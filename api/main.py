@@ -699,7 +699,9 @@ class BootstrapRequest(BaseModel):
 
 
 class AdminPasswordChange(BaseModel):
-    password: str = Field(min_length=16, max_length=256)
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=16, max_length=128)
+    confirm_password: str = Field(min_length=16, max_length=128)
 
 
 @app.get("/api/auth/status")
@@ -710,7 +712,23 @@ def auth_status() -> dict:
 @app.put("/api/security/admin-password")
 def change_admin_password(payload: AdminPasswordChange, _: None = Depends(require_token)) -> dict:
     global ADMIN_PASSWORD
-    password = payload.password
+    if not hmac.compare_digest(payload.current_password, ADMIN_PASSWORD):
+        raise HTTPException(status_code=400, detail="Текущий пароль указан неверно")
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail="Новые пароли не совпадают")
+    password = payload.new_password
+    if hmac.compare_digest(password, ADMIN_PASSWORD):
+        raise HTTPException(status_code=400, detail="Новый пароль должен отличаться от текущего")
+    if any(ord(character) < 33 or ord(character) > 126 for character in password):
+        raise HTTPException(status_code=400, detail="Используйте печатные латинские символы без пробелов")
+    categories = sum((
+        any(character.islower() for character in password),
+        any(character.isupper() for character in password),
+        any(character.isdigit() for character in password),
+        any(not character.isalnum() for character in password),
+    ))
+    if categories < 3:
+        raise HTTPException(status_code=400, detail="Используйте минимум три группы: строчные, заглавные, цифры и спецсимволы")
     if password.lower() in {"password", "changeme", "change-me", "vpscontrol.312", "vpsadmin-2026-7qm!rk2#"}:
         raise HTTPException(status_code=400, detail="Choose a non-default administrator password")
     ENV_FILE.parent.mkdir(parents=True, exist_ok=True)

@@ -218,6 +218,14 @@ test("authentication and VPN controls preserve consistent UI states", async () =
   assert.match(page, /async function login\(event: FormEvent\)/);
   assert.match(page, /const response = await fetch\("\/api\/overview"/);
   assert.match(page, /onSubmit=\{login\}/);
+  assert.match(page, /current_password: currentAdminPassword, new_password: newAdminPassword, confirm_password: confirmAdminPassword/);
+  assert.match(page, /Текущий пароль/);
+  assert.match(page, /Повторите новый пароль/);
+  assert.match(page, /actionLabel="Изменить пароль" alwaysAction/);
+  assert.match(page, /ok && !alwaysAction/);
+  assert.match(api, /hmac\.compare_digest\(payload\.current_password, ADMIN_PASSWORD\)/);
+  assert.match(api, /payload\.new_password != payload\.confirm_password/);
+  assert.match(api, /categories < 3/);
   assert.match(page, /runApplicationAction\("identity"\)/);
   assert.match(api, /"installed": bool\(service and run\("systemctl", "show", service, "--property=LoadState", "--value"\) == "loaded"\)/);
   assert.match(api, /if not available_interfaces:/);

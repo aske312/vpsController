@@ -163,7 +163,9 @@ export default function Home() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [passwordDialog, setPasswordDialog] = useState(false);
+  const [currentAdminPassword, setCurrentAdminPassword] = useState("");
   const [newAdminPassword, setNewAdminPassword] = useState("");
+  const [confirmAdminPassword, setConfirmAdminPassword] = useState("");
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
   const [confirmationInput, setConfirmationInput] = useState("");
   const [newClient, setNewClient] = useState({ name: "", protocol: "wg" as Protocol });
@@ -585,14 +587,27 @@ export default function Home() {
     await loadSecurity();
   }
 
+  function closePasswordDialog() {
+    setPasswordDialog(false);
+    setCurrentAdminPassword("");
+    setNewAdminPassword("");
+    setConfirmAdminPassword("");
+  }
+
   async function changeAdminPassword(event: FormEvent) {
     event.preventDefault();
-    if (newAdminPassword.length < 16) { setError("Новый пароль должен содержать минимум 16 символов"); return; }
+    if (!currentAdminPassword) { setError("Введите текущий пароль"); return; }
+    if (newAdminPassword.length < 16 || newAdminPassword.length > 128) { setError("Новый пароль должен содержать от 16 до 128 символов"); return; }
+    if (!/^[!-~]+$/.test(newAdminPassword)) { setError("Используйте печатные латинские символы без пробелов"); return; }
+    const passwordCategories = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((pattern) => pattern.test(newAdminPassword)).length;
+    if (passwordCategories < 3) { setError("Добавьте минимум три группы: строчные, заглавные, цифры и спецсимволы"); return; }
+    if (newAdminPassword === currentAdminPassword) { setError("Новый пароль должен отличаться от текущего"); return; }
+    if (newAdminPassword !== confirmAdminPassword) { setError("Новые пароли не совпадают"); return; }
     setBusy(true); setError("");
     try {
-      await request("/security/admin-password", { method: "PUT", body: JSON.stringify({ password: newAdminPassword }) });
+      await request("/security/admin-password", { method: "PUT", body: JSON.stringify({ current_password: currentAdminPassword, new_password: newAdminPassword, confirm_password: confirmAdminPassword }) });
       sessionStorage.removeItem("312-token");
-      setPasswordDialog(false); setNewAdminPassword(""); setToken(""); setLoginPassword("");
+      closePasswordDialog(); setToken(""); setLoginPassword("");
       setNotice("Пароль изменён. Войдите заново с новым паролем.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось изменить пароль"); }
     finally { setBusy(false); }
@@ -1214,7 +1229,7 @@ export default function Home() {
               ? `Активно ${Object.values(legacy).filter((service) => service.active).length} · установлены отдельно и не управляются приложением`
               : "Не обнаружены"}
           />
-          <SecurityActionRow ok={Boolean(applicationSecurity?.admin_password_strong)} title="Пароль администратора" text={applicationSecurity?.admin_password_strong ? "Достаточная длина и стойкость пароля панели" : "Стандартный пароль считается небезопасным"} onAction={() => setPasswordDialog(true)} actionLabel="Изменить пароль" />
+          <SecurityActionRow ok={Boolean(applicationSecurity?.admin_password_strong)} title="Пароль администратора" text={applicationSecurity?.admin_password_strong ? "Достаточная длина и стойкость пароля панели" : "Стандартный пароль считается небезопасным"} onAction={() => setPasswordDialog(true)} actionLabel="Изменить пароль" alwaysAction />
           <SecurityRow ok={Boolean(applicationSecurity?.secrets_protected)} title="Секреты приложения" text={`/etc/vps-control.env · права ${applicationSecurity?.secrets_mode || "не определены"} · владелец root`} />
           <SecurityRow ok={Boolean(applicationSecurity?.api_local_only)} title="Локальный API" text={applicationSecurity?.api_local_only ? "API слушает только 127.0.0.1:8000" : "API не найден локально или доступен на внешнем интерфейсе"} />
           <SecurityRow ok={Boolean(applicationSecurity?.control_command_protected)} title="Команда управления" text={`vps-control · права ${applicationSecurity?.control_command_mode || "не определены"} · запись ограничена`} />
@@ -1563,12 +1578,14 @@ export default function Home() {
         </div>}</article>
         <ConnectionGuide />
       </section>}
-      {passwordDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={() => setPasswordDialog(false)}>
+      {passwordDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closePasswordDialog}>
         <form className="confirmDialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()} onSubmit={changeAdminPassword}>
           <p className="eyebrow">ADMINISTRATOR ACCESS</p><h2>Изменить пароль администратора</h2>
           <p>Новый пароль сохраняется на сервере с закрытыми правами доступа. После смены потребуется войти заново.</p>
-          <label>Новый пароль<input autoFocus type="password" minLength={16} value={newAdminPassword} onChange={(event) => setNewAdminPassword(event.target.value)} required /></label>
-          <div className="confirmActions"><button type="button" onClick={() => setPasswordDialog(false)}>Отмена</button><button className="confirmPrimary" type="submit" disabled={busy || newAdminPassword.length < 16}>Сохранить пароль</button></div>
+          <label>Текущий пароль<input autoFocus type="password" autoComplete="current-password" maxLength={256} value={currentAdminPassword} onChange={(event) => setCurrentAdminPassword(event.target.value)} required /></label>
+          <label>Новый пароль<input type="password" autoComplete="new-password" minLength={16} maxLength={128} value={newAdminPassword} onChange={(event) => setNewAdminPassword(event.target.value)} required /></label>
+          <label>Повторите новый пароль<input type="password" autoComplete="new-password" minLength={16} maxLength={128} value={confirmAdminPassword} onChange={(event) => setConfirmAdminPassword(event.target.value)} required /></label>
+          <div className="confirmActions"><button type="button" onClick={closePasswordDialog}>Отмена</button><button className="confirmPrimary" type="submit" disabled={busy || !currentAdminPassword || newAdminPassword.length < 16 || newAdminPassword !== confirmAdminPassword}>Сохранить пароль</button></div>
         </form>
       </div>}
       {confirmation && <div className="confirmBackdrop" role="presentation" onMouseDown={() => closeConfirmation(false)}>
@@ -1685,8 +1702,8 @@ function Metric({ title, value, percent, detail, history }: { title: string; val
 function SecurityRow({ ok, title, text, okLabel = "Confirmed", badLabel = "Attention" }: { ok: boolean; title: string; text: string; okLabel?: string; badLabel?: string }) {
   return <div><span className={ok ? "check" : "warning"}>{ok ? "✓" : "!"}</span><p><strong>{title}</strong><small>{text}</small></p><em className={ok ? "onlinePill" : "offlinePill"}>{ok ? okLabel : badLabel}</em></div>;
 }
-function SecurityActionRow({ ok, title, text, onAction, actionLabel = "Исправить" }: { ok: boolean; title: string; text: string; onAction: () => void; actionLabel?: string }) {
-  return <div><span className={ok ? "check" : "warning"}>{ok ? "✓" : "!"}</span><p><strong>{title}</strong><small>{text}</small></p>{ok ? <em className="onlinePill">Готово</em> : <button className="securityFixButton" onClick={onAction}>{actionLabel}</button>}</div>;
+function SecurityActionRow({ ok, title, text, onAction, actionLabel = "Исправить", alwaysAction = false }: { ok: boolean; title: string; text: string; onAction: () => void; actionLabel?: string; alwaysAction?: boolean }) {
+  return <div><span className={ok ? "check" : "warning"}>{ok ? "✓" : "!"}</span><p><strong>{title}</strong><small>{text}</small></p>{ok && !alwaysAction ? <em className="onlinePill">Готово</em> : <button className="securityFixButton" onClick={onAction}>{actionLabel}</button>}</div>;
 }
 function VersionFooter() {
   return <LegalFooter version={appVersion} commit={buildCommit} />;
