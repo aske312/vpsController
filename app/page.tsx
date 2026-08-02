@@ -992,9 +992,8 @@ export default function Home() {
   const panelSecurity = firewall?.panel_access;
   const panelAccessHealthy = Boolean(panelSecurity?.consistent && (panelSecurity?.vpn_only || panelSecurity?.publicly_accessible));
   const sshProtected = Boolean(
-    ssh?.active
-    && fail2ban?.active
-    && fail2ban?.jail_active
+    ssh?.active === false
+    || (ssh?.active && fail2ban?.active && fail2ban?.jail_active)
   );
   const securityChecks = [
     Boolean(firewall?.active),
@@ -1002,7 +1001,7 @@ export default function Home() {
     panelAccessHealthy,
     Boolean(fail2ban?.active && fail2ban?.jail_active),
     sshProtected,
-    ssh?.x11_forwarding === "no",
+    ssh?.active === false || ssh?.x11_forwarding === "no",
     Boolean(security) && Number(updates?.available || 0) === 0,
     Boolean(security) && !updates?.reboot_required,
     Boolean(updates?.automatic),
@@ -1169,7 +1168,7 @@ export default function Home() {
           </div>
         </article>
         <article className="panel securityList compactSecurity">
-          <SecurityRow ok={Boolean(firewall?.active)} title="Firewall" text={`UFW · ${firewall?.rules?.length || 0} правил`} />
+          <SecurityActionRow ok={Boolean(firewall?.active)} title="Firewall" text={`UFW · ${firewall?.rules?.length || 0} правил`} onAction={() => void fixSecurity("secure")} />
           <SecurityActionRow
             ok={Boolean(firewall?.vpn_policy_healthy)}
             title="VPN FIREWALL POLICY"
@@ -1177,24 +1176,26 @@ export default function Home() {
             onAction={() => void fixSecurity("vpn-firewall")}
             actionLabel="Исправить"
           />
-          <SecurityRow
+          <SecurityActionRow
             ok={panelAccessHealthy}
             title="Доступ к панели"
             text={panelSecurity?.publicly_accessible
               ? `Публичный TCP ${panelSecurity.port || 80} разрешён правилами UFW`
               : `Из интернета закрыт · доступ только через ${(panelSecurity?.allowed_interfaces || []).join(" / ") || "WG / AWG"}`}
+            onAction={() => void fixSecurity("secure")}
           />
           <SecurityActionRow ok={Boolean(fail2ban?.active && fail2ban?.jail_active)} title="Fail2ban · SSH" text={`В бане ${fail2ban?.currently_banned || 0} · всего ${fail2ban?.total_banned || 0}`} onAction={() => void fixSecurity("secure")} />
-          <SecurityRow
+          <SecurityActionRow
             ok={sshProtected}
             title="SSH · административный доступ"
             text={ssh?.active === false
               ? "Служба остановлена · входящие SSH-подключения не принимаются"
               : `Из интернета: ${ssh?.publicly_allowed ? "открыт по согласованной политике" : "закрыт"} · Fail2ban: ${fail2ban?.active && fail2ban?.jail_active ? "защищает" : "не защищает"} · Password: ${String(ssh?.password_authentication || "unknown")} · Root: ${String(ssh?.permit_root_login || "unknown")}`}
+            onAction={() => void fixSecurity("secure")}
           />
           <SecurityActionRow ok={securityLoading || (Number(updates?.available || 0) === 0 && !updates?.reboot_required)} title="Обновления Ubuntu" text={`${String(updates?.available ?? "—")} пакетов${updates?.reboot_required ? " · нужен reboot" : ""}`} onAction={() => void fixSecurity("kernel-update")} actionLabel="Обновить" />
           <SecurityActionRow ok={Boolean(updates?.automatic)} title="Автоматические обновления" text={updates?.automatic ? "Unattended upgrades · ON" : "Unattended upgrades · OFF"} onAction={() => void fixSecurity("secure")} />
-          <SecurityRow
+          <SecurityActionRow
             ok={applicationVersion?.outdated === false}
             title="Версия приложения"
             text={applicationVersion?.refreshing && applicationVersion?.outdated == null
@@ -1204,11 +1205,13 @@ export default function Home() {
                 : applicationVersion?.outdated
                   ? `Устарела: ${applicationVersion.current_commit || "unknown"} · ${applicationVersion.branch || "stabl"}: ${applicationVersion.latest_commit || "unknown"}`
                   : `Актуальна: ${applicationVersion?.current_commit || "unknown"} · ветка ${applicationVersion?.branch || "main"}`}
+            onAction={() => void runApplicationAction(applicationVersion?.branch === "main" ? "test-update" : "update")}
+            actionLabel="Обновить"
           />
-          <SecurityRow ok={Boolean(securitySystem?.apparmor?.active)} title="AppArmor" text={`${securitySystem?.apparmor?.profiles || 0} профилей · ${securitySystem?.apparmor?.active ? "активен" : "выключен"}`} />
+          <SecurityActionRow ok={Boolean(securitySystem?.apparmor?.active)} title="AppArmor" text={`${securitySystem?.apparmor?.profiles || 0} профилей · ${securitySystem?.apparmor?.active ? "активен" : "выключен"}`} onAction={() => void fixSecurity("secure")} />
           <SecurityActionRow ok={Boolean(securitySystem?.auditd_active)} title="Аудит действий" text={`auditd · ${securitySystem?.auditd_active ? "активен" : "остановлен"}`} onAction={() => void fixSecurity("secure")} />
-          <SecurityRow ok={Boolean(securitySystem?.syn_cookies)} title="Защита TCP" text={`SYN ${securitySystem?.syn_cookies ? "ON" : "OFF"} · Forwarding ${securitySystem?.ipv4_forwarding ? "ON" : "OFF"}`} />
-          <SecurityRow ok={Boolean(securitySystem?.rp_filter_valid && securitySystem?.dmesg_restricted)} title="Защита ядра" text={`RP ${securitySystem?.rp_filter_mode === 1 ? "strict" : securitySystem?.rp_filter_mode === 2 ? "loose" : securitySystem?.rp_filter_valid ? "VPN-safe" : "OFF"} · dmesg ${securitySystem?.dmesg_restricted ? "restricted" : "open"}`} />
+          <SecurityActionRow ok={Boolean(securitySystem?.syn_cookies)} title="Защита TCP" text={`SYN ${securitySystem?.syn_cookies ? "ON" : "OFF"} · Forwarding ${securitySystem?.ipv4_forwarding ? "ON" : "OFF"}`} onAction={() => void fixSecurity("secure")} />
+          <SecurityActionRow ok={Boolean(securitySystem?.rp_filter_valid && securitySystem?.dmesg_restricted)} title="Защита ядра" text={`RP ${securitySystem?.rp_filter_mode === 1 ? "strict" : securitySystem?.rp_filter_mode === 2 ? "loose" : securitySystem?.rp_filter_valid ? "VPN-safe" : "OFF"} · dmesg ${securitySystem?.dmesg_restricted ? "restricted" : "open"}`} onAction={() => void fixSecurity("secure")} />
           <SecurityActionRow
             ok={Boolean(securitySystem?.redirects_disabled && securitySystem?.source_route_disabled)}
             title="KERNEL ROUTING"
@@ -1216,24 +1219,27 @@ export default function Home() {
             onAction={() => void fixSecurity("secure")}
           />
           <SecurityActionRow
-            ok={ssh?.active !== false}
+            ok={ssh?.active === false || ssh?.x11_forwarding === "no"}
             title="SSH-туннели"
             text={ssh?.active === false ? "Служба остановлена · настройки туннелей не применяются" : `X11: ${ssh?.x11_forwarding || "unknown"} · TCP forwarding: ${ssh?.tcp_forwarding || "unknown"} (оставлен для административного контроля) · MaxAuthTries: ${ssh?.max_auth_tries || "unknown"}`}
             onAction={() => void fixSecurity("secure")}
           />
-          <SecurityRow ok={Boolean(securitySystem) && (securitySystem?.login_users?.length || 0) <= 5} title="Учётные записи" text={`sudo ${securitySystem?.sudo_users?.length || 0} · login ${securitySystem?.login_users?.length || 0}`} />
-          <SecurityRow
+          <SecurityActionRow ok title="Учётные записи" text={`sudo ${securitySystem?.sudo_users?.length || 0} · login ${securitySystem?.login_users?.length || 0}`} onAction={() => void runApplicationAction("integrity-check")} actionLabel="Проверить" alwaysAction />
+          <SecurityActionRow
             ok
             title="Дополнительные VPN-службы"
             text={Object.values(legacy).some((service) => service.active)
               ? `Активно ${Object.values(legacy).filter((service) => service.active).length} · установлены отдельно и не управляются приложением`
               : "Не обнаружены"}
+            onAction={() => void runApplicationAction("network-check")}
+            actionLabel="Проверить"
+            alwaysAction
           />
           <SecurityActionRow ok={Boolean(applicationSecurity?.admin_password_strong)} title="Пароль администратора" text={applicationSecurity?.admin_password_strong ? "Достаточная длина и стойкость пароля панели" : "Стандартный пароль считается небезопасным"} onAction={() => setPasswordDialog(true)} actionLabel="Изменить пароль" alwaysAction />
-          <SecurityRow ok={Boolean(applicationSecurity?.secrets_protected)} title="Секреты приложения" text={`/etc/vps-control.env · права ${applicationSecurity?.secrets_mode || "не определены"} · владелец root`} />
-          <SecurityRow ok={Boolean(applicationSecurity?.api_local_only)} title="Локальный API" text={applicationSecurity?.api_local_only ? "API слушает только 127.0.0.1:8000" : "API не найден локально или доступен на внешнем интерфейсе"} />
-          <SecurityRow ok={Boolean(applicationSecurity?.control_command_protected)} title="Команда управления" text={`vps-control · права ${applicationSecurity?.control_command_mode || "не определены"} · запись ограничена`} />
-          <SecurityRow ok={Boolean(applicationSecurity?.cors_restricted)} title="Доверенные источники" text={applicationSecurity?.cors_restricted ? "CORS ограничен заданными адресами панели" : "CORS разрешает запросы с произвольных источников"} />
+          <SecurityActionRow ok={Boolean(applicationSecurity?.secrets_protected)} title="Секреты приложения" text={`/etc/vps-control.env · права ${applicationSecurity?.secrets_mode || "не определены"} · владелец root`} onAction={() => void fixSecurity("secure")} />
+          <SecurityActionRow ok={Boolean(applicationSecurity?.api_local_only)} title="Локальный API" text={applicationSecurity?.api_local_only ? "API слушает только 127.0.0.1:8000" : "API не найден локально или доступен на внешнем интерфейсе"} onAction={() => void fixSecurity("secure")} />
+          <SecurityActionRow ok={Boolean(applicationSecurity?.control_command_protected)} title="Команда управления" text={`vps-control · права ${applicationSecurity?.control_command_mode || "не определены"} · запись ограничена`} onAction={() => void fixSecurity("secure")} />
+          <SecurityActionRow ok={Boolean(applicationSecurity?.cors_restricted)} title="Доверенные источники" text={applicationSecurity?.cors_restricted ? "CORS ограничен заданными адресами панели" : "CORS разрешает запросы с произвольных источников"} onAction={() => void fixSecurity("secure")} />
         </article>
         <article className="panel listeners"><div className="panelHead"><div><p className="eyebrow">LIVE NETWORK</p><h2>Открытые порты</h2></div><span>{listeners.length} listeners · kernel {securitySystem?.kernel || "—"}</span></div><pre>{listeners.join("\n") || "Нет данных"}</pre></article>
         <article className={`panel logDrawer ${securityLogsOpen ? "open" : ""}`}>

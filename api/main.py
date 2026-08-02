@@ -59,6 +59,7 @@ CLIENTS_FILE = DATA_DIR / "clients.json"
 ACTION_FILE = DATA_DIR / "application-action.json"
 AUTOMATION_FILE = DATA_DIR / "automation.json"
 SERVICE_MODE_FILE = DATA_DIR / "service-mode.json"
+TEST_BACKUP_DIR = DATA_DIR / "test-app-backup"
 UPDATES_FILE = DATA_DIR / "security-updates.json"
 APP_VERSION_FILE = DATA_DIR / "application-version.json"
 LOGGING_CONFIG_FILE = Path("/etc/vps-control-logging.conf")
@@ -1394,6 +1395,10 @@ def installed_build_commit() -> str:
         return os.getenv("BUILD_COMMIT", "unknown").strip()
 
 
+def expected_application_branch() -> str:
+    return "main" if SERVICE_MODE_FILE.exists() and TEST_BACKUP_DIR.is_dir() else "stabl"
+
+
 def application_repository_url() -> str:
     configured = os.getenv("APP_REPOSITORY_URL", "").strip()
     if configured:
@@ -1413,7 +1418,7 @@ def refresh_application_version_cache() -> None:
         return
     try:
         current = installed_build_commit()
-        branch = "stabl"
+        branch = expected_application_branch()
         repository = application_repository_url()
         latest = ""
         error = ""
@@ -1449,7 +1454,7 @@ def application_version_status() -> dict:
     except (OSError, json.JSONDecodeError):
         pass
     age = time.time() - APP_VERSION_FILE.stat().st_mtime if APP_VERSION_FILE.exists() else float("inf")
-    expected_branch = "stabl"
+    expected_branch = expected_application_branch()
     installed_commit = installed_build_commit()
     refreshing = (
         age > 600

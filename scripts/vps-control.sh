@@ -485,8 +485,9 @@ install_packages() {
 
 secure_server() {
   info "Настройка защиты Ubuntu"
-  apt-get update
-  apt-get install -y auditd fail2ban unattended-upgrades
+  prepare_package_manager
+  apt-get -o DPkg::Lock::Timeout=300 update
+  apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw
   install -d -m 0755 /etc/fail2ban/jail.d
   cat >/etc/fail2ban/jail.d/vps-control.local <<'EOF'
 [sshd]
@@ -501,14 +502,17 @@ EOF
   systemctl restart fail2ban
   systemctl enable --now unattended-upgrades
   systemctl enable --now auditd
+  systemctl enable --now apparmor.service >/dev/null 2>&1 || warn "AppArmor установлен, но для активации может потребоваться перезагрузка."
   install -d -m 0755 /etc/sysctl.d /etc/ssh/sshd_config.d
   cat >/etc/sysctl.d/99-vps-control-routing.conf <<'EOF'
+net.ipv4.tcp_syncookies = 1
 net.ipv4.conf.all.accept_redirects = 0
 net.ipv4.conf.default.accept_redirects = 0
 net.ipv4.conf.all.send_redirects = 0
 net.ipv4.conf.default.send_redirects = 0
 net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
+kernel.dmesg_restrict = 1
 EOF
   sysctl --system >/dev/null 2>&1 || true
   cat >/etc/ssh/sshd_config.d/99-vps-control-tunnels.conf <<'EOF'
@@ -517,7 +521,20 @@ AllowTcpForwarding yes
 PermitTunnel yes
 EOF
   sshd -t >/dev/null 2>&1 && systemctl reload ssh.service 2>/dev/null || true
-  ok "Fail2ban, auditd и автоматические security-обновления включены."
+  if [[ -f "${ENV_FILE}" ]]; then
+    chown root:root "${ENV_FILE}"
+    chmod 0600 "${ENV_FILE}"
+  fi
+  if [[ -f "${COMMAND_PATH}" ]]; then
+    chown root:root "${COMMAND_PATH}"
+    chmod 0755 "${COMMAND_PATH}"
+  fi
+  configure_access
+  configure_firewall "panel-only"
+  install_api
+  ensure_api_write_access
+  systemctl restart "${APP_NAME}-api.service"
+  ok "Firewall, Fail2ban, AppArmor, auditd, sysctl, SSH, API, права и автоматические security-обновления проверены."
 }
 
 check_vpn() {

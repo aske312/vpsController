@@ -131,6 +131,26 @@ test("VPN firewall diagnostics accept module rules and offer a persistent repair
   assert.match(manager, /vpn-firewall\) configure_vpn_firewall_policy/);
 });
 
+test("every security posture item has a safe repair or review action", async () => {
+  const [page, manager] = await Promise.all([read("app/page.tsx"), read("scripts/vps-control.sh")]);
+  const start = page.indexOf('{tab === "security"');
+  const end = page.indexOf('{tab === "application"', start);
+  const section = page.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(section, /<SecurityRow\b/);
+  assert.ok((section.match(/<SecurityActionRow\b/g) || []).length >= 20);
+  assert.match(section, /title="Firewall".*fixSecurity\("secure"\)/s);
+  assert.match(section, /title="Версия приложения".*applicationVersion\?\.branch === "main" \? "test-update" : "update"/s);
+  assert.match(section, /title="Учётные записи".*runApplicationAction\("integrity-check"\)/s);
+  assert.match(section, /title="Дополнительные VPN-службы".*runApplicationAction\("network-check"\)/s);
+  assert.match(manager, /apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw/);
+  assert.match(manager, /net\.ipv4\.tcp_syncookies = 1/);
+  assert.match(manager, /kernel\.dmesg_restrict = 1/);
+  assert.match(manager, /chmod 0600 "\$\{ENV_FILE\}"/);
+  assert.match(manager, /configure_firewall "panel-only"/);
+  assert.doesNotMatch(manager, /systemctl (?:disable|stop).*strongswan|systemctl (?:disable|stop).*xl2tpd/);
+});
+
 test("security and services expose current logs and retention controls", async () => {
   const [api, page, manager] = await Promise.all([
     read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"),
@@ -180,8 +200,10 @@ test("service mode tests main without publishing it while stabl remains the only
   assert.match(manager, /сервисный режим включён; версия приложения не изменена/);
   assert.match(manager, /переход на тестовую версию разрешён только в сервисном режиме/);
   assert.match(api, /payload\.action in \("test-update", "test-rollback"\) and not SERVICE_MODE_FILE\.exists\(\)/);
-  assert.match(api, /branch = "stabl"/);
-  assert.match(api, /expected_branch = "stabl"/);
+  assert.match(api, /def expected_application_branch\(\)/);
+  assert.match(api, /return "main" if SERVICE_MODE_FILE\.exists\(\) and TEST_BACKUP_DIR\.is_dir\(\) else "stabl"/);
+  assert.match(api, /branch = expected_application_branch\(\)/);
+  assert.match(api, /expected_branch = expected_application_branch\(\)/);
   assert.match(api, /cached\.get\("current_commit"\) != installed_commit/);
   assert.match(page, /applicationVersion\.branch \|\| "stabl"/);
   assert.match(page, /setAutoRefresh\(false\)/);
