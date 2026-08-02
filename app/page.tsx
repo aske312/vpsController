@@ -647,7 +647,7 @@ export default function Home() {
     })) return;
     setBusy(true); setError("");
     try {
-      autoRefreshBeforeServiceMode.current = autoRefresh;
+      if (active) autoRefreshBeforeServiceMode.current = autoRefresh;
       setAutoRefresh(false);
       await request("/services/service-mode", { method: "PUT", body: JSON.stringify({ active }) });
       let confirmed = false;

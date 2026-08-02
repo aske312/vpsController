@@ -182,6 +182,7 @@ test("service mode exposes an explicit main test release while stabl remains pro
   assert.match(api, /cached\.get\("current_commit"\) != installed_commit/);
   assert.match(page, /applicationVersion\.branch \|\| "stabl"/);
   assert.match(page, /setAutoRefresh\(false\)/);
+  assert.match(page, /if \(active\) autoRefreshBeforeServiceMode\.current = autoRefresh/);
   assert.match(page, /setAutoRefresh\(autoRefreshBeforeServiceMode\.current\)/);
   assert.match(page, /serviceModeActive && <button onClick=\{\(\) => void runApplicationAction\("test-update"\)\}/);
   assert.match(page, /Переход на тестовую версию/);
