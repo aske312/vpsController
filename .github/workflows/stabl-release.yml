@@ -1,0 +1,59 @@
+name: Publish stabl release
+
+on:
+  push:
+    branches: [stabl]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stabl-release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Select semantic version
+        id: version
+        shell: bash
+        run: |
+          base="$(node -p 'require("./package.json").version')"
+          major_minor="${base%.*}"
+          latest="$(git tag --list "v${major_minor}.*" --sort=-v:refname | head -n 1)"
+          if [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
+            version="$latest"
+          elif [[ -z "$latest" ]]; then
+            version="v${base}"
+          else
+            patch="${latest##*.}"
+            version="v${major_minor}.$((patch + 1))"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Build verified Linux release
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: bash scripts/build-release.sh outputs/vps-control-release.tar.gz
+      - name: Replace stabl-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete stabl-latest --cleanup-tag --yes || true
+          gh release create stabl-latest outputs/vps-control-release.tar.gz \
+            --target "$GITHUB_SHA" \
+            --title "${{ steps.version.outputs.version }}" \
+            --notes "Prepared release ${{ steps.version.outputs.version }} for stabl commit $GITHUB_SHA" \
+            --latest=false
+          if ! git rev-parse "${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            git tag "${{ steps.version.outputs.version }}" "$GITHUB_SHA"
+            git push origin "${{ steps.version.outputs.version }}"
+          fi

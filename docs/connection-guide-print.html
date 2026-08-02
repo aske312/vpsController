@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Подключение WG и AWG — руководство</title>
+  <style>
+    @page { size: A4; margin: 15mm 17mm 16mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #17201f; font: 10.4pt/1.42 Arial, sans-serif; }
+    header { padding: 0 0 11mm; border-bottom: 2px solid #79a62c; }
+    .kicker { margin: 0 0 3mm; color: #648b22; font-size: 8pt; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; }
+    h1 { margin: 0; max-width: 165mm; font-size: 25pt; line-height: 1.08; letter-spacing: -.4px; }
+    .lead { margin: 4mm 0 0; max-width: 165mm; color: #52615f; font-size: 11.5pt; }
+    h2 { margin: 8mm 0 3mm; color: #24322f; font-size: 15pt; line-height: 1.15; page-break-after: avoid; }
+    h3 { margin: 5mm 0 2mm; font-size: 11.5pt; page-break-after: avoid; }
+    p { margin: 0 0 3mm; }
+    ol, ul { margin: 0 0 4mm; padding-left: 6mm; }
+    li { margin: 0 0 2.2mm; padding-left: 1.5mm; }
+    .choice { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin-top: 5mm; }
+    .card { padding: 4.5mm; border: 1px solid #d6dfdc; border-radius: 3mm; background: #f6f9f8; }
+    .card strong { display: block; margin-bottom: 1.5mm; font-size: 13pt; }
+    .card.wg strong { color: #287267; }
+    .card.awg strong { color: #6b8f28; }
+    .note { margin: 5mm 0; padding: 4mm 5mm; border-left: 3px solid #79a62c; background: #f2f7e9; }
+    .warning { border-left-color: #c98b22; background: #fff8e9; }
+    .steps { counter-reset: step; list-style: none; padding: 0; }
+    .steps li { position: relative; min-height: 8mm; padding-left: 11mm; }
+    .steps li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: -.5mm; width: 7mm; height: 7mm; display: grid; place-items: center; border-radius: 50%; background: #24322f; color: white; font-size: 8pt; font-weight: 700; }
+    .checklist li::marker { color: #648b22; }
+    footer { margin-top: 8mm; padding-top: 3mm; border-top: 1px solid #d6dfdc; color: #6b7674; font-size: 8pt; }
+    .page-break { break-before: page; }
+  </style>
+</head>
+<body>
+  <header>
+    <p class="kicker">Руководство для клиента</p>
+    <h1>Как подключиться с помощью WG или AWG</h1>
+    <p class="lead">Простая инструкция для случая, когда вы уже получили готовый файл конфигурации <b>.conf</b>.</p>
+  </header>
+
+  <h2>Сначала выберите подходящий вариант</h2>
+  <div class="choice">
+    <div class="card wg"><strong>WG · WireGuard</strong>Рекомендуется для компьютера, роутера или другого устройства с постоянным домашним или офисным интернетом — особенно при подключении по кабелю.</div>
+    <div class="card awg"><strong>AWG · AmneziaWG</strong>Рекомендуется для смартфона, планшета и других устройств, которые часто выходят в интернет через мобильную сеть.</div>
+  </div>
+  <div class="note"><b>Одно приложение для обоих вариантов.</b> Установите <b>AmneziaWG</b>. Оно используется и для WG, и для AWG. Если файл уже прислал администратор, самостоятельно менять тип подключения не нужно.</div>
+
+  <h2>Перед началом</h2>
+  <ul class="checklist">
+    <li>Сохраните полученный файл <b>.conf</b> на устройство. Обычно он находится в папке «Загрузки» или «Файлы».</li>
+    <li>Не открывайте файл в текстовом редакторе и ничего в нём не изменяйте.</li>
+    <li>Не пересылайте файл посторонним: это ваш персональный ключ доступа.</li>
+    <li>Используйте один файл только на одном устройстве.</li>
+  </ul>
+
+  <h2>Установите приложение</h2>
+  <p>Откройте магазин приложений вашей системы, найдите <b>AmneziaWG</b> и установите его. Другой клиент для WG не требуется.</p>
+
+  <h2>Если у вас WG (WireGuard)</h2>
+  <ol class="steps">
+    <li>Откройте AmneziaWG и нажмите кнопку добавления подключения.</li>
+    <li>Выберите импорт <b>из файла</b> и откройте полученный файл <b>.conf</b>.</li>
+    <li><b>Обязательно включите галочку «Обфускация».</b></li>
+    <li>Сохраните подключение и подтвердите создание VPN, если система попросит разрешение.</li>
+    <li>Включите переключатель рядом с новым подключением.</li>
+  </ol>
+
+  <h2 class="page-break">Если у вас AWG (AmneziaWG)</h2>
+  <ol class="steps">
+    <li>Откройте AmneziaWG и нажмите кнопку добавления подключения.</li>
+    <li>Выберите импорт <b>из файла</b>, найдите полученный файл <b>.conf</b> и откройте его.</li>
+    <li>Сохраните подключение.</li>
+    <li>Если система попросит разрешение на создание VPN-подключения, подтвердите его.</li>
+    <li>Включите новое подключение.</li>
+  </ol>
+
+  <h2>Как понять, что всё работает</h2>
+  <ul class="checklist">
+    <li>Переключатель подключения в приложении включён.</li>
+    <li>Появился статус «Активно» или данные о переданном трафике.</li>
+    <li>Интернет-сайты открываются как обычно.</li>
+  </ul>
+
+  <h2>Если не подключается</h2>
+  <ol>
+    <li>Проверьте, работает ли обычный интернет без подключения WG/AWG.</li>
+    <li>Выключите подключение, подождите 10 секунд и включите его снова.</li>
+    <li>Убедитесь, что выбран именно полученный файл и его содержимое не менялось.</li>
+    <li>Перезагрузите устройство.</li>
+    <li>Если проблема осталась, сообщите администратору название устройства, тип подключения (WG или AWG) и примерное время ошибки.</li>
+  </ol>
+
+  <div class="note warning"><b>Не отправляйте содержимое файла в открытый чат.</b> Если устройство потеряно, продано или файл попал к постороннему человеку, сразу сообщите администратору: старый доступ нужно отозвать и создать новый.</div>
+
+  <footer>312.net · Руководство по подключению WG и AWG</footer>
+</body>
+</html>
