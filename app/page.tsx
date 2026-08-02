@@ -118,6 +118,13 @@ const bytes = (value = 0) => {
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
   return `${(value / 1024 ** index).toFixed(index > 2 ? 1 : 0)} ${units[index]}`;
 };
+
+function reloadWithoutCache(message: string) {
+  sessionStorage.setItem("312-notice", message);
+  const target = new URL(window.location.href);
+  target.searchParams.set("_refresh", Date.now().toString());
+  window.location.replace(target.toString());
+}
 const duration = (seconds?: number) => {
   if (seconds === undefined || seconds === null) return "никогда";
   if (seconds < 60) return `${seconds} сек назад`;
@@ -380,9 +387,8 @@ export default function Home() {
         return;
       }
       const message = `${label}: успешно завершено`;
-      if (action.action === "update" || action.action === "test-update" || action.action === "test-rollback") {
-        sessionStorage.setItem("312-notice", `${message}. Интерфейс обновлён до установленной версии`);
-        window.setTimeout(() => window.location.reload(), 600);
+      if (["update", "test-update", "test-rollback", "kernel-update"].includes(action.action || "")) {
+        window.setTimeout(() => reloadWithoutCache(`${message}. Кэш интерфейса сброшен`), 600);
         return;
       }
       setNotice(message);
@@ -677,7 +683,7 @@ export default function Home() {
       }
       if (!confirmed) throw new Error("Сервер не подтвердил завершение переключения режима");
       setAutoRefresh(autoRefreshAfterChange);
-      await loadSecurity();
+      reloadWithoutCache(`Сервисный режим ${active ? "включён" : "выключен"}. Кэш интерфейса сброшен`);
     } catch (cause) {
       setAutoRefresh(autoRefreshAfterChange);
       setError(cause instanceof Error ? cause.message : "Не удалось изменить сервисный режим");

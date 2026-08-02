@@ -230,8 +230,11 @@ test("live system status refreshes below one second without overlapping heavy ch
   assert.match(page, /liveRequestInFlight/);
   assert.match(page, /setInterval\(\(\) => void loadLiveStatus\(\), 800\)/);
   assert.match(page, /"\<1"/);
-  assert.match(page, /sessionStorage\.setItem\("312-notice"/);
-  assert.match(page, /window\.location\.reload\(\)/);
+  assert.match(page, /function reloadWithoutCache\(message: string\)/);
+  assert.match(page, /target\.searchParams\.set\("_refresh", Date\.now\(\)\.toString\(\)\)/);
+  assert.match(page, /window\.location\.replace\(target\.toString\(\)\)/);
+  assert.match(page, /\["update", "test-update", "test-rollback", "kernel-update"\]\.includes/);
+  assert.match(page, /Сервисный режим \$\{active \? "включён" : "выключен"\}\. Кэш интерфейса сброшен/);
   assert.match(page, /успешно завершено/);
 });
 
