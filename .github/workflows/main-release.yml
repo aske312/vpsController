@@ -1,0 +1,37 @@
+name: Publish main test release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: main-test-release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build verified Linux release
+        run: bash scripts/build-release.sh outputs/vps-control-release.tar.gz
+      - name: Replace main-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete main-latest --cleanup-tag --yes || true
+          gh release create main-latest outputs/vps-control-release.tar.gz \
+            --target "$GITHUB_SHA" \
+            --title "main test latest" \
+            --notes "Prepared test release for main commit $GITHUB_SHA" \
+            --latest=false

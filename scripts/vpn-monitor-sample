@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+env_file="/etc/vps-control.env"
+data_dir="/var/lib/vps-control/monitor"
+lock="${data_dir}/sample.lock"
+events="${data_dir}/events.log"
+
+install -d -m 0750 "${data_dir}"
+exec 9>"${lock}"
+flock -n 9 || exit 0
+set -a
+# shellcheck disable=SC1090
+source "${env_file}"
+set +a
+
+ping_probe() {
+  local target="$1" output loss avg jitter
+  output="$(ping -n -q -c 5 -i 0.2 -W 1 "${target}" 2>/dev/null || true)"
+  loss="$(printf '%s\n' "${output}" | sed -nE 's/.* ([0-9]+([.][0-9]+)?)% packet loss.*/\1/p' | head -n 1)"
+  read -r avg jitter < <(
+    printf '%s\n' "${output}" | awk -F'=' '
+      /^(rtt|round-trip) / {
+        gsub(/ ms/, "", $2)
+        split($2, values, "/")
+        print values[2], values[4]
+        exit
+      }'
+  )
+  printf '%s %s %s\n' "${loss:-100}" "${avg:--1}" "${jitter:--1}"
+}
+
+sample_protocol() {
+  local protocol="$1" command="$2" interface="$3" unit="$4"
+  local csv="${data_dir}/${protocol}.csv" timestamp epoch active dump peers online latest rx tx
+  local stats rx_errors tx_errors rx_dropped tx_dropped old_state state
+  local uplink uplink_stats uplink_rx_errors uplink_tx_errors uplink_rx_dropped uplink_tx_dropped
+  local ping_cf_loss ping_cf_avg ping_cf_jitter ping_google_loss ping_google_avg ping_google_jitter
+  local conntrack_count conntrack_max header expected_header
+  timestamp="$(date --iso-8601=seconds)"
+  epoch="$(date +%s)"
+  active=0
+  systemctl is-active --quiet "${unit}" && active=1
+  dump="$("${command}" show "${interface}" dump 2>/dev/null || true)"
+  read -r peers online latest rx tx < <(
+    printf '%s\n' "${dump}" | awk -v now="${epoch}" '
+      NR > 1 {
+        peers++
+        if ($5 > newest) newest=$5
+        if ($5 > 0 && now-$5 <= 180) online++
+        rx+=$6; tx+=$7
+      }
+      END { print peers+0,online+0,(newest > 0 ? now-newest : -1),rx+0,tx+0 }'
+  )
+  stats="/sys/class/net/${interface}/statistics"
+  rx_errors="$(cat "${stats}/rx_errors" 2>/dev/null || echo 0)"
+  tx_errors="$(cat "${stats}/tx_errors" 2>/dev/null || echo 0)"
+  rx_dropped="$(cat "${stats}/rx_dropped" 2>/dev/null || echo 0)"
+  tx_dropped="$(cat "${stats}/tx_dropped" 2>/dev/null || echo 0)"
+  uplink="$(ip -o -4 route show default 2>/dev/null | awk 'NR==1 {print $5}')"
+  uplink_stats="/sys/class/net/${uplink}/statistics"
+  uplink_rx_errors="$(cat "${uplink_stats}/rx_errors" 2>/dev/null || echo 0)"
+  uplink_tx_errors="$(cat "${uplink_stats}/tx_errors" 2>/dev/null || echo 0)"
+  uplink_rx_dropped="$(cat "${uplink_stats}/rx_dropped" 2>/dev/null || echo 0)"
+  uplink_tx_dropped="$(cat "${uplink_stats}/tx_dropped" 2>/dev/null || echo 0)"
+  read -r ping_cf_loss ping_cf_avg ping_cf_jitter < <(ping_probe 1.1.1.1)
+  read -r ping_google_loss ping_google_avg ping_google_jitter < <(ping_probe 8.8.8.8)
+  conntrack_count="$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || echo 0)"
+  conntrack_max="$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || echo 0)"
+
+  expected_header="timestamp,epoch,service_active,peer_count,online_peers,latest_handshake_age_s,rx_bytes,tx_bytes,rx_errors,tx_errors,rx_dropped,tx_dropped,ping_1_1_1_loss,ping_1_1_1_ms,ping_1_1_1_jitter,ping_8_8_8_8_loss,ping_8_8_8_8_ms,ping_8_8_8_8_jitter,uplink,uplink_rx_errors,uplink_tx_errors,uplink_rx_dropped,uplink_tx_dropped,conntrack_count,conntrack_max"
+  header="$(head -n 1 "${csv}" 2>/dev/null || true)"
+  if test -n "${header}" && test "${header}" != "${expected_header}"; then
+    mv -- "${csv}" "${csv}.legacy-$(date +%s)"
+  fi
+  if ! test -s "${csv}"; then
+    printf '%s\n' "${expected_header}" >"${csv}"
+  fi
+  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+    "${timestamp}" "${epoch}" "${active}" "${peers}" "${online}" "${latest}" \
+    "${rx}" "${tx}" "${rx_errors}" "${tx_errors}" "${rx_dropped}" "${tx_dropped}" \
+    "${ping_cf_loss}" "${ping_cf_avg}" "${ping_cf_jitter}" \
+    "${ping_google_loss}" "${ping_google_avg}" "${ping_google_jitter}" "${uplink}" \
+    "${uplink_rx_errors}" "${uplink_tx_errors}" "${uplink_rx_dropped}" "${uplink_tx_dropped}" \
+    "${conntrack_count}" "${conntrack_max}" >>"${csv}"
+
+  state="${active}:${online}"
+  old_state="$(cat "${data_dir}/${protocol}.state" 2>/dev/null || true)"
+  if test "${state}" != "${old_state}"; then
+    printf '%s,%s,%s,%s\n' "${timestamp}" "${protocol}" "${old_state:-unknown}" "${state}" >>"${events}"
+    printf '%s' "${state}" >"${data_dir}/${protocol}.state"
+  fi
+}
+
+sample_protocol wg wg "${WG_INTERFACE:-wg0}" "wg-quick@${WG_INTERFACE:-wg0}.service"
+if command -v awg >/dev/null 2>&1; then
+  sample_protocol awg awg "${AWG_INTERFACE:-awg0}" "awg-quick@${AWG_INTERFACE:-awg0}.service"
+fi

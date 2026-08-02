@@ -1,0 +1,12 @@
+{
+  "id": "wg",
+  "name": "WireGuard",
+  "version": "1.0.0",
+  "description": "Классический WireGuard с systemd, маршрутизацией и NAT",
+  "category": "secure-tunnels",
+  "category_name": "Защищённые туннели",
+  "installer": "install.sh",
+  "uninstaller": "uninstall.sh",
+  "interface_env": "WG_INTERFACE",
+  "service": "wg-quick@{interface}.service"
+}
