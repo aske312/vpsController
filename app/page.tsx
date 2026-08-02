@@ -6,6 +6,7 @@ import { LegalFooter } from "./legal";
 
 type Tab = "overview" | "security" | "application" | "services" | "wg" | "awg" | "clients";
 type Protocol = "wg" | "awg";
+type TrafficHistory = { rx: number[]; tx: number[] };
 type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
 type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" | "network-check" | "integrity-check" | "identity" | "secure" | "kernel-update" | "vpn-firewall" | "optimize" | "reboot" | "poweroff";
 type Client = {
@@ -132,7 +133,9 @@ const duration = (seconds?: number) => {
   return `${Math.floor(seconds / 3600)} ч назад`;
 };
 const uptime = (seconds = 0) => `${Math.floor(seconds / 86400)}д ${Math.floor((seconds % 86400) / 3600)}ч`;
-const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-48);
+const LIVE_SAMPLE_SECONDS = 3;
+const HISTORY_SAMPLES = 100;
+const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-HISTORY_SAMPLES);
 export default function Home() {
   const [tab, setTab] = useState<Tab>("overview");
   const [token, setToken] = useState("");
@@ -161,6 +164,10 @@ export default function Home() {
   const [protocolImages, setProtocolImages] = useState<ProtocolImage[]>([]);
   const [protocolStatuses, setProtocolStatuses] = useState<Partial<Record<Protocol, ProtocolStatus>>>({});
   const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number; tx: number }>>>({});
+  const [protocolTrafficHistory, setProtocolTrafficHistory] = useState<Record<Protocol, TrafficHistory>>({
+    wg: { rx: [], tx: [] }, awg: { rx: [], tx: [] },
+  });
+  const [protocolLive, setProtocolLive] = useState<LiveStatus["protocols"] | null>(null);
   const [installingProtocol, setInstallingProtocol] = useState("");
   const [checkingResources, setCheckingResources] = useState<Protocol | null>(null);
   const [checkingDiagnostics, setCheckingDiagnostics] = useState<Protocol | null>(null);
@@ -181,6 +188,7 @@ export default function Home() {
   const settingsRef = useRef<HTMLDivElement>(null);
   const networkSample = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
+  const liveProtocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
   const automationDirty = useRef(false);
   const loggingDirty = useRef(false);
@@ -242,26 +250,6 @@ export default function Home() {
         request("/overview") as Promise<Overview>,
         request("/protocol-images") as Promise<{ items: ProtocolImage[] }>,
       ]);
-      const now = Date.now();
-      const previous = networkSample.current;
-      let nextRxRate = 0;
-      let nextTxRate = 0;
-      if (previous) {
-        const seconds = Math.max((now - previous.at) / 1000, 0.1);
-        nextRxRate = Math.max(0, (next.resources.network_rx - previous.rx) / seconds);
-        nextTxRate = Math.max(0, (next.resources.network_tx - previous.tx) / seconds);
-        setNetworkRate({ rx: nextRxRate, tx: nextTxRate });
-      }
-      const memoryUsed = next.resources.memory_total ? 100 - next.resources.memory_available / next.resources.memory_total * 100 : 0;
-      const diskUsed = next.resources.disk_total ? 100 - next.resources.disk_available / next.resources.disk_total * 100 : 0;
-      setResourceHistory((history) => ({
-        load: appendSample(history.load, next.resources.cpu_percent || 0),
-        memory: appendSample(history.memory, memoryUsed),
-        disk: appendSample(history.disk, diskUsed),
-        rx: previous ? appendSample(history.rx, nextRxRate) : history.rx,
-        tx: previous ? appendSample(history.tx, nextTxRate) : history.tx,
-      }));
-      networkSample.current = { rx: next.resources.network_rx, tx: next.resources.network_tx, at: now };
       setOverview(next);
       setProtocolImages(imageData.items || []);
       if (installingProtocol && imageData.items.some((image) => image.id === installingProtocol && image.installed)) {
@@ -359,15 +347,18 @@ export default function Home() {
     if (tab === "security") return;
     const actionRunning = ["active", "activating", "running"].includes(application?.action?.state || "");
     const updateRunning = actionRunning && ["update", "test-update", "test-rollback", "kernel-update"].includes(application?.action?.action || "");
-    const delay = updateRunning ? 3000 : 5000;
+    const delay = updateRunning ? 3000
+      : tab === "overview" ? 30000
+        : tab === "wg" || tab === "awg" || tab === "clients" ? 15000
+          : 10000;
     const timer = window.setInterval(() => void refreshCurrent(false), delay);
     return () => window.clearInterval(timer);
   }, [application?.action?.action, application?.action?.state, autoRefresh, refreshCurrent, tab, token]);
 
   useEffect(() => {
     const actionRunning = ["active", "activating", "running"].includes(application?.action?.state || "");
-    if (!token || (!autoRefresh && !actionRunning)) return;
-    const timer = window.setInterval(() => void loadApplication(), 3000);
+    if (!token || !actionRunning) return;
+    const timer = window.setInterval(() => void loadApplication(), 2000);
     return () => window.clearInterval(timer);
   }, [application?.action?.state, autoRefresh, loadApplication, token]);
 
@@ -458,6 +449,36 @@ export default function Home() {
         tx: previous ? appendSample(history.tx, nextTxRate) : history.tx,
       }));
       networkSample.current = { rx: next.resources.network_rx, tx: next.resources.network_tx, at: now };
+      const nextProtocolRates: Partial<Record<Protocol, { rx: number; tx: number }>> = {};
+      (["wg", "awg"] as Protocol[]).forEach((protocol) => {
+        const counters = next.protocols[protocol];
+        const protocolPrevious = liveProtocolSamples.current[protocol];
+        if (protocolPrevious) {
+          const seconds = Math.max((now - protocolPrevious.at) / 1000, 0.1);
+          nextProtocolRates[protocol] = {
+            rx: Math.max(0, (counters.interface_rx_bytes - protocolPrevious.rx) / seconds),
+            tx: Math.max(0, (counters.interface_tx_bytes - protocolPrevious.tx) / seconds),
+          };
+        }
+        liveProtocolSamples.current[protocol] = {
+          rx: counters.interface_rx_bytes, tx: counters.interface_tx_bytes, at: now,
+        };
+      });
+      if (Object.keys(nextProtocolRates).length) {
+        setProtocolRates((current) => ({ ...current, ...nextProtocolRates }));
+        setProtocolTrafficHistory((history) => {
+          const updated = { ...history };
+          (["wg", "awg"] as Protocol[]).forEach((protocol) => {
+            const rate = nextProtocolRates[protocol];
+            if (rate) updated[protocol] = {
+              rx: appendSample(history[protocol].rx, rate.rx),
+              tx: appendSample(history[protocol].tx, rate.tx),
+            };
+          });
+          return updated;
+        });
+      }
+      setProtocolLive(next.protocols);
       setOverview((current) => current ? {
         ...current,
         resources: next.resources,
@@ -494,7 +515,7 @@ export default function Home() {
   useEffect(() => {
     if (!token || !autoRefresh || !["overview", "clients", "wg", "awg", "security"].includes(tab)) return;
     const initial = window.setTimeout(() => void loadLiveStatus(), 0);
-    const timer = window.setInterval(() => void loadLiveStatus(), 800);
+    const timer = window.setInterval(() => void loadLiveStatus(), LIVE_SAMPLE_SECONDS * 1000);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(timer);
@@ -1097,7 +1118,7 @@ export default function Home() {
       <header className="topbar">
         <div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p className="subtitle">{overview?.server.city}, {overview?.server.country} · управление инфраструктурой</p></div>
         <div className="topActions">
-          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={busy} onClick={() => setAutoRefresh((value) => !value)}><i />{autoRefresh ? `Авто · ${["overview", "clients", "wg", "awg", "security"].includes(tab) ? "<1" : tab === "application" || tab === "services" ? "5" : "30"}с` : "Пауза"}</button>
+          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={busy} onClick={() => setAutoRefresh((value) => !value)}><i />{autoRefresh ? `Авто · ${["overview", "clients", "wg", "awg", "security"].includes(tab) ? LIVE_SAMPLE_SECONDS : tab === "application" || tab === "services" ? "10" : "30"}с` : "Пауза"}</button>
           {lastUpdated && <span className="updatedAt">{lastUpdated.toLocaleTimeString("ru-RU")}</span>}
           <button className="iconButton" onClick={() => void refreshCurrent(true)} aria-label="Обновить текущий модуль">↻</button>
           <button className="ghostButton" onClick={() => { sessionStorage.removeItem("312-token"); setToken(""); }}>Выйти</button>
@@ -1125,6 +1146,23 @@ export default function Home() {
             </div>
           </article>
         </div>
+        <article className="panel protocolTrafficPanel">
+          <div className="panelHead"><div><p className="eyebrow">VPN THROUGHPUT · 5 MIN</p><h2>Передача данных по протоколам</h2></div><span>замер каждые {LIVE_SAMPLE_SECONDS} сек · без диагностических запросов</span></div>
+          <div className="protocolTrafficGrid">
+            {(["wg", "awg"] as Protocol[]).map((protocol) => {
+              const live = protocolLive?.[protocol];
+              const rate = protocolRates[protocol] || { rx: 0, tx: 0 };
+              const history = protocolTrafficHistory[protocol];
+              const name = protocol === "wg" ? "WireGuard" : "AmneziaWG";
+              return <section className={`protocolTrafficCard ${live?.active ? "active" : "inactive"}`} key={protocol}>
+                <div className="protocolTrafficHead"><span className={`protocol ${protocol}`}>{protocol === "wg" ? "WG" : "AW"}</span><div><strong>{name}</strong><small>{live?.active ? `${live.online_peers}/${live.peers} подключений online` : "модуль не активен"}</small></div></div>
+                <div className="protocolRateNow"><span>↓ RX <strong>{bytes(rate.rx)}/с</strong></span><span>↑ TX <strong>{bytes(rate.tx)}/с</strong></span></div>
+                <TrendGraph values={history.rx} secondary={history.tx} relative sampleIntervalSeconds={LIVE_SAMPLE_SECONDS} formatValue={(value) => `${bytes(value)}/с`} ariaLabel={`${name}: история входящей и исходящей скорости`} />
+                <div className="protocolTrafficTotals"><span>Получено <strong>{bytes(live?.interface_rx_bytes || 0)}</strong></span><span>Передано <strong>{bytes(live?.interface_tx_bytes || 0)}</strong></span></div>
+              </section>;
+            })}
+          </div>
+        </article>
         <article className="panel protocolSummary">
           <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div></div>
           {(["wg", "awg"] as Protocol[]).filter((protocol) => overview?.protocols[protocol].active).map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
@@ -1649,8 +1687,8 @@ function AutomationEditor({
     <label className="automationSwitch"><input type="checkbox" checked={value.enabled} onChange={(event) => onChange({ enabled: event.target.checked })} /><span /><em>{value.enabled ? "Вкл" : "Выкл"}</em></label>
   </div>;
 }
-function TrendGraph({ values, secondary, relative = false, formatValue = (value) => `${Math.round(value)}%`, ariaLabel }: {
-  values: number[]; secondary?: number[]; relative?: boolean; formatValue?: (value: number) => string; ariaLabel: string;
+function TrendGraph({ values, secondary, relative = false, sampleIntervalSeconds = LIVE_SAMPLE_SECONDS, formatValue = (value) => `${Math.round(value)}%`, ariaLabel }: {
+  values: number[]; secondary?: number[]; relative?: boolean; sampleIntervalSeconds?: number; formatValue?: (value: number) => string; ariaLabel: string;
 }) {
   const width = 240;
   const height = 72;
@@ -1673,7 +1711,9 @@ function TrendGraph({ values, secondary, relative = false, formatValue = (value)
   const secondaryLast = secondaryCoordinates.at(-1);
   const primaryPeak = values.length ? Math.max(...values) : 0;
   const secondaryPeak = secondary?.length ? Math.max(...secondary) : 0;
-  const elapsedSeconds = Math.max(0, (values.length - 1) * 5);
+  const primaryAverage = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  const secondaryAverage = secondary?.length ? secondary.reduce((sum, value) => sum + value, 0) / secondary.length : 0;
+  const elapsedSeconds = Math.max(0, (values.length - 1) * sampleIntervalSeconds);
   const elapsedLabel = elapsedSeconds >= 60 ? `${Math.round(elapsedSeconds / 60)} мин` : `${elapsedSeconds} сек`;
   return <div className={`trendGraph ${secondary ? "dual" : ""}`} role="img" aria-label={ariaLabel}>
     <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
@@ -1687,11 +1727,13 @@ function TrendGraph({ values, secondary, relative = false, formatValue = (value)
     <span className="trendXAxis"><b>−{elapsedLabel}</b><b>сейчас</b></span>
     <span className="trendSummary">
       <b>Сейчас {formatValue(values.at(-1) || 0)}</b>
+      <b>Среднее {formatValue(primaryAverage)}</b>
       <b>Пик {formatValue(primaryPeak)}</b>
+      {secondary && <b>TX среднее {formatValue(secondaryAverage)}</b>}
       {secondary && <b>TX пик {formatValue(secondaryPeak)}</b>}
     </span>
     {secondary && <span className="trendLegend"><i /> RX <i /> TX</span>}
-    <small>{values.length < 2 ? "Сбор данных…" : `${values.length} замеров · интервал 5 сек`}</small>
+    <small>{values.length < 2 ? "Сбор данных…" : `${values.length} замеров · интервал ${sampleIntervalSeconds} сек`}</small>
   </div>;
 }
 function Metric({ title, value, percent, detail, history }: { title: string; value: string; percent: number; detail: string; history: number[] }) {

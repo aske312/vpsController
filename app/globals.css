@@ -515,6 +515,21 @@ input, select { height: 46px; font-size: 11px; }
 .networkDirections { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: auto; }
 .networkDirections span { display: flex; flex-direction: column; gap: 6px; padding-top: 11px; border-top: 1px solid #29403a; color: var(--muted); font-size: 9px; }
 .networkDirections strong { color: var(--text); font: 500 11px var(--font-mono); }
+.protocolTrafficPanel { grid-column: 1 / -1; padding: 20px 22px; }
+.protocolTrafficGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.protocolTrafficCard { min-width: 0; display: grid; grid-template-columns: minmax(130px, .55fr) minmax(260px, 1.45fr); gap: 14px 20px; padding: 17px; border: 1px solid #29403a; border-radius: 8px; background: linear-gradient(145deg, #11201d, #101719); }
+.protocolTrafficCard.inactive { border-color: var(--line); background: #11191b; }
+.protocolTrafficCard.inactive .trendGraph { opacity: .62; }
+.protocolTrafficHead { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: center; gap: 10px; }
+.protocolTrafficHead > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.protocolTrafficHead strong { font-size: 12px; }
+.protocolTrafficHead small { overflow: hidden; color: var(--muted); font: 9px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.protocolRateNow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; align-self: end; }
+.protocolRateNow span, .protocolTrafficTotals span { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 9px; }
+.protocolRateNow strong { color: var(--text); font: 600 12px var(--font-mono); }
+.protocolTrafficCard > .trendGraph { grid-column: 2; grid-row: 1 / span 2; }
+.protocolTrafficTotals { grid-column: 1 / -1; display: flex; gap: 24px; padding-top: 11px; border-top: 1px solid #29403a; }
+.protocolTrafficTotals strong { color: var(--text); font: 500 10px var(--font-mono); }
 .protocolSummary { padding: 12px 14px; }
 .protocolSummary > button { padding: 17px 10px; }
 .protocolInstaller { grid-template-columns: 46px minmax(0, 1fr) auto; padding: 17px 10px; gap: 14px; }
@@ -860,6 +875,9 @@ input, select { height: 46px; font-size: 11px; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .metricCard { min-height: 116px; padding: 14px; }
   .networkMetric { grid-column: 1 / -1; }
+  .protocolTrafficGrid { grid-template-columns: 1fr; }
+  .protocolTrafficCard { grid-template-columns: 1fr; }
+  .protocolTrafficCard > .trendGraph { grid-column: 1; grid-row: auto; }
   .securityStats { display: none; }
   .compactSecurity { grid-template-columns: 1fr; padding: 8px; }
   .compactSecurity > div, .runtimeRows > div { grid-template-columns: 25px minmax(0, 1fr); min-height: 58px; }

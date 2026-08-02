@@ -223,13 +223,21 @@ test("service mode tests main without publishing it while stabl remains the only
   assert.match(stablWorkflow, /gh release create stabl-latest/);
 });
 
-test("live system status refreshes below one second without overlapping heavy checks", async () => {
+test("live monitoring uses stable low-load cadence and protocol throughput history", async () => {
   const [api, page] = await Promise.all([read("api/main.py"), read("app/page.tsx")]);
   assert.match(api, /@app\.get\("\/api\/live-status"\)/);
   assert.match(api, /include_quality=False/);
   assert.match(page, /liveRequestInFlight/);
-  assert.match(page, /setInterval\(\(\) => void loadLiveStatus\(\), 800\)/);
-  assert.match(page, /"\<1"/);
+  assert.match(page, /const LIVE_SAMPLE_SECONDS = 3/);
+  assert.match(page, /const HISTORY_SAMPLES = 100/);
+  assert.match(page, /setInterval\(\(\) => void loadLiveStatus\(\), LIVE_SAMPLE_SECONDS \* 1000\)/);
+  assert.match(page, /tab === "overview" \? 30000/);
+  assert.match(page, /tab === "wg" \|\| tab === "awg" \|\| tab === "clients" \? 15000/);
+  assert.match(page, /protocolTrafficHistory/);
+  assert.match(page, /interface_rx_bytes/);
+  assert.match(page, /sampleIntervalSeconds=\{LIVE_SAMPLE_SECONDS\}/);
+  assert.match(page, /Среднее \{formatValue\(primaryAverage\)\}/);
+  assert.doesNotMatch(page, /loadLiveStatus\(\), 800/);
   assert.match(page, /function reloadWithoutCache\(message: string\)/);
   assert.match(page, /target\.searchParams\.set\("_refresh", Date\.now\(\)\.toString\(\)\)/);
   assert.match(page, /window\.location\.replace\(target\.toString\(\)\)/);
