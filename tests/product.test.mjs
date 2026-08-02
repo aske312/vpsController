@@ -110,6 +110,8 @@ test("security distinguishes public SSH from public panel access", async () => {
   assert.match(page, /title="Доступ к панели"/);
   assert.match(page, /SSH · административный доступ/);
   assert.match(page, /открыт по согласованной политике/);
+  assert.match(page, /title="Дополнительные VPN-службы"/);
+  assert.match(page, /установлены отдельно и не управляются приложением/);
 });
 
 test("VPN firewall diagnostics accept module rules and offer a persistent repair", async () => {
@@ -177,6 +179,8 @@ test("service mode exposes an explicit main test release while stabl remains pro
   assert.match(api, /payload\.action in \("test-update", "test-rollback"\) and not SERVICE_MODE_FILE\.exists\(\)/);
   assert.match(api, /branch = "stabl"/);
   assert.match(api, /expected_branch = "stabl"/);
+  assert.match(api, /cached\.get\("current_commit"\) != installed_commit/);
+  assert.match(page, /applicationVersion\.branch \|\| "stabl"/);
   assert.match(page, /setAutoRefresh\(false\)/);
   assert.match(page, /setAutoRefresh\(autoRefreshBeforeServiceMode\.current\)/);
   assert.match(page, /serviceModeActive && <button onClick=\{\(\) => void runApplicationAction\("test-update"\)\}/);

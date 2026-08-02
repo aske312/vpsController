@@ -1187,7 +1187,7 @@ export default function Home() {
               : applicationVersion?.error
                 ? applicationVersion.error
                 : applicationVersion?.outdated
-                  ? `Устарела: ${applicationVersion.current_commit || "unknown"} · main: ${applicationVersion.latest_commit || "unknown"}`
+                  ? `Устарела: ${applicationVersion.current_commit || "unknown"} · ${applicationVersion.branch || "stabl"}: ${applicationVersion.latest_commit || "unknown"}`
                   : `Актуальна: ${applicationVersion?.current_commit || "unknown"} · ветка ${applicationVersion?.branch || "main"}`}
           />
           <SecurityRow ok={Boolean(securitySystem?.apparmor?.active)} title="AppArmor" text={`${securitySystem?.apparmor?.profiles || 0} профилей · ${securitySystem?.apparmor?.active ? "активен" : "выключен"}`} />
@@ -1207,7 +1207,13 @@ export default function Home() {
             onAction={() => void fixSecurity("secure")}
           />
           <SecurityRow ok={Boolean(securitySystem) && (securitySystem?.login_users?.length || 0) <= 5} title="Учётные записи" text={`sudo ${securitySystem?.sudo_users?.length || 0} · login ${securitySystem?.login_users?.length || 0}`} />
-          <SecurityRow ok={!Object.values(legacy).some((service) => service.active)} title="Устаревшие VPN-службы" text={`Активно ${Object.values(legacy).filter((service) => service.active).length}`} />
+          <SecurityRow
+            ok
+            title="Дополнительные VPN-службы"
+            text={Object.values(legacy).some((service) => service.active)
+              ? `Активно ${Object.values(legacy).filter((service) => service.active).length} · установлены отдельно и не управляются приложением`
+              : "Не обнаружены"}
+          />
           <SecurityActionRow ok={Boolean(applicationSecurity?.admin_password_strong)} title="Пароль администратора" text={applicationSecurity?.admin_password_strong ? "Достаточная длина и стойкость пароля панели" : "Стандартный пароль считается небезопасным"} onAction={() => setPasswordDialog(true)} actionLabel="Изменить пароль" />
           <SecurityRow ok={Boolean(applicationSecurity?.secrets_protected)} title="Секреты приложения" text={`/etc/vps-control.env · права ${applicationSecurity?.secrets_mode || "не определены"} · владелец root`} />
           <SecurityRow ok={Boolean(applicationSecurity?.api_local_only)} title="Локальный API" text={applicationSecurity?.api_local_only ? "API слушает только 127.0.0.1:8000" : "API не найден локально или доступен на внешнем интерфейсе"} />

@@ -1432,13 +1432,18 @@ def application_version_status() -> dict:
         pass
     age = time.time() - APP_VERSION_FILE.stat().st_mtime if APP_VERSION_FILE.exists() else float("inf")
     expected_branch = "stabl"
-    refreshing = age > 600 or cached.get("branch") != expected_branch
+    installed_commit = installed_build_commit()
+    refreshing = (
+        age > 600
+        or cached.get("branch") != expected_branch
+        or cached.get("current_commit") != installed_commit
+    )
     if refreshing and not app_version_refresh_lock.locked():
         threading.Thread(target=refresh_application_version_cache, daemon=True).start()
     if cached:
         return {**cached, "refreshing": refreshing}
     return {
-        "branch": expected_branch, "current_commit": installed_build_commit(), "latest_commit": "",
+        "branch": expected_branch, "current_commit": installed_commit, "latest_commit": "",
         "outdated": None, "checked_at": None, "error": "", "refreshing": True,
     }
 
