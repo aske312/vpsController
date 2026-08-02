@@ -207,8 +207,10 @@ test("service mode tests main without publishing it while stabl remains the only
   assert.match(api, /cached\.get\("current_commit"\) != installed_commit/);
   assert.match(page, /applicationVersion\.branch \|\| "stabl"/);
   assert.match(page, /setAutoRefresh\(false\)/);
-  assert.match(page, /if \(active\) autoRefreshBeforeServiceMode\.current = autoRefresh/);
-  assert.match(page, /setAutoRefresh\(autoRefreshBeforeServiceMode\.current\)/);
+  assert.match(page, /const autoRefreshAfterChange = autoRefresh/);
+  assert.match(page, /setAutoRefresh\(autoRefreshAfterChange\)/);
+  assert.match(page, /className=\{`autoButton \$\{autoRefresh \? "active" : ""\}`\} disabled=\{busy\}/);
+  assert.doesNotMatch(page, /disabled=\{serviceModeActive\}.*Авто · выкл/);
   assert.match(page, /serviceModeActive && <button onClick=\{\(\) => void runApplicationAction\("test-update"\)\}/);
   assert.match(page, /Переход на тестовую версию/);
   assert.match(page, /application\?\.service_mode\?\.rollback_available/);

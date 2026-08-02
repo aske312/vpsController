@@ -174,7 +174,6 @@ export default function Home() {
   const settingsRef = useRef<HTMLDivElement>(null);
   const networkSample = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
-  const autoRefreshBeforeServiceMode = useRef(true);
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
   const automationDirty = useRef(false);
   const loggingDirty = useRef(false);
@@ -397,14 +396,6 @@ export default function Home() {
     const timer = window.setTimeout(() => setNotice(""), 8000);
     return () => window.clearTimeout(timer);
   }, [notice]);
-
-  useEffect(() => {
-    if (!autoRefresh || !(services?.service_mode?.active || application?.service_mode?.active)) return;
-    autoRefreshBeforeServiceMode.current = true;
-    // Service mode freezes telemetry so tests and maintenance do not race background requests.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAutoRefresh(false);
-  }, [application?.service_mode?.active, autoRefresh, services?.service_mode?.active]);
 
   useEffect(() => {
     if (!token || tab === "overview") return;
@@ -660,9 +651,9 @@ export default function Home() {
       confirmLabel: active ? "Включить режим" : "Завершить обслуживание",
       danger: active,
     })) return;
+    const autoRefreshAfterChange = autoRefresh;
     setBusy(true); setError("");
     try {
-      if (active) autoRefreshBeforeServiceMode.current = autoRefresh;
       setAutoRefresh(false);
       await request("/services/service-mode", { method: "PUT", body: JSON.stringify({ active }) });
       let confirmed = false;
@@ -685,11 +676,10 @@ export default function Home() {
         }
       }
       if (!confirmed) throw new Error("Сервер не подтвердил завершение переключения режима");
-      if (!active) setAutoRefresh(autoRefreshBeforeServiceMode.current);
+      setAutoRefresh(autoRefreshAfterChange);
       await loadSecurity();
     } catch (cause) {
-      if (!active) setAutoRefresh(false);
-      else setAutoRefresh(autoRefreshBeforeServiceMode.current);
+      setAutoRefresh(autoRefreshAfterChange);
       setError(cause instanceof Error ? cause.message : "Не удалось изменить сервисный режим");
     } finally { setBusy(false); }
   }
@@ -1101,7 +1091,7 @@ export default function Home() {
       <header className="topbar">
         <div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p className="subtitle">{overview?.server.city}, {overview?.server.country} · управление инфраструктурой</p></div>
         <div className="topActions">
-          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={serviceModeActive} onClick={() => setAutoRefresh((value) => !value)}><i />{serviceModeActive ? "Авто · выкл" : autoRefresh ? `Авто · ${["overview", "clients", "wg", "awg", "security"].includes(tab) ? "<1" : tab === "application" || tab === "services" ? "5" : "30"}с` : "Пауза"}</button>
+          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={busy} onClick={() => setAutoRefresh((value) => !value)}><i />{autoRefresh ? `Авто · ${["overview", "clients", "wg", "awg", "security"].includes(tab) ? "<1" : tab === "application" || tab === "services" ? "5" : "30"}с` : "Пауза"}</button>
           {lastUpdated && <span className="updatedAt">{lastUpdated.toLocaleTimeString("ru-RU")}</span>}
           <button className="iconButton" onClick={() => void refreshCurrent(true)} aria-label="Обновить текущий модуль">↻</button>
           <button className="ghostButton" onClick={() => { sessionStorage.removeItem("312-token"); setToken(""); }}>Выйти</button>
