@@ -77,6 +77,9 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(page, /clientDialog && <div className="confirmBackdrop"/);
   assert.match(page, /Новое подключение/);
   assert.match(page, /data-tooltip="Пошаговая инструкция/);
+  assert.match(page, /const CLIENTS_PER_PAGE = 10/);
+  assert.match(page, /visibleClients\.map/);
+  assert.match(page, /Показаны \{visibleClientStart\}–\{visibleClientEnd\} из \{protocolClients\.length\}/);
   assert.match(page, /connection-guide-wg-awg\.pdf/);
   assert.match(page, /installedProtocols\.length > 0/);
   assert.match(page, /waitForProtocolState/);

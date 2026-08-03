@@ -136,6 +136,7 @@ const duration = (seconds?: number) => {
 const uptime = (seconds = 0) => `${Math.floor(seconds / 86400)}д ${Math.floor((seconds % 86400) / 3600)}ч`;
 const LIVE_SAMPLE_SECONDS = 3;
 const HISTORY_SAMPLES = 100;
+const CLIENTS_PER_PAGE = 10;
 const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-HISTORY_SAMPLES);
 export default function Home() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -175,6 +176,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [passwordDialog, setPasswordDialog] = useState(false);
   const [clientDialog, setClientDialog] = useState(false);
+  const [clientPage, setClientPage] = useState(1);
   const [currentAdminPassword, setCurrentAdminPassword] = useState("");
   const [newAdminPassword, setNewAdminPassword] = useState("");
   const [confirmAdminPassword, setConfirmAdminPassword] = useState("");
@@ -865,6 +867,11 @@ export default function Home() {
     () => tab === "wg" || tab === "awg" ? clients.filter((client) => client.protocol === tab) : clients,
     [clients, tab],
   );
+  const clientPageCount = Math.max(1, Math.ceil(protocolClients.length / CLIENTS_PER_PAGE));
+  const currentClientPage = Math.min(clientPage, clientPageCount);
+  const visibleClients = protocolClients.slice((currentClientPage - 1) * CLIENTS_PER_PAGE, currentClientPage * CLIENTS_PER_PAGE);
+  const visibleClientStart = protocolClients.length ? (currentClientPage - 1) * CLIENTS_PER_PAGE + 1 : 0;
+  const visibleClientEnd = Math.min(currentClientPage * CLIENTS_PER_PAGE, protocolClients.length);
   const installedProtocols = useMemo(
     () => protocolImages.filter((image) => image.installed && (image.id === "wg" || image.id === "awg")).map((image) => image.id as Protocol),
     [protocolImages],
@@ -1574,12 +1581,16 @@ export default function Home() {
 
       {tab === "clients" && installedProtocols.length > 0 && <section className="clientsLayout">
         <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все подключения" : labels[tab]}</h2></div><div className="clientPanelActions"><span>{protocolClients.length} подключений</span><a className="guideAction" href="/connection-guide-wg-awg.pdf" download aria-label="Скачать руководство по подключению" data-tooltip="Пошаговая инструкция для владельца устройства: установка приложения и импорт конфигурации"><span aria-hidden="true">↓</span><div><strong>Скачать гайд</strong><small>PDF · ДЛЯ ПОЛЬЗОВАТЕЛЯ</small></div></a><button className="primaryButton" onClick={openClientDialog}>Новое подключение <span>＋</span></button></div></div>
-          <div className="clientTable">{protocolClients.length ? protocolClients.map((client) =>
+          <div className="clientTable">{protocolClients.length ? visibleClients.map((client) =>
             <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><span className={`protocol ${client.protocol}`}>{client.protocol.toUpperCase()}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address} · {client.quality_reason || "состояние уточняется"}</small></p>
               <span className="traffic"><small>ПОЛУЧЕНО <b>↓ {bytes(client.rx_bytes)}</b></small><small>ОТПРАВЛЕНО <b>↑ {bytes(client.tx_bytes)}</b></small></span><span className="handshake"><small>ПОСЛЕДНЯЯ СВЯЗЬ</small><strong>{duration(client.handshake_age_s)}</strong></span>
               <span className="clientLink"><small>LINK QUALITY</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} ms` : "—"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · loss ${client.packet_loss_percent}%` : ""}</strong></span>
               <button className="dangerButton" onClick={() => void removeClient(client.id)}>Отозвать</button></div>
           ) : <div className="emptyState"><span>◎</span><p>Подключений пока нет</p></div>}</div>
+          {protocolClients.length > CLIENTS_PER_PAGE && <nav className="clientPagination" aria-label="Страницы подключений">
+            <span>Показаны {visibleClientStart}–{visibleClientEnd} из {protocolClients.length}</span>
+            <div><button onClick={() => setClientPage(1)} disabled={currentClientPage === 1} aria-label="Первая страница">«</button><button onClick={() => setClientPage(Math.max(1, currentClientPage - 1))} disabled={currentClientPage === 1}>Назад</button><strong>{currentClientPage} / {clientPageCount}</strong><button onClick={() => setClientPage(Math.min(clientPageCount, currentClientPage + 1))} disabled={currentClientPage === clientPageCount}>Дальше</button><button onClick={() => setClientPage(clientPageCount)} disabled={currentClientPage === clientPageCount} aria-label="Последняя страница">»</button></div>
+          </nav>}
         </article>
         <ConnectionGuide />
       </section>}

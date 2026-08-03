@@ -221,6 +221,13 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .guideSteps a { display: inline-block; margin-top: 12px; color: var(--green); font: 10px var(--font-mono); text-decoration: none; }
 .guideSteps a:hover { text-decoration: underline; }
 .clientTable { display: grid; gap: 8px; }
+.clientPagination { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; padding: 13px 4px 0; border-top: 1px solid var(--line); }
+.clientPagination > span { color: var(--muted); font: 9px var(--font-mono); }
+.clientPagination > div { display: flex; align-items: center; gap: 6px; }
+.clientPagination button { min-width: 34px; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: #11191b; color: #9eaaa7; font-size: 9px; }
+.clientPagination button:hover:not(:disabled) { border-color: #31534a; background: var(--green-dim); color: var(--green); }
+.clientPagination button:disabled { opacity: .35; cursor: not-allowed; }
+.clientPagination strong { min-width: 54px; color: var(--text); font: 9px var(--font-mono); text-align: center; }
 .clientRow { display: grid; grid-template-columns: 44px minmax(150px, 1fr) 150px 110px 145px auto; gap: 13px; align-items: center; padding: 15px; border: 1px solid var(--line); border-radius: 8px; background: #121a1c; }
 .clientRow > p > strong { display: flex; align-items: center; gap: 7px; }
 .clientQuality { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: #63706e; box-shadow: none; }
@@ -797,6 +804,9 @@ input, select { height: 46px; font-size: 11px; }
   .clientPanelActions > span { display: block; }
   .guideAction, .clientPanelActions .primaryButton { width: 100%; }
   .guideAction::after { display: none; }
+  .clientPagination { align-items: stretch; flex-direction: column; }
+  .clientPagination > div { justify-content: space-between; }
+  .clientPagination button { padding-inline: 8px; }
 }
 
 /* Compact operations layout: useful state fits into a typical 1440×900 viewport. */
