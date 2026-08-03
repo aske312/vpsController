@@ -354,6 +354,33 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(awgInstall, /if ! command -v awg.*command -v awg-quick.*modinfo amneziawg/s);
 });
 
+test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", async () => {
+  const [api, manager, ssManifest, ssInstall, ssRemove, vlessManifest, vlessInstall, vlessRemove] = await Promise.all([
+    read("api/main.py"), read("scripts/vps-control.sh"),
+    read("protocol-images/shadowsocks/manifest.json"),
+    read("protocol-images/shadowsocks/install.sh"),
+    read("protocol-images/shadowsocks/uninstall.sh"),
+    read("protocol-images/vless-reality-xhttp/manifest.json"),
+    read("protocol-images/vless-reality-xhttp/install.sh"),
+    read("protocol-images/vless-reality-xhttp/uninstall.sh"),
+  ]);
+  assert.equal(JSON.parse(ssManifest).id, "shadowsocks");
+  assert.equal(JSON.parse(vlessManifest).id, "vless-reality-xhttp");
+  assert.match(ssInstall, /vps-control-shadowsocks@\.service/);
+  assert.match(ssInstall, /shadowsocks-libev/);
+  assert.doesNotMatch(ssInstall + ssRemove, /wg-quick|awg-quick/);
+  assert.match(vlessInstall, /VLESS \+ REALITY \+ XHTTP/);
+  assert.match(vlessInstall, /"network": "xhttp"/);
+  assert.match(vlessInstall, /"security": "reality"/);
+  assert.match(vlessInstall, /limitFallbackUpload/);
+  assert.doesNotMatch(vlessInstall + vlessRemove, /wg-quick|awg-quick|shadowsocks/);
+  assert.match(api, /Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\]/);
+  assert.match(api, /vless:\/\//);
+  assert.match(api, /ss:\/\//);
+  assert.match(manager, /SHADOWSOCKS_PORT_START/);
+  assert.match(manager, /VLESS_REALITY_TARGET/);
+});
+
 test("the interface uses one fixed visual design without personalization", async () => {
   const [page, api, css, manager] = await Promise.all([
     read("app/page.tsx"), read("api/main.py"), read("app/globals.css"), read("scripts/vps-control.sh"),
