@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import base64
 import ipaddress
 import json
 import csv
@@ -10,6 +11,8 @@ import secrets
 import subprocess
 import threading
 import time
+import urllib.parse
+import uuid
 import platform
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -47,6 +50,11 @@ AWG_SUBNET = ipaddress.ip_network(os.getenv("AWG_SUBNET", "10.73.0.0/24"))
 WG_CONFIG = Path(os.getenv("WG_CONFIG", f"/etc/wireguard/{WG_INTERFACE}.conf"))
 AWG_CONFIG = Path(os.getenv("AWG_CONFIG", f"/etc/amnezia/amneziawg/{AWG_INTERFACE}.conf"))
 AWG_MTU = int(os.getenv("AWG_MTU", "1280"))
+SHADOWSOCKS_PORT_START = int(os.getenv("SHADOWSOCKS_PORT_START", "30000"))
+SHADOWSOCKS_CONFIG_DIR = Path("/etc/vps-control/shadowsocks/clients")
+VLESS_CONFIG_DIR = Path("/etc/vps-control/vless-reality-xhttp")
+VLESS_CONFIG = VLESS_CONFIG_DIR / "config.json"
+VLESS_ENV = VLESS_CONFIG_DIR / "reality.env"
 AWG_PROFILE = {
     "Jc": os.getenv("AWG_JC", "6"), "Jmin": os.getenv("AWG_JMIN", "8"), "Jmax": os.getenv("AWG_JMAX", "80"),
     "S1": os.getenv("AWG_S1", "64"), "S2": os.getenv("AWG_S2", "112"),
@@ -252,6 +260,33 @@ def interface_dump(protocol: Literal["wg", "awg"], include_quality: bool = True)
         if include_quality and peer not in online_peers:
             peer.update({"quality": "offline", "latency_ms": None, "packet_loss_percent": None, "quality_reason": "Нет активного handshake"})
     return peers
+
+
+def stream_proxy_dump() -> list[dict]:
+    peers = []
+    for item in read_clients():
+        protocol = item.get("protocol")
+        if protocol == "shadowsocks":
+            unit = f'vps-control-shadowsocks@{item.get("id", "")}.service'
+            active = run("systemctl", "is-active", unit) == "active"
+            address = f'{PUBLIC_IP}:{item.get("port", "—")}'
+        elif protocol == "vless-reality-xhttp":
+            active = run("systemctl", "is-active", "vps-control-vless-reality-xhttp.service") == "active"
+            address = f'{PUBLIC_IP}:{item.get("port", 443)}'
+        else:
+            continue
+        peers.append({
+            "id": item.get("id", ""), "name": item.get("name", "Подключение"), "protocol": protocol,
+            "public_key": item.get("public_key", item.get("id", "")), "endpoint": address, "address": address,
+            "handshake_age_s": None, "rx_bytes": 0, "tx_bytes": 0, "enabled": True,
+            "quality": "stable" if active else "offline", "latency_ms": None, "packet_loss_percent": None,
+            "quality_reason": "Служба протокола активна" if active else "Служба подключения остановлена",
+        })
+    return peers
+
+
+def all_client_dump(include_quality: bool = True) -> list[dict]:
+    return interface_dump("wg", include_quality) + interface_dump("awg", include_quality) + stream_proxy_dump()
 
 
 def client_connection_quality(peer: dict) -> dict:
@@ -1121,7 +1156,9 @@ def protocol_image_manifests() -> dict[str, dict]:
         interface_env = str(manifest.get("interface_env", ""))
         interface = os.getenv(interface_env, "") if interface_env else ""
         service_template = str(manifest.get("service", ""))
-        service = service_template.replace("{interface}", interface) if interface and service_template else ""
+        # Stream proxies do not create a tunnel interface. Their manifests use a
+        # fixed systemd unit, while WG-like images may still interpolate one.
+        service = service_template.replace("{interface}", interface) if service_template else ""
         images[image_id] = {
             "id": image_id,
             "name": str(manifest.get("name", image_id)),
@@ -1133,6 +1170,7 @@ def protocol_image_manifests() -> dict[str, dict]:
             # Installed and running are different states. A stopped tunnel must
             # remain manageable instead of being offered for installation again.
             "installed": bool(service and run("systemctl", "show", service, "--property=LoadState", "--value") == "loaded"),
+            "active": bool(service and run("systemctl", "is-active", service) == "active"),
             "removable": bool(uninstaller),
         }
     return images
@@ -1605,7 +1643,7 @@ def live_status(_: None = Depends(require_token)) -> dict:
     load = os.getloadavg()
     network_rx, network_tx = network_info()
     ufw_config = Path("/etc/ufw/ufw.conf")
-    live_clients = interface_dump("wg", include_quality=False) + interface_dump("awg", include_quality=False)
+    live_clients = all_client_dump(include_quality=False)
 
     def protocol_live(protocol: str, interface: str) -> dict:
         protocol_clients = [client for client in live_clients if client["protocol"] == protocol]
@@ -1842,12 +1880,12 @@ def update_automation(payload: AutomationSettings, _: None = Depends(require_tok
 
 @app.get("/api/clients")
 def clients(_: None = Depends(require_token)) -> dict:
-    return {"items": interface_dump("wg") + interface_dump("awg")}
+    return {"items": all_client_dump()}
 
 
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
-    protocol: Literal["wg", "awg"]
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"]
 
 
 def key(command: str) -> str:
@@ -1880,6 +1918,75 @@ def append_peer(config: Path, client_id: str, public_key: str, psk: str, address
 
 @app.post("/api/clients")
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
+    client_id = secrets.token_hex(8)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
+    if payload.protocol == "shadowsocks":
+        if run("systemctl", "show", "vps-control-shadowsocks.target", "--property=LoadState", "--value") != "loaded":
+            raise HTTPException(status_code=409, detail="shadowsocks protocol is not installed")
+        used_ports = {int(item["port"]) for item in read_clients() if item.get("protocol") == "shadowsocks" and item.get("port")}
+        port = next((candidate for candidate in range(SHADOWSOCKS_PORT_START, min(65536, SHADOWSOCKS_PORT_START + 10000)) if candidate not in used_ports), None)
+        if port is None:
+            raise HTTPException(status_code=409, detail="No free Shadowsocks ports")
+        password = secrets.token_urlsafe(32)
+        method = "chacha20-ietf-poly1305"
+        SHADOWSOCKS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        config_path = SHADOWSOCKS_CONFIG_DIR / f"{client_id}.json"
+        config_path.write_text(json.dumps({
+            "server": "0.0.0.0", "server_port": port, "password": password, "method": method,
+            "timeout": 300, "mode": "tcp_and_udp", "fast_open": False,
+        }, indent=2), encoding="utf-8")
+        os.chmod(config_path, 0o600)
+        try:
+            run("systemctl", "enable", "--now", f"vps-control-shadowsocks@{client_id}.service", timeout=20, check=True)
+            if run("systemctl", "is-active", "ufw") == "active":
+                run("ufw", "allow", f"{port}/tcp", "comment", "312.net Shadowsocks client", check=True)
+                run("ufw", "allow", f"{port}/udp", "comment", "312.net Shadowsocks client", check=True)
+        except Exception:
+            config_path.unlink(missing_ok=True)
+            run("systemctl", "disable", "--now", f"vps-control-shadowsocks@{client_id}.service")
+            raise
+        userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
+        client_config = f"ss://{userinfo}@{PUBLIC_IP}:{port}#{urllib.parse.quote(payload.name)}"
+        items = read_clients()
+        items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
+        write_clients(items)
+        return {"id": client_id, "filename": f"{safe_name}-shadowsocks.txt", "config": client_config}
+
+    if payload.protocol == "vless-reality-xhttp":
+        if not VLESS_CONFIG.exists() or not VLESS_ENV.exists():
+            raise HTTPException(status_code=409, detail="vless-reality-xhttp protocol is not installed")
+        try:
+            config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
+            reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+            inbound_clients = config_data["inbounds"][0]["settings"]["clients"]
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail="VLESS module configuration is invalid") from exc
+        client_uuid = str(uuid.uuid4())
+        inbound_clients.append({"id": client_uuid, "email": f"{client_id}@312.net"})
+        tmp = VLESS_CONFIG.with_suffix(".tmp")
+        tmp.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.chmod(tmp, 0o640)
+        os.chown(tmp, 0, 65534)
+        xray = "/usr/local/lib/vps-control-vless-reality-xhttp/xray"
+        result = subprocess.run([xray, "run", "-test", "-config", str(tmp)], capture_output=True, text=True, timeout=15, check=False)
+        if result.returncode:
+            tmp.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail=result.stderr.strip() or "Generated VLESS config is invalid")
+        tmp.replace(VLESS_CONFIG)
+        run("systemctl", "restart", "vps-control-vless-reality-xhttp.service", timeout=20, check=True)
+        target_host = reality.get("TARGET", "www.microsoft.com:443").rsplit(":", 1)[0]
+        port = int(reality.get("PORT", "443"))
+        query = urllib.parse.urlencode({
+            "encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome",
+            "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", ""),
+            "type": "xhttp", "path": reality.get("PATH", "/"), "mode": "auto",
+        })
+        client_config = f"vless://{client_uuid}@{PUBLIC_IP}:{port}?{query}#{urllib.parse.quote(payload.name)}"
+        items = read_clients()
+        items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
+        write_clients(items)
+        return {"id": client_id, "filename": f"{safe_name}-vless.txt", "config": client_config}
+
     command = "wg" if payload.protocol == "wg" else "awg"
     config_path = WG_CONFIG if payload.protocol == "wg" else AWG_CONFIG
     if not config_path.exists():
@@ -1888,7 +1995,6 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     public_key = key(f"printf '%s' '{private_key}' | {command} pubkey")
     psk = key(f"{command} genpsk")
     address = next_address(payload.protocol)
-    client_id = secrets.token_hex(8)
     interface = WG_INTERFACE if payload.protocol == "wg" else AWG_INTERFACE
     append_peer(config_path, client_id, public_key, psk, str(address))
     run_with_input(
@@ -1919,7 +2025,6 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         }
     )
     write_clients(items)
-    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
     return {"id": client_id, "filename": f"{safe_name}-{payload.protocol}.conf", "config": client_config}
 
 
@@ -1930,6 +2035,30 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     if not item:
         raise HTTPException(status_code=404, detail="Client not found")
     protocol = item["protocol"]
+    if protocol == "shadowsocks":
+        port = int(item.get("port", 0))
+        run("systemctl", "disable", "--now", f"vps-control-shadowsocks@{client_id}.service", timeout=20)
+        (SHADOWSOCKS_CONFIG_DIR / f"{client_id}.json").unlink(missing_ok=True)
+        if port and run("systemctl", "is-active", "ufw") == "active":
+            run("ufw", "--force", "delete", "allow", f"{port}/tcp")
+            run("ufw", "--force", "delete", "allow", f"{port}/udp")
+        write_clients([entry for entry in items if entry["id"] != client_id])
+        return {"deleted": client_id}
+    if protocol == "vless-reality-xhttp":
+        try:
+            config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
+            inbound_clients = config_data["inbounds"][0]["settings"]["clients"]
+            config_data["inbounds"][0]["settings"]["clients"] = [client for client in inbound_clients if client.get("id") != item.get("public_key")]
+            tmp = VLESS_CONFIG.with_suffix(".tmp")
+            tmp.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.chmod(tmp, 0o640)
+            os.chown(tmp, 0, 65534)
+            tmp.replace(VLESS_CONFIG)
+            run("systemctl", "restart", "vps-control-vless-reality-xhttp.service", timeout=20, check=True)
+        except (OSError, json.JSONDecodeError, KeyError) as exc:
+            raise HTTPException(status_code=409, detail="VLESS module configuration is invalid") from exc
+        write_clients([entry for entry in items if entry["id"] != client_id])
+        return {"deleted": client_id}
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
     config = WG_CONFIG if protocol == "wg" else AWG_CONFIG

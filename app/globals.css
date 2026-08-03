@@ -118,6 +118,13 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .protocolInstaller small { color: var(--muted); font: 8px/1.5 var(--font-mono); margin-top: 5px; }
 .protocolInstaller button { border: 1px solid #31534a; border-radius: 6px; background: var(--green-dim); color: var(--green); padding: 8px 11px; font-size: 8px; }
 .protocolInstaller button:disabled { opacity: .55; cursor: wait; }
+.protocolInstaller.installed { grid-template-columns: 42px minmax(0, 1fr) auto auto auto; }
+.protocolInstaller.installed em { font-style: normal; }
+@media (max-width: 900px) {
+  .protocolInstaller.installed { grid-template-columns: 42px minmax(0, 1fr) auto; }
+  .protocolInstaller.installed em { grid-column: 2; }
+  .protocolInstaller.installed button { grid-row: 2; }
+}
 .protocolCategory { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 14px; align-items: center; border-top: 1px solid var(--line); padding: 17px 10px; }
 .categoryMark { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 6px; color: #83b6ff; background: #17263a; font: 750 9px var(--font-mono); }
 .categoryDetails { min-width: 0; display: grid; gap: 5px; }

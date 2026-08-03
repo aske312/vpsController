@@ -1,0 +1,11 @@
+{
+  "id": "vless-reality-xhttp",
+  "name": "VLESS + REALITY + XHTTP",
+  "version": "1.0.0",
+  "description": "Защищённый XHTTP-транспорт через REALITY без собственного домена и TLS-сертификата",
+  "category": "proxy-protocols",
+  "category_name": "Прокси-протоколы",
+  "installer": "install.sh",
+  "uninstaller": "uninstall.sh",
+  "service": "vps-control-vless-reality-xhttp.service"
+}

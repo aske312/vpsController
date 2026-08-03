@@ -27,6 +27,9 @@ LOCAL_CIDR=""
 HTTP_PORT="80"
 WG_PORT="51820"
 AWG_PORT="51822"
+SHADOWSOCKS_PORT_START="30000"
+VLESS_REALITY_PORT="443"
+VLESS_REALITY_TARGET="www.microsoft.com:443"
 WG_INTERFACE="wg0"
 AWG_INTERFACE="awg0"
 AWG_MTU="1280"
@@ -307,6 +310,9 @@ configure_access() {
   set_env_value "ACCESS_MODE" "${ACCESS_MODE}"
   set_env_value "WG_PORT" "${WG_PORT}"
   set_env_value "AWG_PORT" "${AWG_PORT}"
+  set_env_value "SHADOWSOCKS_PORT_START" "${SHADOWSOCKS_PORT_START}"
+  set_env_value "VLESS_REALITY_PORT" "${VLESS_REALITY_PORT}"
+  set_env_value "VLESS_REALITY_TARGET" "${VLESS_REALITY_TARGET}"
   set_env_value "WG_INTERFACE" "${WG_INTERFACE}"
   set_env_value "AWG_INTERFACE" "${AWG_INTERFACE}"
   set_env_value "AWG_MTU" "${AWG_MTU}"
@@ -576,6 +582,7 @@ install_protocol_image() {
   prepare_package_manager
   ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+    PUBLIC_IP="${PUBLIC_IP}" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${installer}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
@@ -599,6 +606,7 @@ remove_protocol_image() {
   info "Удаление установленного протокола ${image_id}"
   ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+    PUBLIC_IP="${PUBLIC_IP}" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${uninstaller}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor

@@ -7,7 +7,8 @@ import { ConnectionGuide } from "./connection-guide";
 import { LegalFooter } from "./legal";
 
 type Tab = "overview" | "security" | "application" | "services" | "wg" | "awg" | "clients";
-type Protocol = "wg" | "awg";
+type TunnelProtocol = "wg" | "awg";
+type Protocol = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp";
 type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
 type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" | "network-check" | "integrity-check" | "identity" | "secure" | "kernel-update" | "vpn-firewall" | "optimize" | "reboot" | "poweroff";
 type Client = {
@@ -18,7 +19,7 @@ type Client = {
 type Overview = {
   server: { name: string; public_ip: string; city: string; country: string; country_code: string; uptime_s: number };
   resources: { load1: number; cpu_percent: number; cpu_count: number; memory_total: number; memory_available: number; disk_total: number; disk_available: number; network_rx: number; network_tx: number };
-  protocols: Record<Protocol, { interface: string; port: number; active: boolean }>;
+  protocols: Record<"wg" | "awg", { interface: string; port: number; active: boolean }>;
 };
 type ApplicationStatus = {
   api: { active: boolean; enabled: boolean };
@@ -35,7 +36,7 @@ type ApplicationStatus = {
 };
 type ProtocolImage = {
   id: string; name: string; version: string; description: string; category: string; category_name: string;
-  interface: string; installed: boolean; removable: boolean;
+  interface: string; installed: boolean; active?: boolean; removable: boolean;
 };
 type AutomationSchedule = {
   enabled: boolean; cadence: "daily" | "weekly" | "monthly"; weekday: string; hour: number; minute: number;
@@ -56,7 +57,7 @@ type ServicesStatus = {
 };
 type LiveStatus = {
   resources: Overview["resources"];
-  protocols: Record<Protocol, {
+  protocols: Record<"wg" | "awg", {
     active: boolean; peers: number; online_peers: number; interface_rx_bytes: number; interface_tx_bytes: number;
   }>;
   clients: Client[];
@@ -97,8 +98,8 @@ type ProtocolStatus = {
   };
 };
 
-const labels: Record<Tab, string> = {
-  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", clients: "Подключения",
+const labels: Record<Tab | Protocol, string> = {
+  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", shadowsocks: "Shadowsocks", "vless-reality-xhttp": "VLESS + REALITY + XHTTP", clients: "Подключения",
 };
 const navigationLabels: Record<Tab, string> = {
   overview: "OVERVIEW", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
@@ -464,7 +465,7 @@ export default function Home() {
       })));
       setProtocolStatuses((current) => {
         const updated = { ...current };
-        (["wg", "awg"] as Protocol[]).forEach((protocol) => {
+        (["wg", "awg"] as TunnelProtocol[]).forEach((protocol) => {
           if (updated[protocol]) updated[protocol] = { ...updated[protocol]!, ...next.protocols[protocol] };
         });
         return updated;
@@ -873,7 +874,7 @@ export default function Home() {
   const visibleClientStart = protocolClients.length ? (currentClientPage - 1) * CLIENTS_PER_PAGE + 1 : 0;
   const visibleClientEnd = Math.min(currentClientPage * CLIENTS_PER_PAGE, protocolClients.length);
   const installedProtocols = useMemo(
-    () => protocolImages.filter((image) => image.installed && (image.id === "wg" || image.id === "awg")).map((image) => image.id as Protocol),
+    () => protocolImages.filter((image) => image.installed && (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(image.id)).map((image) => image.id as Protocol),
     [protocolImages],
   );
   const protocolCategories = useMemo(() => {
@@ -1067,7 +1068,7 @@ export default function Home() {
           const available = category.images.filter((image) => image.installed);
           if (available.length === 1) {
             const image = available[0];
-            return <button key={category.id} onClick={() => setTab(image.id as Protocol)} className={`navItem ${tab === image.id ? "active" : ""}`}>
+            return <button key={category.id} onClick={() => setTab(image.id === "wg" || image.id === "awg" ? image.id : "clients")} className={`navItem ${tab === image.id ? "active" : ""}`}>
               <b>{image.name}</b>
             </button>;
           }
@@ -1080,7 +1081,7 @@ export default function Home() {
             </button>
             {moduleMenuOpen === category.id && <div className="settingsMenu moduleMenu">
               {available.map((image) => <button key={image.id} onClick={() => {
-                setTab(image.id as Protocol);
+                setTab(image.id === "wg" || image.id === "awg" ? image.id : "clients");
                 setModuleMenuOpen("");
               }} className={`navItem ${tab === image.id ? "active" : ""}`}><b>{image.name}</b></button>)}
             </div>}
@@ -1147,11 +1148,18 @@ export default function Home() {
           </div>
         <article className="panel protocolSummary">
           <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div></div>
-          {(["wg", "awg"] as Protocol[]).filter((protocol) => overview?.protocols[protocol].active).map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
+          {(["wg", "awg"] as TunnelProtocol[]).filter((protocol) => overview?.protocols[protocol].active).map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
             <span className={`protocol ${protocol}`}>{protocol === "wg" ? "WG" : "AW"}</span>
             <p><strong>{protocol === "wg" ? "WireGuard" : "AmneziaWG"}</strong><small>{overview?.protocols[protocol].interface} · UDP {overview?.protocols[protocol].port}</small></p>
             <em className="onlinePill">Активен</em><b>›</b>
           </button>)}
+          {protocolImages.filter((image) => image.installed && image.id !== "wg" && image.id !== "awg").map((image) => <div className="protocolInstaller installed" key={image.id}>
+            <span className={`protocol ${image.id}`}>{image.id === "shadowsocks" ? "SS" : "VL"}</span>
+            <p><strong>{image.name}</strong><small>{image.description} · независимый модуль</small></p>
+            <em className={image.active ? "onlinePill" : "offlinePill"}>{image.active ? "Активен" : "Остановлен"}</em>
+            <button onClick={() => setTab("clients")}>Подключения</button>
+            {image.removable && <button className="dangerButton" onClick={() => void removeProtocol(image)} disabled={busy}>Удалить</button>}
+          </div>)}
           {protocolImages.filter((image) => !image.installed).map((image) =>
             <div className="protocolInstaller" key={image.id}>
               <span className={`protocol ${image.id}`}>{image.id.toUpperCase()}</span>
@@ -1611,7 +1619,7 @@ export default function Home() {
                 {generatedQr ? <div className="generatedQr"><Image src={generatedQr} width={300} height={300} unoptimized alt={`QR-код конфигурации ${generatedName}`} /><small>Отсканируйте код в приложении на устройстве владельца</small></div> : <div className="generatedQr pending"><span>{generatedQrError || "Создаём QR-код…"}</span></div>}
                 <div className="generatedTransfer">
                   <div><strong>Передача подключения</strong><p>Выберите один способ: передайте файл по защищённому каналу или покажите QR-код. Не публикуйте их — внутри находится приватный ключ.</p></div>
-                  <button type="button" className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать файл</strong><small>{selectedClientProtocol === "awg" ? "AMNEZIAWG" : "WIREGUARD"} · .CONF</small></div></button>
+                  <button type="button" className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать файл</strong><small>{labels[selectedClientProtocol].toUpperCase()} · {generatedName.split(".").pop()?.toUpperCase()}</small></div></button>
                   {generatedQr && <a className="qrDownload" href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}>Скачать QR в полном размере</a>}
                 </div>
               </div>
