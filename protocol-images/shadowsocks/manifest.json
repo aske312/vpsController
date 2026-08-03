@@ -3,8 +3,8 @@
   "name": "Shadowsocks",
   "version": "1.0.0",
   "description": "Независимый Shadowsocks-сервер с отдельным ключом и портом для каждого подключения",
-  "category": "proxy-protocols",
-  "category_name": "Прокси-протоколы",
+  "category": "secure-tunnels",
+  "category_name": "Защищённые туннели",
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
   "service": "vps-control-shadowsocks.target"

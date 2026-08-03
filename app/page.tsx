@@ -6,9 +6,9 @@ import QRCode from "qrcode";
 import { ConnectionGuide } from "./connection-guide";
 import { LegalFooter } from "./legal";
 
-type Tab = "overview" | "security" | "application" | "services" | "wg" | "awg" | "clients";
-type TunnelProtocol = "wg" | "awg";
 type Protocol = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp";
+type Tab = "overview" | "security" | "application" | "services" | "clients" | Protocol;
+type TunnelProtocol = "wg" | "awg";
 type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
 type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" | "network-check" | "integrity-check" | "identity" | "secure" | "kernel-update" | "vpn-firewall" | "optimize" | "reboot" | "poweroff";
 type Client = {
@@ -103,7 +103,7 @@ const labels: Record<Tab | Protocol, string> = {
 };
 const navigationLabels: Record<Tab, string> = {
   overview: "OVERVIEW", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
-  wg: "WIREGUARD", awg: "AMNEZIAWG", clients: "CONNECTIONS",
+  wg: "WIREGUARD", awg: "AMNEZIAWG", shadowsocks: "SHADOWSOCKS", "vless-reality-xhttp": "VLESS", clients: "CONNECTIONS",
 };
 const actionLabels: Record<string, string> = {
   install: "Установка 312.net", start: "Запуск приложения", stop: "Остановка приложения",
@@ -1068,7 +1068,7 @@ export default function Home() {
           const available = category.images.filter((image) => image.installed);
           if (available.length === 1) {
             const image = available[0];
-            return <button key={category.id} onClick={() => setTab(image.id === "wg" || image.id === "awg" ? image.id : "clients")} className={`navItem ${tab === image.id ? "active" : ""}`}>
+            return <button key={category.id} onClick={() => setTab(image.id as Protocol)} className={`navItem ${tab === image.id ? "active" : ""}`}>
               <b>{image.name}</b>
             </button>;
           }
@@ -1081,7 +1081,7 @@ export default function Home() {
             </button>
             {moduleMenuOpen === category.id && <div className="settingsMenu moduleMenu">
               {available.map((image) => <button key={image.id} onClick={() => {
-                setTab(image.id === "wg" || image.id === "awg" ? image.id : "clients");
+                setTab(image.id as Protocol);
                 setModuleMenuOpen("");
               }} className={`navItem ${tab === image.id ? "active" : ""}`}><b>{image.name}</b></button>)}
             </div>}
@@ -1153,16 +1153,15 @@ export default function Home() {
             <p><strong>{protocol === "wg" ? "WireGuard" : "AmneziaWG"}</strong><small>{overview?.protocols[protocol].interface} · UDP {overview?.protocols[protocol].port}</small></p>
             <em className="onlinePill">Активен</em><b>›</b>
           </button>)}
-          {protocolImages.filter((image) => image.installed && image.id !== "wg" && image.id !== "awg").map((image) => <div className="protocolInstaller installed" key={image.id}>
+          {protocolImages.filter((image) => image.installed && image.id !== "wg" && image.id !== "awg").map((image) => <button key={image.id} onClick={() => setTab(image.id as Protocol)}>
             <span className={`protocol ${image.id}`}>{image.id === "shadowsocks" ? "SS" : "V"}</span>
             <p><strong>{image.name}</strong><small>{image.description} · независимый модуль</small></p>
             <em className={image.active ? "onlinePill" : "offlinePill"}>{image.active ? "Активен" : "Остановлен"}</em>
-            <button onClick={() => setTab("clients")}>Подключения</button>
-            {image.removable && <button className="dangerButton" onClick={() => void removeProtocol(image)} disabled={busy}>Удалить</button>}
-          </div>)}
+            <b>›</b>
+          </button>)}
           {protocolImages.filter((image) => !image.installed).map((image) =>
             <div className="protocolInstaller" key={image.id}>
-              <span className={`protocol ${image.id}`}>{image.id.toUpperCase()}</span>
+              <span className={`protocol ${image.id}`}>{image.id === "wg" ? "WG" : image.id === "awg" ? "AW" : image.id === "shadowsocks" ? "SS" : "V"}</span>
               <p><strong>{image.name}</strong><small>{image.description} · образ {image.version}</small></p>
               <button onClick={() => void installProtocol(image)} disabled={busy || Boolean(installingProtocol)}>
                 {installingProtocol === image.id ? "Устанавливается…" : "Установить"}

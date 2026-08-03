@@ -366,6 +366,8 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   ]);
   assert.equal(JSON.parse(ssManifest).id, "shadowsocks");
   assert.equal(JSON.parse(vlessManifest).id, "vless-reality-xhttp");
+  assert.equal(JSON.parse(ssManifest).category, "secure-tunnels");
+  assert.equal(JSON.parse(vlessManifest).category, "secure-tunnels");
   assert.match(ssInstall, /vps-control-shadowsocks@\.service/);
   assert.match(ssInstall, /shadowsocks-libev/);
   assert.doesNotMatch(ssInstall + ssRemove, /wg-quick|awg-quick/);
@@ -382,6 +384,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.doesNotMatch(manager, /PUBLIC_IP="\$\{PUBLIC_IP\}"/);
   assert.match(manager, /PUBLIC_IP="\$\(env_value PUBLIC_IP\)"/);
   assert.match(page, /image\.id === "shadowsocks" \? "SS" : "V"/);
+  assert.match(page, /setTab\(image\.id as Protocol\)/);
   assert.match(css, /\.protocol\.shadowsocks/);
   assert.match(css, /\.protocol\.vless-reality-xhttp/);
 });
