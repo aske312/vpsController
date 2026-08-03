@@ -888,7 +888,7 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     if (!generated) return () => { cancelled = true; };
-    void QRCode.toDataURL(generated, { errorCorrectionLevel: "M", margin: 2, width: 320 })
+    void QRCode.toDataURL(generated, { errorCorrectionLevel: "L", margin: 4, width: 768 })
       .then((dataUrl) => { if (!cancelled) setGeneratedQr(dataUrl); })
       .catch(() => { if (!cancelled) setGeneratedQrError("Не удалось создать QR-код для этой конфигурации"); });
     return () => { cancelled = true; };
@@ -1597,7 +1597,7 @@ export default function Home() {
             <div className="generated">
               <div className="generatedHead"><span>✓</span><div><small>КОНФИГУРАЦИЯ ГОТОВА</small><strong>{generatedName}</strong><p>Передайте владельцу скачанный файл или покажите QR-код. Один ключ предназначен только для одного устройства.</p></div></div>
               <button type="button" className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать конфигурацию</strong><small>{selectedClientProtocol === "awg" ? "AMNEZIAWG" : "WIREGUARD"} · .CONF</small></div></button>
-              {generatedQr && <div className="generatedQr"><Image src={generatedQr} width={128} height={128} unoptimized alt={`QR-код конфигурации ${generatedName}`} /><div><strong>Импорт через QR-код</strong><p>Откройте добавление туннеля на устройстве владельца и отсканируйте код. QR-код содержит приватный ключ — не сохраняйте и не публикуйте его.</p><a href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}>Скачать QR-код</a></div></div>}
+              {generatedQr && <div className="generatedQr"><Image src={generatedQr} width={360} height={360} unoptimized alt={`QR-код конфигурации ${generatedName}`} /><div><strong>Импорт через QR-код</strong><p>Откройте добавление туннеля на устройстве владельца и отсканируйте код с экрана. Держите камеру ровно и дождитесь фокусировки. QR-код содержит приватный ключ — не сохраняйте и не публикуйте его.</p><a href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}>Скачать QR-код в полном размере</a></div></div>}
               {generatedQrError && <p className="generatedQrError">{generatedQrError}</p>}
               <details><summary>Показать техническое содержимое <span>⌄</span></summary><textarea readOnly value={generated} /></details>
               <button type="button" className="copyButton" onClick={() => navigator.clipboard.writeText(generated)}>Копировать содержимое</button>

@@ -273,8 +273,9 @@ input:focus, select:focus, textarea:focus { border-color: #516830; box-shadow: 0
 .generated summary { display: flex; justify-content: space-between; padding: 11px; color: #879592; font-size: 9px; cursor: pointer; list-style: none; }
 .generated textarea { height: 190px; padding: 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0; resize: vertical; font: 8px/1.6 var(--font-mono); }
 .generated .copyButton { border: 1px solid var(--line); background: #111b1d; color: #9baba7; border-radius: 6px; padding: 10px; font-size: 9px; }
-.generatedQr { display: grid; grid-template-columns: 128px 1fr; gap: 14px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: #0a1214; }
-.generatedQr img { display: block; width: 128px; height: 128px; padding: 5px; border-radius: 5px; background: #fff; image-rendering: pixelated; }
+.generatedQr { display: grid; justify-items: center; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 7px; background: #0a1214; text-align: center; }
+.generatedQr img { display: block; width: min(360px, 100%); height: auto; aspect-ratio: 1; border-radius: 5px; background: #fff; image-rendering: pixelated; }
+.generatedQr > div { max-width: 500px; }
 .generatedQr strong { color: var(--text); font-size: 10px; }
 .generatedQr p { margin: 7px 0 9px; color: var(--muted); font-size: 9px; line-height: 1.55; }
 .generatedQr a { color: var(--green); font: 9px var(--font-mono); text-decoration: none; }
@@ -791,7 +792,6 @@ input, select { height: 46px; font-size: 11px; }
   .legalScreen > header, .legalScreen > article, .legalScreen > footer { padding-inline: 18px; }
   .legalLanguage { margin-inline: 18px; }
   .guideSteps { grid-template-columns: 1fr; }
-  .generatedQr { grid-template-columns: 1fr; }
   .connectionForm { grid-template-columns: 1fr; }
   .clientPanelActions { width: 100%; align-items: stretch; flex-direction: column; }
   .clientPanelActions > span { display: block; }
