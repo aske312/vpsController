@@ -174,6 +174,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [passwordDialog, setPasswordDialog] = useState(false);
+  const [clientDialog, setClientDialog] = useState(false);
   const [currentAdminPassword, setCurrentAdminPassword] = useState("");
   const [newAdminPassword, setNewAdminPassword] = useState("");
   const [confirmAdminPassword, setConfirmAdminPassword] = useState("");
@@ -578,6 +579,19 @@ export default function Home() {
     setCurrentAdminPassword("");
     setNewAdminPassword("");
     setConfirmAdminPassword("");
+  }
+
+  function openClientDialog() {
+    setGenerated(""); setGeneratedQr(""); setGeneratedQrError(""); setError(""); setClientDialog(true);
+  }
+
+  function closeClientDialog() {
+    if (busy) return;
+    setClientDialog(false); setGenerated(""); setGeneratedQr(""); setGeneratedQrError("");
+  }
+
+  function resetClientDialog() {
+    setGenerated(""); setGeneratedQr(""); setGeneratedQrError(""); setError("");
   }
 
   async function changeAdminPassword(event: FormEvent) {
@@ -1559,7 +1573,7 @@ export default function Home() {
       </section>}
 
       {tab === "clients" && installedProtocols.length > 0 && <section className="clientsLayout">
-        <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все подключения" : labels[tab]}</h2></div><span>{protocolClients.length} подключений</span></div>
+        <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все подключения" : labels[tab]}</h2></div><div className="clientPanelActions"><span>{protocolClients.length} подключений</span><a className="guideAction" href="/connection-guide-wg-awg.pdf" download aria-label="Скачать руководство по подключению" data-tooltip="Пошаговая инструкция для владельца устройства: установка приложения и импорт конфигурации"><span aria-hidden="true">↓</span><div><strong>Скачать гайд</strong><small>PDF · ДЛЯ ПОЛЬЗОВАТЕЛЯ</small></div></a><button className="primaryButton" onClick={openClientDialog}>Новое подключение <span>＋</span></button></div></div>
           <div className="clientTable">{protocolClients.length ? protocolClients.map((client) =>
             <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><span className={`protocol ${client.protocol}`}>{client.protocol.toUpperCase()}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address} · {client.quality_reason || "состояние уточняется"}</small></p>
               <span className="traffic"><small>ПОЛУЧЕНО <b>↓ {bytes(client.rx_bytes)}</b></small><small>ОТПРАВЛЕНО <b>↑ {bytes(client.tx_bytes)}</b></small></span><span className="handshake"><small>ПОСЛЕДНЯЯ СВЯЗЬ</small><strong>{duration(client.handshake_age_s)}</strong></span>
@@ -1567,20 +1581,31 @@ export default function Home() {
               <button className="dangerButton" onClick={() => void removeClient(client.id)}>Отозвать</button></div>
           ) : <div className="emptyState"><span>◎</span><p>Подключений пока нет</p></div>}</div>
         </article>
-        <article className="panel addClient"><div className="addClientHead"><div><p className="eyebrow">NEW ACCESS</p><h2>Добавить подключение</h2></div><a className="guideDownload" href="/connection-guide-wg-awg.pdf" download aria-label="Скачать руководство по подключению" title="Скачать руководство по подключению"><span aria-hidden="true">↓</span><small>PDF</small></a></div><form onSubmit={addClient}>
-          <label>Название<input required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов: буквы, цифры, пробел, точка, дефис или _</small></label>
-          <label>Протокол<select value={selectedClientProtocol} onChange={(event) => setNewClient({ ...newClient, protocol: event.target.value as Protocol })}>{installedProtocols.map((protocol) => <option key={protocol} value={protocol}>{labels[protocol]}</option>)}</select></label>
-          <button className="primaryButton" disabled={busy}>Создать конфигурацию <span>→</span></button>
-        </form>{generated && <div className="generated">
-          <div className="generatedHead"><span>✓</span><div><small>КОНФИГУРАЦИЯ ГОТОВА</small><strong>{generatedName}</strong><p>Передайте владельцу скачанный файл или покажите QR-код. Один ключ предназначен только для одного устройства.</p></div></div>
-            <button className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать конфигурацию</strong><small>{selectedClientProtocol === "awg" ? "AMNEZIAWG" : "WIREGUARD"} · .CONF</small></div></button>
-          {generatedQr && <div className="generatedQr"><Image src={generatedQr} width={128} height={128} unoptimized alt={`QR-код конфигурации ${generatedName}`} /><div><strong>Импорт через QR-код</strong><p>Откройте добавление туннеля на устройстве владельца и отсканируйте код. QR-код содержит приватный ключ — не сохраняйте и не публикуйте его.</p><a href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}>Скачать QR-код</a></div></div>}
-          {generatedQrError && <p className="generatedQrError">{generatedQrError}</p>}
-          <details><summary>Показать техническое содержимое <span>⌄</span></summary><textarea readOnly value={generated} /></details>
-          <button className="copyButton" onClick={() => navigator.clipboard.writeText(generated)}>Копировать содержимое</button>
-        </div>}</article>
         <ConnectionGuide />
       </section>}
+      {clientDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closeClientDialog}>
+        <form className="connectionDialog addClient" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={addClient}>
+          <header><div><p className="eyebrow">NEW ACCESS</p><h2 id="connection-dialog-title">{generated ? "Подключение создано" : "Новое подключение"}</h2></div><button className="dialogClose" type="button" onClick={closeClientDialog} aria-label="Закрыть">×</button></header>
+          {!generated ? <>
+            <p className="connectionDialogIntro">Создайте отдельную конфигурацию для конкретного устройства. Один ключ нельзя использовать на нескольких устройствах.</p>
+            <div className="connectionForm">
+              <label>Название устройства<input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов · это имя будет видно только администратору панели</small></label>
+              <label>Протокол<select value={selectedClientProtocol} onChange={(event) => setNewClient({ ...newClient, protocol: event.target.value as Protocol })}>{installedProtocols.map((protocol) => <option key={protocol} value={protocol}>{labels[protocol]}</option>)}</select><small className="fieldHint">Выберите протокол, который будет использовать устройство</small></label>
+            </div>
+            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy}>{busy ? "Создаём…" : "Создать конфигурацию"}<span>→</span></button></div>
+          </> : <>
+            <div className="generated">
+              <div className="generatedHead"><span>✓</span><div><small>КОНФИГУРАЦИЯ ГОТОВА</small><strong>{generatedName}</strong><p>Передайте владельцу скачанный файл или покажите QR-код. Один ключ предназначен только для одного устройства.</p></div></div>
+              <button type="button" className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать конфигурацию</strong><small>{selectedClientProtocol === "awg" ? "AMNEZIAWG" : "WIREGUARD"} · .CONF</small></div></button>
+              {generatedQr && <div className="generatedQr"><Image src={generatedQr} width={128} height={128} unoptimized alt={`QR-код конфигурации ${generatedName}`} /><div><strong>Импорт через QR-код</strong><p>Откройте добавление туннеля на устройстве владельца и отсканируйте код. QR-код содержит приватный ключ — не сохраняйте и не публикуйте его.</p><a href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}>Скачать QR-код</a></div></div>}
+              {generatedQrError && <p className="generatedQrError">{generatedQrError}</p>}
+              <details><summary>Показать техническое содержимое <span>⌄</span></summary><textarea readOnly value={generated} /></details>
+              <button type="button" className="copyButton" onClick={() => navigator.clipboard.writeText(generated)}>Копировать содержимое</button>
+            </div>
+            <div className="connectionDialogActions"><button type="button" onClick={resetClientDialog}>Создать ещё</button><button type="button" className="primaryButton" onClick={closeClientDialog}>Готово <span>✓</span></button></div>
+          </>}
+        </form>
+      </div>}
       {passwordDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closePasswordDialog}>
         <form className="confirmDialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()} onSubmit={changeAdminPassword}>
           <p className="eyebrow">ADMINISTRATOR ACCESS</p><h2>Изменить пароль администратора</h2>

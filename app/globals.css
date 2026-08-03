@@ -206,7 +206,8 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .runtimeRows em { font-style: normal; }
 .applicationLogs { grid-column: 1 / -1; }
 
-.clientsLayout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(290px, .55fr); gap: 14px; align-items: start; }
+.clientsLayout { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
+.clientsPanel { grid-column: 1 / -1; }
 .connectionGuide { grid-column: 1 / -1; }
 .guideLanguage, .legalLanguage { display: flex; gap: 5px; }
 .guideLanguage button, .legalLanguage button { border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; background: #11191b; color: var(--muted); font: 8px var(--font-mono); }
@@ -239,13 +240,16 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .emptyState { min-height: 190px; border-top: 1px solid var(--line); display: grid; place-items: center; align-content: center; color: #515e70; }
 .emptyState span { font-size: 24px; }
 .emptyState p { font-size: 10px; margin: 8px 0 0; }
-.addClientHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
-.addClientHead h2 { margin: 0; font-size: 18px; }
-.guideDownload { flex: 0 0 auto; width: 38px; height: 38px; display: grid; grid-template-rows: 22px 10px; place-items: center; border: 1px solid #31534a; border-radius: 8px; background: var(--green-dim); color: var(--green); text-decoration: none; transition: border-color .2s, background .2s, transform .2s; }
-.guideDownload span { font: 18px/1 var(--font-mono); }
-.guideDownload small { font: 6px/1 var(--font-mono); letter-spacing: .7px; }
-.guideDownload:hover { border-color: var(--green); background: #1b3029; transform: translateY(-1px); }
-.guideDownload:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.clientPanelActions { display: flex; align-items: center; gap: 9px; }
+.clientPanelActions > span { margin-right: 5px; color: var(--muted); font: 9px var(--font-mono); }
+.guideAction { position: relative; min-height: 40px; display: flex; align-items: center; gap: 9px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 9px; background: #11191b; color: #aeb9b6; text-decoration: none; }
+.guideAction > span { color: var(--green); font: 18px/1 var(--font-mono); }
+.guideAction > div { display: flex; flex-direction: column; gap: 2px; }
+.guideAction strong { font-size: 9px; }
+.guideAction small { color: var(--muted); font: 7px var(--font-mono); }
+.guideAction:hover { border-color: #31534a; background: var(--green-dim); }
+.guideAction::after { content: attr(data-tooltip); position: absolute; z-index: 4; right: 0; top: calc(100% + 9px); width: 290px; padding: 10px 12px; border: 1px solid #31534a; border-radius: 7px; background: #0a1112; color: #aeb9b6; font: 9px/1.55 var(--font-mono); box-shadow: 0 12px 30px #0008; opacity: 0; visibility: hidden; transform: translateY(-3px); transition: .15s ease; pointer-events: none; }
+.guideAction:hover::after, .guideAction:focus-visible::after { opacity: 1; visibility: visible; transform: translateY(0); }
 .addClient form { display: grid; gap: 14px; }
 .addClient label, .loginCard label { display: grid; gap: 7px; color: #788597; font: 8px var(--font-geist-mono); letter-spacing: .5px; }
 .addClient .fieldHint { color: #73817f; font-size: 9px; line-height: 1.5; letter-spacing: 0; }
@@ -276,6 +280,16 @@ input:focus, select:focus, textarea:focus { border-color: #516830; box-shadow: 0
 .generatedQr a { color: var(--green); font: 9px var(--font-mono); text-decoration: none; }
 .generatedQr a:hover { text-decoration: underline; }
 .generatedQrError { margin: 0; color: var(--warning); font-size: 9px; }
+.connectionDialog { width: min(720px, 100%); max-height: calc(100vh - 36px); overflow-y: auto; padding: 26px; border: 1px solid #31564b; border-radius: 14px; background: linear-gradient(145deg, #151d1b, #0d1211); box-shadow: 0 28px 80px #000a; }
+.connectionDialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.connectionDialog h2 { margin: 0; font-size: 25px; }
+.dialogClose { width: 36px; height: 36px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 8px; background: #111918; color: var(--muted); font-size: 21px; }
+.dialogClose:hover { border-color: #44675e; color: var(--text); }
+.connectionDialogIntro { max-width: 590px; margin: 14px 0 0; color: #8d9794; font-size: 11px; line-height: 1.65; }
+.connectionForm { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 22px; }
+.connectionDialogActions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.connectionDialogActions > button:not(.primaryButton) { min-height: 40px; padding: 0 16px; border: 1px solid var(--line); border-radius: 8px; background: #111918; color: #9da7a4; font-size: 10px; }
+.connectionDialog .generated { margin-top: 22px; }
 
 .loginPage { min-height: 100vh; display: grid; place-items: center; padding: 24px; position: relative; overflow: hidden; background-image: linear-gradient(#12192355 1px, transparent 1px), linear-gradient(90deg, #12192355 1px, transparent 1px); background-size: 72px 72px; }
 .loginGlow { position: absolute; width: 600px; height: 600px; border-radius: 50%; background: #7ca72720; filter: blur(140px); top: -360px; left: calc(50% - 300px); }
@@ -778,6 +792,11 @@ input, select { height: 46px; font-size: 11px; }
   .legalLanguage { margin-inline: 18px; }
   .guideSteps { grid-template-columns: 1fr; }
   .generatedQr { grid-template-columns: 1fr; }
+  .connectionForm { grid-template-columns: 1fr; }
+  .clientPanelActions { width: 100%; align-items: stretch; flex-direction: column; }
+  .clientPanelActions > span { display: block; }
+  .guideAction, .clientPanelActions .primaryButton { width: 100%; }
+  .guideAction::after { display: none; }
 }
 
 /* Compact operations layout: useful state fits into a typical 1440×900 viewport. */

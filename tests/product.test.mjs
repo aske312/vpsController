@@ -74,6 +74,9 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(guideUi, /storage\.googleapis\.com\/amnezia\/amnezia\.org/);
   assert.match(page, /QRCode\.toDataURL\(generated/);
   assert.match(page, /Импорт через QR-код/);
+  assert.match(page, /clientDialog && <div className="confirmBackdrop"/);
+  assert.match(page, /Новое подключение/);
+  assert.match(page, /data-tooltip="Пошаговая инструкция/);
   assert.match(page, /connection-guide-wg-awg\.pdf/);
   assert.match(page, /installedProtocols\.length > 0/);
   assert.match(page, /waitForProtocolState/);
