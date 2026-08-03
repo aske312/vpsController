@@ -141,6 +141,8 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .protocol { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; font: 750 9px var(--font-geist-mono); }
 .protocol.wg { color: #83b6ff; background: #17263a; }
 .protocol.awg { color: #bc9cff; background: #251d38; }
+.protocol.shadowsocks { color: #66dfc2; background: #15312d; }
+.protocol.vless-reality-xhttp { color: #ffb76b; background: #352719; }
 .onlinePill, .offlinePill { display: inline-flex; align-items: center; border-radius: 20px; padding: 6px 9px; white-space: nowrap; font-size: 8px; font-weight: 650; }
 .onlinePill { color: var(--green); background: var(--green-dim); }
 .offlinePill { color: var(--amber); background: #302415; }

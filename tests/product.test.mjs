@@ -355,8 +355,8 @@ test("WG and AWG modules install and uninstall independently", async () => {
 });
 
 test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", async () => {
-  const [api, manager, ssManifest, ssInstall, ssRemove, vlessManifest, vlessInstall, vlessRemove] = await Promise.all([
-    read("api/main.py"), read("scripts/vps-control.sh"),
+  const [api, manager, page, css, ssManifest, ssInstall, ssRemove, vlessManifest, vlessInstall, vlessRemove] = await Promise.all([
+    read("api/main.py"), read("scripts/vps-control.sh"), read("app/page.tsx"), read("app/globals.css"),
     read("protocol-images/shadowsocks/manifest.json"),
     read("protocol-images/shadowsocks/install.sh"),
     read("protocol-images/shadowsocks/uninstall.sh"),
@@ -379,6 +379,11 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(api, /ss:\/\//);
   assert.match(manager, /SHADOWSOCKS_PORT_START/);
   assert.match(manager, /VLESS_REALITY_TARGET/);
+  assert.doesNotMatch(manager, /PUBLIC_IP="\$\{PUBLIC_IP\}"/);
+  assert.match(manager, /PUBLIC_IP="\$\(env_value PUBLIC_IP\)"/);
+  assert.match(page, /image\.id === "shadowsocks" \? "SS" : "V"/);
+  assert.match(css, /\.protocol\.shadowsocks/);
+  assert.match(css, /\.protocol\.vless-reality-xhttp/);
 });
 
 test("the interface uses one fixed visual design without personalization", async () => {

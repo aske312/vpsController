@@ -1154,7 +1154,7 @@ export default function Home() {
             <em className="onlinePill">Активен</em><b>›</b>
           </button>)}
           {protocolImages.filter((image) => image.installed && image.id !== "wg" && image.id !== "awg").map((image) => <div className="protocolInstaller installed" key={image.id}>
-            <span className={`protocol ${image.id}`}>{image.id === "shadowsocks" ? "SS" : "VL"}</span>
+            <span className={`protocol ${image.id}`}>{image.id === "shadowsocks" ? "SS" : "V"}</span>
             <p><strong>{image.name}</strong><small>{image.description} · независимый модуль</small></p>
             <em className={image.active ? "onlinePill" : "offlinePill"}>{image.active ? "Активен" : "Остановлен"}</em>
             <button onClick={() => setTab("clients")}>Подключения</button>
