@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
+import QRCode from "qrcode";
 import { ConnectionGuide } from "./connection-guide";
 import { LegalFooter } from "./legal";
 
@@ -180,6 +182,8 @@ export default function Home() {
   const [newClient, setNewClient] = useState({ name: "", protocol: "wg" as Protocol });
   const [generated, setGenerated] = useState("");
   const [generatedName, setGeneratedName] = useState("client.conf");
+  const [generatedQr, setGeneratedQr] = useState("");
+  const [generatedQrError, setGeneratedQrError] = useState("");
   const settingsRef = useRef<HTMLDivElement>(null);
   const networkSample = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
@@ -867,8 +871,17 @@ export default function Home() {
   );
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!generated) return () => { cancelled = true; };
+    void QRCode.toDataURL(generated, { errorCorrectionLevel: "M", margin: 2, width: 320 })
+      .then((dataUrl) => { if (!cancelled) setGeneratedQr(dataUrl); })
+      .catch(() => { if (!cancelled) setGeneratedQrError("Не удалось создать QR-код для этой конфигурации"); });
+    return () => { cancelled = true; };
+  }, [generated]);
+
   async function addClient(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setGenerated(""); setError("");
+    event.preventDefault(); setBusy(true); setGenerated(""); setGeneratedQr(""); setGeneratedQrError(""); setError("");
     if (!installedProtocols.includes(selectedClientProtocol)) {
       setBusy(false); setError("Сначала установите выбранный протокол"); return;
     }
@@ -1559,8 +1572,10 @@ export default function Home() {
           <label>Протокол<select value={selectedClientProtocol} onChange={(event) => setNewClient({ ...newClient, protocol: event.target.value as Protocol })}>{installedProtocols.map((protocol) => <option key={protocol} value={protocol}>{labels[protocol]}</option>)}</select></label>
           <button className="primaryButton" disabled={busy}>Создать конфигурацию <span>→</span></button>
         </form>{generated && <div className="generated">
-          <div className="generatedHead"><span>✓</span><div><small>КОНФИГУРАЦИЯ ГОТОВА</small><strong>{generatedName}</strong><p>Сохраните файл сейчас — приватный ключ повторно не показывается.</p></div></div>
+          <div className="generatedHead"><span>✓</span><div><small>КОНФИГУРАЦИЯ ГОТОВА</small><strong>{generatedName}</strong><p>Передайте владельцу скачанный файл или покажите QR-код. Один ключ предназначен только для одного устройства.</p></div></div>
             <button className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать конфигурацию</strong><small>{selectedClientProtocol === "awg" ? "AMNEZIAWG" : "WIREGUARD"} · .CONF</small></div></button>
+          {generatedQr && <div className="generatedQr"><Image src={generatedQr} width={128} height={128} unoptimized alt={`QR-код конфигурации ${generatedName}`} /><div><strong>Импорт через QR-код</strong><p>Откройте добавление туннеля на устройстве владельца и отсканируйте код. QR-код содержит приватный ключ — не сохраняйте и не публикуйте его.</p><a href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}>Скачать QR-код</a></div></div>}
+          {generatedQrError && <p className="generatedQrError">{generatedQrError}</p>}
           <details><summary>Показать техническое содержимое <span>⌄</span></summary><textarea readOnly value={generated} /></details>
           <button className="copyButton" onClick={() => navigator.clipboard.writeText(generated)}>Копировать содержимое</button>
         </div>}</article>

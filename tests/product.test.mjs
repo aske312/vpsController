@@ -69,10 +69,11 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(guideUi, /How to create and share a new connection/);
   assert.match(guideUi, /Одно подключение — один ключ/);
   assert.match(guideUi, /Каждое подключение создаётся для одного конкретного устройства/);
-  assert.match(guideUi, /Для новых протоколов здесь будет добавляться отдельный способ установки/);
-  assert.match(guideUi, /\*\-wg\.conf/);
-  assert.match(guideUi, /\*\-awg\.conf/);
+  assert.match(guideUi, /Передайте конфигурацию/);
+  assert.doesNotMatch(guideUi, /PROTOCOL INSTRUCTIONS/);
   assert.match(guideUi, /storage\.googleapis\.com\/amnezia\/amnezia\.org/);
+  assert.match(page, /QRCode\.toDataURL\(generated/);
+  assert.match(page, /Импорт через QR-код/);
   assert.match(page, /connection-guide-wg-awg\.pdf/);
   assert.match(page, /installedProtocols\.length > 0/);
   assert.match(page, /waitForProtocolState/);
