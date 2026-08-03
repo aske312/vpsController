@@ -1605,13 +1605,16 @@ export default function Home() {
             </div>
             <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy}>{busy ? "Создаём…" : "Создать конфигурацию"}<span>→</span></button></div>
           </> : <>
-            <div className="generated">
+            <div className="generated compactGenerated">
               <div className="generatedHead"><span>✓</span><div><small>КОНФИГУРАЦИЯ ГОТОВА</small><strong>{generatedName}</strong><p>Передайте владельцу скачанный файл или покажите QR-код. Один ключ предназначен только для одного устройства.</p></div></div>
-              <button type="button" className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать конфигурацию</strong><small>{selectedClientProtocol === "awg" ? "AMNEZIAWG" : "WIREGUARD"} · .CONF</small></div></button>
-              {generatedQr && <div className="generatedQr"><Image src={generatedQr} width={360} height={360} unoptimized alt={`QR-код конфигурации ${generatedName}`} /><div><strong>Импорт через QR-код</strong><p>Откройте добавление туннеля на устройстве владельца и отсканируйте код с экрана. Держите камеру ровно и дождитесь фокусировки. QR-код содержит приватный ключ — не сохраняйте и не публикуйте его.</p><a href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}>Скачать QR-код в полном размере</a></div></div>}
-              {generatedQrError && <p className="generatedQrError">{generatedQrError}</p>}
-              <details><summary>Показать техническое содержимое <span>⌄</span></summary><textarea readOnly value={generated} /></details>
-              <button type="button" className="copyButton" onClick={() => navigator.clipboard.writeText(generated)}>Копировать содержимое</button>
+              <div className="generatedResult">
+                {generatedQr ? <div className="generatedQr"><Image src={generatedQr} width={300} height={300} unoptimized alt={`QR-код конфигурации ${generatedName}`} /><small>Отсканируйте код в приложении на устройстве владельца</small></div> : <div className="generatedQr pending"><span>{generatedQrError || "Создаём QR-код…"}</span></div>}
+                <div className="generatedTransfer">
+                  <div><strong>Передача подключения</strong><p>Выберите один способ: передайте файл по защищённому каналу или покажите QR-код. Не публикуйте их — внутри находится приватный ключ.</p></div>
+                  <button type="button" className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать файл</strong><small>{selectedClientProtocol === "awg" ? "AMNEZIAWG" : "WIREGUARD"} · .CONF</small></div></button>
+                  {generatedQr && <a className="qrDownload" href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}>Скачать QR в полном размере</a>}
+                </div>
+              </div>
             </div>
             <div className="connectionDialogActions"><button type="button" onClick={resetClientDialog}>Создать ещё</button><button type="button" className="primaryButton" onClick={closeClientDialog}>Готово <span>✓</span></button></div>
           </>}
