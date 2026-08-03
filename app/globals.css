@@ -211,6 +211,14 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .guideLanguage, .legalLanguage { display: flex; gap: 5px; }
 .guideLanguage button, .legalLanguage button { border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; background: #11191b; color: var(--muted); font: 8px var(--font-mono); }
 .guideLanguage button.active, .legalLanguage button.active { border-color: #31534a; background: var(--green-dim); color: var(--green); }
+.guideProtocolTabs { display: flex; gap: 8px; margin-top: 18px; }
+.guideProtocolTabs > button { display: flex; align-items: center; gap: 9px; min-width: 150px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: #11191b; color: #8d9a98; }
+.guideProtocolTabs > button.active { border-color: #31534a; background: var(--green-dim); color: var(--text); }
+.guideProtocolTabs .protocol { width: 32px; height: 24px; display: grid; place-items: center; border-radius: 5px; font-size: 8px; }
+.guideIdentification { margin-top: 12px; padding: 15px 17px; border-left: 3px solid var(--green); border-radius: 6px; background: #101c1a; }
+.guideIdentification strong { font-size: 12px; }
+.guideIdentification p { margin: 7px 0 5px; color: #bdc8c6; font-size: 11px; line-height: 1.65; }
+.guideIdentification small { color: var(--muted); font-size: 9px; line-height: 1.55; }
 .guideSteps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; margin-top: 20px; }
 .guideSteps section { display: flex; gap: 12px; min-height: 150px; padding: 18px; border: 1px solid var(--line); border-radius: 9px; background: #11191b; }
 .guideSteps section > span { color: var(--green); font: 11px var(--font-mono); }
