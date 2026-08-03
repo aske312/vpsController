@@ -219,6 +219,18 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .guideSteps p { margin: 0; color: #a5b1af; font-size: 11px; line-height: 1.75; }
 .guideSteps a { display: inline-block; margin-top: 12px; color: var(--green); font: 10px var(--font-mono); text-decoration: none; }
 .guideSteps a:hover { text-decoration: underline; }
+.protocolGuideHead { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--line); }
+.protocolGuideHead h3 { margin: 5px 0 7px; font-size: 15px; }
+.protocolGuideHead > p:last-child { max-width: 900px; margin: 0; color: #a5b1af; font-size: 11px; line-height: 1.7; }
+.protocolGuideGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; margin-top: 15px; }
+.protocolGuideCard { display: grid; align-content: start; gap: 15px; padding: 18px; border: 1px solid var(--line); border-radius: 9px; background: #11191b; }
+.protocolGuideCard header { display: flex; align-items: center; gap: 12px; }
+.protocolGuideCard header h3 { margin: 0 0 4px; font-size: 13px; }
+.protocolGuideCard code { color: var(--muted); font: 9px var(--font-mono); }
+.protocolGuideCard strong { display: block; margin-bottom: 5px; color: #d9e2e0; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+.protocolGuideCard p { margin: 0; color: #a5b1af; font-size: 11px; line-height: 1.7; }
+.protocolGuideCard a { width: fit-content; color: var(--green); font: 10px var(--font-mono); text-decoration: none; }
+.protocolGuideCard a:hover { text-decoration: underline; }
 .clientTable { display: grid; gap: 8px; }
 .clientRow { display: grid; grid-template-columns: 44px minmax(150px, 1fr) 150px 110px 145px auto; gap: 13px; align-items: center; padding: 15px; border: 1px solid var(--line); border-radius: 8px; background: #121a1c; }
 .clientRow > p > strong { display: flex; align-items: center; gap: 7px; }
@@ -727,6 +739,7 @@ input, select { height: 46px; font-size: 11px; }
   .metrics, .protocolSummary { grid-column: 1; }
   .protocolMonitorGrid { grid-template-columns: 1fr 1fr; }
   .guideSteps { grid-template-columns: repeat(2, 1fr); }
+  .protocolGuideGrid { grid-template-columns: 1fr; }
   .protocolFlow { grid-column: 1 / -1; }
 }
 

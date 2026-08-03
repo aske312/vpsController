@@ -67,8 +67,11 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(guide, /AmneziaWG.*storage\.googleapis\.com\/amnezia\/amnezia\.org/s);
   assert.doesNotMatch(guide, /wireguard\.com\/install/);
   assert.match(guideUi, /How to create and share a new connection/);
-  assert.match(guideUi, /Один ключ — одно устройство/);
-  assert.match(guideUi, /передаёт владельцу только скачанный файл \.conf/);
+  assert.match(guideUi, /Одно подключение — один ключ/);
+  assert.match(guideUi, /Каждое подключение создаётся для одного конкретного устройства/);
+  assert.match(guideUi, /Для новых протоколов здесь будет добавляться отдельный способ установки/);
+  assert.match(guideUi, /\*\-wg\.conf/);
+  assert.match(guideUi, /\*\-awg\.conf/);
   assert.match(guideUi, /storage\.googleapis\.com\/amnezia\/amnezia\.org/);
   assert.match(page, /connection-guide-wg-awg\.pdf/);
   assert.match(page, /installedProtocols\.length > 0/);

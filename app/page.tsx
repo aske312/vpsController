@@ -1546,15 +1546,15 @@ export default function Home() {
       </section>}
 
       {tab === "clients" && installedProtocols.length > 0 && <section className="clientsLayout">
-        <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все клиенты" : labels[tab]}</h2></div><span>{protocolClients.length} подключений</span></div>
+        <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все подключения" : labels[tab]}</h2></div><span>{protocolClients.length} подключений</span></div>
           <div className="clientTable">{protocolClients.length ? protocolClients.map((client) =>
             <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><span className={`protocol ${client.protocol}`}>{client.protocol.toUpperCase()}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address} · {client.quality_reason || "состояние уточняется"}</small></p>
               <span className="traffic"><small>ПОЛУЧЕНО <b>↓ {bytes(client.rx_bytes)}</b></small><small>ОТПРАВЛЕНО <b>↑ {bytes(client.tx_bytes)}</b></small></span><span className="handshake"><small>ПОСЛЕДНЯЯ СВЯЗЬ</small><strong>{duration(client.handshake_age_s)}</strong></span>
               <span className="clientLink"><small>LINK QUALITY</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} ms` : "—"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · loss ${client.packet_loss_percent}%` : ""}</strong></span>
               <button className="dangerButton" onClick={() => void removeClient(client.id)}>Отозвать</button></div>
-          ) : <div className="emptyState"><span>◎</span><p>Клиентов пока нет</p></div>}</div>
+          ) : <div className="emptyState"><span>◎</span><p>Подключений пока нет</p></div>}</div>
         </article>
-        <article className="panel addClient"><div className="addClientHead"><div><p className="eyebrow">NEW ACCESS</p><h2>Добавить клиента</h2></div><a className="guideDownload" href="/connection-guide-wg-awg.pdf" download aria-label="Скачать руководство по подключению WG и AWG" title="Скачать руководство по подключению WG и AWG"><span aria-hidden="true">↓</span><small>PDF</small></a></div><form onSubmit={addClient}>
+        <article className="panel addClient"><div className="addClientHead"><div><p className="eyebrow">NEW ACCESS</p><h2>Добавить подключение</h2></div><a className="guideDownload" href="/connection-guide-wg-awg.pdf" download aria-label="Скачать руководство по подключению" title="Скачать руководство по подключению"><span aria-hidden="true">↓</span><small>PDF</small></a></div><form onSubmit={addClient}>
           <label>Название<input required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов: буквы, цифры, пробел, точка, дефис или _</small></label>
           <label>Протокол<select value={selectedClientProtocol} onChange={(event) => setNewClient({ ...newClient, protocol: event.target.value as Protocol })}>{installedProtocols.map((protocol) => <option key={protocol} value={protocol}>{labels[protocol]}</option>)}</select></label>
           <button className="primaryButton" disabled={busy}>Создать конфигурацию <span>→</span></button>
