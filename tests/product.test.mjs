@@ -63,11 +63,12 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(guide, /имя-wg\.conf.*WireGuard/s);
   assert.match(guide, /имя-awg\.conf.*AmneziaWG/s);
   assert.match(guide, /параметры обфускации.*Jc.*Jmin.*Jmax/s);
-  assert.match(guide, /WireGuard.*wireguard\.com\/install/s);
+  assert.match(guide, /одно приложение для WG и AWG/i);
   assert.match(guide, /AmneziaWG.*storage\.googleapis\.com\/amnezia\/amnezia\.org/s);
-  assert.match(guideUi, /How to connect with the received configuration/);
-  assert.match(guideUi, /Как понять, какой конфиг вам дали/);
-  assert.match(guideUi, /стандартный WG-конфиг не требует ручного включения обфускации/i);
+  assert.doesNotMatch(guide, /wireguard\.com\/install/);
+  assert.match(guideUi, /How to create and share a new connection/);
+  assert.match(guideUi, /Один ключ — одно устройство/);
+  assert.match(guideUi, /передаёт владельцу только скачанный файл \.conf/);
   assert.match(guideUi, /storage\.googleapis\.com\/amnezia\/amnezia\.org/);
   assert.match(page, /connection-guide-wg-awg\.pdf/);
   assert.match(page, /installedProtocols\.length > 0/);
@@ -99,9 +100,11 @@ test("primary resource metrics use CPU percent and readable RAM and disk units",
   const [api, page] = await Promise.all([read("api/main.py"), read("app/page.tsx")]);
   assert.match(api, /def cpu_usage_percent/);
   assert.match(api, /"cpu_percent": cpu_percent/);
-  assert.match(page, /title="CPU".*cpu_percent/s);
-  assert.match(page, /title="RAM" value=\{bytes\(memoryUsedBytes\)\}/);
-  assert.match(page, /title="Disk" value=\{bytes\(diskUsedBytes\)\}/);
+  assert.match(page, /title="CPU · СЕРВЕР".*cpu_percent/s);
+  assert.match(page, /title="RAM · СЕРВЕР" value=\{bytes\(memoryUsedBytes\)\}/);
+  assert.match(page, /title="ДИСК · СЕРВЕР" value=\{bytes\(diskUsedBytes\)\}/);
+  assert.match(page, /свободно.*memory_available/s);
+  assert.match(page, /свободно.*disk_available/s);
 });
 
 test("security distinguishes public SSH from public panel access", async () => {
@@ -225,7 +228,7 @@ test("service mode tests main without publishing it while stabl remains the only
   assert.match(stablWorkflow, /gh release create stabl-latest/);
 });
 
-test("live monitoring uses stable low-load cadence and protocol throughput history", async () => {
+test("live monitoring uses stable low-load cadence and detailed server metrics", async () => {
   const [api, page] = await Promise.all([read("api/main.py"), read("app/page.tsx")]);
   assert.match(api, /@app\.get\("\/api\/live-status"\)/);
   assert.match(api, /include_quality=False/);
@@ -235,9 +238,11 @@ test("live monitoring uses stable low-load cadence and protocol throughput histo
   assert.match(page, /setInterval\(\(\) => void loadLiveStatus\(\), LIVE_SAMPLE_SECONDS \* 1000\)/);
   assert.match(page, /tab === "overview" \? 30000/);
   assert.match(page, /tab === "wg" \|\| tab === "awg" \|\| tab === "clients" \? 15000/);
-  assert.match(page, /protocolTrafficHistory/);
-  assert.match(page, /interface_rx_bytes/);
-  assert.match(page, /sampleIntervalSeconds=\{LIVE_SAMPLE_SECONDS\}/);
+  assert.doesNotMatch(page, /protocolTrafficHistory/);
+  assert.match(page, /CPU · СЕРВЕР/);
+  assert.match(page, /RAM · СЕРВЕР/);
+  assert.match(page, /ДИСК · СЕРВЕР/);
+  assert.match(page, /Всего получено/);
   assert.match(page, /Среднее \{formatValue\(primaryAverage\)\}/);
   assert.doesNotMatch(page, /loadLiveStatus\(\), 800/);
   assert.match(page, /function reloadWithoutCache\(message: string\)/);

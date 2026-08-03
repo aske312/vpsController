@@ -6,7 +6,6 @@ import { LegalFooter } from "./legal";
 
 type Tab = "overview" | "security" | "application" | "services" | "wg" | "awg" | "clients";
 type Protocol = "wg" | "awg";
-type TrafficHistory = { rx: number[]; tx: number[] };
 type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
 type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" | "network-check" | "integrity-check" | "identity" | "secure" | "kernel-update" | "vpn-firewall" | "optimize" | "reboot" | "poweroff";
 type Client = {
@@ -164,10 +163,6 @@ export default function Home() {
   const [protocolImages, setProtocolImages] = useState<ProtocolImage[]>([]);
   const [protocolStatuses, setProtocolStatuses] = useState<Partial<Record<Protocol, ProtocolStatus>>>({});
   const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number; tx: number }>>>({});
-  const [protocolTrafficHistory, setProtocolTrafficHistory] = useState<Record<Protocol, TrafficHistory>>({
-    wg: { rx: [], tx: [] }, awg: { rx: [], tx: [] },
-  });
-  const [protocolLive, setProtocolLive] = useState<LiveStatus["protocols"] | null>(null);
   const [installingProtocol, setInstallingProtocol] = useState("");
   const [checkingResources, setCheckingResources] = useState<Protocol | null>(null);
   const [checkingDiagnostics, setCheckingDiagnostics] = useState<Protocol | null>(null);
@@ -188,7 +183,6 @@ export default function Home() {
   const settingsRef = useRef<HTMLDivElement>(null);
   const networkSample = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
-  const liveProtocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
   const automationDirty = useRef(false);
   const loggingDirty = useRef(false);
@@ -449,36 +443,6 @@ export default function Home() {
         tx: previous ? appendSample(history.tx, nextTxRate) : history.tx,
       }));
       networkSample.current = { rx: next.resources.network_rx, tx: next.resources.network_tx, at: now };
-      const nextProtocolRates: Partial<Record<Protocol, { rx: number; tx: number }>> = {};
-      (["wg", "awg"] as Protocol[]).forEach((protocol) => {
-        const counters = next.protocols[protocol];
-        const protocolPrevious = liveProtocolSamples.current[protocol];
-        if (protocolPrevious) {
-          const seconds = Math.max((now - protocolPrevious.at) / 1000, 0.1);
-          nextProtocolRates[protocol] = {
-            rx: Math.max(0, (counters.interface_rx_bytes - protocolPrevious.rx) / seconds),
-            tx: Math.max(0, (counters.interface_tx_bytes - protocolPrevious.tx) / seconds),
-          };
-        }
-        liveProtocolSamples.current[protocol] = {
-          rx: counters.interface_rx_bytes, tx: counters.interface_tx_bytes, at: now,
-        };
-      });
-      if (Object.keys(nextProtocolRates).length) {
-        setProtocolRates((current) => ({ ...current, ...nextProtocolRates }));
-        setProtocolTrafficHistory((history) => {
-          const updated = { ...history };
-          (["wg", "awg"] as Protocol[]).forEach((protocol) => {
-            const rate = nextProtocolRates[protocol];
-            if (rate) updated[protocol] = {
-              rx: appendSample(history[protocol].rx, rate.rx),
-              tx: appendSample(history[protocol].tx, rate.tx),
-            };
-          });
-          return updated;
-        });
-      }
-      setProtocolLive(next.protocols);
       setOverview((current) => current ? {
         ...current,
         resources: next.resources,
@@ -1134,35 +1098,19 @@ export default function Home() {
           <div className={`nodeStatus ${nodeState}`}><span className="pulse" /><div><strong>{applicationStateTitle}</strong><small>{operationActive ? application?.action?.message || "Команда выполняется" : `Uptime ${uptime(overview?.server.uptime_s)}`}</small></div></div>
         </article>
         <div className="metrics">
-          <Metric title="CPU" value={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%`} percent={overview?.resources.cpu_percent || 0} detail={`Load ${overview?.resources.load1.toFixed(2) || "—"} · ${overview?.resources.cpu_count || "—"} vCPU`} history={resourceHistory.load} />
-          <Metric title="RAM" value={bytes(memoryUsedBytes)} percent={memUsed} detail={`${memUsed.toFixed(0)}% · всего ${bytes(overview?.resources.memory_total)}`} history={resourceHistory.memory} />
-          <Metric title="Disk" value={bytes(diskUsedBytes)} percent={diskUsed} detail={`${diskUsed.toFixed(0)}% · всего ${bytes(overview?.resources.disk_total)}`} history={resourceHistory.disk} />
+          <Metric title="CPU · СЕРВЕР" value={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%`} percent={overview?.resources.cpu_percent || 0} detail={`Нагрузка ${overview?.resources.load1.toFixed(2) || "—"} · ядер ${overview?.resources.cpu_count || "—"} · свободно ${Math.max(0, 100 - (overview?.resources.cpu_percent || 0)).toFixed(0)}%`} history={resourceHistory.load} />
+          <Metric title="RAM · СЕРВЕР" value={bytes(memoryUsedBytes)} percent={memUsed} detail={`Использовано ${memUsed.toFixed(0)}% · свободно ${bytes(overview?.resources.memory_available)} · всего ${bytes(overview?.resources.memory_total)}`} history={resourceHistory.memory} />
+          <Metric title="ДИСК · СЕРВЕР" value={bytes(diskUsedBytes)} percent={diskUsed} detail={`Использовано ${diskUsed.toFixed(0)}% · свободно ${bytes(overview?.resources.disk_available)} · всего ${bytes(overview?.resources.disk_total)}`} history={resourceHistory.disk} />
           <article className="panel metricCard networkMetric">
             <div><p className="eyebrow">NETWORK</p><h2>{bytes(networkRate.rx)}<small>/с</small></h2></div>
             <TrendGraph values={resourceHistory.rx} secondary={resourceHistory.tx} relative formatValue={(value) => `${bytes(value)}/с`} ariaLabel="История сетевой нагрузки" />
-            <div className="networkDirections">
-              <span>↓ Входящая <strong>{bytes(networkRate.rx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.rx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
-              <span>↑ Исходящая <strong>{bytes(networkRate.tx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.tx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
-            </div>
-          </article>
-        </div>
-        <article className="panel protocolTrafficPanel">
-          <div className="panelHead"><div><p className="eyebrow">VPN THROUGHPUT · 5 MIN</p><h2>Передача данных по протоколам</h2></div><span>замер каждые {LIVE_SAMPLE_SECONDS} сек · без диагностических запросов</span></div>
-          <div className="protocolTrafficGrid">
-            {(["wg", "awg"] as Protocol[]).map((protocol) => {
-              const live = protocolLive?.[protocol];
-              const rate = protocolRates[protocol] || { rx: 0, tx: 0 };
-              const history = protocolTrafficHistory[protocol];
-              const name = protocol === "wg" ? "WireGuard" : "AmneziaWG";
-              return <section className={`protocolTrafficCard ${live?.active ? "active" : "inactive"}`} key={protocol}>
-                <div className="protocolTrafficHead"><span className={`protocol ${protocol}`}>{protocol === "wg" ? "WG" : "AW"}</span><div><strong>{name}</strong><small>{live?.active ? `${live.online_peers}/${live.peers} подключений online` : "модуль не активен"}</small></div></div>
-                <div className="protocolRateNow"><span>↓ RX <strong>{bytes(rate.rx)}/с</strong></span><span>↑ TX <strong>{bytes(rate.tx)}/с</strong></span></div>
-                <TrendGraph values={history.rx} secondary={history.tx} relative sampleIntervalSeconds={LIVE_SAMPLE_SECONDS} formatValue={(value) => `${bytes(value)}/с`} ariaLabel={`${name}: история входящей и исходящей скорости`} />
-                <div className="protocolTrafficTotals"><span>Получено <strong>{bytes(live?.interface_rx_bytes || 0)}</strong></span><span>Передано <strong>{bytes(live?.interface_tx_bytes || 0)}</strong></span></div>
-              </section>;
-            })}
+              <div className="networkDirections">
+                <span>↓ Входящая <strong>{bytes(networkRate.rx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.rx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
+                <span>↑ Исходящая <strong>{bytes(networkRate.tx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.tx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
+              </div>
+              <div className="networkTotals"><span>Всего получено <strong>{bytes(overview?.resources.network_rx)}</strong></span><span>Всего отправлено <strong>{bytes(overview?.resources.network_tx)}</strong></span></div>
+            </article>
           </div>
-        </article>
         <article className="panel protocolSummary">
           <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div></div>
           {(["wg", "awg"] as Protocol[]).filter((protocol) => overview?.protocols[protocol].active).map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
@@ -1612,7 +1560,7 @@ export default function Home() {
           <button className="primaryButton" disabled={busy}>Создать конфигурацию <span>→</span></button>
         </form>{generated && <div className="generated">
           <div className="generatedHead"><span>✓</span><div><small>КОНФИГУРАЦИЯ ГОТОВА</small><strong>{generatedName}</strong><p>Сохраните файл сейчас — приватный ключ повторно не показывается.</p></div></div>
-          <button className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать конфигурацию</strong><small>WIREGUARD · .CONF</small></div></button>
+            <button className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать конфигурацию</strong><small>{selectedClientProtocol === "awg" ? "AMNEZIAWG" : "WIREGUARD"} · .CONF</small></div></button>
           <details><summary>Показать техническое содержимое <span>⌄</span></summary><textarea readOnly value={generated} /></details>
           <button className="copyButton" onClick={() => navigator.clipboard.writeText(generated)}>Копировать содержимое</button>
         </div>}</article>
