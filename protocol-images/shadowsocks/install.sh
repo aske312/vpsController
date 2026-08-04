@@ -38,6 +38,7 @@ After=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/bin/ss-server -c /etc/vps-control/shadowsocks/clients/%i.json
+IPAccounting=true
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true

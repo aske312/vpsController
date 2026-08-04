@@ -103,6 +103,9 @@ except (OSError, ValueError, KeyError, IndexError):
     pass
 config = {
   "log": {"loglevel": "warning"},
+  "stats": {},
+  "api": {"tag": "api", "services": ["StatsService"]},
+  "policy": {"levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}}},
   "inbounds": [{
     "tag": "vless-reality-xhttp", "listen": "0.0.0.0", "port": int(port), "protocol": "vless",
     "settings": {"clients": existing_clients, "decryption": "none"},
@@ -116,9 +119,12 @@ config = {
       }
     },
     "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}
+  }, {
+    "listen": "127.0.0.1", "port": 10085, "protocol": "dokodemo-door",
+    "settings": {"address": "127.0.0.1"}, "tag": "api"
   }],
-  "outbounds": [{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "blocked"}],
-  "routing": {"domainStrategy": "AsIs", "rules": [{"type": "field", "ip": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10"], "outboundTag": "blocked"}]}
+  "outbounds": [{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "blocked"}, {"protocol": "freedom", "tag": "api"}],
+  "routing": {"domainStrategy": "AsIs", "rules": [{"type": "field", "inboundTag": ["api"], "outboundTag": "api"}, {"type": "field", "ip": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10"], "outboundTag": "blocked"}]}
 }
 with open(output, "w", encoding="utf-8") as handle:
     json.dump(config, handle, ensure_ascii=False, indent=2)
