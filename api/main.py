@@ -82,6 +82,7 @@ network_diagnostic_lock = threading.Lock()
 resource_check_cache: dict[str, dict] = {}
 network_diagnostic_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
+client_mutation_lock = threading.Lock()
 cpu_usage_lock = threading.Lock()
 cpu_previous: tuple[int, int] | None = None
 RESOURCE_TARGETS = (
@@ -1904,6 +1905,28 @@ def shadowsocks_firewall(action: Literal["add", "delete"], port: int) -> None:
         raise RuntimeError(result.stderr.strip() or "Unable to update Shadowsocks firewall rule")
 
 
+def restart_vless_service() -> None:
+    unit = "vps-control-vless-reality-xhttp.service"
+    run("systemctl", "restart", unit, timeout=20, check=True)
+    for _ in range(10):
+        if run("systemctl", "is-active", unit) == "active":
+            return
+        time.sleep(0.2)
+    raise RuntimeError("VLESS service did not become active")
+
+
+def restore_vless_config(original: bytes, token: str) -> None:
+    rollback = VLESS_CONFIG_DIR / f".config-{token}.rollback"
+    try:
+        rollback.write_bytes(original)
+        os.chmod(rollback, 0o640)
+        os.chown(rollback, 0, 65534)
+        rollback.replace(VLESS_CONFIG)
+        restart_vless_service()
+    finally:
+        rollback.unlink(missing_ok=True)
+
+
 def next_address(protocol: Literal["wg", "awg"]) -> ipaddress.IPv4Address:
     network = WG_SUBNET if protocol == "wg" else AWG_SUBNET
     used = {
@@ -1972,46 +1995,57 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         return {"id": client_id, "filename": f"{safe_name}-shadowsocks.txt", "config": client_config}
 
     if payload.protocol == "vless-reality-xhttp":
-        if not VLESS_CONFIG.exists() or not VLESS_ENV.exists():
-            raise HTTPException(status_code=409, detail="vless-reality-xhttp protocol is not installed")
-        try:
-            config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
-            reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
-            inbound_clients = config_data["inbounds"][0]["settings"]["clients"]
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
-            raise HTTPException(status_code=409, detail="VLESS module configuration is invalid") from exc
-        client_uuid = str(uuid.uuid4())
-        inbound_clients.append({"id": client_uuid, "email": f"{client_id}@312.net"})
-        tmp = VLESS_CONFIG.with_suffix(".tmp")
-        try:
-            tmp.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
-            os.chmod(tmp, 0o640)
-            os.chown(tmp, 0, 65534)
-        except OSError as exc:
+        with client_mutation_lock:
+            if not VLESS_CONFIG.exists() or not VLESS_ENV.exists():
+                raise HTTPException(status_code=409, detail="vless-reality-xhttp protocol is not installed")
+            tmp = VLESS_CONFIG_DIR / f".config-{client_id}.tmp"
+            replaced = False
+            stage = "чтение конфигурации"
             try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise HTTPException(status_code=500, detail="Unable to save VLESS client configuration") from exc
-        xray = "/usr/local/lib/vps-control-vless-reality-xhttp/xray"
-        result = subprocess.run([xray, "run", "-test", "-config", str(tmp)], capture_output=True, text=True, timeout=15, check=False)
-        if result.returncode:
-            tmp.unlink(missing_ok=True)
-            raise HTTPException(status_code=500, detail=result.stderr.strip() or "Generated VLESS config is invalid")
-        tmp.replace(VLESS_CONFIG)
-        run("systemctl", "restart", "vps-control-vless-reality-xhttp.service", timeout=20, check=True)
-        target_host = reality.get("TARGET", "www.microsoft.com:443").rsplit(":", 1)[0]
-        port = int(reality.get("PORT", "443"))
-        query = urllib.parse.urlencode({
-            "encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome",
-            "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", ""),
-            "type": "xhttp", "path": reality.get("XHTTP_PATH", reality.get("PATH", "/")), "mode": "auto",
-        })
-        client_config = f"vless://{client_uuid}@{PUBLIC_IP}:{port}?{query}#{urllib.parse.quote(payload.name)}"
-        items = read_clients()
-        items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
-        write_clients(items)
-        return {"id": client_id, "filename": f"{safe_name}-vless.txt", "config": client_config}
+                original = VLESS_CONFIG.read_bytes()
+                config_data = json.loads(original.decode("utf-8"))
+                reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+                inbound_clients = config_data["inbounds"][0]["settings"]["clients"]
+                client_uuid = str(uuid.uuid4())
+                inbound_clients.append({"id": client_uuid, "email": f"{client_id}@312.net"})
+                stage = "запись временной конфигурации"
+                tmp.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(tmp, 0o640)
+                os.chown(tmp, 0, 65534)
+                stage = "проверка конфигурации Xray"
+                xray = "/usr/local/lib/vps-control-vless-reality-xhttp/xray"
+                result = subprocess.run([xray, "run", "-test", "-config", str(tmp)], capture_output=True, text=True, timeout=15, check=False)
+                if result.returncode:
+                    raise RuntimeError(result.stderr.strip() or "Xray rejected generated configuration")
+                stage = "активация конфигурации"
+                tmp.replace(VLESS_CONFIG)
+                replaced = True
+                restart_vless_service()
+                target_host = reality.get("TARGET", "www.microsoft.com:443").rsplit(":", 1)[0]
+                port = int(reality.get("PORT", "443"))
+                query = urllib.parse.urlencode({
+                    "encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome",
+                    "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", ""),
+                    "type": "xhttp", "path": reality.get("XHTTP_PATH", reality.get("PATH", "/")), "mode": "auto",
+                })
+                client_config = f"vless://{client_uuid}@{PUBLIC_IP}:{port}?{query}#{urllib.parse.quote(payload.name)}"
+                stage = "сохранение подключения"
+                items = read_clients()
+                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
+                write_clients(items)
+                return {"id": client_id, "filename": f"{safe_name}-vless.txt", "config": client_config}
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                if replaced:
+                    try:
+                        restore_vless_config(original, client_id)
+                    except Exception:
+                        pass
+                raise HTTPException(status_code=500, detail=f"Не удалось создать VLESS-подключение: {stage}") from exc
+            finally:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     command = "wg" if payload.protocol == "wg" else "awg"
     config_path = WG_CONFIG if payload.protocol == "wg" else AWG_CONFIG
