@@ -327,7 +327,7 @@ export default function Home() {
       else if (tab === "security") await Promise.all([loadSecurity(), loadServices()]);
       else if (tab === "application") await loadApplication();
       else if (tab === "services") await loadServices();
-      else if (tab === "wg" || tab === "awg") await Promise.all([loadClients(), loadProtocolStatus(tab)]);
+      else if (["wg", "awg", "shadowsocks", "vless-reality-xhttp"].includes(tab)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
       else await loadClients();
     } finally {
       if (showBusy) setBusy(false);
@@ -351,7 +351,7 @@ export default function Home() {
     const updateRunning = actionRunning && ["update", "test-update", "test-rollback", "kernel-update"].includes(application?.action?.action || "");
     const delay = updateRunning ? 3000
       : tab === "overview" ? 30000
-        : tab === "wg" || tab === "awg" || tab === "clients" ? 15000
+        : ["wg", "awg", "shadowsocks", "vless-reality-xhttp", "clients"].includes(tab) ? 15000
           : 10000;
     const timer = window.setInterval(() => void refreshCurrent(false), delay);
     return () => window.clearInterval(timer);
@@ -1036,9 +1036,10 @@ export default function Home() {
     Boolean(applicationSecurity?.control_command_protected),
   ];
   const securityScore = Math.round(securityChecks.filter(Boolean).length / securityChecks.length * 100);
-  const activeProtocol = tab === "wg" || tab === "awg" ? protocolStatuses[tab] : undefined;
-  const activeProtocolRate = tab === "wg" || tab === "awg" ? protocolRates[tab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
-  const activeProtocolImage = tab === "wg" || tab === "awg" ? protocolImages.find((image) => image.id === tab) : undefined;
+  const protocolTab = (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(tab) ? tab as Protocol : undefined;
+  const activeProtocol = protocolTab ? protocolStatuses[protocolTab] : undefined;
+  const activeProtocolRate = protocolTab ? protocolRates[protocolTab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
+  const activeProtocolImage = protocolTab ? protocolImages.find((image) => image.id === protocolTab) : undefined;
   const operationActive = ["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(application?.action?.state || "");
   const operationProgress = Math.max(0, Math.min(100, application?.action?.progress || (operationActive ? 5 : 100)));
   const operationName = application?.action?.action || "";
@@ -1460,6 +1461,29 @@ export default function Home() {
           />
           </div>
           <div className="automationNote">Persistent=true · пропущенная задача будет выполнена после следующего запуска сервера</div>
+        </article>
+      </section>}
+
+      {(tab === "shadowsocks" || tab === "vless-reality-xhttp") && activeProtocol && <section className="protocolMonitor">
+        <article className="panel protocolLiveHero">
+          <div>
+            <p className="eyebrow">LIVE TUNNEL</p>
+            <h2>{labels[tab]}</h2>
+            <p className="mono">{activeProtocol.address || "адрес не назначен"} · TCP {activeProtocol.listen_port || "—"} · {activeProtocol.peers} подключений</p>
+          </div>
+          <div className="protocolControlStack">
+            <div className={activeProtocol.service_active ? "protocolHealth online" : "protocolHealth"}>
+              <span className="pulse" />
+              <div>
+                <strong>{activeProtocol.service_active ? "Протокол работает" : "Протокол остановлен"}</strong>
+                <small>{activeProtocol.service_enabled ? "Автозапуск включён" : "Автозапуск отключён"} · активно {activeProtocol.online_peers}</small>
+              </div>
+            </div>
+            <div className="protocolActions">
+              <button onClick={() => void restartProtocol(tab)} disabled={busy}>Перезапустить</button>
+              {activeProtocolImage?.removable && <button className="removeProtocolButton" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить протокол</button>}
+            </div>
+          </div>
         </article>
       </section>}
 

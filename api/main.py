@@ -1979,7 +1979,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         query = urllib.parse.urlencode({
             "encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome",
             "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", ""),
-            "type": "xhttp", "path": reality.get("PATH", "/"), "mode": "auto",
+            "type": "xhttp", "path": reality.get("XHTTP_PATH", reality.get("PATH", "/")), "mode": "auto",
         })
         client_config = f"vless://{client_uuid}@{PUBLIC_IP}:{port}?{query}#{urllib.parse.quote(payload.name)}"
         items = read_clients()
@@ -2071,7 +2071,34 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
 
 
 @app.get("/api/protocols/{protocol}/status")
-def protocol_status(protocol: Literal["wg", "awg"], _: None = Depends(require_token)) -> dict:
+def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"], _: None = Depends(require_token)) -> dict:
+    if protocol in ("shadowsocks", "vless-reality-xhttp"):
+        unit = "vps-control-shadowsocks.target" if protocol == "shadowsocks" else "vps-control-vless-reality-xhttp.service"
+        protocol_clients = [item for item in read_clients() if item.get("protocol") == protocol]
+        if protocol == "shadowsocks":
+            active_clients = sum(
+                run("systemctl", "is-active", f'vps-control-shadowsocks@{item.get("id", "")}.service') == "active"
+                for item in protocol_clients
+            )
+            listen_port = SHADOWSOCKS_PORT_START
+        else:
+            active_clients = len(protocol_clients) if run("systemctl", "is-active", unit) == "active" else 0
+            try:
+                reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+                listen_port = int(reality.get("PORT", "443"))
+            except (OSError, ValueError):
+                listen_port = 443
+        service_active = run("systemctl", "is-active", unit) == "active"
+        return {
+            "protocol": protocol, "interface": "systemd", "active": service_active,
+            "service_active": service_active, "service_enabled": run("systemctl", "is-enabled", unit) == "enabled",
+            "active_since": run("systemctl", "show", unit, "--property=ActiveEnterTimestamp", "--value"),
+            "address": PUBLIC_IP, "listen_port": listen_port, "mtu": 0,
+            "peers": len(protocol_clients), "online_peers": active_clients, "endpoints": active_clients,
+            "last_handshake_age_s": None, "peer_rx_bytes": 0, "peer_tx_bytes": 0,
+            "interface_rx_bytes": 0, "interface_tx_bytes": 0, "rx_errors": 0, "tx_errors": 0,
+            "rx_dropped": 0, "tx_dropped": 0,
+        }
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
     unit = f"{'wg-quick' if protocol == 'wg' else 'awg-quick'}@{interface}.service"
@@ -2153,7 +2180,21 @@ def check_network_diagnostics(protocol: Literal["wg", "awg"], _: None = Depends(
 
 
 @app.post("/api/protocols/{protocol}/restart")
-def restart_protocol(protocol: Literal["wg", "awg"], _: None = Depends(require_token)) -> dict:
-    unit = f"wg-quick@{WG_INTERFACE}.service" if protocol == "wg" else f"awg-quick@{AWG_INTERFACE}.service"
-    run("systemctl", "restart", unit, timeout=20, check=True)
+def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"], _: None = Depends(require_token)) -> dict:
+    if protocol == "shadowsocks":
+        unit = "vps-control-shadowsocks.target"
+        if run("systemctl", "show", unit, "--property=LoadState", "--value") != "loaded":
+            raise HTTPException(status_code=409, detail="Shadowsocks protocol is not installed")
+        for item in read_clients():
+            if item.get("protocol") == protocol:
+                run("systemctl", "restart", f'vps-control-shadowsocks@{item.get("id", "")}.service', timeout=20, check=True)
+    else:
+        unit = (
+            f"wg-quick@{WG_INTERFACE}.service" if protocol == "wg"
+            else f"awg-quick@{AWG_INTERFACE}.service" if protocol == "awg"
+            else "vps-control-vless-reality-xhttp.service"
+        )
+        if run("systemctl", "show", unit, "--property=LoadState", "--value") != "loaded":
+            raise HTTPException(status_code=409, detail=f"{protocol} protocol is not installed")
+        run("systemctl", "restart", unit, timeout=20, check=True)
     return {"protocol": protocol, "active": run("systemctl", "is-active", unit) == "active"}

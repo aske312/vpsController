@@ -24,7 +24,7 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=300 update
-apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl unzip
+apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl openssl unzip
 
 case "$(dpkg --print-architecture)" in
   amd64) asset="Xray-linux-64.zip" ;;
@@ -52,20 +52,28 @@ install -d -m 0750 -o root -g nogroup "${CONFIG_DIR}"
 if [[ ! -s "${CONFIG_DIR}/reality.env" ]]; then
   key_output="$("${MODULE_DIR}/xray" x25519)"
   private_key="$(sed -n 's/^PrivateKey:[[:space:]]*//p' <<<"${key_output}" | head -n 1)"
-  public_key="$(sed -n -E 's/^(Password|PublicKey):[[:space:]]*//p' <<<"${key_output}" | head -n 1)"
+  public_key="$(sed -n -E 's/^(Password( \(PublicKey\))?|PublicKey):[[:space:]]*//p' <<<"${key_output}" | head -n 1)"
   [[ -n "${private_key}" && -n "${public_key}" ]] || { echo "Xray не создал ключи REALITY" >&2; exit 1; }
   short_id="$(openssl rand -hex 8)"
   path="/$(openssl rand -hex 12)"
   umask 077
-  printf 'PRIVATE_KEY=%s\nPUBLIC_KEY=%s\nSHORT_ID=%s\nPATH=%s\nTARGET=%s\nPORT=%s\n' \
+  printf 'PRIVATE_KEY=%s\nPUBLIC_KEY=%s\nSHORT_ID=%s\nXHTTP_PATH=%s\nTARGET=%s\nPORT=%s\n' \
     "${private_key}" "${public_key}" "${short_id}" "${path}" "${TARGET}" "${PORT}" >"${CONFIG_DIR}/reality.env"
 fi
 
-set -a
-# shellcheck disable=SC1091
-source "${CONFIG_DIR}/reality.env"
-set +a
-python3 - "${CONFIG_DIR}/config.json" "${PORT}" "${TARGET}" "${TARGET_HOST}" "${PRIVATE_KEY}" "${SHORT_ID}" "${PATH}" <<'PY'
+env_setting() {
+  sed -n "s/^${1}=//p" "${CONFIG_DIR}/reality.env" | tail -n 1
+}
+PRIVATE_KEY="$(env_setting PRIVATE_KEY)"
+PUBLIC_KEY="$(env_setting PUBLIC_KEY)"
+SHORT_ID="$(env_setting SHORT_ID)"
+XHTTP_PATH="$(env_setting XHTTP_PATH)"
+XHTTP_PATH="${XHTTP_PATH:-$(env_setting PATH)}"
+[[ -n "${PRIVATE_KEY}" && -n "${PUBLIC_KEY}" && -n "${SHORT_ID}" && -n "${XHTTP_PATH}" ]] || { echo "Конфигурация REALITY неполна" >&2; exit 1; }
+if ! grep -q '^XHTTP_PATH=' "${CONFIG_DIR}/reality.env"; then
+  sed -i "s|^PATH=.*|XHTTP_PATH=${XHTTP_PATH}|" "${CONFIG_DIR}/reality.env"
+fi
+python3 - "${CONFIG_DIR}/config.json" "${PORT}" "${TARGET}" "${TARGET_HOST}" "${PRIVATE_KEY}" "${SHORT_ID}" "${XHTTP_PATH}" <<'PY'
 import json, sys
 output, port, target, host, private_key, short_id, path = sys.argv[1:]
 existing_clients = []
@@ -114,6 +122,8 @@ Restart=on-failure
 RestartSec=3
 User=nobody
 NoNewPrivileges=true
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
@@ -132,5 +142,12 @@ if command -v ufw >/dev/null 2>&1 && [[ "${ENABLE_UFW:-yes}" == "yes" ]]; then
 fi
 systemctl daemon-reload
 systemctl enable --now vps-control-vless-reality-xhttp.service
+for _ in {1..10}; do
+  if systemctl is-active --quiet vps-control-vless-reality-xhttp.service && ss -H -ltn "sport = :${PORT}" | grep -q .; then
+    break
+  fi
+  sleep 0.5
+done
 systemctl is-active --quiet vps-control-vless-reality-xhttp.service
+ss -H -ltn "sport = :${PORT}" | grep -q . || { journalctl -u vps-control-vless-reality-xhttp.service -n 20 --no-pager >&2; exit 1; }
 echo "VLESS + REALITY + XHTTP установлен на TCP ${PORT}."
