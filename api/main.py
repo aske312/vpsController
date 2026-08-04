@@ -268,13 +268,24 @@ def interface_dump(protocol: Literal["wg", "awg"], include_quality: bool = True)
 def xray_user_stats(email: str) -> tuple[int, int, int | None]:
     output = run(XRAY_BIN, "api", "statsquery", "-server=127.0.0.1:10085", "-pattern", f"user>>>{email}>>>traffic>>>", timeout=3)
     uplink = downlink = 0
-    for line in output.splitlines():
-        match = re.search(r"(?:uplink|downlink):\s*(\d+)", line)
-        if match:
-            if "uplink" in line:
-                uplink = int(match.group(1))
-            else:
-                downlink = int(match.group(1))
+    try:
+        payload = json.loads(output)
+        for item in payload.get("stat", []):
+            name = str(item.get("name", ""))
+            value = int(item.get("value", 0))
+            if name.endswith(">>>uplink"):
+                uplink = value
+            elif name.endswith(">>>downlink"):
+                downlink = value
+    except (TypeError, ValueError, json.JSONDecodeError):
+        # Older Xray builds returned human-readable lines instead of JSON.
+        for line in output.splitlines():
+            match = re.search(r"(?:uplink|downlink):\s*(\d+)", line)
+            if match:
+                if "uplink" in line:
+                    uplink = int(match.group(1))
+                else:
+                    downlink = int(match.group(1))
     now = time.time()
     key = f"vhr:{email}"
     previous = stream_stats_cache.get(key)
