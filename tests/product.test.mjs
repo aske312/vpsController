@@ -406,7 +406,9 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /tab === "shadowsocks" \|\| tab === "vless-reality-xhttp"/);
   assert.match(page, /TRANSPORT &amp; SECURITY/);
   assert.match(manager, /ReadWritePaths=-\/etc\/vps-control\.env -\/etc\/vps-control /);
-  assert.match(manager, /grep -Eq '\^ReadWritePaths=\.\*-\?\/etc\/vps-control\(\[\[:space:\]\]\|\$\)'/);
+  assert.match(manager, /grep -Fxq "\$\{expected\}" "\$\{SERVICE_FILE\}"/);
+  assert.match(manager, /start_services\(\) \{[\s\S]*?ensure_api_write_access[\s\S]*?systemctl start/);
+  assert.match(manager, /restart_services\(\) \{[\s\S]*?ensure_api_write_access[\s\S]*?systemctl restart/);
   assert.match(css, /\.protocol\.shadowsocks/);
   assert.match(css, /\.protocol\.vless-reality-xhttp/);
 });

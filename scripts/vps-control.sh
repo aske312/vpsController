@@ -858,7 +858,7 @@ EOF
 
 ensure_api_write_access() {
   local expected="ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/wireguard -/etc/amnezia ${DATA_DIR}"
-  if ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}"; then
+  if ! grep -Fxq "${expected}" "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
     systemctl daemon-reload
   fi
@@ -1029,6 +1029,7 @@ PY
 
 start_services() {
   configure_access
+  ensure_api_write_access
   if [[ -r "${INSTALL_DIR}/.build-commit" ]]; then
     BUILD_COMMIT="$(<"${INSTALL_DIR}/.build-commit")"
   fi
@@ -1060,6 +1061,7 @@ uninstall_app() {
 }
 
 restart_services() {
+  ensure_api_write_access
   info "Перезапуск служб панели"
   systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
   verify_app
