@@ -13,6 +13,7 @@ setting() {
 
 PORT="$(setting VLESS_REALITY_PORT 443)"
 TARGET="$(setting VLESS_REALITY_TARGET www.apple.com:443)"
+[[ "${TARGET}" != "www.microsoft.com:443" ]] || TARGET="www.apple.com:443"
 [[ "${PORT}" =~ ^[0-9]+$ && "${PORT}" -ge 1 && "${PORT}" -le 65535 ]] || { echo "Некорректный VLESS_REALITY_PORT" >&2; exit 1; }
 [[ "${TARGET}" =~ ^[A-Za-z0-9.-]+:[0-9]+$ ]] || { echo "Некорректный VLESS_REALITY_TARGET" >&2; exit 1; }
 TARGET_HOST="${TARGET%:*}"
