@@ -2,7 +2,7 @@
   "id": "shadowsocks",
   "name": "ShadowSocks",
   "version": "1.0.0",
-  "description": "Независимый Shadowsocks-сервер с отдельным ключом и портом для каждого подключения",
+  "description": "Лёгкий прокси с отдельным ключом для подключения",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",
   "installer": "install.sh",

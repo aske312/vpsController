@@ -586,7 +586,6 @@ install_protocol_image() {
     bash "${image_root}/${installer}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
-  systemctl restart "${APP_NAME}-api.service"
   ok "Образ ${image_id} установлен."
 }
 
@@ -610,7 +609,6 @@ remove_protocol_image() {
     bash "${image_root}/${uninstaller}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
-  systemctl restart "${APP_NAME}-api.service"
   ok "Протокол ${image_id} удалён; образ сохранён."
 }
 

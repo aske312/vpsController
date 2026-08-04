@@ -709,10 +709,12 @@ export default function Home() {
         setApplication(status);
         const current = imageData.items?.find((item) => item.id === image.id);
         const actionState = status.action?.state || "";
+        // The observed module state is authoritative. A transient systemd unit
+        // can disappear immediately after completing and briefly look failed.
+        if (Boolean(current?.installed) === installed) return;
         if (actionState === "failed" || status.action?.result === "failed") {
           throw new Error(`${installed ? "Установка" : "Удаление"} ${image.name} завершилось с ошибкой`);
         }
-        if (Boolean(current?.installed) === installed && !["active", "activating", "running"].includes(actionState)) return;
       } catch (cause) {
         if (cause instanceof Error && cause.message.includes("завершилось с ошибкой")) throw cause;
         // API may restart briefly after installing or removing a module.
@@ -1152,19 +1154,19 @@ export default function Home() {
           <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div></div>
           {(["wg", "awg"] as TunnelProtocol[]).filter((protocol) => overview?.protocols[protocol].active).map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
             <span className={`protocol ${protocol}`}>{protocol === "wg" ? "WG" : "AW"}</span>
-            <p><strong>{protocol === "wg" ? "WireGuard" : "AmneziaWG"}</strong><small>{overview?.protocols[protocol].interface} · UDP {overview?.protocols[protocol].port}</small></p>
+            <p><strong>{protocol === "wg" ? "WireGuard" : "AmneziaWG"}</strong><small>{protocolImages.find((image) => image.id === protocol)?.description || `${overview?.protocols[protocol].interface} · UDP ${overview?.protocols[protocol].port}`}</small></p>
             <em className="onlinePill">Активен</em><b>›</b>
           </button>)}
           {protocolImages.filter((image) => image.installed && image.id !== "wg" && image.id !== "awg").map((image) => <button key={image.id} onClick={() => setTab(image.id as Protocol)}>
-            <span className={`protocol ${image.id}`}>{image.id === "shadowsocks" ? "SS" : "V"}</span>
-            <p><strong>{image.name}</strong><small>{image.id === "shadowsocks" ? "Прокси-протокол" : "REALITY · XHTTP"}</small></p>
+            <span className={`protocol ${image.id}`}>{image.id === "shadowsocks" ? "SS" : "VHR"}</span>
+            <p><strong>{image.name}</strong><small>{image.description}</small></p>
             <em className={image.active ? "onlinePill" : "offlinePill"}>{image.active ? "Активен" : "Остановлен"}</em>
             <b>›</b>
           </button>)}
           {protocolImages.filter((image) => !image.installed).map((image) =>
             <div className="protocolInstaller" key={image.id}>
-              <span className={`protocol ${image.id}`}>{image.id === "wg" ? "WG" : image.id === "awg" ? "AW" : image.id === "shadowsocks" ? "SS" : "V"}</span>
-              <p><strong>{image.name}</strong><small>{image.id === "shadowsocks" ? "Прокси-протокол" : image.id === "vless-reality-xhttp" ? "REALITY · XHTTP" : `образ ${image.version}`}</small></p>
+              <span className={`protocol ${image.id}`}>{image.id === "wg" ? "WG" : image.id === "awg" ? "AW" : image.id === "shadowsocks" ? "SS" : "VHR"}</span>
+              <p><strong>{image.name}</strong><small>{image.description}</small></p>
               <button onClick={() => void installProtocol(image)} disabled={busy || Boolean(installingProtocol)}>
                 {installingProtocol === image.id ? "Устанавливается…" : "Установить"}
               </button>
@@ -1494,7 +1496,7 @@ export default function Home() {
           </article>
           <article className="panel protocolTelemetry">
             <p className="eyebrow">TRANSPORT &amp; SECURITY</p>
-            <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "V"}</strong><span>{activeProtocol.security || "—"}</span></div>
+            <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "VHR"}</strong><span>{activeProtocol.security || "—"}</span></div>
             <dl><div><dt>Транспорт</dt><dd>{activeProtocol.transport || "—"}</dd></div><div><dt>Целевой узел</dt><dd>{activeProtocol.target || "Прямой выход"}</dd></div></dl>
           </article>
           <article className="panel protocolTelemetry">
@@ -1631,7 +1633,7 @@ export default function Home() {
       {tab === "clients" && installedProtocols.length > 0 && <section className="clientsLayout">
         <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все подключения" : labels[tab]}</h2></div><div className="clientPanelActions"><span>{protocolClients.length} подключений</span><a className="guideAction" href="/connection-guide-wg-awg.pdf" download aria-label="Скачать руководство по подключению" data-tooltip="Пошаговая инструкция для владельца устройства: установка приложения и импорт конфигурации"><span aria-hidden="true">↓</span><div><strong>Скачать гайд</strong><small>PDF · ДЛЯ ПОЛЬЗОВАТЕЛЯ</small></div></a><button className="primaryButton" onClick={openClientDialog}>Новое подключение <span>＋</span></button></div></div>
           <div className="clientTable">{protocolClients.length ? visibleClients.map((client) =>
-            <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><span className={`protocol ${client.protocol}`}>{client.protocol === "wg" ? "WG" : client.protocol === "awg" ? "AW" : client.protocol === "shadowsocks" ? "SS" : "V"}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address} · {client.quality_reason || "состояние уточняется"}</small></p>
+            <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><span className={`protocol ${client.protocol}`}>{client.protocol === "wg" ? "WG" : client.protocol === "awg" ? "AW" : client.protocol === "shadowsocks" ? "SS" : "VHR"}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address} · {client.quality_reason || "состояние уточняется"}</small></p>
               <span className="traffic"><small>ПОЛУЧЕНО <b>↓ {bytes(client.rx_bytes)}</b></small><small>ОТПРАВЛЕНО <b>↑ {bytes(client.tx_bytes)}</b></small></span><span className="handshake"><small>ПОСЛЕДНЯЯ СВЯЗЬ</small><strong>{duration(client.handshake_age_s)}</strong></span>
               <span className="clientLink"><small>LINK QUALITY</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} ms` : "—"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · loss ${client.packet_loss_percent}%` : ""}</strong></span>
               <button className="dangerButton" onClick={() => void removeClient(client.id)}>Отозвать</button></div>

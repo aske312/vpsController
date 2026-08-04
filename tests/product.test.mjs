@@ -400,10 +400,16 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(manager, /VLESS_REALITY_TARGET/);
   assert.doesNotMatch(manager, /PUBLIC_IP="\$\{PUBLIC_IP\}"/);
   assert.match(manager, /PUBLIC_IP="\$\(env_value PUBLIC_IP\)"/);
-  assert.match(page, /image\.id === "shadowsocks" \? "SS" : "V"/);
+  assert.match(page, /image\.id === "shadowsocks" \? "SS" : "VHR"/);
+  assert.match(page, /<small>\{image\.description\}<\/small>/);
+  assert.match(page, /protocolImages\.find\(\(image\) => image\.id === protocol\)\?\.description/);
   assert.match(page, /setTab\(image\.id as Protocol\)/);
   assert.match(page, /LIVE TUNNEL/);
-  assert.match(page, /client\.protocol === "shadowsocks" \? "SS" : "V"/);
+  assert.match(page, /client\.protocol === "shadowsocks" \? "SS" : "VHR"/);
+  assert.match(page, /if \(Boolean\(current\?\.installed\) === installed\) return;/);
+  assert.doesNotMatch(manager.match(/install_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /systemctl restart "\$\{APP_NAME\}-api\.service"/);
+  assert.doesNotMatch(manager.match(/remove_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /systemctl restart "\$\{APP_NAME\}-api\.service"/);
+  assert.match(vlessManifest, /"name": "VHR"/);
   assert.match(page, /tab === "shadowsocks" \|\| tab === "vless-reality-xhttp"/);
   assert.match(page, /TRANSPORT &amp; SECURITY/);
   assert.match(manager, /ReadWritePaths=-\/etc\/vps-control\.env -\/etc\/vps-control /);
