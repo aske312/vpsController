@@ -12,7 +12,7 @@ setting() {
 }
 
 PORT="$(setting VLESS_REALITY_PORT 443)"
-TARGET="$(setting VLESS_REALITY_TARGET www.microsoft.com:443)"
+TARGET="$(setting VLESS_REALITY_TARGET www.apple.com:443)"
 [[ "${PORT}" =~ ^[0-9]+$ && "${PORT}" -ge 1 && "${PORT}" -le 65535 ]] || { echo "Некорректный VLESS_REALITY_PORT" >&2; exit 1; }
 [[ "${TARGET}" =~ ^[A-Za-z0-9.-]+:[0-9]+$ ]] || { echo "Некорректный VLESS_REALITY_TARGET" >&2; exit 1; }
 TARGET_HOST="${TARGET%:*}"
@@ -49,6 +49,13 @@ install -d -m 0755 "${MODULE_DIR}"
 install -m 0755 "${tmp_dir}/xray" "${MODULE_DIR}/xray"
 install -d -m 0750 -o root -g nogroup "${CONFIG_DIR}"
 
+tls_probe="$("${MODULE_DIR}/xray" tls ping "${TARGET}" 2>&1)"
+grep -q 'Handshake succeeded' <<<"${tls_probe}" \
+  || { echo "REALITY target ${TARGET} не завершает TLS handshake" >&2; exit 1; }
+certificate_length="$(sed -n -E 's/.*total length:[[:space:]]*([0-9]+).*/\1/p' <<<"${tls_probe}" | tail -n 1)"
+[[ "${certificate_length}" =~ ^[0-9]+$ && "${certificate_length}" -le 3500 ]] \
+  || { echo "REALITY target ${TARGET} использует слишком большую TLS-цепочку" >&2; exit 1; }
+
 if [[ ! -s "${CONFIG_DIR}/reality.env" ]]; then
   key_output="$("${MODULE_DIR}/xray" x25519)"
   private_key="$(sed -n 's/^PrivateKey:[[:space:]]*//p' <<<"${key_output}" | head -n 1)"
@@ -59,6 +66,17 @@ if [[ ! -s "${CONFIG_DIR}/reality.env" ]]; then
   umask 077
   printf 'PRIVATE_KEY=%s\nPUBLIC_KEY=%s\nSHORT_ID=%s\nXHTTP_PATH=%s\nTARGET=%s\nPORT=%s\n' \
     "${private_key}" "${public_key}" "${short_id}" "${path}" "${TARGET}" "${PORT}" >"${CONFIG_DIR}/reality.env"
+fi
+
+if grep -q '^TARGET=' "${CONFIG_DIR}/reality.env"; then
+  sed -i "s|^TARGET=.*|TARGET=${TARGET}|" "${CONFIG_DIR}/reality.env"
+else
+  printf 'TARGET=%s\n' "${TARGET}" >>"${CONFIG_DIR}/reality.env"
+fi
+if grep -q '^PORT=' "${CONFIG_DIR}/reality.env"; then
+  sed -i "s|^PORT=.*|PORT=${PORT}|" "${CONFIG_DIR}/reality.env"
+else
+  printf 'PORT=%s\n' "${PORT}" >>"${CONFIG_DIR}/reality.env"
 fi
 
 env_setting() {
