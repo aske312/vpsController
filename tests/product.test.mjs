@@ -387,9 +387,9 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(vlessInstall, /limitFallbackUpload/);
   assert.match(vlessInstall, /xray" tls ping "\$\{TARGET\}"/);
   assert.match(vlessInstall, /certificate_length.*-le 3500/s);
-  assert.match(vlessInstall, /TARGET.*www\.microsoft\.com:443.*TARGET="www\.apple\.com:443"/);
+  assert.match(vlessInstall, /TARGET.*www\.microsoft\.com:443.*www\.apple\.com:443.*TARGET="www\.intel\.com:443"/);
   assert.match(vlessInstall, /sed -i "s\|\^TARGET=\.\*\|TARGET=\$\{TARGET\}\|"/);
-  assert.match(manager, /VLESS_REALITY_TARGET="www\.apple\.com:443"/);
+  assert.match(manager, /VLESS_REALITY_TARGET="www\.intel\.com:443"/);
   assert.doesNotMatch(vlessInstall + vlessRemove, /wg-quick|awg-quick|shadowsocks/);
   assert.match(api, /Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\]/);
   assert.match(api, /vless:\/\//);

@@ -2022,7 +2022,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 tmp.replace(VLESS_CONFIG)
                 replaced = True
                 restart_vless_service()
-                target_host = reality.get("TARGET", "www.apple.com:443").rsplit(":", 1)[0]
+                target_host = reality.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0]
                 port = int(reality.get("PORT", "443"))
                 query = urllib.parse.urlencode({
                     "encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome",
