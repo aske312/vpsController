@@ -1972,7 +1972,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             os.chmod(tmp, 0o640)
             os.chown(tmp, 0, 65534)
         except OSError as exc:
-            tmp.unlink(missing_ok=True)
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
             raise HTTPException(status_code=500, detail="Unable to save VLESS client configuration") from exc
         xray = "/usr/local/lib/vps-control-vless-reality-xhttp/xray"
         result = subprocess.run([xray, "run", "-test", "-config", str(tmp)], capture_output=True, text=True, timeout=15, check=False)

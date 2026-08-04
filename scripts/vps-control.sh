@@ -1117,6 +1117,7 @@ install_prebuilt_release() {
   if ! install_api \
     || ! install_web \
     || ! ensure_api_write_access \
+    || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
     || ! build_commit="$(awk -F= '$1 == "commit" {print $2}' "${INSTALL_DIR}/.prebuilt-release")" \
     || ! printf '%s\n' "${build_commit:-manual}" >"${INSTALL_DIR}/.build-commit" \
     || ! write_integrity_manifest \
