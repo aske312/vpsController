@@ -1998,7 +1998,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         with client_mutation_lock:
             if not VLESS_CONFIG.exists() or not VLESS_ENV.exists():
                 raise HTTPException(status_code=409, detail="vless-reality-xhttp protocol is not installed")
-            tmp = VLESS_CONFIG_DIR / f".config-{client_id}.tmp"
+            # Xray detects the input format from the filename extension.
+            tmp = VLESS_CONFIG_DIR / f".config-{client_id}.tmp.json"
             replaced = False
             stage = "чтение конфигурации"
             try:

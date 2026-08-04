@@ -393,6 +393,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(api, /vps-control-shadowsocks@/);
   assert.match(api, /client_mutation_lock/);
   assert.match(api, /restore_vless_config/);
+  assert.match(api, /\.config-\{client_id\}\.tmp\.json/);
   assert.match(api, /Не удалось создать VLESS-подключение: \{stage\}/);
   assert.match(api, /"transport": "TCP \+ UDP"/);
   assert.match(manager, /SHADOWSOCKS_PORT_START/);
