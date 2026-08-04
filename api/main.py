@@ -1892,6 +1892,18 @@ def key(command: str) -> str:
     return run("bash", "-lc", command, check=True)
 
 
+def shadowsocks_firewall(action: Literal["add", "delete"], port: int) -> None:
+    result = subprocess.run(
+        [
+            "systemd-run", "--wait", "--collect", "--pipe", "--quiet", "--property=Type=oneshot",
+            CONTROL_COMMAND, "client-firewall", action, str(port),
+        ],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "Unable to update Shadowsocks firewall rule")
+
+
 def next_address(protocol: Literal["wg", "awg"]) -> ipaddress.IPv4Address:
     network = WG_SUBNET if protocol == "wg" else AWG_SUBNET
     used = {
@@ -1940,14 +1952,18 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         except OSError as exc:
             raise HTTPException(status_code=500, detail="Unable to save Shadowsocks client configuration") from exc
         try:
+            shadowsocks_firewall("add", port)
             run("systemctl", "enable", "--now", f"vps-control-shadowsocks@{client_id}.service", timeout=20, check=True)
-            if run("systemctl", "is-active", "ufw") == "active":
-                run("ufw", "allow", f"{port}/tcp", "comment", "312.net Shadowsocks client", check=True)
-                run("ufw", "allow", f"{port}/udp", "comment", "312.net Shadowsocks client", check=True)
+            if run("systemctl", "is-active", f"vps-control-shadowsocks@{client_id}.service") != "active":
+                raise RuntimeError("Shadowsocks client service did not become active")
         except Exception:
-            config_path.unlink(missing_ok=True)
             run("systemctl", "disable", "--now", f"vps-control-shadowsocks@{client_id}.service")
-            raise
+            try:
+                shadowsocks_firewall("delete", port)
+            except Exception:
+                pass
+            config_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail="Unable to start Shadowsocks client service")
         userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
         client_config = f"ss://{userinfo}@{PUBLIC_IP}:{port}#{urllib.parse.quote(payload.name)}"
         items = read_clients()
@@ -2049,9 +2065,11 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
         port = int(item.get("port", 0))
         run("systemctl", "disable", "--now", f"vps-control-shadowsocks@{client_id}.service", timeout=20)
         (SHADOWSOCKS_CONFIG_DIR / f"{client_id}.json").unlink(missing_ok=True)
-        if port and run("systemctl", "is-active", "ufw") == "active":
-            run("ufw", "--force", "delete", "allow", f"{port}/tcp")
-            run("ufw", "--force", "delete", "allow", f"{port}/udp")
+        if port:
+            try:
+                shadowsocks_firewall("delete", port)
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail="Unable to remove Shadowsocks firewall rule") from exc
         write_clients([entry for entry in items if entry["id"] != client_id])
         return {"deleted": client_id}
     if protocol == "vless-reality-xhttp":

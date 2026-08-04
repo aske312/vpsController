@@ -614,6 +614,23 @@ remove_protocol_image() {
   ok "Протокол ${image_id} удалён; образ сохранён."
 }
 
+client_firewall() {
+  local action="${2:-}" port="${3:-}" port_end=$((SHADOWSOCKS_PORT_START + 9999))
+  (( port_end <= 65535 )) || port_end=65535
+  [[ "${action}" == "add" || "${action}" == "delete" ]] || die "client-firewall: ожидается add или delete."
+  [[ "${port}" =~ ^[0-9]+$ ]] || die "client-firewall: порт должен быть числом."
+  (( port >= SHADOWSOCKS_PORT_START && port <= port_end )) || die "client-firewall: порт вне диапазона Shadowsocks."
+  command -v ufw >/dev/null 2>&1 || return 0
+  ufw status | grep -q '^Status: active' || return 0
+  if [[ "${action}" == "add" ]]; then
+    ufw allow "${port}/tcp" comment '312.net Shadowsocks client'
+    ufw allow "${port}/udp" comment '312.net Shadowsocks client'
+  else
+    ufw --force delete allow "${port}/tcp" >/dev/null 2>&1 || true
+    ufw --force delete allow "${port}/udp" >/dev/null 2>&1 || true
+  fi
+}
+
 configure_firewall() {
   info "Настройка firewall"
   [[ "${ENABLE_UFW}" == "yes" ]] || { warn "настройка UFW отключена в install.conf."; return; }
@@ -1737,6 +1754,8 @@ usage() {
                    установить протокол из образа
   protocol-remove <id>
                    удалить протокол, сохранив образ
+  client-firewall <add|delete> <port>
+                   изменить правило отдельного Shadowsocks-подключения
   credentials      показать логин и пароль администратора
   help             показать эту справку
 EOF
@@ -1817,6 +1836,7 @@ main() {
     poweroff) poweroff_server ;;
     protocol-install) install_protocol_image "$@" ;;
     protocol-remove) remove_protocol_image "$@" ;;
+    client-firewall) client_firewall "$@" ;;
     credentials) show_credentials ;;
     help|-h|--help) usage ;;
     *) usage >&2; exit 2 ;;

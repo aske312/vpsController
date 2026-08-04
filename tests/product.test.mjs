@@ -370,6 +370,10 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.equal(JSON.parse(vlessManifest).category, "secure-tunnels");
   assert.match(ssInstall, /vps-control-shadowsocks@\.service/);
   assert.match(ssInstall, /shadowsocks-libev/);
+  assert.match(api, /CONTROL_COMMAND, "client-firewall", action, str\(port\)/);
+  assert.match(manager, /client_firewall\(\)/);
+  assert.match(manager, /ufw allow "\$\{port\}\/tcp"/);
+  assert.match(manager, /ufw allow "\$\{port\}\/udp"/);
   assert.doesNotMatch(ssInstall + ssRemove, /wg-quick|awg-quick/);
   assert.match(vlessInstall, /VLESS \+ REALITY \+ XHTTP/);
   assert.match(vlessInstall, /"network": "xhttp"/);
