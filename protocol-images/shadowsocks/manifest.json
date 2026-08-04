@@ -1,6 +1,6 @@
 {
   "id": "shadowsocks",
-  "name": "Shadowsocks",
+  "name": "ShadowSocks",
   "version": "1.0.0",
   "description": "Независимый Shadowsocks-сервер с отдельным ключом и портом для каждого подключения",
   "category": "secure-tunnels",

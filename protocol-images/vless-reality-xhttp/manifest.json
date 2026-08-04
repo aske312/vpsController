@@ -1,8 +1,8 @@
 {
   "id": "vless-reality-xhttp",
-  "name": "VLESS + REALITY + XHTTP",
+  "name": "VRH",
   "version": "1.0.0",
-  "description": "Защищённый XHTTP-транспорт через REALITY без собственного домена и TLS-сертификата",
+  "description": "Защищённый XHTTP-транспорт через REALITY по IP",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",
   "installer": "install.sh",
