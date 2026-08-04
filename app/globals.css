@@ -635,6 +635,9 @@ input, select { height: 46px; font-size: 11px; }
 .protocolActions .removeProtocolButton { border-color: #493033; color: #ef8c82; }
 .protocolActions button:disabled { opacity: .45; cursor: wait; }
 .protocolMonitorGrid { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(230px, .75fr)); gap: 12px; }
+.streamProtocolDetails { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.streamProtocolDetails .protocolTelemetry { min-width: 0; }
+.streamProtocolDetails dd { overflow-wrap: anywhere; }
 .protocolFlow, .protocolTelemetry { min-height: 190px; }
 .protocolFlow { display: flex; flex-direction: column; }
 .protocolFlow h3 { margin-top: 5px; font-size: 17px; }

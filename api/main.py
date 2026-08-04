@@ -1929,13 +1929,16 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             raise HTTPException(status_code=409, detail="No free Shadowsocks ports")
         password = secrets.token_urlsafe(32)
         method = "chacha20-ietf-poly1305"
-        SHADOWSOCKS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         config_path = SHADOWSOCKS_CONFIG_DIR / f"{client_id}.json"
-        config_path.write_text(json.dumps({
-            "server": "0.0.0.0", "server_port": port, "password": password, "method": method,
-            "timeout": 300, "mode": "tcp_and_udp", "fast_open": False,
-        }, indent=2), encoding="utf-8")
-        os.chmod(config_path, 0o600)
+        try:
+            SHADOWSOCKS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(json.dumps({
+                "server": "0.0.0.0", "server_port": port, "password": password, "method": method,
+                "timeout": 300, "mode": "tcp_and_udp", "fast_open": False,
+            }, indent=2), encoding="utf-8")
+            os.chmod(config_path, 0o600)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail="Unable to save Shadowsocks client configuration") from exc
         try:
             run("systemctl", "enable", "--now", f"vps-control-shadowsocks@{client_id}.service", timeout=20, check=True)
             if run("systemctl", "is-active", "ufw") == "active":
@@ -1964,9 +1967,13 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         client_uuid = str(uuid.uuid4())
         inbound_clients.append({"id": client_uuid, "email": f"{client_id}@312.net"})
         tmp = VLESS_CONFIG.with_suffix(".tmp")
-        tmp.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.chmod(tmp, 0o640)
-        os.chown(tmp, 0, 65534)
+        try:
+            tmp.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.chmod(tmp, 0o640)
+            os.chown(tmp, 0, 65534)
+        except OSError as exc:
+            tmp.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail="Unable to save VLESS client configuration") from exc
         xray = "/usr/local/lib/vps-control-vless-reality-xhttp/xray"
         result = subprocess.run([xray, "run", "-test", "-config", str(tmp)], capture_output=True, text=True, timeout=15, check=False)
         if result.returncode:
@@ -2075,6 +2082,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
     if protocol in ("shadowsocks", "vless-reality-xhttp"):
         unit = "vps-control-shadowsocks.target" if protocol == "shadowsocks" else "vps-control-vless-reality-xhttp.service"
         protocol_clients = [item for item in read_clients() if item.get("protocol") == protocol]
+        target = ""
         if protocol == "shadowsocks":
             active_clients = sum(
                 run("systemctl", "is-active", f'vps-control-shadowsocks@{item.get("id", "")}.service') == "active"
@@ -2086,6 +2094,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
             try:
                 reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
                 listen_port = int(reality.get("PORT", "443"))
+                target = reality.get("TARGET", "")
             except (OSError, ValueError):
                 listen_port = 443
         service_active = run("systemctl", "is-active", unit) == "active"
@@ -2098,6 +2107,10 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
             "last_handshake_age_s": None, "peer_rx_bytes": 0, "peer_tx_bytes": 0,
             "interface_rx_bytes": 0, "interface_tx_bytes": 0, "rx_errors": 0, "tx_errors": 0,
             "rx_dropped": 0, "tx_dropped": 0,
+            "unit": unit,
+            "transport": "TCP + UDP" if protocol == "shadowsocks" else "XHTTP over TCP",
+            "security": "ChaCha20-IETF-Poly1305" if protocol == "shadowsocks" else "REALITY",
+            "target": target,
         }
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE

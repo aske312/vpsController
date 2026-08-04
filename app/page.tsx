@@ -76,6 +76,7 @@ type ProtocolStatus = {
   endpoints: number; last_handshake_age_s?: number; peer_rx_bytes: number; peer_tx_bytes: number;
   interface_rx_bytes: number; interface_tx_bytes: number; rx_errors: number; tx_errors: number;
   rx_dropped: number; tx_dropped: number;
+  unit?: string; transport?: string; security?: string; target?: string;
   resources: {
     checked_at?: string;
     items: Array<{ name: string; available: boolean; status_code?: number; latency_ms: number }>;
@@ -1156,14 +1157,14 @@ export default function Home() {
           </button>)}
           {protocolImages.filter((image) => image.installed && image.id !== "wg" && image.id !== "awg").map((image) => <button key={image.id} onClick={() => setTab(image.id as Protocol)}>
             <span className={`protocol ${image.id}`}>{image.id === "shadowsocks" ? "SS" : "V"}</span>
-            <p><strong>{image.name}</strong><small>{image.description} · независимый модуль</small></p>
+            <p><strong>{image.name}</strong><small>{image.id === "shadowsocks" ? "Прокси-протокол" : "REALITY · XHTTP"}</small></p>
             <em className={image.active ? "onlinePill" : "offlinePill"}>{image.active ? "Активен" : "Остановлен"}</em>
             <b>›</b>
           </button>)}
           {protocolImages.filter((image) => !image.installed).map((image) =>
             <div className="protocolInstaller" key={image.id}>
               <span className={`protocol ${image.id}`}>{image.id === "wg" ? "WG" : image.id === "awg" ? "AW" : image.id === "shadowsocks" ? "SS" : "V"}</span>
-              <p><strong>{image.name}</strong><small>{image.description} · образ {image.version}</small></p>
+              <p><strong>{image.name}</strong><small>{image.id === "shadowsocks" ? "Прокси-протокол" : image.id === "vless-reality-xhttp" ? "REALITY · XHTTP" : `образ ${image.version}`}</small></p>
               <button onClick={() => void installProtocol(image)} disabled={busy || Boolean(installingProtocol)}>
                 {installingProtocol === image.id ? "Устанавливается…" : "Установить"}
               </button>
@@ -1485,6 +1486,23 @@ export default function Home() {
             </div>
           </div>
         </article>
+        <div className="protocolMonitorGrid streamProtocolDetails">
+          <article className="panel protocolTelemetry protocolQuality">
+            <p className="eyebrow">CONNECTIONS</p>
+            <div className="telemetryMain"><strong>{activeProtocol.online_peers}/{activeProtocol.peers}</strong><span>активно сейчас</span></div>
+            <dl><div><dt>Всего подключений</dt><dd>{activeProtocol.peers}</dd></div><div><dt>Активные службы</dt><dd>{activeProtocol.online_peers}</dd></div></dl>
+          </article>
+          <article className="panel protocolTelemetry">
+            <p className="eyebrow">TRANSPORT &amp; SECURITY</p>
+            <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "V"}</strong><span>{activeProtocol.security || "—"}</span></div>
+            <dl><div><dt>Транспорт</dt><dd>{activeProtocol.transport || "—"}</dd></div><div><dt>Целевой узел</dt><dd>{activeProtocol.target || "Прямой выход"}</dd></div></dl>
+          </article>
+          <article className="panel protocolTelemetry">
+            <p className="eyebrow">SYSTEM SERVICE</p>
+            <div className="telemetryMain"><strong>{activeProtocol.service_active ? "ON" : "OFF"}</strong><span>systemd</span></div>
+            <dl><div><dt>Служба</dt><dd>{activeProtocol.unit || "—"}</dd></div><div><dt>Запущена с</dt><dd>{activeProtocol.active_since ? new Date(activeProtocol.active_since).toLocaleString("ru-RU") : "—"}</dd></div><div><dt>Версия образа</dt><dd>{activeProtocolImage?.version || "—"}</dd></div></dl>
+          </article>
+        </div>
       </section>}
 
       {(tab === "wg" || tab === "awg") && activeProtocol && <section className="protocolMonitor">
