@@ -386,6 +386,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(vlessInstall, /ss -H -ltn/);
   assert.match(vlessInstall, /limitFallbackUpload/);
   assert.match(vlessInstall, /StatsService/);
+  assert.match(vlessInstall, /\"listen\": \"127\.0\.0\.1:10085\"/);
   assert.match(vlessInstall, /statsUserUplink/);
   assert.match(api, /xray_user_stats/);
   assert.match(api, /service_bytes/);
