@@ -333,9 +333,22 @@ def service_bytes(unit: str) -> tuple[int, int]:
     return value("IPIngressBytes"), value("IPEgressBytes")
 
 
-def shadowsocks_connections(port: int) -> int:
+def shadowsocks_connection_details(port: int) -> tuple[int, list[str]]:
     output = run("ss", "-Htn", "state", "established", f"( sport = :{port} )")
-    return sum(1 for line in output.splitlines() if line.strip())
+    sources: set[str] = set()
+    count = 0
+    for line in output.splitlines():
+        columns = line.split()
+        if len(columns) < 4:
+            continue
+        count += 1
+        source = columns[3].rsplit(":", 1)[0]
+        sources.add(source.strip("[]"))
+    return count, sorted(sources)
+
+
+def shadowsocks_connections(port: int) -> int:
+    return shadowsocks_connection_details(port)[0]
 
 
 def stream_proxy_dump() -> list[dict]:
@@ -357,7 +370,7 @@ def stream_proxy_dump() -> list[dict]:
             continue
         if protocol == "shadowsocks":
             rx_bytes, tx_bytes = service_bytes(unit)
-            active_connections = shadowsocks_connections(int(item.get("port", 0)))
+            active_connections, active_sources = shadowsocks_connection_details(int(item.get("port", 0)))
             handshake_age, rx_bps, tx_bps = stream_sample(f'ss:{item.get("id", "")}', rx_bytes, tx_bytes)
             if active_connections:
                 handshake_age = 0
@@ -370,6 +383,7 @@ def stream_proxy_dump() -> list[dict]:
             "public_key": item.get("public_key", item.get("id", "")), "endpoint": address, "address": address,
             "handshake_age_s": handshake_age, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "enabled": True,
             "rx_bps": rx_bps, "tx_bps": tx_bps, "active_connections": active_connections,
+            "active_sources": active_sources if protocol == "shadowsocks" else [],
             "quality": "stable" if online else "offline", "latency_ms": None, "packet_loss_percent": None,
             "quality_reason": (f"Активных соединений: {active_connections}" if online else "Нет недавней активности") if active else "Служба подключения остановлена",
         })
