@@ -2094,7 +2094,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             config_path.write_text(json.dumps({
                 "server": "0.0.0.0", "server_port": port, "password": password, "method": method,
                 "timeout": 30, "mode": "tcp_and_udp", "fast_open": False,
-                "no_delay": True, "mtu": 1280,
+                "no_delay": True, "mtu": 1200,
             }, indent=2), encoding="utf-8")
             os.chmod(config_path, 0o600)
         except OSError as exc:
