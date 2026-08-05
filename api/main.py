@@ -384,6 +384,8 @@ def stream_proxy_dump() -> list[dict]:
             rx_bytes, tx_bytes = service_bytes(unit)
             active_connections, active_sources = shadowsocks_connection_details(int(item.get("port", 0)))
             handshake_age, rx_bps, tx_bps = stream_sample(f'ss:{item.get("id", "")}', rx_bytes, tx_bytes)
+            if not active_connections:
+                handshake_age = None
         # For Shadowsocks, raw byte deltas also include unauthenticated scans.
         # Only an established TCP socket proves a live client. Xray activity is
         # authenticated and can safely use the recent-activity window.
@@ -2091,7 +2093,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             SHADOWSOCKS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             config_path.write_text(json.dumps({
                 "server": "0.0.0.0", "server_port": port, "password": password, "method": method,
-                "timeout": 300, "mode": "tcp_and_udp", "fast_open": False,
+                "timeout": 120, "mode": "tcp_and_udp", "fast_open": False,
                 "no_delay": True, "mtu": 1280,
             }, indent=2), encoding="utf-8")
             os.chmod(config_path, 0o600)
@@ -2269,7 +2271,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 rx, tx = service_bytes(f'vps-control-shadowsocks@{item.get("id", "")}.service')
                 age, _, _ = stream_sample(f'ss:{item.get("id", "")}', rx, tx)
                 connections = shadowsocks_connections(int(item.get("port", 0)))
-                stats.append((rx, tx, age, connections))
+                stats.append((rx, tx, age if connections else None, connections))
             active_clients = sum(
                 1 for _, _, age, connections in stats
                 if connections and age is not None and age < STREAM_ACTIVITY_WINDOW_S
