@@ -237,7 +237,8 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .clientPagination button:hover:not(:disabled) { border-color: #31534a; background: var(--green-dim); color: var(--green); }
 .clientPagination button:disabled { opacity: .35; cursor: not-allowed; }
 .clientPagination strong { min-width: 54px; color: var(--text); font: 9px var(--font-mono); text-align: center; }
-.clientRow { display: grid; grid-template-columns: 44px minmax(150px, 1fr) 150px 110px 145px auto; gap: 13px; align-items: center; padding: 15px; border: 1px solid var(--line); border-radius: 8px; background: #121a1c; }
+.clientRow { display: grid; grid-template-columns: minmax(190px, 1.25fr) minmax(145px, 1fr) minmax(190px, 1.3fr) 145px 145px auto; gap: 13px; align-items: center; padding: 15px; border: 1px solid var(--line); border-radius: 8px; background: #121a1c; }
+.clientIdentity { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .clientRow > p > strong { display: flex; align-items: center; gap: 7px; }
 .clientQuality { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: #63706e; box-shadow: none; }
 .clientQuality.stable { background: var(--green); box-shadow: 0 0 9px color-mix(in srgb, var(--green) 65%, transparent); }
@@ -247,6 +248,10 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .clientRow.quality-warning { border-left: 3px solid var(--amber); }
 .clientRow.quality-error { border-left: 3px solid var(--red); background: color-mix(in srgb, var(--red) 5%, #121a1c); }
 .clientRow.quality-offline { border-left: 3px solid #63706e; opacity: .78; }
+.clientState, .clientState span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.clientState small, .clientState span, .handshake span { color: #60716e; font: 7px var(--font-mono); letter-spacing: .5px; }
+.clientState strong { color: #a9b7b4; font: 600 9px var(--font-mono); }
+.clientState span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .traffic { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; text-align: left; }
 .traffic small, .handshake small, .clientLink small { color: #60716e; font: 7px var(--font-mono); letter-spacing: .7px; }
 .traffic b { display: block; margin-top: 5px; color: #a9b7b4; font: 500 9px var(--font-mono); }
@@ -457,6 +462,8 @@ input, select { height: 46px; font-size: 11px; }
   .applicationHero, .applicationLogs { grid-column: 1; }
   .updatedAt { display: none; }
   .clientRow { grid-template-columns: 38px 1fr auto; }
+  .clientIdentity { grid-column: 1 / -1; }
+  .clientState { grid-column: 2 / -1; }
   .traffic, .handshake { display: none; }
   .clientLink { align-items: flex-end; }
   .clientRow .dangerButton { grid-column: 2 / -1; }
