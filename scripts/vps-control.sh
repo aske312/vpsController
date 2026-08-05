@@ -208,10 +208,11 @@ die() { printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
 
 cleanup_update_dir() {
   [[ -n "${UPDATE_TEMP_DIR}" ]] || return 0
-  local target base
+  local target base leaf
   target="$(realpath -m -- "${UPDATE_TEMP_DIR}")"
   base="$(realpath -m -- "${DATA_DIR}/tmp")"
-  [[ "${target}" == "${base}"/update.* || "${target}" == "${base}"/test-update.* ]] \
+  leaf="${target##*/}"
+  [[ "${target}" == "${base}"/* && "${leaf}" =~ ^(update|test-update)\.[A-Za-z0-9]+$ ]] \
     || die "отказ от очистки неожиданного пути ${target}."
   rm -rf -- "${target}"
   UPDATE_TEMP_DIR=""

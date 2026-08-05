@@ -409,7 +409,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(api, /"transport": "TCP \+ UDP"/);
   assert.match(manager, /SHADOWSOCKS_PORT_START/);
   assert.match(manager, /VLESS_REALITY_TARGET/);
-  assert.match(manager, /"\$\{base\}"\/test-update\.\*/);
+  assert.match(manager, /\(update\|test-update\)\\\./);
   assert.match(api, /def recent_xray_activity/);
   assert.match(api, /def shadowsocks_connections/);
   assert.match(api, /raw byte deltas also include unauthenticated scans/);
