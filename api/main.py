@@ -2118,7 +2118,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 query = urllib.parse.urlencode({
                     "encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome",
                     "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", ""),
-                    "type": "xhttp", "path": reality.get("XHTTP_PATH", reality.get("PATH", "/")), "mode": "auto",
+                    "type": "xhttp", "host": target_host,
+                    "path": reality.get("XHTTP_PATH", reality.get("PATH", "/")), "mode": "auto",
                 })
                 client_config = f"vless://{client_uuid}@{PUBLIC_IP}:{port}?{query}#{urllib.parse.quote(payload.name)}"
                 stage = "сохранение подключения"

@@ -412,6 +412,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(manager, /\(update\|test-update\)\\\./);
   assert.match(api, /def recent_xray_activity/);
   assert.match(api, /def shadowsocks_connections/);
+  assert.match(api, /"type": "xhttp", "host": target_host/);
   assert.match(api, /raw byte deltas also include unauthenticated scans/);
   assert.match(api, /"rx_bps": rx_bps, "tx_bps": tx_bps/);
   assert.match(api, /"no_delay": True, "mtu": 1280/);
