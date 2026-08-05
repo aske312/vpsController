@@ -361,7 +361,10 @@ def stream_proxy_dump() -> list[dict]:
             handshake_age, rx_bps, tx_bps = stream_sample(f'ss:{item.get("id", "")}', rx_bytes, tx_bytes)
             if active_connections:
                 handshake_age = 0
-        online = active and (active_connections > 0 or (handshake_age is not None and handshake_age < 180))
+        # For Shadowsocks, raw byte deltas also include unauthenticated scans.
+        # Only an established TCP socket proves a live client. Xray activity is
+        # authenticated and can safely use the recent-activity window.
+        online = active and (active_connections > 0 if protocol == "shadowsocks" else handshake_age is not None and handshake_age < 180)
         peers.append({
             "id": item.get("id", ""), "name": item.get("name", "Подключение"), "protocol": protocol,
             "public_key": item.get("public_key", item.get("id", "")), "endpoint": address, "address": address,
@@ -2234,7 +2237,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 age, _, _ = stream_sample(f'ss:{item.get("id", "")}', rx, tx)
                 connections = shadowsocks_connections(int(item.get("port", 0)))
                 stats.append((rx, tx, 0 if connections else age, connections))
-            active_clients = sum(1 for _, _, age, connections in stats if connections or (age is not None and age < 180))
+            active_clients = sum(1 for _, _, _, connections in stats if connections)
             listen_port = SHADOWSOCKS_PORT_START
         else:
             activity = recent_xray_activity()
