@@ -19,6 +19,24 @@ apt-get -o DPkg::Lock::Timeout=300 install -y shadowsocks-libev
 command -v ss-server >/dev/null 2>&1 || { echo "ss-server не установлен" >&2; exit 1; }
 
 install -d -m 0700 /etc/vps-control/shadowsocks/clients
+# Keep UDP datagrams below the conservative tunnel MTU. This avoids EMSGSIZE
+# drops on mobile and tunneled client paths while preserving TCP + UDP mode.
+python3 - <<'PY'
+import glob, json, os
+for path in glob.glob("/etc/vps-control/shadowsocks/clients/*.json"):
+    try:
+        with open(path, encoding="utf-8") as source:
+            config = json.load(source)
+        config["mtu"] = 1280
+        config["no_delay"] = True
+        temporary = path + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as target:
+            json.dump(config, target, indent=2)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except (OSError, ValueError):
+        continue
+PY
 cat >/etc/systemd/system/vps-control-shadowsocks.target <<'EOF'
 [Unit]
 Description=312.net managed Shadowsocks instances
@@ -39,6 +57,7 @@ After=network-online.target
 Type=simple
 ExecStart=/usr/bin/ss-server -c /etc/vps-control/shadowsocks/clients/%i.json
 IPAccounting=true
+LimitNOFILE=65536
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true

@@ -14,6 +14,7 @@ type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" 
 type Client = {
   id: string; name: string; protocol: Protocol; public_key: string; endpoint?: string;
   address: string; handshake_age_s?: number; rx_bytes: number; tx_bytes: number;
+  rx_bps?: number; tx_bps?: number; active_connections?: number;
   quality?: "stable" | "warning" | "error" | "offline"; latency_ms?: number; jitter_ms?: number; packet_loss_percent?: number; quality_reason?: string;
 };
 type Overview = {
@@ -1634,7 +1635,7 @@ export default function Home() {
         <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все подключения" : labels[tab]}</h2></div><div className="clientPanelActions"><span>{protocolClients.length} подключений</span><a className="guideAction" href="/connection-guide-wg-awg.pdf" download aria-label="Скачать руководство по подключению" data-tooltip="Пошаговая инструкция для владельца устройства: установка приложения и импорт конфигурации"><span aria-hidden="true">↓</span><div><strong>Скачать гайд</strong><small>PDF · ДЛЯ ПОЛЬЗОВАТЕЛЯ</small></div></a><button className="primaryButton" onClick={openClientDialog}>Новое подключение <span>＋</span></button></div></div>
           <div className="clientTable">{protocolClients.length ? visibleClients.map((client) =>
             <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><span className={`protocol ${client.protocol}`}>{client.protocol === "wg" ? "WG" : client.protocol === "awg" ? "AW" : client.protocol === "shadowsocks" ? "SS" : "VHR"}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address} · {client.quality_reason || "состояние уточняется"}</small></p>
-              <span className="traffic"><small>ПОЛУЧЕНО <b>↓ {bytes(client.rx_bytes)}</b></small><small>ОТПРАВЛЕНО <b>↑ {bytes(client.tx_bytes)}</b></small></span><span className="handshake"><small>ПОСЛЕДНЯЯ СВЯЗЬ</small><strong>{duration(client.handshake_age_s)}</strong></span>
+              <span className="traffic"><small>ПОЛУЧЕНО <b>↓ {bytes(client.rx_bytes)} · {bytes(client.rx_bps)}/с</b></small><small>ОТПРАВЛЕНО <b>↑ {bytes(client.tx_bytes)} · {bytes(client.tx_bps)}/с</b></small></span><span className="handshake"><small>{client.protocol === "wg" || client.protocol === "awg" ? "ПОСЛЕДНИЙ HANDSHAKE" : "ПОСЛЕДНЯЯ АКТИВНОСТЬ"}</small><strong>{duration(client.handshake_age_s)}{client.active_connections ? ` · ${client.active_connections} сейчас` : ""}</strong></span>
               <span className="clientLink"><small>LINK QUALITY</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} ms` : "—"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · loss ${client.packet_loss_percent}%` : ""}</strong></span>
               <button className="dangerButton" onClick={() => void removeClient(client.id)}>Отозвать</button></div>
           ) : <div className="emptyState"><span>◎</span><p>Подключений пока нет</p></div>}</div>

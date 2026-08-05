@@ -409,6 +409,12 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(api, /"transport": "TCP \+ UDP"/);
   assert.match(manager, /SHADOWSOCKS_PORT_START/);
   assert.match(manager, /VLESS_REALITY_TARGET/);
+  assert.match(api, /def recent_xray_activity/);
+  assert.match(api, /def shadowsocks_connections/);
+  assert.match(api, /"rx_bps": rx_bps, "tx_bps": tx_bps/);
+  assert.match(api, /"no_delay": True, "mtu": 1280/);
+  assert.match(ssInstall, /config\["mtu"\] = 1280/);
+  assert.match(page, /ПОСЛЕДНЯЯ АКТИВНОСТЬ/);
   assert.doesNotMatch(manager, /PUBLIC_IP="\$\{PUBLIC_IP\}"/);
   assert.match(manager, /PUBLIC_IP="\$\(env_value PUBLIC_IP\)"/);
   assert.match(page, /image\.id === "shadowsocks" \? "SS" : "VHR"/);

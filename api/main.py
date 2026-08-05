@@ -265,7 +265,41 @@ def interface_dump(protocol: Literal["wg", "awg"], include_quality: bool = True)
     return peers
 
 
-def xray_user_stats(email: str) -> tuple[int, int, int | None]:
+def recent_xray_activity() -> dict[str, int]:
+    """Return seconds since the latest authenticated request for each Xray user."""
+    output = run(
+        "journalctl", "-u", "vps-control-vless-reality-xhttp.service", "--since", "24 hours ago",
+        "--no-pager", "-o", "short-unix", "-n", "2000", timeout=4,
+    )
+    now = time.time()
+    activity: dict[str, int] = {}
+    for line in output.splitlines():
+        match = re.search(r"^(\d+(?:\.\d+)?)\s+.*\bemail:\s*([^\s]+)", line)
+        if match:
+            activity[match.group(2)] = max(0, int(now - float(match.group(1))))
+    return activity
+
+
+def stream_sample(key: str, rx: int, tx: int, fallback_age: int | None = None) -> tuple[int | None, float, float]:
+    now = time.time()
+    previous = stream_stats_cache.get(key)
+    last_activity = now - fallback_age if fallback_age is not None else (previous or {}).get("last_activity", 0)
+    rx_bps = tx_bps = 0.0
+    if previous:
+        elapsed = max(now - previous["sampled_at"], 0.1)
+        rx_delta = max(0, rx - previous["rx"])
+        tx_delta = max(0, tx - previous["tx"])
+        rx_bps, tx_bps = rx_delta / elapsed, tx_delta / elapsed
+        if rx_delta or tx_delta:
+            last_activity = now
+    stream_stats_cache[key] = {
+        "rx": rx, "tx": tx, "sampled_at": now, "last_activity": last_activity,
+        "rx_bps": rx_bps, "tx_bps": tx_bps,
+    }
+    return (int(now - last_activity) if last_activity else None), round(rx_bps, 2), round(tx_bps, 2)
+
+
+def xray_user_stats(email: str, journal_age: int | None = None) -> tuple[int, int, int | None, float, float]:
     output = run(XRAY_BIN, "api", "statsquery", "-server=127.0.0.1:10085", "-pattern", f"user>>>{email}>>>traffic>>>", timeout=3)
     uplink = downlink = 0
     try:
@@ -286,14 +320,8 @@ def xray_user_stats(email: str) -> tuple[int, int, int | None]:
                     uplink = int(match.group(1))
                 else:
                     downlink = int(match.group(1))
-    now = time.time()
-    key = f"vhr:{email}"
-    previous = stream_stats_cache.get(key)
-    last_activity = previous.get("last_activity", 0) if previous else 0
-    if previous and (uplink > previous["rx"] or downlink > previous["tx"]):
-        last_activity = now
-    stream_stats_cache[key] = {"rx": uplink, "tx": downlink, "last_activity": last_activity}
-    return uplink, downlink, int(now - last_activity) if last_activity else None
+    age, rx_bps, tx_bps = stream_sample(f"vhr:{email}", uplink, downlink, journal_age)
+    return uplink, downlink, age, rx_bps, tx_bps
 
 
 def service_bytes(unit: str) -> tuple[int, int]:
@@ -305,8 +333,14 @@ def service_bytes(unit: str) -> tuple[int, int]:
     return value("IPIngressBytes"), value("IPEgressBytes")
 
 
+def shadowsocks_connections(port: int) -> int:
+    output = run("ss", "-Htn", "state", "established", f"( sport = :{port} )")
+    return sum(1 for line in output.splitlines() if line.strip())
+
+
 def stream_proxy_dump() -> list[dict]:
     peers = []
+    xray_activity = recent_xray_activity()
     for item in read_clients():
         protocol = item.get("protocol")
         if protocol == "shadowsocks":
@@ -316,19 +350,25 @@ def stream_proxy_dump() -> list[dict]:
         elif protocol == "vless-reality-xhttp":
             active = run("systemctl", "is-active", "vps-control-vless-reality-xhttp.service") == "active"
             address = f'{PUBLIC_IP}:{item.get("port", 443)}'
-            rx_bytes, tx_bytes, handshake_age = xray_user_stats(f'{item.get("id", "")}@312.net')
+            email = f'{item.get("id", "")}@312.net'
+            rx_bytes, tx_bytes, handshake_age, rx_bps, tx_bps = xray_user_stats(email, xray_activity.get(email))
+            active_connections = 1 if handshake_age is not None and handshake_age < 180 else 0
         else:
             continue
         if protocol == "shadowsocks":
             rx_bytes, tx_bytes = service_bytes(unit)
-            handshake_age = None
-        online = active and ((protocol == "shadowsocks" and (rx_bytes + tx_bytes) > 0) or (protocol == "vless-reality-xhttp" and handshake_age is not None and handshake_age < 180))
+            active_connections = shadowsocks_connections(int(item.get("port", 0)))
+            handshake_age, rx_bps, tx_bps = stream_sample(f'ss:{item.get("id", "")}', rx_bytes, tx_bytes)
+            if active_connections:
+                handshake_age = 0
+        online = active and (active_connections > 0 or (handshake_age is not None and handshake_age < 180))
         peers.append({
             "id": item.get("id", ""), "name": item.get("name", "Подключение"), "protocol": protocol,
             "public_key": item.get("public_key", item.get("id", "")), "endpoint": address, "address": address,
             "handshake_age_s": handshake_age, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "enabled": True,
+            "rx_bps": rx_bps, "tx_bps": tx_bps, "active_connections": active_connections,
             "quality": "stable" if online else "offline", "latency_ms": None, "packet_loss_percent": None,
-            "quality_reason": "Служба протокола активна" if active else "Служба подключения остановлена",
+            "quality_reason": (f"Активных соединений: {active_connections}" if online else "Нет недавней активности") if active else "Служба подключения остановлена",
         })
     return peers
 
@@ -2017,6 +2057,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             config_path.write_text(json.dumps({
                 "server": "0.0.0.0", "server_port": port, "password": password, "method": method,
                 "timeout": 300, "mode": "tcp_and_udp", "fast_open": False,
+                "no_delay": True, "mtu": 1280,
             }, indent=2), encoding="utf-8")
             os.chmod(config_path, 0o600)
         except OSError as exc:
@@ -2188,14 +2229,17 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
         target = ""
         stats = []
         if protocol == "shadowsocks":
-            active_clients = sum(
-                service_bytes(f'vps-control-shadowsocks@{item.get("id", "")}.service')[0] + service_bytes(f'vps-control-shadowsocks@{item.get("id", "")}.service')[1] > 0
-                for item in protocol_clients
-            )
+            for item in protocol_clients:
+                rx, tx = service_bytes(f'vps-control-shadowsocks@{item.get("id", "")}.service')
+                age, _, _ = stream_sample(f'ss:{item.get("id", "")}', rx, tx)
+                connections = shadowsocks_connections(int(item.get("port", 0)))
+                stats.append((rx, tx, 0 if connections else age, connections))
+            active_clients = sum(1 for _, _, age, connections in stats if connections or (age is not None and age < 180))
             listen_port = SHADOWSOCKS_PORT_START
         else:
-            stats = [xray_user_stats(f'{item.get("id", "")}@312.net') for item in protocol_clients]
-            active_clients = sum(1 for _, _, age in stats if age is not None and age < 180)
+            activity = recent_xray_activity()
+            stats = [xray_user_stats(f'{item.get("id", "")}@312.net', activity.get(f'{item.get("id", "")}@312.net')) for item in protocol_clients]
+            active_clients = sum(1 for _, _, age, _, _ in stats if age is not None and age < 180)
             try:
                 reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
                 listen_port = int(reality.get("PORT", "443"))
@@ -2209,10 +2253,10 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
             "active_since": run("systemctl", "show", unit, "--property=ActiveEnterTimestamp", "--value"),
             "address": PUBLIC_IP, "listen_port": listen_port, "mtu": 0,
             "peers": len(protocol_clients), "online_peers": active_clients, "endpoints": active_clients,
-            "last_handshake_age_s": min((age for _, _, age in stats if age is not None), default=None),
-            "peer_rx_bytes": sum(rx for rx, _, _ in stats) if protocol == "vless-reality-xhttp" else sum(service_bytes(f'vps-control-shadowsocks@{item.get("id", "")}.service')[0] for item in protocol_clients),
-            "peer_tx_bytes": sum(tx for _, tx, _ in stats) if protocol == "vless-reality-xhttp" else sum(service_bytes(f'vps-control-shadowsocks@{item.get("id", "")}.service')[1] for item in protocol_clients),
-            "interface_rx_bytes": 0, "interface_tx_bytes": 0, "rx_errors": 0, "tx_errors": 0,
+            "last_handshake_age_s": min((row[2] for row in stats if row[2] is not None), default=None),
+            "peer_rx_bytes": sum(row[0] for row in stats),
+            "peer_tx_bytes": sum(row[1] for row in stats),
+            "interface_rx_bytes": sum(row[0] for row in stats), "interface_tx_bytes": sum(row[1] for row in stats), "rx_errors": 0, "tx_errors": 0,
             "rx_dropped": 0, "tx_dropped": 0,
             "unit": unit,
             "transport": "TCP + UDP" if protocol == "shadowsocks" else "XHTTP over TCP",
