@@ -27,7 +27,7 @@ for path in glob.glob("/etc/vps-control/shadowsocks/clients/*.json"):
     try:
         with open(path, encoding="utf-8") as source:
             config = json.load(source)
-        config["timeout"] = 30
+        config["timeout"] = 300
         config["mode"] = "tcp_and_udp"
         config["mtu"] = 1200
         config["no_delay"] = True
