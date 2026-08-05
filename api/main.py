@@ -283,7 +283,15 @@ def recent_xray_activity() -> dict[str, int]:
 def stream_sample(key: str, rx: int, tx: int, fallback_age: int | None = None) -> tuple[int | None, float, float]:
     now = time.time()
     previous = stream_stats_cache.get(key)
-    last_activity = now - fallback_age if fallback_age is not None else (previous or {}).get("last_activity", 0)
+    # Journal activity is only a bootstrap value.  Do not re-apply it on every
+    # poll: an old accepted request (or a long-lived idle socket) must not keep
+    # the connection permanently online.  Once sampled, only byte deltas move
+    # last_activity forward.
+    last_activity = (
+        (previous or {}).get("last_activity", 0)
+        if previous
+        else (now - fallback_age if fallback_age is not None else 0)
+    )
     rx_bps = tx_bps = 0.0
     if previous:
         elapsed = max(now - previous["sampled_at"], 0.1)
@@ -372,12 +380,16 @@ def stream_proxy_dump() -> list[dict]:
             rx_bytes, tx_bytes = service_bytes(unit)
             active_connections, active_sources = shadowsocks_connection_details(int(item.get("port", 0)))
             handshake_age, rx_bps, tx_bps = stream_sample(f'ss:{item.get("id", "")}', rx_bytes, tx_bytes)
-            if active_connections:
-                handshake_age = 0
         # For Shadowsocks, raw byte deltas also include unauthenticated scans.
         # Only an established TCP socket proves a live client. Xray activity is
         # authenticated and can safely use the recent-activity window.
-        online = active and (active_connections > 0 if protocol == "shadowsocks" else handshake_age is not None and handshake_age < 180)
+        online = active and (
+            active_connections > 0
+            and handshake_age is not None
+            and handshake_age < 180
+            if protocol == "shadowsocks"
+            else handshake_age is not None and handshake_age < 180
+        )
         peers.append({
             "id": item.get("id", ""), "name": item.get("name", "Подключение"), "protocol": protocol,
             "public_key": item.get("public_key", item.get("id", "")), "endpoint": address, "address": address,
