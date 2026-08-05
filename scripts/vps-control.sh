@@ -211,7 +211,8 @@ cleanup_update_dir() {
   local target base
   target="$(realpath -m -- "${UPDATE_TEMP_DIR}")"
   base="$(realpath -m -- "${DATA_DIR}/tmp")"
-  [[ "${target}" == "${base}"/update.* ]] || die "отказ от очистки неожиданного пути ${target}."
+  [[ "${target}" == "${base}"/update.* || "${target}" == "${base}"/test-update.* ]] \
+    || die "отказ от очистки неожиданного пути ${target}."
   rm -rf -- "${target}"
   UPDATE_TEMP_DIR=""
 }
