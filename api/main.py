@@ -51,6 +51,10 @@ WG_CONFIG = Path(os.getenv("WG_CONFIG", f"/etc/wireguard/{WG_INTERFACE}.conf"))
 AWG_CONFIG = Path(os.getenv("AWG_CONFIG", f"/etc/amnezia/amneziawg/{AWG_INTERFACE}.conf"))
 AWG_MTU = int(os.getenv("AWG_MTU", "1280"))
 SHADOWSOCKS_PORT_START = int(os.getenv("SHADOWSOCKS_PORT_START", "30000"))
+# A stream proxy has no WireGuard-style handshake.  Consider it online only
+# while its byte counters or authenticated requests were observed recently;
+# this prevents iOS keepalive sockets from being reported as usable traffic.
+STREAM_ACTIVITY_WINDOW_S = 30
 SHADOWSOCKS_CONFIG_DIR = Path("/etc/vps-control/shadowsocks/clients")
 VLESS_CONFIG_DIR = Path("/etc/vps-control/vless-reality-xhttp")
 VLESS_CONFIG = VLESS_CONFIG_DIR / "config.json"
@@ -373,7 +377,7 @@ def stream_proxy_dump() -> list[dict]:
             address = f'{PUBLIC_IP}:{item.get("port", 443)}'
             email = f'{item.get("id", "")}@312.net'
             rx_bytes, tx_bytes, handshake_age, rx_bps, tx_bps = xray_user_stats(email, xray_activity.get(email))
-            active_connections = 1 if handshake_age is not None and handshake_age < 180 else 0
+            active_connections = 1 if handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S else 0
         else:
             continue
         if protocol == "shadowsocks":
@@ -386,9 +390,9 @@ def stream_proxy_dump() -> list[dict]:
         online = active and (
             active_connections > 0
             and handshake_age is not None
-            and handshake_age < 180
+            and handshake_age < STREAM_ACTIVITY_WINDOW_S
             if protocol == "shadowsocks"
-            else handshake_age is not None and handshake_age < 180
+            else handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S
         )
         peers.append({
             "id": item.get("id", ""), "name": item.get("name", "Подключение"), "protocol": protocol,
@@ -1775,7 +1779,9 @@ def live_status(_: None = Depends(require_token)) -> dict:
             "peers": len(protocol_clients),
             "online_peers": len([
                 client for client in protocol_clients
-                if client.get("handshake_age_s") is not None and client["handshake_age_s"] < 180
+                if client.get("handshake_age_s") is not None and client["handshake_age_s"] < (
+                    STREAM_ACTIVITY_WINDOW_S if protocol in ("shadowsocks", "vless-reality-xhttp") else 180
+                )
             ]),
             "interface_rx_bytes": received,
             "interface_tx_bytes": transmitted,
@@ -2263,13 +2269,16 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 rx, tx = service_bytes(f'vps-control-shadowsocks@{item.get("id", "")}.service')
                 age, _, _ = stream_sample(f'ss:{item.get("id", "")}', rx, tx)
                 connections = shadowsocks_connections(int(item.get("port", 0)))
-                stats.append((rx, tx, 0 if connections else age, connections))
-            active_clients = sum(1 for _, _, _, connections in stats if connections)
+                stats.append((rx, tx, age, connections))
+            active_clients = sum(
+                1 for _, _, age, connections in stats
+                if connections and age is not None and age < STREAM_ACTIVITY_WINDOW_S
+            )
             listen_port = SHADOWSOCKS_PORT_START
         else:
             activity = recent_xray_activity()
             stats = [xray_user_stats(f'{item.get("id", "")}@312.net', activity.get(f'{item.get("id", "")}@312.net')) for item in protocol_clients]
-            active_clients = sum(1 for _, _, age, _, _ in stats if age is not None and age < 180)
+            active_clients = sum(1 for _, _, age, _, _ in stats if age is not None and age < STREAM_ACTIVITY_WINDOW_S)
             try:
                 reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
                 listen_port = int(reality.get("PORT", "443"))
