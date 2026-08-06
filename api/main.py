@@ -49,6 +49,12 @@ WG_SUBNET = ipaddress.ip_network(os.getenv("WG_SUBNET", "10.72.0.0/24"))
 AWG_SUBNET = ipaddress.ip_network(os.getenv("AWG_SUBNET", "10.73.0.0/24"))
 WG_CONFIG = Path(os.getenv("WG_CONFIG", f"/etc/wireguard/{WG_INTERFACE}.conf"))
 AWG_CONFIG = Path(os.getenv("AWG_CONFIG", f"/etc/amnezia/amneziawg/{AWG_INTERFACE}.conf"))
+try:
+    WG_MTU = int(os.getenv("WG_MTU", "1280"))
+except ValueError:
+    WG_MTU = 1280
+if not 1280 <= WG_MTU <= 1420:
+    WG_MTU = 1280
 AWG_MTU = int(os.getenv("AWG_MTU", "1280"))
 try:
     SHADOWSOCKS_PORT_START = int(os.getenv("SHADOWSOCKS_PORT_START", "30000"))
@@ -2201,7 +2207,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     port = WG_PORT if payload.protocol == "wg" else AWG_PORT
     client_config = (
         f"[Interface]\nAddress = {address}/32\nDNS = 1.1.1.1, 1.0.0.1\n"
-        f"PrivateKey = {private_key}\nMTU = {AWG_MTU if payload.protocol == 'awg' else 1380}\n{extra}\n[Peer]\n"
+        f"PrivateKey = {private_key}\nMTU = {AWG_MTU if payload.protocol == 'awg' else WG_MTU}\n{extra}\n[Peer]\n"
         f"PublicKey = {server_public}\nPresharedKey = {psk}\nAllowedIPs = 0.0.0.0/0\n"
         f"Endpoint = {PUBLIC_IP}:{port}\nPersistentKeepalive = 25\n"
     )
