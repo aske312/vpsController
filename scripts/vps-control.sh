@@ -335,14 +335,15 @@ env_value() {
 
 set_env_value() {
   local key="$1" value="$2" encoded escaped
+  # The file is sourced by vpn-monitor and also consumed as a systemd
+  # EnvironmentFile. Always quote and escape shell metacharacters: passwords
+  # commonly contain '$', '&' or backticks and must never be expanded by bash.
   encoded="${value}"
-  if [[ "${encoded}" =~ [[:space:]] ]]; then
-    encoded="${encoded//\\/\\\\}"
-    encoded="${encoded//\"/\\\"}"
-    encoded="${encoded//\$/\\\$}"
-    encoded="${encoded//\`/\\\`}"
-    encoded="\"${encoded}\""
-  fi
+  encoded="${encoded//\\/\\\\}"
+  encoded="${encoded//\"/\\\"}"
+  encoded="${encoded//\$/\\\$}"
+  encoded="${encoded//\`/\\\`}"
+  encoded="\"${encoded}\""
   escaped="${encoded//\\/\\\\}"
   escaped="${escaped//&/\\&}"
   escaped="${escaped//|/\\|}"
