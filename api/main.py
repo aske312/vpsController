@@ -5,6 +5,7 @@ import base64
 import ipaddress
 import json
 import csv
+import logging
 import os
 import re
 import secrets
@@ -25,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="312.net Infrastructure API", version="0.1.0")
+logger = logging.getLogger("vps-control.api")
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -2175,12 +2177,23 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}-vless.txt", "config": client_config}
-            except (OSError, json.JSONDecodeError, KeyError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, RuntimeError, subprocess.SubprocessError, HTTPException) as exc:
                 if replaced:
                     try:
                         restore_vless_config(original, client_id)
                     except Exception:
                         pass
+                raise HTTPException(status_code=500, detail=f"Не удалось создать VLESS-подключение: {stage}") from exc
+            except Exception as exc:
+                # Do not turn an unexpected filesystem/systemd failure into a
+                # blank HTTP 500. Keep the stage visible in the UI and retain
+                # the traceback in the API journal for diagnosis.
+                logger.exception("VLESS client creation failed at stage %s", stage)
+                if replaced:
+                    try:
+                        restore_vless_config(original, client_id)
+                    except Exception:
+                        logger.exception("VLESS rollback failed for %s", client_id)
                 raise HTTPException(status_code=500, detail=f"Не удалось создать VLESS-подключение: {stage}") from exc
             finally:
                 try:
