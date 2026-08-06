@@ -904,7 +904,10 @@ def change_admin_password(payload: AdminPasswordChange, _: None = Depends(requir
     ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     try:
         lines = ENV_FILE.read_text(encoding="utf-8").splitlines() if ENV_FILE.exists() else []
-        encoded = json.dumps(password, ensure_ascii=False)
+        # EnvironmentFile is also sourced by the shell monitor. JSON quoting
+        # protects quotes, but '$' and backticks still expand inside double
+        # quotes, so escape them explicitly before persisting the value.
+        encoded = json.dumps(password, ensure_ascii=False).replace("$", "\\$").replace("`", "\\`")
         replaced = False
         for index, line in enumerate(lines):
             if line.startswith("ADMIN_PASSWORD="):

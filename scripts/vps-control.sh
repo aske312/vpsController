@@ -790,7 +790,29 @@ ensure_environment() {
   else
     ok "существующий ${ENV_FILE} сохранён."
     [[ -n "$(env_value ADMIN_USER)" ]] || set_env_value "ADMIN_USER" "${ADMIN_USER}"
-    [[ -n "$(env_value ADMIN_PASSWORD)" ]] || set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
+    if [[ -n "$(env_value ADMIN_PASSWORD)" ]]; then
+      # Re-serialize passwords written by older builds without sourcing an
+      # unsafe '$' or backtick from the existing env file.
+      local existing_password
+      existing_password="$(python3 - "${ENV_FILE}" <<'PY'
+import ast
+import sys
+
+for line in open(sys.argv[1], encoding="utf-8"):
+    if line.startswith("ADMIN_PASSWORD="):
+        value = line.rstrip("\n").split("=", 1)[1]
+        try:
+            value = ast.literal_eval(value)
+        except (SyntaxError, ValueError):
+            pass
+        print(value, end="")
+        break
+PY
+)"
+      [[ -n "${existing_password}" ]] && set_env_value "ADMIN_PASSWORD" "${existing_password}"
+    else
+      set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
+    fi
   fi
   if [[ -z "$(env_value PUBLIC_IP)" ]]; then
     refresh_server_identity
