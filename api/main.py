@@ -2292,8 +2292,23 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
         unit = "vps-control-shadowsocks.target" if protocol == "shadowsocks" else "vps-control-vless-reality-xhttp.service"
         protocol_clients = [item for item in read_clients() if item.get("protocol") == protocol]
         target = ""
+        settings: dict[str, str | int | bool] = {}
         stats = []
         if protocol == "shadowsocks":
+            config_values: dict = {}
+            for config_path in sorted(SHADOWSOCKS_CONFIG_DIR.glob("*.json")):
+                try:
+                    config_values = json.loads(config_path.read_text(encoding="utf-8"))
+                    break
+                except (OSError, json.JSONDecodeError):
+                    continue
+            settings = {
+                "Шифр": str(config_values.get("method", "chacha20-ietf-poly1305")),
+                "Режим": str(config_values.get("mode", "tcp_and_udp")),
+                "MTU UDP": int(config_values.get("mtu", 1200) or 1200),
+                "Таймаут": f"{int(config_values.get('timeout', 300) or 300)} с",
+                "TCP no-delay": bool(config_values.get("no_delay", True)),
+            }
             for item in protocol_clients:
                 rx, tx = service_bytes(f'vps-control-shadowsocks@{item.get("id", "")}.service')
                 age, _, _ = stream_sample(f'ss:{item.get("id", "")}', rx, tx)
@@ -2312,6 +2327,12 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
                 listen_port = int(reality.get("PORT", "443"))
                 target = reality.get("TARGET", "")
+                settings = {
+                    "REALITY target": target,
+                    "XHTTP path": reality.get("XHTTP_PATH", reality.get("PATH", "/")),
+                    "SNI": target.rsplit(":", 1)[0] if ":" in target else target,
+                    "DNS": "на стороне клиента",
+                }
             except (OSError, ValueError):
                 listen_port = 443
         service_active = run("systemctl", "is-active", unit) == "active"
@@ -2330,6 +2351,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
             "transport": "TCP + UDP" if protocol == "shadowsocks" else "XHTTP over TCP",
             "security": "ChaCha20-IETF-Poly1305" if protocol == "shadowsocks" else "REALITY",
             "target": target,
+            "settings": settings,
         }
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE

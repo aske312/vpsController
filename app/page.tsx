@@ -78,6 +78,7 @@ type ProtocolStatus = {
   interface_rx_bytes: number; interface_tx_bytes: number; rx_errors: number; tx_errors: number;
   rx_dropped: number; tx_dropped: number;
   unit?: string; transport?: string; security?: string; target?: string;
+  settings?: Record<string, string | number | boolean>;
   resources: {
     checked_at?: string;
     items: Array<{ name: string; available: boolean; status_code?: number; latency_ms: number }>;
@@ -1499,6 +1500,11 @@ export default function Home() {
             <p className="eyebrow">TRANSPORT &amp; SECURITY</p>
             <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "VHR"}</strong><span>{activeProtocol.security || "—"}</span></div>
             <dl><div><dt>Транспорт</dt><dd>{activeProtocol.transport || "—"}</dd></div><div><dt>Целевой узел</dt><dd>{activeProtocol.target || "Прямой выход"}</dd></div></dl>
+          </article>
+          <article className="panel protocolTelemetry protocolSettingsCard">
+            <p className="eyebrow">PROTOCOL SETTINGS</p>
+            <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "VRX"}</strong><span>актуальная конфигурация</span></div>
+            <dl>{Object.entries(activeProtocol.settings || {}).map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{typeof value === "boolean" ? (value ? "включено" : "выключено") : value}</dd></div>)}</dl>
           </article>
           <article className="panel protocolTelemetry">
             <p className="eyebrow">SYSTEM SERVICE</p>
