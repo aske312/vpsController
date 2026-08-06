@@ -588,6 +588,11 @@ install_protocol_image() {
     PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${installer}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
+  # Protocol clients persist configs below /etc/vps-control.  Keep the API
+  # sandbox in sync even when a module is installed on an older deployment
+  # whose service unit predates the writable path.
+  ensure_api_write_access
+  systemctl restart "${APP_NAME}-api.service"
   sync_protocol_monitor
   ok "Образ ${image_id} установлен."
 }
@@ -611,6 +616,8 @@ remove_protocol_image() {
     PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${uninstaller}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
+  ensure_api_write_access
+  systemctl restart "${APP_NAME}-api.service"
   sync_protocol_monitor
   ok "Протокол ${image_id} удалён; образ сохранён."
 }
