@@ -21,12 +21,34 @@ command -v ss-server >/dev/null 2>&1 || { echo "ss-server не установл�
 install -d -m 0700 /etc/vps-control/shadowsocks/clients
 # Keep UDP datagrams below the conservative tunnel MTU. This avoids EMSGSIZE
 # drops on mobile and tunneled client paths while preserving TCP + UDP mode.
-python3 - <<'PY'
+python3 - "${PORT_START}" <<'PY'
 import glob, json, os
-for path in glob.glob("/etc/vps-control/shadowsocks/clients/*.json"):
+import sys
+
+port_start = int(sys.argv[1])
+next_port = port_start
+used_ports = set()
+for path in sorted(glob.glob("/etc/vps-control/shadowsocks/clients/*.json")):
     try:
         with open(path, encoding="utf-8") as source:
             config = json.load(source)
+        # Migrate profiles produced by older builds.  An invalid port makes
+        # ss-server fail before it can listen; allocate a valid one instead.
+        try:
+            port = int(config.get("server_port", 0))
+        except (TypeError, ValueError):
+            port = 0
+        if not 1024 <= port <= 65535 or port in used_ports:
+            while next_port <= 65535 and next_port in used_ports:
+                next_port += 1
+            if next_port > 65535:
+                raise ValueError("no free Shadowsocks port during migration")
+            config["server_port"] = next_port
+            port = next_port
+            next_port += 1
+        used_ports.add(port)
+        if config.get("method") == "chacha20-ietf-poly13005":
+            config["method"] = "chacha20-ietf-poly1305"
         config["timeout"] = 300
         config["mode"] = "tcp_and_udp"
         config["mtu"] = 1200

@@ -50,7 +50,12 @@ AWG_SUBNET = ipaddress.ip_network(os.getenv("AWG_SUBNET", "10.73.0.0/24"))
 WG_CONFIG = Path(os.getenv("WG_CONFIG", f"/etc/wireguard/{WG_INTERFACE}.conf"))
 AWG_CONFIG = Path(os.getenv("AWG_CONFIG", f"/etc/amnezia/amneziawg/{AWG_INTERFACE}.conf"))
 AWG_MTU = int(os.getenv("AWG_MTU", "1280"))
-SHADOWSOCKS_PORT_START = int(os.getenv("SHADOWSOCKS_PORT_START", "30000"))
+try:
+    SHADOWSOCKS_PORT_START = int(os.getenv("SHADOWSOCKS_PORT_START", "30000"))
+except ValueError:
+    SHADOWSOCKS_PORT_START = 30000
+if not 1024 <= SHADOWSOCKS_PORT_START <= 55535:
+    SHADOWSOCKS_PORT_START = 30000
 # A stream proxy has no WireGuard-style handshake.  Consider it online only
 # while its byte counters or authenticated requests were observed recently;
 # this prevents iOS keepalive sockets from being reported as usable traffic.
