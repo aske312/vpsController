@@ -9,6 +9,8 @@ import logging
 import os
 import re
 import secrets
+import socket
+import struct
 import subprocess
 import threading
 import time
@@ -96,6 +98,7 @@ INSTALL_DIR = Path(os.getenv("INSTALL_DIR", "/opt/vps-control"))
 CONTROL_COMMAND = os.getenv("CONTROL_COMMAND", "/usr/local/sbin/vps-control")
 PROTOCOL_IMAGES_DIR = INSTALL_DIR / "protocol-images"
 MONITOR_DIR = DATA_DIR / "monitor"
+DNS_SETTINGS_FILE = DATA_DIR / "dns-settings.json"
 updates_refresh_lock = threading.Lock()
 app_version_refresh_lock = threading.Lock()
 resource_check_lock = threading.Lock()
@@ -125,6 +128,22 @@ RESOURCE_TARGETS = (
     ("Cloudflare", "https://1.1.1.1/"),
     ("GitHub", "https://github.com/"),
     ("Microsoft", "https://www.microsoft.com/"),
+)
+
+DNS_PROVIDERS = (
+    {"id": "yandex-basic", "name": "Яндекс DNS — базовый", "country": "RU", "addresses": ["77.88.8.8", "77.88.8.1"], "doh_url": "https://common.dot.dns.yandex.net/dns-query", "filter": "Без фильтрации"},
+    {"id": "yandex-safe", "name": "Яндекс DNS — безопасный", "country": "RU", "addresses": ["77.88.8.88", "77.88.8.2"], "filter": "Вредоносные сайты"},
+    {"id": "yandex-family", "name": "Яндекс DNS — семейный", "country": "RU", "addresses": ["77.88.8.7", "77.88.8.3"], "filter": "Вредоносные и взрослые сайты"},
+    {"id": "skydns", "name": "SkyDNS", "country": "RU", "addresses": ["193.58.251.251"], "filter": "Российская фильтрация"},
+    {"id": "nsdi", "name": "НСДИ", "country": "RU", "addresses": ["195.208.4.1", "195.208.5.1"], "filter": "Национальная система доменных имён"},
+    {"id": "safedns", "name": "SafeDNS", "country": "INT", "addresses": ["195.46.39.39", "195.46.39.40"], "filter": "Безопасность и категории"},
+    {"id": "cloudflare", "name": "Cloudflare", "country": "INT", "addresses": ["1.1.1.1", "1.0.0.1"], "doh_url": "https://cloudflare-dns.com/dns-query", "filter": "Без фильтрации"},
+    {"id": "cloudflare-malware", "name": "Cloudflare Malware", "country": "INT", "addresses": ["1.1.1.2", "1.0.0.2"], "filter": "Вредоносные сайты"},
+    {"id": "google", "name": "Google Public DNS", "country": "INT", "addresses": ["8.8.8.8", "8.8.4.4"], "doh_url": "https://dns.google/dns-query", "filter": "Без фильтрации"},
+    {"id": "quad9", "name": "Quad9 Secure", "country": "INT", "addresses": ["9.9.9.9", "149.112.112.112"], "doh_url": "https://dns.quad9.net/dns-query", "filter": "Вредоносные сайты"},
+    {"id": "adguard", "name": "AdGuard DNS", "country": "INT", "addresses": ["94.140.14.14", "94.140.15.15"], "doh_url": "https://dns.adguard-dns.com/dns-query", "filter": "Реклама и трекеры"},
+    {"id": "opendns", "name": "OpenDNS", "country": "INT", "addresses": ["208.67.222.222", "208.67.220.220"], "filter": "Базовая защита"},
+    {"id": "cleanbrowsing", "name": "CleanBrowsing Security", "country": "INT", "addresses": ["185.228.168.9", "185.228.169.9"], "filter": "Вредоносные сайты"},
 )
 
 
@@ -2023,9 +2042,91 @@ def update_automation(payload: AutomationSettings, _: None = Depends(require_tok
     }
 
 
+class DnsCustomResolver(BaseModel):
+    name: str = Field(default="Собственный DNS", min_length=2, max_length=48)
+    addresses: list[str] = Field(min_length=1, max_length=4)
+    doh_url: str = Field(default="", max_length=256)
+
+
+class DnsSettingsUpdate(BaseModel):
+    selected_id: str = Field(min_length=2, max_length=64, pattern=r"^[a-z0-9-]+$")
+    apply_wg: bool = True
+    apply_awg: bool = True
+    apply_shadowsocks: bool = True
+    apply_vrx: bool = True
+    prefer_encrypted: bool = False
+    fallback_enabled: bool = True
+    custom: DnsCustomResolver | None = None
+
+
+class DnsCheckRequest(BaseModel):
+    provider_id: str | None = Field(default=None, max_length=64)
+
+
 @app.get("/api/clients")
 def clients(_: None = Depends(require_token)) -> dict:
     return {"items": all_client_dump()}
+
+
+@app.get("/api/dns")
+def dns_status(_: None = Depends(require_token)) -> dict:
+    settings = read_dns_settings()
+    return {"settings": settings, "providers": dns_provider_list(settings), "protocol_effect": {
+        "wg": current_env_value("WG_DNS", WG_DNS), "awg": current_env_value("AWG_DNS", AWG_DNS),
+        "shadowsocks": current_env_value("SHADOWSOCKS_DNS", "не настроен"),
+        "vless-reality-xhttp": current_env_value("VRX_DNS", "не настроен"),
+    }}
+
+
+@app.put("/api/dns/settings")
+def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_token)) -> dict:
+    data = payload.model_dump()
+    if data.get("custom"):
+        for address in data["custom"]["addresses"]:
+            try:
+                ipaddress.ip_address(address)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"Некорректный DNS-адрес: {address}") from exc
+        doh_url = data["custom"].get("doh_url", "")
+        if doh_url and not re.fullmatch(r"https://[^\s]+", doh_url):
+            raise HTTPException(status_code=422, detail="DoH URL должен использовать HTTPS")
+    providers = dns_provider_list(data)
+    selected = next((item for item in providers if item["id"] == data["selected_id"]), None)
+    if not selected:
+        raise HTTPException(status_code=422, detail="Выбранный DNS-профиль не найден")
+    selected_addresses = selected["addresses"] if data["fallback_enabled"] else selected["addresses"][:1]
+    addresses = ", ".join(selected_addresses)
+    env_updates = {}
+    if data["apply_wg"]:
+        env_updates["WG_DNS"] = addresses
+    if data["apply_awg"]:
+        env_updates["AWG_DNS"] = addresses
+    if data["apply_shadowsocks"]:
+        env_updates["SHADOWSOCKS_DNS"] = addresses
+    if data["apply_vrx"]:
+        env_updates["VRX_DNS"] = addresses
+    if data["apply_vrx"] and VLESS_CONFIG.exists():
+        apply_vrx_dns(selected_addresses)
+    if env_updates:
+        persist_env_values(env_updates)
+    DNS_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = DNS_SETTINGS_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(DNS_SETTINGS_FILE)
+    return dns_status()
+
+
+@app.post("/api/dns/check")
+def check_dns(payload: DnsCheckRequest, _: None = Depends(require_token)) -> dict:
+    providers = dns_provider_list()
+    if payload.provider_id:
+        providers = [item for item in providers if item["id"] == payload.provider_id]
+        if not providers:
+            raise HTTPException(status_code=404, detail="DNS-профиль не найден")
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(providers)))) as pool:
+        results = list(pool.map(check_dns_provider, providers))
+    return {"checked_at": datetime.now(timezone.utc).isoformat(), "items": results}
 
 
 class ClientCreate(BaseModel):
@@ -2059,6 +2160,97 @@ def current_env_value(name: str, fallback: str) -> str:
         return value or fallback
     except OSError:
         return fallback
+
+
+def read_dns_settings() -> dict:
+    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "prefer_encrypted": False, "fallback_enabled": True, "custom": None}
+    try:
+        saved = json.loads(DNS_SETTINGS_FILE.read_text(encoding="utf-8"))
+        return {**defaults, **saved}
+    except (OSError, json.JSONDecodeError, TypeError):
+        return defaults
+
+
+def dns_provider_list(settings: dict | None = None) -> list[dict]:
+    providers = [dict(item) for item in DNS_PROVIDERS]
+    custom = (settings or read_dns_settings()).get("custom")
+    if custom:
+        providers.append({"id": "custom", "country": "CUSTOM", "filter": "Пользовательский", **custom})
+    return providers
+
+
+def protocol_dns_addresses(protocol: Literal["shadowsocks", "vless-reality-xhttp"]) -> list[str]:
+    key_name = "SHADOWSOCKS_DNS" if protocol == "shadowsocks" else "VRX_DNS"
+    return [value.strip() for value in current_env_value(key_name, "").split(",") if value.strip()]
+
+
+def apply_vrx_dns(addresses: list[str]) -> None:
+    """Apply server-side Xray resolution without replacing a working config on validation failure."""
+    original = VLESS_CONFIG.read_bytes()
+    temporary = VLESS_CONFIG.with_suffix(".dns.tmp.json")
+    try:
+        config = json.loads(original.decode("utf-8"))
+        config["dns"] = {"servers": addresses, "queryStrategy": "UseIP"}
+        config.setdefault("routing", {})["domainStrategy"] = "IPIfNonMatch"
+        temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.chmod(temporary, 0o640)
+        os.chown(temporary, 0, 65534)
+        result = subprocess.run([XRAY_BIN, "run", "-test", "-config", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or "Xray rejected DNS configuration")
+        temporary.replace(VLESS_CONFIG)
+        restart_vless_service()
+    except Exception as exc:
+        VLESS_CONFIG.write_bytes(original)
+        os.chmod(VLESS_CONFIG, 0o640)
+        os.chown(VLESS_CONFIG, 0, 65534)
+        raise HTTPException(status_code=500, detail="Не удалось применить DNS к VRX; рабочая конфигурация восстановлена") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def dns_wire_query(address: str, tcp: bool = False, timeout: float = 2.0) -> tuple[bool, float | None]:
+    transaction = secrets.randbelow(65536)
+    labels = b"".join(bytes([len(part)]) + part.encode("ascii") for part in "example.com".split(".")) + b"\0"
+    packet = struct.pack("!HHHHHH", transaction, 0x0100, 1, 0, 0, 0) + labels + struct.pack("!HH", 1, 1)
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    started = time.monotonic()
+    try:
+        with socket.socket(family, socket.SOCK_STREAM if tcp else socket.SOCK_DGRAM) as sock:
+            sock.settimeout(timeout)
+            sock.connect((address, 53))
+            if tcp:
+                sock.sendall(struct.pack("!H", len(packet)) + packet)
+                length = sock.recv(2)
+                if len(length) != 2:
+                    return False, None
+                response = sock.recv(struct.unpack("!H", length)[0])
+            else:
+                sock.send(packet)
+                response = sock.recv(4096)
+        valid = len(response) >= 12 and struct.unpack("!H", response[:2])[0] == transaction and bool(response[2] & 0x80)
+        return valid, round((time.monotonic() - started) * 1000, 1) if valid else None
+    except (OSError, socket.timeout):
+        return False, None
+
+
+def check_dns_provider(provider: dict) -> dict:
+    address = str(provider.get("addresses", [""])[0])
+    udp_ok, udp_ms = dns_wire_query(address)
+    tcp_ok, tcp_ms = dns_wire_query(address, tcp=True)
+    doh_ok, doh_ms = False, None
+    doh_url = str(provider.get("doh_url", ""))
+    if doh_url:
+        started = time.monotonic()
+        try:
+            result = subprocess.run(["curl", "-fsS", "--max-time", "4", "-H", "accept: application/dns-json", f"{doh_url}?name=example.com&type=A"], capture_output=True, timeout=5, check=False)
+            doh_ok = result.returncode == 0 and bool(result.stdout)
+            doh_ms = round((time.monotonic() - started) * 1000, 1) if doh_ok else None
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    available = udp_ok or tcp_ok or doh_ok
+    latencies = [value for value in (udp_ms, tcp_ms, doh_ms) if value is not None]
+    return {"id": provider["id"], "available": available, "udp_ok": udp_ok, "udp_ms": udp_ms, "tcp_ok": tcp_ok, "tcp_ms": tcp_ms, "doh_ok": doh_ok, "doh_ms": doh_ms, "latency_ms": min(latencies) if latencies else None}
 
 
 def shadowsocks_firewall(action: Literal["add", "delete"], port: int) -> None:
@@ -2157,7 +2349,9 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             config_path.unlink(missing_ok=True)
             raise HTTPException(status_code=500, detail="Unable to start Shadowsocks client service")
         userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
-        client_config = f"ss://{userinfo}@{PUBLIC_IP}:{port}#{urllib.parse.quote(payload.name)}"
+        ss_dns = ",".join(protocol_dns_addresses("shadowsocks"))
+        dns_query = "?" + urllib.parse.urlencode({"dns": ss_dns}) if ss_dns else ""
+        client_config = f"ss://{userinfo}@{PUBLIC_IP}:{port}{dns_query}#{urllib.parse.quote(payload.name)}"
         items = read_clients()
         items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
         write_clients(items)
@@ -2202,6 +2396,9 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     "type": "xhttp", "host": target_host,
                     "path": reality.get("XHTTP_PATH", reality.get("PATH", "/")), "mode": xhttp_mode,
                 }
+                vrx_dns = ",".join(protocol_dns_addresses("vless-reality-xhttp"))
+                if vrx_dns:
+                    query_values["dns"] = vrx_dns
                 if xhttp_settings.get("extra"):
                     query_values["extra"] = json.dumps(xhttp_settings["extra"], separators=(",", ":"))
                 query = urllib.parse.urlencode(query_values)
@@ -2344,6 +2541,7 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
                 {"value": "tcp_and_udp", "label": "TCP + UDP"}, {"value": "tcp_only", "label": "Только TCP"},
             ]},
             {"key": "no_delay", "label": "TCP no-delay", "type": "boolean", "value": bool(values.get("no_delay", True))},
+            {"key": "dns", "label": "DNS новых профилей", "type": "text", "value": current_env_value("SHADOWSOCKS_DNS", "1.1.1.1, 1.0.0.1"), "help": "Добавляется в новые SS-ссылки; применение зависит от поддержки DNS-параметра клиентом."},
         ]
     return [{
         "key": "xhttp_mode", "label": "Режим XHTTP", "type": "select",
@@ -2361,6 +2559,9 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
     }, {
         "key": "xpadding", "label": "XHTTP padding, байт", "type": "text", "value": str(values.get("xPaddingBytes", "100-1000")),
         "help": "Одно число или диапазон, например 100-1000.",
+    }, {
+        "key": "dns", "label": "DNS VRX", "type": "text", "value": current_env_value("VRX_DNS", "1.1.1.1, 1.0.0.1"),
+        "help": "Применяется к Xray на сервере и добавляется в новые VRX-ссылки. Уже импортированные профили не изменяются.",
     }]
 
 
@@ -2416,8 +2617,8 @@ def update_protocol_settings(
     supplied = payload.model_dump(exclude_none=True)
     allowed = {
         "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
-        "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay"},
-        "vless-reality-xhttp": {"xhttp_mode", "loglevel", "xpadding"},
+        "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
+        "vless-reality-xhttp": {"xhttp_mode", "loglevel", "xpadding", "dns"},
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
         raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
@@ -2434,6 +2635,8 @@ def update_protocol_settings(
             **({f"{prefix}_KEEPALIVE": supplied["keepalive"]} if "keepalive" in supplied else {}),
         })
     elif protocol == "shadowsocks":
+        if "dns" in supplied:
+            persist_env_values({"SHADOWSOCKS_DNS": supplied["dns"]})
         paths = sorted(SHADOWSOCKS_CONFIG_DIR.glob("*.json"))
         if not paths:
             raise HTTPException(status_code=409, detail="Нет настроенных каналов Shadowsocks")
@@ -2474,6 +2677,10 @@ def update_protocol_settings(
                 config["inbounds"][0]["streamSettings"]["xhttpSettings"].setdefault("extra", {})["xPaddingBytes"] = supplied["xpadding"]
             if "loglevel" in supplied:
                 config.setdefault("log", {})["loglevel"] = supplied["loglevel"]
+            if "dns" in supplied:
+                dns_addresses = [value.strip() for value in supplied["dns"].split(",") if value.strip()]
+                config["dns"] = {"servers": dns_addresses, "queryStrategy": "UseIP"}
+                config.setdefault("routing", {})["domainStrategy"] = "IPIfNonMatch"
             temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
             os.chmod(temporary, 0o640)
             os.chown(temporary, 0, 65534)
@@ -2481,6 +2688,8 @@ def update_protocol_settings(
             if result.returncode:
                 raise RuntimeError(result.stderr.strip() or "Xray rejected configuration")
             temporary.replace(VLESS_CONFIG)
+            if "dns" in supplied:
+                persist_env_values({"VRX_DNS": supplied["dns"]})
             restart_vless_service()
         except Exception as exc:
             VLESS_CONFIG.write_bytes(original)
@@ -2518,6 +2727,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 "MTU UDP": int(config_values.get("mtu", 1200) or 1200),
                 "Таймаут": f"{int(config_values.get('timeout', 300) or 300)} с",
                 "TCP no-delay": bool(config_values.get("no_delay", True)),
+                "DNS новых профилей": current_env_value("SHADOWSOCKS_DNS", "не настроен"),
             }
             editable_settings = editable_protocol_settings(protocol, config_values)
             for item in protocol_clients:
@@ -2542,7 +2752,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                     "REALITY target": target,
                     "XHTTP path": reality.get("XHTTP_PATH", reality.get("PATH", "/")),
                     "SNI": target.rsplit(":", 1)[0] if ":" in target else target,
-                    "DNS": "на стороне клиента",
+                    "DNS": current_env_value("VRX_DNS", "не настроен"),
                 }
                 config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
                 xhttp_values = dict(config_data["inbounds"][0]["streamSettings"].get("xhttpSettings", {}))

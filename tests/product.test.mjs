@@ -478,6 +478,32 @@ test("protocol pages safely edit channel settings and VRX links select HTTP2", a
   assert.match(css, /\.protocolConfiguration/);
 });
 
+test("DNS control provides Russian resolvers, live checks and protocol application", async () => {
+  const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), read("app/globals.css")]);
+  assert.match(page, /type Tab = "overview" \| "dns"/);
+  assert.match(page, /CENTRAL DNS CONTROL/);
+  assert.match(page, /Проверить все DNS/);
+  assert.match(page, /Собственный DNS/);
+  assert.match(api, /DNS_PROVIDERS = \(/);
+  assert.ok((api.match(/"country": "RU"/g) || []).length >= 5);
+  assert.ok((api.match(/"id": "[a-z0-9-]+", "name":/g) || []).length >= 10);
+  assert.match(api, /@app\.get\("\/api\/dns"\)/);
+  assert.match(api, /@app\.put\("\/api\/dns\/settings"\)/);
+  assert.match(api, /@app\.post\("\/api\/dns\/check"\)/);
+  assert.match(api, /def dns_wire_query/);
+  assert.match(api, /env_updates\["WG_DNS"\]/);
+  assert.match(api, /env_updates\["AWG_DNS"\]/);
+  assert.match(api, /env_updates\["SHADOWSOCKS_DNS"\]/);
+  assert.match(api, /env_updates\["VRX_DNS"\]/);
+  assert.match(api, /def apply_vrx_dns/);
+  assert.match(api, /query_values\["dns"\]/);
+  assert.match(api, /urllib\.parse\.urlencode\(\{"dns": ss_dns\}\)/);
+  assert.match(page, /apply_shadowsocks/);
+  assert.match(page, /apply_vrx/);
+  assert.match(css, /\.dnsCatalog/);
+  assert.match(css, /\.dnsSaveBar/);
+});
+
 test("manual releases are prebuilt and installed without Docker or package upgrades", async () => {
   const [builder, api, page, manager, readme] = await Promise.all([
     read("scripts/build-release.sh"), read("api/main.py"), read("app/page.tsx"),

@@ -621,6 +621,34 @@ input, select { height: 46px; font-size: 11px; }
 .dangerButton, input, select, textarea, .primaryButton { border-radius: 6px; }
 
 .protocolMonitor { display: grid; gap: 12px; margin-bottom: 12px; }
+.dnsWorkspace { display: grid; grid-template-columns: 1fr; gap: 12px; padding-bottom: 72px; }
+.dnsHero { min-height: 150px; display: flex; align-items: center; justify-content: space-between; gap: 24px; background: linear-gradient(110deg, #10231f, #101719 68%); }
+.dnsHero h2 { margin: 5px 0 9px; font-size: 30px; }
+.dnsHero p { max-width: 650px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.dnsHeroActions { display: flex; align-items: center; gap: 12px; }
+.dnsHeroActions button, .customDns .panelHead button { min-height: 36px; padding: 0 13px; border: 1px solid #315a4f; border-radius: 6px; background: #163129; color: #9fe4ca; font-size: 9px; }
+.dnsHeroActions strong { min-width: 78px; display: grid; color: var(--green); font: 600 28px var(--font-mono); text-align: center; }
+.dnsHeroActions small { color: var(--muted); font-size: 7px; }
+.dnsPolicyGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 16px; }
+.dnsPolicyGrid label { display: flex; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: #101817; }
+.dnsPolicyGrid input { width: 17px; height: 17px; accent-color: var(--green); }
+.dnsPolicyGrid span { display: grid; gap: 4px; }
+.dnsPolicyGrid strong { font-size: 9px; }.dnsPolicyGrid small { color: var(--muted); font-size: 7px; }
+.dnsProtocolEffect { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 10px; }
+.dnsProtocolEffect div { display: grid; gap: 4px; padding: 9px; border-radius: 6px; background: #0c1415; }
+.dnsProtocolEffect strong { color: var(--green); font-size: 8px; }.dnsProtocolEffect span { overflow-wrap: anywhere; color: var(--muted); font: 7px var(--font-mono); }
+.dnsCatalog { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dnsProvider { min-height: 190px; display: grid; align-content: start; gap: 14px; color: var(--text); text-align: left; cursor: pointer; }
+.dnsProvider.selected { border-color: #4c8c78; box-shadow: inset 0 0 0 1px #4c8c7844; background: #10201d; }
+.dnsProvider header { display: grid; grid-template-columns: auto 1fr 22px; align-items: center; gap: 10px; }
+.dnsProvider header div { display: grid; gap: 4px; }.dnsProvider header strong { font-size: 11px; }.dnsProvider header small { color: var(--muted); font-size: 8px; }
+.dnsProvider header i { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--green); color: #0b1714; font-style: normal; }
+.dnsCountry { min-width: 34px; padding: 5px; border-radius: 5px; background: #222b2d; color: var(--muted); font: 7px var(--font-mono); text-align: center; }.dnsCountry.ru { background: #263b34; color: #9fe4ca; }
+.dnsProvider code { color: #b9cbc6; font-size: 9px; }
+.dnsChecks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }.dnsChecks span { padding: 7px 4px; border-radius: 5px; background: #181516; color: #876f71; font: 7px var(--font-mono); text-align: center; }.dnsChecks span.ok { background: #11231e; color: var(--green); }
+.dnsTestOne { justify-self: start; color: var(--green); font-size: 8px; text-decoration: underline; }
+.customDnsFields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; }.customDnsFields label { display: grid; gap: 6px; color: var(--muted); font-size: 8px; }.customDnsFields input { width: 100%; padding: 0 10px; border: 1px solid var(--line); background: #0d1516; color: var(--text); }
+.dnsSaveBar { position: sticky; bottom: 12px; z-index: 4; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 13px 16px; border: 1px solid #315a4f; border-radius: 9px; background: #101d1bcc; box-shadow: 0 10px 30px #0008; backdrop-filter: blur(14px); }.dnsSaveBar p { display: grid; gap: 4px; margin: 0; }.dnsSaveBar strong { font-size: 10px; }.dnsSaveBar span { color: var(--muted); font-size: 8px; }.dnsSaveBar button { min-height: 38px; padding: 0 18px; border: 0; border-radius: 6px; background: var(--green); color: #0b1714; font-weight: 700; }
 .protocolLiveHero {
   min-height: 134px; display: flex; align-items: center; justify-content: space-between; gap: 24px;
   background: linear-gradient(105deg, #10201d, #0f1618 62%);
@@ -783,6 +811,8 @@ input, select { height: 46px; font-size: 11px; }
 .legalLanguage button { font-size: 11px; }
 
 @media (max-width: 1050px) {
+  .dnsCatalog { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dnsPolicyGrid, .dnsProtocolEffect { grid-template-columns: repeat(2, 1fr); }
   .resourceIndicators { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
   .sidebar { gap: 16px; padding-inline: 18px; }
   .sidebar > .brand > div, .locationCard > div, .navItem em { display: none; }
@@ -800,6 +830,10 @@ input, select { height: 46px; font-size: 11px; }
 }
 
 @media (max-width: 700px) {
+  .dnsHero, .dnsSaveBar { align-items: stretch; flex-direction: column; }
+  .dnsHeroActions { align-items: stretch; flex-direction: column; }
+  .dnsCatalog, .dnsPolicyGrid, .dnsProtocolEffect, .customDnsFields { grid-template-columns: 1fr; }
+  .dnsSaveBar button { width: 100%; }
   .resourceIndicators { grid-template-columns: 1fr; }
   .resourceAvailability .panelHead, .resourceTools { align-items: flex-start; flex-direction: column; }
   .protocolCategory { grid-template-columns: 40px minmax(0, 1fr); }

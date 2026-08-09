@@ -7,7 +7,7 @@ import { ConnectionGuide } from "./connection-guide";
 import { LegalFooter } from "./legal";
 
 type Protocol = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp";
-type Tab = "overview" | "security" | "application" | "services" | "clients" | Protocol;
+type Tab = "overview" | "dns" | "security" | "application" | "services" | "clients" | Protocol;
 type TunnelProtocol = "wg" | "awg";
 type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
 type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" | "network-check" | "integrity-check" | "identity" | "secure" | "kernel-update" | "vpn-firewall" | "optimize" | "reboot" | "poweroff";
@@ -65,6 +65,10 @@ type LiveStatus = {
   security: { firewall_active: boolean; fail2ban_active: boolean; ssh_listening: boolean };
 };
 type LoggingSettings = { persistent: boolean; retention_days: number };
+type DnsProvider = { id: string; name: string; country: string; addresses: string[]; doh_url?: string; filter: string };
+type DnsSettings = { selected_id: string; apply_wg: boolean; apply_awg: boolean; apply_shadowsocks: boolean; apply_vrx: boolean; prefer_encrypted: boolean; fallback_enabled: boolean; custom?: { name: string; addresses: string[]; doh_url: string } | null };
+type DnsStatus = { settings: DnsSettings; providers: DnsProvider[]; protocol_effect: Record<string, string> };
+type DnsCheck = { id: string; available: boolean; udp_ok: boolean; udp_ms?: number; tcp_ok: boolean; tcp_ms?: number; doh_ok: boolean; doh_ms?: number; latency_ms?: number };
 type ConfirmationRequest = {
   title: string; message: string; confirmLabel: string; phrase?: string; danger?: boolean;
   resolve: (confirmed: boolean) => void;
@@ -103,10 +107,10 @@ type ProtocolStatus = {
 };
 
 const labels: Record<Tab | Protocol, string> = {
-  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", shadowsocks: "Shadowsocks", "vless-reality-xhttp": "VLESS + REALITY + XHTTP", clients: "Подключения",
+  overview: "Обзор", dns: "DNS", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", shadowsocks: "Shadowsocks", "vless-reality-xhttp": "VLESS + REALITY + XHTTP", clients: "Подключения",
 };
 const navigationLabels: Record<Tab, string> = {
-  overview: "OVERVIEW", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
+  overview: "OVERVIEW", dns: "DNS CONTROL", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
   wg: "WIREGUARD", awg: "AMNEZIAWG", shadowsocks: "SHADOWSOCKS", "vless-reality-xhttp": "VLESS", clients: "CONNECTIONS",
 };
 const actionLabels: Record<string, string> = {
@@ -163,6 +167,10 @@ export default function Home() {
   const [securityNewLogCount, setSecurityNewLogCount] = useState(0);
   const [application, setApplication] = useState<ApplicationStatus | null>(null);
   const [services, setServices] = useState<ServicesStatus | null>(null);
+  const [dns, setDns] = useState<DnsStatus | null>(null);
+  const [dnsDraft, setDnsDraft] = useState<DnsSettings | null>(null);
+  const [dnsChecks, setDnsChecks] = useState<Record<string, DnsCheck>>({});
+  const [checkingDns, setCheckingDns] = useState(false);
   const [automationDraft, setAutomationDraft] = useState<ServicesStatus["automation"] | null>(null);
   const [loggingDraft, setLoggingDraft] = useState<LoggingSettings | null>(null);
   const [notice, setNotice] = useState("");
@@ -335,6 +343,33 @@ export default function Home() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить состояние протокола"); }
   }, [request, token]);
 
+  const loadDns = useCallback(async () => {
+    if (!token) return;
+    try {
+      const next = await request("/dns") as DnsStatus;
+      setDns(next); setDnsDraft((current) => current || next.settings); setLastUpdated(new Date());
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось загрузить DNS"); }
+  }, [request, token]);
+
+  async function saveDnsSettings() {
+    if (!dnsDraft) return;
+    setBusy(true); setError("");
+    try {
+      const next = await request("/dns/settings", { method: "PUT", body: JSON.stringify(dnsDraft) }) as DnsStatus;
+      setDns(next); setDnsDraft(next.settings); setNotice("DNS-профиль сохранён и применён к выбранным протоколам");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось сохранить DNS"); }
+    finally { setBusy(false); }
+  }
+
+  async function checkDnsProviders(providerId?: string) {
+    setCheckingDns(true); setError("");
+    try {
+      const result = await request("/dns/check", { method: "POST", body: JSON.stringify({ provider_id: providerId || null }) }) as { items: DnsCheck[] };
+      setDnsChecks((current) => ({ ...current, ...Object.fromEntries(result.items.map((item) => [item.id, item])) }));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Проверка DNS не выполнена"); }
+    finally { setCheckingDns(false); }
+  }
+
   function changeProtocolSetting(protocol: Protocol, key: string, value: string | number | boolean) {
     protocolSettingsDirty.current[protocol] = true;
     setProtocolSettingsDraft((drafts) => ({ ...drafts, [protocol]: { ...(drafts[protocol] || {}), [key]: value } }));
@@ -367,12 +402,13 @@ export default function Home() {
       else if (tab === "security") await Promise.all([loadSecurity(), loadServices()]);
       else if (tab === "application") await loadApplication();
       else if (tab === "services") await loadServices();
+      else if (tab === "dns") await loadDns();
       else if (["wg", "awg", "shadowsocks", "vless-reality-xhttp"].includes(tab)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
       else await loadClients();
     } finally {
       if (showBusy) setBusy(false);
     }
-  }, [loadApplication, loadClients, loadOverview, loadProtocolStatus, loadSecurity, loadServices, tab, token]);
+  }, [loadApplication, loadClients, loadDns, loadOverview, loadProtocolStatus, loadSecurity, loadServices, tab, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -930,7 +966,7 @@ export default function Home() {
     return [...groups.values()];
   }, [protocolImages]);
   const navigation = useMemo(
-    () => (["overview", "clients"] as Tab[]).filter((id) => id !== "clients" || installedProtocols.length > 0),
+    () => (["overview", "dns", "clients"] as Tab[]).filter((id) => id !== "clients" || installedProtocols.length > 0),
     [installedProtocols],
   );
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
@@ -1213,6 +1249,38 @@ export default function Home() {
           )}
           {!overview?.protocols.wg.active && !overview?.protocols.awg.active && !protocolImages.length && <div className="protocolEmpty"><span>—</span><p><strong>Нет доступных образов</strong><small>Добавьте manifest.json в каталог protocol-images</small></p></div>}
         </article>
+      </section>}
+
+      {tab === "dns" && <section className="dnsWorkspace">
+        <article className="panel dnsHero">
+          <div><p className="eyebrow">CENTRAL DNS CONTROL</p><h2>Единая точка DNS</h2><p>Выберите резолвер, проверьте доступность и примените его к WG, AWG, Shadowsocks и VRX.</p></div>
+          <div className="dnsHeroActions"><button onClick={() => void checkDnsProviders()} disabled={checkingDns}>{checkingDns ? "Проверяем…" : "Проверить все DNS"}</button><strong>{dns?.providers.length || 0}<small>профилей</small></strong></div>
+        </article>
+        <article className="panel dnsPolicy">
+          <div className="panelHead"><div><p className="eyebrow">APPLICATION POLICY</p><h3>Область применения</h3></div><span>без разрыва текущих туннелей</span></div>
+          <div className="dnsPolicyGrid">
+            <label><input type="checkbox" checked={dnsDraft?.apply_wg ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_wg: event.target.checked } : value)} /><span><strong>WireGuard</strong><small>DNS новых профилей WG</small></span></label>
+            <label><input type="checkbox" checked={dnsDraft?.apply_awg ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_awg: event.target.checked } : value)} /><span><strong>AmneziaWG</strong><small>DNS новых профилей AWG</small></span></label>
+            <label><input type="checkbox" checked={dnsDraft?.apply_shadowsocks ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_shadowsocks: event.target.checked } : value)} /><span><strong>Shadowsocks</strong><small>DNS новых SS-профилей</small></span></label>
+            <label><input type="checkbox" checked={dnsDraft?.apply_vrx ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_vrx: event.target.checked } : value)} /><span><strong>VRX</strong><small>DNS Xray и новых VRX-профилей</small></span></label>
+            <label><input type="checkbox" checked={dnsDraft?.prefer_encrypted ?? false} onChange={(event) => setDnsDraft((value) => value ? { ...value, prefer_encrypted: event.target.checked } : value)} /><span><strong>Шифрованный DNS</strong><small>Предпочитать DoH при наличии</small></span></label>
+            <label><input type="checkbox" checked={dnsDraft?.fallback_enabled ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, fallback_enabled: event.target.checked } : value)} /><span><strong>Резервный адрес</strong><small>Добавлять второй IP резолвера</small></span></label>
+          </div>
+          <div className="dnsProtocolEffect">{Object.entries(dns?.protocol_effect || {}).map(([protocol, value]) => <div key={protocol}><strong>{protocol === "vless-reality-xhttp" ? "VRX" : protocol.toUpperCase()}</strong><span>{value}</span></div>)}</div>
+        </article>
+        <article className="dnsCatalog">
+          {(dns?.providers || []).map((provider) => { const check = dnsChecks[provider.id]; const selected = dnsDraft?.selected_id === provider.id; return <button type="button" className={`panel dnsProvider ${selected ? "selected" : ""}`} key={provider.id} onClick={() => setDnsDraft((value) => value ? { ...value, selected_id: provider.id } : value)}>
+            <header><span className={provider.country === "RU" ? "dnsCountry ru" : "dnsCountry"}>{provider.country}</span><div><strong>{provider.name}</strong><small>{provider.filter}</small></div><i>{selected ? "✓" : ""}</i></header>
+            <code>{provider.addresses.join(" · ")}</code>
+            <div className="dnsChecks"><span className={check?.udp_ok ? "ok" : ""}>UDP {check?.udp_ms != null ? `${check.udp_ms} мс` : "—"}</span><span className={check?.tcp_ok ? "ok" : ""}>TCP {check?.tcp_ms != null ? `${check.tcp_ms} мс` : "—"}</span><span className={check?.doh_ok ? "ok" : ""}>DoH {check?.doh_ms != null ? `${check.doh_ms} мс` : provider.doh_url ? "—" : "нет"}</span></div>
+            <span className="dnsTestOne" onClick={(event) => { event.stopPropagation(); void checkDnsProviders(provider.id); }}>Проверить</span>
+          </button>; })}
+        </article>
+        <article className="panel customDns">
+          <div className="panelHead"><div><p className="eyebrow">CUSTOM RESOLVER</p><h3>Собственный DNS</h3></div><button onClick={() => setDnsDraft((value) => value ? { ...value, selected_id: "custom", custom: value.custom || { name: "Собственный DNS", addresses: [""], doh_url: "" } } : value)}>Использовать свой</button></div>
+          {dnsDraft?.selected_id === "custom" && <div className="customDnsFields"><label>Название<input value={dnsDraft.custom?.name || ""} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { addresses: [""], doh_url: "" }), name: event.target.value } } : value)} /></label><label>IP-адреса через запятую<input value={(dnsDraft.custom?.addresses || []).join(", ")} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { name: "Собственный DNS", doh_url: "" }), addresses: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) } } : value)} /></label><label>DoH URL<input type="url" placeholder="https://dns.example/dns-query" value={dnsDraft.custom?.doh_url || ""} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { name: "Собственный DNS", addresses: [""] }), doh_url: event.target.value } } : value)} /></label></div>}
+        </article>
+        <div className="dnsSaveBar"><p><strong>{dns?.providers.find((item) => item.id === dnsDraft?.selected_id)?.name || dnsDraft?.custom?.name || "DNS не выбран"}</strong><span>VRX обновляется на сервере; новые клиентские профили получают выбранный DNS</span></p><button onClick={() => void saveDnsSettings()} disabled={busy || !dnsDraft}>{busy ? "Применяем…" : "Сохранить и применить"}</button></div>
       </section>}
 
       {tab === "security" && <section className="securityGrid">
