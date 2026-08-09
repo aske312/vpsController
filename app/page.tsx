@@ -79,6 +79,7 @@ type ProtocolStatus = {
   rx_dropped: number; tx_dropped: number;
   unit?: string; transport?: string; security?: string; target?: string;
   settings?: Record<string, string | number | boolean>;
+  editable_settings?: EditableProtocolSetting[];
   resources: {
     checked_at?: string;
     items: Array<{ name: string; available: boolean; status_code?: number; latency_ms: number }>;
@@ -123,6 +124,11 @@ const bytes = (value = 0) => {
   const units = ["B", "KB", "MB", "GB", "TB"];
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
   return `${(value / 1024 ** index).toFixed(index > 2 ? 1 : 0)} ${units[index]}`;
+};
+type EditableProtocolSetting = {
+  key: string; label: string; type: "number" | "select" | "boolean";
+  value: string | number | boolean; min?: number; max?: number; help?: string;
+  options?: Array<{ value: string; label: string }>;
 };
 
 function reloadWithoutCache(message: string) {
@@ -170,6 +176,7 @@ export default function Home() {
   const [protocolImages, setProtocolImages] = useState<ProtocolImage[]>([]);
   const [protocolStatuses, setProtocolStatuses] = useState<Partial<Record<Protocol, ProtocolStatus>>>({});
   const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number; tx: number }>>>({});
+  const [protocolSettingsDraft, setProtocolSettingsDraft] = useState<Partial<Record<Protocol, Record<string, string | number | boolean>>>>({});
   const [installingProtocol, setInstallingProtocol] = useState("");
   const [checkingResources, setCheckingResources] = useState<Protocol | null>(null);
   const [checkingDiagnostics, setCheckingDiagnostics] = useState<Protocol | null>(null);
@@ -194,6 +201,7 @@ export default function Home() {
   const settingsRef = useRef<HTMLDivElement>(null);
   const networkSample = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
+  const protocolSettingsDirty = useRef<Partial<Record<Protocol, boolean>>>({});
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
   const automationDirty = useRef(false);
   const loggingDirty = useRef(false);
@@ -317,9 +325,38 @@ export default function Home() {
       }
       protocolSamples.current[protocol] = { rx: next.interface_rx_bytes, tx: next.interface_tx_bytes, at: now };
       setProtocolStatuses((statuses) => ({ ...statuses, [protocol]: next }));
+      if (!protocolSettingsDirty.current[protocol]) {
+        setProtocolSettingsDraft((drafts) => ({
+          ...drafts,
+          [protocol]: Object.fromEntries((next.editable_settings || []).map((setting) => [setting.key, setting.value])),
+        }));
+      }
       setLastUpdated(new Date());
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить состояние протокола"); }
   }, [request, token]);
+
+  function changeProtocolSetting(protocol: Protocol, key: string, value: string | number | boolean) {
+    protocolSettingsDirty.current[protocol] = true;
+    setProtocolSettingsDraft((drafts) => ({ ...drafts, [protocol]: { ...(drafts[protocol] || {}), [key]: value } }));
+  }
+
+  async function saveProtocolSettings(protocol: Protocol) {
+    const fields = protocolStatuses[protocol]?.editable_settings || [];
+    const draft = protocolSettingsDraft[protocol] || {};
+    const body = Object.fromEntries(fields.map((field) => [field.key, draft[field.key] ?? field.value]));
+    setBusy(true); setError("");
+    try {
+      const next = await request(`/protocols/${protocol}/settings`, { method: "PATCH", body: JSON.stringify(body) }) as ProtocolStatus;
+      protocolSettingsDirty.current[protocol] = false;
+      setProtocolStatuses((statuses) => ({ ...statuses, [protocol]: next }));
+      setProtocolSettingsDraft((drafts) => ({
+        ...drafts,
+        [protocol]: Object.fromEntries((next.editable_settings || []).map((setting) => [setting.key, setting.value])),
+      }));
+      setNotice(`Настройки ${labels[protocol]} применены`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось применить настройки протокола"); }
+    finally { setBusy(false); }
+  }
 
   const refreshCurrent = useCallback(async (showBusy = false) => {
     if (!token) return;
@@ -1160,14 +1197,14 @@ export default function Home() {
             <em className="onlinePill">Активен</em><b>›</b>
           </button>)}
           {protocolImages.filter((image) => image.installed && image.id !== "wg" && image.id !== "awg").map((image) => <button key={image.id} onClick={() => setTab(image.id as Protocol)}>
-            <span className={`protocol ${image.id}`}>{image.id === "shadowsocks" ? "SS" : "VHR"}</span>
+            <span className={`protocol ${image.id}`}>{image.id === "shadowsocks" ? "SS" : "VRX"}</span>
             <p><strong>{image.name}</strong><small>{image.description}</small></p>
             <em className={image.active ? "onlinePill" : "offlinePill"}>{image.active ? "Активен" : "Остановлен"}</em>
             <b>›</b>
           </button>)}
           {protocolImages.filter((image) => !image.installed).map((image) =>
             <div className="protocolInstaller" key={image.id}>
-              <span className={`protocol ${image.id}`}>{image.id === "wg" ? "WG" : image.id === "awg" ? "AW" : image.id === "shadowsocks" ? "SS" : "VHR"}</span>
+              <span className={`protocol ${image.id}`}>{image.id === "wg" ? "WG" : image.id === "awg" ? "AW" : image.id === "shadowsocks" ? "SS" : "VRX"}</span>
               <p><strong>{image.name}</strong><small>{image.description}</small></p>
               <button onClick={() => void installProtocol(image)} disabled={busy || Boolean(installingProtocol)}>
                 {installingProtocol === image.id ? "Устанавливается…" : "Установить"}
@@ -1498,13 +1535,15 @@ export default function Home() {
           </article>
           <article className="panel protocolTelemetry">
             <p className="eyebrow">TRANSPORT &amp; SECURITY</p>
-            <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "VHR"}</strong><span>{activeProtocol.security || "—"}</span></div>
+            <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "VRX"}</strong><span>{activeProtocol.security || "—"}</span></div>
             <dl><div><dt>Транспорт</dt><dd>{activeProtocol.transport || "—"}</dd></div><div><dt>Целевой узел</dt><dd>{activeProtocol.target || "Прямой выход"}</dd></div></dl>
           </article>
           <article className="panel protocolTelemetry protocolSettingsCard">
             <p className="eyebrow">PROTOCOL SETTINGS</p>
             <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "VRX"}</strong><span>актуальная конфигурация</span></div>
             <dl>{Object.entries(activeProtocol.settings || {}).map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{typeof value === "boolean" ? (value ? "включено" : "выключено") : value}</dd></div>)}</dl>
+            <ProtocolSettingsEditor fields={activeProtocol.editable_settings || []} draft={protocolSettingsDraft[tab] || {}} busy={busy}
+              onChange={(key, value) => changeProtocolSetting(tab, key, value)} onSave={() => void saveProtocolSettings(tab)} />
           </article>
           <article className="panel protocolTelemetry">
             <p className="eyebrow">SYSTEM SERVICE</p>
@@ -1561,6 +1600,12 @@ export default function Home() {
               <div><dt>Максимальная задержка</dt><dd>{activeProtocol.history.latency_max_ms != null ? `${activeProtocol.history.latency_max_ms.toFixed(1)} мс` : "—"}</dd></div>
               <div><dt>Текущие соединения</dt><dd>{activeProtocol.online_peers} из {activeProtocol.peers} · {duration(activeProtocol.last_handshake_age_s)}</dd></div>
             </dl>
+          </article>
+          <article className="panel protocolTelemetry protocolSettingsCard">
+            <p className="eyebrow">CHANNEL SETTINGS</p>
+            <div className="telemetryMain"><strong>MTU</strong><span>параметры новых и текущих каналов</span></div>
+            <ProtocolSettingsEditor fields={activeProtocol.editable_settings || []} draft={protocolSettingsDraft[tab] || {}} busy={busy}
+              onChange={(key, value) => changeProtocolSetting(tab, key, value)} onSave={() => void saveProtocolSettings(tab)} />
           </article>
         </div>
         <article className={`panel networkDiagnostics ${activeProtocol.diagnostics?.status || "pending"} ${diagnosticsOpen[tab] ? "open" : ""}`}>
@@ -1640,7 +1685,7 @@ export default function Home() {
       {tab === "clients" && installedProtocols.length > 0 && <section className="clientsLayout">
         <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все подключения" : labels[tab]}</h2></div><div className="clientPanelActions"><span>{protocolClients.length} подключений</span><a className="guideAction" href="/connection-guide-wg-awg.pdf" download aria-label="Скачать руководство по подключению" data-tooltip="Пошаговая инструкция для владельца устройства: установка приложения и импорт конфигурации"><span aria-hidden="true">↓</span><div><strong>Скачать гайд</strong><small>PDF · ДЛЯ ПОЛЬЗОВАТЕЛЯ</small></div></a><button className="primaryButton" onClick={openClientDialog}>Новое подключение <span>＋</span></button></div></div>
           <div className="clientTable">{protocolClients.length ? visibleClients.map((client) =>
-            <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><div className="clientIdentity"><span className={`protocol ${client.protocol}`}>{client.protocol === "wg" ? "WG" : client.protocol === "awg" ? "AW" : client.protocol === "shadowsocks" ? "SS" : "VHR"}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address}{client.active_sources?.length ? ` · источник: ${client.active_sources.join(", ")}` : ""}</small></p></div>
+            <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><div className="clientIdentity"><span className={`protocol ${client.protocol}`}>{client.protocol === "wg" ? "WG" : client.protocol === "awg" ? "AW" : client.protocol === "shadowsocks" ? "SS" : "VRX"}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address}{client.active_sources?.length ? ` · источник: ${client.active_sources.join(", ")}` : ""}</small></p></div>
               <div className="clientState"><small>СТАТУС</small><strong>{client.quality === "stable" ? "ОНЛАЙН" : client.quality === "offline" ? "ОФЛАЙН" : "НЕСТАБИЛЬНО"}</strong><span>{client.quality_reason || "состояние уточняется"}</span></div>
               <div className="traffic"><small>ТРАФИК · ПОЛУЧЕНО<b>↓ {bytes(client.rx_bytes)} · {bytes(client.rx_bps)}/с</b></small><small>ТРАФИК · ОТПРАВЛЕНО<b>↑ {bytes(client.tx_bytes)} · {bytes(client.tx_bps)}/с</b></small></div><span className="handshake"><small>{client.protocol === "wg" || client.protocol === "awg" ? "ПОСЛЕДНИЙ HANDSHAKE" : "ПОСЛЕДНЯЯ АКТИВНОСТЬ"}</small><strong>{duration(client.handshake_age_s)}</strong><span>{client.active_connections ? `${client.active_connections} ${client.protocol === "shadowsocks" ? "TCP-сокетов" : "активн."}` : "нет активных"}</span></span>
               <span className="clientLink"><small>КАЧЕСТВО КАНАЛА</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} ms` : "—"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · loss ${client.packet_loss_percent}%` : ""}</strong></span>
@@ -1714,6 +1759,29 @@ export default function Home() {
 
 function Logo() {
   return <div className="brand"><span className="brandMark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 7h12l6 6v12H13l-6-6V7Z" /><path d="M11 12h8l2 2v6h-8l-2-2v-6Z" /></svg></span><div><strong>312<span>.net</span></strong><small>INFRASTRUCTURE</small></div></div>;
+}
+function ProtocolSettingsEditor({
+  fields, draft, busy, onChange, onSave,
+}: {
+  fields: EditableProtocolSetting[];
+  draft: Record<string, string | number | boolean>;
+  busy: boolean;
+  onChange: (key: string, value: string | number | boolean) => void;
+  onSave: () => void;
+}) {
+  if (!fields.length) return <p className="protocolSettingsEmpty">Для этого протокола нет изменяемых параметров.</p>;
+  return <div className="protocolSettingsEditor">
+    {fields.map((field) => <label key={field.key}>
+      <span>{field.label}</span>
+      {field.type === "boolean" ? <input type="checkbox" checked={Boolean(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.checked)} />
+        : field.type === "select" ? <select value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)}>
+          {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+          : <input type="number" min={field.min} max={field.max} value={Number(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, Number(event.target.value))} />}
+      {field.help && <small>{field.help}</small>}
+    </label>)}
+    <button type="button" className="protocolSettingsSave" onClick={onSave} disabled={busy}>{busy ? "Применяем…" : "Применить настройки"}</button>
+  </div>;
 }
 function AutomationEditor({
   title, description, value, timer, onChange,

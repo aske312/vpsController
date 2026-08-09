@@ -345,7 +345,7 @@ def xray_user_stats(email: str, journal_age: int | None = None) -> tuple[int, in
                     uplink = int(match.group(1))
                 else:
                     downlink = int(match.group(1))
-    age, rx_bps, tx_bps = stream_sample(f"vhr:{email}", uplink, downlink, journal_age)
+    age, rx_bps, tx_bps = stream_sample(f"vrx:{email}", uplink, downlink, journal_age)
     return uplink, downlink, age, rx_bps, tx_bps
 
 
@@ -2029,6 +2029,15 @@ class ClientCreate(BaseModel):
     protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"]
 
 
+class ProtocolSettingsUpdate(BaseModel):
+    mtu: int | None = Field(default=None, ge=1280, le=1420)
+    timeout: int | None = Field(default=None, ge=30, le=3600)
+    udp_mtu: int | None = Field(default=None, ge=576, le=1500)
+    mode: Literal["tcp_only", "tcp_and_udp"] | None = None
+    no_delay: bool | None = None
+    xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
+
+
 def key(command: str) -> str:
     return run("bash", "-lc", command, check=True)
 
@@ -2165,11 +2174,13 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 restart_vless_service()
                 target_host = reality.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0]
                 port = int(reality.get("PORT", "443"))
+                xhttp_mode = str(config_data["inbounds"][0]["streamSettings"].get("xhttpSettings", {}).get("mode", "auto"))
                 query = urllib.parse.urlencode({
                     "encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome",
+                    "alpn": "h2",
                     "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", ""),
                     "type": "xhttp", "host": target_host,
-                    "path": reality.get("XHTTP_PATH", reality.get("PATH", "/")), "mode": "auto",
+                    "path": reality.get("XHTTP_PATH", reality.get("PATH", "/")), "mode": xhttp_mode,
                 })
                 client_config = f"vless://{client_uuid}@{PUBLIC_IP}:{port}?{query}#{urllib.parse.quote(payload.name)}"
                 stage = "сохранение подключения"
@@ -2286,6 +2297,141 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     return {"deleted": client_id}
 
 
+def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
+    if protocol in ("wg", "awg"):
+        return [{
+            "key": "mtu", "label": "MTU туннеля", "type": "number",
+            "value": int(values.get("mtu", 1280)), "min": 1280, "max": 1420,
+            "help": "Применяется к серверному интерфейсу и новым клиентским конфигурациям.",
+        }]
+    if protocol == "shadowsocks":
+        return [
+            {"key": "timeout", "label": "Таймаут соединения, с", "type": "number", "value": int(values.get("timeout", 300)), "min": 30, "max": 3600},
+            {"key": "udp_mtu", "label": "MTU UDP", "type": "number", "value": int(values.get("mtu", 1200)), "min": 576, "max": 1500},
+            {"key": "mode", "label": "Транспорт", "type": "select", "value": str(values.get("mode", "tcp_and_udp")), "options": [
+                {"value": "tcp_and_udp", "label": "TCP + UDP"}, {"value": "tcp_only", "label": "Только TCP"},
+            ]},
+            {"key": "no_delay", "label": "TCP no-delay", "type": "boolean", "value": bool(values.get("no_delay", True))},
+        ]
+    return [{
+        "key": "xhttp_mode", "label": "Режим XHTTP", "type": "select",
+        "value": str(values.get("mode", "auto")),
+        "options": [
+            {"value": "auto", "label": "Автоматически (рекомендуется)"},
+            {"value": "stream-one", "label": "Один поток"},
+            {"value": "stream-up", "label": "Раздельный upload"},
+            {"value": "packet-up", "label": "Пакетный upload"},
+        ],
+        "help": "Клиенты с режимом auto согласуют выбранный серверный режим автоматически.",
+    }]
+
+
+def persist_tunnel_mtu(protocol: Literal["wg", "awg"], mtu: int) -> None:
+    config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
+    interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
+    text = config.read_text(encoding="utf-8")
+    interface_end = text.find("\n[Peer]")
+    head = text if interface_end < 0 else text[:interface_end]
+    tail = "" if interface_end < 0 else text[interface_end:]
+    if re.search(r"(?im)^MTU\s*=", head):
+        head = re.sub(r"(?im)^MTU\s*=.*$", f"MTU = {mtu}", head)
+    else:
+        head = head.rstrip() + f"\nMTU = {mtu}\n"
+    temporary = config.with_suffix(config.suffix + ".tmp")
+    temporary.write_text(head + tail, encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(config)
+    run("ip", "link", "set", "dev", interface, "mtu", str(mtu), check=True)
+    env_key = "WG_MTU" if protocol == "wg" else "AWG_MTU"
+    env_text = ENV_FILE.read_text(encoding="utf-8") if ENV_FILE.exists() else ""
+    if re.search(rf"(?m)^{env_key}=", env_text):
+        env_text = re.sub(rf"(?m)^{env_key}=.*$", f'{env_key}="{mtu}"', env_text)
+    else:
+        env_text = env_text.rstrip() + f'\n{env_key}="{mtu}"\n'
+    env_temporary = ENV_FILE.with_suffix(".tmp")
+    env_temporary.write_text(env_text, encoding="utf-8")
+    os.chmod(env_temporary, 0o600)
+    env_temporary.replace(ENV_FILE)
+
+
+@app.patch("/api/protocols/{protocol}/settings")
+def update_protocol_settings(
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
+    payload: ProtocolSettingsUpdate,
+    _: None = Depends(require_token),
+) -> dict:
+    supplied = payload.model_dump(exclude_none=True)
+    allowed = {
+        "wg": {"mtu"}, "awg": {"mtu"},
+        "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay"},
+        "vless-reality-xhttp": {"xhttp_mode"},
+    }[protocol]
+    if not supplied or not set(supplied).issubset(allowed):
+        raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
+
+    if protocol in ("wg", "awg"):
+        config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
+        if not config.exists():
+            raise HTTPException(status_code=409, detail="Конфигурация туннеля не установлена")
+        persist_tunnel_mtu(protocol, int(supplied["mtu"]))
+    elif protocol == "shadowsocks":
+        paths = sorted(SHADOWSOCKS_CONFIG_DIR.glob("*.json"))
+        if not paths:
+            raise HTTPException(status_code=409, detail="Нет настроенных каналов Shadowsocks")
+        originals = {path: path.read_bytes() for path in paths}
+        try:
+            for path in paths:
+                config = json.loads(originals[path])
+                if "timeout" in supplied:
+                    config["timeout"] = supplied["timeout"]
+                if "udp_mtu" in supplied:
+                    config["mtu"] = supplied["udp_mtu"]
+                if "mode" in supplied:
+                    config["mode"] = supplied["mode"]
+                if "no_delay" in supplied:
+                    config["no_delay"] = supplied["no_delay"]
+                temporary = path.with_suffix(".tmp.json")
+                temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(temporary, 0o600)
+                temporary.replace(path)
+            for item in read_clients():
+                if item.get("protocol") == protocol:
+                    run("systemctl", "restart", f'vps-control-shadowsocks@{item.get("id", "")}.service', timeout=20, check=True)
+        except Exception as exc:
+            for path, original in originals.items():
+                path.write_bytes(original)
+                os.chmod(path, 0o600)
+            raise HTTPException(status_code=500, detail="Не удалось применить настройки Shadowsocks") from exc
+    else:
+        if not VLESS_CONFIG.exists():
+            raise HTTPException(status_code=409, detail="VRX не установлен")
+        original = VLESS_CONFIG.read_bytes()
+        temporary = VLESS_CONFIG.with_suffix(".settings.tmp.json")
+        try:
+            config = json.loads(original)
+            config["inbounds"][0]["streamSettings"]["xhttpSettings"]["mode"] = supplied["xhttp_mode"]
+            temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.chmod(temporary, 0o640)
+            os.chown(temporary, 0, 65534)
+            result = subprocess.run([XRAY_BIN, "run", "-test", "-config", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
+            if result.returncode:
+                raise RuntimeError(result.stderr.strip() or "Xray rejected configuration")
+            temporary.replace(VLESS_CONFIG)
+            restart_vless_service()
+        except Exception as exc:
+            VLESS_CONFIG.write_bytes(original)
+            os.chmod(VLESS_CONFIG, 0o640)
+            os.chown(VLESS_CONFIG, 0, 65534)
+            try:
+                restart_vless_service()
+            except Exception:
+                pass
+            raise HTTPException(status_code=500, detail="Не удалось применить настройки VRX") from exc
+        finally:
+            temporary.unlink(missing_ok=True)
+    return protocol_status(protocol)
+
+
 @app.get("/api/protocols/{protocol}/status")
 def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"], _: None = Depends(require_token)) -> dict:
     if protocol in ("shadowsocks", "vless-reality-xhttp"):
@@ -2309,6 +2455,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 "Таймаут": f"{int(config_values.get('timeout', 300) or 300)} с",
                 "TCP no-delay": bool(config_values.get("no_delay", True)),
             }
+            editable_settings = editable_protocol_settings(protocol, config_values)
             for item in protocol_clients:
                 rx, tx = service_bytes(f'vps-control-shadowsocks@{item.get("id", "")}.service')
                 age, _, _ = stream_sample(f'ss:{item.get("id", "")}', rx, tx)
@@ -2333,8 +2480,12 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                     "SNI": target.rsplit(":", 1)[0] if ":" in target else target,
                     "DNS": "на стороне клиента",
                 }
-            except (OSError, ValueError):
+                config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
+                xhttp_values = config_data["inbounds"][0]["streamSettings"].get("xhttpSettings", {})
+                editable_settings = editable_protocol_settings(protocol, xhttp_values)
+            except (OSError, ValueError, json.JSONDecodeError, KeyError, IndexError):
                 listen_port = 443
+                editable_settings = editable_protocol_settings(protocol, {})
         service_active = run("systemctl", "is-active", unit) == "active"
         return {
             "protocol": protocol, "interface": "systemd", "active": service_active,
@@ -2352,6 +2503,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
             "security": "ChaCha20-IETF-Poly1305" if protocol == "shadowsocks" else "REALITY",
             "target": target,
             "settings": settings,
+            "editable_settings": editable_settings,
         }
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
@@ -2405,6 +2557,8 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
         "address": address,
         "listen_port": listen_port,
         "mtu": mtu,
+        "settings": {"MTU": mtu},
+        "editable_settings": editable_protocol_settings(protocol, {"mtu": mtu}),
         "peers": len(rows) - 1 if rows else 0,
         "online_peers": sum(1 for age in handshakes if age < 180),
         "endpoints": endpoints,

@@ -421,12 +421,12 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /ПОСЛЕДНЯЯ АКТИВНОСТЬ/);
   assert.doesNotMatch(manager, /PUBLIC_IP="\$\{PUBLIC_IP\}"/);
   assert.match(manager, /PUBLIC_IP="\$\(env_value PUBLIC_IP\)"/);
-  assert.match(page, /image\.id === "shadowsocks" \? "SS" : "VHR"/);
+  assert.match(page, /image\.id === "shadowsocks" \? "SS" : "VRX"/);
   assert.match(page, /<small>\{image\.description\}<\/small>/);
   assert.match(page, /protocolImages\.find\(\(image\) => image\.id === protocol\)\?\.description/);
   assert.match(page, /setTab\(image\.id as Protocol\)/);
   assert.match(page, /LIVE TUNNEL/);
-  assert.match(page, /client\.protocol === "shadowsocks" \? "SS" : "VHR"/);
+  assert.match(page, /client\.protocol === "shadowsocks" \? "SS" : "VRX"/);
   assert.match(page, /if \(Boolean\(current\?\.installed\) === installed\) return;/);
   assert.match(manager.match(/install_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
   assert.match(manager.match(/remove_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
@@ -451,6 +451,25 @@ test("the interface uses one fixed visual design without personalization", async
   assert.match(page, /<main className="shell">/);
   assert.match(css, /\.shell \.metricCard \{ border-left: 2px solid var\(--green\)/);
   assert.match(manager, /rm -f -- "\$\{DATA_DIR\}\/personalization\.json"/);
+});
+
+test("protocol pages safely edit channel settings and VRX links select HTTP2", async () => {
+  const [page, api, css] = await Promise.all([
+    read("app/page.tsx"), read("api/main.py"), read("app/globals.css"),
+  ]);
+  assert.match(api, /@app\.patch\("\/api\/protocols\/\{protocol\}\/settings"\)/);
+  assert.match(api, /class ProtocolSettingsUpdate/);
+  assert.match(api, /persist_tunnel_mtu/);
+  assert.match(api, /XRAY_BIN, "run", "-test"/);
+  assert.match(api, /originals = \{path: path\.read_bytes\(\) for path in paths\}/);
+  assert.match(api, /"alpn": "h2"/);
+  assert.match(api, /"mode": xhttp_mode/);
+  assert.match(api, /"editable_settings": editable_settings/);
+  assert.match(page, /function ProtocolSettingsEditor/);
+  assert.match(page, /saveProtocolSettings/);
+  assert.match(page, /method: "PATCH"/);
+  assert.match(page, /CHANNEL SETTINGS/);
+  assert.match(css, /\.protocolSettingsEditor/);
 });
 
 test("manual releases are prebuilt and installed without Docker or package upgrades", async () => {

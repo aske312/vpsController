@@ -641,6 +641,14 @@ input, select { height: 46px; font-size: 11px; }
 .protocolActions button:hover { border-color: #3b5d54; color: var(--text); }
 .protocolActions .removeProtocolButton { border-color: #493033; color: #ef8c82; }
 .protocolActions button:disabled { opacity: .45; cursor: wait; }
+.protocolSettingsEditor { display: grid; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.protocolSettingsEditor label { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr); align-items: center; gap: 7px 10px; color: var(--muted); font-size: 9px; }
+.protocolSettingsEditor input:not([type="checkbox"]), .protocolSettingsEditor select { width: 100%; min-width: 0; height: 34px; border: 1px solid var(--line); border-radius: 6px; background: #0f1719; color: var(--text); padding: 0 9px; font: inherit; }
+.protocolSettingsEditor input[type="checkbox"] { justify-self: end; width: 18px; height: 18px; accent-color: var(--accent); }
+.protocolSettingsEditor label small { grid-column: 1 / -1; color: var(--dim); line-height: 1.45; }
+.protocolSettingsSave { height: 36px; border: 1px solid #315a4f; border-radius: 6px; background: #163129; color: #9fe4ca; font-size: 9px; cursor: pointer; }
+.protocolSettingsSave:disabled { opacity: .5; cursor: wait; }
+.protocolSettingsEmpty { margin-top: 12px; color: var(--dim); font-size: 9px; }
 .protocolMonitorGrid { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(230px, .75fr)); gap: 12px; }
 .streamProtocolDetails { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .streamProtocolDetails .protocolTelemetry { min-width: 0; }
