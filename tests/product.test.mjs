@@ -495,6 +495,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /env_updates\["AWG_DNS"\]/);
   assert.match(api, /env_updates\["SHADOWSOCKS_DNS"\]/);
   assert.match(api, /env_updates\["VRX_DNS"\]/);
+  assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
   assert.match(api, /def apply_vrx_dns/);
   assert.match(api, /query_values\["dns"\]/);
   assert.match(api, /urllib\.parse\.urlencode\(\{"dns": ss_dns\}\)/);

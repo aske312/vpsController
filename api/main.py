@@ -2105,15 +2105,44 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
         env_updates["SHADOWSOCKS_DNS"] = addresses
     if data["apply_vrx"]:
         env_updates["VRX_DNS"] = addresses
-    if data["apply_vrx"] and VLESS_CONFIG.exists():
-        apply_vrx_dns(selected_addresses)
-    if env_updates:
-        persist_env_values(env_updates)
-    DNS_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    env_original = ENV_FILE.read_bytes() if ENV_FILE.exists() else None
+    vrx_original = VLESS_CONFIG.read_bytes() if data["apply_vrx"] and VLESS_CONFIG.exists() else None
+    settings_original = DNS_SETTINGS_FILE.read_bytes() if DNS_SETTINGS_FILE.exists() else None
     temporary = DNS_SETTINGS_FILE.with_suffix(".tmp")
-    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    temporary.replace(DNS_SETTINGS_FILE)
+    try:
+        if env_updates:
+            persist_env_values(env_updates)
+        if vrx_original is not None:
+            apply_vrx_dns(selected_addresses)
+        DNS_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        temporary.replace(DNS_SETTINGS_FILE)
+    except Exception as exc:
+        logger.exception("DNS settings transaction failed; restoring previous state")
+        if env_original is None:
+            ENV_FILE.unlink(missing_ok=True)
+        else:
+            ENV_FILE.write_bytes(env_original)
+            os.chmod(ENV_FILE, 0o600)
+        if settings_original is None:
+            DNS_SETTINGS_FILE.unlink(missing_ok=True)
+        else:
+            DNS_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            DNS_SETTINGS_FILE.write_bytes(settings_original)
+            os.chmod(DNS_SETTINGS_FILE, 0o600)
+        if vrx_original is not None:
+            VLESS_CONFIG.write_bytes(vrx_original)
+            os.chmod(VLESS_CONFIG, 0o640)
+            os.chown(VLESS_CONFIG, 0, 65534)
+            try:
+                restart_vless_service()
+            except Exception:
+                logger.exception("VRX restart failed during DNS rollback")
+        detail = exc.detail if isinstance(exc, HTTPException) else "Не удалось сохранить DNS; предыдущие настройки восстановлены"
+        raise HTTPException(status_code=500, detail=detail) from exc
+    finally:
+        temporary.unlink(missing_ok=True)
     return dns_status()
 
 
@@ -2587,10 +2616,8 @@ def persist_tunnel_mtu(protocol: Literal["wg", "awg"], mtu: int) -> None:
         env_text = re.sub(rf"(?m)^{env_key}=.*$", f'{env_key}="{mtu}"', env_text)
     else:
         env_text = env_text.rstrip() + f'\n{env_key}="{mtu}"\n'
-    env_temporary = ENV_FILE.with_suffix(".tmp")
-    env_temporary.write_text(env_text, encoding="utf-8")
-    os.chmod(env_temporary, 0o600)
-    env_temporary.replace(ENV_FILE)
+    ENV_FILE.write_text(env_text, encoding="utf-8")
+    os.chmod(ENV_FILE, 0o600)
 
 
 def persist_env_values(values: dict[str, str | int | bool]) -> None:
@@ -2602,10 +2629,11 @@ def persist_env_values(values: dict[str, str | int | bool]) -> None:
             env_text = re.sub(rf"(?m)^{re.escape(key)}=.*$", lambda _: line, env_text)
         else:
             env_text = env_text.rstrip() + "\n" + line + "\n"
-    temporary = ENV_FILE.with_suffix(".settings.tmp")
-    temporary.write_text(env_text, encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    temporary.replace(ENV_FILE)
+    # ProtectSystem=strict exposes the exact /etc/vps-control.env file as
+    # writable, not arbitrary sibling paths in /etc. Writing a sibling temp
+    # file therefore fails with EROFS inside the API service sandbox.
+    ENV_FILE.write_text(env_text, encoding="utf-8")
+    os.chmod(ENV_FILE, 0o600)
 
 
 @app.patch("/api/protocols/{protocol}/settings")
