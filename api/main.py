@@ -2174,7 +2174,7 @@ class ProtocolSettingsUpdate(BaseModel):
     keepalive: int | None = Field(default=None, ge=0, le=300)
     loglevel: Literal["debug", "info", "warning", "error", "none"] | None = None
     xpadding: str | None = Field(default=None, min_length=1, max_length=32, pattern=r"^\d+(?:-\d+)?$")
-    sni: str | None = Field(default=None, min_length=4, max_length=253, pattern=r"^(?=.{4,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
+    sni: str | None = Field(default=None, min_length=4, max_length=253, pattern=r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
 
 
 def key(command: str) -> str:

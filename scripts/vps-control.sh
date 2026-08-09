@@ -1160,6 +1160,12 @@ install_prebuilt_release() {
   [[ -n "${installed_requirements_hash}" && "${requirements_hash}" == "${installed_requirements_hash}" ]] \
     || { rm -rf -- "${stage_root}"; die "Python-зависимости изменились; подготовьте полный системный релиз."; }
 
+  # Import the candidate API with the installed production dependencies before
+  # replacing the working tree. This catches Pydantic schema and other module
+  # initialization errors without interrupting the running release.
+  PYTHONPATH="${payload}" "${INSTALL_DIR}/venv/bin/python" -c 'import api.main' >/dev/null \
+    || { rm -rf -- "${stage_root}"; die "API нового релиза не проходит проверку импорта; обновление отменено до остановки служб."; }
+
   rollback="${INSTALL_DIR}.rollback.$(date -u +%Y%m%dT%H%M%SZ)"
   info "Установка заранее собранного релиза без Docker и сборки на VPS"
   if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -Eq '^vps-control-(web|gateway)-1$'; then
@@ -1182,6 +1188,8 @@ install_prebuilt_release() {
     || ! write_integrity_manifest \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
+    || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
+      "http://127.0.0.1:8000/api/health" >/dev/null \
     || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
       "http://127.0.0.1:${HTTP_PORT}/" >/dev/null; then
     warn "новый релиз не прошёл проверку; выполняется откат."

@@ -537,5 +537,7 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(manager, /TimeoutStopSec=15/);
   assert.match(manager, /KillMode=mixed/);
   assert.match(manager, /mv -- "\$\{INSTALL_DIR\}\/venv" "\$\{rollback\}\/venv"/);
+  assert.match(manager, /PYTHONPATH="\$\{payload\}" "\$\{INSTALL_DIR\}\/venv\/bin\/python" -c 'import api\.main'/);
+  assert.match(manager, /http:\/\/127\.0\.0\.1:8000\/api\/health/);
   assert.match(manager, /install -d -m 0755 "\$\{INSTALL_DIR\}"\s+chmod 0755 "\$\{INSTALL_DIR\}"/);
 });
