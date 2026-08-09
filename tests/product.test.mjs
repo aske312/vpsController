@@ -464,12 +464,18 @@ test("protocol pages safely edit channel settings and VRX links select HTTP2", a
   assert.match(api, /originals = \{path: path\.read_bytes\(\) for path in paths\}/);
   assert.match(api, /"alpn": "h2"/);
   assert.match(api, /"mode": xhttp_mode/);
+  assert.match(api, /query_values\["extra"\]/);
+  assert.match(api, /"dns", "keepalive"/);
+  assert.match(api, /"loglevel", "xpadding"/);
+  assert.match(api, /allow_methods=\["GET", "POST", "PUT", "PATCH", "DELETE"\]/);
   assert.match(api, /"editable_settings": editable_settings/);
   assert.match(page, /function ProtocolSettingsEditor/);
+  assert.match(page, /function ProtocolSettingsPanel/);
   assert.match(page, /saveProtocolSettings/);
   assert.match(page, /method: "PATCH"/);
-  assert.match(page, /CHANNEL SETTINGS/);
+  assert.match(page, /CHANNEL CONFIGURATION/);
   assert.match(css, /\.protocolSettingsEditor/);
+  assert.match(css, /\.protocolConfiguration/);
 });
 
 test("manual releases are prebuilt and installed without Docker or package upgrades", async () => {

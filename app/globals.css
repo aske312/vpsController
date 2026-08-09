@@ -641,16 +641,25 @@ input, select { height: 46px; font-size: 11px; }
 .protocolActions button:hover { border-color: #3b5d54; color: var(--text); }
 .protocolActions .removeProtocolButton { border-color: #493033; color: #ef8c82; }
 .protocolActions button:disabled { opacity: .45; cursor: wait; }
-.protocolSettingsEditor { display: grid; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
-.protocolSettingsEditor label { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr); align-items: center; gap: 7px 10px; color: var(--muted); font-size: 9px; }
+.protocolConfiguration { display: grid; gap: 18px; border-left: 3px solid #407a68; background: linear-gradient(120deg, #101b1a, #101617 68%); }
+.protocolConfiguration > header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.protocolConfiguration > header h3 { margin: 4px 0 6px; font-size: 18px; }
+.protocolConfiguration > header > div > span { color: var(--muted); font-size: 9px; }
+.configurationSafety { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #29483f; border-radius: 7px; background: #0d1917; }
+.configurationSafety > i { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: var(--green); color: #0b1714; font-style: normal; font-weight: 700; }
+.configurationSafety p { display: grid; gap: 3px; margin: 0; }
+.configurationSafety strong { font-size: 9px; }
+.configurationSafety small { color: var(--muted); font-size: 7px; }
+.protocolSettingsEditor { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+.protocolSettingsEditor label { min-height: 86px; display: grid; grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr); align-content: start; align-items: center; gap: 8px 10px; padding: 12px; border: 1px solid #263432; border-radius: 7px; background: #0d1516; color: var(--muted); font-size: 9px; }
 .protocolSettingsEditor input:not([type="checkbox"]), .protocolSettingsEditor select { width: 100%; min-width: 0; height: 34px; border: 1px solid var(--line); border-radius: 6px; background: #0f1719; color: var(--text); padding: 0 9px; font: inherit; }
 .protocolSettingsEditor input[type="checkbox"] { justify-self: end; width: 18px; height: 18px; accent-color: var(--accent); }
 .protocolSettingsEditor label small { grid-column: 1 / -1; color: var(--dim); line-height: 1.45; }
-.protocolSettingsSave { height: 36px; border: 1px solid #315a4f; border-radius: 6px; background: #163129; color: #9fe4ca; font-size: 9px; cursor: pointer; }
+.protocolSettingsSave { grid-column: 1 / -1; justify-self: end; min-width: 210px; height: 38px; border: 1px solid #315a4f; border-radius: 6px; background: #163129; color: #9fe4ca; font-size: 9px; cursor: pointer; }
 .protocolSettingsSave:disabled { opacity: .5; cursor: wait; }
 .protocolSettingsEmpty { margin-top: 12px; color: var(--dim); font-size: 9px; }
 .protocolMonitorGrid { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(230px, .75fr)); gap: 12px; }
-.streamProtocolDetails { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.streamProtocolDetails { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .streamProtocolDetails .protocolTelemetry { min-width: 0; }
 .streamProtocolDetails dd { overflow-wrap: anywhere; }
 .protocolFlow, .protocolTelemetry { min-height: 190px; }
@@ -785,6 +794,7 @@ input, select { height: 46px; font-size: 11px; }
   .overview { grid-template-columns: 1fr; }
   .metrics, .protocolSummary { grid-column: 1; }
   .protocolMonitorGrid { grid-template-columns: 1fr 1fr; }
+  .protocolSettingsEditor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .guideSteps { grid-template-columns: repeat(2, 1fr); }
   .protocolFlow { grid-column: 1 / -1; }
 }
@@ -820,6 +830,10 @@ input, select { height: 46px; font-size: 11px; }
   .protocolHealth { width: 100%; }
   .protocolControlStack { width: 100%; min-width: 0; }
   .protocolMonitorGrid { grid-template-columns: 1fr; }
+  .protocolConfiguration > header { align-items: flex-start; flex-direction: column; }
+  .configurationSafety { width: 100%; }
+  .protocolSettingsEditor { grid-template-columns: 1fr; }
+  .protocolSettingsSave { width: 100%; min-width: 0; }
   .protocolFlow { grid-column: 1; }
   .flowValues { grid-template-columns: 1fr; }
   .eventRows { grid-template-columns: 1fr; }

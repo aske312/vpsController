@@ -31,7 +31,7 @@ CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://l
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -58,6 +58,10 @@ except ValueError:
 if not 1280 <= WG_MTU <= 1420:
     WG_MTU = 1280
 AWG_MTU = int(os.getenv("AWG_MTU", "1280"))
+WG_DNS = os.getenv("WG_DNS", "1.1.1.1, 1.0.0.1")
+AWG_DNS = os.getenv("AWG_DNS", "1.1.1.1, 1.0.0.1")
+WG_KEEPALIVE = int(os.getenv("WG_KEEPALIVE", "25"))
+AWG_KEEPALIVE = int(os.getenv("AWG_KEEPALIVE", "25"))
 try:
     SHADOWSOCKS_PORT_START = int(os.getenv("SHADOWSOCKS_PORT_START", "30000"))
 except ValueError:
@@ -2036,10 +2040,25 @@ class ProtocolSettingsUpdate(BaseModel):
     mode: Literal["tcp_only", "tcp_and_udp"] | None = None
     no_delay: bool | None = None
     xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
+    dns: str | None = Field(default=None, min_length=7, max_length=128, pattern=r"^[0-9a-fA-F:., ]+$")
+    keepalive: int | None = Field(default=None, ge=0, le=300)
+    loglevel: Literal["debug", "info", "warning", "error", "none"] | None = None
+    xpadding: str | None = Field(default=None, min_length=1, max_length=32, pattern=r"^\d+(?:-\d+)?$")
 
 
 def key(command: str) -> str:
     return run("bash", "-lc", command, check=True)
+
+
+def current_env_value(name: str, fallback: str) -> str:
+    try:
+        line = next((row for row in reversed(ENV_FILE.read_text(encoding="utf-8").splitlines()) if row.startswith(name + "=")), "")
+        value = line.split("=", 1)[1].strip() if line else ""
+        if len(value) >= 2 and value[0] == value[-1] == '"':
+            value = value[1:-1]
+        return value or fallback
+    except OSError:
+        return fallback
 
 
 def shadowsocks_firewall(action: Literal["add", "delete"], port: int) -> None:
@@ -2174,14 +2193,18 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 restart_vless_service()
                 target_host = reality.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0]
                 port = int(reality.get("PORT", "443"))
-                xhttp_mode = str(config_data["inbounds"][0]["streamSettings"].get("xhttpSettings", {}).get("mode", "auto"))
-                query = urllib.parse.urlencode({
+                xhttp_settings = config_data["inbounds"][0]["streamSettings"].get("xhttpSettings", {})
+                xhttp_mode = str(xhttp_settings.get("mode", "auto"))
+                query_values = {
                     "encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome",
                     "alpn": "h2",
                     "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", ""),
                     "type": "xhttp", "host": target_host,
                     "path": reality.get("XHTTP_PATH", reality.get("PATH", "/")), "mode": xhttp_mode,
-                })
+                }
+                if xhttp_settings.get("extra"):
+                    query_values["extra"] = json.dumps(xhttp_settings["extra"], separators=(",", ":"))
+                query = urllib.parse.urlencode(query_values)
                 client_config = f"vless://{client_uuid}@{PUBLIC_IP}:{port}?{query}#{urllib.parse.quote(payload.name)}"
                 stage = "сохранение подключения"
                 items = read_clients()
@@ -2233,10 +2256,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         extra = "".join(f"{key} = {value}\n" for key, value in AWG_PROFILE.items())
     port = WG_PORT if payload.protocol == "wg" else AWG_PORT
     client_config = (
-        f"[Interface]\nAddress = {address}/32\nDNS = 1.1.1.1, 1.0.0.1\n"
+        f"[Interface]\nAddress = {address}/32\nDNS = {current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS)}\n"
         f"PrivateKey = {private_key}\nMTU = {AWG_MTU if payload.protocol == 'awg' else WG_MTU}\n{extra}\n[Peer]\n"
         f"PublicKey = {server_public}\nPresharedKey = {psk}\nAllowedIPs = 0.0.0.0/0\n"
-        f"Endpoint = {PUBLIC_IP}:{port}\nPersistentKeepalive = 25\n"
+        f"Endpoint = {PUBLIC_IP}:{port}\nPersistentKeepalive = {current_env_value('AWG_KEEPALIVE', str(AWG_KEEPALIVE)) if payload.protocol == 'awg' else current_env_value('WG_KEEPALIVE', str(WG_KEEPALIVE))}\n"
     )
     items = read_clients()
     items.append(
@@ -2299,10 +2322,19 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
 
 def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
     if protocol in ("wg", "awg"):
+        prefix = "WG" if protocol == "wg" else "AWG"
         return [{
             "key": "mtu", "label": "MTU туннеля", "type": "number",
             "value": int(values.get("mtu", 1280)), "min": 1280, "max": 1420,
             "help": "Применяется к серверному интерфейсу и новым клиентским конфигурациям.",
+        }, {
+            "key": "dns", "label": "DNS новых профилей", "type": "text",
+            "value": str(values.get("dns", current_env_value(f"{prefix}_DNS", "1.1.1.1, 1.0.0.1"))),
+            "help": "Список DNS через запятую. Применяется к новым конфигурациям.",
+        }, {
+            "key": "keepalive", "label": "Keepalive новых профилей, с", "type": "number",
+            "value": int(values.get("keepalive", current_env_value(f"{prefix}_KEEPALIVE", "25"))), "min": 0, "max": 300,
+            "help": "0 отключает keepalive; 25 секунд подходит для NAT и мобильных сетей.",
         }]
     if protocol == "shadowsocks":
         return [
@@ -2323,6 +2355,12 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             {"value": "packet-up", "label": "Пакетный upload"},
         ],
         "help": "Клиенты с режимом auto согласуют выбранный серверный режим автоматически.",
+    }, {
+        "key": "loglevel", "label": "Уровень журнала", "type": "select", "value": str(values.get("loglevel", "warning")),
+        "options": [{"value": value, "label": label} for value, label in (("debug", "Debug"), ("info", "Info"), ("warning", "Warning"), ("error", "Error"), ("none", "Отключён"))],
+    }, {
+        "key": "xpadding", "label": "XHTTP padding, байт", "type": "text", "value": str(values.get("xPaddingBytes", "100-1000")),
+        "help": "Одно число или диапазон, например 100-1000.",
     }]
 
 
@@ -2354,6 +2392,21 @@ def persist_tunnel_mtu(protocol: Literal["wg", "awg"], mtu: int) -> None:
     env_temporary.replace(ENV_FILE)
 
 
+def persist_env_values(values: dict[str, str | int | bool]) -> None:
+    env_text = ENV_FILE.read_text(encoding="utf-8") if ENV_FILE.exists() else ""
+    for key, value in values.items():
+        encoded = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+        line = f'{key}="{encoded}"'
+        if re.search(rf"(?m)^{re.escape(key)}=", env_text):
+            env_text = re.sub(rf"(?m)^{re.escape(key)}=.*$", lambda _: line, env_text)
+        else:
+            env_text = env_text.rstrip() + "\n" + line + "\n"
+    temporary = ENV_FILE.with_suffix(".settings.tmp")
+    temporary.write_text(env_text, encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(ENV_FILE)
+
+
 @app.patch("/api/protocols/{protocol}/settings")
 def update_protocol_settings(
     protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
@@ -2362,9 +2415,9 @@ def update_protocol_settings(
 ) -> dict:
     supplied = payload.model_dump(exclude_none=True)
     allowed = {
-        "wg": {"mtu"}, "awg": {"mtu"},
+        "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
         "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay"},
-        "vless-reality-xhttp": {"xhttp_mode"},
+        "vless-reality-xhttp": {"xhttp_mode", "loglevel", "xpadding"},
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
         raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
@@ -2373,7 +2426,13 @@ def update_protocol_settings(
         config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
         if not config.exists():
             raise HTTPException(status_code=409, detail="Конфигурация туннеля не установлена")
-        persist_tunnel_mtu(protocol, int(supplied["mtu"]))
+        if "mtu" in supplied:
+            persist_tunnel_mtu(protocol, int(supplied["mtu"]))
+        prefix = "WG" if protocol == "wg" else "AWG"
+        persist_env_values({
+            **({f"{prefix}_DNS": supplied["dns"]} if "dns" in supplied else {}),
+            **({f"{prefix}_KEEPALIVE": supplied["keepalive"]} if "keepalive" in supplied else {}),
+        })
     elif protocol == "shadowsocks":
         paths = sorted(SHADOWSOCKS_CONFIG_DIR.glob("*.json"))
         if not paths:
@@ -2409,7 +2468,12 @@ def update_protocol_settings(
         temporary = VLESS_CONFIG.with_suffix(".settings.tmp.json")
         try:
             config = json.loads(original)
-            config["inbounds"][0]["streamSettings"]["xhttpSettings"]["mode"] = supplied["xhttp_mode"]
+            if "xhttp_mode" in supplied:
+                config["inbounds"][0]["streamSettings"]["xhttpSettings"]["mode"] = supplied["xhttp_mode"]
+            if "xpadding" in supplied:
+                config["inbounds"][0]["streamSettings"]["xhttpSettings"].setdefault("extra", {})["xPaddingBytes"] = supplied["xpadding"]
+            if "loglevel" in supplied:
+                config.setdefault("log", {})["loglevel"] = supplied["loglevel"]
             temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
             os.chmod(temporary, 0o640)
             os.chown(temporary, 0, 65534)
@@ -2481,7 +2545,9 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                     "DNS": "на стороне клиента",
                 }
                 config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
-                xhttp_values = config_data["inbounds"][0]["streamSettings"].get("xhttpSettings", {})
+                xhttp_values = dict(config_data["inbounds"][0]["streamSettings"].get("xhttpSettings", {}))
+                xhttp_values["loglevel"] = config_data.get("log", {}).get("loglevel", "warning")
+                xhttp_values["xPaddingBytes"] = xhttp_values.get("extra", {}).get("xPaddingBytes", "100-1000")
                 editable_settings = editable_protocol_settings(protocol, xhttp_values)
             except (OSError, ValueError, json.JSONDecodeError, KeyError, IndexError):
                 listen_port = 443

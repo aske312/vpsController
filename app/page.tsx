@@ -126,7 +126,7 @@ const bytes = (value = 0) => {
   return `${(value / 1024 ** index).toFixed(index > 2 ? 1 : 0)} ${units[index]}`;
 };
 type EditableProtocolSetting = {
-  key: string; label: string; type: "number" | "select" | "boolean";
+  key: string; label: string; type: "number" | "select" | "boolean" | "text";
   value: string | number | boolean; min?: number; max?: number; help?: string;
   options?: Array<{ value: string; label: string }>;
 };
@@ -1542,8 +1542,6 @@ export default function Home() {
             <p className="eyebrow">PROTOCOL SETTINGS</p>
             <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "VRX"}</strong><span>актуальная конфигурация</span></div>
             <dl>{Object.entries(activeProtocol.settings || {}).map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{typeof value === "boolean" ? (value ? "включено" : "выключено") : value}</dd></div>)}</dl>
-            <ProtocolSettingsEditor fields={activeProtocol.editable_settings || []} draft={protocolSettingsDraft[tab] || {}} busy={busy}
-              onChange={(key, value) => changeProtocolSetting(tab, key, value)} onSave={() => void saveProtocolSettings(tab)} />
           </article>
           <article className="panel protocolTelemetry">
             <p className="eyebrow">SYSTEM SERVICE</p>
@@ -1551,6 +1549,8 @@ export default function Home() {
             <dl><div><dt>Служба</dt><dd>{activeProtocol.unit || "—"}</dd></div><div><dt>Запущена с</dt><dd>{activeProtocol.active_since ? new Date(activeProtocol.active_since).toLocaleString("ru-RU") : "—"}</dd></div><div><dt>Версия образа</dt><dd>{activeProtocolImage?.version || "—"}</dd></div></dl>
           </article>
         </div>
+        <ProtocolSettingsPanel protocol={tab} fields={activeProtocol.editable_settings || []} draft={protocolSettingsDraft[tab] || {}} busy={busy}
+          onChange={(key, value) => changeProtocolSetting(tab, key, value)} onSave={() => void saveProtocolSettings(tab)} />
       </section>}
 
       {(tab === "wg" || tab === "awg") && activeProtocol && <section className="protocolMonitor">
@@ -1601,13 +1601,9 @@ export default function Home() {
               <div><dt>Текущие соединения</dt><dd>{activeProtocol.online_peers} из {activeProtocol.peers} · {duration(activeProtocol.last_handshake_age_s)}</dd></div>
             </dl>
           </article>
-          <article className="panel protocolTelemetry protocolSettingsCard">
-            <p className="eyebrow">CHANNEL SETTINGS</p>
-            <div className="telemetryMain"><strong>MTU</strong><span>параметры новых и текущих каналов</span></div>
-            <ProtocolSettingsEditor fields={activeProtocol.editable_settings || []} draft={protocolSettingsDraft[tab] || {}} busy={busy}
-              onChange={(key, value) => changeProtocolSetting(tab, key, value)} onSave={() => void saveProtocolSettings(tab)} />
-          </article>
         </div>
+        <ProtocolSettingsPanel protocol={tab} fields={activeProtocol.editable_settings || []} draft={protocolSettingsDraft[tab] || {}} busy={busy}
+          onChange={(key, value) => changeProtocolSetting(tab, key, value)} onSave={() => void saveProtocolSettings(tab)} />
         <article className={`panel networkDiagnostics ${activeProtocol.diagnostics?.status || "pending"} ${diagnosticsOpen[tab] ? "open" : ""}`}>
           <button className="resourceToggle diagnosticToggle" onClick={() => toggleNetworkDiagnostics(tab)} aria-expanded={Boolean(diagnosticsOpen[tab])}>
             <div><p className="eyebrow">NETWORK DIAGNOSTICS</p><h3>Причины нестабильности сети и подключений</h3></div>
@@ -1760,6 +1756,22 @@ export default function Home() {
 function Logo() {
   return <div className="brand"><span className="brandMark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 7h12l6 6v12H13l-6-6V7Z" /><path d="M11 12h8l2 2v6h-8l-2-2v-6Z" /></svg></span><div><strong>312<span>.net</span></strong><small>INFRASTRUCTURE</small></div></div>;
 }
+function ProtocolSettingsPanel({
+  protocol, fields, draft, busy, onChange, onSave,
+}: {
+  protocol: Protocol; fields: EditableProtocolSetting[]; draft: Record<string, string | number | boolean>;
+  busy: boolean; onChange: (key: string, value: string | number | boolean) => void; onSave: () => void;
+}) {
+  const tunnel = protocol === "wg" || protocol === "awg";
+  return <article className="panel protocolConfiguration">
+    <header>
+      <div><p className="eyebrow">CHANNEL CONFIGURATION</p><h3>Настройки {labels[protocol]}</h3>
+        <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
+      <div className="configurationSafety"><i>✓</i><p><strong>Безопасное применение</strong><small>валидация и автоматический откат</small></p></div>
+    </header>
+    <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} onChange={onChange} onSave={onSave} />
+  </article>;
+}
 function ProtocolSettingsEditor({
   fields, draft, busy, onChange, onSave,
 }: {
@@ -1777,7 +1789,8 @@ function ProtocolSettingsEditor({
         : field.type === "select" ? <select value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)}>
           {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
-          : <input type="number" min={field.min} max={field.max} value={Number(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, Number(event.target.value))} />}
+          : field.type === "number" ? <input type="number" min={field.min} max={field.max} value={Number(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, Number(event.target.value))} />
+            : <input type="text" value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)} />}
       {field.help && <small>{field.help}</small>}
     </label>)}
     <button type="button" className="protocolSettingsSave" onClick={onSave} disabled={busy}>{busy ? "Применяем…" : "Применить настройки"}</button>
