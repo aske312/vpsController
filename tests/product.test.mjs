@@ -481,6 +481,8 @@ test("protocol pages safely edit channel settings and VRX links select HTTP2", a
 test("DNS control provides Russian resolvers, live checks and protocol application", async () => {
   const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), read("app/globals.css")]);
   assert.match(page, /type Tab = "overview" \| "dns"/);
+  assert.match(page, /\(\["overview", "clients"\] as Tab\[\]\)/);
+  assert.match(page, /\(\["dns", "security", "application", "services"\] as Tab\[\]\)/);
   assert.match(page, /CENTRAL DNS CONTROL/);
   assert.match(page, /Проверить все DNS/);
   assert.match(page, /Собственный DNS/);
@@ -498,6 +500,9 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
   assert.match(api, /def apply_vrx_dns/);
   assert.match(api, /query_values\["dns"\]/);
+  assert.match(api, /def validate_reality_sni/);
+  assert.match(api, /reality_settings\["serverNames"\] = \[supplied\["sni"\]\]/);
+  assert.match(api, /persist_vrx_target\(supplied\["sni"\]\)/);
   assert.match(api, /urllib\.parse\.urlencode\(\{"dns": ss_dns\}\)/);
   assert.match(page, /apply_shadowsocks/);
   assert.match(page, /apply_vrx/);

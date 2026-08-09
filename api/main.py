@@ -2174,6 +2174,7 @@ class ProtocolSettingsUpdate(BaseModel):
     keepalive: int | None = Field(default=None, ge=0, le=300)
     loglevel: Literal["debug", "info", "warning", "error", "none"] | None = None
     xpadding: str | None = Field(default=None, min_length=1, max_length=32, pattern=r"^\d+(?:-\d+)?$")
+    sni: str | None = Field(default=None, min_length=4, max_length=253, pattern=r"^(?=.{4,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
 
 
 def key(command: str) -> str:
@@ -2573,6 +2574,10 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             {"key": "dns", "label": "DNS новых профилей", "type": "text", "value": current_env_value("SHADOWSOCKS_DNS", "1.1.1.1, 1.0.0.1"), "help": "Добавляется в новые SS-ссылки; применение зависит от поддержки DNS-параметра клиентом."},
         ]
     return [{
+        "key": "sni", "label": "SNI маскировки", "type": "text",
+        "value": str(values.get("sni", "www.intel.com")),
+        "help": "Публичный HTTPS-домен без https:// и порта. Изменение требует заново импортировать существующие VRX-профили.",
+    }, {
         "key": "xhttp_mode", "label": "Режим XHTTP", "type": "select",
         "value": str(values.get("mode", "auto")),
         "options": [
@@ -2636,6 +2641,37 @@ def persist_env_values(values: dict[str, str | int | bool]) -> None:
     os.chmod(ENV_FILE, 0o600)
 
 
+def validate_reality_sni(host: str) -> None:
+    try:
+        addresses = {row[4][0] for row in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)}
+    except socket.gaierror as exc:
+        raise HTTPException(status_code=422, detail="SNI не разрешается через DNS") from exc
+    if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
+        raise HTTPException(status_code=422, detail="SNI должен указывать только на публичные IP-адреса")
+    try:
+        result = subprocess.run(
+            ["openssl", "s_client", "-connect", f"{host}:443", "-servername", host, "-brief"],
+            input="", capture_output=True, text=True, timeout=8, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise HTTPException(status_code=422, detail="Не удалось проверить TLS выбранного SNI") from exc
+    if result.returncode != 0 or "Protocol version:" not in (result.stdout + result.stderr):
+        raise HTTPException(status_code=422, detail="Адрес SNI не завершает корректное TLS-соединение на порту 443")
+
+
+def persist_vrx_target(host: str) -> None:
+    text = VLESS_ENV.read_text(encoding="utf-8")
+    target = f"TARGET={host}:443"
+    if re.search(r"(?m)^TARGET=", text):
+        text = re.sub(r"(?m)^TARGET=.*$", target, text)
+    else:
+        text = text.rstrip() + "\n" + target + "\n"
+    temporary = VLESS_ENV.with_suffix(".env.tmp")
+    temporary.write_text(text, encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(VLESS_ENV)
+
+
 @app.patch("/api/protocols/{protocol}/settings")
 def update_protocol_settings(
     protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
@@ -2646,7 +2682,7 @@ def update_protocol_settings(
     allowed = {
         "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
         "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
-        "vless-reality-xhttp": {"xhttp_mode", "loglevel", "xpadding", "dns"},
+        "vless-reality-xhttp": {"xhttp_mode", "loglevel", "xpadding", "dns", "sni"},
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
         raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
@@ -2696,9 +2732,15 @@ def update_protocol_settings(
         if not VLESS_CONFIG.exists():
             raise HTTPException(status_code=409, detail="VRX не установлен")
         original = VLESS_CONFIG.read_bytes()
+        env_original = VLESS_ENV.read_bytes() if VLESS_ENV.exists() else None
         temporary = VLESS_CONFIG.with_suffix(".settings.tmp.json")
         try:
             config = json.loads(original)
+            if "sni" in supplied:
+                validate_reality_sni(supplied["sni"])
+                reality_settings = config["inbounds"][0]["streamSettings"]["realitySettings"]
+                reality_settings["target"] = f'{supplied["sni"]}:443'
+                reality_settings["serverNames"] = [supplied["sni"]]
             if "xhttp_mode" in supplied:
                 config["inbounds"][0]["streamSettings"]["xhttpSettings"]["mode"] = supplied["xhttp_mode"]
             if "xpadding" in supplied:
@@ -2716,6 +2758,8 @@ def update_protocol_settings(
             if result.returncode:
                 raise RuntimeError(result.stderr.strip() or "Xray rejected configuration")
             temporary.replace(VLESS_CONFIG)
+            if "sni" in supplied:
+                persist_vrx_target(supplied["sni"])
             if "dns" in supplied:
                 persist_env_values({"VRX_DNS": supplied["dns"]})
             restart_vless_service()
@@ -2723,10 +2767,15 @@ def update_protocol_settings(
             VLESS_CONFIG.write_bytes(original)
             os.chmod(VLESS_CONFIG, 0o640)
             os.chown(VLESS_CONFIG, 0, 65534)
+            if env_original is not None:
+                VLESS_ENV.write_bytes(env_original)
+                os.chmod(VLESS_ENV, 0o600)
             try:
                 restart_vless_service()
             except Exception:
                 pass
+            if isinstance(exc, HTTPException):
+                raise exc
             raise HTTPException(status_code=500, detail="Не удалось применить настройки VRX") from exc
         finally:
             temporary.unlink(missing_ok=True)
@@ -2784,6 +2833,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 }
                 config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
                 xhttp_values = dict(config_data["inbounds"][0]["streamSettings"].get("xhttpSettings", {}))
+                xhttp_values["sni"] = target.rsplit(":", 1)[0] if ":" in target else target
                 xhttp_values["loglevel"] = config_data.get("log", {}).get("loglevel", "warning")
                 xhttp_values["xPaddingBytes"] = xhttp_values.get("extra", {}).get("xPaddingBytes", "100-1000")
                 editable_settings = editable_protocol_settings(protocol, xhttp_values)

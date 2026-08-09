@@ -966,7 +966,7 @@ export default function Home() {
     return [...groups.values()];
   }, [protocolImages]);
   const navigation = useMemo(
-    () => (["overview", "dns", "clients"] as Tab[]).filter((id) => id !== "clients" || installedProtocols.length > 0),
+    () => (["overview", "clients"] as Tab[]).filter((id) => id !== "clients" || installedProtocols.length > 0),
     [installedProtocols],
   );
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
@@ -1169,11 +1169,11 @@ export default function Home() {
         <div className="settingsWrap" ref={settingsRef}><button onClick={() => {
           setModuleMenuOpen("");
           setSettingsOpen((value) => !value);
-        }} className={`navItem settingsToggle ${tab === "security" || tab === "application" || tab === "services" ? "active" : ""}`}>
+        }} className={`navItem settingsToggle ${tab === "dns" || tab === "security" || tab === "application" || tab === "services" ? "active" : ""}`}>
           <b>Настройки</b>
         </button>
         {settingsOpen && <div className="settingsMenu">
-          {(["security", "application", "services"] as Tab[]).map((id) =>
+          {(["dns", "security", "application", "services"] as Tab[]).map((id) =>
             <button key={id} onClick={() => { setTab(id); setSettingsOpen(false); }} className={`navItem ${tab === id ? "active" : ""}`}>
               <b>{labels[id]}</b>
             </button>
