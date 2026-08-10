@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import hmac
+import base64
 import ipaddress
 import json
 import csv
+import logging
 import os
 import re
 import secrets
+import socket
+import struct
 import subprocess
 import threading
 import time
+import urllib.parse
+import uuid
 import platform
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -22,11 +28,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="312.net Infrastructure API", version="0.1.0")
+logger = logging.getLogger("vps-control.api")
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -46,7 +53,31 @@ WG_SUBNET = ipaddress.ip_network(os.getenv("WG_SUBNET", "10.72.0.0/24"))
 AWG_SUBNET = ipaddress.ip_network(os.getenv("AWG_SUBNET", "10.73.0.0/24"))
 WG_CONFIG = Path(os.getenv("WG_CONFIG", f"/etc/wireguard/{WG_INTERFACE}.conf"))
 AWG_CONFIG = Path(os.getenv("AWG_CONFIG", f"/etc/amnezia/amneziawg/{AWG_INTERFACE}.conf"))
+try:
+    WG_MTU = int(os.getenv("WG_MTU", "1280"))
+except ValueError:
+    WG_MTU = 1280
+if not 1280 <= WG_MTU <= 1420:
+    WG_MTU = 1280
 AWG_MTU = int(os.getenv("AWG_MTU", "1280"))
+WG_DNS = os.getenv("WG_DNS", "1.1.1.1, 1.0.0.1")
+AWG_DNS = os.getenv("AWG_DNS", "1.1.1.1, 1.0.0.1")
+WG_KEEPALIVE = int(os.getenv("WG_KEEPALIVE", "25"))
+AWG_KEEPALIVE = int(os.getenv("AWG_KEEPALIVE", "25"))
+try:
+    SHADOWSOCKS_PORT_START = int(os.getenv("SHADOWSOCKS_PORT_START", "30000"))
+except ValueError:
+    SHADOWSOCKS_PORT_START = 30000
+if not 1024 <= SHADOWSOCKS_PORT_START <= 55535:
+    SHADOWSOCKS_PORT_START = 30000
+# A stream proxy has no WireGuard-style handshake.  Consider it online only
+# while its byte counters or authenticated requests were observed recently;
+# this prevents iOS keepalive sockets from being reported as usable traffic.
+STREAM_ACTIVITY_WINDOW_S = 30
+SHADOWSOCKS_CONFIG_DIR = Path("/etc/vps-control/shadowsocks/clients")
+VLESS_CONFIG_DIR = Path("/etc/vps-control/vless-reality-xhttp")
+VLESS_CONFIG = VLESS_CONFIG_DIR / "config.json"
+VLESS_ENV = VLESS_CONFIG_DIR / "reality.env"
 AWG_PROFILE = {
     "Jc": os.getenv("AWG_JC", "6"), "Jmin": os.getenv("AWG_JMIN", "8"), "Jmax": os.getenv("AWG_JMAX", "80"),
     "S1": os.getenv("AWG_S1", "64"), "S2": os.getenv("AWG_S2", "112"),
@@ -59,6 +90,7 @@ CLIENTS_FILE = DATA_DIR / "clients.json"
 ACTION_FILE = DATA_DIR / "application-action.json"
 AUTOMATION_FILE = DATA_DIR / "automation.json"
 SERVICE_MODE_FILE = DATA_DIR / "service-mode.json"
+TEST_BACKUP_DIR = DATA_DIR / "test-app-backup"
 UPDATES_FILE = DATA_DIR / "security-updates.json"
 APP_VERSION_FILE = DATA_DIR / "application-version.json"
 LOGGING_CONFIG_FILE = Path("/etc/vps-control-logging.conf")
@@ -66,6 +98,7 @@ INSTALL_DIR = Path(os.getenv("INSTALL_DIR", "/opt/vps-control"))
 CONTROL_COMMAND = os.getenv("CONTROL_COMMAND", "/usr/local/sbin/vps-control")
 PROTOCOL_IMAGES_DIR = INSTALL_DIR / "protocol-images"
 MONITOR_DIR = DATA_DIR / "monitor"
+DNS_SETTINGS_FILE = DATA_DIR / "dns-settings.json"
 updates_refresh_lock = threading.Lock()
 app_version_refresh_lock = threading.Lock()
 resource_check_lock = threading.Lock()
@@ -73,6 +106,9 @@ network_diagnostic_lock = threading.Lock()
 resource_check_cache: dict[str, dict] = {}
 network_diagnostic_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
+stream_stats_cache: dict[str, dict] = {}
+XRAY_BIN = "/usr/local/lib/vps-control-vless-reality-xhttp/xray"
+client_mutation_lock = threading.Lock()
 cpu_usage_lock = threading.Lock()
 cpu_previous: tuple[int, int] | None = None
 RESOURCE_TARGETS = (
@@ -92,6 +128,22 @@ RESOURCE_TARGETS = (
     ("Cloudflare", "https://1.1.1.1/"),
     ("GitHub", "https://github.com/"),
     ("Microsoft", "https://www.microsoft.com/"),
+)
+
+DNS_PROVIDERS = (
+    {"id": "yandex-basic", "name": "Яндекс DNS — базовый", "country": "RU", "addresses": ["77.88.8.8", "77.88.8.1"], "doh_url": "https://common.dot.dns.yandex.net/dns-query", "filter": "Без фильтрации"},
+    {"id": "yandex-safe", "name": "Яндекс DNS — безопасный", "country": "RU", "addresses": ["77.88.8.88", "77.88.8.2"], "filter": "Вредоносные сайты"},
+    {"id": "yandex-family", "name": "Яндекс DNS — семейный", "country": "RU", "addresses": ["77.88.8.7", "77.88.8.3"], "filter": "Вредоносные и взрослые сайты"},
+    {"id": "skydns", "name": "SkyDNS", "country": "RU", "addresses": ["193.58.251.251"], "filter": "Российская фильтрация"},
+    {"id": "nsdi", "name": "НСДИ", "country": "RU", "addresses": ["195.208.4.1", "195.208.5.1"], "filter": "Национальная система доменных имён"},
+    {"id": "safedns", "name": "SafeDNS", "country": "INT", "addresses": ["195.46.39.39", "195.46.39.40"], "filter": "Безопасность и категории"},
+    {"id": "cloudflare", "name": "Cloudflare", "country": "INT", "addresses": ["1.1.1.1", "1.0.0.1"], "doh_url": "https://cloudflare-dns.com/dns-query", "filter": "Без фильтрации"},
+    {"id": "cloudflare-malware", "name": "Cloudflare Malware", "country": "INT", "addresses": ["1.1.1.2", "1.0.0.2"], "filter": "Вредоносные сайты"},
+    {"id": "google", "name": "Google Public DNS", "country": "INT", "addresses": ["8.8.8.8", "8.8.4.4"], "doh_url": "https://dns.google/dns-query", "filter": "Без фильтрации"},
+    {"id": "quad9", "name": "Quad9 Secure", "country": "INT", "addresses": ["9.9.9.9", "149.112.112.112"], "doh_url": "https://dns.quad9.net/dns-query", "filter": "Вредоносные сайты"},
+    {"id": "adguard", "name": "AdGuard DNS", "country": "INT", "addresses": ["94.140.14.14", "94.140.15.15"], "doh_url": "https://dns.adguard-dns.com/dns-query", "filter": "Реклама и трекеры"},
+    {"id": "opendns", "name": "OpenDNS", "country": "INT", "addresses": ["208.67.222.222", "208.67.220.220"], "filter": "Базовая защита"},
+    {"id": "cleanbrowsing", "name": "CleanBrowsing Security", "country": "INT", "addresses": ["185.228.168.9", "185.228.169.9"], "filter": "Вредоносные сайты"},
 )
 
 
@@ -147,12 +199,16 @@ def run_with_input(args: list[str], value: str) -> str:
     return result.stdout.strip()
 
 
-def cached_resource_availability(protocol: Literal["wg", "awg"]) -> dict:
+def cached_resource_availability(
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
+) -> dict:
     cached = resource_check_cache.get(protocol)
     return {key: value for key, value in (cached or {}).items() if not key.startswith("_")}
 
 
-def check_resource_availability(protocol: Literal["wg", "awg"]) -> dict:
+def check_resource_availability(
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
+) -> dict:
     cached = resource_check_cache.get(protocol)
     if not resource_check_lock.acquire(blocking=False):
         return cached_resource_availability(protocol)
@@ -249,8 +305,151 @@ def interface_dump(protocol: Literal["wg", "awg"], include_quality: bool = True)
             peer.update(qualities[peer["id"]])
     for peer in peers:
         if include_quality and peer not in online_peers:
-            peer.update({"quality": "offline", "latency_ms": None, "packet_loss_percent": None, "quality_reason": "Нет активного handshake"})
+            peer.update({"quality": "offline", "latency_ms": None, "jitter_ms": None, "packet_loss_percent": None, "latency_source": "server_icmp_tunnel_ip", "quality_reason": "Нет активного handshake"})
     return peers
+
+
+def recent_xray_activity() -> dict[str, int]:
+    """Return seconds since the latest authenticated request for each Xray user."""
+    output = run(
+        "journalctl", "-u", "vps-control-vless-reality-xhttp.service", "--since", "24 hours ago",
+        "--no-pager", "-o", "short-unix", "-n", "2000", timeout=4,
+    )
+    now = time.time()
+    activity: dict[str, int] = {}
+    for line in output.splitlines():
+        match = re.search(r"^(\d+(?:\.\d+)?)\s+.*\bemail:\s*([^\s]+)", line)
+        if match:
+            activity[match.group(2)] = max(0, int(now - float(match.group(1))))
+    return activity
+
+
+def stream_sample(key: str, rx: int, tx: int, fallback_age: int | None = None) -> tuple[int | None, float, float]:
+    now = time.time()
+    previous = stream_stats_cache.get(key)
+    # Journal activity is only a bootstrap value.  Do not re-apply it on every
+    # poll: an old accepted request (or a long-lived idle socket) must not keep
+    # the connection permanently online.  Once sampled, only byte deltas move
+    # last_activity forward.
+    last_activity = (
+        (previous or {}).get("last_activity", 0)
+        if previous
+        else (now - fallback_age if fallback_age is not None else 0)
+    )
+    rx_bps = tx_bps = 0.0
+    if previous:
+        elapsed = max(now - previous["sampled_at"], 0.1)
+        rx_delta = max(0, rx - previous["rx"])
+        tx_delta = max(0, tx - previous["tx"])
+        rx_bps, tx_bps = rx_delta / elapsed, tx_delta / elapsed
+        if rx_delta or tx_delta:
+            last_activity = now
+    stream_stats_cache[key] = {
+        "rx": rx, "tx": tx, "sampled_at": now, "last_activity": last_activity,
+        "rx_bps": rx_bps, "tx_bps": tx_bps,
+    }
+    return (int(now - last_activity) if last_activity else None), round(rx_bps, 2), round(tx_bps, 2)
+
+
+def xray_user_stats(email: str, journal_age: int | None = None) -> tuple[int, int, int | None, float, float]:
+    output = run(XRAY_BIN, "api", "statsquery", "-server=127.0.0.1:10085", "-pattern", f"user>>>{email}>>>traffic>>>", timeout=3)
+    uplink = downlink = 0
+    try:
+        payload = json.loads(output)
+        for item in payload.get("stat", []):
+            name = str(item.get("name", ""))
+            value = int(item.get("value", 0))
+            if name.endswith(">>>uplink"):
+                uplink = value
+            elif name.endswith(">>>downlink"):
+                downlink = value
+    except (TypeError, ValueError, json.JSONDecodeError):
+        # Older Xray builds returned human-readable lines instead of JSON.
+        for line in output.splitlines():
+            match = re.search(r"(?:uplink|downlink):\s*(\d+)", line)
+            if match:
+                if "uplink" in line:
+                    uplink = int(match.group(1))
+                else:
+                    downlink = int(match.group(1))
+    age, rx_bps, tx_bps = stream_sample(f"vrx:{email}", uplink, downlink, journal_age)
+    return uplink, downlink, age, rx_bps, tx_bps
+
+
+def service_bytes(unit: str) -> tuple[int, int]:
+    def value(name: str) -> int:
+        try:
+            return int(run("systemctl", "show", unit, "--property=" + name, "--value") or 0)
+        except ValueError:
+            return 0
+    return value("IPIngressBytes"), value("IPEgressBytes")
+
+
+def shadowsocks_connection_details(port: int) -> tuple[int, list[str]]:
+    output = run("ss", "-Htn", "state", "established", f"( sport = :{port} )")
+    sources: set[str] = set()
+    count = 0
+    for line in output.splitlines():
+        columns = line.split()
+        if len(columns) < 4:
+            continue
+        count += 1
+        source = columns[3].rsplit(":", 1)[0]
+        sources.add(source.strip("[]"))
+    return count, sorted(sources)
+
+
+def shadowsocks_connections(port: int) -> int:
+    return shadowsocks_connection_details(port)[0]
+
+
+def stream_proxy_dump() -> list[dict]:
+    peers = []
+    xray_activity = recent_xray_activity()
+    for item in read_clients():
+        protocol = item.get("protocol")
+        if protocol == "shadowsocks":
+            unit = f'vps-control-shadowsocks@{item.get("id", "")}.service'
+            active = run("systemctl", "is-active", unit) == "active"
+            address = f'{PUBLIC_IP}:{item.get("port", "—")}'
+        elif protocol == "vless-reality-xhttp":
+            active = run("systemctl", "is-active", "vps-control-vless-reality-xhttp.service") == "active"
+            address = f'{PUBLIC_IP}:{item.get("port", 443)}'
+            email = f'{item.get("id", "")}@312.net'
+            rx_bytes, tx_bytes, handshake_age, rx_bps, tx_bps = xray_user_stats(email, xray_activity.get(email))
+            active_connections = 1 if handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S else 0
+        else:
+            continue
+        if protocol == "shadowsocks":
+            rx_bytes, tx_bytes = service_bytes(unit)
+            active_connections, active_sources = shadowsocks_connection_details(int(item.get("port", 0)))
+            handshake_age, rx_bps, tx_bps = stream_sample(f'ss:{item.get("id", "")}', rx_bytes, tx_bytes)
+            if not active_connections:
+                handshake_age = None
+        # For Shadowsocks, raw byte deltas also include unauthenticated scans.
+        # Only an established TCP socket proves a live client. Xray activity is
+        # authenticated and can safely use the recent-activity window.
+        online = active and (
+            active_connections > 0
+            and handshake_age is not None
+            and handshake_age < STREAM_ACTIVITY_WINDOW_S
+            if protocol == "shadowsocks"
+            else handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S
+        )
+        peers.append({
+            "id": item.get("id", ""), "name": item.get("name", "Подключение"), "protocol": protocol,
+            "public_key": item.get("public_key", item.get("id", "")), "endpoint": address, "address": address,
+            "handshake_age_s": handshake_age, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "enabled": True,
+            "rx_bps": rx_bps, "tx_bps": tx_bps, "active_connections": active_connections,
+            "active_sources": active_sources if protocol == "shadowsocks" else [],
+            "quality": "stable" if online else "offline", "latency_ms": None, "jitter_ms": None, "packet_loss_percent": None, "latency_source": "not_supported",
+            "quality_reason": (f"Активных соединений: {active_connections}" if online else "Нет недавней активности") if active else "Служба подключения остановлена",
+        })
+    return peers
+
+
+def all_client_dump(include_quality: bool = True) -> list[dict]:
+    return interface_dump("wg", include_quality) + interface_dump("awg", include_quality) + stream_proxy_dump()
 
 
 def client_connection_quality(peer: dict) -> dict:
@@ -279,6 +478,7 @@ def client_connection_quality(peer: dict) -> dict:
         quality, reason = "stable", "Туннель активен · ICMP недоступен"
     result = {
         "quality": quality, "latency_ms": latency, "jitter_ms": jitter, "packet_loss_percent": loss,
+        "latency_source": "server_icmp_tunnel_ip", "sample_size": 5,
         "quality_reason": reason, "_cached_at": time.time(),
     }
     client_quality_cache[cache_key] = result
@@ -531,7 +731,7 @@ def network_diagnostics(protocol: Literal["wg", "awg"], history: dict, force: bo
             finding("warning", "packet_loss", "Нестабильная доставка пакетов", f"Сейчас {live_loss:.1f}%, за 24 часа {historical_loss or 0:.1f}%.", "Снять MTR в обе стороны и проверить, на каком участке начинается потеря.")
         historical_jitter = history.get("jitter_avg_ms")
         if (live_jitter is not None and live_jitter >= 30) or (historical_jitter is not None and historical_jitter >= 30):
-            finding("warning", "jitter", "Высокий jitter", f"Сейчас {live_jitter or 0:.1f} мс, за 24 часа {historical_jitter or 0:.1f} мс.", "Проверить загрузку канала, очереди и регион размещения VPS.")
+            finding("warning", "rtt_variation", "Высокий разброс RTT", f"mdev сейчас {live_jitter or 0:.1f} мс, за 24 часа {historical_jitter or 0:.1f} мс.", "Проверить загрузку канала, очереди и регион размещения VPS.")
         if not mtu_safe or not pmtu_ok:
             finding("critical" if not mtu_safe else "warning", "mtu", "Риск фрагментации или blackhole MTU", f"MTU туннеля {tunnel_mtu or 'не определён'}, внешний MTU {uplink_mtu or 'не определён'}.", "Уменьшить MTU туннеля и повторить проверку крупных пакетов с DF.")
         if history.get("uplink_dropped", 0) > 0 or uplink_dropped > 0:
@@ -734,7 +934,10 @@ def change_admin_password(payload: AdminPasswordChange, _: None = Depends(requir
     ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     try:
         lines = ENV_FILE.read_text(encoding="utf-8").splitlines() if ENV_FILE.exists() else []
-        encoded = json.dumps(password, ensure_ascii=False)
+        # EnvironmentFile is also sourced by the shell monitor. JSON quoting
+        # protects quotes, but '$' and backticks still expand inside double
+        # quotes, so escape them explicitly before persisting the value.
+        encoded = json.dumps(password, ensure_ascii=False).replace("$", "\\$").replace("`", "\\`")
         replaced = False
         for index, line in enumerate(lines):
             if line.startswith("ADMIN_PASSWORD="):
@@ -1120,7 +1323,9 @@ def protocol_image_manifests() -> dict[str, dict]:
         interface_env = str(manifest.get("interface_env", ""))
         interface = os.getenv(interface_env, "") if interface_env else ""
         service_template = str(manifest.get("service", ""))
-        service = service_template.replace("{interface}", interface) if interface and service_template else ""
+        # Stream proxies do not create a tunnel interface. Their manifests use a
+        # fixed systemd unit, while WG-like images may still interpolate one.
+        service = service_template.replace("{interface}", interface) if service_template else ""
         images[image_id] = {
             "id": image_id,
             "name": str(manifest.get("name", image_id)),
@@ -1132,6 +1337,7 @@ def protocol_image_manifests() -> dict[str, dict]:
             # Installed and running are different states. A stopped tunnel must
             # remain manageable instead of being offered for installation again.
             "installed": bool(service and run("systemctl", "show", service, "--property=LoadState", "--value") == "loaded"),
+            "active": bool(service and run("systemctl", "is-active", service) == "active"),
             "removable": bool(uninstaller),
         }
     return images
@@ -1394,6 +1600,10 @@ def installed_build_commit() -> str:
         return os.getenv("BUILD_COMMIT", "unknown").strip()
 
 
+def expected_application_branch() -> str:
+    return "main" if SERVICE_MODE_FILE.exists() and TEST_BACKUP_DIR.is_dir() else "stabl"
+
+
 def application_repository_url() -> str:
     configured = os.getenv("APP_REPOSITORY_URL", "").strip()
     if configured:
@@ -1413,7 +1623,7 @@ def refresh_application_version_cache() -> None:
         return
     try:
         current = installed_build_commit()
-        branch = "stabl"
+        branch = expected_application_branch()
         repository = application_repository_url()
         latest = ""
         error = ""
@@ -1449,7 +1659,7 @@ def application_version_status() -> dict:
     except (OSError, json.JSONDecodeError):
         pass
     age = time.time() - APP_VERSION_FILE.stat().st_mtime if APP_VERSION_FILE.exists() else float("inf")
-    expected_branch = "stabl"
+    expected_branch = expected_application_branch()
     installed_commit = installed_build_commit()
     refreshing = (
         age > 600
@@ -1600,7 +1810,7 @@ def live_status(_: None = Depends(require_token)) -> dict:
     load = os.getloadavg()
     network_rx, network_tx = network_info()
     ufw_config = Path("/etc/ufw/ufw.conf")
-    live_clients = interface_dump("wg", include_quality=False) + interface_dump("awg", include_quality=False)
+    live_clients = all_client_dump(include_quality=False)
 
     def protocol_live(protocol: str, interface: str) -> dict:
         protocol_clients = [client for client in live_clients if client["protocol"] == protocol]
@@ -1615,7 +1825,9 @@ def live_status(_: None = Depends(require_token)) -> dict:
             "peers": len(protocol_clients),
             "online_peers": len([
                 client for client in protocol_clients
-                if client.get("handshake_age_s") is not None and client["handshake_age_s"] < 180
+                if client.get("handshake_age_s") is not None and client["handshake_age_s"] < (
+                    STREAM_ACTIVITY_WINDOW_S if protocol in ("shadowsocks", "vless-reality-xhttp") else 180
+                )
             ]),
             "interface_rx_bytes": received,
             "interface_tx_bytes": transmitted,
@@ -1835,18 +2047,279 @@ def update_automation(payload: AutomationSettings, _: None = Depends(require_tok
     }
 
 
+class DnsCustomResolver(BaseModel):
+    name: str = Field(default="Собственный DNS", min_length=2, max_length=48)
+    addresses: list[str] = Field(min_length=1, max_length=4)
+    doh_url: str = Field(default="", max_length=256)
+
+
+class DnsSettingsUpdate(BaseModel):
+    selected_id: str = Field(min_length=2, max_length=64, pattern=r"^[a-z0-9-]+$")
+    apply_wg: bool = True
+    apply_awg: bool = True
+    apply_shadowsocks: bool = True
+    apply_vrx: bool = True
+    prefer_encrypted: bool = False
+    fallback_enabled: bool = True
+    custom: DnsCustomResolver | None = None
+
+
+class DnsCheckRequest(BaseModel):
+    provider_id: str | None = Field(default=None, max_length=64)
+
+
 @app.get("/api/clients")
 def clients(_: None = Depends(require_token)) -> dict:
-    return {"items": interface_dump("wg") + interface_dump("awg")}
+    return {"items": all_client_dump()}
+
+
+@app.get("/api/dns")
+def dns_status(_: None = Depends(require_token)) -> dict:
+    settings = read_dns_settings()
+    return {"settings": settings, "providers": dns_provider_list(settings), "protocol_effect": {
+        "wg": current_env_value("WG_DNS", WG_DNS), "awg": current_env_value("AWG_DNS", AWG_DNS),
+        "shadowsocks": current_env_value("SHADOWSOCKS_DNS", "не настроен"),
+        "vless-reality-xhttp": current_env_value("VRX_DNS", "не настроен"),
+    }}
+
+
+@app.put("/api/dns/settings")
+def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_token)) -> dict:
+    data = payload.model_dump()
+    if data.get("custom"):
+        for address in data["custom"]["addresses"]:
+            try:
+                ipaddress.ip_address(address)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"Некорректный DNS-адрес: {address}") from exc
+        doh_url = data["custom"].get("doh_url", "")
+        if doh_url and not re.fullmatch(r"https://[^\s]+", doh_url):
+            raise HTTPException(status_code=422, detail="DoH URL должен использовать HTTPS")
+    providers = dns_provider_list(data)
+    selected = next((item for item in providers if item["id"] == data["selected_id"]), None)
+    if not selected:
+        raise HTTPException(status_code=422, detail="Выбранный DNS-профиль не найден")
+    selected_addresses = selected["addresses"] if data["fallback_enabled"] else selected["addresses"][:1]
+    addresses = ", ".join(selected_addresses)
+    vrx_servers = list(selected_addresses)
+    if data["prefer_encrypted"] and selected.get("doh_url"):
+        vrx_servers.insert(0, selected["doh_url"])
+    vrx_addresses = ", ".join(vrx_servers)
+    env_updates = {}
+    if data["apply_wg"]:
+        env_updates["WG_DNS"] = addresses
+    if data["apply_awg"]:
+        env_updates["AWG_DNS"] = addresses
+    if data["apply_shadowsocks"]:
+        env_updates["SHADOWSOCKS_DNS"] = addresses
+    if data["apply_vrx"]:
+        env_updates["VRX_DNS"] = vrx_addresses
+    env_original = ENV_FILE.read_bytes() if ENV_FILE.exists() else None
+    vrx_original = VLESS_CONFIG.read_bytes() if data["apply_vrx"] and VLESS_CONFIG.exists() else None
+    settings_original = DNS_SETTINGS_FILE.read_bytes() if DNS_SETTINGS_FILE.exists() else None
+    temporary = DNS_SETTINGS_FILE.with_suffix(".tmp")
+    try:
+        if env_updates:
+            persist_env_values(env_updates)
+        if vrx_original is not None:
+            apply_vrx_dns(vrx_servers)
+        DNS_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        temporary.replace(DNS_SETTINGS_FILE)
+    except Exception as exc:
+        logger.exception("DNS settings transaction failed; restoring previous state")
+        if env_original is None:
+            ENV_FILE.unlink(missing_ok=True)
+        else:
+            ENV_FILE.write_bytes(env_original)
+            os.chmod(ENV_FILE, 0o600)
+        if settings_original is None:
+            DNS_SETTINGS_FILE.unlink(missing_ok=True)
+        else:
+            DNS_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            DNS_SETTINGS_FILE.write_bytes(settings_original)
+            os.chmod(DNS_SETTINGS_FILE, 0o600)
+        if vrx_original is not None:
+            VLESS_CONFIG.write_bytes(vrx_original)
+            os.chmod(VLESS_CONFIG, 0o640)
+            os.chown(VLESS_CONFIG, 0, 65534)
+            try:
+                restart_vless_service()
+            except Exception:
+                logger.exception("VRX restart failed during DNS rollback")
+        detail = exc.detail if isinstance(exc, HTTPException) else "Не удалось сохранить DNS; предыдущие настройки восстановлены"
+        raise HTTPException(status_code=500, detail=detail) from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+    return dns_status()
+
+
+@app.post("/api/dns/check")
+def check_dns(payload: DnsCheckRequest, _: None = Depends(require_token)) -> dict:
+    providers = dns_provider_list()
+    if payload.provider_id:
+        providers = [item for item in providers if item["id"] == payload.provider_id]
+        if not providers:
+            raise HTTPException(status_code=404, detail="DNS-профиль не найден")
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(providers)))) as pool:
+        results = list(pool.map(check_dns_provider, providers))
+    return {"checked_at": datetime.now(timezone.utc).isoformat(), "items": results}
 
 
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
-    protocol: Literal["wg", "awg"]
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"]
+
+
+class ProtocolSettingsUpdate(BaseModel):
+    mtu: int | None = Field(default=None, ge=1280, le=1420)
+    timeout: int | None = Field(default=None, ge=30, le=3600)
+    udp_mtu: int | None = Field(default=None, ge=576, le=1500)
+    mode: Literal["tcp_only", "tcp_and_udp"] | None = None
+    no_delay: bool | None = None
+    xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
+    dns: str | None = Field(default=None, min_length=3, max_length=512)
+    keepalive: int | None = Field(default=None, ge=0, le=300)
+    loglevel: Literal["debug", "info", "warning", "error", "none"] | None = None
+    xpadding: str | None = Field(default=None, min_length=1, max_length=32, pattern=r"^\d+(?:-\d+)?$")
+    sni: str | None = Field(default=None, min_length=4, max_length=253, pattern=r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
+    xmux_concurrency: int | None = Field(default=None, ge=1, le=64)
 
 
 def key(command: str) -> str:
     return run("bash", "-lc", command, check=True)
+
+
+def current_env_value(name: str, fallback: str) -> str:
+    try:
+        line = next((row for row in reversed(ENV_FILE.read_text(encoding="utf-8").splitlines()) if row.startswith(name + "=")), "")
+        value = line.split("=", 1)[1].strip() if line else ""
+        if len(value) >= 2 and value[0] == value[-1] == '"':
+            value = value[1:-1]
+        return value or fallback
+    except OSError:
+        return fallback
+
+
+def read_dns_settings() -> dict:
+    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "prefer_encrypted": False, "fallback_enabled": True, "custom": None}
+    try:
+        saved = json.loads(DNS_SETTINGS_FILE.read_text(encoding="utf-8"))
+        return {**defaults, **saved}
+    except (OSError, json.JSONDecodeError, TypeError):
+        return defaults
+
+
+def dns_provider_list(settings: dict | None = None) -> list[dict]:
+    providers = [dict(item) for item in DNS_PROVIDERS]
+    custom = (settings or read_dns_settings()).get("custom")
+    if custom:
+        providers.append({"id": "custom", "country": "CUSTOM", "filter": "Пользовательский", **custom})
+    return providers
+
+
+def apply_vrx_dns(addresses: list[str]) -> None:
+    """Apply server-side Xray resolution without replacing a working config on validation failure."""
+    original = VLESS_CONFIG.read_bytes()
+    temporary = VLESS_CONFIG.with_suffix(".dns.tmp.json")
+    try:
+        config = json.loads(original.decode("utf-8"))
+        config["dns"] = {"servers": addresses, "queryStrategy": "UseIP"}
+        config.setdefault("routing", {})["domainStrategy"] = "IPIfNonMatch"
+        temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.chmod(temporary, 0o640)
+        os.chown(temporary, 0, 65534)
+        result = subprocess.run([XRAY_BIN, "run", "-test", "-config", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or "Xray rejected DNS configuration")
+        temporary.replace(VLESS_CONFIG)
+        restart_vless_service()
+    except Exception as exc:
+        VLESS_CONFIG.write_bytes(original)
+        os.chmod(VLESS_CONFIG, 0o640)
+        os.chown(VLESS_CONFIG, 0, 65534)
+        raise HTTPException(status_code=500, detail="Не удалось применить DNS к VRX; рабочая конфигурация восстановлена") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def dns_wire_query(address: str, tcp: bool = False, timeout: float = 2.0) -> tuple[bool, float | None]:
+    transaction = secrets.randbelow(65536)
+    labels = b"".join(bytes([len(part)]) + part.encode("ascii") for part in "example.com".split(".")) + b"\0"
+    packet = struct.pack("!HHHHHH", transaction, 0x0100, 1, 0, 0, 0) + labels + struct.pack("!HH", 1, 1)
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    started = time.monotonic()
+    try:
+        with socket.socket(family, socket.SOCK_STREAM if tcp else socket.SOCK_DGRAM) as sock:
+            sock.settimeout(timeout)
+            sock.connect((address, 53))
+            if tcp:
+                sock.sendall(struct.pack("!H", len(packet)) + packet)
+                length = sock.recv(2)
+                if len(length) != 2:
+                    return False, None
+                response = sock.recv(struct.unpack("!H", length)[0])
+            else:
+                sock.send(packet)
+                response = sock.recv(4096)
+        valid = len(response) >= 12 and struct.unpack("!H", response[:2])[0] == transaction and bool(response[2] & 0x80)
+        return valid, round((time.monotonic() - started) * 1000, 1) if valid else None
+    except (OSError, socket.timeout):
+        return False, None
+
+
+def check_dns_provider(provider: dict) -> dict:
+    address = str(provider.get("addresses", [""])[0])
+    udp_ok, udp_ms = dns_wire_query(address)
+    tcp_ok, tcp_ms = dns_wire_query(address, tcp=True)
+    doh_ok, doh_ms = False, None
+    doh_url = str(provider.get("doh_url", ""))
+    if doh_url:
+        started = time.monotonic()
+        try:
+            result = subprocess.run(["curl", "-fsS", "--max-time", "4", "-H", "accept: application/dns-json", f"{doh_url}?name=example.com&type=A"], capture_output=True, timeout=5, check=False)
+            doh_ok = result.returncode == 0 and bool(result.stdout)
+            doh_ms = round((time.monotonic() - started) * 1000, 1) if doh_ok else None
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    available = udp_ok or tcp_ok or doh_ok
+    latencies = [value for value in (udp_ms, tcp_ms, doh_ms) if value is not None]
+    return {"id": provider["id"], "available": available, "udp_ok": udp_ok, "udp_ms": udp_ms, "tcp_ok": tcp_ok, "tcp_ms": tcp_ms, "doh_ok": doh_ok, "doh_ms": doh_ms, "latency_ms": min(latencies) if latencies else None}
+
+
+def shadowsocks_firewall(action: Literal["add", "delete"], port: int) -> None:
+    result = subprocess.run(
+        [
+            "systemd-run", "--wait", "--collect", "--pipe", "--quiet", "--property=Type=oneshot",
+            CONTROL_COMMAND, "client-firewall", action, str(port),
+        ],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "Unable to update Shadowsocks firewall rule")
+
+
+def restart_vless_service() -> None:
+    unit = "vps-control-vless-reality-xhttp.service"
+    run("systemctl", "restart", unit, timeout=20, check=True)
+    for _ in range(10):
+        if run("systemctl", "is-active", unit) == "active":
+            return
+        time.sleep(0.2)
+    raise RuntimeError("VLESS service did not become active")
+
+
+def restore_vless_config(original: bytes, token: str) -> None:
+    rollback = VLESS_CONFIG_DIR / f".config-{token}.rollback"
+    try:
+        rollback.write_bytes(original)
+        os.chmod(rollback, 0o640)
+        os.chown(rollback, 0, 65534)
+        rollback.replace(VLESS_CONFIG)
+        restart_vless_service()
+    finally:
+        rollback.unlink(missing_ok=True)
 
 
 def next_address(protocol: Literal["wg", "awg"]) -> ipaddress.IPv4Address:
@@ -1875,6 +2348,124 @@ def append_peer(config: Path, client_id: str, public_key: str, psk: str, address
 
 @app.post("/api/clients")
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
+    client_id = secrets.token_hex(8)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
+    if payload.protocol == "shadowsocks":
+        if run("systemctl", "show", "vps-control-shadowsocks.target", "--property=LoadState", "--value") != "loaded":
+            raise HTTPException(status_code=409, detail="shadowsocks protocol is not installed")
+        used_ports = {int(item["port"]) for item in read_clients() if item.get("protocol") == "shadowsocks" and item.get("port")}
+        port = next((candidate for candidate in range(SHADOWSOCKS_PORT_START, min(65536, SHADOWSOCKS_PORT_START + 10000)) if candidate not in used_ports), None)
+        if port is None:
+            raise HTTPException(status_code=409, detail="No free Shadowsocks ports")
+        password = secrets.token_urlsafe(32)
+        method = "chacha20-ietf-poly1305"
+        config_path = SHADOWSOCKS_CONFIG_DIR / f"{client_id}.json"
+        try:
+            SHADOWSOCKS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(json.dumps({
+                "server": "0.0.0.0", "server_port": port, "password": password, "method": method,
+                "timeout": 300, "mode": "tcp_and_udp", "fast_open": False,
+                "no_delay": True, "mtu": 1200,
+            }, indent=2), encoding="utf-8")
+            os.chmod(config_path, 0o600)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail="Unable to save Shadowsocks client configuration") from exc
+        try:
+            shadowsocks_firewall("add", port)
+            run("systemctl", "enable", "--now", f"vps-control-shadowsocks@{client_id}.service", timeout=20, check=True)
+            if run("systemctl", "is-active", f"vps-control-shadowsocks@{client_id}.service") != "active":
+                raise RuntimeError("Shadowsocks client service did not become active")
+        except Exception:
+            run("systemctl", "disable", "--now", f"vps-control-shadowsocks@{client_id}.service")
+            try:
+                shadowsocks_firewall("delete", port)
+            except Exception:
+                pass
+            config_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail="Unable to start Shadowsocks client service")
+        userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
+        client_config = f"ss://{userinfo}@{PUBLIC_IP}:{port}#{urllib.parse.quote(payload.name)}"
+        items = read_clients()
+        items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
+        write_clients(items)
+        return {"id": client_id, "filename": f"{safe_name}-shadowsocks.txt", "config": client_config}
+
+    if payload.protocol == "vless-reality-xhttp":
+        with client_mutation_lock:
+            if not VLESS_CONFIG.exists() or not VLESS_ENV.exists():
+                raise HTTPException(status_code=409, detail="vless-reality-xhttp protocol is not installed")
+            # Xray detects the input format from the filename extension.
+            tmp = VLESS_CONFIG_DIR / f".config-{client_id}.tmp.json"
+            replaced = False
+            stage = "чтение конфигурации"
+            try:
+                original = VLESS_CONFIG.read_bytes()
+                config_data = json.loads(original.decode("utf-8"))
+                reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+                inbound_clients = config_data["inbounds"][0]["settings"]["clients"]
+                client_uuid = str(uuid.uuid4())
+                inbound_clients.append({"id": client_uuid, "email": f"{client_id}@312.net"})
+                stage = "запись временной конфигурации"
+                tmp.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(tmp, 0o640)
+                os.chown(tmp, 0, 65534)
+                stage = "проверка конфигурации Xray"
+                xray = "/usr/local/lib/vps-control-vless-reality-xhttp/xray"
+                result = subprocess.run([xray, "run", "-test", "-config", str(tmp)], capture_output=True, text=True, timeout=15, check=False)
+                if result.returncode:
+                    raise RuntimeError(result.stderr.strip() or "Xray rejected generated configuration")
+                stage = "активация конфигурации"
+                tmp.replace(VLESS_CONFIG)
+                replaced = True
+                restart_vless_service()
+                target_host = reality.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0]
+                port = int(reality.get("PORT", "443"))
+                xhttp_settings = config_data["inbounds"][0]["streamSettings"].get("xhttpSettings", {})
+                xhttp_mode = str(xhttp_settings.get("mode", "auto"))
+                query_values = {
+                    "encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome",
+                    "alpn": "h2",
+                    "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", ""),
+                    "type": "xhttp", "host": target_host,
+                    "path": reality.get("XHTTP_PATH", reality.get("PATH", "/")), "mode": xhttp_mode,
+                }
+                client_extra = {
+                    "xPaddingBytes": "100-1000",
+                    "xmux": {"maxConcurrency": "8-16", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000"},
+                    **xhttp_settings.get("extra", {}),
+                }
+                query_values["extra"] = json.dumps(client_extra, separators=(",", ":"))
+                query = urllib.parse.urlencode(query_values)
+                client_config = f"vless://{client_uuid}@{PUBLIC_IP}:{port}?{query}#{urllib.parse.quote(payload.name)}"
+                stage = "сохранение подключения"
+                items = read_clients()
+                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
+                write_clients(items)
+                return {"id": client_id, "filename": f"{safe_name}-vless.txt", "config": client_config}
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, RuntimeError, subprocess.SubprocessError, HTTPException) as exc:
+                if replaced:
+                    try:
+                        restore_vless_config(original, client_id)
+                    except Exception:
+                        pass
+                raise HTTPException(status_code=500, detail=f"Не удалось создать VLESS-подключение: {stage}") from exc
+            except Exception as exc:
+                # Do not turn an unexpected filesystem/systemd failure into a
+                # blank HTTP 500. Keep the stage visible in the UI and retain
+                # the traceback in the API journal for diagnosis.
+                logger.exception("VLESS client creation failed at stage %s", stage)
+                if replaced:
+                    try:
+                        restore_vless_config(original, client_id)
+                    except Exception:
+                        logger.exception("VLESS rollback failed for %s", client_id)
+                raise HTTPException(status_code=500, detail=f"Не удалось создать VLESS-подключение: {stage}") from exc
+            finally:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
     command = "wg" if payload.protocol == "wg" else "awg"
     config_path = WG_CONFIG if payload.protocol == "wg" else AWG_CONFIG
     if not config_path.exists():
@@ -1883,7 +2474,6 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     public_key = key(f"printf '%s' '{private_key}' | {command} pubkey")
     psk = key(f"{command} genpsk")
     address = next_address(payload.protocol)
-    client_id = secrets.token_hex(8)
     interface = WG_INTERFACE if payload.protocol == "wg" else AWG_INTERFACE
     append_peer(config_path, client_id, public_key, psk, str(address))
     run_with_input(
@@ -1897,10 +2487,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         extra = "".join(f"{key} = {value}\n" for key, value in AWG_PROFILE.items())
     port = WG_PORT if payload.protocol == "wg" else AWG_PORT
     client_config = (
-        f"[Interface]\nAddress = {address}/32\nDNS = 1.1.1.1, 1.0.0.1\n"
-        f"PrivateKey = {private_key}\nMTU = {AWG_MTU if payload.protocol == 'awg' else 1380}\n{extra}\n[Peer]\n"
+        f"[Interface]\nAddress = {address}/32\nDNS = {current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS)}\n"
+        f"PrivateKey = {private_key}\nMTU = {AWG_MTU if payload.protocol == 'awg' else WG_MTU}\n{extra}\n[Peer]\n"
         f"PublicKey = {server_public}\nPresharedKey = {psk}\nAllowedIPs = 0.0.0.0/0\n"
-        f"Endpoint = {PUBLIC_IP}:{port}\nPersistentKeepalive = 25\n"
+        f"Endpoint = {PUBLIC_IP}:{port}\nPersistentKeepalive = {current_env_value('AWG_KEEPALIVE', str(AWG_KEEPALIVE)) if payload.protocol == 'awg' else current_env_value('WG_KEEPALIVE', str(WG_KEEPALIVE))}\n"
     )
     items = read_clients()
     items.append(
@@ -1914,7 +2504,6 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         }
     )
     write_clients(items)
-    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
     return {"id": client_id, "filename": f"{safe_name}-{payload.protocol}.conf", "config": client_config}
 
 
@@ -1925,6 +2514,32 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     if not item:
         raise HTTPException(status_code=404, detail="Client not found")
     protocol = item["protocol"]
+    if protocol == "shadowsocks":
+        port = int(item.get("port", 0))
+        run("systemctl", "disable", "--now", f"vps-control-shadowsocks@{client_id}.service", timeout=20)
+        (SHADOWSOCKS_CONFIG_DIR / f"{client_id}.json").unlink(missing_ok=True)
+        if port:
+            try:
+                shadowsocks_firewall("delete", port)
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail="Unable to remove Shadowsocks firewall rule") from exc
+        write_clients([entry for entry in items if entry["id"] != client_id])
+        return {"deleted": client_id}
+    if protocol == "vless-reality-xhttp":
+        try:
+            config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
+            inbound_clients = config_data["inbounds"][0]["settings"]["clients"]
+            config_data["inbounds"][0]["settings"]["clients"] = [client for client in inbound_clients if client.get("id") != item.get("public_key")]
+            tmp = VLESS_CONFIG.with_suffix(".tmp.json")
+            tmp.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.chmod(tmp, 0o640)
+            os.chown(tmp, 0, 65534)
+            tmp.replace(VLESS_CONFIG)
+            run("systemctl", "restart", "vps-control-vless-reality-xhttp.service", timeout=20, check=True)
+        except (OSError, json.JSONDecodeError, KeyError) as exc:
+            raise HTTPException(status_code=409, detail="VLESS module configuration is invalid") from exc
+        write_clients([entry for entry in items if entry["id"] != client_id])
+        return {"deleted": client_id}
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
     config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
@@ -1936,8 +2551,340 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     return {"deleted": client_id}
 
 
+def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
+    if protocol in ("wg", "awg"):
+        prefix = "WG" if protocol == "wg" else "AWG"
+        return [{
+            "key": "mtu", "label": "MTU туннеля", "type": "number",
+            "value": int(values.get("mtu", 1280)), "min": 1280, "max": 1420,
+            "help": "Применяется к серверному интерфейсу и новым клиентским конфигурациям.",
+        }, {
+            "key": "dns", "label": "DNS новых профилей", "type": "text",
+            "value": str(values.get("dns", current_env_value(f"{prefix}_DNS", "1.1.1.1, 1.0.0.1"))),
+            "help": "Список DNS через запятую. Применяется к новым конфигурациям.",
+        }, {
+            "key": "keepalive", "label": "Keepalive новых профилей, с", "type": "number",
+            "value": int(values.get("keepalive", current_env_value(f"{prefix}_KEEPALIVE", "25"))), "min": 0, "max": 300,
+            "help": "0 отключает keepalive; 25 секунд подходит для NAT и мобильных сетей.",
+        }]
+    if protocol == "shadowsocks":
+        return [
+            {"key": "timeout", "label": "Таймаут соединения, с", "type": "number", "value": int(values.get("timeout", 300)), "min": 30, "max": 3600},
+            {"key": "udp_mtu", "label": "MTU UDP", "type": "number", "value": int(values.get("mtu", 1200)), "min": 576, "max": 1500},
+            {"key": "mode", "label": "Транспорт", "type": "select", "value": str(values.get("mode", "tcp_and_udp")), "options": [
+                {"value": "tcp_and_udp", "label": "TCP + UDP"}, {"value": "tcp_only", "label": "Только TCP"},
+            ]},
+            {"key": "no_delay", "label": "TCP no-delay", "type": "boolean", "value": bool(values.get("no_delay", True))},
+            {"key": "dns", "label": "Рекомендуемый DNS клиента", "type": "text", "value": current_env_value("SHADOWSOCKS_DNS", "1.1.1.1, 1.0.0.1"), "help": "Сохраняется как политика администратора. SS-сервер не может принудительно изменить DNS устройства; настройте его в клиентском приложении."},
+        ]
+    return [{
+        "key": "sni", "label": "SNI маскировки", "type": "text",
+        "value": str(values.get("sni", "www.intel.com")),
+        "help": "Публичный HTTPS-домен без https:// и порта. Изменение требует заново импортировать существующие VRX-профили.",
+    }, {
+        "key": "xhttp_mode", "label": "Режим XHTTP", "type": "select",
+        "value": str(values.get("mode", "auto")),
+        "options": [
+            {"value": "auto", "label": "Автоматически (рекомендуется)"},
+            {"value": "stream-one", "label": "Один поток"},
+            {"value": "stream-up", "label": "Раздельный upload"},
+            {"value": "packet-up", "label": "Пакетный upload"},
+        ],
+        "help": "Клиенты с режимом auto согласуют выбранный серверный режим автоматически.",
+    }, {
+        "key": "loglevel", "label": "Уровень журнала", "type": "select", "value": str(values.get("loglevel", "warning")),
+        "options": [{"value": value, "label": label} for value, label in (("debug", "Debug"), ("info", "Info"), ("warning", "Warning"), ("error", "Error"), ("none", "Отключён"))],
+    }, {
+        "key": "xpadding", "label": "XHTTP padding, байт", "type": "text", "value": str(values.get("xPaddingBytes", "100-1000")),
+        "help": "Одно число или диапазон, например 100-1000.",
+    }, {
+        "key": "xmux_concurrency", "label": "Параллелизм XHTTP", "type": "number", "value": int(values.get("xmuxConcurrency", 12)), "min": 1, "max": 64,
+        "help": "Количество одновременных запросов на HTTP-соединение. 8–16 устраняет секундные очереди; применяется к новым VRX-профилям.",
+    }, {
+        "key": "dns", "label": "DNS VRX", "type": "text", "value": current_env_value("VRX_DNS", "1.1.1.1, 1.0.0.1"),
+        "help": "Применяется к серверному резолверу Xray. DNS самого устройства задаётся в клиентском приложении.",
+    }]
+
+
+def persist_tunnel_mtu(protocol: Literal["wg", "awg"], mtu: int) -> None:
+    config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
+    interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
+    text = config.read_text(encoding="utf-8")
+    interface_end = text.find("\n[Peer]")
+    head = text if interface_end < 0 else text[:interface_end]
+    tail = "" if interface_end < 0 else text[interface_end:]
+    if re.search(r"(?im)^MTU\s*=", head):
+        head = re.sub(r"(?im)^MTU\s*=.*$", f"MTU = {mtu}", head)
+    else:
+        head = head.rstrip() + f"\nMTU = {mtu}\n"
+    temporary = config.with_suffix(config.suffix + ".tmp")
+    temporary.write_text(head + tail, encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(config)
+    run("ip", "link", "set", "dev", interface, "mtu", str(mtu), check=True)
+    env_key = "WG_MTU" if protocol == "wg" else "AWG_MTU"
+    env_text = ENV_FILE.read_text(encoding="utf-8") if ENV_FILE.exists() else ""
+    if re.search(rf"(?m)^{env_key}=", env_text):
+        env_text = re.sub(rf"(?m)^{env_key}=.*$", f'{env_key}="{mtu}"', env_text)
+    else:
+        env_text = env_text.rstrip() + f'\n{env_key}="{mtu}"\n'
+    ENV_FILE.write_text(env_text, encoding="utf-8")
+    os.chmod(ENV_FILE, 0o600)
+
+
+def persist_env_values(values: dict[str, str | int | bool]) -> None:
+    env_text = ENV_FILE.read_text(encoding="utf-8") if ENV_FILE.exists() else ""
+    for key, value in values.items():
+        encoded = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+        line = f'{key}="{encoded}"'
+        if re.search(rf"(?m)^{re.escape(key)}=", env_text):
+            env_text = re.sub(rf"(?m)^{re.escape(key)}=.*$", lambda _: line, env_text)
+        else:
+            env_text = env_text.rstrip() + "\n" + line + "\n"
+    # ProtectSystem=strict exposes the exact /etc/vps-control.env file as
+    # writable, not arbitrary sibling paths in /etc. Writing a sibling temp
+    # file therefore fails with EROFS inside the API service sandbox.
+    ENV_FILE.write_text(env_text, encoding="utf-8")
+    os.chmod(ENV_FILE, 0o600)
+
+
+def validate_reality_sni(host: str) -> None:
+    try:
+        addresses = {row[4][0] for row in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)}
+    except socket.gaierror as exc:
+        raise HTTPException(status_code=422, detail="SNI не разрешается через DNS") from exc
+    if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
+        raise HTTPException(status_code=422, detail="SNI должен указывать только на публичные IP-адреса")
+    try:
+        result = subprocess.run(
+            ["openssl", "s_client", "-connect", f"{host}:443", "-servername", host, "-brief"],
+            input="", capture_output=True, text=True, timeout=8, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise HTTPException(status_code=422, detail="Не удалось проверить TLS выбранного SNI") from exc
+    if result.returncode != 0 or "Protocol version:" not in (result.stdout + result.stderr):
+        raise HTTPException(status_code=422, detail="Адрес SNI не завершает корректное TLS-соединение на порту 443")
+
+
+def persist_vrx_target(host: str) -> None:
+    text = VLESS_ENV.read_text(encoding="utf-8")
+    target = f"TARGET={host}:443"
+    if re.search(r"(?m)^TARGET=", text):
+        text = re.sub(r"(?m)^TARGET=.*$", target, text)
+    else:
+        text = text.rstrip() + "\n" + target + "\n"
+    temporary = VLESS_ENV.with_suffix(".env.tmp")
+    temporary.write_text(text, encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(VLESS_ENV)
+
+
+@app.patch("/api/protocols/{protocol}/settings")
+def update_protocol_settings(
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
+    payload: ProtocolSettingsUpdate,
+    _: None = Depends(require_token),
+) -> dict:
+    supplied = payload.model_dump(exclude_none=True)
+    allowed = {
+        "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
+        "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
+        "vless-reality-xhttp": {"xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni"},
+    }[protocol]
+    if not supplied or not set(supplied).issubset(allowed):
+        raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
+    if "dns" in supplied:
+        resolver_values = [value.strip() for value in supplied["dns"].split(",") if value.strip()]
+        if not resolver_values:
+            raise HTTPException(status_code=422, detail="Укажите хотя бы один DNS-резолвер")
+        for resolver in resolver_values:
+            if protocol == "vless-reality-xhttp" and re.fullmatch(r"https://[^\s]+", resolver):
+                continue
+            try:
+                ipaddress.ip_address(resolver)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"Некорректный DNS для {protocol}: {resolver}") from exc
+
+    if protocol in ("wg", "awg"):
+        config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
+        if not config.exists():
+            raise HTTPException(status_code=409, detail="Конфигурация туннеля не установлена")
+        if "mtu" in supplied:
+            persist_tunnel_mtu(protocol, int(supplied["mtu"]))
+        prefix = "WG" if protocol == "wg" else "AWG"
+        persist_env_values({
+            **({f"{prefix}_DNS": supplied["dns"]} if "dns" in supplied else {}),
+            **({f"{prefix}_KEEPALIVE": supplied["keepalive"]} if "keepalive" in supplied else {}),
+        })
+    elif protocol == "shadowsocks":
+        if "dns" in supplied:
+            persist_env_values({"SHADOWSOCKS_DNS": supplied["dns"]})
+        paths = sorted(SHADOWSOCKS_CONFIG_DIR.glob("*.json"))
+        if not paths:
+            raise HTTPException(status_code=409, detail="Нет настроенных каналов Shadowsocks")
+        originals = {path: path.read_bytes() for path in paths}
+        try:
+            for path in paths:
+                config = json.loads(originals[path])
+                if "timeout" in supplied:
+                    config["timeout"] = supplied["timeout"]
+                if "udp_mtu" in supplied:
+                    config["mtu"] = supplied["udp_mtu"]
+                if "mode" in supplied:
+                    config["mode"] = supplied["mode"]
+                if "no_delay" in supplied:
+                    config["no_delay"] = supplied["no_delay"]
+                temporary = path.with_suffix(".tmp.json")
+                temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(temporary, 0o600)
+                temporary.replace(path)
+            for item in read_clients():
+                if item.get("protocol") == protocol:
+                    run("systemctl", "restart", f'vps-control-shadowsocks@{item.get("id", "")}.service', timeout=20, check=True)
+        except Exception as exc:
+            for path, original in originals.items():
+                path.write_bytes(original)
+                os.chmod(path, 0o600)
+            raise HTTPException(status_code=500, detail="Не удалось применить настройки Shadowsocks") from exc
+    else:
+        if not VLESS_CONFIG.exists():
+            raise HTTPException(status_code=409, detail="VRX не установлен")
+        original = VLESS_CONFIG.read_bytes()
+        env_original = VLESS_ENV.read_bytes() if VLESS_ENV.exists() else None
+        temporary = VLESS_CONFIG.with_suffix(".settings.tmp.json")
+        try:
+            config = json.loads(original)
+            if "sni" in supplied:
+                validate_reality_sni(supplied["sni"])
+                reality_settings = config["inbounds"][0]["streamSettings"]["realitySettings"]
+                reality_settings["target"] = f'{supplied["sni"]}:443'
+                reality_settings["serverNames"] = [supplied["sni"]]
+            if "xhttp_mode" in supplied:
+                config["inbounds"][0]["streamSettings"]["xhttpSettings"]["mode"] = supplied["xhttp_mode"]
+            if "xpadding" in supplied:
+                config["inbounds"][0]["streamSettings"]["xhttpSettings"].setdefault("extra", {})["xPaddingBytes"] = supplied["xpadding"]
+            if "xmux_concurrency" in supplied:
+                extra = config["inbounds"][0]["streamSettings"]["xhttpSettings"].setdefault("extra", {})
+                extra["xmux"] = {
+                    "maxConcurrency": str(supplied["xmux_concurrency"]),
+                    "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000",
+                }
+            if "loglevel" in supplied:
+                config.setdefault("log", {})["loglevel"] = supplied["loglevel"]
+            if "dns" in supplied:
+                dns_addresses = [value.strip() for value in supplied["dns"].split(",") if value.strip()]
+                config["dns"] = {"servers": dns_addresses, "queryStrategy": "UseIP"}
+                config.setdefault("routing", {})["domainStrategy"] = "IPIfNonMatch"
+            temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.chmod(temporary, 0o640)
+            os.chown(temporary, 0, 65534)
+            result = subprocess.run([XRAY_BIN, "run", "-test", "-config", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
+            if result.returncode:
+                raise RuntimeError(result.stderr.strip() or "Xray rejected configuration")
+            temporary.replace(VLESS_CONFIG)
+            if "sni" in supplied:
+                persist_vrx_target(supplied["sni"])
+            if "dns" in supplied:
+                persist_env_values({"VRX_DNS": supplied["dns"]})
+            restart_vless_service()
+        except Exception as exc:
+            VLESS_CONFIG.write_bytes(original)
+            os.chmod(VLESS_CONFIG, 0o640)
+            os.chown(VLESS_CONFIG, 0, 65534)
+            if env_original is not None:
+                VLESS_ENV.write_bytes(env_original)
+                os.chmod(VLESS_ENV, 0o600)
+            try:
+                restart_vless_service()
+            except Exception:
+                pass
+            if isinstance(exc, HTTPException):
+                raise exc
+            raise HTTPException(status_code=500, detail="Не удалось применить настройки VRX") from exc
+        finally:
+            temporary.unlink(missing_ok=True)
+    return protocol_status(protocol)
+
+
 @app.get("/api/protocols/{protocol}/status")
-def protocol_status(protocol: Literal["wg", "awg"], _: None = Depends(require_token)) -> dict:
+def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"], _: None = Depends(require_token)) -> dict:
+    if protocol in ("shadowsocks", "vless-reality-xhttp"):
+        unit = "vps-control-shadowsocks.target" if protocol == "shadowsocks" else "vps-control-vless-reality-xhttp.service"
+        protocol_clients = [item for item in read_clients() if item.get("protocol") == protocol]
+        target = ""
+        settings: dict[str, str | int | bool] = {}
+        stats = []
+        if protocol == "shadowsocks":
+            config_values: dict = {}
+            for config_path in sorted(SHADOWSOCKS_CONFIG_DIR.glob("*.json")):
+                try:
+                    config_values = json.loads(config_path.read_text(encoding="utf-8"))
+                    break
+                except (OSError, json.JSONDecodeError):
+                    continue
+            settings = {
+                "Шифр": str(config_values.get("method", "chacha20-ietf-poly1305")),
+                "Режим": str(config_values.get("mode", "tcp_and_udp")),
+                "MTU UDP": int(config_values.get("mtu", 1200) or 1200),
+                "Таймаут": f"{int(config_values.get('timeout', 300) or 300)} с",
+                "TCP no-delay": bool(config_values.get("no_delay", True)),
+                "DNS новых профилей": current_env_value("SHADOWSOCKS_DNS", "не настроен"),
+            }
+            editable_settings = editable_protocol_settings(protocol, config_values)
+            for item in protocol_clients:
+                rx, tx = service_bytes(f'vps-control-shadowsocks@{item.get("id", "")}.service')
+                age, _, _ = stream_sample(f'ss:{item.get("id", "")}', rx, tx)
+                connections = shadowsocks_connections(int(item.get("port", 0)))
+                stats.append((rx, tx, age if connections else None, connections))
+            active_clients = sum(
+                1 for _, _, age, connections in stats
+                if connections and age is not None and age < STREAM_ACTIVITY_WINDOW_S
+            )
+            listen_port = SHADOWSOCKS_PORT_START
+        else:
+            activity = recent_xray_activity()
+            stats = [xray_user_stats(f'{item.get("id", "")}@312.net', activity.get(f'{item.get("id", "")}@312.net')) for item in protocol_clients]
+            active_clients = sum(1 for _, _, age, _, _ in stats if age is not None and age < STREAM_ACTIVITY_WINDOW_S)
+            try:
+                reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+                listen_port = int(reality.get("PORT", "443"))
+                target = reality.get("TARGET", "")
+                settings = {
+                    "REALITY target": target,
+                    "XHTTP path": reality.get("XHTTP_PATH", reality.get("PATH", "/")),
+                    "SNI": target.rsplit(":", 1)[0] if ":" in target else target,
+                    "DNS": current_env_value("VRX_DNS", "не настроен"),
+                }
+                config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
+                xhttp_values = dict(config_data["inbounds"][0]["streamSettings"].get("xhttpSettings", {}))
+                xhttp_values["sni"] = target.rsplit(":", 1)[0] if ":" in target else target
+                xhttp_values["loglevel"] = config_data.get("log", {}).get("loglevel", "warning")
+                xhttp_values["xPaddingBytes"] = xhttp_values.get("extra", {}).get("xPaddingBytes", "100-1000")
+                max_concurrency = xhttp_values.get("extra", {}).get("xmux", {}).get("maxConcurrency", "12")
+                xhttp_values["xmuxConcurrency"] = int(str(max_concurrency).split("-", 1)[0])
+                editable_settings = editable_protocol_settings(protocol, xhttp_values)
+            except (OSError, ValueError, json.JSONDecodeError, KeyError, IndexError):
+                listen_port = 443
+                editable_settings = editable_protocol_settings(protocol, {})
+        service_active = run("systemctl", "is-active", unit) == "active"
+        return {
+            "protocol": protocol, "interface": "systemd", "active": service_active,
+            "service_active": service_active, "service_enabled": run("systemctl", "is-enabled", unit) == "enabled",
+            "active_since": run("systemctl", "show", unit, "--property=ActiveEnterTimestamp", "--value"),
+            "address": PUBLIC_IP, "listen_port": listen_port, "mtu": 0,
+            "peers": len(protocol_clients), "online_peers": active_clients, "endpoints": active_clients,
+            "last_handshake_age_s": min((row[2] for row in stats if row[2] is not None), default=None),
+            "peer_rx_bytes": sum(row[0] for row in stats),
+            "peer_tx_bytes": sum(row[1] for row in stats),
+            "interface_rx_bytes": sum(row[0] for row in stats), "interface_tx_bytes": sum(row[1] for row in stats), "rx_errors": 0, "tx_errors": 0,
+            "rx_dropped": 0, "tx_dropped": 0,
+            "unit": unit,
+            "transport": "TCP + UDP" if protocol == "shadowsocks" else "XHTTP over TCP",
+            "security": "ChaCha20-IETF-Poly1305" if protocol == "shadowsocks" else "REALITY",
+            "target": target,
+            "settings": settings,
+            "editable_settings": editable_settings,
+        }
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
     unit = f"{'wg-quick' if protocol == 'wg' else 'awg-quick'}@{interface}.service"
@@ -1990,6 +2937,8 @@ def protocol_status(protocol: Literal["wg", "awg"], _: None = Depends(require_to
         "address": address,
         "listen_port": listen_port,
         "mtu": mtu,
+        "settings": {"MTU": mtu},
+        "editable_settings": editable_protocol_settings(protocol, {"mtu": mtu}),
         "peers": len(rows) - 1 if rows else 0,
         "online_peers": sum(1 for age in handshakes if age < 180),
         "endpoints": endpoints,
@@ -2009,7 +2958,10 @@ def protocol_status(protocol: Literal["wg", "awg"], _: None = Depends(require_to
 
 
 @app.post("/api/protocols/{protocol}/resources/check")
-def check_protocol_resources(protocol: Literal["wg", "awg"], _: None = Depends(require_token)) -> dict:
+def check_protocol_resources(
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
+    _: None = Depends(require_token),
+) -> dict:
     return check_resource_availability(protocol)
 
 
@@ -2019,7 +2971,21 @@ def check_network_diagnostics(protocol: Literal["wg", "awg"], _: None = Depends(
 
 
 @app.post("/api/protocols/{protocol}/restart")
-def restart_protocol(protocol: Literal["wg", "awg"], _: None = Depends(require_token)) -> dict:
-    unit = f"wg-quick@{WG_INTERFACE}.service" if protocol == "wg" else f"awg-quick@{AWG_INTERFACE}.service"
-    run("systemctl", "restart", unit, timeout=20, check=True)
+def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"], _: None = Depends(require_token)) -> dict:
+    if protocol == "shadowsocks":
+        unit = "vps-control-shadowsocks.target"
+        if run("systemctl", "show", unit, "--property=LoadState", "--value") != "loaded":
+            raise HTTPException(status_code=409, detail="Shadowsocks protocol is not installed")
+        for item in read_clients():
+            if item.get("protocol") == protocol:
+                run("systemctl", "restart", f'vps-control-shadowsocks@{item.get("id", "")}.service', timeout=20, check=True)
+    else:
+        unit = (
+            f"wg-quick@{WG_INTERFACE}.service" if protocol == "wg"
+            else f"awg-quick@{AWG_INTERFACE}.service" if protocol == "awg"
+            else "vps-control-vless-reality-xhttp.service"
+        )
+        if run("systemctl", "show", unit, "--property=LoadState", "--value") != "loaded":
+            raise HTTPException(status_code=409, detail=f"{protocol} protocol is not installed")
+        run("systemctl", "restart", unit, timeout=20, check=True)
     return {"protocol": protocol, "active": run("systemctl", "is-active", unit) == "active"}

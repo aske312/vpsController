@@ -1,0 +1,11 @@
+{
+  "id": "shadowsocks",
+  "name": "ShadowSocks",
+  "version": "1.0.0",
+  "description": "Лёгкий прокси с отдельным ключом для подключения",
+  "category": "secure-tunnels",
+  "category_name": "Защищённые туннели",
+  "installer": "install.sh",
+  "uninstaller": "uninstall.sh",
+  "service": "vps-control-shadowsocks.target"
+}

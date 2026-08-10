@@ -27,9 +27,17 @@ LOCAL_CIDR=""
 HTTP_PORT="80"
 WG_PORT="51820"
 AWG_PORT="51822"
+SHADOWSOCKS_PORT_START="30000"
+VLESS_REALITY_PORT="443"
+VLESS_REALITY_TARGET="www.intel.com:443"
 WG_INTERFACE="wg0"
 AWG_INTERFACE="awg0"
+WG_MTU="1280"
 AWG_MTU="1280"
+WG_DNS="1.1.1.1, 1.0.0.1"
+AWG_DNS="1.1.1.1, 1.0.0.1"
+WG_KEEPALIVE="25"
+AWG_KEEPALIVE="25"
 AWG_JC="6"
 AWG_JMIN="8"
 AWG_JMAX="80"
@@ -205,10 +213,12 @@ die() { printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
 
 cleanup_update_dir() {
   [[ -n "${UPDATE_TEMP_DIR}" ]] || return 0
-  local target base
+  local target base leaf
   target="$(realpath -m -- "${UPDATE_TEMP_DIR}")"
   base="$(realpath -m -- "${DATA_DIR}/tmp")"
-  [[ "${target}" == "${base}"/update.* ]] || die "отказ от очистки неожиданного пути ${target}."
+  leaf="${target##*/}"
+  [[ "${target}" == "${base}"/* && "${leaf}" =~ ^(update|test-update)\.[A-Za-z0-9]+$ ]] \
+    || die "отказ от очистки неожиданного пути ${target}."
   rm -rf -- "${target}"
   UPDATE_TEMP_DIR=""
 }
@@ -307,9 +317,17 @@ configure_access() {
   set_env_value "ACCESS_MODE" "${ACCESS_MODE}"
   set_env_value "WG_PORT" "${WG_PORT}"
   set_env_value "AWG_PORT" "${AWG_PORT}"
+  set_env_value "SHADOWSOCKS_PORT_START" "${SHADOWSOCKS_PORT_START}"
+  set_env_value "VLESS_REALITY_PORT" "${VLESS_REALITY_PORT}"
+  set_env_value "VLESS_REALITY_TARGET" "${VLESS_REALITY_TARGET}"
   set_env_value "WG_INTERFACE" "${WG_INTERFACE}"
   set_env_value "AWG_INTERFACE" "${AWG_INTERFACE}"
+  set_env_value "WG_MTU" "${WG_MTU}"
   set_env_value "AWG_MTU" "${AWG_MTU}"
+  set_env_value "WG_DNS" "${WG_DNS}"
+  set_env_value "AWG_DNS" "${AWG_DNS}"
+  set_env_value "WG_KEEPALIVE" "${WG_KEEPALIVE}"
+  set_env_value "AWG_KEEPALIVE" "${AWG_KEEPALIVE}"
   set_env_value "AWG_JC" "${AWG_JC}"
   set_env_value "AWG_JMIN" "${AWG_JMIN}"
   set_env_value "AWG_JMAX" "${AWG_JMAX}"
@@ -327,14 +345,15 @@ env_value() {
 
 set_env_value() {
   local key="$1" value="$2" encoded escaped
+  # The file is sourced by vpn-monitor and also consumed as a systemd
+  # EnvironmentFile. Always quote and escape shell metacharacters: passwords
+  # commonly contain '$', '&' or backticks and must never be expanded by bash.
   encoded="${value}"
-  if [[ "${encoded}" =~ [[:space:]] ]]; then
-    encoded="${encoded//\\/\\\\}"
-    encoded="${encoded//\"/\\\"}"
-    encoded="${encoded//\$/\\\$}"
-    encoded="${encoded//\`/\\\`}"
-    encoded="\"${encoded}\""
-  fi
+  encoded="${encoded//\\/\\\\}"
+  encoded="${encoded//\"/\\\"}"
+  encoded="${encoded//\$/\\\$}"
+  encoded="${encoded//\`/\\\`}"
+  encoded="\"${encoded}\""
   escaped="${encoded//\\/\\\\}"
   escaped="${escaped//&/\\&}"
   escaped="${escaped//|/\\|}"
@@ -485,8 +504,9 @@ install_packages() {
 
 secure_server() {
   info "Настройка защиты Ubuntu"
-  apt-get update
-  apt-get install -y auditd fail2ban unattended-upgrades
+  prepare_package_manager
+  apt-get -o DPkg::Lock::Timeout=300 update
+  apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw
   install -d -m 0755 /etc/fail2ban/jail.d
   cat >/etc/fail2ban/jail.d/vps-control.local <<'EOF'
 [sshd]
@@ -501,14 +521,17 @@ EOF
   systemctl restart fail2ban
   systemctl enable --now unattended-upgrades
   systemctl enable --now auditd
+  systemctl enable --now apparmor.service >/dev/null 2>&1 || warn "AppArmor установлен, но для активации может потребоваться перезагрузка."
   install -d -m 0755 /etc/sysctl.d /etc/ssh/sshd_config.d
   cat >/etc/sysctl.d/99-vps-control-routing.conf <<'EOF'
+net.ipv4.tcp_syncookies = 1
 net.ipv4.conf.all.accept_redirects = 0
 net.ipv4.conf.default.accept_redirects = 0
 net.ipv4.conf.all.send_redirects = 0
 net.ipv4.conf.default.send_redirects = 0
 net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
+kernel.dmesg_restrict = 1
 EOF
   sysctl --system >/dev/null 2>&1 || true
   cat >/etc/ssh/sshd_config.d/99-vps-control-tunnels.conf <<'EOF'
@@ -517,7 +540,20 @@ AllowTcpForwarding yes
 PermitTunnel yes
 EOF
   sshd -t >/dev/null 2>&1 && systemctl reload ssh.service 2>/dev/null || true
-  ok "Fail2ban, auditd и автоматические security-обновления включены."
+  if [[ -f "${ENV_FILE}" ]]; then
+    chown root:root "${ENV_FILE}"
+    chmod 0600 "${ENV_FILE}"
+  fi
+  if [[ -f "${COMMAND_PATH}" ]]; then
+    chown root:root "${COMMAND_PATH}"
+    chmod 0755 "${COMMAND_PATH}"
+  fi
+  configure_access
+  configure_firewall "panel-only"
+  install_api
+  ensure_api_write_access
+  systemctl restart "${APP_NAME}-api.service"
+  ok "Firewall, Fail2ban, AppArmor, auditd, sysctl, SSH, API, права и автоматические security-обновления проверены."
 }
 
 check_vpn() {
@@ -559,10 +595,15 @@ install_protocol_image() {
   prepare_package_manager
   ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+    PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${installer}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
-  sync_protocol_monitor
+  # Protocol clients persist configs below /etc/vps-control.  Keep the API
+  # sandbox in sync even when a module is installed on an older deployment
+  # whose service unit predates the writable path.
+  ensure_api_write_access
   systemctl restart "${APP_NAME}-api.service"
+  sync_protocol_monitor
   ok "Образ ${image_id} установлен."
 }
 
@@ -582,11 +623,30 @@ remove_protocol_image() {
   info "Удаление установленного протокола ${image_id}"
   ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+    PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${uninstaller}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
-  sync_protocol_monitor
+  ensure_api_write_access
   systemctl restart "${APP_NAME}-api.service"
+  sync_protocol_monitor
   ok "Протокол ${image_id} удалён; образ сохранён."
+}
+
+client_firewall() {
+  local action="${2:-}" port="${3:-}" port_end=$((SHADOWSOCKS_PORT_START + 9999))
+  (( port_end <= 65535 )) || port_end=65535
+  [[ "${action}" == "add" || "${action}" == "delete" ]] || die "client-firewall: ожидается add или delete."
+  [[ "${port}" =~ ^[0-9]+$ ]] || die "client-firewall: порт должен быть числом."
+  (( port >= SHADOWSOCKS_PORT_START && port <= port_end )) || die "client-firewall: порт вне диапазона Shadowsocks."
+  command -v ufw >/dev/null 2>&1 || return 0
+  ufw status | grep -q '^Status: active' || return 0
+  if [[ "${action}" == "add" ]]; then
+    ufw allow "${port}/tcp" comment '312.net Shadowsocks client'
+    ufw allow "${port}/udp" comment '312.net Shadowsocks client'
+  else
+    ufw --force delete allow "${port}/tcp" >/dev/null 2>&1 || true
+    ufw --force delete allow "${port}/udp" >/dev/null 2>&1 || true
+  fi
 }
 
 configure_firewall() {
@@ -747,7 +807,29 @@ ensure_environment() {
   else
     ok "существующий ${ENV_FILE} сохранён."
     [[ -n "$(env_value ADMIN_USER)" ]] || set_env_value "ADMIN_USER" "${ADMIN_USER}"
-    [[ -n "$(env_value ADMIN_PASSWORD)" ]] || set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
+    if [[ -n "$(env_value ADMIN_PASSWORD)" ]]; then
+      # Re-serialize passwords written by older builds without sourcing an
+      # unsafe '$' or backtick from the existing env file.
+      local existing_password
+      existing_password="$(python3 - "${ENV_FILE}" <<'PY'
+import ast
+import sys
+
+for line in open(sys.argv[1], encoding="utf-8"):
+    if line.startswith("ADMIN_PASSWORD="):
+        value = line.rstrip("\n").split("=", 1)[1]
+        try:
+            value = ast.literal_eval(value)
+        except (SyntaxError, ValueError):
+            pass
+        print(value, end="")
+        break
+PY
+)"
+      [[ -n "${existing_password}" ]] && set_env_value "ADMIN_PASSWORD" "${existing_password}"
+    else
+      set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
+    fi
   fi
   if [[ -z "$(env_value PUBLIC_IP)" ]]; then
     refresh_server_identity
@@ -805,7 +887,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=-/etc/vps-control.env -/etc/wireguard -/etc/amnezia ${DATA_DIR}
+ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/wireguard -/etc/amnezia ${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -815,8 +897,8 @@ EOF
 }
 
 ensure_api_write_access() {
-  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/wireguard -/etc/amnezia ${DATA_DIR}"
-  if ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}"; then
+  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/wireguard -/etc/amnezia ${DATA_DIR}"
+  if ! grep -Fxq "${expected}" "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
     systemctl daemon-reload
   fi
@@ -987,6 +1069,7 @@ PY
 
 start_services() {
   configure_access
+  ensure_api_write_access
   if [[ -r "${INSTALL_DIR}/.build-commit" ]]; then
     BUILD_COMMIT="$(<"${INSTALL_DIR}/.build-commit")"
   fi
@@ -1018,6 +1101,7 @@ uninstall_app() {
 }
 
 restart_services() {
+  ensure_api_write_access
   info "Перезапуск служб панели"
   systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
   verify_app
@@ -1076,6 +1160,12 @@ install_prebuilt_release() {
   [[ -n "${installed_requirements_hash}" && "${requirements_hash}" == "${installed_requirements_hash}" ]] \
     || { rm -rf -- "${stage_root}"; die "Python-зависимости изменились; подготовьте полный системный релиз."; }
 
+  # Import the candidate API with the installed production dependencies before
+  # replacing the working tree. This catches Pydantic schema and other module
+  # initialization errors without interrupting the running release.
+  PYTHONPATH="${payload}" "${INSTALL_DIR}/venv/bin/python" -c 'import api.main' >/dev/null \
+    || { rm -rf -- "${stage_root}"; die "API нового релиза не проходит проверку импорта; обновление отменено до остановки служб."; }
+
   rollback="${INSTALL_DIR}.rollback.$(date -u +%Y%m%dT%H%M%SZ)"
   info "Установка заранее собранного релиза без Docker и сборки на VPS"
   if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -Eq '^vps-control-(web|gateway)-1$'; then
@@ -1092,11 +1182,14 @@ install_prebuilt_release() {
   if ! install_api \
     || ! install_web \
     || ! ensure_api_write_access \
+    || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
     || ! build_commit="$(awk -F= '$1 == "commit" {print $2}' "${INSTALL_DIR}/.prebuilt-release")" \
     || ! printf '%s\n' "${build_commit:-manual}" >"${INSTALL_DIR}/.build-commit" \
     || ! write_integrity_manifest \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
+    || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
+      "http://127.0.0.1:8000/api/health" >/dev/null \
     || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
       "http://127.0.0.1:${HTTP_PORT}/" >/dev/null; then
     warn "новый релиз не прошёл проверку; выполняется откат."
@@ -1639,7 +1732,8 @@ integrity_check() {
   [[ -r "${SERVICE_FILE}" ]] \
     || die "не найден systemd-профиль API ${SERVICE_FILE}."
   grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
-    || die "systemd-профиль API не разрешает сохранять административный токен в ${ENV_FILE}."
+    && grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
+    || die "systemd-профиль API не разрешает сохранять конфигурацию приложения."
   [[ "$(stat -c '%U' "${COMMAND_PATH}")" == "root" ]] \
     || die "${COMMAND_PATH} должен принадлежать root."
   command_mode="$(stat -c '%a' "${COMMAND_PATH}")"
@@ -1710,6 +1804,8 @@ usage() {
                    установить протокол из образа
   protocol-remove <id>
                    удалить протокол, сохранив образ
+  client-firewall <add|delete> <port>
+                   изменить правило отдельного Shadowsocks-подключения
   credentials      показать логин и пароль администратора
   help             показать эту справку
 EOF
@@ -1790,6 +1886,7 @@ main() {
     poweroff) poweroff_server ;;
     protocol-install) install_protocol_image "$@" ;;
     protocol-remove) remove_protocol_image "$@" ;;
+    client-firewall) client_firewall "$@" ;;
     credentials) show_credentials ;;
     help|-h|--help) usage ;;
     *) usage >&2; exit 2 ;;

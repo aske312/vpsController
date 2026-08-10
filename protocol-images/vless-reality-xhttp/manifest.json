@@ -1,0 +1,11 @@
+{
+  "id": "vless-reality-xhttp",
+  "name": "VRX",
+  "version": "1.0.0",
+  "description": "VLESS через REALITY и XHTTP без собственного домена",
+  "category": "secure-tunnels",
+  "category_name": "Защищённые туннели",
+  "installer": "install.sh",
+  "uninstaller": "uninstall.sh",
+  "service": "vps-control-vless-reality-xhttp.service"
+}

@@ -118,6 +118,13 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .protocolInstaller small { color: var(--muted); font: 8px/1.5 var(--font-mono); margin-top: 5px; }
 .protocolInstaller button { border: 1px solid #31534a; border-radius: 6px; background: var(--green-dim); color: var(--green); padding: 8px 11px; font-size: 8px; }
 .protocolInstaller button:disabled { opacity: .55; cursor: wait; }
+.protocolInstaller.installed { grid-template-columns: 42px minmax(0, 1fr) auto auto auto; }
+.protocolInstaller.installed em { font-style: normal; }
+@media (max-width: 900px) {
+  .protocolInstaller.installed { grid-template-columns: 42px minmax(0, 1fr) auto; }
+  .protocolInstaller.installed em { grid-column: 2; }
+  .protocolInstaller.installed button { grid-row: 2; }
+}
 .protocolCategory { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 14px; align-items: center; border-top: 1px solid var(--line); padding: 17px 10px; }
 .categoryMark { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 6px; color: #83b6ff; background: #17263a; font: 750 9px var(--font-mono); }
 .categoryDetails { min-width: 0; display: grid; gap: 5px; }
@@ -134,6 +141,8 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .protocol { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; font: 750 9px var(--font-geist-mono); }
 .protocol.wg { color: #83b6ff; background: #17263a; }
 .protocol.awg { color: #bc9cff; background: #251d38; }
+.protocol.shadowsocks { color: #66dfc2; background: #15312d; }
+.protocol.vless-reality-xhttp { color: #ffb76b; background: #352719; }
 .onlinePill, .offlinePill { display: inline-flex; align-items: center; border-radius: 20px; padding: 6px 9px; white-space: nowrap; font-size: 8px; font-weight: 650; }
 .onlinePill { color: var(--green); background: var(--green-dim); }
 .offlinePill { color: var(--amber); background: #302415; }
@@ -206,11 +215,13 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .runtimeRows em { font-style: normal; }
 .applicationLogs { grid-column: 1 / -1; }
 
-.clientsLayout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(290px, .55fr); gap: 14px; align-items: start; }
+.clientsLayout { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
+.clientsPanel { grid-column: 1 / -1; }
 .connectionGuide { grid-column: 1 / -1; }
 .guideLanguage, .legalLanguage { display: flex; gap: 5px; }
 .guideLanguage button, .legalLanguage button { border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; background: #11191b; color: var(--muted); font: 8px var(--font-mono); }
 .guideLanguage button.active, .legalLanguage button.active { border-color: #31534a; background: var(--green-dim); color: var(--green); }
+.guideIntro { max-width: 900px; margin: 15px 0 0; color: #a5b1af; font-size: 11px; line-height: 1.7; }
 .guideSteps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; margin-top: 20px; }
 .guideSteps section { display: flex; gap: 12px; min-height: 150px; padding: 18px; border: 1px solid var(--line); border-radius: 9px; background: #11191b; }
 .guideSteps section > span { color: var(--green); font: 11px var(--font-mono); }
@@ -219,7 +230,15 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .guideSteps a { display: inline-block; margin-top: 12px; color: var(--green); font: 10px var(--font-mono); text-decoration: none; }
 .guideSteps a:hover { text-decoration: underline; }
 .clientTable { display: grid; gap: 8px; }
-.clientRow { display: grid; grid-template-columns: 44px minmax(150px, 1fr) 150px 110px 145px auto; gap: 13px; align-items: center; padding: 15px; border: 1px solid var(--line); border-radius: 8px; background: #121a1c; }
+.clientPagination { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; padding: 13px 4px 0; border-top: 1px solid var(--line); }
+.clientPagination > span { color: var(--muted); font: 9px var(--font-mono); }
+.clientPagination > div { display: flex; align-items: center; gap: 6px; }
+.clientPagination button { min-width: 34px; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: #11191b; color: #9eaaa7; font-size: 9px; }
+.clientPagination button:hover:not(:disabled) { border-color: #31534a; background: var(--green-dim); color: var(--green); }
+.clientPagination button:disabled { opacity: .35; cursor: not-allowed; }
+.clientPagination strong { min-width: 54px; color: var(--text); font: 9px var(--font-mono); text-align: center; }
+.clientRow { display: grid; grid-template-columns: minmax(190px, 1.25fr) minmax(145px, 1fr) minmax(190px, 1.3fr) 145px 145px auto; gap: 13px; align-items: center; padding: 15px; border: 1px solid var(--line); border-radius: 8px; background: #121a1c; }
+.clientIdentity { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .clientRow > p > strong { display: flex; align-items: center; gap: 7px; }
 .clientQuality { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: #63706e; box-shadow: none; }
 .clientQuality.stable { background: var(--green); box-shadow: 0 0 9px color-mix(in srgb, var(--green) 65%, transparent); }
@@ -229,6 +248,10 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .clientRow.quality-warning { border-left: 3px solid var(--amber); }
 .clientRow.quality-error { border-left: 3px solid var(--red); background: color-mix(in srgb, var(--red) 5%, #121a1c); }
 .clientRow.quality-offline { border-left: 3px solid #63706e; opacity: .78; }
+.clientState, .clientState span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.clientState small, .clientState span, .handshake span { color: #60716e; font: 7px var(--font-mono); letter-spacing: .5px; }
+.clientState strong { color: #a9b7b4; font: 600 9px var(--font-mono); }
+.clientState span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .traffic { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; text-align: left; }
 .traffic small, .handshake small, .clientLink small { color: #60716e; font: 7px var(--font-mono); letter-spacing: .7px; }
 .traffic b { display: block; margin-top: 5px; color: #a9b7b4; font: 500 9px var(--font-mono); }
@@ -238,13 +261,16 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .emptyState { min-height: 190px; border-top: 1px solid var(--line); display: grid; place-items: center; align-content: center; color: #515e70; }
 .emptyState span { font-size: 24px; }
 .emptyState p { font-size: 10px; margin: 8px 0 0; }
-.addClientHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
-.addClientHead h2 { margin: 0; font-size: 18px; }
-.guideDownload { flex: 0 0 auto; width: 38px; height: 38px; display: grid; grid-template-rows: 22px 10px; place-items: center; border: 1px solid #31534a; border-radius: 8px; background: var(--green-dim); color: var(--green); text-decoration: none; transition: border-color .2s, background .2s, transform .2s; }
-.guideDownload span { font: 18px/1 var(--font-mono); }
-.guideDownload small { font: 6px/1 var(--font-mono); letter-spacing: .7px; }
-.guideDownload:hover { border-color: var(--green); background: #1b3029; transform: translateY(-1px); }
-.guideDownload:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.clientPanelActions { display: flex; align-items: center; gap: 9px; }
+.clientPanelActions > span { margin-right: 5px; color: var(--muted); font: 9px var(--font-mono); }
+.guideAction { position: relative; min-height: 40px; display: flex; align-items: center; gap: 9px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 9px; background: #11191b; color: #aeb9b6; text-decoration: none; }
+.guideAction > span { color: var(--green); font: 18px/1 var(--font-mono); }
+.guideAction > div { display: flex; flex-direction: column; gap: 2px; }
+.guideAction strong { font-size: 9px; }
+.guideAction small { color: var(--muted); font: 7px var(--font-mono); }
+.guideAction:hover { border-color: #31534a; background: var(--green-dim); }
+.guideAction::after { content: attr(data-tooltip); position: absolute; z-index: 4; right: 0; top: calc(100% + 9px); width: 290px; padding: 10px 12px; border: 1px solid #31534a; border-radius: 7px; background: #0a1112; color: #aeb9b6; font: 9px/1.55 var(--font-mono); box-shadow: 0 12px 30px #0008; opacity: 0; visibility: hidden; transform: translateY(-3px); transition: .15s ease; pointer-events: none; }
+.guideAction:hover::after, .guideAction:focus-visible::after { opacity: 1; visibility: visible; transform: translateY(0); }
 .addClient form { display: grid; gap: 14px; }
 .addClient label, .loginCard label { display: grid; gap: 7px; color: #788597; font: 8px var(--font-geist-mono); letter-spacing: .5px; }
 .addClient .fieldHint { color: #73817f; font-size: 9px; line-height: 1.5; letter-spacing: 0; }
@@ -268,6 +294,27 @@ input:focus, select:focus, textarea:focus { border-color: #516830; box-shadow: 0
 .generated summary { display: flex; justify-content: space-between; padding: 11px; color: #879592; font-size: 9px; cursor: pointer; list-style: none; }
 .generated textarea { height: 190px; padding: 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0; resize: vertical; font: 8px/1.6 var(--font-mono); }
 .generated .copyButton { border: 1px solid var(--line); background: #111b1d; color: #9baba7; border-radius: 6px; padding: 10px; font-size: 9px; }
+.generatedResult { display: grid; grid-template-columns: minmax(260px, 300px) 1fr; gap: 16px; align-items: stretch; }
+.generatedQr { display: grid; justify-items: center; align-content: center; gap: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: #fff; text-align: center; }
+.generatedQr img { display: block; width: min(300px, 100%); height: auto; aspect-ratio: 1; background: #fff; image-rendering: pixelated; }
+.generatedQr small { color: #45504e; font: 8px/1.45 var(--font-mono); }
+.generatedQr.pending { min-height: 300px; background: #0a1214; color: var(--muted); font: 9px var(--font-mono); }
+.generatedTransfer { display: flex; flex-direction: column; justify-content: center; gap: 13px; padding: 17px; border: 1px solid var(--line); border-radius: 7px; background: #0a1214; }
+.generatedTransfer > div > strong { color: var(--text); font-size: 12px; }
+.generatedTransfer p { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.qrDownload { display: block; padding: 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--green); font: 9px var(--font-mono); text-align: center; text-decoration: none; }
+.qrDownload:hover { border-color: #31534a; background: var(--green-dim); }
+.generatedQrError { margin: 0; color: var(--warning); font-size: 9px; }
+.connectionDialog { width: min(680px, 100%); max-height: calc(100vh - 36px); overflow-y: auto; padding: 24px; border: 1px solid #31564b; border-radius: 14px; background: linear-gradient(145deg, #151d1b, #0d1211); box-shadow: 0 28px 80px #000a; }
+.connectionDialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.connectionDialog h2 { margin: 0; font-size: 25px; }
+.dialogClose { width: 36px; height: 36px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 8px; background: #111918; color: var(--muted); font-size: 21px; }
+.dialogClose:hover { border-color: #44675e; color: var(--text); }
+.connectionDialogIntro { max-width: 590px; margin: 14px 0 0; color: #8d9794; font-size: 11px; line-height: 1.65; }
+.connectionForm { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 22px; }
+.connectionDialogActions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.connectionDialogActions > button:not(.primaryButton) { min-height: 40px; padding: 0 16px; border: 1px solid var(--line); border-radius: 8px; background: #111918; color: #9da7a4; font-size: 10px; }
+.connectionDialog .generated { margin-top: 22px; }
 
 .loginPage { min-height: 100vh; display: grid; place-items: center; padding: 24px; position: relative; overflow: hidden; background-image: linear-gradient(#12192355 1px, transparent 1px), linear-gradient(90deg, #12192355 1px, transparent 1px); background-size: 72px 72px; }
 .loginGlow { position: absolute; width: 600px; height: 600px; border-radius: 50%; background: #7ca72720; filter: blur(140px); top: -360px; left: calc(50% - 300px); }
@@ -415,6 +462,8 @@ input, select { height: 46px; font-size: 11px; }
   .applicationHero, .applicationLogs { grid-column: 1; }
   .updatedAt { display: none; }
   .clientRow { grid-template-columns: 38px 1fr auto; }
+  .clientIdentity { grid-column: 1 / -1; }
+  .clientState { grid-column: 2 / -1; }
   .traffic, .handshake { display: none; }
   .clientLink { align-items: flex-end; }
   .clientRow .dangerButton { grid-column: 2 / -1; }
@@ -515,6 +564,8 @@ input, select { height: 46px; font-size: 11px; }
 .networkDirections { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: auto; }
 .networkDirections span { display: flex; flex-direction: column; gap: 6px; padding-top: 11px; border-top: 1px solid #29403a; color: var(--muted); font-size: 9px; }
 .networkDirections strong { color: var(--text); font: 500 11px var(--font-mono); }
+.networkTotals { display: flex; justify-content: space-between; gap: 12px; margin-top: 9px; color: var(--muted); font: 8px var(--font-mono); }
+.networkTotals strong { margin-left: 5px; color: var(--text); font-weight: 500; }
 .protocolSummary { padding: 12px 14px; }
 .protocolSummary > button { padding: 17px 10px; }
 .protocolInstaller { grid-template-columns: 46px minmax(0, 1fr) auto; padding: 17px 10px; gap: 14px; }
@@ -570,6 +621,40 @@ input, select { height: 46px; font-size: 11px; }
 .dangerButton, input, select, textarea, .primaryButton { border-radius: 6px; }
 
 .protocolMonitor { display: grid; gap: 12px; margin-bottom: 12px; }
+.dnsWorkspace { display: grid; grid-template-columns: 1fr; gap: 14px; padding-bottom: 80px; }
+.dnsHero { min-height: 164px; display: flex; align-items: center; justify-content: space-between; gap: 28px; overflow: hidden; background: radial-gradient(circle at 84% 20%, #1d4a3b55, transparent 34%), linear-gradient(110deg, #10231f, #101719 68%); }
+.dnsHero h2 { margin: 6px 0 10px; font-size: 32px; }
+.dnsHero p { max-width: 680px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.dnsHeroActions { min-width: 220px; display: grid; gap: 10px; }
+.dnsHeroStat { display: flex; align-items: center; gap: 10px; }.dnsHeroStat strong { color: var(--green); font: 600 30px var(--font-mono); }.dnsHeroStat span { color: var(--muted); font-size: 8px; }
+.dnsCheckAll, .dnsCustomButton { min-height: 40px; padding: 0 15px; border: 1px solid #3a6a5c; border-radius: 7px; background: #18372e; color: #b0eed7; font-size: 9px; font-weight: 700; }.dnsCheckAll span { margin-right: 8px; font-size: 15px; }
+.dnsSetupGrid { display: grid; grid-template-columns: 1.45fr 1fr; gap: 14px; }
+.dnsSectionTitle { display: flex; align-items: center; gap: 11px; }.dnsSectionTitle > span { width: 28px; height: 28px; display: grid; flex: 0 0 auto; place-items: center; border: 1px solid #376357; border-radius: 50%; background: #142923; color: var(--green); font: 9px var(--font-mono); }.dnsSectionTitle h3 { margin-top: 3px; }
+.dnsSectionHint { margin: 11px 0 0; color: var(--muted); font-size: 8px; }
+.dnsSectionHead { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.dnsSectionHead > small { color: var(--muted); font-size: 8px; }
+.dnsPolicyGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 14px; }
+.dnsPolicyGrid label { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: #101817; cursor: pointer; }
+.dnsPolicyGrid label:has(input:checked) { border-color: #315a4f; background: #12231f; }.dnsPolicyGrid input, .dnsOptionList input { width: 17px; height: 17px; accent-color: var(--green); }
+.dnsPolicyGrid span { display: grid; gap: 4px; }.dnsPolicyGrid strong { font-size: 9px; }.dnsPolicyGrid small { color: var(--muted); font-size: 7px; }
+.dnsOptionList { display: grid; gap: 8px; margin-top: 14px; }.dnsOptionList label { min-height: 55px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 7px; background: #101817; cursor: pointer; }.dnsOptionList label > span { display: grid; gap: 5px; }.dnsOptionList strong { font-size: 9px; }.dnsOptionList small { color: var(--muted); font-size: 7px; line-height: 1.4; }
+.dnsResolverSection { display: grid; gap: 16px; }
+.dnsProtocolEffect { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+.dnsProtocolEffect div { display: grid; gap: 5px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: #0c1415; }.dnsProtocolEffect strong { color: var(--green); font-size: 8px; }.dnsProtocolEffect span { overflow-wrap: anywhere; color: var(--muted); font: 7px var(--font-mono); }
+.dnsCurrent { display: grid; grid-template-columns: 180px 1fr; align-items: center; gap: 18px; }.dnsCurrent h3 { margin-top: 4px; }
+.dnsCatalog { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dnsProvider { min-height: 202px; display: grid; align-content: start; gap: 14px; padding: 15px; border: 1px solid var(--line); border-radius: 8px; background: #0f1718; color: var(--text); text-align: left; transition: border-color .15s, background .15s; }
+.dnsProvider.selected { border-color: #4c8c78; box-shadow: inset 0 0 0 1px #4c8c7833; background: #10201d; }
+.dnsProvider header { display: grid; grid-template-columns: auto 1fr 22px; align-items: center; gap: 10px; }
+.dnsProvider header div { display: grid; gap: 4px; }.dnsProvider header strong { font-size: 11px; }.dnsProvider header small { color: var(--muted); font-size: 8px; }
+.dnsProvider header i { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--green); color: #0b1714; font-style: normal; }
+.dnsCountry { min-width: 34px; padding: 5px; border-radius: 5px; background: #222b2d; color: var(--muted); font: 7px var(--font-mono); text-align: center; }.dnsCountry.ru { background: #263b34; color: #9fe4ca; }
+.dnsProvider code { color: #b9cbc6; font-size: 9px; }
+.dnsChecks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }.dnsChecks span { display: grid; gap: 3px; padding: 7px 4px; border-radius: 5px; background: #181516; color: #876f71; text-align: center; }.dnsChecks span small { font: 6px var(--font-mono); opacity: .7; }.dnsChecks span strong { font: 7px var(--font-mono); }.dnsChecks span.ok { background: #11231e; color: var(--green); }
+.dnsProviderActions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: auto; }.dnsProviderActions button { min-height: 34px; border-radius: 6px; font-size: 8px; font-weight: 700; }.dnsTestButton { border: 1px solid var(--line); background: #131c1d; color: #a5b1ae; }.dnsSelectButton { border: 1px solid #376357; background: #17332b; color: var(--green); }.dnsSelectButton:disabled { border-color: transparent; background: var(--green); color: #0b1714; opacity: 1; }
+.customDnsFields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; }.customDnsFields label { display: grid; gap: 6px; color: var(--muted); font-size: 8px; }.customDnsFields input { width: 100%; padding: 0 10px; border: 1px solid var(--line); background: #0d1516; color: var(--text); }
+.dnsSaveBar { position: sticky; bottom: 12px; z-index: 4; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 16px; border: 1px solid #3c7161; border-radius: 9px; background: #101d1bf2; box-shadow: 0 10px 30px #0008; backdrop-filter: blur(14px); }.dnsSaveBar p { display: grid; gap: 3px; margin: 0; }.dnsSaveBar p > small { color: var(--green); font: 6px var(--font-mono); }.dnsSaveBar strong { font-size: 11px; }.dnsSaveBar span { color: var(--muted); font-size: 8px; }.dnsSaveBar button { min-height: 42px; padding: 0 20px; border: 0; border-radius: 6px; background: var(--green); color: #0b1714; font-weight: 800; }
+.clientPaginationTop { margin: 12px 0 4px; padding: 11px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.deviceProbe { display: grid; grid-template-columns: minmax(190px, .8fr) 1.4fr auto; align-items: center; gap: 18px; margin: 12px 0 4px; padding: 13px 14px; border: 1px solid #315a4f; border-radius: 8px; background: #10201d; }.deviceProbe > div { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 3px 9px; }.deviceProbe > div p { grid-column: 1 / -1; margin: 0; }.deviceProbe > div strong { color: var(--green); font: 600 20px var(--font-mono); }.deviceProbe > div span { color: var(--muted); font-size: 8px; }.deviceProbe dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 0; }.deviceProbe dl div { display: grid; gap: 4px; padding: 8px; border-radius: 6px; background: #0c1515; }.deviceProbe dt { color: var(--muted); font-size: 7px; }.deviceProbe dd { margin: 0; font: 8px var(--font-mono); }.deviceProbe button { min-height: 36px; padding: 0 12px; border: 1px solid #376357; border-radius: 6px; background: #17332b; color: var(--green); font-size: 8px; font-weight: 700; }
 .protocolLiveHero {
   min-height: 134px; display: flex; align-items: center; justify-content: space-between; gap: 24px;
   background: linear-gradient(105deg, #10201d, #0f1618 62%);
@@ -590,7 +675,27 @@ input, select { height: 46px; font-size: 11px; }
 .protocolActions button:hover { border-color: #3b5d54; color: var(--text); }
 .protocolActions .removeProtocolButton { border-color: #493033; color: #ef8c82; }
 .protocolActions button:disabled { opacity: .45; cursor: wait; }
+.protocolConfiguration { display: grid; gap: 18px; border-left: 3px solid #407a68; background: linear-gradient(120deg, #101b1a, #101617 68%); }
+.protocolConfiguration > header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.protocolConfiguration > header h3 { margin: 4px 0 6px; font-size: 18px; }
+.protocolConfiguration > header > div > span { color: var(--muted); font-size: 9px; }
+.configurationSafety { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #29483f; border-radius: 7px; background: #0d1917; }
+.configurationSafety > i { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: var(--green); color: #0b1714; font-style: normal; font-weight: 700; }
+.configurationSafety p { display: grid; gap: 3px; margin: 0; }
+.configurationSafety strong { font-size: 9px; }
+.configurationSafety small { color: var(--muted); font-size: 7px; }
+.protocolSettingsEditor { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+.protocolSettingsEditor label { min-height: 86px; display: grid; grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr); align-content: start; align-items: center; gap: 8px 10px; padding: 12px; border: 1px solid #263432; border-radius: 7px; background: #0d1516; color: var(--muted); font-size: 9px; }
+.protocolSettingsEditor input:not([type="checkbox"]), .protocolSettingsEditor select { width: 100%; min-width: 0; height: 34px; border: 1px solid var(--line); border-radius: 6px; background: #0f1719; color: var(--text); padding: 0 9px; font: inherit; }
+.protocolSettingsEditor input[type="checkbox"] { justify-self: end; width: 18px; height: 18px; accent-color: var(--accent); }
+.protocolSettingsEditor label small { grid-column: 1 / -1; color: var(--dim); line-height: 1.45; }
+.protocolSettingsSave { grid-column: 1 / -1; justify-self: end; min-width: 210px; height: 38px; border: 1px solid #315a4f; border-radius: 6px; background: #163129; color: #9fe4ca; font-size: 9px; cursor: pointer; }
+.protocolSettingsSave:disabled { opacity: .5; cursor: wait; }
+.protocolSettingsEmpty { margin-top: 12px; color: var(--dim); font-size: 9px; }
 .protocolMonitorGrid { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(230px, .75fr)); gap: 12px; }
+.streamProtocolDetails { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.streamProtocolDetails .protocolTelemetry { min-width: 0; }
+.streamProtocolDetails dd { overflow-wrap: anywhere; }
 .protocolFlow, .protocolTelemetry { min-height: 190px; }
 .protocolFlow { display: flex; flex-direction: column; }
 .protocolFlow h3 { margin-top: 5px; font-size: 17px; }
@@ -712,6 +817,9 @@ input, select { height: 46px; font-size: 11px; }
 .legalLanguage button { font-size: 11px; }
 
 @media (max-width: 1050px) {
+  .dnsCatalog { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dnsSetupGrid { grid-template-columns: 1fr; }
+  .dnsPolicyGrid, .dnsProtocolEffect { grid-template-columns: repeat(2, 1fr); }
   .resourceIndicators { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
   .sidebar { gap: 16px; padding-inline: 18px; }
   .sidebar > .brand > div, .locationCard > div, .navItem em { display: none; }
@@ -723,11 +831,20 @@ input, select { height: 46px; font-size: 11px; }
   .overview { grid-template-columns: 1fr; }
   .metrics, .protocolSummary { grid-column: 1; }
   .protocolMonitorGrid { grid-template-columns: 1fr 1fr; }
+  .protocolSettingsEditor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .guideSteps { grid-template-columns: repeat(2, 1fr); }
   .protocolFlow { grid-column: 1 / -1; }
 }
 
 @media (max-width: 700px) {
+  .dnsHero, .dnsSaveBar { align-items: stretch; flex-direction: column; }
+  .dnsHeroActions { align-items: stretch; flex-direction: column; }
+  .dnsCatalog, .dnsPolicyGrid, .dnsProtocolEffect, .customDnsFields { grid-template-columns: 1fr; }
+  .dnsCurrent { grid-template-columns: 1fr; }
+  .dnsSectionHead { align-items: flex-start; flex-direction: column; }
+  .dnsCustomButton { width: 100%; }
+  .deviceProbe { grid-template-columns: 1fr; }.deviceProbe dl { grid-template-columns: 1fr; }.deviceProbe button { width: 100%; }
+  .dnsSaveBar button { width: 100%; }
   .resourceIndicators { grid-template-columns: 1fr; }
   .resourceAvailability .panelHead, .resourceTools { align-items: flex-start; flex-direction: column; }
   .protocolCategory { grid-template-columns: 40px minmax(0, 1fr); }
@@ -758,6 +875,10 @@ input, select { height: 46px; font-size: 11px; }
   .protocolHealth { width: 100%; }
   .protocolControlStack { width: 100%; min-width: 0; }
   .protocolMonitorGrid { grid-template-columns: 1fr; }
+  .protocolConfiguration > header { align-items: flex-start; flex-direction: column; }
+  .configurationSafety { width: 100%; }
+  .protocolSettingsEditor { grid-template-columns: 1fr; }
+  .protocolSettingsSave { width: 100%; min-width: 0; }
   .protocolFlow { grid-column: 1; }
   .flowValues { grid-template-columns: 1fr; }
   .eventRows { grid-template-columns: 1fr; }
@@ -767,6 +888,15 @@ input, select { height: 46px; font-size: 11px; }
   .legalScreen > header, .legalScreen > article, .legalScreen > footer { padding-inline: 18px; }
   .legalLanguage { margin-inline: 18px; }
   .guideSteps { grid-template-columns: 1fr; }
+  .connectionForm { grid-template-columns: 1fr; }
+  .generatedResult { grid-template-columns: 1fr; }
+  .clientPanelActions { width: 100%; align-items: stretch; flex-direction: column; }
+  .clientPanelActions > span { display: block; }
+  .guideAction, .clientPanelActions .primaryButton { width: 100%; }
+  .guideAction::after { display: none; }
+  .clientPagination { align-items: stretch; flex-direction: column; }
+  .clientPagination > div { justify-content: space-between; }
+  .clientPagination button { padding-inline: 8px; }
 }
 
 /* Compact operations layout: useful state fits into a typical 1440×900 viewport. */

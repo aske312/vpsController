@@ -2,20 +2,26 @@
 
 import { useState } from "react";
 
+const APP_URL = "https://storage.googleapis.com/amnezia/amnezia.org";
+
 export function ConnectionGuide() {
   const [language, setLanguage] = useState<"ru" | "en">("ru");
   const ru = language === "ru";
+
   return <article className="panel connectionGuide">
     <div className="panelHead">
-      <div><p className="eyebrow">CLIENT GUIDE</p><h2>{ru ? "Создание и подключение клиента" : "Create and connect a client"}</h2></div>
+      <div><p className="eyebrow">CONNECTION WORKFLOW</p><h2>{ru ? "Как создать и передать новое подключение" : "How to create and share a new connection"}</h2></div>
       <div className="guideLanguage"><button className={ru ? "active" : ""} onClick={() => setLanguage("ru")}>RU</button><button className={!ru ? "active" : ""} onClick={() => setLanguage("en")}>EN</button></div>
     </div>
+    <p className="guideIntro">{ru
+      ? "Каждое подключение создаётся для одного конкретного устройства. Выберите доступный протокол, скачайте созданную конфигурацию и передайте её только владельцу этого устройства."
+      : "Each connection is created for one specific device. Select an available protocol, download the generated configuration and send it only to that device owner."}</p>
     <div className="guideSteps">
-      <section><span>01</span><div><h3>{ru ? "Установите AmneziaWG" : "Install AmneziaWG"}</h3><p>{ru ? "Для подключений WG и AWG используйте одно приложение — AmneziaWG." : "Use the same AmneziaWG app for both WG and AWG connections."}</p><a href="https://storage.googleapis.com/amnezia/amnezia.org" target="_blank" rel="noreferrer">{ru ? "Скачать приложение ↗" : "Download the app ↗"}</a></div></section>
-      <section><span>02</span><div><h3>{ru ? "Создайте клиента" : "Create a client"}</h3><p>{ru ? "Введите понятное уникальное имя, выберите протокол и нажмите «Создать конфигурацию». Один клиент — одно устройство." : "Enter a clear unique name, select a protocol and click “Create configuration”. Use one client per device."}</p></div></section>
-      <section><span>03</span><div><h3>{ru ? "Сохраните конфигурацию" : "Save the configuration"}</h3><p>{ru ? "Скачайте .conf сразу: приватный ключ повторно не показывается. Передавайте файл только владельцу устройства по защищённому каналу." : "Download the .conf file immediately: the private key is not shown again. Send it only to the device owner over a secure channel."}</p></div></section>
-      <section><span>04</span><div><h3>{ru ? "Импортируйте и включите" : "Import and activate"}</h3><p>{ru ? "Импортируйте .conf в AmneziaWG. Для WG обязательно включите галочку «Обфускация», затем сохраните и включите подключение." : "Import the .conf file into AmneziaWG. For WG, enable the “Obfuscation” checkbox, then save and activate the connection."}</p></div></section>
-      <section><span>05</span><div><h3>{ru ? "Отзовите при утрате" : "Revoke if compromised"}</h3><p>{ru ? "Если устройство или файл потеряны, нажмите «Отозвать» и создайте нового клиента. Не используйте одну конфигурацию на нескольких устройствах." : "If a device or file is lost, click “Revoke” and create a new client. Never reuse one configuration on multiple devices."}</p></div></section>
+      <section><span>01</span><div><h3>{ru ? "Назовите устройство" : "Name the device"}</h3><p>{ru ? "Укажите понятное уникальное имя, например «iPhone Анны» или «Office-PC». По нему подключение можно будет найти и отозвать." : "Use a clear unique name, such as Anna's iPhone or Office-PC, so the connection can be found and revoked later."}</p></div></section>
+      <section><span>02</span><div><h3>{ru ? "Выберите протокол" : "Select a protocol"}</h3><p>{ru ? "Выберите один из установленных на сервере протоколов и нажмите «Создать конфигурацию». Панель выпустит отдельный ключ." : "Select one of the protocols installed on the server and click Create configuration. The panel will issue a separate key."}</p></div></section>
+      <section><span>03</span><div><h3>{ru ? "Передайте конфигурацию" : "Share the configuration"}</h3><p>{ru ? "Скачайте файл и передайте его владельцу по защищённому личному каналу либо покажите созданный QR-код на его устройстве. Приватный ключ повторно не показывается." : "Download the file and send it to the owner through a secure private channel, or let them scan the generated QR code on their device. The private key is not shown again."}</p></div></section>
+      <section><span>04</span><div><h3>{ru ? "Отправьте ссылку на приложение" : "Send the app link"}</h3><p>{ru ? "Если приложение ещё не установлено, отдельно отправьте владельцу ссылку на его установку. Не публикуйте конфигурацию, файл или QR-код в общем чате." : "If the app is not installed yet, send its installation link separately. Never post the configuration file or QR code in a group chat."}</p><a href={APP_URL} target="_blank" rel="noreferrer">{ru ? "Ссылка на установку" : "Installation link"} ↗</a></div></section>
+      <section><span>05</span><div><h3>{ru ? "Одно подключение — один ключ" : "One connection, one key"}</h3><p>{ru ? "Не используйте одну конфигурацию на нескольких устройствах. Для каждого устройства создавайте новое подключение. Потерянный или скомпрометированный файл отзовите и выпустите заново." : "Never reuse one configuration across multiple devices. Create a new connection for each device. Revoke and replace any lost or compromised file."}</p></div></section>
     </div>
   </article>;
 }

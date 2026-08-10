@@ -1,22 +1,27 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
+import QRCode from "qrcode";
 import { ConnectionGuide } from "./connection-guide";
 import { LegalFooter } from "./legal";
 
-type Tab = "overview" | "security" | "application" | "services" | "wg" | "awg" | "clients";
-type Protocol = "wg" | "awg";
+type Protocol = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp";
+type Tab = "overview" | "dns" | "security" | "application" | "services" | "clients" | Protocol;
+type TunnelProtocol = "wg" | "awg";
 type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
 type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" | "network-check" | "integrity-check" | "identity" | "secure" | "kernel-update" | "vpn-firewall" | "optimize" | "reboot" | "poweroff";
 type Client = {
   id: string; name: string; protocol: Protocol; public_key: string; endpoint?: string;
   address: string; handshake_age_s?: number; rx_bytes: number; tx_bytes: number;
-  quality?: "stable" | "warning" | "error" | "offline"; latency_ms?: number; jitter_ms?: number; packet_loss_percent?: number; quality_reason?: string;
+  rx_bps?: number; tx_bps?: number; active_connections?: number; active_sources?: string[];
+  quality?: "stable" | "warning" | "error" | "offline"; latency_ms?: number; jitter_ms?: number; packet_loss_percent?: number; quality_reason?: string; latency_source?: "server_icmp_tunnel_ip" | "not_supported"; sample_size?: number;
 };
+type DeviceProbe = { latency_ms: number | null; variation_ms: number | null; loss_percent: number; successful: number; samples: number; measured_at: string; route: string };
 type Overview = {
   server: { name: string; public_ip: string; city: string; country: string; country_code: string; uptime_s: number };
   resources: { load1: number; cpu_percent: number; cpu_count: number; memory_total: number; memory_available: number; disk_total: number; disk_available: number; network_rx: number; network_tx: number };
-  protocols: Record<Protocol, { interface: string; port: number; active: boolean }>;
+  protocols: Record<"wg" | "awg", { interface: string; port: number; active: boolean }>;
 };
 type ApplicationStatus = {
   api: { active: boolean; enabled: boolean };
@@ -33,7 +38,7 @@ type ApplicationStatus = {
 };
 type ProtocolImage = {
   id: string; name: string; version: string; description: string; category: string; category_name: string;
-  interface: string; installed: boolean; removable: boolean;
+  interface: string; installed: boolean; active?: boolean; removable: boolean;
 };
 type AutomationSchedule = {
   enabled: boolean; cadence: "daily" | "weekly" | "monthly"; weekday: string; hour: number; minute: number;
@@ -54,13 +59,17 @@ type ServicesStatus = {
 };
 type LiveStatus = {
   resources: Overview["resources"];
-  protocols: Record<Protocol, {
+  protocols: Record<"wg" | "awg", {
     active: boolean; peers: number; online_peers: number; interface_rx_bytes: number; interface_tx_bytes: number;
   }>;
   clients: Client[];
   security: { firewall_active: boolean; fail2ban_active: boolean; ssh_listening: boolean };
 };
 type LoggingSettings = { persistent: boolean; retention_days: number };
+type DnsProvider = { id: string; name: string; country: string; addresses: string[]; doh_url?: string; filter: string };
+type DnsSettings = { selected_id: string; apply_wg: boolean; apply_awg: boolean; apply_shadowsocks: boolean; apply_vrx: boolean; prefer_encrypted: boolean; fallback_enabled: boolean; custom?: { name: string; addresses: string[]; doh_url: string } | null };
+type DnsStatus = { settings: DnsSettings; providers: DnsProvider[]; protocol_effect: Record<string, string> };
+type DnsCheck = { id: string; available: boolean; udp_ok: boolean; udp_ms?: number; tcp_ok: boolean; tcp_ms?: number; doh_ok: boolean; doh_ms?: number; latency_ms?: number };
 type ConfirmationRequest = {
   title: string; message: string; confirmLabel: string; phrase?: string; danger?: boolean;
   resolve: (confirmed: boolean) => void;
@@ -73,6 +82,9 @@ type ProtocolStatus = {
   endpoints: number; last_handshake_age_s?: number; peer_rx_bytes: number; peer_tx_bytes: number;
   interface_rx_bytes: number; interface_tx_bytes: number; rx_errors: number; tx_errors: number;
   rx_dropped: number; tx_dropped: number;
+  unit?: string; transport?: string; security?: string; target?: string;
+  settings?: Record<string, string | number | boolean>;
+  editable_settings?: EditableProtocolSetting[];
   resources: {
     checked_at?: string;
     items: Array<{ name: string; available: boolean; status_code?: number; latency_ms: number }>;
@@ -95,12 +107,12 @@ type ProtocolStatus = {
   };
 };
 
-const labels: Record<Tab, string> = {
-  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", clients: "Подключения",
+const labels: Record<Tab | Protocol, string> = {
+  overview: "Обзор", dns: "DNS", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", shadowsocks: "Shadowsocks", "vless-reality-xhttp": "VLESS + REALITY + XHTTP", clients: "Подключения",
 };
 const navigationLabels: Record<Tab, string> = {
-  overview: "OVERVIEW", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
-  wg: "WIREGUARD", awg: "AMNEZIAWG", clients: "CONNECTIONS",
+  overview: "OVERVIEW", dns: "DNS CONTROL", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
+  wg: "WIREGUARD", awg: "AMNEZIAWG", shadowsocks: "SHADOWSOCKS", "vless-reality-xhttp": "VLESS", clients: "CONNECTIONS",
 };
 const actionLabels: Record<string, string> = {
   install: "Установка 312.net", start: "Запуск приложения", stop: "Остановка приложения",
@@ -118,6 +130,18 @@ const bytes = (value = 0) => {
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
   return `${(value / 1024 ** index).toFixed(index > 2 ? 1 : 0)} ${units[index]}`;
 };
+type EditableProtocolSetting = {
+  key: string; label: string; type: "number" | "select" | "boolean" | "text";
+  value: string | number | boolean; min?: number; max?: number; help?: string;
+  options?: Array<{ value: string; label: string }>;
+};
+
+function reloadWithoutCache(message: string) {
+  sessionStorage.setItem("312-notice", message);
+  const target = new URL(window.location.href);
+  target.searchParams.set("_refresh", Date.now().toString());
+  window.location.replace(target.toString());
+}
 const duration = (seconds?: number) => {
   if (seconds === undefined || seconds === null) return "никогда";
   if (seconds < 60) return `${seconds} сек назад`;
@@ -125,7 +149,10 @@ const duration = (seconds?: number) => {
   return `${Math.floor(seconds / 3600)} ч назад`;
 };
 const uptime = (seconds = 0) => `${Math.floor(seconds / 86400)}д ${Math.floor((seconds % 86400) / 3600)}ч`;
-const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-48);
+const LIVE_SAMPLE_SECONDS = 3;
+const HISTORY_SAMPLES = 100;
+const CLIENTS_PER_PAGE = 10;
+const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-HISTORY_SAMPLES);
 export default function Home() {
   const [tab, setTab] = useState<Tab>("overview");
   const [token, setToken] = useState("");
@@ -141,6 +168,13 @@ export default function Home() {
   const [securityNewLogCount, setSecurityNewLogCount] = useState(0);
   const [application, setApplication] = useState<ApplicationStatus | null>(null);
   const [services, setServices] = useState<ServicesStatus | null>(null);
+  const [dns, setDns] = useState<DnsStatus | null>(null);
+  const [dnsDraft, setDnsDraft] = useState<DnsSettings | null>(null);
+  const [dnsChecks, setDnsChecks] = useState<Record<string, DnsCheck>>({});
+  const [deviceProbe, setDeviceProbe] = useState<DeviceProbe | null>(null);
+  const [probingDevice, setProbingDevice] = useState(false);
+  const deviceProbeAt = useRef(0);
+  const [checkingDns, setCheckingDns] = useState(false);
   const [automationDraft, setAutomationDraft] = useState<ServicesStatus["automation"] | null>(null);
   const [loggingDraft, setLoggingDraft] = useState<LoggingSettings | null>(null);
   const [notice, setNotice] = useState("");
@@ -154,6 +188,7 @@ export default function Home() {
   const [protocolImages, setProtocolImages] = useState<ProtocolImage[]>([]);
   const [protocolStatuses, setProtocolStatuses] = useState<Partial<Record<Protocol, ProtocolStatus>>>({});
   const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number; tx: number }>>>({});
+  const [protocolSettingsDraft, setProtocolSettingsDraft] = useState<Partial<Record<Protocol, Record<string, string | number | boolean>>>>({});
   const [installingProtocol, setInstallingProtocol] = useState("");
   const [checkingResources, setCheckingResources] = useState<Protocol | null>(null);
   const [checkingDiagnostics, setCheckingDiagnostics] = useState<Protocol | null>(null);
@@ -163,6 +198,8 @@ export default function Home() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [passwordDialog, setPasswordDialog] = useState(false);
+  const [clientDialog, setClientDialog] = useState(false);
+  const [clientPage, setClientPage] = useState(1);
   const [currentAdminPassword, setCurrentAdminPassword] = useState("");
   const [newAdminPassword, setNewAdminPassword] = useState("");
   const [confirmAdminPassword, setConfirmAdminPassword] = useState("");
@@ -171,10 +208,12 @@ export default function Home() {
   const [newClient, setNewClient] = useState({ name: "", protocol: "wg" as Protocol });
   const [generated, setGenerated] = useState("");
   const [generatedName, setGeneratedName] = useState("client.conf");
+  const [generatedQr, setGeneratedQr] = useState("");
+  const [generatedQrError, setGeneratedQrError] = useState("");
   const settingsRef = useRef<HTMLDivElement>(null);
   const networkSample = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
-  const autoRefreshBeforeServiceMode = useRef(true);
+  const protocolSettingsDirty = useRef<Partial<Record<Protocol, boolean>>>({});
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
   const automationDirty = useRef(false);
   const loggingDirty = useRef(false);
@@ -236,26 +275,6 @@ export default function Home() {
         request("/overview") as Promise<Overview>,
         request("/protocol-images") as Promise<{ items: ProtocolImage[] }>,
       ]);
-      const now = Date.now();
-      const previous = networkSample.current;
-      let nextRxRate = 0;
-      let nextTxRate = 0;
-      if (previous) {
-        const seconds = Math.max((now - previous.at) / 1000, 0.1);
-        nextRxRate = Math.max(0, (next.resources.network_rx - previous.rx) / seconds);
-        nextTxRate = Math.max(0, (next.resources.network_tx - previous.tx) / seconds);
-        setNetworkRate({ rx: nextRxRate, tx: nextTxRate });
-      }
-      const memoryUsed = next.resources.memory_total ? 100 - next.resources.memory_available / next.resources.memory_total * 100 : 0;
-      const diskUsed = next.resources.disk_total ? 100 - next.resources.disk_available / next.resources.disk_total * 100 : 0;
-      setResourceHistory((history) => ({
-        load: appendSample(history.load, next.resources.cpu_percent || 0),
-        memory: appendSample(history.memory, memoryUsed),
-        disk: appendSample(history.disk, diskUsed),
-        rx: previous ? appendSample(history.rx, nextRxRate) : history.rx,
-        tx: previous ? appendSample(history.tx, nextTxRate) : history.tx,
-      }));
-      networkSample.current = { rx: next.resources.network_rx, tx: next.resources.network_tx, at: now };
       setOverview(next);
       setProtocolImages(imageData.items || []);
       if (installingProtocol && imageData.items.some((image) => image.id === installingProtocol && image.installed)) {
@@ -318,9 +337,99 @@ export default function Home() {
       }
       protocolSamples.current[protocol] = { rx: next.interface_rx_bytes, tx: next.interface_tx_bytes, at: now };
       setProtocolStatuses((statuses) => ({ ...statuses, [protocol]: next }));
+      if (!protocolSettingsDirty.current[protocol]) {
+        setProtocolSettingsDraft((drafts) => ({
+          ...drafts,
+          [protocol]: Object.fromEntries((next.editable_settings || []).map((setting) => [setting.key, setting.value])),
+        }));
+      }
       setLastUpdated(new Date());
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить состояние протокола"); }
   }, [request, token]);
+
+  const loadDns = useCallback(async () => {
+    if (!token) return;
+    try {
+      const next = await request("/dns") as DnsStatus;
+      setDns(next); setDnsDraft((current) => current || next.settings); setLastUpdated(new Date());
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось загрузить DNS"); }
+  }, [request, token]);
+
+  async function saveDnsSettings() {
+    if (!dnsDraft) return;
+    setBusy(true); setError("");
+    try {
+      const next = await request("/dns/settings", { method: "PUT", body: JSON.stringify(dnsDraft) }) as DnsStatus;
+      setDns(next); setDnsDraft(next.settings); setNotice("DNS-профиль сохранён и применён к выбранным протоколам");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось сохранить DNS"); }
+    finally { setBusy(false); }
+  }
+
+  const measureDeviceRoute = useCallback(async (force = false) => {
+    if (!force && Date.now() - deviceProbeAt.current < 30000) return;
+    setProbingDevice(true);
+    const samples: number[] = [];
+    let failed = 0;
+    for (let index = 0; index < 5; index += 1) {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 4000);
+      const started = performance.now();
+      try {
+        const response = await fetch(`/api/health?_probe=${Date.now()}-${index}`, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        await response.json();
+        samples.push(performance.now() - started);
+      } catch {
+        failed += 1;
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+    const host = window.location.hostname;
+    const route = host === "10.72.0.1" ? "WireGuard" : host === "10.73.0.1" ? "AmneziaWG" : "текущий маршрут браузера";
+    const average = samples.length ? samples.reduce((sum, value) => sum + value, 0) / samples.length : null;
+    const variation = samples.length > 1 ? Math.max(...samples) - Math.min(...samples) : null;
+    setDeviceProbe({
+      latency_ms: average == null ? null : Math.round(average),
+      variation_ms: variation == null ? null : Math.round(variation),
+      loss_percent: failed / 5 * 100,
+      successful: samples.length, samples: 5, measured_at: new Date().toISOString(), route,
+    });
+    deviceProbeAt.current = Date.now();
+    setProbingDevice(false);
+  }, []);
+
+  async function checkDnsProviders(providerId?: string) {
+    setCheckingDns(true); setError("");
+    try {
+      const result = await request("/dns/check", { method: "POST", body: JSON.stringify({ provider_id: providerId || null }) }) as { items: DnsCheck[] };
+      setDnsChecks((current) => ({ ...current, ...Object.fromEntries(result.items.map((item) => [item.id, item])) }));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Проверка DNS не выполнена"); }
+    finally { setCheckingDns(false); }
+  }
+
+  function changeProtocolSetting(protocol: Protocol, key: string, value: string | number | boolean) {
+    protocolSettingsDirty.current[protocol] = true;
+    setProtocolSettingsDraft((drafts) => ({ ...drafts, [protocol]: { ...(drafts[protocol] || {}), [key]: value } }));
+  }
+
+  async function saveProtocolSettings(protocol: Protocol) {
+    const fields = protocolStatuses[protocol]?.editable_settings || [];
+    const draft = protocolSettingsDraft[protocol] || {};
+    const body = Object.fromEntries(fields.map((field) => [field.key, draft[field.key] ?? field.value]));
+    setBusy(true); setError("");
+    try {
+      const next = await request(`/protocols/${protocol}/settings`, { method: "PATCH", body: JSON.stringify(body) }) as ProtocolStatus;
+      protocolSettingsDirty.current[protocol] = false;
+      setProtocolStatuses((statuses) => ({ ...statuses, [protocol]: next }));
+      setProtocolSettingsDraft((drafts) => ({
+        ...drafts,
+        [protocol]: Object.fromEntries((next.editable_settings || []).map((setting) => [setting.key, setting.value])),
+      }));
+      setNotice(`Настройки ${labels[protocol]} применены`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось применить настройки протокола"); }
+    finally { setBusy(false); }
+  }
 
   const refreshCurrent = useCallback(async (showBusy = false) => {
     if (!token) return;
@@ -331,12 +440,16 @@ export default function Home() {
       else if (tab === "security") await Promise.all([loadSecurity(), loadServices()]);
       else if (tab === "application") await loadApplication();
       else if (tab === "services") await loadServices();
-      else if (tab === "wg" || tab === "awg") await Promise.all([loadClients(), loadProtocolStatus(tab)]);
-      else await loadClients();
+      else if (tab === "dns") await loadDns();
+      else if (["wg", "awg", "shadowsocks", "vless-reality-xhttp"].includes(tab)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
+      else {
+        await loadClients();
+        if (tab === "clients") await measureDeviceRoute(showBusy);
+      }
     } finally {
       if (showBusy) setBusy(false);
     }
-  }, [loadApplication, loadClients, loadOverview, loadProtocolStatus, loadSecurity, loadServices, tab, token]);
+  }, [loadApplication, loadClients, loadDns, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, tab, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -353,15 +466,18 @@ export default function Home() {
     if (tab === "security") return;
     const actionRunning = ["active", "activating", "running"].includes(application?.action?.state || "");
     const updateRunning = actionRunning && ["update", "test-update", "test-rollback", "kernel-update"].includes(application?.action?.action || "");
-    const delay = updateRunning ? 3000 : 5000;
+    const delay = updateRunning ? 3000
+      : tab === "overview" ? 30000
+        : ["wg", "awg", "shadowsocks", "vless-reality-xhttp", "clients"].includes(tab) ? 15000
+          : 10000;
     const timer = window.setInterval(() => void refreshCurrent(false), delay);
     return () => window.clearInterval(timer);
   }, [application?.action?.action, application?.action?.state, autoRefresh, refreshCurrent, tab, token]);
 
   useEffect(() => {
     const actionRunning = ["active", "activating", "running"].includes(application?.action?.state || "");
-    if (!token || (!autoRefresh && !actionRunning)) return;
-    const timer = window.setInterval(() => void loadApplication(), 3000);
+    if (!token || !actionRunning) return;
+    const timer = window.setInterval(() => void loadApplication(), 2000);
     return () => window.clearInterval(timer);
   }, [application?.action?.state, autoRefresh, loadApplication, token]);
 
@@ -381,9 +497,8 @@ export default function Home() {
         return;
       }
       const message = `${label}: успешно завершено`;
-      if (action.action === "update" || action.action === "test-update" || action.action === "test-rollback") {
-        sessionStorage.setItem("312-notice", `${message}. Интерфейс обновлён до установленной версии`);
-        window.setTimeout(() => window.location.reload(), 600);
+      if (["update", "test-update", "test-rollback", "kernel-update"].includes(action.action || "")) {
+        window.setTimeout(() => reloadWithoutCache(`${message}. Кэш интерфейса сброшен`), 600);
         return;
       }
       setNotice(message);
@@ -397,14 +512,6 @@ export default function Home() {
     const timer = window.setTimeout(() => setNotice(""), 8000);
     return () => window.clearTimeout(timer);
   }, [notice]);
-
-  useEffect(() => {
-    if (!autoRefresh || !(services?.service_mode?.active || application?.service_mode?.active)) return;
-    autoRefreshBeforeServiceMode.current = true;
-    // Service mode freezes telemetry so tests and maintenance do not race background requests.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAutoRefresh(false);
-  }, [application?.service_mode?.active, autoRefresh, services?.service_mode?.active]);
 
   useEffect(() => {
     if (!token || tab === "overview") return;
@@ -475,7 +582,7 @@ export default function Home() {
       })));
       setProtocolStatuses((current) => {
         const updated = { ...current };
-        (["wg", "awg"] as Protocol[]).forEach((protocol) => {
+        (["wg", "awg"] as TunnelProtocol[]).forEach((protocol) => {
           if (updated[protocol]) updated[protocol] = { ...updated[protocol]!, ...next.protocols[protocol] };
         });
         return updated;
@@ -497,7 +604,7 @@ export default function Home() {
   useEffect(() => {
     if (!token || !autoRefresh || !["overview", "clients", "wg", "awg", "security"].includes(tab)) return;
     const initial = window.setTimeout(() => void loadLiveStatus(), 0);
-    const timer = window.setInterval(() => void loadLiveStatus(), 800);
+    const timer = window.setInterval(() => void loadLiveStatus(), LIVE_SAMPLE_SECONDS * 1000);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(timer);
@@ -594,6 +701,19 @@ export default function Home() {
     setConfirmAdminPassword("");
   }
 
+  function openClientDialog() {
+    setGenerated(""); setGeneratedQr(""); setGeneratedQrError(""); setError(""); setClientDialog(true);
+  }
+
+  function closeClientDialog() {
+    if (busy) return;
+    setClientDialog(false); setGenerated(""); setGeneratedQr(""); setGeneratedQrError("");
+  }
+
+  function resetClientDialog() {
+    setGenerated(""); setGeneratedQr(""); setGeneratedQrError(""); setError("");
+  }
+
   async function changeAdminPassword(event: FormEvent) {
     event.preventDefault();
     if (!currentAdminPassword) { setError("Введите текущий пароль"); return; }
@@ -660,9 +780,9 @@ export default function Home() {
       confirmLabel: active ? "Включить режим" : "Завершить обслуживание",
       danger: active,
     })) return;
+    const autoRefreshAfterChange = autoRefresh;
     setBusy(true); setError("");
     try {
-      if (active) autoRefreshBeforeServiceMode.current = autoRefresh;
       setAutoRefresh(false);
       await request("/services/service-mode", { method: "PUT", body: JSON.stringify({ active }) });
       let confirmed = false;
@@ -685,11 +805,10 @@ export default function Home() {
         }
       }
       if (!confirmed) throw new Error("Сервер не подтвердил завершение переключения режима");
-      if (!active) setAutoRefresh(autoRefreshBeforeServiceMode.current);
-      await loadSecurity();
+      setAutoRefresh(autoRefreshAfterChange);
+      reloadWithoutCache(`Сервисный режим ${active ? "включён" : "выключен"}. Кэш интерфейса сброшен`);
     } catch (cause) {
-      if (!active) setAutoRefresh(false);
-      else setAutoRefresh(autoRefreshBeforeServiceMode.current);
+      setAutoRefresh(autoRefreshAfterChange);
       setError(cause instanceof Error ? cause.message : "Не удалось изменить сервисный режим");
     } finally { setBusy(false); }
   }
@@ -706,10 +825,12 @@ export default function Home() {
         setApplication(status);
         const current = imageData.items?.find((item) => item.id === image.id);
         const actionState = status.action?.state || "";
+        // The observed module state is authoritative. A transient systemd unit
+        // can disappear immediately after completing and briefly look failed.
+        if (Boolean(current?.installed) === installed) return;
         if (actionState === "failed" || status.action?.result === "failed") {
           throw new Error(`${installed ? "Установка" : "Удаление"} ${image.name} завершилось с ошибкой`);
         }
-        if (Boolean(current?.installed) === installed && !["active", "activating", "running"].includes(actionState)) return;
       } catch (cause) {
         if (cause instanceof Error && cause.message.includes("завершилось с ошибкой")) throw cause;
         // API may restart briefly after installing or removing a module.
@@ -866,8 +987,13 @@ export default function Home() {
     () => tab === "wg" || tab === "awg" ? clients.filter((client) => client.protocol === tab) : clients,
     [clients, tab],
   );
+  const clientPageCount = Math.max(1, Math.ceil(protocolClients.length / CLIENTS_PER_PAGE));
+  const currentClientPage = Math.min(clientPage, clientPageCount);
+  const visibleClients = protocolClients.slice((currentClientPage - 1) * CLIENTS_PER_PAGE, currentClientPage * CLIENTS_PER_PAGE);
+  const visibleClientStart = protocolClients.length ? (currentClientPage - 1) * CLIENTS_PER_PAGE + 1 : 0;
+  const visibleClientEnd = Math.min(currentClientPage * CLIENTS_PER_PAGE, protocolClients.length);
   const installedProtocols = useMemo(
-    () => protocolImages.filter((image) => image.installed && (image.id === "wg" || image.id === "awg")).map((image) => image.id as Protocol),
+    () => protocolImages.filter((image) => image.installed && (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(image.id)).map((image) => image.id as Protocol),
     [protocolImages],
   );
   const protocolCategories = useMemo(() => {
@@ -886,8 +1012,17 @@ export default function Home() {
   );
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!generated) return () => { cancelled = true; };
+    void QRCode.toDataURL(generated, { errorCorrectionLevel: "L", margin: 4, width: 768 })
+      .then((dataUrl) => { if (!cancelled) setGeneratedQr(dataUrl); })
+      .catch(() => { if (!cancelled) setGeneratedQrError("Не удалось создать QR-код для этой конфигурации"); });
+    return () => { cancelled = true; };
+  }, [generated]);
+
   async function addClient(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setGenerated(""); setError("");
+    event.preventDefault(); setBusy(true); setGenerated(""); setGeneratedQr(""); setGeneratedQrError(""); setError("");
     if (!installedProtocols.includes(selectedClientProtocol)) {
       setBusy(false); setError("Сначала установите выбранный протокол"); return;
     }
@@ -992,9 +1127,8 @@ export default function Home() {
   const panelSecurity = firewall?.panel_access;
   const panelAccessHealthy = Boolean(panelSecurity?.consistent && (panelSecurity?.vpn_only || panelSecurity?.publicly_accessible));
   const sshProtected = Boolean(
-    ssh?.active
-    && fail2ban?.active
-    && fail2ban?.jail_active
+    ssh?.active === false
+    || (ssh?.active && fail2ban?.active && fail2ban?.jail_active)
   );
   const securityChecks = [
     Boolean(firewall?.active),
@@ -1002,7 +1136,7 @@ export default function Home() {
     panelAccessHealthy,
     Boolean(fail2ban?.active && fail2ban?.jail_active),
     sshProtected,
-    ssh?.x11_forwarding === "no",
+    ssh?.active === false || ssh?.x11_forwarding === "no",
     Boolean(security) && Number(updates?.available || 0) === 0,
     Boolean(security) && !updates?.reboot_required,
     Boolean(updates?.automatic),
@@ -1021,9 +1155,10 @@ export default function Home() {
     Boolean(applicationSecurity?.control_command_protected),
   ];
   const securityScore = Math.round(securityChecks.filter(Boolean).length / securityChecks.length * 100);
-  const activeProtocol = tab === "wg" || tab === "awg" ? protocolStatuses[tab] : undefined;
-  const activeProtocolRate = tab === "wg" || tab === "awg" ? protocolRates[tab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
-  const activeProtocolImage = tab === "wg" || tab === "awg" ? protocolImages.find((image) => image.id === tab) : undefined;
+  const protocolTab = (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(tab) ? tab as Protocol : undefined;
+  const activeProtocol = protocolTab ? protocolStatuses[protocolTab] : undefined;
+  const activeProtocolRate = protocolTab ? protocolRates[protocolTab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
+  const activeProtocolImage = protocolTab ? protocolImages.find((image) => image.id === protocolTab) : undefined;
   const operationActive = ["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(application?.action?.state || "");
   const operationProgress = Math.max(0, Math.min(100, application?.action?.progress || (operationActive ? 5 : 100)));
   const operationName = application?.action?.action || "";
@@ -1075,11 +1210,11 @@ export default function Home() {
         <div className="settingsWrap" ref={settingsRef}><button onClick={() => {
           setModuleMenuOpen("");
           setSettingsOpen((value) => !value);
-        }} className={`navItem settingsToggle ${tab === "security" || tab === "application" || tab === "services" ? "active" : ""}`}>
+        }} className={`navItem settingsToggle ${tab === "dns" || tab === "security" || tab === "application" || tab === "services" ? "active" : ""}`}>
           <b>Настройки</b>
         </button>
         {settingsOpen && <div className="settingsMenu">
-          {(["security", "application", "services"] as Tab[]).map((id) =>
+          {(["dns", "security", "application", "services"] as Tab[]).map((id) =>
             <button key={id} onClick={() => { setTab(id); setSettingsOpen(false); }} className={`navItem ${tab === id ? "active" : ""}`}>
               <b>{labels[id]}</b>
             </button>
@@ -1102,7 +1237,7 @@ export default function Home() {
       <header className="topbar">
         <div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p className="subtitle">{overview?.server.city}, {overview?.server.country} · управление инфраструктурой</p></div>
         <div className="topActions">
-          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={serviceModeActive} onClick={() => setAutoRefresh((value) => !value)}><i />{serviceModeActive ? "Авто · выкл" : autoRefresh ? `Авто · ${["overview", "clients", "wg", "awg", "security"].includes(tab) ? "<1" : tab === "application" || tab === "services" ? "5" : "30"}с` : "Пауза"}</button>
+          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={busy} onClick={() => setAutoRefresh((value) => !value)}><i />{autoRefresh ? `Авто · ${["overview", "clients", "wg", "awg", "security"].includes(tab) ? LIVE_SAMPLE_SECONDS : tab === "application" || tab === "services" ? "10" : "30"}с` : "Пауза"}</button>
           {lastUpdated && <span className="updatedAt">{lastUpdated.toLocaleTimeString("ru-RU")}</span>}
           <button className="iconButton" onClick={() => void refreshCurrent(true)} aria-label="Обновить текущий модуль">↻</button>
           <button className="ghostButton" onClick={() => { sessionStorage.removeItem("312-token"); setToken(""); }}>Выйти</button>
@@ -1118,29 +1253,36 @@ export default function Home() {
           <div className={`nodeStatus ${nodeState}`}><span className="pulse" /><div><strong>{applicationStateTitle}</strong><small>{operationActive ? application?.action?.message || "Команда выполняется" : `Uptime ${uptime(overview?.server.uptime_s)}`}</small></div></div>
         </article>
         <div className="metrics">
-          <Metric title="CPU" value={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%`} percent={overview?.resources.cpu_percent || 0} detail={`Load ${overview?.resources.load1.toFixed(2) || "—"} · ${overview?.resources.cpu_count || "—"} vCPU`} history={resourceHistory.load} />
-          <Metric title="RAM" value={bytes(memoryUsedBytes)} percent={memUsed} detail={`${memUsed.toFixed(0)}% · всего ${bytes(overview?.resources.memory_total)}`} history={resourceHistory.memory} />
-          <Metric title="Disk" value={bytes(diskUsedBytes)} percent={diskUsed} detail={`${diskUsed.toFixed(0)}% · всего ${bytes(overview?.resources.disk_total)}`} history={resourceHistory.disk} />
+          <Metric title="CPU · СЕРВЕР" value={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%`} percent={overview?.resources.cpu_percent || 0} detail={`Нагрузка ${overview?.resources.load1.toFixed(2) || "—"} · ядер ${overview?.resources.cpu_count || "—"} · свободно ${Math.max(0, 100 - (overview?.resources.cpu_percent || 0)).toFixed(0)}%`} history={resourceHistory.load} />
+          <Metric title="RAM · СЕРВЕР" value={bytes(memoryUsedBytes)} percent={memUsed} detail={`Использовано ${memUsed.toFixed(0)}% · свободно ${bytes(overview?.resources.memory_available)} · всего ${bytes(overview?.resources.memory_total)}`} history={resourceHistory.memory} />
+          <Metric title="ДИСК · СЕРВЕР" value={bytes(diskUsedBytes)} percent={diskUsed} detail={`Использовано ${diskUsed.toFixed(0)}% · свободно ${bytes(overview?.resources.disk_available)} · всего ${bytes(overview?.resources.disk_total)}`} history={resourceHistory.disk} />
           <article className="panel metricCard networkMetric">
             <div><p className="eyebrow">NETWORK</p><h2>{bytes(networkRate.rx)}<small>/с</small></h2></div>
             <TrendGraph values={resourceHistory.rx} secondary={resourceHistory.tx} relative formatValue={(value) => `${bytes(value)}/с`} ariaLabel="История сетевой нагрузки" />
-            <div className="networkDirections">
-              <span>↓ Входящая <strong>{bytes(networkRate.rx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.rx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
-              <span>↑ Исходящая <strong>{bytes(networkRate.tx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.tx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
-            </div>
-          </article>
-        </div>
+              <div className="networkDirections">
+                <span>↓ Входящая <strong>{bytes(networkRate.rx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.rx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
+                <span>↑ Исходящая <strong>{bytes(networkRate.tx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.tx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
+              </div>
+              <div className="networkTotals"><span>Всего получено <strong>{bytes(overview?.resources.network_rx)}</strong></span><span>Всего отправлено <strong>{bytes(overview?.resources.network_tx)}</strong></span></div>
+            </article>
+          </div>
         <article className="panel protocolSummary">
           <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div></div>
-          {(["wg", "awg"] as Protocol[]).filter((protocol) => overview?.protocols[protocol].active).map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
+          {(["wg", "awg"] as TunnelProtocol[]).filter((protocol) => overview?.protocols[protocol].active).map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
             <span className={`protocol ${protocol}`}>{protocol === "wg" ? "WG" : "AW"}</span>
-            <p><strong>{protocol === "wg" ? "WireGuard" : "AmneziaWG"}</strong><small>{overview?.protocols[protocol].interface} · UDP {overview?.protocols[protocol].port}</small></p>
+            <p><strong>{protocol === "wg" ? "WireGuard" : "AmneziaWG"}</strong><small>{protocolImages.find((image) => image.id === protocol)?.description || `${overview?.protocols[protocol].interface} · UDP ${overview?.protocols[protocol].port}`}</small></p>
             <em className="onlinePill">Активен</em><b>›</b>
+          </button>)}
+          {protocolImages.filter((image) => image.installed && image.id !== "wg" && image.id !== "awg").map((image) => <button key={image.id} onClick={() => setTab(image.id as Protocol)}>
+            <span className={`protocol ${image.id}`}>{image.id === "shadowsocks" ? "SS" : "VRX"}</span>
+            <p><strong>{image.name}</strong><small>{image.description}</small></p>
+            <em className={image.active ? "onlinePill" : "offlinePill"}>{image.active ? "Активен" : "Остановлен"}</em>
+            <b>›</b>
           </button>)}
           {protocolImages.filter((image) => !image.installed).map((image) =>
             <div className="protocolInstaller" key={image.id}>
-              <span className={`protocol ${image.id}`}>{image.id.toUpperCase()}</span>
-              <p><strong>{image.name}</strong><small>{image.description} · образ {image.version}</small></p>
+              <span className={`protocol ${image.id}`}>{image.id === "wg" ? "WG" : image.id === "awg" ? "AW" : image.id === "shadowsocks" ? "SS" : "VRX"}</span>
+              <p><strong>{image.name}</strong><small>{image.description}</small></p>
               <button onClick={() => void installProtocol(image)} disabled={busy || Boolean(installingProtocol)}>
                 {installingProtocol === image.id ? "Устанавливается…" : "Установить"}
               </button>
@@ -1148,6 +1290,24 @@ export default function Home() {
           )}
           {!overview?.protocols.wg.active && !overview?.protocols.awg.active && !protocolImages.length && <div className="protocolEmpty"><span>—</span><p><strong>Нет доступных образов</strong><small>Добавьте manifest.json в каталог protocol-images</small></p></div>}
         </article>
+      </section>}
+
+      {tab === "dns" && <section className="dnsWorkspace">
+        <article className="panel dnsHero">
+          <div><p className="eyebrow">CENTRAL DNS CONTROL</p><h2>Управление DNS</h2><p>Одна политика резолвинга для всех каналов. Выберите протоколы, сравните доступность провайдеров и примените подходящий профиль.</p></div>
+          <div className="dnsHeroActions"><div className="dnsHeroStat"><strong>{dns?.providers.length || 0}</strong><span>доступных профилей</span></div><button className="dnsCheckAll" type="button" onClick={() => void checkDnsProviders()} disabled={checkingDns}><span aria-hidden="true">↻</span>{checkingDns ? "Идёт проверка…" : "Проверить все DNS"}</button></div>
+        </article>
+        <div className="dnsSetupGrid"><article className="panel dnsPolicy"><div className="dnsSectionTitle"><span>1</span><div><p className="eyebrow">ОБЛАСТЬ ПРИМЕНЕНИЯ</p><h3>Куда применить DNS</h3></div></div><p className="dnsSectionHint">Выключенные протоколы сохранят прежние настройки.</p><div className="dnsPolicyGrid">
+          <label><input type="checkbox" checked={dnsDraft?.apply_wg ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_wg: event.target.checked } : value)} /><span><strong>WireGuard</strong><small>Новые профили WG</small></span></label><label><input type="checkbox" checked={dnsDraft?.apply_awg ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_awg: event.target.checked } : value)} /><span><strong>AmneziaWG</strong><small>Новые профили AWG</small></span></label><label><input type="checkbox" checked={dnsDraft?.apply_shadowsocks ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_shadowsocks: event.target.checked } : value)} /><span><strong>Shadowsocks</strong><small>Рекомендация для клиента</small></span></label><label><input type="checkbox" checked={dnsDraft?.apply_vrx ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_vrx: event.target.checked } : value)} /><span><strong>VRX</strong><small>Серверный DNS Xray</small></span></label>
+        </div></article><article className="panel dnsOptions"><div className="dnsSectionTitle"><span>2</span><div><p className="eyebrow">ПОЛИТИКА</p><h3>Как использовать DNS</h3></div></div><p className="dnsSectionHint">Дополнительные правила отказоустойчивости и защиты.</p><div className="dnsOptionList"><label><span><strong>Резервный DNS</strong><small>Использовать второй IP при недоступности основного</small></span><input type="checkbox" checked={dnsDraft?.fallback_enabled ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, fallback_enabled: event.target.checked } : value)} /></label><label><span><strong>DoH для VRX</strong><small>Xray использует зашифрованный DNS провайдера; WG, AWG и SS сохраняют IP-DNS</small></span><input type="checkbox" checked={dnsDraft?.prefer_encrypted ?? false} onChange={(event) => setDnsDraft((value) => value ? { ...value, prefer_encrypted: event.target.checked } : value)} /></label></div></article></div>
+        <article className="panel dnsResolverSection"><div className="dnsSectionHead"><div className="dnsSectionTitle"><span>3</span><div><p className="eyebrow">DNS-ПРОВАЙДЕР</p><h3>Выберите резолвер</h3></div></div><small>Задержка измеряется непосредственно с сервера</small></div><div className="dnsCatalog">
+          {(dns?.providers || []).map((provider) => { const check = dnsChecks[provider.id]; const selected = dnsDraft?.selected_id === provider.id; return <article className={`dnsProvider ${selected ? "selected" : ""}`} key={provider.id}><header><span className={provider.country === "RU" ? "dnsCountry ru" : "dnsCountry"}>{provider.country}</span><div><strong>{provider.name}</strong><small>{provider.filter}</small></div>{selected && <i aria-label="Выбран">✓</i>}</header><code>{provider.addresses.join(" · ")}</code><div className="dnsChecks"><span className={check?.udp_ok ? "ok" : ""}><small>UDP</small><strong>{check?.udp_ms != null ? `${check.udp_ms} мс` : "—"}</strong></span><span className={check?.tcp_ok ? "ok" : ""}><small>TCP</small><strong>{check?.tcp_ms != null ? `${check.tcp_ms} мс` : "—"}</strong></span><span className={check?.doh_ok ? "ok" : ""}><small>DoH</small><strong>{check?.doh_ms != null ? `${check.doh_ms} мс` : provider.doh_url ? "—" : "нет"}</strong></span></div><div className="dnsProviderActions"><button type="button" className="dnsTestButton" onClick={() => void checkDnsProviders(provider.id)}>Проверить</button><button type="button" className="dnsSelectButton" disabled={selected} onClick={() => setDnsDraft((value) => value ? { ...value, selected_id: provider.id } : value)}>{selected ? "Выбран" : "Выбрать"}</button></div></article>; })}
+        </div></article>
+        <article className="panel customDns">
+          <div className="dnsSectionHead"><div className="dnsSectionTitle"><span>4</span><div><p className="eyebrow">СВОЙ РЕЗОЛВЕР</p><h3>Собственный DNS</h3></div></div><button type="button" className="dnsCustomButton" onClick={() => setDnsDraft((value) => value ? { ...value, selected_id: "custom", custom: value.custom || { name: "Собственный DNS", addresses: [""], doh_url: "" } } : value)}>Настроить свой DNS</button></div>
+          {dnsDraft?.selected_id === "custom" && <div className="customDnsFields"><label>Название<input value={dnsDraft.custom?.name || ""} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { addresses: [""], doh_url: "" }), name: event.target.value } } : value)} /></label><label>IP-адреса через запятую<input value={(dnsDraft.custom?.addresses || []).join(", ")} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { name: "Собственный DNS", doh_url: "" }), addresses: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) } } : value)} /></label><label>DoH URL<input type="url" placeholder="https://dns.example/dns-query" value={dnsDraft.custom?.doh_url || ""} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { name: "Собственный DNS", addresses: [""] }), doh_url: event.target.value } } : value)} /></label></div>}
+        </article>
+        <article className="panel dnsCurrent"><div><p className="eyebrow">ТЕКУЩИЕ ЗНАЧЕНИЯ</p><h3>DNS по протоколам</h3></div><div className="dnsProtocolEffect">{Object.entries(dns?.protocol_effect || {}).map(([protocol, value]) => <div key={protocol}><strong>{protocol === "vless-reality-xhttp" ? "VRX" : protocol.toUpperCase()}</strong><span>{value}</span></div>)}</div></article><div className="dnsSaveBar"><p><small>БУДЕТ ПРИМЕНЁН</small><strong>{dns?.providers.find((item) => item.id === dnsDraft?.selected_id)?.name || dnsDraft?.custom?.name || "DNS не выбран"}</strong><span>WG/AWG — новые профили; VRX — сервер Xray; SS — рекомендация для клиентского приложения</span></p><button type="button" onClick={() => void saveDnsSettings()} disabled={busy || !dnsDraft}>{busy ? "Применяем…" : "Сохранить и применить"}</button></div>
       </section>}
 
       {tab === "security" && <section className="securityGrid">
@@ -1169,7 +1329,7 @@ export default function Home() {
           </div>
         </article>
         <article className="panel securityList compactSecurity">
-          <SecurityRow ok={Boolean(firewall?.active)} title="Firewall" text={`UFW · ${firewall?.rules?.length || 0} правил`} />
+          <SecurityActionRow ok={Boolean(firewall?.active)} title="Firewall" text={`UFW · ${firewall?.rules?.length || 0} правил`} onAction={() => void fixSecurity("secure")} />
           <SecurityActionRow
             ok={Boolean(firewall?.vpn_policy_healthy)}
             title="VPN FIREWALL POLICY"
@@ -1177,24 +1337,26 @@ export default function Home() {
             onAction={() => void fixSecurity("vpn-firewall")}
             actionLabel="Исправить"
           />
-          <SecurityRow
+          <SecurityActionRow
             ok={panelAccessHealthy}
             title="Доступ к панели"
             text={panelSecurity?.publicly_accessible
               ? `Публичный TCP ${panelSecurity.port || 80} разрешён правилами UFW`
               : `Из интернета закрыт · доступ только через ${(panelSecurity?.allowed_interfaces || []).join(" / ") || "WG / AWG"}`}
+            onAction={() => void fixSecurity("secure")}
           />
           <SecurityActionRow ok={Boolean(fail2ban?.active && fail2ban?.jail_active)} title="Fail2ban · SSH" text={`В бане ${fail2ban?.currently_banned || 0} · всего ${fail2ban?.total_banned || 0}`} onAction={() => void fixSecurity("secure")} />
-          <SecurityRow
+          <SecurityActionRow
             ok={sshProtected}
             title="SSH · административный доступ"
             text={ssh?.active === false
               ? "Служба остановлена · входящие SSH-подключения не принимаются"
               : `Из интернета: ${ssh?.publicly_allowed ? "открыт по согласованной политике" : "закрыт"} · Fail2ban: ${fail2ban?.active && fail2ban?.jail_active ? "защищает" : "не защищает"} · Password: ${String(ssh?.password_authentication || "unknown")} · Root: ${String(ssh?.permit_root_login || "unknown")}`}
+            onAction={() => void fixSecurity("secure")}
           />
           <SecurityActionRow ok={securityLoading || (Number(updates?.available || 0) === 0 && !updates?.reboot_required)} title="Обновления Ubuntu" text={`${String(updates?.available ?? "—")} пакетов${updates?.reboot_required ? " · нужен reboot" : ""}`} onAction={() => void fixSecurity("kernel-update")} actionLabel="Обновить" />
           <SecurityActionRow ok={Boolean(updates?.automatic)} title="Автоматические обновления" text={updates?.automatic ? "Unattended upgrades · ON" : "Unattended upgrades · OFF"} onAction={() => void fixSecurity("secure")} />
-          <SecurityRow
+          <SecurityActionRow
             ok={applicationVersion?.outdated === false}
             title="Версия приложения"
             text={applicationVersion?.refreshing && applicationVersion?.outdated == null
@@ -1204,11 +1366,13 @@ export default function Home() {
                 : applicationVersion?.outdated
                   ? `Устарела: ${applicationVersion.current_commit || "unknown"} · ${applicationVersion.branch || "stabl"}: ${applicationVersion.latest_commit || "unknown"}`
                   : `Актуальна: ${applicationVersion?.current_commit || "unknown"} · ветка ${applicationVersion?.branch || "main"}`}
+            onAction={() => void runApplicationAction(applicationVersion?.branch === "main" ? "test-update" : "update")}
+            actionLabel="Обновить"
           />
-          <SecurityRow ok={Boolean(securitySystem?.apparmor?.active)} title="AppArmor" text={`${securitySystem?.apparmor?.profiles || 0} профилей · ${securitySystem?.apparmor?.active ? "активен" : "выключен"}`} />
+          <SecurityActionRow ok={Boolean(securitySystem?.apparmor?.active)} title="AppArmor" text={`${securitySystem?.apparmor?.profiles || 0} профилей · ${securitySystem?.apparmor?.active ? "активен" : "выключен"}`} onAction={() => void fixSecurity("secure")} />
           <SecurityActionRow ok={Boolean(securitySystem?.auditd_active)} title="Аудит действий" text={`auditd · ${securitySystem?.auditd_active ? "активен" : "остановлен"}`} onAction={() => void fixSecurity("secure")} />
-          <SecurityRow ok={Boolean(securitySystem?.syn_cookies)} title="Защита TCP" text={`SYN ${securitySystem?.syn_cookies ? "ON" : "OFF"} · Forwarding ${securitySystem?.ipv4_forwarding ? "ON" : "OFF"}`} />
-          <SecurityRow ok={Boolean(securitySystem?.rp_filter_valid && securitySystem?.dmesg_restricted)} title="Защита ядра" text={`RP ${securitySystem?.rp_filter_mode === 1 ? "strict" : securitySystem?.rp_filter_mode === 2 ? "loose" : securitySystem?.rp_filter_valid ? "VPN-safe" : "OFF"} · dmesg ${securitySystem?.dmesg_restricted ? "restricted" : "open"}`} />
+          <SecurityActionRow ok={Boolean(securitySystem?.syn_cookies)} title="Защита TCP" text={`SYN ${securitySystem?.syn_cookies ? "ON" : "OFF"} · Forwarding ${securitySystem?.ipv4_forwarding ? "ON" : "OFF"}`} onAction={() => void fixSecurity("secure")} />
+          <SecurityActionRow ok={Boolean(securitySystem?.rp_filter_valid && securitySystem?.dmesg_restricted)} title="Защита ядра" text={`RP ${securitySystem?.rp_filter_mode === 1 ? "strict" : securitySystem?.rp_filter_mode === 2 ? "loose" : securitySystem?.rp_filter_valid ? "VPN-safe" : "OFF"} · dmesg ${securitySystem?.dmesg_restricted ? "restricted" : "open"}`} onAction={() => void fixSecurity("secure")} />
           <SecurityActionRow
             ok={Boolean(securitySystem?.redirects_disabled && securitySystem?.source_route_disabled)}
             title="KERNEL ROUTING"
@@ -1216,24 +1380,27 @@ export default function Home() {
             onAction={() => void fixSecurity("secure")}
           />
           <SecurityActionRow
-            ok={ssh?.active !== false}
+            ok={ssh?.active === false || ssh?.x11_forwarding === "no"}
             title="SSH-туннели"
             text={ssh?.active === false ? "Служба остановлена · настройки туннелей не применяются" : `X11: ${ssh?.x11_forwarding || "unknown"} · TCP forwarding: ${ssh?.tcp_forwarding || "unknown"} (оставлен для административного контроля) · MaxAuthTries: ${ssh?.max_auth_tries || "unknown"}`}
             onAction={() => void fixSecurity("secure")}
           />
-          <SecurityRow ok={Boolean(securitySystem) && (securitySystem?.login_users?.length || 0) <= 5} title="Учётные записи" text={`sudo ${securitySystem?.sudo_users?.length || 0} · login ${securitySystem?.login_users?.length || 0}`} />
-          <SecurityRow
+          <SecurityActionRow ok title="Учётные записи" text={`sudo ${securitySystem?.sudo_users?.length || 0} · login ${securitySystem?.login_users?.length || 0}`} onAction={() => void runApplicationAction("integrity-check")} actionLabel="Проверить" alwaysAction />
+          <SecurityActionRow
             ok
             title="Дополнительные VPN-службы"
             text={Object.values(legacy).some((service) => service.active)
               ? `Активно ${Object.values(legacy).filter((service) => service.active).length} · установлены отдельно и не управляются приложением`
               : "Не обнаружены"}
+            onAction={() => void runApplicationAction("network-check")}
+            actionLabel="Проверить"
+            alwaysAction
           />
           <SecurityActionRow ok={Boolean(applicationSecurity?.admin_password_strong)} title="Пароль администратора" text={applicationSecurity?.admin_password_strong ? "Достаточная длина и стойкость пароля панели" : "Стандартный пароль считается небезопасным"} onAction={() => setPasswordDialog(true)} actionLabel="Изменить пароль" alwaysAction />
-          <SecurityRow ok={Boolean(applicationSecurity?.secrets_protected)} title="Секреты приложения" text={`/etc/vps-control.env · права ${applicationSecurity?.secrets_mode || "не определены"} · владелец root`} />
-          <SecurityRow ok={Boolean(applicationSecurity?.api_local_only)} title="Локальный API" text={applicationSecurity?.api_local_only ? "API слушает только 127.0.0.1:8000" : "API не найден локально или доступен на внешнем интерфейсе"} />
-          <SecurityRow ok={Boolean(applicationSecurity?.control_command_protected)} title="Команда управления" text={`vps-control · права ${applicationSecurity?.control_command_mode || "не определены"} · запись ограничена`} />
-          <SecurityRow ok={Boolean(applicationSecurity?.cors_restricted)} title="Доверенные источники" text={applicationSecurity?.cors_restricted ? "CORS ограничен заданными адресами панели" : "CORS разрешает запросы с произвольных источников"} />
+          <SecurityActionRow ok={Boolean(applicationSecurity?.secrets_protected)} title="Секреты приложения" text={`/etc/vps-control.env · права ${applicationSecurity?.secrets_mode || "не определены"} · владелец root`} onAction={() => void fixSecurity("secure")} />
+          <SecurityActionRow ok={Boolean(applicationSecurity?.api_local_only)} title="Локальный API" text={applicationSecurity?.api_local_only ? "API слушает только 127.0.0.1:8000" : "API не найден локально или доступен на внешнем интерфейсе"} onAction={() => void fixSecurity("secure")} />
+          <SecurityActionRow ok={Boolean(applicationSecurity?.control_command_protected)} title="Команда управления" text={`vps-control · права ${applicationSecurity?.control_command_mode || "не определены"} · запись ограничена`} onAction={() => void fixSecurity("secure")} />
+          <SecurityActionRow ok={Boolean(applicationSecurity?.cors_restricted)} title="Доверенные источники" text={applicationSecurity?.cors_restricted ? "CORS ограничен заданными адресами панели" : "CORS разрешает запросы с произвольных источников"} onAction={() => void fixSecurity("secure")} />
         </article>
         <article className="panel listeners"><div className="panelHead"><div><p className="eyebrow">LIVE NETWORK</p><h2>Открытые порты</h2></div><span>{listeners.length} listeners · kernel {securitySystem?.kernel || "—"}</span></div><pre>{listeners.join("\n") || "Нет данных"}</pre></article>
         <article className={`panel logDrawer ${securityLogsOpen ? "open" : ""}`}>
@@ -1434,6 +1601,53 @@ export default function Home() {
         </article>
       </section>}
 
+      {(tab === "shadowsocks" || tab === "vless-reality-xhttp") && activeProtocol && <section className="protocolMonitor">
+        <article className="panel protocolLiveHero">
+          <div>
+            <p className="eyebrow">LIVE TUNNEL</p>
+            <h2>{labels[tab]}</h2>
+            <p className="mono">{activeProtocol.address || "адрес не назначен"} · TCP {activeProtocol.listen_port || "—"} · {activeProtocol.peers} подключений</p>
+          </div>
+          <div className="protocolControlStack">
+            <div className={activeProtocol.service_active ? "protocolHealth online" : "protocolHealth"}>
+              <span className="pulse" />
+              <div>
+                <strong>{activeProtocol.service_active ? "Протокол работает" : "Протокол остановлен"}</strong>
+                <small>{activeProtocol.service_enabled ? "Автозапуск включён" : "Автозапуск отключён"} · активно {activeProtocol.online_peers}</small>
+              </div>
+            </div>
+            <div className="protocolActions">
+              <button onClick={() => void restartProtocol(tab)} disabled={busy}>Перезапустить</button>
+              {activeProtocolImage?.removable && <button className="removeProtocolButton" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить протокол</button>}
+            </div>
+          </div>
+        </article>
+        <div className="protocolMonitorGrid streamProtocolDetails">
+          <article className="panel protocolTelemetry protocolQuality">
+            <p className="eyebrow">CONNECTIONS</p>
+            <div className="telemetryMain"><strong>{activeProtocol.online_peers}/{activeProtocol.peers}</strong><span>активно сейчас</span></div>
+            <dl><div><dt>Всего подключений</dt><dd>{activeProtocol.peers}</dd></div><div><dt>Активные службы</dt><dd>{activeProtocol.online_peers}</dd></div></dl>
+          </article>
+          <article className="panel protocolTelemetry">
+            <p className="eyebrow">TRANSPORT &amp; SECURITY</p>
+            <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "VRX"}</strong><span>{activeProtocol.security || "—"}</span></div>
+            <dl><div><dt>Транспорт</dt><dd>{activeProtocol.transport || "—"}</dd></div><div><dt>Целевой узел</dt><dd>{activeProtocol.target || "Прямой выход"}</dd></div></dl>
+          </article>
+          <article className="panel protocolTelemetry protocolSettingsCard">
+            <p className="eyebrow">PROTOCOL SETTINGS</p>
+            <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "VRX"}</strong><span>актуальная конфигурация</span></div>
+            <dl>{Object.entries(activeProtocol.settings || {}).map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{typeof value === "boolean" ? (value ? "включено" : "выключено") : value}</dd></div>)}</dl>
+          </article>
+          <article className="panel protocolTelemetry">
+            <p className="eyebrow">SYSTEM SERVICE</p>
+            <div className="telemetryMain"><strong>{activeProtocol.service_active ? "ON" : "OFF"}</strong><span>systemd</span></div>
+            <dl><div><dt>Служба</dt><dd>{activeProtocol.unit || "—"}</dd></div><div><dt>Запущена с</dt><dd>{activeProtocol.active_since ? new Date(activeProtocol.active_since).toLocaleString("ru-RU") : "—"}</dd></div><div><dt>Версия образа</dt><dd>{activeProtocolImage?.version || "—"}</dd></div></dl>
+          </article>
+        </div>
+        <ProtocolSettingsPanel protocol={tab} fields={activeProtocol.editable_settings || []} draft={protocolSettingsDraft[tab] || {}} busy={busy}
+          onChange={(key, value) => changeProtocolSetting(tab, key, value)} onSave={() => void saveProtocolSettings(tab)} />
+      </section>}
+
       {(tab === "wg" || tab === "awg") && activeProtocol && <section className="protocolMonitor">
         <article className="panel protocolLiveHero">
           <div>
@@ -1473,16 +1687,18 @@ export default function Home() {
             </dl>
           </article>
           <article className="panel protocolTelemetry">
-            <p className="eyebrow">VPS CONNECTIVITY · 24 HOURS</p>
-            <div className="telemetryMain"><strong>{activeProtocol.history.latency_avg_ms != null ? activeProtocol.history.latency_avg_ms.toFixed(1) : "—"}</strong><span>мс в среднем</span></div>
+            <p className="eyebrow">ВНЕШНИЙ КАНАЛ VPS · 24 ЧАСА</p>
+            <div className="telemetryMain"><strong>{activeProtocol.history.latency_avg_ms != null ? activeProtocol.history.latency_avg_ms.toFixed(1) : "—"}</strong><span>мс от VPS до 1.1.1.1 / 8.8.8.8</span></div>
             <dl>
               <div><dt>Потери контрольных пакетов</dt><dd>{activeProtocol.history.external_loss_percent != null ? `${activeProtocol.history.external_loss_percent}%` : "—"}</dd></div>
-              <div><dt>Средний jitter</dt><dd>{activeProtocol.history.jitter_avg_ms != null ? `${activeProtocol.history.jitter_avg_ms.toFixed(1)} мс` : "—"}</dd></div>
+              <div><dt>Средний разброс RTT (mdev)</dt><dd>{activeProtocol.history.jitter_avg_ms != null ? `${activeProtocol.history.jitter_avg_ms.toFixed(1)} мс` : "—"}</dd></div>
               <div><dt>Максимальная задержка</dt><dd>{activeProtocol.history.latency_max_ms != null ? `${activeProtocol.history.latency_max_ms.toFixed(1)} мс` : "—"}</dd></div>
               <div><dt>Текущие соединения</dt><dd>{activeProtocol.online_peers} из {activeProtocol.peers} · {duration(activeProtocol.last_handshake_age_s)}</dd></div>
             </dl>
           </article>
         </div>
+        <ProtocolSettingsPanel protocol={tab} fields={activeProtocol.editable_settings || []} draft={protocolSettingsDraft[tab] || {}} busy={busy}
+          onChange={(key, value) => changeProtocolSetting(tab, key, value)} onSave={() => void saveProtocolSettings(tab)} />
         <article className={`panel networkDiagnostics ${activeProtocol.diagnostics?.status || "pending"} ${diagnosticsOpen[tab] ? "open" : ""}`}>
           <button className="resourceToggle diagnosticToggle" onClick={() => toggleNetworkDiagnostics(tab)} aria-expanded={Boolean(diagnosticsOpen[tab])}>
             <div><p className="eyebrow">NETWORK DIAGNOSTICS</p><h3>Причины нестабильности сети и подключений</h3></div>
@@ -1490,7 +1706,7 @@ export default function Home() {
           </button>
           {diagnosticsOpen[tab] && <div className="diagnosticBody">
             <div className="diagnosticHead">
-              <p>Проверка внешнего канала, DNS, HTTPS, UDP, маршрутизации, MTU, drops и conntrack.</p>
+              <p>Серверная проверка внешнего канала VPS, DNS, HTTPS, UDP, маршрутизации, MTU, drops и conntrack. Она не измеряет маршрут от устройства.</p>
               <div className="diagnosticScore">
                 <span>{activeProtocol.diagnostics?.score != null ? activeProtocol.diagnostics.score : "—"}</span>
                 <small>{activeProtocol.diagnostics?.status === "healthy" ? "СТАБИЛЬНО" : activeProtocol.diagnostics?.status === "critical" ? "КРИТИЧНО" : activeProtocol.diagnostics?.status === "warning" ? "ТРЕБУЕТ ВНИМАНИЯ" : "ПРОВЕРКА"}</small>
@@ -1558,26 +1774,45 @@ export default function Home() {
       </section>}
 
       {tab === "clients" && installedProtocols.length > 0 && <section className="clientsLayout">
-        <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все клиенты" : labels[tab]}</h2></div><span>{protocolClients.length} подключений</span></div>
-          <div className="clientTable">{protocolClients.length ? protocolClients.map((client) =>
-            <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><span className={`protocol ${client.protocol}`}>{client.protocol.toUpperCase()}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address} · {client.quality_reason || "состояние уточняется"}</small></p>
-              <span className="traffic"><small>ПОЛУЧЕНО <b>↓ {bytes(client.rx_bytes)}</b></small><small>ОТПРАВЛЕНО <b>↑ {bytes(client.tx_bytes)}</b></small></span><span className="handshake"><small>ПОСЛЕДНЯЯ СВЯЗЬ</small><strong>{duration(client.handshake_age_s)}</strong></span>
-              <span className="clientLink"><small>LINK QUALITY</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} ms` : "—"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · loss ${client.packet_loss_percent}%` : ""}</strong></span>
+        <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все подключения" : labels[tab]}</h2></div><div className="clientPanelActions"><span>{protocolClients.length} подключений</span><a className="guideAction" href="/connection-guide-wg-awg.pdf" download aria-label="Скачать руководство по подключению" data-tooltip="Пошаговая инструкция для владельца устройства: установка приложения и импорт конфигурации"><span aria-hidden="true">↓</span><div><strong>Скачать гайд</strong><small>PDF · ДЛЯ ПОЛЬЗОВАТЕЛЯ</small></div></a><button className="primaryButton" onClick={openClientDialog}>Новое подключение <span>＋</span></button></div></div>
+          <div className="deviceProbe"><div><p className="eyebrow">ЭТО УСТРОЙСТВО → ПАНЕЛЬ</p><strong>{deviceProbe?.latency_ms != null ? `${deviceProbe.latency_ms} мс` : "—"}</strong><span>{deviceProbe?.route || "текущий маршрут браузера"}</span></div><dl><div><dt>Успешно</dt><dd>{deviceProbe ? `${deviceProbe.successful}/${deviceProbe.samples}` : "—"}</dd></div><div><dt>Неудачные пробы</dt><dd>{deviceProbe ? `${deviceProbe.loss_percent}%` : "—"}</dd></div><div><dt>Разброс RTT</dt><dd>{deviceProbe?.variation_ms != null ? `${deviceProbe.variation_ms} мс` : "—"}</dd></div></dl><button type="button" onClick={() => void measureDeviceRoute(true)} disabled={probingDevice}>{probingDevice ? "Измеряем…" : "Измерить с устройства"}</button></div>
+          {protocolClients.length > CLIENTS_PER_PAGE && <nav className="clientPagination clientPaginationTop" aria-label="Страницы подключений"><span>Показаны {visibleClientStart}–{visibleClientEnd} из {protocolClients.length}</span><div><button onClick={() => setClientPage(1)} disabled={currentClientPage === 1} aria-label="Первая страница">«</button><button onClick={() => setClientPage(Math.max(1, currentClientPage - 1))} disabled={currentClientPage === 1}>Назад</button><strong>{currentClientPage} / {clientPageCount}</strong><button onClick={() => setClientPage(Math.min(clientPageCount, currentClientPage + 1))} disabled={currentClientPage === clientPageCount}>Дальше</button><button onClick={() => setClientPage(clientPageCount)} disabled={currentClientPage === clientPageCount} aria-label="Последняя страница">»</button></div></nav>}
+          <div className="clientTable">{protocolClients.length ? visibleClients.map((client) =>
+            <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><div className="clientIdentity"><span className={`protocol ${client.protocol}`}>{client.protocol === "wg" ? "WG" : client.protocol === "awg" ? "AW" : client.protocol === "shadowsocks" ? "SS" : "VRX"}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address}{client.active_sources?.length ? ` · источник: ${client.active_sources.join(", ")}` : ""}</small></p></div>
+              <div className="clientState"><small>СТАТУС</small><strong>{client.quality === "stable" ? "ОНЛАЙН" : client.quality === "offline" ? "ОФЛАЙН" : "НЕСТАБИЛЬНО"}</strong><span>{client.quality_reason || "состояние уточняется"}</span></div>
+              <div className="traffic"><small>ТРАФИК · ПОЛУЧЕНО<b>↓ {bytes(client.rx_bytes)} · {bytes(client.rx_bps)}/с</b></small><small>ТРАФИК · ОТПРАВЛЕНО<b>↑ {bytes(client.tx_bytes)} · {bytes(client.tx_bps)}/с</b></small></div><span className="handshake"><small>{client.protocol === "wg" || client.protocol === "awg" ? "ПОСЛЕДНИЙ HANDSHAKE" : "ПОСЛЕДНЯЯ АКТИВНОСТЬ"}</small><strong>{duration(client.handshake_age_s)}</strong><span>{client.active_connections ? `${client.active_connections} ${client.protocol === "shadowsocks" ? "TCP-сокетов" : "активн."}` : "нет активных"}</span></span>
+              <span className="clientLink" title={client.latency_source === "server_icmp_tunnel_ip" ? `ICMP от VPS к туннельному IP · ${client.sample_size || 5} проб` : "Для SS/VRX сервер не может измерить RTT клиентского устройства без клиентского агента"}><small>{client.latency_source === "server_icmp_tunnel_ip" ? "RTT VPS → УСТРОЙСТВО" : "RTT УСТРОЙСТВА"}</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} мс` : "ICMP недоступен"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · потери ${client.packet_loss_percent}%` : ""}</strong></span>
               <button className="dangerButton" onClick={() => void removeClient(client.id)}>Отозвать</button></div>
-          ) : <div className="emptyState"><span>◎</span><p>Клиентов пока нет</p></div>}</div>
+          ) : <div className="emptyState"><span>◎</span><p>Подключений пока нет</p></div>}</div>
         </article>
-        <article className="panel addClient"><div className="addClientHead"><div><p className="eyebrow">NEW ACCESS</p><h2>Добавить клиента</h2></div><a className="guideDownload" href="/connection-guide-wg-awg.pdf" download aria-label="Скачать руководство по подключению WG и AWG" title="Скачать руководство по подключению WG и AWG"><span aria-hidden="true">↓</span><small>PDF</small></a></div><form onSubmit={addClient}>
-          <label>Название<input required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов: буквы, цифры, пробел, точка, дефис или _</small></label>
-          <label>Протокол<select value={selectedClientProtocol} onChange={(event) => setNewClient({ ...newClient, protocol: event.target.value as Protocol })}>{installedProtocols.map((protocol) => <option key={protocol} value={protocol}>{labels[protocol]}</option>)}</select></label>
-          <button className="primaryButton" disabled={busy}>Создать конфигурацию <span>→</span></button>
-        </form>{generated && <div className="generated">
-          <div className="generatedHead"><span>✓</span><div><small>КОНФИГУРАЦИЯ ГОТОВА</small><strong>{generatedName}</strong><p>Сохраните файл сейчас — приватный ключ повторно не показывается.</p></div></div>
-          <button className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать конфигурацию</strong><small>WIREGUARD · .CONF</small></div></button>
-          <details><summary>Показать техническое содержимое <span>⌄</span></summary><textarea readOnly value={generated} /></details>
-          <button className="copyButton" onClick={() => navigator.clipboard.writeText(generated)}>Копировать содержимое</button>
-        </div>}</article>
         <ConnectionGuide />
       </section>}
+      {clientDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closeClientDialog}>
+        <form className="connectionDialog addClient" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={addClient}>
+          <header><div><p className="eyebrow">NEW ACCESS</p><h2 id="connection-dialog-title">{generated ? "Подключение создано" : "Новое подключение"}</h2></div><button className="dialogClose" type="button" onClick={closeClientDialog} aria-label="Закрыть">×</button></header>
+          {!generated ? <>
+            <p className="connectionDialogIntro">Создайте отдельную конфигурацию для конкретного устройства. Один ключ нельзя использовать на нескольких устройствах.</p>
+            <div className="connectionForm">
+              <label>Название устройства<input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов · это имя будет видно только администратору панели</small></label>
+              <label>Протокол<select value={selectedClientProtocol} onChange={(event) => setNewClient({ ...newClient, protocol: event.target.value as Protocol })}>{installedProtocols.map((protocol) => <option key={protocol} value={protocol}>{labels[protocol]}</option>)}</select><small className="fieldHint">Выберите протокол, который будет использовать устройство</small></label>
+            </div>
+            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy}>{busy ? "Создаём…" : "Создать конфигурацию"}<span>→</span></button></div>
+          </> : <>
+            <div className="generated compactGenerated">
+              <div className="generatedHead"><span>✓</span><div><small>КОНФИГУРАЦИЯ ГОТОВА</small><strong>{generatedName}</strong><p>Передайте владельцу скачанный файл или покажите QR-код. Один ключ предназначен только для одного устройства.</p></div></div>
+              <div className="generatedResult">
+                {generatedQr ? <div className="generatedQr"><Image src={generatedQr} width={300} height={300} unoptimized alt={`QR-код конфигурации ${generatedName}`} /><small>Отсканируйте код в приложении на устройстве владельца</small></div> : <div className="generatedQr pending"><span>{generatedQrError || "Создаём QR-код…"}</span></div>}
+                <div className="generatedTransfer">
+                  <div><strong>Передача подключения</strong><p>Выберите один способ: передайте файл по защищённому каналу или покажите QR-код. Не публикуйте их — внутри находится приватный ключ.</p></div>
+                  <button type="button" className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать файл</strong><small>{labels[selectedClientProtocol].toUpperCase()} · {generatedName.split(".").pop()?.toUpperCase()}</small></div></button>
+                  {generatedQr && <a className="qrDownload" href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}>Скачать QR в полном размере</a>}
+                </div>
+              </div>
+            </div>
+            <div className="connectionDialogActions"><button type="button" onClick={resetClientDialog}>Создать ещё</button><button type="button" className="primaryButton" onClick={closeClientDialog}>Готово <span>✓</span></button></div>
+          </>}
+        </form>
+      </div>}
       {passwordDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closePasswordDialog}>
         <form className="confirmDialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()} onSubmit={changeAdminPassword}>
           <p className="eyebrow">ADMINISTRATOR ACCESS</p><h2>Изменить пароль администратора</h2>
@@ -1614,6 +1849,46 @@ export default function Home() {
 function Logo() {
   return <div className="brand"><span className="brandMark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 7h12l6 6v12H13l-6-6V7Z" /><path d="M11 12h8l2 2v6h-8l-2-2v-6Z" /></svg></span><div><strong>312<span>.net</span></strong><small>INFRASTRUCTURE</small></div></div>;
 }
+function ProtocolSettingsPanel({
+  protocol, fields, draft, busy, onChange, onSave,
+}: {
+  protocol: Protocol; fields: EditableProtocolSetting[]; draft: Record<string, string | number | boolean>;
+  busy: boolean; onChange: (key: string, value: string | number | boolean) => void; onSave: () => void;
+}) {
+  const tunnel = protocol === "wg" || protocol === "awg";
+  return <article className="panel protocolConfiguration">
+    <header>
+      <div><p className="eyebrow">CHANNEL CONFIGURATION</p><h3>Настройки {labels[protocol]}</h3>
+        <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
+      <div className="configurationSafety"><i>✓</i><p><strong>Безопасное применение</strong><small>валидация и автоматический откат</small></p></div>
+    </header>
+    <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} onChange={onChange} onSave={onSave} />
+  </article>;
+}
+function ProtocolSettingsEditor({
+  fields, draft, busy, onChange, onSave,
+}: {
+  fields: EditableProtocolSetting[];
+  draft: Record<string, string | number | boolean>;
+  busy: boolean;
+  onChange: (key: string, value: string | number | boolean) => void;
+  onSave: () => void;
+}) {
+  if (!fields.length) return <p className="protocolSettingsEmpty">Для этого протокола нет изменяемых параметров.</p>;
+  return <div className="protocolSettingsEditor">
+    {fields.map((field) => <label key={field.key}>
+      <span>{field.label}</span>
+      {field.type === "boolean" ? <input type="checkbox" checked={Boolean(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.checked)} />
+        : field.type === "select" ? <select value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)}>
+          {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+          : field.type === "number" ? <input type="number" min={field.min} max={field.max} value={Number(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, Number(event.target.value))} />
+            : <input type="text" value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)} />}
+      {field.help && <small>{field.help}</small>}
+    </label>)}
+    <button type="button" className="protocolSettingsSave" onClick={onSave} disabled={busy}>{busy ? "Применяем…" : "Применить настройки"}</button>
+  </div>;
+}
 function AutomationEditor({
   title, description, value, timer, onChange,
 }: {
@@ -1647,8 +1922,8 @@ function AutomationEditor({
     <label className="automationSwitch"><input type="checkbox" checked={value.enabled} onChange={(event) => onChange({ enabled: event.target.checked })} /><span /><em>{value.enabled ? "Вкл" : "Выкл"}</em></label>
   </div>;
 }
-function TrendGraph({ values, secondary, relative = false, formatValue = (value) => `${Math.round(value)}%`, ariaLabel }: {
-  values: number[]; secondary?: number[]; relative?: boolean; formatValue?: (value: number) => string; ariaLabel: string;
+function TrendGraph({ values, secondary, relative = false, sampleIntervalSeconds = LIVE_SAMPLE_SECONDS, formatValue = (value) => `${Math.round(value)}%`, ariaLabel }: {
+  values: number[]; secondary?: number[]; relative?: boolean; sampleIntervalSeconds?: number; formatValue?: (value: number) => string; ariaLabel: string;
 }) {
   const width = 240;
   const height = 72;
@@ -1671,7 +1946,9 @@ function TrendGraph({ values, secondary, relative = false, formatValue = (value)
   const secondaryLast = secondaryCoordinates.at(-1);
   const primaryPeak = values.length ? Math.max(...values) : 0;
   const secondaryPeak = secondary?.length ? Math.max(...secondary) : 0;
-  const elapsedSeconds = Math.max(0, (values.length - 1) * 5);
+  const primaryAverage = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  const secondaryAverage = secondary?.length ? secondary.reduce((sum, value) => sum + value, 0) / secondary.length : 0;
+  const elapsedSeconds = Math.max(0, (values.length - 1) * sampleIntervalSeconds);
   const elapsedLabel = elapsedSeconds >= 60 ? `${Math.round(elapsedSeconds / 60)} мин` : `${elapsedSeconds} сек`;
   return <div className={`trendGraph ${secondary ? "dual" : ""}`} role="img" aria-label={ariaLabel}>
     <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
@@ -1685,11 +1962,13 @@ function TrendGraph({ values, secondary, relative = false, formatValue = (value)
     <span className="trendXAxis"><b>−{elapsedLabel}</b><b>сейчас</b></span>
     <span className="trendSummary">
       <b>Сейчас {formatValue(values.at(-1) || 0)}</b>
+      <b>Среднее {formatValue(primaryAverage)}</b>
       <b>Пик {formatValue(primaryPeak)}</b>
+      {secondary && <b>TX среднее {formatValue(secondaryAverage)}</b>}
       {secondary && <b>TX пик {formatValue(secondaryPeak)}</b>}
     </span>
     {secondary && <span className="trendLegend"><i /> RX <i /> TX</span>}
-    <small>{values.length < 2 ? "Сбор данных…" : `${values.length} замеров · интервал 5 сек`}</small>
+    <small>{values.length < 2 ? "Сбор данных…" : `${values.length} замеров · интервал ${sampleIntervalSeconds} сек`}</small>
   </div>;
 }
 function Metric({ title, value, percent, detail, history }: { title: string; value: string; percent: number; detail: string; history: number[] }) {

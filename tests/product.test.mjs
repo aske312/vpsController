@@ -59,14 +59,29 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(legalUi, /Privacy Notice/);
   assert.match(legalUi, /MIT LICENSE/);
   assert.doesNotMatch(legalUi, /EU \/ EEA|ЕС \/ ЕЭЗ|GDPR/);
-  assert.match(guide, /Подключение с помощью WireGuard \(WG\) и AmneziaWG \(AWG\)/);
-  assert.match(guide, /WireGuard \(WG\).*локальным подключением/s);
-  assert.match(guide, /AmneziaWG \(AWG\).*мобильную сеть/s);
-  assert.match(guide, /одно приложение — \*\*AmneziaWG\*\*/);
-  assert.match(guide, /Обязательно включите галочку «Обфускация»/);
-  assert.match(guideUi, /Create and connect a client/);
-  assert.match(guideUi, /Для WG обязательно включите галочку «Обфускация»/);
+  assert.match(guide, /Как понять, какой конфиг вам дали/);
+  assert.match(guide, /имя-wg\.conf.*WireGuard/s);
+  assert.match(guide, /имя-awg\.conf.*AmneziaWG/s);
+  assert.match(guide, /параметры обфускации.*Jc.*Jmin.*Jmax/s);
+  assert.match(guide, /одно приложение для WG и AWG/i);
+  assert.match(guide, /AmneziaWG.*storage\.googleapis\.com\/amnezia\/amnezia\.org/s);
+  assert.doesNotMatch(guide, /wireguard\.com\/install/);
+  assert.match(guideUi, /How to create and share a new connection/);
+  assert.match(guideUi, /Одно подключение — один ключ/);
+  assert.match(guideUi, /Каждое подключение создаётся для одного конкретного устройства/);
+  assert.match(guideUi, /Передайте конфигурацию/);
+  assert.doesNotMatch(guideUi, /PROTOCOL INSTRUCTIONS/);
   assert.match(guideUi, /storage\.googleapis\.com\/amnezia\/amnezia\.org/);
+  assert.match(page, /QRCode\.toDataURL\(generated, \{ errorCorrectionLevel: "L", margin: 4, width: 768 \}\)/);
+  assert.match(page, /Отсканируйте код в приложении/);
+  assert.doesNotMatch(page, /Показать техническое содержимое/);
+  assert.doesNotMatch(page, /Копировать содержимое/);
+  assert.match(page, /clientDialog && <div className="confirmBackdrop"/);
+  assert.match(page, /Новое подключение/);
+  assert.match(page, /data-tooltip="Пошаговая инструкция/);
+  assert.match(page, /const CLIENTS_PER_PAGE = 10/);
+  assert.match(page, /visibleClients\.map/);
+  assert.match(page, /Показаны \{visibleClientStart\}–\{visibleClientEnd\} из \{protocolClients\.length\}/);
   assert.match(page, /connection-guide-wg-awg\.pdf/);
   assert.match(page, /installedProtocols\.length > 0/);
   assert.match(page, /waitForProtocolState/);
@@ -97,9 +112,11 @@ test("primary resource metrics use CPU percent and readable RAM and disk units",
   const [api, page] = await Promise.all([read("api/main.py"), read("app/page.tsx")]);
   assert.match(api, /def cpu_usage_percent/);
   assert.match(api, /"cpu_percent": cpu_percent/);
-  assert.match(page, /title="CPU".*cpu_percent/s);
-  assert.match(page, /title="RAM" value=\{bytes\(memoryUsedBytes\)\}/);
-  assert.match(page, /title="Disk" value=\{bytes\(diskUsedBytes\)\}/);
+  assert.match(page, /title="CPU · СЕРВЕР".*cpu_percent/s);
+  assert.match(page, /title="RAM · СЕРВЕР" value=\{bytes\(memoryUsedBytes\)\}/);
+  assert.match(page, /title="ДИСК · СЕРВЕР" value=\{bytes\(diskUsedBytes\)\}/);
+  assert.match(page, /свободно.*memory_available/s);
+  assert.match(page, /свободно.*disk_available/s);
 });
 
 test("security distinguishes public SSH from public panel access", async () => {
@@ -129,6 +146,26 @@ test("VPN firewall diagnostics accept module rules and offer a persistent repair
   assert.match(manager, /vps-control-vpn-firewall\.service/);
   assert.match(manager, /iptables -C FORWARD/);
   assert.match(manager, /vpn-firewall\) configure_vpn_firewall_policy/);
+});
+
+test("every security posture item has a safe repair or review action", async () => {
+  const [page, manager] = await Promise.all([read("app/page.tsx"), read("scripts/vps-control.sh")]);
+  const start = page.indexOf('{tab === "security"');
+  const end = page.indexOf('{tab === "application"', start);
+  const section = page.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(section, /<SecurityRow\b/);
+  assert.ok((section.match(/<SecurityActionRow\b/g) || []).length >= 20);
+  assert.match(section, /title="Firewall".*fixSecurity\("secure"\)/s);
+  assert.match(section, /title="Версия приложения".*applicationVersion\?\.branch === "main" \? "test-update" : "update"/s);
+  assert.match(section, /title="Учётные записи".*runApplicationAction\("integrity-check"\)/s);
+  assert.match(section, /title="Дополнительные VPN-службы".*runApplicationAction\("network-check"\)/s);
+  assert.match(manager, /apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw/);
+  assert.match(manager, /net\.ipv4\.tcp_syncookies = 1/);
+  assert.match(manager, /kernel\.dmesg_restrict = 1/);
+  assert.match(manager, /chmod 0600 "\$\{ENV_FILE\}"/);
+  assert.match(manager, /configure_firewall "panel-only"/);
+  assert.doesNotMatch(manager, /systemctl (?:disable|stop).*strongswan|systemctl (?:disable|stop).*xl2tpd/);
 });
 
 test("security and services expose current logs and retention controls", async () => {
@@ -180,13 +217,17 @@ test("service mode tests main without publishing it while stabl remains the only
   assert.match(manager, /сервисный режим включён; версия приложения не изменена/);
   assert.match(manager, /переход на тестовую версию разрешён только в сервисном режиме/);
   assert.match(api, /payload\.action in \("test-update", "test-rollback"\) and not SERVICE_MODE_FILE\.exists\(\)/);
-  assert.match(api, /branch = "stabl"/);
-  assert.match(api, /expected_branch = "stabl"/);
+  assert.match(api, /def expected_application_branch\(\)/);
+  assert.match(api, /return "main" if SERVICE_MODE_FILE\.exists\(\) and TEST_BACKUP_DIR\.is_dir\(\) else "stabl"/);
+  assert.match(api, /branch = expected_application_branch\(\)/);
+  assert.match(api, /expected_branch = expected_application_branch\(\)/);
   assert.match(api, /cached\.get\("current_commit"\) != installed_commit/);
   assert.match(page, /applicationVersion\.branch \|\| "stabl"/);
   assert.match(page, /setAutoRefresh\(false\)/);
-  assert.match(page, /if \(active\) autoRefreshBeforeServiceMode\.current = autoRefresh/);
-  assert.match(page, /setAutoRefresh\(autoRefreshBeforeServiceMode\.current\)/);
+  assert.match(page, /const autoRefreshAfterChange = autoRefresh/);
+  assert.match(page, /setAutoRefresh\(autoRefreshAfterChange\)/);
+  assert.match(page, /className=\{`autoButton \$\{autoRefresh \? "active" : ""\}`\} disabled=\{busy\}/);
+  assert.doesNotMatch(page, /disabled=\{serviceModeActive\}.*Авто · выкл/);
   assert.match(page, /serviceModeActive && <button onClick=\{\(\) => void runApplicationAction\("test-update"\)\}/);
   assert.match(page, /Переход на тестовую версию/);
   assert.match(page, /application\?\.service_mode\?\.rollback_available/);
@@ -199,15 +240,28 @@ test("service mode tests main without publishing it while stabl remains the only
   assert.match(stablWorkflow, /gh release create stabl-latest/);
 });
 
-test("live system status refreshes below one second without overlapping heavy checks", async () => {
+test("live monitoring uses stable low-load cadence and detailed server metrics", async () => {
   const [api, page] = await Promise.all([read("api/main.py"), read("app/page.tsx")]);
   assert.match(api, /@app\.get\("\/api\/live-status"\)/);
   assert.match(api, /include_quality=False/);
   assert.match(page, /liveRequestInFlight/);
-  assert.match(page, /setInterval\(\(\) => void loadLiveStatus\(\), 800\)/);
-  assert.match(page, /"\<1"/);
-  assert.match(page, /sessionStorage\.setItem\("312-notice"/);
-  assert.match(page, /window\.location\.reload\(\)/);
+  assert.match(page, /const LIVE_SAMPLE_SECONDS = 3/);
+  assert.match(page, /const HISTORY_SAMPLES = 100/);
+  assert.match(page, /setInterval\(\(\) => void loadLiveStatus\(\), LIVE_SAMPLE_SECONDS \* 1000\)/);
+  assert.match(page, /tab === "overview" \? 30000/);
+  assert.match(page, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp", "clients"\]\.includes\(tab\) \? 15000/);
+  assert.doesNotMatch(page, /protocolTrafficHistory/);
+  assert.match(page, /CPU · СЕРВЕР/);
+  assert.match(page, /RAM · СЕРВЕР/);
+  assert.match(page, /ДИСК · СЕРВЕР/);
+  assert.match(page, /Всего получено/);
+  assert.match(page, /Среднее \{formatValue\(primaryAverage\)\}/);
+  assert.doesNotMatch(page, /loadLiveStatus\(\), 800/);
+  assert.match(page, /function reloadWithoutCache\(message: string\)/);
+  assert.match(page, /target\.searchParams\.set\("_refresh", Date\.now\(\)\.toString\(\)\)/);
+  assert.match(page, /window\.location\.replace\(target\.toString\(\)\)/);
+  assert.match(page, /\["update", "test-update", "test-rollback", "kernel-update"\]\.includes/);
+  assert.match(page, /Сервисный режим \$\{active \? "включён" : "выключен"\}\. Кэш интерфейса сброшен/);
   assert.match(page, /успешно завершено/);
 });
 
@@ -300,6 +354,93 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(awgInstall, /if ! command -v awg.*command -v awg-quick.*modinfo amneziawg/s);
 });
 
+test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", async () => {
+  const [api, manager, page, css, ssManifest, ssInstall, ssRemove, vlessManifest, vlessInstall, vlessRemove] = await Promise.all([
+    read("api/main.py"), read("scripts/vps-control.sh"), read("app/page.tsx"), read("app/globals.css"),
+    read("protocol-images/shadowsocks/manifest.json"),
+    read("protocol-images/shadowsocks/install.sh"),
+    read("protocol-images/shadowsocks/uninstall.sh"),
+    read("protocol-images/vless-reality-xhttp/manifest.json"),
+    read("protocol-images/vless-reality-xhttp/install.sh"),
+    read("protocol-images/vless-reality-xhttp/uninstall.sh"),
+  ]);
+  assert.equal(JSON.parse(ssManifest).id, "shadowsocks");
+  assert.equal(JSON.parse(vlessManifest).id, "vless-reality-xhttp");
+  assert.equal(JSON.parse(ssManifest).category, "secure-tunnels");
+  assert.equal(JSON.parse(vlessManifest).category, "secure-tunnels");
+  assert.match(ssInstall, /vps-control-shadowsocks@\.service/);
+  assert.match(ssInstall, /shadowsocks-libev/);
+  assert.match(api, /CONTROL_COMMAND, "client-firewall", action, str\(port\)/);
+  assert.match(manager, /client_firewall\(\)/);
+  assert.match(manager, /ufw allow "\$\{port\}\/tcp"/);
+  assert.match(manager, /ufw allow "\$\{port\}\/udp"/);
+  assert.doesNotMatch(ssInstall + ssRemove, /wg-quick|awg-quick/);
+  assert.match(vlessInstall, /VLESS \+ REALITY \+ XHTTP/);
+  assert.match(vlessInstall, /"network": "xhttp"/);
+  assert.match(vlessInstall, /"security": "reality"/);
+  assert.match(vlessInstall, /Password.*PublicKey/);
+  assert.match(vlessInstall, /ca-certificates curl openssl unzip/);
+  assert.match(vlessInstall, /XHTTP_PATH/);
+  assert.doesNotMatch(vlessInstall, /source "\$\{CONFIG_DIR\}\/reality\.env"/);
+  assert.match(vlessInstall, /AmbientCapabilities=CAP_NET_BIND_SERVICE/);
+  assert.match(vlessInstall, /ss -H -ltn/);
+  assert.match(vlessInstall, /limitFallbackUpload/);
+  assert.match(vlessInstall, /StatsService/);
+  assert.match(vlessInstall, /\"listen\": \"127\.0\.0\.1:10085\"/);
+  assert.match(vlessInstall, /statsUserUplink/);
+  assert.match(api, /xray_user_stats/);
+  assert.match(api, /service_bytes/);
+  assert.match(ssInstall, /IPAccounting=true/);
+  assert.match(vlessInstall, /xray" tls ping "\$\{TARGET\}"/);
+  assert.match(vlessInstall, /certificate_length.*-le 3500/s);
+  assert.match(vlessInstall, /TARGET.*www\.microsoft\.com:443.*www\.apple\.com:443.*TARGET="www\.intel\.com:443"/);
+  assert.match(vlessInstall, /sed -i "s\|\^TARGET=\.\*\|TARGET=\$\{TARGET\}\|"/);
+  assert.match(manager, /VLESS_REALITY_TARGET="www\.intel\.com:443"/);
+  assert.doesNotMatch(vlessInstall + vlessRemove, /wg-quick|awg-quick|shadowsocks/);
+  assert.match(api, /Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\]/);
+  assert.match(api, /vless:\/\//);
+  assert.match(api, /ss:\/\//);
+  assert.match(api, /Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\]/);
+  assert.match(api, /vps-control-shadowsocks@/);
+  assert.match(api, /client_mutation_lock/);
+  assert.match(api, /restore_vless_config/);
+  assert.match(api, /\.config-\{client_id\}\.tmp\.json/);
+  assert.match(api, /Не удалось создать VLESS-подключение: \{stage\}/);
+  assert.match(api, /"transport": "TCP \+ UDP"/);
+  assert.match(manager, /SHADOWSOCKS_PORT_START/);
+  assert.match(manager, /VLESS_REALITY_TARGET/);
+  assert.match(manager, /\(update\|test-update\)\\\./);
+  assert.match(api, /def recent_xray_activity/);
+  assert.match(api, /def shadowsocks_connections/);
+  assert.match(api, /def shadowsocks_connection_details/);
+  assert.match(api, /"type": "xhttp", "host": target_host/);
+  assert.match(api, /raw byte deltas also include unauthenticated scans/);
+  assert.match(api, /"rx_bps": rx_bps, "tx_bps": tx_bps/);
+  assert.match(api, /"no_delay": True, "mtu": 1200/);
+  assert.match(ssInstall, /config\["mtu"\] = 1200/);
+  assert.match(page, /ПОСЛЕДНЯЯ АКТИВНОСТЬ/);
+  assert.doesNotMatch(manager, /PUBLIC_IP="\$\{PUBLIC_IP\}"/);
+  assert.match(manager, /PUBLIC_IP="\$\(env_value PUBLIC_IP\)"/);
+  assert.match(page, /image\.id === "shadowsocks" \? "SS" : "VRX"/);
+  assert.match(page, /<small>\{image\.description\}<\/small>/);
+  assert.match(page, /protocolImages\.find\(\(image\) => image\.id === protocol\)\?\.description/);
+  assert.match(page, /setTab\(image\.id as Protocol\)/);
+  assert.match(page, /LIVE TUNNEL/);
+  assert.match(page, /client\.protocol === "shadowsocks" \? "SS" : "VRX"/);
+  assert.match(page, /if \(Boolean\(current\?\.installed\) === installed\) return;/);
+  assert.match(manager.match(/install_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
+  assert.match(manager.match(/remove_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
+  assert.match(vlessManifest, /"name": "VRX"/);
+  assert.match(page, /tab === "shadowsocks" \|\| tab === "vless-reality-xhttp"/);
+  assert.match(page, /TRANSPORT &amp; SECURITY/);
+  assert.match(manager, /ReadWritePaths=-\/etc\/vps-control\.env -\/etc\/vps-control /);
+  assert.match(manager, /grep -Fxq "\$\{expected\}" "\$\{SERVICE_FILE\}"/);
+  assert.match(manager, /start_services\(\) \{[\s\S]*?ensure_api_write_access[\s\S]*?systemctl start/);
+  assert.match(manager, /restart_services\(\) \{[\s\S]*?ensure_api_write_access[\s\S]*?systemctl restart/);
+  assert.match(css, /\.protocol\.shadowsocks/);
+  assert.match(css, /\.protocol\.vless-reality-xhttp/);
+});
+
 test("the interface uses one fixed visual design without personalization", async () => {
   const [page, api, css, manager] = await Promise.all([
     read("app/page.tsx"), read("api/main.py"), read("app/globals.css"), read("scripts/vps-control.sh"),
@@ -310,6 +451,77 @@ test("the interface uses one fixed visual design without personalization", async
   assert.match(page, /<main className="shell">/);
   assert.match(css, /\.shell \.metricCard \{ border-left: 2px solid var\(--green\)/);
   assert.match(manager, /rm -f -- "\$\{DATA_DIR\}\/personalization\.json"/);
+});
+
+test("protocol pages safely edit channel settings and VRX links select HTTP2", async () => {
+  const [page, api, css] = await Promise.all([
+    read("app/page.tsx"), read("api/main.py"), read("app/globals.css"),
+  ]);
+  assert.match(api, /@app\.patch\("\/api\/protocols\/\{protocol\}\/settings"\)/);
+  assert.match(api, /class ProtocolSettingsUpdate/);
+  assert.match(api, /persist_tunnel_mtu/);
+  assert.match(api, /XRAY_BIN, "run", "-test"/);
+  assert.match(api, /originals = \{path: path\.read_bytes\(\) for path in paths\}/);
+  assert.match(api, /"alpn": "h2"/);
+  assert.match(api, /"mode": xhttp_mode/);
+  assert.match(api, /query_values\["extra"\]/);
+  assert.match(api, /"maxConcurrency": "8-16"/);
+  assert.match(api, /"xmux_concurrency"/);
+  assert.match(api, /"dns", "keepalive"/);
+  assert.match(api, /"loglevel", "xpadding"/);
+  assert.match(api, /protocol: Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\]/);
+  assert.match(api, /@app\.post\("\/api\/protocols\/\{protocol\}\/resources\/check"\)/);
+  assert.match(api, /allow_methods=\["GET", "POST", "PUT", "PATCH", "DELETE"\]/);
+  assert.match(api, /"editable_settings": editable_settings/);
+  assert.match(page, /function ProtocolSettingsEditor/);
+  assert.match(page, /function ProtocolSettingsPanel/);
+  assert.match(page, /saveProtocolSettings/);
+  assert.match(page, /method: "PATCH"/);
+  assert.match(page, /CHANNEL CONFIGURATION/);
+  assert.match(css, /\.protocolSettingsEditor/);
+  assert.match(css, /\.protocolConfiguration/);
+});
+
+test("DNS control provides Russian resolvers, live checks and protocol application", async () => {
+  const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), read("app/globals.css")]);
+  assert.match(page, /type Tab = "overview" \| "dns"/);
+  assert.match(page, /\(\["overview", "clients"\] as Tab\[\]\)/);
+  assert.match(page, /\(\["dns", "security", "application", "services"\] as Tab\[\]\)/);
+  assert.match(page, /CENTRAL DNS CONTROL/);
+  assert.match(page, /Проверить все DNS/);
+  assert.match(page, /Собственный DNS/);
+  assert.match(api, /DNS_PROVIDERS = \(/);
+  assert.ok((api.match(/"country": "RU"/g) || []).length >= 5);
+  assert.ok((api.match(/"id": "[a-z0-9-]+", "name":/g) || []).length >= 10);
+  assert.match(api, /@app\.get\("\/api\/dns"\)/);
+  assert.match(api, /@app\.put\("\/api\/dns\/settings"\)/);
+  assert.match(api, /@app\.post\("\/api\/dns\/check"\)/);
+  assert.match(api, /def dns_wire_query/);
+  assert.match(api, /env_updates\["WG_DNS"\]/);
+  assert.match(api, /env_updates\["AWG_DNS"\]/);
+  assert.match(api, /env_updates\["SHADOWSOCKS_DNS"\]/);
+  assert.match(api, /env_updates\["VRX_DNS"\]/);
+  assert.match(api, /vrx_servers\.insert\(0, selected\["doh_url"\]\)/);
+  assert.match(page, /DoH для VRX/);
+  assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
+  assert.match(api, /def apply_vrx_dns/);
+  assert.match(api, /def validate_reality_sni/);
+  assert.match(api, /reality_settings\["serverNames"\] = \[supplied\["sni"\]\]/);
+  assert.match(api, /persist_vrx_target\(supplied\["sni"\]\)/);
+  assert.doesNotMatch(api, /urllib\.parse\.urlencode\(\{"dns": ss_dns\}\)/);
+  assert.match(page, /apply_shadowsocks/);
+  assert.match(page, /apply_vrx/);
+  assert.match(css, /\.dnsCatalog/);
+  assert.match(css, /\.dnsSaveBar/);
+});
+
+test("connection latency labels identify the real measurement source", async () => {
+  const [api, page] = await Promise.all([read("api/main.py"), read("app/page.tsx")]);
+  assert.match(api, /"latency_source": "server_icmp_tunnel_ip"/);
+  assert.match(page, /ЭТО УСТРОЙСТВО → ПАНЕЛЬ/);
+  assert.match(page, /RTT VPS → УСТРОЙСТВО/);
+  assert.match(page, /ВНЕШНИЙ КАНАЛ VPS · 24 ЧАСА/);
+  assert.match(page, /не измеряет маршрут от устройства/);
 });
 
 test("manual releases are prebuilt and installed without Docker or package upgrades", async () => {
@@ -339,5 +551,7 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(manager, /TimeoutStopSec=15/);
   assert.match(manager, /KillMode=mixed/);
   assert.match(manager, /mv -- "\$\{INSTALL_DIR\}\/venv" "\$\{rollback\}\/venv"/);
+  assert.match(manager, /PYTHONPATH="\$\{payload\}" "\$\{INSTALL_DIR\}\/venv\/bin\/python" -c 'import api\.main'/);
+  assert.match(manager, /http:\/\/127\.0\.0\.1:8000\/api\/health/);
   assert.match(manager, /install -d -m 0755 "\$\{INSTALL_DIR\}"\s+chmod 0755 "\$\{INSTALL_DIR\}"/);
 });

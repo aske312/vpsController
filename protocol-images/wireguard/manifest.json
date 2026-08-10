@@ -2,7 +2,7 @@
   "id": "wg",
   "name": "WireGuard",
   "version": "1.0.0",
-  "description": "Классический WireGuard с systemd, маршрутизацией и NAT",
+  "description": "Быстрый VPN-туннель с маршрутизацией и NAT",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",
   "installer": "install.sh",
