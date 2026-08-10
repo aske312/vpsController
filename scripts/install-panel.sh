@@ -3,7 +3,9 @@ set -Eeuo pipefail
 
 REPOSITORY="${VPS_CONTROL_REPOSITORY:-https://github.com/aske312/vpsController}"
 BRANCH="${VPS_CONTROL_BRANCH:-stabl}"
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR="$(pwd)"
+[[ -z "${SCRIPT_PATH}" ]] || SCRIPT_DIR="$(cd -- "$(dirname -- "${SCRIPT_PATH}")" && pwd)"
 BOOTSTRAP_DIR=""
 BOOTSTRAP_LOG="/tmp/vps-control-bootstrap.log"
 

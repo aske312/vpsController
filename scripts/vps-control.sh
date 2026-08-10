@@ -13,7 +13,9 @@ CADDY_CONFIG="/etc/caddy/Caddyfile"
 COMMAND_PATH="/usr/local/sbin/${APP_NAME}"
 INSTALL_CONFIG="/etc/${APP_NAME}-install.conf"
 PANEL_URL=""
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR="$(pwd)"
+[[ -z "${SCRIPT_PATH}" ]] || SCRIPT_DIR="$(cd -- "$(dirname -- "${SCRIPT_PATH}")" && pwd)"
 PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 if [[ "${SCRIPT_DIR}" == "/usr/local/sbin" && -d "${INSTALL_DIR}" ]]; then
   PROJECT_DIR="${INSTALL_DIR}"
@@ -558,7 +560,10 @@ doctor() {
   memory_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
   (( memory_kb >= 900000 )) && ok "оперативная память: $((memory_kb / 1024)) МБ" \
     || { warn "требуется не менее 1 ГБ RAM"; failed=1; }
-  disk_kb="$(df -Pk "${PROJECT_DIR}" | awk 'NR==2 {print $4}')"
+  # Bootstrap sources may live on a small /tmp tmpfs. Installation itself is
+  # written below /opt, so validate the target filesystem rather than /tmp.
+  disk_kb="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $4}')"
+  [[ -n "${disk_kb}" ]] || disk_kb="$(df -Pk / | awk 'NR==2 {print $4}')"
   (( disk_kb >= 5000000 )) && ok "свободное место: $((disk_kb / 1024 / 1024)) ГБ" \
     || { warn "требуется не менее 5 ГБ свободного места"; failed=1; }
   getent hosts github.com >/dev/null 2>&1 && ok "DNS и GitHub доступны" \
