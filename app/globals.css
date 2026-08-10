@@ -263,6 +263,16 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .emptyState p { font-size: 10px; margin: 8px 0 0; }
 .clientPanelActions { display: flex; align-items: center; gap: 9px; }
 .clientPanelActions > span { margin-right: 5px; color: var(--muted); font: 9px var(--font-mono); }
+.clientOverview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 16px 0 10px; }
+.clientOverview button { display: flex; align-items: center; justify-content: space-between; min-height: 54px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 7px; background: #0f1718; color: var(--muted); text-align: left; }
+.clientOverview button:hover, .clientOverview button.active { border-color: #3d7061; background: #13231f; color: var(--text); }
+.clientOverview button.online strong { color: var(--green); }.clientOverview button.attention strong { color: var(--amber); }
+.clientOverview small { font: 7px var(--font-mono); letter-spacing: .7px; }.clientOverview strong { font: 18px var(--font-mono); }
+.clientFilters { display: grid; grid-template-columns: minmax(220px, 1fr) 190px auto auto; gap: 8px; align-items: end; margin-bottom: 14px; padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: #0d1516; }
+.clientFilters label { display: grid; gap: 5px; }.clientFilters label > span { color: var(--muted); font: 7px var(--font-mono); text-transform: uppercase; }
+.clientFilters input, .clientFilters select { width: 100%; min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: #111a1b; color: var(--text); }
+.clientFilters button { min-height: 36px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted); font-size: 8px; }
+.clientFilters > span { align-self: center; color: var(--muted); font: 8px var(--font-mono); white-space: nowrap; }
 .guideAction { position: relative; min-height: 40px; display: flex; align-items: center; gap: 9px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 9px; background: #11191b; color: #aeb9b6; text-decoration: none; }
 .guideAction > span { color: var(--green); font: 18px/1 var(--font-mono); }
 .guideAction > div { display: flex; flex-direction: column; gap: 2px; }
@@ -639,7 +649,7 @@ input, select { height: 46px; font-size: 11px; }
 .dnsOptionList { display: grid; gap: 8px; margin-top: 14px; }.dnsOptionList label { min-height: 55px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 7px; background: #101817; cursor: pointer; }.dnsOptionList label > span { display: grid; gap: 5px; }.dnsOptionList strong { font-size: 9px; }.dnsOptionList small { color: var(--muted); font-size: 7px; line-height: 1.4; }
 .dnsResolverSection { display: grid; gap: 16px; }
 .dnsProtocolEffect { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
-.dnsProtocolEffect div { display: grid; gap: 5px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: #0c1415; }.dnsProtocolEffect strong { color: var(--green); font-size: 8px; }.dnsProtocolEffect span { overflow-wrap: anywhere; color: var(--muted); font: 7px var(--font-mono); }
+.dnsProtocolEffect div { display: grid; gap: 5px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: #0c1415; }.dnsProtocolEffect strong { color: var(--green); font-size: 8px; }.dnsProtocolEffect span { overflow-wrap: anywhere; color: var(--muted); font: 7px var(--font-mono); }.dnsProtocolEffect em { color: #70817d; font: normal 6px var(--font-mono); }.dnsProtocolEffect .differs { border-color: #654f31; background: #1b1711; }.dnsProtocolEffect .differs strong, .dnsProtocolEffect .differs em { color: var(--amber); }
 .dnsCurrent { display: grid; grid-template-columns: 180px 1fr; align-items: center; gap: 18px; }.dnsCurrent h3 { margin-top: 4px; }
 .dnsCatalog { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .dnsProvider { min-height: 202px; display: grid; align-content: start; gap: 14px; padding: 15px; border: 1px solid var(--line); border-radius: 8px; background: #0f1718; color: var(--text); text-align: left; transition: border-color .15s, background .15s; }
@@ -897,6 +907,8 @@ input, select { height: 46px; font-size: 11px; }
   .clientPagination { align-items: stretch; flex-direction: column; }
   .clientPagination > div { justify-content: space-between; }
   .clientPagination button { padding-inline: 8px; }
+  .clientOverview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .clientFilters { grid-template-columns: 1fr; }
 }
 
 /* Compact operations layout: useful state fits into a typical 1440×900 viewport. */

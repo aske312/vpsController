@@ -2076,11 +2076,32 @@ def clients(_: None = Depends(require_token)) -> dict:
 @app.get("/api/dns")
 def dns_status(_: None = Depends(require_token)) -> dict:
     settings = read_dns_settings()
-    return {"settings": settings, "providers": dns_provider_list(settings), "protocol_effect": {
-        "wg": current_env_value("WG_DNS", WG_DNS), "awg": current_env_value("AWG_DNS", AWG_DNS),
+    providers = dns_provider_list(settings)
+    selected = next((item for item in providers if item["id"] == settings["selected_id"]), None)
+    selected_addresses = list(selected["addresses"] if selected else [])
+    if not settings["fallback_enabled"]:
+        selected_addresses = selected_addresses[:1]
+    expected = ", ".join(selected_addresses)
+    expected_vrx = list(selected_addresses)
+    if settings["prefer_encrypted"] and selected and selected.get("doh_url"):
+        expected_vrx.insert(0, selected["doh_url"])
+    effects = {
+        "wg": current_env_value("WG_DNS", WG_DNS),
+        "awg": current_env_value("AWG_DNS", AWG_DNS),
         "shadowsocks": current_env_value("SHADOWSOCKS_DNS", "не настроен"),
         "vless-reality-xhttp": current_env_value("VRX_DNS", "не настроен"),
-    }}
+    }
+    return {
+        "settings": settings,
+        "providers": providers,
+        "protocol_effect": effects,
+        "protocol_effect_details": {
+            "wg": {"value": effects["wg"], "scope": "new_profiles", "changes_existing": False, "matches_selected": effects["wg"] == expected},
+            "awg": {"value": effects["awg"], "scope": "new_profiles", "changes_existing": False, "matches_selected": effects["awg"] == expected},
+            "shadowsocks": {"value": effects["shadowsocks"], "scope": "client_recommendation", "changes_existing": False, "matches_selected": effects["shadowsocks"] == expected},
+            "vless-reality-xhttp": {"value": effects["vless-reality-xhttp"], "scope": "server_xray", "changes_existing": True, "matches_selected": effects["vless-reality-xhttp"] == ", ".join(expected_vrx)},
+        },
+    }
 
 
 @app.put("/api/dns/settings")

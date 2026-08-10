@@ -487,7 +487,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(page, /type Tab = "overview" \| "dns"/);
   assert.match(page, /\(\["overview", "clients"\] as Tab\[\]\)/);
   assert.match(page, /\(\["dns", "security", "application", "services"\] as Tab\[\]\)/);
-  assert.match(page, /CENTRAL DNS CONTROL/);
+  assert.match(page, /DNS POLICY/);
   assert.match(page, /Проверить все DNS/);
   assert.match(page, /Собственный DNS/);
   assert.match(api, /DNS_PROVIDERS = \(/);
@@ -505,6 +505,10 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(page, /DoH для VRX/);
   assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
   assert.match(api, /def apply_vrx_dns/);
+  assert.match(api, /"scope": "new_profiles"/);
+  assert.match(api, /"scope": "client_recommendation"/);
+  assert.match(api, /"scope": "server_xray"/);
+  assert.match(api, /"changes_existing": False/);
   assert.match(api, /def validate_reality_sni/);
   assert.match(api, /reality_settings\["serverNames"\] = \[supplied\["sni"\]\]/);
   assert.match(api, /persist_vrx_target\(supplied\["sni"\]\)/);
@@ -513,6 +517,22 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(page, /apply_vrx/);
   assert.match(css, /\.dnsCatalog/);
   assert.match(css, /\.dnsSaveBar/);
+});
+
+test("DNS and connection screens describe real effects and provide safe filtering", async () => {
+  const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), read("app/globals.css")]);
+  assert.match(page, /DNS без скрытых изменений/);
+  assert.match(page, /Действующие WG\/AWG-подключения не изменяются/);
+  assert.match(page, /Снятый флажок означает «оставить текущее значение»/);
+  assert.match(page, /Существующие WG\/AWG-конфиги, ключи и активные соединения останутся без изменений/);
+  assert.match(page, /clientProtocolFilter/);
+  assert.match(page, /clientStateFilter/);
+  assert.match(page, /clientSearch/);
+  assert.match(page, /ТРЕБУЮТ ВНИМАНИЯ/);
+  assert.match(api, /protocol_effect_details/);
+  assert.match(api, /matches_selected/);
+  assert.match(css, /\.clientOverview/);
+  assert.match(css, /\.clientFilters/);
 });
 
 test("connection latency labels identify the real measurement source", async () => {
