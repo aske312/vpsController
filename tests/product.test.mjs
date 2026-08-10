@@ -15,6 +15,7 @@ test("поставка содержит установщик, образы и р
   assert.match(bootstrap, /archive\/refs\/heads\/\$\{BRANCH\}\.tar\.gz/);
   assert.match(bootstrap, /DPkg::Lock::Timeout=300/);
   assert.match(bootstrap, /ID=\(ubuntu\|debian\)/);
+  assert.match(bootstrap, /SCRIPT_PATH="\$\{BASH_SOURCE\[0\]:-\}"/);
   assert.match(manager, /doctor\)/);
   assert.match(manager, /install\)/);
   assert.match(manager, /update\)/);
@@ -548,6 +549,7 @@ test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", a
   assert.match(config, /VLESS_REALITY_PORT="8443"/);
   assert.match(caddy, /\{\$SITE_ADDRESS\}/);
   assert.doesNotMatch(caddy, /bind 0\.0\.0\.0/);
+  assert.match(manager, /df -Pk \/opt/);
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
