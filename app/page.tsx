@@ -19,7 +19,7 @@ type Client = {
 };
 type DeviceProbe = { latency_ms: number | null; variation_ms: number | null; loss_percent: number; successful: number; samples: number; measured_at: string; route: string };
 type Overview = {
-  server: { name: string; public_ip: string; city: string; country: string; country_code: string; uptime_s: number };
+  server: { name: string; public_ip: string; public_ipv4?: string; public_ipv6?: string; public_domain?: string; public_endpoint?: string; city: string; country: string; country_code: string; uptime_s: number };
   resources: { load1: number; cpu_percent: number; cpu_count: number; memory_total: number; memory_available: number; disk_total: number; disk_available: number; network_rx: number; network_tx: number };
   protocols: Record<"wg" | "awg", { interface: string; port: number; active: boolean }>;
 };
@@ -1239,7 +1239,7 @@ export default function Home() {
         </div>}
         </div>
       </nav>
-      <div className={`locationCard ${nodeState}`}><span className="healthDot" /><div><small>{nodeStateLabel}</small><strong>{overview?.server.city}</strong><p>{overview?.server.country} · {overview?.server.public_ip}</p></div></div>
+      <div className={`locationCard ${nodeState}`}><span className="healthDot" /><div><small>{nodeStateLabel}</small><strong>{overview?.server.city}</strong><p>{overview?.server.country} · {overview?.server.public_endpoint || overview?.server.public_ip}</p></div></div>
     </aside>
 
     <section className="content">
@@ -1266,7 +1266,7 @@ export default function Home() {
 
       {tab === "overview" && <section className="overview">
         <article className="heroPanel panel">
-          <div><p className="eyebrow">PRIMARY NODE</p><h2>{overview?.server.city}</h2><p className="mono">{overview?.server.country} · {overview?.server.public_ip}</p></div>
+          <div><p className="eyebrow">PRIMARY NODE</p><h2>{overview?.server.city}</h2><p className="mono">{overview?.server.country} · {overview?.server.public_endpoint || overview?.server.public_ip}{overview?.server.public_ipv6 ? ` · IPv6 ${overview.server.public_ipv6}` : ""}</p></div>
           <div className={`nodeStatus ${nodeState}`}><span className="pulse" /><div><strong>{applicationStateTitle}</strong><small>{operationActive ? application?.action?.message || "Команда выполняется" : `Uptime ${uptime(overview?.server.uptime_s)}`}</small></div></div>
         </article>
         <div className="metrics">

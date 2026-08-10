@@ -107,7 +107,7 @@ config = {
   "api": {"tag": "api", "listen": "127.0.0.1:10085", "services": ["StatsService"]},
   "policy": {"levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}}},
   "inbounds": [{
-    "tag": "vless-reality-xhttp", "listen": "0.0.0.0", "port": int(port), "protocol": "vless",
+    "tag": "vless-reality-xhttp", "listen": "::", "port": int(port), "protocol": "vless",
     "settings": {"clients": existing_clients, "decryption": "none"},
     "streamSettings": {
       "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": "auto", "extra": {

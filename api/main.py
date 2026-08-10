@@ -42,6 +42,10 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 basic_auth = HTTPBasic(auto_error=False)
 SERVER_NAME = os.getenv("SERVER_NAME", "Unknown location")
 PUBLIC_IP = os.getenv("PUBLIC_IP", "")
+PUBLIC_IPV4 = os.getenv("PUBLIC_IPV4", PUBLIC_IP)
+PUBLIC_IPV6 = os.getenv("PUBLIC_IPV6", "")
+PUBLIC_DOMAIN = os.getenv("PUBLIC_DOMAIN", "")
+PUBLIC_ENDPOINT = os.getenv("PUBLIC_ENDPOINT", PUBLIC_DOMAIN or PUBLIC_IPV4 or (f"[{PUBLIC_IPV6}]" if PUBLIC_IPV6 else PUBLIC_IP))
 SERVER_CITY = os.getenv("SERVER_CITY", "Unknown")
 SERVER_COUNTRY = os.getenv("SERVER_COUNTRY", "Unknown")
 SERVER_COUNTRY_CODE = os.getenv("SERVER_COUNTRY_CODE", "")
@@ -411,10 +415,10 @@ def stream_proxy_dump() -> list[dict]:
         if protocol == "shadowsocks":
             unit = f'vps-control-shadowsocks@{item.get("id", "")}.service'
             active = run("systemctl", "is-active", unit) == "active"
-            address = f'{PUBLIC_IP}:{item.get("port", "—")}'
+            address = f'{PUBLIC_ENDPOINT}:{item.get("port", "—")}'
         elif protocol == "vless-reality-xhttp":
             active = run("systemctl", "is-active", "vps-control-vless-reality-xhttp.service") == "active"
-            address = f'{PUBLIC_IP}:{item.get("port", 443)}'
+            address = f'{PUBLIC_ENDPOINT}:{item.get("port", 8443)}'
             email = f'{item.get("id", "")}@312.net'
             rx_bytes, tx_bytes, handshake_age, rx_bps, tx_bps = xray_user_stats(email, xray_activity.get(email))
             active_connections = 1 if handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S else 0
@@ -967,6 +971,10 @@ def overview(_: None = Depends(require_token)) -> dict:
         "server": {
             "name": SERVER_NAME,
             "public_ip": PUBLIC_IP,
+            "public_ipv4": PUBLIC_IPV4,
+            "public_ipv6": PUBLIC_IPV6,
+            "public_domain": PUBLIC_DOMAIN,
+            "public_endpoint": PUBLIC_ENDPOINT,
             "city": SERVER_CITY,
             "country": SERVER_COUNTRY,
             "country_code": SERVER_COUNTRY_CODE,
@@ -2384,7 +2392,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         try:
             SHADOWSOCKS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             config_path.write_text(json.dumps({
-                "server": "0.0.0.0", "server_port": port, "password": password, "method": method,
+                "server": "::", "server_port": port, "password": password, "method": method,
                 "timeout": 300, "mode": "tcp_and_udp", "fast_open": False,
                 "no_delay": True, "mtu": 1200,
             }, indent=2), encoding="utf-8")
@@ -2405,7 +2413,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             config_path.unlink(missing_ok=True)
             raise HTTPException(status_code=500, detail="Unable to start Shadowsocks client service")
         userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
-        client_config = f"ss://{userinfo}@{PUBLIC_IP}:{port}#{urllib.parse.quote(payload.name)}"
+        client_config = f"ss://{userinfo}@{PUBLIC_ENDPOINT}:{port}#{urllib.parse.quote(payload.name)}"
         items = read_clients()
         items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
         write_clients(items)
@@ -2457,7 +2465,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 }
                 query_values["extra"] = json.dumps(client_extra, separators=(",", ":"))
                 query = urllib.parse.urlencode(query_values)
-                client_config = f"vless://{client_uuid}@{PUBLIC_IP}:{port}?{query}#{urllib.parse.quote(payload.name)}"
+                client_config = f"vless://{client_uuid}@{PUBLIC_ENDPOINT}:{port}?{query}#{urllib.parse.quote(payload.name)}"
                 stage = "сохранение подключения"
                 items = read_clients()
                 items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
@@ -2511,7 +2519,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         f"[Interface]\nAddress = {address}/32\nDNS = {current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS)}\n"
         f"PrivateKey = {private_key}\nMTU = {AWG_MTU if payload.protocol == 'awg' else WG_MTU}\n{extra}\n[Peer]\n"
         f"PublicKey = {server_public}\nPresharedKey = {psk}\nAllowedIPs = 0.0.0.0/0\n"
-        f"Endpoint = {PUBLIC_IP}:{port}\nPersistentKeepalive = {current_env_value('AWG_KEEPALIVE', str(AWG_KEEPALIVE)) if payload.protocol == 'awg' else current_env_value('WG_KEEPALIVE', str(WG_KEEPALIVE))}\n"
+        f"Endpoint = {PUBLIC_ENDPOINT}:{port}\nPersistentKeepalive = {current_env_value('AWG_KEEPALIVE', str(AWG_KEEPALIVE)) if payload.protocol == 'awg' else current_env_value('WG_KEEPALIVE', str(WG_KEEPALIVE))}\n"
     )
     items = read_clients()
     items.append(
@@ -2868,7 +2876,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
             active_clients = sum(1 for _, _, age, _, _ in stats if age is not None and age < STREAM_ACTIVITY_WINDOW_S)
             try:
                 reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
-                listen_port = int(reality.get("PORT", "443"))
+                listen_port = int(reality.get("PORT", "8443"))
                 target = reality.get("TARGET", "")
                 settings = {
                     "REALITY target": target,
@@ -2885,14 +2893,14 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 xhttp_values["xmuxConcurrency"] = int(str(max_concurrency).split("-", 1)[0])
                 editable_settings = editable_protocol_settings(protocol, xhttp_values)
             except (OSError, ValueError, json.JSONDecodeError, KeyError, IndexError):
-                listen_port = 443
+                listen_port = 8443
                 editable_settings = editable_protocol_settings(protocol, {})
         service_active = run("systemctl", "is-active", unit) == "active"
         return {
             "protocol": protocol, "interface": "systemd", "active": service_active,
             "service_active": service_active, "service_enabled": run("systemctl", "is-enabled", unit) == "enabled",
             "active_since": run("systemctl", "show", unit, "--property=ActiveEnterTimestamp", "--value"),
-            "address": PUBLIC_IP, "listen_port": listen_port, "mtu": 0,
+            "address": PUBLIC_ENDPOINT, "listen_port": listen_port, "mtu": 0,
             "peers": len(protocol_clients), "online_peers": active_clients, "endpoints": active_clients,
             "last_handshake_age_s": min((row[2] for row in stats if row[2] is not None), default=None),
             "peer_rx_bytes": sum(row[0] for row in stats),

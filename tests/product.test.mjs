@@ -14,10 +14,13 @@ test("поставка содержит установщик, образы и р
   ]);
   assert.match(bootstrap, /archive\/refs\/heads\/\$\{BRANCH\}\.tar\.gz/);
   assert.match(bootstrap, /DPkg::Lock::Timeout=300/);
+  assert.match(bootstrap, /ID=\(ubuntu\|debian\)/);
   assert.match(manager, /doctor\)/);
   assert.match(manager, /install\)/);
   assert.match(manager, /update\)/);
-  assert.match(manager, /22\.04\|24\.04\|26\.04/);
+  assert.match(manager, /ubuntu:22\.04\|ubuntu:24\.04\|ubuntu:26\.04/);
+  assert.match(manager, /debian:13/);
+  assert.match(manager, /check_supported_os/);
   assert.match(manager, /distro_node_packages=\(nodejs npm\)/);
   assert.match(manager, /Candidate:\/ && !found/);
   assert.match(manager, /Node\.js \$\{node_major\} доступен в репозитории Ubuntu/);
@@ -27,7 +30,7 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 2/);
   assert.match(manager, /value="\$\{value:1:\$\{#value\}-2\}"/);
   assert.match(manager, /--retry 10 --retry-all-errors --retry-delay 2/);
-  assert.match(readme, /Ubuntu Server 22\.04, 24\.04 или 26\.04/);
+  assert.match(readme, /Ubuntu Server 22\.04, 24\.04, 26\.04 или Debian 13/);
   assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/stabl\/scripts\/install-panel\.sh/);
   assert.match(readme, /Возможные ошибки установки/);
   assert.match(readme, /установка/i);
@@ -528,6 +531,23 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(page, /apply_vrx/);
   assert.match(css, /\.dnsCatalog/);
   assert.match(css, /\.dnsSaveBar/);
+});
+
+test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", async () => {
+  const [manager, api, config, caddy] = await Promise.all([
+    read("scripts/vps-control.sh"), read("api/main.py"), read("install.conf"), read("Caddyfile"),
+  ]);
+  assert.match(manager, /detect_public_endpoints\(\)/);
+  assert.match(manager, /curl -6 .*api64\.ipify\.org/);
+  assert.match(manager, /socket\.gethostbyaddr/);
+  assert.match(manager, /socket\.getaddrinfo/);
+  assert.match(manager, /set_env_value "PUBLIC_ENDPOINT"/);
+  assert.match(manager, /ufw allow 443\/tcp comment '312\.net HTTPS panel'/);
+  assert.match(api, /PUBLIC_ENDPOINT = os\.getenv/);
+  assert.match(config, /HTTP_PORT="8080"/);
+  assert.match(config, /VLESS_REALITY_PORT="8443"/);
+  assert.match(caddy, /\{\$SITE_ADDRESS\}/);
+  assert.doesNotMatch(caddy, /bind 0\.0\.0\.0/);
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
