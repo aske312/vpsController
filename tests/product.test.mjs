@@ -17,6 +17,17 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /doctor\)/);
   assert.match(manager, /install\)/);
   assert.match(manager, /update\)/);
+  assert.match(manager, /22\.04\|24\.04\|26\.04/);
+  assert.match(manager, /distro_node_packages=\(nodejs npm\)/);
+  assert.match(manager, /Candidate:\/ && !found/);
+  assert.match(manager, /Node\.js \$\{node_major\} доступен в репозитории Ubuntu/);
+  assert.match(manager, /VPS_CONTROL_ADMIN_USER/);
+  assert.match(manager, /VPS_CONTROL_ADMIN_PASSWORD/);
+  assert.match(manager, /tail -n 1 \| tr -d '\\r'/);
+  assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 2/);
+  assert.match(manager, /value="\$\{value:1:\$\{#value\}-2\}"/);
+  assert.match(manager, /--retry 10 --retry-all-errors --retry-delay 2/);
+  assert.match(readme, /Ubuntu Server 22\.04, 24\.04 или 26\.04/);
   assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/stabl\/scripts\/install-panel\.sh/);
   assert.match(readme, /Возможные ошибки установки/);
   assert.match(readme, /установка/i);
