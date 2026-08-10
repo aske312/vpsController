@@ -49,6 +49,9 @@ fi
 
 # В полном клоне этот же файл сразу запускает локальный мастер.
 if [[ -x "${SCRIPT_DIR}/vps-control.sh" ]]; then
+  if [[ "${VPS_CONTROL_PREFLIGHT_ONLY:-no}" == "yes" ]]; then
+    exec "${SCRIPT_DIR}/vps-control.sh" doctor "$@"
+  fi
   exec "${SCRIPT_DIR}/vps-control.sh" install "$@"
 fi
 

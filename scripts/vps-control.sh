@@ -764,6 +764,7 @@ configure_firewall() {
     ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
   else
     if [[ -n "$(env_value PUBLIC_DOMAIN)" ]]; then
+      ufw --force delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
       ufw allow 80/tcp comment '312.net HTTPS redirect'
       ufw allow 443/tcp comment '312.net HTTPS panel'
     else
@@ -1769,7 +1770,8 @@ verify_app() {
     http://127.0.0.1:8000/api/health \
     || die "API не отвечает на локальную проверку."
   printf '\n'
-  curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 2 "${PANEL_URL}/" >/dev/null \
+  curl --fail --silent --show-error --connect-timeout 10 --max-time 15 \
+    --retry 18 --retry-all-errors --retry-delay 5 "${PANEL_URL}/" >/dev/null \
     || die "веб-панель не отвечает."
   ok "установка исправна; веб-интерфейс отвечает."
 }
@@ -1945,6 +1947,9 @@ main() {
       ui_done "ветка stabl назначена источником релизов"
       ui_stage "Развёртывание локальной версии"
       deploy full
+      # Identity and the verified domain are known only after deploy creates
+      # the environment. Reconcile public ports before ACME/HTTPS verification.
+      configure_firewall "panel-only"
       verify_app
       ui_done "локальная версия установлена"
       ui_stage "Режим обновлений"

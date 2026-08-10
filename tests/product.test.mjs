@@ -16,6 +16,7 @@ test("поставка содержит установщик, образы и р
   assert.match(bootstrap, /DPkg::Lock::Timeout=300/);
   assert.match(bootstrap, /ID=\(ubuntu\|debian\)/);
   assert.match(bootstrap, /SCRIPT_PATH="\$\{BASH_SOURCE\[0\]:-\}"/);
+  assert.match(bootstrap, /VPS_CONTROL_PREFLIGHT_ONLY/);
   assert.match(manager, /doctor\)/);
   assert.match(manager, /install\)/);
   assert.match(manager, /update\)/);
@@ -30,7 +31,7 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /tail -n 1 \| tr -d '\\r'/);
   assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 2/);
   assert.match(manager, /value="\$\{value:1:\$\{#value\}-2\}"/);
-  assert.match(manager, /--retry 10 --retry-all-errors --retry-delay 2/);
+  assert.match(manager, /--retry 18 --retry-all-errors --retry-delay 5/);
   assert.match(readme, /Ubuntu Server 22\.04, 24\.04, 26\.04 или Debian 13/);
   assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/stabl\/scripts\/install-panel\.sh/);
   assert.match(readme, /Возможные ошибки установки/);
@@ -550,6 +551,8 @@ test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", a
   assert.match(caddy, /\{\$SITE_ADDRESS\}/);
   assert.doesNotMatch(caddy, /bind 0\.0\.0\.0/);
   assert.match(manager, /df -Pk \/opt/);
+  assert.match(manager, /configure_firewall "panel-only"\s+verify_app/);
+  assert.match(manager, /--retry 18 --retry-all-errors --retry-delay 5/);
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
