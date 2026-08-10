@@ -1158,7 +1158,7 @@ PY
   systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
   systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
   curl --fail --silent --show-error --retry 6 --retry-connrefused --retry-delay 2 \
-    "http://127.0.0.1:${HTTP_PORT}/" >/dev/null
+    "http://127.0.0.1:3000/" >/dev/null
   cleanup_legacy_runtime
   ok "панель запущена: ${PANEL_URL}"
 }
@@ -1274,6 +1274,7 @@ install_prebuilt_release() {
   mv -- "${rollback}/venv" "${INSTALL_DIR}/venv"
   chmod 0755 "${INSTALL_DIR}" "${INSTALL_DIR}/scripts/vps-control.sh"
   PROJECT_DIR="${INSTALL_DIR}"
+  write_caddy_config
 
   if ! install_api \
     || ! install_web \
@@ -1287,7 +1288,7 @@ install_prebuilt_release() {
     || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
       "http://127.0.0.1:8000/api/health" >/dev/null \
     || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
-      "http://127.0.0.1:${HTTP_PORT}/" >/dev/null; then
+      "http://127.0.0.1:3000/" >/dev/null; then
     warn "новый релиз не прошёл проверку; выполняется откат."
     systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
     if [[ -d "${INSTALL_DIR}/venv" && ! -e "${rollback}/venv" ]]; then
@@ -1295,6 +1296,8 @@ install_prebuilt_release() {
     fi
     rm -rf -- "${INSTALL_DIR}"
     mv -- "${rollback}" "${INSTALL_DIR}"
+    PROJECT_DIR="${INSTALL_DIR}"
+    write_caddy_config
     if [[ "${legacy_runtime}" == "yes" ]]; then
       systemctl stop "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
       start_legacy_containers
@@ -1453,7 +1456,7 @@ restore_test_app() {
   if ! install_api || ! install_web || ! ensure_api_write_access \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
-    || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:${HTTP_PORT}/" >/dev/null; then
+    || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:3000/" >/dev/null; then
     warn "сохранённая версия не запустилась; тестовая версия восстанавливается."
     systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
     if [[ -d "${INSTALL_DIR}/venv" && ! -e "${failed_install}/venv" ]]; then
