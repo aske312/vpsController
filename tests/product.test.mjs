@@ -29,6 +29,11 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /Node\.js \$\{node_major\} доступен в репозитории Ubuntu/);
   assert.match(manager, /VPS_CONTROL_ADMIN_USER/);
   assert.match(manager, /VPS_CONTROL_ADMIN_PASSWORD/);
+  assert.match(manager, /VPS_CONTROL_PUBLIC_DOMAIN/);
+  assert.match(manager, /VPS_CONTROL_ACCESS_MODE/);
+  assert.match(manager, /VPS_CONTROL_HTTP_PORT/);
+  assert.match(manager, /VPS_CONTROL_VLESS_PORT/);
+  assert.match(manager, /od -An -N18 -tx1 \/dev\/urandom/);
   assert.match(manager, /tail -n 1 \| tr -d '\\r'/);
   assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 2/);
   assert.match(manager, /value="\$\{value:1:\$\{#value\}-2\}"/);

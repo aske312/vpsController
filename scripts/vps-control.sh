@@ -262,6 +262,12 @@ load_install_config() {
   local config="${INSTALL_CONFIG}"
   local admin_user_override="${VPS_CONTROL_ADMIN_USER:-}"
   local admin_password_override="${VPS_CONTROL_ADMIN_PASSWORD:-}"
+  local domain_override="${VPS_CONTROL_PUBLIC_DOMAIN:-}"
+  local access_override="${VPS_CONTROL_ACCESS_MODE:-}"
+  local http_port_override="${VPS_CONTROL_HTTP_PORT:-}"
+  local vless_port_override="${VPS_CONTROL_VLESS_PORT:-}"
+  local fresh_install="no"
+  [[ -r "${INSTALL_CONFIG}" ]] || fresh_install="yes"
   [[ -r "${config}" ]] || config="${PROJECT_DIR}/install.conf"
   if [[ -r "${config}" ]]; then
     # Конфиг принадлежит администратору и содержит только shell-переменные.
@@ -269,10 +275,22 @@ load_install_config() {
     source "${config}"
   fi
   [[ -z "${admin_user_override}" ]] || ADMIN_USER="${admin_user_override}"
-  [[ -z "${admin_password_override}" ]] || ADMIN_PASSWORD="${admin_password_override}"
+  if [[ -n "${admin_password_override}" ]]; then
+    ADMIN_PASSWORD="${admin_password_override}"
+  elif [[ "${fresh_install}" == "yes" ]]; then
+    ADMIN_PASSWORD="$(od -An -N18 -tx1 /dev/urandom | tr -d ' \n')"
+  fi
+  [[ -z "${domain_override}" ]] || PUBLIC_DOMAIN="${domain_override}"
+  [[ -z "${access_override}" ]] || ACCESS_MODE="${access_override}"
+  [[ -z "${http_port_override}" ]] || HTTP_PORT="${http_port_override}"
+  [[ -z "${vless_port_override}" ]] || VLESS_REALITY_PORT="${vless_port_override}"
   [[ "${ACCESS_MODE}" == "external" || "${ACCESS_MODE}" == "local" || "${ACCESS_MODE}" == "vpn" ]] \
     || die "ACCESS_MODE должен быть external, local или vpn."
   [[ "${HTTP_PORT}" =~ ^[0-9]+$ ]] || die "HTTP_PORT должен быть числом."
+  [[ "${VLESS_REALITY_PORT}" =~ ^[0-9]+$ ]] || die "VLESS_REALITY_PORT must be numeric."
+  (( HTTP_PORT >= 1 && HTTP_PORT <= 65535 )) || die "HTTP_PORT must be between 1 and 65535."
+  (( VLESS_REALITY_PORT >= 1 && VLESS_REALITY_PORT <= 65535 )) || die "VLESS_REALITY_PORT must be between 1 and 65535."
+  [[ "${VLESS_REALITY_PORT}" != "443" ]] || die "TCP 443 is reserved for the HTTPS panel; choose another VLESS port."
 }
 
 detect_local_network() {
