@@ -19,6 +19,14 @@
 curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh | sudo bash
 ```
 
+Перед установкой можно выполнить только безопасную предварительную диагностику ОС, архитектуры, RAM, целевого диска `/opt`, systemd, DNS и GitHub:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh | sudo VPS_CONTROL_PREFLIGHT_ONLY=yes bash
+```
+
+Если сервер использует внешний firewall в панели хостинга, заранее разрешите входящие TCP 80 и 443 для доменной HTTPS-панели. UFW на самом сервере установщик настраивает автоматически. Для установки без проверенного домена разрешите настроенный `HTTP_PORT` (по умолчанию 8080).
+
 Установка из Git-клона удобна, если перед запуском нужно проверить или изменить `install.conf`:
 
 ```bash
@@ -51,6 +59,8 @@ sudo systemctl --no-pager --full status vps-control-api vps-control-web caddy
 - Недостаточно памяти или места: требуется не менее 1 ГБ RAM и 5 ГБ свободного места. Проверьте `free -h` и `df -h`.
 - Порт 80 занят: проверьте `sudo ss -ltnp | grep ':80 '`. Остановите конфликтующую службу либо задайте другой `HTTP_PORT` в `install.conf` до установки.
 - Caddy или приложение не запустились: выполните `sudo vps-control verify`, затем посмотрите `sudo journalctl -u vps-control-api -u vps-control-web -u caddy -n 200 --no-pager` и `/var/log/vps-control-install.log`.
+- Let’s Encrypt сообщает `Timeout during connect`: проверьте A/AAAA домена и доступность TCP 80/443 не только в UFW, но и во внешнем firewall хостинга. Повторный запуск установщика безопасно переиспользует установленные пакеты и конфигурацию.
+- Полный журнал bootstrap сохраняется в `/tmp/vps-control-bootstrap.log`, журнал установки приложения — в `/var/log/vps-control-install.log`.
 - Установка оборвалась из-за разрыва SSH: повторно запустите ту же команду. Конфигурация и уже установленные пакеты используются повторно; WG/AWG устанавливаются отдельно как модули.
 - Bootstrap не может скачать ветку: клонируйте репозиторий командой из примера и запустите `sudo bash scripts/install-panel.sh` локально.
 
