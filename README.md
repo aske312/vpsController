@@ -54,6 +54,7 @@ sudo systemctl --no-pager --full status vps-control-api vps-control-web caddy
 ### Возможные ошибки установки
 
 - `dpkg was interrupted` или незавершённая настройка пакетов: выполните `sudo dpkg --configure -a`, затем повторите установку.
+- Повторный запуск на Debian сохраняет NodeSource Node.js 22 со встроенным npm и не пытается установить конфликтующий системный пакет `npm`.
 - `Could not get lock /var/lib/dpkg/lock`: дождитесь завершения `apt`, `unattended-upgrades` или первичной настройки cloud-init. Установщик ожидает блокировку до пяти минут; не удаляйте lock-файлы вручную.
 - GitHub, NodeSource или репозитории Ubuntu недоступны: проверьте `getent hosts github.com`, DNS, исходящий HTTPS и системное время командой `timedatectl`.
 - Недостаточно памяти или места: требуется не менее 1 ГБ RAM и 5 ГБ свободного места. Проверьте `free -h` и `df -h`.

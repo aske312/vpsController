@@ -24,6 +24,7 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /debian:13/);
   assert.match(manager, /check_supported_os/);
   assert.match(manager, /distro_node_packages=\(nodejs npm\)/);
+  assert.match(manager, /command -v node.*command -v npm[\s\S]*distro_node_packages=\(nodejs\)/);
   assert.match(manager, /Candidate:\/ && !found/);
   assert.match(manager, /Node\.js \$\{node_major\} доступен в репозитории Ubuntu/);
   assert.match(manager, /VPS_CONTROL_ADMIN_USER/);
