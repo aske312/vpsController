@@ -52,14 +52,14 @@ fi
 
 # Загруженный отдельно файл служит bootstrap и получает полный stabl-архив.
 banner
-if [[ ! -r /etc/os-release ]] || ! grep -q '^ID=ubuntu$' /etc/os-release; then
-  printf 'Ошибка: установщик поддерживает только Ubuntu Server.\n' >&2
+if [[ ! -r /etc/os-release ]] || ! grep -Eq '^ID=(ubuntu|debian)$' /etc/os-release; then
+  printf 'Ошибка: установщик поддерживает Ubuntu Server и Debian.\n' >&2
   exit 1
 fi
 
 export DEBIAN_FRONTEND=noninteractive
 : >"${BOOTSTRAP_LOG}"
-run_stage "${yellow}" "Проверяем каталоги Ubuntu" apt-get -o DPkg::Lock::Timeout=300 update
+run_stage "${yellow}" "Проверяем системные репозитории" apt-get -o DPkg::Lock::Timeout=300 update
 run_stage "${magenta}" "Добавляем инструменты загрузки" apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl tar
 
 BOOTSTRAP_DIR="$(mktemp -d /tmp/vps-control-bootstrap.XXXXXX)"

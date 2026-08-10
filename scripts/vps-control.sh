@@ -24,11 +24,11 @@ ADMIN_USER="admin"
 ADMIN_PASSWORD="VpsAdmin-2026-7Qm!rK2#"
 LOCAL_ADDRESS=""
 LOCAL_CIDR=""
-HTTP_PORT="80"
+HTTP_PORT="8080"
 WG_PORT="51820"
 AWG_PORT="51822"
 SHADOWSOCKS_PORT_START="30000"
-VLESS_REALITY_PORT="443"
+VLESS_REALITY_PORT="8443"
 VLESS_REALITY_TARGET="www.intel.com:443"
 WG_INTERFACE="wg0"
 AWG_INTERFACE="awg0"
@@ -258,12 +258,16 @@ load_manager_config() {
 
 load_install_config() {
   local config="${INSTALL_CONFIG}"
+  local admin_user_override="${VPS_CONTROL_ADMIN_USER:-}"
+  local admin_password_override="${VPS_CONTROL_ADMIN_PASSWORD:-}"
   [[ -r "${config}" ]] || config="${PROJECT_DIR}/install.conf"
   if [[ -r "${config}" ]]; then
     # Конфиг принадлежит администратору и содержит только shell-переменные.
     # shellcheck source=/dev/null
     source "${config}"
   fi
+  [[ -z "${admin_user_override}" ]] || ADMIN_USER="${admin_user_override}"
+  [[ -z "${admin_password_override}" ]] || ADMIN_PASSWORD="${admin_password_override}"
   [[ "${ACCESS_MODE}" == "external" || "${ACCESS_MODE}" == "local" || "${ACCESS_MODE}" == "vpn" ]] \
     || die "ACCESS_MODE должен быть external, local или vpn."
   [[ "${HTTP_PORT}" =~ ^[0-9]+$ ]] || die "HTTP_PORT должен быть числом."
@@ -282,7 +286,9 @@ detect_local_network() {
 
 configure_access() {
   local public_ip
-  public_ip="$(env_value PUBLIC_IP)"
+  detect_public_endpoints
+  public_ip="$(env_value PUBLIC_ENDPOINT)"
+  [[ -n "${public_ip}" ]] || public_ip="$(env_value PUBLIC_IP)"
   if [[ "${ACCESS_MODE}" == "local" ]]; then
     detect_local_network
     set_env_value "PANEL_HOST" "${LOCAL_ADDRESS}"
@@ -306,12 +312,17 @@ configure_access() {
     local wg_address awg_address origins
     wg_address="$({ ip -o -4 addr show dev "${WG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
     awg_address="$({ ip -o -4 addr show dev "${AWG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
-    origins="http://${public_ip}:${HTTP_PORT}"
+    if [[ -n "$(env_value PUBLIC_DOMAIN)" ]]; then
+      origins="https://${public_ip}"
+      PANEL_URL="https://${public_ip}"
+    else
+      origins="http://${public_ip}:${HTTP_PORT}"
+      PANEL_URL="http://${public_ip}:${HTTP_PORT}"
+    fi
     [[ -z "${wg_address}" ]] || origins+=",http://${wg_address}:${HTTP_PORT}"
     [[ -z "${awg_address}" ]] || origins+=",http://${awg_address}:${HTTP_PORT}"
     set_env_value "PANEL_HOST" "0.0.0.0"
     set_env_value "CORS_ORIGINS" "${origins}"
-    PANEL_URL="http://${public_ip}:${HTTP_PORT}"
   fi
   set_env_value "HTTP_PORT" "${HTTP_PORT}"
   set_env_value "ACCESS_MODE" "${ACCESS_MODE}"
@@ -339,8 +350,75 @@ configure_access() {
   set_env_value "AWG_H4" "${AWG_H4}"
 }
 
+detect_public_endpoints() {
+  local public_ipv4 public_ipv6 domain configured_domain endpoint
+  public_ipv4="$(env_value PUBLIC_IPV4)"
+  [[ -n "${public_ipv4}" ]] || public_ipv4="$(env_value PUBLIC_IP)"
+  public_ipv6="$(curl -6 --fail --silent --show-error --max-time 8 https://api64.ipify.org 2>/dev/null || true)"
+  [[ "${public_ipv6}" == *:* ]] || public_ipv6=""
+  configured_domain="${PUBLIC_DOMAIN:-$(env_value PUBLIC_DOMAIN)}"
+  domain="${configured_domain}"
+  if [[ -z "${domain}" && -n "${public_ipv4}" ]]; then
+    domain="$(python3 - "${public_ipv4}" <<'PY' 2>/dev/null || true
+import socket, sys
+try:
+    name = socket.gethostbyaddr(sys.argv[1])[0].rstrip(".")
+    if "." in name:
+        print(name)
+except (OSError, IndexError):
+    pass
+PY
+)"
+  fi
+  if [[ -n "${domain}" ]]; then
+    if ! python3 - "${domain}" "${public_ipv4}" "${public_ipv6}" <<'PY' >/dev/null 2>&1
+import ipaddress, socket, sys
+name, ipv4, ipv6 = sys.argv[1:]
+expected = {value for value in (ipv4, ipv6) if value}
+resolved = {str(ipaddress.ip_address(item[4][0])) for item in socket.getaddrinfo(name, None)}
+raise SystemExit(0 if expected & resolved else 1)
+PY
+    then
+      warn "domain ${domain} does not resolve to this server; using an IP address."
+      domain=""
+    fi
+  fi
+  if [[ -n "${domain}" ]]; then
+    endpoint="${domain}"
+  elif [[ -n "${public_ipv4}" ]]; then
+    endpoint="${public_ipv4}"
+  elif [[ -n "${public_ipv6}" ]]; then
+    endpoint="[${public_ipv6}]"
+  else
+    die "unable to detect a public IPv4 or IPv6 address."
+  fi
+  set_env_value "PUBLIC_IPV4" "${public_ipv4}"
+  set_env_value "PUBLIC_IPV6" "${public_ipv6}"
+  set_env_value "PUBLIC_DOMAIN" "${domain}"
+  set_env_value "PUBLIC_ENDPOINT" "${endpoint}"
+  [[ -z "${public_ipv4}" ]] || set_env_value "PUBLIC_IP" "${public_ipv4}"
+  ok "endpoint: ${endpoint}; IPv4: ${public_ipv4:-none}; IPv6: ${public_ipv6:-none}."
+}
+
+write_caddy_config() {
+  local domain
+  domain="$(env_value PUBLIC_DOMAIN)"
+  if [[ -n "${domain}" && "${ACCESS_MODE}" == "external" ]]; then
+    sed -e "s|{\$SITE_ADDRESS}|${domain}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
+      "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
+  else
+    sed -e "s|{\$SITE_ADDRESS}|:${HTTP_PORT}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
+      "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
+  fi
+}
+
 env_value() {
-  sed -n "s/^${1}=//p" "${ENV_FILE}" 2>/dev/null | tail -n 1
+  local value
+  value="$(sed -n "s/^${1}=//p" "${ENV_FILE}" 2>/dev/null | tail -n 1 | tr -d '\r')"
+  if [[ "${value}" == \"*\" && "${value}" == *\" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s\n' "${value}"
 }
 
 set_env_value() {
@@ -457,20 +535,21 @@ build_web() {
   ok "веб-интерфейс собран"
 }
 
-check_ubuntu() {
+check_supported_os() {
   [[ -r /etc/os-release ]] || die "не удалось определить операционную систему."
   # shellcheck source=/dev/null
   source /etc/os-release
-  [[ ${ID:-} == "ubuntu" ]] || die "поддерживается только Ubuntu; обнаружена ${PRETTY_NAME:-неизвестная ОС}."
-  [[ -n "${VERSION_ID:-}" ]] || die "не удалось определить версию Ubuntu."
-  case "${VERSION_ID}" in
-    22.04|24.04) ;;
-    *) warn "Ubuntu ${VERSION_ID} не проходила расширенную проверку; продолжаем установку с базовыми проверками." ;;
+  [[ ${ID:-} == "ubuntu" || ${ID:-} == "debian" ]] \
+    || die "поддерживаются Ubuntu Server и Debian; обнаружена ${PRETTY_NAME:-неизвестная ОС}."
+  [[ -n "${VERSION_ID:-}" ]] || die "не удалось определить версию операционной системы."
+  case "${ID}:${VERSION_ID}" in
+    ubuntu:22.04|ubuntu:24.04|ubuntu:26.04|debian:13) ;;
+    *) warn "${PRETTY_NAME:-${ID} ${VERSION_ID}} не проходила расширенную проверку; продолжаем установку с базовыми проверками." ;;
   esac
 }
 
 doctor() {
-  check_ubuntu
+  check_supported_os
   local failed=0 memory_kb disk_kb architecture
   architecture="$(dpkg --print-architecture 2>/dev/null || uname -m)"
   case "${architecture}" in amd64|arm64|x86_64|aarch64) ok "архитектура: ${architecture}" ;; *) warn "архитектура ${architecture} не проверена"; failed=1 ;; esac
@@ -492,10 +571,19 @@ doctor() {
 install_packages() {
   info "Установка системных зависимостей"
   export DEBIAN_FRONTEND=noninteractive
+  local node_candidate node_major
+  local -a distro_node_packages=()
   install -d -m 0750 "$(dirname -- "${INSTALL_LOG}")"
   prepare_package_manager
   run_with_status "Загрузка списка пакетов" apt-get -o DPkg::Lock::Timeout=300 update
-  run_with_status "Установка системных зависимостей" apt-get -o DPkg::Lock::Timeout=300 install -y auditd build-essential ca-certificates caddy curl fail2ban git iproute2 openssh-server openssl procps python3 python3-venv rsync tar ufw unattended-upgrades
+  # Не завершаем awk досрочно: с pipefail apt-cache получает SIGPIPE (141).
+  node_candidate="$(apt-cache policy nodejs 2>/dev/null | awk '/Candidate:/ && !found {print $2; found=1}')"
+  node_major="$(sed -n 's/^[^0-9]*\([0-9][0-9]*\).*/\1/p' <<<"${node_candidate}")"
+  if [[ "${node_major:-0}" -ge 22 ]] && apt-cache show npm >/dev/null 2>&1; then
+    distro_node_packages=(nodejs npm)
+    ok "Node.js ${node_major} доступен в репозитории Ubuntu; внешний репозиторий не требуется."
+  fi
+  run_with_status "Установка системных зависимостей" apt-get -o DPkg::Lock::Timeout=300 install -y auditd build-essential ca-certificates caddy curl fail2ban git iproute2 openssh-server openssl procps python3 python3-venv rsync tar ufw unattended-upgrades "${distro_node_packages[@]}"
   if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1 || [[ "$(node -p 'process.versions.node.split(`.`)[0]' 2>/dev/null || echo 0)" -lt 22 ]]; then
     run_with_status "Подключение Node.js 22" bash -c 'curl -fsSL https://deb.nodesource.com/setup_22.x | bash -'
     run_with_status "Установка Node.js 22" apt-get -o DPkg::Lock::Timeout=300 install -y nodejs
@@ -503,7 +591,7 @@ install_packages() {
 }
 
 secure_server() {
-  info "Настройка защиты Ubuntu"
+  info "Настройка защиты сервера"
   prepare_package_manager
   apt-get -o DPkg::Lock::Timeout=300 update
   apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw
@@ -670,7 +758,12 @@ configure_firewall() {
     [[ "${vpn_interface_available}" == "yes" ]] || die "нет доступного интерфейса WG/AWG для панели."
     ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
   else
-    ufw allow "${HTTP_PORT}/tcp"
+    if [[ -n "$(env_value PUBLIC_DOMAIN)" ]]; then
+      ufw allow 80/tcp comment '312.net HTTPS redirect'
+      ufw allow 443/tcp comment '312.net HTTPS panel'
+    else
+      ufw allow "${HTTP_PORT}/tcp"
+    fi
   fi
   ufw --force enable
 }
@@ -800,6 +893,9 @@ ensure_environment() {
   rm -f -- "${DATA_DIR}/personalization.json"
   if [[ ! -s "${ENV_FILE}" ]]; then
     install -m 0600 "${PROJECT_DIR}/.env.example" "${ENV_FILE}"
+    # Архив мог быть подготовлен на Windows. CR в EnvironmentFile становится
+    # частью адресов и ломает Caddy/PANEL_URL, поэтому нормализуем шаблон.
+    sed -i 's/\r$//' "${ENV_FILE}"
     set_env_value "ADMIN_USER" "${ADMIN_USER}"
     set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
     chmod 0600 "${ENV_FILE}"
@@ -982,7 +1078,7 @@ ReadWritePaths=${DATA_DIR}/web
 WantedBy=multi-user.target
 EOF
   install -d -m 0755 /etc/caddy
-  sed "s/{\$HTTP_PORT}/${HTTP_PORT}/g" "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
+  write_caddy_config
   caddy validate --config "${CADDY_CONFIG}" >/dev/null
   systemctl daemon-reload
   systemctl enable "${APP_NAME}-web.service" caddy.service >>"${INSTALL_LOG}" 2>&1
@@ -1383,7 +1479,7 @@ change_access_mode() {
   set_config_value "${INSTALL_DIR}/install.conf" "ACCESS_MODE" "${ACCESS_MODE}"
   configure_access
   configure_firewall "panel-only"
-  sed "s/{\$HTTP_PORT}/${HTTP_PORT}/g" "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
+  write_caddy_config
   caddy validate --config "${CADDY_CONFIG}" >/dev/null
   systemctl restart caddy.service
   systemctl restart "${APP_NAME}-api.service"
@@ -1661,9 +1757,11 @@ verify_app() {
   systemctl is-active --quiet "${APP_NAME}-api.service" || die "API не запущен."
   systemctl is-active --quiet "${APP_NAME}-web.service" || die "веб-служба не запущена."
   systemctl is-active --quiet caddy.service || die "Caddy не запущен."
-  curl --fail --silent --show-error http://127.0.0.1:8000/api/health
+  curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
+    http://127.0.0.1:8000/api/health \
+    || die "API не отвечает на локальную проверку."
   printf '\n'
-  curl --fail --silent --show-error --retry 6 --retry-connrefused --retry-delay 5 "${PANEL_URL}/" >/dev/null \
+  curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 2 "${PANEL_URL}/" >/dev/null \
     || die "веб-панель не отвечает."
   ok "установка исправна; веб-интерфейс отвечает."
 }
