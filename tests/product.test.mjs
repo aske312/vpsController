@@ -465,6 +465,8 @@ test("protocol pages safely edit channel settings and VRX links select HTTP2", a
   assert.match(api, /"alpn": "h2"/);
   assert.match(api, /"mode": xhttp_mode/);
   assert.match(api, /query_values\["extra"\]/);
+  assert.match(api, /"maxConcurrency": "8-16"/);
+  assert.match(api, /"xmux_concurrency"/);
   assert.match(api, /"dns", "keepalive"/);
   assert.match(api, /"loglevel", "xpadding"/);
   assert.match(api, /allow_methods=\["GET", "POST", "PUT", "PATCH", "DELETE"\]/);

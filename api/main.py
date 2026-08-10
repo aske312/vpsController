@@ -2175,6 +2175,7 @@ class ProtocolSettingsUpdate(BaseModel):
     loglevel: Literal["debug", "info", "warning", "error", "none"] | None = None
     xpadding: str | None = Field(default=None, min_length=1, max_length=32, pattern=r"^\d+(?:-\d+)?$")
     sni: str | None = Field(default=None, min_length=4, max_length=253, pattern=r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
+    xmux_concurrency: int | None = Field(default=None, ge=1, le=64)
 
 
 def key(command: str) -> str:
@@ -2429,8 +2430,12 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 vrx_dns = ",".join(protocol_dns_addresses("vless-reality-xhttp"))
                 if vrx_dns:
                     query_values["dns"] = vrx_dns
-                if xhttp_settings.get("extra"):
-                    query_values["extra"] = json.dumps(xhttp_settings["extra"], separators=(",", ":"))
+                client_extra = {
+                    "xPaddingBytes": "100-1000",
+                    "xmux": {"maxConcurrency": "8-16", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000"},
+                    **xhttp_settings.get("extra", {}),
+                }
+                query_values["extra"] = json.dumps(client_extra, separators=(",", ":"))
                 query = urllib.parse.urlencode(query_values)
                 client_config = f"vless://{client_uuid}@{PUBLIC_IP}:{port}?{query}#{urllib.parse.quote(payload.name)}"
                 stage = "сохранение подключения"
@@ -2594,6 +2599,9 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
         "key": "xpadding", "label": "XHTTP padding, байт", "type": "text", "value": str(values.get("xPaddingBytes", "100-1000")),
         "help": "Одно число или диапазон, например 100-1000.",
     }, {
+        "key": "xmux_concurrency", "label": "Параллелизм XHTTP", "type": "number", "value": int(values.get("xmuxConcurrency", 12)), "min": 1, "max": 64,
+        "help": "Количество одновременных запросов на HTTP-соединение. 8–16 устраняет секундные очереди; применяется к новым VRX-профилям.",
+    }, {
         "key": "dns", "label": "DNS VRX", "type": "text", "value": current_env_value("VRX_DNS", "1.1.1.1, 1.0.0.1"),
         "help": "Применяется к Xray на сервере и добавляется в новые VRX-ссылки. Уже импортированные профили не изменяются.",
     }]
@@ -2682,7 +2690,7 @@ def update_protocol_settings(
     allowed = {
         "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
         "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
-        "vless-reality-xhttp": {"xhttp_mode", "loglevel", "xpadding", "dns", "sni"},
+        "vless-reality-xhttp": {"xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni"},
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
         raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
@@ -2745,6 +2753,12 @@ def update_protocol_settings(
                 config["inbounds"][0]["streamSettings"]["xhttpSettings"]["mode"] = supplied["xhttp_mode"]
             if "xpadding" in supplied:
                 config["inbounds"][0]["streamSettings"]["xhttpSettings"].setdefault("extra", {})["xPaddingBytes"] = supplied["xpadding"]
+            if "xmux_concurrency" in supplied:
+                extra = config["inbounds"][0]["streamSettings"]["xhttpSettings"].setdefault("extra", {})
+                extra["xmux"] = {
+                    "maxConcurrency": str(supplied["xmux_concurrency"]),
+                    "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000",
+                }
             if "loglevel" in supplied:
                 config.setdefault("log", {})["loglevel"] = supplied["loglevel"]
             if "dns" in supplied:
@@ -2836,6 +2850,8 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 xhttp_values["sni"] = target.rsplit(":", 1)[0] if ":" in target else target
                 xhttp_values["loglevel"] = config_data.get("log", {}).get("loglevel", "warning")
                 xhttp_values["xPaddingBytes"] = xhttp_values.get("extra", {}).get("xPaddingBytes", "100-1000")
+                max_concurrency = xhttp_values.get("extra", {}).get("xmux", {}).get("maxConcurrency", "12")
+                xhttp_values["xmuxConcurrency"] = int(str(max_concurrency).split("-", 1)[0])
                 editable_settings = editable_protocol_settings(protocol, xhttp_values)
             except (OSError, ValueError, json.JSONDecodeError, KeyError, IndexError):
                 listen_port = 443

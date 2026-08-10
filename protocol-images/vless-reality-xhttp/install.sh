@@ -110,7 +110,9 @@ config = {
     "tag": "vless-reality-xhttp", "listen": "0.0.0.0", "port": int(port), "protocol": "vless",
     "settings": {"clients": existing_clients, "decryption": "none"},
     "streamSettings": {
-      "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": "auto"},
+      "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": "auto", "extra": {
+        "xPaddingBytes": "100-1000", "xmux": {"maxConcurrency": "8-16", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000"}
+      }},
       "realitySettings": {
         "show": False, "target": target, "xver": 0, "serverNames": [host],
         "privateKey": private_key, "shortIds": [short_id],
