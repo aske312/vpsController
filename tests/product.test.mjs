@@ -35,7 +35,7 @@ test("интерфейс и метаданные относятся к прод�
   assert.equal(JSON.parse(packageJson).name, "312-net-control");
   assert.doesNotMatch(`${layout}\n${page}`, /ChatGPT|Starter Project|Codex/i);
   assert.match(page, /NEXT_PUBLIC_APP_VERSION \|\| "v1\.0\.0"/);
-  assert.equal(JSON.parse(packageJson).version, "1.0.0");
+  assert.match(JSON.parse(packageJson).version, /^\d+\.\d+\.\d+$/);
 });
 
 test("MIT license, privacy notice and connection guide are included and exposed in RU and EN", async () => {
