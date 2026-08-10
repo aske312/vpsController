@@ -469,6 +469,8 @@ test("protocol pages safely edit channel settings and VRX links select HTTP2", a
   assert.match(api, /"xmux_concurrency"/);
   assert.match(api, /"dns", "keepalive"/);
   assert.match(api, /"loglevel", "xpadding"/);
+  assert.match(api, /protocol: Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\]/);
+  assert.match(api, /@app\.post\("\/api\/protocols\/\{protocol\}\/resources\/check"\)/);
   assert.match(api, /allow_methods=\["GET", "POST", "PUT", "PATCH", "DELETE"\]/);
   assert.match(api, /"editable_settings": editable_settings/);
   assert.match(page, /function ProtocolSettingsEditor/);
@@ -499,17 +501,27 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /env_updates\["AWG_DNS"\]/);
   assert.match(api, /env_updates\["SHADOWSOCKS_DNS"\]/);
   assert.match(api, /env_updates\["VRX_DNS"\]/);
+  assert.match(api, /vrx_servers\.insert\(0, selected\["doh_url"\]\)/);
+  assert.match(page, /DoH для VRX/);
   assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
   assert.match(api, /def apply_vrx_dns/);
-  assert.match(api, /query_values\["dns"\]/);
   assert.match(api, /def validate_reality_sni/);
   assert.match(api, /reality_settings\["serverNames"\] = \[supplied\["sni"\]\]/);
   assert.match(api, /persist_vrx_target\(supplied\["sni"\]\)/);
-  assert.match(api, /urllib\.parse\.urlencode\(\{"dns": ss_dns\}\)/);
+  assert.doesNotMatch(api, /urllib\.parse\.urlencode\(\{"dns": ss_dns\}\)/);
   assert.match(page, /apply_shadowsocks/);
   assert.match(page, /apply_vrx/);
   assert.match(css, /\.dnsCatalog/);
   assert.match(css, /\.dnsSaveBar/);
+});
+
+test("connection latency labels identify the real measurement source", async () => {
+  const [api, page] = await Promise.all([read("api/main.py"), read("app/page.tsx")]);
+  assert.match(api, /"latency_source": "server_icmp_tunnel_ip"/);
+  assert.match(page, /ЭТО УСТРОЙСТВО → ПАНЕЛЬ/);
+  assert.match(page, /RTT VPS → УСТРОЙСТВО/);
+  assert.match(page, /ВНЕШНИЙ КАНАЛ VPS · 24 ЧАСА/);
+  assert.match(page, /не измеряет маршрут от устройства/);
 });
 
 test("manual releases are prebuilt and installed without Docker or package upgrades", async () => {

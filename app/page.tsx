@@ -15,8 +15,9 @@ type Client = {
   id: string; name: string; protocol: Protocol; public_key: string; endpoint?: string;
   address: string; handshake_age_s?: number; rx_bytes: number; tx_bytes: number;
   rx_bps?: number; tx_bps?: number; active_connections?: number; active_sources?: string[];
-  quality?: "stable" | "warning" | "error" | "offline"; latency_ms?: number; jitter_ms?: number; packet_loss_percent?: number; quality_reason?: string;
+  quality?: "stable" | "warning" | "error" | "offline"; latency_ms?: number; jitter_ms?: number; packet_loss_percent?: number; quality_reason?: string; latency_source?: "server_icmp_tunnel_ip" | "not_supported"; sample_size?: number;
 };
+type DeviceProbe = { latency_ms: number | null; variation_ms: number | null; loss_percent: number; successful: number; samples: number; measured_at: string; route: string };
 type Overview = {
   server: { name: string; public_ip: string; city: string; country: string; country_code: string; uptime_s: number };
   resources: { load1: number; cpu_percent: number; cpu_count: number; memory_total: number; memory_available: number; disk_total: number; disk_available: number; network_rx: number; network_tx: number };
@@ -170,6 +171,9 @@ export default function Home() {
   const [dns, setDns] = useState<DnsStatus | null>(null);
   const [dnsDraft, setDnsDraft] = useState<DnsSettings | null>(null);
   const [dnsChecks, setDnsChecks] = useState<Record<string, DnsCheck>>({});
+  const [deviceProbe, setDeviceProbe] = useState<DeviceProbe | null>(null);
+  const [probingDevice, setProbingDevice] = useState(false);
+  const deviceProbeAt = useRef(0);
   const [checkingDns, setCheckingDns] = useState(false);
   const [automationDraft, setAutomationDraft] = useState<ServicesStatus["automation"] | null>(null);
   const [loggingDraft, setLoggingDraft] = useState<LoggingSettings | null>(null);
@@ -361,6 +365,40 @@ export default function Home() {
     finally { setBusy(false); }
   }
 
+  const measureDeviceRoute = useCallback(async (force = false) => {
+    if (!force && Date.now() - deviceProbeAt.current < 30000) return;
+    setProbingDevice(true);
+    const samples: number[] = [];
+    let failed = 0;
+    for (let index = 0; index < 5; index += 1) {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 4000);
+      const started = performance.now();
+      try {
+        const response = await fetch(`/api/health?_probe=${Date.now()}-${index}`, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        await response.json();
+        samples.push(performance.now() - started);
+      } catch {
+        failed += 1;
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+    const host = window.location.hostname;
+    const route = host === "10.72.0.1" ? "WireGuard" : host === "10.73.0.1" ? "AmneziaWG" : "текущий маршрут браузера";
+    const average = samples.length ? samples.reduce((sum, value) => sum + value, 0) / samples.length : null;
+    const variation = samples.length > 1 ? Math.max(...samples) - Math.min(...samples) : null;
+    setDeviceProbe({
+      latency_ms: average == null ? null : Math.round(average),
+      variation_ms: variation == null ? null : Math.round(variation),
+      loss_percent: failed / 5 * 100,
+      successful: samples.length, samples: 5, measured_at: new Date().toISOString(), route,
+    });
+    deviceProbeAt.current = Date.now();
+    setProbingDevice(false);
+  }, []);
+
   async function checkDnsProviders(providerId?: string) {
     setCheckingDns(true); setError("");
     try {
@@ -404,11 +442,14 @@ export default function Home() {
       else if (tab === "services") await loadServices();
       else if (tab === "dns") await loadDns();
       else if (["wg", "awg", "shadowsocks", "vless-reality-xhttp"].includes(tab)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
-      else await loadClients();
+      else {
+        await loadClients();
+        if (tab === "clients") await measureDeviceRoute(showBusy);
+      }
     } finally {
       if (showBusy) setBusy(false);
     }
-  }, [loadApplication, loadClients, loadDns, loadOverview, loadProtocolStatus, loadSecurity, loadServices, tab, token]);
+  }, [loadApplication, loadClients, loadDns, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, tab, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -1257,8 +1298,8 @@ export default function Home() {
           <div className="dnsHeroActions"><div className="dnsHeroStat"><strong>{dns?.providers.length || 0}</strong><span>доступных профилей</span></div><button className="dnsCheckAll" type="button" onClick={() => void checkDnsProviders()} disabled={checkingDns}><span aria-hidden="true">↻</span>{checkingDns ? "Идёт проверка…" : "Проверить все DNS"}</button></div>
         </article>
         <div className="dnsSetupGrid"><article className="panel dnsPolicy"><div className="dnsSectionTitle"><span>1</span><div><p className="eyebrow">ОБЛАСТЬ ПРИМЕНЕНИЯ</p><h3>Куда применить DNS</h3></div></div><p className="dnsSectionHint">Выключенные протоколы сохранят прежние настройки.</p><div className="dnsPolicyGrid">
-          <label><input type="checkbox" checked={dnsDraft?.apply_wg ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_wg: event.target.checked } : value)} /><span><strong>WireGuard</strong><small>Новые профили WG</small></span></label><label><input type="checkbox" checked={dnsDraft?.apply_awg ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_awg: event.target.checked } : value)} /><span><strong>AmneziaWG</strong><small>Новые профили AWG</small></span></label><label><input type="checkbox" checked={dnsDraft?.apply_shadowsocks ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_shadowsocks: event.target.checked } : value)} /><span><strong>Shadowsocks</strong><small>Новые SS-профили</small></span></label><label><input type="checkbox" checked={dnsDraft?.apply_vrx ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_vrx: event.target.checked } : value)} /><span><strong>VRX</strong><small>Xray и новые профили</small></span></label>
-        </div></article><article className="panel dnsOptions"><div className="dnsSectionTitle"><span>2</span><div><p className="eyebrow">ПОЛИТИКА</p><h3>Как использовать DNS</h3></div></div><p className="dnsSectionHint">Дополнительные правила отказоустойчивости и защиты.</p><div className="dnsOptionList"><label><span><strong>Резервный DNS</strong><small>Использовать второй IP при недоступности основного</small></span><input type="checkbox" checked={dnsDraft?.fallback_enabled ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, fallback_enabled: event.target.checked } : value)} /></label><label><span><strong>Предпочитать DoH</strong><small>Выбирать шифрованную проверку, если она доступна</small></span><input type="checkbox" checked={dnsDraft?.prefer_encrypted ?? false} onChange={(event) => setDnsDraft((value) => value ? { ...value, prefer_encrypted: event.target.checked } : value)} /></label></div></article></div>
+          <label><input type="checkbox" checked={dnsDraft?.apply_wg ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_wg: event.target.checked } : value)} /><span><strong>WireGuard</strong><small>Новые профили WG</small></span></label><label><input type="checkbox" checked={dnsDraft?.apply_awg ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_awg: event.target.checked } : value)} /><span><strong>AmneziaWG</strong><small>Новые профили AWG</small></span></label><label><input type="checkbox" checked={dnsDraft?.apply_shadowsocks ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_shadowsocks: event.target.checked } : value)} /><span><strong>Shadowsocks</strong><small>Рекомендация для клиента</small></span></label><label><input type="checkbox" checked={dnsDraft?.apply_vrx ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_vrx: event.target.checked } : value)} /><span><strong>VRX</strong><small>Серверный DNS Xray</small></span></label>
+        </div></article><article className="panel dnsOptions"><div className="dnsSectionTitle"><span>2</span><div><p className="eyebrow">ПОЛИТИКА</p><h3>Как использовать DNS</h3></div></div><p className="dnsSectionHint">Дополнительные правила отказоустойчивости и защиты.</p><div className="dnsOptionList"><label><span><strong>Резервный DNS</strong><small>Использовать второй IP при недоступности основного</small></span><input type="checkbox" checked={dnsDraft?.fallback_enabled ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, fallback_enabled: event.target.checked } : value)} /></label><label><span><strong>DoH для VRX</strong><small>Xray использует зашифрованный DNS провайдера; WG, AWG и SS сохраняют IP-DNS</small></span><input type="checkbox" checked={dnsDraft?.prefer_encrypted ?? false} onChange={(event) => setDnsDraft((value) => value ? { ...value, prefer_encrypted: event.target.checked } : value)} /></label></div></article></div>
         <article className="panel dnsResolverSection"><div className="dnsSectionHead"><div className="dnsSectionTitle"><span>3</span><div><p className="eyebrow">DNS-ПРОВАЙДЕР</p><h3>Выберите резолвер</h3></div></div><small>Задержка измеряется непосредственно с сервера</small></div><div className="dnsCatalog">
           {(dns?.providers || []).map((provider) => { const check = dnsChecks[provider.id]; const selected = dnsDraft?.selected_id === provider.id; return <article className={`dnsProvider ${selected ? "selected" : ""}`} key={provider.id}><header><span className={provider.country === "RU" ? "dnsCountry ru" : "dnsCountry"}>{provider.country}</span><div><strong>{provider.name}</strong><small>{provider.filter}</small></div>{selected && <i aria-label="Выбран">✓</i>}</header><code>{provider.addresses.join(" · ")}</code><div className="dnsChecks"><span className={check?.udp_ok ? "ok" : ""}><small>UDP</small><strong>{check?.udp_ms != null ? `${check.udp_ms} мс` : "—"}</strong></span><span className={check?.tcp_ok ? "ok" : ""}><small>TCP</small><strong>{check?.tcp_ms != null ? `${check.tcp_ms} мс` : "—"}</strong></span><span className={check?.doh_ok ? "ok" : ""}><small>DoH</small><strong>{check?.doh_ms != null ? `${check.doh_ms} мс` : provider.doh_url ? "—" : "нет"}</strong></span></div><div className="dnsProviderActions"><button type="button" className="dnsTestButton" onClick={() => void checkDnsProviders(provider.id)}>Проверить</button><button type="button" className="dnsSelectButton" disabled={selected} onClick={() => setDnsDraft((value) => value ? { ...value, selected_id: provider.id } : value)}>{selected ? "Выбран" : "Выбрать"}</button></div></article>; })}
         </div></article>
@@ -1266,7 +1307,7 @@ export default function Home() {
           <div className="dnsSectionHead"><div className="dnsSectionTitle"><span>4</span><div><p className="eyebrow">СВОЙ РЕЗОЛВЕР</p><h3>Собственный DNS</h3></div></div><button type="button" className="dnsCustomButton" onClick={() => setDnsDraft((value) => value ? { ...value, selected_id: "custom", custom: value.custom || { name: "Собственный DNS", addresses: [""], doh_url: "" } } : value)}>Настроить свой DNS</button></div>
           {dnsDraft?.selected_id === "custom" && <div className="customDnsFields"><label>Название<input value={dnsDraft.custom?.name || ""} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { addresses: [""], doh_url: "" }), name: event.target.value } } : value)} /></label><label>IP-адреса через запятую<input value={(dnsDraft.custom?.addresses || []).join(", ")} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { name: "Собственный DNS", doh_url: "" }), addresses: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) } } : value)} /></label><label>DoH URL<input type="url" placeholder="https://dns.example/dns-query" value={dnsDraft.custom?.doh_url || ""} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { name: "Собственный DNS", addresses: [""] }), doh_url: event.target.value } } : value)} /></label></div>}
         </article>
-        <article className="panel dnsCurrent"><div><p className="eyebrow">ТЕКУЩИЕ ЗНАЧЕНИЯ</p><h3>DNS по протоколам</h3></div><div className="dnsProtocolEffect">{Object.entries(dns?.protocol_effect || {}).map(([protocol, value]) => <div key={protocol}><strong>{protocol === "vless-reality-xhttp" ? "VRX" : protocol.toUpperCase()}</strong><span>{value}</span></div>)}</div></article><div className="dnsSaveBar"><p><small>БУДЕТ ПРИМЕНЁН</small><strong>{dns?.providers.find((item) => item.id === dnsDraft?.selected_id)?.name || dnsDraft?.custom?.name || "DNS не выбран"}</strong><span>VRX обновляется на сервере; новые клиентские профили получают выбранный DNS</span></p><button type="button" onClick={() => void saveDnsSettings()} disabled={busy || !dnsDraft}>{busy ? "Применяем…" : "Сохранить и применить"}</button></div>
+        <article className="panel dnsCurrent"><div><p className="eyebrow">ТЕКУЩИЕ ЗНАЧЕНИЯ</p><h3>DNS по протоколам</h3></div><div className="dnsProtocolEffect">{Object.entries(dns?.protocol_effect || {}).map(([protocol, value]) => <div key={protocol}><strong>{protocol === "vless-reality-xhttp" ? "VRX" : protocol.toUpperCase()}</strong><span>{value}</span></div>)}</div></article><div className="dnsSaveBar"><p><small>БУДЕТ ПРИМЕНЁН</small><strong>{dns?.providers.find((item) => item.id === dnsDraft?.selected_id)?.name || dnsDraft?.custom?.name || "DNS не выбран"}</strong><span>WG/AWG — новые профили; VRX — сервер Xray; SS — рекомендация для клиентского приложения</span></p><button type="button" onClick={() => void saveDnsSettings()} disabled={busy || !dnsDraft}>{busy ? "Применяем…" : "Сохранить и применить"}</button></div>
       </section>}
 
       {tab === "security" && <section className="securityGrid">
@@ -1646,11 +1687,11 @@ export default function Home() {
             </dl>
           </article>
           <article className="panel protocolTelemetry">
-            <p className="eyebrow">VPS CONNECTIVITY · 24 HOURS</p>
-            <div className="telemetryMain"><strong>{activeProtocol.history.latency_avg_ms != null ? activeProtocol.history.latency_avg_ms.toFixed(1) : "—"}</strong><span>мс в среднем</span></div>
+            <p className="eyebrow">ВНЕШНИЙ КАНАЛ VPS · 24 ЧАСА</p>
+            <div className="telemetryMain"><strong>{activeProtocol.history.latency_avg_ms != null ? activeProtocol.history.latency_avg_ms.toFixed(1) : "—"}</strong><span>мс от VPS до 1.1.1.1 / 8.8.8.8</span></div>
             <dl>
               <div><dt>Потери контрольных пакетов</dt><dd>{activeProtocol.history.external_loss_percent != null ? `${activeProtocol.history.external_loss_percent}%` : "—"}</dd></div>
-              <div><dt>Средний jitter</dt><dd>{activeProtocol.history.jitter_avg_ms != null ? `${activeProtocol.history.jitter_avg_ms.toFixed(1)} мс` : "—"}</dd></div>
+              <div><dt>Средний разброс RTT (mdev)</dt><dd>{activeProtocol.history.jitter_avg_ms != null ? `${activeProtocol.history.jitter_avg_ms.toFixed(1)} мс` : "—"}</dd></div>
               <div><dt>Максимальная задержка</dt><dd>{activeProtocol.history.latency_max_ms != null ? `${activeProtocol.history.latency_max_ms.toFixed(1)} мс` : "—"}</dd></div>
               <div><dt>Текущие соединения</dt><dd>{activeProtocol.online_peers} из {activeProtocol.peers} · {duration(activeProtocol.last_handshake_age_s)}</dd></div>
             </dl>
@@ -1665,7 +1706,7 @@ export default function Home() {
           </button>
           {diagnosticsOpen[tab] && <div className="diagnosticBody">
             <div className="diagnosticHead">
-              <p>Проверка внешнего канала, DNS, HTTPS, UDP, маршрутизации, MTU, drops и conntrack.</p>
+              <p>Серверная проверка внешнего канала VPS, DNS, HTTPS, UDP, маршрутизации, MTU, drops и conntrack. Она не измеряет маршрут от устройства.</p>
               <div className="diagnosticScore">
                 <span>{activeProtocol.diagnostics?.score != null ? activeProtocol.diagnostics.score : "—"}</span>
                 <small>{activeProtocol.diagnostics?.status === "healthy" ? "СТАБИЛЬНО" : activeProtocol.diagnostics?.status === "critical" ? "КРИТИЧНО" : activeProtocol.diagnostics?.status === "warning" ? "ТРЕБУЕТ ВНИМАНИЯ" : "ПРОВЕРКА"}</small>
@@ -1734,12 +1775,13 @@ export default function Home() {
 
       {tab === "clients" && installedProtocols.length > 0 && <section className="clientsLayout">
         <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все подключения" : labels[tab]}</h2></div><div className="clientPanelActions"><span>{protocolClients.length} подключений</span><a className="guideAction" href="/connection-guide-wg-awg.pdf" download aria-label="Скачать руководство по подключению" data-tooltip="Пошаговая инструкция для владельца устройства: установка приложения и импорт конфигурации"><span aria-hidden="true">↓</span><div><strong>Скачать гайд</strong><small>PDF · ДЛЯ ПОЛЬЗОВАТЕЛЯ</small></div></a><button className="primaryButton" onClick={openClientDialog}>Новое подключение <span>＋</span></button></div></div>
+          <div className="deviceProbe"><div><p className="eyebrow">ЭТО УСТРОЙСТВО → ПАНЕЛЬ</p><strong>{deviceProbe?.latency_ms != null ? `${deviceProbe.latency_ms} мс` : "—"}</strong><span>{deviceProbe?.route || "текущий маршрут браузера"}</span></div><dl><div><dt>Успешно</dt><dd>{deviceProbe ? `${deviceProbe.successful}/${deviceProbe.samples}` : "—"}</dd></div><div><dt>Неудачные пробы</dt><dd>{deviceProbe ? `${deviceProbe.loss_percent}%` : "—"}</dd></div><div><dt>Разброс RTT</dt><dd>{deviceProbe?.variation_ms != null ? `${deviceProbe.variation_ms} мс` : "—"}</dd></div></dl><button type="button" onClick={() => void measureDeviceRoute(true)} disabled={probingDevice}>{probingDevice ? "Измеряем…" : "Измерить с устройства"}</button></div>
           {protocolClients.length > CLIENTS_PER_PAGE && <nav className="clientPagination clientPaginationTop" aria-label="Страницы подключений"><span>Показаны {visibleClientStart}–{visibleClientEnd} из {protocolClients.length}</span><div><button onClick={() => setClientPage(1)} disabled={currentClientPage === 1} aria-label="Первая страница">«</button><button onClick={() => setClientPage(Math.max(1, currentClientPage - 1))} disabled={currentClientPage === 1}>Назад</button><strong>{currentClientPage} / {clientPageCount}</strong><button onClick={() => setClientPage(Math.min(clientPageCount, currentClientPage + 1))} disabled={currentClientPage === clientPageCount}>Дальше</button><button onClick={() => setClientPage(clientPageCount)} disabled={currentClientPage === clientPageCount} aria-label="Последняя страница">»</button></div></nav>}
           <div className="clientTable">{protocolClients.length ? visibleClients.map((client) =>
             <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><div className="clientIdentity"><span className={`protocol ${client.protocol}`}>{client.protocol === "wg" ? "WG" : client.protocol === "awg" ? "AW" : client.protocol === "shadowsocks" ? "SS" : "VRX"}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address}{client.active_sources?.length ? ` · источник: ${client.active_sources.join(", ")}` : ""}</small></p></div>
               <div className="clientState"><small>СТАТУС</small><strong>{client.quality === "stable" ? "ОНЛАЙН" : client.quality === "offline" ? "ОФЛАЙН" : "НЕСТАБИЛЬНО"}</strong><span>{client.quality_reason || "состояние уточняется"}</span></div>
               <div className="traffic"><small>ТРАФИК · ПОЛУЧЕНО<b>↓ {bytes(client.rx_bytes)} · {bytes(client.rx_bps)}/с</b></small><small>ТРАФИК · ОТПРАВЛЕНО<b>↑ {bytes(client.tx_bytes)} · {bytes(client.tx_bps)}/с</b></small></div><span className="handshake"><small>{client.protocol === "wg" || client.protocol === "awg" ? "ПОСЛЕДНИЙ HANDSHAKE" : "ПОСЛЕДНЯЯ АКТИВНОСТЬ"}</small><strong>{duration(client.handshake_age_s)}</strong><span>{client.active_connections ? `${client.active_connections} ${client.protocol === "shadowsocks" ? "TCP-сокетов" : "активн."}` : "нет активных"}</span></span>
-              <span className="clientLink"><small>КАЧЕСТВО КАНАЛА</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} ms` : "—"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · loss ${client.packet_loss_percent}%` : ""}</strong></span>
+              <span className="clientLink" title={client.latency_source === "server_icmp_tunnel_ip" ? `ICMP от VPS к туннельному IP · ${client.sample_size || 5} проб` : "Для SS/VRX сервер не может измерить RTT клиентского устройства без клиентского агента"}><small>{client.latency_source === "server_icmp_tunnel_ip" ? "RTT VPS → УСТРОЙСТВО" : "RTT УСТРОЙСТВА"}</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} мс` : "ICMP недоступен"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · потери ${client.packet_loss_percent}%` : ""}</strong></span>
               <button className="dangerButton" onClick={() => void removeClient(client.id)}>Отозвать</button></div>
           ) : <div className="emptyState"><span>◎</span><p>Подключений пока нет</p></div>}</div>
         </article>

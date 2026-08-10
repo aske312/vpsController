@@ -199,12 +199,16 @@ def run_with_input(args: list[str], value: str) -> str:
     return result.stdout.strip()
 
 
-def cached_resource_availability(protocol: Literal["wg", "awg"]) -> dict:
+def cached_resource_availability(
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
+) -> dict:
     cached = resource_check_cache.get(protocol)
     return {key: value for key, value in (cached or {}).items() if not key.startswith("_")}
 
 
-def check_resource_availability(protocol: Literal["wg", "awg"]) -> dict:
+def check_resource_availability(
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
+) -> dict:
     cached = resource_check_cache.get(protocol)
     if not resource_check_lock.acquire(blocking=False):
         return cached_resource_availability(protocol)
@@ -301,7 +305,7 @@ def interface_dump(protocol: Literal["wg", "awg"], include_quality: bool = True)
             peer.update(qualities[peer["id"]])
     for peer in peers:
         if include_quality and peer not in online_peers:
-            peer.update({"quality": "offline", "latency_ms": None, "packet_loss_percent": None, "quality_reason": "Нет активного handshake"})
+            peer.update({"quality": "offline", "latency_ms": None, "jitter_ms": None, "packet_loss_percent": None, "latency_source": "server_icmp_tunnel_ip", "quality_reason": "Нет активного handshake"})
     return peers
 
 
@@ -438,7 +442,7 @@ def stream_proxy_dump() -> list[dict]:
             "handshake_age_s": handshake_age, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "enabled": True,
             "rx_bps": rx_bps, "tx_bps": tx_bps, "active_connections": active_connections,
             "active_sources": active_sources if protocol == "shadowsocks" else [],
-            "quality": "stable" if online else "offline", "latency_ms": None, "packet_loss_percent": None,
+            "quality": "stable" if online else "offline", "latency_ms": None, "jitter_ms": None, "packet_loss_percent": None, "latency_source": "not_supported",
             "quality_reason": (f"Активных соединений: {active_connections}" if online else "Нет недавней активности") if active else "Служба подключения остановлена",
         })
     return peers
@@ -474,6 +478,7 @@ def client_connection_quality(peer: dict) -> dict:
         quality, reason = "stable", "Туннель активен · ICMP недоступен"
     result = {
         "quality": quality, "latency_ms": latency, "jitter_ms": jitter, "packet_loss_percent": loss,
+        "latency_source": "server_icmp_tunnel_ip", "sample_size": 5,
         "quality_reason": reason, "_cached_at": time.time(),
     }
     client_quality_cache[cache_key] = result
@@ -726,7 +731,7 @@ def network_diagnostics(protocol: Literal["wg", "awg"], history: dict, force: bo
             finding("warning", "packet_loss", "Нестабильная доставка пакетов", f"Сейчас {live_loss:.1f}%, за 24 часа {historical_loss or 0:.1f}%.", "Снять MTR в обе стороны и проверить, на каком участке начинается потеря.")
         historical_jitter = history.get("jitter_avg_ms")
         if (live_jitter is not None and live_jitter >= 30) or (historical_jitter is not None and historical_jitter >= 30):
-            finding("warning", "jitter", "Высокий jitter", f"Сейчас {live_jitter or 0:.1f} мс, за 24 часа {historical_jitter or 0:.1f} мс.", "Проверить загрузку канала, очереди и регион размещения VPS.")
+            finding("warning", "rtt_variation", "Высокий разброс RTT", f"mdev сейчас {live_jitter or 0:.1f} мс, за 24 часа {historical_jitter or 0:.1f} мс.", "Проверить загрузку канала, очереди и регион размещения VPS.")
         if not mtu_safe or not pmtu_ok:
             finding("critical" if not mtu_safe else "warning", "mtu", "Риск фрагментации или blackhole MTU", f"MTU туннеля {tunnel_mtu or 'не определён'}, внешний MTU {uplink_mtu or 'не определён'}.", "Уменьшить MTU туннеля и повторить проверку крупных пакетов с DF.")
         if history.get("uplink_dropped", 0) > 0 or uplink_dropped > 0:
@@ -2096,6 +2101,10 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
         raise HTTPException(status_code=422, detail="Выбранный DNS-профиль не найден")
     selected_addresses = selected["addresses"] if data["fallback_enabled"] else selected["addresses"][:1]
     addresses = ", ".join(selected_addresses)
+    vrx_servers = list(selected_addresses)
+    if data["prefer_encrypted"] and selected.get("doh_url"):
+        vrx_servers.insert(0, selected["doh_url"])
+    vrx_addresses = ", ".join(vrx_servers)
     env_updates = {}
     if data["apply_wg"]:
         env_updates["WG_DNS"] = addresses
@@ -2104,7 +2113,7 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
     if data["apply_shadowsocks"]:
         env_updates["SHADOWSOCKS_DNS"] = addresses
     if data["apply_vrx"]:
-        env_updates["VRX_DNS"] = addresses
+        env_updates["VRX_DNS"] = vrx_addresses
     env_original = ENV_FILE.read_bytes() if ENV_FILE.exists() else None
     vrx_original = VLESS_CONFIG.read_bytes() if data["apply_vrx"] and VLESS_CONFIG.exists() else None
     settings_original = DNS_SETTINGS_FILE.read_bytes() if DNS_SETTINGS_FILE.exists() else None
@@ -2113,7 +2122,7 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
         if env_updates:
             persist_env_values(env_updates)
         if vrx_original is not None:
-            apply_vrx_dns(selected_addresses)
+            apply_vrx_dns(vrx_servers)
         DNS_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
         temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         os.chmod(temporary, 0o600)
@@ -2170,7 +2179,7 @@ class ProtocolSettingsUpdate(BaseModel):
     mode: Literal["tcp_only", "tcp_and_udp"] | None = None
     no_delay: bool | None = None
     xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
-    dns: str | None = Field(default=None, min_length=7, max_length=128, pattern=r"^[0-9a-fA-F:., ]+$")
+    dns: str | None = Field(default=None, min_length=3, max_length=512)
     keepalive: int | None = Field(default=None, ge=0, le=300)
     loglevel: Literal["debug", "info", "warning", "error", "none"] | None = None
     xpadding: str | None = Field(default=None, min_length=1, max_length=32, pattern=r"^\d+(?:-\d+)?$")
@@ -2208,11 +2217,6 @@ def dns_provider_list(settings: dict | None = None) -> list[dict]:
     if custom:
         providers.append({"id": "custom", "country": "CUSTOM", "filter": "Пользовательский", **custom})
     return providers
-
-
-def protocol_dns_addresses(protocol: Literal["shadowsocks", "vless-reality-xhttp"]) -> list[str]:
-    key_name = "SHADOWSOCKS_DNS" if protocol == "shadowsocks" else "VRX_DNS"
-    return [value.strip() for value in current_env_value(key_name, "").split(",") if value.strip()]
 
 
 def apply_vrx_dns(addresses: list[str]) -> None:
@@ -2380,9 +2384,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             config_path.unlink(missing_ok=True)
             raise HTTPException(status_code=500, detail="Unable to start Shadowsocks client service")
         userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
-        ss_dns = ",".join(protocol_dns_addresses("shadowsocks"))
-        dns_query = "?" + urllib.parse.urlencode({"dns": ss_dns}) if ss_dns else ""
-        client_config = f"ss://{userinfo}@{PUBLIC_IP}:{port}{dns_query}#{urllib.parse.quote(payload.name)}"
+        client_config = f"ss://{userinfo}@{PUBLIC_IP}:{port}#{urllib.parse.quote(payload.name)}"
         items = read_clients()
         items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
         write_clients(items)
@@ -2427,9 +2429,6 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     "type": "xhttp", "host": target_host,
                     "path": reality.get("XHTTP_PATH", reality.get("PATH", "/")), "mode": xhttp_mode,
                 }
-                vrx_dns = ",".join(protocol_dns_addresses("vless-reality-xhttp"))
-                if vrx_dns:
-                    query_values["dns"] = vrx_dns
                 client_extra = {
                     "xPaddingBytes": "100-1000",
                     "xmux": {"maxConcurrency": "8-16", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000"},
@@ -2576,7 +2575,7 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
                 {"value": "tcp_and_udp", "label": "TCP + UDP"}, {"value": "tcp_only", "label": "Только TCP"},
             ]},
             {"key": "no_delay", "label": "TCP no-delay", "type": "boolean", "value": bool(values.get("no_delay", True))},
-            {"key": "dns", "label": "DNS новых профилей", "type": "text", "value": current_env_value("SHADOWSOCKS_DNS", "1.1.1.1, 1.0.0.1"), "help": "Добавляется в новые SS-ссылки; применение зависит от поддержки DNS-параметра клиентом."},
+            {"key": "dns", "label": "Рекомендуемый DNS клиента", "type": "text", "value": current_env_value("SHADOWSOCKS_DNS", "1.1.1.1, 1.0.0.1"), "help": "Сохраняется как политика администратора. SS-сервер не может принудительно изменить DNS устройства; настройте его в клиентском приложении."},
         ]
     return [{
         "key": "sni", "label": "SNI маскировки", "type": "text",
@@ -2603,7 +2602,7 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
         "help": "Количество одновременных запросов на HTTP-соединение. 8–16 устраняет секундные очереди; применяется к новым VRX-профилям.",
     }, {
         "key": "dns", "label": "DNS VRX", "type": "text", "value": current_env_value("VRX_DNS", "1.1.1.1, 1.0.0.1"),
-        "help": "Применяется к Xray на сервере и добавляется в новые VRX-ссылки. Уже импортированные профили не изменяются.",
+        "help": "Применяется к серверному резолверу Xray. DNS самого устройства задаётся в клиентском приложении.",
     }]
 
 
@@ -2694,6 +2693,17 @@ def update_protocol_settings(
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
         raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
+    if "dns" in supplied:
+        resolver_values = [value.strip() for value in supplied["dns"].split(",") if value.strip()]
+        if not resolver_values:
+            raise HTTPException(status_code=422, detail="Укажите хотя бы один DNS-резолвер")
+        for resolver in resolver_values:
+            if protocol == "vless-reality-xhttp" and re.fullmatch(r"https://[^\s]+", resolver):
+                continue
+            try:
+                ipaddress.ip_address(resolver)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"Некорректный DNS для {protocol}: {resolver}") from exc
 
     if protocol in ("wg", "awg"):
         config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
@@ -2948,7 +2958,10 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
 
 
 @app.post("/api/protocols/{protocol}/resources/check")
-def check_protocol_resources(protocol: Literal["wg", "awg"], _: None = Depends(require_token)) -> dict:
+def check_protocol_resources(
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
+    _: None = Depends(require_token),
+) -> dict:
     return check_resource_availability(protocol)
 
 

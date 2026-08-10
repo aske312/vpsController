@@ -654,6 +654,7 @@ input, select { height: 46px; font-size: 11px; }
 .customDnsFields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; }.customDnsFields label { display: grid; gap: 6px; color: var(--muted); font-size: 8px; }.customDnsFields input { width: 100%; padding: 0 10px; border: 1px solid var(--line); background: #0d1516; color: var(--text); }
 .dnsSaveBar { position: sticky; bottom: 12px; z-index: 4; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 16px; border: 1px solid #3c7161; border-radius: 9px; background: #101d1bf2; box-shadow: 0 10px 30px #0008; backdrop-filter: blur(14px); }.dnsSaveBar p { display: grid; gap: 3px; margin: 0; }.dnsSaveBar p > small { color: var(--green); font: 6px var(--font-mono); }.dnsSaveBar strong { font-size: 11px; }.dnsSaveBar span { color: var(--muted); font-size: 8px; }.dnsSaveBar button { min-height: 42px; padding: 0 20px; border: 0; border-radius: 6px; background: var(--green); color: #0b1714; font-weight: 800; }
 .clientPaginationTop { margin: 12px 0 4px; padding: 11px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.deviceProbe { display: grid; grid-template-columns: minmax(190px, .8fr) 1.4fr auto; align-items: center; gap: 18px; margin: 12px 0 4px; padding: 13px 14px; border: 1px solid #315a4f; border-radius: 8px; background: #10201d; }.deviceProbe > div { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 3px 9px; }.deviceProbe > div p { grid-column: 1 / -1; margin: 0; }.deviceProbe > div strong { color: var(--green); font: 600 20px var(--font-mono); }.deviceProbe > div span { color: var(--muted); font-size: 8px; }.deviceProbe dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 0; }.deviceProbe dl div { display: grid; gap: 4px; padding: 8px; border-radius: 6px; background: #0c1515; }.deviceProbe dt { color: var(--muted); font-size: 7px; }.deviceProbe dd { margin: 0; font: 8px var(--font-mono); }.deviceProbe button { min-height: 36px; padding: 0 12px; border: 1px solid #376357; border-radius: 6px; background: #17332b; color: var(--green); font-size: 8px; font-weight: 700; }
 .protocolLiveHero {
   min-height: 134px; display: flex; align-items: center; justify-content: space-between; gap: 24px;
   background: linear-gradient(105deg, #10201d, #0f1618 62%);
@@ -842,6 +843,7 @@ input, select { height: 46px; font-size: 11px; }
   .dnsCurrent { grid-template-columns: 1fr; }
   .dnsSectionHead { align-items: flex-start; flex-direction: column; }
   .dnsCustomButton { width: 100%; }
+  .deviceProbe { grid-template-columns: 1fr; }.deviceProbe dl { grid-template-columns: 1fr; }.deviceProbe button { width: 100%; }
   .dnsSaveBar button { width: 100%; }
   .resourceIndicators { grid-template-columns: 1fr; }
   .resourceAvailability .panelHead, .resourceTools { align-items: flex-start; flex-direction: column; }
