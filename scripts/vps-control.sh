@@ -584,7 +584,12 @@ install_packages() {
   # Не завершаем awk досрочно: с pipefail apt-cache получает SIGPIPE (141).
   node_candidate="$(apt-cache policy nodejs 2>/dev/null | awk '/Candidate:/ && !found {print $2; found=1}')"
   node_major="$(sed -n 's/^[^0-9]*\([0-9][0-9]*\).*/\1/p' <<<"${node_candidate}")"
-  if [[ "${node_major:-0}" -ge 22 ]] && apt-cache show npm >/dev/null 2>&1; then
+  if [[ "${node_major:-0}" -ge 22 ]] && command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    # NodeSource bundles npm in nodejs; asking Debian for its separate npm
+    # package on a repeated run creates an unsatisfiable downgrade conflict.
+    distro_node_packages=(nodejs)
+    ok "Node.js ${node_major} and npm are already installed; keeping the current package source."
+  elif [[ "${node_major:-0}" -ge 22 ]] && apt-cache show npm >/dev/null 2>&1; then
     distro_node_packages=(nodejs npm)
     ok "Node.js ${node_major} доступен в репозитории Ubuntu; внешний репозиторий не требуется."
   fi
