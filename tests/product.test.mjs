@@ -387,7 +387,10 @@ test("the panel has direct private addresses inside WG and AWG tunnels", async (
   assert.match(caddy, /http:\/\/{WG_PANEL_ADDRESS}, http:\/\/{AWG_PANEL_ADDRESS}/);
   assert.match(manager, /ipaddress\.ip_network\(sys\.argv\[1\] or "10\.72\.0\.0\/24"\)/);
   assert.match(manager, /s\|{WG_PANEL_ADDRESS}\|\$\{wg_panel_address\}\|g/);
+  assert.match(api, /vpn_urls\.append\(f"https:\/\/\{PUBLIC_DOMAIN\}"\)/);
   assert.match(api, /vpn_urls\.append\(f"http:\/\/\{address\}:/);
+  assert.match(manager, /HTTPS panel via WG/);
+  assert.match(manager, /HTTPS panel via AWG/);
 });
 
 test("WG and AWG modules install and uninstall independently", async () => {

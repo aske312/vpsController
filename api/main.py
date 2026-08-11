@@ -1772,10 +1772,13 @@ def services_status(_: None = Depends(require_token)) -> dict:
         if details["installed"] and module_configured:
             items.append(details)
     vpn_urls = []
-    for interface in (WG_INTERFACE, AWG_INTERFACE):
-        address = run("bash", "-lc", f"ip -o -4 addr show dev {interface} 2>/dev/null | awk 'NR==1 {{split($4,a,\"/\"); print a[1]}}'")
-        if address:
-            vpn_urls.append(f"http://{address}:{os.getenv('HTTP_PORT', '80')}")
+    if PUBLIC_DOMAIN:
+        vpn_urls.append(f"https://{PUBLIC_DOMAIN}")
+    else:
+        for interface in (WG_INTERFACE, AWG_INTERFACE):
+            address = run("bash", "-lc", f"ip -o -4 addr show dev {interface} 2>/dev/null | awk 'NR==1 {{split($4,a,\"/\"); print a[1]}}'")
+            if address:
+                vpn_urls.append(f"http://{address}:{os.getenv('HTTP_PORT', '80')}")
     logging_values = {}
     if LOGGING_CONFIG_FILE.exists():
         for line in LOGGING_CONFIG_FILE.read_text(encoding="utf-8").splitlines():

@@ -814,14 +814,19 @@ configure_firewall() {
     local vpn_interface_available="no"
     if ip link show "${WG_INTERFACE}" >/dev/null 2>&1; then
       ufw allow in on "${WG_INTERFACE}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via WG'
+      [[ -z "$(env_value PUBLIC_DOMAIN)" ]] \
+        || ufw allow in on "${WG_INTERFACE}" to any port 443 proto tcp comment '312.net HTTPS panel via WG'
       vpn_interface_available="yes"
     fi
     if ip link show "${AWG_INTERFACE}" >/dev/null 2>&1; then
       ufw allow in on "${AWG_INTERFACE}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via AWG'
+      [[ -z "$(env_value PUBLIC_DOMAIN)" ]] \
+        || ufw allow in on "${AWG_INTERFACE}" to any port 443 proto tcp comment '312.net HTTPS panel via AWG'
       vpn_interface_available="yes"
     fi
     [[ "${vpn_interface_available}" == "yes" ]] || die "нет доступного интерфейса WG/AWG для панели."
     ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
+    ufw delete allow 443/tcp >/dev/null 2>&1 || true
   else
     if [[ -n "$(env_value PUBLIC_DOMAIN)" ]]; then
       ufw --force delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
