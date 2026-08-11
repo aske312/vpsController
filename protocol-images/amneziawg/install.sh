@@ -18,6 +18,7 @@ setting() {
 AWG_SUBNET="$(setting AWG_SUBNET 10.73.0.0/24)"
 CONFIGURED_AWG_CONFIG="$(setting AWG_CONFIG "/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf")"
 AWG_CONFIG="/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf"
+QUICK_CONFIG="/etc/amnezia/${AWG_INTERFACE}.conf"
 AWG_MTU="$(setting AWG_MTU 1280)"
 AWG_JC="$(setting AWG_JC 6)"
 AWG_JMIN="$(setting AWG_JMIN 8)"
@@ -36,14 +37,33 @@ systemctl is-active --quiet "awg-quick@${AWG_INTERFACE}.service" 2>/dev/null && 
 [[ "${AWG_PORT}" =~ ^[0-9]+$ && "${AWG_PORT}" -ge 1 && "${AWG_PORT}" -le 65535 ]] || { echo "Некорректный UDP-порт" >&2; exit 1; }
 [[ "${AWG_MTU}" =~ ^[0-9]+$ && "${AWG_MTU}" -ge 1280 && "${AWG_MTU}" -le 1420 ]] || { echo "AWG_MTU должен быть от 1280 до 1420" >&2; exit 1; }
 [[ -n "${UPLINK_INTERFACE}" ]] || { echo "Не найден внешний сетевой интерфейс" >&2; exit 1; }
-grep -qi '^ID=ubuntu' /etc/os-release || { echo "Образ поддерживает Ubuntu 22.04/24.04" >&2; exit 1; }
+source /etc/os-release
+[[ "${ID:-}" == "ubuntu" || "${ID:-}" == "debian" ]] || { echo "AmneziaWG supports Ubuntu and Debian" >&2; exit 1; }
 
 export DEBIAN_FRONTEND=noninteractive
 if ! command -v awg >/dev/null 2>&1 || ! command -v awg-quick >/dev/null 2>&1 || ! modinfo amneziawg >/dev/null 2>&1; then
   apt-get -o DPkg::Lock::Timeout=300 update
-  apt-get -o DPkg::Lock::Timeout=300 install -y software-properties-common python3-launchpadlib gnupg2 "linux-headers-$(uname -r)" iptables
-  if ! grep -Rqs 'ppa.launchpadcontent.net/amnezia/ppa' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
-    add-apt-repository -y ppa:amnezia/ppa
+  if [[ "${ID}" == "ubuntu" ]]; then
+    apt-get -o DPkg::Lock::Timeout=300 install -y software-properties-common python3-launchpadlib gnupg2 "linux-headers-$(uname -r)" iptables
+    grep -Rqs 'ppa.launchpadcontent.net/amnezia/ppa' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null \
+      || add-apt-repository -y ppa:amnezia/ppa
+  else
+    apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl dirmngr dkms gnupg iptables "linux-headers-$(uname -r)"
+    if [[ ! -s /usr/share/keyrings/amnezia-ppa.gpg || ! -s /etc/apt/sources.list.d/amnezia-ppa.list ]]; then
+      key_home="$(mktemp -d)"
+      chmod 0700 "${key_home}"
+      gpg --homedir "${key_home}" --batch --keyserver hkps://keyserver.ubuntu.com \
+        --recv-keys 75C9DD72C799870E310542E24166F2C257290828
+      fingerprint="$(gpg --homedir "${key_home}" --batch --with-colons --fingerprint \
+        75C9DD72C799870E310542E24166F2C257290828 | grep '^fpr:' | head -n 1 | cut -d: -f10)"
+      [[ "${fingerprint}" == "75C9DD72C799870E310542E24166F2C257290828" ]] \
+        || { rm -rf -- "${key_home}"; echo "Amnezia PPA signing key fingerprint mismatch" >&2; exit 1; }
+      gpg --homedir "${key_home}" --batch --export 75C9DD72C799870E310542E24166F2C257290828 \
+        >/usr/share/keyrings/amnezia-ppa.gpg
+      rm -rf -- "${key_home}"
+      printf '%s\n' 'deb [signed-by=/usr/share/keyrings/amnezia-ppa.gpg] https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main' \
+        >/etc/apt/sources.list.d/amnezia-ppa.list
+    fi
   fi
   apt-get -o DPkg::Lock::Timeout=300 update
   apt-get -o DPkg::Lock::Timeout=300 install -y amneziawg
@@ -92,6 +112,9 @@ else
 fi
 if [[ "${CONFIGURED_AWG_CONFIG}" != "${AWG_CONFIG}" ]]; then
   ln -sfn -- "${AWG_CONFIG}" "${CONFIGURED_AWG_CONFIG}"
+fi
+if [[ "${QUICK_CONFIG}" != "${AWG_CONFIG}" && "${QUICK_CONFIG}" != "${CONFIGURED_AWG_CONFIG}" ]]; then
+  ln -sfn -- "${AWG_CONFIG}" "${QUICK_CONFIG}"
 fi
 
 cat >/etc/sysctl.d/99-vps-control-amneziawg.conf <<'EOF'

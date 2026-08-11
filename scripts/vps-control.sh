@@ -702,17 +702,40 @@ install_protocol_image() {
     fi
   done < <(find "${image_dir}" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print)
   [[ -n "${manifest}" ]] || die "образ ${image_id} не найден."
-  local installer image_root
+  local installer image_root module_log failure_message
   image_root="$(dirname -- "${manifest}")"
   installer="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("installer",""))' "${manifest}")"
+  source /etc/os-release
+  if ! python3 - "${manifest}" "${ID:-unknown}" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    supported = json.load(source).get("supported_os", [])
+raise SystemExit(0 if sys.argv[2] in supported else 1)
+PY
+  then
+    die "образ ${image_id} не поддерживает ОС ${ID:-unknown}."
+  fi
   [[ "${installer}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${installer}" ]] \
     || die "образ ${image_id} содержит некорректный installer."
   info "Установка образа ${image_id}"
   prepare_package_manager
+  apt-get -o DPkg::Lock::Timeout=300 check \
+    || die "пакетный менеджер не готов к установке ${image_id}; выполните apt-get check."
+  module_log="/var/log/${APP_NAME}-protocol-${image_id}.log"
+  install -m 0600 /dev/null "${module_log}"
   ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
     PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
-    bash "${image_root}/${installer}"
+    bash "${image_root}/${installer}" >"${module_log}" 2>&1 || {
+      tail -n 40 "${module_log}" >&2 || true
+      failure_message="$(tail -n 1 "${module_log}" | tr '\n\r' ' ' | cut -c1-240)"
+      [[ -n "${failure_message}" ]] || failure_message="установщик завершился с ошибкой"
+      write_action_status "failed" "${failure_message}; журнал: ${module_log}"
+      CURRENT_ACTION=""
+      die "не удалось установить ${image_id}; журнал: ${module_log}"
+    }
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   # Protocol clients persist configs below /etc/vps-control.  Keep the API
   # sandbox in sync even when a module is installed on an older deployment

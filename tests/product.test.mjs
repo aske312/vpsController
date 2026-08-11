@@ -46,6 +46,30 @@ test("поставка содержит установщик, образы и р
   assert.equal(JSON.parse(awg).id, "awg");
 });
 
+test("protocol installers declare OS support and keep per-module diagnostics", async () => {
+  const [manager, awgInstall, awgRemove, ...manifests] = await Promise.all([
+    read("scripts/vps-control.sh"),
+    read("protocol-images/amneziawg/install.sh"),
+    read("protocol-images/amneziawg/uninstall.sh"),
+    read("protocol-images/wireguard/manifest.json"),
+    read("protocol-images/amneziawg/manifest.json"),
+    read("protocol-images/shadowsocks/manifest.json"),
+    read("protocol-images/vless-reality-xhttp/manifest.json"),
+  ]);
+  for (const manifest of manifests.map(JSON.parse)) {
+    assert.deepEqual(manifest.supported_os, ["ubuntu", "debian"]);
+  }
+  assert.match(manager, /apt-get -o DPkg::Lock::Timeout=300 check/);
+  assert.match(manager, /protocol-\$\{image_id\}\.log/);
+  assert.match(manager, /write_action_status "failed"/);
+  assert.match(awgInstall, /"\$\{ID\}" == "ubuntu"/);
+  assert.match(awgInstall, /add-apt-repository -y ppa:amnezia\/ppa/);
+  assert.match(awgInstall, /signed-by=\/usr\/share\/keyrings\/amnezia-ppa\.gpg/);
+  assert.match(awgInstall, /75C9DD72C799870E310542E24166F2C257290828/);
+  assert.match(awgInstall, /QUICK_CONFIG="\/etc\/amnezia\/\$\{AWG_INTERFACE\}\.conf"/);
+  assert.match(awgRemove, /amnezia-ppa\.list/);
+});
+
 test("интерфейс и метаданные относятся к продукту 312.net", async () => {
   const [layout, page, packageJson] = await Promise.all([
     read("app/layout.tsx"),
