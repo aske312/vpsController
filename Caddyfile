@@ -6,3 +6,12 @@
         reverse_proxy 127.0.0.1:3000
     }
 }
+
+http://{WG_PANEL_ADDRESS}, http://{AWG_PANEL_ADDRESS} {
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}

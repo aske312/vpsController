@@ -421,13 +421,27 @@ PY
 }
 
 write_caddy_config() {
-  local domain
+  local domain wg_panel_address awg_panel_address
   domain="$(env_value PUBLIC_DOMAIN)"
+  wg_panel_address="$(python3 - "$(env_value WG_SUBNET)" <<'PY'
+import ipaddress
+import sys
+print(next(ipaddress.ip_network(sys.argv[1] or "10.72.0.0/24").hosts()))
+PY
+)"
+  awg_panel_address="$(python3 - "$(env_value AWG_SUBNET)" <<'PY'
+import ipaddress
+import sys
+print(next(ipaddress.ip_network(sys.argv[1] or "10.73.0.0/24").hosts()))
+PY
+)"
   if [[ -n "${domain}" && "${ACCESS_MODE}" == "external" ]]; then
     sed -e "s|{\$SITE_ADDRESS}|${domain}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
+      -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   else
     sed -e "s|{\$SITE_ADDRESS}|:${HTTP_PORT}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
+      -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   fi
 }
