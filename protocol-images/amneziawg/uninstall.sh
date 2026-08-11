@@ -4,10 +4,16 @@ set -Eeuo pipefail
 ENV_FILE="${ENV_FILE:-/etc/vps-control.env}"
 AWG_INTERFACE="${AWG_INTERFACE:-awg0}"
 AWG_PORT="${AWG_PORT:-51822}"
-AWG_SUBNET="$(sed -n 's/^AWG_SUBNET=//p' "${ENV_FILE}" 2>/dev/null | tail -n 1)"
+env_value() {
+  local value
+  value="$(sed -n "s/^${1}=//p" "${ENV_FILE}" 2>/dev/null | tail -n 1 | tr -d '\r')"
+  [[ "${value}" == \"*\" && "${value}" == *\" ]] && value="${value:1:${#value}-2}"
+  printf '%s\n' "${value}"
+}
+AWG_SUBNET="$(env_value AWG_SUBNET)"
 AWG_SUBNET="${AWG_SUBNET:-10.73.0.0/24}"
 UPLINK_INTERFACE="$(ip -o -4 route show default | awk '{print $5; exit}')"
-CONFIGURED_AWG_CONFIG="$(sed -n 's/^AWG_CONFIG=//p' "${ENV_FILE}" 2>/dev/null | tail -n 1)"
+CONFIGURED_AWG_CONFIG="$(env_value AWG_CONFIG)"
 CONFIGURED_AWG_CONFIG="${CONFIGURED_AWG_CONFIG:-/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf}"
 PACKAGE_CONFIG="/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf"
 QUICK_CONFIG="/etc/amnezia/${AWG_INTERFACE}.conf"

@@ -6,7 +6,12 @@ WG_INTERFACE="${WG_INTERFACE:-wg0}"
 WG_PORT="${WG_PORT:-51820}"
 
 env_value() {
-  sed -n "s/^${1}=//p" "${ENV_FILE}" 2>/dev/null | tail -n 1
+  local value
+  value="$(sed -n "s/^${1}=//p" "${ENV_FILE}" 2>/dev/null | tail -n 1 | tr -d '\r')"
+  if [[ "${value}" == \"*\" && "${value}" == *\" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s\n' "${value}"
 }
 
 WG_SUBNET="$(env_value WG_SUBNET)"

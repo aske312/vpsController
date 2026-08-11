@@ -4,10 +4,16 @@ set -Eeuo pipefail
 ENV_FILE="${ENV_FILE:-/etc/vps-control.env}"
 WG_INTERFACE="${WG_INTERFACE:-wg0}"
 WG_PORT="${WG_PORT:-51820}"
-WG_SUBNET="$(sed -n 's/^WG_SUBNET=//p' "${ENV_FILE}" 2>/dev/null | tail -n 1)"
+env_value() {
+  local value
+  value="$(sed -n "s/^${1}=//p" "${ENV_FILE}" 2>/dev/null | tail -n 1 | tr -d '\r')"
+  [[ "${value}" == \"*\" && "${value}" == *\" ]] && value="${value:1:${#value}-2}"
+  printf '%s\n' "${value}"
+}
+WG_SUBNET="$(env_value WG_SUBNET)"
 WG_SUBNET="${WG_SUBNET:-10.72.0.0/24}"
 UPLINK_INTERFACE="$(ip -o -4 route show default | awk '{print $5; exit}')"
-WG_CONFIG="$(sed -n 's/^WG_CONFIG=//p' "${ENV_FILE}" 2>/dev/null | tail -n 1)"
+WG_CONFIG="$(env_value WG_CONFIG)"
 WG_CONFIG="${WG_CONFIG:-/etc/wireguard/${WG_INTERFACE}.conf}"
 
 systemctl disable --now "wg-quick@${WG_INTERFACE}.service" 2>/dev/null || true
