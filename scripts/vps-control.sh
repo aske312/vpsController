@@ -732,7 +732,7 @@ PY
       tail -n 40 "${module_log}" >&2 || true
       failure_message="$(tail -n 1 "${module_log}" | tr '\n\r' ' ' | cut -c1-240)"
       [[ -n "${failure_message}" ]] || failure_message="установщик завершился с ошибкой"
-      write_action_status "failed" "${failure_message}; журнал: ${module_log}"
+      write_action_status "failed" "${ACTION_PROGRESS}" "${failure_message}; журнал: ${module_log}"
       CURRENT_ACTION=""
       die "не удалось установить ${image_id}; журнал: ${module_log}"
     }
