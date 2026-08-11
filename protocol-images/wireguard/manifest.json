@@ -7,6 +7,7 @@
   "category_name": "Защищённые туннели",
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
+  "supported_os": ["ubuntu", "debian"],
   "interface_env": "WG_INTERFACE",
   "service": "wg-quick@{interface}.service"
 }

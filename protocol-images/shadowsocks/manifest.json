@@ -7,5 +7,6 @@
   "category_name": "Защищённые туннели",
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
+  "supported_os": ["ubuntu", "debian"],
   "service": "vps-control-shadowsocks.target"
 }
