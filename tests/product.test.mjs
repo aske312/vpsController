@@ -380,6 +380,16 @@ test("web and gateway run as systemd services without Docker", async () => {
   assert.match(page, /службы<\/span>/);
 });
 
+test("the panel has direct private addresses inside WG and AWG tunnels", async () => {
+  const [caddy, manager, api] = await Promise.all([
+    read("Caddyfile"), read("scripts/vps-control.sh"), read("api/main.py"),
+  ]);
+  assert.match(caddy, /http:\/\/{WG_PANEL_ADDRESS}, http:\/\/{AWG_PANEL_ADDRESS}/);
+  assert.match(manager, /ipaddress\.ip_network\(sys\.argv\[1\] or "10\.72\.0\.0\/24"\)/);
+  assert.match(manager, /s\|{WG_PANEL_ADDRESS}\|\$\{wg_panel_address\}\|g/);
+  assert.match(api, /vpn_urls\.append\(f"http:\/\/\{address\}:/);
+});
+
 test("WG and AWG modules install and uninstall independently", async () => {
   const [api, manager, wgInstall, awgInstall, wgRemove, awgRemove] = await Promise.all([
     read("api/main.py"), read("scripts/vps-control.sh"),
