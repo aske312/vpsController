@@ -258,7 +258,9 @@ test("service mode tests main without publishing it while stabl remains the only
   assert.doesNotMatch(manager, /SERVICE_BRANCH=/);
   assert.match(manager, /update_prebuilt_branch "\$\{PRODUCTION_BRANCH\}" "stabl-latest"/);
   assert.match(manager, /update_test_branch\(\)/);
-  assert.match(manager, /archive\/refs\/heads\/main\.tar\.gz/);
+  assert.doesNotMatch(manager, /archive\/refs\/heads\/main\.tar\.gz/);
+  assert.match(manager, /archive\/\$\{latest\}\.tar\.gz/);
+  assert.match(manager, /mktemp -d "\$\{DATA_DIR\}\/tmp\/update\.XXXXXX"/);
   assert.match(manager, /BUILD_COMMIT="\$\{latest\}" RELEASE_VERSION="\$\{test_version\}"/);
   assert.match(page, /тестовую ветку main без публикации Release/);
   assert.match(manager, /for attempt in \$\(seq 1 48\)/);
@@ -645,6 +647,10 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(manager, /legacy_runtime="no"/);
   assert.match(manager, /start_legacy_containers\(\)/);
   assert.match(manager, /cleanup_legacy_runtime/);
+  assert.match(manager, /requirements_changed="no"/);
+  assert.match(manager, /cp -a -- "\$\{INSTALL_DIR\}\/venv" "\$\{payload\}\/venv"/);
+  assert.match(manager, /"\$\{candidate_python\}" -m pip install/);
+  assert.doesNotMatch(manager, /Python-зависимости изменились; подготовьте полный системный релиз/);
   assert.match(manager, /контрольные суммы подготовленного релиза не совпали/);
   assert.match(manager, /новый релиз не прошёл проверку; выполняется откат/);
   assert.match(manager, /install_prebuilt_release install-release "\$\{archive\}"/);
@@ -658,8 +664,14 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(readme, /Ручное обновление без сборки на VPS/);
   assert.match(manager, /TimeoutStopSec=15/);
   assert.match(manager, /KillMode=mixed/);
-  assert.match(manager, /mv -- "\$\{INSTALL_DIR\}\/venv" "\$\{rollback\}\/venv"/);
-  assert.match(manager, /PYTHONPATH="\$\{payload\}" "\$\{INSTALL_DIR\}\/venv\/bin\/python" -c 'import api\.main'/);
+  assert.match(
+    manager,
+    /mv -- "\$\{INSTALL_DIR\}\/venv" "\$\{rollback\}\/venv"/,
+  );
+  assert.match(
+    manager,
+    /PYTHONPATH="\$\{payload\}" "\$\{candidate_python\}" -c 'import api\.main'/,
+  );
   assert.match(manager, /http:\/\/127\.0\.0\.1:8000\/api\/health/);
   assert.match(manager, /install -d -m 0755 "\$\{INSTALL_DIR\}"\s+chmod 0755 "\$\{INSTALL_DIR\}"/);
 });

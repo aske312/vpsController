@@ -1301,7 +1301,7 @@ restore_update_ssh() {
 }
 
 install_prebuilt_release() {
-  local archive="${2:-}" preserve_previous="${3:-no}" archive_path archive_listing stage_root payload rollback requirements_hash installed_requirements_hash build_commit legacy_runtime="no"
+  local archive="${2:-}" preserve_previous="${3:-no}" archive_path archive_listing stage_root payload rollback requirements_hash installed_requirements_hash build_commit candidate_python venv_entry first_line legacy_runtime="no" requirements_changed="no"
   [[ -n "${archive}" ]] || die "укажите путь к подготовленному vps-control-release.tar.gz."
   archive_path="$(readlink -f -- "${archive}")"
   [[ -f "${archive_path}" ]] || die "архив релиза не найден: ${archive}."
@@ -1324,14 +1324,35 @@ install_prebuilt_release() {
 
   requirements_hash="$(sha256sum "${payload}/api/requirements.txt" | awk '{print $1}')"
   installed_requirements_hash="$(cat "${INSTALL_DIR}/venv/.requirements.sha256" 2>/dev/null || true)"
-  [[ -n "${installed_requirements_hash}" && "${requirements_hash}" == "${installed_requirements_hash}" ]] \
-    || { rm -rf -- "${stage_root}"; die "Python-зависимости изменились; подготовьте полный системный релиз."; }
+  candidate_python="${INSTALL_DIR}/venv/bin/python"
+  if [[ -z "${installed_requirements_hash}" || "${requirements_hash}" != "${installed_requirements_hash}" ]]; then
+    requirements_changed="yes"
+    [[ -x "${candidate_python}" ]] \
+      || { rm -rf -- "${stage_root}"; die "установленное Python-окружение повреждено; выполните полную установку."; }
+    info "Подготовка обновлённых Python-зависимостей в отдельном окружении"
+    cp -a -- "${INSTALL_DIR}/venv" "${payload}/venv"
+    candidate_python="${payload}/venv/bin/python"
+    run_with_status "Подготовка Python-зависимостей релиза" \
+      "${candidate_python}" -m pip install --disable-pip-version-check \
+        -r "${payload}/api/requirements.txt" \
+      || { rm -rf -- "${stage_root}"; die "не удалось подготовить Python-зависимости нового релиза."; }
+    printf '%s\n' "${requirements_hash}" >"${payload}/venv/.requirements.sha256"
+  fi
 
   # Import the candidate API with the installed production dependencies before
   # replacing the working tree. This catches Pydantic schema and other module
   # initialization errors without interrupting the running release.
-  PYTHONPATH="${payload}" "${INSTALL_DIR}/venv/bin/python" -c 'import api.main' >/dev/null \
+  PYTHONPATH="${payload}" "${candidate_python}" -c 'import api.main' >/dev/null \
     || { rm -rf -- "${stage_root}"; die "API нового релиза не проходит проверку импорта; обновление отменено до остановки служб."; }
+
+  if [[ "${requirements_changed}" == "yes" ]]; then
+    while IFS= read -r -d '' venv_entry; do
+      IFS= read -r first_line <"${venv_entry}" || true
+      if [[ "${first_line}" == "#!${payload}/venv/"* ]]; then
+        sed -i "1s|^#!${payload}/venv/|#!${INSTALL_DIR}/venv/|" "${venv_entry}"
+      fi
+    done < <(find "${payload}/venv/bin" -maxdepth 1 -type f -print0)
+  fi
 
   rollback="${INSTALL_DIR}.rollback.$(date -u +%Y%m%dT%H%M%SZ)"
   info "Установка заранее собранного релиза без Docker и сборки на VPS"
@@ -1342,7 +1363,9 @@ install_prebuilt_release() {
   systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
   mv -- "${INSTALL_DIR}" "${rollback}"
   mv -- "${payload}" "${INSTALL_DIR}"
-  mv -- "${rollback}/venv" "${INSTALL_DIR}/venv"
+  if [[ "${requirements_changed}" == "no" ]]; then
+    mv -- "${rollback}/venv" "${INSTALL_DIR}/venv"
+  fi
   chmod 0755 "${INSTALL_DIR}" "${INSTALL_DIR}/scripts/vps-control.sh"
   PROJECT_DIR="${INSTALL_DIR}"
   write_caddy_config
@@ -1472,11 +1495,13 @@ update_test_branch() {
   fi
 
   install -d -m 0750 "${DATA_DIR}/tmp"
-  UPDATE_TEMP_DIR="$(mktemp -d "${DATA_DIR}/tmp/test-update.XXXXXX")"
+  # Use the common update.* prefix accepted by the EXIT cleanup guard.
+  UPDATE_TEMP_DIR="$(mktemp -d "${DATA_DIR}/tmp/update.XXXXXX")"
   source_archive="${UPDATE_TEMP_DIR}/main.tar.gz"
   source_dir="${UPDATE_TEMP_DIR}/source"
   archive="${UPDATE_TEMP_DIR}/vps-control-release.tar.gz"
-  source_url="https://github.com/${repository_path}/archive/refs/heads/main.tar.gz"
+  # Download the exact revision checked above instead of a moving branch HEAD.
+  source_url="https://github.com/${repository_path}/archive/${latest}.tar.gz"
   info "загрузка исходного кода тестовой ветки main ${latest:0:7}"
   curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
     --connect-timeout 15 --max-time 300 --output "${source_archive}" "${source_url}"
@@ -1494,12 +1519,13 @@ update_test_branch() {
   (
     cd "${source_dir}"
     BUILD_COMMIT="${latest}" RELEASE_VERSION="${test_version}" bash scripts/build-release.sh "${archive}"
-  )
+  ) || die "не удалось собрать тестовую версию main; рабочая версия не изменена."
   if [[ -d "${TEST_BACKUP_DIR}" ]]; then
     install_prebuilt_release install-release "${archive}"
   else
     install_prebuilt_release install-release "${archive}" yes
   fi
+  rm -f "${DATA_DIR}/application-version.json"
   ok "тестовая ветка main ${latest:0:7} собрана и установлена без публикации GitHub Release."
 }
 
@@ -1527,6 +1553,7 @@ restore_test_app() {
   if ! install_api || ! install_web || ! ensure_api_write_access \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
+    || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:8000/api/health" >/dev/null \
     || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:3000/" >/dev/null; then
     warn "сохранённая версия не запустилась; тестовая версия восстанавливается."
     systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
