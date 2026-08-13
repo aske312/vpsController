@@ -1477,7 +1477,7 @@ update_prebuilt_branch() {
 
 update_test_branch() {
   local remote="${REMOTE_URL:-https://github.com/aske312/vpsController.git}"
-  local latest current repository_path source_url source_archive source_dir archive test_version archive_listing
+  local latest current repository_path release_url archive release_commit ready="no" attempt
   if [[ "${remote}" =~ ^git@github\.com:(.+)$ ]]; then
     remote="https://github.com/${BASH_REMATCH[1]}"
   elif [[ "${remote}" =~ ^ssh://git@github\.com/(.+)$ ]]; then
@@ -1494,39 +1494,36 @@ update_test_branch() {
     return 0
   fi
 
+  release_url="https://github.com/${repository_path}/releases/download/stabl-latest/vps-control-main-${latest}.tar.gz"
+  info "ожидание подготовленной GitHub-сборки main ${latest:0:7}; рабочая версия продолжает обслуживать запросы"
+  for attempt in $(seq 1 60); do
+    if curl --fail --location --silent --show-error --head \
+      --connect-timeout 10 --max-time 30 "${release_url}" >/dev/null 2>&1; then
+      ready="yes"
+      break
+    fi
+    sleep 10
+  done
+  [[ "${ready}" == "yes" ]] \
+    || die "подготовленная сборка main ${latest:0:7} не опубликована; рабочая версия не изменена."
+
   install -d -m 0750 "${DATA_DIR}/tmp"
-  # Use the common update.* prefix accepted by the EXIT cleanup guard.
   UPDATE_TEMP_DIR="$(mktemp -d "${DATA_DIR}/tmp/update.XXXXXX")"
-  source_archive="${UPDATE_TEMP_DIR}/main.tar.gz"
-  source_dir="${UPDATE_TEMP_DIR}/source"
-  archive="${UPDATE_TEMP_DIR}/vps-control-release.tar.gz"
-  # Download the exact revision checked above instead of a moving branch HEAD.
-  source_url="https://github.com/${repository_path}/archive/${latest}.tar.gz"
-  info "загрузка исходного кода тестовой ветки main ${latest:0:7}"
-  curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
-    --connect-timeout 15 --max-time 300 --output "${source_archive}" "${source_url}"
-  archive_listing="$(tar -tzf "${source_archive}")"
-  grep -Eq '^[^/]+/(package\.json|scripts/build-release\.sh)$' <<<"${archive_listing}" \
-    || die "архив ветки main не содержит исходный код приложения."
-  if grep -Eq '(^|/)\.\.(/|$)|^/' <<<"${archive_listing}"; then
-    die "архив ветки main содержит небезопасные пути."
-  fi
-  install -d -m 0750 "${source_dir}"
-  tar -xzf "${source_archive}" -C "${source_dir}" --strip-components=1 --no-same-owner
-  test_version="$(awk -F= '$1 == "version" {print $2}' "${INSTALL_DIR}/.prebuilt-release" 2>/dev/null || true)"
-  [[ "${test_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || test_version="v1.0.0"
-  info "сборка изолированной тестовой версии main без публикации Release"
-  (
-    cd "${source_dir}"
-    BUILD_COMMIT="${latest}" RELEASE_VERSION="${test_version}" bash scripts/build-release.sh "${archive}"
-  ) || die "не удалось собрать тестовую версию main; рабочая версия не изменена."
+  archive="${UPDATE_TEMP_DIR}/vps-control-main-${latest}.tar.gz"
+  info "загрузка готовой тестовой сборки main без сборки на VPS"
+  curl --fail --location --silent --show-error --retry 4 --retry-all-errors --retry-delay 2 \
+    --connect-timeout 15 --max-time 900 --output "${archive}" "${release_url}"
+  release_commit="$(tar -xOf "${archive}" vps-control-release/.prebuilt-release 2>/dev/null \
+    | awk -F= '$1 == "commit" {print $2}')"
+  [[ "${release_commit}" == "${latest}" ]] \
+    || die "подготовленная сборка не соответствует main ${latest}; рабочая версия не изменена."
   if [[ -d "${TEST_BACKUP_DIR}" ]]; then
     install_prebuilt_release install-release "${archive}"
   else
     install_prebuilt_release install-release "${archive}" yes
   fi
   rm -f "${DATA_DIR}/application-version.json"
-  ok "тестовая ветка main ${latest:0:7} собрана и установлена без публикации GitHub Release."
+  ok "подготовленная тестовая ветка main ${latest:0:7} установлена с автоматическим откатом при ошибке."
 }
 
 update_app() {

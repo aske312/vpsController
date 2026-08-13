@@ -2,18 +2,19 @@ name: Publish stabl release
 
 on:
   push:
-    branches: [stabl]
+    branches: [stabl, main]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: stabl-release
-  cancel-in-progress: true
+  group: release-publishing
+  cancel-in-progress: false
 
 jobs:
   release:
+    if: github.ref_name == 'stabl'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -43,12 +44,25 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: bash scripts/build-release.sh outputs/vps-control-release.tar.gz
+      - name: Build current main preview for the same stable release
+        shell: bash
+        run: |
+          git worktree add /tmp/vps-control-main origin/main
+          main_sha="$(git -C /tmp/vps-control-main rev-parse HEAD)"
+          version="v$(node -p 'require("/tmp/vps-control-main/package.json").version')"
+          (
+            cd /tmp/vps-control-main
+            BUILD_COMMIT="$main_sha" RELEASE_VERSION="$version" \
+              bash scripts/build-release.sh \
+              "$GITHUB_WORKSPACE/outputs/vps-control-main-${main_sha}.tar.gz"
+          )
       - name: Replace stabl-latest release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete stabl-latest --cleanup-tag --yes || true
           gh release create stabl-latest outputs/vps-control-release.tar.gz \
+            outputs/vps-control-main-*.tar.gz \
             --target "$GITHUB_SHA" \
             --title "${{ steps.version.outputs.version }}" \
             --notes "Prepared release ${{ steps.version.outputs.version }} for stabl commit $GITHUB_SHA" \
@@ -57,3 +71,35 @@ jobs:
             git tag "${{ steps.version.outputs.version }}" "$GITHUB_SHA"
             git push origin "${{ steps.version.outputs.version }}"
           fi
+
+  preview:
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build verified main preview outside the VPS
+        env:
+          BUILD_COMMIT: ${{ github.sha }}
+        run: |
+          version="v$(node -p 'require("./package.json").version')"
+          RELEASE_VERSION="$version" bash scripts/build-release.sh \
+            "outputs/vps-control-main-${GITHUB_SHA}.tar.gz"
+      - name: Attach content-addressed preview to stabl release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 60); do
+            gh release view stabl-latest >/dev/null 2>&1 && break
+            sleep 10
+          done
+          gh release view stabl-latest >/dev/null
+          gh release delete-asset stabl-latest \
+            "vps-control-main-${GITHUB_SHA}.tar.gz" --yes >/dev/null 2>&1 || true
+          gh release upload stabl-latest \
+            "outputs/vps-control-main-${GITHUB_SHA}.tar.gz"

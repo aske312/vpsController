@@ -1462,18 +1462,31 @@ def application_status(_: None = Depends(require_token)) -> dict:
             resolved_state = recorded_state
             result = action.get("result", "success" if recorded_state == "succeeded" else "failed")
         else:
-            active_state = run("systemctl", "is-active", unit) or "unknown"
-            result = run("systemctl", "show", unit, "--property=Result", "--value") or "unknown"
-            if active_state in ("active", "activating"):
-                resolved_state = active_state
-            elif result == "success":
-                resolved_state = "succeeded"
-            elif active_state == "failed" or result == "failed":
+            started_at = action.get("started_at", "")
+            try:
+                started_time = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                started_time = None
+            boot_time = system_boot_time()
+            if boot_time and started_time and boot_time > started_time:
+                action["state"] = "failed"
+                action["result"] = "interrupted"
+                action["message"] = "Операция прервана перезагрузкой; рабочая версия сохранена"
                 resolved_state = "failed"
+                result = "interrupted"
             else:
-                # A collected transient unit may disappear between the two
-                # systemctl calls. Treat that as a completed operation.
-                resolved_state = "finished"
+                active_state = run("systemctl", "is-active", unit) or "unknown"
+                result = run("systemctl", "show", unit, "--property=Result", "--value") or "unknown"
+                if active_state in ("active", "activating"):
+                    resolved_state = active_state
+                elif active_state == "failed" or result not in ("success", "unknown"):
+                    resolved_state = "failed"
+                elif int(action.get("progress", 0) or 0) >= 100 and result == "success":
+                    resolved_state = "succeeded"
+                else:
+                    resolved_state = "failed"
+                    result = "interrupted"
+                    action["message"] = "Операция завершилась без подтверждения; рабочая версия сохранена"
         action["state"] = resolved_state
         action["result"] = result
         try:

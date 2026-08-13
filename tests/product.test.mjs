@@ -259,10 +259,10 @@ test("service mode tests main without publishing it while stabl remains the only
   assert.match(manager, /update_prebuilt_branch "\$\{PRODUCTION_BRANCH\}" "stabl-latest"/);
   assert.match(manager, /update_test_branch\(\)/);
   assert.doesNotMatch(manager, /archive\/refs\/heads\/main\.tar\.gz/);
-  assert.match(manager, /archive\/\$\{latest\}\.tar\.gz/);
+  assert.doesNotMatch(manager, /archive\/\$\{latest\}\.tar\.gz/);
   assert.match(manager, /mktemp -d "\$\{DATA_DIR\}\/tmp\/update\.XXXXXX"/);
-  assert.match(manager, /BUILD_COMMIT="\$\{latest\}" RELEASE_VERSION="\$\{test_version\}"/);
-  assert.match(page, /тестовую ветку main без публикации Release/);
+  assert.match(manager, /releases\/download\/stabl-latest\/vps-control-main-\$\{latest\}\.tar\.gz/);
+  assert.match(manager, /release_commit.*== "\$\{latest\}"/s);
   assert.match(manager, /for attempt in \$\(seq 1 48\)/);
   assert.match(manager, /подготовленный релиз не соответствует актуальной ревизии ветки \$\{branch\}/);
   assert.match(manager, /vpn-monitor\.timer vps-control-auto-reboot\.timer/);
@@ -290,8 +290,21 @@ test("service mode tests main without publishing it while stabl remains the only
   assert.match(manager, /restore_test_app\(\)/);
   assert.match(manager, /if \[\[ -d "\$\{TEST_BACKUP_DIR\}" \]\]; then\s+info "возврат к сохранённой стабильной версии перед выключением сервисного режима"\s+restore_test_app/s);
   assert.match(page, /Будет восстановлена стабильная версия stabl/);
-  assert.match(stablWorkflow, /branches: \[stabl\]/);
+  assert.match(stablWorkflow, /branches: \[stabl, main\]/);
   assert.match(stablWorkflow, /gh release create stabl-latest/);
+});
+
+test("main preview is built off-VPS and interrupted updates cannot report success", async () => {
+  const [workflow, manager, api] = await Promise.all([
+    read(".github/workflows/stabl-release.yml"),
+    read("scripts/vps-control.sh"),
+    read("api/main.py"),
+  ]);
+  assert.match(workflow, /Build verified main preview outside the VPS/);
+  assert.match(workflow, /vps-control-main-\$\{GITHUB_SHA\}\.tar\.gz/);
+  assert.doesNotMatch(manager, /BUILD_COMMIT="\$\{latest\}".*build-release/s);
+  assert.match(api, /Операция прервана перезагрузкой/);
+  assert.match(api, /int\(action\.get\("progress"/);
 });
 
 test("live monitoring uses stable low-load cadence and detailed server metrics", async () => {
