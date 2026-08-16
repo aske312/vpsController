@@ -1,0 +1,26 @@
+{
+  "id": "transport-reality",
+  "name": "VLESS Reality + XHTTP",
+  "version": "1.0.0",
+  "description": "Отдельный Xray/Reality-инстанс для Mihomo-профилей.",
+  "category": "transport",
+  "category_name": "Каналы",
+  "default_enabled": false,
+  "scope": "mihomo",
+  "settings": [
+    {
+      "key": "port",
+      "label": "TCP-порт",
+      "type": "number",
+      "default": 9443,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "target",
+      "label": "REALITY target",
+      "type": "text",
+      "default": "www.intel.com:443"
+    }
+  ]
+}

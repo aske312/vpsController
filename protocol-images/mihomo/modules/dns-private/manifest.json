@@ -1,0 +1,34 @@
+{
+  "id": "dns-private",
+  "name": "Private DNS",
+  "version": "1.0.0",
+  "description": "DNS-политика только для конфигураций Mihomo.",
+  "category": "dns",
+  "category_name": "DNS",
+  "default_enabled": false,
+  "scope": "mihomo",
+  "settings": [
+    {
+      "key": "enhanced_mode",
+      "label": "Enhanced mode",
+      "type": "select",
+      "default": "fake-ip",
+      "options": [
+        "fake-ip",
+        "redir-host"
+      ]
+    },
+    {
+      "key": "nameserver",
+      "label": "Nameserver",
+      "type": "text",
+      "default": "https://1.1.1.1/dns-query"
+    },
+    {
+      "key": "fallback",
+      "label": "Fallback",
+      "type": "text",
+      "default": "https://8.8.8.8/dns-query"
+    }
+  ]
+}

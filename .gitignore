@@ -56,3 +56,4 @@ __pycache__/
 /.idea/
 /vps-d.txt
 /.servers/
+/.claude/

@@ -1,4 +1,10 @@
 {$SITE_ADDRESS} {
+    handle /api/mihomo/* {
+        reverse_proxy 127.0.0.1:8791
+    }
+    handle /api/protocols/mihomo/status {
+        reverse_proxy 127.0.0.1:8791
+    }
     handle /api/* {
         reverse_proxy 127.0.0.1:8000
     }
@@ -8,6 +14,12 @@
 }
 
 http://{WG_PANEL_ADDRESS}, http://{AWG_PANEL_ADDRESS} {
+    handle /api/mihomo/* {
+        reverse_proxy 127.0.0.1:8791
+    }
+    handle /api/protocols/mihomo/status {
+        reverse_proxy 127.0.0.1:8791
+    }
     handle /api/* {
         reverse_proxy 127.0.0.1:8000
     }

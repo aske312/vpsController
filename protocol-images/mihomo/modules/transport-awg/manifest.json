@@ -1,0 +1,88 @@
+{
+  "id": "transport-awg",
+  "name": "AmneziaWG",
+  "version": "1.0.0",
+  "description": "Отдельный AmneziaWG-инстанс только для профилей Mihomo.",
+  "category": "transport",
+  "category_name": "Каналы",
+  "default_enabled": false,
+  "scope": "mihomo",
+  "settings": [
+    {
+      "key": "port",
+      "label": "UDP-порт",
+      "type": "number",
+      "default": 51831,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "subnet",
+      "label": "Подсеть",
+      "type": "text",
+      "default": "10.83.0.0/24"
+    },
+    {
+      "key": "mtu",
+      "label": "MTU",
+      "type": "number",
+      "default": 1280,
+      "min": 1280,
+      "max": 1420
+    },
+    {
+      "key": "jc",
+      "label": "Jc",
+      "type": "number",
+      "default": 6
+    },
+    {
+      "key": "jmin",
+      "label": "Jmin",
+      "type": "number",
+      "default": 8
+    },
+    {
+      "key": "jmax",
+      "label": "Jmax",
+      "type": "number",
+      "default": 80
+    },
+    {
+      "key": "s1",
+      "label": "S1",
+      "type": "number",
+      "default": 64
+    },
+    {
+      "key": "s2",
+      "label": "S2",
+      "type": "number",
+      "default": 112
+    },
+    {
+      "key": "h1",
+      "label": "H1",
+      "type": "number",
+      "default": 150000000
+    },
+    {
+      "key": "h2",
+      "label": "H2",
+      "type": "number",
+      "default": 600000000
+    },
+    {
+      "key": "h3",
+      "label": "H3",
+      "type": "number",
+      "default": 1000000000
+    },
+    {
+      "key": "h4",
+      "label": "H4",
+      "type": "number",
+      "default": 1400000000
+    }
+  ]
+}

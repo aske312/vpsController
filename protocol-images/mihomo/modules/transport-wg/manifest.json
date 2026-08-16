@@ -1,0 +1,34 @@
+{
+  "id": "transport-wg",
+  "name": "WireGuard",
+  "version": "1.0.0",
+  "description": "Отдельный WireGuard-инстанс только для профилей Mihomo.",
+  "category": "transport",
+  "category_name": "Каналы",
+  "default_enabled": false,
+  "scope": "mihomo",
+  "settings": [
+    {
+      "key": "port",
+      "label": "UDP-порт",
+      "type": "number",
+      "default": 51830,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "subnet",
+      "label": "Подсеть",
+      "type": "text",
+      "default": "10.82.0.0/24"
+    },
+    {
+      "key": "mtu",
+      "label": "MTU",
+      "type": "number",
+      "default": 1280,
+      "min": 1280,
+      "max": 1420
+    }
+  ]
+}

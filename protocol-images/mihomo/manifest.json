@@ -1,0 +1,16 @@
+{
+  "id": "mihomo",
+  "name": "Mihomo",
+  "version": "1.0.0",
+  "description": "Менеджер подключений: независимые профили, каналы, DNS и маршрутизация Mihomo.",
+  "category": "connection-manager",
+  "category_name": "Менеджер подключений",
+  "installer": "install.sh",
+  "uninstaller": "uninstall.sh",
+  "supported_os": [
+    "ubuntu",
+    "debian"
+  ],
+  "service": "vps-control-mihomo-manager.service",
+  "removable": true
+}

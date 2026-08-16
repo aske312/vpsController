@@ -1,0 +1,53 @@
+{
+  "id": "routing-policy",
+  "name": "Маршрутизация",
+  "version": "1.0.0",
+  "description": "Выбор primary/fallback и правила только внутри Mihomo.",
+  "category": "routing",
+  "category_name": "Маршрутизация",
+  "default_enabled": false,
+  "scope": "mihomo",
+  "settings": [
+    {
+      "key": "mode",
+      "label": "Режим",
+      "type": "select",
+      "default": "rule",
+      "options": [
+        "rule",
+        "global"
+      ]
+    },
+    {
+      "key": "strategy",
+      "label": "Стратегия каналов",
+      "type": "select",
+      "default": "fallback",
+      "options": [
+        "fallback",
+        "url-test",
+        "select"
+      ]
+    },
+    {
+      "key": "test_url",
+      "label": "URL проверки",
+      "type": "text",
+      "default": "https://www.gstatic.com/generate_204"
+    },
+    {
+      "key": "interval",
+      "label": "Интервал, сек.",
+      "type": "number",
+      "default": 180,
+      "min": 30,
+      "max": 3600
+    },
+    {
+      "key": "rules",
+      "label": "Дополнительные правила",
+      "type": "textarea",
+      "default": ""
+    }
+  ]
+}
