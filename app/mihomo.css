@@ -1,95 +1,50 @@
 /* Mihomo module integration for the original v0.1.5 / d2391d6 visual system.
    Intentionally scoped: the stable UI in globals.css remains authoritative. */
 
-.mihomoHost {
-  position: fixed;
-  z-index: 70;
-  inset: 0 0 0 248px;
-  overflow: auto;
-  background:
-    linear-gradient(rgba(8,13,15,.975), rgba(8,13,15,.99)),
-    radial-gradient(circle at 82% 12%, rgba(103,213,180,.07), transparent 32%),
-    var(--bg);
-  color: var(--text);
+.mihomoPage {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
 }
 
-.mihomoHost__screen {
-  width: min(100%, 1540px);
-  min-height: 100%;
-  margin: 0 auto;
-  padding: 34px 38px 70px;
-}
-
-.mihomoHost__top {
-  min-height: 128px;
+.mihomoPage__hero {
+  min-height: 110px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 0 0 22px;
-  border-bottom: 1px solid var(--line);
+  gap: 18px;
 }
 
-.mihomoHost__top > div:first-child {
+.mihomoPage__hero > div:first-child {
   min-width: 0;
 }
 
-.mihomoHost__top h1 {
-  margin: 7px 0 0;
-  font-size: 35px;
-  line-height: 1.05;
-  letter-spacing: -1.4px;
+.mihomoPage__hero h2 {
+  margin: 5px 0 0;
+  font-size: 22px;
+  letter-spacing: -.55px;
 }
 
-.mihomoHost__top > div:first-child > p:last-child {
-  max-width: 800px;
-  margin: 11px 0 0;
+.mihomoPage__hero > div:first-child > p:last-child {
+  max-width: 760px;
+  margin: 8px 0 0;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.55;
+  font-size: 10px;
+  line-height: 1.5;
 }
 
-.mihomoHost__topActions {
+.mihomoPage__heroActions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 7px;
 }
 
-.mihomoPill {
-  min-height: 34px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #11191b;
-  color: var(--muted);
-  font: 700 9px var(--font-mono);
-  white-space: nowrap;
-}
-
-.mihomoPill i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #6d7775;
-}
-
-.mihomoPill.is-online {
-  border-color: #285247;
-  background: var(--green-dim);
-  color: var(--green);
-}
-
-.mihomoPill.is-online i {
-  background: var(--green);
-}
 
 .mihomoHost__tabs {
-  position: sticky;
-  z-index: 5;
-  top: 0;
+  position: relative;
+  z-index: 1;
   display: flex;
   gap: 2px;
   margin: 14px 0;
@@ -696,7 +651,6 @@
 }
 
 @media (max-width: 1100px) {
-  .mihomoHost__screen { padding-inline: 22px; }
   .mihomoCore { grid-template-columns: 1fr; }
   .mihomoMiniModules { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .mihomoProfiles > div:not(.mihomoEmpty) {
@@ -707,21 +661,14 @@
 }
 
 @media (max-width: 720px) {
-  .mihomoHost {
-    inset: 0 0 76px 0;
-  }
-  .mihomoHost__screen {
-    padding: 18px 11px 34px;
-  }
-  .mihomoHost__top {
+  .mihomoPage__hero {
+    align-items: flex-start;
     flex-direction: column;
   }
-  .mihomoHost__top h1 {
-    font-size: 27px;
-  }
-  .mihomoHost__topActions {
+
+  .mihomoPage__heroActions {
     width: 100%;
-    flex-wrap: wrap;
+    justify-content: flex-start;
   }
   .mihomoCore dl,
   .mihomoMiniModules,

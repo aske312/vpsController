@@ -52,8 +52,13 @@ const channelShort: Record<string, string> = {
   "transport-shadowsocks": "SS",
 };
 
-export function MihomoHost() {
-  const [open, setOpen] = useState(false);
+export function MihomoPage({
+  token,
+  onRemoved,
+}: {
+  token: string;
+  onRemoved: () => void;
+}) {
   const [view, setView] = useState<View>("overview");
   const [status, setStatus] = useState<Status | null>(null);
   const [modules, setModules] = useState<Module[]>([]);
@@ -68,7 +73,6 @@ export function MihomoHost() {
   const [profileChannels, setProfileChannels] = useState<string[]>([]);
 
   const request = useCallback(async (path: string, init?: RequestInit) => {
-    const token = sessionStorage.getItem("312-token");
     if (!token) throw new Error("Сессия панели завершена. Войдите заново.");
     const response = await fetch(`/api${path}`, {
       ...init,
@@ -92,7 +96,7 @@ export function MihomoHost() {
       return response.text();
     }
     return response.status === 204 ? null : response.json();
-  }, []);
+  }, [token]);
 
   const refresh = useCallback(async () => {
     setError("");
@@ -111,43 +115,10 @@ export function MihomoHost() {
   }, [request]);
 
   useEffect(() => {
-    const normalizeMihomoBadges = () => {
-      document.querySelectorAll<HTMLElement>(".protocol.mihomo").forEach((node) => {
-        if (node.textContent !== "MH") node.textContent = "MH";
-      });
-    };
-    normalizeMihomoBadges();
-    const observer = new MutationObserver(normalizeMihomoBadges);
-    observer.observe(document.body, { childList: true, subtree: true });
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const click = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      const button = target?.closest("button");
-      if (!button) return;
-      const text = (button.textContent || "").replace(/\s+/g, " ").trim();
-      const isMihomoNavigation =
-        /^Mihomo\b/i.test(text) &&
-        !/установ/i.test(text) &&
-        !/удал/i.test(text);
-      if (!isMihomoNavigation) return;
-      event.preventDefault();
-      event.stopPropagation();
-      setOpen(true);
-      setView("overview");
-    };
-    document.addEventListener("click", click, true);
-    return () => document.removeEventListener("click", click, true);
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
     void refresh();
     const timer = window.setInterval(() => void refresh(), 15000);
     return () => window.clearInterval(timer);
-  }, [open, refresh]);
+  }, [refresh]);
 
   async function removeCore() {
     if (!window.confirm(
@@ -163,7 +134,7 @@ export function MihomoHost() {
           const data = (await request("/protocol-images")) as { items?: Array<{ id: string; installed: boolean }> };
           const current = data.items?.find((item) => item.id === "mihomo");
           if (!current?.installed) {
-            window.location.reload();
+            onRemoved();
             return;
           }
         } catch {
@@ -175,14 +146,6 @@ export function MihomoHost() {
       setError(cause instanceof Error ? cause.message : "Не удалось удалить Mihomo");
       setBusy("");
     }
-  }
-
-  function close() {
-    setOpen(false);
-    setEditing(null);
-    setProfileDialog(null);
-    setError("");
-    setNotice("");
   }
 
   async function toggleModule(module: Module) {
@@ -307,35 +270,26 @@ export function MihomoHost() {
   const routingModule = modules.find((item) => item.category === "routing");
   const installedChannels = transportModules.filter((item) => item.installed);
 
-  if (!open) return null;
-
   return (
-    <div className="mihomoHost">
-      <section className="mihomoHost__screen" aria-label="Mihomo Manager">
-        <header className="mihomoHost__top">
-          <div>
-            <p className="eyebrow">APPLICATION MODULE / MIHOMO</p>
-            <h1>Менеджер подключений</h1>
-            <p>
-              Изолированный контур Mihomo: профили, собственные каналы, DNS и маршрутизация.
-              Direct-подключения GATE.312 остаются отдельными.
-            </p>
-          </div>
-          <div className="mihomoHost__topActions">
-            <span className={status?.active ? "mihomoPill is-online" : "mihomoPill"}>
-              <i /> {status?.active ? "Mihomo работает" : "Проверка статуса"}
-            </span>
-            <button className="ghostButton" type="button" onClick={() => void refresh()}>
-              Обновить
-            </button>
-            <button className="dangerButton" type="button" onClick={() => void removeCore()} disabled={busy === "remove-core"}>
-              {busy === "remove-core" ? "Удаляется…" : "Удалить Mihomo"}
-            </button>
-            <button className="iconButton" type="button" onClick={close} aria-label="Закрыть Mihomo">
-              ×
-            </button>
-          </div>
-        </header>
+    <section className="mihomoPage" aria-label="Mihomo Manager">
+      <article className="panel mihomoPage__hero">
+        <div>
+          <p className="eyebrow">MIHOMO MANAGER</p>
+          <h2>Менеджер подключений</h2>
+          <p>Профили устройств, собственные каналы, DNS и маршрутизация Mihomo.</p>
+        </div>
+        <div className="mihomoPage__heroActions">
+          <span className={status?.active ? "mihomoPill is-online" : "mihomoPill"}>
+            <i /> {status?.active ? "Mihomo работает" : "Проверка статуса"}
+          </span>
+          <button className="ghostButton" type="button" onClick={() => void refresh()}>
+            Обновить
+          </button>
+          <button className="dangerButton" type="button" onClick={() => void removeCore()} disabled={busy === "remove-core"}>
+            {busy === "remove-core" ? "Удаляется…" : "Удалить Mihomo"}
+          </button>
+        </div>
+      </article>
 
         <nav className="mihomoHost__tabs">
           <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
@@ -360,34 +314,14 @@ export function MihomoHost() {
                 </p>
               </div>
               <dl>
-                <Metric label="Core" value={status?.core_version || "определяется"} />
+                <Metric label="Версия Mihomo" value={status?.core_version || "определяется"} />
                 <Metric label="Профили" value={String(status?.profiles ?? profiles.length)} />
                 <Metric label="Каналы" value={`${status?.channels_installed ?? installedChannels.length}/4`} />
                 <Metric label="Endpoint" value={status?.endpoint || "—"} />
               </dl>
             </article>
 
-            <article className="panel">
-              <div className="panelHead">
-                <div>
-                  <p className="eyebrow">ISOLATION</p>
-                  <h2>Два независимых контура</h2>
-                </div>
-              </div>
-              <div className="mihomoBoundary">
-                <div>
-                  <b>Прямые подключения</b>
-                  <p>Существующие server modules `wg0`, `awg0`, direct SS/Xray и страница «Подключения».</p>
-                  <span>НЕ ИЗМЕНЯЮТСЯ MIHOMO</span>
-                </div>
-                <i>≠</i>
-                <div className="is-mihomo">
-                  <b>Mihomo</b>
-                  <p>`mh-wg0`, `mh-awg0`, отдельные SS instances, отдельный Reality service, свой DNS и routing.</p>
-                  <span>СОБСТВЕННЫЕ SUB-MODULES</span>
-                </div>
-              </div>
-            </article>
+            
 
             <article className="panel">
               <div className="panelHead">
@@ -484,8 +418,7 @@ export function MihomoHost() {
             onToggle={toggleModule}
             onSettings={openSettings}
           />
-        )}
-      </section>
+      )}
 
       {editing && (
         <div className="mihomoDialogBackdrop" onMouseDown={(event) => {
@@ -589,7 +522,7 @@ export function MihomoHost() {
           </form>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 

@@ -5,9 +5,10 @@ import Image from "next/image";
 import QRCode from "qrcode";
 import { ConnectionGuide } from "./connection-guide";
 import { LegalFooter } from "./legal";
+import { MihomoPage } from "./mihomo/mihomo-host";
 
 type Protocol = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp";
-type Tab = "overview" | "dns" | "security" | "application" | "services" | "clients" | Protocol;
+type Tab = "overview" | "dns" | "security" | "application" | "services" | "clients" | "mihomo" | Protocol;
 type TunnelProtocol = "wg" | "awg";
 type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
 type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" | "network-check" | "integrity-check" | "identity" | "secure" | "kernel-update" | "vpn-firewall" | "optimize" | "reboot" | "poweroff";
@@ -109,11 +110,11 @@ type ProtocolStatus = {
 };
 
 const labels: Record<Tab | Protocol, string> = {
-  overview: "Обзор", dns: "DNS", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", shadowsocks: "Shadowsocks", "vless-reality-xhttp": "VLESS + REALITY + XHTTP", clients: "Подключения",
+  overview: "Обзор", dns: "DNS", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", shadowsocks: "Shadowsocks", "vless-reality-xhttp": "VLESS + REALITY + XHTTP", clients: "Подключения", mihomo: "Mihomo",
 };
 const navigationLabels: Record<Tab, string> = {
   overview: "OVERVIEW", dns: "DNS CONTROL", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
-  wg: "WIREGUARD", awg: "AMNEZIAWG", shadowsocks: "SHADOWSOCKS", "vless-reality-xhttp": "VLESS", clients: "CONNECTIONS",
+  wg: "WIREGUARD", awg: "AMNEZIAWG", shadowsocks: "SHADOWSOCKS", "vless-reality-xhttp": "VLESS", clients: "CONNECTIONS", mihomo: "MIHOMO",
 };
 const actionLabels: Record<string, string> = {
   install: "Установка 312.net", start: "Запуск приложения", stop: "Остановка приложения",
@@ -445,6 +446,7 @@ export default function Home() {
       else if (tab === "application") await loadApplication();
       else if (tab === "services") await loadServices();
       else if (tab === "dns") await loadDns();
+      else if (tab === "mihomo") await loadOverview();
       else if (["wg", "awg", "shadowsocks", "vless-reality-xhttp"].includes(tab)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
       else {
         await loadClients();
@@ -858,7 +860,16 @@ export default function Home() {
         action: started,
       }));
       await waitForProtocolState(image, true);
-      await Promise.all([loadOverview(), loadClients(), loadProtocolStatus(image.id as Protocol)]);
+      if (image.id === "mihomo") {
+        await Promise.all([loadOverview(), loadClients()]);
+        setTab("mihomo");
+      } else {
+        await Promise.all([
+          loadOverview(),
+          loadClients(),
+          loadProtocolStatus(image.id as Protocol),
+        ]);
+      }
       setNotice(`${image.name} установлен и готов к работе`);
     } catch (cause) {
       setInstallingProtocol("");
@@ -1205,7 +1216,7 @@ export default function Home() {
           const available = category.images.filter((image) => image.installed);
           if (available.length === 1) {
             const image = available[0];
-            return <button key={category.id} onClick={() => setTab(image.id as Protocol)} className={`navItem ${tab === image.id ? "active" : ""}`}>
+            return <button key={category.id} onClick={() => setTab(image.id as Tab)} className={`navItem ${tab === image.id ? "active" : ""}`}>
               <b>{image.name}</b>
             </button>;
           }
@@ -1218,7 +1229,7 @@ export default function Home() {
             </button>
             {moduleMenuOpen === category.id && <div className="settingsMenu moduleMenu">
               {available.map((image) => <button key={image.id} onClick={() => {
-                setTab(image.id as Protocol);
+                setTab(image.id as Tab);
                 setModuleMenuOpen("");
               }} className={`navItem ${tab === image.id ? "active" : ""}`}><b>{image.name}</b></button>)}
             </div>}
@@ -1254,7 +1265,7 @@ export default function Home() {
       <header className="topbar">
         <div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p className="subtitle">{overview?.server.city}, {overview?.server.country} · управление инфраструктурой</p></div>
         <div className="topActions">
-          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={busy} onClick={() => setAutoRefresh((value) => !value)}><i />{autoRefresh ? `Авто · ${["overview", "clients", "wg", "awg", "security"].includes(tab) ? LIVE_SAMPLE_SECONDS : tab === "application" || tab === "services" ? "10" : "30"}с` : "Пауза"}</button>
+          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={busy} onClick={() => setAutoRefresh((value) => !value)}><i />{autoRefresh ? `Авто · ${["overview", "clients", "wg", "awg", "security"].includes(tab) ? LIVE_SAMPLE_SECONDS : tab === "mihomo" ? "15" : tab === "application" || tab === "services" ? "10" : "30"}с` : "Пауза"}</button>
           {lastUpdated && <span className="updatedAt">{lastUpdated.toLocaleTimeString("ru-RU")}</span>}
           <button className="iconButton" onClick={() => void refreshCurrent(true)} aria-label="Обновить текущий модуль">↻</button>
           <button className="ghostButton" onClick={() => { sessionStorage.removeItem("312-token"); setToken(""); }}>Выйти</button>
@@ -1290,15 +1301,15 @@ export default function Home() {
             <p><strong>{protocol === "wg" ? "WireGuard" : "AmneziaWG"}</strong><small>{protocolImages.find((image) => image.id === protocol)?.description || `${overview?.protocols[protocol].interface} · UDP ${overview?.protocols[protocol].port}`}</small></p>
             <em className="onlinePill">Активен</em><b>›</b>
           </button>)}
-          {protocolImages.filter((image) => image.installed && image.id !== "wg" && image.id !== "awg").map((image) => <button key={image.id} onClick={() => setTab(image.id as Protocol)}>
-            <span className={`protocol ${image.id}`}>{image.id === "shadowsocks" ? "SS" : "VRX"}</span>
+          {protocolImages.filter((image) => image.installed && image.id !== "wg" && image.id !== "awg").map((image) => <button key={image.id} onClick={() => setTab(image.id as Tab)}>
+            <span className={`protocol ${image.id}`}>{image.id === "mihomo" ? "MH" : image.id === "shadowsocks" ? "SS" : "VRX"}</span>
             <p><strong>{image.name}</strong><small>{image.description}</small></p>
             <em className={image.active ? "onlinePill" : "offlinePill"}>{image.active ? "Активен" : "Остановлен"}</em>
             <b>›</b>
           </button>)}
           {protocolImages.filter((image) => !image.installed).map((image) =>
             <div className="protocolInstaller" key={image.id}>
-              <span className={`protocol ${image.id}`}>{image.id === "wg" ? "WG" : image.id === "awg" ? "AW" : image.id === "shadowsocks" ? "SS" : "VRX"}</span>
+              <span className={`protocol ${image.id}`}>{image.id === "wg" ? "WG" : image.id === "awg" ? "AW" : image.id === "mihomo" ? "MH" : image.id === "shadowsocks" ? "SS" : "VRX"}</span>
               <p><strong>{image.name}</strong><small>{image.description}</small></p>
               <button onClick={() => void installProtocol(image)} disabled={busy || Boolean(installingProtocol)}>
                 {installingProtocol === image.id ? "Устанавливается…" : "Установить"}
@@ -1308,6 +1319,16 @@ export default function Home() {
           {!overview?.protocols.wg.active && !overview?.protocols.awg.active && !protocolImages.length && <div className="protocolEmpty"><span>—</span><p><strong>Нет доступных образов</strong><small>Добавьте manifest.json в каталог protocol-images</small></p></div>}
         </article>
       </section>}
+
+      {tab === "mihomo" && (
+        <MihomoPage
+          token={token}
+          onRemoved={() => {
+            setTab("overview");
+            void loadOverview();
+          }}
+        />
+      )}
 
       {tab === "dns" && <section className="dnsWorkspace">
         <article className="panel dnsHero">

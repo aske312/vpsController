@@ -1,8 +1,8 @@
 {
   "id": "mihomo",
   "name": "Mihomo",
-  "version": "1.0.0",
-  "description": "Менеджер подключений: независимые профили, каналы, DNS и маршрутизация Mihomo.",
+  "version": "1.19.28",
+  "description": "Mihomo Manager: профили, собственные каналы, DNS и маршрутизация.",
   "category": "connection-manager",
   "category_name": "Менеджер подключений",
   "installer": "install.sh",

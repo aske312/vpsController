@@ -49,6 +49,17 @@ gzip -dc "${mihomo_archive}" >"${STAGE}/api/bin/mihomo"
 chmod 0755 "${STAGE}/api/bin/mihomo"
 "${STAGE}/api/bin/mihomo" -v | grep -F "Mihomo Meta v${MIHOMO_VERSION} " >/dev/null
 
+python3 - "${STAGE}/protocol-images/mihomo/manifest.json" "${MIHOMO_VERSION}" <<'PY'
+import json, sys
+path, version = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    manifest = json.load(handle)
+manifest["version"] = version
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PY
+
 commit="${BUILD_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || printf manual)}"
 app_version="${RELEASE_VERSION:-$(node -e 'const p=require(process.argv[1]); const v=String(p.version||"1.0.0").split("."); process.stdout.write("v"+[v[0]||"1",v[1]||"0",v[2]||"0"].join("."))' "${ROOT_DIR}/package.json")}"
 [[ "${app_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid release version: ${app_version}" >&2; exit 1; }

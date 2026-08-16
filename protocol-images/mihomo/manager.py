@@ -6,6 +6,7 @@ import ipaddress
 import json
 import os
 import secrets
+import re
 import shutil
 import subprocess
 import tempfile
@@ -276,16 +277,20 @@ def core_status() -> dict[str, Any]:
     module_state = state()
     installed_modules = [module_id for module_id in KNOWN_MODULES if module_is_installed(module_id)]
     core_version = ""
+    core_build = ""
     if CORE_BIN.is_file():
         result = run(str(CORE_BIN), "-v")
-        core_version = (result.stdout or result.stderr).strip().splitlines()[0] if result.returncode == 0 else ""
+        core_build = (result.stdout or result.stderr).strip().splitlines()[0] if result.returncode == 0 else ""
+        match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", core_build)
+        core_version = match.group(1) if match else core_build
     return {
         "id": "mihomo",
         "name": "Mihomo",
         "active": systemctl_active("vps-control-mihomo-manager.service"),
         "installed": True,
-        "version": "1.0.0",
+        "version": core_version,
         "core_version": core_version,
+        "core_build": core_build,
         "modules_installed": len(installed_modules),
         "modules_total": len(KNOWN_MODULES),
         "profiles": len(profiles()),

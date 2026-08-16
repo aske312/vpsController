@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Manrope, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import "./mihomo.css";
-import { MihomoHost } from "./mihomo/mihomo-host";
 
 const sans = Manrope({ variable: "--font-sans", subsets: ["latin", "cyrillic"] });
 const mono = JetBrains_Mono({ variable: "--font-mono", subsets: ["latin", "cyrillic"] });
@@ -23,7 +22,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="ru">
       <body className={`${sans.variable} ${mono.variable}`}>
         {children}
-        <MihomoHost />
       </body>
     </html>
   );
