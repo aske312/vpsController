@@ -1,0 +1,14 @@
+{
+  "id": "hy",
+  "name": "Hysteria2",
+  "version": "1.0.0",
+  "description": "Временно не доступно",
+  "category": "secure-tunnels",
+  "category_name": "Защищённые туннели",
+  "installer": "",
+  "uninstaller": "",
+  "supported_os": ["ubuntu", "debian"],
+  "interface_env": "",
+  "service": "",
+  "package": ""
+}
