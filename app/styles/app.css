@@ -9,14 +9,18 @@
 .brandMark svg {
   width: 24px;
   height: 24px;
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
 }
 
 .brandMark svg path:first-child {
-  fill: #091411;
+  fill: color-mix(in srgb, var(--green) 8%, transparent);
 }
 
 .brandMark svg path:last-child {
-  fill: var(--green);
+  fill: none;
 }
 
 .brand > div {
@@ -50,13 +54,13 @@
   display: grid;
   place-items: center;
   border-radius: 7px;
-  background: var(--green);
-  color: #07110e;
+  border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, #07110e);
+  color: var(--green);
   font-weight: 900;
   font-size: 11px;
   letter-spacing: -.5px;
   box-shadow: 0 0 24px #73dfbe18;
-  transform: rotate(-3deg);
 }
 
 .brand strong {

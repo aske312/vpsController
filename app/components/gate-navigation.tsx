@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { BrandGlyph } from "./brand-glyph";
 
 type ProtocolImage = {
   id: string;
@@ -140,10 +141,6 @@ function NavButton({
       {badge && <span className="gateNavBeta">{badge}</span>}
     </button>
   );
-}
-
-function BrandGlyph() {
-  return <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 7h12l6 6v12H13l-6-6V7Z" /><path d="M11 12h8l2 2v6h-8l-2-2v-6Z" /></svg>;
 }
 
 function NavGlyph({ name }: { name: string }) {

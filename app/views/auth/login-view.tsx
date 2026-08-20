@@ -1,6 +1,7 @@
 "use client";
 
 import type { Dispatch, FormEvent, SetStateAction } from "react";
+import { BrandGlyph } from "../../components/brand-glyph";
 import { LegalFooter } from "../../legal";
 
 type LoginViewProps = {
@@ -75,7 +76,7 @@ export function LoginView({ loginUser, loginPassword, loginPasswordVisible, erro
 }
 
 function Logo() {
-  return <div className="brand"><span className="brandMark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 7h12l6 6v12H13l-6-6V7Z" /><path d="M11 12h8l2 2v6h-8l-2-2v-6Z" /></svg></span><div><strong>312<span>.net</span></strong><small>INFRASTRUCTURE</small></div></div>;
+  return <div className="brand"><span className="brandMark"><BrandGlyph /></span><div><strong>312<span>.net</span></strong><small>INFRASTRUCTURE</small></div></div>;
 }
 
 function VersionFooter({ version, commit }: { version: string; commit: string }) {
