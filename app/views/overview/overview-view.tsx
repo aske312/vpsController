@@ -306,17 +306,17 @@ export function OverviewDashboard({
   }, [directChannels, token]);
 
   useEffect(() => {
-    void loadMihomoSummary();
-    if (!mihomoInstalled) return;
+    const initial = window.setTimeout(() => void loadMihomoSummary(), 0);
+    if (!mihomoInstalled) return () => window.clearTimeout(initial);
     const timer = window.setInterval(() => void loadMihomoSummary(), 12000);
-    return () => window.clearInterval(timer);
+    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [loadMihomoSummary, mihomoInstalled]);
 
   useEffect(() => {
-    void loadDirectStatuses();
-    if (!directChannels.length) return;
+    const initial = window.setTimeout(() => void loadDirectStatuses(), 0);
+    if (!directChannels.length) return () => window.clearTimeout(initial);
     const timer = window.setInterval(() => void loadDirectStatuses(), 6000);
-    return () => window.clearInterval(timer);
+    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [directChannels, loadDirectStatuses]);
 
   const installedMihomoChannels = useMemo(

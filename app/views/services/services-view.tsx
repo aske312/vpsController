@@ -120,7 +120,7 @@ export function ServicesDashboard({
   onAutomationChange,
   onSaveAutomation,
 }: Props) {
-  const items = services?.items || [];
+  const items = useMemo(() => services?.items || [], [services?.items]);
   const installed = items.filter((item) => item.installed);
   const active = installed.filter((item) => item.active);
   const enabled = installed.filter((item) => item.enabled);

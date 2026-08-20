@@ -61,7 +61,6 @@ export function SecurityView(props: SecurityViewProps) {
         </article>
 
         <article className="securityMatrix">
-          <img className="securityMatrixArt" src="/gate-art/alternatives/security-alt.webp" alt="" aria-hidden="true" />
           <div className="securityMatrixShade" />
           <header className="securityMatrixHead">
             <div>

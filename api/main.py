@@ -1920,11 +1920,10 @@ def service_details(service_id: str, definition: dict) -> dict:
         "id": service_id,
         "name": definition["name"],
         "unit": unit,
-        # UnitFileState (not LoadState): wg-quick@/awg-quick@ are templated
-        # units shared with Mihomo's isolated mh-wg0/mh-awg0 instances, so
-        # LoadState=loaded as soon as the package exists for *any* instance
-        # name. UnitFileState reflects this specific instance's own enablement.
-        "installed": properties.get("UnitFileState") in ("enabled", "enabled-runtime", "static"),
+        # A loaded unit is present on this server even when it is disabled.
+        # Keep presence, runtime state and autostart as separate facts so an
+        # actually running disabled unit never disappears from the UI.
+        "installed": properties.get("LoadState") == "loaded",
         "active": properties.get("ActiveState") == "active",
         "state": properties.get("ActiveState", "unknown"),
         "substate": properties.get("SubState", "unknown"),
@@ -3310,4 +3309,3 @@ app.include_router(
         mihomo_request=access_beta_mihomo_request,
     )
 )
-

@@ -141,9 +141,9 @@ export function MihomoPage({
   }, [request]);
 
   useEffect(() => {
-    void refresh();
+    const initial = window.setTimeout(() => void refresh(), 0);
     const timer = window.setInterval(() => void refresh(), 15000);
-    return () => window.clearInterval(timer);
+    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [refresh]);
 
   async function requestCoreRemoval() {

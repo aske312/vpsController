@@ -1,4 +1,11 @@
 {$SITE_ADDRESS} {
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
     handle /api/mihomo/* {
         reverse_proxy 127.0.0.1:8791
     }
@@ -14,6 +21,13 @@
 }
 
 http://{WG_PANEL_ADDRESS}, http://{AWG_PANEL_ADDRESS} {
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
     handle /api/mihomo/* {
         reverse_proxy 127.0.0.1:8791
     }

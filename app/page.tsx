@@ -1024,20 +1024,6 @@ export default function Home() {
     () => directProtocolOrder.filter((protocol) => protocolImages.some((image) => image.id === protocol && image.installed)),
     [protocolImages],
   );
-  const protocolCategories = useMemo(() => {
-    const groups = new Map<string, { id: string; name: string; images: ProtocolImage[] }>();
-    for (const image of protocolImages) {
-      const id = image.category || "network";
-      const group = groups.get(id) || { id, name: image.category_name || "Сетевые модули", images: [] };
-      group.images.push(image);
-      groups.set(id, group);
-    }
-    return [...groups.values()];
-  }, [protocolImages]);
-  const navigation = useMemo(
-    () => (["overview", "clients"] as Tab[]).filter((id) => id !== "clients" || installedProtocols.length > 0),
-    [installedProtocols],
-  );
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
 
   useEffect(() => {

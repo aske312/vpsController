@@ -397,14 +397,15 @@ export function AccessProfilesBeta({ token }: { token: string }) {
   }, [api, token]);
 
   useEffect(() => {
-    void load();
+    const initial = window.setTimeout(() => void load(), 0);
     const timer = window.setInterval(() => void load(true), 20000);
-    return () => window.clearInterval(timer);
+    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [load]);
 
   useEffect(() => {
     if (!data) return;
-    void loadRuntime(data);
+    const initial = window.setTimeout(() => void loadRuntime(data), 0);
+    return () => window.clearTimeout(initial);
   }, [data, loadRuntime]);
 
   const installedTransports = useMemo(
@@ -413,16 +414,6 @@ export function AccessProfilesBeta({ token }: { token: string }) {
   );
   const mihomo = data?.capabilities.items.find((item) => item.id === "mihomo");
   const mihomoModules = data?.capabilities.mihomo.modules || [];
-  const totalDevices = data?.users.reduce((sum, user) => sum + user.devices.length, 0) || 0;
-  const totalConnections = data?.users.reduce(
-    (sum, user) => sum + user.devices.reduce((count, device) => count + device.connections.length, 0),
-    0,
-  ) || 0;
-  const totalSmart = data?.users.reduce(
-    (sum, user) => sum + user.devices.reduce((count, device) => count + (device.smart_profile ? 1 : 0), 0),
-    0,
-  ) || 0;
-
   const targetContext = useMemo(() => {
     if (!deviceTarget || !data) return null;
     const user = data.users.find((item) => item.id === deviceTarget.userId);
