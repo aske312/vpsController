@@ -53,6 +53,8 @@ ENABLE_UFW="yes"
 GEOLOCATION_PRIMARY_URL="https://api.2ip.io"
 GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code"
 UPDATE_TEMP_DIR=""
+UPDATE_ROLLBACK_DIR=""
+UPDATE_SWAP_ACTIVE="no"
 SSH_TEMP_STARTED="no"
 SSH_TEMP_RULE="no"
 APP_VERSION="v1.0.0"
@@ -67,6 +69,10 @@ ACTION_STARTED_AT=""
 ACTION_PROGRESS=0
 REBOOT_AFTER_UPDATE="no"
 INSTALL_LOG="/var/log/vps-control-install.log"
+MAIN_RELEASE_WAIT_ATTEMPTS=18
+STABL_RELEASE_WAIT_ATTEMPTS=30
+UPDATE_DOWNLOAD_TIMEOUT=300
+DEPENDENCY_INSTALL_TIMEOUT=300
 
 UI_STEP=0
 UI_TOTAL=0
@@ -184,12 +190,17 @@ finish_operation() {
       *) write_action_status "succeeded" 100 "Операция завершена" ;;
     esac
   else
-    write_action_status "failed" "${ACTION_PROGRESS}" "Операция завершилась с ошибкой"
+    if [[ "${CURRENT_ACTION}" == "test-update" || "${CURRENT_ACTION}" == "update" ]]; then
+      write_action_status "failed" "${ACTION_PROGRESS}" "Обновление остановлено по ошибке или таймауту; рабочая версия восстановлена"
+    else
+      write_action_status "failed" "${ACTION_PROGRESS}" "Операция завершилась с ошибкой"
+    fi
   fi
 }
 
 handle_exit() {
   local exit_code="$?"
+  rollback_interrupted_update || warn "Emergency rollback encountered an additional error."
   cleanup_update_dir
   restore_update_ssh
   finish_operation "${exit_code}"
@@ -738,6 +749,39 @@ for package in data.get("preflight_packages", []):
     if not installed and not available:
         raise SystemExit(f"Required package {package} is unavailable in configured APT repositories.")
 PY
+}
+
+rollback_interrupted_update() {
+  [[ "${UPDATE_SWAP_ACTIVE}" == "yes" ]] || return 0
+  local rollback target failed
+  rollback="$(realpath -m -- "${UPDATE_ROLLBACK_DIR}")"
+  target="$(realpath -m -- "${INSTALL_DIR}")"
+  [[ "${rollback}" == "${target}.rollback."* ]] || {
+    warn "Emergency rollback rejected an unexpected path: ${rollback}"
+    return 0
+  }
+  [[ -d "${rollback}" ]] || return 0
+
+  warn "Update was interrupted after the application swap; restoring the previous release."
+  systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
+  if [[ -d "${INSTALL_DIR}/venv" && ! -e "${rollback}/venv" ]]; then
+    mv -- "${INSTALL_DIR}/venv" "${rollback}/venv"
+  fi
+  failed="${DATA_DIR}/tmp/interrupted-update.$(date -u +%Y%m%dT%H%M%SZ)"
+  install -d -m 0750 "${DATA_DIR}/tmp"
+  [[ ! -e "${failed}" ]] || { warn "Emergency rollback staging path already exists: ${failed}"; return 0; }
+  [[ ! -e "${INSTALL_DIR}" ]] || mv -- "${INSTALL_DIR}" "${failed}"
+  mv -- "${rollback}" "${INSTALL_DIR}"
+  PROJECT_DIR="${INSTALL_DIR}"
+  systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
+  restart_mihomo_manager_if_present || true
+  if systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service; then
+    [[ ! -d "${failed}" ]] || rm -rf -- "${failed}"
+    UPDATE_SWAP_ACTIVE="no"
+    UPDATE_ROLLBACK_DIR=""
+  else
+    warn "Previous release was restored on disk but one or more panel services require attention."
+  fi
 }
 
 install_protocol_image() {
@@ -1446,7 +1490,8 @@ install_prebuilt_release() {
     cp -a -- "${INSTALL_DIR}/venv" "${payload}/venv"
     candidate_python="${payload}/venv/bin/python"
     run_with_status "Подготовка Python-зависимостей релиза" \
-      "${candidate_python}" -m pip install --disable-pip-version-check \
+      timeout --signal=TERM --kill-after=15s "${DEPENDENCY_INSTALL_TIMEOUT}" \
+        "${candidate_python}" -m pip install --disable-pip-version-check \
         -r "${payload}/api/requirements.txt" \
       || { rm -rf -- "${stage_root}"; die "не удалось подготовить Python-зависимости нового релиза."; }
     printf '%s\n' "${requirements_hash}" >"${payload}/venv/.requirements.sha256"
@@ -1468,6 +1513,8 @@ install_prebuilt_release() {
   fi
 
   rollback="${INSTALL_DIR}.rollback.$(date -u +%Y%m%dT%H%M%SZ)"
+  UPDATE_ROLLBACK_DIR="${rollback}"
+  UPDATE_SWAP_ACTIVE="yes"
   info "Установка заранее собранного релиза без Docker и сборки на VPS"
   if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -Eq '^vps-control-(web|gateway)-1$'; then
     legacy_runtime="yes"
@@ -1525,6 +1572,8 @@ install_prebuilt_release() {
   else
     rm -rf -- "${rollback}"
   fi
+  UPDATE_SWAP_ACTIVE="no"
+  UPDATE_ROLLBACK_DIR=""
   rm -rf -- "${stage_root}"
   cleanup_legacy_runtime
   install -m 0755 "${INSTALL_DIR}/scripts/vps-control.sh" "${COMMAND_PATH}"
@@ -1551,7 +1600,7 @@ update_prebuilt_branch() {
   fi
 
   ready="no"
-  for attempt in $(seq 1 48); do
+  for attempt in $(seq 1 "${STABL_RELEASE_WAIT_ATTEMPTS}"); do
     release_revision="$(git ls-remote "${remote}" "refs/tags/${release_tag}^{}" 2>/dev/null | awk 'NR == 1 {print $1}')"
     if [[ -z "${release_revision}" ]]; then
       release_revision="$(git ls-remote "${remote}" "refs/tags/${release_tag}" 2>/dev/null | awk 'NR == 1 {print $1}')"
@@ -1580,7 +1629,7 @@ update_prebuilt_branch() {
   archive="${UPDATE_TEMP_DIR}/vps-control-release.tar.gz"
   info "Загрузка подготовленного релиза ветки ${branch}"
   curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
-    --connect-timeout 15 --max-time 900 --output "${archive}" "${release_url}"
+    --connect-timeout 15 --max-time "${UPDATE_DOWNLOAD_TIMEOUT}" --output "${archive}" "${release_url}"
   release_commit="$(tar -xOf "${archive}" vps-control-release/.prebuilt-release 2>/dev/null \
     | awk -F= '$1 == "commit" {print $2}')"
   [[ "${release_commit}" =~ ^[0-9a-f]{7,40}$ && "${latest}" == "${release_commit}"* ]] \
@@ -1611,7 +1660,7 @@ update_test_branch() {
 
   release_url="https://github.com/${repository_path}/releases/download/main-latest/vps-control-main.tar.gz"
   info "ожидание подготовленной GitHub-сборки main ${latest:0:7}; рабочая версия продолжает обслуживать запросы"
-  for attempt in $(seq 1 60); do
+  for attempt in $(seq 1 "${MAIN_RELEASE_WAIT_ATTEMPTS}"); do
     release_revision="$(git ls-remote "${remote}" 'refs/tags/main-latest^{}' 2>/dev/null | awk 'NR == 1 {print $1}')"
     [[ -n "${release_revision}" ]] || release_revision="$(git ls-remote "${remote}" refs/tags/main-latest 2>/dev/null | awk 'NR == 1 {print $1}')"
     if [[ "${release_revision}" == "${latest}" ]] && curl --fail --location --silent --show-error --range 0-0 \
@@ -1629,7 +1678,7 @@ update_test_branch() {
   archive="${UPDATE_TEMP_DIR}/vps-control-main.tar.gz"
   info "загрузка готовой тестовой сборки main без сборки на VPS"
   curl --fail --location --silent --show-error --retry 4 --retry-all-errors --retry-delay 2 \
-    --connect-timeout 15 --max-time 900 --output "${archive}" "${release_url}"
+    --connect-timeout 15 --max-time "${UPDATE_DOWNLOAD_TIMEOUT}" --output "${archive}" "${release_url}"
   release_commit="$(tar -xOf "${archive}" vps-control-release/.prebuilt-release 2>/dev/null \
     | awk -F= '$1 == "commit" {print $2}')"
   [[ "${release_commit}" == "${latest}" ]] \
@@ -2138,6 +2187,7 @@ main() {
     install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
       begin_operation "${1}"
       trap handle_exit EXIT
+      trap 'exit 124' TERM INT
       ;;
   esac
   case "${1:-help}" in

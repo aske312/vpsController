@@ -1734,7 +1734,8 @@ def application_action(payload: ApplicationAction, _: None = Depends(require_tok
     result = subprocess.run(
         [
             "systemd-run", f"--unit={unit}", "--collect",
-            "--property=Type=exec", *command,
+            "--property=Type=exec", "--property=RuntimeMaxSec=20min",
+            "--property=TimeoutStopSec=45s", *command,
         ],
         capture_output=True, text=True, timeout=10, check=False,
     )

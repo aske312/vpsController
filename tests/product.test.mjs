@@ -377,7 +377,10 @@ test("service mode deploys main from an isolated preview while stabl remains the
   assert.match(manager, /curl --fail --location --silent --show-error --range 0-0/);
   assert.doesNotMatch(manager, /curl[^\n]*--head/);
   assert.match(manager, /release_commit.*== "\$\{latest\}"/s);
-  assert.match(manager, /for attempt in \$\(seq 1 48\)/);
+  assert.match(manager, /STABL_RELEASE_WAIT_ATTEMPTS=30/);
+  assert.match(manager, /MAIN_RELEASE_WAIT_ATTEMPTS=18/);
+  assert.match(manager, /for attempt in \$\(seq 1 "\$\{MAIN_RELEASE_WAIT_ATTEMPTS\}"\)/);
+  assert.match(manager, /--max-time "\$\{UPDATE_DOWNLOAD_TIMEOUT\}"/);
   assert.match(manager, /подготовленный релиз не соответствует актуальной ревизии ветки \$\{branch\}/);
   assert.match(manager, /vpn-monitor\.timer vps-control-auto-reboot\.timer/);
   assert.match(manager, /"ssh_service_was_active": ssh_service == "yes"/);
@@ -421,6 +424,12 @@ test("main preview is built off-VPS and interrupted updates cannot report succes
   assert.match(workflow, /vps-control-main\.tar\.gz/);
   assert.match(workflow, /gh release create main-latest/);
   assert.doesNotMatch(manager, /BUILD_COMMIT="\$\{latest\}".*build-release/s);
+  assert.match(manager, /rollback_interrupted_update/);
+  assert.match(manager, /Update was interrupted after the application swap; restoring the previous release/);
+  assert.match(manager, /UPDATE_SWAP_ACTIVE="yes"/);
+  assert.match(manager, /trap 'exit 124' TERM INT/);
+  assert.match(api, /--property=RuntimeMaxSec=20min/);
+  assert.match(api, /--property=TimeoutStopSec=45s/);
   assert.match(api, /Операция прервана перезагрузкой/);
   assert.match(api, /int\(action\.get\("progress"/);
 });
