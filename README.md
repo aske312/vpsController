@@ -3,7 +3,7 @@
 312.net — панель управления Ubuntu-сервером. Она показывает состояние ресурсов, служб, сети и безопасности, а также позволяет выполнять диагностику, обновление и обслуживание приложения.
 ## Требования
 
-- Ubuntu Server 22.04/24.04/26.04 или Debian 13 с systemd;
+- Ubuntu Server 22.04/24.04/26.04 или Debian 12/13 с systemd;
 - amd64 или arm64;
 - от 1 ГБ RAM и 5 ГБ свободного места;
 - доступ к репозиториям Ubuntu и GitHub;
@@ -11,13 +11,21 @@
 
 ## Установка на новый сервер
 
-Установка рассчитана на чистую Ubuntu Server 22.04, 24.04, 26.04 или Debian 13 с systemd. Она добавляет Caddy, Node.js 22, Python 3 с venv, Git, UFW, OpenSSH, Fail2ban, auditd, unattended-upgrades и остальные необходимые системные пакеты. Если системный репозиторий уже содержит Node.js 22 (например, Ubuntu 26.04), используется штатный пакет. На Debian 13, где доступен Node.js 20, установщик подключает NodeSource 22 как fallback. Docker не используется.
+Установка рассчитана на чистую Ubuntu Server 22.04, 24.04, 26.04 или Debian 12/13 с systemd. Она добавляет Caddy, Node.js 22, Python 3 с venv, Git, UFW, OpenSSH, Fail2ban, auditd, unattended-upgrades и остальные необходимые системные пакеты. Если системный репозиторий уже содержит Node.js 22 (например, Ubuntu 26.04), используется штатный пакет. На Debian 12/13 установщик при необходимости подключает NodeSource 22 как fallback. Docker не используется.
 
 ### Быстрая установка
 
-Запустите одну команду от пользователя с `sudo`:
+Минимальные образы серверов могут не содержать ни `curl`, ни `sudo`. Если вы вошли как `root`, сначала подготовьте загрузчик, затем запустите установщик:
 
 ```bash
+apt-get update && apt-get install -y ca-certificates curl
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh | bash
+```
+
+Если вы вошли как обычный пользователь с настроенным `sudo`:
+
+```bash
+sudo apt-get update && sudo apt-get install -y ca-certificates curl
 curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh | sudo bash
 ```
 
@@ -48,6 +56,7 @@ sudo systemctl --no-pager --full status vps-control-api vps-control-web caddy
 ### Возможные ошибки установки
 
 - Установка прервалась: запустите ту же команду ещё раз. Уже выполненные этапы и настройки будут сохранены.
+- `curl: command not found` или `sudo: command not found`: используйте подходящий для `root` или sudo-пользователя вариант из раздела быстрой установки выше.
 - Домен не открылся по HTTPS: проверьте его A/AAAA-записи и входящие TCP 80/443 во внешнем firewall хостинга.
 - Не хватает ресурсов: серверу нужны минимум 1 ГБ RAM и 5 ГБ свободного места на диске `/opt`.
 - Для предварительной проверки без развёртывания добавьте `VPS_CONTROL_PREFLIGHT_ONLY=yes` перед `bash`.

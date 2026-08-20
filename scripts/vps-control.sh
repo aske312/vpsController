@@ -577,7 +577,7 @@ check_supported_os() {
     || die "поддерживаются Ubuntu Server и Debian; обнаружена ${PRETTY_NAME:-неизвестная ОС}."
   [[ -n "${VERSION_ID:-}" ]] || die "не удалось определить версию операционной системы."
   case "${ID}:${VERSION_ID}" in
-    ubuntu:22.04|ubuntu:24.04|ubuntu:26.04|debian:13) ;;
+    ubuntu:22.04|ubuntu:24.04|ubuntu:26.04|debian:12|debian:13) ;;
     *) warn "${PRETTY_NAME:-${ID} ${VERSION_ID}} не проходила расширенную проверку; продолжаем установку с базовыми проверками." ;;
   esac
 }

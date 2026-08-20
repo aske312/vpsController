@@ -49,7 +49,7 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /install\)/);
   assert.match(manager, /update\)/);
   assert.match(manager, /ubuntu:22\.04\|ubuntu:24\.04\|ubuntu:26\.04/);
-  assert.match(manager, /debian:13/);
+  assert.match(manager, /debian:12\|debian:13/);
   assert.match(manager, /check_supported_os/);
   assert.match(manager, /distro_node_packages=\(nodejs npm\)/);
   assert.match(manager, /command -v node.*command -v npm[\s\S]*distro_node_packages=\(nodejs\)/);
@@ -66,7 +66,8 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 2/);
   assert.match(manager, /value="\$\{value:1:\$\{#value\}-2\}"/);
   assert.match(manager, /--retry 18 --retry-all-errors --retry-delay 5/);
-  assert.match(readme, /Ubuntu Server 22\.04, 24\.04, 26\.04 или Debian 13/);
+  assert.match(readme, /Ubuntu Server 22\.04, 24\.04, 26\.04 или Debian 12\/13/);
+  assert.match(readme, /apt-get install -y ca-certificates curl/);
   assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/stabl\/scripts\/install-panel\.sh/);
   assert.match(readme, /Возможные ошибки установки/);
   assert.match(readme, /установка/i);
