@@ -49,7 +49,7 @@ export function ApplicationView({ application, services, applicationVersion, upd
             <div className="applicationRuntimeList">
               <div className={application?.api.active ? "healthy" : "failed"}>
                 <i />
-                <span><strong>API панели</strong><small>{application?.api.active ? `Принимает команды · autostart ${application.api.enabled ? "ON" : "OFF"}` : "API не принимает команды"}</small></span>
+                <span><strong>API панели</strong><small>{application?.api.active ? `Принимает команды  autostart ${application.api.enabled ? "ON" : "OFF"}` : "API не принимает команды"}</small></span>
                 <b>{application?.api.active ? "RUNNING" : "STOPPED"}</b>
               </div>
               {(application?.containers || []).map((container, index) => <div className={container.healthy ? "healthy" : "failed"} key={`${container.Name || container.Service}-${index}`}>
@@ -59,7 +59,7 @@ export function ApplicationView({ application, services, applicationVersion, upd
               </div>)}
               {application?.action?.action && <div className={application.action.state !== "failed" && application.action.result !== "failed" ? "healthy" : "failed"}>
                 <i />
-                <span><strong>Последняя команда · {actionLabels[application.action.action.split(":")[0]] || application.action.action}</strong><small>{application.action.state === "running" ? "Команда выполняется системной службой" : application.action.result === "success" ? "Завершена без ошибок" : application.action.message || "Результат уточняется"}</small></span>
+                <span><strong>Последняя команда  {actionLabels[application.action.action.split(":")[0]] || application.action.action}</strong><small>{application.action.state === "running" ? "Команда выполняется системной службой" : application.action.result === "success" ? "Завершена без ошибок" : application.action.message || "Результат уточняется"}</small></span>
                 <b>{application.action.state === "running" ? "RUNNING" : application.action.result === "failed" ? "FAILED" : "DONE"}</b>
               </div>}
             </div>
@@ -82,14 +82,14 @@ export function ApplicationView({ application, services, applicationVersion, upd
 
         <article className="applicationManagement">
           <section className="applicationEnvironment">
-            <header><div><p className="eyebrow">DEPLOYMENT & ACCESS</p><h2>Режим и публикация</h2></div><span>{applicationVersion?.branch || "main"} · {applicationVersion?.current_commit?.slice(0, 12) || "unknown"}</span></header>
+            <header><div><p className="eyebrow">DEPLOYMENT & ACCESS</p><h2>Режим и публикация</h2></div><span>{applicationVersion?.branch || "main"}  {applicationVersion?.current_commit?.slice(0, 12) || "unknown"}</span></header>
             <div className="applicationEnvironmentRows">
               <label>
                 <span><strong>Сервисный режим</strong><small>{serviceModeActive ? "Разрешены test-update, rollback и операции обслуживания" : "Обычная production-работа"}</small></span>
                 <span className="applicationSwitch"><input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy} /><i /></span>
               </label>
               <label>
-                <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? "Публичный адрес панели открыт" : `Доступ через ${(services?.panel_access?.vpn_urls || []).join(" · ") || "VPN"}`}</small></span>
+                <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? "Публичный адрес панели открыт" : `Доступ через ${(services?.panel_access?.vpn_urls || []).join("  ") || "VPN"}`}</small></span>
                 <span className="applicationSwitch"><input type="checkbox" checked={!services?.panel_access?.public} onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")} disabled={busy || !services || serviceModeActive} /><i /></span>
               </label>
             </div>

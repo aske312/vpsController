@@ -106,7 +106,7 @@ export function GateNavigation({
         <div>
           <small>{nodeStateLabel}</small>
           <strong>{server?.city || "VPS"}</strong>
-          <span>{server?.country || "—"} · {server?.public_endpoint || server?.public_ip || "—"}</span>
+          <span>{server?.country || "—"}  {server?.public_endpoint || server?.public_ip || "—"}</span>
         </div>
       </div>
     </aside>

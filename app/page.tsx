@@ -1248,7 +1248,7 @@ export default function Home() {
     applicationStateTitle={applicationStateTitle}
     uptimeLabel={uptime(overview?.server.uptime_s)}
     loadLabel={overview?.resources.load1?.toFixed(2) || "—"}
-    cpuLabel={`${(overview?.resources.cpu_percent || 0).toFixed(0)}% · ${overview?.resources.cpu_count || "—"}c`}
+    cpuLabel={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%  ${overview?.resources.cpu_count || "—"}c`}
     ramLabel={`${memUsed.toFixed(0)}%`}
     networkLabel={`↓ ${bytes(networkRate.rx)}/с`}
     autoRefresh={autoRefresh}
@@ -1259,7 +1259,7 @@ export default function Home() {
     onRefresh={() => void refreshCurrent(true)}
     onLogout={() => { sessionStorage.removeItem("312-token"); setToken(""); }}
   >
-      {tab !== "overview" && tab !== "access-beta" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city}, {overview?.server.country} · управление инфраструктурой</p></div></div>}
+      {tab !== "overview" && tab !== "access-beta" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city}, {overview?.server.country}  управление инфраструктурой</p></div></div>}
       {error && <div className="errorBox">{error}</div>}
       {notice && <div className="successNotice" role="status"><span>✓</span>{notice}<button onClick={() => setNotice("")} aria-label="Закрыть уведомление">×</button></div>}
       {tab === "overview" && (

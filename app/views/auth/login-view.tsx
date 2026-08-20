@@ -26,8 +26,8 @@ export function LoginView({ loginUser, loginPassword, loginPasswordVisible, erro
           <div className="loginCardHeader">
             <Logo />
             <div className="loginStatusPills">
-              <span className="loginPill secure">● Secure admin access</span>
-              <span className="loginPill">Control node · 312.net</span>
+              <span className="loginPill secure">Secure admin access</span>
+              <span className="loginPill">Control node</span>
             </div>
           </div>
 
@@ -62,7 +62,7 @@ export function LoginView({ loginUser, loginPassword, loginPasswordVisible, erro
 
           <div className="loginActions">
             <button className="primaryButton loginSubmit" type="submit" disabled={busy}>
-              {busy ? "Проверка доступа…" : "Войти в панель"} <span>→</span>
+              {busy ? "Проверка доступа…" : "Войти в панель"}
             </button>
             <div className="loginFootnote">
               <strong>Только для администратора</strong>

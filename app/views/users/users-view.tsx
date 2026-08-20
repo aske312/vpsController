@@ -722,7 +722,7 @@ export function AccessProfilesBeta({ token }: { token: string }) {
     try {
       const result = await api(`/users/${targetContext.user.id}/devices/${targetContext.device.id}/connections/${connection.id}/export`) as { filename: string; config: string };
       setExportPreview({
-        title: `${targetContext.device.name} · ${transportLabels[connection.protocol] || connection.protocol}`,
+        title: `${targetContext.device.name}  ${transportLabels[connection.protocol] || connection.protocol}`,
         filename: result.filename,
         config: result.config,
       });
@@ -764,7 +764,7 @@ export function AccessProfilesBeta({ token }: { token: string }) {
     try {
       const config = await apiText(`/users/${targetContext.user.id}/devices/${targetContext.device.id}/smart/export`);
       setExportPreview({
-        title: `${targetContext.device.name} · Smart / Mihomo`,
+        title: `${targetContext.device.name}  Smart / Mihomo`,
         filename: `${targetContext.device.name.replace(/[^A-Za-z0-9_.-]+/g, "-") || "device"}-mihomo.yaml`,
         config,
       });
@@ -836,7 +836,7 @@ export function AccessProfilesBeta({ token }: { token: string }) {
     try {
       const result = await api("/recover", { method: "POST" }) as { recovered?: { users?: number; devices?: number; smart_profiles?: number } };
       const recovered = result.recovered || {};
-      setNotice(`Контур восстановлен: ${recovered.users || 0} пользователей · ${recovered.devices || 0} устройств · ${recovered.smart_profiles || 0} Smart`);
+      setNotice(`Контур восстановлен: ${recovered.users || 0} пользователей  ${recovered.devices || 0} устройств  ${recovered.smart_profiles || 0} Smart`);
       await load(true);
     } catch (cause) {
       setError(formatError(cause, "Не удалось восстановить контур"));
@@ -875,7 +875,7 @@ export function AccessProfilesBeta({ token }: { token: string }) {
           <div className="accessBetaRecoveryIcon">↺</div>
           <div>
             <h2>Найден существующий контур</h2>
-            <p>{data.recovery.smart_candidates} Smart · {data.recovery.direct_candidates} direct</p>
+            <p>{data.recovery.smart_candidates} Smart {data.recovery.direct_candidates} direct</p>
           </div>
           <button className="primaryButton" type="button" disabled={isBusy} onClick={() => void recoverRegistry()}>
             {busyKey === "recover-registry" ? "Восстановление…" : "Восстановить"}
@@ -926,7 +926,7 @@ export function AccessProfilesBeta({ token }: { token: string }) {
                         <i />
                         <span>{runtime.label}</span>
                       </div>
-                      {runtime.configured && <small>↓ {formatBytes(runtime.rx_bytes)} · ↑ {formatBytes(runtime.tx_bytes)}</small>}
+                      {runtime.configured && <small>↓ {formatBytes(runtime.rx_bytes)}  ↑ {formatBytes(runtime.tx_bytes)}</small>}
                     </div>
 
                     <div className="accessBetaDeviceButtons">
@@ -950,9 +950,9 @@ export function AccessProfilesBeta({ token }: { token: string }) {
         <summary><span>Диагностика сервера</span><small>{data?.capabilities.detected_at ? new Date(data.capabilities.detected_at).toLocaleTimeString("ru-RU") : "—"}</small></summary>
         <div className="accessBetaDiagnosticsBody">
           {(data?.capabilities.items || []).map((item) => (
-            <div key={item.id}><span><i className={item.installed ? "ready" : ""} />{item.name}</span><small>{item.installed ? item.active ? "Активен" : "Установлен" : "Не установлен"}{item.version ? ` · ${formatModuleVersion(item.version)}` : ""}</small></div>
+            <div key={item.id}><span><i className={item.installed ? "ready" : ""} />{item.name}</span><small>{item.installed ? item.active ? "Активен" : "Установлен" : "Не установлен"}{item.version ? `  ${formatModuleVersion(item.version)}` : ""}</small></div>
           ))}
-          {mihomo?.installed && <div className="wide"><span>Mihomo transports</span><small>{mihomoModules.filter((item) => item.installed).map((item) => transportCodes[item.transport] || item.transport).join(" · ") || "нет модулей"}</small></div>}
+          {mihomo?.installed && <div className="wide"><span>Mihomo transports</span><small>{mihomoModules.filter((item) => item.installed).map((item) => transportCodes[item.transport] || item.transport).join("  ") || "нет модулей"}</small></div>}
         </div>
       </details>
 
@@ -1079,7 +1079,7 @@ export function AccessProfilesBeta({ token }: { token: string }) {
                     {targetContext.device.smart_profile?.status === "ready" && (
                       <article className="accessBetaRecommended">
                         <div className="accessBetaRecommendedMark">SMART</div>
-                        <div><div><strong>Умный профиль</strong><span>Рекомендуется</span></div><small>{targetContext.device.smart_profile.transports.map((item) => transportCodes[item] || item).join(" · ")} · {strategyLabels[targetContext.device.smart_profile.strategy]}</small></div>
+                        <div><div><strong>Умный профиль</strong><span>Рекомендуется</span></div><small>{targetContext.device.smart_profile.transports.map((item) => transportCodes[item] || item).join("  ")}  {strategyLabels[targetContext.device.smart_profile.strategy]}</small></div>
                         <button className="primaryButton" type="button" disabled={isBusy} onClick={() => void showSmartExport()}>Открыть профиль</button>
                       </article>
                     )}
@@ -1125,7 +1125,7 @@ export function AccessProfilesBeta({ token }: { token: string }) {
                       );
                     })}
 
-                    <div className="accessBetaAdvancedHead smart"><strong>Smart / Mihomo</strong><span>{targetContext.device.mihomo_supported_transports.map((item) => transportCodes[item] || item).join(" · ") || "нет модулей"}</span></div>
+                    <div className="accessBetaAdvancedHead smart"><strong>Smart / Mihomo</strong><span>{targetContext.device.mihomo_supported_transports.map((item) => transportCodes[item] || item).join("  ") || "нет модулей"}</span></div>
                     <div className="accessBetaTechRow smart">
                       <span className="code">M</span>
                       <div><strong>Умный профиль</strong><small>{targetContext.device.smart_profile ? targetContext.device.smart_profile.status === "ready" ? "Готово" : "Ресурс не найден" : "Не создано"}</small></div>

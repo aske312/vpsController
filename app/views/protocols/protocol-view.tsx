@@ -19,7 +19,7 @@ export function ProtocolView(props: ProtocolViewProps) {
   return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()}`}>
         <header className="protocolHeader">
           <div className="protocolHeaderCopy">
-            <p className="eyebrow">312.NET / PROTOCOL CONTROL</p>
+            <p className="eyebrow">PROTOCOL CONTROL</p>
             <div className="protocolHeaderTitle">
               <div>
                 <h1>{labels[protocolTab]}</h1>
@@ -31,7 +31,7 @@ export function ProtocolView(props: ProtocolViewProps) {
                 <span className="version">{formatModuleVersion(activeProtocolImage?.installed_version, "version n/a")}</span>
                 {activeProtocolImage?.update_available && (
                   <span className={`version update${activeProtocolImage.update_breaking ? " breaking" : ""}`}>
-                    обновление → {formatModuleVersion(activeProtocolImage.available_version)}{activeProtocolImage.update_breaking ? " · major" : ""}
+                    обновление → {formatModuleVersion(activeProtocolImage.available_version)}{activeProtocolImage.update_breaking ? "  major" : ""}
                   </span>
                 )}
               </div>
@@ -80,7 +80,7 @@ export function ProtocolView(props: ProtocolViewProps) {
                   <div className="tx"><small>TX NOW</small><strong>{bytes(activeProtocolRate.tx)}<em>/с</em></strong><span>{bytes(activeProtocol.history.transmitted_bytes)} за период</span></div>
                   <div><small>ДОСТУПНОСТЬ</small><strong>{protocolAvailability != null ? `${protocolAvailability}%` : "—"}</strong><span>{activeProtocol.history.service_interruptions} остановок</span><i className="availability"><b style={{ width: `${Math.max(0, Math.min(100, Number(protocolAvailability) || 0))}%` }} /></i></div>
                   <div><small>LATENCY</small><strong>{activeProtocol.history.latency_avg_ms != null ? `${activeProtocol.history.latency_avg_ms.toFixed(1)} мс` : "—"}</strong><span>max {activeProtocol.history.latency_max_ms != null ? `${activeProtocol.history.latency_max_ms.toFixed(1)} мс` : "—"}</span></div>
-                  <div><small>LOSS / CLIENTS</small><strong>{activeProtocol.history.external_loss_percent != null ? `${activeProtocol.history.external_loss_percent}%` : "—"}</strong><span>{activeProtocol.online_peers}/{activeProtocol.peers} online · {duration(activeProtocol.last_handshake_age_s)}</span></div>
+                  <div><small>LOSS / CLIENTS</small><strong>{activeProtocol.history.external_loss_percent != null ? `${activeProtocol.history.external_loss_percent}%` : "—"}</strong><span>{activeProtocol.online_peers}/{activeProtocol.peers} online  {duration(activeProtocol.last_handshake_age_s)}</span></div>
                 </div>
               </article>
             </div>
@@ -96,7 +96,7 @@ export function ProtocolView(props: ProtocolViewProps) {
               <div className="protocolDiagnosticsGrid">
                 <section className={`protocolDiagnosticUnit ${activeProtocol.diagnostics?.status || "pending"} ${diagnosticsOpen[protocolTab] ? "open" : ""}`}>
                   <button className="protocolDiagnosticToggle" onClick={() => toggleNetworkDiagnostics(protocolTab)} aria-expanded={Boolean(diagnosticsOpen[protocolTab])}>
-                    <span><small>{protocolIsTunnel ? "NETWORK" : "RUNTIME"}</small><strong>{protocolIsTunnel ? "Причины нестабильности" : "Состояние runtime"}</strong><em>{protocolDiagnosticsLabel}{activeProtocol.diagnostics?.score != null ? ` · ${activeProtocol.diagnostics.score}/100` : ""}</em></span><b>{diagnosticsOpen[protocolTab] ? "Скрыть" : "Открыть"}</b>
+                    <span><small>{protocolIsTunnel ? "NETWORK" : "RUNTIME"}</small><strong>{protocolIsTunnel ? "Причины нестабильности" : "Состояние runtime"}</strong><em>{protocolDiagnosticsLabel}{activeProtocol.diagnostics?.score != null ? `  ${activeProtocol.diagnostics.score}/100` : ""}</em></span><b>{diagnosticsOpen[protocolTab] ? "Скрыть" : "Открыть"}</b>
                   </button>
                   {diagnosticsOpen[protocolTab] && <div className="protocolDiagnosticBody">
                     <div className="protocolDiagnosticActions"><span>{activeProtocol.diagnostics?.checked_at ? `Проверено ${safeDateTime(activeProtocol.diagnostics.checked_at)}` : "Ожидание проверки"}</span>{protocolIsTunnel && <button onClick={() => void checkNetworkDiagnostics(protocolTab)} disabled={checkingDiagnostics === protocolTab}>{checkingDiagnostics === protocolTab ? "Проверяем…" : "Проверить"}</button>}</div>
@@ -117,7 +117,7 @@ export function ProtocolView(props: ProtocolViewProps) {
 
                 <section className="protocolDiagnosticUnit events">
                   <div className="protocolEventHead"><span><small>STABILITY LOG</small><strong>Последние события</strong><em>агрегация за {activeProtocol.history.period_hours || 24}ч</em></span><b>{activeProtocol.history.events.length}</b></div>
-                  <div className="protocolEventRows">{activeProtocol.history.events.length ? activeProtocol.history.events.slice(0, 4).map((event, index) => <div key={`${event.at}-${index}`}><i className={event.type === "service_down" ? "critical" : "warning"} /><p><strong>{event.type === "service_down" ? "Служба протокола остановилась" : event.type === "monitor_gap" ? "Пропуск мониторинга" : "Нет активных соединений"}</strong><small>{safeDateTime(event.at)}{event.seconds ? ` · ${event.seconds} сек` : ""}</small></p></div>) : <p className="protocolDiagnosticEmpty">За выбранный период разрывов и остановок не зафиксировано.</p>}</div>
+                  <div className="protocolEventRows">{activeProtocol.history.events.length ? activeProtocol.history.events.slice(0, 4).map((event, index) => <div key={`${event.at}-${index}`}><i className={event.type === "service_down" ? "critical" : "warning"} /><p><strong>{event.type === "service_down" ? "Служба протокола остановилась" : event.type === "monitor_gap" ? "Пропуск мониторинга" : "Нет активных соединений"}</strong><small>{safeDateTime(event.at)}{event.seconds ? `  ${event.seconds} сек` : ""}</small></p></div>) : <p className="protocolDiagnosticEmpty">За выбранный период разрывов и остановок не зафиксировано.</p>}</div>
                 </section>
               </div>
             </article>

@@ -421,7 +421,7 @@ export function OverviewDashboard({
                     </div>
                   </div>
                   <span className={`overviewState ${mihomoStatus?.active ? "online" : "idle"}`}>
-                    {mihomoStatus?.active ? (mihomoInUseCount ? "CORE ONLINE · IN USE" : "CORE ONLINE · IDLE") : "CORE STOPPED"}
+                    {mihomoStatus?.active ? (mihomoInUseCount ? "CORE ONLINE  IN USE" : "CORE ONLINE  IDLE") : "CORE STOPPED"}
                   </span>
                 </header>
 
@@ -439,7 +439,7 @@ export function OverviewDashboard({
                       {mihomoProfiles.slice(0, 5).map((profile) => (
                         <div key={profile.id}>
                           <span className="profileDot" />
-                          <p><b>{profile.name}</b><small>{profile.channels.length ? profile.channels.map((channel) => channelShort[channel] || channel).join(" · ") : "каналы не назначены"}</small></p>
+                          <p><b>{profile.name}</b><small>{profile.channels.length ? profile.channels.map((channel) => channelShort[channel] || channel).join("  ") : "каналы не назначены"}</small></p>
                         </div>
                       ))}
                       {!mihomoProfiles.length && <p className="overviewEmpty">Профили ещё не созданы.</p>}
@@ -456,7 +456,7 @@ export function OverviewDashboard({
                             <span className="overviewProtocolMark violet">{channelShort[module.id] || module.id}</span>
                             <p>
                               <b>{module.name}</b>
-                              <small>{profileRefs ? `${profileRefs} проф. · назначен` : runtimeReady ? "готов, профили не используют" : "runtime не активен"}</small>
+                              <small>{profileRefs ? `${profileRefs} проф.  назначен` : runtimeReady ? "готов, профили не используют" : "runtime не активен"}</small>
                             </p>
                             <em className={state}>{inUse ? "IN USE" : profileRefs > 0 && runtimeReady ? "ASSIGNED" : runtimeReady ? "READY" : "STOPPED"}</em>
                           </div>
@@ -483,7 +483,7 @@ export function OverviewDashboard({
                     <div><p className="eyebrow">INDEPENDENT</p><h2>Direct Channels</h2><small>Прямые подключения вне Mihomo</small></div>
                   </div>
                   <span className={`overviewState ${directInUseCount ? "online" : "idle"}`}>
-                    {directInUseCount ? `${directInUseCount} IN USE · ${directReadyCount} READY` : `${directReadyCount} READY · ${directStoppedCount} STOPPED`}
+                    {directInUseCount ? `${directInUseCount} IN USE ${directReadyCount} READY` : `${directReadyCount} READY ${directStoppedCount} STOPPED`}
                   </span>
                 </header>
 
@@ -496,7 +496,7 @@ export function OverviewDashboard({
                         <span className="overviewProtocolMark cyan">{directShort[protocol]}</span>
                         <p>
                           <b>{directName[protocol]}</b>
-                          <small>{statusFailed ? "runtime status недоступен" : configured === null ? "проверяем конфигурацию" : configured ? `${protocolClients.length} clients · ${sessions} sessions` : "установлен, конфигурация не обнаружена"}</small>
+                          <small>{statusFailed ? "runtime status недоступен" : configured === null ? "проверяем конфигурацию" : configured ? `${protocolClients.length} clients  ${sessions} sessions` : "установлен, конфигурация не обнаружена"}</small>
                         </p>
                         <span className="overviewDirectTraffic"><b>↓ {bytes(rx)}/с</b><small>↑ {bytes(tx)}/с</small></span>
                         <span className="overviewDirectLatency"><b>{avgLatency !== null ? `${avgLatency} ms` : "—"}</b><small>{status?.online_peers ?? 0} peers online</small></span>
@@ -524,14 +524,14 @@ export function OverviewDashboard({
       <section className="overviewTelemetry">
         <header>
           <div><p className="eyebrow">LIVE SYSTEM</p><h2>Телеметрия VPS</h2></div>
-          <small>Шкала времени формируется из текущей сессии панели · шаг ~3 сек</small>
+          <small>Шкала времени формируется из текущей сессии панели  шаг ~3 сек</small>
         </header>
 
         <div className="overviewTaskGraphs">
           <TaskGraph
             label="CPU"
             value={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%`}
-            detail={`load ${overview?.resources.load1?.toFixed(2) || "—"} · ${overview?.resources.cpu_count || 0} cores`}
+            detail={`load ${overview?.resources.load1?.toFixed(2) || "—"}  ${overview?.resources.cpu_count || 0} cores`}
             series={[{ values: resourceHistory.load, tone: "blue" }]}
             maxValue={100}
             yFormatter={(value) => `${Math.round(value)}%`}
@@ -539,15 +539,15 @@ export function OverviewDashboard({
           <TaskGraph
             label="MEMORY"
             value={`${memUsed.toFixed(0)}%`}
-            detail={`${bytes(memoryUsedBytes)} / ${bytes(memoryTotal)} · free ${bytes(memoryFree)}`}
+            detail={`${bytes(memoryUsedBytes)} / ${bytes(memoryTotal)}  free ${bytes(memoryFree)}`}
             series={[{ values: resourceHistory.memory, tone: "green" }]}
             maxValue={100}
             yFormatter={(value) => `${Math.round(value)}%`}
           />
           <TaskGraph
             label="NETWORK"
-            value={`↓ ${bytes(networkRate.rx)}/с · ↑ ${bytes(networkRate.tx)}/с`}
-            detail={`interface total ↓ ${bytes(overview?.resources.network_rx || 0)} · ↑ ${bytes(overview?.resources.network_tx || 0)}`}
+            value={`↓ ${bytes(networkRate.rx)}/с  ↑ ${bytes(networkRate.tx)}/с`}
+            detail={`interface total ↓ ${bytes(overview?.resources.network_rx || 0)}  ↑ ${bytes(overview?.resources.network_tx || 0)}`}
             series={[
               { values: resourceHistory.rx, tone: "blue" },
               { values: resourceHistory.tx, tone: "green" },
@@ -560,12 +560,12 @@ export function OverviewDashboard({
         </div>
 
         <div className="overviewSystemFacts">
-          <FactCard label="DISK USED" value={`${diskUsed.toFixed(0)}%`} detail={`${bytes(diskUsedBytes)} / ${bytes(diskTotal)} · free ${bytes(diskFree)}`} />
-          <FactCard label="UPTIME" value={duration(overview?.server.uptime_s || 0)} detail={`${overview?.server.city || "Node"} · ${overview?.server.country || "—"}`} />
+          <FactCard label="DISK USED" value={`${diskUsed.toFixed(0)}%`} detail={`${bytes(diskUsedBytes)} / ${bytes(diskTotal)}  free ${bytes(diskFree)}`} />
+          <FactCard label="UPTIME" value={duration(overview?.server.uptime_s || 0)} detail={`${overview?.server.city || "Node"}  ${overview?.server.country || "—"}`} />
           <FactCard label="LOAD 1M" value={overview?.resources.load1?.toFixed(2) || "—"} detail={`${overview?.resources.cpu_count || 0} CPU cores`} />
-          <FactCard label="TRAFFIC TOTAL" value={bytes(networkTotal)} detail={`↓ ${bytes(overview?.resources.network_rx || 0)} · ↑ ${bytes(overview?.resources.network_tx || 0)}`} />
-          <FactCard label="DIRECT CLIENTS" value={`${clients.length}`} detail={`${stableDirectClients} stable · ${attentionDirectClients} attention · ${offlineDirectClients} offline`} />
-          <FactCard label="MIHOMO CREDENTIALS" value={`${mihomoStatus?.credentials || 0}`} detail={`${profileCount} profiles · ${mihomoStatus?.profiles_in_use || 0} in use`} />
+          <FactCard label="TRAFFIC TOTAL" value={bytes(networkTotal)} detail={`↓ ${bytes(overview?.resources.network_rx || 0)}  ↑ ${bytes(overview?.resources.network_tx || 0)}`} />
+          <FactCard label="DIRECT CLIENTS" value={`${clients.length}`} detail={`${stableDirectClients} stable  ${attentionDirectClients} attention  ${offlineDirectClients} offline`} />
+          <FactCard label="MIHOMO CREDENTIALS" value={`${mihomoStatus?.credentials || 0}`} detail={`${profileCount} profiles  ${mihomoStatus?.profiles_in_use || 0} in use`} />
           <FactCard label="ROUTES IN USE" value={`${routesInUse}`} detail={`${routesReady} ready / idle`} />
           <FactCard label="FREE MEMORY" value={bytes(memoryFree)} detail={`${memUsed.toFixed(0)}% currently used`} />
         </div>

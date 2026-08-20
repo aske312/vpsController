@@ -139,7 +139,7 @@ export function LegalFooter({ version, commit }: LegalFooterProps) {
       <footer className="versionFooter legalFooter" aria-label="Версия и правовая информация">
         <div className="legalVersionLine" aria-label={`Версия ${version}, сборка ${buildId}`}>
           <strong>{version}</strong>
-          <span aria-hidden="true">·</span>
+          <span aria-hidden="true"></span>
           <small>build </small>
           <code>{buildId}</code>
         </div>
@@ -186,7 +186,7 @@ export function LegalFooter({ version, commit }: LegalFooterProps) {
             <div className="legalModalFoot">
               <div className="legalVersionLine legalVersionLineModal" aria-label={`Версия ${version}, сборка ${buildId}`}>
                 <strong>{version}</strong>
-                <span aria-hidden="true">·</span>
+                <span aria-hidden="true"></span>
                 <small>build</small>
                 <code>{buildId}</code>
               </div>

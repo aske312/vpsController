@@ -112,7 +112,7 @@ export function AppWorkspace({
             <span className="gateMastServer" aria-hidden="true"><i /><i /><i /></span>
             <div>
               <h2><CountryFlag code={countryCode} label={server?.country || "Страна не определена"} />{server?.city || server?.name || "Primary Node"}</h2>
-              <p>{server?.country || "—"} · <span className="mono">{server?.public_endpoint || server?.public_ip || "—"}</span></p>
+              <p>{server?.country || "—"}  <span className="mono">{server?.public_endpoint || server?.public_ip || "—"}</span></p>
             </div>
             <span className={`gateMastState ${nodeState}`}>{applicationStateTitle}</span>
           </div>

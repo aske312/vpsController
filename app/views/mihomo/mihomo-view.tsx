@@ -415,7 +415,7 @@ export function MihomoPage({
         <div className="mihomoHeroShade" />
         <div className="mihomoHeroContent">
           <div className="mihomoHeroIntro">
-            <p className="eyebrow">312.NET / MIHOMO CONTROL</p>
+            <p className="eyebrow">MIHOMO CONTROL</p>
             <div className="mihomoHeroTitleLine">
               <h1>Mihomo</h1>
               <span className={status?.active ? "mihomoCoreState online" : "mihomoCoreState"}>
@@ -455,8 +455,8 @@ export function MihomoPage({
         <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
         <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
         <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Каналы</Tab>
-        <Tab id="dns" current={view} onSelect={setView} badge={policiesReady ? 1 : 0}>DNS</Tab>
-        <Tab id="routing" current={view} onSelect={setView} badge={policiesReady ? 1 : 0}>Маршрутизация</Tab>
+        <Tab id="dns" /*current={view} onSelect={setView} badge={policiesReady ? 1 : 0}*/>DNS</Tab>
+        <Tab id="routing" /*current={view} onSelect={setView} badge={policiesReady ? 1 : 0}*/>Маршрутизация</Tab>
       </nav>
 
       {error && <div className="mihomoMessage is-error">{error}</div>}
@@ -705,7 +705,7 @@ function ModuleCatalog({ title, description, modules, busy, onToggle, onUpdate, 
               {module.installed && module.installed_version && (
                 <span className="mihomoModuleVersionRow">
                   <i>{formatModuleVersion(module.installed_version)}</i>
-                  {module.update_available && <em className={module.update_breaking ? "breaking" : ""}>→ {formatModuleVersion(module.available_version)}{module.update_breaking ? " · major" : ""}</em>}
+                  {module.update_available && <em className={module.update_breaking ? "breaking" : ""}>→ {formatModuleVersion(module.available_version)}{module.update_breaking ? "  major" : ""}</em>}
                 </span>
               )}
             </p>

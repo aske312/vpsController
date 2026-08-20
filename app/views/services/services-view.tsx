@@ -83,8 +83,8 @@ function serviceBadge(service: ServiceItem) {
   const substate = (service.substate || "").toLowerCase();
   if (state === "failed" || substate === "failed") return { className: "failed", label: "FAILED" };
   if (service.active) {
-    if (substate === "exited") return { className: "ready", label: "ACTIVE · EXITED" };
-    if (substate === "waiting") return { className: "ready", label: "ACTIVE · WAITING" };
+    if (substate === "exited") return { className: "ready", label: "ACTIVE  EXITED" };
+    if (substate === "waiting") return { className: "ready", label: "ACTIVE  WAITING" };
     return { className: "running", label: "RUNNING" };
   }
   return { className: "stopped", label: "STOPPED" };
@@ -105,7 +105,7 @@ function formatRetention(days: number | undefined) {
 function runtimeSummary(service: ServiceItem) {
   const autostart = service.enabled ? "Autostart ON" : "Autostart OFF";
   const restartLabel = service.restarts === 1 ? "1 restart" : `${service.restarts || 0} restarts`;
-  return `${autostart} · ${restartLabel} · ${compactSince(service.active_since)}`;
+  return `${autostart}  ${restartLabel}  ${compactSince(service.active_since)}`;
 }
 
 export function ServicesDashboard({
@@ -143,7 +143,7 @@ export function ServicesDashboard({
       <article className={`servicesHero ${nodeTone}`}>
         <div className="servicesHeroBackdrop" aria-hidden="true" />
         <div className="servicesHeroCopy">
-          <p className="eyebrow">312.NET / SERVICES CONTROL</p>
+          <p className="eyebrow">SERVICES CONTROL</p>
           <h1>Службы и обслуживание</h1>
           <p>Systemd, защищённые каналы, журналы и плановые операции узла.</p>
           <div className="servicesStats">
