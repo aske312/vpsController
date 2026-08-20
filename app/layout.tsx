@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Manrope, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import "./mihomo.css";
 
 const sans = Manrope({ variable: "--font-sans", subsets: ["latin", "cyrillic"] });
 const mono = JetBrains_Mono({ variable: "--font-mono", subsets: ["latin", "cyrillic"] });

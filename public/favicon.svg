@@ -1,5 +1,65 @@
-<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="64" height="64" rx="15" fill="#67D5B4"/>
-  <path d="M14 14H38L50 26V50H26L14 38V14Z" fill="#091411"/>
-  <path d="M23 24H38L42 28V40H27L23 36V24Z" fill="#67D5B4"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">312.net neon triangle icon</title>
+  <desc id="desc">Minimal futuristic triangular emblem with inner triangle and orbital ring.</desc>
+  <defs>
+    <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="0.45" stop-color="#111a2e"/>
+      <stop offset="1" stop-color="#050915"/>
+    </linearGradient>
+    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00eaff"/>
+      <stop offset="0.45" stop-color="#2f6bff"/>
+      <stop offset="1" stop-color="#d82cff"/>
+    </linearGradient>
+    <radialGradient id="orb" cx="35%" cy="30%" r="75%">
+      <stop offset="0" stop-color="#9ffaff"/>
+      <stop offset="0.32" stop-color="#26d8ff"/>
+      <stop offset="0.68" stop-color="#4c5fff"/>
+      <stop offset="1" stop-color="#b42cff"/>
+    </radialGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8ffcff"/>
+      <stop offset="0.48" stop-color="#2b86ff"/>
+      <stop offset="1" stop-color="#c327ff"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="frameClip">
+      <path fill-rule="evenodd" d="M512 92 L902 806 L122 806 Z M512 238 L775 720 L249 720 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Outer triangular frame -->
+  <path fill="url(#frame)" fill-rule="evenodd" d="M512 92 L902 806 L122 806 Z M512 238 L775 720 L249 720 Z"/>
+  <path d="M512 92 L902 806 L122 806 Z" fill="none" stroke="url(#neon)" stroke-width="10" stroke-linejoin="round" filter="url(#softGlow)"/>
+  <path d="M512 238 L775 720 L249 720 Z" fill="none" stroke="#172a55" stroke-width="7" stroke-linejoin="round"/>
+
+  <!-- Minimal neon edge accents -->
+  <g clip-path="url(#frameClip)" fill="none" stroke-linecap="round" filter="url(#softGlow)">
+    <path d="M180 740 L355 421" stroke="#00eaff" stroke-width="12"/>
+    <path d="M669 402 L832 703" stroke="#d62dff" stroke-width="12"/>
+    <path d="M375 795 L646 795" stroke="url(#neon)" stroke-width="9"/>
+  </g>
+
+  <!-- Orbital ring -->
+  <g transform="rotate(-13 512 535)">
+    <ellipse cx="512" cy="535" rx="420" ry="152" fill="none" stroke="#123e86" stroke-width="12" opacity=".72"/>
+    <ellipse cx="512" cy="535" rx="420" ry="152" fill="none" stroke="url(#neon)" stroke-width="7" filter="url(#glow)"/>
+    <circle cx="868" cy="455" r="20" fill="url(#orb)" stroke="#a9f7ff" stroke-width="4" filter="url(#glow)"/>
+  </g>
+
+  <!-- Inner inverted triangle -->
+  <path d="M512 424 L640 649 L384 649 Z" fill="#071021" stroke="url(#neon)" stroke-width="8" stroke-linejoin="round" filter="url(#softGlow)"/>
+  <path d="M512 474 L590 613 L434 613 Z" fill="url(#core)" stroke="#bffcff" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M512 474 L512 613 M434 613 L512 553 L590 613" fill="none" stroke="#d8fbff" stroke-width="3" opacity=".9"/>
+
+  <!-- Tiny top marker -->
+  <path d="M512 122 L535 162 L489 162 Z" fill="#07111f" stroke="url(#neon)" stroke-width="6" filter="url(#softGlow)"/>
 </svg>

@@ -3,140 +3,23 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
-import { ConnectionGuide } from "./connection-guide";
 import { LegalFooter } from "./legal";
-import { MihomoPage } from "./mihomo/mihomo-host";
+import { MihomoPage } from "./views/mihomo/mihomo-view";
+import { OverviewDashboard } from "./views/overview/overview-view";
+import { AppWorkspace } from "./components/layout/app-workspace";
+import { ServicesDashboard } from "./views/services/services-view";
+import { AccessProfilesBeta } from "./views/users/users-view";
+import { DnsView } from "./views/dns/dns-view";
+import { SecurityView } from "./views/security/security-view";
+import { ApplicationView } from "./views/application/application-view";
+import { ConnectionsView } from "./views/connections/connections-view";
+import { ProtocolView } from "./views/protocols/protocol-view";
+import { LoginView } from "./views/auth/login-view";
+import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, DnsCheck, DnsSettings, DnsStatus, LiveStatus, LoggingSettings, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "./types/control-plane";
+import { actionLabels, bytes, CLIENTS_PER_PAGE, directProtocolOrder, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "./lib/control-plane-ui";
 
-type Protocol = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp";
-type Tab = "overview" | "dns" | "security" | "application" | "services" | "clients" | "mihomo" | Protocol;
-type TunnelProtocol = "wg" | "awg";
-type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
-type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" | "network-check" | "integrity-check" | "identity" | "secure" | "kernel-update" | "vpn-firewall" | "optimize" | "reboot" | "poweroff";
-type Client = {
-  id: string; name: string; protocol: Protocol; public_key: string; endpoint?: string;
-  address: string; handshake_age_s?: number; rx_bytes: number; tx_bytes: number;
-  rx_bps?: number; tx_bps?: number; active_connections?: number; active_sources?: string[];
-  quality?: "stable" | "warning" | "error" | "offline"; latency_ms?: number; jitter_ms?: number; packet_loss_percent?: number; quality_reason?: string; latency_source?: "server_icmp_tunnel_ip" | "not_supported"; sample_size?: number;
-};
-type DeviceProbe = { latency_ms: number | null; variation_ms: number | null; loss_percent: number; successful: number; samples: number; measured_at: string; route: string };
-type Overview = {
-  server: { name: string; public_ip: string; public_ipv4?: string; public_ipv6?: string; public_domain?: string; public_endpoint?: string; city: string; country: string; country_code: string; uptime_s: number };
-  resources: { load1: number; cpu_percent: number; cpu_count: number; memory_total: number; memory_available: number; disk_total: number; disk_available: number; network_rx: number; network_tx: number };
-  protocols: Record<"wg" | "awg", { interface: string; port: number; active: boolean }>;
-};
-type ApplicationStatus = {
-  api: { active: boolean; enabled: boolean };
-  containers: Array<{
-    Name?: string; Service?: string; State?: string; Status?: string; Health?: string;
-    component_name?: string; purpose?: string; healthy?: boolean; status_text?: string;
-  }>;
-  action: {
-    unit?: string; action?: string; state?: string; result?: string; started_at?: string; updated_at?: string;
-    progress?: number; message?: string;
-  };
-  service_mode?: { active: boolean; rollback_available?: boolean };
-  runtime?: { mode: "systemd" | "legacy-docker" | "incomplete"; migration_required: boolean };
-};
-type ProtocolImage = {
-  id: string; name: string; version: string; description: string; category: string; category_name: string;
-  interface: string; installed: boolean; active?: boolean; removable: boolean;
-};
-type AutomationSchedule = {
-  enabled: boolean; cadence: "daily" | "weekly" | "monthly"; weekday: string; hour: number; minute: number;
-};
-type ServicesStatus = {
-  items: Array<{
-    id: string; name: string; unit: string; installed: boolean; active: boolean; state: string; substate: string;
-    enabled: boolean; unit_file_state: string; restarts: number; active_since: string; description: string;
-    controls: string[]; disabled_controls?: string[];
-  }>;
-  failed_units: number;
-  reboot_required: boolean;
-  automation: { reboot: AutomationSchedule; cleanup: AutomationSchedule; update: AutomationSchedule };
-  timers: Record<"reboot" | "cleanup" | "update", { installed: boolean; active: boolean; last_trigger: string; next_run: string }>;
-  panel_access?: { mode: "external" | "vpn"; public: boolean; vpn_urls: string[] };
-  service_mode?: { active: boolean };
-  logging?: { persistent: boolean; retention_days: number; automatic_cleanup: boolean; disk_usage: string };
-};
-type LiveStatus = {
-  resources: Overview["resources"];
-  protocols: Record<"wg" | "awg", {
-    active: boolean; peers: number; online_peers: number; interface_rx_bytes: number; interface_tx_bytes: number;
-  }>;
-  clients: Client[];
-  security: { firewall_active: boolean; fail2ban_active: boolean; ssh_listening: boolean };
-};
-type LoggingSettings = { persistent: boolean; retention_days: number };
-type DnsProvider = { id: string; name: string; country: string; addresses: string[]; doh_url?: string; filter: string };
-type DnsSettings = { selected_id: string; apply_wg: boolean; apply_awg: boolean; apply_shadowsocks: boolean; apply_vrx: boolean; prefer_encrypted: boolean; fallback_enabled: boolean; custom?: { name: string; addresses: string[]; doh_url: string } | null };
-type DnsEffect = { value: string; scope: "new_profiles" | "client_recommendation" | "server_xray"; changes_existing: boolean; matches_selected: boolean };
-type DnsStatus = { settings: DnsSettings; providers: DnsProvider[]; protocol_effect: Record<string, string>; protocol_effect_details?: Record<string, DnsEffect> };
-type DnsCheck = { id: string; available: boolean; udp_ok: boolean; udp_ms?: number; tcp_ok: boolean; tcp_ms?: number; doh_ok: boolean; doh_ms?: number; latency_ms?: number };
-type ConfirmationRequest = {
-  title: string; message: string; confirmLabel: string; phrase?: string; danger?: boolean;
-  resolve: (confirmed: boolean) => void;
-};
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
-type ProtocolStatus = {
-  protocol: Protocol; interface: string; active: boolean; service_active: boolean; service_enabled: boolean;
-  active_since: string; address: string; listen_port: number; mtu: number; peers: number; online_peers: number;
-  endpoints: number; last_handshake_age_s?: number; peer_rx_bytes: number; peer_tx_bytes: number;
-  interface_rx_bytes: number; interface_tx_bytes: number; rx_errors: number; tx_errors: number;
-  rx_dropped: number; tx_dropped: number;
-  unit?: string; transport?: string; security?: string; target?: string;
-  settings?: Record<string, string | number | boolean>;
-  editable_settings?: EditableProtocolSetting[];
-  resources: {
-    checked_at?: string;
-    items: Array<{ name: string; available: boolean; status_code?: number; latency_ms: number }>;
-  };
-  history: {
-    period_hours: number; samples: number; availability_percent?: number; monitoring_gaps: number;
-    service_interruptions: number; inactive_connection_periods: number; external_loss_percent?: number;
-    latency_avg_ms?: number; latency_max_ms?: number; jitter_avg_ms?: number;
-    interface_errors: number; interface_dropped: number; uplink_errors: number; uplink_dropped: number; conntrack_peak_percent?: number;
-    received_bytes: number; transmitted_bytes: number;
-    average_rx_bps: number; average_tx_bps: number; peak_rx_bps: number; peak_tx_bps: number;
-    events: Array<{ at?: string; type: "monitor_gap" | "service_down" | "peers_offline"; seconds?: number }>;
-  };
-  diagnostics: {
-    checked_at?: string; status: "healthy" | "warning" | "critical" | "pending"; score?: number;
-    live?: { loss_percent?: number; latency_ms?: number; jitter_ms?: number; dns_ms?: number; https_connect_ms?: number; https_total_ms?: number };
-    network?: { uplink?: string; gateway?: string; uplink_mtu?: number; tunnel_mtu?: number; conntrack_count?: number; conntrack_max?: number; conntrack_percent?: number };
-    checks: Array<{ id: string; name: string; ok: boolean; value: string }>;
-    findings: Array<{ severity: "warning" | "critical"; code: string; title: string; detail: string; action: string }>;
-  };
-};
-
-const labels: Record<Tab | Protocol, string> = {
-  overview: "Обзор", dns: "DNS", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", shadowsocks: "Shadowsocks", "vless-reality-xhttp": "VLESS + REALITY + XHTTP", clients: "Подключения", mihomo: "Mihomo",
-};
-const navigationLabels: Record<Tab, string> = {
-  overview: "OVERVIEW", dns: "DNS CONTROL", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
-  wg: "WIREGUARD", awg: "AMNEZIAWG", shadowsocks: "SHADOWSOCKS", "vless-reality-xhttp": "VLESS", clients: "CONNECTIONS", mihomo: "MIHOMO",
-};
-const actionLabels: Record<string, string> = {
-  install: "Установка 312.net", start: "Запуск приложения", stop: "Остановка приложения",
-  restart: "Перезапуск приложения", update: "Обновление приложения", "test-update": "Переход на тестовую версию", "test-rollback": "Возврат к рабочей версии", "network-check": "Проверка сети и туннелей", identity: "Обновление данных сервера",
-  "integrity-check": "Проверка целостности",
-  secure: "Настройка защиты", "kernel-update": "Обновление ядра", "vpn-firewall": "Восстановление VPN firewall", optimize: "Оптимизация ресурсов",
-  "service-mode": "Переключение режима и ветки",
-  reboot: "Перезагрузка сервера", poweroff: "Выключение сервера",
-  "protocol-install": "Установка протокола", "protocol-remove": "Удаление протокола",
-};
-
-const bytes = (value = 0) => {
-  if (!value) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
-  return `${(value / 1024 ** index).toFixed(index > 2 ? 1 : 0)} ${units[index]}`;
-};
-type EditableProtocolSetting = {
-  key: string; label: string; type: "number" | "select" | "boolean" | "text";
-  value: string | number | boolean; min?: number; max?: number; help?: string;
-  options?: Array<{ value: string; label: string }>;
-};
 
 function reloadWithoutCache(message: string) {
   sessionStorage.setItem("312-notice", message);
@@ -144,22 +27,13 @@ function reloadWithoutCache(message: string) {
   target.searchParams.set("_refresh", Date.now().toString());
   window.location.replace(target.toString());
 }
-const duration = (seconds?: number) => {
-  if (seconds === undefined || seconds === null) return "никогда";
-  if (seconds < 60) return `${seconds} сек назад`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} мин назад`;
-  return `${Math.floor(seconds / 3600)} ч назад`;
-};
-const uptime = (seconds = 0) => `${Math.floor(seconds / 86400)}д ${Math.floor((seconds % 86400) / 3600)}ч`;
-const LIVE_SAMPLE_SECONDS = 3;
-const HISTORY_SAMPLES = 100;
-const CLIENTS_PER_PAGE = 10;
 const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-HISTORY_SAMPLES);
 export default function Home() {
   const [tab, setTab] = useState<Tab>("overview");
   const [token, setToken] = useState("");
   const [loginUser, setLoginUser] = useState("admin");
   const [loginPassword, setLoginPassword] = useState("");
+  const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [security, setSecurity] = useState<Record<string, unknown> | null>(null);
@@ -330,7 +204,52 @@ export default function Home() {
   const loadProtocolStatus = useCallback(async (protocol: Protocol) => {
     if (!token) return;
     try {
-      const next = await request(`/protocols/${protocol}/status`) as ProtocolStatus;
+      const raw = await request(`/protocols/${protocol}/status`) as ProtocolStatus;
+      // WG/AWG already return full monitoring data. Stream protocols (VRX/SS)
+      // may omit history/resources/diagnostics, so normalize the response before
+      // rendering the shared Protocol Workspace. This keeps one UI contract for
+      // every installed protocol and prevents a blank page on VRX/SS.
+      const next: ProtocolStatus = {
+        ...raw,
+        resources: {
+          checked_at: raw.resources?.checked_at,
+          items: raw.resources?.items || [],
+        },
+        history: {
+          period_hours: 24,
+          samples: 0,
+          availability_percent: raw.service_active ? 100 : 0,
+          monitoring_gaps: 0,
+          service_interruptions: 0,
+          inactive_connection_periods: 0,
+          external_loss_percent: undefined,
+          latency_avg_ms: undefined,
+          latency_max_ms: undefined,
+          jitter_avg_ms: undefined,
+          interface_errors: 0,
+          interface_dropped: 0,
+          uplink_errors: 0,
+          uplink_dropped: 0,
+          conntrack_peak_percent: undefined,
+          received_bytes: raw.peer_rx_bytes || raw.interface_rx_bytes || 0,
+          transmitted_bytes: raw.peer_tx_bytes || raw.interface_tx_bytes || 0,
+          average_rx_bps: 0,
+          average_tx_bps: 0,
+          peak_rx_bps: 0,
+          peak_tx_bps: 0,
+          ...(raw.history || {}),
+          events: raw.history?.events || [],
+        },
+        diagnostics: {
+          checked_at: raw.diagnostics?.checked_at,
+          status: raw.diagnostics?.status || "pending",
+          score: raw.diagnostics?.score,
+          live: raw.diagnostics?.live,
+          network: raw.diagnostics?.network,
+          checks: raw.diagnostics?.checks || [],
+          findings: raw.diagnostics?.findings || [],
+        },
+      };
       const now = Date.now();
       const previous = protocolSamples.current[protocol];
       if (previous) {
@@ -470,7 +389,7 @@ export default function Home() {
     // Security data is intentionally refreshed only when entering the tab;
     // its checks are expensive and the page displays the last known snapshot.
     if (tab === "security") return;
-    const actionRunning = ["active", "activating", "running"].includes(application?.action?.state || "");
+    const actionRunning = ["queued", "active", "activating", "running", "rebooting", "powering-off"].includes(application?.action?.state || "");
     const updateRunning = actionRunning && ["update", "test-update", "test-rollback", "kernel-update"].includes(application?.action?.action || "");
     const delay = updateRunning ? 3000
       : tab === "overview" ? 30000
@@ -481,7 +400,7 @@ export default function Home() {
   }, [application?.action?.action, application?.action?.state, autoRefresh, refreshCurrent, tab, token]);
 
   useEffect(() => {
-    const actionRunning = ["active", "activating", "running"].includes(application?.action?.state || "");
+    const actionRunning = ["queued", "active", "activating", "running", "rebooting", "powering-off"].includes(application?.action?.state || "");
     if (!token || !actionRunning) return;
     const timer = window.setInterval(() => void loadApplication(), 2000);
     return () => window.clearInterval(timer);
@@ -490,7 +409,7 @@ export default function Home() {
   useEffect(() => {
     const action = application?.action;
     if (!action?.unit) return;
-    if (["active", "activating", "running"].includes(action.state || "")) {
+    if (["queued", "active", "activating", "running", "rebooting", "powering-off"].includes(action.state || "")) {
       trackedActionUnit.current = action.unit;
       return;
     }
@@ -848,7 +767,7 @@ export default function Home() {
   async function installProtocol(image: ProtocolImage) {
     if (!await askConfirmation({
       title: `Установить ${image.name}?`,
-      message: `На сервер будет установлен модуль ${image.name} ${image.version}.`,
+      message: `На сервер будет установлен модуль ${image.name}${image.available_version ? ` ${image.available_version}` : ""}.`,
       confirmLabel: "Установить",
     })) return;
     setBusy(true); setError(""); setInstallingProtocol(image.id);
@@ -877,10 +796,59 @@ export default function Home() {
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
 
+  async function waitForProtocolUpdate(image: ProtocolImage) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 5000));
+      try {
+        const [imageData, status] = await Promise.all([
+          request("/protocol-images") as Promise<{ items: ProtocolImage[] }>,
+          request("/application/status") as Promise<ApplicationStatus>,
+        ]);
+        setProtocolImages(imageData.items || []);
+        setApplication(status);
+        const current = imageData.items?.find((item) => item.id === image.id);
+        const actionState = status.action?.state || "";
+        if (current && !current.update_available) return;
+        if (actionState === "failed" || status.action?.result === "failed") {
+          throw new Error(`Обновление ${image.name} завершилось с ошибкой`);
+        }
+      } catch (cause) {
+        if (cause instanceof Error && cause.message.includes("завершилось с ошибкой")) throw cause;
+        // API may restart briefly while the update installs.
+      }
+    }
+    throw new Error(`Сервер не подтвердил обновление ${image.name} за 10 минут`);
+  }
+
+  async function updateProtocol(image: ProtocolImage) {
+    if (!await askConfirmation({
+      title: `Обновить ${image.name}?`,
+      message: image.update_breaking
+        ? `Доступна версия ${image.available_version} (сейчас ${image.installed_version || "—"}). Это смена старшей версии протокола — после обновления может понадобиться пересоздать подключения, использующие этот протокол.`
+        : `Доступна версия ${image.available_version} (сейчас ${image.installed_version || "—"}). Активные подключения не будут разорваны.`,
+      confirmLabel: "Обновить",
+      danger: image.update_breaking,
+    })) return;
+    setBusy(true); setError(""); setInstallingProtocol(`update-${image.id}`);
+    try {
+      const started = await request(`/protocol-images/${image.id}/update`, { method: "POST" });
+      setApplication((current) => ({
+        api: current?.api || { active: true, enabled: true },
+        containers: current?.containers || [],
+        action: started,
+      }));
+      await waitForProtocolUpdate(image);
+      await Promise.all([loadOverview(), loadProtocolStatus(image.id as Protocol)]);
+      setNotice(`${image.name} обновлён до ${image.available_version}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось запустить обновление протокола");
+    } finally { setInstallingProtocol(""); setBusy(false); }
+  }
+
   async function restartProtocol(protocol: Protocol) {
     if (!await askConfirmation({
-      title: `Перезапустить ${labels[protocol]}?`,
-      message: "Активные VPN-соединения кратковременно прервутся.",
+      title: "Перезапустить протокол?",
+      message: `${labels[protocol]} будет перезапущен. Активные соединения могут кратковременно прерваться.`,
       confirmLabel: "Перезапустить",
     })) return;
     setBusy(true); setError("");
@@ -965,7 +933,37 @@ export default function Home() {
   function toggleNetworkDiagnostics(protocol: Protocol) {
     const opening = !diagnosticsOpen[protocol];
     setDiagnosticsOpen((values) => ({ ...values, [protocol]: opening }));
-    if (opening) void checkNetworkDiagnostics(protocol);
+    if (!opening) return;
+    if (protocol === "wg" || protocol === "awg") {
+      void checkNetworkDiagnostics(protocol);
+      return;
+    }
+    // VRX/SS have no tunnel-specific /diagnostics/check endpoint. Build a
+    // runtime diagnostic snapshot locally so the shared protocol page stays
+    // functional instead of sending an unsupported request.
+    setProtocolStatuses((statuses) => {
+      const current = statuses[protocol];
+      if (!current) return statuses;
+      const serviceOk = Boolean(current.service_active);
+      const checks = [
+        { id: "service", name: "Служба протокола", ok: serviceOk, value: serviceOk ? "active" : "не запущена" },
+        { id: "autostart", name: "Автозапуск", ok: Boolean(current.service_enabled), value: current.service_enabled ? "включён" : "выключен" },
+        { id: "listener", name: "Порт протокола", ok: Boolean(current.listen_port), value: current.listen_port ? String(current.listen_port) : "не определён" },
+      ];
+      return {
+        ...statuses,
+        [protocol]: {
+          ...current,
+          diagnostics: {
+            checked_at: new Date().toISOString(),
+            status: serviceOk ? "healthy" : "critical",
+            score: serviceOk ? 100 : 40,
+            checks,
+            findings: serviceOk ? [] : [{ severity: "critical", code: "service", title: "Служба протокола остановлена", detail: "Runtime протокола не активен.", action: "Перезапустить протокол и проверить systemd journal." }],
+          },
+        },
+      };
+    });
   }
 
   function toggleProtocolResources(protocol: Protocol) {
@@ -976,9 +974,11 @@ export default function Home() {
 
   async function removeProtocol(image: ProtocolImage) {
     if (!await askConfirmation({
-      title: `Удалить ${image.name}?`,
-      message: "Будут удалены модуль, его конфигурация и все подключения. Образ останется доступен для повторной установки.",
-      confirmLabel: "Удалить модуль", phrase: "УДАЛИТЬ", danger: true,
+      title: image.id === "mihomo" ? `Удалить ${image.name}?` : "Удалить протокол?",
+      message: image.id === "mihomo"
+        ? "Будут удалены Mihomo Core, его профили, внутренние каналы, DNS и маршрутизация. Direct-подключения GATE.312 не изменятся."
+        : `${image.name} будет удалён из панели. Его конфигурация и связанные подключения станут недоступны; модуль можно установить повторно.`,
+      confirmLabel: image.id === "mihomo" ? "Удалить модуль" : "Удалить", phrase: image.id === "mihomo" ? "УДАЛИТЬ" : undefined, danger: true,
     })) return;
     setBusy(true); setError(""); setInstallingProtocol(`remove-${image.id}`);
     try {
@@ -1021,7 +1021,7 @@ export default function Home() {
   const visibleClientStart = protocolClients.length ? (currentClientPage - 1) * CLIENTS_PER_PAGE + 1 : 0;
   const visibleClientEnd = Math.min(currentClientPage * CLIENTS_PER_PAGE, protocolClients.length);
   const installedProtocols = useMemo(
-    () => protocolImages.filter((image) => image.installed && (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(image.id)).map((image) => image.id as Protocol),
+    () => directProtocolOrder.filter((protocol) => protocolImages.some((image) => image.id === protocol && image.installed)),
     [protocolImages],
   );
   const protocolCategories = useMemo(() => {
@@ -1079,9 +1079,9 @@ export default function Home() {
 
   async function removeClient(id: string) {
     if (!await askConfirmation({
-      title: "Отозвать доступ клиента?",
-      message: "Клиент будет удалён, а его VPN-доступ прекратится немедленно.",
-      confirmLabel: "Отозвать доступ", danger: true,
+      title: "Отозвать доступ",
+      message: "Подключение будет удалено, а доступ этого устройства к VPN прекратится сразу.",
+      confirmLabel: "Отозвать", danger: true,
     })) return;
     setBusy(true);
     try { await request(`/clients/${id}`, { method: "DELETE" }); await loadClients(); }
@@ -1104,6 +1104,7 @@ export default function Home() {
       }
       setToken(candidateToken);
       setLoginPassword("");
+      setLoginPasswordVisible(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось войти в панель");
     } finally {
@@ -1112,19 +1113,19 @@ export default function Home() {
   }
 
   if (!token) {
-    return <main className="loginPage">
-      <div className="loginGlow" />
-      <form className="loginCard" onSubmit={login}>
-        <Logo />
-        <div><p className="eyebrow">INFRASTRUCTURE CONTROL</p><h1>Вход в панель управления сервером.</h1></div>
-        <p className="loginCopy">Введите учётные данные администратора для доступа к панели.</p>
-        <label>Логин<input type="text" value={loginUser} onChange={(event) => setLoginUser(event.target.value)} autoFocus required /></label>
-        <label>Пароль<input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required /></label>
-        <button className="primaryButton" type="submit" disabled={busy}>{busy ? "Проверка…" : "Открыть панель"} <span>→</span></button>
-        {error && <div className="errorBox">{error}</div>}
-      </form>
-      <VersionFooter />
-    </main>;
+    return <LoginView
+      loginUser={loginUser}
+      loginPassword={loginPassword}
+      loginPasswordVisible={loginPasswordVisible}
+      error={error}
+      busy={busy}
+      version={appVersion}
+      commit={buildCommit}
+      setLoginUser={setLoginUser}
+      setLoginPassword={setLoginPassword}
+      setLoginPasswordVisible={setLoginPasswordVisible}
+      login={login}
+    />;
   }
 
   const memUsed = overview ? 100 - overview.resources.memory_available / overview.resources.memory_total * 100 : 0;
@@ -1183,12 +1184,45 @@ export default function Home() {
     Boolean(applicationSecurity?.control_command_protected),
   ];
   const securityScore = Math.round(securityChecks.filter(Boolean).length / securityChecks.length * 100);
+  const securityPerimeterChecks = [
+    Boolean(firewall?.active),
+    Boolean(firewall?.vpn_policy_healthy),
+    panelAccessHealthy,
+    Boolean(fail2ban?.active && fail2ban?.jail_active),
+    sshProtected,
+    ssh?.active === false || ssh?.x11_forwarding === "no",
+  ];
+  const securitySystemChecks = [
+    Boolean(security) && Number(updates?.available || 0) === 0 && !updates?.reboot_required,
+    Boolean(updates?.automatic),
+    Boolean(securitySystem?.apparmor?.active),
+    Boolean(securitySystem?.auditd_active),
+    Boolean(securitySystem?.syn_cookies),
+    Boolean(securitySystem?.rp_filter_valid && securitySystem?.dmesg_restricted),
+    Boolean(securitySystem?.redirects_disabled && securitySystem?.source_route_disabled),
+  ];
+  const securityApplicationChecks = [
+    applicationVersion?.outdated === false,
+    true,
+    true,
+    Boolean(applicationSecurity?.admin_password_strong),
+    Boolean(applicationSecurity?.secrets_protected),
+    Boolean(applicationSecurity?.api_local_only),
+    Boolean(applicationSecurity?.control_command_protected),
+    Boolean(applicationSecurity?.cors_restricted),
+  ];
   const protocolTab = (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(tab) ? tab as Protocol : undefined;
   const activeProtocol = protocolTab ? protocolStatuses[protocolTab] : undefined;
   const activeProtocolRate = protocolTab ? protocolRates[protocolTab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
   const activeProtocolImage = protocolTab ? protocolImages.find((image) => image.id === protocolTab) : undefined;
+  const protocolCode = protocolTab === "wg" ? "WG" : protocolTab === "awg" ? "AWG" : protocolTab === "shadowsocks" ? "SS" : protocolTab === "vless-reality-xhttp" ? "VRX" : "";
+  const protocolIsTunnel = protocolTab === "wg" || protocolTab === "awg";
+  const protocolOperational = Boolean(activeProtocol && (protocolIsTunnel ? activeProtocol.active && activeProtocol.service_active : activeProtocol.service_active));
+  const protocolAvailability = activeProtocol?.history.availability_percent ?? (protocolOperational ? 100 : 0);
+  const protocolDiagnosticsLabel = activeProtocol?.diagnostics?.status === "healthy" ? "Стабильно" : activeProtocol?.diagnostics?.status === "critical" ? "Критично" : activeProtocol?.diagnostics?.status === "warning" ? "Требует внимания" : "Не проверено";
+  const protocolResourceAvailable = activeProtocol?.resources?.items?.filter((item) => item.available).length || 0;
+  const protocolResourceTotal = activeProtocol?.resources?.items?.length || 0;
   const operationActive = ["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(application?.action?.state || "");
-  const operationProgress = Math.max(0, Math.min(100, application?.action?.progress || (operationActive ? 5 : 100)));
   const operationName = application?.action?.action || "";
   const operationLabel = actionLabels[operationName.split(":")[0]] || operationName;
   const nodeHasError = Boolean(error) || application?.action?.state === "failed" || application?.action?.result === "failed";
@@ -1204,652 +1238,248 @@ export default function Home() {
     : nodeDegraded ? "Нарушение работы"
     : "В сети";
 
-  return <main className="shell">
-    <aside className="sidebar">
-      <Logo />
-      <nav>{navigation.map((id) =>
-        <button key={id} onClick={() => setTab(id)} className={`navItem ${tab === id ? "active" : ""}`}>
-          <b>{labels[id]}</b>{id === "clients" && <em>{clients.length}</em>}
-        </button>
-      )}
-        {protocolCategories.filter((category) => category.images.some((image) => image.installed)).map((category) => {
-          const available = category.images.filter((image) => image.installed);
-          if (available.length === 1) {
-            const image = available[0];
-            return <button key={category.id} onClick={() => setTab(image.id as Tab)} className={`navItem ${tab === image.id ? "active" : ""}`}>
-              <b>{image.name}</b>
-            </button>;
-          }
-          return <div className="settingsWrap moduleMenuWrap" key={category.id}>
-            <button onClick={() => {
-              setSettingsOpen(false);
-              setModuleMenuOpen((value) => value === category.id ? "" : category.id);
-            }} className={`navItem moduleToggle ${available.some((image) => image.id === tab) ? "active" : ""}`}>
-              <b>{category.name}</b>
-            </button>
-            {moduleMenuOpen === category.id && <div className="settingsMenu moduleMenu">
-              {available.map((image) => <button key={image.id} onClick={() => {
-                setTab(image.id as Tab);
-                setModuleMenuOpen("");
-              }} className={`navItem ${tab === image.id ? "active" : ""}`}><b>{image.name}</b></button>)}
-            </div>}
-          </div>;
-        })}
-        <div className="settingsWrap" ref={settingsRef}><button onClick={() => {
-          setModuleMenuOpen("");
-          setSettingsOpen((value) => !value);
-        }} className={`navItem settingsToggle ${tab === "dns" || tab === "security" || tab === "application" || tab === "services" ? "active" : ""}`}>
-          <b>Настройки</b>
-        </button>
-        {settingsOpen && <div className="settingsMenu">
-          {(["dns", "security", "application", "services"] as Tab[]).map((id) =>
-            <button key={id} onClick={() => { setTab(id); setSettingsOpen(false); }} className={`navItem ${tab === id ? "active" : ""}`}>
-              <b>{labels[id]}</b>
-            </button>
-          )}
-        </div>}
-        </div>
-      </nav>
-      <div className={`locationCard ${nodeState}`}><span className="healthDot" /><div><small>{nodeStateLabel}</small><strong>{overview?.server.city}</strong><p>{overview?.server.country} · {overview?.server.public_endpoint || overview?.server.public_ip}</p></div></div>
-    </aside>
+  const visualArt =
+    tab === "overview" ? "overview"
+    : tab === "mihomo" ? "mihomo"
+    : tab === "clients" || tab === "access-beta" ? "direct"
+    : tab === "dns" ? "network"
+    : tab === "security" || tab === "services" ? "security"
+    : tab === "application" ? "modules"
+    : "modules";
 
-    <section className="content">
-      {operationActive && <aside className="operationBanner" aria-live="polite">
-        <span className="operationSpinner" />
-        <div>
-          <strong>{operationLabel || "Выполняется системная операция"}</strong>
-          <small>{application?.action?.message || "Сервер выполняет команду…"} · {operationProgress}%</small>
-          <i><b style={{ width: `${operationProgress}%` }} /></i>
-        </div>
-      </aside>}
-      <header className="topbar">
-        <div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p className="subtitle">{overview?.server.city}, {overview?.server.country} · управление инфраструктурой</p></div>
-        <div className="topActions">
-          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={busy} onClick={() => setAutoRefresh((value) => !value)}><i />{autoRefresh ? `Авто · ${["overview", "clients", "wg", "awg", "security"].includes(tab) ? LIVE_SAMPLE_SECONDS : tab === "mihomo" ? "15" : tab === "application" || tab === "services" ? "10" : "30"}с` : "Пауза"}</button>
-          {lastUpdated && <span className="updatedAt">{lastUpdated.toLocaleTimeString("ru-RU")}</span>}
-          <button className="iconButton" onClick={() => void refreshCurrent(true)} aria-label="Обновить текущий модуль">↻</button>
-          <button className="ghostButton" onClick={() => { sessionStorage.removeItem("312-token"); setToken(""); }}>Выйти</button>
-        </div>
-      </header>
+  return <AppWorkspace
+    activeTab={tab}
+    visualArt={visualArt}
+    protocolImages={protocolImages}
+    showConnections={installedProtocols.length > 0}
+    nodeState={nodeState}
+    nodeStateLabel={nodeStateLabel}
+    server={overview?.server}
+    onNavigate={(id) => setTab(id as Tab)}
+    operationAction={application?.action}
+    operationLabel={operationLabel}
+    operationActive={operationActive}
+    applicationStateTitle={applicationStateTitle}
+    uptimeLabel={uptime(overview?.server.uptime_s)}
+    loadLabel={overview?.resources.load1?.toFixed(2) || "—"}
+    cpuLabel={`${(overview?.resources.cpu_percent || 0).toFixed(0)}% · ${overview?.resources.cpu_count || "—"}c`}
+    ramLabel={`${memUsed.toFixed(0)}%`}
+    networkLabel={`↓ ${bytes(networkRate.rx)}/с`}
+    autoRefresh={autoRefresh}
+    autoRefreshLabel={`${["overview", "clients", "wg", "awg", "shadowsocks", "vless-reality-xhttp", "security"].includes(tab) ? LIVE_SAMPLE_SECONDS : tab === "mihomo" ? "15" : tab === "application" || tab === "services" ? "10" : "30"}s`}
+    busy={busy}
+    lastUpdated={lastUpdated}
+    onToggleAutoRefresh={() => setAutoRefresh((value) => !value)}
+    onRefresh={() => void refreshCurrent(true)}
+    onLogout={() => { sessionStorage.removeItem("312-token"); setToken(""); }}
+  >
+      {tab !== "overview" && tab !== "access-beta" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city}, {overview?.server.country} · управление инфраструктурой</p></div></div>}
       {error && <div className="errorBox">{error}</div>}
       {notice && <div className="successNotice" role="status"><span>✓</span>{notice}<button onClick={() => setNotice("")} aria-label="Закрыть уведомление">×</button></div>}
-      {busy && <div className="loadingLine" />}
+      {tab === "overview" && (
+        <OverviewDashboard
+          token={token}
+          overview={overview}
+          memUsed={memUsed}
+          diskUsed={diskUsed}
+          memoryUsedBytes={memoryUsedBytes}
+          diskUsedBytes={diskUsedBytes}
+          networkRate={networkRate}
+          resourceHistory={resourceHistory}
+          clients={clients}
+          protocolImages={protocolImages}
+          installingProtocol={installingProtocol}
+          busy={busy}
+          onInstallProtocol={(image) => void installProtocol(image)}
+          onUpdateProtocol={(image) => void updateProtocol(image)}
+        />
+      )}
 
-      {tab === "overview" && <section className="overview">
-        <article className="heroPanel panel">
-          <div><p className="eyebrow">PRIMARY NODE</p><h2>{overview?.server.city}</h2><p className="mono">{overview?.server.country} · {overview?.server.public_endpoint || overview?.server.public_ip}{overview?.server.public_ipv6 ? ` · IPv6 ${overview.server.public_ipv6}` : ""}</p></div>
-          <div className={`nodeStatus ${nodeState}`}><span className="pulse" /><div><strong>{applicationStateTitle}</strong><small>{operationActive ? application?.action?.message || "Команда выполняется" : `Uptime ${uptime(overview?.server.uptime_s)}`}</small></div></div>
-        </article>
-        <div className="metrics">
-          <Metric title="CPU · СЕРВЕР" value={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%`} percent={overview?.resources.cpu_percent || 0} detail={`Нагрузка ${overview?.resources.load1.toFixed(2) || "—"} · ядер ${overview?.resources.cpu_count || "—"} · свободно ${Math.max(0, 100 - (overview?.resources.cpu_percent || 0)).toFixed(0)}%`} history={resourceHistory.load} />
-          <Metric title="RAM · СЕРВЕР" value={bytes(memoryUsedBytes)} percent={memUsed} detail={`Использовано ${memUsed.toFixed(0)}% · свободно ${bytes(overview?.resources.memory_available)} · всего ${bytes(overview?.resources.memory_total)}`} history={resourceHistory.memory} />
-          <Metric title="ДИСК · СЕРВЕР" value={bytes(diskUsedBytes)} percent={diskUsed} detail={`Использовано ${diskUsed.toFixed(0)}% · свободно ${bytes(overview?.resources.disk_available)} · всего ${bytes(overview?.resources.disk_total)}`} history={resourceHistory.disk} />
-          <article className="panel metricCard networkMetric">
-            <div><p className="eyebrow">NETWORK</p><h2>{bytes(networkRate.rx)}<small>/с</small></h2></div>
-            <TrendGraph values={resourceHistory.rx} secondary={resourceHistory.tx} relative formatValue={(value) => `${bytes(value)}/с`} ariaLabel="История сетевой нагрузки" />
-              <div className="networkDirections">
-                <span>↓ Входящая <strong>{bytes(networkRate.rx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.rx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
-                <span>↑ Исходящая <strong>{bytes(networkRate.tx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.tx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
-              </div>
-              <div className="networkTotals"><span>Всего получено <strong>{bytes(overview?.resources.network_rx)}</strong></span><span>Всего отправлено <strong>{bytes(overview?.resources.network_tx)}</strong></span></div>
-            </article>
-          </div>
-        <article className="panel protocolSummary">
-          <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div></div>
-          {(["wg", "awg"] as TunnelProtocol[]).filter((protocol) => overview?.protocols[protocol].active).map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
-            <span className={`protocol ${protocol}`}>{protocol === "wg" ? "WG" : "AW"}</span>
-            <p><strong>{protocol === "wg" ? "WireGuard" : "AmneziaWG"}</strong><small>{protocolImages.find((image) => image.id === protocol)?.description || `${overview?.protocols[protocol].interface} · UDP ${overview?.protocols[protocol].port}`}</small></p>
-            <em className="onlinePill">Активен</em><b>›</b>
-          </button>)}
-          {protocolImages.filter((image) => image.installed && image.id !== "wg" && image.id !== "awg").map((image) => <button key={image.id} onClick={() => setTab(image.id as Tab)}>
-            <span className={`protocol ${image.id}`}>{image.id === "mihomo" ? "MH" : image.id === "shadowsocks" ? "SS" : "VRX"}</span>
-            <p><strong>{image.name}</strong><small>{image.description}</small></p>
-            <em className={image.active ? "onlinePill" : "offlinePill"}>{image.active ? "Активен" : "Остановлен"}</em>
-            <b>›</b>
-          </button>)}
-          {protocolImages.filter((image) => !image.installed).map((image) =>
-            <div className="protocolInstaller" key={image.id}>
-              <span className={`protocol ${image.id}`}>{image.id === "wg" ? "WG" : image.id === "awg" ? "AW" : image.id === "mihomo" ? "MH" : image.id === "shadowsocks" ? "SS" : "VRX"}</span>
-              <p><strong>{image.name}</strong><small>{image.description}</small></p>
-              <button onClick={() => void installProtocol(image)} disabled={busy || Boolean(installingProtocol)}>
-                {installingProtocol === image.id ? "Устанавливается…" : "Установить"}
-              </button>
-            </div>
-          )}
-          {!overview?.protocols.wg.active && !overview?.protocols.awg.active && !protocolImages.length && <div className="protocolEmpty"><span>—</span><p><strong>Нет доступных образов</strong><small>Добавьте manifest.json в каталог protocol-images</small></p></div>}
-        </article>
-      </section>}
+      {tab === "access-beta" && <AccessProfilesBeta token={token} />}
 
       {tab === "mihomo" && (
         <MihomoPage
           token={token}
-          onRemoved={() => {
-            setTab("overview");
-            void loadOverview();
+          confirmAction={askConfirmation}
+          coreBusy={installingProtocol === "remove-mihomo"}
+          onRemoveCore={async () => {
+            const image = protocolImages.find((item) => item.id === "mihomo" && item.installed);
+            if (image) await removeProtocol(image);
           }}
         />
       )}
 
-      {tab === "dns" && <section className="dnsWorkspace">
-        <article className="panel dnsHero">
-          <div><p className="eyebrow">DNS POLICY</p><h2>DNS без скрытых изменений</h2><p>Выберите резолвер и точно укажите, куда записать его адреса. Действующие WG/AWG-подключения не изменяются: настройка попадёт только в новые конфигурации.</p></div>
-          <div className="dnsHeroActions"><div className="dnsHeroStat"><strong>{dns?.providers.length || 0}</strong><span>доступных профилей</span></div><button className="dnsCheckAll" type="button" onClick={() => void checkDnsProviders()} disabled={checkingDns}><span aria-hidden="true">↻</span>{checkingDns ? "Идёт проверка…" : "Проверить все DNS"}</button></div>
-        </article>
-        <div className="dnsSetupGrid"><article className="panel dnsPolicy"><div className="dnsSectionTitle"><span>1</span><div><p className="eyebrow">ЧТО ИЗМЕНИТЬ ПРИ СОХРАНЕНИИ</p><h3>Область применения</h3></div></div><p className="dnsSectionHint">Снятый флажок означает «оставить текущее значение», а не отключить DNS.</p><div className="dnsPolicyGrid">
-          <label><input type="checkbox" checked={dnsDraft?.apply_wg ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_wg: event.target.checked } : value)} /><span><strong>Новые профили WireGuard</strong><small>Добавит строку DNS в следующие скачанные конфиги · текущие не затронет</small></span></label><label><input type="checkbox" checked={dnsDraft?.apply_awg ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_awg: event.target.checked } : value)} /><span><strong>Новые профили AmneziaWG</strong><small>Только следующие скачанные конфиги · текущие не затронет</small></span></label><label><input type="checkbox" checked={dnsDraft?.apply_shadowsocks ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_shadowsocks: event.target.checked } : value)} /><span><strong>Подсказка для Shadowsocks</strong><small>Сохранит рекомендацию · DNS в клиенте меняется вручную</small></span></label><label><input type="checkbox" checked={dnsDraft?.apply_vrx ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_vrx: event.target.checked } : value)} /><span><strong>Серверный DNS Xray</strong><small>Проверит конфиг и перезапустит только службу VRX</small></span></label>
-        </div></article><article className="panel dnsOptions"><div className="dnsSectionTitle"><span>2</span><div><p className="eyebrow">ПОЛИТИКА</p><h3>Как использовать DNS</h3></div></div><p className="dnsSectionHint">Дополнительные правила отказоустойчивости и защиты.</p><div className="dnsOptionList"><label><span><strong>Резервный DNS</strong><small>Использовать второй IP при недоступности основного</small></span><input type="checkbox" checked={dnsDraft?.fallback_enabled ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, fallback_enabled: event.target.checked } : value)} /></label><label><span><strong>DoH для VRX</strong><small>Xray использует зашифрованный DNS провайдера; WG, AWG и SS сохраняют IP-DNS</small></span><input type="checkbox" checked={dnsDraft?.prefer_encrypted ?? false} onChange={(event) => setDnsDraft((value) => value ? { ...value, prefer_encrypted: event.target.checked } : value)} /></label></div></article></div>
-        <article className="panel dnsResolverSection"><div className="dnsSectionHead"><div className="dnsSectionTitle"><span>3</span><div><p className="eyebrow">DNS-ПРОВАЙДЕР</p><h3>Выберите резолвер</h3></div></div><small>Задержка измеряется непосредственно с сервера</small></div><div className="dnsCatalog">
-          {(dns?.providers || []).map((provider) => { const check = dnsChecks[provider.id]; const selected = dnsDraft?.selected_id === provider.id; return <article className={`dnsProvider ${selected ? "selected" : ""}`} key={provider.id}><header><span className={provider.country === "RU" ? "dnsCountry ru" : "dnsCountry"}>{provider.country}</span><div><strong>{provider.name}</strong><small>{provider.filter}</small></div>{selected && <i aria-label="Выбран">✓</i>}</header><code>{provider.addresses.join(" · ")}</code><div className="dnsChecks"><span className={check?.udp_ok ? "ok" : ""}><small>UDP</small><strong>{check?.udp_ms != null ? `${check.udp_ms} мс` : "—"}</strong></span><span className={check?.tcp_ok ? "ok" : ""}><small>TCP</small><strong>{check?.tcp_ms != null ? `${check.tcp_ms} мс` : "—"}</strong></span><span className={check?.doh_ok ? "ok" : ""}><small>DoH</small><strong>{check?.doh_ms != null ? `${check.doh_ms} мс` : provider.doh_url ? "—" : "нет"}</strong></span></div><div className="dnsProviderActions"><button type="button" className="dnsTestButton" onClick={() => void checkDnsProviders(provider.id)}>Проверить</button><button type="button" className="dnsSelectButton" disabled={selected} onClick={() => setDnsDraft((value) => value ? { ...value, selected_id: provider.id } : value)}>{selected ? "Выбран" : "Выбрать"}</button></div></article>; })}
-        </div></article>
-        <article className="panel customDns">
-          <div className="dnsSectionHead"><div className="dnsSectionTitle"><span>4</span><div><p className="eyebrow">СВОЙ РЕЗОЛВЕР</p><h3>Собственный DNS</h3></div></div><button type="button" className="dnsCustomButton" onClick={() => setDnsDraft((value) => value ? { ...value, selected_id: "custom", custom: value.custom || { name: "Собственный DNS", addresses: [""], doh_url: "" } } : value)}>Настроить свой DNS</button></div>
-          {dnsDraft?.selected_id === "custom" && <div className="customDnsFields"><label>Название<input value={dnsDraft.custom?.name || ""} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { addresses: [""], doh_url: "" }), name: event.target.value } } : value)} /></label><label>IP-адреса через запятую<input value={(dnsDraft.custom?.addresses || []).join(", ")} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { name: "Собственный DNS", doh_url: "" }), addresses: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) } } : value)} /></label><label>DoH URL<input type="url" placeholder="https://dns.example/dns-query" value={dnsDraft.custom?.doh_url || ""} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { name: "Собственный DNS", addresses: [""] }), doh_url: event.target.value } } : value)} /></label></div>}
-        </article>
-        <article className="panel dnsCurrent"><div><p className="eyebrow">ФАКТИЧЕСКОЕ СОСТОЯНИЕ</p><h3>Что используется сейчас</h3><small>Метка «другое значение» показывает расхождение с выбранной карточкой DNS.</small></div><div className="dnsProtocolEffect">{Object.entries(dns?.protocol_effect_details || {}).map(([protocol, effect]) => <div className={effect.matches_selected ? "matches" : "differs"} key={protocol}><strong>{protocol === "vless-reality-xhttp" ? "VRX · сервер" : protocol === "shadowsocks" ? "SS · рекомендация" : `${protocol.toUpperCase()} · новые профили`}</strong><span>{effect.value}</span><em>{effect.matches_selected ? "совпадает с выбранным" : "другое значение"}</em></div>)}</div></article><div className="dnsSaveBar"><p><small>ПОСЛЕ НАЖАТИЯ ИЗМЕНЯТСЯ ТОЛЬКО ОТМЕЧЕННЫЕ ОБЛАСТИ</small><strong>{dns?.providers.find((item) => item.id === dnsDraft?.selected_id)?.name || dnsDraft?.custom?.name || "DNS не выбран"}</strong><span>Существующие WG/AWG-конфиги, ключи и активные соединения останутся без изменений.</span></p><button type="button" onClick={() => void saveDnsSettings()} disabled={busy || !dnsDraft}>{busy ? "Применяем…" : "Применить выбранное"}</button></div>
-      </section>}
+      {tab === "dns" && <DnsView
+        dns={dns}
+        dnsDraft={dnsDraft}
+        dnsChecks={dnsChecks}
+        checkingDns={checkingDns}
+        busy={busy}
+        setDnsDraft={setDnsDraft}
+        checkDnsProviders={checkDnsProviders}
+        saveDnsSettings={saveDnsSettings}
+      />}
 
-      {tab === "security" && <section className="securityGrid">
-        <article className="panel securityHero">
-          <div className="scoreRing" style={{ "--score": `${securityScore * 3.6}deg` } as React.CSSProperties}><strong>{securityScore}%</strong></div>
-          <div><p className="eyebrow">SECURITY POSTURE</p><h2>{securityLoading ? "Обновляем информацию…" : securityScore >= 85 ? "Стабильно" : securityScore >= 60 ? "Требует внимания" : "Безопасность не гарантирована"}</h2><span>{securityLoading ? "Идёт проверка системы и служб" : `${securityChecks.filter(Boolean).length} из ${securityChecks.length} проверок пройдено`}</span></div>
-        </article>
-        <div className="securityStats">
-          <article className="panel"><h3>SSH</h3><small>ОТКЛОНЕНО ЗА 24Ч</small><strong>{String(security?.failed_ssh_records_24h ?? "—")}</strong><span>{String(ssh?.active_connections ?? "—")} активных подключений · {String(security?.accepted_ssh_24h ?? "—")} успешных входов за 24ч</span></article>
-          <article className="panel"><h3>NETWORK LISTENERS</h3><small>АКТИВНЫЕ СЕТЕВЫЕ СЛУЖБЫ</small><strong>{listeners.length}</strong><span>TCP {listenerSummary?.tcp ?? "—"} · UDP {listenerSummary?.udp ?? "—"} · локально {listenerSummary?.local_only ?? "—"}<br />UFW контролирует {firewall?.rules?.length || 0} правил доступа</span></article>
-          <article className="panel"><h3>CORE UPDATES</h3><small>KERNEL &amp; PACKAGES</small><strong>{String(updates?.available ?? "—")}</strong><span>{updates?.security || 0} обновлений безопасности</span><time>{updates?.refreshing ? "Идёт точная проверка…" : updates?.checked_at ? `Проверено: ${new Date(updates.checked_at).toLocaleString("ru-RU")}` : "Дата проверки пока недоступна"}</time></article>
-        </div>
-        <article className="panel systemControls">
-          <div><p className="eyebrow">SYSTEM POWER & KERNEL</p><h2>Системные действия</h2><span>Команды выполняются вне процесса панели через systemd</span></div>
-          <div className="systemButtons">
-            <button onClick={() => void runApplicationAction("kernel-update")} disabled={busy}><strong>Обновить сервер</strong><small>{updates?.kernel_available ? "ядро и пакеты · доступно обновление" : "ядро и системные пакеты"}</small></button>
-            <button onClick={() => void runApplicationAction("reboot")} disabled={busy}><strong>Перезагрузить сервер</strong><small>Корректно завершает службы и запускает VPS заново</small></button>
-            <button className="poweroffButton" onClick={() => void runApplicationAction("poweroff")} disabled={busy}><strong>Выключить сервер</strong><small>потребуется запуск у провайдера</small></button>
-          </div>
-        </article>
-        <article className="panel securityList compactSecurity">
-          <SecurityActionRow ok={Boolean(firewall?.active)} title="Firewall" text={`UFW · ${firewall?.rules?.length || 0} правил`} onAction={() => void fixSecurity("secure")} />
-          <SecurityActionRow
-            ok={Boolean(firewall?.vpn_policy_healthy)}
-            title="VPN FIREWALL POLICY"
-            text={`Forwarding: ${firewall?.forwarding_enabled ? "ON" : "OFF"} · Stateful return: ${firewall?.stateful_return ? "ON" : "OFF"} · NAT/route: ${firewall?.vpn_policy_healthy ? "confirmed" : "invalid"}`}
-            onAction={() => void fixSecurity("vpn-firewall")}
-            actionLabel="Исправить"
-          />
-          <SecurityActionRow
-            ok={panelAccessHealthy}
-            title="Доступ к панели"
-            text={panelSecurity?.publicly_accessible
-              ? `Публичный TCP ${panelSecurity.port || 80} разрешён правилами UFW`
-              : `Из интернета закрыт · доступ только через ${(panelSecurity?.allowed_interfaces || []).join(" / ") || "WG / AWG"}`}
-            onAction={() => void fixSecurity("secure")}
-          />
-          <SecurityActionRow ok={Boolean(fail2ban?.active && fail2ban?.jail_active)} title="Fail2ban · SSH" text={`В бане ${fail2ban?.currently_banned || 0} · всего ${fail2ban?.total_banned || 0}`} onAction={() => void fixSecurity("secure")} />
-          <SecurityActionRow
-            ok={sshProtected}
-            title="SSH · административный доступ"
-            text={ssh?.active === false
-              ? "Служба остановлена · входящие SSH-подключения не принимаются"
-              : `Из интернета: ${ssh?.publicly_allowed ? "открыт по согласованной политике" : "закрыт"} · Fail2ban: ${fail2ban?.active && fail2ban?.jail_active ? "защищает" : "не защищает"} · Password: ${String(ssh?.password_authentication || "unknown")} · Root: ${String(ssh?.permit_root_login || "unknown")}`}
-            onAction={() => void fixSecurity("secure")}
-          />
-          <SecurityActionRow ok={securityLoading || (Number(updates?.available || 0) === 0 && !updates?.reboot_required)} title="Обновления Ubuntu" text={`${String(updates?.available ?? "—")} пакетов${updates?.reboot_required ? " · нужен reboot" : ""}`} onAction={() => void fixSecurity("kernel-update")} actionLabel="Обновить" />
-          <SecurityActionRow ok={Boolean(updates?.automatic)} title="Автоматические обновления" text={updates?.automatic ? "Unattended upgrades · ON" : "Unattended upgrades · OFF"} onAction={() => void fixSecurity("secure")} />
-          <SecurityActionRow
-            ok={applicationVersion?.outdated === false}
-            title="Версия приложения"
-            text={applicationVersion?.refreshing && applicationVersion?.outdated == null
-              ? `Проверяется ветка ${applicationVersion?.branch || "main"}…`
-              : applicationVersion?.error
-                ? applicationVersion.error
-                : applicationVersion?.outdated
-                  ? `Устарела: ${applicationVersion.current_commit || "unknown"} · ${applicationVersion.branch || "stabl"}: ${applicationVersion.latest_commit || "unknown"}`
-                  : `Актуальна: ${applicationVersion?.current_commit || "unknown"} · ветка ${applicationVersion?.branch || "main"}`}
-            onAction={() => void runApplicationAction(applicationVersion?.branch === "main" ? "test-update" : "update")}
-            actionLabel="Обновить"
-          />
-          <SecurityActionRow ok={Boolean(securitySystem?.apparmor?.active)} title="AppArmor" text={`${securitySystem?.apparmor?.profiles || 0} профилей · ${securitySystem?.apparmor?.active ? "активен" : "выключен"}`} onAction={() => void fixSecurity("secure")} />
-          <SecurityActionRow ok={Boolean(securitySystem?.auditd_active)} title="Аудит действий" text={`auditd · ${securitySystem?.auditd_active ? "активен" : "остановлен"}`} onAction={() => void fixSecurity("secure")} />
-          <SecurityActionRow ok={Boolean(securitySystem?.syn_cookies)} title="Защита TCP" text={`SYN ${securitySystem?.syn_cookies ? "ON" : "OFF"} · Forwarding ${securitySystem?.ipv4_forwarding ? "ON" : "OFF"}`} onAction={() => void fixSecurity("secure")} />
-          <SecurityActionRow ok={Boolean(securitySystem?.rp_filter_valid && securitySystem?.dmesg_restricted)} title="Защита ядра" text={`RP ${securitySystem?.rp_filter_mode === 1 ? "strict" : securitySystem?.rp_filter_mode === 2 ? "loose" : securitySystem?.rp_filter_valid ? "VPN-safe" : "OFF"} · dmesg ${securitySystem?.dmesg_restricted ? "restricted" : "open"}`} onAction={() => void fixSecurity("secure")} />
-          <SecurityActionRow
-            ok={Boolean(securitySystem?.redirects_disabled && securitySystem?.source_route_disabled)}
-            title="KERNEL ROUTING"
-            text={`Redirects: ${securitySystem?.redirects_disabled ? "blocked" : "allowed"} · Source route: ${securitySystem?.source_route_disabled ? "blocked" : "allowed"}`}
-            onAction={() => void fixSecurity("secure")}
-          />
-          <SecurityActionRow
-            ok={ssh?.active === false || ssh?.x11_forwarding === "no"}
-            title="SSH-туннели"
-            text={ssh?.active === false ? "Служба остановлена · настройки туннелей не применяются" : `X11: ${ssh?.x11_forwarding || "unknown"} · TCP forwarding: ${ssh?.tcp_forwarding || "unknown"} (оставлен для административного контроля) · MaxAuthTries: ${ssh?.max_auth_tries || "unknown"}`}
-            onAction={() => void fixSecurity("secure")}
-          />
-          <SecurityActionRow ok title="Учётные записи" text={`sudo ${securitySystem?.sudo_users?.length || 0} · login ${securitySystem?.login_users?.length || 0}`} onAction={() => void runApplicationAction("integrity-check")} actionLabel="Проверить" alwaysAction />
-          <SecurityActionRow
-            ok
-            title="Дополнительные VPN-службы"
-            text={Object.values(legacy).some((service) => service.active)
-              ? `Активно ${Object.values(legacy).filter((service) => service.active).length} · установлены отдельно и не управляются приложением`
-              : "Не обнаружены"}
-            onAction={() => void runApplicationAction("network-check")}
-            actionLabel="Проверить"
-            alwaysAction
-          />
-          <SecurityActionRow ok={Boolean(applicationSecurity?.admin_password_strong)} title="Пароль администратора" text={applicationSecurity?.admin_password_strong ? "Достаточная длина и стойкость пароля панели" : "Стандартный пароль считается небезопасным"} onAction={() => setPasswordDialog(true)} actionLabel="Изменить пароль" alwaysAction />
-          <SecurityActionRow ok={Boolean(applicationSecurity?.secrets_protected)} title="Секреты приложения" text={`/etc/vps-control.env · права ${applicationSecurity?.secrets_mode || "не определены"} · владелец root`} onAction={() => void fixSecurity("secure")} />
-          <SecurityActionRow ok={Boolean(applicationSecurity?.api_local_only)} title="Локальный API" text={applicationSecurity?.api_local_only ? "API слушает только 127.0.0.1:8000" : "API не найден локально или доступен на внешнем интерфейсе"} onAction={() => void fixSecurity("secure")} />
-          <SecurityActionRow ok={Boolean(applicationSecurity?.control_command_protected)} title="Команда управления" text={`vps-control · права ${applicationSecurity?.control_command_mode || "не определены"} · запись ограничена`} onAction={() => void fixSecurity("secure")} />
-          <SecurityActionRow ok={Boolean(applicationSecurity?.cors_restricted)} title="Доверенные источники" text={applicationSecurity?.cors_restricted ? "CORS ограничен заданными адресами панели" : "CORS разрешает запросы с произвольных источников"} onAction={() => void fixSecurity("secure")} />
-        </article>
-        <article className="panel listeners"><div className="panelHead"><div><p className="eyebrow">LIVE NETWORK</p><h2>Открытые порты</h2></div><span>{listeners.length} listeners · kernel {securitySystem?.kernel || "—"}</span></div><pre>{listeners.join("\n") || "Нет данных"}</pre></article>
-        <article className={`panel logDrawer ${securityLogsOpen ? "open" : ""}`}>
-          <button className="logDrawerToggle" onClick={() => setSecurityLogsOpen((value) => !value)}>
-            <span><strong>JOURNALCTL</strong><small>ПО ЗАПРОСУ · ЖУРНАЛЫ БЕЗОПАСНОСТИ</small></span><em>{securityLogsOpen ? "Скрыть ↑" : "Открыть ↓"}</em>
-          </button>
-          {securityLogsOpen && <div className="logDrawerBody"><div className="logTools"><div className="logTabs">
-            {(["ssh", "firewall", "system"] as const).map((source) =>
-              <button key={source} className={securityLogSource === source ? "active" : ""} onClick={() => { setSecurityLogSource(source); setSecurityLogs([]); }}>
-                {source === "ssh" ? "SSH" : source === "firewall" ? "Firewall" : "Система"}
-              </button>
-            )}
-          </div><div className="logActions"><span>{securityNewLogCount ? `${securityNewLogCount} новых · ` : ""}{autoRefresh ? `автообновление${securityLogsUpdatedAt ? ` · ${securityLogsUpdatedAt.toLocaleTimeString("ru-RU")}` : ""}` : "автообновление выключено"}</span><button className="miniButton" onClick={() => void loadSecurityLogs()}>Обновить</button><button className="miniButton" disabled={!securityLogs.length} onClick={() => downloadLogs(`security-${securityLogSource}-${new Date().toISOString().slice(0, 10)}.log`, securityLogs)}>Выгрузить</button></div></div>
-          <pre>{securityLogs.join("\n") || "В журнале нет записей"}</pre></div>}
-        </article>
-      </section>}
+      {tab === "security" && <SecurityView
+        securityLoading={securityLoading}
+        securityScore={securityScore}
+        securityChecks={securityChecks}
+        securityPerimeterChecks={securityPerimeterChecks}
+        securitySystemChecks={securitySystemChecks}
+        securityApplicationChecks={securityApplicationChecks}
+        firewall={firewall}
+        ssh={ssh}
+        updates={updates}
+        applicationVersion={applicationVersion}
+        securitySystem={securitySystem}
+        fail2ban={fail2ban}
+        listeners={listeners}
+        listenerSummary={listenerSummary}
+        legacy={legacy}
+        applicationSecurity={applicationSecurity}
+        panelSecurity={panelSecurity}
+        panelAccessHealthy={panelAccessHealthy}
+        sshProtected={sshProtected}
+        failedSshRecords24h={String(security?.failed_ssh_records_24h ?? "—")}
+        autoRefresh={autoRefresh}
+        securityLogsOpen={securityLogsOpen}
+        securityLogSource={securityLogSource}
+        securityLogs={securityLogs}
+        securityLogsUpdatedAt={securityLogsUpdatedAt}
+        securityNewLogCount={securityNewLogCount}
+        fixSecurity={fixSecurity}
+        runApplicationAction={runApplicationAction}
+        setPasswordDialog={setPasswordDialog}
+        setSecurityLogsOpen={setSecurityLogsOpen}
+        setSecurityLogSource={setSecurityLogSource}
+        setSecurityLogs={setSecurityLogs}
+        loadSecurityLogs={loadSecurityLogs}
+        downloadLogs={downloadLogs}
+      />}
 
-      {tab === "application" && <section className="applicationGrid">
-        <article className="panel applicationHero">
-          <div><p className="eyebrow">VPS-CONTROL</p><h2>Управление приложением</h2><p>Команды запускаются на сервере как отдельные системные задачи. Вы не потеряете интерфейс во время обновления или перезапуска.</p></div>
-          <span className={application?.api.active ? "onlinePill" : "offlinePill"}>{application?.api.active ? "API работает" : "API остановлен"}</span>
-        </article>
-        <article className="panel actionPanel">
-          <div className="panelHead"><div><p className="eyebrow">SUDO VPS-CONTROL</p><h2>Доступные действия</h2></div></div>
-          <div className="actionButtons">
-            <button onClick={() => void runApplicationAction("restart")} disabled={busy}><strong>Перезапустить приложение</strong><small>Перезапускает панель и API без перезагрузки VPS</small></button>
-            <button onClick={() => void runApplicationAction("update")} disabled={busy}><strong>Обновить приложение</strong><small>Устанавливает проверенный релиз из основной ветки stabl</small></button>
-            {serviceModeActive && <button onClick={() => void runApplicationAction("test-update")} disabled={busy}><strong>Переход на тестовую версию</strong><small>Собирает и устанавливает тестовую ветку main без публикации Release</small></button>}
-            {serviceModeActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={busy}><strong>Вернуться к рабочей версии</strong><small>Восстанавливает приложение, сохранённое перед переходом на main</small></button>}
-            <button onClick={() => void runApplicationAction("network-check")} disabled={busy}><strong>Проверить подключения</strong><small>Проверяет интернет, WG, AWG и доступность портов</small></button>
-            <button onClick={() => void runApplicationAction("integrity-check")} disabled={busy}><strong>Проверить целостность</strong><small>Проверяет файлы, права доступа и настройки компонентов</small></button>
-            <button onClick={() => void runApplicationAction("identity")} disabled={busy}><strong>Обновить данные сервера</strong><small>Повторно определяет публичный IP и географические данные VPS</small></button>
-            <button onClick={() => void runApplicationAction("optimize")} disabled={busy}><strong>Освободить ресурсы</strong><small>Удаляет безопасные временные данные и освобождает место</small></button>
-          </div>
-        </article>
-        <article className="panel systemControls">
-          <div><p className="eyebrow">SYSTEM POWER &amp; KERNEL</p><h2>Системные действия</h2><span>Команды выполняются через systemd и не блокируют интерфейс панели.</span></div>
-          <div className="systemButtons">
-            <button onClick={() => void runApplicationAction("kernel-update")} disabled={busy}><strong>Обновить сервер</strong><small>{updates?.kernel_available ? "Ядро и пакеты · доступно обновление" : "Ядро и системные пакеты"}</small></button>
-            <button onClick={() => void runApplicationAction("reboot")} disabled={busy}><strong>Перезагрузить сервер</strong><small>Корректно завершает службы и запускает VPS заново</small></button>
-            <button className="poweroffButton" onClick={() => void runApplicationAction("poweroff")} disabled={busy}><strong>Выключить сервер</strong><small>Потребуется запуск у провайдера</small></button>
-          </div>
-        </article>
-        <article className="panel panelAccess">
-          <div>
-            <p className="eyebrow">APPLICATION MODE</p>
-            <h3>{services?.panel_access?.public ? "Публичный доступ открыт" : "Доступ через защищённую сеть"}</h3>
-            <small>{services?.panel_access?.public ? "Панель доступна по публичному адресу сервера." : `Локальные адреса: ${services?.panel_access?.vpn_urls.join(" · ") || "недоступны"}`}</small>
-          </div>
-          <div className="panelAccessActions">
-            <label className="serviceModeSwitch">
-              <span><strong>Сервисный режим</strong><small>{serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
-              <input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy} /><i />
-            </label>
-            <label className="serviceModeSwitch protectedAccessSwitch">
-              <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? "публичный адрес открыт" : "только локальная сеть"}</small></span>
-              <input type="checkbox" checked={!services?.panel_access?.public} onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")} disabled={busy || !services || serviceModeActive} /><i />
-            </label>
-          </div>
-        </article>
-        <article className="panel statusPanel">
-          <div className="panelHead"><div><p className="eyebrow">RUNTIME</p><h2>Состояние компонентов</h2></div><span>{application?.containers.length || 0} службы</span></div>
-          <div className="runtimeRows">
-            <SecurityRow ok={Boolean(application?.api.active)} title="API панели" text={application?.api.active ? `Принимает команды интерфейса · автозапуск ${application.api.enabled ? "включён" : "отключён"}` : "Не принимает команды интерфейса"} okLabel="Работает" badLabel="Остановлен" />
-            {(application?.containers || []).map((container, index) =>
-              <SecurityRow
-                key={`${container.Name || container.Service}-${index}`}
-                ok={Boolean(container.healthy)}
-                title={container.component_name || container.Service || `Компонент ${index + 1}`}
-                text={`${container.purpose || "Компонент приложения"} · ${container.status_text || container.Status || container.State || "состояние неизвестно"}`}
-                okLabel="Работает"
-                badLabel="Остановлен"
-              />
-            )}
-            {application?.action?.action && <SecurityRow ok={application.action.state !== "failed" && application.action.result !== "failed"} title={`Последняя команда: ${actionLabels[application.action.action.split(":")[0]] || application.action.action}`} text={application.action.state === "running" ? "Команда выполняется системной службой" : application.action.result === "success" ? "Команда завершена без ошибок" : application.action.message || "Результат выполнения уточняется"} okLabel={application.action.state === "running" ? "Выполняется" : "Выполнена"} badLabel="Ошибка" />}
-          </div>
-        </article>
-        <article className="panel logPanel applicationLogs">
-          <div className="panelHead"><div><p className="eyebrow">SYSTEMD JOURNAL · СВЕЖИЕ СНАЧАЛА</p><h2>Журнал приложения</h2></div><div className="logActions"><button className="miniButton" onClick={() => void loadApplicationLogs()}>Обновить</button><button className="miniButton" disabled={!applicationLogs.length} onClick={() => downloadLogs(`application-${new Date().toISOString().slice(0, 10)}.log`, applicationLogs)}>Выгрузить</button></div></div>
-          <pre>{applicationLogs.join("\n") || "В журнале нет записей"}</pre>
-        </article>
-      </section>}
+      {tab === "application" && <ApplicationView
+        application={application}
+        services={services}
+        applicationVersion={applicationVersion}
+        updates={updates}
+        serviceModeActive={serviceModeActive}
+        busy={busy}
+        applicationLogs={applicationLogs}
+        runApplicationAction={runApplicationAction}
+        changeServiceMode={changeServiceMode}
+        changePanelAccess={changePanelAccess}
+        loadApplicationLogs={loadApplicationLogs}
+        downloadLogs={downloadLogs}
+      />}
 
-      {tab === "services" && <section className="servicesGrid">
-        <article className="panel servicesHero">
-          <div><p className="eyebrow">SYSTEMD CONTROL</p><h2>Службы и обслуживание</h2></div>
-          <div className="serviceSummary">
-            <span className={services?.failed_units ? "offlinePill" : "onlinePill"}>{services?.failed_units || 0} аварийных служб</span>
-            {services?.reboot_required && <span className="warningPill">Требуется перезагрузка</span>}
-          </div>
-        </article>
+      {tab === "services" && <ServicesDashboard
+        services={services}
+        busy={busy}
+        serviceModeActive={serviceModeActive}
+        loggingDraft={loggingDraft}
+        automationDraft={automationDraft}
+        onServiceAction={(serviceId, serviceName, action) => void runServiceAction(serviceId, serviceName, action)}
+        onServiceModeChange={(active) => void changeServiceMode(active)}
+        onPanelAccessChange={(mode) => void changePanelAccess(mode)}
+        onLoggingChange={updateLoggingDraft}
+        onSaveLogging={() => void saveLoggingSettings()}
+        onClearLogs={() => void clearManagedLogs()}
+        onAutomationChange={updateAutomation}
+        onSaveAutomation={() => void saveAutomation()}
+      />}
 
-        <article className="panel panelAccess">
-          <div>
-            <p className="eyebrow">APPLICATION MODE</p>
-            <h3>{services?.panel_access?.public ? "Публичный доступ открыт" : "Доступ через защищённый туннель"}</h3>
-            <small>{services?.panel_access?.public
-              ? "Панель доступна по публичному IP сервера."
-              : `Локальные адреса: ${services?.panel_access?.vpn_urls.join(" · ") || "недоступны"}`}</small>
-          </div>
-          <div className="panelAccessActions">
-            <label className="serviceModeSwitch">
-              <span><strong>Сервисный режим</strong><small>{serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
-              <input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy} />
-              <i />
-            </label>
-            <label className="serviceModeSwitch protectedAccessSwitch">
-              <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? "публичный адрес открыт" : "только локальная сеть"}</small></span>
-              <input
-                type="checkbox"
-                checked={!services?.panel_access?.public}
-                onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")}
-                disabled={busy || !services || serviceModeActive}
-              />
-              <i />
-            </label>
-          </div>
-        </article>
+      {protocolTab && activeProtocol && <ProtocolView
+        protocolTab={protocolTab}
+        activeProtocol={activeProtocol}
+        activeProtocolRate={activeProtocolRate}
+        activeProtocolImage={activeProtocolImage}
+        protocolCode={protocolCode}
+        protocolIsTunnel={protocolIsTunnel}
+        protocolOperational={protocolOperational}
+        protocolAvailability={protocolAvailability}
+        protocolDiagnosticsLabel={protocolDiagnosticsLabel}
+        protocolResourceAvailable={protocolResourceAvailable}
+        protocolResourceTotal={protocolResourceTotal}
+        installedProtocols={installedProtocols}
+        setTab={setTab}
+        protocolSettingsDraft={protocolSettingsDraft}
+        diagnosticsOpen={diagnosticsOpen}
+        resourcesOpen={resourcesOpen}
+        checkingDiagnostics={checkingDiagnostics}
+        checkingResources={checkingResources}
+        installingProtocol={installingProtocol}
+        busy={busy}
+        restartProtocol={restartProtocol}
+        updateProtocol={updateProtocol}
+        removeProtocol={removeProtocol}
+        changeProtocolSetting={changeProtocolSetting}
+        saveProtocolSettings={saveProtocolSettings}
+        toggleNetworkDiagnostics={toggleNetworkDiagnostics}
+        checkNetworkDiagnostics={checkNetworkDiagnostics}
+        toggleProtocolResources={toggleProtocolResources}
+        checkProtocolResources={checkProtocolResources}
+      />}
 
-        <article className="panel servicesPanel">
-          <div className="panelHead"><div><p className="eyebrow">MANAGED SERVICES</p><h2>Системные службы</h2></div><span>{services?.items.filter((item) => item.active).length || 0} активных</span></div>
-          <div className="serviceRows">
-            {(services?.items || []).map((service) => <div className="serviceRow" key={service.id}>
-              <i className={service.active ? "serviceOnline" : "serviceOffline"} />
-              <div><strong>{service.name}</strong><small>{service.unit} · {service.substate} · автозапуск: {service.enabled ? "да" : "нет"}</small></div>
-              <dl><div><dt>Перезапуски</dt><dd>{service.restarts}</dd></div><div><dt>Активна с</dt><dd>{service.active_since || "—"}</dd></div></dl>
-              <div className="serviceActions">
-                {service.controls.includes(service.active ? "restart" : "start") && <button onClick={() => void runServiceAction(service.id, service.name, service.active ? "restart" : "start")} disabled={busy}>{service.active ? "Перезапустить" : "Запустить"}</button>}
-                {service.active && (service.controls.includes("stop") || service.disabled_controls?.includes("stop")) && <button
-                  className="serviceStop"
-                  onClick={() => void runServiceAction(service.id, service.name, "stop")}
-                  disabled={busy || service.disabled_controls?.includes("stop")}
-                  title={service.disabled_controls?.includes("stop") ? "Остановка отключит панель управления и доступ к восстановлению" : undefined}
-                >Остановить</button>}
-              </div>
-            </div>)}
-          </div>
-        </article>
-
-        <article className="panel loggingControl">
-          <div>
-            <p className="eyebrow">LOG MANAGEMENT</p>
-            <h2>Запись и хранение журналов</h2>
-            <small>Системные службы, приложение, контейнеры и история мониторинга · {services?.logging?.disk_usage || "объём уточняется"}</small>
-          </div>
-          <div className="loggingSettings">
-            <label className="serviceModeSwitch protectedAccessSwitch">
-              <span><strong>Запись логов</strong><small>{loggingDraft?.persistent ? "сохраняются после перезагрузки" : "только временно, до перезагрузки"}</small></span>
-              <input
-                type="checkbox"
-                checked={loggingDraft?.persistent ?? true}
-                onChange={(event) => updateLoggingDraft({ persistent: event.target.checked })}
-                disabled={busy || !services}
-              />
-              <i />
-            </label>
-            <label className="loggingRetention">
-              <span><strong>Автоматическая очистка</strong><small>Срок хранения системных журналов</small></span>
-              <select
-                value={loggingDraft?.retention_days ?? 30}
-                onChange={(event) => updateLoggingDraft({ retention_days: Number(event.target.value) })}
-                disabled={busy || !services}
-              >
-                <option value={1}>1 день</option>
-                <option value={7}>7 дней</option>
-                <option value={14}>14 дней</option>
-                <option value={30}>30 дней</option>
-                <option value={90}>90 дней</option>
-                <option value={0}>Не очищать автоматически</option>
-              </select>
-            </label>
-            <button className="primaryButton logSaveButton" onClick={() => void saveLoggingSettings()} disabled={busy || !loggingDraft}>Сохранить</button>
-            <button className="dangerButton" onClick={() => void clearManagedLogs()} disabled={busy}>Очистить журналы</button>
-          </div>
-        </article>
-
-        <article className="panel automationCenter">
-          <div className="automationCenterHead">
-            <div><p className="eyebrow">MAINTENANCE SCHEDULE</p><h2>Плановое обслуживание</h2><small>Перезагрузка и безопасная очистка по расписанию</small></div>
-            <button onClick={() => void saveAutomation()} disabled={busy || !services}>Сохранить изменения</button>
-          </div>
-          <div className="automationRows"><AutomationEditor
-            title="Перезагрузка"
-            description="Плановая перезагрузка VPS. Используйте ночное окно с минимальной активностью."
-            value={automationDraft?.reboot}
-            timer={services?.timers.reboot}
-            onChange={(patch) => updateAutomation("reboot", patch)}
-          />
-          <AutomationEditor
-            title="Очистка"
-            description="Очистка apt-кэша, временных файлов и старых системных журналов."
-            value={automationDraft?.cleanup}
-            timer={services?.timers.cleanup}
-            onChange={(patch) => updateAutomation("cleanup", patch)}
-          />
-          </div>
-          <div className="automationNote">Persistent=true · пропущенная задача будет выполнена после следующего запуска сервера</div>
-        </article>
-      </section>}
-
-      {(tab === "shadowsocks" || tab === "vless-reality-xhttp") && activeProtocol && <section className="protocolMonitor">
-        <article className="panel protocolLiveHero">
-          <div>
-            <p className="eyebrow">LIVE TUNNEL</p>
-            <h2>{labels[tab]}</h2>
-            <p className="mono">{activeProtocol.address || "адрес не назначен"} · TCP {activeProtocol.listen_port || "—"} · {activeProtocol.peers} подключений</p>
-          </div>
-          <div className="protocolControlStack">
-            <div className={activeProtocol.service_active ? "protocolHealth online" : "protocolHealth"}>
-              <span className="pulse" />
-              <div>
-                <strong>{activeProtocol.service_active ? "Протокол работает" : "Протокол остановлен"}</strong>
-                <small>{activeProtocol.service_enabled ? "Автозапуск включён" : "Автозапуск отключён"} · активно {activeProtocol.online_peers}</small>
-              </div>
-            </div>
-            <div className="protocolActions">
-              <button onClick={() => void restartProtocol(tab)} disabled={busy}>Перезапустить</button>
-              {activeProtocolImage?.removable && <button className="removeProtocolButton" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить протокол</button>}
-            </div>
-          </div>
-        </article>
-        <div className="protocolMonitorGrid streamProtocolDetails">
-          <article className="panel protocolTelemetry protocolQuality">
-            <p className="eyebrow">CONNECTIONS</p>
-            <div className="telemetryMain"><strong>{activeProtocol.online_peers}/{activeProtocol.peers}</strong><span>активно сейчас</span></div>
-            <dl><div><dt>Всего подключений</dt><dd>{activeProtocol.peers}</dd></div><div><dt>Активные службы</dt><dd>{activeProtocol.online_peers}</dd></div></dl>
-          </article>
-          <article className="panel protocolTelemetry">
-            <p className="eyebrow">TRANSPORT &amp; SECURITY</p>
-            <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "VRX"}</strong><span>{activeProtocol.security || "—"}</span></div>
-            <dl><div><dt>Транспорт</dt><dd>{activeProtocol.transport || "—"}</dd></div><div><dt>Целевой узел</dt><dd>{activeProtocol.target || "Прямой выход"}</dd></div></dl>
-          </article>
-          <article className="panel protocolTelemetry protocolSettingsCard">
-            <p className="eyebrow">PROTOCOL SETTINGS</p>
-            <div className="telemetryMain"><strong>{tab === "shadowsocks" ? "SS" : "VRX"}</strong><span>актуальная конфигурация</span></div>
-            <dl>{Object.entries(activeProtocol.settings || {}).map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{typeof value === "boolean" ? (value ? "включено" : "выключено") : value}</dd></div>)}</dl>
-          </article>
-          <article className="panel protocolTelemetry">
-            <p className="eyebrow">SYSTEM SERVICE</p>
-            <div className="telemetryMain"><strong>{activeProtocol.service_active ? "ON" : "OFF"}</strong><span>systemd</span></div>
-            <dl><div><dt>Служба</dt><dd>{activeProtocol.unit || "—"}</dd></div><div><dt>Запущена с</dt><dd>{activeProtocol.active_since ? new Date(activeProtocol.active_since).toLocaleString("ru-RU") : "—"}</dd></div><div><dt>Версия образа</dt><dd>{activeProtocolImage?.version || "—"}</dd></div></dl>
-          </article>
-        </div>
-        <ProtocolSettingsPanel protocol={tab} fields={activeProtocol.editable_settings || []} draft={protocolSettingsDraft[tab] || {}} busy={busy}
-          onChange={(key, value) => changeProtocolSetting(tab, key, value)} onSave={() => void saveProtocolSettings(tab)} />
-      </section>}
-
-      {(tab === "wg" || tab === "awg") && activeProtocol && <section className="protocolMonitor">
-        <article className="panel protocolLiveHero">
-          <div>
-            <p className="eyebrow">LIVE TUNNEL</p>
-            <h2>{tab === "wg" ? "WireGuard" : "AmneziaWG"}</h2>
-            <p className="mono">{activeProtocol.interface} · {activeProtocol.address || "адрес не назначен"} · UDP {activeProtocol.listen_port || "—"}</p>
-          </div>
-          <div className="protocolControlStack">
-            <div className={activeProtocol.active && activeProtocol.service_active ? "protocolHealth online" : "protocolHealth"}>
-              <span className="pulse" />
-              <div>
-                <strong>{activeProtocol.active && activeProtocol.service_active ? "Туннель работает" : "Туннель остановлен"}</strong>
-                <small>{activeProtocol.service_enabled ? "Автозапуск включён" : "Автозапуск отключён"}</small>
-              </div>
-            </div>
-            <div className="protocolActions">
-              <button onClick={() => void restartProtocol(tab)} disabled={busy}>Перезапустить</button>
-              {activeProtocolImage?.removable && <button className="removeProtocolButton" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить протокол</button>}
-            </div>
-          </div>
-        </article>
-        <div className="protocolMonitorGrid">
-          <article className="panel protocolFlow">
-            <div className="panelHead"><div><p className="eyebrow">PROTOCOL TRAFFIC</p><h3>Текущий поток и статистика за 24 часа</h3></div><span>{activeProtocol.history.samples} замеров</span></div>
-            <div className="flowValues">
-              <div><small>↓ RX NOW</small><strong>{bytes(activeProtocolRate.rx)}<em>/s</em></strong><span>24H · {bytes(activeProtocol.history.received_bytes)} · MAX {bytes(activeProtocol.history.peak_rx_bps)}/s</span></div>
-              <div><small>↑ TX NOW</small><strong>{bytes(activeProtocolRate.tx)}<em>/s</em></strong><span>24H · {bytes(activeProtocol.history.transmitted_bytes)} · MAX {bytes(activeProtocol.history.peak_tx_bps)}/s</span></div>
-            </div>
-          </article>
-          <article className="panel protocolTelemetry protocolQuality">
-            <p className="eyebrow">AVAILABILITY · 24 HOURS</p>
-            <div className="telemetryMain"><strong>{activeProtocol.history.availability_percent != null ? `${activeProtocol.history.availability_percent}%` : "—"}</strong><span>служба протокола работала</span></div>
-            <dl>
-              <div><dt>Остановки службы</dt><dd>{activeProtocol.history.service_interruptions}</dd></div>
-              <div><dt>Разрывы мониторинга</dt><dd>{activeProtocol.history.monitoring_gaps}</dd></div>
-              <div><dt>Периоды без активных связей</dt><dd>{activeProtocol.history.inactive_connection_periods}</dd></div>
-            </dl>
-          </article>
-          <article className="panel protocolTelemetry">
-            <p className="eyebrow">ВНЕШНИЙ КАНАЛ VPS · 24 ЧАСА</p>
-            <div className="telemetryMain"><strong>{activeProtocol.history.latency_avg_ms != null ? activeProtocol.history.latency_avg_ms.toFixed(1) : "—"}</strong><span>мс от VPS до 1.1.1.1 / 8.8.8.8</span></div>
-            <dl>
-              <div><dt>Потери контрольных пакетов</dt><dd>{activeProtocol.history.external_loss_percent != null ? `${activeProtocol.history.external_loss_percent}%` : "—"}</dd></div>
-              <div><dt>Средний разброс RTT (mdev)</dt><dd>{activeProtocol.history.jitter_avg_ms != null ? `${activeProtocol.history.jitter_avg_ms.toFixed(1)} мс` : "—"}</dd></div>
-              <div><dt>Максимальная задержка</dt><dd>{activeProtocol.history.latency_max_ms != null ? `${activeProtocol.history.latency_max_ms.toFixed(1)} мс` : "—"}</dd></div>
-              <div><dt>Текущие соединения</dt><dd>{activeProtocol.online_peers} из {activeProtocol.peers} · {duration(activeProtocol.last_handshake_age_s)}</dd></div>
-            </dl>
-          </article>
-        </div>
-        <ProtocolSettingsPanel protocol={tab} fields={activeProtocol.editable_settings || []} draft={protocolSettingsDraft[tab] || {}} busy={busy}
-          onChange={(key, value) => changeProtocolSetting(tab, key, value)} onSave={() => void saveProtocolSettings(tab)} />
-        <article className={`panel networkDiagnostics ${activeProtocol.diagnostics?.status || "pending"} ${diagnosticsOpen[tab] ? "open" : ""}`}>
-          <button className="resourceToggle diagnosticToggle" onClick={() => toggleNetworkDiagnostics(tab)} aria-expanded={Boolean(diagnosticsOpen[tab])}>
-            <div><p className="eyebrow">NETWORK DIAGNOSTICS</p><h3>Причины нестабильности сети и подключений</h3></div>
-            <span>{checkingDiagnostics === tab ? "Диагностика…" : diagnosticsOpen[tab] ? "Скрыть" : "Развернуть"}</span>
-          </button>
-          {diagnosticsOpen[tab] && <div className="diagnosticBody">
-            <div className="diagnosticHead">
-              <p>Серверная проверка внешнего канала VPS, DNS, HTTPS, UDP, маршрутизации, MTU, drops и conntrack. Она не измеряет маршрут от устройства.</p>
-              <div className="diagnosticScore">
-                <span>{activeProtocol.diagnostics?.score != null ? activeProtocol.diagnostics.score : "—"}</span>
-                <small>{activeProtocol.diagnostics?.status === "healthy" ? "СТАБИЛЬНО" : activeProtocol.diagnostics?.status === "critical" ? "КРИТИЧНО" : activeProtocol.diagnostics?.status === "warning" ? "ТРЕБУЕТ ВНИМАНИЯ" : "ПРОВЕРКА"}</small>
-              </div>
-              <button onClick={() => void checkNetworkDiagnostics(tab)} disabled={checkingDiagnostics === tab}>
-                {checkingDiagnostics === tab ? "Диагностика…" : "Проверить сейчас"}
-              </button>
-            </div>
-            <div className="diagnosticChecks">
-              {(activeProtocol.diagnostics?.checks || []).map((check) =>
-                <div className={check.ok ? "ok" : "failed"} key={check.id}><i /><span><strong>{check.name}</strong><small>{check.value}</small></span></div>
-              )}
-            </div>
-            <div className="diagnosticFindings">
-              {(activeProtocol.diagnostics?.findings || []).map((finding) =>
-                <div className={finding.severity} key={finding.code}>
-                  <span>{finding.severity === "critical" ? "!" : "i"}</span>
-                  <p><strong>{finding.title}</strong><small>{finding.detail}</small><em>{finding.action}</em></p>
-                </div>
-              )}
-              {activeProtocol.diagnostics?.status === "healthy" && <div className="diagnosticHealthy"><span>✓</span><p><strong>Критичных проблем не обнаружено</strong><small>Маршрут, DNS, внешний HTTPS, UDP, MTU и маршрутизация прошли проверку.</small></p></div>}
-              {!activeProtocol.diagnostics?.checks?.length && <div className="eventEmpty">Диагностика выполняется…</div>}
-            </div>
-            <div className="diagnosticFooter">
-              <span>Uplink: {activeProtocol.diagnostics?.network?.uplink || "—"} · MTU {activeProtocol.diagnostics?.network?.uplink_mtu || "—"}</span>
-              <span>Conntrack: {activeProtocol.diagnostics?.network?.conntrack_percent != null ? `${activeProtocol.diagnostics.network.conntrack_percent}%` : "—"}</span>
-              <span>Drops 24h: uplink {activeProtocol.history.uplink_dropped || 0} · tunnel {activeProtocol.history.interface_dropped || 0}</span>
-              <span>{activeProtocol.diagnostics?.checked_at ? `Проверено ${new Date(activeProtocol.diagnostics.checked_at).toLocaleString("ru-RU")}` : "Ожидание первого замера"}</span>
-            </div>
-          </div>}
-        </article>
-        <article className={`panel resourceAvailability ${resourcesOpen[tab] ? "open" : ""}`}>
-          <button className="resourceToggle" onClick={() => toggleProtocolResources(tab)} aria-expanded={Boolean(resourcesOpen[tab])}>
-            <div><p className="eyebrow">RESOURCE AVAILABILITY</p><h3>Проверка внешних сервисов с VPS</h3></div>
-            <span>{checkingResources === tab ? "Проверяем…" : resourcesOpen[tab] ? "Скрыть" : "Развернуть"}</span>
-          </button>
-          {resourcesOpen[tab] && <div className="resourceBody">
-            <div className="resourceTools">
-              <span>{activeProtocol.resources?.checked_at ? `проверено ${new Date(activeProtocol.resources.checked_at).toLocaleTimeString("ru-RU")}` : "выполняется первая проверка"}</span>
-              <button onClick={() => void checkProtocolResources(tab)} disabled={checkingResources === tab}>
-                {checkingResources === tab ? "Проверяем…" : "Обновить результат"}
-              </button>
-            </div>
-            <div className="resourceIndicators">
-              {(activeProtocol.resources?.items || []).map((resource) =>
-                <div className={resource.available ? "resourceItem online" : "resourceItem offline"} key={resource.name} title={resource.status_code ? `HTTP ${resource.status_code}` : undefined}>
-                  <i /><strong>{resource.name}</strong><span>{resource.available ? `${resource.latency_ms} мс` : "недоступен"}</span>
-                </div>
-              )}
-              {!activeProtocol.resources?.items?.length && <div className="eventEmpty">Проверка выполняется…</div>}
-            </div>
-          </div>}
-        </article>
-        <article className="panel protocolEvents">
-          <div className="panelHead"><div><p className="eyebrow">STABILITY LOG</p><h3>Последние события протокола</h3></div><span>агрегация за 24 часа</span></div>
-          <div className="eventRows">
-            {activeProtocol.history.events.length ? activeProtocol.history.events.map((event, index) =>
-              <div key={`${event.at}-${index}`}><i className={event.type === "service_down" ? "eventCritical" : "eventWarning"} />
-                <p><strong>{event.type === "service_down" ? "Служба протокола остановилась" : event.type === "monitor_gap" ? "Пропуск данных мониторинга" : "Не осталось активных соединений"}</strong>
-                <small>{event.at ? new Date(event.at).toLocaleString("ru-RU") : "—"}{event.seconds ? ` · ${event.seconds} сек` : ""}</small></p>
-              </div>
-            ) : <div className="eventEmpty">За выбранный период разрывов и остановок не зафиксировано</div>}
-          </div>
-        </article>
-      </section>}
-
-      {tab === "clients" && installedProtocols.length > 0 && <section className="clientsLayout">
-        <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все подключения" : labels[tab]}</h2></div><div className="clientPanelActions"><span>{protocolClients.length} подключений</span><a className="guideAction" href="/connection-guide-wg-awg.pdf" download aria-label="Скачать руководство по подключению" data-tooltip="Пошаговая инструкция для владельца устройства: установка приложения и импорт конфигурации"><span aria-hidden="true">↓</span><div><strong>Скачать гайд</strong><small>PDF · ДЛЯ ПОЛЬЗОВАТЕЛЯ</small></div></a><button className="primaryButton" onClick={openClientDialog}>Новое подключение <span>＋</span></button></div></div>
-          <div className="clientOverview"><button className={clientStateFilter === "all" ? "active" : ""} onClick={() => { setClientStateFilter("all"); setClientPage(1); }}><small>ВСЕ</small><strong>{clientSummary.total}</strong></button><button className={clientStateFilter === "online" ? "active online" : "online"} onClick={() => { setClientStateFilter("online"); setClientPage(1); }}><small>ОНЛАЙН</small><strong>{clientSummary.online}</strong></button><button className={clientStateFilter === "attention" ? "active attention" : "attention"} onClick={() => { setClientStateFilter("attention"); setClientPage(1); }}><small>ТРЕБУЮТ ВНИМАНИЯ</small><strong>{clientSummary.attention}</strong></button><button className={clientStateFilter === "offline" ? "active" : ""} onClick={() => { setClientStateFilter("offline"); setClientPage(1); }}><small>ОФЛАЙН</small><strong>{clientSummary.offline}</strong></button></div>
-          <div className="clientFilters"><label><span>Поиск</span><input type="search" value={clientSearch} onChange={(event) => { setClientSearch(event.target.value); setClientPage(1); }} placeholder="Имя, адрес или протокол" /></label><label><span>Протокол</span><select value={clientProtocolFilter} onChange={(event) => { setClientProtocolFilter(event.target.value as "all" | Protocol); setClientPage(1); }}><option value="all">Все протоколы</option>{installedProtocols.map((protocol) => <option key={protocol} value={protocol}>{labels[protocol]}</option>)}</select></label>{(clientSearch || clientProtocolFilter !== "all" || clientStateFilter !== "all") && <button type="button" onClick={() => { setClientSearch(""); setClientProtocolFilter("all"); setClientStateFilter("all"); setClientPage(1); }}>Сбросить фильтры</button>}<span>Найдено: {protocolClients.length}</span></div>
-          <div className="deviceProbe"><div><p className="eyebrow">ЭТО УСТРОЙСТВО → ПАНЕЛЬ</p><strong>{deviceProbe?.latency_ms != null ? `${deviceProbe.latency_ms} мс` : "—"}</strong><span>{deviceProbe?.route || "текущий маршрут браузера"}</span></div><dl><div><dt>Успешно</dt><dd>{deviceProbe ? `${deviceProbe.successful}/${deviceProbe.samples}` : "—"}</dd></div><div><dt>Неудачные пробы</dt><dd>{deviceProbe ? `${deviceProbe.loss_percent}%` : "—"}</dd></div><div><dt>Разброс RTT</dt><dd>{deviceProbe?.variation_ms != null ? `${deviceProbe.variation_ms} мс` : "—"}</dd></div></dl><button type="button" onClick={() => void measureDeviceRoute(true)} disabled={probingDevice}>{probingDevice ? "Измеряем…" : "Измерить с устройства"}</button></div>
-          {protocolClients.length > CLIENTS_PER_PAGE && <nav className="clientPagination clientPaginationTop" aria-label="Страницы подключений"><span>Показаны {visibleClientStart}–{visibleClientEnd} из {protocolClients.length}</span><div><button onClick={() => setClientPage(1)} disabled={currentClientPage === 1} aria-label="Первая страница">«</button><button onClick={() => setClientPage(Math.max(1, currentClientPage - 1))} disabled={currentClientPage === 1}>Назад</button><strong>{currentClientPage} / {clientPageCount}</strong><button onClick={() => setClientPage(Math.min(clientPageCount, currentClientPage + 1))} disabled={currentClientPage === clientPageCount}>Дальше</button><button onClick={() => setClientPage(clientPageCount)} disabled={currentClientPage === clientPageCount} aria-label="Последняя страница">»</button></div></nav>}
-          <div className="clientTable">{protocolClients.length ? visibleClients.map((client) =>
-            <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><div className="clientIdentity"><span className={`protocol ${client.protocol}`}>{client.protocol === "wg" ? "WG" : client.protocol === "awg" ? "AW" : client.protocol === "shadowsocks" ? "SS" : "VRX"}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address}{client.active_sources?.length ? ` · источник: ${client.active_sources.join(", ")}` : ""}</small></p></div>
-              <div className="clientState"><small>СТАТУС</small><strong>{client.quality === "stable" ? "ОНЛАЙН" : client.quality === "offline" ? "ОФЛАЙН" : "НЕСТАБИЛЬНО"}</strong><span>{client.quality_reason || "состояние уточняется"}</span></div>
-              <div className="traffic"><small>ТРАФИК · ПОЛУЧЕНО<b>↓ {bytes(client.rx_bytes)} · {bytes(client.rx_bps)}/с</b></small><small>ТРАФИК · ОТПРАВЛЕНО<b>↑ {bytes(client.tx_bytes)} · {bytes(client.tx_bps)}/с</b></small></div><span className="handshake"><small>{client.protocol === "wg" || client.protocol === "awg" ? "ПОСЛЕДНИЙ HANDSHAKE" : "ПОСЛЕДНЯЯ АКТИВНОСТЬ"}</small><strong>{duration(client.handshake_age_s)}</strong><span>{client.active_connections ? `${client.active_connections} ${client.protocol === "shadowsocks" ? "TCP-сокетов" : "активн."}` : "нет активных"}</span></span>
-              <span className="clientLink" title={client.latency_source === "server_icmp_tunnel_ip" ? `ICMP от VPS к туннельному IP · ${client.sample_size || 5} проб` : "Для SS/VRX сервер не может измерить RTT клиентского устройства без клиентского агента"}><small>{client.latency_source === "server_icmp_tunnel_ip" ? "RTT VPS → УСТРОЙСТВО" : "RTT УСТРОЙСТВА"}</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} мс` : "ICMP недоступен"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · потери ${client.packet_loss_percent}%` : ""}</strong></span>
-              <button className="dangerButton" onClick={() => void removeClient(client.id)}>Отозвать</button></div>
-          ) : <div className="emptyState"><span>◎</span><p>Подключений пока нет</p></div>}</div>
-        </article>
-        <ConnectionGuide />
-      </section>}
+      {tab === "clients" && installedProtocols.length > 0 && <ConnectionsView
+        installedProtocols={installedProtocols}
+        clientStateFilter={clientStateFilter}
+        setClientStateFilter={setClientStateFilter}
+        setClientPage={setClientPage}
+        clientSummary={clientSummary}
+        deviceProbe={deviceProbe}
+        probingDevice={probingDevice}
+        measureDeviceRoute={measureDeviceRoute}
+        openClientDialog={openClientDialog}
+        protocolClients={protocolClients}
+        clientSearch={clientSearch}
+        setClientSearch={setClientSearch}
+        clientProtocolFilter={clientProtocolFilter}
+        setClientProtocolFilter={setClientProtocolFilter}
+        currentClientPage={currentClientPage}
+        clientPageCount={clientPageCount}
+        visibleClientStart={visibleClientStart}
+        visibleClientEnd={visibleClientEnd}
+        visibleClients={visibleClients}
+        removeClient={removeClient}
+      />}
       {clientDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closeClientDialog}>
         <form className="connectionDialog addClient" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={addClient}>
-          <header><div><p className="eyebrow">NEW ACCESS</p><h2 id="connection-dialog-title">{generated ? "Подключение создано" : "Новое подключение"}</h2></div><button className="dialogClose" type="button" onClick={closeClientDialog} aria-label="Закрыть">×</button></header>
+          <header className="connectionDialogHead"><div><h2 id="connection-dialog-title">{generated ? "Подключение создано" : "Новое подключение"}</h2><p>{generated ? "Конфигурация готова к передаче на устройство." : "Укажите устройство и выберите протокол доступа."}</p></div><button className="connectionDialogClose" type="button" onClick={closeClientDialog}>Закрыть</button></header>
           {!generated ? <>
-            <p className="connectionDialogIntro">Создайте отдельную конфигурацию для конкретного устройства. Один ключ нельзя использовать на нескольких устройствах.</p>
-            <div className="connectionForm">
-              <label>Название устройства<input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов · это имя будет видно только администратору панели</small></label>
-              <label>Протокол<select value={selectedClientProtocol} onChange={(event) => setNewClient({ ...newClient, protocol: event.target.value as Protocol })}>{installedProtocols.map((protocol) => <option key={protocol} value={protocol}>{labels[protocol]}</option>)}</select><small className="fieldHint">Выберите протокол, который будет использовать устройство</small></label>
-            </div>
-            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy}>{busy ? "Создаём…" : "Создать конфигурацию"}<span>→</span></button></div>
-          </> : <>
-            <div className="generated compactGenerated">
-              <div className="generatedHead"><span>✓</span><div><small>КОНФИГУРАЦИЯ ГОТОВА</small><strong>{generatedName}</strong><p>Передайте владельцу скачанный файл или покажите QR-код. Один ключ предназначен только для одного устройства.</p></div></div>
-              <div className="generatedResult">
-                {generatedQr ? <div className="generatedQr"><Image src={generatedQr} width={300} height={300} unoptimized alt={`QR-код конфигурации ${generatedName}`} /><small>Отсканируйте код в приложении на устройстве владельца</small></div> : <div className="generatedQr pending"><span>{generatedQrError || "Создаём QR-код…"}</span></div>}
-                <div className="generatedTransfer">
-                  <div><strong>Передача подключения</strong><p>Выберите один способ: передайте файл по защищённому каналу или покажите QR-код. Не публикуйте их — внутри находится приватный ключ.</p></div>
-                  <button type="button" className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать файл</strong><small>{labels[selectedClientProtocol].toUpperCase()} · {generatedName.split(".").pop()?.toUpperCase()}</small></div></button>
-                  {generatedQr && <a className="qrDownload" href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}>Скачать QR в полном размере</a>}
-                </div>
+            <div className="connectionCreateBody">
+              <div className="connectionCreateLead">
+                <span>ACCESS PROFILE</span>
+                <strong>Отдельный ключ для одного устройства</strong>
+                <p>Имя используется только в панели. После создания конфигурацию можно передать файлом или показать QR-код владельцу устройства.</p>
+              </div>
+              <div className="connectionForm">
+                <label>Название устройства<input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов</small></label>
+                <label>Протокол<select value={selectedClientProtocol} onChange={(event) => setNewClient({ ...newClient, protocol: event.target.value as Protocol })}>{installedProtocols.map((protocol) => <option key={protocol} value={protocol}>{labels[protocol]}</option>)}</select><small className="fieldHint">Только установленные протоколы</small></label>
               </div>
             </div>
-            <div className="connectionDialogActions"><button type="button" onClick={resetClientDialog}>Создать ещё</button><button type="button" className="primaryButton" onClick={closeClientDialog}>Готово <span>✓</span></button></div>
+            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy}>{busy ? "Создаём…" : "Создать подключение"}</button></div>
+          </> : <>
+            <div className="connectionGenerated">
+              <div className="connectionGeneratedSummary">
+                <div><span>CONFIGURATION</span><strong>{generatedName}</strong></div>
+                <div><span>PROTOCOL</span><strong>{labels[selectedClientProtocol]}</strong></div>
+                <p>Конфигурация содержит приватный ключ. Передавайте её только владельцу устройства.</p>
+              </div>
+              <div className="connectionGeneratedGrid">
+                <section className="connectionQrPanel">
+                  <header><span>QR CODE</span><strong>Сканирование на устройстве</strong></header>
+                  {generatedQr ? <div className="connectionQrCanvas"><Image src={generatedQr} width={284} height={284} unoptimized alt={`QR-код конфигурации ${generatedName}`} /></div> : <div className="connectionQrCanvas pending"><span>{generatedQrError || "Создаём QR-код…"}</span></div>}
+                  <p>Откройте клиент протокола на устройстве и отсканируйте код.</p>
+                </section>
+                <section className="connectionTransfer">
+                  <div className="connectionTransferIntro"><span>TRANSFER</span><strong>Передача конфигурации</strong><p>Используйте один из вариантов ниже. Файл и QR содержат одинаковую конфигурацию подключения.</p></div>
+                  <button type="button" className="connectionDownloadPrimary" onClick={() => downloadConfig(generatedName, generated)}><span>Конфигурация</span><strong>Скачать файл</strong><small>{generatedName}</small></button>
+                  {generatedQr && <a className="connectionDownloadSecondary" href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}><span>QR-код</span><strong>Скачать изображение</strong></a>}
+                  <div className="connectionTransferNote"><strong>После передачи</strong><p>Закройте окно или создайте отдельное подключение для следующего устройства. Не используйте один ключ на нескольких устройствах.</p></div>
+                </section>
+              </div>
+            </div>
+            <div className="connectionDialogActions generatedActions"><button type="button" onClick={resetClientDialog}>Создать ещё</button><button type="button" className="primaryButton" onClick={closeClientDialog}>Готово</button></div>
           </>}
         </form>
       </div>}
@@ -1863,167 +1493,62 @@ export default function Home() {
           <div className="confirmActions"><button type="button" onClick={closePasswordDialog}>Отмена</button><button className="confirmPrimary" type="submit" disabled={busy || !currentAdminPassword || newAdminPassword.length < 16 || newAdminPassword !== confirmAdminPassword}>Сохранить пароль</button></div>
         </form>
       </div>}
-      {confirmation && <div className="confirmBackdrop" role="presentation" onMouseDown={() => closeConfirmation(false)}>
-        <form className={`confirmDialog ${confirmation.danger ? "danger" : ""}`} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => {
+      {confirmation && <div className={`confirmBackdrop ${tab === "application" ? "applicationConfirmBackdrop" : tab === "clients" ? "connectionConfirmBackdrop" : protocolTab ? "protocolConfirmBackdrop" : ""}`} role="presentation" onMouseDown={() => closeConfirmation(false)}>
+        <form className={`confirmDialog ${confirmation.danger ? "danger" : ""} ${tab === "application" ? "applicationConfirmDialog" : tab === "clients" ? "connectionConfirmDialog" : protocolTab ? "protocolConfirmDialog" : ""}`} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => {
           event.preventDefault();
-          if (!confirmation.phrase || confirmationInput === confirmation.phrase) closeConfirmation(true);
+          if (tab === "application" || !confirmation.phrase || confirmationInput === confirmation.phrase) closeConfirmation(true);
         }}>
-          <div className="confirmMark">{confirmation.danger ? "!" : "✓"}</div>
-          <p className="eyebrow">ACTION CONFIRMATION</p>
-          <h2 id="confirm-title">{confirmation.title}</h2>
-          <p>{confirmation.message}</p>
-          {confirmation.phrase && <label>Для подтверждения введите <strong>{confirmation.phrase}</strong>
-            <input autoFocus value={confirmationInput} onChange={(event) => setConfirmationInput(event.target.value)} autoComplete="off" />
-          </label>}
-          <div className="confirmActions">
-            <button type="button" onClick={() => closeConfirmation(false)}>Отмена</button>
-            <button className="confirmPrimary" type="submit" disabled={Boolean(confirmation.phrase && confirmationInput !== confirmation.phrase)}>{confirmation.confirmLabel}</button>
-          </div>
+          {tab === "application" ? <>
+            <div className="applicationConfirmCopy">
+              <h2 id="confirm-title">{confirmation.title}</h2>
+              <p>{confirmation.message}</p>
+            </div>
+            <div className="applicationConfirmActions">
+              <button type="button" onClick={() => closeConfirmation(false)}>Отмена</button>
+              <button className={`applicationConfirmPrimary ${confirmation.danger ? "danger" : ""}`} type="submit">Выполнить</button>
+            </div>
+          </> : tab === "clients" ? <>
+            <div className="connectionConfirmCopy">
+              <h2 id="confirm-title">{confirmation.title}</h2>
+              <p>{confirmation.message}</p>
+            </div>
+            <div className="connectionConfirmActions">
+              <button type="button" onClick={() => closeConfirmation(false)}>Отмена</button>
+              <button className="connectionConfirmPrimary danger" type="submit">Отозвать</button>
+            </div>
+          </> : protocolTab ? <>
+            <div className="protocolConfirmCopy">
+              <p className="eyebrow">ПОДТВЕРЖДЕНИЕ ДЕЙСТВИЯ</p>
+              <h2 id="confirm-title">{confirmation.title}</h2>
+              <p>{confirmation.message}</p>
+              <div className="protocolConfirmObject"><span>Текущий протокол</span><strong>{labels[protocolTab]}</strong></div>
+            </div>
+            {confirmation.phrase && <label className="protocolConfirmPhrase">Для подтверждения введите <strong>{confirmation.phrase}</strong>
+              <input autoFocus value={confirmationInput} onChange={(event) => setConfirmationInput(event.target.value)} autoComplete="off" />
+            </label>}
+            <div className="protocolConfirmActions">
+              <button type="button" onClick={() => closeConfirmation(false)}>Отмена</button>
+              <button className={confirmation.danger ? "danger" : "primary"} type="submit" disabled={Boolean(confirmation.phrase && confirmationInput !== confirmation.phrase)}>{confirmation.confirmLabel}</button>
+            </div>
+          </> : <>
+            <div className="confirmMark">{confirmation.danger ? "!" : "✓"}</div>
+            <p className="eyebrow">ACTION CONFIRMATION</p>
+            <h2 id="confirm-title">{confirmation.title}</h2>
+            <p>{confirmation.message}</p>
+            {confirmation.phrase && <label>Для подтверждения введите <strong>{confirmation.phrase}</strong>
+              <input autoFocus value={confirmationInput} onChange={(event) => setConfirmationInput(event.target.value)} autoComplete="off" />
+            </label>}
+            <div className="confirmActions">
+              <button type="button" onClick={() => closeConfirmation(false)}>Отмена</button>
+              <button className="confirmPrimary" type="submit" disabled={Boolean(confirmation.phrase && confirmationInput !== confirmation.phrase)}>{confirmation.confirmLabel}</button>
+            </div>
+          </>}
         </form>
       </div>}
       <VersionFooter />
-    </section>
-  </main>;
+  </AppWorkspace>;
 }
 
-function Logo() {
-  return <div className="brand"><span className="brandMark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 7h12l6 6v12H13l-6-6V7Z" /><path d="M11 12h8l2 2v6h-8l-2-2v-6Z" /></svg></span><div><strong>312<span>.net</span></strong><small>INFRASTRUCTURE</small></div></div>;
-}
-function ProtocolSettingsPanel({
-  protocol, fields, draft, busy, onChange, onSave,
-}: {
-  protocol: Protocol; fields: EditableProtocolSetting[]; draft: Record<string, string | number | boolean>;
-  busy: boolean; onChange: (key: string, value: string | number | boolean) => void; onSave: () => void;
-}) {
-  const tunnel = protocol === "wg" || protocol === "awg";
-  return <article className="panel protocolConfiguration">
-    <header>
-      <div><p className="eyebrow">CHANNEL CONFIGURATION</p><h3>Настройки {labels[protocol]}</h3>
-        <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
-      <div className="configurationSafety"><i>✓</i><p><strong>Безопасное применение</strong><small>валидация и автоматический откат</small></p></div>
-    </header>
-    <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} onChange={onChange} onSave={onSave} />
-  </article>;
-}
-function ProtocolSettingsEditor({
-  fields, draft, busy, onChange, onSave,
-}: {
-  fields: EditableProtocolSetting[];
-  draft: Record<string, string | number | boolean>;
-  busy: boolean;
-  onChange: (key: string, value: string | number | boolean) => void;
-  onSave: () => void;
-}) {
-  if (!fields.length) return <p className="protocolSettingsEmpty">Для этого протокола нет изменяемых параметров.</p>;
-  return <div className="protocolSettingsEditor">
-    {fields.map((field) => <label key={field.key}>
-      <span>{field.label}</span>
-      {field.type === "boolean" ? <input type="checkbox" checked={Boolean(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.checked)} />
-        : field.type === "select" ? <select value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)}>
-          {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-          : field.type === "number" ? <input type="number" min={field.min} max={field.max} value={Number(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, Number(event.target.value))} />
-            : <input type="text" value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)} />}
-      {field.help && <small>{field.help}</small>}
-    </label>)}
-    <button type="button" className="protocolSettingsSave" onClick={onSave} disabled={busy}>{busy ? "Применяем…" : "Применить настройки"}</button>
-  </div>;
-}
-function AutomationEditor({
-  title, description, value, timer, onChange,
-}: {
-  title: string;
-  description: string;
-  value?: AutomationSchedule;
-  timer?: { installed: boolean; active: boolean; last_trigger: string; next_run: string };
-  onChange: (patch: Partial<AutomationSchedule>) => void;
-}) {
-  const weekdays = [
-    ["Mon", "Понедельник"], ["Tue", "Вторник"], ["Wed", "Среда"], ["Thu", "Четверг"],
-    ["Fri", "Пятница"], ["Sat", "Суббота"], ["Sun", "Воскресенье"],
-  ];
-  if (!value) return <div className="automationRow"><div><h3>{title}</h3><small>Загрузка параметров…</small></div></div>;
-  const time = `${String(value.hour).padStart(2, "0")}:${String(value.minute).padStart(2, "0")}`;
-  return <div className={`automationRow ${value.enabled ? "enabled" : ""}`}>
-    <div className="automationIdentity"><h3>{title}</h3><small>{description}</small></div>
-    <div className="automationFields">
-      <label>Период<select value={value.cadence} onChange={(event) => onChange({ cadence: event.target.value as AutomationSchedule["cadence"] })}>
-        <option value="daily">Ежедневно</option><option value="weekly">Еженедельно</option><option value="monthly">Ежемесячно, 1-го числа</option>
-      </select></label>
-      {value.cadence === "weekly" && <label>День недели<select value={value.weekday} onChange={(event) => onChange({ weekday: event.target.value })}>
-        {weekdays.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
-      </select></label>}
-      <label>Время сервера<input type="time" value={time} onChange={(event) => {
-        const [hour, minute] = event.target.value.split(":").map(Number);
-        if (Number.isInteger(hour) && Number.isInteger(minute)) onChange({ hour, minute });
-      }} /></label>
-    </div>
-    <div className="automationRun"><small>Следующий запуск</small><strong>{timer?.next_run || "—"}</strong><span>{timer?.last_trigger ? `последний: ${timer.last_trigger}` : "ещё не запускалось"}</span></div>
-    <label className="automationSwitch"><input type="checkbox" checked={value.enabled} onChange={(event) => onChange({ enabled: event.target.checked })} /><span /><em>{value.enabled ? "Вкл" : "Выкл"}</em></label>
-  </div>;
-}
-function TrendGraph({ values, secondary, relative = false, sampleIntervalSeconds = LIVE_SAMPLE_SECONDS, formatValue = (value) => `${Math.round(value)}%`, ariaLabel }: {
-  values: number[]; secondary?: number[]; relative?: boolean; sampleIntervalSeconds?: number; formatValue?: (value: number) => string; ariaLabel: string;
-}) {
-  const width = 240;
-  const height = 72;
-  const all = secondary ? [...values, ...secondary] : values;
-  const ceiling = relative ? Math.max(1, ...all) : 100;
-  const coordinates = (series: number[]) => series.map((value, index) => {
-    const x = series.length > 1 ? index / (series.length - 1) * width : width;
-    const y = height - Math.min(value / ceiling, 1) * height;
-    return { x, y };
-  });
-  const primaryCoordinates = coordinates(values);
-  const secondaryCoordinates = secondary ? coordinates(secondary) : [];
-  const stepPath = (coordinatesList: Array<{ x: number; y: number }>) => coordinatesList.reduce((path, point, index) => {
-    if (!index) return `M ${point.x.toFixed(1)} ${point.y.toFixed(1)}`;
-    return `${path} H ${point.x.toFixed(1)} V ${point.y.toFixed(1)}`;
-  }, "");
-  const primaryPath = stepPath(primaryCoordinates);
-  const secondaryPath = stepPath(secondaryCoordinates);
-  const primaryLast = primaryCoordinates.at(-1);
-  const secondaryLast = secondaryCoordinates.at(-1);
-  const primaryPeak = values.length ? Math.max(...values) : 0;
-  const secondaryPeak = secondary?.length ? Math.max(...secondary) : 0;
-  const primaryAverage = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
-  const secondaryAverage = secondary?.length ? secondary.reduce((sum, value) => sum + value, 0) / secondary.length : 0;
-  const elapsedSeconds = Math.max(0, (values.length - 1) * sampleIntervalSeconds);
-  const elapsedLabel = elapsedSeconds >= 60 ? `${Math.round(elapsedSeconds / 60)} мин` : `${elapsedSeconds} сек`;
-  return <div className={`trendGraph ${secondary ? "dual" : ""}`} role="img" aria-label={ariaLabel}>
-    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-      {values.length > 1 && <path className="primaryArea" d={`${primaryPath} V ${height} H 0 Z`} />}
-      {values.length > 1 && <path className="primaryTrend" d={primaryPath} />}
-      {secondary && secondary.length > 1 && <path className="secondaryTrend" d={secondaryPath} />}
-      {primaryLast && values.length > 1 && <circle className="primaryPoint" cx={primaryLast.x} cy={primaryLast.y} r="2.8" />}
-      {secondaryLast && secondary && secondary.length > 1 && <circle className="secondaryPoint" cx={secondaryLast.x} cy={secondaryLast.y} r="2.4" />}
-    </svg>
-    <span className="trendYAxis"><b>{formatValue(ceiling)}</b><b>{formatValue(0)}</b></span>
-    <span className="trendXAxis"><b>−{elapsedLabel}</b><b>сейчас</b></span>
-    <span className="trendSummary">
-      <b>Сейчас {formatValue(values.at(-1) || 0)}</b>
-      <b>Среднее {formatValue(primaryAverage)}</b>
-      <b>Пик {formatValue(primaryPeak)}</b>
-      {secondary && <b>TX среднее {formatValue(secondaryAverage)}</b>}
-      {secondary && <b>TX пик {formatValue(secondaryPeak)}</b>}
-    </span>
-    {secondary && <span className="trendLegend"><i /> RX <i /> TX</span>}
-    <small>{values.length < 2 ? "Сбор данных…" : `${values.length} замеров · интервал ${sampleIntervalSeconds} сек`}</small>
-  </div>;
-}
-function Metric({ title, value, percent, detail, history }: { title: string; value: string; percent: number; detail: string; history: number[] }) {
-  const normalized = Math.max(0, Math.min(100, percent));
-  return <article className="panel metricCard">
-    <div className="metricCopy"><p className="eyebrow">{title.toUpperCase()}</p><h2>{value}</h2><small>{detail}</small></div>
-    <TrendGraph values={history} ariaLabel={`${title}: ${value}, ${Math.round(normalized)} процентов`} />
-  </article>;
-}
-function SecurityRow({ ok, title, text, okLabel = "Confirmed", badLabel = "Attention" }: { ok: boolean; title: string; text: string; okLabel?: string; badLabel?: string }) {
-  return <div><span className={ok ? "check" : "warning"}>{ok ? "✓" : "!"}</span><p><strong>{title}</strong><small>{text}</small></p><em className={ok ? "onlinePill" : "offlinePill"}>{ok ? okLabel : badLabel}</em></div>;
-}
-function SecurityActionRow({ ok, title, text, onAction, actionLabel = "Исправить", alwaysAction = false }: { ok: boolean; title: string; text: string; onAction: () => void; actionLabel?: string; alwaysAction?: boolean }) {
-  return <div><span className={ok ? "check" : "warning"}>{ok ? "✓" : "!"}</span><p><strong>{title}</strong><small>{text}</small></p>{ok && !alwaysAction ? <em className="onlinePill">Готово</em> : <button className="securityFixButton" onClick={onAction}>{actionLabel}</button>}</div>;
-}
 function VersionFooter() {
   return <LegalFooter version={appVersion} commit={buildCommit} />;
 }

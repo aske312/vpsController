@@ -1,0 +1,74 @@
+/* Document reset and classless defaults. */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg);
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at 84% 0%, rgba(126, 104, 255, .08), transparent 24%),
+  radial-gradient(circle at 12% 82%, rgba(58, 139, 255, .06), transparent 26%),
+  var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans), Arial, sans-serif;
+}
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 1;
+  letter-spacing: -2px;
+}
+
+input, select, textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #0b1017;
+  border-radius: 9px;
+  outline: none;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: #516830;
+  box-shadow: 0 0 0 3px #b7f34a0c;
+}
+
+nav {
+  display: grid;
+  gap: 7px;
+}
+
+input, select {
+  height: 46px;
+  padding: 0 12px;
+  font-size: 11px;
+}
+
+@media (max-width: 680px) {
+  nav {
+    display: flex;
+    width: 100%;
+    justify-content: space-around;
+  }
+
+}
+
+@keyframes load { from { transform: translateX(-50%); } to { transform: translateX(50%); } }
+
+@keyframes operation-spin { to { transform: rotate(360deg); } }
+
+@keyframes gateOperationSlide { 0%{transform:translateX(-110%)} 55%{transform:translateX(120%)} 100%{transform:translateX(295%)} }

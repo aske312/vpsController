@@ -37,7 +37,17 @@ if path.exists():
     path.write_text(json.dumps([item for item in items if item.get("protocol") != "awg"], ensure_ascii=False, indent=2), encoding="utf-8")
     path.chmod(0o600)
 PY
-apt-get -o DPkg::Lock::Timeout=300 purge -y amneziawg amneziawg-tools amneziawg-dkms
-add-apt-repository --remove -y ppa:amnezia/ppa >/dev/null 2>&1 || true
-rm -f -- /etc/apt/sources.list.d/amnezia-ppa.list /usr/share/keyrings/amnezia-ppa.gpg
+# The amneziawg package owns awg-quick@.service, a template shared with any
+# other AmneziaWG instance (e.g. Mihomo's isolated mh-awg0 channel). Purging
+# it deletes that template out from under the other instance, which then
+# can't be stopped or torn down cleanly anymore. Only purge when this was
+# the last configured instance.
+other_instance="$(find /etc/amnezia/amneziawg -mindepth 1 -maxdepth 1 -name '*.conf' ! -name "${AWG_INTERFACE}.conf" -print -quit 2>/dev/null)"
+if [[ -z "${other_instance}" ]]; then
+  apt-get -o DPkg::Lock::Timeout=300 purge -y amneziawg amneziawg-tools amneziawg-dkms
+  add-apt-repository --remove -y ppa:amnezia/ppa >/dev/null 2>&1 || true
+  rm -f -- /etc/apt/sources.list.d/amnezia-ppa.list /usr/share/keyrings/amnezia-ppa.gpg
+else
+  echo "amneziawg package kept: still used by $(basename -- "${other_instance}" .conf)"
+fi
 sysctl --system >/dev/null 2>&1 || true

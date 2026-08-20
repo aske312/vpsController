@@ -40,23 +40,57 @@ source /etc/os-release
 export DEBIAN_FRONTEND=noninteractive
 if ! command -v awg >/dev/null 2>&1 || ! command -v awg-quick >/dev/null 2>&1 || ! modinfo amneziawg >/dev/null 2>&1; then
   apt-get -o DPkg::Lock::Timeout=300 update
+  apt-get -o DPkg::Lock::Timeout=300 install -y \
+    ca-certificates curl dirmngr dkms gnupg iptables "linux-headers-$(uname -r)"
+
+  # Do not use add-apt-repository here. In the GATE installer service /root can
+  # be read-only, while launchpadlib tries to create /root/.launchpadlib.
+  # Install the verified PPA key and source directly instead.
+  AMNEZIA_KEY_FPR="75C9DD72C799870E310542E24166F2C257290828"
+  KEYRING="/usr/share/keyrings/amnezia-ppa.gpg"
+  SOURCE_LIST="/etc/apt/sources.list.d/amnezia-ppa.list"
+
+  if [[ ! -s "${KEYRING}" ]]; then
+    key_home="$(mktemp -d)"
+    trap 'rm -rf "${key_home}"' EXIT
+    chmod 0700 "${key_home}"
+    curl -fsSL --retry 4 --retry-all-errors \
+      "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x${AMNEZIA_KEY_FPR}" \
+      -o "${key_home}/amnezia.asc"
+    GNUPGHOME="${key_home}" gpg --batch --import "${key_home}/amnezia.asc" >/dev/null 2>&1
+    fingerprint="$(GNUPGHOME="${key_home}" gpg --batch --with-colons --fingerprint "${AMNEZIA_KEY_FPR}" | awk -F: '$1=="fpr"{print $10; exit}')"
+    [[ "${fingerprint}" == "${AMNEZIA_KEY_FPR}" ]] || {
+      echo "Amnezia signing key fingerprint mismatch" >&2
+      exit 1
+    }
+    GNUPGHOME="${key_home}" gpg --batch --export "${AMNEZIA_KEY_FPR}" >"${KEYRING}"
+    chmod 0644 "${KEYRING}"
+    rm -rf "${key_home}"
+    trap - EXIT
+  fi
+
   if [[ "${ID:-}" == "ubuntu" ]]; then
-    apt-get -o DPkg::Lock::Timeout=300 install -y software-properties-common python3-launchpadlib gnupg2 "linux-headers-$(uname -r)" iptables
-    grep -Rqs 'ppa.launchpadcontent.net/amnezia/ppa' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null       || add-apt-repository -y ppa:amnezia/ppa
+    repo_suite="${VERSION_CODENAME:-}"
+    [[ -n "${repo_suite}" ]] || repo_suite="$(lsb_release -cs 2>/dev/null || true)"
+    [[ -n "${repo_suite}" ]] || repo_suite="focal"
   else
-    apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl dirmngr dkms gnupg iptables "linux-headers-$(uname -r)"
-    if [[ ! -s /usr/share/keyrings/amnezia-ppa.gpg || ! -s /etc/apt/sources.list.d/amnezia-ppa.list ]]; then
-      key_home="$(mktemp -d)"
-      chmod 0700 "${key_home}"
-      gpg --homedir "${key_home}" --batch --keyserver hkps://keyserver.ubuntu.com --recv-keys 75C9DD72C799870E310542E24166F2C257290828
-      fingerprint="$(gpg --homedir "${key_home}" --batch --with-colons --fingerprint 75C9DD72C799870E310542E24166F2C257290828 | grep '^fpr:' | head -n1 | cut -d: -f10)"
-      [[ "${fingerprint}" == "75C9DD72C799870E310542E24166F2C257290828" ]] || { rm -rf "${key_home}"; echo "Amnezia signing key mismatch" >&2; exit 1; }
-      gpg --homedir "${key_home}" --batch --export 75C9DD72C799870E310542E24166F2C257290828 >/usr/share/keyrings/amnezia-ppa.gpg
-      rm -rf "${key_home}"
-      printf '%s\n' 'deb [signed-by=/usr/share/keyrings/amnezia-ppa.gpg] https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main' >/etc/apt/sources.list.d/amnezia-ppa.list
+    repo_suite="focal"
+  fi
+
+  printf 'deb [signed-by=%s] https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu %s main\n' \
+    "${KEYRING}" "${repo_suite}" >"${SOURCE_LIST}"
+
+  if ! apt-get -o DPkg::Lock::Timeout=300 update; then
+    if [[ "${repo_suite}" != "focal" ]]; then
+      echo "Amnezia PPA suite ${repo_suite} недоступен, повторяем через focal" >&2
+      printf 'deb [signed-by=%s] https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main\n' \
+        "${KEYRING}" >"${SOURCE_LIST}"
+      apt-get -o DPkg::Lock::Timeout=300 update
+    else
+      exit 1
     fi
   fi
-  apt-get -o DPkg::Lock::Timeout=300 update
+
   apt-get -o DPkg::Lock::Timeout=300 install -y amneziawg
 fi
 
@@ -112,5 +146,11 @@ fi
 
 systemctl enable "awg-quick@${INTERFACE}.service" >/dev/null
 systemctl restart "awg-quick@${INTERFACE}.service"
-systemctl is-active --quiet "awg-quick@${INTERFACE}.service"
+sleep 1
+systemctl is-active --quiet "awg-quick@${INTERFACE}.service" || {
+  systemctl status "awg-quick@${INTERFACE}.service" --no-pager -l >&2 || true
+  journalctl -u "awg-quick@${INTERFACE}.service" -n 40 --no-pager >&2 || true
+  exit 1
+}
+awg show "${INTERFACE}" >/dev/null
 echo "Mihomo/AmneziaWG: ${INTERFACE}, UDP ${PORT}, ${SUBNET}"

@@ -8,5 +8,6 @@
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
   "supported_os": ["ubuntu", "debian"],
-  "service": "vps-control-shadowsocks.target"
+  "service": "vps-control-shadowsocks.target",
+  "package": "shadowsocks-libev"
 }

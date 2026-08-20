@@ -3,6 +3,23 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const STYLE_FILES = [
+  "app/globals.css",
+  "app/styles/theme.css",
+  "app/styles/base.css",
+  "app/styles/app.css",
+  "app/styles/pages/auth.css",
+  "app/styles/pages/overview.css",
+  "app/styles/pages/dns.css",
+  "app/styles/pages/security.css",
+  "app/styles/pages/application.css",
+  "app/styles/pages/services.css",
+  "app/styles/pages/connections.css",
+  "app/styles/pages/protocols.css",
+  "app/styles/pages/mihomo.css",
+  "app/styles/pages/users.css",
+];
+const readStyles = async () => (await Promise.all(STYLE_FILES.map(read))).join("\n");
 
 test("поставка содержит установщик, образы и русскую документацию", async () => {
   const [bootstrap, manager, readme, wg, awg] = await Promise.all([
@@ -436,7 +453,7 @@ test("WG and AWG modules install and uninstall independently", async () => {
 
 test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", async () => {
   const [api, manager, page, css, ssManifest, ssInstall, ssRemove, vlessManifest, vlessInstall, vlessRemove] = await Promise.all([
-    read("api/main.py"), read("scripts/vps-control.sh"), read("app/page.tsx"), read("app/globals.css"),
+    read("api/main.py"), read("scripts/vps-control.sh"), read("app/page.tsx"), readStyles(),
     read("protocol-images/shadowsocks/manifest.json"),
     read("protocol-images/shadowsocks/install.sh"),
     read("protocol-images/shadowsocks/uninstall.sh"),
@@ -523,19 +540,20 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
 
 test("the interface uses one fixed visual design without personalization", async () => {
   const [page, api, css, manager] = await Promise.all([
-    read("app/page.tsx"), read("api/main.py"), read("app/globals.css"), read("scripts/vps-control.sh"),
+    read("app/page.tsx"), read("api/main.py"), readStyles(), read("scripts/vps-control.sh"),
   ]);
   assert.doesNotMatch(page, /personalization|data-(?:style|palette|density|theme)/i);
   assert.doesNotMatch(api, /personalization/i);
   assert.doesNotMatch(css, /personalization|data-(?:style|palette|density|theme)|task-manager/i);
-  assert.match(page, /<main className="shell">/);
-  assert.match(css, /\.shell \.metricCard \{ border-left: 2px solid var\(--green\)/);
+  assert.match(page, /<AppWorkspace/);
+  assert.match(css, /\.shell\.gateShell/);
+  assert.match(css, /--status-green/);
   assert.match(manager, /rm -f -- "\$\{DATA_DIR\}\/personalization\.json"/);
 });
 
 test("protocol pages safely edit channel settings and VRX links select HTTP2", async () => {
   const [page, api, css] = await Promise.all([
-    read("app/page.tsx"), read("api/main.py"), read("app/globals.css"),
+    read("app/page.tsx"), read("api/main.py"), readStyles(),
   ]);
   assert.match(api, /@app\.patch\("\/api\/protocols\/\{protocol\}\/settings"\)/);
   assert.match(api, /class ProtocolSettingsUpdate/);
@@ -563,7 +581,7 @@ test("protocol pages safely edit channel settings and VRX links select HTTP2", a
 });
 
 test("DNS control provides Russian resolvers, live checks and protocol application", async () => {
-  const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), read("app/globals.css")]);
+  const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), readStyles()]);
   assert.match(page, /type Tab = "overview" \| "dns"/);
   assert.match(page, /\(\["overview", "clients"\] as Tab\[\]\)/);
   assert.match(page, /\(\["dns", "security", "application", "services"\] as Tab\[\]\)/);
@@ -620,7 +638,7 @@ test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", a
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
-  const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), read("app/globals.css")]);
+  const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), readStyles()]);
   assert.match(page, /DNS без скрытых изменений/);
   assert.match(page, /Действующие WG\/AWG-подключения не изменяются/);
   assert.match(page, /Снятый флажок означает «оставить текущее значение»/);

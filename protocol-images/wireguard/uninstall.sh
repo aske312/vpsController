@@ -34,5 +34,15 @@ if path.exists():
     path.write_text(json.dumps([item for item in items if item.get("protocol") != "wg"], ensure_ascii=False, indent=2), encoding="utf-8")
     path.chmod(0o600)
 PY
-apt-get -o DPkg::Lock::Timeout=300 purge -y wireguard-tools
+# wireguard-tools owns wg-quick@.service, a template shared with any other
+# WireGuard instance (e.g. Mihomo's isolated mh-wg0 channel). Purging it
+# deletes that template out from under the other instance, which then can't
+# be stopped or torn down cleanly anymore. Only purge when this was the
+# last configured instance.
+other_instance="$(find /etc/wireguard -mindepth 1 -maxdepth 1 -name '*.conf' ! -name "${WG_INTERFACE}.conf" -print -quit 2>/dev/null)"
+if [[ -z "${other_instance}" ]]; then
+  apt-get -o DPkg::Lock::Timeout=300 purge -y wireguard-tools
+else
+  echo "wireguard-tools package kept: still used by $(basename -- "${other_instance}" .conf)"
+fi
 sysctl --system >/dev/null 2>&1 || true

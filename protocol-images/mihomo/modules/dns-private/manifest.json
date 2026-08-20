@@ -2,11 +2,9 @@
   "id": "dns-private",
   "name": "Private DNS",
   "version": "1.0.0",
-  "description": "DNS-политика только для конфигураций Mihomo.",
+  "description": "DNS-политика для конфигураций Mihomo. Всегда включена, настраивается здесь.",
   "category": "dns",
   "category_name": "DNS",
-  "default_enabled": false,
-  "scope": "mihomo",
   "settings": [
     {
       "key": "enhanced_mode",
@@ -20,15 +18,15 @@
     },
     {
       "key": "nameserver",
-      "label": "Nameserver",
-      "type": "text",
-      "default": "https://1.1.1.1/dns-query"
+      "label": "Основной DNS",
+      "type": "select",
+      "default": "https://cloudflare-dns.com/dns-query"
     },
     {
       "key": "fallback",
-      "label": "Fallback",
-      "type": "text",
-      "default": "https://8.8.8.8/dns-query"
+      "label": "Резервный DNS",
+      "type": "select",
+      "default": "https://dns.google/dns-query"
     }
   ]
 }

@@ -785,6 +785,69 @@ remove_protocol_image() {
   ok "Протокол ${image_id} удалён; образ сохранён."
 }
 
+update_protocol_image() {
+  local image_id="${2:-}"
+  [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
+  local image_dir="${INSTALL_DIR}/protocol-images"
+  local manifest=""
+  while IFS= read -r candidate; do
+    if [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' "${candidate}")" == "${image_id}" ]]; then
+      manifest="${candidate}"
+      break
+    fi
+  done < <(find "${image_dir}" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print)
+  [[ -n "${manifest}" ]] || die "образ ${image_id} не найден."
+  local image_root package installer module_log failure_message
+  image_root="$(dirname -- "${manifest}")"
+  package="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("package",""))' "${manifest}")"
+  installer="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("installer",""))' "${manifest}")"
+  info "Обновление образа ${image_id}"
+  module_log="/var/log/${APP_NAME}-protocol-${image_id}.log"
+  install -m 0600 /dev/null "${module_log}"
+  if [[ -n "${package}" ]]; then
+    # apt-tracked tool (wg/awg/shadowsocks): upgrade the package only. The
+    # running tunnel/service is deliberately left untouched here — restarting
+    # it would drop live connections without the admin explicitly asking for
+    # that; the panel surfaces whether a restart is actually needed.
+    prepare_package_manager
+    {
+      apt-get -o DPkg::Lock::Timeout=300 update &&
+      apt-get -o DPkg::Lock::Timeout=300 install --only-upgrade -y "${package}"
+    } >"${module_log}" 2>&1 || {
+      tail -n 40 "${module_log}" >&2 || true
+      failure_message="$(tail -n 1 "${module_log}" | tr '\n\r' ' ' | cut -c1-240)"
+      [[ -n "${failure_message}" ]] || failure_message="обновление пакета завершилось с ошибкой"
+      write_action_status "failed" "${ACTION_PROGRESS}" "${failure_message}; журнал: ${module_log}"
+      CURRENT_ACTION=""
+      die "не удалось обновить ${image_id}; журнал: ${module_log}"
+    }
+  else
+    # Self-fetching image (e.g. VLESS Reality's Xray binary): its own
+    # installer already downloads and verifies the latest official release.
+    # XRAY_UPDATE_ONLY makes it stop right after swapping the binary in,
+    # skipping the TLS probe/config/systemd-restart steps so the running
+    # service (and its live connections) is not touched by this update.
+    [[ "${installer}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${installer}" ]] \
+      || die "образ ${image_id} не поддерживает обновление."
+    ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+      AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+      PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
+      XRAY_UPDATE_ONLY=1 \
+      bash "${image_root}/${installer}" >"${module_log}" 2>&1 || {
+        tail -n 40 "${module_log}" >&2 || true
+        failure_message="$(tail -n 1 "${module_log}" | tr '\n\r' ' ' | cut -c1-240)"
+        [[ -n "${failure_message}" ]] || failure_message="установщик завершился с ошибкой"
+        write_action_status "failed" "${ACTION_PROGRESS}" "${failure_message}; журнал: ${module_log}"
+        CURRENT_ACTION=""
+        die "не удалось обновить ${image_id}; журнал: ${module_log}"
+      }
+  fi
+  ensure_api_write_access
+  systemctl restart "${APP_NAME}-api.service"
+  sync_protocol_monitor
+  ok "Образ ${image_id} обновлён."
+}
+
 client_firewall() {
   local action="${2:-}" port="${3:-}" port_end=$((SHADOWSOCKS_PORT_START + 9999))
   (( port_end <= 65535 )) || port_end=65535
@@ -1198,6 +1261,16 @@ sync_protocol_monitor() {
   install_protocol_monitor
 }
 
+# Mihomo Manager runs protocol-images/mihomo/manager.py as its own long-lived
+# uvicorn process (vps-control-mihomo-manager.service), separate from
+# vps-control-api.service. A release swap replaces that file on disk like
+# everything else, but restarting only api/web/caddy leaves it running the
+# old code in memory indefinitely - restart it too whenever it's installed.
+restart_mihomo_manager_if_present() {
+  systemctl list-unit-files --no-legend 'vps-control-mihomo-manager.service' 2>/dev/null | grep -q . \
+    && systemctl restart vps-control-mihomo-manager.service 2>/dev/null || true
+}
+
 deploy() {
   check_source
   ensure_runtime_dependencies
@@ -1228,6 +1301,7 @@ PY
   stop_legacy_containers
   systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
   systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
+  restart_mihomo_manager_if_present
   curl --fail --silent --show-error --retry 6 --retry-connrefused --retry-delay 2 \
     "http://127.0.0.1:3000/" >/dev/null
   cleanup_legacy_runtime
@@ -1271,6 +1345,7 @@ restart_services() {
   ensure_api_write_access
   info "Перезапуск служб панели"
   systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
+  restart_mihomo_manager_if_present
   verify_app
   ok "Панель перезапущена."
 }
@@ -1379,6 +1454,7 @@ install_prebuilt_release() {
     || ! write_integrity_manifest \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
+    || ! restart_mihomo_manager_if_present \
     || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
       "http://127.0.0.1:8000/api/health" >/dev/null \
     || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
@@ -1399,6 +1475,7 @@ install_prebuilt_release() {
     else
       systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
     fi
+    restart_mihomo_manager_if_present
     rm -rf -- "${stage_root}"
     die "подготовленный релиз отклонён; предыдущая версия восстановлена."
   fi
@@ -1550,6 +1627,7 @@ restore_test_app() {
   if ! install_api || ! install_web || ! ensure_api_write_access \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
+    || ! restart_mihomo_manager_if_present \
     || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:8000/api/health" >/dev/null \
     || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:3000/" >/dev/null; then
     warn "сохранённая версия не запустилась; тестовая версия восстанавливается."
@@ -1560,6 +1638,7 @@ restore_test_app() {
     mv -- "${INSTALL_DIR}" "${TEST_BACKUP_DIR}"
     mv -- "${failed_install}" "${INSTALL_DIR}"
     systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
+    restart_mihomo_manager_if_present
     die "возврат отклонён; тестовая версия продолжает работать."
   fi
   [[ "${failed_install}" == "${INSTALL_DIR}.failed-test."* ]] || die "небезопасный путь очистки тестовой версии."
@@ -2001,6 +2080,8 @@ usage() {
                    установить протокол из образа
   protocol-remove <id>
                    удалить протокол, сохранив образ
+  protocol-update <id>
+                   обновить протокол до последней официальной версии
   client-firewall <add|delete> <port>
                    изменить правило отдельного Shadowsocks-подключения
   credentials      показать логин и пароль администратора
@@ -2013,7 +2094,7 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove)
+    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
       begin_operation "${1}"
       trap handle_exit EXIT
       ;;
@@ -2086,6 +2167,7 @@ main() {
     poweroff) poweroff_server ;;
     protocol-install) install_protocol_image "$@" ;;
     protocol-remove) remove_protocol_image "$@" ;;
+    protocol-update) update_protocol_image "$@" ;;
     client-firewall) client_firewall "$@" ;;
     credentials) show_credentials ;;
     help|-h|--help) usage ;;

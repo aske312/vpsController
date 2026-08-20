@@ -15,6 +15,8 @@ import subprocess
 import threading
 import time
 import urllib.parse
+import urllib.error
+import urllib.request
 import uuid
 import platform
 from concurrent.futures import ThreadPoolExecutor
@@ -26,6 +28,11 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+try:
+    from .access_beta import create_access_beta_router
+except ImportError:  # uvicorn runs with api/ as WorkingDirectory
+    from access_beta import create_access_beta_router
 
 app = FastAPI(title="312.net Infrastructure API", version="0.1.0")
 logger = logging.getLogger("vps-control.api")
@@ -112,6 +119,9 @@ network_diagnostic_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
 stream_stats_cache: dict[str, dict] = {}
 XRAY_BIN = "/usr/local/lib/vps-control-vless-reality-xhttp/xray"
+XRAY_GITHUB_REPO = "XTLS/Xray-core"
+github_release_lock = threading.Lock()
+github_release_cache: dict[str, dict] = {}
 client_mutation_lock = threading.Lock()
 cpu_usage_lock = threading.Lock()
 cpu_previous: tuple[int, int] | None = None
@@ -1307,6 +1317,129 @@ def security_logs(
     return {"source": source, "lines": run(*commands[source], timeout=12).splitlines()}
 
 
+def apt_package_versions(package: str) -> tuple[str, str]:
+    """Return (installed, candidate) versions for an apt package. Cheap:
+    reads apt's local index, no network."""
+    # LC_ALL=C: a non-English locale (this server runs ru_RU) makes
+    # apt-cache policy print "Установлен:"/"Кандидат:" instead of
+    # "Installed:"/"Candidate:", which the parsing below would silently
+    # never match, leaving both versions permanently blank.
+    output = run("env", "LC_ALL=C", "apt-cache", "policy", package, timeout=10)
+    installed = candidate = ""
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("Installed:"):
+            installed = line.split(":", 1)[1].strip()
+        elif line.startswith("Candidate:"):
+            candidate = line.split(":", 1)[1].strip()
+    return "" if installed == "(none)" else installed, "" if candidate == "(none)" else candidate
+
+
+def version_major(value: str) -> str:
+    # Best-effort leading numeral from a Debian version string (drop any
+    # epoch prefix like "2:") or a plain semver-ish tag.
+    match = re.match(r"\d+", value.split(":")[-1])
+    return match.group(0) if match else ""
+
+
+def xray_installed_version(binary: str) -> str:
+    if not Path(binary).is_file():
+        return ""
+    output = run(binary, "version", timeout=5)
+    match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
+    return match.group(1) if match else ""
+
+
+def github_latest_tag(repo: str) -> str:
+    cached = github_release_cache.get(repo)
+    if cached and time.time() - cached["_cached_at"] < 3600:
+        return cached["tag"]
+    if not github_release_lock.acquire(blocking=False):
+        return cached["tag"] if cached else ""
+    try:
+        output = run(
+            "curl", "--silent", "--show-error", "--connect-timeout", "3", "--max-time", "6",
+            f"https://api.github.com/repos/{repo}/releases/latest",
+            timeout=8,
+        )
+        tag = ""
+        try:
+            tag = str(json.loads(output).get("tag_name", "")).lstrip("v")
+        except (ValueError, json.JSONDecodeError):
+            pass
+        if tag:
+            github_release_cache[repo] = {"tag": tag, "_cached_at": time.time()}
+            return tag
+        return cached["tag"] if cached else ""
+    finally:
+        github_release_lock.release()
+
+
+MIHOMO_CORE_BIN = INSTALL_DIR / "api" / "bin" / "mihomo"
+MIHOMO_GITHUB_REPO = "MetaCubeX/mihomo"
+AMNEZIAWG_GITHUB_REPO = "amnezia-vpn/amneziawg-tools"
+
+
+def mihomo_core_installed_version() -> str:
+    if not MIHOMO_CORE_BIN.is_file():
+        return ""
+    output = run(str(MIHOMO_CORE_BIN), "-v", timeout=5)
+    match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
+    return match.group(1) if match else ""
+
+
+def awg_installed_version() -> str:
+    # `awg --version` (e.g. "amneziawg-tools v3.1.20260812 - ...") is the
+    # real AmneziaWG version. The .deb package's own version field is
+    # inherited from upstream wireguard-tools' date-based scheme and never
+    # changes to reflect it - comparing that would never notice an
+    # AmneziaWG 1.x -> 2.x-style jump.
+    output = run("awg", "--version", timeout=5)
+    match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
+    return match.group(1) if match else ""
+
+
+def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bool) -> dict[str, Any]:
+    package = str(manifest.get("package", ""))
+    # Mihomo's core binary ships inside the vps-control release itself
+    # (build-release.sh pins it to a hand-verified sha256, unlike Xray's
+    # releases there is no published checksum file to fetch and verify
+    # against live), so unlike the others it is informational only here:
+    # no live one-click update, getting a newer core means a new
+    # vps-control release.
+    live_update = image_id != "mihomo"
+    if image_id == "awg":
+        # Real version (see awg_installed_version()) for display/comparison;
+        # the update action still goes through apt (package= is still set),
+        # since that's how a new build actually gets installed.
+        installed_version = awg_installed_version() if installed else ""
+        available_version = github_latest_tag(AMNEZIAWG_GITHUB_REPO)
+    elif package:
+        installed_version, available_version = apt_package_versions(package)
+        if not installed:
+            # The package can be installed system-wide via Mihomo's own
+            # isolated channel while this direct protocol is not; don't
+            # claim an installed version for a protocol that isn't.
+            installed_version = ""
+    elif image_id == "vless-reality-xhttp":
+        installed_version = xray_installed_version(XRAY_BIN) if installed else ""
+        available_version = github_latest_tag(XRAY_GITHUB_REPO)
+    elif image_id == "mihomo":
+        installed_version = mihomo_core_installed_version() if installed else ""
+        available_version = github_latest_tag(MIHOMO_GITHUB_REPO)
+    else:
+        installed_version = available_version = ""
+    update_available = bool(installed_version and available_version and installed_version != available_version)
+    update_breaking = update_available and version_major(installed_version) != version_major(available_version)
+    return {
+        "installed_version": installed_version,
+        "available_version": available_version,
+        "update_available": update_available and live_update,
+        "update_breaking": update_breaking,
+        "update_via_release": update_available and not live_update,
+    }
+
+
 def protocol_image_manifests() -> dict[str, dict]:
     images: dict[str, dict] = {}
     if not PROTOCOL_IMAGES_DIR.exists():
@@ -1334,6 +1467,15 @@ def protocol_image_manifests() -> dict[str, dict]:
         # Stream proxies do not create a tunnel interface. Their manifests use a
         # fixed systemd unit, while WG-like images may still interpolate one.
         service = service_template.replace("{interface}", interface) if service_template else ""
+        # Installed and running are different states. A stopped tunnel must
+        # remain manageable instead of being offered for installation again.
+        # is-enabled (not LoadState) is required here: wg/awg use templated
+        # units (wg-quick@.service, awg-quick@.service) shared with Mihomo's
+        # isolated mh-wg0/mh-awg0 channels. Once Mihomo installs the same
+        # package, LoadState=loaded for *any* instance name, including the
+        # direct wg0/awg0 one that was never actually installed. is-enabled
+        # is set per instance by each installer's own `systemctl enable`.
+        installed = bool(service and run("systemctl", "is-enabled", service) == "enabled")
         images[image_id] = {
             "id": image_id,
             "name": str(manifest.get("name", image_id)),
@@ -1342,11 +1484,11 @@ def protocol_image_manifests() -> dict[str, dict]:
             "category": str(manifest.get("category", "network")),
             "category_name": str(manifest.get("category_name", "Сетевые модули")),
             "interface": interface,
-            # Installed and running are different states. A stopped tunnel must
-            # remain manageable instead of being offered for installation again.
-            "installed": bool(service and run("systemctl", "show", service, "--property=LoadState", "--value") == "loaded"),
+            "service": service,
+            "installed": installed,
             "active": bool(service and run("systemctl", "is-active", service) == "active"),
             "removable": bool(uninstaller),
+            **protocol_version_info(manifest, image_id, installed),
         }
     return images
 
@@ -1384,6 +1526,40 @@ def install_protocol_image(image_id: str, _: None = Depends(require_token)) -> d
         "state": "activating",
         "progress": 3,
         "message": "Запуск установки протокола",
+    }
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
+    os.chmod(ACTION_FILE, 0o600)
+    return action
+
+
+@app.post("/api/protocol-images/{image_id}/update")
+def update_protocol_image(image_id: str, _: None = Depends(require_token)) -> dict:
+    image = protocol_image_manifests().get(image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Protocol image not found")
+    if not image.get("installed"):
+        raise HTTPException(status_code=409, detail="Protocol is not installed")
+    if not image.get("update_available"):
+        raise HTTPException(status_code=409, detail="No update available")
+    if ACTION_FILE.exists():
+        try:
+            previous_unit = json.loads(ACTION_FILE.read_text(encoding="utf-8")).get("unit", "")
+            if previous_unit and run("systemctl", "is-active", previous_unit) in ("active", "activating"):
+                raise HTTPException(status_code=409, detail="Another application action is already running")
+        except (json.JSONDecodeError, OSError):
+            pass
+    unit = f"vps-control-protocol-update-{image_id}-{int(time.time())}"
+    result = subprocess.run(
+        ["systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec", CONTROL_COMMAND, "protocol-update", image_id],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    if result.returncode:
+        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to update protocol")
+    action = {
+        "unit": f"{unit}.service", "action": f"protocol-update:{image_id}",
+        "started_at": datetime.now(timezone.utc).isoformat(), "state": "activating",
+        "progress": 3, "message": "Запуск обновления протокола",
     }
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
@@ -1591,6 +1767,40 @@ def application_logs(lines: int = 160, _: None = Depends(require_token)) -> dict
     return {"lines": run(*args, timeout=12).splitlines()}
 
 
+MIHOMO_STATE_FILE = Path("/var/lib/vps-control/mihomo/state.json")
+# Mirrors manager.py's SERVICE_BY_MODULE. The two files run as separate
+# processes with no shared import, so this small map is kept in sync by hand
+# rather than reading it back over HTTP from a service that might be down.
+MIHOMO_MODULE_SERVICES = {
+    "transport-wg": ("Mihomo · WireGuard", "wg-quick@mh-wg0.service"),
+    "transport-awg": ("Mihomo · AmneziaWG", "awg-quick@mh-awg0.service"),
+    "transport-shadowsocks": ("Mihomo · Shadowsocks", "vps-control-mihomo-ss.target"),
+    "transport-reality": ("Mihomo · VLESS Reality", "vps-control-mihomo-reality.service"),
+}
+
+
+def protocol_managed_services() -> dict[str, dict]:
+    # Kernel/filesystem truth instead of a hand-maintained list: every
+    # installed protocol image (wg, awg, shadowsocks, vless-reality-xhttp,
+    # mihomo itself) shows up here automatically, so new protocol images
+    # never need a matching entry added by hand.
+    services: dict[str, dict] = {
+        image["id"]: {"name": image["name"], "unit": image["service"], "controls": ["start", "stop", "restart"]}
+        for image in protocol_image_manifests().values()
+        if image.get("installed") and image.get("service")
+    }
+    try:
+        mihomo_state = json.loads(MIHOMO_STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        mihomo_state = {}
+    mihomo_modules = mihomo_state.get("modules") if isinstance(mihomo_state, dict) else {}
+    mihomo_modules = mihomo_modules if isinstance(mihomo_modules, dict) else {}
+    for module_id, (name, unit) in MIHOMO_MODULE_SERVICES.items():
+        if mihomo_modules.get(module_id):
+            services[f"mihomo-{module_id}"] = {"name": name, "unit": unit, "controls": ["start", "stop", "restart"]}
+    return services
+
+
 def managed_services() -> dict[str, dict]:
     return {
         "api": {
@@ -1599,8 +1809,6 @@ def managed_services() -> dict[str, dict]:
         },
         "web": {"name": "Web 312.net", "unit": "vps-control-web.service", "controls": ["restart"], "disabled_controls": ["stop"]},
         "gateway": {"name": "Caddy", "unit": "caddy.service", "controls": ["restart"], "disabled_controls": ["stop"]},
-        "wg": {"name": "WireGuard", "unit": f"wg-quick@{WG_INTERFACE}.service", "controls": ["start", "stop", "restart"]},
-        "awg": {"name": "AmneziaWG", "unit": f"awg-quick@{AWG_INTERFACE}.service", "controls": ["start", "stop", "restart"]},
         "monitor": {"name": "Мониторинг VPN", "unit": "vpn-monitor.timer", "controls": ["start", "stop", "restart"]},
         "fail2ban": {"name": "Fail2ban", "unit": "fail2ban.service", "controls": ["start", "stop", "restart"]},
         "updates": {
@@ -1611,6 +1819,7 @@ def managed_services() -> dict[str, dict]:
             "name": "SSH · критическая служба", "unit": "ssh.service",
             "controls": ["start", "stop", "restart"], "disabled_controls": [],
         },
+        **protocol_managed_services(),
     }
 
 
@@ -1711,7 +1920,11 @@ def service_details(service_id: str, definition: dict) -> dict:
         "id": service_id,
         "name": definition["name"],
         "unit": unit,
-        "installed": properties.get("LoadState") == "loaded",
+        # UnitFileState (not LoadState): wg-quick@/awg-quick@ are templated
+        # units shared with Mihomo's isolated mh-wg0/mh-awg0 instances, so
+        # LoadState=loaded as soon as the package exists for *any* instance
+        # name. UnitFileState reflects this specific instance's own enablement.
+        "installed": properties.get("UnitFileState") in ("enabled", "enabled-runtime", "static"),
         "active": properties.get("ActiveState") == "active",
         "state": properties.get("ActiveState", "unknown"),
         "substate": properties.get("SubState", "unknown"),
@@ -1724,8 +1937,12 @@ def service_details(service_id: str, definition: dict) -> dict:
         "disabled_controls": definition.get("disabled_controls", []),
     }
     if service_id == "ssh":
+        # Socket-activated: ssh.service itself is typically enabled=disabled
+        # with ssh.socket holding the actual enablement, so installed/active/
+        # enabled must all fall back to the socket's state too.
         socket_active = run("systemctl", "is-active", "ssh.socket") == "active"
         socket_enabled = run("systemctl", "is-enabled", "ssh.socket") in ("enabled", "enabled-runtime", "static")
+        details["installed"] = details["installed"] or socket_enabled
         details["active"] = details["active"] or socket_active
         details["enabled"] = details["enabled"] or socket_enabled
         details["unit"] = "ssh.service + ssh.socket"
@@ -1775,14 +1992,13 @@ def services_status(_: None = Depends(require_token)) -> dict:
     items = []
     for service_id, definition in managed_services().items():
         details = service_details(service_id, definition)
-        # Optional modules (WG/AWG, monitoring, fail2ban, etc.) are
-        # not shown until their systemd unit is actually installed.
-        module_configured = {
-            "wg": WG_CONFIG.exists(),
-            "awg": AWG_CONFIG.exists(),
-            "monitor": WG_CONFIG.exists() or AWG_CONFIG.exists(),
-        }.get(service_id, True)
-        if details["installed"] and module_configured:
+        # "monitor" is direct WG/AWG CSV logging specifically; hide it until
+        # a direct tunnel exists for it to record. Protocol and Mihomo rows
+        # are already gated by managed_services() only including what's
+        # actually installed, so no separate module_configured check remains.
+        if service_id == "monitor" and not (WG_CONFIG.exists() or AWG_CONFIG.exists()):
+            continue
+        if details["installed"]:
             items.append(details)
     vpn_urls = []
     if PUBLIC_DOMAIN:
@@ -1902,8 +2118,8 @@ def manage_service(service_id: str, payload: ServiceAction, _: None = Depends(re
         raise HTTPException(status_code=409, detail="Action is not allowed for this service")
     if service_id in ("wg", "awg") and payload.action == "stop" and os.getenv("ACCESS_MODE", "external") == "vpn":
         alternate_id = "awg" if service_id == "wg" else "wg"
-        alternate_definition = managed_services()[alternate_id]
-        alternate_ready = (
+        alternate_definition = managed_services().get(alternate_id)
+        alternate_ready = alternate_definition is not None and (
             service_details(alternate_id, alternate_definition)["active"]
             and Path(f"/sys/class/net/{AWG_INTERFACE if alternate_id == 'awg' else WG_INTERFACE}").exists()
         )
@@ -3034,3 +3250,64 @@ def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-realit
             raise HTTPException(status_code=409, detail=f"{protocol} protocol is not installed")
         run("systemctl", "restart", unit, timeout=20, check=True)
     return {"protocol": protocol, "active": run("systemctl", "is-active", unit) == "active"}
+
+# Beta access profiles are mounted as a separate orchestration layer.
+# Existing direct-protocol endpoints remain the implementation adapters; the
+# beta module owns user/device relationships and never rewrites their storage
+# format. Mihomo remains a neighbouring manager process on localhost:8791.
+def access_beta_create_direct(name: str, protocol: str) -> dict:
+    return create_client(ClientCreate(name=name, protocol=protocol), None)
+
+
+def access_beta_delete_direct(client_id: str) -> dict:
+    return delete_client(client_id, None)
+
+
+def access_beta_mihomo_request(method: str, path: str, payload: dict | None = None):
+    if not path.startswith("/api/mihomo/"):
+        raise HTTPException(status_code=500, detail="Invalid Mihomo manager path")
+    password = os.getenv("ADMIN_PASSWORD", "")
+    if not password:
+        raise HTTPException(status_code=503, detail="Mihomo Manager credentials are unavailable")
+    auth = base64.b64encode(f"{ADMIN_USER}:{password}".encode("utf-8")).decode("ascii")
+    body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        f"http://127.0.0.1:8791{path}",
+        data=body,
+        method=method,
+        headers={
+            "Authorization": f"Basic {auth}",
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/plain",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            raw = response.read().decode("utf-8")
+            content_type = response.headers.get("Content-Type", "")
+            if "application/json" in content_type:
+                return json.loads(raw) if raw else {}
+            return raw
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            detail = json.loads(raw).get("detail", raw)
+        except (json.JSONDecodeError, AttributeError):
+            detail = raw
+        raise HTTPException(status_code=exc.code, detail=str(detail or "Mihomo Manager request failed")) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(status_code=503, detail="Mihomo Manager is unavailable") from exc
+
+
+app.include_router(
+    create_access_beta_router(
+        data_dir=DATA_DIR,
+        protocol_detector=protocol_image_manifests,
+        auth_dependency=require_token,
+        direct_create=access_beta_create_direct,
+        direct_delete=access_beta_delete_direct,
+        direct_list=read_clients,
+        mihomo_request=access_beta_mihomo_request,
+    )
+)
+

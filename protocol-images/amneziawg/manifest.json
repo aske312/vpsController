@@ -9,5 +9,6 @@
   "uninstaller": "uninstall.sh",
   "supported_os": ["ubuntu", "debian"],
   "interface_env": "AWG_INTERFACE",
-  "service": "awg-quick@{interface}.service"
+  "service": "awg-quick@{interface}.service",
+  "package": "amneziawg"
 }

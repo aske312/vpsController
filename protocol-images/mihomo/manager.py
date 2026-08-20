@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import hmac
 import ipaddress
 import json
@@ -10,6 +11,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -28,6 +30,27 @@ PROFILE_FILE = DATA_ROOT / "profiles.json"
 STATE_FILE = DATA_ROOT / "state.json"
 SETTINGS_ROOT = DATA_ROOT / "settings"
 CORE_BIN = APP_ROOT / "api" / "bin" / "mihomo"
+# Mihomo defaults to $HOME/.config/mihomo for its home/cache directory.
+# The manager service runs with ProtectHome=true, so /root is masked and
+# that mkdir fails. Point it at a writable directory explicitly instead.
+CORE_HOME = DATA_ROOT / "core-home"
+ACTION_FILE = DATA_ROOT / "action.json"
+REALITY_XRAY_BIN = Path("/usr/local/lib/vps-control-mihomo-reality/xray")
+REALITY_API_SERVER = "127.0.0.1:10086"
+XRAY_GITHUB_REPO = "XTLS/Xray-core"
+MIHOMO_GITHUB_REPO = "MetaCubeX/mihomo"
+AMNEZIAWG_GITHUB_REPO = "amnezia-vpn/amneziawg-tools"
+github_release_lock = threading.Lock()
+profile_mutation_lock = threading.Lock()
+github_release_cache: dict[str, dict[str, Any]] = {}
+
+
+def serialized_profile_mutation(function):
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        with profile_mutation_lock:
+            return function(*args, **kwargs)
+    return wrapped
 
 TRANSPORTS = {
     "transport-wg",
@@ -35,8 +58,31 @@ TRANSPORTS = {
     "transport-shadowsocks",
     "transport-reality",
 }
-NON_TRANSPORTS = {"dns-private", "routing-policy"}
-KNOWN_MODULES = TRANSPORTS | NON_TRANSPORTS
+# routing-policy and dns-private are not toggleable modules: routing is
+# per-profile (see routing_schema()/routing_defaults()) and DNS is always
+# on (see dns_schema()/dns_settings()). Their manifest.json files are kept
+# only as the field schemas for their respective settings editors.
+ROUTING_MODULE_ID = "routing-policy"
+DNS_MODULE_ID = "dns-private"
+KNOWN_MODULES = TRANSPORTS
+
+# Mirrors the DNS_PROVIDERS list in api/main.py (kept independent: separate
+# process, no shared import). Only providers usable directly as a Mihomo
+# nameserver/fallback entry (DoH URL or plain IP for UDP) are included.
+DNS_PROVIDERS = (
+    {"id": "cloudflare", "name": "Cloudflare — без фильтрации", "server": "https://cloudflare-dns.com/dns-query"},
+    {"id": "google", "name": "Google Public DNS — без фильтрации", "server": "https://dns.google/dns-query"},
+    {"id": "quad9", "name": "Quad9 Secure — блокировка вредоносных доменов", "server": "https://dns.quad9.net/dns-query"},
+    {"id": "adguard", "name": "AdGuard DNS — блокировка рекламы и трекеров", "server": "https://dns.adguard-dns.com/dns-query"},
+    {"id": "opendns", "name": "OpenDNS — базовая защита", "server": "208.67.222.222"},
+    {"id": "cleanbrowsing", "name": "CleanBrowsing Security — вредоносные сайты", "server": "185.228.168.9"},
+    {"id": "yandex-basic", "name": "Яндекс DNS — базовый, без фильтрации", "server": "https://common.dot.dns.yandex.net/dns-query"},
+    {"id": "yandex-safe", "name": "Яндекс DNS — безопасный", "server": "77.88.8.88"},
+    {"id": "yandex-family", "name": "Яндекс DNS — семейный", "server": "77.88.8.7"},
+    {"id": "skydns", "name": "SkyDNS — российская фильтрация", "server": "193.58.251.251"},
+    {"id": "nsdi", "name": "НСДИ", "server": "195.208.4.1"},
+    {"id": "safedns", "name": "SafeDNS — безопасность и категории", "server": "195.46.39.39"},
+)
 
 SERVICE_BY_MODULE = {
     "transport-wg": "wg-quick@mh-wg0.service",
@@ -61,11 +107,13 @@ class ModuleSettingsPatch(BaseModel):
 class ProfileCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     channels: list[str] = Field(default_factory=list)
+    routing: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProfileUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
     channels: list[str] | None = None
+    routing: dict[str, Any] | None = None
 
 
 def run(*args: str, check: bool = False, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -88,6 +136,15 @@ def systemctl_active(unit: str) -> bool:
     return run("systemctl", "is-active", "--quiet", unit).returncode == 0
 
 
+def service_stably_active(unit: str, checks: int = 4, interval: float = 0.5) -> bool:
+    """Reject transient systemd 'active' states from a process that immediately crashes."""
+    for _ in range(checks):
+        if not systemctl_active(unit):
+            return False
+        time.sleep(interval)
+    return systemctl_active(unit)
+
+
 def load_json(path: Path, fallback: Any) -> Any:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -108,6 +165,23 @@ def atomic_json(path: Path, value: Any, mode: int = 0o600) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def write_action(action: str, message: str, state: str = "running", progress: int = 10) -> None:
+    # FastAPI dispatches these sync endpoints to a threadpool, so a client can
+    # poll get_action() from a separate request while a long install/profile
+    # operation is still running on another worker thread.
+    atomic_json(ACTION_FILE, {
+        "action": action,
+        "message": message,
+        "state": state,
+        "progress": progress,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+
+
+def get_action_payload() -> dict[str, Any]:
+    return load_json(ACTION_FILE, {"action": "", "message": "", "state": "idle", "progress": 100})
 
 
 def state() -> dict[str, Any]:
@@ -162,6 +236,13 @@ def module_settings(module_id: str) -> dict[str, Any]:
     return {**default_settings(module_id), **stored}
 
 
+def option_value(option: Any) -> Any:
+    # "select" options are normally plain strings, but fields like DNS
+    # providers need a human label distinct from the stored value (a DoH
+    # URL), so an option may also be {"value": ..., "label": ...}.
+    return option.get("value", option) if isinstance(option, dict) else option
+
+
 def validate_settings(module_id: str, values: dict[str, Any]) -> dict[str, Any]:
     definition = {
         str(item["key"]): item
@@ -187,7 +268,7 @@ def validate_settings(module_id: str, values: dict[str, Any]) -> dict[str, Any]:
                 raise HTTPException(status_code=422, detail=f"{key} is above maximum")
             current[key] = value
         elif kind == "select":
-            options = item.get("options", [])
+            options = [option_value(option) for option in item.get("options", [])]
             if raw not in options:
                 raise HTTPException(status_code=422, detail=f"Unsupported value for {key}")
             current[key] = raw
@@ -207,6 +288,119 @@ def validate_settings(module_id: str, values: dict[str, Any]) -> dict[str, Any]:
     return current
 
 
+def routing_schema() -> list[dict[str, Any]]:
+    path = SUBMODULE_ROOT / ROUTING_MODULE_ID / "manifest.json"
+    value = load_json(path, {})
+    settings = value.get("settings", []) if isinstance(value, dict) else []
+    return settings if isinstance(settings, list) else []
+
+
+def routing_defaults() -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for item in routing_schema():
+        if isinstance(item, dict) and item.get("key"):
+            values[str(item["key"])] = item.get("default")
+    return values
+
+
+def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = None) -> dict[str, Any]:
+    definition = {
+        str(item["key"]): item
+        for item in routing_schema()
+        if isinstance(item, dict) and item.get("key")
+    }
+    result = dict(current) if current is not None else routing_defaults()
+    for key, raw in values.items():
+        if key not in definition:
+            raise HTTPException(status_code=422, detail=f"Unknown routing setting: {key}")
+        item = definition[key]
+        kind = item.get("type", "text")
+        if kind == "number":
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail=f"{key} must be numeric")
+            minimum = item.get("min")
+            maximum = item.get("max")
+            if minimum is not None and value < int(minimum):
+                raise HTTPException(status_code=422, detail=f"{key} is below minimum")
+            if maximum is not None and value > int(maximum):
+                raise HTTPException(status_code=422, detail=f"{key} is above maximum")
+            result[key] = value
+        elif kind == "select":
+            options = [option_value(option) for option in item.get("options", [])]
+            if raw not in options:
+                raise HTTPException(status_code=422, detail=f"Unsupported value for {key}")
+            result[key] = raw
+        else:
+            # Unlike module settings, routing text fields (e.g. "rules") are
+            # allowed to be empty: a profile without extra rules is valid.
+            result[key] = str(raw)
+    return result
+
+
+DNS_SETTINGS_FILE = SETTINGS_ROOT / f"{DNS_MODULE_ID}.json"
+
+
+def dns_provider_options() -> list[dict[str, str]]:
+    return [{"value": item["server"], "label": item["name"]} for item in DNS_PROVIDERS]
+
+
+def dns_schema() -> list[dict[str, Any]]:
+    path = SUBMODULE_ROOT / DNS_MODULE_ID / "manifest.json"
+    value = load_json(path, {})
+    settings = value.get("settings", []) if isinstance(value, dict) else []
+    settings = settings if isinstance(settings, list) else []
+    options = dns_provider_options()
+    result: list[dict[str, Any]] = []
+    for item in settings:
+        if not isinstance(item, dict):
+            continue
+        item = dict(item)
+        if item.get("key") in ("nameserver", "fallback"):
+            item["options"] = options
+        result.append(item)
+    return result
+
+
+def dns_defaults() -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for item in dns_schema():
+        if isinstance(item, dict) and item.get("key"):
+            values[str(item["key"])] = item.get("default")
+    return values
+
+
+def dns_settings() -> dict[str, Any]:
+    stored = load_json(DNS_SETTINGS_FILE, {})
+    stored = stored if isinstance(stored, dict) else {}
+    return {**dns_defaults(), **stored}
+
+
+def validate_dns(values: dict[str, Any]) -> dict[str, Any]:
+    definition = {
+        str(item["key"]): item
+        for item in dns_schema()
+        if isinstance(item, dict) and item.get("key")
+    }
+    result = dns_settings()
+    for key, raw in values.items():
+        if key not in definition:
+            raise HTTPException(status_code=422, detail=f"Unknown DNS setting: {key}")
+        item = definition[key]
+        if item.get("type", "text") == "select":
+            options = [option_value(option) for option in item.get("options", [])]
+            if raw not in options:
+                raise HTTPException(status_code=422, detail=f"Unsupported value for {key}")
+            result[key] = raw
+        else:
+            value = str(raw).strip()
+            if not value:
+                raise HTTPException(status_code=422, detail=f"{key} cannot be empty")
+            result[key] = value
+    return result
+
+
 def auth_required(authorization: str | None = Header(default=None)) -> None:
     if not authorization or not authorization.startswith("Basic "):
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -222,6 +416,29 @@ def auth_required(authorization: str | None = Header(default=None)) -> None:
         and hmac.compare_digest(password, expected_password)
     ):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
+@app.get("/api/mihomo/action", dependencies=[Depends(auth_required)])
+def get_action() -> dict[str, Any]:
+    return get_action_payload()
+
+
+@app.get("/api/mihomo/routing/schema", dependencies=[Depends(auth_required)])
+def get_routing_schema() -> dict[str, Any]:
+    return {"schema": routing_schema(), "defaults": routing_defaults()}
+
+
+@app.get("/api/mihomo/dns/settings", dependencies=[Depends(auth_required)])
+def get_dns_settings() -> dict[str, Any]:
+    return {"schema": dns_schema(), "values": dns_settings()}
+
+
+@app.patch("/api/mihomo/dns/settings", dependencies=[Depends(auth_required)])
+def patch_dns_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
+    next_values = validate_dns(patch.values)
+    SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
+    atomic_json(DNS_SETTINGS_FILE, next_values)
+    return {"schema": dns_schema(), "values": next_values}
 
 
 def public_endpoint() -> str:
@@ -240,6 +457,103 @@ def module_is_installed(module_id: str) -> bool:
     return enabled
 
 
+def apt_package_versions(package: str) -> tuple[str, str]:
+    """Return (installed, candidate) versions for an apt package. Mirrors
+    api/main.py's helper of the same name (separate process, no shared
+    import)."""
+    # LC_ALL=C: a non-English locale (this server runs ru_RU) makes
+    # apt-cache policy print "Установлен:"/"Кандидат:" instead of
+    # "Installed:"/"Candidate:", which the parsing below would silently
+    # never match, leaving both versions permanently blank.
+    output = run("env", "LC_ALL=C", "apt-cache", "policy", package).stdout
+    installed = candidate = ""
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("Installed:"):
+            installed = line.split(":", 1)[1].strip()
+        elif line.startswith("Candidate:"):
+            candidate = line.split(":", 1)[1].strip()
+    return "" if installed == "(none)" else installed, "" if candidate == "(none)" else candidate
+
+
+def version_major(value: str) -> str:
+    match = re.match(r"\d+", value.split(":")[-1])
+    return match.group(0) if match else ""
+
+
+def xray_installed_version(binary: Path) -> str:
+    if not binary.is_file():
+        return ""
+    output = run(str(binary), "version").stdout
+    match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
+    return match.group(1) if match else ""
+
+
+def awg_installed_version() -> str:
+    # `awg --version` (e.g. "amneziawg-tools v3.1.20260812 - ...") is the
+    # real AmneziaWG version. The .deb package's own version field is
+    # inherited from upstream wireguard-tools' date-based scheme and never
+    # changes to reflect it - comparing that would never notice an
+    # AmneziaWG 1.x -> 2.x-style jump. run() here doesn't catch a missing
+    # binary the way api/main.py's does, so check explicitly first.
+    if not shutil.which("awg"):
+        return ""
+    output = run("awg", "--version").stdout
+    match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
+    return match.group(1) if match else ""
+
+
+def github_latest_tag(repo: str) -> str:
+    cached = github_release_cache.get(repo)
+    if cached and time.time() - cached["_cached_at"] < 3600:
+        return cached["tag"]
+    if not github_release_lock.acquire(blocking=False):
+        return cached["tag"] if cached else ""
+    try:
+        output = run(
+            "curl", "--silent", "--show-error", "--connect-timeout", "3", "--max-time", "6",
+            f"https://api.github.com/repos/{repo}/releases/latest",
+        ).stdout
+        tag = ""
+        try:
+            tag = str(json.loads(output).get("tag_name", "")).lstrip("v")
+        except (ValueError, json.JSONDecodeError):
+            pass
+        if tag:
+            github_release_cache[repo] = {"tag": tag, "_cached_at": time.time()}
+            return tag
+        return cached["tag"] if cached else ""
+    finally:
+        github_release_lock.release()
+
+
+def module_version_info(module_id: str, info: dict[str, Any], installed: bool) -> dict[str, Any]:
+    package = str(info.get("package", ""))
+    if module_id == "transport-awg":
+        # Real version, not the apt package's (see awg_installed_version()).
+        # The update action still goes through apt (package= stays set on
+        # the manifest), since that's how a new build actually installs.
+        installed_version = awg_installed_version() if installed else ""
+        available_version = github_latest_tag(AMNEZIAWG_GITHUB_REPO)
+    elif package:
+        installed_version, available_version = apt_package_versions(package)
+        if not installed:
+            installed_version = ""
+    elif module_id == "transport-reality":
+        installed_version = xray_installed_version(REALITY_XRAY_BIN) if installed else ""
+        available_version = github_latest_tag(XRAY_GITHUB_REPO)
+    else:
+        installed_version = available_version = ""
+    update_available = bool(installed_version and available_version and installed_version != available_version)
+    update_breaking = update_available and version_major(installed_version) != version_major(available_version)
+    return {
+        "installed_version": installed_version,
+        "available_version": available_version,
+        "update_available": update_available,
+        "update_breaking": update_breaking,
+    }
+
+
 def module_payload(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
     settings = module_settings(module_id)
@@ -251,15 +565,18 @@ def module_payload(module_id: str) -> dict[str, Any]:
         "active": systemctl_active(service) if service else installed,
         "service": service or "",
         "settings_values": settings,
+        **module_version_info(module_id, info, installed),
     }
 
 
-def call_module_script(module_id: str, action: str) -> None:
+def call_module_script(module_id: str, action: str, extra_env: dict[str, str] | None = None) -> None:
     script = SUBMODULE_ROOT / module_id / f"{action}.sh"
     if not script.is_file():
         raise RuntimeError(f"Missing {script.name} for {module_id}")
     env = os.environ.copy()
     env["MIHOMO_SETTINGS_FILE"] = str(SETTINGS_ROOT / f"{module_id}.json")
+    if extra_env:
+        env.update(extra_env)
     result = subprocess.run(
         ["bash", str(script)],
         env=env,
@@ -276,6 +593,23 @@ def call_module_script(module_id: str, action: str) -> None:
 def core_status() -> dict[str, Any]:
     module_state = state()
     installed_modules = [module_id for module_id in KNOWN_MODULES if module_is_installed(module_id)]
+    profile_items = profiles()
+    credentials_count = sum(
+        len(profile.get("credentials", {}))
+        for profile in profile_items
+        if isinstance(profile.get("credentials", {}), dict)
+    )
+    profiles_in_use = sum(
+        1
+        for profile in profile_items
+        if profile.get("channels") or profile.get("credentials")
+    )
+    channels_in_use = sorted({
+        str(channel)
+        for profile in profile_items
+        for channel in profile.get("channels", [])
+        if channel in TRANSPORTS
+    })
     core_version = ""
     core_build = ""
     if CORE_BIN.is_file():
@@ -283,6 +617,12 @@ def core_status() -> dict[str, Any]:
         core_build = (result.stdout or result.stderr).strip().splitlines()[0] if result.returncode == 0 else ""
         match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", core_build)
         core_version = match.group(1) if match else core_build
+    # Informational only: the core binary ships pinned inside the
+    # vps-control release itself (build-release.sh verifies it against a
+    # hand-checked sha256, unlike Xray there is no published checksum file
+    # to fetch and verify live), so a newer upstream tag means "update
+    # vps-control", not a button here.
+    core_available_version = github_latest_tag(MIHOMO_GITHUB_REPO)
     return {
         "id": "mihomo",
         "name": "Mihomo",
@@ -291,9 +631,16 @@ def core_status() -> dict[str, Any]:
         "version": core_version,
         "core_version": core_version,
         "core_build": core_build,
+        "core_available_version": core_available_version,
+        "core_update_via_release": bool(
+            core_version and core_available_version and core_version != core_available_version
+        ),
         "modules_installed": len(installed_modules),
         "modules_total": len(KNOWN_MODULES),
-        "profiles": len(profiles()),
+        "profiles": len(profile_items),
+        "profiles_in_use": profiles_in_use,
+        "credentials": credentials_count,
+        "channels_in_use": channels_in_use,
         "channels_installed": len([item for item in TRANSPORTS if module_is_installed(item)]),
         "endpoint": public_endpoint(),
         "updated_at": module_state.get("updated_at", ""),
@@ -329,8 +676,6 @@ def get_modules() -> dict[str, Any]:
         "transport-wg",
         "transport-reality",
         "transport-shadowsocks",
-        "dns-private",
-        "routing-policy",
     ]
     return {"items": [module_payload(module_id) for module_id in order]}
 
@@ -352,36 +697,51 @@ def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[st
     SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
     atomic_json(SETTINGS_ROOT / f"{module_id}.json", next_values)
     if module_is_installed(module_id) and module_id in TRANSPORTS:
+        write_action(f"module-settings:{module_id}", f"Применение настроек {manifest(module_id)['name']}…")
         try:
             call_module_script(module_id, "install")
         except RuntimeError as exc:
+            write_action(f"module-settings:{module_id}", str(exc), state="failed", progress=100)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+        write_action(f"module-settings:{module_id}", f"Настройки {manifest(module_id)['name']} применены", state="done", progress=100)
     return get_module_settings(module_id)
 
 
 @app.post("/api/mihomo/modules/{module_id}/install", dependencies=[Depends(auth_required)])
 def install_module(module_id: str) -> dict[str, Any]:
-    manifest(module_id)
+    info = manifest(module_id)
     if module_is_installed(module_id):
         return module_payload(module_id)
+    write_action(f"module-install:{module_id}", f"Установка {info['name']}…", progress=10)
     # Create defaults before the installer so the first install is deterministic.
     settings_path = SETTINGS_ROOT / f"{module_id}.json"
     if not settings_path.exists():
         atomic_json(settings_path, default_settings(module_id))
     try:
         call_module_script(module_id, "install")
+        write_action(f"module-install:{module_id}", f"Проверка службы {info['name']}…", progress=70)
+        service = SERVICE_BY_MODULE.get(module_id)
+        if service and not service_stably_active(service):
+            status = run("systemctl", "status", service, "--no-pager", "-l")
+            detail = (status.stdout or status.stderr).strip()
+            raise RuntimeError(
+                f"{manifest(module_id)['name']} не подтвердил рабочее состояние systemd"
+                + (f"\n{detail}" if detail else "")
+            )
     except RuntimeError as exc:
+        write_action(f"module-install:{module_id}", str(exc), state="failed", progress=100)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     value = state()
     value["modules"][module_id] = True
     value["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     save_state(value)
+    write_action(f"module-install:{module_id}", f"{info['name']} установлен", state="done", progress=100)
     return module_payload(module_id)
 
 
 @app.delete("/api/mihomo/modules/{module_id}", dependencies=[Depends(auth_required)])
 def remove_module(module_id: str) -> dict[str, Any]:
-    manifest(module_id)
+    info = manifest(module_id)
     in_use = [
         profile["name"]
         for profile in profiles()
@@ -392,14 +752,48 @@ def remove_module(module_id: str) -> dict[str, Any]:
             status_code=409,
             detail=f"Модуль используется профилями: {', '.join(in_use)}",
         )
+    write_action(f"module-remove:{module_id}", f"Удаление {info['name']}…", progress=10)
     try:
         call_module_script(module_id, "uninstall")
     except RuntimeError as exc:
+        write_action(f"module-remove:{module_id}", str(exc), state="failed", progress=100)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     value = state()
     value["modules"][module_id] = False
     value["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     save_state(value)
+    write_action(f"module-remove:{module_id}", f"{info['name']} удалён", state="done", progress=100)
+    return module_payload(module_id)
+
+
+@app.post("/api/mihomo/modules/{module_id}/update", dependencies=[Depends(auth_required)])
+def update_module(module_id: str) -> dict[str, Any]:
+    info = manifest(module_id)
+    if not module_is_installed(module_id):
+        raise HTTPException(status_code=409, detail="Module is not installed")
+    if not module_payload(module_id).get("update_available"):
+        raise HTTPException(status_code=409, detail="No update available")
+    write_action(f"module-update:{module_id}", f"Обновление {info['name']}…", progress=10)
+    package = str(info.get("package", ""))
+    try:
+        if package:
+            # Package upgrade only, same as the direct protocol's update:
+            # the running tunnel/service is left untouched so live
+            # connections aren't dropped by an unattended restart.
+            run("apt-get", "-o", "DPkg::Lock::Timeout=300", "update", check=True)
+            run("apt-get", "-o", "DPkg::Lock::Timeout=300", "install", "--only-upgrade", "-y", package, check=True)
+        else:
+            # Self-fetching module (transport-reality's bundled Xray): its
+            # installer already downloads and verifies the latest official
+            # release. XRAY_UPDATE_ONLY makes it stop right after swapping
+            # the binary in, skipping the TLS probe/config/systemd-restart
+            # steps so the running service and its live profile connections
+            # aren't touched by this update.
+            call_module_script(module_id, "install", extra_env={"XRAY_UPDATE_ONLY": "1"})
+    except RuntimeError as exc:
+        write_action(f"module-update:{module_id}", str(exc), state="failed", progress=100)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    write_action(f"module-update:{module_id}", f"{info['name']} обновлён", state="done", progress=100)
     return module_payload(module_id)
 
 
@@ -553,11 +947,21 @@ def reality_env() -> dict[str, str]:
     return result
 
 
+def reality_inbound(config: dict[str, Any]) -> dict[str, Any]:
+    # The config also carries a loopback "api" inbound for the Stats API
+    # (see transport-reality/install.sh); find the client inbound by tag
+    # instead of assuming it is inbounds[0].
+    for inbound in config.get("inbounds", []):
+        if isinstance(inbound, dict) and inbound.get("tag") == "mihomo-reality":
+            return inbound
+    raise KeyError("mihomo-reality inbound missing")
+
+
 def add_reality_credential(profile_id: str) -> dict[str, Any]:
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
     try:
-        clients = config["inbounds"][0]["settings"]["clients"]
+        clients = reality_inbound(config)["settings"]["clients"]
     except (TypeError, KeyError, IndexError):
         raise RuntimeError("Mihomo Reality server configuration is invalid")
     user_id = str(uuid.uuid4())
@@ -580,16 +984,107 @@ def remove_reality_credential(profile_id: str, credential: dict[str, Any]) -> No
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
     try:
-        clients = config["inbounds"][0]["settings"]["clients"]
+        inbound = reality_inbound(config)
         user_id = credential.get("uuid")
-        config["inbounds"][0]["settings"]["clients"] = [
-            item for item in clients if item.get("id") != user_id
+        inbound["settings"]["clients"] = [
+            item for item in inbound["settings"]["clients"] if item.get("id") != user_id
         ]
         atomic_json(config_path, config, mode=0o640)
         shutil.chown(config_path, user="root", group="nogroup")
         run("systemctl", "restart", "vps-control-mihomo-reality.service")
     except (TypeError, KeyError, IndexError):
         pass
+
+
+def wg_like_dump(module_id: str) -> dict[str, dict[str, Any]]:
+    tool = "wg" if module_id == "transport-wg" else "awg"
+    interface = "mh-wg0" if module_id == "transport-wg" else "mh-awg0"
+    output = run(tool, "show", interface, "dump").stdout
+    now = int(time.time())
+    peers: dict[str, dict[str, Any]] = {}
+    for row in output.splitlines()[1:]:
+        columns = row.split("\t")
+        if len(columns) < 8:
+            continue
+        key, _, endpoint, _, handshake, rx, tx, _ = columns[:8]
+        handshake_at = int(handshake or 0)
+        peers[key] = {
+            "endpoint": endpoint if endpoint and endpoint != "(none)" else None,
+            "rx_bytes": int(rx or 0),
+            "tx_bytes": int(tx or 0),
+            "handshake_age_s": (now - handshake_at) if handshake_at else None,
+        }
+    return peers
+
+
+def shadowsocks_profile_stats(profile_id: str, port: int) -> dict[str, Any]:
+    unit = f"vps-control-mihomo-ss@{profile_id}.service"
+
+    def counter(name: str) -> int:
+        try:
+            return int(run("systemctl", "show", unit, f"--property={name}", "--value").stdout.strip() or 0)
+        except ValueError:
+            return 0
+
+    connections = run("ss", "-Htn", "state", "established", f"( sport = :{port} )").stdout
+    active_connections = len([line for line in connections.splitlines() if line.strip()])
+    return {
+        "active": systemctl_active(unit),
+        "rx_bytes": counter("IPIngressBytes"),
+        "tx_bytes": counter("IPEgressBytes"),
+        "active_connections": active_connections,
+    }
+
+
+def reality_profile_stats(profile_id: str) -> dict[str, Any]:
+    active = systemctl_active("vps-control-mihomo-reality.service")
+    if not REALITY_XRAY_BIN.is_file() or not active:
+        return {"active": active, "rx_bytes": 0, "tx_bytes": 0}
+    email = f"mihomo-{profile_id}"
+    output = run(
+        str(REALITY_XRAY_BIN), "api", "statsquery",
+        f"-server={REALITY_API_SERVER}", "-pattern", f"user>>>{email}>>>traffic>>>",
+    ).stdout
+    uplink = downlink = 0
+    try:
+        payload = json.loads(output)
+        for entry in payload.get("stat", []):
+            name = str(entry.get("name", ""))
+            value = int(entry.get("value", 0))
+            if name.endswith(">>>uplink"):
+                uplink = value
+            elif name.endswith(">>>downlink"):
+                downlink = value
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+    # "uplink"/"downlink" are named from the client's perspective, matching
+    # the rx/tx convention used by the wg/awg and Shadowsocks stats above.
+    return {"active": True, "rx_bytes": downlink, "tx_bytes": uplink}
+
+
+@app.get("/api/mihomo/profiles/{profile_id}/stats", dependencies=[Depends(auth_required)])
+def profile_stats(profile_id: str) -> dict[str, Any]:
+    item = next((entry for entry in profiles() if entry.get("id") == profile_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    credentials = item.get("credentials", {})
+    channels: dict[str, Any] = {}
+    wg_dump: dict[str, dict[str, Any]] | None = None
+    awg_dump: dict[str, dict[str, Any]] | None = None
+    empty_peer = {"endpoint": None, "rx_bytes": 0, "tx_bytes": 0, "handshake_age_s": None}
+    for module_id in item.get("channels", []):
+        credential = credentials.get(module_id, {})
+        if module_id == "transport-wg":
+            wg_dump = wg_like_dump("transport-wg") if wg_dump is None else wg_dump
+            channels[module_id] = wg_dump.get(str(credential.get("public_key", "")), empty_peer)
+        elif module_id == "transport-awg":
+            awg_dump = wg_like_dump("transport-awg") if awg_dump is None else awg_dump
+            channels[module_id] = awg_dump.get(str(credential.get("public_key", "")), empty_peer)
+        elif module_id == "transport-shadowsocks":
+            channels[module_id] = shadowsocks_profile_stats(profile_id, int(credential.get("port", 0)))
+        elif module_id == "transport-reality":
+            channels[module_id] = reality_profile_stats(profile_id)
+    return {"id": profile_id, "channels": channels}
 
 
 def provision(profile_id: str, module_id: str) -> dict[str, Any]:
@@ -646,17 +1141,22 @@ def list_profiles() -> dict[str, Any]:
 
 
 @app.post("/api/mihomo/profiles", dependencies=[Depends(auth_required)])
+@serialized_profile_mutation
 def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     channels = validate_channels(payload.channels)
+    routing = validate_routing(payload.routing)
     profile_id = uuid.uuid4().hex[:12]
+    write_action(f"profile-create:{profile_id}", f"Создание профиля «{payload.name}»…", progress=15)
     try:
         credentials = create_profile_credentials(profile_id, channels)
     except Exception as exc:
+        write_action(f"profile-create:{profile_id}", str(exc), state="failed", progress=100)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     item = {
         "id": profile_id,
         "name": payload.name.strip(),
         "channels": channels,
+        "routing": routing,
         "credentials": credentials,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -664,17 +1164,22 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     data = profiles()
     data.append(item)
     save_profiles(data)
+    write_action(f"profile-create:{profile_id}", f"Профиль «{item['name']}» создан", state="done", progress=100)
     return item
 
 
 @app.patch("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(auth_required)])
+@serialized_profile_mutation
 def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     data = profiles()
     item = next((entry for entry in data if entry.get("id") == profile_id), None)
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
+    write_action(f"profile-update:{profile_id}", f"Обновление профиля «{item.get('name', '')}»…", progress=15)
     if payload.name is not None:
         item["name"] = payload.name.strip()
+    if payload.routing is not None:
+        item["routing"] = validate_routing(payload.routing, current={**routing_defaults(), **item.get("routing", {})})
     if payload.channels is not None:
         next_channels = validate_channels(payload.channels)
         current = list(item.get("channels", []))
@@ -688,26 +1193,39 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
                 if module_id not in current:
                     credentials[module_id] = provision(profile_id, module_id)
         except Exception as exc:
+            write_action(f"profile-update:{profile_id}", str(exc), state="failed", progress=100)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         item["channels"] = next_channels
         item["credentials"] = credentials
     item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     save_profiles(data)
+    write_action(f"profile-update:{profile_id}", f"Профиль «{item['name']}» обновлён", state="done", progress=100)
     return item
 
 
 @app.delete("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(auth_required)])
+@serialized_profile_mutation
 def delete_profile(profile_id: str) -> dict[str, Any]:
     data = profiles()
     item = next((entry for entry in data if entry.get("id") == profile_id), None)
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
+    write_action(f"profile-delete:{profile_id}", f"Удаление профиля «{item.get('name', '')}»…", progress=20)
+    errors: list[str] = []
     for module_id, credential in dict(item.get("credentials", {})).items():
         try:
             deprovision(profile_id, module_id, credential)
-        except Exception:
-            pass
+        except Exception as exc:
+            errors.append(f"{module_id}: {exc}")
+    if errors:
+        detail = "; ".join(errors)
+        write_action(f"profile-delete:{profile_id}", detail, state="failed", progress=100)
+        # Keep profile metadata visible. Some adapters are idempotent, so the
+        # administrator can retry deletion instead of losing track of a live
+        # credential that failed to deprovision.
+        raise HTTPException(status_code=500, detail=f"Не удалось полностью удалить профиль: {detail}")
     save_profiles([entry for entry in data if entry.get("id") != profile_id])
+    write_action(f"profile-delete:{profile_id}", "Профиль удалён", state="done", progress=100)
     return {"removed": profile_id}
 
 
@@ -791,9 +1309,8 @@ def render_profile(item: dict[str, Any]) -> str:
     if not channels:
         raise HTTPException(status_code=409, detail="У профиля нет установленных каналов Mihomo")
     credentials = item.get("credentials", {})
-    routing = module_settings("routing-policy")
-    routing_enabled = module_is_installed("routing-policy")
-    mode = str(routing.get("mode", "rule")) if routing_enabled else "rule"
+    routing = {**routing_defaults(), **item.get("routing", {})}
+    mode = str(routing.get("mode", "rule"))
     lines = [
         "mixed-port: 7890",
         "allow-lan: false",
@@ -808,23 +1325,20 @@ def render_profile(item: dict[str, Any]) -> str:
         "  dns-hijack:",
         '    - "any:53"',
     ]
-    if module_is_installed("dns-private"):
-        dns = module_settings("dns-private")
-        lines += [
-            "dns:",
-            "  enable: true",
-            f"  enhanced-mode: {dns['enhanced_mode']}",
-            "  nameserver:",
-            f"    - {q(dns['nameserver'])}",
-            "  fallback:",
-            f"    - {q(dns['fallback'])}",
-        ]
+    dns = dns_settings()
+    lines += [
+        "dns:",
+        "  enable: true",
+        f"  enhanced-mode: {dns['enhanced_mode']}",
+        "  nameserver:",
+        f"    - {q(dns['nameserver'])}",
+        "  fallback:",
+        f"    - {q(dns['fallback'])}",
+    ]
     lines.append("proxies:")
     for module_id in channels:
         lines.extend(render_proxy(module_id, credentials[module_id]))
-    group_type = "select"
-    if routing_enabled:
-        group_type = str(routing.get("strategy", "fallback"))
+    group_type = str(routing.get("strategy", "fallback"))
     lines += [
         "proxy-groups:",
         '  - name: "GATE.312"',
@@ -839,12 +1353,11 @@ def render_profile(item: dict[str, Any]) -> str:
             f"    interval: {int(routing.get('interval', 180))}",
         ]
     lines.append("rules:")
-    if routing_enabled:
-        raw_rules = str(routing.get("rules", "")).replace("\r", "")
-        for rule in raw_rules.split("\n"):
-            rule = rule.strip()
-            if rule and not rule.startswith("#"):
-                lines.append(f"  - {q(rule)}")
+    raw_rules = str(routing.get("rules", "")).replace("\r", "")
+    for rule in raw_rules.split("\n"):
+        rule = rule.strip()
+        if rule and not rule.startswith("#"):
+            lines.append(f"  - {q(rule)}")
     lines.append('  - "MATCH,GATE.312"')
     return "\n".join(lines) + "\n"
 
@@ -864,7 +1377,8 @@ def profile_config(profile_id: str) -> str:
             handle.write(config)
             temp_path = handle.name
         try:
-            result = run(str(CORE_BIN), "-t", "-f", temp_path)
+            CORE_HOME.mkdir(parents=True, exist_ok=True)
+            result = run(str(CORE_BIN), "-t", "-d", str(CORE_HOME), "-f", temp_path)
             if result.returncode:
                 raise HTTPException(
                     status_code=500,

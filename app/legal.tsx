@@ -1,105 +1,204 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 
-type LegalDocument = "privacy" | "terms";
-type Language = "ru" | "en";
-type LegalSection = [title: string, content: ReactNode];
-type LocalizedDocument = { label: string; eyebrow: string; notice: ReactNode; sections: LegalSection[] };
-
-const documents: Record<Language, Record<LegalDocument, LocalizedDocument>> = {
-  ru: {
-    privacy: {
-      label: "Уведомление о приватности",
-      eyebrow: "SELF-HOSTED · 02.08.2026",
-      notice: <>312.net — свободное self-hosted ПО. Проект не предоставляет централизованный облачный сервис и не получает встроенный административный доступ к установленному экземпляру.</>,
-      sections: [
-        ["Где находятся данные", <>Конфигурации, ключи, журналы, сведения о сервере, модулях и соединениях обрабатываются на VPS, которым управляет пользователь. Данные сессии панели могут временно храниться в sessionStorage браузера администратора. Встроенной отправки содержимого экземпляра участникам проекта нет.</>],
-        ["Внешние соединения", <>Установка, обновления, пакетные репозитории, GeoIP и сетевая диагностика могут обращаться к GitHub и другим сторонним ресурсам. Такие ресурсы получают IP-адрес и технические метаданные запроса и применяют собственные политики.</>],
-        ["Ответственность администратора", <>Лицо или организация, управляющие конкретным экземпляром, самостоятельно определяют цели и способы обработки данных. Если применимое право требует уведомления о приватности, правового основания, сроков удаления, защиты данных или обработки запросов пользователей, администратор экземпляра обеспечивает это самостоятельно.</>],
-        ["Добровольные обращения", <>Сообщения об ошибках, предложения и иные материалы передаются проекту только по инициативе отправителя. Не включайте в публичные обращения пароли, приватные ключи, токены, персональные данные и другие секреты.</>],
-      ],
-    },
-    terms: {
-      label: "Свободная лицензия",
-      eyebrow: "MIT LICENSE · 02.08.2026",
-      notice: <>312.net распространяется по лицензии MIT. Юридически определяющим является полный текст файла LICENSE в составе проекта.</>,
-      sections: [
-        ["Разрешения", <>Разрешается безвозмездно использовать, копировать, изменять, объединять, публиковать, распространять, сублицензировать и продавать копии ПО, а также разрешать это другим лицам при сохранении уведомления об авторских правах и текста лицензии MIT.</>],
-        ["Независимый экземпляр", <>ПО является инструментом управления собственным VPS. Участники проекта не становятся хостинг-провайдером, VPN-оператором, оператором связи или администратором установленного пользователем экземпляра и не управляют его трафиком, ключами и соединениями.</>],
-        ["Действия пользователя", <>Лицензия на ПО не предоставляет разрешения на доступ к чужим системам и не отменяет требования закона, договора с хостинг-провайдером или права третьих лиц. Пользователь самостоятельно отвечает за выбранные серверы, команды, конфигурации и способы применения ПО.</>],
-        ["Сторонние компоненты", <>Операционная система, библиотеки, модули, GitHub, пакетные репозитории, GeoIP и другие сторонние ресурсы могут иметь собственные лицензии и условия. MIT применяется к 312.net и не заменяет условия таких компонентов.</>],
-        ["Отсутствие гарантий", <>ПО предоставляется «как есть», без каких-либо гарантий. В пределах, допускаемых применимым правом, авторы и правообладатели не несут ответственности по искам, за ущерб или иные требования, возникшие из ПО, его использования или иных действий с ним. Обязательные нормы применимого права сохраняют силу.</>],
-      ],
-    },
-  },
-  en: {
-    privacy: {
-      label: "Privacy Notice",
-      eyebrow: "SELF-HOSTED · 2 AUG 2026",
-      notice: <>312.net is free self-hosted software. The project does not provide a central cloud service or receive built-in administrative access to an installed instance.</>,
-      sections: [
-        ["Where data resides", <>Configurations, keys, logs and server, module and connection details are processed on the VPS controlled by the user. Panel session data may be stored temporarily in the administrator browser&apos;s sessionStorage. Instance content is not transmitted to project contributors by default.</>],
-        ["External connections", <>Installation, updates, package repositories, GeoIP and network diagnostics may contact GitHub and other third-party resources. Those resources receive the IP address and technical request metadata and apply their own policies.</>],
-        ["Instance administrator", <>The person or organisation controlling an instance independently determines the purposes and means of any data processing. Where applicable law requires a privacy notice, legal basis, deletion periods, safeguards or responses to data-subject requests, the instance administrator must provide them.</>],
-        ["Voluntary submissions", <>Bug reports, suggestions and other materials reach the project only when a sender chooses to submit them. Do not include passwords, private keys, tokens, personal data or other secrets in public submissions.</>],
-      ],
-    },
-    terms: {
-      label: "Free Software License",
-      eyebrow: "MIT LICENSE · 2 AUG 2026",
-      notice: <>312.net is distributed under the MIT License. The complete LICENSE file included with the project is the legally controlling text.</>,
-      sections: [
-        ["Permission", <>Any person may, free of charge, use, copy, modify, merge, publish, distribute, sublicense and sell copies of the Software, and permit others to do so, provided that the copyright notice and MIT permission notice are included.</>],
-        ["Independent instance", <>The Software is a tool for administering a user-controlled VPS. Project contributors do not thereby become a hosting provider, VPN operator, communications provider or administrator of the installed instance and do not control its traffic, keys or connections.</>],
-        ["User actions", <>The software license does not authorise access to third-party systems or override law, hosting agreements or third-party rights. Users remain responsible for the servers, commands, configurations and uses they choose.</>],
-        ["Third-party components", <>The operating system, libraries, modules, GitHub, package repositories, GeoIP and other third-party resources may have their own licences and terms. MIT applies to 312.net and does not replace those terms.</>],
-        ["No warranty", <>The Software is provided “as is”, without warranty of any kind. To the extent permitted by applicable law, authors and copyright holders are not liable for claims, damages or other liability arising from the Software, its use or other dealings in it. Mandatory applicable law remains unaffected.</>],
-      ],
-    },
-  },
+type LegalFooterProps = {
+  version: string;
+  commit: string;
 };
 
-export function LegalFooter({ version, commit }: { version: string; commit: string }) {
-  const [openDocument, setOpenDocument] = useState<LegalDocument | null>(null);
-  const [language, setLanguage] = useState<Language>("ru");
+type LegalPanel = "privacy" | "license" | null;
 
-  useEffect(() => {
-    if (!openDocument) return;
-    const close = (event: KeyboardEvent) => event.key === "Escape" && setOpenDocument(null);
-    document.addEventListener("keydown", close);
-    return () => document.removeEventListener("keydown", close);
-  }, [openDocument]);
+type LegalSection = {
+  heading: string;
+  body: string;
+};
 
-  const current = openDocument ? documents[language][openDocument] : null;
-  return <>
-    <footer className="versionFooter">
-      <span>{version} build {commit}</span>
-      <nav aria-label="Правовые документы / Legal documents">
-        <button type="button" onClick={() => setOpenDocument("privacy")}>Приватность / Privacy</button>
-        <button type="button" onClick={() => setOpenDocument("terms")}>Лицензия / License</button>
-      </nav>
-    </footer>
-    {current && <div className="legalBackdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) setOpenDocument(null);
-    }}>
-      <section className="legalScreen" role="dialog" aria-modal="true" aria-labelledby="legal-title">
-        <header>
-          <div><p className="eyebrow">{current.eyebrow}</p><h2 id="legal-title">{current.label}</h2></div>
-          <button type="button" onClick={() => setOpenDocument(null)} aria-label="Закрыть / Close">×</button>
-        </header>
-        <div className="legalLanguage" role="group" aria-label="Language">
-          <button className={language === "ru" ? "active" : ""} onClick={() => setLanguage("ru")}>RU</button>
-          <button className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>EN</button>
+type LegalDocument = {
+  title: string;
+  subtitle: string;
+  notice?: string;
+  sections: LegalSection[];
+};
+
+const PRIVACY_TEXT: LegalDocument = {
+  title: "Приватность / Privacy",
+  subtitle: "Техническое уведомление о данных, которые могут обрабатываться при эксплуатации панели.",
+  notice:
+    "Это встроенное техническое уведомление не заменяет обязательную политику конфиденциальности конкретного владельца или оператора сервера. Если развёртывание используется для обработки персональных данных, оператор обязан самостоятельно определить применимые требования законодательства и предоставить необходимые сведения пользователям.",
+  sections: [
+    {
+      heading: "Кто отвечает за данные",
+      body:
+        "В self-hosted развёртывании цели, способы и параметры обработки данных определяет владелец или оператор конкретного сервера. Разработчик приложения не становится автоматически получателем данных, контролёром или оператором персональных данных только из-за факта установки программного обеспечения. Иное возможно, если отдельный договор, облачный сервис, интеграция или фактическая передача данных предусматривают участие разработчика или третьей стороны.",
+    },
+    {
+      heading: "Учётные данные и авторизация",
+      body:
+        "Панель использует введённые администратором учётные данные для выполнения авторизации и административных запросов. Оператор обязан самостоятельно обеспечивать надёжность паролей, ограничение доступа, защищённый транспорт, актуальность системы и недопущение передачи административных данных посторонним лицам. Интерфейс не должен рассматриваться как замена организационным и инфраструктурным мерам безопасности.",
+    },
+    {
+      heading: "Техническая телеметрия",
+      body:
+        "Интерфейс может отображать сведения об узле и его работе: IP-адреса, версии компонентов, состояние сервисов, конфигурационные статусы, сетевые показатели, загрузку ресурсов, VPN-сессии, идентификаторы подключений, результаты диагностик и другую операционную информацию. Состав фактически доступных данных зависит от конфигурации конкретного сервера и установленных компонентов.",
+    },
+    {
+      heading: "Журналы, диагностика и история",
+      body:
+        "Системные журналы и результаты диагностических команд могут содержать адреса, имена устройств, идентификаторы, временные метки и иные сведения, которые в конкретной юрисдикции могут считаться персональными или конфиденциальными. Решения о сроках хранения, резервном копировании, экспорте, удалении и доступе к таким данным принимает оператор сервера.",
+    },
+    {
+      heading: "Сторонние сервисы и интеграции",
+      body:
+        "Если оператор самостоятельно подключает внешние DNS-службы, хостинг, системы мониторинга, прокси, VPN-провайдеров, репозитории, API или иные внешние сервисы, соответствующие данные могут обрабатываться этими сторонами по их собственным правилам. Разработчик приложения не контролирует условия, безопасность и практики сторонних сервисов, если иное прямо не согласовано отдельно.",
+    },
+    {
+      heading: "Безопасность и ответственность оператора",
+      body:
+        "Оператор несёт ответственность за корректную настройку сети, firewall, SSH, VPN, обновлений, прав доступа, сертификатов, резервных копий и иных защитных механизмов своей инфраструктуры. Наличие функций безопасности или диагностических индикаторов в интерфейсе не является гарантией отсутствия уязвимостей, атак, утечек, ошибок конфигурации или компрометации узла.",
+    },
+    {
+      heading: "Права пользователей и обязательные уведомления",
+      body:
+        "Если на конкретное развёртывание распространяются нормы о защите персональных данных, владелец или оператор обязан самостоятельно определить правовое основание обработки, сроки хранения, получателей данных, возможные международные передачи, порядок реализации прав субъектов данных и контактные сведения ответственного лица. Эти параметры зависят от конкретного использования и не могут быть достоверно определены универсальным интерфейсом приложения.",
+    },
+  ],
+};
+
+const LICENSE_TEXT: LegalDocument = {
+  title: "Лицензия / License",
+  subtitle: "Условия использования интерфейса, компонентов и операционных функций приложения.",
+  notice:
+    "Ниже приведено общее юридическое уведомление интерфейса. Если для конкретной копии приложения предоставлен отдельный файл LICENSE, договор, коммерческая лицензия или письменное соглашение, соответствующие условия имеют приоритет в той части, в которой они прямо регулируют использование программного обеспечения.",
+  sections: [
+    {
+      heading: "Назначение приложения",
+      body:
+        "312.net Infrastructure Control предназначен для администрирования серверной инфраструктуры, сетевых компонентов, VPN-каналов, системных служб и связанных операций. Пользователь самостоятельно определяет допустимость и законность конкретного способа применения приложения и несёт ответственность за соблюдение законодательства, правил провайдера, договорных ограничений и прав третьих лиц.",
+    },
+    {
+      heading: "Использование на собственный риск",
+      body:
+        "Если отдельным письменным соглашением прямо не предусмотрено иное, программное обеспечение и интерфейс предоставляются по принципу «как есть» и «по мере доступности» (AS IS / AS AVAILABLE). Не предоставляются гарантии непрерывной работы, отсутствия ошибок, совместимости с любым окружением, пригодности для конкретной цели, сохранности данных, определённой производительности или соответствия индивидуальным требованиям пользователя.",
+    },
+    {
+      heading: "Ограничение ответственности",
+      body:
+        "В максимально допустимой применимым законодательством степени разработчик, авторы и лица, участвовавшие в создании или распространении приложения, не несут ответственности за косвенные, случайные, специальные или последующие убытки, потерю прибыли, данных, конфигураций, доступа, соединений, репутации или возможности использования инфраструктуры, возникшие в связи с установкой, обновлением, настройкой, эксплуатацией или невозможностью использования приложения. Ограничение не применяется в той части, в которой такая ответственность не может быть исключена законом.",
+    },
+    {
+      heading: "Административные и опасные операции",
+      body:
+        "Приложение может выполнять привилегированные действия: устанавливать и удалять компоненты, изменять сетевые настройки, перезапускать службы, обновлять систему, изменять firewall, выполнять reboot или shutdown и применять конфигурации VPN. Администратор обязан понимать последствия команды, проверять выбранный объект и иметь независимый способ восстановления доступа к серверу до выполнения критических операций.",
+    },
+    {
+      heading: "Резервные копии и восстановление",
+      body:
+        "Перед обновлениями, изменением сетевых политик, удалением модулей или другими существенными действиями оператор обязан самостоятельно создавать и проверять пригодные резервные копии, snapshots и процедуры восстановления. Наличие встроенных механизмов rollback, recovery или подтверждения операций не гарантирует возможность восстановления во всех сценариях отказа.",
+    },
+    {
+      heading: "Сетевые и VPN-компоненты",
+      body:
+        "Приложение является инструментом управления и не предоставляет пользователю права нарушать применимое законодательство, ограничения доступа, условия сетевых операторов или права третьих лиц. Ответственность за выбранные маршруты, точки выхода, конфигурации туннелей, содержимое передаваемого трафика и использование созданных подключений несёт оператор соответствующей инфраструктуры и её пользователи.",
+    },
+    {
+      heading: "Безопасность",
+      body:
+        "Ни один программный продукт не может гарантировать абсолютную безопасность. Проверки статуса, security score, диагностика, firewall-правила и другие функции приложения носят операционный характер и не являются аудитом безопасности, сертификацией или гарантией защищённости. Оператор обязан самостоятельно устанавливать обновления, ограничивать доступ, контролировать журналы и применять необходимые меры защиты.",
+    },
+    {
+      heading: "Сторонние компоненты",
+      body:
+        "WireGuard, AmneziaWG, Mihomo, Shadowsocks, VLESS/Reality, системные библиотеки и другие сторонние проекты сохраняют собственные авторские права, товарные знаки и лицензионные условия. Их присутствие или возможность установки через панель не означает передачи исключительных прав на такие проекты и не создаёт гарантии или поддержки со стороны их авторов либо разработчика панели.",
+    },
+    {
+      heading: "Изменения и производные сборки",
+      body:
+        "При самостоятельном изменении исходного кода, сборке неофициальной версии, подключении сторонних модулей или изменении автоматизации ответственность за результат такой модификации несёт лицо, выполнившее изменение или осуществляющее эксплуатацию соответствующей сборки. Номер версии и build-id используются для идентификации конкретного состояния интерфейса и не подтверждают подлинность сторонней модифицированной копии.",
+    },
+    {
+      heading: "Поддержка и доступность",
+      body:
+        "Если отдельным соглашением не предусмотрено иное, публикация программного обеспечения не создаёт обязанности предоставлять техническую поддержку, исправления, обновления, совместимость с будущими версиями операционных систем или восстановление инфраструктуры пользователя. Разработчик вправе изменять, прекращать или перерабатывать отдельные функции в будущих версиях с учётом применимых обязательств.",
+    },
+    {
+      heading: "Права на приложение",
+      body:
+        "Права на оригинальный код, дизайн, документацию и иные созданные специально для приложения материалы принадлежат их соответствующим правообладателям. Никакое положение данного уведомления не передаёт пользователю исключительные права, товарные знаки или права на сторонние компоненты сверх объёма, прямо разрешённого применимой лицензией или отдельным соглашением.",
+    },
+  ],
+};
+
+export function LegalFooter({ version, commit }: LegalFooterProps) {
+  const [panel, setPanel] = useState<LegalPanel>(null);
+  const buildId = useMemo(() => (commit && commit !== "unknown" ? commit.slice(0, 12) : "unknown"), [commit]);
+  const legal = panel === "privacy" ? PRIVACY_TEXT : panel === "license" ? LICENSE_TEXT : null;
+
+  return (
+    <>
+      <footer className="versionFooter legalFooter" aria-label="Версия и правовая информация">
+        <div className="legalVersionLine" aria-label={`Версия ${version}, сборка ${buildId}`}>
+          <strong>{version}</strong>
+          <span aria-hidden="true">·</span>
+          <small>build </small>
+          <code>{buildId}</code>
         </div>
-        <article>
-          <p className="legalNotice">{current.notice}</p>
-          {current.sections.map(([title, content], index) => <section key={title}>
-            <h3>{index + 1}. {title}</h3><div>{content}</div>
-          </section>)}
-        </article>
-        <footer><button type="button" onClick={() => setOpenDocument(null)}>{language === "ru" ? "Закрыть" : "Close"}</button></footer>
-      </section>
-    </div>}
-  </>;
+        <div className="legalFooterLinks">
+          <button type="button" className="legalLink" onClick={() => setPanel("privacy")}>
+            Приватность / Privacy
+          </button>
+          <button type="button" className="legalLink" onClick={() => setPanel("license")}>
+            Лицензия / License
+          </button>
+        </div>
+      </footer>
+
+      {legal && (
+        <div className="legalBackdrop" role="presentation" onClick={() => setPanel(null)}>
+          <section
+            className="legalModal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="legal-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="legalModalHead">
+              <div>
+                <p className="eyebrow">LEGAL INFORMATION</p>
+                <h2 id="legal-dialog-title">{legal.title}</h2>
+                <p>{legal.subtitle}</p>
+              </div>
+              <button type="button" className="legalClose" onClick={() => setPanel(null)} aria-label="Закрыть окно">
+                ×
+              </button>
+            </div>
+
+            <div className="legalModalBody">
+              {legal.notice && <div className="legalNotice">{legal.notice}</div>}
+              {legal.sections.map((section) => (
+                <article key={section.heading} className="legalSection">
+                  <h3>{section.heading}</h3>
+                  <p>{section.body}</p>
+                </article>
+              ))}
+            </div>
+
+            <div className="legalModalFoot">
+              <div className="legalVersionLine legalVersionLineModal" aria-label={`Версия ${version}, сборка ${buildId}`}>
+                <strong>{version}</strong>
+                <span aria-hidden="true">·</span>
+                <small>build</small>
+                <code>{buildId}</code>
+              </div>
+              <button type="button" className="primaryButton legalPrimary" onClick={() => setPanel(null)}>
+                Понятно
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  );
 }
+
+export default LegalFooter;

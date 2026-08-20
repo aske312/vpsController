@@ -1,0 +1,363 @@
+/* Application workspace only. */
+
+.applicationLogs { grid-column: 1 / -1; }
+
+@media (max-width: 680px) {
+.applicationHero, .applicationLogs { grid-column: 1; }
+}
+
+@media (max-width: 700px) {
+.listeners, .logDrawer, .applicationHero, .applicationLogs { grid-column: 1; }
+}
+
+@media (max-width: 700px) {
+.shell .subtitle,
+  .shell .applicationHero p:not(.eyebrow) {
+    font-size: 13px;
+    line-height: 1.65;
+  }
+}
+
+.applicationWorkspace {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.gateShell .content:has(.applicationWorkspace) > .gateSectionIntro { display: none !important; }
+
+.applicationWorkspace *, .applicationWorkspace *::before, .applicationWorkspace *::after { box-sizing: border-box; }
+
+.applicationSummary {
+  display: grid;
+  grid-template-columns: minmax(280px, .72fr) minmax(560px, 1.28fr);
+  gap: 18px;
+  align-items: end;
+  min-width: 0;
+  padding: 17px 18px;
+  border: 1px solid rgba(91,116,141,.22);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 72% 0%, rgba(82,65,190,.09), transparent 36%),
+    linear-gradient(110deg, rgba(8,17,25,.97), rgba(7,15,23,.92));
+}
+
+.applicationSummaryCopy h1 { margin: 0; font-size: 29px; line-height: 1; }
+
+.applicationSummaryCopy > p:last-child { max-width: 60ch; margin: 9px 0 0; color: #91a6b5; font-size: 13px; line-height: 1.45; }
+
+.applicationSummaryStats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0,1fr));
+  overflow: hidden;
+  border: 1px solid rgba(91,116,141,.17);
+  border-radius: 14px;
+  background: rgba(5,13,20,.44);
+}
+
+.applicationSummaryStats > span { display: grid; gap: 4px; min-width: 0; padding: 10px 12px; border-right: 1px solid rgba(91,116,141,.14); }
+
+.applicationSummaryStats > span:last-child { border-right: 0; }
+
+.applicationSummaryStats small { color:#748a99; font:700 9px/1.1 var(--font-mono),monospace; letter-spacing:.1em; }
+
+.applicationSummaryStats strong { color:#edf5f8; font-size:16px; line-height:1.05; }
+
+.applicationSummaryStats em { overflow:hidden; color:#7e93a2; font:normal 10px/1.25 var(--font-mono),monospace; text-overflow:ellipsis; white-space:nowrap; }
+
+.applicationSummaryStats .ok strong { color:#6addba; }
+
+.applicationSummaryStats .bad strong { color:#ff8888; }
+
+.applicationSummaryStats .warn strong { color:#f0c368; }
+
+.applicationControlPlane {
+  position: relative;
+  min-height: 500px;
+  overflow: hidden;
+  border: 1px solid rgba(91,116,141,.22);
+  border-radius: 20px;
+  background: #060e16;
+}
+
+.applicationControlPlane::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("/gate-art/new-operator/application.webp");
+  background-repeat: no-repeat;
+  background-position: right center;
+  background-size: auto 100%;
+  opacity: .72;
+  pointer-events: none;
+}
+
+.applicationControlPlane::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(5,13,20,.995) 0%, rgba(5,13,20,.985) 37%, rgba(5,13,20,.87) 55%, rgba(5,13,20,.32) 72%, rgba(5,13,20,.08) 100%),
+    linear-gradient(180deg, rgba(5,13,20,.08), rgba(5,13,20,.20));
+  pointer-events: none;
+}
+
+.applicationControlShade { position:absolute; inset:0; z-index:1; background:radial-gradient(circle at 55% 28%, rgba(93,64,207,.10), transparent 34%); pointer-events:none; }
+
+.applicationControlContent { position:relative; z-index:2; display:grid; gap:14px; width:min(780px, 59%); min-width:0; padding:18px; }
+
+.applicationControlHead { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+
+.applicationControlHead h2 { margin:0; font-size:22px; }
+
+.applicationControlHead span { display:block; max-width:54ch; margin-top:5px; color:#8297a6; font-size:11px; line-height:1.45; }
+
+.applicationControlBadges { display:flex; justify-content:flex-end; gap:7px; flex-wrap:wrap; }
+
+.applicationControlBadges > span { display:inline-flex; align-items:center; min-height:27px; padding:0 9px; border:1px solid rgba(91,116,141,.18); border-radius:999px; background:rgba(6,14,21,.58); color:#91a4b1; font:700 9.5px var(--font-mono),monospace; white-space:nowrap; }
+
+.applicationControlBadges > span.ok { color:#6ee0bd; border-color:rgba(89,202,168,.24); }
+
+.applicationControlBadges > span.bad { color:#ff8a8a; border-color:rgba(209,79,79,.24); }
+
+.applicationRuntimeList { display:grid; overflow:hidden; border:1px solid rgba(91,116,141,.15); border-radius:14px; background:rgba(5,13,20,.72); backdrop-filter:blur(8px); }
+
+.applicationRuntimeList > div { display:grid; grid-template-columns:10px minmax(0,1fr) auto; gap:10px; align-items:center; min-width:0; padding:9px 11px; border-bottom:1px solid rgba(91,116,141,.11); }
+
+.applicationRuntimeList > div:last-child { border-bottom:0; }
+
+.applicationRuntimeList i { width:8px; height:8px; border-radius:50%; background:#7d919e; }
+
+.applicationRuntimeList .healthy i { background:#62dab6; box-shadow:0 0 0 4px rgba(98,218,182,.10); }
+
+.applicationRuntimeList .failed i { background:#ef8585; box-shadow:0 0 0 4px rgba(239,133,133,.10); }
+
+.applicationRuntimeList span { min-width:0; }
+
+.applicationRuntimeList strong { display:block; color:#edf5f8; font-size:12px; }
+
+.applicationRuntimeList small { display:block; overflow:hidden; margin-top:2px; color:#7890a0; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+
+.applicationRuntimeList b { color:#69dcb9; font:700 9px var(--font-mono),monospace; }
+
+.applicationRuntimeList .failed b { color:#f08787; }
+
+.applicationPrimaryActions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+
+.applicationPrimaryActions button { display:grid; grid-template-columns:auto 1fr; grid-template-areas:"tag title" "tag sub"; gap:2px 10px; min-width:0; min-height:63px; padding:10px 11px; border:1px solid rgba(103,92,196,.20); border-radius:12px; background:rgba(10,16,31,.72); color:#e7eff4; text-align:left; backdrop-filter:blur(8px); }
+
+.applicationPrimaryActions button > span { grid-area:tag; align-self:center; display:grid; place-items:center; width:55px; height:27px; border-radius:8px; background:rgba(83,73,184,.17); color:#a9a5ff; font:700 8.5px var(--font-mono),monospace; letter-spacing:.07em; }
+
+.applicationPrimaryActions button strong { grid-area:title; align-self:end; font-size:12px; }
+
+.applicationPrimaryActions button small { grid-area:sub; color:#7d92a1; font-size:9.5px; line-height:1.3; }
+
+.applicationPrimaryActions button:hover:not(:disabled) { border-color:rgba(120,105,231,.34); background:rgba(26,24,62,.74); }
+
+.applicationSecondaryActions { display:flex; gap:7px; flex-wrap:wrap; }
+
+.applicationSecondaryActions button { min-height:32px; padding:0 11px; border:1px solid rgba(91,116,141,.17); border-radius:9px; background:rgba(5,13,20,.66); color:#b9c9d3; font-size:10.5px; }
+
+.applicationSecondaryActions button:hover:not(:disabled) { color:#edf5f8; border-color:rgba(115,140,164,.28); }
+
+.applicationManagement { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr); gap:12px; min-width:0; }
+
+.applicationEnvironment, .applicationLifecycle, .applicationJournal { min-width:0; overflow:hidden; border:1px solid rgba(91,116,141,.22); border-radius:18px; background:linear-gradient(180deg,rgba(8,16,24,.96),rgba(7,15,23,.93)); }
+
+.applicationEnvironment > header, .applicationLifecycle > header, .applicationJournal > header { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; padding:13px 15px; border-bottom:1px solid rgba(91,116,141,.12); }
+
+.applicationEnvironment h2, .applicationLifecycle h2, .applicationJournal h2 { margin:0; font-size:18px; }
+
+.applicationEnvironment > header > span { color:#7991a1; font:10px var(--font-mono),monospace; }
+
+.applicationEnvironmentRows { display:grid; }
+
+.applicationEnvironmentRows > label { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; min-width:0; padding:11px 15px; border-bottom:1px solid rgba(91,116,141,.10); }
+
+.applicationEnvironmentRows strong { display:block; font-size:12px; }
+
+.applicationEnvironmentRows small { display:block; margin-top:3px; color:#7c91a0; font-size:10px; line-height:1.35; }
+
+.applicationSwitch { position:relative; width:38px; height:22px; flex:0 0 auto; }
+
+.applicationSwitch input { position:absolute; inset:0; opacity:0; cursor:pointer; }
+
+.applicationSwitch i { display:block; width:38px; height:22px; border:1px solid rgba(91,116,141,.22); border-radius:999px; background:#17252e; }
+
+.applicationSwitch i::after { content:""; position:absolute; top:4px; left:4px; width:14px; height:14px; border-radius:50%; background:#78909d; transition:.18s ease; }
+
+.applicationSwitch input:checked + i { background:rgba(34,124,100,.45); border-color:rgba(94,214,179,.30); }
+
+.applicationSwitch input:checked + i::after { left:20px; background:#70dfbe; }
+
+.applicationRelease { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding:11px 15px 13px; }
+
+.applicationRelease > span { display:grid; gap:4px; padding:9px 10px; border:1px solid rgba(91,116,141,.12); border-radius:11px; background:rgba(6,14,21,.35); min-width:0; }
+
+.applicationRelease small { color:#738999; font:700 8.5px var(--font-mono),monospace; letter-spacing:.09em; }
+
+.applicationRelease strong { overflow:hidden; color:#dce9ef; font:700 10px var(--font-mono),monospace; text-overflow:ellipsis; white-space:nowrap; }
+
+.applicationRelease .ok strong { color:#69dcb9; }
+
+.applicationRelease .bad strong { color:#ef8989; }
+
+.applicationLifecycleActions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding:12px 14px 14px; }
+
+.applicationLifecycleActions button { min-height:78px; padding:11px; border:1px solid rgba(91,116,141,.15); border-radius:12px; background:rgba(6,14,21,.43); color:#dce8ee; text-align:left; }
+
+.applicationLifecycleActions button strong { display:block; font-size:11.5px; }
+
+.applicationLifecycleActions button small { display:block; margin-top:5px; color:#7a91a0; font-size:9.5px; line-height:1.35; }
+
+.applicationLifecycleActions button.danger { border-color:rgba(207,72,72,.28); background:rgba(65,18,24,.12); }
+
+.applicationLifecycleActions button.danger strong { color:#ff9999; }
+
+.applicationJournal > header > div:first-child span { display:block; margin-top:4px; color:#7c92a1; font-size:10px; }
+
+.applicationJournal > header > div:last-child { display:flex; gap:7px; }
+
+.applicationJournal > header button { min-height:31px; padding:0 10px; border:1px solid rgba(91,116,141,.17); border-radius:9px; background:rgba(6,14,21,.50); color:#c7d6df; font-size:10px; }
+
+.applicationJournal pre { min-height:190px; max-height:285px; margin:0; overflow:auto; padding:12px 14px; background:#050d14; color:#82bad8; font:10px/1.5 var(--font-mono),monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+
+.gateShell .content:has(.applicationWorkspace) > .gateMasthead { position:sticky; top:10px; z-index:60; }
+
+@media (max-width: 1260px) {
+.applicationSummary { grid-template-columns:1fr; align-items:start; }
+.applicationControlContent { width:min(760px,68%); }
+.applicationManagement { grid-template-columns:1fr; }
+}
+
+@media (max-width: 980px) {
+.applicationSummaryStats { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.applicationSummaryStats > span:nth-child(2) { border-right:0; }
+.applicationSummaryStats > span:nth-child(-n/**/+2) { border-bottom:1px solid rgba(91,116,141,.14); }
+.applicationControlPlane { min-height:auto; }
+.applicationControlPlane::before { opacity:.34; background-size:cover; background-position:72% center; }
+.applicationControlPlane::after { background:linear-gradient(90deg,rgba(5,13,20,.99),rgba(5,13,20,.93) 65%,rgba(5,13,20,.68)); }
+.applicationControlContent { width:100%; }
+.applicationLifecycleActions { grid-template-columns:1fr; }
+}
+
+@media (max-width: 680px) {
+.applicationSummary, .applicationControlContent { padding-left:14px; padding-right:14px; }
+.applicationPrimaryActions { grid-template-columns:1fr; }
+.applicationControlHead, .applicationEnvironment > header, .applicationLifecycle > header, .applicationJournal > header { flex-direction:column; align-items:flex-start; }
+.applicationControlBadges { justify-content:flex-start; }
+.applicationRelease { grid-template-columns:1fr; }
+.applicationJournal > header > div:last-child { width:100%; }
+.applicationJournal > header button { flex:1; }
+}
+
+.applicationConfirmBackdrop {
+  background: rgba(2, 7, 11, 0.78) !important;
+  backdrop-filter: blur(14px) saturate(0.82) !important;
+}
+
+.applicationConfirmDialog {
+  width: min(520px, calc(100vw - 32px)) !important;
+  padding: 0 !important;
+  overflow: hidden;
+  border: 1px solid rgba(91, 118, 143, 0.28) !important;
+  border-radius: 20px !important;
+  background:
+    linear-gradient(180deg, rgba(9, 18, 27, 0.985), rgba(7, 15, 23, 0.975)) !important;
+  box-shadow:
+    0 30px 100px rgba(0, 0, 0, 0.52),
+    inset 0 1px 0 rgba(255, 255, 255, 0.025) !important;
+}
+
+.applicationConfirmDialog.danger {
+  border-color: rgba(192, 77, 77, 0.34) !important;
+  background:
+    linear-gradient(180deg, rgba(16, 20, 27, 0.99), rgba(13, 16, 22, 0.985)) !important;
+}
+
+.applicationConfirmCopy {
+  padding: 24px 26px 22px;
+}
+
+.applicationConfirmCopy h2 {
+  margin: 0 !important;
+  color: #eef5f8;
+  font-size: 25px !important;
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+}
+
+.applicationConfirmCopy p {
+  margin: 13px 0 0 !important;
+  color: #8fa5b4 !important;
+  font-size: 14px !important;
+  line-height: 1.6 !important;
+}
+
+.applicationConfirmActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 16px 26px 22px;
+  border-top: 1px solid rgba(91, 118, 143, 0.14);
+  background: rgba(5, 12, 18, 0.35);
+}
+
+.applicationConfirmActions button {
+  min-height: 44px;
+  border-radius: 11px;
+  border: 1px solid rgba(91, 118, 143, 0.24);
+  background: rgba(10, 19, 28, 0.78);
+  color: #aebfca;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease, color .18s ease;
+}
+
+.applicationConfirmActions button:hover {
+  border-color: rgba(117, 148, 176, 0.38);
+  background: rgba(13, 24, 34, 0.94);
+  color: #edf5f8;
+}
+
+.applicationConfirmActions .applicationConfirmPrimary {
+  border-color: rgba(80, 194, 159, 0.30);
+  background: rgba(22, 84, 68, 0.30);
+  color: #73e4bf;
+}
+
+.applicationConfirmActions .applicationConfirmPrimary:hover {
+  border-color: rgba(98, 221, 183, 0.40);
+  background: rgba(27, 103, 82, 0.38);
+  color: #91f0d0;
+}
+
+.applicationConfirmActions .applicationConfirmPrimary.danger {
+  border-color: rgba(203, 82, 82, 0.34);
+  background: rgba(93, 29, 33, 0.30);
+  color: #ff9292;
+}
+
+.applicationConfirmActions .applicationConfirmPrimary.danger:hover {
+  border-color: rgba(229, 101, 101, 0.44);
+  background: rgba(112, 34, 39, 0.38);
+  color: #ffabab;
+}
+
+@media (max-width: 560px) {
+.applicationConfirmCopy {
+    padding: 20px 18px 18px;
+  }
+.applicationConfirmCopy h2 {
+    font-size: 22px !important;
+  }
+.applicationConfirmActions {
+    grid-template-columns: 1fr;
+    padding: 14px 18px 18px;
+  }
+}

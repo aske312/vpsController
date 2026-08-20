@@ -1,0 +1,55 @@
+/*
+ * 312.net application theme.
+ * Canonical palette, typography and geometry tokens only.
+ * Page styles must consume these tokens instead of redefining a local theme.
+ */
+:root {
+  color-scheme: dark;
+
+  /* Backgrounds */
+  --bg: #071019;
+  --bg-deep: #050b12;
+  --sidebar: #07111a;
+  --panel: #0b1620;
+  --panel-soft: #0d1a25;
+  --panel-raised: #101e2a;
+  --panel-inset: #08131d;
+
+  /* Borders */
+  --line: rgba(105, 135, 160, .20);
+  --line-strong: rgba(118, 154, 183, .32);
+
+  /* Text */
+  --text: #edf5f8;
+  --muted: #8ca0ae;
+  --dim: #5f7483;
+
+  /* Brand / semantic */
+  --blue: #64b8ff;
+  --cyan: #56d9e9;
+  --violet: #a27bff;
+  --green: #62d7b4;
+  --green-dim: rgba(98, 215, 180, .10);
+  --amber: #e8b761;
+  --red: #f07b7b;
+
+  --status-green: var(--green);
+  --status-yellow: var(--amber);
+  --status-red: var(--red);
+  --status-gray: #718394;
+  --warning: var(--amber);
+  --accent: var(--green);
+
+  /* Typography */
+  --ui-font: var(--font-sans), "Segoe UI", Arial, sans-serif;
+  --display-font: var(--font-sans), "Segoe UI", Arial, sans-serif;
+  --technical-font: var(--font-mono), "Cascadia Mono", Consolas, monospace;
+  --font-geist-sans: var(--font-sans);
+  --font-geist-mono: var(--font-mono);
+
+  /* Geometry */
+  --radius-sm: 7px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+  --control-height: 40px;
+}

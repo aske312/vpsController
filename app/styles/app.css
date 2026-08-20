@@ -1,0 +1,2065 @@
+/* 312.net canonical application UI: shell, controls, dialogs, shared cards and artwork. */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brandMark svg {
+  width: 24px;
+  height: 24px;
+}
+
+.brandMark svg path:first-child {
+  fill: #091411;
+}
+
+.brandMark svg path:last-child {
+  fill: var(--green);
+}
+
+.brand > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand strong span {
+  color: var(--green);
+}
+
+.shell {
+  --ui-font: var(--font-sans), "Segoe UI", Arial, sans-serif;
+  --display-font: var(--font-sans), "Segoe UI", Arial, sans-serif;
+  --technical-font: var(--font-mono), "Cascadia Mono", Consolas, monospace;
+  display: block;
+  grid-template-columns: 276px minmax(0, 1fr);
+  min-height: 100vh;
+  font-family: var(--ui-font);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  background-image: linear-gradient(color-mix(in srgb, var(--green) 5%, transparent) 1px, transparent 1px),
+  linear-gradient(90deg, color-mix(in srgb, var(--green) 5%, transparent) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.brandMark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--green);
+  color: #07110e;
+  font-weight: 900;
+  font-size: 11px;
+  letter-spacing: -.5px;
+  box-shadow: 0 0 24px #73dfbe18;
+  transform: rotate(-3deg);
+}
+
+.brand strong {
+  font-size: 19px;
+  letter-spacing: -1px;
+  line-height: 1;
+}
+
+.brand small {
+  color: #607370;
+  font: 7px/1 var(--font-mono);
+  letter-spacing: 1.7px;
+  margin-top: 7px;
+  font-size: 8px;
+}
+
+.content {
+  width: 100%;
+  max-width: 1460px;
+  margin: 0 auto;
+  padding: 52px clamp(24px, 5vw, 76px) 76px;
+}
+
+.shell h1, .shell h2, .shell h3, .shell .brand strong {
+  font-family: var(--display-font);
+  font-kerning: normal;
+}
+
+.shell p, .shell small, .shell label, .shell button, .shell input, .shell select, .shell textarea {
+  font-family: var(--ui-font);
+}
+
+.shell .eyebrow {
+  letter-spacing: 1.35px;
+  line-height: 1.35;
+}
+
+.shell .onlinePill, .shell .offlinePill, .shell .warningPill {
+  font-family: var(--ui-font);
+  letter-spacing: 0;
+}
+
+.shell .eyebrow, .shell .mono, .shell pre {
+  font-family: var(--technical-font);
+}
+
+.shell .panel {
+  box-shadow: none;
+}
+
+.shell small {
+  font-family: var(--ui-font);
+  font-size: 11px;
+  line-height: 1.55;
+  letter-spacing: 0;
+}
+
+.shell .eyebrow, .shell .updatedAt, .shell .versionFooter, .shell .brand small {
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.shell.gateShell {
+  display: grid !important;
+  grid-template-columns: 232px minmax(0, 1fr) !important;
+  min-height: 100vh;
+  background: radial-gradient(circle at 76% -12%, rgba(68, 130, 191, .10), transparent 34%),
+  linear-gradient(180deg, #071019, #060d14 72%);
+  color: var(--text);
+}
+
+.gateShell::before, .gateShell::after {
+  display: none !important;
+  content: none !important;
+}
+
+.gateSidebar {
+  position: sticky;
+  top: 0;
+  z-index: 80;
+  height: 100vh;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 14px 16px;
+  background: linear-gradient(180deg, rgba(10, 21, 31, .98), rgba(5, 13, 20, .99)),
+  var(--sidebar);
+  border-right: 1px solid var(--line);
+  box-shadow: 16px 0 42px rgba(0, 0, 0, .14);
+}
+
+.gateBrand {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 7px 22px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gateBrandMark {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgba(87, 217, 233, .22), rgba(74, 137, 255, .09));
+  border: 1px solid rgba(86, 217, 233, .30);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .08), 0 10px 28px rgba(0, 0, 0, .16);
+}
+
+.gateBrandMark svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: var(--cyan);
+  stroke-width: 1.7;
+}
+
+.gateBrandMark svg path:first-child {
+  fill: rgba(86, 217, 233, .08);
+}
+
+.gateBrand > span:last-child {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gateBrand strong {
+  font: 750 21px/1 var(--font-sans);
+  letter-spacing: -.8px;
+}
+
+.gateBrand strong span {
+  color: var(--cyan);
+}
+
+.gateNav {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 130, 150, .22) transparent;
+  padding: 2px 0 14px;
+}
+
+.gateNavGroup {
+  margin: 0 0 17px;
+}
+
+.gateNavGroup > div {
+  display: grid;
+  gap: 3px;
+}
+
+.gateNavButton {
+  appearance: none;
+  position: relative;
+  width: 100%;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #8397a5;
+  text-align: left;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, color .15s ease, transform .15s ease;
+}
+
+.gateNavButton:hover {
+  background: rgba(111, 155, 183, .07);
+  color: #c8d6dd;
+}
+
+.gateNavButton.active {
+  background: linear-gradient(90deg, rgba(70, 132, 187, .18), rgba(70, 132, 187, .07));
+  border-color: rgba(102, 169, 222, .18);
+  color: var(--text);
+}
+
+.gateNavButton.active::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--blue);
+  box-shadow: 0 0 12px rgba(100, 184, 255, .55);
+}
+
+.gateNavButton.violet.active::before {
+  background: var(--violet);
+  box-shadow: 0 0 12px rgba(162, 123, 255, .55);
+}
+
+.gateNavButton.cyan.active::before {
+  background: var(--cyan);
+  box-shadow: 0 0 12px rgba(86, 217, 233, .50);
+}
+
+.gateNavButton.compact {
+  min-height: 38px;
+}
+
+.gateNavGlyph {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  color: #6f8ba0;
+}
+
+.gateNavGlyph svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.gateNavButton.active .gateNavGlyph {
+  color: var(--blue);
+}
+
+.gateNavButton.violet.active .gateNavGlyph {
+  color: var(--violet);
+}
+
+.gateNavButton.cyan.active .gateNavGlyph {
+  color: var(--cyan);
+}
+
+.gateSidebarNode {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.gateSidebarNode.working .gateNodePulse {
+  background: var(--amber);
+  color: var(--amber);
+}
+
+.gateSidebarNode.error .gateNodePulse {
+  background: var(--red);
+  color: var(--red);
+}
+
+.gateSidebarNode > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.gateShell > .content {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0;
+  padding: 16px clamp(18px, 2.3vw, 34px) 52px !important;
+  background: transparent !important;
+}
+
+.gateMastNode {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.gateMastServer {
+  width: 41px;
+  height: 41px;
+  flex: 0 0 auto;
+  display: grid;
+  place-content: center;
+  gap: 3px;
+  border-radius: 11px;
+  border: 1px solid rgba(100, 184, 255, .24);
+  background: rgba(64, 132, 194, .12);
+}
+
+.gateMastServer i {
+  display: block;
+  width: 20px;
+  height: 5px;
+  border: 1px solid rgba(100,184,255,.7);
+  border-radius: 2px;
+  background: rgba(100,184,255,.08);
+}
+
+.gateMastNode > div {
+  min-width: 0;
+}
+
+.gateMastState::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 9px currentColor;
+}
+
+.gateMastState.working {
+  color: var(--amber);
+  border-color: rgba(232,183,97,.20);
+  background: rgba(232,183,97,.05);
+}
+
+.gateMastState.error {
+  color: var(--red);
+  border-color: rgba(240,123,123,.20);
+  background: rgba(240,123,123,.05);
+}
+
+.gateMastFacts {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid rgba(105,135,160,.13);
+  border-radius: 11px;
+  overflow: hidden;
+  background: rgba(4, 10, 16, .26);
+}
+
+.gateMastFacts > div {
+  min-width: 78px;
+  padding: 8px 11px;
+  border-left: 1px solid rgba(105,135,160,.13);
+}
+
+.gateMastFacts > div:first-child {
+  border-left: 0;
+}
+
+.gateMastActions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.gateMastActions .autoButton, .gateMastActions .iconButton, .gateMastActions .ghostButton {
+  height: 36px !important;
+  min-height: 36px;
+  border-radius: 9px !important;
+  border: 1px solid var(--line) !important;
+  background: #0c1821 !important;
+  color: #8ea3b0 !important;
+  box-shadow: none !important;
+}
+
+.gateMastActions .autoButton.active {
+  color: var(--green) !important;
+  border-color: rgba(98,215,180,.22) !important;
+  background: rgba(98,215,180,.08) !important;
+}
+
+.gateMastActions .iconButton {
+  width: 36px !important;
+  padding: 0 !important;
+}
+
+.gateMastActions .ghostButton {
+  padding: 0 12px !important;
+}
+
+.gateSectionIntro {
+  margin: 12px 2px 18px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.gateSectionIntro h1 {
+  margin: 2px 0 0;
+  color: var(--text);
+  font: 720 28px/1.1 var(--font-sans);
+  letter-spacing: -.8px;
+}
+
+.gateSectionIntro p:last-child {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font: 500 11px/1.45 var(--font-sans);
+}
+
+.gateShell .errorBox, .gateShell .successNotice {
+  margin: 0 0 12px;
+  border-radius: 11px;
+}
+
+.gateShell .panel {
+  border-radius: 13px;
+}
+
+.gateMasthead {
+  position: sticky;
+  z-index: 140;
+  min-height: 78px;
+  display: grid;
+  grid-template-columns: minmax(250px, 1fr) auto auto;
+  align-items: center;
+  gap: 18px;
+  margin: 0 0 16px;
+  padding: 10px 12px 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: rgba(8, 18, 27, .93);
+  box-shadow: 0 12px 34px rgba(0,0,0,.24), inset 0 1px rgba(255,255,255,.028);
+  backdrop-filter: blur(16px);
+  top: 10px;
+}
+
+.gateBrand small {
+  margin-top: 5px;
+  color: var(--dim);
+  font: 700 8px/1 var(--font-mono);
+  letter-spacing: .16em;
+  font-size: 9.5px;
+  line-height: 1.15;
+}
+
+.gateNavGroup > p {
+  margin: 0 9px 7px;
+  color: #637b8b;
+  font: 750 8px/1 var(--font-mono);
+  letter-spacing: .14em;
+  font-size: 9px;
+  line-height: 1.15;
+}
+
+.gateNavButton b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 650 12px/1.2 var(--font-sans);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.gateSidebarNode small {
+  color: #6f8796;
+  font: 700 7px/1 var(--font-mono);
+  letter-spacing: .12em;
+  font-size: 9px;
+  line-height: 1.15;
+}
+
+.gateSidebarNode strong {
+  font: 700 12px/1.2 var(--font-sans);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.gateSidebarNode span:last-child {
+  color: #8499a6;
+  font: 500 9px/1.35 var(--font-sans);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10.5px;
+}
+
+.gateMastNode h2 {
+  margin: 0;
+  font: 700 14px/1.25 var(--font-sans);
+  letter-spacing: -.15px;
+  font-size: 15px;
+}
+
+.gateMastNode p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font: 500 10px/1.35 var(--font-sans);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.gateMastState {
+  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid rgba(98, 215, 180, .20);
+  border-radius: 999px;
+  color: var(--green);
+  background: rgba(98,215,180,.06);
+  font: 750 8px/1 var(--font-mono);
+  letter-spacing: .06em;
+  font-size: 9.5px;
+}
+
+.gateMastFacts span {
+  display: block;
+  color: #6f8796;
+  font: 700 7px/1 var(--font-mono);
+  letter-spacing: .11em;
+  font-size: 8.5px;
+}
+
+.gateMastFacts strong {
+  display: block;
+  margin-top: 4px;
+  color: #d9e7ed;
+  font: 650 10px/1.1 var(--font-mono);
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+
+.gateMastActions .updatedAt {
+  color: #718897;
+  font: 600 8px/1 var(--font-mono);
+  font-size: 9.5px;
+}
+
+.gateNavButton.hasBadge {
+  grid-template-columns: 28px minmax(0,1fr) auto;
+}
+
+.gateNavBeta {
+  margin-left: auto;
+  padding: 3px 5px;
+  border: 1px solid rgba(142,105,242,.35);
+  border-radius: 5px;
+  color: #bba9ee;
+  background: rgba(104,67,191,.12);
+  font: 700 7px/1 var(--font-mono);
+  letter-spacing: .08em;
+}
+
+.autoButton i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #66716f;
+}
+
+.autoButton.active i {
+  background: var(--green);
+  box-shadow: 0 0 9px #67d5b477;
+}
+
+.autoButton:disabled {
+  cursor: not-allowed;
+  opacity: .65;
+}
+
+.iconButton, .ghostButton, .primaryButton {
+  height: 40px;
+  border-radius: 9px;
+}
+
+.primaryButton:hover {
+  background: #8aebce;
+}
+
+.primaryButton:disabled {
+  opacity: .5;
+  cursor: wait;
+}
+
+.onlinePill {
+  color: var(--green);
+  background: var(--green-dim);
+}
+
+.offlinePill {
+  color: var(--amber);
+  background: #302415;
+}
+
+.check {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.warning {
+  background: #302415;
+  color: var(--amber);
+}
+
+.listeners {
+  grid-column: 1 / -1;
+}
+
+.logTools {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.logActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.logActions > span {
+  color: #71807d;
+  font: 8px var(--font-mono);
+}
+
+.logActions .miniButton:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.logTabs {
+  display: flex;
+  gap: 6px;
+  margin: 0 10px 14px;
+}
+
+.logTabs button.active {
+  color: var(--green);
+  border-color: #31594f;
+  background: var(--green-dim);
+}
+
+.guideLanguage {
+  display: flex;
+  gap: 5px;
+}
+
+.guideLanguage button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 9px;
+  background: #11191b;
+  color: var(--muted);
+  font: 8px var(--font-mono);
+}
+
+.guideLanguage button.active {
+  border-color: #31534a;
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.traffic {
+  display: grid;
+  flex-direction: column;
+  margin: 0;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  text-align: left;
+}
+
+.traffic b {
+  display: block;
+  margin-top: 5px;
+  color: #a9b7b4;
+  font: 500 9px var(--font-mono);
+}
+
+.addClient form {
+  display: grid;
+  gap: 14px;
+}
+
+.addClient .fieldHint {
+  color: #73817f;
+  font-size: 9px;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+
+.addClient .primaryButton {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.errorBox {
+  border: 1px solid #4b2a2a;
+  background: #211517;
+  color: #ef8b7e;
+  border-radius: 9px;
+  padding: 11px 13px;
+  font-size: 10px;
+}
+
+.successNotice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+  padding: 11px 13px;
+  border: 1px solid #31594f;
+  border-radius: 9px;
+  background: #10241f;
+  color: var(--green);
+  font-size: 10px;
+}
+
+.successNotice > span {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #214a3e;
+}
+
+.successNotice > button {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: #78a598;
+  font-size: 17px;
+}
+
+.autoButton {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: #8a9694;
+  border-radius: 9px;
+  padding: 0 14px;
+  font: 8px var(--font-mono);
+  white-space: nowrap;
+  font-size: 9px;
+}
+
+.iconButton {
+  width: 44px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: #8692a2;
+  font-size: 16px;
+}
+
+.ghostButton {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: #8f9aaa;
+  padding: 0 16px;
+  font-size: 11px;
+  padding-inline: 18px;
+}
+
+.mono {
+  margin: 8px 0 0;
+  color: #758398;
+  font: 10px var(--font-geist-mono);
+  font-size: 11px;
+  margin-top: 11px;
+}
+
+.logTabs button, .miniButton {
+  border: 1px solid var(--line);
+  background: #0b1517;
+  color: var(--muted);
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: 9px;
+}
+
+.dangerButton {
+  border: 1px solid #432a2a;
+  background: #211719;
+  color: var(--red);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 9px;
+}
+
+.addClient h2 {
+  font-size: 21px;
+}
+
+.primaryButton {
+  border: 0;
+  background: var(--green);
+  color: #0b0f08;
+  padding: 0 18px;
+  font-size: 11px;
+  font-weight: 750;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  height: 44px;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 10px 0 0;
+  margin-top: 12px;
+}
+
+.eyebrow {
+  margin: 0 0 9px;
+  color: #768784;
+  font: 700 8px var(--font-mono);
+  letter-spacing: 1.8px;
+  font-size: 9px;
+  margin-bottom: 11px;
+}
+
+.autoButton, .iconButton, .ghostButton {
+  height: 40px;
+  border-radius: 6px;
+  background: #101719;
+}
+
+.autoButton.active {
+  color: var(--green);
+  border-color: #2d4d45;
+  background: #142722;
+}
+
+.updatedAt {
+  align-self: center;
+  color: #596663;
+  font: 8px var(--font-mono);
+  font-size: 9px;
+  margin-inline: 4px;
+  padding: 0 7px;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  background: #0f1618;
+  border-radius: 10px;
+  padding: 24px;
+  box-shadow: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: #263538;
+}
+
+.onlinePill, .offlinePill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 5px;
+  padding: 7px 11px;
+  white-space: nowrap;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.listeners pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  background: #090f11;
+  border: 1px solid #1e292c;
+  color: #8fa4a0;
+  border-radius: 6px;
+  padding: 17px;
+  font: 9px/1.7 var(--font-geist-mono);
+  font-size: 10px;
+  line-height: 1.75;
+}
+
+.dangerButton, input, select, textarea, .primaryButton {
+  border-radius: 6px;
+}
+
+.configurationSafety {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #29483f;
+  border-radius: 7px;
+  background: #0d1917;
+}
+
+.configurationSafety > i {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--green);
+  color: #0b1714;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.configurationSafety p {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.configurationSafety strong {
+  font-size: 9px;
+}
+
+.configurationSafety small {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.versionFooter {
+  width: 100%;
+  padding: 34px 0 2px;
+  color: #596663;
+  font: 8px var(--font-mono);
+  letter-spacing: .7px;
+  text-align: center;
+}
+
+.versionFooter > span {
+  display: block;
+}
+
+.versionFooter nav {
+  display: flex;
+  justify-content: center;
+  gap: 13px;
+  margin-top: 8px;
+}
+
+.versionFooter button {
+  border: 0;
+  border-bottom: 1px solid transparent;
+  padding: 2px 0;
+  background: transparent;
+  color: #6f807d;
+  font: inherit;
+}
+
+.versionFooter button:hover {
+  border-bottom-color: #5f8077;
+  color: var(--green);
+}
+
+.confirmBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: #070b0ad9;
+  backdrop-filter: blur(8px);
+}
+
+.confirmDialog {
+  width: min(460px, 100%);
+  padding: 26px;
+  border: 1px solid #31564b;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #151d1b, #0d1211);
+  box-shadow: 0 28px 80px #000a;
+}
+
+.confirmDialog.danger {
+  border-color: #673e39;
+}
+
+.confirmMark {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 18px;
+  border: 1px solid #31564b;
+  border-radius: 50%;
+  background: var(--green-dim);
+  color: var(--green);
+  font: 600 15px var(--font-mono);
+}
+
+.confirmDialog.danger .confirmMark {
+  border-color: #673e39;
+  background: #2d1b19;
+  color: #ef8178;
+}
+
+.confirmDialog h2 {
+  margin: 0 0 10px;
+  font-size: 24px;
+}
+
+.confirmDialog > p:not(.eyebrow) {
+  margin: 0;
+  color: #8d9794;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.confirmDialog > label {
+  display: block;
+  margin-top: 18px;
+  color: #7e8986;
+  font: 9px var(--font-mono);
+}
+
+.confirmDialog > label strong {
+  color: #d5ddda;
+}
+
+.confirmDialog input {
+  width: 100%;
+  height: 42px;
+  margin-top: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: none;
+  background: #0a0f0e;
+  color: #d5ddda;
+  font: 11px var(--font-mono);
+}
+
+.confirmDialog input:focus {
+  border-color: #4b786b;
+}
+
+.confirmActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.confirmActions button {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #151c1a;
+  color: #9da7a4;
+  font: 9px var(--font-mono);
+  cursor: pointer;
+}
+
+.confirmActions .confirmPrimary {
+  border-color: #31564b;
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.confirmDialog.danger .confirmPrimary {
+  border-color: #673e39;
+  background: #2d1b19;
+  color: #ef8178;
+}
+
+.confirmActions button:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
+.shell .serviceRow small, .shell .automationIdentity small {
+  font-size: 11px;
+  line-height: 1.55;
+  letter-spacing: 0;
+}
+
+.shell .subtitle {
+  font-size: 12px;
+  line-height: 1.65;
+  font-family: var(--ui-font);
+}
+
+.shell .serviceRow dt, .shell .serviceRow dd, .shell .automationFields label, .shell .automationRun small, .shell .automationRun strong, .shell .automationRun span {
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.shell .automationIdentity small {
+  font-family: var(--ui-font);
+}
+
+.protocol.mihomo {
+  border-color: rgba(111,93,213,.34) !important;
+  background: rgba(49,37,113,.22) !important;
+  color: #c7bbff !important;
+}
+
+.gateNodePulse {
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 12px currentColor;
+  color: var(--green);
+}
+
+.overviewRoute.mihomo {
+  border-color: rgba(162,123,255,.28);
+  background: linear-gradient(120deg, rgba(31,25,49,.72), rgba(7,15,22,.86) 68%);
+}
+
+.profileDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--violet);
+  box-shadow: 0 0 8px rgba(162,123,255,.45);
+}
+
+.gateOperationCard {
+  pointer-events: auto;
+  overflow: hidden;
+  border: 1px solid rgba(232,183,97,.30);
+  border-radius: 12px;
+  background: rgba(10,17,23,.94);
+  box-shadow: 0 16px 42px rgba(0,0,0,.34), inset 0 1px rgba(255,255,255,.025);
+  backdrop-filter: blur(18px);
+}
+
+.gateOperationCard.error {
+  border-color: rgba(240,123,123,.38);
+}
+
+.gateOperationCard.success {
+  border-color: rgba(98,215,180,.34);
+}
+
+.gateOperationContent {
+  display: grid;
+  grid-template-columns: 30px minmax(0,1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px 8px;
+}
+
+.gateOperationIcon {
+  width: 29px;
+  height: 29px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--amber);
+  border: 1px solid rgba(232,183,97,.23);
+  background: rgba(232,183,97,.08);
+  font: 800 8px/1 var(--font-mono);
+}
+
+.gateOperationCard.error .gateOperationIcon {
+  color: var(--red);
+}
+
+.gateOperationCard.success .gateOperationIcon {
+  color: var(--green);
+}
+
+.gateOperationText {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.gateOperationTrack {
+  height: 3px;
+  overflow: hidden;
+  background: rgba(105,135,160,.10);
+}
+
+.gateOperationTrack > i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg,#d5a653,#f0cd7f);
+  box-shadow: 0 0 9px rgba(232,183,97,.28);
+  transition: width .35s ease;
+}
+
+.gateOperationCard.error .gateOperationTrack > i {
+  background: var(--red);
+}
+
+.gateOperationCard.success .gateOperationTrack > i {
+  background: var(--green);
+}
+
+.gateOperationTrack.indeterminate > i {
+  width: 34% !important;
+  animation: gateOperationSlide 1.15s ease-in-out infinite;
+}
+
+.gateOperationDock {
+  position: fixed;
+  z-index: 240;
+  top: 100px;
+  right: 18px;
+  width: min(390px, calc(100vw - 270px));
+  display: grid;
+  gap: 7px;
+  pointer-events: none;
+}
+
+.taskGraphCard {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 7px;
+  min-height: 196px;
+  padding: 10px 11px 9px;
+  border: 1px solid rgba(105,135,160,.16);
+  border-radius: 11px;
+  background: rgba(4,11,17,.34);
+}
+
+.taskGraphCard.wide {
+  grid-column: 1 / -1;
+  min-height: 210px;
+}
+
+.taskGraphCard > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.taskGraphCard > header > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.taskGraphLegend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 3px;
+}
+
+.taskGraphLegend span {
+  position: relative;
+  padding-left: 11px;
+}
+
+.taskGraphLegend span::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 7px;
+  height: 2px;
+  background: #64b8ff;
+  box-shadow: 0 0 6px rgba(100,184,255,.35);
+}
+
+.taskGraphLegend span.green::before {
+  background: #62d7b4;
+  box-shadow: 0 0 6px rgba(98,215,180,.32);
+}
+
+.taskGraphPlot {
+  position: relative;
+  min-height: 125px;
+  margin-right: 46px;
+  margin-bottom: 15px;
+  border: 1px solid rgba(105,135,160,.13);
+  background: rgba(2,8,13,.24);
+}
+
+.taskGraphCard.wide .taskGraphPlot {
+  min-height: 136px;
+}
+
+.taskGraphPlot > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.taskGrid line {
+  stroke: rgba(105,135,160,.12);
+  stroke-width: .35;
+  vector-effect: non-scaling-stroke;
+  shape-rendering: crispEdges;
+}
+
+.taskGrid line:first-child, .taskGrid line:nth-child(5) {
+  stroke: rgba(105,135,160,.17);
+}
+
+.taskSeries {
+  fill: none;
+  stroke-width: 1.35;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.taskSeries.blue {
+  stroke: #64b8ff;
+  filter: drop-shadow(0 0 3px rgba(100,184,255,.18));
+}
+
+.taskSeries.green {
+  stroke: #62d7b4;
+  filter: drop-shadow(0 0 3px rgba(98,215,180,.16));
+}
+
+.taskYAxis {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: -4px;
+  bottom: -4px;
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  pointer-events: none;
+}
+
+.taskYAxis span {
+  color: #4f6676;
+  font: 600 6px/1 var(--font-mono);
+  white-space: nowrap;
+}
+
+.taskXAxis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 5px);
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.taskXAxis span {
+  color: #4f6676;
+  font: 600 6px/1 var(--font-mono);
+}
+
+.taskGraphCard > header span {
+  color: #708796;
+  font: 700 7px/1 var(--font-mono);
+  letter-spacing: .09em;
+  font-size: 9px;
+  line-height: 1.15;
+}
+
+.taskGraphCard > header strong {
+  color: #e1edf1;
+  font: 720 16px/1 var(--font-mono);
+  font-size: 17px;
+}
+
+.taskGraphCard > small {
+  color: #758b99;
+  font: 500 7px/1.2 var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.taskYAxis span, .taskXAxis span {
+  font-size: 8px;
+  line-height: 1;
+  color: #687f8e;
+}
+
+.gateOperationText > span {
+  color: #728897;
+  font: 750 6px/1 var(--font-mono);
+  letter-spacing: .10em;
+  font-size: 8px;
+}
+
+.gateOperationText > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e0ebef;
+  font: 650 10px/1.2 var(--font-sans);
+  font-size: 11.5px;
+  line-height: 1.25;
+}
+
+.gateOperationText > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #8397a3;
+  font: 500 7px/1.2 var(--font-sans);
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.gateOperationPercent {
+  color: #d9e6ec;
+  font: 700 10px/1 var(--font-mono);
+  font-size: 11.5px;
+}
+
+.dnsWorkspace, .securityWorkspace, .applicationWorkspace {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.gateShell .content:has(.dnsWorkspace) > .gateSectionIntro, .gateShell .content:has(.securityWorkspace) > .gateSectionIntro, .gateShell .content:has(.applicationWorkspace) > .gateSectionIntro {
+  display: none !important;
+}
+
+.listeners pre, .securityLogs pre, .applicationLogs pre {
+  min-height: 170px;
+  max-height: 330px;
+  margin: 0;
+  overflow: auto;
+  padding: 13px 15px;
+  background: #050d14;
+  color: #89bdd8;
+  font: 10px/1.55 var(--font-mono),monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.gateShell .content:has(.dnsWorkspace) > .gateMasthead, .gateShell .content:has(.securityWorkspace) > .gateMasthead, .gateShell .content:has(.applicationWorkspace) > .gateMasthead {
+  position: sticky;
+  top: 10px;
+  z-index: 80;
+}
+
+.operationsTitle {
+  min-width: 0;
+}
+
+.operationsTitle h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.operationsTitle small {
+  display: block;
+  margin-top: 4px;
+  color: #7e93a2;
+  font-size: 11px;
+}
+
+.connectionIdentity > .protocol {
+  width: 42px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  font: 700 9px var(--font-mono), monospace;
+}
+
+.visualShell {
+  --gate-art-overview: url("/gate-art/new-operator/auth.webp");
+  --gate-art-mihomo: url("/gate-art/new-operator/mihomo.webp");
+  --gate-art-direct: url("/gate-art/new-operator/connections.webp");
+  --gate-art-modules: url("/gate-art/new-operator/application.webp");
+  --gate-art-network: url("/gate-art/new-operator/network_1.webp");
+  --gate-art-security: url("/gate-art/new-operator/security.webp");
+  --gate-art: var(--gate-art-overview);
+  --gate-art-x: 96%;
+  --gate-art-y: 46%;
+  --gate-art-size: auto 235%;
+  --gate-art-opacity: .92;
+  --gate-art-violet: #8d72ff;
+  --gate-art-blue: #5aa9ff;
+  --gate-art-cyan: #65d9e5;
+  background: radial-gradient(circle at 82% 4%, color-mix(in srgb, var(--gate-art-violet) 4%, transparent), transparent 24%),
+  radial-gradient(circle at 62% 92%, rgba(64, 126, 202, .025), transparent 28%),
+  var(--bg);
+}
+
+.visualShell.art-overview {
+  --gate-art: var(--gate-art-overview);
+  --gate-art-x: 94%;
+  --gate-art-y: 40%;
+  --gate-art-size: auto 245%;
+}
+
+.visualShell.art-mihomo {
+  --gate-art: var(--gate-art-mihomo);
+  --gate-art-x: 96%;
+  --gate-art-y: 54%;
+  --gate-art-size: auto 220%;
+}
+
+.visualShell.art-direct {
+  --gate-art: var(--gate-art-direct);
+  --gate-art-x: 96%;
+  --gate-art-y: 46%;
+  --gate-art-size: auto 235%;
+}
+
+.visualShell.art-modules {
+  --gate-art: var(--gate-art-modules);
+  --gate-art-x: 96%;
+  --gate-art-y: 48%;
+  --gate-art-size: auto 235%;
+}
+
+.visualShell.art-network {
+  --gate-art: var(--gate-art-network);
+  --gate-art-x: 94%;
+  --gate-art-y: 44%;
+  --gate-art-size: auto 225%;
+}
+
+.visualShell.art-security {
+  --gate-art: var(--gate-art-security);
+  --gate-art-x: 95%;
+  --gate-art-y: 48%;
+  --gate-art-size: auto 225%;
+}
+
+.visualShell .content {
+  position: relative;
+}
+
+.visualShell .content::before {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  right: -220px;
+  top: 72px;
+  width: 760px;
+  height: 760px;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--gate-art-violet) 5.5%, transparent), transparent 56%),
+  radial-gradient(circle at 66% 40%, color-mix(in srgb, var(--gate-art-blue) 3%, transparent), transparent 42%);
+  filter: blur(8px);
+}
+
+.visualLogin {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: #070a0f !important;
+}
+
+.visualLogin::before {
+  content: "";
+  position: absolute;
+  z-index: -3;
+  inset: 0;
+  background-image: url("/gate-art/new-operator/auth.webp");
+  background-repeat: no-repeat;
+  background-position: 77% 42%;
+  background-size: cover;
+  opacity: .86;
+  filter: saturate(.92) brightness(.80);
+}
+
+.visualLogin::after {
+  content: "";
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(5,9,14,.98) 0%, rgba(5,9,14,.92) 38%, rgba(5,9,14,.48) 68%, rgba(5,9,14,.20) 100%),
+  radial-gradient(circle at 80% 44%, rgba(118, 86, 238, .14), transparent 28%),
+  linear-gradient(0deg, rgba(5,8,12,.72), transparent 52%);
+}
+
+.visualLogin .loginCard {
+  position: relative;
+  border-color: rgba(72, 75, 112, .76);
+  background: rgba(9, 14, 20, .91);
+  box-shadow: 0 28px 100px rgba(0, 0, 0, .38);
+  backdrop-filter: blur(18px);
+}
+
+@media (max-width: 1000px) {
+  .shell {
+    grid-template-columns: 76px minmax(0, 1fr);
+  }
+
+}
+
+@media (max-width: 1240px) {
+  .shell.gateShell {
+    grid-template-columns: 88px minmax(0,1fr) !important;
+  }
+
+  .gateSidebar {
+    padding: 18px 10px 14px;
+  }
+
+  .gateBrand {
+    justify-content: center;
+    padding: 4px 0 20px;
+  }
+
+  .gateBrand > span:last-child, .gateNavGroup > p, .gateNavButton b, .gateSidebarNode > div {
+    display: none;
+  }
+
+  .gateNavButton {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 0;
+  }
+
+  .gateNavButton.active::before {
+    top: 8px;
+    bottom: 8px;
+  }
+
+  .gateSidebarNode {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 11px 0;
+  }
+
+  .gateMasthead {
+    grid-template-columns: minmax(220px,1fr) auto;
+  }
+
+  .gateMastFacts {
+    display: none;
+  }
+
+}
+
+@media (max-width: 470px) {
+  .gateMastState {
+    display: none;
+  }
+
+}
+
+@media (max-width:960px) {
+  .gateNavButton.hasBadge {
+    grid-template-columns: 1fr;
+  }
+
+  .gateNavBeta {
+    display: none;
+  }
+
+}
+
+@media (max-width: 680px) {
+  .shell {
+    display: block;
+  }
+
+  .content {
+    padding: 25px 14px 90px;
+  }
+
+  .ghostButton {
+    display: none;
+  }
+
+  .listeners {
+    grid-column: 1;
+  }
+
+  .updatedAt {
+    display: none;
+  }
+
+  .traffic {
+    display: none;
+  }
+
+}
+
+@media (min-width: 1051px) {
+  .brandMark {
+    width: 36px;
+    height: 36px;
+  }
+
+  .content {
+    max-width: 1500px;
+    padding: 26px clamp(22px, 3.5vw, 52px) 28px;
+  }
+
+  .subtitle {
+    margin-top: 7px;
+  }
+
+  .eyebrow {
+    margin-bottom: 7px;
+  }
+
+  .panel {
+    padding: 18px;
+  }
+
+  .versionFooter {
+    padding-top: 20px;
+  }
+
+}
+
+@media (max-width: 700px) {
+  .content {
+    padding: 18px 12px 96px;
+  }
+
+  .shell small {
+    font-size: 11px;
+  }
+
+  .updatedAt, .ghostButton {
+    display: none;
+  }
+
+  .autoButton {
+    padding: 0 9px;
+  }
+
+  .configurationSafety {
+    width: 100%;
+  }
+
+  .versionFooter nav {
+    align-items: center;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .moduleMenuWrap {
+    flex: 0 0 auto;
+  }
+
+  .subtitle {
+    display: none;
+  }
+
+  .panel {
+    padding: 15px;
+    border-radius: 11px;
+  }
+
+  .applicationLogs {
+    display: none;
+  }
+
+  .shell .serviceRow small {
+    font-size: 10px;
+    line-height: 1.5;
+  }
+
+  .shell small, .shell .automationRun small, .shell .automationRun span {
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+}
+
+@media (max-width:1240px) {
+  .gateOperationDock {
+    width: min(380px, calc(100vw - 120px));
+  }
+
+}
+
+@media (max-width:760px) {
+  .gateOperationDock {
+    top: auto;
+    right: 10px;
+    bottom: 76px;
+    left: 10px;
+    width: auto;
+  }
+
+}
+
+@media (max-width: 980px) {
+  .taskGraphCard.wide {
+    grid-column: auto;
+  }
+
+}
+
+@media (max-width:470px) {
+  .taskGraphCard > header strong {
+    font-size: 13px;
+  }
+
+}
+
+@media (max-width: 1100px) {
+  .securityDiagnostics {
+    grid-template-columns: 1fr;
+  }
+
+}
+
+@media (max-width: 1180px) {
+  .visualShell {
+    --gate-art-size: auto 215%;
+    --gate-art-opacity: .76;
+  }
+
+}
+
+@media (max-width: 760px) {
+  .shell.gateShell {
+    display: block !important;
+    padding-bottom: 68px;
+  }
+
+  .gateSidebar {
+    position: fixed;
+    z-index: 120;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 64px;
+    display: block;
+    padding: 6px 8px max(6px, env(safe-area-inset-bottom));
+    border-right: 0;
+    border-top: 1px solid var(--line);
+    background: rgba(6,14,21,.96);
+    backdrop-filter: blur(18px);
+  }
+
+  .gateBrand, .gateSidebarNode, .gateNavGroup > p {
+    display: none;
+  }
+
+  .gateNav {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0;
+    scrollbar-width: none;
+  }
+
+  .gateNav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .gateNavGroup {
+    margin: 0;
+    display: contents;
+  }
+
+  .gateNavGroup > div {
+    display: contents;
+  }
+
+  .gateNavButton {
+    min-width: 52px;
+    width: 52px;
+    min-height: 50px;
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 0;
+    border-radius: 10px;
+  }
+
+  .gateNavButton b {
+    display: none;
+  }
+
+  .gateNavButton.active::before {
+    left: 12px;
+    right: 12px;
+    top: auto;
+    bottom: -1px;
+    width: auto;
+    height: 2px;
+  }
+
+  .gateShell > .content {
+    padding: 10px 10px 28px !important;
+  }
+
+  .gateMastNode {
+    gap: 8px;
+  }
+
+  .gateMastServer {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+  }
+
+  .gateMastServer i {
+    width: 16px;
+    height: 4px;
+  }
+
+  .gateMastActions .autoButton, .gateMastActions .updatedAt, .gateMastActions .ghostButton {
+    display: none !important;
+  }
+
+  .gateMastActions .iconButton {
+    display: grid !important;
+  }
+
+  .gateSectionIntro {
+    margin: 8px 2px 12px;
+  }
+
+  .gateSectionIntro h1 {
+    font-size: 22px;
+  }
+
+  .gateMasthead {
+    min-height: 64px;
+    grid-template-columns: minmax(0,1fr) auto;
+    margin-bottom: 10px;
+    padding: 8px 9px;
+    border-radius: 12px;
+    top: 8px;
+    z-index: 145;
+  }
+
+  .gateMastNode h2 {
+    font-size: 13px;
+  }
+
+  .gateMastNode p {
+    font-size: 10px;
+  }
+
+  .gateMastState {
+    padding: 5px 6px;
+    font-size: 8.5px;
+  }
+
+  .gateOperationDock {
+    top: auto;
+  }
+
+  .taskGraphCard, .taskGraphCard.wide {
+    min-height: 175px;
+  }
+
+  .taskGraphPlot, .taskGraphCard.wide .taskGraphPlot {
+    min-height: 108px;
+    margin-right: 39px;
+  }
+
+  .taskGraphCard > header strong {
+    font-size: 15px;
+  }
+
+  .taskYAxis span, .taskXAxis span {
+    font-size: 7.5px;
+  }
+
+  .visualShell {
+    --gate-art-size: auto 220%;
+    --gate-art-opacity: .38;
+    --gate-art-x: 82%;
+  }
+
+  .visualShell .content::before {
+    display: none;
+  }
+
+  .visualLogin::before {
+    background-position: 69% center;
+    opacity: .52;
+  }
+
+}

@@ -9,5 +9,6 @@
   "uninstaller": "uninstall.sh",
   "supported_os": ["ubuntu", "debian"],
   "interface_env": "WG_INTERFACE",
-  "service": "wg-quick@{interface}.service"
+  "service": "wg-quick@{interface}.service",
+  "package": "wireguard-tools"
 }

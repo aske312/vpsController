@@ -18,7 +18,11 @@ CORE="${APP_ROOT}/api/bin/mihomo"
 }
 
 install -d -m 0700 "${DATA_DIR}" "${DATA_DIR}/settings"
-install -d -m 0700 "${CONFIG_DIR}" "${CONFIG_DIR}/shadowsocks" "${CONFIG_DIR}/reality"
+# 0711 on the parent: traversal only, no listing. Reality's own installer
+# locks its subdir down further (0750 root:nogroup) since Xray there runs
+# as nobody:nogroup and must be able to reach it through this directory.
+install -d -m 0711 "${CONFIG_DIR}"
+install -d -m 0700 "${CONFIG_DIR}/shadowsocks" "${CONFIG_DIR}/reality"
 
 python3 - "${DATA_DIR}/state.json" <<'PY'
 import json, os, sys, tempfile
@@ -28,8 +32,6 @@ modules = {
     "transport-awg": False,
     "transport-shadowsocks": False,
     "transport-reality": False,
-    "dns-private": False,
-    "routing-policy": False,
 }
 try:
     with open(path, encoding="utf-8") as handle:

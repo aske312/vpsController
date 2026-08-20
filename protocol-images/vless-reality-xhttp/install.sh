@@ -48,6 +48,16 @@ unzip -q "${tmp_dir}/${asset}" xray -d "${tmp_dir}"
 
 install -d -m 0755 "${MODULE_DIR}"
 install -m 0755 "${tmp_dir}/xray" "${MODULE_DIR}/xray"
+
+if [[ "${XRAY_UPDATE_ONLY:-}" == "1" ]]; then
+  # Binary-only update: the on-disk Xray build is now current, but the
+  # running service still has the old one loaded in memory. Leave it be —
+  # restarting here would drop every live connection without being asked.
+  # An admin restart from the Services page picks up the new binary.
+  echo "Xray обновлён до $("${MODULE_DIR}/xray" version | head -n1); служба не перезапущена — перезапустите вручную (Службы), чтобы применить."
+  exit 0
+fi
+
 install -d -m 0750 -o root -g nogroup "${CONFIG_DIR}"
 
 tls_probe="$("${MODULE_DIR}/xray" tls ping "${TARGET}" 2>&1)"
