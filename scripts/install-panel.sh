@@ -82,3 +82,10 @@ if [[ -z "${VPS_CONTROL_ADMIN_PASSWORD:-}" ]]; then
   export VPS_CONTROL_RANDOM_ADMIN_PASSWORD=yes
 fi
 "${source_dir}/scripts/install-panel.sh" "$@"
+
+if command -v vps-control >/dev/null 2>&1; then
+  printf "\n${cyan}◆${reset} Проверяем последний подготовленный релиз stabl.\n"
+  if ! vps-control update; then
+    printf "${yellow}Предупреждение:${reset} stabl-latest пока недоступен; исходная установка продолжает работать. Повторите vps-control update позднее.\n" >&2
+  fi
+fi

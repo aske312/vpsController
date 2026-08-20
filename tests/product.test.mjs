@@ -45,6 +45,8 @@ test("поставка содержит установщик, образы и р
   assert.match(bootstrap, /ID=\(ubuntu\|debian\)/);
   assert.match(bootstrap, /SCRIPT_PATH="\$\{BASH_SOURCE\[0\]:-\}"/);
   assert.match(bootstrap, /VPS_CONTROL_PREFLIGHT_ONLY/);
+  assert.match(bootstrap, /command -v vps-control/);
+  assert.match(bootstrap, /vps-control update/);
   assert.match(manager, /doctor\)/);
   assert.match(manager, /install\)/);
   assert.match(manager, /update\)/);
@@ -71,6 +73,7 @@ test("поставка содержит установщик, образы и р
   assert.match(readme, /Ubuntu Server 22\.04, 24\.04, 26\.04 или Debian 12\/13/);
   assert.match(readme, /apt-get install -y ca-certificates curl/);
   assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/stabl\/scripts\/install-panel\.sh/);
+  assert.match(readme, /Отдельно запускать `vps-control update` не требуется/);
   assert.match(readme, /Возможные ошибки установки/);
   assert.match(readme, /установка/i);
   assert.equal(JSON.parse(wg).id, "wg");
