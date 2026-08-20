@@ -11,8 +11,8 @@ html {
 
 body {
   margin: 0;
-  background: radial-gradient(circle at 84% 0%, rgba(126, 104, 255, .08), transparent 24%),
-  radial-gradient(circle at 12% 82%, rgba(58, 139, 255, .06), transparent 26%),
+  background: radial-gradient(circle at 84% 0%, rgba(97, 207, 216, .055), transparent 28%),
+  radial-gradient(circle at 12% 82%, rgba(112, 183, 232, .045), transparent 30%),
   var(--bg);
   color: var(--text);
   font-family: var(--font-sans), Arial, sans-serif;
@@ -43,8 +43,8 @@ input, select, textarea {
 }
 
 input:focus, select:focus, textarea:focus {
-  border-color: #516830;
-  box-shadow: 0 0 0 3px #b7f34a0c;
+  border-color: color-mix(in srgb, var(--cyan) 58%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 10%, transparent);
 }
 
 nav {

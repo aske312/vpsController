@@ -7,28 +7,28 @@
   color-scheme: dark;
 
   /* Backgrounds */
-  --bg: #071019;
-  --bg-deep: #050b12;
-  --sidebar: #07111a;
-  --panel: #0b1620;
-  --panel-soft: #0d1a25;
-  --panel-raised: #101e2a;
-  --panel-inset: #08131d;
+  --bg: #071018;
+  --bg-deep: #050b11;
+  --sidebar: #08121a;
+  --panel: #0c1821;
+  --panel-soft: #0e1b25;
+  --panel-raised: #11212c;
+  --panel-inset: #09141c;
 
   /* Borders */
-  --line: rgba(105, 135, 160, .20);
-  --line-strong: rgba(118, 154, 183, .32);
+  --line: rgba(118, 148, 168, .20);
+  --line-strong: rgba(128, 166, 190, .34);
 
   /* Text */
   --text: #edf5f8;
-  --muted: #8ca0ae;
-  --dim: #5f7483;
+  --muted: #91a6b3;
+  --dim: #6b8190;
 
   /* Brand / semantic */
-  --blue: #64b8ff;
-  --cyan: #56d9e9;
-  --violet: #a27bff;
-  --green: #62d7b4;
+  --blue: #70b7e8;
+  --cyan: #61cfd8;
+  --violet: #9b8bd8;
+  --green: #69c8aa;
   --green-dim: rgba(98, 215, 180, .10);
   --amber: #e8b761;
   --red: #f07b7b;

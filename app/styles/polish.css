@@ -1,0 +1,94 @@
+/* Final readability and palette pass shared by every authenticated page. */
+
+html { font-size: 16px; }
+
+body,
+button,
+input,
+select,
+textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+
+::selection { color: var(--text); background: color-mix(in srgb, var(--cyan) 28%, transparent); }
+
+.gateShell {
+  background:
+    radial-gradient(circle at 78% -16%, rgba(97, 207, 216, .065), transparent 36%),
+    linear-gradient(180deg, var(--bg), var(--bg-deep) 76%) !important;
+}
+
+.gateSidebar,
+.gateMasthead,
+.gateShell .panel {
+  border-color: var(--line) !important;
+}
+
+.gateSidebar {
+  background: linear-gradient(180deg, rgba(10, 22, 31, .99), rgba(6, 14, 20, .995)), var(--sidebar) !important;
+}
+
+.gateMasthead {
+  background: color-mix(in srgb, var(--panel) 94%, transparent) !important;
+}
+
+.gateShell small {
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  color: var(--muted);
+}
+
+.gateShell .eyebrow,
+.gateShell .gateNavGroup > p,
+.gateShell .gateBrand small {
+  font-size: 10px !important;
+  line-height: 1.25 !important;
+  color: var(--dim);
+  letter-spacing: .12em;
+}
+
+.gateShell p { line-height: 1.48; }
+
+.gateShell :is(button, input, select, textarea) {
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.gateShell :is(input, select, textarea) {
+  border-color: var(--line);
+  background: var(--panel-inset);
+}
+
+.gateShell :is(input, select, textarea):focus {
+  border-color: color-mix(in srgb, var(--cyan) 62%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 9%, transparent);
+}
+
+.gateShell :is(.primaryButton, .ghostButton, .miniButton, .iconButton, .autoButton) {
+  border-color: var(--line-strong);
+  box-shadow: none;
+}
+
+.gateShell .primaryButton {
+  border-color: color-mix(in srgb, var(--cyan) 38%, var(--line));
+  background: color-mix(in srgb, var(--cyan) 14%, var(--panel));
+  color: #c7f4f5;
+}
+
+.gateShell :is(.ghostButton, .miniButton, .iconButton, .autoButton) {
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
+.gateShell button:focus-visible,
+.gateShell a:focus-visible,
+.gateShell summary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--cyan) 66%, white 8%);
+  outline-offset: 2px;
+}
+
+.gateShell :is(.errorBox, [class*="Error"], [class*="danger"]) { --accent: var(--red); }
+.gateShell :is(.successNotice, [class*="Success"]) { --accent: var(--green); }
+
+@media (max-width: 760px) {
+  .gateShell small { font-size: 10.5px !important; }
+  .gateShell :is(button, input, select, textarea) { font-size: 12px; }
+}
