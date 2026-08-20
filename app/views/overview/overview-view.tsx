@@ -575,59 +575,79 @@ export function OverviewDashboard({
           <div className="overviewComponentCounters"><span><b>{installedServerModules.length}</b> installed</span><span><b>{installableModules.length}</b> available</span></div>
         </header>
 
-        <div className="overviewComponentsGrid">
-          <section className="overviewComponentInstalled">
-            <div className="overviewSectionLabel"><b>Установлено</b><span>{installedServerModules.length}</span></div>
-            <div>
-              {installedServerModules.map((image) => {
-                const protocol = image.id as ProtocolId;
-                const directStatus = (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(image.id) ? directStatuses[protocol] : undefined;
-                const running = image.id === "mihomo" ? Boolean(mihomoStatus?.active) : directStatus ? Boolean(directStatus.service_active ?? directStatus.active) : Boolean(image.active);
-                const version = image.id === "mihomo"
-                  ? (mihomoStatus?.core_version ? `core ${mihomoStatus.core_version}` : `package ${image.version || "—"}`)
-                  : (image.installed_version ? `v${image.installed_version}` : `package ${image.version || "—"}`);
-                const updateNote = image.id === "mihomo"
-                  ? (image.update_via_release ? `новая версия core ${image.available_version || ""} — доступна в релизе панели` : "")
-                  : (image.update_available ? `обновление → ${image.available_version}${image.update_breaking ? " · major" : ""}` : "");
-                return (
-                  <div key={image.id}>
-                    <span className={`overviewProtocolMark ${image.id === "mihomo" ? "violet" : "cyan"}`}>{protocolMark(image.id)}</span>
-                    <p>
-                      <b>{image.name}</b>
-                      <small>{version}</small>
-                      {updateNote && <small className={`overviewUpdateNote${image.update_breaking ? " breaking" : ""}`}>{updateNote}</small>}
-                    </p>
-                    <span className="overviewInstalledState">
-                      <em className={running ? "online" : "ready"}>{running ? "RUNNING" : "INSTALLED"}</em>
-                      {image.id !== "mihomo" && image.update_available && (
-                        <button type="button" className={image.update_breaking ? "warning" : ""} disabled={busy || Boolean(installingProtocol)} onClick={() => onUpdateProtocol(image)}>
-                          {installingProtocol === `update-${image.id}` ? "…" : "Обновить"}
-                        </button>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
-              {!installedServerModules.length && <p className="overviewEmpty">На узле пока нет установленных компонентов.</p>}
-            </div>
-          </section>
+        <section className="overviewComponentRegistry" aria-label="Управление модулями узла">
+          <header>
+            <span>МОДУЛЬ</span>
+            <span>ВЕРСИЯ</span>
+            <span>СОСТОЯНИЕ</span>
+            <span>ДЕЙСТВИЕ</span>
+          </header>
+          <div>
+            {protocolImages.map((image) => {
+              const protocol = image.id as ProtocolId;
+              const isDirect = (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(image.id);
+              const directStatus = isDirect ? directStatuses[protocol] : undefined;
+              const statusFailed = isDirect && Boolean(directStatusFailures[protocol]);
+              const statusKnown = image.id === "mihomo"
+                ? Boolean(mihomoStatus) || Boolean(mihomoSummaryError)
+                : isDirect
+                  ? Boolean(directStatus) || statusFailed
+                  : typeof image.active === "boolean";
+              const running = image.id === "mihomo"
+                ? Boolean(mihomoStatus?.active)
+                : directStatus
+                  ? Boolean(directStatus.service_active ?? directStatus.active)
+                  : Boolean(image.active);
+              const installedVersion = image.id === "mihomo" && mihomoStatus?.core_version
+                ? `core ${mihomoStatus.core_version}`
+                : image.installed_version
+                  ? `v${image.installed_version}`
+                  : image.installed
+                    ? `package ${image.version || "—"}`
+                    : "—";
+              const availableVersion = image.available_version ? `v${image.available_version}` : image.version ? `package ${image.version}` : "—";
+              const state = !image.installed
+                ? { className: "available", label: "ДОСТУПЕН" }
+                : !statusKnown
+                  ? { className: "checking", label: "ПРОВЕРКА" }
+                  : statusFailed || (image.id === "mihomo" && Boolean(mihomoSummaryError))
+                    ? { className: "unavailable", label: "НЕТ ДАННЫХ" }
+                    : running
+                      ? { className: "online", label: "РАБОТАЕТ" }
+                      : { className: "stopped", label: "ОСТАНОВЛЕН" };
 
-          <section className="overviewComponentCatalog">
-            <div className="overviewSectionLabel"><b>Доступно к установке</b><span>{installableModules.length}</span></div>
-            <div>
-              {installableModules.map((image) => (
-                <div key={image.id}>
-                  <span className={`overviewProtocolMark ${image.id === "mihomo" ? "violet" : "cyan"}`}>{protocolMark(image.id)}</span>
-                  <p><b>{image.name}</b><small>{image.available_version ? `v${image.available_version}` : `package ${image.version || "—"}`} · {image.description || image.category_name}</small></p>
-                  <button type="button" disabled={busy || Boolean(installingProtocol)} onClick={() => onInstallProtocol(image)}>
-                    {installingProtocol === image.id ? "Установка…" : `Установить${image.available_version ? ` ${image.available_version}` : ""}`}
-                  </button>
+              return (
+                <div className="overviewComponentRow" key={image.id}>
+                  <div className="overviewComponentIdentity">
+                    <span className={`overviewProtocolMark ${image.id === "mihomo" ? "violet" : "cyan"}`}>{protocolMark(image.id)}</span>
+                    <p><b>{image.name}</b><small>{image.description || image.category_name}</small></p>
+                  </div>
+                  <div className="overviewComponentVersion">
+                    <b>{installedVersion}</b>
+                    <small>{image.installed ? `доступно: ${availableVersion}` : `для установки: ${availableVersion}`}</small>
+                  </div>
+                  <span className={`overviewComponentState ${state.className}`}>{state.label}</span>
+                  <div className="overviewComponentAction">
+                    {!image.installed ? (
+                      <button type="button" disabled={busy || Boolean(installingProtocol)} onClick={() => onInstallProtocol(image)}>
+                        {installingProtocol === image.id ? "Установка…" : "Установить"}
+                      </button>
+                    ) : image.id !== "mihomo" && image.update_available ? (
+                      <button type="button" className={image.update_breaking ? "warning" : ""} disabled={busy || Boolean(installingProtocol)} onClick={() => onUpdateProtocol(image)}>
+                        {installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}
+                      </button>
+                    ) : image.update_via_release ? (
+                      <small>Обновляется с приложением</small>
+                    ) : (
+                      <small>Актуальная версия</small>
+                    )}
+                  </div>
                 </div>
-              ))}
-              {!installableModules.length && <div className="overviewCatalogComplete"><span>✓</span><p><b>Все компоненты установлены</b><small>В каталоге сейчас нет доступных модулей.</small></p></div>}
-            </div>
-          </section>
-        </div>
+              );
+            })}
+            {!protocolImages.length && <p className="overviewEmpty">Каталог модулей временно недоступен.</p>}
+          </div>
+        </section>
       </article>
     </section>
   );

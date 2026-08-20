@@ -25,6 +25,7 @@
 .overviewComponents {
   position:relative;
   min-width:0;
+  grid-column:1 / -1;
   border:1px solid var(--line);
   border-radius:15px;
   background:linear-gradient(180deg, rgba(12,25,35,.94), rgba(8,17,25,.97));
@@ -213,31 +214,16 @@
 .overviewProtocolMark.cyan { color:#8beaf1; border:1px solid rgba(86,217,233,.25); background:rgba(86,217,233,.08); }
 
 .overviewChannelList em,
-.overviewDirectList em,
-.overviewComponentInstalled em { font:750 7px/1 var(--font-mono); font-style:normal; }
+.overviewDirectList em { font:750 7px/1 var(--font-mono); font-style:normal; }
 
 .overviewChannelList em.online,
-.overviewDirectList em.online,
-.overviewComponentInstalled em.online { color:var(--green); }
+.overviewDirectList em.online { color:var(--green); }
 
-.overviewChannelList em.ready,
-.overviewComponentInstalled em.ready { color:#718894; }
+.overviewChannelList em.ready { color:#718894; }
 
 .overviewDirectList em.offline { color:var(--red); }
 
 .overviewEmpty { margin:8px 0 0; color:#607686; font:500 8px/1.4 var(--font-sans); }
-
-.overviewUpdateNote { color:#6ee1bc !important; }
-
-.overviewUpdateNote.breaking { color:#efb657 !important; }
-
-.overviewInstalledState { min-width:0; display:grid; justify-items:end; gap:4px; }
-
-.overviewInstalledState button { min-height:22px; padding:0 7px; border:1px solid rgba(110,225,188,.26); border-radius:7px; background:rgba(17,60,51,.14); color:#6ee1bc; font:650 6.5px/1 var(--font-sans); cursor:pointer; white-space:nowrap; }
-
-.overviewInstalledState button.warning { border-color:rgba(239,182,87,.30); background:rgba(90,60,17,.14); color:#efb657; }
-
-.overviewInstalledState button:disabled { opacity:.5; cursor:wait; }
 
 .overviewRoute > footer { min-height:30px; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 11px; border-top:1px solid rgba(105,135,160,.11); color:#5c7281; font:500 7px/1 var(--font-mono); }
 
@@ -317,37 +303,46 @@
 
 .overviewComponentCounters b { color:#d6e4ea; font-size:10px; }
 
-.overviewComponentsGrid { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr); gap:9px; margin-top:11px; }
+.overviewComponentRegistry { margin-top:11px; overflow:hidden; border:1px solid rgba(105,135,160,.13); border-radius:11px; background:rgba(4,11,17,.24); }
 
-.overviewComponentInstalled,
-.overviewComponentCatalog { min-width:0; padding:9px 10px; border:1px solid rgba(105,135,160,.13); border-radius:11px; background:rgba(4,11,17,.24); }
+.overviewComponentRegistry > header,
+.overviewComponentRow { display:grid; grid-template-columns:minmax(220px,1.4fr) minmax(150px,.8fr) 112px minmax(130px,.55fr); align-items:center; gap:12px; }
 
-.overviewComponentInstalled > div:last-child,
-.overviewComponentCatalog > div:last-child { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin-top:4px; }
+.overviewComponentRegistry > header { min-height:30px; padding:0 12px; border-bottom:1px solid rgba(105,135,160,.12); color:#587080; font:700 7px/1 var(--font-mono); letter-spacing:.09em; }
 
-.overviewComponentInstalled > div:last-child > div,
-.overviewComponentCatalog > div:last-child > div { min-width:0; min-height:48px; display:grid; grid-template-columns:30px minmax(0,1fr) auto; align-items:center; gap:8px; padding:6px 7px; border:1px solid rgba(105,135,160,.10); border-radius:9px; background:rgba(5,12,18,.27); }
+.overviewComponentRow { min-height:62px; padding:8px 12px; border-bottom:1px solid rgba(105,135,160,.09); }
 
-.overviewComponentInstalled p,
-.overviewComponentCatalog p { min-width:0; display:grid; gap:2px; margin:0; }
+.overviewComponentRow:last-child { border-bottom:0; }
 
-.overviewComponentInstalled p b,
-.overviewComponentCatalog p b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#d8e6ec; font:650 8px/1.2 var(--font-sans); }
+.overviewComponentIdentity { min-width:0; display:grid; grid-template-columns:34px minmax(0,1fr); align-items:center; gap:9px; }
 
-.overviewComponentInstalled p small,
-.overviewComponentCatalog p small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#607686; font:500 6px/1.2 var(--font-sans); }
+.overviewComponentIdentity p,
+.overviewComponentVersion { min-width:0; display:grid; gap:3px; margin:0; }
 
-.overviewComponentCatalog button { min-height:29px; padding:0 8px; border:1px solid rgba(100,184,255,.22); border-radius:8px; background:rgba(100,184,255,.08); color:#79baf0; font:650 7px/1 var(--font-sans); cursor:pointer; }
+.overviewComponentIdentity b,
+.overviewComponentVersion b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#d8e6ec; font:650 10px/1.2 var(--font-sans); }
 
-.overviewComponentCatalog button:hover:not(:disabled) { background:rgba(100,184,255,.14); border-color:rgba(100,184,255,.34); }
+.overviewComponentIdentity small,
+.overviewComponentVersion small,
+.overviewComponentAction small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#758b99; font:500 8px/1.3 var(--font-sans); }
 
-.overviewComponentCatalog button:disabled { opacity:.45; cursor:wait; }
+.overviewComponentState { justify-self:start; padding:5px 7px; border:1px solid currentColor; border-radius:999px; font:700 7px/1 var(--font-mono); letter-spacing:.06em; }
 
-.overviewCatalogComplete { grid-column:1 / -1 !important; display:flex !important; grid-template-columns:none !important; justify-content:center; text-align:left; color:var(--green); }
+.overviewComponentState.online { color:var(--green); }
+.overviewComponentState.stopped,
+.overviewComponentState.unavailable { color:var(--red); }
+.overviewComponentState.checking { color:var(--amber); }
+.overviewComponentState.available { color:var(--cyan); }
 
-.overviewCatalogComplete > span { font-size:16px; }
+.overviewComponentAction { display:flex; justify-content:flex-end; }
 
-.overviewCatalogComplete p { flex:1; }
+.overviewComponentAction button { min-width:104px; min-height:32px; padding:0 10px; border:1px solid rgba(100,184,255,.22); border-radius:8px; background:rgba(100,184,255,.08); color:#79baf0; font:650 9px/1 var(--font-sans); cursor:pointer; }
+
+.overviewComponentAction button:hover:not(:disabled) { background:rgba(100,184,255,.14); border-color:rgba(100,184,255,.34); }
+
+.overviewComponentAction button.warning { border-color:rgba(232,183,97,.28); background:rgba(232,183,97,.08); color:var(--amber); }
+
+.overviewComponentAction button:disabled { opacity:.45; cursor:wait; }
 
 @media (max-width:1240px) {
 .overviewTopologyHead { padding-right:205px; }
@@ -362,7 +357,6 @@
 .overviewExit { display:none; }
 .overviewMihomoBody { grid-template-columns:1fr; }
 .overviewChannels { border-left:0; border-top:1px solid rgba(105,135,160,.12); }
-.overviewComponentsGrid { grid-template-columns:1fr; }
 }
 
 @media (max-width:760px) {
@@ -397,8 +391,12 @@
 .overviewComponents { padding:11px; }
 .overviewComponents > header { align-items:flex-start; }
 .overviewComponentCounters { display:none; }
-.overviewComponentInstalled > div:last-child,
-  .overviewComponentCatalog > div:last-child { grid-template-columns:1fr; }
+.overviewComponentRegistry > header { display:none; }
+.overviewComponentRow { grid-template-columns:minmax(0,1fr) auto; }
+.overviewComponentIdentity { grid-column:1; }
+.overviewComponentAction { grid-column:2; grid-row:1; }
+.overviewComponentVersion { grid-column:1; }
+.overviewComponentState { grid-column:2; }
 }
 
 @media (max-width:470px) {
@@ -443,11 +441,6 @@
 .overviewSystemFacts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; margin-top:9px; }
 
 .overviewFactCard { min-height: 61px; }
-
-.overviewComponents .overviewComponentInstalled p small,
-.overviewComponents .overviewComponentCatalog p small { color:#7590a0; font-size:6.5px; }
-
-.overviewComponents .overviewComponentCatalog button { white-space:nowrap; }
 
 @media (max-width: 1240px) {
 .overviewDirectList > div { grid-template-columns:31px minmax(130px,1fr) 90px 62px auto; }
@@ -509,7 +502,6 @@
 
 .overviewProtocolMark { font-size: 8.5px; }
 
-.overviewComponentInstalled em,
 .overviewChannelList em,
 .overviewDirectList em { font-size: 9px; line-height: 1; }
 
@@ -547,14 +539,6 @@
 .overviewComponentCounters span { font-size: 8.5px; }
 
 .overviewComponentCounters b { font-size: 11px; }
-
-.overviewComponentCatalog p b,
-.overviewComponentInstalled p b { font-size: 10px; line-height: 1.25; }
-
-.overviewComponents .overviewComponentInstalled p small,
-.overviewComponents .overviewComponentCatalog p small { font-size: 9px; line-height: 1.3; color: #8297a4; }
-
-.overviewComponentCatalog button { min-height: 32px; font-size: 9.5px; }
 
 @media (max-width: 760px) {
 .overviewTopologyHead > div:first-child > p:last-child { font-size: 10.5px; }
