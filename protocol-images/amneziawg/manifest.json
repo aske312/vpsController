@@ -2,6 +2,7 @@
   "id": "awg",
   "name": "AmneziaWG",
   "version": "2.0.0",
+  "installable": true,
   "description": "VPN-туннель с маскировкой трафика WireGuard",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",

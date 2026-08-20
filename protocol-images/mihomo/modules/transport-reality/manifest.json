@@ -2,6 +2,7 @@
   "id": "transport-reality",
   "name": "VLESS Reality + XHTTP",
   "version": "1.0.0",
+  "installable": true,
   "description": "Отдельный Xray/Reality-инстанс для Mihomo-профилей.",
   "category": "transport",
   "category_name": "Каналы",

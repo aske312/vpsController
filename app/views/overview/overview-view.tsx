@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { formatModuleVersion } from "../../lib/format-version";
 
 type ProtocolId = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp";
 type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
@@ -42,6 +43,7 @@ type ProtocolImage = {
   interface: string;
   installed: boolean;
   active?: boolean;
+  installable: boolean;
   removable: boolean;
   installed_version?: string;
   available_version?: string;
@@ -519,7 +521,8 @@ export function OverviewDashboard({
         </div>
       </article>
 
-      <article className="overviewTelemetry">
+      <article className="overviewNodeWorkspace">
+      <section className="overviewTelemetry">
         <header>
           <div><p className="eyebrow">LIVE SYSTEM</p><h2>Телеметрия VPS</h2></div>
           <small>Шкала времени формируется из текущей сессии панели · шаг ~3 сек</small>
@@ -567,9 +570,9 @@ export function OverviewDashboard({
           <FactCard label="ROUTES IN USE" value={`${routesInUse}`} detail={`${routesReady} ready / idle`} />
           <FactCard label="FREE MEMORY" value={bytes(memoryFree)} detail={`${memUsed.toFixed(0)}% currently used`} />
         </div>
-      </article>
+      </section>
 
-      <article className="overviewComponents">
+      <section className="overviewComponents">
         <header>
           <div><p className="eyebrow">NODE COMPONENTS</p><h2>Компоненты</h2><small>Версия берётся из фактического каталога установки; для Mihomo после запуска показывается версия core.</small></div>
           <div className="overviewComponentCounters"><span><b>{installedServerModules.length}</b> installed</span><span><b>{installableModules.length}</b> available</span></div>
@@ -599,13 +602,13 @@ export function OverviewDashboard({
                   ? Boolean(directStatus.service_active ?? directStatus.active)
                   : Boolean(image.active);
               const installedVersion = image.id === "mihomo" && mihomoStatus?.core_version
-                ? `core ${mihomoStatus.core_version}`
+                ? formatModuleVersion(mihomoStatus.core_version)
                 : image.installed_version
-                  ? `v${image.installed_version}`
+                  ? formatModuleVersion(image.installed_version)
                   : image.installed
-                    ? `package ${image.version || "—"}`
+                    ? formatModuleVersion(image.version)
                     : "—";
-              const availableVersion = image.available_version ? `v${image.available_version}` : image.version ? `package ${image.version}` : "—";
+              const availableVersion = formatModuleVersion(image.available_version || image.version);
               const state = !image.installed
                 ? { className: "available", label: "ДОСТУПЕН" }
                 : !statusKnown
@@ -629,8 +632,8 @@ export function OverviewDashboard({
                   <span className={`overviewComponentState ${state.className}`}>{state.label}</span>
                   <div className="overviewComponentAction">
                     {!image.installed ? (
-                      <button type="button" disabled={busy || Boolean(installingProtocol)} onClick={() => onInstallProtocol(image)}>
-                        {installingProtocol === image.id ? "Установка…" : "Установить"}
+                      <button type="button" disabled={!image.installable || busy || Boolean(installingProtocol)} onClick={() => onInstallProtocol(image)}>
+                        {!image.installable ? "В разработке" : installingProtocol === image.id ? "Установка…" : "Установить"}
                       </button>
                     ) : image.id !== "mihomo" && image.update_available ? (
                       <button type="button" className={image.update_breaking ? "warning" : ""} disabled={busy || Boolean(installingProtocol)} onClick={() => onUpdateProtocol(image)}>
@@ -648,6 +651,7 @@ export function OverviewDashboard({
             {!protocolImages.length && <p className="overviewEmpty">Каталог модулей временно недоступен.</p>}
           </div>
         </section>
+      </section>
       </article>
     </section>
   );

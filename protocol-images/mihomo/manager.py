@@ -561,6 +561,7 @@ def module_payload(module_id: str) -> dict[str, Any]:
     service = SERVICE_BY_MODULE.get(module_id)
     return {
         **info,
+        "installable": info.get("installable", True) is True,
         "installed": installed,
         "active": systemctl_active(service) if service else installed,
         "service": service or "",
@@ -710,6 +711,8 @@ def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[st
 @app.post("/api/mihomo/modules/{module_id}/install", dependencies=[Depends(auth_required)])
 def install_module(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
+    if info.get("installable", True) is not True:
+        raise HTTPException(status_code=409, detail="Module is not available for installation")
     if module_is_installed(module_id):
         return module_payload(module_id)
     write_action(f"module-install:{module_id}", f"Установка {info['name']}…", progress=10)

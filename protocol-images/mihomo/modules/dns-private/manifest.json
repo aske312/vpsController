@@ -2,6 +2,7 @@
   "id": "dns-private",
   "name": "Private DNS",
   "version": "1.0.0",
+  "installable": true,
   "description": "DNS-политика для конфигураций Mihomo. Всегда включена, настраивается здесь.",
   "category": "dns",
   "category_name": "DNS",

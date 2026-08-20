@@ -1452,6 +1452,7 @@ def protocol_image_manifests() -> dict[str, dict]:
         image_id = str(manifest.get("id", ""))
         installer = str(manifest.get("installer", ""))
         uninstaller = str(manifest.get("uninstaller", ""))
+        installable = manifest.get("installable", True) is True
         if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", image_id):
             continue
         if not re.fullmatch(r"[A-Za-z0-9._-]+", installer) or not (manifest_path.parent / installer).is_file():
@@ -1487,6 +1488,7 @@ def protocol_image_manifests() -> dict[str, dict]:
             "service": service,
             "installed": installed,
             "active": bool(service and run("systemctl", "is-active", service) == "active"),
+            "installable": installable,
             "removable": bool(uninstaller),
             **protocol_version_info(manifest, image_id, installed),
         }
@@ -1500,8 +1502,11 @@ def protocol_images(_: None = Depends(require_token)) -> dict:
 
 @app.post("/api/protocol-images/{image_id}/install")
 def install_protocol_image(image_id: str, _: None = Depends(require_token)) -> dict:
-    if image_id not in protocol_image_manifests():
+    image = protocol_image_manifests().get(image_id)
+    if not image:
         raise HTTPException(status_code=404, detail="Protocol image not found")
+    if not image.get("installable"):
+        raise HTTPException(status_code=409, detail="Protocol image is not available for installation")
     if ACTION_FILE.exists():
         try:
             previous_unit = json.loads(ACTION_FILE.read_text(encoding="utf-8")).get("unit", "")

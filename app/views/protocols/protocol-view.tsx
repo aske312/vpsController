@@ -1,5 +1,7 @@
 "use client";
 
+import { formatModuleVersion } from "../../lib/format-version";
+
 import Image from "next/image";
 import type { Dispatch, SetStateAction } from "react";
 import { bytes, duration, labels, safeDateTime } from "../../lib/control-plane-ui";
@@ -26,10 +28,10 @@ export function ProtocolView(props: ProtocolViewProps) {
               <div className="protocolHeaderState">
                 <span className={protocolOperational ? "online" : "offline"}>{protocolOperational ? "ACTIVE" : "STOPPED"}</span>
                 <span className={activeProtocol.service_enabled ? "online" : "muted"}>{activeProtocol.service_enabled ? "AUTOSTART" : "MANUAL"}</span>
-                <span className="version">{activeProtocolImage?.installed_version ? `v${activeProtocolImage.installed_version}` : "version n/a"}</span>
+                <span className="version">{formatModuleVersion(activeProtocolImage?.installed_version, "version n/a")}</span>
                 {activeProtocolImage?.update_available && (
                   <span className={`version update${activeProtocolImage.update_breaking ? " breaking" : ""}`}>
-                    обновление → {activeProtocolImage.available_version}{activeProtocolImage.update_breaking ? " · major" : ""}
+                    обновление → {formatModuleVersion(activeProtocolImage.available_version)}{activeProtocolImage.update_breaking ? " · major" : ""}
                   </span>
                 )}
               </div>

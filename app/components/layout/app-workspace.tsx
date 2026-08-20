@@ -99,7 +99,7 @@ export function AppWorkspace({
       <OperationDock action={operationAction} label={operationLabel} active={operationActive} />
 
       <section className="content">
-        <header className="gateMasthead">
+        <header className="gateMasthead" aria-label="Состояние сервера">
           <div className="gateMastNode">
             <span className="gateMastServer" aria-hidden="true"><i /><i /><i /></span>
             <div>
@@ -109,12 +109,12 @@ export function AppWorkspace({
             <span className={`gateMastState ${nodeState}`}>{applicationStateTitle}</span>
           </div>
 
-          <div className="gateMastFacts">
-            <div><span>UPTIME</span><strong>{uptimeLabel}</strong></div>
-            <div><span>LOAD</span><strong>{loadLabel}</strong></div>
-            <div><span>CPU</span><strong>{cpuLabel}</strong></div>
-            <div><span>RAM</span><strong>{ramLabel}</strong></div>
-            <div><span>NET</span><strong>{networkLabel}</strong></div>
+          <div className="gateMastFacts" aria-label="Метрики сервера">
+            <div className="gateMastMetric"><span>UPTIME</span><strong>{uptimeLabel}</strong><i /></div>
+            <div className="gateMastMetric"><span>LOAD</span><strong>{loadLabel}</strong><i /></div>
+            <div className="gateMastMetric"><span>CPU</span><strong>{cpuLabel}</strong><i /></div>
+            <div className="gateMastMetric"><span>RAM</span><strong>{ramLabel}</strong><i /></div>
+            <div className="gateMastMetric network"><span>NETWORK</span><strong>{networkLabel}</strong><i /></div>
           </div>
 
           <div className="gateMastActions">

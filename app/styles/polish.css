@@ -92,3 +92,151 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
   .gateShell small { font-size: 10.5px !important; }
   .gateShell :is(button, input, select, textarea) { font-size: 12px; }
 }
+
+/* Unified page rhythm: every workspace starts like the Users page. */
+.gateSectionIntro,
+.overviewTopologyHead,
+.dnsOverview,
+.securityOverview,
+.servicesHero,
+.mihomoCommandHero,
+.connectionsHero,
+.protocolHeader,
+.applicationSummary {
+  min-height: 76px;
+  margin: 0 0 12px;
+  padding: 12px 14px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 13px !important;
+  background: linear-gradient(180deg, rgba(10,21,30,.90), rgba(7,15,22,.84)) !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.025) !important;
+}
+
+.gateSectionIntro h1,
+.overviewTopologyHead h1,
+.dnsOverview h1,
+.securityOverview h1,
+.servicesHero h1,
+.mihomoCommandHero h1,
+.connectionsHero h1,
+.protocolHeader h1,
+.applicationSummary h1 { font-size: clamp(23px, 2.2vw, 29px) !important; letter-spacing: -.035em !important; }
+
+.connectionsHeroArt,.mihomoHeroShade { display:none !important; }
+.connectionsHeroContent,.mihomoHeroContent { width:100% !important; min-height:0 !important; padding:0 !important; }
+
+/* Sticky server command bar. */
+.gateMasthead {
+  min-height: 68px;
+  grid-template-columns: minmax(250px,1fr) minmax(430px,1.55fr) auto;
+  gap: 10px;
+  padding: 8px 9px 8px 11px;
+  border-radius: 13px;
+  background: rgba(7,16,24,.94) !important;
+  box-shadow: 0 10px 28px rgba(0,0,0,.27), inset 0 1px rgba(255,255,255,.03);
+}
+
+.gateMastServer { width: 36px; height: 36px; border-radius: 9px; }
+.gateMastFacts { border: 0; gap: 5px; overflow: visible; background: transparent; }
+.gateMastFacts > .gateMastMetric {
+  position: relative;
+  min-width: 68px;
+  flex: 1 1 0;
+  overflow: hidden;
+  padding: 7px 9px 9px;
+  border: 1px solid var(--line) !important;
+  border-radius: 9px;
+  background: var(--panel-inset);
+}
+.gateMastMetric.network { min-width: 112px; flex: 1.35 1 0; }
+.gateMastMetric > i { position:absolute; inset:auto 8px 5px; height:2px; border-radius:2px; background:linear-gradient(90deg,var(--cyan),transparent); opacity:.48; }
+.gateMastFacts strong { margin-top:3px; font-size:10.5px; }
+.gateMastFacts span { font-size:7.5px; }
+
+/* Overview: telemetry and module registry are one adaptive 70/30 surface. */
+.overviewNodeWorkspace {
+  display:grid;
+  grid-template-columns:minmax(0,7fr) minmax(280px,3fr);
+  gap:10px;
+  padding:10px;
+  border:1px solid var(--line);
+  border-radius:15px;
+  background:linear-gradient(145deg,rgba(8,18,27,.94),rgba(5,12,19,.90));
+}
+.overviewNodeWorkspace > :is(.overviewTelemetry,.overviewComponents) { min-width:0; padding:10px; border:0 !important; border-radius:11px; background:rgba(3,10,16,.28); }
+.overviewComponents > header { align-items:flex-start; }
+.overviewComponents > header small { display:none !important; }
+.overviewComponentCounters { display:grid !important; gap:3px !important; }
+.overviewComponentRegistry > header { display:none; }
+.overviewComponentRow { grid-template-columns:minmax(0,1fr) auto !important; gap:6px 10px !important; min-height:0 !important; padding:8px !important; }
+.overviewComponentIdentity p small { display:none; }
+.overviewComponentVersion { text-align:right; }
+.overviewComponentVersion small { display:none; }
+.overviewComponentState { justify-self:start; }
+.overviewComponentAction { justify-self:end; }
+.overviewComponentAction button { min-height:27px !important; padding:0 8px !important; }
+
+/* DNS and Services keep artwork on their largest operational surface. */
+.dnsWorkspace,.servicesWorkspace { gap:10px !important; }
+.dnsOverview { grid-template-columns:minmax(260px,.8fr) minmax(440px,1.2fr) auto !important; gap:10px !important; }
+.dnsOverviewCopy > p:last-child,.servicesHeroCopy > p:last-of-type { margin-top:5px !important; font-size:11px !important; }
+.dnsOverviewStats > span { padding:7px 8px !important; }
+.dnsControlPlane,.servicesManaged { border-radius:15px !important; }
+.dnsControlContent { width:min(79%,1180px) !important; }
+.dnsPolicyStrip { padding:8px 12px !important; }
+.dnsResolverRow { min-height:0 !important; padding:8px 10px !important; }
+.servicesHero { grid-template-columns:minmax(0,1fr) auto !important; }
+.servicesHeroBackdrop,.servicesHero::after { display:none !important; }
+.servicesHeroCopy { padding:0 !important; }
+.servicesStats { margin-top:9px !important; }
+.servicesNode { margin:0 !important; padding:10px 12px !important; }
+.servicesManagedHead,.servicesGroupHead { padding-top:10px !important; padding-bottom:8px !important; }
+.serviceRow { min-height:48px !important; padding-top:6px !important; padding-bottom:6px !important; }
+.servicesOperations { gap:8px !important; }
+
+/* Security diagnostics live as an operational console instead of a loose footer. */
+.securityWorkspace { gap:10px !important; }
+.securityOverview { grid-template-columns:minmax(0,1.2fr) minmax(330px,.8fr) !important; }
+.securityTelemetry { grid-column:1/-1; }
+.securityDiagnosticsGrid { grid-template-columns:minmax(280px, .36fr) minmax(0,.64fr) !important; }
+.securityLogs.open { grid-column:auto !important; }
+.securityListeners pre,.securityLogs pre { min-height:220px !important; max-height:360px !important; }
+
+/* One modal language for every action dialog. */
+:is(.confirmBackdrop,.accessBetaModalBackdrop,.mihomoDialogBackdrop,.legalBackdrop) {
+  position:fixed !important;
+  z-index:400 !important;
+  inset:0 !important;
+  display:grid !important;
+  place-items:center !important;
+  padding:20px !important;
+  background:rgba(2,7,11,.78) !important;
+  backdrop-filter:blur(12px) saturate(.8) !important;
+}
+:is(.confirmDialog,.connectionDialog,.accessBetaDialog,.mihomoDialog,.legalModal) {
+  width:min(620px,calc(100vw - 28px));
+  max-height:min(86vh,820px);
+  overflow:auto;
+  border:1px solid var(--line-strong) !important;
+  border-radius:15px !important;
+  background:linear-gradient(180deg,rgba(12,24,34,.99),rgba(6,14,21,.99)) !important;
+  box-shadow:0 28px 90px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.035) !important;
+}
+:is(.confirmDialog,.connectionDialog,.accessBetaDialog,.mihomoDialog,.legalModal) > header,
+.legalModalHead { padding:15px 16px 12px !important; border-bottom:1px solid var(--line) !important; }
+:is(.confirmActions,.connectionDialogActions,.accessBetaDialogActions,.mihomoDialog footer,.legalModalFoot) { padding:12px 16px !important; border-top:1px solid var(--line) !important; }
+
+@media (max-width:1180px) {
+  .gateMasthead { grid-template-columns:minmax(220px,1fr) auto; }
+  .gateMastFacts { display:none; }
+  .overviewNodeWorkspace { grid-template-columns:1fr; }
+  .overviewComponentRegistry > div { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
+}
+@media (max-width:760px) {
+  .dnsOverview,.securityOverview,.servicesHero { grid-template-columns:1fr !important; }
+  .dnsOverviewStats { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+  .dnsControlContent { width:100% !important; }
+  .dnsControlArt { opacity:.28 !important; }
+  .securityDiagnosticsGrid { grid-template-columns:1fr !important; }
+  .overviewComponentRegistry > div { grid-template-columns:1fr; }
+}

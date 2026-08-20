@@ -29,6 +29,7 @@ const STYLE_FILES = [
   "app/styles/pages/protocols.css",
   "app/styles/pages/mihomo.css",
   "app/styles/pages/users.css",
+  "app/styles/polish.css",
 ];
 const readStyles = async () => (await Promise.all(STYLE_FILES.map(read))).join("\n");
 
@@ -108,6 +109,38 @@ test("protocol installers declare OS support and keep per-module diagnostics", a
   assert.match(wgRemove, /WG_SUBNET="\$\(env_value WG_SUBNET\)"/);
   assert.match(awgRemove, /AWG_SUBNET="\$\(env_value AWG_SUBNET\)"/);
   assert.match(awgRemove, /amnezia-ppa\.list/);
+});
+
+test("protocol catalog distinguishes installable modules from safe placeholders", async () => {
+  const ids = ["wireguard", "amneziawg", "shadowsocks", "vless-reality-xhttp", "mihomo", "hysteria2", "ikev2", "openvpn", "trojan"];
+  const manifests = await Promise.all(ids.map((id) => read(`protocol-images/${id}/manifest.json`).then(JSON.parse)));
+  for (const manifest of manifests.slice(0, 5)) assert.equal(manifest.installable, true);
+  for (const [index, manifest] of manifests.slice(5).entries()) {
+    assert.equal(manifest.installable, false);
+    assert.equal(manifest.installer, "install.sh");
+    assert.equal(manifest.uninstaller, "uninstall.sh");
+    const directory = ids[index + 5];
+    const [install, uninstall] = await Promise.all([
+      read(`protocol-images/${directory}/install.sh`),
+      read(`protocol-images/${directory}/uninstall.sh`),
+    ]);
+    assert.match(install, /exit 2/);
+    assert.match(uninstall, /удаление не требуется/i);
+  }
+  const api = await read("api/main.py");
+  assert.match(api, /manifest\.get\("installable", True\) is True/);
+  assert.match(api, /Protocol image is not available for installation/);
+});
+
+test("control surfaces share compact headers, telemetry and modal language", async () => {
+  const [styles, overview, versions] = await Promise.all([
+    readStyles(), read("app/views/overview/overview-view.tsx"), read("app/lib/format-version.ts"),
+  ]);
+  assert.match(overview, /overviewNodeWorkspace/);
+  assert.match(styles, /grid-template-columns:minmax\(0,7fr\) minmax\(280px,3fr\)/);
+  assert.match(styles, /\.gateMastMetric/);
+  assert.match(styles, /\.confirmBackdrop,.accessBetaModalBackdrop,.mihomoDialogBackdrop,.legalBackdrop/);
+  assert.match(versions, /slice\(0, 3\)/);
 });
 
 test("интерфейс и метаданные относятся к продукту 312.net", async () => {

@@ -2,6 +2,7 @@
   "id": "transport-shadowsocks",
   "name": "Shadowsocks",
   "version": "1.0.0",
+  "installable": true,
   "description": "Собственные Shadowsocks-инстансы Mihomo; direct-клиенты не используются.",
   "category": "transport",
   "category_name": "Каналы",

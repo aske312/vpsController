@@ -18,6 +18,7 @@ rsync -a --delete \
   --exclude '.wrangler/' --exclude 'node_modules/' --exclude 'dist/' --exclude 'outputs/' \
   --exclude '.env*' --exclude 'venv/' \
   "${ROOT_DIR}/" "${STAGE}/"
+find "${STAGE}/protocol-images" -type f \( -name 'install.sh' -o -name 'uninstall.sh' \) -exec chmod 0755 {} +
 
 # Mihomo is bundled into the prepared release. The server module uses the same
 # pinned binary for config validation; client profiles never download an

@@ -2,6 +2,7 @@
   "id": "shadowsocks",
   "name": "ShadowSocks",
   "version": "1.0.0",
+  "installable": true,
   "description": "Лёгкий прокси с отдельным ключом для подключения",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",

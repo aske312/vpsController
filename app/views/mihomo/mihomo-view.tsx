@@ -1,5 +1,7 @@
 "use client";
 
+import { formatModuleVersion } from "../../lib/format-version";
+
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 type View = "overview" | "profiles" | "channels" | "dns" | "routing";
@@ -42,6 +44,7 @@ type Module = {
   category: "transport" | "dns" | "routing";
   category_name: string;
   installed: boolean;
+  installable?: boolean;
   active: boolean;
   service?: string;
   settings?: SettingField[];
@@ -668,8 +671,8 @@ function ModuleCatalog({ title, description, modules, busy, onToggle, onUpdate, 
               <code>{module.service || "config-only module"}</code>
               {module.installed && module.installed_version && (
                 <span className="mihomoModuleVersionRow">
-                  <i>v{module.installed_version}</i>
-                  {module.update_available && <em className={module.update_breaking ? "breaking" : ""}>→ {module.available_version}{module.update_breaking ? " · major" : ""}</em>}
+                  <i>{formatModuleVersion(module.installed_version)}</i>
+                  {module.update_available && <em className={module.update_breaking ? "breaking" : ""}>→ {formatModuleVersion(module.available_version)}{module.update_breaking ? " · major" : ""}</em>}
                 </span>
               )}
             </p>
@@ -679,7 +682,7 @@ function ModuleCatalog({ title, description, modules, busy, onToggle, onUpdate, 
               {module.installed && module.update_available && (
                 <button className={`ghostButton${module.update_breaking ? " breaking" : ""}`} disabled={Boolean(busy)} onClick={() => void onUpdate(module)}>{busy === `update:${module.id}` ? "Обновление…" : "Обновить"}</button>
               )}
-              <button className={module.installed ? "dangerButton" : "primaryButton"} disabled={Boolean(busy)} onClick={() => void onToggle(module)}>{busy === module.id ? "Выполняется…" : module.installed ? "Удалить" : "Установить"}</button>
+              <button className={module.installed ? "dangerButton" : "primaryButton"} disabled={module.installable === false || Boolean(busy)} onClick={() => void onToggle(module)}>{module.installable === false ? "В разработке" : busy === module.id ? "Выполняется…" : module.installed ? "Удалить" : "Установить"}</button>
             </span>
           </div>
         ))}

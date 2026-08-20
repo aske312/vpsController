@@ -2,6 +2,7 @@
   "id": "routing-policy",
   "name": "Маршрутизация",
   "version": "1.0.0",
+  "installable": true,
   "description": "Выбор primary/fallback и правила только внутри Mihomo.",
   "category": "routing",
   "category_name": "Маршрутизация",

@@ -2,6 +2,7 @@
   "id": "wg",
   "name": "WireGuard",
   "version": "1.0.0",
+  "installable": true,
   "description": "Быстрый VPN-туннель с маршрутизацией и NAT",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",

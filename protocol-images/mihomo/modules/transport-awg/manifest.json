@@ -2,6 +2,7 @@
   "id": "transport-awg",
   "name": "AmneziaWG",
   "version": "1.0.0",
+  "installable": true,
   "description": "Отдельный AmneziaWG-инстанс только для профилей Mihomo.",
   "category": "transport",
   "category_name": "Каналы",

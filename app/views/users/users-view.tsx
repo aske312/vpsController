@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { formatModuleVersion } from "../../lib/format-version";
 
 type Capability = {
   id: string;
@@ -949,7 +950,7 @@ export function AccessProfilesBeta({ token }: { token: string }) {
         <summary><span>Диагностика сервера</span><small>{data?.capabilities.detected_at ? new Date(data.capabilities.detected_at).toLocaleTimeString("ru-RU") : "—"}</small></summary>
         <div className="accessBetaDiagnosticsBody">
           {(data?.capabilities.items || []).map((item) => (
-            <div key={item.id}><span><i className={item.installed ? "ready" : ""} />{item.name}</span><small>{item.installed ? item.active ? "Активен" : "Установлен" : "Не установлен"}{item.version ? ` · ${item.version}` : ""}</small></div>
+            <div key={item.id}><span><i className={item.installed ? "ready" : ""} />{item.name}</span><small>{item.installed ? item.active ? "Активен" : "Установлен" : "Не установлен"}{item.version ? ` · ${formatModuleVersion(item.version)}` : ""}</small></div>
           ))}
           {mihomo?.installed && <div className="wide"><span>Mihomo transports</span><small>{mihomoModules.filter((item) => item.installed).map((item) => transportCodes[item.transport] || item.transport).join(" · ") || "нет модулей"}</small></div>}
         </div>
