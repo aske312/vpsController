@@ -1477,7 +1477,7 @@ update_prebuilt_branch() {
 
 update_test_branch() {
   local remote="${REMOTE_URL:-https://github.com/aske312/vpsController.git}"
-  local latest current repository_path release_url archive release_commit ready="no" attempt
+  local latest current repository_path release_url archive release_commit release_revision ready="no" attempt
   if [[ "${remote}" =~ ^git@github\.com:(.+)$ ]]; then
     remote="https://github.com/${BASH_REMATCH[1]}"
   elif [[ "${remote}" =~ ^ssh://git@github\.com/(.+)$ ]]; then
@@ -1494,11 +1494,13 @@ update_test_branch() {
     return 0
   fi
 
-  release_url="https://github.com/${repository_path}/releases/download/stabl-latest/vps-control-main-${latest}.tar.gz"
+  release_url="https://github.com/${repository_path}/releases/download/main-latest/vps-control-main.tar.gz"
   info "ожидание подготовленной GitHub-сборки main ${latest:0:7}; рабочая версия продолжает обслуживать запросы"
   for attempt in $(seq 1 60); do
-    if curl --fail --location --silent --show-error --head \
-      --connect-timeout 10 --max-time 30 "${release_url}" >/dev/null 2>&1; then
+    release_revision="$(git ls-remote "${remote}" 'refs/tags/main-latest^{}' 2>/dev/null | awk 'NR == 1 {print $1}')"
+    [[ -n "${release_revision}" ]] || release_revision="$(git ls-remote "${remote}" refs/tags/main-latest 2>/dev/null | awk 'NR == 1 {print $1}')"
+    if [[ "${release_revision}" == "${latest}" ]] && curl --fail --location --silent --show-error --range 0-0 \
+      --connect-timeout 10 --max-time 30 --output /dev/null "${release_url}" 2>/dev/null; then
       ready="yes"
       break
     fi
@@ -1509,7 +1511,7 @@ update_test_branch() {
 
   install -d -m 0750 "${DATA_DIR}/tmp"
   UPDATE_TEMP_DIR="$(mktemp -d "${DATA_DIR}/tmp/update.XXXXXX")"
-  archive="${UPDATE_TEMP_DIR}/vps-control-main-${latest}.tar.gz"
+  archive="${UPDATE_TEMP_DIR}/vps-control-main.tar.gz"
   info "загрузка готовой тестовой сборки main без сборки на VPS"
   curl --fail --location --silent --show-error --retry 4 --retry-all-errors --retry-delay 2 \
     --connect-timeout 15 --max-time 900 --output "${archive}" "${release_url}"

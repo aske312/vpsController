@@ -249,7 +249,7 @@ test("service settings are staged, saved explicitly and survive background refre
   assert.match(manager, /install -m 0755 "\$\{PROJECT_DIR\}\/scripts\/vps-control\.sh" "\$\{COMMAND_PATH\}"/);
 });
 
-test("service mode tests main without publishing it while stabl remains the only release branch", async () => {
+test("service mode uses a dedicated verified main preview while stabl remains the release branch", async () => {
   const [api, page, manager, stablWorkflow] = await Promise.all([
     read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"),
     read(".github/workflows/stabl-release.yml"),
@@ -261,7 +261,10 @@ test("service mode tests main without publishing it while stabl remains the only
   assert.doesNotMatch(manager, /archive\/refs\/heads\/main\.tar\.gz/);
   assert.doesNotMatch(manager, /archive\/\$\{latest\}\.tar\.gz/);
   assert.match(manager, /mktemp -d "\$\{DATA_DIR\}\/tmp\/update\.XXXXXX"/);
-  assert.match(manager, /releases\/download\/stabl-latest\/vps-control-main-\$\{latest\}\.tar\.gz/);
+  assert.match(manager, /releases\/download\/main-latest\/vps-control-main\.tar\.gz/);
+  assert.match(manager, /refs\/tags\/main-latest/);
+  assert.match(manager, /curl --fail --location --silent --show-error --range 0-0/);
+  assert.doesNotMatch(manager, /curl[^\n]*--head/);
   assert.match(manager, /release_commit.*== "\$\{latest\}"/s);
   assert.match(manager, /for attempt in \$\(seq 1 48\)/);
   assert.match(manager, /подготовленный релиз не соответствует актуальной ревизии ветки \$\{branch\}/);
@@ -292,6 +295,7 @@ test("service mode tests main without publishing it while stabl remains the only
   assert.match(page, /Будет восстановлена стабильная версия stabl/);
   assert.match(stablWorkflow, /branches: \[stabl, main\]/);
   assert.match(stablWorkflow, /gh release create stabl-latest/);
+  assert.match(stablWorkflow, /gh release create main-latest/);
 });
 
 test("main preview is built off-VPS and interrupted updates cannot report success", async () => {
@@ -301,7 +305,7 @@ test("main preview is built off-VPS and interrupted updates cannot report succes
     read("api/main.py"),
   ]);
   assert.match(workflow, /Build verified main preview outside the VPS/);
-  assert.match(workflow, /vps-control-main-\$\{GITHUB_SHA\}\.tar\.gz/);
+  assert.match(workflow, /vps-control-main\.tar\.gz/);
   assert.doesNotMatch(manager, /BUILD_COMMIT="\$\{latest\}".*build-release/s);
   assert.match(api, /Операция прервана перезагрузкой/);
   assert.match(api, /int\(action\.get\("progress"/);
