@@ -293,6 +293,8 @@ test("service mode deploys main from an isolated preview while stabl remains the
   assert.match(manager, /mktemp -d "\$\{DATA_DIR\}\/tmp\/update\.XXXXXX"/);
   assert.match(manager, /releases\/download\/main-latest\/vps-control-main\.tar\.gz/);
   assert.match(manager, /refs\/tags\/main-latest/);
+  assert.match(manager, /curl --fail --location --silent --show-error --range 0-0/);
+  assert.doesNotMatch(manager, /curl[^\n]*--head/);
   assert.match(manager, /release_commit.*== "\$\{latest\}"/s);
   assert.match(manager, /for attempt in \$\(seq 1 48\)/);
   assert.match(manager, /подготовленный релиз не соответствует актуальной ревизии ветки \$\{branch\}/);

@@ -1576,8 +1576,8 @@ update_test_branch() {
   for attempt in $(seq 1 60); do
     release_revision="$(git ls-remote "${remote}" 'refs/tags/main-latest^{}' 2>/dev/null | awk 'NR == 1 {print $1}')"
     [[ -n "${release_revision}" ]] || release_revision="$(git ls-remote "${remote}" refs/tags/main-latest 2>/dev/null | awk 'NR == 1 {print $1}')"
-    if [[ "${release_revision}" == "${latest}" ]] && curl --fail --location --silent --show-error --head \
-      --connect-timeout 10 --max-time 30 "${release_url}" >/dev/null 2>&1; then
+    if [[ "${release_revision}" == "${latest}" ]] && curl --fail --location --silent --show-error --range 0-0 \
+      --connect-timeout 10 --max-time 30 --output /dev/null "${release_url}" 2>/dev/null; then
       ready="yes"
       break
     fi
