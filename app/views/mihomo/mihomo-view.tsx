@@ -455,8 +455,8 @@ export function MihomoPage({
         <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
         <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
         <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Каналы</Tab>
-        <Tab id="dns" /*current={view} onSelect={setView} badge={policiesReady ? 1 : 0}*/>DNS</Tab>
-        <Tab id="routing" /*current={view} onSelect={setView} badge={policiesReady ? 1 : 0}*/>Маршрутизация</Tab>
+        <Tab id="dns" current={view} onSelect={setView} badge={policiesReady ? 1 : 0}>DNS</Tab>
+        <Tab id="routing" current={view} onSelect={setView} badge={policiesReady ? 1 : 0}>Маршрутизация</Tab>
       </nav>
 
       {error && <div className="mihomoMessage is-error">{error}</div>}
