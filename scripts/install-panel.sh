@@ -78,4 +78,7 @@ source_dir="$(find "${BOOTSTRAP_DIR}" -mindepth 1 -maxdepth 1 -type d -name 'vps
   || { printf 'Ошибка: загруженный архив не содержит установщик 312.net.\n' >&2; exit 1; }
 
 printf "\n${green}◆ Базовая подготовка завершена.${reset} Запускаем мастер приложения.\n\n"
+if [[ -z "${VPS_CONTROL_ADMIN_PASSWORD:-}" ]]; then
+  export VPS_CONTROL_RANDOM_ADMIN_PASSWORD=yes
+fi
 "${source_dir}/scripts/install-panel.sh" "$@"

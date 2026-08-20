@@ -277,7 +277,7 @@ load_install_config() {
   [[ -z "${admin_user_override}" ]] || ADMIN_USER="${admin_user_override}"
   if [[ -n "${admin_password_override}" ]]; then
     ADMIN_PASSWORD="${admin_password_override}"
-  elif [[ "${fresh_install}" == "yes" ]]; then
+  elif [[ "${fresh_install}" == "yes" && "${VPS_CONTROL_RANDOM_ADMIN_PASSWORD:-no}" == "yes" ]]; then
     ADMIN_PASSWORD="$(od -An -N18 -tx1 /dev/urandom | tr -d ' \n')"
   fi
   [[ -z "${domain_override}" ]] || PUBLIC_DOMAIN="${domain_override}"
@@ -2035,6 +2035,7 @@ integrity_check() {
 show_credentials() {
   [[ -r "${ENV_FILE}" ]] || die "${ENV_FILE} не найден."
   printf 'Логин: '; env_value ADMIN_USER
+  printf 'Пароль: '; env_value ADMIN_PASSWORD
 }
 
 usage() {
@@ -2134,6 +2135,7 @@ main() {
       ui_summary
       printf '\nОткройте: %s\n' "${PANEL_URL}"
       printf 'Логин: %s\n' "${ADMIN_USER}"
+      printf 'Пароль: %s\n' "${ADMIN_PASSWORD}"
       ui_done "установка завершена"
       ;;
     uninstall) uninstall_app "$@" ;;

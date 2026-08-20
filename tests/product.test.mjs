@@ -57,6 +57,8 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /Node\.js \$\{node_major\} доступен в репозитории Ubuntu/);
   assert.match(manager, /VPS_CONTROL_ADMIN_USER/);
   assert.match(manager, /VPS_CONTROL_ADMIN_PASSWORD/);
+  assert.match(manager, /printf 'Пароль: '; env_value ADMIN_PASSWORD/);
+  assert.match(manager, /printf 'Пароль: %s\\n' "\$\{ADMIN_PASSWORD\}"/);
   assert.match(manager, /VPS_CONTROL_PUBLIC_DOMAIN/);
   assert.match(manager, /VPS_CONTROL_ACCESS_MODE/);
   assert.match(manager, /VPS_CONTROL_HTTP_PORT/);

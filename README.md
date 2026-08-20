@@ -29,7 +29,7 @@ sudo apt-get update && sudo apt-get install -y ca-certificates curl
 curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh | sudo bash
 ```
 
-Установщик сам проверит сервер, установит зависимости, определит IPv4/IPv6, настроит firewall и HTTPS, запустит службы и проверит результат. В конце он покажет адрес панели, логин и созданный случайный пароль.
+Установщик сам проверит сервер, установит зависимости, определит IPv4/IPv6, настроит firewall и HTTPS, запустит службы и проверит результат. Быстрая установка создаёт случайный пароль и в конце показывает адрес панели, логин и пароль. Сохраните их до закрытия терминала.
 
 ### Свои логин, пароль или домен
 
@@ -118,6 +118,8 @@ sudo vps-control integrity-check
 sudo vps-control install-release /root/vps-control-release.tar.gz
 sudo vps-control credentials
 ```
+
+Команда доступна только администратору сервера и повторно показывает фактические логин и пароль из `/etc/vps-control.env`. Значения в `install.conf` являются входными настройками установки; действующие учётные данные всегда хранятся в защищённом env-файле.
 
 ## Лицензия
 
