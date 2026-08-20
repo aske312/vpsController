@@ -165,6 +165,21 @@ test("control surfaces share compact headers, telemetry and modal language", asy
   assert.match(versions, /slice\(0, 3\)/);
 });
 
+test("operational pages keep their artwork, 70/30 workspace and real country flags", async () => {
+  const [workspace, styles] = await Promise.all([
+    read("app/components/layout/app-workspace.tsx"), readStyles(),
+  ]);
+  for (const asset of ["overview.webp", "network_1.webp", "security.webp", "services.webp", "application.webp", "mihomo.webp"]) {
+    assert.match(styles, new RegExp(asset.replace(".", "\\.")));
+  }
+  assert.match(styles, /\.overviewNodeWorkspace\s*\{[\s\S]*?grid-template-columns:minmax\(0,7fr\) minmax\(280px,3fr\)/);
+  assert.match(workspace, /function CountryFlag/);
+  assert.match(workspace, /<svg viewBox="0 0 27 18"/);
+  assert.match(workspace, /country === "nl"/);
+  assert.match(workspace, /country === "lv"/);
+  assert.match(workspace, /country === "ru"/);
+});
+
 test("Mihomo transports automatically provision DNS and routing policies", async () => {
   const [manager, page, styles, dnsManifest, routingManifest] = await Promise.all([
     read("protocol-images/mihomo/manager.py"),

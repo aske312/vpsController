@@ -85,13 +85,13 @@ export function AppWorkspace({
   children,
 }: AppWorkspaceProps) {
   const country = String(server?.country || "").toLowerCase();
-  const countryFlag = country.includes("netherlands") || country.includes("нидерланд")
-    ? "🇳🇱"
-    : country.includes("latvia") || country.includes("латви")
-      ? "🇱🇻"
-      : country.includes("russia") || country.includes("росси")
-        ? "🇷🇺"
-        : "🌐";
+  const countryCode = country === "nl" || country.includes("netherlands") || country.includes("нидерланд")
+    ? "nl"
+    : country === "lv" || country.includes("latvia") || country.includes("латви")
+      ? "lv"
+      : country === "ru" || country.includes("russia") || country.includes("росси")
+        ? "ru"
+        : "unknown";
   return (
     <main className={`shell gateShell visualShell art-${visualArt}`}>
       <GateNavigation
@@ -111,7 +111,7 @@ export function AppWorkspace({
           <div className="gateMastNode">
             <span className="gateMastServer" aria-hidden="true"><i /><i /><i /></span>
             <div>
-              <h2><span className="gateCountryFlag" role="img" aria-label={server?.country || "Страна не определена"}>{countryFlag}</span>{server?.city || server?.name || "Primary Node"}</h2>
+              <h2><CountryFlag code={countryCode} label={server?.country || "Страна не определена"} />{server?.city || server?.name || "Primary Node"}</h2>
               <p>{server?.country || "—"} · <span className="mono">{server?.public_endpoint || server?.public_ip || "—"}</span></p>
             </div>
             <span className={`gateMastState ${nodeState}`}>{applicationStateTitle}</span>
@@ -139,4 +139,14 @@ export function AppWorkspace({
       </section>
     </main>
   );
+}
+
+function CountryFlag({ code, label }: { code: "nl" | "lv" | "ru" | "unknown"; label: string }) {
+  if (code === "unknown") return <span className="gateCountryFlag unknown" role="img" aria-label={label}>◎</span>;
+  const stripes = code === "nl"
+    ? ["#ae1c28", "#ffffff", "#21468b"]
+    : code === "lv"
+      ? ["#9e3039", "#ffffff", "#9e3039"]
+      : ["#ffffff", "#1c57a7", "#d52b1e"];
+  return <span className="gateCountryFlag" role="img" aria-label={label}><svg viewBox="0 0 27 18" aria-hidden="true"><rect width="27" height="18" rx="2" fill={stripes[0]} />{code === "lv" ? <rect y="8" width="27" height="2" fill={stripes[1]} /> : <><rect y="6" width="27" height="6" fill={stripes[1]} /><rect y="12" width="27" height="6" fill={stripes[2]} /></>}</svg></span>;
 }
