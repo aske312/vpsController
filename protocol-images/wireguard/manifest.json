@@ -9,6 +9,9 @@
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
   "supported_os": ["ubuntu", "debian"],
+  "preflight_packages": ["iptables", "wireguard-tools"],
+  "minimum_free_mb": 128,
+  "requires_kernel_headers": false,
   "interface_env": "WG_INTERFACE",
   "service": "wg-quick@{interface}.service",
   "package": "wireguard-tools"

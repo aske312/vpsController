@@ -9,5 +9,8 @@
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
   "supported_os": ["ubuntu", "debian"],
+  "preflight_packages": ["ca-certificates", "curl", "openssl", "unzip"],
+  "minimum_free_mb": 256,
+  "requires_kernel_headers": false,
   "service": "vps-control-vless-reality-xhttp.service"
 }

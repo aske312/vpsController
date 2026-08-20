@@ -45,15 +45,36 @@ systemctl is-active --quiet "awg-quick@${AWG_INTERFACE}.service" 2>/dev/null && 
 source /etc/os-release
 [[ "${ID:-}" == "ubuntu" || "${ID:-}" == "debian" ]] || { echo "AmneziaWG supports Ubuntu and Debian" >&2; exit 1; }
 
+install_running_kernel_headers() {
+  local running_kernel header_package
+  running_kernel="$(uname -r)"
+  header_package="linux-headers-${running_kernel}"
+  if apt-cache show "${header_package}" 2>/dev/null | grep -q '^Package:'; then
+    apt-get -o DPkg::Lock::Timeout=300 install -y "${header_package}"
+    return
+  fi
+
+  echo "Headers for the running kernel ${running_kernel} are no longer available." >&2
+  if [[ "${ID}" == "ubuntu" ]]; then
+    apt-get -o DPkg::Lock::Timeout=300 install -y linux-generic linux-headers-generic
+  else
+    apt-get -o DPkg::Lock::Timeout=300 install -y linux-image-amd64 linux-headers-amd64
+  fi
+  echo "A supported kernel and its headers are installed. Reboot the VPS, then install AmneziaWG again." >&2
+  exit 75
+}
+
 export DEBIAN_FRONTEND=noninteractive
 if ! command -v awg >/dev/null 2>&1 || ! command -v awg-quick >/dev/null 2>&1 || ! modinfo amneziawg >/dev/null 2>&1; then
   apt-get -o DPkg::Lock::Timeout=300 update
   if [[ "${ID}" == "ubuntu" ]]; then
-    apt-get -o DPkg::Lock::Timeout=300 install -y software-properties-common python3-launchpadlib gnupg2 "linux-headers-$(uname -r)" iptables
+    apt-get -o DPkg::Lock::Timeout=300 install -y software-properties-common python3-launchpadlib gnupg2 iptables
+    install_running_kernel_headers
     grep -Rqs 'ppa.launchpadcontent.net/amnezia/ppa' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null \
       || add-apt-repository -y ppa:amnezia/ppa
   else
-    apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl dirmngr dkms gnupg iptables "linux-headers-$(uname -r)"
+    apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl dirmngr dkms gnupg iptables
+    install_running_kernel_headers
     if [[ ! -s /usr/share/keyrings/amnezia-ppa.gpg || ! -s /etc/apt/sources.list.d/amnezia-ppa.list ]]; then
       key_home="$(mktemp -d)"
       chmod 0700 "${key_home}"

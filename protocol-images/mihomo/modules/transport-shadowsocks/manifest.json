@@ -8,6 +8,10 @@
   "category_name": "Каналы",
   "default_enabled": false,
   "scope": "mihomo",
+  "supported_os": ["ubuntu", "debian"],
+  "preflight_packages": ["shadowsocks-libev"],
+  "minimum_free_mb": 128,
+  "requires_kernel_headers": false,
   "package": "shadowsocks-libev",
   "settings": [
     {

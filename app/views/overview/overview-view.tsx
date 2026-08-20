@@ -385,7 +385,6 @@ export function OverviewDashboard({
           <div>
             <p className="eyebrow">ROUTING TOPOLOGY</p>
             <h1>Доступ и маршруты</h1>
-            <p>Установлено — не значит используется. Здесь отдельно показаны runtime, готовность, клиенты и фактический трафик.</p>
           </div>
           <div className="overviewTopologyStats">
             <span><small>CONFIGURED</small><strong>{totalAccessObjects}</strong></span>

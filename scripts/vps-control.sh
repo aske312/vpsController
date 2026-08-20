@@ -704,6 +704,42 @@ prepare_package_manager() {
     || die "dpkg остаётся в незавершённом состоянии; проверьте журнал пакетного менеджера."
 }
 
+preflight_protocol_image() {
+  local manifest="$1"
+  python3 - "${manifest}" <<'PY'
+import json
+import re
+import shutil
+import subprocess
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    data = json.load(source)
+
+minimum_free_mb = int(data.get("minimum_free_mb", 128))
+free_mb = shutil.disk_usage("/opt").free // (1024 * 1024)
+if free_mb < minimum_free_mb:
+    raise SystemExit(
+        f"Not enough free space for {data.get('name', data.get('id', 'module'))}: "
+        f"{free_mb} MB available, {minimum_free_mb} MB required."
+    )
+
+for package in data.get("preflight_packages", []):
+    if not isinstance(package, str) or not re.fullmatch(r"[a-z0-9][a-z0-9.+-]*", package):
+        raise SystemExit(f"Invalid preflight package in {sys.argv[1]}")
+    installed = subprocess.run(
+        ["dpkg-query", "-W", "-f=${db:Status-Status}", package],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=False,
+    ).stdout.strip() == "installed"
+    available = bool(subprocess.run(
+        ["apt-cache", "show", package],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=False,
+    ).stdout.strip())
+    if not installed and not available:
+        raise SystemExit(f"Required package {package} is unavailable in configured APT repositories.")
+PY
+}
+
 install_protocol_image() {
   local image_id="${2:-}"
   [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
@@ -735,6 +771,8 @@ PY
     || die "образ ${image_id} содержит некорректный installer."
   info "Установка образа ${image_id}"
   prepare_package_manager
+  preflight_protocol_image "${manifest}" \
+    || die "preflight модуля ${image_id} не пройден; установка не запускалась."
   apt-get -o DPkg::Lock::Timeout=300 check \
     || die "пакетный менеджер не готов к установке ${image_id}; выполните apt-get check."
   module_log="/var/log/${APP_NAME}-protocol-${image_id}.log"

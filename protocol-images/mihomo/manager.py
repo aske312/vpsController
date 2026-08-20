@@ -58,10 +58,9 @@ TRANSPORTS = {
     "transport-shadowsocks",
     "transport-reality",
 }
-# routing-policy and dns-private are not toggleable modules: routing is
-# per-profile (see routing_schema()/routing_defaults()) and DNS is always
-# on (see dns_schema()/dns_settings()). Their manifest.json files are kept
-# only as the field schemas for their respective settings editors.
+# DNS and routing are mandatory policy layers, not toggleable modules. Their
+# settings are created with the first transport and edited on dedicated pages.
+# Profiles may override individual routing values without replacing defaults.
 ROUTING_MODULE_ID = "routing-policy"
 DNS_MODULE_ID = "dns-private"
 KNOWN_MODULES = TRANSPORTS
@@ -194,6 +193,8 @@ def state() -> dict[str, Any]:
     for module_id in KNOWN_MODULES:
         modules.setdefault(module_id, False)
     value["modules"] = modules
+    if any(bool(modules.get(module_id)) for module_id in TRANSPORTS):
+        ensure_policy_settings()
     return value
 
 
@@ -340,6 +341,7 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
 
 
 DNS_SETTINGS_FILE = SETTINGS_ROOT / f"{DNS_MODULE_ID}.json"
+ROUTING_SETTINGS_FILE = SETTINGS_ROOT / f"{ROUTING_MODULE_ID}.json"
 
 
 def dns_provider_options() -> list[dict[str, str]]:
@@ -375,6 +377,20 @@ def dns_settings() -> dict[str, Any]:
     stored = load_json(DNS_SETTINGS_FILE, {})
     stored = stored if isinstance(stored, dict) else {}
     return {**dns_defaults(), **stored}
+
+
+def routing_settings() -> dict[str, Any]:
+    stored = load_json(ROUTING_SETTINGS_FILE, {})
+    stored = stored if isinstance(stored, dict) else {}
+    return {**routing_defaults(), **stored}
+
+
+def ensure_policy_settings() -> None:
+    SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
+    if not DNS_SETTINGS_FILE.exists():
+        atomic_json(DNS_SETTINGS_FILE, dns_defaults())
+    if not ROUTING_SETTINGS_FILE.exists():
+        atomic_json(ROUTING_SETTINGS_FILE, routing_defaults())
 
 
 def validate_dns(values: dict[str, Any]) -> dict[str, Any]:
@@ -425,7 +441,15 @@ def get_action() -> dict[str, Any]:
 
 @app.get("/api/mihomo/routing/schema", dependencies=[Depends(auth_required)])
 def get_routing_schema() -> dict[str, Any]:
-    return {"schema": routing_schema(), "defaults": routing_defaults()}
+    return {"schema": routing_schema(), "values": routing_settings()}
+
+
+@app.patch("/api/mihomo/routing/settings", dependencies=[Depends(auth_required)])
+def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
+    next_values = validate_routing(patch.values, current=routing_settings())
+    SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
+    atomic_json(ROUTING_SETTINGS_FILE, next_values)
+    return {"schema": routing_schema(), "values": next_values}
 
 
 @app.get("/api/mihomo/dns/settings", dependencies=[Depends(auth_required)])
@@ -568,6 +592,41 @@ def module_payload(module_id: str) -> dict[str, Any]:
         "settings_values": settings,
         **module_version_info(module_id, info, installed),
     }
+
+
+def preflight_module(info: dict[str, Any]) -> None:
+    os_release: dict[str, str] = {}
+    try:
+        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                os_release[key] = value.strip().strip('"')
+    except OSError as exc:
+        raise RuntimeError("Unable to identify the server operating system") from exc
+
+    supported = info.get("supported_os", [])
+    if os_release.get("ID") not in supported:
+        raise RuntimeError(f"Module does not support OS {os_release.get('ID', 'unknown')}")
+
+    minimum_free_mb = int(info.get("minimum_free_mb", 128))
+    free_mb = shutil.disk_usage("/opt").free // (1024 * 1024)
+    if free_mb < minimum_free_mb:
+        raise RuntimeError(f"Not enough free space: {free_mb} MB available, {minimum_free_mb} MB required")
+
+    audit = run("dpkg", "--audit")
+    if audit.stdout.strip() or audit.returncode:
+        raise RuntimeError("dpkg has an unfinished operation; repair the package manager before installing modules")
+    apt_check = run("apt-get", "-o", "DPkg::Lock::Timeout=300", "check")
+    if apt_check.returncode:
+        raise RuntimeError(apt_check.stderr.strip() or "APT package check failed")
+
+    for package in info.get("preflight_packages", []):
+        if not isinstance(package, str) or not re.fullmatch(r"[a-z0-9][a-z0-9.+-]*", package):
+            raise RuntimeError("Module manifest contains an invalid package requirement")
+        installed = run("dpkg-query", "-W", "-f=${db:Status-Status}", package).stdout.strip() == "installed"
+        available = bool(run("apt-cache", "show", package).stdout.strip())
+        if not installed and not available:
+            raise RuntimeError(f"Required package {package} is unavailable in configured APT repositories")
 
 
 def call_module_script(module_id: str, action: str, extra_env: dict[str, str] | None = None) -> None:
@@ -715,6 +774,11 @@ def install_module(module_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="Module is not available for installation")
     if module_is_installed(module_id):
         return module_payload(module_id)
+    try:
+        preflight_module(info)
+    except RuntimeError as exc:
+        write_action(f"module-install:{module_id}", str(exc), state="failed", progress=100)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     write_action(f"module-install:{module_id}", f"Установка {info['name']}…", progress=10)
     # Create defaults before the installer so the first install is deterministic.
     settings_path = SETTINGS_ROOT / f"{module_id}.json"
@@ -731,6 +795,7 @@ def install_module(module_id: str) -> dict[str, Any]:
                 f"{manifest(module_id)['name']} не подтвердил рабочее состояние systemd"
                 + (f"\n{detail}" if detail else "")
             )
+        ensure_policy_settings()
     except RuntimeError as exc:
         write_action(f"module-install:{module_id}", str(exc), state="failed", progress=100)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -1147,7 +1212,7 @@ def list_profiles() -> dict[str, Any]:
 @serialized_profile_mutation
 def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     channels = validate_channels(payload.channels)
-    routing = validate_routing(payload.routing)
+    routing = validate_routing(payload.routing, current={})
     profile_id = uuid.uuid4().hex[:12]
     write_action(f"profile-create:{profile_id}", f"Создание профиля «{payload.name}»…", progress=15)
     try:
@@ -1182,7 +1247,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     if payload.name is not None:
         item["name"] = payload.name.strip()
     if payload.routing is not None:
-        item["routing"] = validate_routing(payload.routing, current={**routing_defaults(), **item.get("routing", {})})
+        item["routing"] = validate_routing(payload.routing, current=item.get("routing", {}))
     if payload.channels is not None:
         next_channels = validate_channels(payload.channels)
         current = list(item.get("channels", []))
@@ -1312,7 +1377,7 @@ def render_profile(item: dict[str, Any]) -> str:
     if not channels:
         raise HTTPException(status_code=409, detail="У профиля нет установленных каналов Mihomo")
     credentials = item.get("credentials", {})
-    routing = {**routing_defaults(), **item.get("routing", {})}
+    routing = {**routing_settings(), **item.get("routing", {})}
     mode = str(routing.get("mode", "rule"))
     lines = [
         "mixed-port: 7890",

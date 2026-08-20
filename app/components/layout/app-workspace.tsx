@@ -84,6 +84,14 @@ export function AppWorkspace({
   onLogout,
   children,
 }: AppWorkspaceProps) {
+  const country = String(server?.country || "").toLowerCase();
+  const countryFlag = country.includes("netherlands") || country.includes("нидерланд")
+    ? "🇳🇱"
+    : country.includes("latvia") || country.includes("латви")
+      ? "🇱🇻"
+      : country.includes("russia") || country.includes("росси")
+        ? "🇷🇺"
+        : "🌐";
   return (
     <main className={`shell gateShell visualShell art-${visualArt}`}>
       <GateNavigation
@@ -103,7 +111,7 @@ export function AppWorkspace({
           <div className="gateMastNode">
             <span className="gateMastServer" aria-hidden="true"><i /><i /><i /></span>
             <div>
-              <h2>{server?.city || server?.name || "Primary Node"}</h2>
+              <h2><span className="gateCountryFlag" role="img" aria-label={server?.country || "Страна не определена"}>{countryFlag}</span>{server?.city || server?.name || "Primary Node"}</h2>
               <p>{server?.country || "—"} · <span className="mono">{server?.public_endpoint || server?.public_ip || "—"}</span></p>
             </div>
             <span className={`gateMastState ${nodeState}`}>{applicationStateTitle}</span>
@@ -119,7 +127,7 @@ export function AppWorkspace({
 
           <div className="gateMastActions">
             <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={busy} onClick={onToggleAutoRefresh}>
-              <i />{autoRefresh ? `AUTO ${autoRefreshLabel}` : "PAUSE"}
+              <i /><span>{autoRefresh ? autoRefreshLabel : "Ⅱ"}</span>
             </button>
             {lastUpdated && <span className="updatedAt">{lastUpdated.toLocaleTimeString("ru-RU")}</span>}
             <button className="iconButton" onClick={onRefresh} aria-label="Обновить текущий модуль">↻</button>

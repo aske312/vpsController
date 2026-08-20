@@ -63,6 +63,11 @@ type Profile = {
   updated_at: string;
 };
 
+type PolicySettings = {
+  schema: SettingField[];
+  values: Record<string, string | number>;
+};
+
 const channelShort: Record<string, string> = {
   "transport-awg": "AW",
   "transport-wg": "WG",
@@ -92,6 +97,8 @@ export function MihomoPage({
   const [status, setStatus] = useState<Status | null>(null);
   const [modules, setModules] = useState<Module[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [dnsPolicy, setDnsPolicy] = useState<PolicySettings | null>(null);
+  const [routingPolicy, setRoutingPolicy] = useState<PolicySettings | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -130,14 +137,18 @@ export function MihomoPage({
   const refresh = useCallback(async () => {
     setError("");
     try {
-      const [nextStatus, nextModules, nextProfiles] = await Promise.all([
+      const [nextStatus, nextModules, nextProfiles, nextDns, nextRouting] = await Promise.all([
         request("/mihomo/status"),
         request("/mihomo/modules"),
         request("/mihomo/profiles"),
+        request("/mihomo/dns/settings"),
+        request("/mihomo/routing/schema"),
       ]);
       setStatus(nextStatus as Status);
       setModules((nextModules as { items: Module[] }).items || []);
       setProfiles((nextProfiles as { items: Profile[] }).items || []);
+      setDnsPolicy(nextDns as PolicySettings);
+      setRoutingPolicy(nextRouting as PolicySettings);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось загрузить Mihomo Manager");
     }
@@ -191,7 +202,9 @@ export function MihomoPage({
     const confirmed = await confirmAction({
       title: `${install ? "Установить" : "Удалить"} ${module.name}?`,
       message:
-        "Операция относится только к внутреннему модулю Mihomo. Прямые подключения и одноимённые server modules GATE.312 не изменяются.",
+        install
+          ? "Будет установлен внутренний канал Mihomo. При первом канале автоматически создаются базовые DNS и маршрутизация. Прямые модули GATE.312 не изменяются."
+          : "Будет удалён только внутренний канал Mihomo. Прямые подключения и одноимённые модули GATE.312 не изменяются.",
       confirmLabel: install ? "Установить" : "Удалить модуль",
       danger: !install,
     });
@@ -207,7 +220,7 @@ export function MihomoPage({
         method: install ? "POST" : "DELETE",
       });
       await refresh();
-      setNotice(`${module.name}: ${install ? "установлен внутри Mihomo" : "удалён из Mihomo"}.`);
+      setNotice(`${module.name}: ${install ? "установлен; DNS и маршрутизация Mihomo готовы" : "удалён из Mihomo"}.`);
       publishMihomoOperation(operationId, operationLabel, "success", "Изменение применено");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Операция Mihomo не выполнена";
@@ -253,6 +266,24 @@ export function MihomoPage({
     setSettingsDraft({ ...module.settings_values });
   }
 
+  function openPolicySettings(kind: "dns" | "routing") {
+    const policy = kind === "dns" ? dnsPolicy : routingPolicy;
+    if (!policy) return;
+    openSettings({
+      id: kind === "dns" ? "dns-private" : "routing-policy",
+      name: kind === "dns" ? "DNS Mihomo" : "Маршрутизация Mihomo",
+      description: kind === "dns"
+        ? "Базовая DNS-политика применяется ко всем конфигурациям Mihomo."
+        : "Базовая стратегия маршрутизации применяется ко всем профилям без собственных переопределений.",
+      category: kind === "dns" ? "dns" : "routing",
+      category_name: kind === "dns" ? "DNS" : "Маршрутизация",
+      installed: installedChannels.length > 0,
+      active: installedChannels.length > 0,
+      settings: policy.schema,
+      settings_values: policy.values,
+    });
+  }
+
   async function saveSettings(event: FormEvent) {
     event.preventDefault();
     if (!editing) return;
@@ -262,7 +293,12 @@ export function MihomoPage({
     setBusy(operationId);
     setError("");
     try {
-      await request(`/mihomo/modules/${editing.id}/settings`, {
+      const settingsPath = editing.category === "dns"
+        ? "/mihomo/dns/settings"
+        : editing.category === "routing"
+          ? "/mihomo/routing/settings"
+          : `/mihomo/modules/${editing.id}/settings`;
+      await request(settingsPath, {
         method: "PATCH",
         body: JSON.stringify({ values: settingsDraft }),
       });
@@ -370,9 +406,8 @@ export function MihomoPage({
     () => modules.filter((item) => item.category === "transport"),
     [modules],
   );
-  const dnsModule = modules.find((item) => item.category === "dns");
-  const routingModule = modules.find((item) => item.category === "routing");
   const installedChannels = transportModules.filter((item) => item.installed);
+  const policiesReady = installedChannels.length > 0 && Boolean(dnsPolicy && routingPolicy);
 
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
@@ -420,8 +455,8 @@ export function MihomoPage({
         <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
         <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
         <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Каналы</Tab>
-        <Tab id="dns" current={view} onSelect={setView} badge={dnsModule?.installed ? 1 : 0}>DNS</Tab>
-        <Tab id="routing" current={view} onSelect={setView} badge={routingModule?.installed ? 1 : 0}>Маршрутизация</Tab>
+        <Tab id="dns" current={view} onSelect={setView} badge={policiesReady ? 1 : 0}>DNS</Tab>
+        <Tab id="routing" current={view} onSelect={setView} badge={policiesReady ? 1 : 0}>Маршрутизация</Tab>
       </nav>
 
       {error && <div className="mihomoMessage is-error">{error}</div>}
@@ -462,8 +497,8 @@ export function MihomoPage({
               <div className="mihomoTopologyArrow" aria-hidden="true" />
               <div className="mihomoTopologyNode policy">
                 <small>POLICY</small>
-                <strong>{[dnsModule?.installed, routingModule?.installed].filter(Boolean).length} / 2</strong>
-                <span>DNS + routing</span>
+                <strong>{policiesReady ? "ACTIVE" : "WAIT"}</strong>
+                <span>DNS + routing создаются с первым каналом</span>
               </div>
             </div>
           </article>
@@ -494,13 +529,13 @@ export function MihomoPage({
           <article className="mihomoQuickState">
             <div>
               <small>DNS MODULE</small>
-              <strong>{dnsModule?.installed ? "Установлен" : "Не установлен"}</strong>
-              <span>{dnsModule?.active ? "runtime active" : dnsModule?.installed ? "готов к использованию" : "config module отсутствует"}</span>
+              <strong>{policiesReady ? "Активен" : "Ожидает канал"}</strong>
+              <span>Общая DNS-политика всех профилей</span>
             </div>
             <div>
               <small>ROUTING MODULE</small>
-              <strong>{routingModule?.installed ? "Установлен" : "Не установлен"}</strong>
-              <span>{routingModule?.active ? "runtime active" : routingModule?.installed ? "готов к использованию" : "policy module отсутствует"}</span>
+              <strong>{policiesReady ? "Активна" : "Ожидает канал"}</strong>
+              <span>Базовая стратегия всех профилей</span>
             </div>
             <div>
               <small>PROFILES IN USE</small>
@@ -562,26 +597,24 @@ export function MihomoPage({
       )}
 
       {view === "dns" && (
-        <ModuleCatalog
-          title="DNS внутри Mihomo"
-          description="Настройки записываются только в config.yaml Mihomo. Системный DNS VPS и Direct-подключения не меняются."
-          modules={dnsModule ? [dnsModule] : []}
-          busy={busy}
-          onToggle={toggleModule}
-          onUpdate={updateModule}
-          onSettings={openSettings}
+        <PolicyPanel
+          code="DNS"
+          title="DNS-политика Mihomo"
+          description="Создаётся автоматически вместе с первым каналом. Настройки применяются только к конфигурациям Mihomo и не меняют системный DNS VPS."
+          ready={policiesReady}
+          values={dnsPolicy?.values}
+          onSettings={() => openPolicySettings("dns")}
         />
       )}
 
       {view === "routing" && (
-        <ModuleCatalog
+        <PolicyPanel
+          code="RT"
           title="Маршрутизация Mihomo"
-          description="Fallback, url-test и select управляют поведением только между внутренними каналами Mihomo."
-          modules={routingModule ? [routingModule] : []}
-          busy={busy}
-          onToggle={toggleModule}
-          onUpdate={updateModule}
-          onSettings={openSettings}
+          description="Создаётся автоматически вместе с первым каналом. Здесь задаётся базовая стратегия выбора внутренних каналов для всех профилей."
+          ready={policiesReady}
+          values={routingPolicy?.values}
+          onSettings={() => openPolicySettings("routing")}
         />
       )}
 
@@ -688,6 +721,25 @@ function ModuleCatalog({ title, description, modules, busy, onToggle, onUpdate, 
         ))}
         {!modules.length && <Empty title="Каталог пуст" text="Mihomo Manager не получил manifest внутренних модулей." />}
       </div>
+    </article>
+  );
+}
+
+function PolicyPanel({ code, title, description, ready, values, onSettings }: { code: string; title: string; description: string; ready: boolean; values?: Record<string, string | number>; onSettings: () => void }) {
+  return (
+    <article className="mihomoPolicyPanel">
+      <header>
+        <span className="mihomoPolicyMark">{code}</span>
+        <div><p className="eyebrow">AUTOMATIC POLICY</p><h2>{title}</h2><p>{description}</p></div>
+        <span className={ready ? "mihomoPill is-online" : "mihomoPill"}><i />{ready ? "ACTIVE" : "WAITING"}</span>
+      </header>
+      <div className="mihomoPolicyValues">
+        {Object.entries(values || {}).map(([key, value]) => <div key={key}><small>{key.replaceAll("_", " ")}</small><strong>{String(value) || "—"}</strong></div>)}
+      </div>
+      <footer>
+        <span>{ready ? "Политика подключена ко всем новым конфигурациям Mihomo." : "Установите первый внутренний канал, чтобы активировать policy-слой."}</span>
+        <button className="primaryButton" type="button" onClick={onSettings} disabled={!values}>Настроить</button>
+      </footer>
     </article>
   );
 }

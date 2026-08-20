@@ -37,11 +37,33 @@ UPLINK="$(ip -o -4 route show default | awk '{print $5; exit}')"
 [[ -n "${UPLINK}" ]] || { echo "Не найден uplink" >&2; exit 1; }
 
 source /etc/os-release
+[[ "${ID:-}" == "ubuntu" || "${ID:-}" == "debian" ]] || { echo "AmneziaWG supports Ubuntu and Debian" >&2; exit 1; }
+
+install_running_kernel_headers() {
+  local running_kernel header_package
+  running_kernel="$(uname -r)"
+  header_package="linux-headers-${running_kernel}"
+  if apt-cache show "${header_package}" 2>/dev/null | grep -q '^Package:'; then
+    apt-get -o DPkg::Lock::Timeout=300 install -y "${header_package}"
+    return
+  fi
+
+  echo "Headers for the running kernel ${running_kernel} are no longer available." >&2
+  if [[ "${ID}" == "ubuntu" ]]; then
+    apt-get -o DPkg::Lock::Timeout=300 install -y linux-generic linux-headers-generic
+  else
+    apt-get -o DPkg::Lock::Timeout=300 install -y linux-image-amd64 linux-headers-amd64
+  fi
+  echo "A supported kernel and its headers are installed. Reboot the VPS, then install the AWG module again." >&2
+  exit 75
+}
+
 export DEBIAN_FRONTEND=noninteractive
 if ! command -v awg >/dev/null 2>&1 || ! command -v awg-quick >/dev/null 2>&1 || ! modinfo amneziawg >/dev/null 2>&1; then
   apt-get -o DPkg::Lock::Timeout=300 update
   apt-get -o DPkg::Lock::Timeout=300 install -y \
-    ca-certificates curl dirmngr dkms gnupg iptables "linux-headers-$(uname -r)"
+    ca-certificates curl dirmngr dkms gnupg iptables
+  install_running_kernel_headers
 
   # Do not use add-apt-repository here. In the GATE installer service /root can
   # be read-only, while launchpadlib tries to create /root/.launchpadlib.

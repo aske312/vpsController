@@ -21,7 +21,7 @@ export function ApplicationView({ application, services, applicationVersion, upd
           <div className="applicationSummaryCopy">
             <p className="eyebrow">312.NET / APPLICATION CONTROL</p>
             <h1>Приложение</h1>
-            <p>Состояние панели, релиз, режим доступа и операции жизненного цикла в одном рабочем контуре.</p>
+            <p>Фактическое состояние API и web-службы, установленная ветка, доступ панели и безопасные операции обновления.</p>
           </div>
           <div className="applicationSummaryStats">
             <span className={application?.api.active ? "ok" : "bad"}><small>API</small><strong>{application?.api.active ? "ONLINE" : "STOPPED"}</strong><em>autostart {application?.api.enabled ? "ON" : "OFF"}</em></span>

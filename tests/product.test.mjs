@@ -114,7 +114,13 @@ test("protocol installers declare OS support and keep per-module diagnostics", a
 test("protocol catalog distinguishes installable modules from safe placeholders", async () => {
   const ids = ["wireguard", "amneziawg", "shadowsocks", "vless-reality-xhttp", "mihomo", "hysteria2", "ikev2", "openvpn", "trojan"];
   const manifests = await Promise.all(ids.map((id) => read(`protocol-images/${id}/manifest.json`).then(JSON.parse)));
-  for (const manifest of manifests.slice(0, 5)) assert.equal(manifest.installable, true);
+  for (const manifest of manifests.slice(0, 5)) {
+    assert.equal(manifest.installable, true);
+    assert.deepEqual(manifest.supported_os, ["ubuntu", "debian"]);
+    assert.ok(Array.isArray(manifest.preflight_packages));
+    assert.ok(manifest.minimum_free_mb >= 128);
+    assert.equal(typeof manifest.requires_kernel_headers, "boolean");
+  }
   for (const [index, manifest] of manifests.slice(5).entries()) {
     assert.equal(manifest.installable, false);
     assert.equal(manifest.installer, "install.sh");
@@ -130,6 +136,22 @@ test("protocol catalog distinguishes installable modules from safe placeholders"
   const api = await read("api/main.py");
   assert.match(api, /manifest\.get\("installable", True\) is True/);
   assert.match(api, /Protocol image is not available for installation/);
+  const [manager, mihomoManager, ...mihomoManifests] = await Promise.all([
+    read("scripts/vps-control.sh"),
+    read("protocol-images/mihomo/manager.py"),
+    ...["transport-awg", "transport-wg", "transport-shadowsocks", "transport-reality"]
+      .map((id) => read(`protocol-images/mihomo/modules/${id}/manifest.json`).then(JSON.parse)),
+  ]);
+  assert.match(manager, /preflight_protocol_image "\$\{manifest\}"/);
+  assert.match(manager, /shutil\.disk_usage\("\/opt"\)/);
+  assert.match(mihomoManager, /def preflight_module/);
+  assert.match(mihomoManager, /apt-get", "-o", "DPkg::Lock::Timeout=300", "check"/);
+  for (const manifest of mihomoManifests) {
+    assert.deepEqual(manifest.supported_os, ["ubuntu", "debian"]);
+    assert.ok(Array.isArray(manifest.preflight_packages));
+    assert.ok(manifest.minimum_free_mb >= 128);
+    assert.equal(typeof manifest.requires_kernel_headers, "boolean");
+  }
 });
 
 test("control surfaces share compact headers, telemetry and modal language", async () => {
@@ -141,6 +163,32 @@ test("control surfaces share compact headers, telemetry and modal language", asy
   assert.match(styles, /\.gateMastMetric/);
   assert.match(styles, /\.confirmBackdrop,.accessBetaModalBackdrop,.mihomoDialogBackdrop,.legalBackdrop/);
   assert.match(versions, /slice\(0, 3\)/);
+});
+
+test("Mihomo transports automatically provision DNS and routing policies", async () => {
+  const [manager, page, styles, dnsManifest, routingManifest] = await Promise.all([
+    read("protocol-images/mihomo/manager.py"),
+    read("app/views/mihomo/mihomo-view.tsx"),
+    read("app/styles/pages/mihomo.css"),
+    read("protocol-images/mihomo/modules/dns-private/manifest.json").then(JSON.parse),
+    read("protocol-images/mihomo/modules/routing-policy/manifest.json").then(JSON.parse),
+  ]);
+  assert.match(manager, /def ensure_policy_settings/);
+  assert.match(manager, /atomic_json\(DNS_SETTINGS_FILE, dns_defaults\(\)\)/);
+  assert.match(manager, /atomic_json\(ROUTING_SETTINGS_FILE, routing_defaults\(\)\)/);
+  assert.match(manager, /ensure_policy_settings\(\)[\s\S]+value\["modules"\]\[module_id\] = True/);
+  assert.match(manager, /@app\.patch\("\/api\/mihomo\/routing\/settings"/);
+  assert.match(manager, /routing = \{\*\*routing_settings\(\), \*\*item\.get\("routing", \{\}\)\}/);
+  assert.match(page, /request\("\/mihomo\/dns\/settings"\)/);
+  assert.match(page, /request\("\/mihomo\/routing\/schema"\)/);
+  assert.match(page, /<PolicyPanel[\s\S]+code="DNS"/);
+  assert.match(page, /DNS и маршрутизация Mihomo готовы/);
+  assert.match(styles, /\.mihomoPolicyPanel/);
+  for (const policy of [dnsManifest, routingManifest]) {
+    assert.equal(policy.installable, false);
+    assert.equal(policy.automatic, true);
+    assert.equal(policy.settings_only, true);
+  }
 });
 
 test("интерфейс и метаданные относятся к продукту 312.net", async () => {
@@ -481,10 +529,11 @@ test("the panel has direct private addresses inside WG and AWG tunnels", async (
 });
 
 test("WG and AWG modules install and uninstall independently", async () => {
-  const [api, manager, wgInstall, awgInstall, wgRemove, awgRemove] = await Promise.all([
+  const [api, manager, wgInstall, awgInstall, mihomoAwgInstall, wgRemove, awgRemove] = await Promise.all([
     read("api/main.py"), read("scripts/vps-control.sh"),
     read("protocol-images/wireguard/install.sh"),
     read("protocol-images/amneziawg/install.sh"),
+    read("protocol-images/mihomo/modules/transport-awg/install.sh"),
     read("protocol-images/wireguard/uninstall.sh"),
     read("protocol-images/amneziawg/uninstall.sh"),
   ]);
@@ -504,6 +553,13 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(awgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(wgInstall, /if ! command -v wg.*command -v wg-quick/s);
   assert.match(awgInstall, /if ! command -v awg.*command -v awg-quick.*modinfo amneziawg/s);
+  for (const installer of [awgInstall, mihomoAwgInstall]) {
+    assert.match(installer, /apt-cache show "\$\{header_package\}"/);
+    assert.match(installer, /linux-image-amd64 linux-headers-amd64/);
+    assert.match(installer, /linux-generic linux-headers-generic/);
+    assert.match(installer, /Reboot the VPS/);
+    assert.doesNotMatch(installer, /apt-get[^\n]+"linux-headers-\$\(uname -r\)"/);
+  }
 });
 
 test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", async () => {
@@ -646,7 +702,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(page, /onNavigate\("application"\)/);
   assert.match(page, /onNavigate\("services"\)/);
   assert.match(page, /DNS POLICY/);
-  assert.match(page, /Проверить DNS/);
+  assert.match(page, /Проверить все/);
   assert.match(page, /Собственный DNS/);
   assert.match(api, /DNS_PROVIDERS = \(/);
   assert.ok((api.match(/"country": "RU"/g) || []).length >= 5);
@@ -660,7 +716,11 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /env_updates\["SHADOWSOCKS_DNS"\]/);
   assert.match(api, /env_updates\["VRX_DNS"\]/);
   assert.match(api, /vrx_servers\.insert\(0, selected\["doh_url"\]\)/);
-  assert.match(page, /DoH \/ VRX/);
+  assert.match(page, /DoH для VRX/);
+  assert.match(page, /DNS самого VPS/);
+  assert.match(api, /def apply_system_dns/);
+  assert.match(api, /systemd-resolved/);
+  assert.match(api, /restore_system_dns_state/);
   assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
   assert.match(api, /def apply_vrx_dns/);
   assert.match(api, /"scope": "new_profiles"/);
@@ -674,7 +734,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(page, /apply_shadowsocks/);
   assert.match(page, /apply_vrx/);
   assert.match(css, /\.dnsWorkspace/);
-  assert.match(css, /\.dnsSaveBar/);
+  assert.match(css, /\.dnsApplyDock/);
 });
 
 test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", async () => {
@@ -702,10 +762,9 @@ test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", a
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
   const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), readStyles()]);
-  assert.match(page, /Единая DNS-политика/);
-  assert.match(page, /Активные WG\/AWG-подключения и существующие конфигурации не изменяются/);
-  assert.match(page, /новые профили/);
-  assert.match(page, /Активные WG\/AWG-подключения и существующие конфигурации не изменяются/);
+  assert.match(page, /Настройка локального resolver VPS/);
+  assert.match(page, /DNS самого VPS будет изменён с проверкой и откатом/);
+  assert.match(page, /Новые WireGuard-профили/);
   assert.match(page, /clientProtocolFilter/);
   assert.match(page, /clientStateFilter/);
   assert.match(page, /clientSearch/);

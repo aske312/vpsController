@@ -9,6 +9,9 @@
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
   "supported_os": ["ubuntu", "debian"],
+  "preflight_packages": ["ca-certificates", "curl", "dirmngr", "dkms", "gnupg", "iptables"],
+  "minimum_free_mb": 256,
+  "requires_kernel_headers": true,
   "interface_env": "AWG_INTERFACE",
   "service": "awg-quick@{interface}.service",
   "package": "amneziawg"

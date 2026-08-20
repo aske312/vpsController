@@ -9,6 +9,9 @@
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
   "supported_os": ["ubuntu", "debian"],
+  "preflight_packages": ["shadowsocks-libev"],
+  "minimum_free_mb": 128,
+  "requires_kernel_headers": false,
   "service": "vps-control-shadowsocks.target",
   "package": "shadowsocks-libev"
 }

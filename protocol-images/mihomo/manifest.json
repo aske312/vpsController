@@ -12,6 +12,9 @@
     "ubuntu",
     "debian"
   ],
+  "preflight_packages": [],
+  "minimum_free_mb": 256,
+  "requires_kernel_headers": false,
   "service": "vps-control-mihomo-manager.service",
   "removable": true
 }

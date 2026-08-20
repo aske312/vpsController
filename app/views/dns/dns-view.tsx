@@ -3,114 +3,21 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { DnsCheck, DnsSettings, DnsStatus } from "../../types/control-plane";
 
-type DnsViewProps = {
-  dns: DnsStatus | null;
-  dnsDraft: DnsSettings | null;
-  dnsChecks: Record<string, DnsCheck>;
-  checkingDns: boolean;
-  busy: boolean;
-  setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>>;
-  checkDnsProviders: (providerId?: string) => Promise<void> | void;
-  saveDnsSettings: () => Promise<void> | void;
-};
+type Props = { dns: DnsStatus | null; dnsDraft: DnsSettings | null; dnsChecks: Record<string, DnsCheck>; checkingDns: boolean; busy: boolean; setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>>; checkDnsProviders: (providerId?: string) => Promise<void> | void; saveDnsSettings: () => Promise<void> | void };
+const scope = [["apply_system","VPS","Локальный resolver сервера"],["apply_wg","WG","Новые WireGuard-профили"],["apply_awg","AWG","Новые AmneziaWG-профили"],["apply_shadowsocks","SS","Рекомендация клиенту"],["apply_vrx","VRX","Серверный Xray"]] as const;
 
-export function DnsView({ dns, dnsDraft, dnsChecks, checkingDns, busy, setDnsDraft, checkDnsProviders, saveDnsSettings }: DnsViewProps) {
-  return <section className="dnsWorkspace">
-        <article className="dnsOverview">
-          <div className="dnsOverviewCopy">
-            <p className="eyebrow">312.NET / NETWORK & DNS</p>
-            <h1>Сеть и DNS</h1>
-            <p>Единая DNS-политика для новых конфигураций и серверного VRX без изменения уже работающих WG/AWG-подключений.</p>
-          </div>
-          <div className="dnsOverviewStats">
-            <span><small>SELECTED</small><strong>{dns?.providers.find((item) => item.id === dnsDraft?.selected_id)?.name || dnsDraft?.custom?.name || "—"}</strong></span>
-            <span><small>RESOLVERS</small><strong>{dns?.providers.length || 0}</strong></span>
-            <span><small>SCOPE</small><strong>{[dnsDraft?.apply_wg, dnsDraft?.apply_awg, dnsDraft?.apply_shadowsocks, dnsDraft?.apply_vrx].filter(Boolean).length}/4</strong></span>
-            <span className={dnsDraft?.fallback_enabled ? "ok" : "muted"}><small>FALLBACK</small><strong>{dnsDraft?.fallback_enabled ? "ON" : "OFF"}</strong></span>
-            <span className={dnsDraft?.prefer_encrypted ? "ok" : "muted"}><small>DOH / VRX</small><strong>{dnsDraft?.prefer_encrypted ? "ON" : "OFF"}</strong></span>
-          </div>
-          <button className="dnsCheckAll" type="button" onClick={() => void checkDnsProviders()} disabled={checkingDns}>{checkingDns ? "Проверяем DNS…" : "Проверить DNS"}</button>
-        </article>
-
-        <article className="dnsControlPlane">
-          <div className="dnsControlArt" aria-hidden="true" />
-          <div className="dnsControlShade" aria-hidden="true" />
-          <div className="dnsControlContent">
-            <header className="dnsControlHead">
-              <div>
-                <p className="eyebrow">DNS CONTROL PLANE</p>
-                <h2>Резолверы и политика применения</h2>
-                <span>Выбор, scope и фактическая задержка собраны в одном рабочем контуре.</span>
-              </div>
-              <div className="dnsControlBadges">
-                <span>{dns?.providers.find((item) => item.id === dnsDraft?.selected_id)?.country || (dnsDraft?.selected_id === "custom" ? "CUSTOM" : "—")}</span>
-                <span>{[dnsDraft?.apply_wg && "WG", dnsDraft?.apply_awg && "AWG", dnsDraft?.apply_shadowsocks && "SS", dnsDraft?.apply_vrx && "VRX"].filter(Boolean).join(" · ") || "NO SCOPE"}</span>
-              </div>
-            </header>
-
-            <div className="dnsPolicyStrip">
-              <div className="dnsScopePills">
-                <label className={dnsDraft?.apply_wg ? "active" : ""}><input type="checkbox" checked={dnsDraft?.apply_wg ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_wg: event.target.checked } : value)} /><span><strong>WireGuard</strong><small>новые профили</small></span></label>
-                <label className={dnsDraft?.apply_awg ? "active" : ""}><input type="checkbox" checked={dnsDraft?.apply_awg ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_awg: event.target.checked } : value)} /><span><strong>AmneziaWG</strong><small>новые профили</small></span></label>
-                <label className={dnsDraft?.apply_shadowsocks ? "active" : ""}><input type="checkbox" checked={dnsDraft?.apply_shadowsocks ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_shadowsocks: event.target.checked } : value)} /><span><strong>Shadowsocks</strong><small>client hint</small></span></label>
-                <label className={dnsDraft?.apply_vrx ? "active" : ""}><input type="checkbox" checked={dnsDraft?.apply_vrx ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, apply_vrx: event.target.checked } : value)} /><span><strong>VLESS Reality</strong><small>server Xray</small></span></label>
-              </div>
-              <div className="dnsPolicyToggles">
-                <label><span><strong>Fallback</strong><small>резервный адрес</small></span><input type="checkbox" checked={dnsDraft?.fallback_enabled ?? true} onChange={(event) => setDnsDraft((value) => value ? { ...value, fallback_enabled: event.target.checked } : value)} /></label>
-                <label><span><strong>DoH / VRX</strong><small>encrypted DNS</small></span><input type="checkbox" checked={dnsDraft?.prefer_encrypted ?? false} onChange={(event) => setDnsDraft((value) => value ? { ...value, prefer_encrypted: event.target.checked } : value)} /></label>
-              </div>
-            </div>
-
-            <section className="dnsResolverSection">
-              <div className="dnsSectionTitle"><div><p className="eyebrow">RESOLVERS</p><h3>Доступные DNS</h3></div><span>UDP / TCP / DoH</span></div>
-              <div className="dnsResolverRows">
-                {(dns?.providers || []).map((provider) => {
-                  const check = dnsChecks[provider.id];
-                  const selected = dnsDraft?.selected_id === provider.id;
-                  return <div className={`dnsResolverRow ${selected ? "selected" : ""}`} key={provider.id}>
-                    <div className="dnsResolverIdentity">
-                      <span className={provider.country === "RU" ? "dnsCountry ru" : "dnsCountry"}>{provider.country}</span>
-                      <div><strong>{provider.name}</strong><small>{provider.filter}</small><code>{provider.addresses.join(" · ")}</code></div>
-                    </div>
-                    <div className="dnsResolverLatency">
-                      <span className={check?.udp_ok ? "ok" : ""}><small>UDP</small><strong>{check?.udp_ms != null ? `${check.udp_ms} мс` : "—"}</strong></span>
-                      <span className={check?.tcp_ok ? "ok" : ""}><small>TCP</small><strong>{check?.tcp_ms != null ? `${check.tcp_ms} мс` : "—"}</strong></span>
-                      <span className={check?.doh_ok ? "ok" : ""}><small>DoH</small><strong>{check?.doh_ms != null ? `${check.doh_ms} мс` : provider.doh_url ? "—" : "нет"}</strong></span>
-                    </div>
-                    <div className="dnsResolverActions">
-                      <button type="button" onClick={() => void checkDnsProviders(provider.id)} disabled={checkingDns}>Проверить</button>
-                      <button type="button" className="primary" disabled={selected} onClick={() => setDnsDraft((value) => value ? { ...value, selected_id: provider.id } : value)}>{selected ? "Выбран" : "Выбрать"}</button>
-                    </div>
-                  </div>;
-                })}
-              </div>
-            </section>
-
-            <section className="dnsCustomStrip">
-              <div className="dnsSectionTitle compact"><div><p className="eyebrow">CUSTOM DNS</p><h3>Собственный резолвер</h3></div><button type="button" className={dnsDraft?.selected_id === "custom" ? "active" : ""} onClick={() => setDnsDraft((value) => value ? { ...value, selected_id: "custom", custom: value.custom || { name: "Собственный DNS", addresses: [""], doh_url: "" } } : value)}>{dnsDraft?.selected_id === "custom" ? "Используется" : "Использовать"}</button></div>
-              {dnsDraft?.selected_id === "custom" && <div className="dnsCustomFields">
-                <label><span>Название</span><input value={dnsDraft.custom?.name || ""} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { addresses: [""], doh_url: "" }), name: event.target.value } } : value)} /></label>
-                <label><span>IP-адреса</span><input value={(dnsDraft.custom?.addresses || []).join(", ")} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { name: "Собственный DNS", doh_url: "" }), addresses: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) } } : value)} /></label>
-                <label><span>DoH URL</span><input type="url" placeholder="https://dns.example/dns-query" value={dnsDraft.custom?.doh_url || ""} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { name: "Собственный DNS", addresses: [""] }), doh_url: event.target.value } } : value)} /></label>
-              </div>}
-            </section>
-
-            <section className="dnsEffectiveStrip">
-              <div className="dnsSectionTitle compact"><div><p className="eyebrow">EFFECTIVE DNS</p><h3>Фактическое применение</h3></div><span>Новые конфигурации и server-side VRX</span></div>
-              <div className="dnsEffectRows">
-                {Object.entries(dns?.protocol_effect_details || {}).map(([protocol, effect]) => <div className={effect.matches_selected ? "matches" : "differs"} key={protocol}>
-                  <strong>{protocol === "vless-reality-xhttp" ? "VRX" : protocol === "shadowsocks" ? "SS" : protocol.toUpperCase()}</strong>
-                  <span>{effect.value}</span>
-                  <em>{effect.matches_selected ? "MATCH" : "DIFFERS"}</em>
-                </div>)}
-              </div>
-            </section>
-          </div>
-        </article>
-
-        <div className="dnsSaveBar">
-          <div><p className="eyebrow">PENDING DNS POLICY</p><strong>{dns?.providers.find((item) => item.id === dnsDraft?.selected_id)?.name || dnsDraft?.custom?.name || "DNS не выбран"}</strong><span>Активные WG/AWG-подключения и существующие конфигурации не изменяются.</span></div>
-          <button type="button" onClick={() => void saveDnsSettings()} disabled={busy || !dnsDraft}>{busy ? "Применяем…" : "Применить"}</button>
-        </div>
-      </section>;
+export function DnsView({ dns, dnsDraft, dnsChecks, checkingDns, busy, setDnsDraft, checkDnsProviders, saveDnsSettings }: Props) {
+  const selected = dns?.providers.find((item) => item.id === dnsDraft?.selected_id);
+  const selectedName = selected?.name || dnsDraft?.custom?.name || "DNS не выбран";
+  const enabledScopes = scope.filter(([key]) => Boolean(dnsDraft?.[key])).length;
+  const systemDnsAvailable = dns?.system_resolver?.available !== false;
+  return <section className="dnsWorkspace dnsWorkspaceV2">
+    <header className="dnsPageHead plainPageHead"><div><p className="eyebrow">312.NET / NETWORK & DNS</p><h1>Сеть и DNS</h1><p>Настройка локального resolver VPS, DNS новых VPN-профилей и серверного VRX.</p></div><div className="dnsPageFacts"><span><small>ПРОФИЛЬ</small><strong>{selectedName}</strong></span><span><small>КОНТУРЫ</small><strong>{enabledScopes}/5</strong></span><span><small>VPS DNS</small><strong>{dns?.system_resolver?.managed ? "MANAGED" : "SYSTEM"}</strong></span></div></header>
+    <div className="dnsWorkbench">
+      <article className="dnsResolverBrowser"><div className="dnsResolverArt" aria-hidden="true" /><header><div><p className="eyebrow">RESOLVER CATALOG</p><h2>Доступные DNS</h2><span>Проверяйте ответ с этого VPS перед выбором.</span></div><button type="button" onClick={() => void checkDnsProviders()} disabled={checkingDns}>{checkingDns ? "Проверяем…" : "Проверить все"}</button></header><div className="dnsResolverRows">{(dns?.providers || []).map((provider) => { const check=dnsChecks[provider.id]; const active=dnsDraft?.selected_id===provider.id; return <button type="button" className={`dnsResolverCard ${active ? "selected" : ""}`} key={provider.id} onClick={() => setDnsDraft((value) => value ? {...value,selected_id:provider.id}:value)}><span className="dnsResolverCountry">{provider.country}</span><span className="dnsResolverName"><strong>{provider.name}</strong><small>{provider.filter}</small><code>{provider.addresses.join(" · ")}</code></span><span className="dnsResolverProbe"><b className={check?.udp_ok ? "ok":""}>UDP {check?.udp_ms != null ? `${check.udp_ms} ms`:"—"}</b><b className={check?.doh_ok ? "ok":""}>DoH {check?.doh_ms != null ? `${check.doh_ms} ms`:provider.doh_url ? "—":"нет"}</b></span><em>{active ? "ВЫБРАН":"ВЫБРАТЬ"}</em></button>; })}</div></article>
+      <aside className="dnsPolicyConsole"><header><p className="eyebrow">DNS POLICY</p><h2>Куда применять</h2><span>Изменения затронут только отмеченные контуры.</span></header><div className="dnsScopeList">{scope.map(([key,code,description]) => <label className={dnsDraft?.[key] ? "active":""} key={key}><input type="checkbox" disabled={key === "apply_system" && !systemDnsAvailable} checked={dnsDraft?.[key] ?? true} onChange={(event) => setDnsDraft((value) => value ? {...value,[key]:event.target.checked}:value)} /><b>{code}</b><span><strong>{key === "apply_system" ? "DNS самого VPS":description}</strong><small>{key === "apply_system" ? `${dns?.system_resolver?.mode || "resolver"} · ${(dns?.system_resolver?.servers || []).join(" · ") || "управление недоступно"}`:description}</small></span><i /></label>)}</div><div className="dnsOptionList"><label><span><strong>Резервный DNS</strong><small>использовать второй адрес</small></span><input type="checkbox" checked={dnsDraft?.fallback_enabled ?? true} onChange={(e) => setDnsDraft((v) => v ? {...v,fallback_enabled:e.target.checked}:v)} /></label><label><span><strong>DoH для VRX</strong><small>encrypted resolver для Xray</small></span><input type="checkbox" checked={dnsDraft?.prefer_encrypted ?? false} onChange={(e) => setDnsDraft((v) => v ? {...v,prefer_encrypted:e.target.checked}:v)} /></label></div></aside>
+    </div>
+    <div className="dnsLowerGrid"><article className="dnsCustomPanel"><header><div><p className="eyebrow">CUSTOM RESOLVER</p><h3>Собственный DNS</h3></div><button type="button" className={dnsDraft?.selected_id === "custom" ? "active":""} onClick={() => setDnsDraft((v) => v ? {...v,selected_id:"custom",custom:v.custom || {name:"Собственный DNS",addresses:[""],doh_url:""}}:v)}>Использовать</button></header>{dnsDraft?.selected_id === "custom" && <div><label><span>Название</span><input value={dnsDraft.custom?.name || ""} onChange={(e) => setDnsDraft((v) => v ? {...v,custom:{...(v.custom || {addresses:[""],doh_url:""}),name:e.target.value}}:v)} /></label><label><span>IP-адреса</span><input value={(dnsDraft.custom?.addresses || []).join(", ")} onChange={(e) => setDnsDraft((v) => v ? {...v,custom:{...(v.custom || {name:"DNS",doh_url:""}),addresses:e.target.value.split(",").map((x) => x.trim()).filter(Boolean)}}:v)} /></label><label><span>DoH URL</span><input value={dnsDraft.custom?.doh_url || ""} onChange={(e) => setDnsDraft((v) => v ? {...v,custom:{...(v.custom || {name:"DNS",addresses:[""]}),doh_url:e.target.value}}:v)} /></label></div>}</article><article className="dnsEffectivePanel"><header><p className="eyebrow">EFFECTIVE STATE</p><h3>Фактические значения</h3></header><div>{Object.entries(dns?.protocol_effect_details || {}).map(([protocol,effect]) => <span className={effect.matches_selected ? "matches":"differs"} key={protocol}><b>{protocol === "vless-reality-xhttp" ? "VRX":protocol === "shadowsocks" ? "SS":protocol.toUpperCase()}</b><code>{effect.value}</code><em>{effect.matches_selected ? "MATCH":"DIFF"}</em></span>)}</div></article></div>
+    <footer className="dnsApplyDock"><div><p className="eyebrow">READY TO APPLY</p><strong>{selectedName}</strong><span>{dnsDraft?.apply_system ? "DNS самого VPS будет изменён с проверкой и откатом при ошибке.":"DNS самого VPS останется без изменений."}</span></div><button type="button" onClick={() => void saveDnsSettings()} disabled={busy || !dnsDraft}>{busy ? "Применяем…":"Применить политику"}</button></footer>
+  </section>;
 }
