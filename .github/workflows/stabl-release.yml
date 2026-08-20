@@ -44,6 +44,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
+          npm ci --include=dev --include=optional --ignore-scripts
           npm run lint
           node --test tests/product.test.mjs
           bash scripts/build-release.sh outputs/vps-control-release.tar.gz
@@ -77,6 +78,7 @@ jobs:
         env:
           BUILD_COMMIT: ${{ github.sha }}
         run: |
+          npm ci --include=dev --include=optional --ignore-scripts
           npm run lint
           node --test tests/product.test.mjs
           version="v$(node -p 'require("./package.json").version')"
