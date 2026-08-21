@@ -99,10 +99,14 @@ test("protocol installers declare OS support and keep per-module diagnostics", a
   assert.match(manager, /apt-get -o DPkg::Lock::Timeout=300 check/);
   assert.match(manager, /protocol-\$\{image_id\}\.log/);
   assert.match(manager, /write_action_status "failed" "\$\{ACTION_PROGRESS\}"/);
+  assert.match(manager, /installer_status=\$\?/);
+  assert.match(manager, /installer_status\}" -eq 75/);
   assert.match(awgInstall, /"\$\{ID\}" == "ubuntu"/);
   assert.match(awgInstall, /add-apt-repository -y ppa:amnezia\/ppa/);
   assert.match(awgInstall, /signed-by=\/usr\/share\/keyrings\/amnezia-ppa\.gpg/);
   assert.match(awgInstall, /75C9DD72C799870E310542E24166F2C257290828/);
+  assert.match(awgInstall, /readlink -f \/vmlinuz/);
+  assert.match(awgInstall, /headers are ready\. Reboot the VPS once/);
   assert.match(awgInstall, /QUICK_CONFIG="\/etc\/amnezia\/\$\{AWG_INTERFACE\}\.conf"/);
   assert.match(awgInstall, /value="\$\{value:1:\$\{#value\}-2\}"/);
   assert.match(wgInstall, /value="\$\{value:1:\$\{#value\}-2\}"/);

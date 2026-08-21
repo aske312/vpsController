@@ -1091,7 +1091,7 @@
   
   height: 100%;
   width: auto;
-  aspect-ratio: 1672 / 941;
+  aspect-ratio: 3 / 2;
 
   overflow: visible;
   border: 0;
@@ -1105,7 +1105,7 @@
   background-image: url("/gate-art/new-operator/connections.webp");
   background-repeat: no-repeat;
   background-position: center;
-  background-size: 100% 100%;
+  background-size: contain;
 
   
   -webkit-mask-image: linear-gradient(
@@ -1231,9 +1231,9 @@
     right: 0;
     height: 100%;
     width: auto;
-    aspect-ratio: 1672 / 941;
+    aspect-ratio: 3 / 2;
     opacity: .22;
-    background-size: 100% 100%;
+    background-size: contain;
     -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.18) 38%, #000 74%);
     mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.18) 38%, #000 74%);
   }

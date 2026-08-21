@@ -796,7 +796,7 @@ install_protocol_image() {
     fi
   done < <(find "${image_dir}" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print)
   [[ -n "${manifest}" ]] || die "образ ${image_id} не найден."
-  local installer image_root module_log failure_message
+  local installer image_root module_log failure_message installer_status
   image_root="$(dirname -- "${manifest}")"
   installer="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("installer",""))' "${manifest}")"
   source /etc/os-release
@@ -821,17 +821,24 @@ PY
     || die "пакетный менеджер не готов к установке ${image_id}; выполните apt-get check."
   module_log="/var/log/${APP_NAME}-protocol-${image_id}.log"
   install -m 0600 /dev/null "${module_log}"
+  set +e
   ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
     PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
-    bash "${image_root}/${installer}" >"${module_log}" 2>&1 || {
+    bash "${image_root}/${installer}" >"${module_log}" 2>&1
+  installer_status=$?
+  set -e
+  if [[ "${installer_status}" -ne 0 ]]; then
       tail -n 40 "${module_log}" >&2 || true
       failure_message="$(tail -n 1 "${module_log}" | tr '\n\r' ' ' | cut -c1-240)"
       [[ -n "${failure_message}" ]] || failure_message="установщик завершился с ошибкой"
+      if [[ "${installer_status}" -eq 75 ]]; then
+        failure_message="Требуется одна перезагрузка VPS: ${failure_message}"
+      fi
       write_action_status "failed" "${ACTION_PROGRESS}" "${failure_message}; журнал: ${module_log}"
       CURRENT_ACTION=""
       die "не удалось установить ${image_id}; журнал: ${module_log}"
-    }
+  fi
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   # Protocol clients persist configs below /etc/vps-control.  Keep the API
   # sandbox in sync even when a module is installed on an older deployment
