@@ -67,6 +67,11 @@ ACTION_STARTED_AT=""
 ACTION_PROGRESS=0
 REBOOT_AFTER_UPDATE="no"
 INSTALL_LOG="/var/log/vps-control-install.log"
+PACKAGE_MODE="${VPS_CONTROL_PACKAGE_MODE:-auto}"
+case "${PACKAGE_MODE}" in
+  auto|interactive|skip) ;;
+  *) PACKAGE_MODE="auto" ;;
+esac
 
 UI_STEP=0
 UI_TOTAL=0
@@ -605,8 +610,37 @@ doctor() {
   ok "сервер совместим с установкой 312.net."
 }
 
+check_manual_dependencies() {
+  info "Проверка зависимостей ручной установки (--no-apt)"
+  local command_name node_major
+  local -a missing=()
+  for command_name in caddy curl git ip node npm openssl python3 rsync ss ufw; do
+    command -v "${command_name}" >/dev/null 2>&1 || missing+=("${command_name}")
+  done
+  if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import venv' >/dev/null 2>&1; then
+    missing+=("python3-venv")
+  fi
+  if command -v node >/dev/null 2>&1; then
+    node_major="$(node -p 'process.versions.node.split(`.`)[0]' 2>/dev/null || echo 0)"
+    [[ "${node_major:-0}" -ge 22 ]] || missing+=("nodejs>=22")
+  fi
+  if ((${#missing[@]})); then
+    printf 'Не хватает зависимостей: %s\n' "${missing[*]}" >&2
+    printf 'Установите их вручную и повторите: bash scripts/install-panel.sh --no-apt\n' >&2
+    return 1
+  fi
+  if [[ -n "$(dpkg --audit 2>/dev/null)" ]]; then
+    warn "dpkg содержит незавершённые пакеты, но режим --no-apt их не изменяет."
+  fi
+  ok "необходимые зависимости уже установлены; apt/dpkg запускаться не будут."
+}
+
 install_packages() {
   info "Установка системных зависимостей"
+  if [[ "${PACKAGE_MODE}" == "skip" ]]; then
+    check_manual_dependencies
+    return
+  fi
   export DEBIAN_FRONTEND=noninteractive
   local node_candidate node_major
   local -a distro_node_packages=()
@@ -695,13 +729,34 @@ check_vpn() {
 }
 
 prepare_package_manager() {
-  export DEBIAN_FRONTEND=noninteractive
+  if [[ "${PACKAGE_MODE}" == "skip" ]]; then
+    check_manual_dependencies
+    return
+  fi
+
   if [[ -n "$(dpkg --audit 2>/dev/null)" ]]; then
-    info "Восстановление незавершённой пакетной операции"
-    apt-get -o DPkg::Lock::Timeout=300 -f install -y
+    if [[ "${PACKAGE_MODE}" == "interactive" ]]; then
+      info "Ручное завершение незавершённой пакетной операции"
+      if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+        die "dpkg требует ручной настройки, но /dev/tty недоступен. Запустите установку из SSH/VNC: bash scripts/install-panel.sh --manual"
+      fi
+      printf '\nОткрыта ручная настройка dpkg. Для grub-pc выбирайте загрузочный ДИСК целиком (например /dev/vda), не раздел /dev/vda1.\n\n' >/dev/tty
+      DEBIAN_FRONTEND=dialog dpkg --configure -a </dev/tty >/dev/tty 2>&1 \
+        || die "ручная настройка dpkg не завершена; исправьте показанную ошибку и повторите установку."
+    else
+      info "Восстановление незавершённой пакетной операции"
+      export DEBIAN_FRONTEND=noninteractive
+      if ! apt-get -o DPkg::Lock::Timeout=300 -f install -y; then
+        if dpkg-query -W grub-pc >/dev/null 2>&1; then
+          die "не удалось автоматически настроить grub-pc. Повторите установку в ручном режиме: bash scripts/install-panel.sh --manual"
+        fi
+        die "не удалось автоматически восстановить dpkg. Повторите установку с --manual."
+      fi
+    fi
   fi
   [[ -z "$(dpkg --audit 2>/dev/null)" ]] \
-    || die "dpkg остаётся в незавершённом состоянии; проверьте журнал пакетного менеджера."
+    || die "dpkg остаётся в незавершённом состоянии; выполните ручную настройку и повторите установку."
+  export DEBIAN_FRONTEND=noninteractive
 }
 
 install_protocol_image() {
@@ -1008,6 +1063,10 @@ PY
 }
 
 ensure_runtime_dependencies() {
+  if [[ "${PACKAGE_MODE}" == "skip" ]]; then
+    check_manual_dependencies
+    return
+  fi
   local command_name
   for command_name in caddy curl git node npm python3 rsync; do
     if ! command -v "${command_name}" >/dev/null 2>&1; then
@@ -1955,7 +2014,8 @@ integrity_check() {
 
 show_credentials() {
   [[ -r "${ENV_FILE}" ]] || die "${ENV_FILE} не найден."
-  printf 'Логин: '; env_value ADMIN_USER
+  printf 'Логин:  '; env_value ADMIN_USER
+  printf 'Пароль: '; env_value ADMIN_PASSWORD
 }
 
 usage() {
@@ -2052,7 +2112,9 @@ main() {
       ui_stage "Завершение"
       ui_summary
       printf '\nОткройте: %s\n' "${PANEL_URL}"
-      printf 'Логин: %s\n' "${ADMIN_USER}"
+      printf '\n\033[1mДанные для входа:\033[0m\n'
+      show_credentials
+      printf '\n\033[1;33mСохраните пароль сейчас. Позже его можно посмотреть командой: vps-control credentials\033[0m\n'
       ui_done "установка завершена"
       ;;
     uninstall) uninstall_app "$@" ;;
