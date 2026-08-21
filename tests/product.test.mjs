@@ -307,8 +307,7 @@ test("security distinguishes public SSH from public panel access", async () => {
   assert.match(api, /"publicly_accessible": panel_publicly_accessible/);
   assert.match(api, /panel_access_consistent/);
   assert.match(page, /title="Доступ к панели"/);
-  assert.match(page, /SSH · административный доступ/);
-  assert.match(page, /SSH · административный доступ/);
+  assert.match(page, /SSH  административный доступ/);
   assert.match(page, /title="Дополнительные VPN-службы"/);
   assert.match(page, /вне управления панели/);
 });
@@ -657,7 +656,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /image\.description \|\| image\.category_name/);
   assert.match(page, /activeProtocolImage/);
   assert.match(page, /setTab\(protocol\)/);
-  assert.match(page, /312\.NET \/ PROTOCOL CONTROL/);
+  assert.match(page, /<p className="eyebrow">PROTOCOL CONTROL<\/p>/);
   assert.match(page, /client\.protocol === "shadowsocks" \? "SS" : "VRX"/);
   assert.match(page, /if \(Boolean\(current\?\.installed\) === installed\) return;/);
   assert.match(manager.match(/install_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
