@@ -68,6 +68,11 @@ ACTION_PROGRESS=0
 REBOOT_AFTER_UPDATE="no"
 INSTALL_LOG="/var/log/vps-control-install.log"
 PACKAGE_MODE="${VPS_CONTROL_PACKAGE_MODE:-auto}"
+OS_UPDATE="${VPS_CONTROL_OS_UPDATE:-yes}"
+case "${OS_UPDATE}" in
+  yes|no) ;;
+  *) OS_UPDATE="yes" ;;
+esac
 case "${PACKAGE_MODE}" in
   auto|interactive|skip) ;;
   *) PACKAGE_MODE="auto" ;;
@@ -635,6 +640,49 @@ check_manual_dependencies() {
   ok "необходимые зависимости уже установлены; apt/dpkg запускаться не будут."
 }
 
+update_platform() {
+  if [[ "${PACKAGE_MODE}" == "skip" || "${OS_UPDATE}" != "yes" ]]; then
+    [[ "${PACKAGE_MODE}" == "skip" ]] \
+      && ok "обновление ОС пропущено: активен режим --no-apt." \
+      || ok "обновление ОС пропущено параметром --no-os-update."
+    return 0
+  fi
+
+  source /etc/os-release
+  case "${ID:-}" in
+    ubuntu|debian) ;;
+    *) die "обновление платформы поддерживается только для Ubuntu и Debian." ;;
+  esac
+
+  info "Обновление платформы ${PRETTY_NAME:-${ID}}"
+  prepare_package_manager
+  export DEBIAN_FRONTEND=noninteractive
+  run_with_status "Обновление индекса APT" apt-get -o DPkg::Lock::Timeout=300 update
+  # Use conservative APT upgrade semantics: update the current release without
+  # authorizing removal of installed packages or a distribution-version transition.
+  if ! run_with_status "Обновление пакетов ОС" apt-get -o DPkg::Lock::Timeout=300 \
+      -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y; then
+    if [[ -n "$(dpkg --audit 2>/dev/null)" && -r /dev/tty && -w /dev/tty ]]; then
+      warn "обновление остановилось на настройке пакета; открываю системный диалог в текущем терминале."
+      printf '\nЗавершите настройку пакетов. Для grub-pc выбирайте диск целиком (например /dev/vda), не /dev/vda1.\n\n' >/dev/tty
+      DEBIAN_FRONTEND=dialog dpkg --configure -a </dev/tty >/dev/tty 2>&1 \
+        || die "ручная настройка пакетов после обновления не завершена."
+      export DEBIAN_FRONTEND=noninteractive
+      run_with_status "Повтор обновления пакетов ОС" apt-get -o DPkg::Lock::Timeout=300 \
+        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y
+    else
+      die "не удалось обновить пакеты ОС; см. ${INSTALL_LOG}."
+    fi
+  fi
+  apt-get -o DPkg::Lock::Timeout=300 check >>"${INSTALL_LOG}" 2>&1 \
+    || die "APT сообщает о проблемах после обновления ОС; см. ${INSTALL_LOG}."
+  if [[ -e /var/run/reboot-required ]]; then
+    REBOOT_AFTER_UPDATE="yes"
+    warn "обновлены системные компоненты; после установки панели рекомендуется перезагрузить VPS."
+  fi
+  ok "${PRETTY_NAME:-${ID}} обновлена до актуальных пакетов текущего релиза."
+}
+
 install_packages() {
   info "Установка системных зависимостей"
   if [[ "${PACKAGE_MODE}" == "skip" ]]; then
@@ -747,10 +795,16 @@ prepare_package_manager() {
       info "Восстановление незавершённой пакетной операции"
       export DEBIAN_FRONTEND=noninteractive
       if ! apt-get -o DPkg::Lock::Timeout=300 -f install -y; then
-        if dpkg-query -W grub-pc >/dev/null 2>&1; then
-          die "не удалось автоматически настроить grub-pc. Повторите установку в ручном режиме: bash scripts/install-panel.sh --manual"
+        if [[ -r /dev/tty && -w /dev/tty ]]; then
+          warn "автоматическое восстановление dpkg не удалось; переключаюсь на ручную настройку в текущем терминале."
+          printf '\nЕсли grub-pc спросит загрузочный диск, выбирайте диск целиком (например /dev/vda), не раздел /dev/vda1.\n\n' >/dev/tty
+          DEBIAN_FRONTEND=dialog dpkg --configure -a </dev/tty >/dev/tty 2>&1 \
+            || die "ручная настройка dpkg не завершена; исправьте показанную ошибку и повторите установку."
+        elif dpkg-query -W grub-pc >/dev/null 2>&1; then
+          die "не удалось автоматически настроить grub-pc и нет интерактивного терминала. Повторите установку из SSH/VNC с --manual."
+        else
+          die "не удалось автоматически восстановить dpkg. Повторите установку из SSH/VNC с --manual."
         fi
-        die "не удалось автоматически восстановить dpkg. Повторите установку с --manual."
       fi
     fi
   fi
@@ -2082,11 +2136,14 @@ main() {
   esac
   case "${1:-help}" in
     install)
-      UI_TOTAL=8
+      UI_TOTAL=9
       ui_header
       ui_stage "Проверка сервера"
       doctor
       ui_done "сервер совместим"
+      ui_stage "Обновление Ubuntu/Debian"
+      update_platform
+      ui_done "операционная система обновлена"
       ui_stage "Системные зависимости"
       install_packages
       ui_done "зависимости установлены"
@@ -2115,6 +2172,9 @@ main() {
       printf '\n\033[1mДанные для входа:\033[0m\n'
       show_credentials
       printf '\n\033[1;33mСохраните пароль сейчас. Позже его можно посмотреть командой: vps-control credentials\033[0m\n'
+      if [[ "${REBOOT_AFTER_UPDATE}" == "yes" || -e /var/run/reboot-required ]]; then
+        printf '\n\033[1;33m⚠ После обновления ОС рекомендуется перезагрузить VPS: sudo reboot\033[0m\n'
+      fi
       ui_done "установка завершена"
       ;;
     uninstall) uninstall_app "$@" ;;
