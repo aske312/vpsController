@@ -111,7 +111,7 @@
 
 /* Mihomo — the protocol scene is retained as the primary command surface. */
 .mihomoCommandHero { min-height:390px !important; border-color:var(--cc-line) !important; border-radius:18px !important; box-shadow:var(--cc-shadow) !important; }
-.mihomoCommandHero::before { background-size:cover !important; background-position:center !important; opacity:.90 !important; }
+.mihomoCommandHero::before { background-size:contain !important; background-position:right center !important; opacity:.90 !important; }
 .mihomoHeroShade { display:block !important; background:linear-gradient(90deg,rgba(4,11,20,.99) 0%,rgba(4,11,20,.91) 50%,rgba(4,11,20,.14) 82%),linear-gradient(180deg,transparent,rgba(4,11,20,.68)) !important; }
 .mihomoHeroContent { width:60% !important; min-height:390px !important; padding:24px !important; }
 .mihomoHeroFacts > div { background:rgba(4,11,19,.68) !important; backdrop-filter:blur(8px); }
