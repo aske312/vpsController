@@ -19,7 +19,7 @@ export function ApplicationView({ application, services, applicationVersion, upd
   return <section className="applicationWorkspace">
         <article className="applicationSummary">
           <div className="applicationSummaryCopy">
-            <p className="eyebrow">312.NET / APPLICATION CONTROL</p>
+            <p className="eyebrow">APPLICATION CONTROL</p>
             <h1>Приложение</h1>
             <p>Фактическое состояние API и web-службы, установленная ветка, доступ панели и безопасные операции обновления.</p>
           </div>
