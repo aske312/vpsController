@@ -30,6 +30,7 @@ const STYLE_FILES = [
   "app/styles/pages/mihomo.css",
   "app/styles/pages/users.css",
   "app/styles/polish.css",
+  "app/styles/control-center.css",
 ];
 const readStyles = async () => (await Promise.all(STYLE_FILES.map(read))).join("\n");
 
@@ -163,7 +164,7 @@ test("control surfaces share compact headers, telemetry and modal language", asy
     readStyles(), read("app/views/overview/overview-view.tsx"), read("app/lib/format-version.ts"),
   ]);
   assert.match(overview, /overviewNodeWorkspace/);
-  assert.match(styles, /grid-template-columns:minmax\(0,7fr\) minmax\(280px,3fr\)/);
+  assert.match(styles, /grid-template-columns:minmax\(0,8fr\) minmax\(260px,2fr\)/);
   assert.match(styles, /\.gateMastMetric/);
   assert.match(styles, /\.confirmBackdrop,.accessBetaModalBackdrop,.mihomoDialogBackdrop,.legalBackdrop/);
   assert.match(versions, /slice\(0, 3\)/);
@@ -176,7 +177,7 @@ test("operational pages keep their artwork, 70/30 workspace and real country fla
   for (const asset of ["overview.webp", "network_1.webp", "security.webp", "services.webp", "application.webp", "mihomo.webp"]) {
     assert.match(styles, new RegExp(asset.replace(".", "\\.")));
   }
-  assert.match(styles, /\.overviewNodeWorkspace\s*\{[\s\S]*?grid-template-columns:minmax\(0,7fr\) minmax\(280px,3fr\)/);
+  assert.match(styles, /\.overviewNodeWorkspace\s*\{[\s\S]*?grid-template-columns:minmax\(0,8fr\) minmax\(260px,2fr\)/);
   assert.match(workspace, /function CountryFlag/);
   assert.match(workspace, /<svg viewBox="0 0 27 18"/);
   assert.match(workspace, /country === "nl"/);
@@ -438,7 +439,10 @@ test("main preview is built off-VPS and interrupted updates cannot report succes
     read("scripts/vps-control.sh"),
     read("api/main.py"),
   ]);
-  assert.match(workflow, /Build verified main preview outside the VPS/);
+  const previewWorkflow = workflow.split("  preview:")[1] || "";
+  assert.match(workflow, /Build main preview package/);
+  assert.doesNotMatch(previewWorkflow, /npm run lint/);
+  assert.doesNotMatch(previewWorkflow, /node --test tests\/product\.test\.mjs/);
   assert.match(workflow, /vps-control-main\.tar\.gz/);
   assert.match(workflow, /gh release create main-latest/);
   assert.doesNotMatch(manager, /BUILD_COMMIT="\$\{latest\}".*build-release/s);

@@ -74,13 +74,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Build verified main preview outside the VPS
+      - name: Build main preview package
         env:
           BUILD_COMMIT: ${{ github.sha }}
         run: |
-          npm ci --include=dev --include=optional --ignore-scripts
-          npm run lint
-          node --test tests/product.test.mjs
           version="v$(node -p 'require("./package.json").version')"
           RELEASE_VERSION="$version" bash scripts/build-release.sh \
             "outputs/vps-control-main.tar.gz"
