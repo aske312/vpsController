@@ -380,7 +380,6 @@ export function OverviewDashboard({
   return (
     <section className="overview" aria-label="Обзор инфраструктуры">
       <article className="overviewTopology">
-        <div className="overviewOperator" aria-hidden="true" />
         <header className="overviewTopologyHead">
           <div>
             <p className="eyebrow">ROUTING TOPOLOGY</p>

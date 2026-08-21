@@ -46,14 +46,6 @@
   border:0 !important; border-radius:18px !important; background:#06101a !important;
   box-shadow:var(--cc-shadow) !important;
 }
-.overviewTopology::before {
-  background:
-    linear-gradient(90deg,rgba(4,11,18,.98) 0%,rgba(5,13,21,.91) 52%,rgba(5,13,21,.26) 78%,rgba(5,13,21,.12)),
-    linear-gradient(180deg,rgba(5,13,21,.04),rgba(5,13,21,.72)),
-    url('/gate-art/new-operator/overview.webp') center/cover no-repeat !important;
-  opacity:1 !important;
-}
-.overviewOperator { display:none !important; }
 .overviewTopologyHead { max-width:72% !important; padding:0 !important; }
 .overviewTopologyHead h1 { font-size:clamp(24px,2.2vw,31px) !important; }
 .overviewTopologyHead > div:first-child > p:last-child { display:none !important; }
@@ -147,7 +139,7 @@
   .gateMastNode p,.gateMastActions .updatedAt { display:none !important; }
   .overviewTopology,.securityOverview { min-height:0 !important; padding:14px !important; }
   .overviewFlow { grid-template-columns:1fr !important; }
-  .overviewTopology::before,.securityOverview::before { opacity:.42 !important; }
+  .securityOverview::before { opacity:.42 !important; }
   .dnsResolverBrowser { min-height:0; }
   .dnsResolverArt { opacity:.38 !important; }
   .dnsResolverList { width:100%; }

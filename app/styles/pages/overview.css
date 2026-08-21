@@ -37,57 +37,31 @@
 .overviewTopology { overflow:hidden; min-height:455px; padding:20px; isolation:isolate; }
 
 .overviewTopology::before {
-  content:""; position:absolute; inset:0; z-index:-2; pointer-events:none;
-  background:
-    radial-gradient(circle at 36% 8%, rgba(162,123,255,.085), transparent 31%),
-    radial-gradient(circle at 65% 88%, rgba(86,217,233,.055), transparent 32%);
-}
-
-.overviewOperator {
+  content:"";
   position:absolute;
-  z-index:-1;
+  inset:0;
+  z-index:-2;
   pointer-events:none;
-  top:-12px;
-  right:-34px;
-  bottom:0;
-  width:min(520px,39vw);
-
-  background:
+  background-color:#06101a;
+  background-image:
     linear-gradient(
       90deg,
-      rgba(5,13,20,.72) 0%,
-      rgba(5,13,20,.48) 42%,
-      rgba(5,13,20,.12) 100%
+      rgba(4,11,18,.99) 0%,
+      rgba(5,13,21,.96) 38%,
+      rgba(5,13,21,.82) 57%,
+      rgba(5,13,21,.42) 74%,
+      rgba(5,13,21,.16) 100%
     ),
     linear-gradient(
       180deg,
-      rgba(5,13,20,.08) 0%,
-      rgba(5,13,20,.34) 100%
+      rgba(5,13,21,.05) 0%,
+      rgba(5,13,21,.10) 54%,
+      rgba(5,13,21,.62) 100%
     ),
-    url("/gate-art/new-operator/overview.webp")
-      right center / auto 85% no-repeat;
-
-  opacity:.44;
-
-  filter:
-    saturate(.95)
-    brightness(.90);
-
-  -webkit-mask-image:
-    linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(0,0,0,.28) 24%,
-      #000 64%
-    );
-
-  mask-image:
-    linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(0,0,0,.28) 24%,
-      #000 64%
-    );
+    url("/gate-art/new-operator/overview.webp");
+  background-repeat:no-repeat;
+  background-position:center, center, right center;
+  background-size:100% 100%, 100% 100%, contain;
 }
 
 .overviewTopologyHead { position:relative; z-index:2; max-width:1110px; display:flex; align-items:flex-start; justify-content:space-between; gap:18px; padding-right:min(255px,19vw); }
@@ -300,7 +274,6 @@
 }
 
 @media (max-width:980px) {
-.overviewOperator { width:340px; opacity:.23; }
 .overviewTopologyHead { padding-right:120px; }
 .overviewTopologyStats { display:none; }
 .overviewFlow { grid-template-columns:105px minmax(0,1fr); }
@@ -311,7 +284,6 @@
 
 @media (max-width:760px) {
 .overviewTopology { min-height:0; padding:14px 11px; border-radius:13px; }
-.overviewOperator { top:0; right:-110px; width:300px; height:230px; bottom:auto; opacity:.16; }
 .overviewTopologyHead { padding-right:72px; }
 .overviewTopologyHead h1 { font-size:22px; }
 .overviewTopologyHead > div:first-child > p:last-child { font-size:9px; }
@@ -351,7 +323,6 @@
 
 @media (max-width:470px) {
 .overviewTopologyHead { padding-right:0; }
-.overviewOperator { opacity:.09; }
 }
 
 .overviewTopology { min-height: 0; }
