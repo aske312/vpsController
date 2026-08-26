@@ -80,7 +80,7 @@
 .securityOverview {
   position:relative; min-height:0; overflow:hidden; padding:22px !important; isolation:isolate;
   display:grid !important; grid-template-columns:minmax(0,1fr) minmax(340px,.75fr) !important;
-  border-radius:18px !important; background:linear-gradient(145deg,#07131d,#050d14) !important; box-shadow:var(--cc-shadow) !important;
+  border-color:transparent !important; border-radius:0 !important; background:transparent !important; box-shadow:none !important;
 }
 .securityOverview::before,.securityOverview::after { content:none !important; }
 .securityOverviewLead { align-self:start; max-width:690px; padding:0 !important; }

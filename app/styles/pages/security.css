@@ -245,7 +245,7 @@
 
 .securityDiagTitle span{max-width:52%;color:#718797;font-size:9px;text-align:right}
 
-.securityListeners pre{margin:0;height:240px;overflow:auto;padding:11px 13px;background:#030a10;color:#62c8ff;font:9.5px/1.5 var(--font-mono),monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.securityListeners pre{margin:0;height:auto;overflow:visible;padding:11px 13px;background:#030a10;color:#62c8ff;font:9.5px/1.5 var(--font-mono),monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 
 .securityLogsToggle{width:100%;min-height:62px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 13px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
 
