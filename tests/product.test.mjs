@@ -585,8 +585,8 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(manager, /DPkg::Lock::Timeout=300 -f install -y/);
   assert.match(wgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(awgInstall, /DPkg::Lock::Timeout=300/);
-  assert.match(wgInstall, /if ! command -v wg.*command -v wg-quick/s);
-  assert.match(awgInstall, /if ! command -v awg.*command -v awg-quick.*modinfo amneziawg/s);
+  assert.match(wgInstall, /install -y iptables wireguard-tools/);
+  assert.match(awgInstall, /install -y amneziawg/);
   for (const installer of [awgInstall, mihomoAwgInstall]) {
     assert.match(installer, /apt-cache show "\$\{header_package\}"/);
     assert.match(installer, /linux-image-amd64 linux-headers-amd64/);
@@ -904,6 +904,20 @@ test("Mihomo installs and updates the latest verified stable core independently"
   assert.doesNotMatch(api, /live_update = image_id != "mihomo"/);
   assert.match(control, /MIHOMO_UPDATE_ONLY=1/);
   assert.deepEqual(JSON.parse(manifest).preflight_packages, ["ca-certificates", "curl", "gzip"]);
+});
+
+test("WG, AWG and Shadowsocks install the latest repository candidates", async () => {
+  const [wg, awg, shadowsocks] = await Promise.all([
+    read("protocol-images/wireguard/install.sh"),
+    read("protocol-images/amneziawg/install.sh"),
+    read("protocol-images/shadowsocks/install.sh"),
+  ]);
+  for (const [script, packageName] of [[wg, "wireguard-tools"], [awg, "amneziawg"], [shadowsocks, "shadowsocks-libev"]]) {
+    assert.match(script, /apt-get -o DPkg::Lock::Timeout=300 update/);
+    assert.match(script, new RegExp(`apt-get -o DPkg::Lock::Timeout=300 install -y(?: [a-z-]+)* ${packageName}`));
+    assert.match(script, new RegExp(`dpkg-query -W -f='\\$\\{Version\\}' ${packageName}`));
+    assert.match(script, new RegExp(`apt-cache policy ${packageName}`));
+  }
 });
 
 test("SSH management does not start socket activation and the daemon together", async () => {

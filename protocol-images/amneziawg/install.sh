@@ -74,35 +74,38 @@ install_running_kernel_headers() {
 }
 
 export DEBIAN_FRONTEND=noninteractive
-if ! command -v awg >/dev/null 2>&1 || ! command -v awg-quick >/dev/null 2>&1 || ! modinfo amneziawg >/dev/null 2>&1; then
-  apt-get -o DPkg::Lock::Timeout=300 update
-  if [[ "${ID}" == "ubuntu" ]]; then
-    apt-get -o DPkg::Lock::Timeout=300 install -y software-properties-common python3-launchpadlib gnupg2 iptables
-    install_running_kernel_headers
-    grep -Rqs 'ppa.launchpadcontent.net/amnezia/ppa' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null \
-      || add-apt-repository -y ppa:amnezia/ppa
-  else
-    apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl dirmngr dkms gnupg iptables
-    install_running_kernel_headers
-    if [[ ! -s /usr/share/keyrings/amnezia-ppa.gpg || ! -s /etc/apt/sources.list.d/amnezia-ppa.list ]]; then
-      key_home="$(mktemp -d)"
-      chmod 0700 "${key_home}"
-      gpg --homedir "${key_home}" --batch --keyserver hkps://keyserver.ubuntu.com \
-        --recv-keys 75C9DD72C799870E310542E24166F2C257290828
-      fingerprint="$(gpg --homedir "${key_home}" --batch --with-colons --fingerprint \
-        75C9DD72C799870E310542E24166F2C257290828 | grep '^fpr:' | head -n 1 | cut -d: -f10)"
-      [[ "${fingerprint}" == "75C9DD72C799870E310542E24166F2C257290828" ]] \
-        || { rm -rf -- "${key_home}"; echo "Amnezia PPA signing key fingerprint mismatch" >&2; exit 1; }
-      gpg --homedir "${key_home}" --batch --export 75C9DD72C799870E310542E24166F2C257290828 \
-        >/usr/share/keyrings/amnezia-ppa.gpg
-      rm -rf -- "${key_home}"
-      printf '%s\n' 'deb [signed-by=/usr/share/keyrings/amnezia-ppa.gpg] https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main' \
-        >/etc/apt/sources.list.d/amnezia-ppa.list
-    fi
+apt-get -o DPkg::Lock::Timeout=300 update
+if [[ "${ID}" == "ubuntu" ]]; then
+  apt-get -o DPkg::Lock::Timeout=300 install -y software-properties-common python3-launchpadlib gnupg2 iptables
+  install_running_kernel_headers
+  grep -Rqs 'ppa.launchpadcontent.net/amnezia/ppa' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null \
+    || add-apt-repository -y ppa:amnezia/ppa
+else
+  apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl dirmngr dkms gnupg iptables
+  install_running_kernel_headers
+  if [[ ! -s /usr/share/keyrings/amnezia-ppa.gpg || ! -s /etc/apt/sources.list.d/amnezia-ppa.list ]]; then
+    key_home="$(mktemp -d)"
+    chmod 0700 "${key_home}"
+    gpg --homedir "${key_home}" --batch --keyserver hkps://keyserver.ubuntu.com \
+      --recv-keys 75C9DD72C799870E310542E24166F2C257290828
+    fingerprint="$(gpg --homedir "${key_home}" --batch --with-colons --fingerprint \
+      75C9DD72C799870E310542E24166F2C257290828 | grep '^fpr:' | head -n 1 | cut -d: -f10)"
+    [[ "${fingerprint}" == "75C9DD72C799870E310542E24166F2C257290828" ]] \
+      || { rm -rf -- "${key_home}"; echo "Amnezia PPA signing key fingerprint mismatch" >&2; exit 1; }
+    gpg --homedir "${key_home}" --batch --export 75C9DD72C799870E310542E24166F2C257290828 \
+      >/usr/share/keyrings/amnezia-ppa.gpg
+    rm -rf -- "${key_home}"
+    printf '%s\n' 'deb [signed-by=/usr/share/keyrings/amnezia-ppa.gpg] https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main' \
+      >/etc/apt/sources.list.d/amnezia-ppa.list
   fi
-  apt-get -o DPkg::Lock::Timeout=300 update
-  apt-get -o DPkg::Lock::Timeout=300 install -y amneziawg
 fi
+
+apt-get -o DPkg::Lock::Timeout=300 update
+apt-get -o DPkg::Lock::Timeout=300 install -y amneziawg
+awg_installed_package="$(dpkg-query -W -f='${Version}' amneziawg 2>/dev/null || true)"
+awg_candidate_package="$(apt-cache policy amneziawg | awk '/Candidate:/ {print $2; exit}')"
+[[ -n "${awg_installed_package}" && "${awg_installed_package}" == "${awg_candidate_package}" ]] \
+  || { echo "AmneziaWG не обновлён до актуальной версии репозитория" >&2; exit 1; }
 
 command -v awg >/dev/null || { echo "Пакет не установил awg" >&2; exit 1; }
 command -v awg-quick >/dev/null || { echo "Пакет не установил awg-quick" >&2; exit 1; }

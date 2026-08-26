@@ -25,10 +25,12 @@ UPLINK_INTERFACE="$(ip -o -4 route show default | awk '{print $5; exit}')"
 [[ -n "${UPLINK_INTERFACE}" ]] || { echo "Не найден внешний сетевой интерфейс" >&2; exit 1; }
 
 export DEBIAN_FRONTEND=noninteractive
-if ! command -v wg >/dev/null 2>&1 || ! command -v wg-quick >/dev/null 2>&1; then
-  apt-get -o DPkg::Lock::Timeout=300 update
-  apt-get -o DPkg::Lock::Timeout=300 install -y iptables wireguard-tools
-fi
+apt-get -o DPkg::Lock::Timeout=300 update
+apt-get -o DPkg::Lock::Timeout=300 install -y iptables wireguard-tools
+wg_installed_version="$(dpkg-query -W -f='${Version}' wireguard-tools 2>/dev/null || true)"
+wg_candidate_version="$(apt-cache policy wireguard-tools | awk '/Candidate:/ {print $2; exit}')"
+[[ -n "${wg_installed_version}" && "${wg_installed_version}" == "${wg_candidate_version}" ]] \
+  || { echo "WireGuard tools не обновлены до актуальной версии репозитория" >&2; exit 1; }
 
 install -d -m 0700 "$(dirname -- "${WG_CONFIG}")"
 if [[ ! -s "${WG_CONFIG}" ]]; then
