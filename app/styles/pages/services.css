@@ -1154,3 +1154,234 @@
   .servicesMaintenanceHead { align-items:flex-start; }
   .maintenanceControls,.maintenanceControls.weekly,.maintenanceRuntime { grid-template-columns:1fr; }
 }
+
+/* Services v3 — rebuilt as a native system console. */
+.servicesHero {
+  display:block;
+}
+
+.servicesHeroCopy {
+  padding-bottom:18px;
+}
+
+.nodeStatusLine {
+  min-width:0;
+  display:grid;
+  grid-template-columns:auto auto auto minmax(0,1fr);
+  align-items:center;
+  gap:9px;
+  max-width:760px;
+  margin-top:14px;
+  padding-top:12px;
+  border-top:1px solid rgba(105,137,162,.14);
+}
+
+.nodeStatusLine > i {
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#69dcb9;
+  box-shadow:0 0 12px rgba(105,220,185,.38);
+}
+
+.nodeStatusLine > small {
+  color:#718898;
+  font-size:9px;
+  font-weight:750;
+  letter-spacing:.11em;
+}
+
+.nodeStatusLine > strong {
+  color:#dce9ef;
+  font-size:12px;
+  font-weight:700;
+}
+
+.nodeStatusLine > span {
+  min-width:0;
+  overflow:hidden;
+  color:#748a99;
+  font-size:11px;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+}
+
+.nodeStatusLine.attention > i { background:#efb657; box-shadow:0 0 12px rgba(239,182,87,.34); }
+.nodeStatusLine.attention > strong { color:#ffd17b; }
+
+.servicesRegistry {
+  width:100%;
+  min-width:0;
+  padding:8px 12px 12px;
+  background:linear-gradient(90deg,rgba(4,12,19,.48),rgba(4,12,19,.20));
+}
+
+.servicesRegistryColumns {
+  display:grid;
+  grid-template-columns:minmax(250px,1.2fr) minmax(220px,1fr) minmax(180px,auto);
+  gap:16px;
+  padding:5px 12px 8px;
+  color:#617786;
+  font-size:9px;
+  font-weight:750;
+  letter-spacing:.12em;
+}
+
+.servicesRegistryColumns span:last-child { text-align:right; }
+
+.servicesRegistry .serviceRows {
+  display:grid;
+  grid-template-columns:1fr;
+  gap:6px;
+}
+
+.servicesRegistry .serviceRow {
+  grid-template-columns:minmax(250px,1.2fr) minmax(220px,1fr) minmax(180px,auto);
+  gap:16px;
+  padding:11px 12px;
+  border:1px solid rgba(105,137,162,.09);
+  border-radius:11px;
+  background:rgba(5,14,21,.50);
+}
+
+.servicesRegistry .serviceRow:hover {
+  border-color:rgba(105,137,162,.18);
+  background:rgba(12,26,37,.68);
+}
+
+.serviceCategory {
+  display:block;
+  margin-bottom:3px;
+  color:#607b8d;
+  font-size:8px;
+  font-weight:750;
+  letter-spacing:.11em;
+}
+
+.servicesOperations {
+  overflow:visible;
+  border:0;
+  border-radius:0;
+  background:transparent;
+}
+
+.servicesOperationsHead {
+  align-items:center;
+  padding:14px 2px 10px;
+  border-bottom:0;
+}
+
+.servicesOperationsHead h2 { font-size:21px; }
+
+.servicesOperationsFacts > span {
+  min-height:34px;
+  padding:7px 12px;
+  border-color:rgba(93,119,143,.13);
+  background:rgba(7,16,24,.70);
+}
+
+.servicesOperationsGrid {
+  display:grid;
+  grid-template-columns:1fr;
+  gap:10px;
+  padding:0;
+}
+
+.servicesLog,
+.servicesMaintenance {
+  border:1px solid rgba(91,116,141,.17);
+  border-radius:17px;
+  background:linear-gradient(150deg,rgba(10,21,30,.92),rgba(5,13,20,.88));
+  box-shadow:inset 0 1px rgba(255,255,255,.025);
+}
+
+.servicesLog {
+  display:grid;
+  grid-template-columns:minmax(220px,.58fr) minmax(0,1.42fr);
+  gap:24px;
+  align-items:center;
+  padding:16px 18px;
+}
+
+.operationsTitle h3 { margin:1px 0 4px; font-size:17px; }
+.operationsTitle small { color:#718796; line-height:1.4; }
+
+.servicesLogControls {
+  display:grid;
+  grid-template-columns:minmax(150px,.62fr) minmax(210px,1fr) auto;
+  gap:10px;
+  align-items:stretch;
+}
+
+.servicesLogControls .opsField {
+  min-height:66px;
+  padding:10px 12px;
+  border:1px solid rgba(91,116,141,.12);
+  border-radius:12px;
+  background:rgba(3,10,16,.35);
+}
+
+.servicesLogControls .opsField.toggle { align-items:center; }
+.servicesLogActions { align-items:stretch; }
+.servicesLogActions button { height:auto; min-height:32px; }
+
+.servicesMaintenance {
+  padding:16px 18px 18px;
+}
+
+.servicesMaintenanceHead {
+  align-items:center;
+  margin-bottom:12px;
+  padding-bottom:11px;
+  border-bottom:1px solid rgba(91,116,141,.10);
+}
+
+.maintenanceRows {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+  overflow:visible;
+  border:0;
+  border-radius:0;
+  background:transparent;
+}
+
+.maintenanceRow,
+.maintenanceRow.enabled {
+  display:grid;
+  grid-template-columns:1fr;
+  gap:12px;
+  align-content:start;
+  padding:14px;
+  border:1px solid rgba(91,116,141,.13);
+  border-radius:14px;
+  background:rgba(3,10,16,.30);
+}
+
+.maintenanceRow + .maintenanceRow { border-top:1px solid rgba(91,116,141,.13); }
+.maintenanceRow.enabled { border-color:rgba(74,190,155,.20); background:linear-gradient(145deg,rgba(14,53,45,.20),rgba(3,10,16,.32)); }
+.maintenanceControls,.maintenanceControls.weekly { grid-template-columns:120px repeat(3,minmax(110px,1fr)); }
+.maintenanceRuntime { grid-column:auto; grid-template-columns:repeat(2,minmax(0,1fr)); }
+
+@media (max-width: 1120px) {
+  .servicesLog { grid-template-columns:1fr; gap:12px; }
+  .maintenanceRows { grid-template-columns:1fr; }
+}
+
+@media (max-width: 860px) {
+  .servicesRegistryColumns { display:none; }
+  .servicesRegistry .serviceRow { grid-template-columns:1fr; gap:8px; }
+  .servicesRegistry .serviceActions { justify-content:flex-start; }
+  .servicesLogControls { grid-template-columns:1fr; }
+  .servicesLogActions { justify-content:flex-start; }
+  .servicesLogActions button { min-height:36px; }
+  .maintenanceControls,.maintenanceControls.weekly { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+
+@media (max-width: 620px) {
+  .nodeStatusLine { grid-template-columns:auto auto 1fr; }
+  .nodeStatusLine > span { grid-column:2 / -1; white-space:normal; }
+  .servicesRegistry { padding:7px; }
+  .servicesLog,.servicesMaintenance { padding:14px; }
+  .maintenanceControls,.maintenanceControls.weekly,.maintenanceRuntime { grid-template-columns:1fr; }
+}

@@ -127,13 +127,10 @@ export function ServicesDashboard({
   const totalRestarts = installed.reduce((sum, item) => sum + Number(item.restarts || 0), 0);
   const schedulesActive = [automationDraft?.reboot?.enabled, automationDraft?.cleanup?.enabled].filter(Boolean).length;
 
-  const grouped = useMemo(() => {
-    const map: Record<ServiceGroupId, ServiceItem[]> = { control: [], network: [], security: [], system: [] };
-    for (const service of items) map[serviceGroup(service)].push(service);
-    return map;
+  const orderedItems = useMemo(() => {
+    const groupOrder: Record<ServiceGroupId, number> = { control: 0, network: 1, security: 2, system: 3 };
+    return [...items].sort((left, right) => groupOrder[serviceGroup(left)] - groupOrder[serviceGroup(right)]);
   }, [items]);
-
-  const availableGroups = (["control", "network", "security", "system"] as ServiceGroupId[]).filter((groupId) => grouped[groupId].length > 0);
   const nodeTone = services?.reboot_required || services?.failed_units ? "attention" : "healthy";
   const nodeTitle = services?.reboot_required ? "Требуется перезагрузка" : services?.failed_units ? "Требует внимания" : "Система в норме";
   const nodeHint = services?.reboot_required ? "Обновления ожидают reboot" : services?.failed_units ? `${services.failed_units} аварийных unit` : "Systemd без аварий";
@@ -146,18 +143,18 @@ export function ServicesDashboard({
           <p className="eyebrow">SERVICES CONTROL</p>
           <h1>Службы и обслуживание</h1>
           <p>Systemd, защищённые каналы, журналы и плановые операции узла.</p>
+          <div className={`nodeStatusLine ${nodeTone}`}>
+            <i aria-hidden="true" />
+            <small>NODE STATE</small>
+            <strong>{nodeTitle}</strong>
+            <span>{nodeHint}</span>
+          </div>
           <div className="servicesStats">
             <Metric label="ACTIVE" value={`${active.length}/${installed.length || 0}`} tone={services?.failed_units ? "warn" : "ok"} />
             <Metric label="FAILED" value={String(services?.failed_units || 0)} tone={services?.failed_units ? "bad" : "ok"} />
             <Metric label="AUTOSTART" value={`${enabled.length}/${installed.length || 0}`} />
             <Metric label="RESTARTS" value={String(totalRestarts)} />
           </div>
-        </div>
-        <div className={`servicesNode ${nodeTone}`}>
-          <small>NODE STATE</small>
-          <strong>{nodeTitle}</strong>
-          <span>{nodeHint}</span>
-          <i aria-hidden="true" />
         </div>
       </article>
 
@@ -171,23 +168,15 @@ export function ServicesDashboard({
           </div>
         </header>
 
-        <div className="servicesManagedContent">
-          {availableGroups.map((groupId) => {
-            const group = grouped[groupId];
-            const meta = groupMeta[groupId];
-            return (
-              <section className="servicesGroup" key={groupId}>
-                <header className="servicesGroupHead">
-                  <p className="eyebrow">{meta.eyebrow}</p>
-                  <h3>{meta.title}</h3>
-                  <small>{meta.hint}</small>
-                </header>
-                <div className="serviceRows">
-                  {group.map((service) => <ServiceRow key={service.id} service={service} busy={busy} onAction={onServiceAction} />)}
-                </div>
-              </section>
-            );
-          })}
+        <div className="servicesRegistry">
+          <div className="servicesRegistryColumns" aria-hidden="true">
+            <span>SERVICE</span><span>RUNTIME</span><span>ACTIONS</span>
+          </div>
+          <div className="serviceRows">
+            {orderedItems.map((service) => (
+              <ServiceRow key={service.id} service={service} groupId={serviceGroup(service)} busy={busy} onAction={onServiceAction} />
+            ))}
+          </div>
         </div>
       </article>
 
@@ -261,7 +250,7 @@ function Metric({ label, value, tone = "" }: { label: string; value: string; ton
   return <div className={`serviceMetric ${tone}`}><small>{label}</small><strong>{value}</strong></div>;
 }
 
-function ServiceRow({ service, busy, onAction }: { service: ServiceItem; busy: boolean; onAction: Props["onServiceAction"] }) {
+function ServiceRow({ service, groupId, busy, onAction }: { service: ServiceItem; groupId: ServiceGroupId; busy: boolean; onAction: Props["onServiceAction"] }) {
   const badge = serviceBadge(service);
   const canPrimary = service.controls.includes(service.active ? "restart" : "start");
   const canStop = service.active && (service.controls.includes("stop") || service.disabled_controls?.includes("stop"));
@@ -272,6 +261,7 @@ function ServiceRow({ service, busy, onAction }: { service: ServiceItem; busy: b
       <div className="serviceIdentity">
         <i className={`serviceDot ${badge.className}`} />
         <div>
+          <span className="serviceCategory">{groupMeta[groupId].eyebrow}</span>
           <strong>{service.name}</strong>
           <small title={service.unit}>{service.unit}</small>
         </div>
