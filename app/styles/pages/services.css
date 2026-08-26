@@ -62,13 +62,13 @@
   background:#071019;
   box-shadow:0 18px 50px rgba(0,0,0,.26);
 }
-.servicesManagedBackdrop { position:absolute; inset:0; z-index:-2; background:url('/gate-art/new-operator/services.webp') right center/cover no-repeat; opacity:.62; }
-.servicesManaged::before { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,rgba(4,11,18,.99),rgba(4,11,18,.92) 64%,rgba(4,11,18,.38)); }
+.servicesManagedBackdrop { position:absolute; inset:0; z-index:-2; background:url('/gate-art/new-operator/services.webp') right center/contain no-repeat; opacity:.78; }
+.servicesManaged::before { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,rgba(4,11,18,.99) 0%,rgba(4,11,18,.96) 48%,rgba(4,11,18,.72) 62%,rgba(4,11,18,.16) 100%); }
 .servicesManagedHead { padding:15px 18px 13px; border-bottom:1px solid rgba(105,137,162,.12); }
 .servicesManagedHead h2 { margin:0; color:#edf5f9; font-size:21px; }
 .servicesManagedHead span { display:block; margin-top:5px; color:#8196a5; font-size:12px; }
 
-.servicesRegistry { width:100%; min-width:0; padding:8px 12px 12px; }
+.servicesRegistry { width:60%; min-width:620px; padding:8px 12px 12px; }
 .servicesRegistryColumns {
   display:grid;
   grid-template-columns:minmax(250px,1.2fr) minmax(220px,1fr) minmax(180px,auto);
@@ -210,12 +210,14 @@
 .maintenanceRuntime strong { display:block; margin-top:3px; overflow:hidden; color:#dce9ef; font-size:10px; white-space:nowrap; text-overflow:ellipsis; }
 
 @media (max-width:1180px) {
+  .servicesRegistry { width:72%; min-width:0; }
   .servicesOperationsGrid { grid-template-columns:1fr; grid-template-areas:'maintenance' 'logging'; }
   .servicesLogControls { grid-template-columns:150px minmax(220px,1fr) auto; align-items:center; }
   .servicesLogActions { margin-top:0; }
 }
 
 @media (max-width:860px) {
+  .servicesRegistry { width:100%; }
   .servicesRegistryColumns { display:none; }
   .serviceRow { grid-template-columns:1fr; gap:8px; }
   .serviceActions { justify-content:flex-start; }

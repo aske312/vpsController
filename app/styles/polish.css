@@ -246,7 +246,6 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
 .overviewTopologyHead > div:first-child > p:last-child { display:none !important; }
 .gateCountryFlag { margin-right:7px; font-size:18px; line-height:1; filter:saturate(.92); }
 .gateMastActions .autoButton { width:34px; padding:0 !important; justify-content:center; }
-.gateMastActions .autoButton > span { font:750 8px var(--font-mono); }
 
 .dnsWorkspaceV2 { padding-bottom:78px; }
 .dnsPageHead { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; padding:4px 2px 2px !important; }

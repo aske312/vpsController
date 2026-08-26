@@ -48,7 +48,6 @@ type AppWorkspaceProps = {
   ramLabel: string;
   networkLabel: string;
   autoRefresh: boolean;
-  autoRefreshLabel: string;
   busy: boolean;
   lastUpdated?: Date | null;
   onToggleAutoRefresh: () => void;
@@ -76,7 +75,6 @@ export function AppWorkspace({
   ramLabel,
   networkLabel,
   autoRefresh,
-  autoRefreshLabel,
   busy,
   lastUpdated,
   onToggleAutoRefresh,
@@ -115,7 +113,7 @@ export function AppWorkspace({
               <h2>{server?.city || server?.name || "Primary Node"}</h2>
               <p>{server?.country || "—"} <span className="mono">{server?.public_endpoint || server?.public_ip || "—"}</span></p>
             </div>
-            <div className={`gateMastState ${nodeState}`}><i />{applicationStateTitle}</div>
+            <div className={`gateMastState ${nodeState}`}>{applicationStateTitle}</div>
           </div>
 
           <div className="gateMastFacts" aria-label="Метрики сервера">
@@ -127,11 +125,11 @@ export function AppWorkspace({
           </div>
 
           <div className="gateMastActions">
-            <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={busy} onClick={onToggleAutoRefresh}>
-              <i /><span>{autoRefresh ? autoRefreshLabel : "Ⅱ"}</span>
-            </button>
+            <div className={`refreshControl ${autoRefresh ? "active" : ""}`} aria-label="Управление обновлением данных">
+              <button className="autoButton" disabled={busy} onClick={onToggleAutoRefresh} aria-label={autoRefresh ? "Остановить автообновление" : "Включить автообновление"}><i /></button>
+              <button className="iconButton" onClick={onRefresh} aria-label="Обновить текущий модуль">↻</button>
+            </div>
             {lastUpdated && <span className="updatedAt">{lastUpdated.toLocaleTimeString("ru-RU")}</span>}
-            <button className="iconButton" onClick={onRefresh} aria-label="Обновить текущий модуль">↻</button>
             <button className="ghostButton" onClick={onLogout}>Выйти</button>
           </div>
         </header>

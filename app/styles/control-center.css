@@ -32,7 +32,6 @@
 .gateCountryFlag svg { display:block; width:100%; height:100%; }
 .gateCountryFlag.unknown { align-items:center; justify-content:center; color:#78909f; font:700 13px/1 var(--font-mono); }
 .gateMastState { margin:0 !important; padding:6px 8px !important; border:0 !important; border-radius:8px !important; background:rgba(98,215,180,.055) !important; letter-spacing:.03em !important; }
-.gateMastState > i { width:6px; height:6px; border-radius:50%; background:currentColor; box-shadow:0 0 9px currentColor; }
 .gateMastFacts { min-width:0; display:grid !important; grid-template-columns:repeat(5,minmax(62px,1fr)) !important; gap:0 !important; overflow:hidden; border:1px solid rgba(121,151,174,.10); border-radius:10px; background:rgba(2,9,15,.30); }
 .gateMastFacts > div { min-width:0; min-height:43px; padding:7px 9px !important; border:0 !important; border-right:1px solid rgba(121,151,174,.09) !important; border-radius:0 !important; background:transparent !important; }
 .gateMastFacts > div:last-child { border-right:0 !important; }

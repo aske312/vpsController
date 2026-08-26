@@ -416,7 +416,10 @@ test("service mode deploys main from an isolated preview while stabl remains the
   assert.match(page, /setAutoRefresh\(false\)/);
   assert.match(page, /const autoRefreshAfterChange = autoRefresh/);
   assert.match(page, /setAutoRefresh\(autoRefreshAfterChange\)/);
-  assert.match(page, /className=\{`autoButton \$\{autoRefresh \? "active" : ""\}`\} disabled=\{busy\}/);
+  assert.match(page, /className=\{`refreshControl \$\{autoRefresh \? "active" : ""\}`\}/);
+  assert.match(page, /className="autoButton" disabled=\{busy\} onClick=\{onToggleAutoRefresh\}/);
+  assert.match(page, /className="iconButton" onClick=\{onRefresh\}/);
+  assert.doesNotMatch(page, /autoRefreshLabel/);
   assert.doesNotMatch(page, /disabled=\{serviceModeActive\}.*Авто · выкл/);
   assert.match(page, /serviceModeActive && <button onClick=\{\(\) => void runApplicationAction\("test-update"\)\}/);
   assert.match(page, /Переход на тестовую версию/);

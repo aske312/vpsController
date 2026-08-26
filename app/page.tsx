@@ -1252,7 +1252,6 @@ export default function Home() {
     ramLabel={`${memUsed.toFixed(0)}%`}
     networkLabel={`↓ ${bytes(networkRate.rx)}/с`}
     autoRefresh={autoRefresh}
-    autoRefreshLabel={`${["overview", "clients", "wg", "awg", "shadowsocks", "vless-reality-xhttp", "security"].includes(tab) ? LIVE_SAMPLE_SECONDS : tab === "mihomo" ? "15" : tab === "application" || tab === "services" ? "10" : "30"}s`}
     busy={busy}
     lastUpdated={lastUpdated}
     onToggleAutoRefresh={() => setAutoRefresh((value) => !value)}

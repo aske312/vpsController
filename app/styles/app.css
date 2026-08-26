@@ -373,15 +373,6 @@
   min-width: 0;
 }
 
-.gateMastState::before {
-  content: "";
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 9px currentColor;
-}
-
 .gateMastState.working {
   color: var(--amber);
   border-color: rgba(232,183,97,.20);
@@ -429,12 +420,6 @@
   box-shadow: none !important;
 }
 
-.gateMastActions .autoButton.active {
-  color: var(--green) !important;
-  border-color: rgba(98,215,180,.22) !important;
-  background: rgba(98,215,180,.08) !important;
-}
-
 .gateMastActions .iconButton {
   width: 36px !important;
   padding: 0 !important;
@@ -443,6 +428,20 @@
 .gateMastActions .ghostButton {
   padding: 0 12px !important;
 }
+
+.refreshControl {
+  display:inline-flex;
+  align-items:center;
+  overflow:hidden;
+  border:1px solid var(--line);
+  border-radius:9px;
+  background:#0c1821;
+}
+.refreshControl .autoButton,.refreshControl .iconButton { border:0 !important; border-radius:0 !important; background:transparent !important; }
+.refreshControl .autoButton { width:27px !important; min-width:27px; padding:0 !important; }
+.refreshControl .iconButton { border-left:1px solid var(--line) !important; }
+.refreshControl.active { border-color:rgba(98,215,180,.22); }
+.refreshControl.active .autoButton { color:var(--green) !important; }
 
 .gateSectionIntro {
   margin: 12px 2px 18px;
