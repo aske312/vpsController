@@ -219,37 +219,35 @@
 
 .securityRows .securityFixButton { color:#78efc7; background:rgba(18,82,67,.24); border:1px solid rgba(74,190,155,.26); cursor:pointer; }
 
-.securityDiagnostics { min-width:0; overflow:hidden; border-radius:20px; border:1px solid rgba(91,116,141,.22); background:linear-gradient(180deg,rgba(8,16,24,.98),rgba(7,15,23,.95)); }
+.securityDiagnostics { display:block; min-width:0; overflow:hidden; border:1px solid rgba(91,116,141,.18); border-radius:16px; background:#07111a; }
 
-.securityDiagnosticsHead { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; padding:13px 16px 11px; border-bottom:1px solid rgba(91,116,141,.11); }
+.securityDiagnosticsHead { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:16px 18px; border-bottom:1px solid rgba(91,116,141,.11); }
 
-.securityDiagnosticsHead h2{margin:0;font-size:19px}
+.securityDiagnosticsHead h2{margin:0;font-size:18px}
 
-.securityDiagnosticsHead span{color:#8095a4;font-size:11px}
+.securityDiagnosticsHead span{display:block;margin-top:5px;color:#8095a4;font-size:10px}
 
 .securityDiagnosticsStats { display:flex; gap:7px; }
 
-.securityDiagnosticsStats>span{display:grid;gap:2px;min-width:64px;padding:6px 8px;border:1px solid rgba(91,116,141,.14);border-radius:10px;background:rgba(6,14,21,.42)}
+.securityDiagnosticsStats>span{display:grid;gap:3px;min-width:68px;padding:7px 9px;border:1px solid rgba(91,116,141,.14);border-radius:9px;background:rgba(3,10,16,.42)}
 
 .securityDiagnosticsStats small{color:#748b9b;font:700 8px var(--font-mono),monospace}
 
 .securityDiagnosticsStats strong{color:#e7f0f5;font:800 13px var(--font-mono),monospace}
 
-.securityDiagnosticsGrid { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr); }
+.securityDiagnosticsGrid { display:grid; grid-template-columns:minmax(0,.88fr) minmax(0,1.12fr); gap:10px; padding:10px; }
 
-.securityListeners { min-width:0; border-right:1px solid rgba(91,116,141,.11); }
+.securityListeners,.securityLogs { min-width:0; overflow:hidden; border:1px solid rgba(91,116,141,.12); border-radius:11px; background:rgba(3,10,16,.34); }
 
-.securityDiagTitle{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:10px 13px 8px}
+.securityDiagTitle{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:62px;padding:11px 13px;border-bottom:1px solid rgba(91,116,141,.10)}
 
 .securityDiagTitle h3{margin:0;font-size:15px}
 
-.securityDiagTitle span{color:#718797;font-size:10px}
+.securityDiagTitle span{max-width:52%;color:#718797;font-size:9px;text-align:right}
 
-.securityListeners pre{margin:0;height:210px;overflow:auto;padding:10px 12px;background:rgba(3,10,16,.72);color:#62c8ff;font:10px/1.45 var(--font-mono),monospace;white-space:pre-wrap}
+.securityListeners pre{margin:0;height:240px;overflow:auto;padding:11px 13px;background:#030a10;color:#62c8ff;font:9.5px/1.5 var(--font-mono),monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 
-.securityLogs { min-width:0; }
-
-.securityLogsToggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 14px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.securityLogsToggle{width:100%;min-height:62px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 13px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
 
 .securityLogsToggle span{display:grid;gap:3px}
 
@@ -259,11 +257,11 @@
 
 .securityLogsToggle em{font-style:normal;color:#72e2be;font-size:10px}
 
-.securityLogsBody{border-top:1px solid rgba(91,116,141,.11)}
+.securityLogsBody{border-top:1px solid rgba(91,116,141,.10)}
 
 .securityLogsBody .logTools{padding:8px 10px}
 
-.securityLogsBody pre{height:210px;margin:0;overflow:auto;padding:10px 12px;background:rgba(3,10,16,.72);color:#62c8ff;font:10px/1.45 var(--font-mono),monospace;white-space:pre-wrap}
+.securityLogsBody pre{height:188px;margin:0;overflow:auto;padding:11px 13px;background:#030a10;color:#62c8ff;font:9.5px/1.5 var(--font-mono),monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 
 @media (max-width:1280px) {
 .securityMatrixContent{width:min(78%,980px)}
@@ -350,20 +348,6 @@
   background:
     radial-gradient(circle at 84% 34%, rgba(86,72,210,.11), transparent 30%),
     linear-gradient(180deg, rgba(6,14,21,.02), rgba(6,14,21,.15));
-}
-
-.securityListeners pre {
-  height: auto;
-  min-height: 0;
-  max-height: none;
-  overflow: visible;
-  padding: 10px 12px 12px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.securityListeners {
-  align-self: stretch;
 }
 
 @media (max-width: 1280px) {

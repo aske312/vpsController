@@ -184,13 +184,9 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
 .dnsPolicyStrip { padding:8px 12px !important; }
 .dnsResolverRow { min-height:0 !important; padding:8px 10px !important; }
 
-/* Security diagnostics live as an operational console instead of a loose footer. */
 .securityWorkspace { gap:10px !important; }
 .securityOverview { grid-template-columns:minmax(0,1.2fr) minmax(330px,.8fr) !important; }
 .securityTelemetry { grid-column:1/-1; }
-.securityDiagnosticsGrid { grid-template-columns:minmax(280px, .36fr) minmax(0,.64fr) !important; }
-.securityLogs.open { grid-column:auto !important; }
-.securityListeners pre,.securityLogs pre { min-height:220px !important; max-height:360px !important; }
 
 /* One modal language for every action dialog. */
 :is(.confirmBackdrop,.accessBetaModalBackdrop,.mihomoDialogBackdrop,.legalBackdrop) {
@@ -275,9 +271,8 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
 .dnsLowerGrid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; }.dnsCustomPanel > div { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; padding:10px; }.dnsCustomPanel label { display:grid; gap:5px; color:var(--muted); font-size:9px; }.dnsCustomPanel input { height:34px; }.dnsEffectivePanel > div { display:grid; gap:4px; padding:8px; }.dnsEffectivePanel > div > span { display:grid; grid-template-columns:42px minmax(0,1fr) 44px; gap:8px; align-items:center; padding:7px 8px; border-radius:8px; background:var(--panel-inset); }.dnsEffectivePanel code { overflow:hidden; color:var(--muted); font-size:9px; text-overflow:ellipsis; white-space:nowrap; }.dnsEffectivePanel em { color:var(--amber); font:700 8px var(--font-mono); font-style:normal; }.dnsEffectivePanel .matches em { color:var(--green); }
 .dnsApplyDock { position:sticky; z-index:60; bottom:10px; display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px 12px; border:1px solid var(--line-strong); border-radius:12px; background:rgba(7,16,24,.95); box-shadow:0 14px 34px rgba(0,0,0,.30); backdrop-filter:blur(14px); }.dnsApplyDock > div { min-width:0; display:grid; grid-template-columns:auto auto minmax(0,1fr); align-items:center; gap:8px; }.dnsApplyDock p { margin:0; }.dnsApplyDock strong { font-size:11px; }.dnsApplyDock span { overflow:hidden; color:var(--muted); font-size:9px; text-overflow:ellipsis; white-space:nowrap; }.dnsApplyDock button { min-height:34px; padding:0 13px; border:1px solid rgba(98,215,180,.28); border-radius:9px; background:rgba(37,111,91,.28); color:var(--green); font-weight:750; }
 
-.securityOverview { order:1; padding:2px !important; }.securityDiagnostics { order:2; }.securityMatrix { order:3; }
+.securityOverview { order:1; padding:2px !important; }
 .securityTelemetry { gap:6px; padding:6px 0 0 !important; }.securityTelemetry > span { border:1px solid var(--line) !important; border-radius:9px !important; background:var(--panel-soft) !important; }
-.securityDiagnostics { border:1px solid var(--line); border-radius:14px; background:rgba(7,16,24,.90); }.securityDiagnosticsHead { padding:11px 13px !important; }.securityDiagnosticsGrid { padding:0 8px 8px; }.securityListeners,.securityLogs { border-radius:10px !important; }
 .applicationSummary { padding:2px !important; }
 
 @media(max-width:980px){.dnsWorkbench,.dnsLowerGrid{grid-template-columns:1fr}.dnsPageHead{align-items:flex-start;flex-direction:column}.dnsPageFacts{width:100%}}

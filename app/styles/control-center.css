@@ -76,20 +76,19 @@
 .dnsPolicyConsole { background:linear-gradient(180deg,rgba(12,27,38,.96),rgba(5,13,20,.98)) !important; }
 .dnsApplyDock { border-color:var(--cc-line-hot) !important; background:rgba(5,14,22,.94) !important; }
 
-/* Security — posture and diagnostics lead, controls follow. */
+/* Security — posture first, protection matrix second, diagnostics last. */
 .securityOverview {
-  position:relative; min-height:330px; overflow:hidden; padding:22px !important; isolation:isolate;
+  position:relative; min-height:0; overflow:hidden; padding:22px !important; isolation:isolate;
   display:grid !important; grid-template-columns:minmax(0,1fr) minmax(340px,.75fr) !important;
-  border-radius:18px !important; background:#06101a !important; box-shadow:var(--cc-shadow) !important;
+  border-radius:18px !important; background:linear-gradient(145deg,#07131d,#050d14) !important; box-shadow:var(--cc-shadow) !important;
 }
-.securityOverview::before { content:""; position:absolute; inset:0; z-index:-2; background:url('/gate-art/new-operator/security.webp') right center/cover no-repeat; opacity:.84; }
-.securityOverview::after { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,rgba(4,12,19,.99) 0%,rgba(4,12,19,.88) 51%,rgba(4,12,19,.24) 82%),linear-gradient(180deg,transparent 45%,rgba(4,12,19,.82)); }
+.securityOverview::before,.securityOverview::after { content:none !important; }
 .securityOverviewLead { align-self:start; max-width:690px; padding:0 !important; }
 .securityOverviewDomains { align-self:end; padding:8px 0 0 !important; }
 .securityTelemetry { align-self:end; padding:8px 0 0 !important; }
-.securityTelemetry > span { background:rgba(4,12,19,.65) !important; backdrop-filter:blur(8px); }
-.securityDiagnostics { order:2 !important; border-color:var(--cc-line) !important; border-radius:15px !important; background:var(--cc-surface) !important; }
-.securityMatrix { order:3 !important; border-color:var(--cc-line) !important; border-radius:15px !important; background:var(--cc-surface) !important; }
+.securityTelemetry > span { background:rgba(4,12,19,.65) !important; }
+.securityMatrix { order:2 !important; border-color:var(--cc-line) !important; border-radius:15px !important; background:var(--cc-surface) !important; }
+.securityDiagnostics { order:3 !important; }
 .securityMatrixArt { display:none !important; }
 .securityMatrixContent { width:100% !important; }
 
@@ -131,7 +130,6 @@
   .gateMastState,.gateMastNode p,.gateMastActions .updatedAt { display:none !important; }
   .overviewTopology,.securityOverview { min-height:0 !important; padding:14px !important; }
   .overviewFlow { grid-template-columns:1fr !important; }
-  .securityOverview::before { opacity:.42 !important; }
   .dnsResolverBrowser { min-height:0; }
   .dnsResolverArt { opacity:.38 !important; }
   .dnsResolverList { width:100%; }
