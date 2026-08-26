@@ -202,8 +202,8 @@
 .maintenanceIdentity { min-width:0; }
 .maintenanceIdentity strong { display:block; color:#edf5f9; font-size:13px; }
 .maintenanceIdentity small { display:block; margin-top:4px; color:#7e93a2; font-size:10px; line-height:1.35; }
-.maintenanceControls { min-width:0; display:grid; grid-template-columns:120px minmax(150px,1fr) minmax(120px,.7fr); gap:8px; align-items:end; }
-.maintenanceControls.weekly { grid-template-columns:120px repeat(3,minmax(110px,1fr)); }
+.maintenanceControls { min-width:0; display:grid; grid-template-columns:112px minmax(150px,200px) minmax(125px,160px); justify-content:end; gap:8px; align-items:end; }
+.maintenanceControls.weekly { grid-template-columns:112px minmax(150px,200px) minmax(140px,180px) minmax(125px,160px); }
 .maintenanceRuntime { grid-column:1 / -1; min-width:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
 .maintenanceRuntime > span { min-width:0; padding:7px 9px; border:1px solid rgba(91,116,141,.10); border-radius:9px; background:rgba(4,12,19,.34); }
 .maintenanceRuntime small { color:#788e9e; font-size:8px; font-weight:750; letter-spacing:.09em; }
