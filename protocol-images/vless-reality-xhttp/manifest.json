@@ -1,9 +1,9 @@
 {
   "id": "vless-reality-xhttp",
-  "name": "VRX",
+  "name": "VLESS",
   "version": "1.0.0",
   "installable": true,
-  "description": "VLESS через REALITY и XHTTP без собственного домена",
+  "description": "VLESS на ядре Xray с настраиваемыми REALITY и XHTTP",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",
   "installer": "install.sh",

@@ -197,7 +197,7 @@ const transportLabels: Record<string, string> = {
 const transportCodes: Record<string, string> = {
   awg: "AWG",
   wg: "WG",
-  "vless-reality-xhttp": "VRX",
+  "vless-reality-xhttp": "VLESS",
   shadowsocks: "SS",
 };
 

@@ -45,18 +45,42 @@ expected="$(grep -Eio '[0-9a-f]{64}' "${tmp_dir}/${asset}.dgst" | head -n 1 | tr
 actual="$(sha256sum "${tmp_dir}/${asset}" | awk '{print $1}')"
 [[ -n "${expected}" && "${actual}" == "${expected}" ]] || { echo "Контрольная сумма Xray не совпала" >&2; exit 1; }
 unzip -q "${tmp_dir}/${asset}" xray -d "${tmp_dir}"
+"${tmp_dir}/xray" version >/dev/null
 
 install -d -m 0755 "${MODULE_DIR}"
-install -m 0755 "${tmp_dir}/xray" "${MODULE_DIR}/xray"
 
 if [[ "${XRAY_UPDATE_ONLY:-}" == "1" ]]; then
-  # Binary-only update: the on-disk Xray build is now current, but the
-  # running service still has the old one loaded in memory. Leave it be —
-  # restarting here would drop every live connection without being asked.
-  # An admin restart from the Services page picks up the new binary.
-  echo "Xray обновлён до $("${MODULE_DIR}/xray" version | head -n1); служба не перезапущена — перезапустите вручную (Службы), чтобы применить."
+  candidate="${MODULE_DIR}/.xray.new"
+  previous="${MODULE_DIR}/.xray.previous"
+  install -m 0755 "${tmp_dir}/xray" "${candidate}"
+  "${candidate}" run -test -config "${CONFIG_DIR}/config.json"
+  [[ ! -x "${MODULE_DIR}/xray" ]] || cp -p -- "${MODULE_DIR}/xray" "${previous}"
+  mv -f -- "${candidate}" "${MODULE_DIR}/xray"
+  update_ready=false
+  if systemctl restart vps-control-vless-reality-xhttp.service; then
+    for _ in {1..10}; do
+      if systemctl is-active --quiet vps-control-vless-reality-xhttp.service && ss -H -ltn "sport = :${PORT}" | grep -q .; then
+        update_ready=true
+        break
+      fi
+      sleep 0.5
+    done
+  fi
+  if [[ "${update_ready}" != "true" ]]; then
+    journalctl -u vps-control-vless-reality-xhttp.service -n 20 --no-pager >&2 || true
+    if [[ -x "${previous}" ]]; then
+      mv -f -- "${previous}" "${MODULE_DIR}/xray"
+      systemctl restart vps-control-vless-reality-xhttp.service || true
+    fi
+    echo "Новая версия Xray не запустилась; восстановлена предыдущая." >&2
+    exit 1
+  fi
+  rm -f -- "${previous}"
+  echo "Xray обновлён и запущен: $("${MODULE_DIR}/xray" version | head -n1)."
   exit 0
 fi
+
+install -m 0755 "${tmp_dir}/xray" "${MODULE_DIR}/xray"
 
 install -d -m 0750 -o root -g nogroup "${CONFIG_DIR}"
 

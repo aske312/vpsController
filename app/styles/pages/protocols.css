@@ -105,7 +105,7 @@
 
 .protocolWorkspace-wg { --protocol-accent:#66cfe1; --protocol-soft:rgba(102,207,225,.10); --protocol-line:rgba(102,207,225,.25); }
 
-.protocolWorkspace-vrx { --protocol-accent:#9b82ff; --protocol-soft:rgba(155,130,255,.11); --protocol-line:rgba(155,130,255,.28); }
+.protocolWorkspace-vless { --protocol-accent:#9b82ff; --protocol-soft:rgba(155,130,255,.11); --protocol-line:rgba(155,130,255,.28); }
 
 .protocolWorkspace-ss { --protocol-accent:#63bfe8; --protocol-soft:rgba(99,191,232,.10); --protocol-line:rgba(99,191,232,.25); }
 
@@ -472,6 +472,34 @@
 .protocolWorkspace .configurationSafety small { display:block; margin-top:2px; color:#6f8794; font-size:8px; }
 
 .protocolSettingsEditor { display:block !important; padding:0 !important; }
+
+.vlessStack {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:11px 14px;
+  border-bottom:1px solid rgba(92,122,145,.10);
+  background:rgba(4,12,18,.34);
+}
+
+.vlessStack span { min-width:84px; }
+.vlessStack b { display:block; color:#dfe9ee; font:750 9px var(--font-mono); letter-spacing:.06em; }
+.vlessStack small { display:block; margin-top:2px; color:#607888; font-size:7px; }
+.vlessStack i { color:var(--protocol-accent); font:700 10px var(--font-mono); font-style:normal; }
+.protocolWorkspace-vless .protocolSettingsFields { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.protocolWorkspace-vless .protocolSettingsFields label:first-child { grid-column:span 2; }
+.protocolWorkspace-vless .protocolSettingsFields label > span { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.protocolWorkspace-vless .protocolSettingsFields label > span em { color:var(--protocol-accent); font:750 7px var(--font-mono); font-style:normal; letter-spacing:.08em; }
+
+@media (max-width: 900px) {
+  .protocolWorkspace-vless .protocolSettingsFields { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+
+@media (max-width: 620px) {
+  .vlessStack { flex-wrap:wrap; }
+  .protocolWorkspace-vless .protocolSettingsFields { grid-template-columns:1fr; }
+  .protocolWorkspace-vless .protocolSettingsFields label:first-child { grid-column:auto; }
+}
 
 .protocolSettingsFields {
   min-width:0;

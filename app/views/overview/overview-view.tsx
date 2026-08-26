@@ -143,7 +143,7 @@ const directShort: Record<ProtocolId, string> = {
   wg: "WG",
   awg: "AWG",
   shadowsocks: "SS",
-  "vless-reality-xhttp": "VRX",
+  "vless-reality-xhttp": "VLESS",
 };
 
 const directName: Record<ProtocolId, string> = {
@@ -169,7 +169,7 @@ const duration = (seconds = 0) => {
   return `${minutes}м`;
 };
 
-const protocolMark = (id: string) => id === "mihomo" ? "M" : id === "vless-reality-xhttp" ? "VRX" : id === "shadowsocks" ? "SS" : id.toUpperCase();
+const protocolMark = (id: string) => id === "mihomo" ? "M" : id === "vless-reality-xhttp" ? "VLESS" : id === "shadowsocks" ? "SS" : id.toUpperCase();
 const normalize = (value = "") => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 const channelAliases: Record<string, string[]> = {

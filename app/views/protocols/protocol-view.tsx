@@ -16,6 +16,7 @@ type ProtocolViewProps = {
 
 export function ProtocolView(props: ProtocolViewProps) {
   const { protocolTab, activeProtocol, activeProtocolRate, activeProtocolImage, protocolCode, protocolIsTunnel, protocolOperational, protocolAvailability, protocolDiagnosticsLabel, protocolResourceAvailable, protocolResourceTotal, installedProtocols, setTab, protocolSettingsDraft, diagnosticsOpen, resourcesOpen, checkingDiagnostics, checkingResources, installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol, changeProtocolSetting, saveProtocolSettings, toggleNetworkDiagnostics, checkNetworkDiagnostics, toggleProtocolResources, checkProtocolResources } = props;
+  const isVless = protocolTab === "vless-reality-xhttp";
   return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()}`}>
         <header className="protocolHeader">
           <div className="protocolHeaderCopy">
@@ -23,7 +24,7 @@ export function ProtocolView(props: ProtocolViewProps) {
             <div className="protocolHeaderTitle">
               <div>
                 <h1>{labels[protocolTab]}</h1>
-                <p>Runtime, конфигурация, диагностика и подключения протокола.</p>
+                <p>{isVless ? "Протокол VLESS, его транспорт, защита и подключения." : "Runtime, конфигурация, диагностика и подключения протокола."}</p>
               </div>
               <div className="protocolHeaderState">
                 <span className={protocolOperational ? "online" : "offline"}>{protocolOperational ? "ACTIVE" : "STOPPED"}</span>
@@ -38,7 +39,7 @@ export function ProtocolView(props: ProtocolViewProps) {
             </div>
           </div>
           {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные протоколы">
-            {installedProtocols.map((protocol) => <button key={protocol} className={protocol === protocolTab ? "active" : ""} onClick={() => setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : "VRX"}</button>)}
+            {installedProtocols.map((protocol) => <button key={protocol} className={protocol === protocolTab ? "active" : ""} onClick={() => setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : "VLESS"}</button>)}
           </nav>}
         </header>
 
@@ -51,13 +52,13 @@ export function ProtocolView(props: ProtocolViewProps) {
                   <span className={protocolOperational ? "state online" : "state offline"}>{protocolOperational ? "Работает" : "Остановлен"}</span>
                 </header>
                 <dl className="protocolRuntimeFacts">
-                  <div><dt>ИНТЕРФЕЙС</dt><dd>{activeProtocol.interface || "—"}</dd></div>
-                  <div><dt>ТИП</dt><dd>{labels[protocolTab]}</dd></div>
-                  <div><dt>АДРЕС</dt><dd>{activeProtocol.address || "—"}</dd></div>
-                  <div><dt>ПОРТ</dt><dd>{activeProtocol.listen_port || "—"}</dd></div>
+                  <div><dt>{isVless ? "ЯДРО" : "ИНТЕРФЕЙС"}</dt><dd>{isVless ? `Xray ${formatModuleVersion(activeProtocolImage?.installed_version, "—")}` : activeProtocol.interface || "—"}</dd></div>
+                  <div><dt>ПРОТОКОЛ</dt><dd>{labels[protocolTab]}</dd></div>
+                  <div><dt>{isVless ? "ВХОД" : "АДРЕС"}</dt><dd>{isVless ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port || "—"}` : activeProtocol.address || "—"}</dd></div>
+                  {!isVless && <div><dt>ПОРТ</dt><dd>{activeProtocol.listen_port || "—"}</dd></div>}
                   <div><dt>TRANSPORT</dt><dd>{activeProtocol.transport || (protocolIsTunnel ? "UDP" : "—")}</dd></div>
                   {!protocolIsTunnel && <div><dt>SECURITY</dt><dd>{activeProtocol.security || "—"}</dd></div>}
-                  {!protocolIsTunnel && <div><dt>TARGET</dt><dd>{activeProtocol.target || "Прямой выход"}</dd></div>}
+                  {!protocolIsTunnel && <div><dt>{isVless ? "МАСКИРОВКА" : "TARGET"}</dt><dd>{activeProtocol.target || "Прямой выход"}</dd></div>}
                   <div><dt>КЛИЕНТЫ</dt><dd>{activeProtocol.online_peers}/{activeProtocol.peers} online</dd></div>
                   <div><dt>ЗАПУЩЕН С</dt><dd>{safeDateTime(activeProtocol.active_since)}</dd></div>
                   <div><dt>SYSTEMD</dt><dd>{activeProtocol.unit || (activeProtocol.service_active ? "active" : "inactive")}</dd></div>
@@ -139,29 +140,33 @@ function ProtocolSettingsPanel({
   busy: boolean; onChange: (key: string, value: string | number | boolean) => void; onSave: () => void;
 }) {
   const tunnel = protocol === "wg" || protocol === "awg";
+  const isVless = protocol === "vless-reality-xhttp";
   return <article className="panel protocolConfiguration">
     <header>
-      <div><p className="eyebrow">CHANNEL CONFIGURATION</p><h3>Настройки {labels[protocol]}</h3>
-        <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
+      <div><p className="eyebrow">{isVless ? "VLESS CONFIGURATION" : "CHANNEL CONFIGURATION"}</p><h3>{isVless ? "Конфигурация VLESS" : `Настройки ${labels[protocol]}`}</h3>
+        <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : isVless ? "REALITY отвечает за защиту и маскировку, XHTTP — за транспорт. Ядро Xray обновляется отдельно от конфигурации." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
       <div className="configurationSafety"><i aria-hidden="true" /><p><strong>Безопасное применение</strong><small>валидация и автоматический откат</small></p></div>
     </header>
-    <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} onChange={onChange} onSave={onSave} />
+    <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} vless={isVless} onChange={onChange} onSave={onSave} />
   </article>;
 }
 function ProtocolSettingsEditor({
-  fields, draft, busy, onChange, onSave,
+  fields, draft, busy, vless = false, onChange, onSave,
 }: {
   fields: EditableProtocolSetting[];
   draft: Record<string, string | number | boolean>;
   busy: boolean;
+  vless?: boolean;
   onChange: (key: string, value: string | number | boolean) => void;
   onSave: () => void;
 }) {
   if (!fields.length) return <p className="protocolSettingsEmpty">Для этого протокола нет изменяемых параметров.</p>;
-  return <div className="protocolSettingsEditor">
+  const fieldLayer = (key: string) => key === "sni" ? "REALITY" : ["xhttp_mode", "xpadding", "xmux_concurrency"].includes(key) ? "XHTTP" : "XRAY";
+  return <div className={`protocolSettingsEditor${vless ? " vlessSettingsEditor" : ""}`}>
+    {vless && <div className="vlessStack" aria-label="Состав VLESS"><span><b>VLESS</b><small>протокол</small></span><i>+</i><span><b>REALITY</b><small>защита</small></span><i>+</i><span><b>XHTTP</b><small>транспорт</small></span><i>·</i><span><b>XRAY</b><small>ядро</small></span></div>}
     <div className="protocolSettingsFields">
       {fields.map((field) => <label key={field.key}>
-        <span>{field.label}</span>
+        <span>{field.label}{vless && <em>{fieldLayer(field.key)}</em>}</span>
         {field.type === "boolean" ? <input type="checkbox" checked={Boolean(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.checked)} />
           : field.type === "select" ? <select value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)}>
             {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}

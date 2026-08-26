@@ -663,16 +663,20 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /АКТИВНОСТЬ/);
   assert.doesNotMatch(manager, /PUBLIC_IP="\$\{PUBLIC_IP\}"/);
   assert.match(manager, /PUBLIC_IP="\$\(env_value PUBLIC_IP\)"/);
-  assert.match(page, /protocolTab === "shadowsocks" \? "SS" : protocolTab === "vless-reality-xhttp" \? "VRX"/);
+  assert.match(page, /protocolTab === "shadowsocks" \? "SS" : protocolTab === "vless-reality-xhttp" \? "VLESS"/);
   assert.match(page, /image\.description \|\| image\.category_name/);
   assert.match(page, /activeProtocolImage/);
   assert.match(page, /setTab\(protocol\)/);
   assert.match(page, /<p className="eyebrow">PROTOCOL CONTROL<\/p>/);
-  assert.match(page, /client\.protocol === "shadowsocks" \? "SS" : "VRX"/);
+  assert.match(page, /client\.protocol === "shadowsocks" \? "SS" : "VLESS"/);
   assert.match(page, /if \(Boolean\(current\?\.installed\) === installed\) return;/);
   assert.match(manager.match(/install_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
   assert.match(manager.match(/remove_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
-  assert.match(vlessManifest, /"name": "VRX"/);
+  assert.match(vlessManifest, /"name": "VLESS"/);
+  assert.match(vlessInstall, /"\$\{candidate\}" run -test -config/);
+  assert.match(vlessInstall, /mv -f -- "\$\{candidate\}" "\$\{MODULE_DIR\}\/xray"/);
+  assert.match(vlessInstall, /systemctl restart vps-control-vless-reality-xhttp\.service/);
+  assert.match(vlessInstall, /восстановлена предыдущая/);
   assert.match(page, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\].*includes\(tab\)/);
   assert.match(page, /CHANNEL CONFIGURATION/);
   assert.match(manager, /ReadWritePaths=-\/etc\/vps-control\.env -\/etc\/vps-control /);
@@ -697,7 +701,7 @@ test("the interface uses one fixed visual design without personalization", async
   assert.match(manager, /rm -f -- "\$\{DATA_DIR\}\/personalization\.json"/);
 });
 
-test("protocol pages safely edit channel settings and VRX links select HTTP2", async () => {
+test("protocol pages safely edit channel settings and VLESS links select HTTP2", async () => {
   const [page, api, css] = await Promise.all([
     read("app/page.tsx"), read("api/main.py"), readStyles(),
   ]);
@@ -750,7 +754,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /env_updates\["SHADOWSOCKS_DNS"\]/);
   assert.match(api, /env_updates\["VRX_DNS"\]/);
   assert.match(api, /vrx_servers\.insert\(0, selected\["doh_url"\]\)/);
-  assert.match(page, /DoH для VRX/);
+  assert.match(page, /DoH для VLESS/);
   assert.match(page, /DNS самого VPS/);
   assert.match(api, /def apply_system_dns/);
   assert.match(api, /systemd-resolved/);

@@ -825,7 +825,9 @@ export default function Home() {
       title: `Обновить ${image.name}?`,
       message: image.update_breaking
         ? `Доступна версия ${image.available_version} (сейчас ${image.installed_version || "—"}). Это смена старшей версии протокола — после обновления может понадобиться пересоздать подключения, использующие этот протокол.`
-        : `Доступна версия ${image.available_version} (сейчас ${image.installed_version || "—"}). Активные подключения не будут разорваны.`,
+        : image.id === "vless-reality-xhttp"
+          ? `Доступна версия Xray ${image.available_version} (сейчас ${image.installed_version || "—"}). После проверки бинарника служба VLESS будет кратковременно перезапущена, конфигурация и подключения сохранятся.`
+          : `Доступна версия ${image.available_version} (сейчас ${image.installed_version || "—"}). Активные подключения не будут разорваны.`,
       confirmLabel: "Обновить",
       danger: image.update_breaking,
     })) return;
@@ -1201,7 +1203,7 @@ export default function Home() {
   const activeProtocol = protocolTab ? protocolStatuses[protocolTab] : undefined;
   const activeProtocolRate = protocolTab ? protocolRates[protocolTab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
   const activeProtocolImage = protocolTab ? protocolImages.find((image) => image.id === protocolTab) : undefined;
-  const protocolCode = protocolTab === "wg" ? "WG" : protocolTab === "awg" ? "AWG" : protocolTab === "shadowsocks" ? "SS" : protocolTab === "vless-reality-xhttp" ? "VRX" : "";
+  const protocolCode = protocolTab === "wg" ? "WG" : protocolTab === "awg" ? "AWG" : protocolTab === "shadowsocks" ? "SS" : protocolTab === "vless-reality-xhttp" ? "VLESS" : "";
   const protocolIsTunnel = protocolTab === "wg" || protocolTab === "awg";
   const protocolOperational = Boolean(activeProtocol && (protocolIsTunnel ? activeProtocol.active && activeProtocol.service_active : activeProtocol.service_active));
   const protocolAvailability = activeProtocol?.history.availability_percent ?? (protocolOperational ? 100 : 0);
