@@ -876,6 +876,15 @@ test("installable protocol images are dispatched independently", async () => {
   assert.match(installer, /bash "\$\{image_root\}\/\$\{installer\}"/);
 });
 
+test("node components distinguish installable images and refresh real versions", async () => {
+  const page = await read("app/page.tsx");
+  assert.match(page, /!item\.installed && item\.installable/);
+  assert.match(page, /!image\.installed && !image\.installable/);
+  assert.match(page, /displayedVersion = image\.installed \? installedVersion : availableVersion/);
+  assert.match(page, /onUpdateApplication/);
+  assert.match(page, /await loadOverview\(\)/);
+});
+
 test("SSH management does not start socket activation and the daemon together", async () => {
   const [api, manager] = await Promise.all([
     read("api/main.py"), read("scripts/vps-control.sh"),

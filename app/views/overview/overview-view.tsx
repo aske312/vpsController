@@ -130,6 +130,7 @@ type Props = {
   busy: boolean;
   onInstallProtocol: (image: ProtocolImage) => void;
   onUpdateProtocol: (image: ProtocolImage) => void;
+  onUpdateApplication: () => void;
 };
 
 const channelShort: Record<string, string> = {
@@ -212,6 +213,7 @@ export function OverviewDashboard({
   busy,
   onInstallProtocol,
   onUpdateProtocol,
+  onUpdateApplication,
 }: Props) {
   const mihomoImage = protocolImages.find((item) => item.id === "mihomo");
   const mihomoInstalled = Boolean(mihomoImage?.installed);
@@ -327,7 +329,11 @@ export function OverviewDashboard({
   );
 
   const installedServerModules = useMemo(() => protocolImages.filter((item) => item.installed), [protocolImages]);
-  const installableModules = useMemo(() => protocolImages.filter((item) => !item.installed), [protocolImages]);
+  const installableModules = useMemo(() => protocolImages.filter((item) => !item.installed && item.installable), [protocolImages]);
+  const componentImages = useMemo(() => [...protocolImages].sort((left, right) => {
+    const rank = (item: ProtocolImage) => item.installed ? 0 : item.installable ? 1 : 2;
+    return rank(left) - rank(right) || left.name.localeCompare(right.name, "ru");
+  }), [protocolImages]);
   const stableDirectClients = clients.filter((client) => client.quality === "stable").length;
   const attentionDirectClients = clients.filter((client) => client.quality === "warning" || client.quality === "error").length;
   const offlineDirectClients = clients.filter((client) => client.quality === "offline").length;
@@ -584,7 +590,7 @@ export function OverviewDashboard({
             <span>ДЕЙСТВИЕ</span>
           </header>
           <div>
-            {protocolImages.map((image) => {
+            {componentImages.map((image) => {
               const protocol = image.id as ProtocolId;
               const isDirect = (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(image.id);
               const directStatus = isDirect ? directStatuses[protocol] : undefined;
@@ -607,7 +613,10 @@ export function OverviewDashboard({
                     ? formatModuleVersion(image.version)
                     : "—";
               const availableVersion = formatModuleVersion(image.available_version || image.version);
-              const state = !image.installed
+              const displayedVersion = image.installed ? installedVersion : availableVersion;
+              const state = !image.installed && !image.installable
+                ? { className: "unavailable", label: "НЕДОСТУПЕН" }
+                : !image.installed
                 ? { className: "available", label: "ДОСТУПЕН" }
                 : !statusKnown
                   ? { className: "checking", label: "ПРОВЕРКА" }
@@ -624,8 +633,8 @@ export function OverviewDashboard({
                     <p><b>{image.name}</b><small>{image.description || image.category_name}</small></p>
                   </div>
                   <div className="overviewComponentVersion">
-                    <b>{installedVersion}</b>
-                    <small>{image.installed ? `доступно: ${availableVersion}` : `для установки: ${availableVersion}`}</small>
+                    <b>{displayedVersion}</b>
+                    <small>{image.installed ? image.update_available || image.update_via_release ? `новая: ${availableVersion}` : "фактическая версия" : image.installable ? "версия для установки" : "образ не готов"}</small>
                   </div>
                   <span className={`overviewComponentState ${state.className}`}>{state.label}</span>
                   <div className="overviewComponentAction">
@@ -638,7 +647,7 @@ export function OverviewDashboard({
                         {installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}
                       </button>
                     ) : image.update_via_release ? (
-                      <small>Обновляется с приложением</small>
+                      <button type="button" disabled={busy || Boolean(installingProtocol)} onClick={onUpdateApplication}>Обновить приложение</button>
                     ) : (
                       <small>Актуальная версия</small>
                     )}
