@@ -36,9 +36,10 @@ install -d -m 0755 "${MODULE_DIR}"
 # a hardcoded version, so the "update available" check and this installer
 # agree on what "latest" means, and re-running this (e.g. on a settings
 # save) picks up new releases automatically.
-release_json="$(curl -fsSL --retry 4 https://api.github.com/repos/XTLS/Xray-core/releases/latest)"
-XRAY_VERSION="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' <<<"${release_json}")"
-[[ -n "${XRAY_VERSION}" ]] || { echo "Не удалось определить последнюю версию Xray" >&2; exit 1; }
+latest_url="$(curl -fsSL --retry 4 -o /dev/null -w '%{url_effective}' https://github.com/XTLS/Xray-core/releases/latest)"
+release_tag="${latest_url##*/}"
+[[ "${release_tag}" =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { echo "Не удалось определить последнюю версию Xray" >&2; exit 1; }
+XRAY_VERSION="${release_tag#v}"
 
 current_xray_version=""
 if [[ -x "${MODULE_DIR}/xray" ]]; then
@@ -52,9 +53,8 @@ if [[ "${current_xray_version}" != *"${XRAY_VERSION}"* ]]; then
     *) echo "Архитектура Xray не поддерживается" >&2; exit 1 ;;
   esac
 
-  download_url="$(python3 -c 'import json,sys; d=json.load(sys.stdin); n=sys.argv[1]; print(next((a["browser_download_url"] for a in d["assets"] if a["name"]==n), ""))' "${asset}" <<<"${release_json}")"
-  digest_url="$(python3 -c 'import json,sys; d=json.load(sys.stdin); n=sys.argv[1]+".dgst"; print(next((a["browser_download_url"] for a in d["assets"] if a["name"]==n), ""))' "${asset}" <<<"${release_json}")"
-  [[ -n "${download_url}" && -n "${digest_url}" ]] || { echo "Не найдены официальные assets Xray" >&2; exit 1; }
+  download_url="https://github.com/XTLS/Xray-core/releases/download/${release_tag}/${asset}"
+  digest_url="${download_url}.dgst"
 
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' EXIT

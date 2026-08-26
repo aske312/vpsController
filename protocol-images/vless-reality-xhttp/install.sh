@@ -35,10 +35,11 @@ esac
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf -- "${tmp_dir}"' EXIT
-release_json="$(curl -fsSL --retry 3 https://api.github.com/repos/XTLS/Xray-core/releases/latest)"
-download_url="$(python3 -c 'import json,sys; d=json.load(sys.stdin); n=sys.argv[1]; print(next((a["browser_download_url"] for a in d["assets"] if a["name"]==n), ""))' "${asset}" <<<"${release_json}")"
-digest_url="$(python3 -c 'import json,sys; d=json.load(sys.stdin); n=sys.argv[1]+".dgst"; print(next((a["browser_download_url"] for a in d["assets"] if a["name"]==n), ""))' "${asset}" <<<"${release_json}")"
-[[ -n "${download_url}" && -n "${digest_url}" ]] || { echo "Не найдены официальные assets Xray" >&2; exit 1; }
+latest_url="$(curl -fsSL --retry 3 -o /dev/null -w '%{url_effective}' https://github.com/XTLS/Xray-core/releases/latest)"
+release_tag="${latest_url##*/}"
+[[ "${release_tag}" =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { echo "Не удалось определить последний официальный релиз Xray" >&2; exit 1; }
+download_url="https://github.com/XTLS/Xray-core/releases/download/${release_tag}/${asset}"
+digest_url="${download_url}.dgst"
 curl -fL --retry 3 -o "${tmp_dir}/${asset}" "${download_url}"
 curl -fL --retry 3 -o "${tmp_dir}/${asset}.dgst" "${digest_url}"
 expected="$(grep -Eio '[0-9a-f]{64}' "${tmp_dir}/${asset}.dgst" | head -n 1 | tr 'A-F' 'a-f')"

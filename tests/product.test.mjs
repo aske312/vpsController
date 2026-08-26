@@ -622,6 +622,10 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(vlessInstall, /"security": "reality"/);
   assert.match(vlessInstall, /Password.*PublicKey/);
   assert.match(vlessInstall, /ca-certificates curl openssl unzip/);
+  assert.match(vlessInstall, /github\.com\/XTLS\/Xray-core\/releases\/latest/);
+  assert.match(vlessInstall, /releases\/download\/\$\{release_tag\}\/\$\{asset\}/);
+  assert.match(vlessInstall, /digest_url="\$\{download_url\}\.dgst"/);
+  assert.doesNotMatch(vlessInstall, /api\.github\.com/);
   assert.match(vlessInstall, /XHTTP_PATH/);
   assert.doesNotMatch(vlessInstall, /source "\$\{CONFIG_DIR\}\/reality\.env"/);
   assert.match(vlessInstall, /AmbientCapabilities=CAP_NET_BIND_SERVICE/);

@@ -1370,6 +1370,15 @@ def github_latest_tag(repo: str) -> str:
         if tag:
             github_release_cache[repo] = {"tag": tag, "_cached_at": time.time()}
             return tag
+        latest_url = run(
+            "curl", "--silent", "--show-error", "--location", "--connect-timeout", "3", "--max-time", "8",
+            "--output", "/dev/null", "--write-out", "%{url_effective}",
+            f"https://github.com/{repo}/releases/latest", timeout=10,
+        )
+        fallback_tag = latest_url.rstrip("/").rsplit("/", 1)[-1].lstrip("v")
+        if re.fullmatch(r"[0-9][0-9A-Za-z._-]*", fallback_tag):
+            github_release_cache[repo] = {"tag": fallback_tag, "_cached_at": time.time()}
+            return fallback_tag
         return cached["tag"] if cached else ""
     finally:
         github_release_lock.release()
