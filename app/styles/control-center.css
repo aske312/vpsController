@@ -76,13 +76,14 @@
 .dnsPolicyConsole { background:linear-gradient(180deg,rgba(12,27,38,.96),rgba(5,13,20,.98)) !important; }
 .dnsApplyDock { border-color:var(--cc-line-hot) !important; background:rgba(5,14,22,.94) !important; }
 
-.dnsResolverRows { gap:2px; padding:5px; }
-.dnsResolverCard { grid-template-columns:26px minmax(0,1fr) auto 56px; gap:7px; min-height:36px; padding:3px 7px; }
-.dnsResolverCountry { height:24px; border-radius:6px; font-size:7px; }
-.dnsResolverName { grid-template-columns:minmax(150px,.9fr) minmax(120px,.7fr) minmax(150px,1fr); align-items:center; gap:8px; }
-.dnsResolverName strong,.dnsResolverName small,.dnsResolverName code { font-size:8.5px; }
-.dnsResolverProbe b { padding:3px 4px; font-size:7px; }
-.dnsResolverCard > em { font-size:7px; }
+.dnsResolverRows { width:60%; min-width:620px; gap:4px; padding:7px; }
+.dnsResolverCard { grid-template-columns:34px minmax(0,1fr) auto 62px; gap:9px; min-height:57px; padding:7px 9px; }
+.dnsResolverCountry { height:29px; border-radius:7px; font-size:8px; }
+.dnsResolverName { display:grid; grid-template-columns:1fr; align-items:initial; gap:2px; }
+.dnsResolverName strong { font-size:11px; }
+.dnsResolverName small,.dnsResolverName code { font-size:9px; }
+.dnsResolverProbe b { padding:4px 5px; font-size:8px; }
+.dnsResolverCard > em { font-size:8px; }
 
 .dnsPolicyConsole > header { align-items:flex-start; }
 .dnsPolicyConsole > header > div { min-width:120px; }
@@ -141,6 +142,7 @@
   .gateMastFacts { display:none !important; }
   .overviewTopologyHead,.overviewFlow { width:82%; max-width:82% !important; }
   .dnsResolverList { width:78%; min-width:0; }
+  .dnsResolverRows { width:72%; min-width:0; }
   .applicationControlContent,.mihomoHeroContent { width:72% !important; }
 }
 @media (max-width:900px) {
@@ -148,6 +150,7 @@
   .overviewTopologyHead,.overviewFlow { width:100%; max-width:100% !important; }
   .overviewFlow { grid-template-columns:105px minmax(0,1fr) !important; }
   .overviewExit { display:none !important; }
+  .dnsResolverRows { width:100%; }
   .securityOverview { grid-template-columns:1fr !important; }
   .applicationControlContent,.mihomoHeroContent { width:82% !important; }
 }
