@@ -881,8 +881,29 @@ test("node components distinguish installable images and refresh real versions",
   assert.match(page, /!item\.installed && item\.installable/);
   assert.match(page, /!image\.installed && !image\.installable/);
   assert.match(page, /displayedVersion = image\.installed \? installedVersion : availableVersion/);
-  assert.match(page, /onUpdateApplication/);
   assert.match(page, /await loadOverview\(\)/);
+});
+
+test("Mihomo installs and updates the latest verified stable core independently", async () => {
+  const [installer, manager, api, control, manifest] = await Promise.all([
+    read("protocol-images/mihomo/install.sh"),
+    read("protocol-images/mihomo/manager.py"),
+    read("api/main.py"),
+    read("scripts/vps-control.sh"),
+    read("protocol-images/mihomo/manifest.json"),
+  ]);
+  assert.match(installer, /repos\/MetaCubeX\/mihomo\/releases\/latest/);
+  assert.match(installer, /asset\.get\("digest", ""\)/);
+  assert.match(installer, /sha256:\[0-9a-fA-F\]\{64\}/);
+  assert.match(installer, /sha256sum -c -/);
+  assert.match(installer, /candidate="\$\{CORE_DIR\}\/\.mihomo\.\$\$\.tmp"/);
+  assert.match(installer, /mv -f -- "\$\{candidate\}" "\$\{CORE\}"/);
+  assert.match(installer, /MIHOMO_UPDATE_ONLY/);
+  assert.match(manager, /RUNTIME_CORE_BIN/);
+  assert.match(api, /MIHOMO_RUNTIME_CORE_BIN/);
+  assert.doesNotMatch(api, /live_update = image_id != "mihomo"/);
+  assert.match(control, /MIHOMO_UPDATE_ONLY=1/);
+  assert.deepEqual(JSON.parse(manifest).preflight_packages, ["ca-certificates", "curl", "gzip"]);
 });
 
 test("SSH management does not start socket activation and the daemon together", async () => {

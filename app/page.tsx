@@ -1277,7 +1277,6 @@ export default function Home() {
           busy={busy}
           onInstallProtocol={(image) => void installProtocol(image)}
           onUpdateProtocol={(image) => void updateProtocol(image)}
-          onUpdateApplication={() => void (async () => { await runApplicationAction(applicationVersion?.branch === "main" ? "test-update" : "update"); await loadOverview(); })()}
         />
       )}
 

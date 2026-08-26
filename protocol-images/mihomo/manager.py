@@ -29,7 +29,9 @@ CONFIG_ROOT = Path("/etc/vps-control/mihomo")
 PROFILE_FILE = DATA_ROOT / "profiles.json"
 STATE_FILE = DATA_ROOT / "state.json"
 SETTINGS_ROOT = DATA_ROOT / "settings"
-CORE_BIN = APP_ROOT / "api" / "bin" / "mihomo"
+RUNTIME_CORE_BIN = DATA_ROOT / "bin" / "mihomo"
+BUNDLED_CORE_BIN = APP_ROOT / "api" / "bin" / "mihomo"
+CORE_BIN = RUNTIME_CORE_BIN if RUNTIME_CORE_BIN.is_file() else BUNDLED_CORE_BIN
 # Mihomo defaults to $HOME/.config/mihomo for its home/cache directory.
 # The manager service runs with ProtectHome=true, so /root is masked and
 # that mkdir fails. Point it at a writable directory explicitly instead.
@@ -677,11 +679,6 @@ def core_status() -> dict[str, Any]:
         core_build = (result.stdout or result.stderr).strip().splitlines()[0] if result.returncode == 0 else ""
         match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", core_build)
         core_version = match.group(1) if match else core_build
-    # Informational only: the core binary ships pinned inside the
-    # vps-control release itself (build-release.sh verifies it against a
-    # hand-checked sha256, unlike Xray there is no published checksum file
-    # to fetch and verify live), so a newer upstream tag means "update
-    # vps-control", not a button here.
     core_available_version = github_latest_tag(MIHOMO_GITHUB_REPO)
     return {
         "id": "mihomo",
@@ -692,9 +689,7 @@ def core_status() -> dict[str, Any]:
         "core_version": core_version,
         "core_build": core_build,
         "core_available_version": core_available_version,
-        "core_update_via_release": bool(
-            core_version and core_available_version and core_version != core_available_version
-        ),
+        "core_update_via_release": False,
         "modules_installed": len(installed_modules),
         "modules_total": len(KNOWN_MODULES),
         "profiles": len(profile_items),

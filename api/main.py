@@ -1375,15 +1375,17 @@ def github_latest_tag(repo: str) -> str:
         github_release_lock.release()
 
 
-MIHOMO_CORE_BIN = INSTALL_DIR / "api" / "bin" / "mihomo"
+MIHOMO_RUNTIME_CORE_BIN = Path("/var/lib/vps-control/mihomo/bin/mihomo")
+MIHOMO_BUNDLED_CORE_BIN = INSTALL_DIR / "api" / "bin" / "mihomo"
 MIHOMO_GITHUB_REPO = "MetaCubeX/mihomo"
 AMNEZIAWG_GITHUB_REPO = "amnezia-vpn/amneziawg-tools"
 
 
 def mihomo_core_installed_version() -> str:
-    if not MIHOMO_CORE_BIN.is_file():
+    core = MIHOMO_RUNTIME_CORE_BIN if MIHOMO_RUNTIME_CORE_BIN.is_file() else MIHOMO_BUNDLED_CORE_BIN
+    if not core.is_file():
         return ""
-    output = run(str(MIHOMO_CORE_BIN), "-v", timeout=5)
+    output = run(str(core), "-v", timeout=5)
     match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
     return match.group(1) if match else ""
 
@@ -1401,13 +1403,6 @@ def awg_installed_version() -> str:
 
 def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bool) -> dict[str, Any]:
     package = str(manifest.get("package", ""))
-    # Mihomo's core binary ships inside the vps-control release itself
-    # (build-release.sh pins it to a hand-verified sha256, unlike Xray's
-    # releases there is no published checksum file to fetch and verify
-    # against live), so unlike the others it is informational only here:
-    # no live one-click update, getting a newer core means a new
-    # vps-control release.
-    live_update = image_id != "mihomo"
     if image_id == "awg":
         # Real version (see awg_installed_version()) for display/comparison;
         # the update action still goes through apt (package= is still set),
@@ -1434,9 +1429,9 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
     return {
         "installed_version": installed_version,
         "available_version": available_version,
-        "update_available": update_available and live_update,
+        "update_available": update_available,
         "update_breaking": update_breaking,
-        "update_via_release": update_available and not live_update,
+        "update_via_release": False,
     }
 
 

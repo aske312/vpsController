@@ -12,7 +12,7 @@
     "ubuntu",
     "debian"
   ],
-  "preflight_packages": [],
+  "preflight_packages": ["ca-certificates", "curl", "gzip"],
   "minimum_free_mb": 256,
   "requires_kernel_headers": false,
   "service": "vps-control-mihomo-manager.service",

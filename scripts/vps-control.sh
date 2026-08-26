@@ -921,7 +921,7 @@ update_protocol_image() {
     ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
       AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
       PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
-      XRAY_UPDATE_ONLY=1 \
+      XRAY_UPDATE_ONLY=1 MIHOMO_UPDATE_ONLY=1 \
       bash "${image_root}/${installer}" >"${module_log}" 2>&1 || {
         tail -n 40 "${module_log}" >&2 || true
         failure_message="$(tail -n 1 "${module_log}" | tr '\n\r' ' ' | cut -c1-240)"
@@ -930,6 +930,9 @@ update_protocol_image() {
         CURRENT_ACTION=""
         die "не удалось обновить ${image_id}; журнал: ${module_log}"
       }
+  fi
+  if [[ "${image_id}" == "mihomo" ]]; then
+    systemctl restart vps-control-mihomo-manager.service
   fi
   ensure_api_write_access
   systemctl restart "${APP_NAME}-api.service"

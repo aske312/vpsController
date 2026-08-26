@@ -130,7 +130,6 @@ type Props = {
   busy: boolean;
   onInstallProtocol: (image: ProtocolImage) => void;
   onUpdateProtocol: (image: ProtocolImage) => void;
-  onUpdateApplication: () => void;
 };
 
 const channelShort: Record<string, string> = {
@@ -213,7 +212,6 @@ export function OverviewDashboard({
   busy,
   onInstallProtocol,
   onUpdateProtocol,
-  onUpdateApplication,
 }: Props) {
   const mihomoImage = protocolImages.find((item) => item.id === "mihomo");
   const mihomoInstalled = Boolean(mihomoImage?.installed);
@@ -642,12 +640,10 @@ export function OverviewDashboard({
                       <button type="button" disabled={!image.installable || busy || Boolean(installingProtocol)} onClick={() => onInstallProtocol(image)}>
                         {!image.installable ? "В разработке" : installingProtocol === image.id ? "Установка…" : "Установить"}
                       </button>
-                    ) : image.id !== "mihomo" && image.update_available ? (
+                    ) : image.update_available ? (
                       <button type="button" className={image.update_breaking ? "warning" : ""} disabled={busy || Boolean(installingProtocol)} onClick={() => onUpdateProtocol(image)}>
                         {installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}
                       </button>
-                    ) : image.update_via_release ? (
-                      <button type="button" disabled={busy || Boolean(installingProtocol)} onClick={onUpdateApplication}>Обновить приложение</button>
                     ) : (
                       <small>Актуальная версия</small>
                     )}

@@ -6,18 +6,52 @@ MODULE_DIR="${APP_ROOT}/protocol-images/mihomo"
 DATA_DIR="/var/lib/vps-control/mihomo"
 CONFIG_DIR="/etc/vps-control/mihomo"
 SERVICE="/etc/systemd/system/vps-control-mihomo-manager.service"
-CORE="${APP_ROOT}/api/bin/mihomo"
+CORE_DIR="${DATA_DIR}/bin"
+CORE="${CORE_DIR}/mihomo"
 
-[[ -x "${CORE}" ]] || {
-  echo "В release отсутствует api/bin/mihomo. Используйте scripts/build-release.sh из этого обновления." >&2
-  exit 1
-}
 [[ -x "${APP_ROOT}/venv/bin/uvicorn" ]] || {
   echo "Python runtime панели не найден: ${APP_ROOT}/venv/bin/uvicorn" >&2
   exit 1
 }
 
-install -d -m 0700 "${DATA_DIR}" "${DATA_DIR}/settings"
+install -d -m 0700 "${DATA_DIR}" "${DATA_DIR}/settings" "${CORE_DIR}"
+
+tmp_dir="$(mktemp -d)"
+candidate="${CORE_DIR}/.mihomo.$$.tmp"
+trap 'rm -rf -- "${tmp_dir}"; rm -f -- "${candidate}"' EXIT
+release_json="${tmp_dir}/release.json"
+curl --fail --location --silent --show-error --retry 3 \
+  https://api.github.com/repos/MetaCubeX/mihomo/releases/latest -o "${release_json}"
+read -r core_version asset_url core_digest < <(python3 - "${release_json}" "$(uname -m)" <<'PY'
+import json, re, sys
+release = json.load(open(sys.argv[1], encoding="utf-8"))
+version = str(release.get("tag_name", "")).lstrip("v")
+architecture = sys.argv[2]
+suffix = "amd64-compatible" if architecture == "x86_64" else "arm64" if architecture in {"aarch64", "arm64"} else ""
+if not version or not suffix:
+    raise SystemExit("Архитектура Mihomo не поддерживается")
+name = f"mihomo-linux-{suffix}-v{version}.gz"
+asset = next((item for item in release.get("assets", []) if item.get("name") == name), None)
+if not asset:
+    raise SystemExit(f"Asset {name} не найден")
+digest = str(asset.get("digest", ""))
+if not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
+    raise SystemExit(f"Официальный SHA-256 для {name} отсутствует")
+print(version, asset["browser_download_url"], digest.removeprefix("sha256:"))
+PY
+)
+archive="${tmp_dir}/mihomo.gz"
+curl --fail --location --silent --show-error --retry 3 "${asset_url}" -o "${archive}"
+printf '%s  %s\n' "${core_digest}" "${archive}" | sha256sum -c -
+gzip -dc "${archive}" >"${candidate}"
+chmod 0755 "${candidate}"
+"${candidate}" -v | grep -F "Mihomo Meta v${core_version} " >/dev/null
+mv -f -- "${candidate}" "${CORE}"
+
+if [[ "${MIHOMO_UPDATE_ONLY:-0}" == "1" ]]; then
+  echo "Mihomo core обновлён до v${core_version}."
+  exit 0
+fi
 # 0711 on the parent: traversal only, no listing. Reality's own installer
 # locks its subdir down further (0750 root:nogroup) since Xray there runs
 # as nobody:nogroup and must be able to reach it through this directory.
