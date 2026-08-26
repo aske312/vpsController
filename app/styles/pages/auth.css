@@ -20,14 +20,6 @@
 
 .loginPage .versionFooter { position: absolute; inset: auto 0 18px; }
 
-.legalBackdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: #030708db; backdrop-filter: blur(12px); }
-
-.legalNotice { margin: 8px 0 0; padding: 14px 16px; border: 1px solid #5c5031; border-radius: 8px; background: #201c10; color: #d8c786; font-size: 12px; line-height: 1.65; }
-
-@media (max-width: 700px) {
-.legalBackdrop { padding: 10px; }
-}
-
 .gateShell .content > .legalFooter,
 .gateShell .content > footer { max-width:none; }
 
@@ -339,21 +331,20 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(4, 8, 12, 0.72);
-  backdrop-filter: blur(10px);
+  background: rgba(2, 7, 11, 0.82);
+  backdrop-filter: blur(14px);
 }
 
 .legalModal {
-  width: min(760px, calc(100vw - 32px));
-  max-height: min(86vh, 860px);
+  width: min(860px, calc(100vw - 32px));
+  max-height: min(88vh, 900px);
   display: grid;
   grid-template-rows: auto minmax(0,1fr) auto;
   overflow: hidden;
-  border-radius: 24px;
-  border: 1px solid rgba(95, 118, 144, 0.34);
-  background:
-    linear-gradient(180deg, rgba(8, 14, 21, 0.98), rgba(8, 14, 21, 0.94));
-  box-shadow: 0 32px 100px rgba(0, 0, 0, 0.48);
+  border-radius: 18px;
+  border: 1px solid rgba(121, 151, 174, 0.20);
+  background: linear-gradient(180deg, #09131c, #071019);
+  box-shadow: 0 36px 120px rgba(0, 0, 0, 0.58);
 }
 
 .legalModalHead,
@@ -362,7 +353,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
-  padding: 22px 22px 18px;
+  padding: 18px 20px 16px;
 }
 
 .legalModalHead {
@@ -370,27 +361,27 @@
 }
 
 .legalModalHead h2 {
-  margin: 6px 0 8px;
-  font-size: 28px;
+  margin: 4px 0 6px;
+  font-size: 24px;
   line-height: 1.05;
 }
 
 .legalModalHead p:last-child {
   margin: 0;
   color: #8ea2b0;
-  font-size: 14px;
+  font-size: 12.5px;
   line-height: 1.55;
   max-width: 56ch;
 }
 
 .legalClose {
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   border: 1px solid rgba(89, 110, 132, 0.28);
   background: rgba(10, 18, 27, 0.78);
   color: #dbe7ef;
-  font-size: 28px;
+  font-size: 22px;
   line-height: 1;
   cursor: pointer;
 }
@@ -398,35 +389,41 @@
 .legalModalBody {
   overflow: auto;
   display: grid;
-  gap: 14px;
-  padding: 18px 22px 6px;
+  gap: 8px;
+  padding: 12px 20px 16px;
 }
 
 .legalSection {
-  padding: 16px 16px 14px;
-  border-radius: 16px;
+  padding: 12px 14px;
+  border-radius: 11px;
   border: 1px solid rgba(77, 98, 120, 0.22);
-  background: rgba(10, 18, 27, 0.46);
+  background: rgba(5, 14, 22, 0.58);
 }
 
 .legalSection h3 {
-  margin: 0 0 8px;
-  font-size: 15px;
+  margin: 0 0 5px;
+  font-size: 13px;
   color: #e7f0f6;
 }
 
 .legalSection p {
   margin: 0;
   color: #95a8b6;
-  font-size: 14px;
-  line-height: 1.62;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .legalModalFoot {
   align-items: center;
   border-top: 1px solid rgba(74, 96, 118, 0.20);
-  padding-top: 18px;
+  padding: 12px 20px;
+  background: rgba(3, 10, 16, 0.46);
 }
+
+.legalBuildIdentity { min-width:0; display:flex; align-items:center; gap:8px; }
+.legalBuildIdentity > span { min-width:140px; display:grid; gap:4px; padding:8px 11px; border:1px solid rgba(121,151,174,.12); border-radius:9px; background:rgba(2,9,15,.36); }
+.legalBuildIdentity small { color:#647b8a; font:750 7px/1 var(--font-mono); letter-spacing:.11em; }
+.legalBuildIdentity strong,.legalBuildIdentity code { color:#dce9ef; font:700 11px/1.2 var(--font-mono); }
 
 .legalPrimary {
   min-height: 44px;
@@ -536,38 +533,14 @@
   }
 }
 
-.legalModal {
-  width: min(820px, calc(100vw - 32px));
-  max-height: min(88vh, 900px);
-}
-
-.legalModalBody {
-  gap: 12px;
-  padding-bottom: 18px;
-}
-
 .legalNotice {
-  padding: 15px 16px;
+  padding: 12px 14px;
   border: 1px solid rgba(231, 183, 97, 0.22);
-  border-radius: 15px;
+  border-radius: 11px;
   background: rgba(232, 183, 97, 0.055);
   color: #b8aa8c;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.6;
-}
-
-.legalSection {
-  padding: 15px 16px;
-}
-
-.legalSection p {
-  font-size: 13.5px;
-  line-height: 1.62;
-}
-
-.legalPrimary {
-  min-width: 112px;
-  justify-content: center !important;
 }
 
 @media (max-width: 760px) {
@@ -580,4 +553,6 @@
   .legalSection p {
     font-size: 13px;
   }
+.legalBuildIdentity { width:100%; }
+.legalBuildIdentity > span { flex:1 1 0; min-width:0; }
 }

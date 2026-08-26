@@ -109,12 +109,13 @@ export function AppWorkspace({
       <section className="content">
         <header className="gateMasthead" aria-label="Состояние сервера">
           <div className="gateMastNode">
-            <span className="gateMastServer" aria-hidden="true"><i /><i /><i /></span>
-            <div>
-              <h2><CountryFlag code={countryCode} label={server?.country || "Страна не определена"} />{server?.city || server?.name || "Primary Node"}</h2>
-              <p>{server?.country || "—"}  <span className="mono">{server?.public_endpoint || server?.public_ip || "—"}</span></p>
+            <CountryFlag code={countryCode} label={server?.country || "Страна не определена"} />
+            <div className="gateMastIdentity">
+              <span>PRIMARY NODE</span>
+              <h2>{server?.city || server?.name || "Primary Node"}</h2>
+              <p>{server?.country || "—"} <span className="mono">{server?.public_endpoint || server?.public_ip || "—"}</span></p>
             </div>
-            <span className={`gateMastState ${nodeState}`}>{applicationStateTitle}</span>
+            <div className={`gateMastState ${nodeState}`}><i />{applicationStateTitle}</div>
           </div>
 
           <div className="gateMastFacts" aria-label="Метрики сервера">

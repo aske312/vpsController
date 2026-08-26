@@ -132,13 +132,17 @@ const LICENSE_TEXT: LegalDocument = {
 export function LegalFooter({ version, commit }: LegalFooterProps) {
   const [panel, setPanel] = useState<LegalPanel>(null);
   const buildId = useMemo(() => (commit && commit !== "unknown" ? commit.slice(0, 12) : "unknown"), [commit]);
+  const displayVersion = useMemo(() => {
+    const normalized = String(version || "").trim().replace(/^v/i, "");
+    return normalized ? `v${normalized}` : "unknown";
+  }, [version]);
   const legal = panel === "privacy" ? PRIVACY_TEXT : panel === "license" ? LICENSE_TEXT : null;
 
   return (
     <>
       <footer className="versionFooter legalFooter" aria-label="Версия и правовая информация">
-        <div className="legalVersionLine" aria-label={`Версия ${version}, сборка ${buildId}`}>
-          <strong>{version}</strong>
+        <div className="legalVersionLine" aria-label={`Версия ${displayVersion}, сборка ${buildId}`}>
+          <strong>{displayVersion}</strong>
           <span aria-hidden="true"></span>
           <small>build </small>
           <code>{buildId}</code>
@@ -184,11 +188,9 @@ export function LegalFooter({ version, commit }: LegalFooterProps) {
             </div>
 
             <div className="legalModalFoot">
-              <div className="legalVersionLine legalVersionLineModal" aria-label={`Версия ${version}, сборка ${buildId}`}>
-                <strong>{version}</strong>
-                <span aria-hidden="true"></span>
-                <small>build</small>
-                <code>{buildId}</code>
+              <div className="legalBuildIdentity" aria-label={`Версия ${displayVersion}, сборка ${buildId}`}>
+                <span><small>APPLICATION VERSION</small><strong>{displayVersion}</strong></span>
+                <span><small>BUILD ID</small><code>{buildId}</code></span>
               </div>
               <button type="button" className="primaryButton legalPrimary" onClick={() => setPanel(null)}>
                 Понятно

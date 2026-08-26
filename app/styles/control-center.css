@@ -9,28 +9,33 @@
 }
 
 .gateMasthead {
-  min-height: 64px !important;
-  grid-template-columns: minmax(230px, .9fr) minmax(420px, 1.45fr) auto !important;
-  gap: 12px !important;
+  min-height: 70px !important;
+  grid-template-columns: minmax(260px, .95fr) minmax(430px, 1.45fr) auto !important;
+  gap: 10px !important;
   margin-bottom: 12px !important;
-  padding: 7px 8px 7px 12px !important;
+  padding: 8px 9px !important;
   border-color: var(--cc-line) !important;
-  border-radius: 13px !important;
-  background: rgba(5, 14, 22, .92) !important;
+  border-radius: 14px !important;
+  background: linear-gradient(180deg, rgba(7,17,25,.96), rgba(5,14,22,.94)) !important;
   box-shadow: 0 10px 32px rgba(0,0,0,.28), inset 0 1px rgba(255,255,255,.025) !important;
 }
-.gateMastNode { min-width:0; }
-.gateMastNode h2 { display:flex; align-items:center; min-width:0; font-size:13px !important; }
-.gateMastNode p { font-size:9px !important; }
+.gateMastNode { min-width:0; display:grid !important; grid-template-columns:auto minmax(0,1fr) auto !important; align-items:center !important; gap:10px !important; padding:2px 8px 2px 4px; }
+.gateMastIdentity { min-width:0; }
+.gateMastIdentity > span { display:block; color:#617988; font:750 7px/1 var(--font-mono); letter-spacing:.13em; }
+.gateMastIdentity h2 { min-width:0; margin:3px 0 0 !important; overflow:hidden; font-size:13px !important; white-space:nowrap; text-overflow:ellipsis; }
+.gateMastIdentity p { margin-top:2px !important; font-size:9px !important; }
 .gateCountryFlag {
-  flex:0 0 auto; width:27px; height:18px; display:inline-flex; margin-right:8px;
+  flex:0 0 auto; width:32px; height:22px; display:inline-flex; margin:0;
   overflow:hidden; border:1px solid rgba(255,255,255,.24); border-radius:3px;
   background:#101b24; box-shadow:0 2px 8px rgba(0,0,0,.38);
 }
 .gateCountryFlag svg { display:block; width:100%; height:100%; }
 .gateCountryFlag.unknown { align-items:center; justify-content:center; color:#78909f; font:700 13px/1 var(--font-mono); }
-.gateMastFacts { gap:4px !important; }
-.gateMastFacts > div { min-width:0; padding:6px 9px !important; border-radius:8px !important; background:rgba(12,26,36,.62) !important; }
+.gateMastState { margin:0 !important; padding:6px 8px !important; border:0 !important; border-radius:8px !important; background:rgba(98,215,180,.055) !important; letter-spacing:.03em !important; }
+.gateMastState > i { width:6px; height:6px; border-radius:50%; background:currentColor; box-shadow:0 0 9px currentColor; }
+.gateMastFacts { min-width:0; display:grid !important; grid-template-columns:repeat(5,minmax(62px,1fr)) !important; gap:0 !important; overflow:hidden; border:1px solid rgba(121,151,174,.10); border-radius:10px; background:rgba(2,9,15,.30); }
+.gateMastFacts > div { min-width:0; min-height:43px; padding:7px 9px !important; border:0 !important; border-right:1px solid rgba(121,151,174,.09) !important; border-radius:0 !important; background:transparent !important; }
+.gateMastFacts > div:last-child { border-right:0 !important; }
 .gateMastFacts span { font-size:7px !important; }
 .gateMastFacts strong { margin-top:3px !important; font-size:10px !important; }
 .gateMastActions { gap:5px !important; }
@@ -89,17 +94,6 @@
 .securityMatrixArt { display:none !important; }
 .securityMatrixContent { width:100% !important; }
 
-/* Services — managed units become the dominant illustrated operating table. */
-.servicesHero { min-height:0 !important; padding:3px 2px 7px !important; border:0 !important; border-radius:0 !important; background:transparent !important; box-shadow:none !important; }
-.servicesHeroBackdrop,.servicesHero::after { display:none !important; }
-.servicesHeroCopy { padding:0 !important; }
-.servicesManaged { min-height:500px; border-color:var(--cc-line) !important; border-radius:18px !important; box-shadow:var(--cc-shadow) !important; }
-.servicesManagedBackdrop { opacity:.86 !important; background-position:right center !important; background-size:cover !important; }
-.servicesManaged::before { background:linear-gradient(90deg,rgba(4,11,18,.99) 0%,rgba(4,11,18,.91) 54%,rgba(4,11,18,.20) 84%),linear-gradient(180deg,transparent,rgba(4,11,18,.72)) !important; }
-.servicesManagedContent { width:66% !important; grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
-.servicesGroup { background:rgba(4,11,18,.70) !important; backdrop-filter:blur(8px); }
-.servicesOperations { border-color:var(--cc-line) !important; background:var(--cc-surface) !important; }
-
 /* Application — lifecycle controls sit inside the application scene. */
 .applicationSummary { padding:3px 2px 7px !important; }
 .applicationControlPlane { min-height:510px !important; border-color:var(--cc-line) !important; border-radius:18px !important; box-shadow:var(--cc-shadow) !important; }
@@ -122,7 +116,6 @@
   .gateMastFacts { display:none !important; }
   .overviewTopologyHead,.overviewFlow { width:82%; max-width:82% !important; }
   .dnsResolverList { width:78%; min-width:0; }
-  .servicesManagedContent { width:78% !important; }
   .applicationControlContent,.mihomoHeroContent { width:72% !important; }
 }
 @media (max-width:900px) {
@@ -131,20 +124,18 @@
   .overviewFlow { grid-template-columns:105px minmax(0,1fr) !important; }
   .overviewExit { display:none !important; }
   .securityOverview { grid-template-columns:1fr !important; }
-  .servicesManagedContent { width:100% !important; grid-template-columns:1fr !important; }
   .applicationControlContent,.mihomoHeroContent { width:82% !important; }
 }
 @media (max-width:680px) {
   .gateMasthead { grid-template-columns:minmax(0,1fr) auto !important; }
-  .gateMastNode p,.gateMastActions .updatedAt { display:none !important; }
+  .gateMastNode { grid-template-columns:auto minmax(0,1fr) !important; }
+  .gateMastState,.gateMastNode p,.gateMastActions .updatedAt { display:none !important; }
   .overviewTopology,.securityOverview { min-height:0 !important; padding:14px !important; }
   .overviewFlow { grid-template-columns:1fr !important; }
   .securityOverview::before { opacity:.42 !important; }
   .dnsResolverBrowser { min-height:0; }
   .dnsResolverArt { opacity:.38 !important; }
   .dnsResolverList { width:100%; }
-  .servicesManaged { min-height:0; }
-  .servicesManagedBackdrop { opacity:.35 !important; }
   .applicationControlPlane,.mihomoCommandHero { min-height:0 !important; }
   .applicationControlContent,.mihomoHeroContent { width:100% !important; min-height:0 !important; padding:15px !important; }
 }
