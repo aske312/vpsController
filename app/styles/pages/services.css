@@ -11,7 +11,7 @@
 .gateShell .content:has(.servicesWorkspace) > .gateSectionIntro { display:none; }
 .gateShell .content:has(.servicesWorkspace) > .gateMasthead { position:sticky; top:10px; z-index:180; }
 
-.servicesHero { min-width:0; padding:3px 2px 7px; }
+.servicesHero { min-width:0; margin:0; padding:3px 2px 7px; border:0; border-radius:0; background:transparent; box-shadow:none; }
 .servicesHeroBackdrop { display:none; }
 .servicesHeroCopy h1 { margin:0; color:#edf5f9; font-size:clamp(24px,2.2vw,30px); line-height:1.05; }
 .servicesHeroCopy > p:last-of-type { margin:8px 0 0; color:#879ba9; font-size:13px; }
@@ -148,6 +148,53 @@
 .servicesLogControls .opsField { min-height:62px; padding:10px 12px; border:1px solid rgba(91,116,141,.12); border-radius:11px; background:rgba(3,10,16,.35); }
 .servicesLogActions { display:flex; gap:8px; margin-top:auto; }
 .servicesLogActions button { flex:1 1 0; min-height:36px; }
+
+.servicePrimary,.serviceDanger {
+  min-height:36px;
+  padding:0 12px;
+  border-radius:9px;
+  font-size:11px;
+  font-weight:700;
+  cursor:pointer;
+}
+.servicePrimary { color:#76efc7; border:1px solid rgba(74,190,155,.26); background:rgba(18,82,67,.25); }
+.servicePrimary.ghost { color:#b9d9cf; background:rgba(15,48,43,.16); }
+.serviceDanger { color:#ff9292; border:1px solid rgba(211,82,82,.24); background:rgba(82,24,29,.20); }
+.servicePrimary:disabled,.serviceDanger:disabled { cursor:not-allowed; opacity:.48; }
+
+.serviceToggle {
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  min-width:70px;
+}
+.serviceToggle input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+.serviceToggle > span {
+  position:relative;
+  width:34px;
+  height:18px;
+  flex:0 0 auto;
+  border:1px solid rgba(112,137,155,.24);
+  border-radius:999px;
+  background:rgba(61,76,88,.38);
+  transition:.16s ease;
+}
+.serviceToggle > span::after {
+  content:"";
+  position:absolute;
+  top:3px;
+  left:3px;
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:#8da0ad;
+  transition:.16s ease;
+}
+.serviceToggle input:checked + span { border-color:rgba(74,190,155,.34); background:rgba(33,116,92,.38); }
+.serviceToggle input:checked + span::after { left:19px; background:#72dfbd; }
+.serviceToggle em { color:#869aa8; font:700 9px/1 var(--font-mono); font-style:normal; }
+.serviceToggle input:checked ~ em { color:#72dfbd; }
 
 .maintenanceRows { min-width:0; display:grid; grid-template-columns:1fr; gap:9px; }
 .maintenanceRow { min-width:0; display:grid; grid-template-columns:minmax(150px,.42fr) minmax(0,1.58fr); gap:12px; align-items:center; padding:12px; border:1px solid rgba(91,116,141,.12); border-radius:12px; background:rgba(3,10,16,.30); }
