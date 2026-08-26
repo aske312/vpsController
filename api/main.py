@@ -2347,16 +2347,22 @@ def dns_status(_: None = Depends(require_token)) -> dict:
         "shadowsocks": current_env_value("SHADOWSOCKS_DNS", "не настроен"),
         "vless-reality-xhttp": current_env_value("VRX_DNS", "не настроен"),
     }
+    installed = {
+        "wg": WG_CONFIG.exists() and run("systemctl", "is-enabled", f"wg-quick@{WG_INTERFACE}.service") == "enabled",
+        "awg": AWG_CONFIG.exists() and run("systemctl", "is-enabled", f"awg-quick@{AWG_INTERFACE}.service") == "enabled",
+        "shadowsocks": run("systemctl", "is-enabled", "vps-control-shadowsocks.target") == "enabled",
+        "vless-reality-xhttp": VLESS_CONFIG.exists() and run("systemctl", "is-enabled", "vps-control-vless-reality-xhttp.service") == "enabled",
+    }
     return {
         "settings": settings,
         "system_resolver": system_dns_status(),
         "providers": providers,
         "protocol_effect": effects,
         "protocol_effect_details": {
-            "wg": {"value": effects["wg"], "scope": "new_profiles", "changes_existing": False, "matches_selected": effects["wg"] == expected},
-            "awg": {"value": effects["awg"], "scope": "new_profiles", "changes_existing": False, "matches_selected": effects["awg"] == expected},
-            "shadowsocks": {"value": effects["shadowsocks"], "scope": "client_recommendation", "changes_existing": False, "matches_selected": effects["shadowsocks"] == expected},
-            "vless-reality-xhttp": {"value": effects["vless-reality-xhttp"], "scope": "server_xray", "changes_existing": True, "matches_selected": effects["vless-reality-xhttp"] == ", ".join(expected_vrx)},
+            "wg": {"installed": installed["wg"], "value": effects["wg"], "scope": "new_profiles", "changes_existing": False, "matches_selected": effects["wg"] == expected},
+            "awg": {"installed": installed["awg"], "value": effects["awg"], "scope": "new_profiles", "changes_existing": False, "matches_selected": effects["awg"] == expected},
+            "shadowsocks": {"installed": installed["shadowsocks"], "value": effects["shadowsocks"], "scope": "client_recommendation", "changes_existing": False, "matches_selected": effects["shadowsocks"] == expected},
+            "vless-reality-xhttp": {"installed": installed["vless-reality-xhttp"], "value": effects["vless-reality-xhttp"], "scope": "server_xray", "changes_existing": True, "matches_selected": effects["vless-reality-xhttp"] == ", ".join(expected_vrx)},
         },
     }
 

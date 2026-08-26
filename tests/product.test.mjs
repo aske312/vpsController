@@ -737,7 +737,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(page, /onNavigate\("services"\)/);
   assert.match(page, /DNS POLICY/);
   assert.match(page, /Проверить все/);
-  assert.match(page, /Собственный DNS/);
+  assert.match(page, /Сторонний DNS/);
   assert.match(api, /DNS_PROVIDERS = \(/);
   assert.ok((api.match(/"country": "RU"/g) || []).length >= 5);
   assert.ok((api.match(/"id": "[a-z0-9-]+", "name":/g) || []).length >= 10);
@@ -796,14 +796,17 @@ test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", a
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
   const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), readStyles()]);
-  assert.match(page, /Настройка локального resolver VPS/);
-  assert.match(page, /DNS самого VPS будет изменён с проверкой и откатом/);
-  assert.match(page, /Новые WireGuard-профили/);
+  assert.match(page, /Локальный resolver VPS настраивается автоматически/);
+  assert.match(page, /DNS самого VPS будет настроен автоматически с проверкой и откатом/);
+  assert.match(page, /DNS новых профилей/);
   assert.match(page, /clientProtocolFilter/);
   assert.match(page, /clientStateFilter/);
   assert.match(page, /clientSearch/);
   assert.match(page, /НЕСТАБИЛЬНО/);
   assert.match(api, /protocol_effect_details/);
+  assert.match(api, /"installed": installed\["wg"\]/);
+  assert.match(page, /filter\(\(\[, effect\]\) => effect\.installed\)/);
+  assert.match(page, /Нет установленных протоколов/);
   assert.match(api, /matches_selected/);
   assert.match(css, /\.connectionsWorkspace/);
   assert.match(css, /\.connectionsFilters/);

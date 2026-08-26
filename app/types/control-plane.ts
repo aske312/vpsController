@@ -14,7 +14,7 @@ export type LiveStatus = { resources: Overview["resources"]; protocols: Record<"
 export type LoggingSettings = { persistent: boolean; retention_days: number };
 export type DnsProvider = { id: string; name: string; country: string; addresses: string[]; doh_url?: string; filter: string };
 export type DnsSettings = { selected_id: string; apply_system: boolean; apply_wg: boolean; apply_awg: boolean; apply_shadowsocks: boolean; apply_vrx: boolean; prefer_encrypted: boolean; fallback_enabled: boolean; custom?: { name: string; addresses: string[]; doh_url: string } | null };
-export type DnsEffect = { value: string; scope: "new_profiles" | "client_recommendation" | "server_xray"; changes_existing: boolean; matches_selected: boolean };
+export type DnsEffect = { installed: boolean; value: string; scope: "new_profiles" | "client_recommendation" | "server_xray"; changes_existing: boolean; matches_selected: boolean };
 export type DnsStatus = { settings: DnsSettings; providers: DnsProvider[]; protocol_effect: Record<string, string>; protocol_effect_details?: Record<string, DnsEffect>; system_resolver?: { mode: "systemd-resolved" | "resolv.conf"; servers: string[]; managed: boolean; available: boolean } };
 export type DnsCheck = { id: string; available: boolean; udp_ok: boolean; udp_ms?: number; tcp_ok: boolean; tcp_ms?: number; doh_ok: boolean; doh_ms?: number; latency_ms?: number };
 export type ConfirmationRequest = { title: string; message: string; confirmLabel: string; phrase?: string; danger?: boolean; resolve: (confirmed: boolean) => void; };
