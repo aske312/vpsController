@@ -203,6 +203,7 @@ export function ServicesDashboard({
           </div>
         </header>
 
+        <div className="servicesOperationsGrid">
         <section className="servicesLog">
           <div className="operationsTitle">
             <p className="eyebrow">LOG MANAGEMENT</p>
@@ -250,6 +251,7 @@ export function ServicesDashboard({
             <ScheduleRow title="Очистка" value={automationDraft?.cleanup} timer={services?.timers.cleanup} busy={busy} onChange={(patch) => onAutomationChange("cleanup", patch)} />
           </div>
         </section>
+        </div>
       </article>
     </section>
   );

@@ -1005,3 +1005,152 @@
 .servicesStats .serviceMetric:nth-child(-n/**/+2) { border-bottom:1px solid rgba(105,137,162,.15); }
 .serviceActions { flex-wrap:wrap; }
 }
+
+/* Services layout refresh: one readable service registry and two focused
+   operation panels. These rules intentionally sit last to supersede the
+   earlier wide-screen experiments without affecting the other workspaces. */
+.servicesHero {
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+}
+
+.servicesNode {
+  width:min(360px,calc(100vw - 48px));
+  min-height:74px;
+  margin:18px 20px 18px 0;
+  padding:13px 52px 13px 18px;
+  align-content:center;
+  border:1px solid rgba(105,137,162,.20);
+  border-radius:999px;
+  background:linear-gradient(135deg,rgba(10,24,34,.84),rgba(8,18,27,.66));
+  box-shadow:inset 0 1px rgba(255,255,255,.035),0 14px 34px rgba(0,0,0,.18);
+}
+
+.servicesNode > strong { font-size:16px; }
+.servicesNode > span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.servicesNode > i { right:22px; bottom:50%; transform:translateY(50%); }
+
+.servicesManagedContent {
+  width:100%;
+  max-width:none;
+  padding:7px 0 12px;
+  background:linear-gradient(90deg,rgba(4,12,19,.42),rgba(4,12,19,.14));
+}
+
+.servicesGroup {
+  width:100%;
+  min-width:0;
+}
+
+.serviceRows {
+  grid-template-columns:minmax(0,1fr);
+}
+
+.serviceRow {
+  width:100%;
+  grid-template-columns:minmax(220px,1.2fr) minmax(220px,1fr) minmax(180px,auto);
+}
+
+.servicesOperationsGrid {
+  min-width:0;
+  display:grid;
+  grid-template-columns:minmax(320px,.78fr) minmax(0,1.22fr);
+  gap:12px;
+  padding:12px;
+}
+
+.servicesLog,
+.servicesMaintenance {
+  min-width:0;
+  border:1px solid rgba(91,116,141,.14);
+  border-radius:16px;
+  background:linear-gradient(180deg,rgba(10,21,30,.70),rgba(5,13,20,.46));
+}
+
+.servicesLog {
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:16px;
+  padding:16px;
+  border-bottom:1px solid rgba(91,116,141,.14);
+}
+
+.servicesLogControls {
+  display:grid;
+  grid-template-columns:1fr;
+  gap:12px;
+  justify-content:stretch;
+}
+
+.servicesLogControls .opsField {
+  min-height:58px;
+  padding:10px 12px;
+  border:1px solid rgba(91,116,141,.12);
+  border-radius:12px;
+  background:rgba(4,12,19,.34);
+}
+
+.servicesLogControls .opsField.toggle { align-items:center; }
+.servicesLogActions { justify-content:stretch; }
+.servicesLogActions button { flex:1 1 0; }
+
+.servicesMaintenance {
+  padding:16px;
+}
+
+.servicesMaintenanceHead {
+  align-items:center;
+  margin-bottom:12px;
+}
+
+.maintenanceRows {
+  display:grid;
+  gap:10px;
+  overflow:visible;
+  border:0;
+  border-radius:0;
+  background:transparent;
+}
+
+.maintenanceRow,
+.maintenanceRow.enabled {
+  grid-template-columns:minmax(150px,.62fr) minmax(0,1.38fr);
+  gap:12px;
+  padding:12px;
+  border:1px solid rgba(91,116,141,.13);
+  border-radius:13px;
+  background:rgba(4,12,19,.32);
+}
+
+.maintenanceRow + .maintenanceRow { border-top:1px solid rgba(91,116,141,.13); }
+.maintenanceRow.enabled { background:linear-gradient(90deg,rgba(17,60,51,.16),rgba(4,12,19,.32)); }
+.maintenanceControls,.maintenanceControls.weekly { grid-template-columns:120px repeat(3,minmax(112px,1fr)); }
+.maintenanceRuntime { grid-column:1 / -1; }
+
+@media (max-width: 1320px) {
+  .servicesOperationsGrid { grid-template-columns:1fr; }
+  .servicesLog { display:grid; grid-template-columns:minmax(210px,.5fr) minmax(0,1.5fr); }
+  .servicesLogControls { grid-template-columns:150px minmax(220px,1fr) auto; align-items:center; }
+  .servicesLogControls .opsField { min-height:0; }
+}
+
+@media (max-width: 980px) {
+  .servicesHero { grid-template-columns:1fr; }
+  .servicesNode { width:auto; margin:0 16px 16px; }
+  .serviceRow { grid-template-columns:1fr; }
+  .serviceActions { justify-content:flex-start; }
+  .servicesLog { grid-template-columns:1fr; }
+  .servicesLogControls { grid-template-columns:1fr; }
+  .maintenanceRow { grid-template-columns:1fr; }
+  .maintenanceControls,.maintenanceControls.weekly { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .maintenanceRuntime { grid-column:auto; }
+}
+
+@media (max-width: 620px) {
+  .servicesNode { border-radius:20px; }
+  .servicesOperationsGrid { padding:8px; }
+  .servicesLog,.servicesMaintenance { padding:14px; }
+  .servicesMaintenanceHead { align-items:flex-start; }
+  .maintenanceControls,.maintenanceControls.weekly,.maintenanceRuntime { grid-template-columns:1fr; }
+}
