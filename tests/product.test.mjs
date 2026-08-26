@@ -922,6 +922,7 @@ test("WG, AWG and Shadowsocks install the latest repository candidates", async (
     assert.match(script, new RegExp(`dpkg-query -W -f='\\$\\{Version\\}' ${packageName}`));
     assert.match(script, new RegExp(`apt-cache policy ${packageName}`));
   }
+  assert.match(awg, /LC_ALL=C apt-cache policy amneziawg/);
 });
 
 test("SSH management does not start socket activation and the daemon together", async () => {

@@ -103,7 +103,7 @@ fi
 apt-get -o DPkg::Lock::Timeout=300 update
 apt-get -o DPkg::Lock::Timeout=300 install -y amneziawg
 awg_installed_package="$(dpkg-query -W -f='${Version}' amneziawg 2>/dev/null || true)"
-awg_candidate_package="$(apt-cache policy amneziawg | awk '/Candidate:/ {print $2; exit}')"
+awg_candidate_package="$(LC_ALL=C apt-cache policy amneziawg | awk '/Candidate:/ {print $2; exit}')"
 [[ -n "${awg_installed_package}" && "${awg_installed_package}" == "${awg_candidate_package}" ]] \
   || { echo "AmneziaWG не обновлён до актуальной версии репозитория" >&2; exit 1; }
 

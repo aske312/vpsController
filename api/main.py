@@ -1378,7 +1378,6 @@ def github_latest_tag(repo: str) -> str:
 MIHOMO_RUNTIME_CORE_BIN = Path("/var/lib/vps-control/mihomo/bin/mihomo")
 MIHOMO_BUNDLED_CORE_BIN = INSTALL_DIR / "api" / "bin" / "mihomo"
 MIHOMO_GITHUB_REPO = "MetaCubeX/mihomo"
-AMNEZIAWG_GITHUB_REPO = "amnezia-vpn/amneziawg-tools"
 
 
 def mihomo_core_installed_version() -> str:
@@ -1403,12 +1402,15 @@ def awg_installed_version() -> str:
 
 def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bool) -> dict[str, Any]:
     package = str(manifest.get("package", ""))
+    update_available_override: bool | None = None
     if image_id == "awg":
-        # Real version (see awg_installed_version()) for display/comparison;
-        # the update action still goes through apt (package= is still set),
-        # since that's how a new build actually gets installed.
+        # The PPA package is the installation/update channel. GitHub release
+        # tags describe a different release stream and cannot be compared to
+        # the version printed by the PPA's awg binary.
+        installed_package, candidate_package = apt_package_versions(package)
         installed_version = awg_installed_version() if installed else ""
-        available_version = github_latest_tag(AMNEZIAWG_GITHUB_REPO)
+        available_version = ""
+        update_available_override = bool(installed and installed_package and candidate_package and installed_package != candidate_package)
     elif package:
         installed_version, available_version = apt_package_versions(package)
         if not installed:
@@ -1424,7 +1426,7 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
         available_version = github_latest_tag(MIHOMO_GITHUB_REPO)
     else:
         installed_version = available_version = ""
-    update_available = bool(installed_version and available_version and installed_version != available_version)
+    update_available = update_available_override if update_available_override is not None else bool(installed_version and available_version and installed_version != available_version)
     update_breaking = update_available and version_major(installed_version) != version_major(available_version)
     return {
         "installed_version": installed_version,

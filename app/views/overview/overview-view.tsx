@@ -610,7 +610,7 @@ export function OverviewDashboard({
                   : image.installed
                     ? formatModuleVersion(image.version)
                     : "—";
-              const availableVersion = formatModuleVersion(image.available_version || image.version);
+              const availableVersion = image.id === "awg" ? "АКТУАЛЬНАЯ" : formatModuleVersion(image.available_version || image.version);
               const displayedVersion = image.installed ? installedVersion : availableVersion;
               const state = !image.installed && !image.installable
                 ? { className: "unavailable", label: "НЕДОСТУПЕН" }

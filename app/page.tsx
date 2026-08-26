@@ -825,6 +825,8 @@ export default function Home() {
       title: `Обновить ${image.name}?`,
       message: image.update_breaking
         ? `Доступна версия ${image.available_version} (сейчас ${image.installed_version || "—"}). Это смена старшей версии протокола — после обновления может понадобиться пересоздать подключения, использующие этот протокол.`
+        : image.id === "awg"
+          ? `В репозитории Amnezia доступна новая сборка AWG. Пакеты и модуль ядра будут обновлены без изменения существующей конфигурации.`
         : image.id === "vless-reality-xhttp"
           ? `Доступна версия Xray ${image.available_version} (сейчас ${image.installed_version || "—"}). После проверки бинарника служба VLESS будет кратковременно перезапущена, конфигурация и подключения сохранятся.`
           : `Доступна версия ${image.available_version} (сейчас ${image.installed_version || "—"}). Активные подключения не будут разорваны.`,

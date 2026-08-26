@@ -236,6 +236,8 @@ export function MihomoPage({
       title: `Обновить ${module.name}?`,
       message: module.update_breaking
         ? `Доступна версия ${module.available_version} (сейчас ${module.installed_version || "—"}). Это смена старшей версии протокола — после обновления может понадобиться пересоздать профили или подключения, использующие этот канал.`
+        : module.id === "transport-awg"
+          ? "В репозитории Amnezia доступна новая сборка AWG. Пакеты будут обновлены без изменения конфигурации канала."
         : `Доступна версия ${module.available_version} (сейчас ${module.installed_version || "—"}). Активный канал и его подключения не будут разорваны.`,
       confirmLabel: "Обновить",
       danger: module.update_breaking,
@@ -705,7 +707,7 @@ function ModuleCatalog({ title, description, modules, busy, onToggle, onUpdate, 
               {module.installed && module.installed_version && (
                 <span className="mihomoModuleVersionRow">
                   <i>{formatModuleVersion(module.installed_version)}</i>
-                  {module.update_available && <em className={module.update_breaking ? "breaking" : ""}>→ {formatModuleVersion(module.available_version)}{module.update_breaking ? "  major" : ""}</em>}
+                  {module.update_available && <em className={module.update_breaking ? "breaking" : ""}>→ {module.id === "transport-awg" ? "репозиторий" : formatModuleVersion(module.available_version)}{module.update_breaking ? "  major" : ""}</em>}
                 </span>
               )}
             </p>

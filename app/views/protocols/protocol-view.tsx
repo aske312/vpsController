@@ -67,7 +67,7 @@ export function ProtocolView(props: ProtocolViewProps) {
                   <button onClick={() => void restartProtocol(protocolTab)} disabled={busy}>Перезапустить</button>
                   {activeProtocolImage?.update_available && (
                     <button className={activeProtocolImage.update_breaking ? "warning" : "accent"} onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy}>
-                      {installingProtocol === `update-${activeProtocolImage.id}` ? "Обновление…" : `Обновить до ${activeProtocolImage.available_version}`}
+                      {installingProtocol === `update-${activeProtocolImage.id}` ? "Обновление…" : activeProtocolImage.id === "awg" ? "Обновить из репозитория" : `Обновить до ${activeProtocolImage.available_version}`}
                     </button>
                   )}
                   {activeProtocolImage?.removable && <button className="danger" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить протокол</button>}
