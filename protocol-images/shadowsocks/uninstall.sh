@@ -34,4 +34,9 @@ os.replace(tmp, path)
 PY
 systemctl daemon-reload
 systemctl reset-failed >/dev/null 2>&1 || true
-echo "Управляемый модуль Shadowsocks удалён. Системный пакет сохранён для независимых установок."
+if find /etc/vps-control/mihomo/shadowsocks -mindepth 1 -maxdepth 1 -name '*.json' -print -quit 2>/dev/null | grep -q .; then
+  echo "shadowsocks-libev сохранён: пакет используется каналом Mihomo."
+else
+  apt-get -o DPkg::Lock::Timeout=300 purge -y shadowsocks-libev
+fi
+echo "Управляемый модуль Shadowsocks удалён."

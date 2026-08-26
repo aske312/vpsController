@@ -1390,11 +1390,13 @@ def mihomo_core_installed_version() -> str:
 
 
 def awg_installed_version() -> str:
-    # `awg --version` (e.g. "amneziawg-tools v3.1.20260812 - ...") is the
-    # real AmneziaWG version. The .deb package's own version field is
-    # inherited from upstream wireguard-tools' date-based scheme and never
-    # changes to reflect it - comparing that would never notice an
-    # AmneziaWG 1.x -> 2.x-style jump.
+    # The kernel module is AWG's actual dataplane and can be newer than the
+    # userspace tools shipped by the same PPA. Prefer its reported protocol
+    # build (for example 3.1.20260812), then fall back to awg tools.
+    output = run("modinfo", "-F", "version", "amneziawg", timeout=5)
+    match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
+    if match:
+        return match.group(1)
     output = run("awg", "--version", timeout=5)
     match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
     return match.group(1) if match else ""

@@ -515,12 +515,10 @@ def xray_installed_version(binary: Path) -> str:
 
 
 def awg_installed_version() -> str:
-    # `awg --version` (e.g. "amneziawg-tools v3.1.20260812 - ...") is the
-    # real AmneziaWG version. The .deb package's own version field is
-    # inherited from upstream wireguard-tools' date-based scheme and never
-    # changes to reflect it - comparing that would never notice an
-    # AmneziaWG 1.x -> 2.x-style jump. run() here doesn't catch a missing
-    # binary the way api/main.py's does, so check explicitly first.
+    module = run("modinfo", "-F", "version", "amneziawg", check=False).stdout
+    match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", module)
+    if match:
+        return match.group(1)
     if not shutil.which("awg"):
         return ""
     output = run("awg", "--version").stdout

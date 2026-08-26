@@ -37,6 +37,9 @@ systemctl disable --now vps-control-mihomo-ss.target >/dev/null 2>&1 || true
 rm -f /etc/systemd/system/vps-control-mihomo-ss.target \
       /etc/systemd/system/vps-control-mihomo-ss@.service
 rm -rf -- "${CONFIG_DIR}"
+if ! find /etc/vps-control/shadowsocks/clients -mindepth 1 -maxdepth 1 -name '*.json' -print -quit 2>/dev/null | grep -q .; then
+  apt-get -o DPkg::Lock::Timeout=300 purge -y shadowsocks-libev
+fi
 systemctl daemon-reload
 
 echo "Mihomo/Shadowsocks и все его профильные instances удалены; direct Shadowsocks не изменялся."

@@ -796,9 +796,10 @@ install_protocol_image() {
     fi
   done < <(find "${image_dir}" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print)
   [[ -n "${manifest}" ]] || die "образ ${image_id} не найден."
-  local installer image_root module_log failure_message installer_status
+  local installer uninstaller image_root module_log failure_message installer_status
   image_root="$(dirname -- "${manifest}")"
   installer="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("installer",""))' "${manifest}")"
+  uninstaller="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("uninstaller",""))' "${manifest}")"
   source /etc/os-release
   if ! python3 - "${manifest}" "${ID:-unknown}" <<'PY'
 import json
@@ -832,6 +833,14 @@ PY
       tail -n 40 "${module_log}" >&2 || true
       failure_message="$(tail -n 1 "${module_log}" | tr '\n\r' ' ' | cut -c1-240)"
       [[ -n "${failure_message}" ]] || failure_message="установщик завершился с ошибкой"
+      if [[ "${uninstaller}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${uninstaller}" ]]; then
+        echo "Откат частично установленного образа ${image_id}" >>"${module_log}"
+        ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+          AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+          PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
+          bash "${image_root}/${uninstaller}" >>"${module_log}" 2>&1 \
+          || echo "Автоматическая очистка завершилась не полностью" >>"${module_log}"
+      fi
       if [[ "${installer_status}" -eq 75 ]]; then
         failure_message="Требуется одна перезагрузка VPS: ${failure_message}"
       fi

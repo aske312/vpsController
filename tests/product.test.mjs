@@ -925,6 +925,27 @@ test("WG, AWG and Shadowsocks install the latest repository candidates", async (
   assert.match(awg, /LC_ALL=C apt-cache policy amneziawg/);
 });
 
+test("failed protocol installs roll back partial state and shared packages have owners", async () => {
+  const [control, api, overview, directSs, mihomoWg, mihomoAwg, mihomoSs] = await Promise.all([
+    read("scripts/vps-control.sh"),
+    read("api/main.py"),
+    read("app/views/overview/overview-view.tsx"),
+    read("protocol-images/shadowsocks/uninstall.sh"),
+    read("protocol-images/mihomo/modules/transport-wg/uninstall.sh"),
+    read("protocol-images/mihomo/modules/transport-awg/uninstall.sh"),
+    read("protocol-images/mihomo/modules/transport-shadowsocks/uninstall.sh"),
+  ]);
+  assert.match(control, /Откат частично установленного образа/);
+  assert.match(control, /bash "\$\{image_root\}\/\$\{uninstaller\}"/);
+  assert.match(api, /modinfo", "-F", "version", "amneziawg"/);
+  assert.doesNotMatch(overview, /formatModuleVersion\(image\.available_version \|\| image\.version\)/);
+  assert.match(overview, /image\.installable \? "АКТУАЛЬНАЯ" : "—"/);
+  assert.match(directSs, /mihomo\/shadowsocks[\s\S]*?purge -y shadowsocks-libev/);
+  assert.match(mihomoWg, /wireguard[\s\S]*?purge -y wireguard-tools/);
+  assert.match(mihomoAwg, /amneziawg[\s\S]*?purge -y amneziawg amneziawg-tools amneziawg-dkms/);
+  assert.match(mihomoSs, /vps-control\/shadowsocks[\s\S]*?purge -y shadowsocks-libev/);
+});
+
 test("SSH management does not start socket activation and the daemon together", async () => {
   const [api, manager] = await Promise.all([
     read("api/main.py"), read("scripts/vps-control.sh"),
