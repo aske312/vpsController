@@ -57,10 +57,22 @@
 .overviewFlow { width:72%; max-width:1000px !important; grid-template-columns:130px minmax(420px,1fr) 95px !important; }
 .overviewRouteCore,.overviewAccessGlyph,.overviewExitGlyph { backdrop-filter:blur(10px); }
 .overviewNodeWorkspace { grid-template-columns:minmax(0,8fr) minmax(260px,2fr) !important; gap:10px !important; }
-.overviewTelemetry,.overviewComponents { border-color:var(--cc-line) !important; border-radius:15px !important; background:var(--cc-surface) !important; }
-.overviewComponents { align-self:stretch; }
-.overviewComponentRegistry > div { gap:5px !important; }
-.overviewComponent { min-height:0 !important; padding:8px !important; border-radius:9px !important; background:var(--cc-inset) !important; }
+.overviewNodeWorkspace { height:clamp(620px,74vh,720px); align-items:stretch; }
+.overviewTelemetry,.overviewComponents { min-height:0; border-color:var(--cc-line) !important; border-radius:15px !important; background:var(--cc-surface) !important; }
+.overviewTelemetry { overflow:hidden; }
+.overviewComponents { align-self:stretch; display:grid; grid-template-rows:auto minmax(0,1fr); overflow:hidden; }
+.overviewComponents > header { min-height:58px; padding:2px 3px 11px; border-bottom:1px solid rgba(106,137,160,.10); }
+.overviewComponentCounters { display:flex !important; align-items:center; gap:5px !important; }
+.overviewComponentCounters span { padding:6px 7px; border-radius:8px; background:var(--cc-inset); }
+.overviewComponentRegistry { min-height:0; margin-top:8px; overflow:hidden; border:0; background:transparent; }
+.overviewComponentRegistry > div { height:100%; display:grid; align-content:start; gap:6px !important; overflow-y:auto; padding:0 3px 3px 0; scrollbar-width:thin; scrollbar-color:rgba(100,184,255,.28) transparent; }
+.overviewComponentRow { min-height:68px !important; padding:9px !important; border:1px solid rgba(106,137,160,.11) !important; border-radius:10px; background:var(--cc-inset); }
+.overviewComponentRow:last-child { border-bottom:1px solid rgba(106,137,160,.11) !important; }
+.overviewComponentIdentity { gap:8px; }
+.overviewComponentIdentity b { font-size:11px; }
+.overviewComponentVersion b { color:#8fa7b5; font-size:9px; }
+.overviewComponentState { padding:4px 6px; border:0; background:rgba(100,184,255,.07); }
+.overviewComponentAction button { min-width:96px; }
 
 /* DNS — resolver field is the main visual surface; policy remains a compact console. */
 .dnsPageHead { padding:3px 2px 7px !important; }
@@ -147,6 +159,8 @@
 }
 @media (max-width:900px) {
   .overviewNodeWorkspace,.dnsWorkbench,.dnsLowerGrid { grid-template-columns:1fr !important; }
+  .overviewNodeWorkspace { height:auto; }
+  .overviewComponents { height:min(620px,72vh); }
   .overviewTopologyHead,.overviewFlow { width:100%; max-width:100% !important; }
   .overviewFlow { grid-template-columns:105px minmax(0,1fr) !important; }
   .overviewExit { display:none !important; }

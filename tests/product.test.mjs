@@ -865,6 +865,17 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(manager, /install -d -m 0755 "\$\{INSTALL_DIR\}"\s+chmod 0755 "\$\{INSTALL_DIR\}"/);
 });
 
+test("installable protocol images are dispatched independently", async () => {
+  const [api, manager] = await Promise.all([read("api/main.py"), read("scripts/vps-control.sh")]);
+  const endpoint = api.match(/def install_protocol_image\([\s\S]*?\n\s*return action/)?.[0] || "";
+  const installer = manager.match(/install_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(endpoint, /if not image\.get\("installable"\)/);
+  assert.match(endpoint, /CONTROL_COMMAND, "protocol-install", image_id/);
+  assert.doesNotMatch(endpoint, /installed.*(?:wg|awg|mihomo|shadowsocks)/i);
+  assert.match(installer, /get\("id",""\).*== "\$\{image_id\}"/s);
+  assert.match(installer, /bash "\$\{image_root\}\/\$\{installer\}"/);
+});
+
 test("SSH management does not start socket activation and the daemon together", async () => {
   const [api, manager] = await Promise.all([
     read("api/main.py"), read("scripts/vps-control.sh"),
