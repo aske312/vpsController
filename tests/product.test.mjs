@@ -858,3 +858,13 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(manager, /http:\/\/127\.0\.0\.1:8000\/api\/health/);
   assert.match(manager, /install -d -m 0755 "\$\{INSTALL_DIR\}"\s+chmod 0755 "\$\{INSTALL_DIR\}"/);
 });
+
+test("SSH management does not start socket activation and the daemon together", async () => {
+  const [api, manager] = await Promise.all([
+    read("api/main.py"), read("scripts/vps-control.sh"),
+  ]);
+  assert.doesNotMatch(api, /"start",\s*"ssh\.socket",\s*"ssh\.service"/);
+  assert.doesNotMatch(manager, /systemctl start ssh\.socket ssh\.service/);
+  assert.match(api, /def manage_ssh_units/);
+  assert.match(manager, /start_preferred_ssh/);
+});

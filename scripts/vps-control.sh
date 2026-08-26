@@ -1439,10 +1439,21 @@ restart_services() {
   ok "Панель перезапущена."
 }
 
+start_preferred_ssh() {
+  if systemctl is-active --quiet ssh.socket || systemctl is-active --quiet ssh.service; then
+    return 0
+  fi
+  if systemctl is-enabled --quiet ssh.socket 2>/dev/null; then
+    systemctl start ssh.socket
+  else
+    systemctl start ssh.service
+  fi
+}
+
 prepare_update_ssh() {
   if ! systemctl is-active --quiet ssh.service && ! systemctl is-active --quiet ssh.socket; then
     info "Временный запуск SSH на время обновления"
-    systemctl start ssh.socket ssh.service
+    start_preferred_ssh
     SSH_TEMP_STARTED="yes"
   fi
   if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
@@ -1793,7 +1804,7 @@ with open(path, "w", encoding="utf-8") as stream:
                "enabled_at": datetime.now(timezone.utc).isoformat()}, stream)
 os.chmod(path, 0o600)
 PY
-    systemctl start ssh.socket ssh.service
+    start_preferred_ssh
     ufw allow OpenSSH
     change_access_mode "$1" external
     ok "сервисный режим включён; версия приложения не изменена."

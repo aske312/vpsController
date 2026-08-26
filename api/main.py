@@ -2114,6 +2114,21 @@ class ServiceAction(BaseModel):
     action: Literal["start", "stop", "restart"]
 
 
+def manage_ssh_units(action: Literal["start", "stop", "restart"]) -> None:
+    """Control OpenSSH without starting its socket and service together."""
+    if action == "stop":
+        run("systemctl", "stop", "ssh.socket", "ssh.service", timeout=30, check=True)
+        return
+
+    socket_active = run("systemctl", "is-active", "ssh.socket") == "active"
+    service_active = run("systemctl", "is-active", "ssh.service") == "active"
+    socket_enabled = run("systemctl", "is-enabled", "ssh.socket") in (
+        "enabled", "enabled-runtime", "static",
+    )
+    unit = "ssh.socket" if socket_active or (not service_active and socket_enabled) else "ssh.service"
+    run("systemctl", action if (socket_active or service_active) else "start", unit, timeout=30, check=True)
+
+
 @app.post("/api/services/{service_id}/action")
 def manage_service(service_id: str, payload: ServiceAction, _: None = Depends(require_token)) -> dict:
     definition = managed_services().get(service_id)
@@ -2150,12 +2165,7 @@ def manage_service(service_id: str, payload: ServiceAction, _: None = Depends(re
                 detail="SSH cannot be stopped until the VPN and control panel recovery path are active",
             )
     if service_id == "ssh":
-        if payload.action == "stop":
-            run("systemctl", "stop", "ssh.socket", "ssh.service", timeout=30, check=True)
-        elif payload.action == "start":
-            run("systemctl", "start", "ssh.socket", "ssh.service", timeout=30, check=True)
-        else:
-            run("systemctl", "restart", "ssh.socket", "ssh.service", timeout=30, check=True)
+        manage_ssh_units(payload.action)
     else:
         run("systemctl", payload.action, definition["unit"], timeout=30, check=True)
     return service_details(service_id, definition)
