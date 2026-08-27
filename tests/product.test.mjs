@@ -906,7 +906,12 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   const controlCenterCss = await read("app/styles/control-center.css");
   assert.match(controlCenterCss, /\.shell small[^}]*font-size:11px !important[^}]*line-height:1\.5 !important/s);
   assert.match(controlCenterCss, /label small[^}]*font-size:12px !important[^}]*line-height:1\.5 !important/s);
-  assert.match(controlCenterCss, /\.protocolSettingsFields label:has\(small\)[^}]*min-height:92px !important/s);
+  assert.match(protocolView, /className="protocolFieldHelp"/);
+  assert.match(protocolCss, /\.protocolFieldHelp\s*\{[^}]*font-size:13px[^}]*line-height:1\.45/s);
+  assert.match(protocolCss, /label:has\(\.protocolFieldHelp\)[^}]*min-height:124px !important/s);
+  assert.match(protocolCss, /\.vlessCommandCenter \.vlessSettingsGroup\s*\{\s*display:block/);
+  assert.match(protocolCss, /\.protocolWorkspace \.protocolSettingsFields label > span[^}]*font-size:12px/s);
+  assert.match(protocolCss, /\.protocolWorkspace \.protocolSettingsFields input:not[^}]*min-height:40px !important/s);
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {

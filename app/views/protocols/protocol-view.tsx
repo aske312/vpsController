@@ -303,7 +303,7 @@ function ProtocolSettingsEditor({
         </select>
           : field.type === "number" ? <input type="number" min={field.min} max={field.max} value={Number(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, Number(event.target.value))} />
             : <input type="text" value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)} />}
-      {field.help && (!vless || ["transport", "cdn_enabled"].includes(field.key)) && <small>{field.help}</small>}
+      {field.help && (!vless || ["transport", "cdn_enabled"].includes(field.key)) && <div className="protocolFieldHelp"><i aria-hidden="true">i</i><span>{field.help}</span></div>}
     </label>)}
   </div>;
   const directFields = visibleFields.filter((field) => directKeys.has(field.key));
