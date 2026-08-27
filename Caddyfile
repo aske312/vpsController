@@ -48,3 +48,7 @@ http://{WG_PANEL_ADDRESS}, http://{AWG_PANEL_ADDRESS} {
         reverse_proxy 127.0.0.1:3000
     }
 }
+
+# Protocol images may add isolated virtual hosts here. A glob with no matches
+# is valid, so a clean installation does not need placeholder configuration.
+import /etc/caddy/vps-control.d/*.caddy

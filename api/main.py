@@ -94,6 +94,9 @@ SHADOWSOCKS_CONFIG_DIR = Path("/etc/vps-control/shadowsocks/clients")
 VLESS_CONFIG_DIR = Path("/etc/vps-control/vless-reality-xhttp")
 VLESS_CONFIG = VLESS_CONFIG_DIR / "config.json"
 VLESS_ENV = VLESS_CONFIG_DIR / "reality.env"
+VLESS_CDN_DOMAIN = os.getenv("VLESS_CDN_DOMAIN", "")
+VLESS_CDN_SNIPPET = Path("/etc/caddy/vps-control.d/vless-cdn.caddy")
+VLESS_CDN_PORT = int(os.getenv("VLESS_CDN_PORT", "10087"))
 AWG_PROFILE = {
     "Jc": os.getenv("AWG_JC", "6"), "Jmin": os.getenv("AWG_JMIN", "8"), "Jmax": os.getenv("AWG_JMAX", "80"),
     "S1": os.getenv("AWG_S1", "64"), "S2": os.getenv("AWG_S2", "112"),
@@ -2494,6 +2497,8 @@ class ProtocolSettingsUpdate(BaseModel):
     xpadding: str | None = Field(default=None, min_length=1, max_length=32, pattern=r"^\d+(?:-\d+)?$")
     sni: str | None = Field(default=None, min_length=4, max_length=253, pattern=r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
     xmux_concurrency: int | None = Field(default=None, ge=1, le=64)
+    cdn_enabled: bool | None = None
+    cdn_domain: str | None = Field(default=None, max_length=253)
 
 
 def configure_vless_transport(stream: dict, transport: str, path: str = "/") -> None:
@@ -2511,8 +2516,15 @@ def configure_vless_transport(stream: dict, transport: str, path: str = "/") -> 
         stream["rawSettings"] = {"header": {"type": "none"}}
 
 
+def vless_reality_inbound(config: dict) -> dict:
+    return next(
+        (item for item in config.get("inbounds", []) if item.get("tag") == "vless-reality-xhttp"),
+        config["inbounds"][0],
+    )
+
+
 def vless_client_query(config: dict, reality: dict) -> dict[str, str]:
-    stream = config["inbounds"][0]["streamSettings"]
+    stream = vless_reality_inbound(config)["streamSettings"]
     transport = str(stream.get("network", "xhttp"))
     target_host = reality.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0]
     values = {"encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome", "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", "")}
@@ -2524,6 +2536,76 @@ def vless_client_query(config: dict, reality: dict) -> dict[str, str]:
     else:
         values["type"] = "tcp"
     return values
+
+
+def vless_cdn_client_query(reality: dict) -> dict[str, str]:
+    return {
+        "encryption": "none", "security": "tls", "sni": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN),
+        "fp": "chrome", "type": "ws", "host": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN),
+        "path": reality.get("WS_PATH", "/"), "alpn": "http/1.1",
+    }
+
+
+def valid_hostname(value: str) -> bool:
+    return bool(re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", value))
+
+
+def update_key_value_file(path: Path, values: dict[str, str], quoted: bool) -> None:
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    for key, value in values.items():
+        encoded = value.replace("\\", "\\\\").replace('"', '\\"') if quoted else value
+        line = f'{key}="{encoded}"' if quoted else f"{key}={encoded}"
+        if re.search(rf"(?m)^{re.escape(key)}=", text):
+            text = re.sub(rf"(?m)^{re.escape(key)}=.*$", lambda _: line, text)
+        else:
+            text = text.rstrip() + "\n" + line + "\n"
+    path.write_text(text, encoding="utf-8")
+    os.chmod(path, 0o600)
+
+
+def configure_vless_cdn(config: dict, reality: dict, enabled: bool, domain: str) -> None:
+    """Add or remove the CDN inbound while preserving every VLESS UUID."""
+    managed_tags = {"vless-cdn-websocket", "vless-tls-websocket"}
+    inbounds = config.get("inbounds", [])
+    existing = next((item for item in inbounds if item.get("tag") in managed_tags), None)
+    reality["CDN_ENABLED"] = "yes" if enabled else "no"
+    reality["CDN_DOMAIN"] = domain
+    reality["CDN_PORT"] = str(VLESS_CDN_PORT)
+    if not enabled:
+        config["inbounds"] = [item for item in inbounds if item.get("tag") not in managed_tags]
+        return
+    clients_by_id: dict[str, dict] = {}
+    for inbound in inbounds:
+        if inbound.get("protocol") != "vless":
+            continue
+        for client in inbound.get("settings", {}).get("clients", []):
+            if client.get("id"):
+                clients_by_id[str(client["id"])] = client
+    ws_path = reality.get("WS_PATH") or "/" + secrets.token_hex(16)
+    cdn_inbound = existing or {}
+    cdn_inbound.update({
+        "tag": "vless-cdn-websocket", "listen": "127.0.0.1", "port": VLESS_CDN_PORT, "protocol": "vless",
+        "settings": {"clients": list(clients_by_id.values()), "decryption": "none"},
+        "streamSettings": {"network": "websocket", "security": "none", "wsSettings": {"path": ws_path}},
+        "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True},
+    })
+    if existing is None:
+        inbounds.append(cdn_inbound)
+    reality["WS_PATH"] = ws_path
+
+
+def write_vless_cdn_snippet(enabled: bool, domain: str, ws_path: str) -> None:
+    VLESS_CDN_SNIPPET.parent.mkdir(parents=True, exist_ok=True)
+    if not enabled:
+        VLESS_CDN_SNIPPET.unlink(missing_ok=True)
+        return
+    temporary = VLESS_CDN_SNIPPET.with_suffix(".tmp")
+    temporary.write_text(
+        f"{domain} {{\n    handle {ws_path} {{\n        reverse_proxy 127.0.0.1:{VLESS_CDN_PORT}\n    }}\n    respond 404\n}}\n",
+        encoding="utf-8",
+    )
+    os.chmod(temporary, 0o644)
+    temporary.replace(VLESS_CDN_SNIPPET)
 
 
 def key(command: str) -> str:
@@ -2860,9 +2942,12 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 original = VLESS_CONFIG.read_bytes()
                 config_data = json.loads(original.decode("utf-8"))
                 reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
-                inbound_clients = config_data["inbounds"][0]["settings"]["clients"]
                 client_uuid = str(uuid.uuid4())
-                inbound_clients.append({"id": client_uuid, "email": f"{client_id}@312.net"})
+                vless_inbounds = [item for item in config_data.get("inbounds", []) if item.get("protocol") == "vless"]
+                if not vless_inbounds:
+                    raise KeyError("no VLESS inbound")
+                for inbound in vless_inbounds:
+                    inbound.setdefault("settings", {}).setdefault("clients", []).append({"id": client_uuid, "email": f"{client_id}@312.net"})
                 stage = "запись временной конфигурации"
                 tmp.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
                 os.chmod(tmp, 0o640)
@@ -2877,14 +2962,20 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 replaced = True
                 restart_vless_service()
                 port = int(reality.get("PORT", "443"))
-                query_values = vless_client_query(config_data, reality)
-                query = urllib.parse.urlencode(query_values)
-                client_config = f"vless://{client_uuid}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}?{query}#{urllib.parse.quote(payload.name)}"
+                direct_query = urllib.parse.urlencode(vless_client_query(config_data, reality))
+                direct_config = f"vless://{client_uuid}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}?{direct_query}#{urllib.parse.quote(payload.name + ' Direct')}"
+                profiles = [{"id": "direct", "name": "Direct · REALITY/XHTTP", "filename": f"{safe_name}-vless-direct.txt", "config": direct_config}]
+                cdn_domain = reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
+                if cdn_domain and any(item.get("tag") == "vless-cdn-websocket" for item in vless_inbounds):
+                    cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality))
+                    cdn_config = f"vless://{client_uuid}@{cdn_domain}:443?{cdn_query}#{urllib.parse.quote(payload.name + ' CDN')}"
+                    profiles.append({"id": "cdn", "name": "CDN · TLS/WebSocket", "filename": f"{safe_name}-vless-cdn.txt", "config": cdn_config})
+                client_config = "\n".join(profile["config"] for profile in profiles)
                 stage = "сохранение подключения"
                 items = read_clients()
                 items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
-                return {"id": client_id, "filename": f"{safe_name}-vless.txt", "config": client_config}
+                return {"id": client_id, "filename": f"{safe_name}-vless.txt", "config": client_config, "profiles": profiles}
             except (OSError, json.JSONDecodeError, KeyError, ValueError, RuntimeError, subprocess.SubprocessError, HTTPException) as exc:
                 if replaced:
                     try:
@@ -2981,8 +3072,11 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     if protocol == "vless-reality-xhttp":
         try:
             config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
-            inbound_clients = config_data["inbounds"][0]["settings"]["clients"]
-            config_data["inbounds"][0]["settings"]["clients"] = [client for client in inbound_clients if client.get("id") != item.get("public_key")]
+            for inbound in config_data.get("inbounds", []):
+                if inbound.get("protocol") != "vless":
+                    continue
+                inbound_clients = inbound.get("settings", {}).get("clients", [])
+                inbound["settings"]["clients"] = [client for client in inbound_clients if client.get("id") != item.get("public_key")]
             tmp = VLESS_CONFIG.with_suffix(".tmp.json")
             tmp.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
             os.chmod(tmp, 0o640)
@@ -3064,6 +3158,12 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
     }, {
         "key": "xmux_concurrency", "label": "Параллелизм XHTTP", "type": "number", "value": int(values.get("xmuxConcurrency", 12)), "min": 1, "max": 64,
         "help": "Количество одновременных запросов на HTTP-соединение. 8–16 устраняет секундные очереди; применяется к новым VRX-профилям.",
+    }, {
+        "key": "cdn_enabled", "label": "Дополнительный маршрут через CDN", "type": "boolean", "value": bool(values.get("cdnEnabled", False)),
+        "help": "Добавляет TLS/WebSocket-вход через Caddy на порту 443. Прямой REALITY-профиль сохраняется.",
+    }, {
+        "key": "cdn_domain", "label": "CDN-домен", "type": "text", "value": str(values.get("cdnDomain", "")),
+        "help": "Например cdn.vpn.example.com. Для Cloudflare запись A должна быть в режиме Proxied.",
     }, {
         "key": "dns", "label": "DNS VRX", "type": "text", "value": current_env_value("VRX_DNS", "1.1.1.1, 1.0.0.1"),
         "help": "Применяется к серверному резолверу Xray. DNS самого устройства задаётся в клиентском приложении.",
@@ -3153,7 +3253,7 @@ def update_protocol_settings(
     allowed = {
         "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
         "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
-        "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni"},
+        "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni", "cdn_enabled", "cdn_domain"},
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
         raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
@@ -3215,17 +3315,20 @@ def update_protocol_settings(
             raise HTTPException(status_code=409, detail="VRX не установлен")
         original = VLESS_CONFIG.read_bytes()
         env_original = VLESS_ENV.read_bytes() if VLESS_ENV.exists() else None
+        snippet_original = VLESS_CDN_SNIPPET.read_bytes() if VLESS_CDN_SNIPPET.exists() else None
         temporary = VLESS_CONFIG.with_suffix(".settings.tmp.json")
         try:
             config = json.loads(original)
-            stream = config["inbounds"][0]["streamSettings"]
+            reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+            reality_inbound = vless_reality_inbound(config)
+            stream = reality_inbound["streamSettings"]
             current_transport = str(stream.get("network", "xhttp"))
             current_path = str(stream.get("xhttpSettings", {}).get("path", "/")) if current_transport == "xhttp" else "/" + str(stream.get("grpcSettings", {}).get("serviceName", "vless"))
             if "transport" in supplied or "transport_path" in supplied:
                 configure_vless_transport(stream, str(supplied.get("transport", current_transport)), str(supplied.get("transport_path", current_path)))
             if "sni" in supplied:
                 validate_reality_sni(supplied["sni"])
-                reality_settings = config["inbounds"][0]["streamSettings"]["realitySettings"]
+                reality_settings = reality_inbound["streamSettings"]["realitySettings"]
                 reality_settings["target"] = f'{supplied["sni"]}:443'
                 reality_settings["serverNames"] = [supplied["sni"]]
             if "xhttp_mode" in supplied:
@@ -3242,6 +3345,14 @@ def update_protocol_settings(
                 dns_addresses = [value.strip() for value in supplied["dns"].split(",") if value.strip()]
                 config["dns"] = {"servers": dns_addresses, "queryStrategy": "UseIP"}
                 config.setdefault("routing", {})["domainStrategy"] = "IPIfNonMatch"
+            cdn_changed = "cdn_enabled" in supplied or "cdn_domain" in supplied
+            if cdn_changed:
+                current_cdn_enabled = reality.get("CDN_ENABLED", "yes" if reality.get("CDN_DOMAIN") else "no") == "yes"
+                cdn_enabled = bool(supplied.get("cdn_enabled", current_cdn_enabled))
+                cdn_domain = str(supplied.get("cdn_domain", reality.get("CDN_DOMAIN", ""))).strip().lower()
+                if cdn_enabled and not valid_hostname(cdn_domain):
+                    raise HTTPException(status_code=422, detail="Укажите корректный CDN-домен без схемы, пути и порта")
+                configure_vless_cdn(config, reality, cdn_enabled, cdn_domain)
             temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
             os.chmod(temporary, 0o640)
             os.chown(temporary, 0, 65534)
@@ -3253,16 +3364,40 @@ def update_protocol_settings(
                 persist_vrx_target(supplied["sni"])
             if "dns" in supplied:
                 persist_env_values({"VRX_DNS": supplied["dns"]})
+            if cdn_changed:
+                update_key_value_file(VLESS_ENV, {
+                    "WS_PATH": reality.get("WS_PATH", ""),
+                    "CDN_ENABLED": "yes" if cdn_enabled else "no",
+                    "CDN_DOMAIN": cdn_domain,
+                    "CDN_PORT": str(VLESS_CDN_PORT),
+                }, quoted=False)
+                write_vless_cdn_snippet(cdn_enabled, cdn_domain, reality.get("WS_PATH", "/"))
+                run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", timeout=15, check=True)
             restart_vless_service()
+            if cdn_changed:
+                run("systemctl", "reload", "caddy.service", timeout=20, check=True)
+                if cdn_enabled and Path("/usr/sbin/ufw").exists():
+                    run(
+                        "systemd-run", "--wait", "--collect", "--property=Type=exec",
+                        CONTROL_COMMAND, "vless-cdn-firewall", timeout=60, check=True,
+                    )
         except Exception as exc:
+            logger.exception("VLESS settings transaction failed")
             VLESS_CONFIG.write_bytes(original)
             os.chmod(VLESS_CONFIG, 0o640)
             os.chown(VLESS_CONFIG, 0, 65534)
             if env_original is not None:
                 VLESS_ENV.write_bytes(env_original)
                 os.chmod(VLESS_ENV, 0o600)
+            if snippet_original is None:
+                VLESS_CDN_SNIPPET.unlink(missing_ok=True)
+            else:
+                VLESS_CDN_SNIPPET.parent.mkdir(parents=True, exist_ok=True)
+                VLESS_CDN_SNIPPET.write_bytes(snippet_original)
+                os.chmod(VLESS_CDN_SNIPPET, 0o644)
             try:
                 restart_vless_service()
+                run("systemctl", "reload", "caddy.service", timeout=20, check=True)
             except Exception:
                 pass
             if isinstance(exc, HTTPException):
@@ -3320,10 +3455,13 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                     "REALITY target": target,
                     "XHTTP path": reality.get("XHTTP_PATH", reality.get("PATH", "/")),
                     "SNI": target.rsplit(":", 1)[0] if ":" in target else target,
+                    "CDN hostname": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN) or "не настроен",
+                    "CDN transport": "TLS/WebSocket" if reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN) else "отключён",
                     "DNS": current_env_value("VRX_DNS", "не настроен"),
                 }
                 config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
-                stream_values = config_data["inbounds"][0]["streamSettings"]
+                stream_values = vless_reality_inbound(config_data)["streamSettings"]
+                cdn_inbound = next((item for item in config_data.get("inbounds", []) if item.get("tag") in {"vless-cdn-websocket", "vless-tls-websocket"}), None)
                 transport = str(stream_values.get("network", "xhttp"))
                 xhttp_values = dict(stream_values.get("xhttpSettings", {}))
                 xhttp_values["transport"] = transport
@@ -3333,6 +3471,8 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 xhttp_values["xPaddingBytes"] = xhttp_values.get("extra", {}).get("xPaddingBytes", "100-1000")
                 max_concurrency = xhttp_values.get("extra", {}).get("xmux", {}).get("maxConcurrency", "12")
                 xhttp_values["xmuxConcurrency"] = int(str(max_concurrency).split("-", 1)[0])
+                xhttp_values["cdnEnabled"] = cdn_inbound is not None and reality.get("CDN_ENABLED", "yes") == "yes"
+                xhttp_values["cdnDomain"] = reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
                 editable_settings = editable_protocol_settings(protocol, xhttp_values)
             except (OSError, ValueError, json.JSONDecodeError, KeyError, IndexError):
                 listen_port = 8443

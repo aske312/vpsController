@@ -170,7 +170,7 @@ function ProtocolSettingsPanel({
   return <article className="panel protocolConfiguration">
     <header>
       <div><p className="eyebrow">{isVless ? "VLESS CONFIGURATION" : "CHANNEL CONFIGURATION"}</p><h3>{isVless ? "Конфигурация VLESS" : `Настройки ${labels[protocol]}`}</h3>
-        <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : isVless ? "REALITY отвечает за защиту и маскировку, XHTTP — за транспорт. Ядро Xray обновляется отдельно от конфигурации." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
+        <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : isVless ? "VLESS поддерживает независимые маршруты: прямой REALITY и дополнительный TLS/WebSocket через CDN. Ядро Xray обновляется отдельно." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
       <div className="configurationSafety"><i aria-hidden="true" /><p><strong>Безопасное применение</strong><small>валидация и автоматический откат</small></p></div>
     </header>
     <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} vless={isVless} onChange={onChange} onSave={onSave} />
@@ -188,12 +188,13 @@ function ProtocolSettingsEditor({
 }) {
   if (!fields.length) return <p className="protocolSettingsEmpty">Для этого протокола нет изменяемых параметров.</p>;
   const selectedTransport = String(draft.transport || fields.find((field) => field.key === "transport")?.value || "xhttp");
+  const cdnEnabled = Boolean(draft.cdn_enabled ?? fields.find((field) => field.key === "cdn_enabled")?.value);
   const visibleFields = vless && selectedTransport !== "xhttp"
     ? fields.filter((field) => !["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key))
     : fields;
-  const fieldLayer = (key: string) => key === "sni" ? "REALITY" : ["xhttp_mode", "xpadding", "xmux_concurrency"].includes(key) ? "XHTTP" : "XRAY";
+  const fieldLayer = (key: string) => key.startsWith("cdn_") ? "CDN" : key === "sni" ? "REALITY" : ["xhttp_mode", "xpadding", "xmux_concurrency"].includes(key) ? "XHTTP" : "XRAY";
   return <div className={`protocolSettingsEditor${vless ? " vlessSettingsEditor" : ""}`}>
-    {vless && <div className="vlessStack" aria-label="Состав VLESS"><span><b>VLESS</b><small>протокол</small></span><i>+</i><span><b>REALITY</b><small>защита</small></span><i>+</i><span><b>{selectedTransport.toUpperCase()}</b><small>транспорт</small></span><i>·</i><span><b>XRAY</b><small>ядро</small></span></div>}
+    {vless && <div className="vlessStack" aria-label="Состав VLESS"><span><b>VLESS</b><small>протокол</small></span><i>+</i><span><b>REALITY</b><small>прямой маршрут</small></span><i>+</i><span><b>{selectedTransport.toUpperCase()}</b><small>транспорт</small></span>{cdnEnabled && <><i>+</i><span><b>CDN</b><small>TLS/WebSocket</small></span></>}<i>·</i><span><b>XRAY</b><small>ядро</small></span></div>}
     <div className="protocolSettingsFields">
       {visibleFields.map((field) => <label key={field.key}>
         <span>{field.label}{vless && <em>{fieldLayer(field.key)}</em>}</span>

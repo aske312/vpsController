@@ -1,9 +1,9 @@
 {
   "id": "vless-reality-xhttp",
   "name": "VLESS",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "installable": true,
-  "description": "VLESS на ядре Xray с настраиваемыми REALITY и XHTTP",
+  "description": "VLESS на ядре Xray: REALITY/XHTTP напрямую и WebSocket через CDN",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",
   "installer": "install.sh",

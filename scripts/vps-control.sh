@@ -10,6 +10,7 @@ MANAGER_CONFIG="/etc/${APP_NAME}-manager.conf"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}-api.service"
 WEB_SERVICE_FILE="/etc/systemd/system/${APP_NAME}-web.service"
 CADDY_CONFIG="/etc/caddy/Caddyfile"
+CADDY_SNIPPET_DIR="/etc/caddy/vps-control.d"
 COMMAND_PATH="/usr/local/sbin/${APP_NAME}"
 INSTALL_CONFIG="/etc/${APP_NAME}-install.conf"
 PANEL_URL=""
@@ -32,6 +33,8 @@ AWG_PORT="51822"
 SHADOWSOCKS_PORT_START="30000"
 VLESS_REALITY_PORT="8443"
 VLESS_REALITY_TARGET="www.intel.com:443"
+VLESS_CDN_DOMAIN=""
+VLESS_CDN_PORT="10087"
 WG_INTERFACE="wg0"
 AWG_INTERFACE="awg0"
 WG_MTU="1280"
@@ -323,7 +326,12 @@ load_install_config() {
   [[ "${VLESS_REALITY_PORT}" =~ ^[0-9]+$ ]] || die "VLESS_REALITY_PORT must be numeric."
   (( HTTP_PORT >= 1 && HTTP_PORT <= 65535 )) || die "HTTP_PORT must be between 1 and 65535."
   (( VLESS_REALITY_PORT >= 1 && VLESS_REALITY_PORT <= 65535 )) || die "VLESS_REALITY_PORT must be between 1 and 65535."
+  [[ "${VLESS_CDN_PORT}" =~ ^[0-9]+$ ]] || die "VLESS_CDN_PORT must be numeric."
+  (( VLESS_CDN_PORT >= 1024 && VLESS_CDN_PORT <= 65535 )) || die "VLESS_CDN_PORT must be between 1024 and 65535."
   [[ "${VLESS_REALITY_PORT}" != "443" ]] || die "TCP 443 is reserved for the HTTPS panel; choose another VLESS port."
+  [[ "${VLESS_CDN_PORT}" != "${VLESS_REALITY_PORT}" ]] || die "VLESS_CDN_PORT and VLESS_REALITY_PORT must differ."
+  [[ -z "${VLESS_CDN_DOMAIN}" || "${VLESS_CDN_DOMAIN}" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] \
+    || die "VLESS_CDN_DOMAIN must be a hostname without scheme, path or port."
   [[ -z "${SERVER_COUNTRY_CODE_OVERRIDE:-}" || "${SERVER_COUNTRY_CODE_OVERRIDE}" =~ ^[A-Z]{2}$ ]] \
     || die "SERVER_COUNTRY_CODE_OVERRIDE должен содержать две латинские буквы."
 }
@@ -386,6 +394,8 @@ configure_access() {
   set_env_value "SHADOWSOCKS_PORT_START" "${SHADOWSOCKS_PORT_START}"
   set_env_value "VLESS_REALITY_PORT" "${VLESS_REALITY_PORT}"
   set_env_value "VLESS_REALITY_TARGET" "${VLESS_REALITY_TARGET}"
+  set_env_value "VLESS_CDN_DOMAIN" "${VLESS_CDN_DOMAIN}"
+  set_env_value "VLESS_CDN_PORT" "${VLESS_CDN_PORT}"
   set_env_value "WG_INTERFACE" "${WG_INTERFACE}"
   set_env_value "AWG_INTERFACE" "${AWG_INTERFACE}"
   set_env_value "WG_MTU" "${WG_MTU}"
@@ -483,6 +493,7 @@ import sys
 print(next(ipaddress.ip_network(sys.argv[1] or "10.73.0.0/24").hosts()))
 PY
 )"
+  install -d -m 0755 "${CADDY_SNIPPET_DIR}"
   if [[ -n "${domain}" && "${ACCESS_MODE}" == "external" ]]; then
     sed -e "s|{\$SITE_ADDRESS}|${domain}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
@@ -1319,7 +1330,7 @@ configure_firewall() {
     ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
     ufw delete allow 443/tcp >/dev/null 2>&1 || true
   else
-    if [[ -n "$(env_value PUBLIC_DOMAIN)" ]]; then
+    if [[ -n "$(env_value PUBLIC_DOMAIN)" || -n "$(env_value VLESS_CDN_DOMAIN)" ]]; then
       ufw --force delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
       ufw allow 80/tcp comment '312.net HTTPS redirect'
       ufw allow 443/tcp comment '312.net HTTPS panel'
@@ -1327,7 +1338,18 @@ configure_firewall() {
       ufw allow "${HTTP_PORT}/tcp"
     fi
   fi
+  if [[ -n "$(env_value VLESS_CDN_DOMAIN)" ]]; then
+    ufw allow 80/tcp comment '312.net VLESS CDN certificate'
+    ufw allow 443/tcp comment '312.net VLESS CDN HTTPS'
+  fi
   ufw --force enable
+}
+
+configure_vless_cdn_firewall() {
+  command -v ufw >/dev/null 2>&1 || return 0
+  [[ "${ENABLE_UFW}" == "yes" ]] || return 0
+  ufw allow 80/tcp comment '312.net VLESS CDN certificate'
+  ufw allow 443/tcp comment '312.net VLESS CDN HTTPS'
 }
 
 configure_vpn_firewall_policy() {
@@ -1558,7 +1580,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/wireguard -/etc/amnezia -/etc/systemd/resolved.conf.d ${DATA_DIR}
+ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/caddy/vps-control.d -/etc/wireguard -/etc/amnezia -/etc/systemd/resolved.conf.d ${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -1568,7 +1590,7 @@ EOF
 }
 
 ensure_api_write_access() {
-  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/wireguard -/etc/amnezia -/etc/systemd/resolved.conf.d ${DATA_DIR}"
+  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/caddy/vps-control.d -/etc/wireguard -/etc/amnezia -/etc/systemd/resolved.conf.d ${DATA_DIR}"
   if ! grep -Fxq "${expected}" "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
     systemctl daemon-reload
@@ -2468,6 +2490,7 @@ integrity_check() {
     || die "не найден systemd-профиль API ${SERVICE_FILE}."
   grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
     && grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
+    && grep -Eq '^ReadWritePaths=.*-?/etc/caddy/vps-control\.d([[:space:]]|$)' "${SERVICE_FILE}" \
     && grep -Eq '^ReadWritePaths=.*-?/etc/systemd/resolved\.conf\.d([[:space:]]|$)' "${SERVICE_FILE}" \
     || die "systemd-профиль API не разрешает сохранять конфигурацию приложения."
   [[ "$(stat -c '%U' "${COMMAND_PATH}")" == "root" ]] \
@@ -2545,6 +2568,8 @@ usage() {
                    обновить протокол до последней официальной версии
   client-firewall <add|delete> <port>
                    изменить правило отдельного Shadowsocks-подключения
+  vless-cdn-firewall
+                   разрешить HTTPS и проверку сертификата для CDN-маршрута VLESS
   credentials      показать логин и пароль администратора
   help             показать эту справку
 EOF
@@ -2555,7 +2580,7 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
+    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
       begin_operation "${1}"
       trap handle_exit EXIT
       trap 'exit 124' TERM INT
@@ -2627,6 +2652,7 @@ main() {
     secure) secure_server ;;
     kernel-update) update_kernel ;;
     vpn-firewall) configure_vpn_firewall_policy ;;
+    vless-cdn-firewall) configure_vless_cdn_firewall ;;
     optimize) optimize_resources ;;
     automation-apply) apply_automation ;;
     logging-config) configure_logging "$@" ;;

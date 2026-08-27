@@ -1450,6 +1450,26 @@
   line-height: 1.55;
 }
 
+.connectionProfileChoices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.connectionProfileChoices button {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.connectionProfileChoices button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 .connectionDownloadPrimary,
 .connectionDownloadSecondary {
   width: 100%;

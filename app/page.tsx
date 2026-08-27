@@ -28,6 +28,7 @@ function reloadWithoutCache(message: string) {
   window.location.replace(target.toString());
 }
 const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-HISTORY_SAMPLES);
+type GeneratedProfile = { id: string; name: string; filename: string; config: string };
 export default function Home() {
   const [tab, setTab] = useState<Tab>("overview");
   const [selectedChannel, setSelectedChannel] = useState<Protocol>("awg");
@@ -88,6 +89,7 @@ export default function Home() {
   const [newClient, setNewClient] = useState({ name: "", protocol: "wg" as Protocol });
   const [generated, setGenerated] = useState("");
   const [generatedName, setGeneratedName] = useState("client.conf");
+  const [generatedProfiles, setGeneratedProfiles] = useState<GeneratedProfile[]>([]);
   const [generatedQr, setGeneratedQr] = useState("");
   const [generatedQrError, setGeneratedQrError] = useState("");
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -629,16 +631,16 @@ export default function Home() {
   }
 
   function openClientDialog() {
-    setGenerated(""); setGeneratedQr(""); setGeneratedQrError(""); setError(""); setClientDialog(true);
+    setGenerated(""); setGeneratedProfiles([]); setGeneratedQr(""); setGeneratedQrError(""); setError(""); setClientDialog(true);
   }
 
   function closeClientDialog() {
     if (busy) return;
-    setClientDialog(false); setGenerated(""); setGeneratedQr(""); setGeneratedQrError("");
+    setClientDialog(false); setGenerated(""); setGeneratedProfiles([]); setGeneratedQr(""); setGeneratedQrError("");
   }
 
   function resetClientDialog() {
-    setGenerated(""); setGeneratedQr(""); setGeneratedQrError(""); setError("");
+    setGenerated(""); setGeneratedProfiles([]); setGeneratedQr(""); setGeneratedQrError(""); setError("");
   }
 
   async function changeAdminPassword(event: FormEvent) {
@@ -1048,9 +1050,13 @@ export default function Home() {
     }
     try {
       const payload = { ...newClient, protocol: selectedClientProtocol };
-      const result = await request("/clients", { method: "POST", body: JSON.stringify(payload) });
-      setGenerated(result.config); setGeneratedName(result.filename || `${newClient.name}-${selectedClientProtocol}.conf`);
-      downloadConfig(result.filename || `${newClient.name}-${selectedClientProtocol}.conf`, result.config);
+      const result = await request("/clients", { method: "POST", body: JSON.stringify(payload) }) as { config: string; filename?: string; profiles?: GeneratedProfile[] };
+      const profiles = result.profiles?.filter((profile) => profile.config && profile.filename) || [];
+      const preferred = profiles.find((profile) => profile.id === "cdn") || profiles[0];
+      setGeneratedProfiles(profiles);
+      setGenerated(preferred?.config || result.config);
+      setGeneratedName(preferred?.filename || result.filename || `${newClient.name}-${selectedClientProtocol}.conf`);
+      downloadConfig(preferred?.filename || result.filename || `${newClient.name}-${selectedClientProtocol}.conf`, preferred?.config || result.config);
       setNewClient({ ...newClient, name: "" });
       await loadClients();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось создать клиента"); }
@@ -1473,6 +1479,7 @@ export default function Home() {
                 </section>
                 <section className="connectionTransfer">
                   <div className="connectionTransferIntro"><span>TRANSFER</span><strong>Передача конфигурации</strong><p>Используйте один из вариантов ниже. Файл и QR содержат одинаковую конфигурацию подключения.</p></div>
+                  {generatedProfiles.length > 1 && <div className="connectionProfileChoices" aria-label="Маршрут VLESS">{generatedProfiles.map((profile) => <button key={profile.id} type="button" className={profile.filename === generatedName ? "active" : ""} onClick={() => { setGenerated(profile.config); setGeneratedName(profile.filename); setGeneratedQr(""); setGeneratedQrError(""); }}>{profile.name}</button>)}</div>}
                   <button type="button" className="connectionDownloadPrimary" onClick={() => downloadConfig(generatedName, generated)}><span>Конфигурация</span><strong>Скачать файл</strong><small>{generatedName}</small></button>
                   {generatedQr && <a className="connectionDownloadSecondary" href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}><span>QR-код</span><strong>Скачать изображение</strong></a>}
                   <div className="connectionTransferNote"><strong>После передачи</strong><p>Закройте окно или создайте отдельное подключение для следующего устройства. Не используйте один ключ на нескольких устройствах.</p></div>

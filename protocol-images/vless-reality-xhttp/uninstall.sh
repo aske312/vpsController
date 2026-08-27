@@ -8,6 +8,7 @@ if [[ -s "${CONFIG_DIR}/reality.env" ]]; then
 fi
 systemctl disable --now vps-control-vless-reality-xhttp.service 2>/dev/null || true
 rm -f -- /etc/systemd/system/vps-control-vless-reality-xhttp.service
+rm -f -- /etc/caddy/vps-control.d/vless-cdn.caddy
 rm -rf -- /etc/vps-control/vless-reality-xhttp /usr/local/lib/vps-control-vless-reality-xhttp
 python3 - <<'PY'
 import json, os
@@ -29,5 +30,6 @@ if [[ "${port}" =~ ^[0-9]+$ ]] && command -v ufw >/dev/null 2>&1; then
   ufw --force delete allow "${port}/tcp" >/dev/null 2>&1 || true
 fi
 systemctl daemon-reload
+systemctl reload caddy.service 2>/dev/null || true
 systemctl reset-failed >/dev/null 2>&1 || true
 echo "Модуль VLESS + REALITY + XHTTP удалён независимо от остальных протоколов."

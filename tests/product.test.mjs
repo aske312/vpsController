@@ -852,6 +852,42 @@ test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", a
   assert.match(manager, /--retry 18 --retry-all-errors --retry-delay 5/);
 });
 
+test("VLESS image supports independent direct and CDN profiles", async () => {
+  const [bootstrap, manager, install, uninstall, api, caddy, config, page] = await Promise.all([
+    read("scripts/install-panel.sh"), read("scripts/vps-control.sh"),
+    read("protocol-images/vless-reality-xhttp/install.sh"),
+    read("protocol-images/vless-reality-xhttp/uninstall.sh"), read("api/main.py"),
+    read("Caddyfile"), read("install.conf"), read("app/page.tsx"),
+  ]);
+  assert.match(manager, /set_env_value "VLESS_CDN_DOMAIN"/);
+  assert.match(manager, /VLESS_CDN_PORT/);
+  assert.match(manager, /VLESS CDN certificate/);
+  assert.doesNotMatch(bootstrap, /--vless-cdn-domain/);
+  assert.match(config, /VLESS_CDN_PORT="10087"/);
+  assert.match(caddy, /import \/etc\/caddy\/vps-control\.d\/\*\.caddy/);
+  assert.match(install, /"tag": "vless-cdn-websocket"/);
+  assert.match(install, /"listen": "127\.0\.0\.1"/);
+  assert.match(install, /existing_clients_by_id/);
+  assert.match(install, /saved_cdn_domain/);
+  assert.match(install, /CDN_ENABLED/);
+  assert.match(install, /vless-cdn\.caddy/);
+  assert.match(install, /caddy validate/);
+  assert.match(uninstall, /vless-cdn\.caddy/);
+  assert.match(api, /def vless_reality_inbound/);
+  assert.match(api, /def vless_cdn_client_query/);
+  assert.match(api, /"key": "cdn_enabled"/);
+  assert.match(api, /"key": "cdn_domain"/);
+  assert.match(api, /def configure_vless_cdn/);
+  assert.match(api, /write_vless_cdn_snippet/);
+  assert.match(api, /CONTROL_COMMAND, "vless-cdn-firewall"/);
+  assert.match(api, /VLESS_CDN_SNIPPET/);
+  assert.match(api, /for inbound in vless_inbounds/);
+  assert.match(api, /"profiles": profiles/);
+  assert.match(page, /generatedProfiles/);
+  assert.match(page, /profile\.id === "cdn"/);
+  assert.match(manager, /configure_vless_cdn_firewall/);
+});
+
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
   const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), readStyles()]);
   assert.match(page, /Локальный resolver VPS настраивается автоматически/);

@@ -13,9 +13,27 @@ setting() {
 
 PORT="$(setting VLESS_REALITY_PORT 443)"
 TARGET="$(setting VLESS_REALITY_TARGET www.intel.com:443)"
+CDN_DOMAIN="$(setting VLESS_CDN_DOMAIN '')"
+CDN_PORT="$(setting VLESS_CDN_PORT 10087)"
+CDN_ENABLED="no"
+[[ -z "${CDN_DOMAIN}" ]] || CDN_ENABLED="yes"
+if [[ -s "${CONFIG_DIR}/reality.env" ]]; then
+  saved_cdn_domain="$(sed -n 's/^CDN_DOMAIN=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
+  saved_cdn_port="$(sed -n 's/^CDN_PORT=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
+  saved_cdn_enabled="$(sed -n 's/^CDN_ENABLED=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
+  [[ -z "${saved_cdn_domain}" ]] || CDN_DOMAIN="${saved_cdn_domain}"
+  [[ -z "${saved_cdn_port}" ]] || CDN_PORT="${saved_cdn_port}"
+  [[ -z "${saved_cdn_enabled}" ]] || CDN_ENABLED="${saved_cdn_enabled}"
+fi
 [[ "${TARGET}" != "www.microsoft.com:443" && "${TARGET}" != "www.apple.com:443" ]] || TARGET="www.intel.com:443"
 [[ "${PORT}" =~ ^[0-9]+$ && "${PORT}" -ge 1 && "${PORT}" -le 65535 ]] || { echo "Некорректный VLESS_REALITY_PORT" >&2; exit 1; }
 [[ "${TARGET}" =~ ^[A-Za-z0-9.-]+:[0-9]+$ ]] || { echo "Некорректный VLESS_REALITY_TARGET" >&2; exit 1; }
+[[ "${CDN_PORT}" =~ ^[0-9]+$ && "${CDN_PORT}" -ge 1024 && "${CDN_PORT}" -le 65535 ]] || { echo "Некорректный VLESS_CDN_PORT" >&2; exit 1; }
+[[ "${CDN_PORT}" != "${PORT}" ]] || { echo "VLESS_CDN_PORT конфликтует с VLESS_REALITY_PORT" >&2; exit 1; }
+[[ -z "${CDN_DOMAIN}" || "${CDN_DOMAIN}" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] \
+  || { echo "Некорректный VLESS_CDN_DOMAIN" >&2; exit 1; }
+[[ "${CDN_ENABLED}" == "yes" || "${CDN_ENABLED}" == "no" ]] || { echo "Некорректный CDN_ENABLED" >&2; exit 1; }
+[[ "${CDN_ENABLED}" != "yes" || -n "${CDN_DOMAIN}" ]] || { echo "Для включения CDN необходим домен" >&2; exit 1; }
 TARGET_HOST="${TARGET%:*}"
 
 if ss -H -ltn "sport = :${PORT}" | grep -q . && ! systemctl is-active --quiet vps-control-vless-reality-xhttp.service 2>/dev/null; then
@@ -99,9 +117,10 @@ if [[ ! -s "${CONFIG_DIR}/reality.env" ]]; then
   [[ -n "${private_key}" && -n "${public_key}" ]] || { echo "Xray не создал ключи REALITY" >&2; exit 1; }
   short_id="$(openssl rand -hex 8)"
   path="/$(openssl rand -hex 12)"
+  ws_path="/$(openssl rand -hex 16)"
   umask 077
-  printf 'PRIVATE_KEY=%s\nPUBLIC_KEY=%s\nSHORT_ID=%s\nXHTTP_PATH=%s\nTARGET=%s\nPORT=%s\n' \
-    "${private_key}" "${public_key}" "${short_id}" "${path}" "${TARGET}" "${PORT}" >"${CONFIG_DIR}/reality.env"
+  printf 'PRIVATE_KEY=%s\nPUBLIC_KEY=%s\nSHORT_ID=%s\nXHTTP_PATH=%s\nWS_PATH=%s\nTARGET=%s\nPORT=%s\nCDN_ENABLED=%s\nCDN_DOMAIN=%s\nCDN_PORT=%s\n' \
+    "${private_key}" "${public_key}" "${short_id}" "${path}" "${ws_path}" "${TARGET}" "${PORT}" "${CDN_ENABLED}" "${CDN_DOMAIN}" "${CDN_PORT}" >"${CONFIG_DIR}/reality.env"
 fi
 
 if grep -q '^TARGET=' "${CONFIG_DIR}/reality.env"; then
@@ -114,6 +133,21 @@ if grep -q '^PORT=' "${CONFIG_DIR}/reality.env"; then
 else
   printf 'PORT=%s\n' "${PORT}" >>"${CONFIG_DIR}/reality.env"
 fi
+if grep -q '^CDN_DOMAIN=' "${CONFIG_DIR}/reality.env"; then
+  sed -i "s|^CDN_DOMAIN=.*|CDN_DOMAIN=${CDN_DOMAIN}|" "${CONFIG_DIR}/reality.env"
+else
+  printf 'CDN_DOMAIN=%s\n' "${CDN_DOMAIN}" >>"${CONFIG_DIR}/reality.env"
+fi
+if grep -q '^CDN_ENABLED=' "${CONFIG_DIR}/reality.env"; then
+  sed -i "s|^CDN_ENABLED=.*|CDN_ENABLED=${CDN_ENABLED}|" "${CONFIG_DIR}/reality.env"
+else
+  printf 'CDN_ENABLED=%s\n' "${CDN_ENABLED}" >>"${CONFIG_DIR}/reality.env"
+fi
+if grep -q '^CDN_PORT=' "${CONFIG_DIR}/reality.env"; then
+  sed -i "s|^CDN_PORT=.*|CDN_PORT=${CDN_PORT}|" "${CONFIG_DIR}/reality.env"
+else
+  printf 'CDN_PORT=%s\n' "${CDN_PORT}" >>"${CONFIG_DIR}/reality.env"
+fi
 
 env_setting() {
   sed -n "s/^${1}=//p" "${CONFIG_DIR}/reality.env" | tail -n 1
@@ -123,40 +157,59 @@ PUBLIC_KEY="$(env_setting PUBLIC_KEY)"
 SHORT_ID="$(env_setting SHORT_ID)"
 XHTTP_PATH="$(env_setting XHTTP_PATH)"
 XHTTP_PATH="${XHTTP_PATH:-$(env_setting PATH)}"
-[[ -n "${PRIVATE_KEY}" && -n "${PUBLIC_KEY}" && -n "${SHORT_ID}" && -n "${XHTTP_PATH}" ]] || { echo "Конфигурация REALITY неполна" >&2; exit 1; }
+WS_PATH="$(env_setting WS_PATH)"
+if [[ -z "${WS_PATH}" ]]; then
+  WS_PATH="/$(openssl rand -hex 16)"
+  printf 'WS_PATH=%s\n' "${WS_PATH}" >>"${CONFIG_DIR}/reality.env"
+fi
+[[ -n "${PRIVATE_KEY}" && -n "${PUBLIC_KEY}" && -n "${SHORT_ID}" && -n "${XHTTP_PATH}" && -n "${WS_PATH}" ]] || { echo "Конфигурация VLESS неполна" >&2; exit 1; }
 if ! grep -q '^XHTTP_PATH=' "${CONFIG_DIR}/reality.env"; then
   sed -i "s|^PATH=.*|XHTTP_PATH=${XHTTP_PATH}|" "${CONFIG_DIR}/reality.env"
 fi
-python3 - "${CONFIG_DIR}/config.json" "${PORT}" "${TARGET}" "${TARGET_HOST}" "${PRIVATE_KEY}" "${SHORT_ID}" "${XHTTP_PATH}" <<'PY'
+python3 - "${CONFIG_DIR}/config.json" "${PORT}" "${TARGET}" "${TARGET_HOST}" "${PRIVATE_KEY}" "${SHORT_ID}" "${XHTTP_PATH}" "${CDN_DOMAIN}" "${CDN_PORT}" "${WS_PATH}" "${CDN_ENABLED}" <<'PY'
 import json, sys
-output, port, target, host, private_key, short_id, path = sys.argv[1:]
-existing_clients = []
+output, port, target, host, private_key, short_id, path, cdn_domain, cdn_port, ws_path, cdn_enabled = sys.argv[1:]
+existing_clients_by_id = {}
 try:
     with open(output, encoding="utf-8") as handle:
-        existing_clients = json.load(handle)["inbounds"][0]["settings"].get("clients", [])
-except (OSError, ValueError, KeyError, IndexError):
+        for inbound in json.load(handle).get("inbounds", []):
+            if inbound.get("protocol") != "vless":
+                continue
+            for client in inbound.get("settings", {}).get("clients", []):
+                if client.get("id"):
+                    existing_clients_by_id[client["id"]] = client
+except (OSError, ValueError, AttributeError):
     pass
+existing_clients = list(existing_clients_by_id.values())
+inbounds = [{
+  "tag": "vless-reality-xhttp", "listen": "::", "port": int(port), "protocol": "vless",
+  "settings": {"clients": existing_clients, "decryption": "none"},
+  "streamSettings": {
+    "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": "auto", "extra": {
+      "xPaddingBytes": "100-1000", "xmux": {"maxConcurrency": "8-16", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000"}
+    }},
+    "realitySettings": {
+      "show": False, "target": target, "xver": 0, "serverNames": [host],
+      "privateKey": private_key, "shortIds": [short_id],
+      "limitFallbackUpload": {"afterBytes": 1048576, "bytesPerSec": 262144, "burstBytesPerSec": 524288},
+      "limitFallbackDownload": {"afterBytes": 1048576, "bytesPerSec": 262144, "burstBytesPerSec": 524288}
+    }
+  },
+  "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}
+}]
+if cdn_enabled == "yes" and cdn_domain:
+    inbounds.append({
+      "tag": "vless-cdn-websocket", "listen": "127.0.0.1", "port": int(cdn_port), "protocol": "vless",
+      "settings": {"clients": existing_clients, "decryption": "none"},
+      "streamSettings": {"network": "websocket", "security": "none", "wsSettings": {"path": ws_path}},
+      "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}
+    })
 config = {
   "log": {"loglevel": "warning"},
   "stats": {},
   "api": {"tag": "api", "listen": "127.0.0.1:10085", "services": ["StatsService"]},
   "policy": {"levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}}},
-  "inbounds": [{
-    "tag": "vless-reality-xhttp", "listen": "::", "port": int(port), "protocol": "vless",
-    "settings": {"clients": existing_clients, "decryption": "none"},
-    "streamSettings": {
-      "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": "auto", "extra": {
-        "xPaddingBytes": "100-1000", "xmux": {"maxConcurrency": "8-16", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000"}
-      }},
-      "realitySettings": {
-        "show": False, "target": target, "xver": 0, "serverNames": [host],
-        "privateKey": private_key, "shortIds": [short_id],
-        "limitFallbackUpload": {"afterBytes": 1048576, "bytesPerSec": 262144, "burstBytesPerSec": 524288},
-        "limitFallbackDownload": {"afterBytes": 1048576, "bytesPerSec": 262144, "burstBytesPerSec": 524288}
-      }
-    },
-    "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}
-  }],
+  "inbounds": inbounds,
   "outbounds": [{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "blocked"}],
   "routing": {"domainStrategy": "AsIs", "rules": [{"type": "field", "ip": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10"], "outboundTag": "blocked"}]}
 }
@@ -167,6 +220,40 @@ chown root:nogroup "${CONFIG_DIR}/config.json"
 chmod 0640 "${CONFIG_DIR}/config.json"
 chmod 0600 "${CONFIG_DIR}/reality.env"
 "${MODULE_DIR}/xray" run -test -config "${CONFIG_DIR}/config.json"
+
+CADDY_SNIPPET_DIR="/etc/caddy/vps-control.d"
+CADDY_SNIPPET="${CADDY_SNIPPET_DIR}/vless-cdn.caddy"
+PREVIOUS_CADDY_SNIPPET="${tmp_dir}/vless-cdn.caddy.previous"
+HAD_CADDY_SNIPPET="no"
+install -d -m 0755 "${CADDY_SNIPPET_DIR}"
+if [[ -f "${CADDY_SNIPPET}" ]]; then
+  cp -p -- "${CADDY_SNIPPET}" "${PREVIOUS_CADDY_SNIPPET}"
+  HAD_CADDY_SNIPPET="yes"
+fi
+if [[ "${CDN_ENABLED}" == "yes" && -n "${CDN_DOMAIN}" ]]; then
+  cat >"${CADDY_SNIPPET}.tmp" <<EOF
+${CDN_DOMAIN} {
+    handle ${WS_PATH} {
+        reverse_proxy 127.0.0.1:${CDN_PORT}
+    }
+    respond 404
+}
+EOF
+  mv -f -- "${CADDY_SNIPPET}.tmp" "${CADDY_SNIPPET}"
+else
+  rm -f -- "${CADDY_SNIPPET}" "${CADDY_SNIPPET}.tmp"
+fi
+if command -v caddy >/dev/null 2>&1 && [[ -s /etc/caddy/Caddyfile ]]; then
+  if ! caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
+    if [[ "${HAD_CADDY_SNIPPET}" == "yes" ]]; then
+      cp -p -- "${PREVIOUS_CADDY_SNIPPET}" "${CADDY_SNIPPET}"
+    else
+      rm -f -- "${CADDY_SNIPPET}"
+    fi
+    echo "Caddy отклонил конфигурацию VLESS CDN; предыдущий маршрут восстановлен." >&2
+    exit 1
+  fi
+fi
 
 cat >/etc/systemd/system/vps-control-vless-reality-xhttp.service <<EOF
 [Unit]
@@ -204,6 +291,18 @@ fi
 systemctl daemon-reload
 systemctl enable vps-control-vless-reality-xhttp.service >/dev/null
 systemctl restart vps-control-vless-reality-xhttp.service
+if command -v caddy >/dev/null 2>&1 && systemctl is-active --quiet caddy.service; then
+  if ! systemctl reload caddy.service; then
+    if [[ "${HAD_CADDY_SNIPPET}" == "yes" ]]; then
+      cp -p -- "${PREVIOUS_CADDY_SNIPPET}" "${CADDY_SNIPPET}"
+    else
+      rm -f -- "${CADDY_SNIPPET}"
+    fi
+    systemctl reload caddy.service || true
+    echo "Caddy не применил VLESS CDN; предыдущий маршрут восстановлен." >&2
+    exit 1
+  fi
+fi
 for _ in {1..10}; do
   if systemctl is-active --quiet vps-control-vless-reality-xhttp.service && ss -H -ltn "sport = :${PORT}" | grep -q .; then
     break
@@ -213,3 +312,4 @@ done
 systemctl is-active --quiet vps-control-vless-reality-xhttp.service
 ss -H -ltn "sport = :${PORT}" | grep -q . || { journalctl -u vps-control-vless-reality-xhttp.service -n 20 --no-pager >&2; exit 1; }
 echo "VLESS + REALITY + XHTTP установлен на TCP ${PORT}."
+[[ "${CDN_ENABLED}" != "yes" || -z "${CDN_DOMAIN}" ]] || echo "VLESS CDN WebSocket подготовлен: ${CDN_DOMAIN}:443 -> 127.0.0.1:${CDN_PORT}."
