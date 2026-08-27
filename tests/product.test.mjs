@@ -610,7 +610,11 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(awgInstall, /install -y amneziawg/);
   for (const installer of [awgInstall, mihomoAwgInstall]) {
     assert.match(installer, /apt-cache show "\$\{header_package\}"/);
-    assert.match(installer, /linux-image-amd64 linux-headers-amd64/);
+    assert.match(installer, /\*-cloud-\$\{architecture\}/);
+    assert.match(installer, /image_meta="linux-image-cloud-\$\{architecture\}"/);
+    assert.match(installer, /headers_meta="linux-headers-cloud-\$\{architecture\}"/);
+    assert.match(installer, /image_meta="linux-image-\$\{architecture\}"/);
+    assert.match(installer, /headers_meta="linux-headers-\$\{architecture\}"/);
     assert.match(installer, /linux-generic linux-headers-generic/);
     assert.match(installer, /Reboot the VPS/);
     assert.doesNotMatch(installer, /apt-get[^\n]+"linux-headers-\$\(uname -r\)"/);

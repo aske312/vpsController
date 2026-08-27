@@ -46,7 +46,7 @@ source /etc/os-release
 [[ "${ID:-}" == "ubuntu" || "${ID:-}" == "debian" ]] || { echo "AmneziaWG supports Ubuntu and Debian" >&2; exit 1; }
 
 install_running_kernel_headers() {
-  local running_kernel header_package next_kernel
+  local running_kernel header_package next_kernel image_meta headers_meta architecture
   running_kernel="$(uname -r)"
   header_package="linux-headers-${running_kernel}"
   if [[ -d "/lib/modules/${running_kernel}/build" ]]; then
@@ -66,7 +66,18 @@ install_running_kernel_headers() {
   if [[ "${ID}" == "ubuntu" ]]; then
     apt-get -o DPkg::Lock::Timeout=300 install -y linux-generic linux-headers-generic
   else
-    apt-get -o DPkg::Lock::Timeout=300 install -y linux-image-amd64 linux-headers-amd64
+    architecture="$(dpkg --print-architecture)"
+    case "${running_kernel}" in
+      *-cloud-${architecture})
+        image_meta="linux-image-cloud-${architecture}"
+        headers_meta="linux-headers-cloud-${architecture}"
+        ;;
+      *)
+        image_meta="linux-image-${architecture}"
+        headers_meta="linux-headers-${architecture}"
+        ;;
+    esac
+    apt-get -o DPkg::Lock::Timeout=300 install -y "${image_meta}" "${headers_meta}"
   fi
   next_kernel="$(basename "$(readlink -f /vmlinuz 2>/dev/null || true)" | sed 's/^vmlinuz-//')"
   echo "Kernel ${next_kernel:-new} and its headers are installed. Reboot the VPS once, then retry AmneziaWG installation." >&2
