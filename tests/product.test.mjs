@@ -903,6 +903,10 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.match(protocolCss, /\.vlessCommandHero/);
   assert.match(protocolCss, /\.vlessRouteBoard/);
   assert.match(protocolCss, /\.vlessCommandArt/);
+  const controlCenterCss = await read("app/styles/control-center.css");
+  assert.match(controlCenterCss, /\.shell small[^}]*font-size:11px !important[^}]*line-height:1\.5 !important/s);
+  assert.match(controlCenterCss, /label small[^}]*font-size:12px !important[^}]*line-height:1\.5 !important/s);
+  assert.match(controlCenterCss, /\.protocolSettingsFields label:has\(small\)[^}]*min-height:92px !important/s);
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {

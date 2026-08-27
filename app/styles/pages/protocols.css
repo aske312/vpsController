@@ -895,7 +895,7 @@
 .vlessCommandCenter .vlessSettingsGroup > header p { max-width:170px; }
 .vlessCommandCenter .vlessSettingsGroup .protocolSettingsFields { width:100%; align-self:center; }
 .vlessCommandCenter .protocolSettingsFields { gap:6px; padding:8px 10px; }
-.vlessCommandCenter .protocolSettingsFields label { min-height:62px !important; gap:4px !important; padding:7px 8px !important; }
+.vlessCommandCenter .protocolSettingsFields label { min-height:68px !important; gap:5px !important; padding:8px 9px !important; }
 .vlessCommandCenter .protocolSettingsFields input:not([type="checkbox"]),.vlessCommandCenter .protocolSettingsFields select { min-height:32px !important; }
 .vlessCommandCenter .protocolSettingsActions { padding:8px 10px 10px; }
 .vlessCommandCenter .vlessSettingsGroup.direct { background:linear-gradient(90deg,rgba(58,42,121,.13),transparent 40%); }

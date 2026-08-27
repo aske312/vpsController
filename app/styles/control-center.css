@@ -200,8 +200,10 @@
   .applicationControlContent,.mihomoHeroContent { width:100% !important; min-height:0 !important; padding:15px !important; }
 }
 
-/* Readability floor for secondary interface text. */
-.shell small { font-size:10px !important; line-height:1.4; }
+/* Readability floor for secondary interface text and form guidance. */
+.shell small { font-size:11px !important; line-height:1.5 !important; }
+.shell :is(label small,.fieldHint,.connectionTransferNote,.mihomoHint) { color:var(--muted) !important; font-size:12px !important; font-weight:500; line-height:1.5 !important; }
+.shell .protocolSettingsFields label:has(small) { min-height:92px !important; }
 .shell .eyebrow { font-size:10px !important; }
 .shell :is(button,input,select,textarea) { font-size:max(11px,.72rem); }
 .shell :is(.protocolRuntimeFacts dt,.protocolSettingsFields label > span,.protocolSettingsActions > span,.protocolDiagnosticToggle small,.protocolEventHead small,.protocolDiagnosticChecks strong,.protocolDiagnosticChecks small,.protocolEventRows strong,.protocolEventRows small,.protocolResourceList span) { font-size:10px !important; line-height:1.4; }
