@@ -784,6 +784,41 @@ rollback_interrupted_update() {
   fi
 }
 
+verify_protocol_image_ready() {
+  local image_id="$1" port
+  case "${image_id}" in
+    wg)
+      systemctl is-active --quiet "wg-quick@${WG_INTERFACE}.service" \
+        && ip link show "${WG_INTERFACE}" >/dev/null 2>&1 \
+        && wg show "${WG_INTERFACE}" >/dev/null 2>&1 \
+        && ss -Hlun | grep -Eq "[:.]${WG_PORT}[[:space:]]"
+      ;;
+    awg)
+      systemctl is-active --quiet "awg-quick@${AWG_INTERFACE}.service" \
+        && ip link show "${AWG_INTERFACE}" >/dev/null 2>&1 \
+        && awg show "${AWG_INTERFACE}" >/dev/null 2>&1 \
+        && ss -Hlun | grep -Eq "[:.]${AWG_PORT}[[:space:]]"
+      ;;
+    shadowsocks)
+      systemctl is-active --quiet vps-control-shadowsocks.target \
+        && systemctl is-enabled --quiet vps-control-shadowsocks.target
+      ;;
+    vless-reality-xhttp)
+      port="$(env_value VLESS_REALITY_PORT)"
+      port="${port:-${VLESS_REALITY_PORT}}"
+      systemctl is-active --quiet vps-control-vless-reality-xhttp.service \
+        && ss -Hltn | grep -Eq "[:.]${port}[[:space:]]"
+      ;;
+    mihomo)
+      systemctl is-active --quiet vps-control-mihomo-manager.service \
+        && ss -Hltn | grep -Eq '127\.0\.0\.1:8791[[:space:]]'
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 install_protocol_image() {
   local image_id="${2:-}"
   [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
@@ -828,6 +863,10 @@ PY
     PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${installer}" >"${module_log}" 2>&1
   installer_status=$?
+  if [[ "${installer_status}" -eq 0 ]] && ! verify_protocol_image_ready "${image_id}" >>"${module_log}" 2>&1; then
+    echo "Post-install health-check failed for ${image_id}" >>"${module_log}"
+    installer_status=1
+  fi
   set -e
   if [[ "${installer_status}" -ne 0 ]]; then
       tail -n 40 "${module_log}" >&2 || true
@@ -849,6 +888,9 @@ PY
       die "не удалось установить ${image_id}; журнал: ${module_log}"
   fi
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
+  if [[ "${image_id}" == "wg" || "${image_id}" == "awg" ]]; then
+    configure_vpn_firewall_policy
+  fi
   # Protocol clients persist configs below /etc/vps-control.  Keep the API
   # sandbox in sync even when a module is installed on an older deployment
   # whose service unit predates the writable path.
@@ -1004,7 +1046,7 @@ configure_firewall() {
 }
 
 configure_vpn_firewall_policy() {
-  local uplink policy_script policy_service interface subnet installed=0
+  local uplink policy_script policy_service interface subnet port installed=0
   uplink="$(ip -4 route show default | awk 'NR == 1 {print $5}')"
   [[ -n "${uplink}" ]] || die "не найден основной сетевой интерфейс сервера."
   policy_script="/usr/local/sbin/vps-control-vpn-firewall"
@@ -1021,7 +1063,13 @@ configure_vpn_firewall_policy() {
       [[ -e "/sys/class/net/${interface}" ]] || continue
       subnet="$(ip -4 route show dev "${interface}" proto kernel scope link | awk 'NR == 1 {print $1}')"
       [[ -n "${subnet}" ]] || continue
+      if [[ "${interface}" == "${WG_INTERFACE}" ]]; then
+        port="${WG_PORT}"
+      else
+        port="${AWG_PORT}"
+      fi
       installed=$((installed + 1))
+      printf 'iptables -C INPUT -p udp --dport %q -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p udp --dport %q -j ACCEPT\n' "${port}" "${port}"
       printf 'iptables -C FORWARD -i %q -o "$uplink" -s %q -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %q -o "$uplink" -s %q -j ACCEPT\n' "${interface}" "${subnet}" "${interface}" "${subnet}"
       printf 'iptables -C FORWARD -o %q -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %q -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\n' "${interface}" "${interface}"
       printf 'iptables -t nat -C POSTROUTING -s %q -o "$uplink" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s %q -o "$uplink" -j MASQUERADE\n' "${subnet}" "${subnet}"

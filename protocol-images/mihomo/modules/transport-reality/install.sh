@@ -26,7 +26,7 @@ TARGET_HOST="${TARGET%:*}"
 [[ "${TARGET}" =~ ^[A-Za-z0-9.-]+:[0-9]+$ ]] || { echo "Некорректный REALITY target" >&2; exit 1; }
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl openssl unzip
+apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl openssl unzip iptables
 
 install -d -m 0755 "${MODULE_DIR}"
 
@@ -167,7 +167,9 @@ After=network-online.target
 Wants=network-online.target
 [Service]
 Type=simple
+ExecStartPre=+/bin/sh -ec '/usr/sbin/iptables -C INPUT -p tcp --dport ${PORT} -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I INPUT 1 -p tcp --dport ${PORT} -j ACCEPT'
 ExecStart=${MODULE_DIR}/xray run -config ${CONFIG_DIR}/config.json
+ExecStopPost=+/bin/sh -ec 'while /usr/sbin/iptables -C INPUT -p tcp --dport ${PORT} -j ACCEPT 2>/dev/null; do /usr/sbin/iptables -D INPUT -p tcp --dport ${PORT} -j ACCEPT; done'
 Restart=on-failure
 RestartSec=3
 User=nobody

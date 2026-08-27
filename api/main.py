@@ -2532,6 +2532,33 @@ def current_env_value(name: str, fallback: str) -> str:
         return fallback
 
 
+def tunnel_interface_settings(config: Path) -> dict[str, str]:
+    """Read the live [Interface] values used to build compatible clients."""
+    values: dict[str, str] = {}
+    try:
+        section = ""
+        for raw_line in config.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if line.startswith("[") and line.endswith("]"):
+                section = line[1:-1].strip().lower()
+                if section != "interface" and values:
+                    break
+                continue
+            if section == "interface" and "=" in line and not line.startswith(("#", ";")):
+                name, value = line.split("=", 1)
+                values[name.strip()] = value.strip()
+    except OSError:
+        return {}
+    return values
+
+
+def configured_int(values: dict[str, str], name: str, fallback: int) -> int:
+    try:
+        return int(values.get(name, str(fallback)))
+    except (TypeError, ValueError):
+        return fallback
+
+
 SYSTEM_DNS_DROPIN = Path("/etc/systemd/resolved.conf.d/312-net.conf")
 SYSTEM_RESOLV_CONF = Path("/etc/resolv.conf")
 
@@ -2889,13 +2916,20 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     )
 
     server_public = run(command, "show", interface, "public-key", check=True)
+    server_settings = tunnel_interface_settings(config_path)
     extra = ""
     if payload.protocol == "awg":
-        extra = "".join(f"{key} = {value}\n" for key, value in AWG_PROFILE.items())
-    port = WG_PORT if payload.protocol == "wg" else AWG_PORT
+        extra = "".join(
+            f"{name} = {server_settings.get(name, fallback)}\n"
+            for name, fallback in AWG_PROFILE.items()
+        )
+    default_port = WG_PORT if payload.protocol == "wg" else AWG_PORT
+    default_mtu = WG_MTU if payload.protocol == "wg" else AWG_MTU
+    port = configured_int(server_settings, "ListenPort", default_port)
+    mtu = configured_int(server_settings, "MTU", default_mtu)
     client_config = (
         f"[Interface]\nAddress = {address}/32\nDNS = {current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS)}\n"
-        f"PrivateKey = {private_key}\nMTU = {AWG_MTU if payload.protocol == 'awg' else WG_MTU}\n{extra}\n[Peer]\n"
+        f"PrivateKey = {private_key}\nMTU = {mtu}\n{extra}\n[Peer]\n"
         f"PublicKey = {server_public}\nPresharedKey = {psk}\nAllowedIPs = 0.0.0.0/0\n"
         f"Endpoint = {PUBLIC_ENDPOINT}:{port}\nPersistentKeepalive = {current_env_value('AWG_KEEPALIVE', str(AWG_KEEPALIVE)) if payload.protocol == 'awg' else current_env_value('WG_KEEPALIVE', str(WG_KEEPALIVE))}\n"
     )

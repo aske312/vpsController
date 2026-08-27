@@ -965,6 +965,30 @@ test("failed protocol installs roll back partial state and shared packages have 
   assert.match(mihomoSs, /vps-control\/shadowsocks[\s\S]*?purge -y shadowsocks-libev/);
 });
 
+test("successful protocol installs are immediately reachable and health-checked", async () => {
+  const [manager, wg, awg, ss, vless, mihomoWg, mihomoAwg, mihomoSs, mihomoReality] = await Promise.all([
+    read("scripts/vps-control.sh"),
+    read("protocol-images/wireguard/install.sh"),
+    read("protocol-images/amneziawg/install.sh"),
+    read("protocol-images/shadowsocks/install.sh"),
+    read("protocol-images/vless-reality-xhttp/install.sh"),
+    read("protocol-images/mihomo/modules/transport-wg/install.sh"),
+    read("protocol-images/mihomo/modules/transport-awg/install.sh"),
+    read("protocol-images/mihomo/modules/transport-shadowsocks/install.sh"),
+    read("protocol-images/mihomo/modules/transport-reality/install.sh"),
+  ]);
+  assert.match(manager, /verify_protocol_image_ready/);
+  assert.match(manager, /Post-install health-check failed/);
+  for (const installer of [wg, awg, mihomoWg, mihomoAwg]) {
+    assert.match(installer, /iptables -C INPUT -p udp --dport/);
+  }
+  assert.match(ss, /vps-control-shadowsocks-firewall add %i/);
+  assert.match(mihomoSs, /vps-control-mihomo-ss-firewall add %i/);
+  for (const installer of [vless, mihomoReality]) {
+    assert.match(installer, /ExecStartPre=.*iptables -C INPUT -p tcp --dport/);
+  }
+});
+
 test("SSH management does not start socket activation and the daemon together", async () => {
   const [api, manager] = await Promise.all([
     read("api/main.py"), read("scripts/vps-control.sh"),

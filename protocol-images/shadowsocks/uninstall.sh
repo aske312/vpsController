@@ -14,7 +14,8 @@ done
 
 systemctl disable --now vps-control-shadowsocks.target 2>/dev/null || true
 rm -f -- /etc/systemd/system/vps-control-shadowsocks.target \
-  /etc/systemd/system/vps-control-shadowsocks@.service
+  /etc/systemd/system/vps-control-shadowsocks@.service \
+  /usr/local/sbin/vps-control-shadowsocks-firewall
 rm -rf -- /etc/vps-control/shadowsocks
 python3 - <<'PY'
 import json, os

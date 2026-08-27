@@ -15,7 +15,7 @@ PORT_START="$(setting SHADOWSOCKS_PORT_START 30000)"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=300 update
-apt-get -o DPkg::Lock::Timeout=300 install -y shadowsocks-libev
+apt-get -o DPkg::Lock::Timeout=300 install -y iptables shadowsocks-libev
 ss_installed_version="$(dpkg-query -W -f='${Version}' shadowsocks-libev 2>/dev/null || true)"
 ss_candidate_version="$(LC_ALL=C apt-cache policy shadowsocks-libev | awk '/Candidate:/ {print $2; exit}')"
 [[ -n "${ss_installed_version}" && "${ss_installed_version}" == "${ss_candidate_version}" ]] \
@@ -23,6 +23,36 @@ ss_candidate_version="$(LC_ALL=C apt-cache policy shadowsocks-libev | awk '/Cand
 command -v ss-server >/dev/null 2>&1 || { echo "ss-server не установлен" >&2; exit 1; }
 
 install -d -m 0700 /etc/vps-control/shadowsocks/clients
+cat >/usr/local/sbin/vps-control-shadowsocks-firewall <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+action="${1:-}"
+client_id="${2:-}"
+[[ "${client_id}" =~ ^[A-Za-z0-9_.-]+$ ]] || exit 2
+config="/etc/vps-control/shadowsocks/clients/${client_id}.json"
+port="$(python3 - "${config}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    port = int(json.load(source)["server_port"])
+if not 1024 <= port <= 65535:
+    raise SystemExit(2)
+print(port)
+PY
+)"
+for protocol in tcp udp; do
+  if [[ "${action}" == "add" ]]; then
+    iptables -C INPUT -p "${protocol}" --dport "${port}" -j ACCEPT 2>/dev/null \
+      || iptables -I INPUT 1 -p "${protocol}" --dport "${port}" -j ACCEPT
+  elif [[ "${action}" == "delete" ]]; then
+    while iptables -C INPUT -p "${protocol}" --dport "${port}" -j ACCEPT 2>/dev/null; do
+      iptables -D INPUT -p "${protocol}" --dport "${port}" -j ACCEPT
+    done
+  else
+    exit 2
+  fi
+done
+EOF
+chmod 0755 /usr/local/sbin/vps-control-shadowsocks-firewall
 # Keep UDP datagrams below the conservative tunnel MTU. This avoids EMSGSIZE
 # drops on mobile and tunneled client paths while preserving TCP + UDP mode.
 python3 - "${PORT_START}" <<'PY'
@@ -83,7 +113,9 @@ After=network-online.target
 
 [Service]
 Type=simple
+ExecStartPre=/usr/local/sbin/vps-control-shadowsocks-firewall add %i
 ExecStart=/usr/bin/ss-server -c /etc/vps-control/shadowsocks/clients/%i.json
+ExecStopPost=/usr/local/sbin/vps-control-shadowsocks-firewall delete %i
 IPAccounting=true
 LimitNOFILE=65536
 Restart=on-failure
@@ -104,6 +136,7 @@ WantedBy=vps-control-shadowsocks.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now vps-control-shadowsocks.target
+systemctl enable vps-control-shadowsocks.target >/dev/null
+systemctl restart vps-control-shadowsocks.target
 systemctl is-active --quiet vps-control-shadowsocks.target
 echo "Shadowsocks установлен. Подключения и порты создаются панелью индивидуально."

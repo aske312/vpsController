@@ -25,7 +25,7 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=300 update
-apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl openssl unzip
+apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl openssl unzip iptables
 
 case "$(dpkg --print-architecture)" in
   amd64) asset="Xray-linux-64.zip" ;;
@@ -176,7 +176,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+ExecStartPre=+/bin/sh -ec '/usr/sbin/iptables -C INPUT -p tcp --dport ${PORT} -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I INPUT 1 -p tcp --dport ${PORT} -j ACCEPT'
 ExecStart=${MODULE_DIR}/xray run -config ${CONFIG_DIR}/config.json
+ExecStopPost=+/bin/sh -ec 'while /usr/sbin/iptables -C INPUT -p tcp --dport ${PORT} -j ACCEPT 2>/dev/null; do /usr/sbin/iptables -D INPUT -p tcp --dport ${PORT} -j ACCEPT; done'
 Restart=on-failure
 RestartSec=3
 User=nobody
@@ -200,7 +202,8 @@ if command -v ufw >/dev/null 2>&1 && [[ "${ENABLE_UFW:-yes}" == "yes" ]]; then
   ufw allow "${PORT}/tcp" comment '312.net VLESS REALITY XHTTP'
 fi
 systemctl daemon-reload
-systemctl enable --now vps-control-vless-reality-xhttp.service
+systemctl enable vps-control-vless-reality-xhttp.service >/dev/null
+systemctl restart vps-control-vless-reality-xhttp.service
 for _ in {1..10}; do
   if systemctl is-active --quiet vps-control-vless-reality-xhttp.service && ss -H -ltn "sport = :${PORT}" | grep -q .; then
     break
