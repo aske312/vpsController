@@ -24,7 +24,7 @@
   border: 1px solid rgba(93, 111, 147, .28);
   border-radius: 20px;
   background:
-    linear-gradient(90deg, rgba(7,16,26,.98) 0%, rgba(7,16,26,.94) 46%, rgba(7,16,26,.48) 67%, rgba(7,16,26,.12) 100%),
+    linear-gradient(90deg, rgba(7,16,26,.98) 0%, rgba(7,16,26,.96) 60%, rgba(7,16,26,.70) 72%, rgba(7,16,26,.18) 100%),
     url("/gate-art/new-operator/mihomo.webp") right center / auto 112% no-repeat,
     #07101a;
   isolation: isolate;
