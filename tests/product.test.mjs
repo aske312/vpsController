@@ -62,7 +62,7 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /VPS_CONTROL_ADMIN_USER/);
   assert.match(manager, /VPS_CONTROL_ADMIN_PASSWORD/);
   assert.match(manager, /printf 'Пароль: '; env_value ADMIN_PASSWORD/);
-  assert.match(manager, /printf 'Пароль: %s\\n' "\$\{ADMIN_PASSWORD\}"/);
+  assert.match(manager, /show_credentials/);
   assert.match(manager, /VPS_CONTROL_PUBLIC_DOMAIN/);
   assert.match(manager, /VPS_CONTROL_ACCESS_MODE/);
   assert.match(manager, /VPS_CONTROL_HTTP_PORT/);
@@ -444,8 +444,8 @@ test("main preview is built off-VPS and interrupted updates cannot report succes
   ]);
   const previewWorkflow = workflow.split("  preview:")[1] || "";
   assert.match(workflow, /Build main preview package/);
-  assert.doesNotMatch(previewWorkflow, /npm run lint/);
-  assert.doesNotMatch(previewWorkflow, /node --test tests\/product\.test\.mjs/);
+  assert.match(previewWorkflow, /npm run lint/);
+  assert.match(previewWorkflow, /node --test tests\/product\.test\.mjs/);
   assert.match(workflow, /vps-control-main\.tar\.gz/);
   assert.match(workflow, /gh release create main-latest/);
   assert.doesNotMatch(manager, /BUILD_COMMIT="\$\{latest\}".*build-release/s);

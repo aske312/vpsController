@@ -8,6 +8,32 @@ SCRIPT_DIR="$(pwd)"
 [[ -z "${SCRIPT_PATH}" ]] || SCRIPT_DIR="$(cd -- "$(dirname -- "${SCRIPT_PATH}")" && pwd)"
 BOOTSTRAP_DIR=""
 BOOTSTRAP_LOG="/tmp/vps-control-bootstrap.log"
+PACKAGE_MODE="${VPS_CONTROL_PACKAGE_MODE:-auto}"
+OS_UPDATE="${VPS_CONTROL_OS_UPDATE:-yes}"
+
+# --manual / --interactive: force dpkg dialogs through /dev/tty.
+# --no-apt: never call apt/dpkg; all runtime dependencies must already exist.
+# --no-os-update: install the application without upgrading existing OS packages.
+while (($#)); do
+  case "$1" in
+    --manual|--interactive)
+      PACKAGE_MODE="interactive"
+      ;;
+    --no-apt)
+      PACKAGE_MODE="skip"
+      OS_UPDATE="no"
+      ;;
+    --no-os-update)
+      OS_UPDATE="no"
+      ;;
+    *)
+      break
+      ;;
+  esac
+  shift
+done
+export VPS_CONTROL_PACKAGE_MODE="${PACKAGE_MODE}"
+export VPS_CONTROL_OS_UPDATE="${OS_UPDATE}"
 
 cyan='\033[1;36m'
 green='\033[1;32m'
@@ -62,10 +88,51 @@ if [[ ! -r /etc/os-release ]] || ! grep -Eq '^ID=(ubuntu|debian)$' /etc/os-relea
   exit 1
 fi
 
-export DEBIAN_FRONTEND=noninteractive
+
 : >"${BOOTSTRAP_LOG}"
-run_stage "${yellow}" "Проверяем системные репозитории" apt-get -o DPkg::Lock::Timeout=300 update
-run_stage "${magenta}" "Добавляем инструменты загрузки" apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl tar
+
+repair_dpkg_interactive() {
+  [[ -z "$(dpkg --audit 2>/dev/null)" ]] && return 0
+  if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+    printf "${red}Ошибка: dpkg требует ручной настройки, но интерактивный терминал недоступен.${reset}\n" >&2
+    printf "Откройте SSH/VNC и повторите установку с параметром --manual.\n" >&2
+    return 1
+  fi
+  printf "\n${yellow}● dpkg содержит незавершённые пакеты.${reset}\n"
+  printf "${yellow}  Открываю ручную настройку. Если GRUB спросит диск — выбирайте весь диск (например /dev/vda), не раздел /dev/vda1.${reset}\n\n"
+  DEBIAN_FRONTEND=dialog dpkg --configure -a </dev/tty >/dev/tty 2>&1
+}
+
+if [[ "${PACKAGE_MODE}" == "interactive" ]]; then
+  repair_dpkg_interactive || exit 1
+fi
+
+if [[ "${PACKAGE_MODE}" != "skip" ]]; then
+  # The curl bootstrap should touch apt only when bootstrap tools are missing.
+  # The full OS update is performed by vps-control after the source archive is loaded,
+  # where broken dpkg/grub-pc can safely fall back to /dev/tty.
+  missing_bootstrap=()
+  command -v curl >/dev/null 2>&1 || missing_bootstrap+=(curl ca-certificates)
+  command -v tar >/dev/null 2>&1 || missing_bootstrap+=(tar)
+  if ((${#missing_bootstrap[@]})); then
+    if [[ -n "$(dpkg --audit 2>/dev/null)" ]]; then
+      repair_dpkg_interactive || exit 1
+    fi
+    export DEBIAN_FRONTEND=noninteractive
+    run_stage "${yellow}" "Проверяем системные репозитории" apt-get -o DPkg::Lock::Timeout=300 update
+    run_stage "${magenta}" "Добавляем инструменты загрузки" apt-get -o DPkg::Lock::Timeout=300 install -y "${missing_bootstrap[@]}"
+  else
+    printf "\n${green}● Инструменты bootstrap уже установлены:${reset} curl, tar.\n"
+  fi
+else
+  for required in curl tar; do
+    command -v "${required}" >/dev/null 2>&1 || {
+      printf "Ошибка: режим --no-apt требует заранее установленную команду %s.\n" "${required}" >&2
+      exit 1
+    }
+  done
+  printf "\n${yellow}● Режим --no-apt:${reset} системные пакеты не изменяются.\n"
+fi
 
 BOOTSTRAP_DIR="$(mktemp -d /tmp/vps-control-bootstrap.XXXXXX)"
 archive="${BOOTSTRAP_DIR}/source.tar.gz"
