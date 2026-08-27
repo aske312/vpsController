@@ -3,6 +3,7 @@
 import { formatModuleVersion } from "../../lib/format-version";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 type View = "overview" | "profiles" | "channels" | "dns" | "routing";
 
@@ -619,7 +620,7 @@ export function MihomoPage({
         />
       )}
 
-      {editing && (
+      {editing && createPortal(
         <div className="mihomoDialogBackdrop" onMouseDown={(event) => {
           if (event.target === event.currentTarget) setEditing(null);
         }}>
@@ -648,7 +649,8 @@ export function MihomoPage({
             <aside>{editing.installed ? "Сохранение настроек перезапустит только этот Mihomo sub-module. Одноимённый Direct-модуль не затрагивается." : "Настройки сохранятся заранее и будут применены при установке sub-module."}</aside>
             <footer><button type="button" className="ghostButton" onClick={() => setEditing(null)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === `settings:${editing.id}`}>Сохранить</button></footer>
           </form>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {profileDialog && (
