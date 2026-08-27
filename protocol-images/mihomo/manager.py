@@ -1387,7 +1387,10 @@ def render_profile(item: dict[str, Any]) -> str:
         "log-level: warning",
         "ipv6: false",
         "tun:",
-        "  enable: true",
+        # A portable profile must start without a privileged TUN driver.
+        # Desktop clients can enable TUN explicitly after import; mixed-port
+        # remains immediately usable on every supported platform.
+        "  enable: false",
         "  stack: mixed",
         "  auto-route: true",
         "  strict-route: true",

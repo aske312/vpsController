@@ -119,11 +119,15 @@ EOF
 systemctl daemon-reload
 systemctl enable --now vps-control-mihomo-manager.service
 
-for _ in {1..20}; do
-  systemctl is-active --quiet vps-control-mihomo-manager.service && break
+for _ in {1..40}; do
+  if systemctl is-active --quiet vps-control-mihomo-manager.service \
+    && ss -Hltn | grep -Eq '127\.0\.0\.1:8791[[:space:]]'; then
+    break
+  fi
   sleep 0.25
 done
 systemctl is-active --quiet vps-control-mihomo-manager.service
+ss -Hltn | grep -Eq '127\.0\.0\.1:8791[[:space:]]'
 "${CORE}" -v
 
 echo "Mihomo Manager установлен. Внутренние каналы: 0/4 — устанавливаются отдельно в разделе Mihomo."

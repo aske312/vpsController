@@ -974,19 +974,26 @@ test("failed protocol installs roll back partial state and shared packages have 
 });
 
 test("successful protocol installs are immediately reachable and health-checked", async () => {
-  const [manager, wg, awg, ss, vless, mihomoWg, mihomoAwg, mihomoSs, mihomoReality] = await Promise.all([
+  const [manager, wg, awg, ss, vless, mihomoInstall, mihomoWg, mihomoAwg, mihomoSs, mihomoReality] = await Promise.all([
     read("scripts/vps-control.sh"),
     read("protocol-images/wireguard/install.sh"),
     read("protocol-images/amneziawg/install.sh"),
     read("protocol-images/shadowsocks/install.sh"),
     read("protocol-images/vless-reality-xhttp/install.sh"),
+    read("protocol-images/mihomo/install.sh"),
     read("protocol-images/mihomo/modules/transport-wg/install.sh"),
     read("protocol-images/mihomo/modules/transport-awg/install.sh"),
     read("protocol-images/mihomo/modules/transport-shadowsocks/install.sh"),
     read("protocol-images/mihomo/modules/transport-reality/install.sh"),
   ]);
   assert.match(manager, /verify_protocol_image_ready/);
+  assert.match(manager, /wait_protocol_image_ready/);
+  assert.match(manager, /sleep 0\.5/);
   assert.match(manager, /Post-install health-check failed/);
+  assert.match(mihomoInstall, /ss -Hltn \| grep -Eq '127\\\.0\\\.0\\\.1:8791/);
+  const mihomoManager = await read("protocol-images/mihomo/manager.py");
+  assert.match(mihomoManager, /"  enable: false"/);
+  assert.match(mihomoManager, /mixed-port: 7890/);
   for (const installer of [wg, awg, mihomoWg, mihomoAwg]) {
     assert.match(installer, /iptables -C INPUT -p udp --dport/);
   }

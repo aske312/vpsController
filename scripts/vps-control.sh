@@ -832,6 +832,16 @@ verify_protocol_image_ready() {
   esac
 }
 
+wait_protocol_image_ready() {
+  local image_id="$1"
+  local attempt
+  for attempt in {1..20}; do
+    verify_protocol_image_ready "${image_id}" && return 0
+    sleep 0.5
+  done
+  verify_protocol_image_ready "${image_id}"
+}
+
 install_protocol_image() {
   local image_id="${2:-}"
   [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
@@ -876,7 +886,7 @@ PY
     PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${installer}" >"${module_log}" 2>&1
   installer_status=$?
-  if [[ "${installer_status}" -eq 0 ]] && ! verify_protocol_image_ready "${image_id}" >>"${module_log}" 2>&1; then
+  if [[ "${installer_status}" -eq 0 ]] && ! wait_protocol_image_ready "${image_id}" >>"${module_log}" 2>&1; then
     echo "Post-install health-check failed for ${image_id}" >>"${module_log}"
     installer_status=1
   fi
