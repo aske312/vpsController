@@ -16,31 +16,31 @@ type ProtocolViewProps = {
 
 const channelProfiles: Record<Protocol, {
   index: string; family: string; title: string; lead: string; signature: string;
-  features: string[]; art: string; runtimeLabel: string; healthLabel: string;
+  features: string[]; runtimeLabel: string; healthLabel: string;
 }> = {
   wg: {
     index: "01", family: "KERNEL TUNNEL", title: "WireGuard",
     lead: "Прямой минималистичный туннель. Здесь важны интерфейс, маршрут, handshake и предсказуемая скорость.",
     signature: "LEAN / NATIVE / UDP", features: ["UDP tunnel", "Kernel interface", "Public key"],
-    art: "/gate-art/new-operator/network_1.webp", runtimeLabel: "Туннель и маршрутизация", healthLabel: "Handshake и трафик",
+    runtimeLabel: "Туннель и маршрутизация", healthLabel: "Handshake и трафик",
   },
   awg: {
     index: "02", family: "STEALTH TUNNEL", title: "AmneziaWG",
     lead: "Управляемый защищённый контур с обфускацией WireGuard-трафика и собственным интерфейсом.",
     signature: "OBFUSCATED / CONTROLLED", features: ["UDP tunnel", "Obfuscation", "Independent keys"],
-    art: "/gate-art/new-operator/operator_prt_1.webp", runtimeLabel: "Защищённый контур", healthLabel: "Канал и доступность",
+    runtimeLabel: "Защищённый контур", healthLabel: "Канал и доступность",
   },
   shadowsocks: {
     index: "03", family: "ENCRYPTED PROXY", title: "Shadowsocks",
     lead: "Лёгкий шифрованный proxy для TCP и UDP. Каждый профиль работает как отдельный управляемый канал.",
     signature: "STREAM / TCP + UDP", features: ["AEAD cipher", "TCP + UDP", "Per-client port"],
-    art: "/gate-art/new-operator/connections.webp", runtimeLabel: "Proxy runtime", healthLabel: "Потоки и соединения",
+    runtimeLabel: "Proxy runtime", healthLabel: "Потоки и соединения",
   },
   "vless-reality-xhttp": {
     index: "04", family: "MODULAR TRANSPORT", title: "VLESS",
     lead: "Составной канал на Xray: VLESS отвечает за протокол, REALITY — за защиту, выбранный transport — за доставку.",
     signature: "VLESS / REALITY / XRAY", features: ["XHTTP · RAW · gRPC", "REALITY", "Reusable UUID"],
-    art: "/gate-art/new-operator/security.webp", runtimeLabel: "Состав и runtime", healthLabel: "Потоки Xray",
+    runtimeLabel: "Состав и runtime", healthLabel: "Потоки Xray",
   },
 };
 
@@ -153,9 +153,7 @@ export function ProtocolView(props: ProtocolViewProps) {
           </div>
 
           <aside className="protocolArtRail" aria-hidden="true">
-            <span className="protocolArtCode">{protocolCode}</span>
-            <div className="protocolArtGlow" />
-            <Image className="protocolArtImage" src={profile.art} alt="" width={941} height={1672} priority />
+            <Image className="protocolArtImage" src="/gate-art/new-operator/operator_prt_1.webp" alt="" width={941} height={1672} priority />
           </aside>
         </div>
       </section>;

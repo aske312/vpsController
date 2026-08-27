@@ -225,39 +225,13 @@
 .protocolMain { min-width:0; display:grid; gap:12px; }
 
 .protocolArtRail {
-  position:relative;
   min-width:0;
   min-height:560px;
   display:flex;
   align-items:center;
   justify-content:center;
   align-self:stretch;
-  overflow:visible;
-  isolation:isolate;
   pointer-events:none;
-}
-
-.protocolArtRail::before {
-  content:"";
-  position:absolute;
-  inset:5% -8% 18%;
-  z-index:-2;
-  background:
-    radial-gradient(circle at 50% 35%, var(--protocol-soft), transparent 36%),
-    radial-gradient(circle at 50% 68%, rgba(66,91,214,.12), transparent 48%);
-  filter:blur(14px);
-}
-
-.protocolArtRail::after {
-  content:"";
-  position:absolute;
-  left:-42px;
-  top:8%;
-  bottom:8%;
-  width:80px;
-  z-index:-1;
-  background:linear-gradient(90deg, transparent, rgba(6,14,22,.46), transparent);
-  filter:blur(16px);
 }
 
 .protocolArtImage {
@@ -268,36 +242,6 @@
   max-height:610px;
   object-fit:contain !important;
   object-position:center center !important;
-  opacity:.80;
-  filter:drop-shadow(0 20px 42px rgba(0,0,0,.30))
-         saturate(.94)
-         brightness(.90);
-}
-
-.protocolArtCode {
-  position:absolute;
-  z-index:-1;
-  left:50%;
-  top:18%;
-  transform:translateX(-50%);
-  color:var(--protocol-accent);
-  opacity:.055;
-  font:900 clamp(72px,7vw,126px)/1 var(--font-mono);
-  letter-spacing:-.08em;
-  white-space:nowrap;
-}
-
-.protocolArtGlow {
-  position:absolute;
-  z-index:-1;
-  width:72%;
-  aspect-ratio:1;
-  top:13%;
-  left:50%;
-  transform:translateX(-50%);
-  border-radius:50%;
-  background:radial-gradient(circle, var(--protocol-soft), transparent 70%);
-  filter:blur(18px);
 }
 
 .protocolSummaryGrid {
@@ -729,7 +673,7 @@
 
 @media (max-width:1320px) {
 .protocolStage { grid-template-columns:minmax(0,1fr) 210px; }
-.protocolArtImage { max-width:210px; max-height:510px; opacity:.68; }
+.protocolArtImage { max-width:210px; max-height:510px; }
 .protocolSummaryGrid { grid-template-columns:minmax(320px,.88fr) minmax(0,1.12fr); }
 .protocolHealthMetrics { grid-template-columns:repeat(3,minmax(0,1fr)); }
 .protocolHealthMetrics > div:nth-child(4) { border-left:0; border-top:1px solid rgba(92,122,145,.10); }
@@ -738,8 +682,7 @@
 
 @media (max-width:1100px) {
 .protocolStage { grid-template-columns:minmax(0,1fr) 150px; }
-.protocolArtImage { max-width:150px; max-height:410px; opacity:.48; }
-.protocolArtCode { font-size:68px; }
+.protocolArtImage { max-width:150px; max-height:410px; }
 .protocolSummaryGrid { grid-template-columns:1fr; }
 .protocolRuntimeFacts { grid-template-columns:repeat(4,minmax(0,1fr)); }
 .protocolDiagnosticsGrid { grid-template-columns:1fr; }
@@ -812,7 +755,6 @@
 .protocolWorkspace-wg .protocolHeader { border-radius:8px 24px 8px 8px; background:linear-gradient(105deg,rgba(5,24,34,.98),rgba(7,17,26,.96) 70%); }
 .protocolWorkspace-wg .protocolIdentityMark { background:repeating-linear-gradient(135deg,rgba(76,194,218,.10) 0 8px,rgba(76,194,218,.025) 8px 16px); }
 .protocolWorkspace-wg .protocolSummaryGrid { grid-template-columns:minmax(0,1.15fr) minmax(360px,.85fr); }
-.protocolWorkspace-wg .protocolArtImage { width:122%; max-width:330px; filter:hue-rotate(135deg) saturate(.85) brightness(.82) drop-shadow(0 20px 42px rgba(0,0,0,.3)); }
 
 .protocolWorkspace-awg {
   --protocol-accent:#72dfbd;
@@ -832,7 +774,6 @@
 .protocolWorkspace-ss .protocolIdentityMark { background:linear-gradient(180deg,rgba(70,151,225,.16),transparent); }
 .protocolWorkspace-ss .protocolSummaryGrid { grid-template-columns:minmax(390px,.9fr) minmax(0,1.1fr); }
 .protocolWorkspace-ss .protocolHealthMetrics > div { min-height:102px; }
-.protocolWorkspace-ss .protocolArtImage { border-radius:50%; opacity:.56; filter:hue-rotate(150deg) saturate(.75) brightness(.72); }
 
 .protocolWorkspace-vless {
   --protocol-accent:#a58cff;
@@ -844,7 +785,6 @@
 .protocolWorkspace-vless .protocolIdentityMark b { font-size:16px; }
 .protocolWorkspace-vless .protocolSummaryGrid { grid-template-columns:1fr; }
 .protocolWorkspace-vless .protocolRuntimeFacts { grid-template-columns:repeat(5,minmax(0,1fr)); }
-.protocolWorkspace-vless .protocolArtImage { opacity:.54; filter:hue-rotate(220deg) saturate(.8) brightness(.72) drop-shadow(0 20px 42px rgba(0,0,0,.35)); }
 .protocolWorkspace-vless .vlessStack { background:linear-gradient(90deg,rgba(142,112,245,.10),transparent); }
 
 @media (max-width:1100px) {
