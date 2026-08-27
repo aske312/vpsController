@@ -269,9 +269,23 @@ export function MihomoPage({
     setSettingsDraft({ ...module.settings_values });
   }
 
-  function openPolicySettings(kind: "dns" | "routing") {
-    const policy = kind === "dns" ? dnsPolicy : routingPolicy;
-    if (!policy) return;
+  async function openPolicySettings(kind: "dns" | "routing") {
+    let policy = kind === "dns" ? dnsPolicy : routingPolicy;
+    setError("");
+    if (!policy) {
+      const operationId = `policy:${kind}`;
+      setBusy(operationId);
+      try {
+        policy = await request(kind === "dns" ? "/mihomo/dns/settings" : "/mihomo/routing/schema") as PolicySettings;
+        if (kind === "dns") setDnsPolicy(policy);
+        else setRoutingPolicy(policy);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : `Не удалось загрузить настройки ${kind === "dns" ? "DNS" : "маршрутизации"} Mihomo`);
+        return;
+      } finally {
+        setBusy("");
+      }
+    }
     openSettings({
       id: kind === "dns" ? "dns-private" : "routing-policy",
       name: kind === "dns" ? "DNS Mihomo" : "Маршрутизация Mihomo",
@@ -605,7 +619,7 @@ export function MihomoPage({
           description="Создаётся автоматически вместе с первым каналом. Настройки применяются только к конфигурациям Mihomo и не меняют системный DNS VPS."
           ready={policiesReady}
           values={dnsPolicy?.values}
-          onSettings={() => openPolicySettings("dns")}
+          onSettings={() => void openPolicySettings("dns")}
         />
       )}
 
@@ -616,7 +630,7 @@ export function MihomoPage({
           description="Создаётся автоматически вместе с первым каналом. Здесь задаётся базовая стратегия выбора внутренних каналов для всех профилей."
           ready={policiesReady}
           values={routingPolicy?.values}
-          onSettings={() => openPolicySettings("routing")}
+          onSettings={() => void openPolicySettings("routing")}
         />
       )}
 
@@ -741,7 +755,7 @@ function PolicyPanel({ code, title, description, ready, values, onSettings }: { 
       </div>
       <footer>
         <span>{ready ? "Политика подключена ко всем новым конфигурациям Mihomo." : "Установите первый внутренний канал, чтобы активировать policy-слой."}</span>
-        <button className="primaryButton" type="button" onClick={onSettings} disabled={!values}>Настроить</button>
+        <button className="primaryButton" type="button" onClick={onSettings}>Настроить</button>
       </footer>
     </article>
   );
