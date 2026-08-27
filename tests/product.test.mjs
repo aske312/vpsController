@@ -47,6 +47,10 @@ test("поставка содержит установщик, образы и р
   assert.match(bootstrap, /ID=\(ubuntu\|debian\)/);
   assert.match(bootstrap, /SCRIPT_PATH="\$\{BASH_SOURCE\[0\]:-\}"/);
   assert.match(bootstrap, /VPS_CONTROL_PREFLIGHT_ONLY/);
+  assert.match(bootstrap, /--domain DOMAIN/);
+  assert.match(bootstrap, /export VPS_CONTROL_PUBLIC_DOMAIN=/);
+  assert.match(bootstrap, /valid_domain/);
+  assert.match(bootstrap, /bash -s -- \[параметры\]/);
   assert.match(bootstrap, /command -v vps-control/);
   assert.match(bootstrap, /vps-control update/);
   assert.match(manager, /doctor\)/);

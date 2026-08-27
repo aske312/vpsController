@@ -11,11 +11,48 @@ BOOTSTRAP_LOG="/tmp/vps-control-bootstrap.log"
 PACKAGE_MODE="${VPS_CONTROL_PACKAGE_MODE:-auto}"
 OS_UPDATE="${VPS_CONTROL_OS_UPDATE:-yes}"
 
+usage() {
+  cat <<'EOF'
+312.net — установщик стабильной версии
+
+Использование:
+  sudo bash install-panel.sh [параметры]
+  curl -fsSL URL | sudo bash -s -- [параметры]
+
+Параметры:
+  --domain DOMAIN   настроить панель и HTTPS для указанного домена
+  --manual          разрешить интерактивное восстановление dpkg/GRUB
+  --no-os-update    не обновлять уже установленные пакеты ОС
+  --no-apt          не использовать apt/dpkg; зависимости должны быть установлены
+  -h, --help        показать эту справку
+
+Перед использованием --domain настройте A/AAAA-запись домена на этот VPS
+и разрешите входящие TCP-порты 80 и 443 во внешнем firewall провайдера.
+EOF
+}
+
+valid_domain() {
+  local domain="$1"
+  [[ ${#domain} -le 253 && "${domain}" == *.* && "${domain}" != *..* ]] || return 1
+  [[ "${domain}" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]
+}
+
 # --manual / --interactive: force dpkg dialogs through /dev/tty.
 # --no-apt: never call apt/dpkg; all runtime dependencies must already exist.
 # --no-os-update: install the application without upgrading existing OS packages.
 while (($#)); do
   case "$1" in
+    --domain)
+      [[ $# -ge 2 ]] || { printf 'Ошибка: после --domain укажите доменное имя.\n' >&2; exit 2; }
+      valid_domain "$2" || { printf 'Ошибка: некорректный домен: %s\n' "$2" >&2; exit 2; }
+      export VPS_CONTROL_PUBLIC_DOMAIN="${2,,}"
+      shift
+      ;;
+    --domain=*)
+      domain="${1#*=}"
+      valid_domain "${domain}" || { printf 'Ошибка: некорректный домен: %s\n' "${domain}" >&2; exit 2; }
+      export VPS_CONTROL_PUBLIC_DOMAIN="${domain,,}"
+      ;;
     --manual|--interactive)
       PACKAGE_MODE="interactive"
       ;;
@@ -26,8 +63,18 @@ while (($#)); do
     --no-os-update)
       OS_UPDATE="no"
       ;;
-    *)
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
       break
+      ;;
+    *)
+      printf 'Ошибка: неизвестный параметр: %s\n' "$1" >&2
+      usage >&2
+      exit 2
       ;;
   esac
   shift

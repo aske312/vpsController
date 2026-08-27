@@ -13,37 +13,64 @@
 
 Установка рассчитана на чистую Ubuntu Server 22.04, 24.04, 26.04 или Debian 12/13 с systemd. Она добавляет Caddy, Node.js 22, Python 3 с venv, Git, UFW, OpenSSH, Fail2ban, auditd, unattended-upgrades и остальные необходимые системные пакеты. Если системный репозиторий уже содержит Node.js 22 (например, Ubuntu 26.04), используется штатный пакет. На Debian 12/13 установщик при необходимости подключает NodeSource 22 как fallback. Docker не используется.
 
-### Быстрая установка
+### Рекомендуемая установка из файла
 
-Минимальные образы серверов могут не содержать ни `curl`, ни `sudo`. Если вы вошли как `root`, сначала подготовьте загрузчик, затем запустите установщик:
+Минимальные образы серверов могут не содержать `curl` или `sudo`. Сначала установите загрузчик, скачайте канонический установочный файл из ветки `stabl`, затем запустите его. Запуск из файла сохраняет интерактивный терминал, если образ провайдера оставил `dpkg` или GRUB в незавершённом состоянии.
+
+Под `root`:
 
 ```bash
 apt-get update && apt-get install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh -o /root/install-312.sh
+bash /root/install-312.sh
 ```
 
-Если вы вошли как обычный пользователь с настроенным `sudo`:
+Под обычным пользователем с `sudo`:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh -o /tmp/install-312.sh
+sudo bash /tmp/install-312.sh
 ```
 
-Установщик сам проверит сервер, установит зависимости, определит IPv4/IPv6, настроит firewall и HTTPS, запустит службы и проверит результат. Он покажет адрес панели, логин и созданный случайный пароль, а после основной установки автоматически сверится с `stabl-latest` и перейдёт на подготовленный стабильный релиз. Отдельно запускать `vps-control update` не требуется.
+Установщик разворачивает исходный код текущей ветки `stabl`, а затем сверяет и устанавливает подготовленный релиз `stabl-latest`. Он проверяет сервер, устанавливает зависимости, определяет IPv4/IPv6, настраивает firewall, запускает службы и показывает созданные логин и пароль. Отдельно запускать `vps-control update` не требуется.
 
-### Свои логин, пароль или домен
+### Установка с доменом и HTTPS
 
-Если стандартного автоматического режима недостаточно, используйте файл [`install.conf`](install.conf):
+До запуска создайте у DNS-провайдера A-запись домена на публичный IPv4 VPS. При использовании IPv6 добавьте корректную AAAA-запись. Во внешнем firewall хостинга должны быть разрешены входящие TCP-порты 80 и 443.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh -o /tmp/install-312.sh
+sudo bash /tmp/install-312.sh --domain gate-312.online
+```
+
+Допустима и однострочная установка, но при повреждённом состоянии `dpkg` предпочтителен скачанный файл:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh | sudo bash -s -- --domain gate-312.online
+```
+
+`--domain` принимает только доменное имя без `http://`, `https://`, пути и порта. Caddy автоматически получает и продлевает TLS-сертификат. Прямой IP сохраняется в настройках как отдельный endpoint для поддерживающих его протоколов. Без `--domain` панель запускается по HTTP на порту 8080.
+
+Произвольный домен нельзя достоверно определить по одному IP, поэтому на чистом VPS его необходимо передать явно. При повторной установке существующие настройки из `/etc/vps-control.env` сохраняются.
+
+### Дополнительные параметры
+
+```text
+--domain DOMAIN   настроить домен и HTTPS
+--manual          разрешить интерактивное восстановление dpkg/GRUB
+--no-os-update    не обновлять установленные пакеты ОС
+--no-apt          не использовать apt/dpkg
+--help            показать справку
+```
+
+Для собственной конфигурации клонируйте `stabl`, измените [`install.conf`](install.conf) и запустите тот же установщик:
 
 ```bash
 git clone --branch stabl https://github.com/aske312/vpsController.git
 cd vpsController
 sudo bash scripts/install-panel.sh
 ```
-
-Обычно достаточно изменить только `ADMIN_USER`, `ADMIN_PASSWORD` и при необходимости `PUBLIC_DOMAIN`.
-
-IPv4 и IPv6 определяются автоматически. Произвольный домен определить невозможно: установщик может использовать только домен из `install.conf` или корректную PTR-запись. Для HTTPS домен должен указывать на сервер, а входящие TCP-порты 80 и 443 должны быть разрешены во внешнем firewall хостинга. Без подтверждённого домена панель запускается по HTTP на порту 8080.
 
 Проверка после установки:
 
