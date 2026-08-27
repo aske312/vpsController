@@ -382,7 +382,7 @@ configure_access() {
 }
 
 detect_public_endpoints() {
-  local public_ipv4 public_ipv6 domain configured_domain endpoint
+  local public_ipv4 public_ipv6 domain configured_domain endpoint ip_endpoint domain_mode
   public_ipv4="$(env_value PUBLIC_IPV4)"
   [[ -n "${public_ipv4}" ]] || public_ipv4="$(env_value PUBLIC_IP)"
   public_ipv6="$(curl -6 --fail --silent --show-error --max-time 8 https://api64.ipify.org 2>/dev/null || true)"
@@ -401,34 +401,47 @@ except (OSError, IndexError):
 PY
 )"
   fi
+  domain_mode="none"
   if [[ -n "${domain}" ]]; then
-    if ! python3 - "${domain}" "${public_ipv4}" "${public_ipv6}" <<'PY' >/dev/null 2>&1
+    domain_mode="$(python3 - "${domain}" "${public_ipv4}" "${public_ipv6}" <<'PY' 2>/dev/null || true
 import ipaddress, socket, sys
 name, ipv4, ipv6 = sys.argv[1:]
 expected = {value for value in (ipv4, ipv6) if value}
-resolved = {str(ipaddress.ip_address(item[4][0])) for item in socket.getaddrinfo(name, None)}
-raise SystemExit(0 if expected & resolved else 1)
+try:
+    resolved = {str(ipaddress.ip_address(item[4][0])) for item in socket.getaddrinfo(name, None)}
+except OSError:
+    raise SystemExit(1)
+print("direct" if expected & resolved else "cdn")
 PY
-    then
-      warn "domain ${domain} does not resolve to this server; using an IP address."
+    )"
+    if [[ "${domain_mode}" != "direct" && "${domain_mode}" != "cdn" ]]; then
+      warn "domain ${domain} does not resolve yet; keeping the direct IP endpoint."
       domain=""
+      domain_mode="none"
     fi
+  fi
+  if [[ -n "${public_ipv4}" ]]; then
+    ip_endpoint="${public_ipv4}"
+  elif [[ -n "${public_ipv6}" ]]; then
+    ip_endpoint="[${public_ipv6}]"
+  else
+    die "unable to detect a public IPv4 or IPv6 address."
   fi
   if [[ -n "${domain}" ]]; then
     endpoint="${domain}"
-  elif [[ -n "${public_ipv4}" ]]; then
-    endpoint="${public_ipv4}"
-  elif [[ -n "${public_ipv6}" ]]; then
-    endpoint="[${public_ipv6}]"
   else
-    die "unable to detect a public IPv4 or IPv6 address."
+    endpoint="${ip_endpoint}"
   fi
   set_env_value "PUBLIC_IPV4" "${public_ipv4}"
   set_env_value "PUBLIC_IPV6" "${public_ipv6}"
   set_env_value "PUBLIC_DOMAIN" "${domain}"
   set_env_value "PUBLIC_ENDPOINT" "${endpoint}"
+  set_env_value "PUBLIC_IP_ENDPOINT" "${ip_endpoint}"
+  set_env_value "PUBLIC_DOMAIN_ENDPOINT" "${domain}"
+  set_env_value "PUBLIC_ENDPOINTS" "${ip_endpoint}${domain:+,${domain}}"
+  set_env_value "DOMAIN_ROUTE_MODE" "${domain_mode}"
   [[ -z "${public_ipv4}" ]] || set_env_value "PUBLIC_IP" "${public_ipv4}"
-  ok "endpoint: ${endpoint}; IPv4: ${public_ipv4:-none}; IPv6: ${public_ipv6:-none}."
+  ok "endpoints: direct=${ip_endpoint}; domain=${domain:-none}; domain mode=${domain_mode}; IPv4=${public_ipv4:-none}; IPv6=${public_ipv6:-none}."
 }
 
 write_caddy_config() {

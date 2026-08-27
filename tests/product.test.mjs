@@ -800,8 +800,16 @@ test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", a
   assert.match(manager, /socket\.gethostbyaddr/);
   assert.match(manager, /socket\.getaddrinfo/);
   assert.match(manager, /set_env_value "PUBLIC_ENDPOINT"/);
+  assert.match(manager, /set_env_value "PUBLIC_IP_ENDPOINT"/);
+  assert.match(manager, /set_env_value "PUBLIC_DOMAIN_ENDPOINT"/);
+  assert.match(manager, /set_env_value "PUBLIC_ENDPOINTS"/);
+  assert.match(manager, /set_env_value "DOMAIN_ROUTE_MODE"/);
+  assert.match(manager, /"direct" if expected & resolved else "cdn"/);
   assert.match(manager, /ufw allow 443\/tcp comment '312\.net HTTPS panel'/);
   assert.match(api, /PUBLIC_ENDPOINT = os\.getenv/);
+  assert.match(api, /PUBLIC_IP_ENDPOINT = os\.getenv/);
+  assert.match(api, /PUBLIC_ENDPOINTS = tuple/);
+  assert.match(api, /PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT/);
   assert.match(config, /HTTP_PORT="8080"/);
   assert.match(config, /VLESS_REALITY_PORT="8443"/);
   assert.match(caddy, /\{\$SITE_ADDRESS\}/);

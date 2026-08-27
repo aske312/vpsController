@@ -53,6 +53,10 @@ PUBLIC_IPV4 = os.getenv("PUBLIC_IPV4", PUBLIC_IP)
 PUBLIC_IPV6 = os.getenv("PUBLIC_IPV6", "")
 PUBLIC_DOMAIN = os.getenv("PUBLIC_DOMAIN", "")
 PUBLIC_ENDPOINT = os.getenv("PUBLIC_ENDPOINT", PUBLIC_DOMAIN or PUBLIC_IPV4 or (f"[{PUBLIC_IPV6}]" if PUBLIC_IPV6 else PUBLIC_IP))
+PUBLIC_IP_ENDPOINT = os.getenv("PUBLIC_IP_ENDPOINT", PUBLIC_IPV4 or (f"[{PUBLIC_IPV6}]" if PUBLIC_IPV6 else PUBLIC_IP))
+PUBLIC_DOMAIN_ENDPOINT = os.getenv("PUBLIC_DOMAIN_ENDPOINT", PUBLIC_DOMAIN)
+PUBLIC_ENDPOINTS = tuple(value for value in os.getenv("PUBLIC_ENDPOINTS", "").split(",") if value) or tuple(dict.fromkeys(value for value in (PUBLIC_IP_ENDPOINT, PUBLIC_DOMAIN_ENDPOINT) if value))
+DOMAIN_ROUTE_MODE = os.getenv("DOMAIN_ROUTE_MODE", "direct" if PUBLIC_DOMAIN else "none")
 SERVER_CITY = os.getenv("SERVER_CITY", "Unknown")
 SERVER_COUNTRY = os.getenv("SERVER_COUNTRY", "Unknown")
 SERVER_COUNTRY_CODE = os.getenv("SERVER_COUNTRY_CODE", "")
@@ -425,10 +429,10 @@ def stream_proxy_dump() -> list[dict]:
         if protocol == "shadowsocks":
             unit = f'vps-control-shadowsocks@{item.get("id", "")}.service'
             active = run("systemctl", "is-active", unit) == "active"
-            address = f'{PUBLIC_ENDPOINT}:{item.get("port", "—")}'
+            address = f'{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{item.get("port", "—")}'
         elif protocol == "vless-reality-xhttp":
             active = run("systemctl", "is-active", "vps-control-vless-reality-xhttp.service") == "active"
-            address = f'{PUBLIC_ENDPOINT}:{item.get("port", 8443)}'
+            address = f'{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{item.get("port", 8443)}'
             email = f'{item.get("id", "")}@312.net'
             rx_bytes, tx_bytes, handshake_age, rx_bps, tx_bps = xray_user_stats(email, xray_activity.get(email))
             active_connections = 1 if handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S else 0
@@ -985,6 +989,10 @@ def overview(_: None = Depends(require_token)) -> dict:
             "public_ipv6": PUBLIC_IPV6,
             "public_domain": PUBLIC_DOMAIN,
             "public_endpoint": PUBLIC_ENDPOINT,
+            "public_ip_endpoint": PUBLIC_IP_ENDPOINT,
+            "public_domain_endpoint": PUBLIC_DOMAIN_ENDPOINT,
+            "public_endpoints": list(PUBLIC_ENDPOINTS),
+            "domain_route_mode": DOMAIN_ROUTE_MODE,
             "city": SERVER_CITY,
             "country": SERVER_COUNTRY,
             "country_code": SERVER_COUNTRY_CODE,
@@ -2833,7 +2841,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             config_path.unlink(missing_ok=True)
             raise HTTPException(status_code=500, detail="Unable to start Shadowsocks client service")
         userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
-        client_config = f"ss://{userinfo}@{PUBLIC_ENDPOINT}:{port}#{urllib.parse.quote(payload.name)}"
+        client_config = f"ss://{userinfo}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}#{urllib.parse.quote(payload.name)}"
         items = read_clients()
         items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
         write_clients(items)
@@ -2870,7 +2878,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 port = int(reality.get("PORT", "443"))
                 query_values = vless_client_query(config_data, reality)
                 query = urllib.parse.urlencode(query_values)
-                client_config = f"vless://{client_uuid}@{PUBLIC_ENDPOINT}:{port}?{query}#{urllib.parse.quote(payload.name)}"
+                client_config = f"vless://{client_uuid}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}?{query}#{urllib.parse.quote(payload.name)}"
                 stage = "сохранение подключения"
                 items = read_clients()
                 items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
@@ -2931,7 +2939,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         f"[Interface]\nAddress = {address}/32\nDNS = {current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS)}\n"
         f"PrivateKey = {private_key}\nMTU = {mtu}\n{extra}\n[Peer]\n"
         f"PublicKey = {server_public}\nPresharedKey = {psk}\nAllowedIPs = 0.0.0.0/0\n"
-        f"Endpoint = {PUBLIC_ENDPOINT}:{port}\nPersistentKeepalive = {current_env_value('AWG_KEEPALIVE', str(AWG_KEEPALIVE)) if payload.protocol == 'awg' else current_env_value('WG_KEEPALIVE', str(WG_KEEPALIVE))}\n"
+        f"Endpoint = {PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}\nPersistentKeepalive = {current_env_value('AWG_KEEPALIVE', str(AWG_KEEPALIVE)) if payload.protocol == 'awg' else current_env_value('WG_KEEPALIVE', str(WG_KEEPALIVE))}\n"
     )
     items = read_clients()
     items.append(
