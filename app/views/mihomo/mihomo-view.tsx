@@ -35,7 +35,7 @@ type SettingField = {
   default: string | number;
   min?: number;
   max?: number;
-  options?: string[];
+  options?: Array<string | { value: string; label: string }>;
 };
 
 type Module = {
@@ -650,7 +650,11 @@ export function MihomoPage({
                   <span>{field.label}</span>
                   {field.type === "select" ? (
                     <select value={String(settingsDraft[field.key] ?? field.default)} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field.key]: event.target.value }))}>
-                      {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
+                      {(field.options || []).map((option) => {
+                        const value = typeof option === "string" ? option : option.value;
+                        const label = typeof option === "string" ? option : option.label;
+                        return <option key={value} value={value}>{label}</option>;
+                      })}
                     </select>
                   ) : field.type === "textarea" ? (
                     <textarea rows={6} value={String(settingsDraft[field.key] ?? field.default)} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nGEOIP,PRIVATE,DIRECT"} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field.key]: event.target.value }))} />
