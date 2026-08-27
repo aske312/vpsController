@@ -211,6 +211,55 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
 :is(.confirmDialog,.connectionDialog,.accessBetaDialog,.mihomoDialog) > header { padding:15px 16px 12px !important; border-bottom:1px solid var(--line) !important; }
 :is(.confirmActions,.connectionDialogActions,.accessBetaDialogActions,.mihomoDialog footer) { padding:12px 16px !important; border-top:1px solid var(--line) !important; }
 
+.standardConfirmDialog {
+  width:min(520px,calc(100vw - 28px)) !important;
+  padding:0 !important;
+  overflow:hidden !important;
+}
+
+.standardConfirmHead {
+  min-height:78px;
+  display:flex !important;
+  align-items:center;
+  gap:12px;
+  padding:16px 18px !important;
+  border-bottom:1px solid rgba(91,121,142,.14) !important;
+  background:rgba(10,22,31,.58);
+}
+
+.standardConfirmDialog .confirmMark {
+  flex:0 0 34px;
+  width:34px;
+  height:34px;
+  margin:0;
+  border-color:rgba(100,216,181,.28);
+  background:rgba(36,112,91,.14);
+}
+
+.standardConfirmHead > div:last-child { min-width:0; }
+.standardConfirmHead .eyebrow { margin:0 0 5px; color:#667f90; font:750 8px var(--font-mono); letter-spacing:.14em; }
+.standardConfirmHead h2 { margin:0; color:#e6eef2; font-size:21px; line-height:1.2; letter-spacing:-.025em; }
+
+.standardConfirmBody { padding:15px 18px 17px; }
+.standardConfirmBody > p { margin:0; color:#8294a0; font-size:11px; line-height:1.55; }
+.standardConfirmBody > label { display:block; margin-top:14px; color:#748894; font:9px var(--font-mono); }
+.standardConfirmBody > label strong { color:#d7e2e7; }
+.standardConfirmBody input { margin-top:8px; }
+
+.standardConfirmDialog .confirmActions {
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin:0;
+  padding:11px 18px 14px !important;
+  background:rgba(5,13,19,.42);
+}
+
+.standardConfirmDialog .confirmActions button { min-height:38px; border-radius:8px; }
+
+@media (max-width:520px) {
+  .standardConfirmDialog .confirmActions { grid-template-columns:1fr; }
+}
+
 @media (max-width:1180px) {
   .gateMasthead { grid-template-columns:minmax(220px,1fr) auto; }
   .gateMastFacts { display:none; }

@@ -1483,7 +1483,7 @@ export default function Home() {
         </form>
       </div>}
       {confirmation && <div className={`confirmBackdrop ${tab === "application" ? "applicationConfirmBackdrop" : tab === "clients" ? "connectionConfirmBackdrop" : protocolTab ? "protocolConfirmBackdrop" : ""}`} role="presentation" onMouseDown={() => closeConfirmation(false)}>
-        <form className={`confirmDialog ${confirmation.danger ? "danger" : ""} ${tab === "application" ? "applicationConfirmDialog" : tab === "clients" ? "connectionConfirmDialog" : protocolTab ? "protocolConfirmDialog" : ""}`} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => {
+        <form className={`confirmDialog ${confirmation.danger ? "danger" : ""} ${tab === "application" ? "applicationConfirmDialog" : tab === "clients" ? "connectionConfirmDialog" : protocolTab ? "protocolConfirmDialog" : "standardConfirmDialog"}`} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => {
           event.preventDefault();
           if (tab === "application" || !confirmation.phrase || confirmationInput === confirmation.phrase) closeConfirmation(true);
         }}>
@@ -1520,13 +1520,16 @@ export default function Home() {
               <button className={confirmation.danger ? "danger" : "primary"} type="submit" disabled={Boolean(confirmation.phrase && confirmationInput !== confirmation.phrase)}>{confirmation.confirmLabel}</button>
             </div>
           </> : <>
-            <div className="confirmMark">{confirmation.danger ? "!" : "✓"}</div>
-            <p className="eyebrow">ACTION CONFIRMATION</p>
-            <h2 id="confirm-title">{confirmation.title}</h2>
-            <p>{confirmation.message}</p>
-            {confirmation.phrase && <label>Для подтверждения введите <strong>{confirmation.phrase}</strong>
-              <input autoFocus value={confirmationInput} onChange={(event) => setConfirmationInput(event.target.value)} autoComplete="off" />
-            </label>}
+            <header className="standardConfirmHead">
+              <div className="confirmMark" aria-hidden="true">{confirmation.danger ? "!" : "✓"}</div>
+              <div><p className="eyebrow">ПОДТВЕРЖДЕНИЕ ДЕЙСТВИЯ</p><h2 id="confirm-title">{confirmation.title}</h2></div>
+            </header>
+            <div className="standardConfirmBody">
+              <p>{confirmation.message}</p>
+              {confirmation.phrase && <label>Для подтверждения введите <strong>{confirmation.phrase}</strong>
+                <input autoFocus value={confirmationInput} onChange={(event) => setConfirmationInput(event.target.value)} autoComplete="off" />
+              </label>}
+            </div>
             <div className="confirmActions">
               <button type="button" onClick={() => closeConfirmation(false)}>Отмена</button>
               <button className="confirmPrimary" type="submit" disabled={Boolean(confirmation.phrase && confirmationInput !== confirmation.phrase)}>{confirmation.confirmLabel}</button>
