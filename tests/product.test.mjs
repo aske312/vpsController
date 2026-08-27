@@ -51,6 +51,10 @@ test("поставка содержит установщик, образы и р
   assert.match(bootstrap, /export VPS_CONTROL_PUBLIC_DOMAIN=/);
   assert.match(bootstrap, /valid_domain/);
   assert.match(bootstrap, /bash -s -- \[параметры\]/);
+  assert.match(bootstrap, /--location-city CITY/);
+  assert.match(bootstrap, /VPS_CONTROL_SERVER_COUNTRY_CODE/);
+  assert.match(manager, /set_env_value "SERVER_CITY_OVERRIDE"/);
+  assert.match(manager, /set_env_value "SERVER_COUNTRY_OVERRIDE"/);
   assert.match(bootstrap, /command -v vps-control/);
   assert.match(bootstrap, /vps-control update/);
   assert.match(manager, /doctor\)/);

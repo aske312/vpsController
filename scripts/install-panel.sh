@@ -21,6 +21,12 @@ usage() {
 
 Параметры:
   --domain DOMAIN   настроить панель и HTTPS для указанного домена
+  --location-city CITY
+                    физический город сервера по данным провайдера
+  --location-country COUNTRY
+                    физическая страна сервера по данным провайдера
+  --location-country-code CODE
+                    двухбуквенный код физической страны, например NL
   --manual          разрешить интерактивное восстановление dpkg/GRUB
   --no-os-update    не обновлять уже установленные пакеты ОС
   --no-apt          не использовать apt/dpkg; зависимости должны быть установлены
@@ -52,6 +58,21 @@ while (($#)); do
       domain="${1#*=}"
       valid_domain "${domain}" || { printf 'Ошибка: некорректный домен: %s\n' "${domain}" >&2; exit 2; }
       export VPS_CONTROL_PUBLIC_DOMAIN="${domain,,}"
+      ;;
+    --location-city)
+      [[ $# -ge 2 && -n "$2" && "$2" != *$'\n'* ]] || { printf 'Ошибка: после --location-city укажите город.\n' >&2; exit 2; }
+      export VPS_CONTROL_SERVER_CITY="$2"
+      shift
+      ;;
+    --location-country)
+      [[ $# -ge 2 && -n "$2" && "$2" != *$'\n'* ]] || { printf 'Ошибка: после --location-country укажите страну.\n' >&2; exit 2; }
+      export VPS_CONTROL_SERVER_COUNTRY="$2"
+      shift
+      ;;
+    --location-country-code)
+      [[ $# -ge 2 && "$2" =~ ^[A-Za-z]{2}$ ]] || { printf 'Ошибка: код страны должен содержать две латинские буквы.\n' >&2; exit 2; }
+      export VPS_CONTROL_SERVER_COUNTRY_CODE="${2^^}"
+      shift
       ;;
     --manual|--interactive)
       PACKAGE_MODE="interactive"

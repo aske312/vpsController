@@ -29,8 +29,8 @@ bash /root/install-312.sh
 
 ```bash
 sudo apt-get update && sudo apt-get install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh -o /tmp/install-312.sh
-sudo bash /tmp/install-312.sh
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh -o install-312.sh
+sudo bash ./install-312.sh
 ```
 
 Установщик разворачивает исходный код текущей ветки `stabl`, а затем сверяет и устанавливает подготовленный релиз `stabl-latest`. Он проверяет сервер, устанавливает зависимости, определяет IPv4/IPv6, настраивает firewall, запускает службы и показывает созданные логин и пароль. Отдельно запускать `vps-control update` не требуется.
@@ -40,8 +40,8 @@ sudo bash /tmp/install-312.sh
 До запуска создайте у DNS-провайдера A-запись домена на публичный IPv4 VPS. При использовании IPv6 добавьте корректную AAAA-запись. Во внешнем firewall хостинга должны быть разрешены входящие TCP-порты 80 и 443.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh -o /tmp/install-312.sh
-sudo bash /tmp/install-312.sh --domain gate-312.online
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh -o install-312.sh
+sudo bash ./install-312.sh --domain gate-312.online
 ```
 
 Допустима и однострочная установка, но при повреждённом состоянии `dpkg` предпочтителен скачанный файл:
@@ -54,10 +54,29 @@ curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts
 
 Произвольный домен нельзя достоверно определить по одному IP, поэтому на чистом VPS его необходимо передать явно. При повторной установке существующие настройки из `/etc/vps-control.env` сохраняются.
 
+### Физическая локация сервера
+
+GeoIP определяет регистрацию IP-подсети, а не местонахождение оборудования. Поэтому автоматический результат может показать город владельца адресного блока — например Благовещенск — даже если сервер физически размещён в Нидерландах. Универсального сетевого способа достоверно определить дата-центр на чистом VPS нет.
+
+Для правильной локации возьмите город и страну из заказа или панели хостинг-провайдера и передайте их при первой установке:
+
+```bash
+sudo bash ./install-312.sh \
+  --domain gate-312.online \
+  --location-city Amsterdam \
+  --location-country Netherlands \
+  --location-country-code NL
+```
+
+Если название содержит пробелы, заключите его в кавычки. Подтверждённая локация сохраняется в `/etc/vps-control.env`, имеет приоритет над GeoIP и не перезаписывается обновлениями. Без этих параметров интерфейс показывает результат GeoIP как приблизительную локацию.
+
 ### Дополнительные параметры
 
 ```text
 --domain DOMAIN   настроить домен и HTTPS
+--location-city CITY
+--location-country COUNTRY
+--location-country-code CODE
 --manual          разрешить интерактивное восстановление dpkg/GRUB
 --no-os-update    не обновлять установленные пакеты ОС
 --no-apt          не использовать apt/dpkg

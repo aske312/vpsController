@@ -287,6 +287,9 @@ load_install_config() {
   local access_override="${VPS_CONTROL_ACCESS_MODE:-}"
   local http_port_override="${VPS_CONTROL_HTTP_PORT:-}"
   local vless_port_override="${VPS_CONTROL_VLESS_PORT:-}"
+  local server_city_override="${VPS_CONTROL_SERVER_CITY:-}"
+  local server_country_override="${VPS_CONTROL_SERVER_COUNTRY:-}"
+  local server_country_code_override="${VPS_CONTROL_SERVER_COUNTRY_CODE:-}"
   local fresh_install="no"
   [[ -r "${INSTALL_CONFIG}" ]] || fresh_install="yes"
   [[ -r "${config}" ]] || config="${PROJECT_DIR}/install.conf"
@@ -305,6 +308,9 @@ load_install_config() {
   [[ -z "${access_override}" ]] || ACCESS_MODE="${access_override}"
   [[ -z "${http_port_override}" ]] || HTTP_PORT="${http_port_override}"
   [[ -z "${vless_port_override}" ]] || VLESS_REALITY_PORT="${vless_port_override}"
+  [[ -z "${server_city_override}" ]] || SERVER_CITY_OVERRIDE="${server_city_override}"
+  [[ -z "${server_country_override}" ]] || SERVER_COUNTRY_OVERRIDE="${server_country_override}"
+  [[ -z "${server_country_code_override}" ]] || SERVER_COUNTRY_CODE_OVERRIDE="${server_country_code_override^^}"
   [[ "${ACCESS_MODE}" == "external" || "${ACCESS_MODE}" == "local" || "${ACCESS_MODE}" == "vpn" ]] \
     || die "ACCESS_MODE должен быть external, local или vpn."
   [[ "${HTTP_PORT}" =~ ^[0-9]+$ ]] || die "HTTP_PORT должен быть числом."
@@ -312,6 +318,8 @@ load_install_config() {
   (( HTTP_PORT >= 1 && HTTP_PORT <= 65535 )) || die "HTTP_PORT must be between 1 and 65535."
   (( VLESS_REALITY_PORT >= 1 && VLESS_REALITY_PORT <= 65535 )) || die "VLESS_REALITY_PORT must be between 1 and 65535."
   [[ "${VLESS_REALITY_PORT}" != "443" ]] || die "TCP 443 is reserved for the HTTPS panel; choose another VLESS port."
+  [[ -z "${SERVER_COUNTRY_CODE_OVERRIDE:-}" || "${SERVER_COUNTRY_CODE_OVERRIDE}" =~ ^[A-Z]{2}$ ]] \
+    || die "SERVER_COUNTRY_CODE_OVERRIDE должен содержать две латинские буквы."
 }
 
 detect_local_network() {
@@ -1371,6 +1379,9 @@ PY
       set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
     fi
   fi
+  [[ -z "${SERVER_CITY_OVERRIDE:-}" ]] || set_env_value "SERVER_CITY_OVERRIDE" "${SERVER_CITY_OVERRIDE}"
+  [[ -z "${SERVER_COUNTRY_OVERRIDE:-}" ]] || set_env_value "SERVER_COUNTRY_OVERRIDE" "${SERVER_COUNTRY_OVERRIDE}"
+  [[ -z "${SERVER_COUNTRY_CODE_OVERRIDE:-}" ]] || set_env_value "SERVER_COUNTRY_CODE_OVERRIDE" "${SERVER_COUNTRY_CODE_OVERRIDE^^}"
   if [[ -z "$(env_value PUBLIC_IP)" ]]; then
     refresh_server_identity
   else
