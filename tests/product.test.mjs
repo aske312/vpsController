@@ -735,7 +735,7 @@ test("protocol pages safely edit channel settings and VLESS links select HTTP2",
 });
 
 test("DNS control provides Russian resolvers, live checks and protocol application", async () => {
-  const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), readStyles()]);
+  const [page, api, css, manager] = await Promise.all([read("app/page.tsx"), read("api/main.py"), readStyles(), read("scripts/vps-control.sh")]);
   assert.match(page, /type Tab = "overview" \| "dns"/);
   assert.match(page, /onNavigate\("overview"\)/);
   assert.match(page, /onNavigate\("clients"\)/);
@@ -765,6 +765,11 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /restore_system_dns_state/);
   assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
   assert.match(api, /def apply_vrx_dns/);
+  assert.match(api, /content-type: application\/dns-message/);
+  assert.doesNotMatch(api, /application\/dns-json/);
+  assert.match(api, /status_code = exc\.status_code if isinstance\(exc, HTTPException\) else 500/);
+  assert.match(manager, /ReadWritePaths=.*-\/etc\/systemd\/resolved\.conf\.d/);
+  assert.match(manager, /grep -Eq '\^ReadWritePaths=.*resolved\\\.conf\\\.d/);
   assert.match(api, /"scope": "new_profiles"/);
   assert.match(api, /"scope": "client_recommendation"/);
   assert.match(api, /"scope": "server_xray"/);

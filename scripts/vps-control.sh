@@ -1218,7 +1218,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/wireguard -/etc/amnezia ${DATA_DIR}
+ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/wireguard -/etc/amnezia -/etc/systemd/resolved.conf.d ${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -1228,7 +1228,7 @@ EOF
 }
 
 ensure_api_write_access() {
-  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/wireguard -/etc/amnezia ${DATA_DIR}"
+  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/wireguard -/etc/amnezia -/etc/systemd/resolved.conf.d ${DATA_DIR}"
   if ! grep -Fxq "${expected}" "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
     systemctl daemon-reload
@@ -2128,6 +2128,7 @@ integrity_check() {
     || die "не найден systemd-профиль API ${SERVICE_FILE}."
   grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
     && grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
+    && grep -Eq '^ReadWritePaths=.*-?/etc/systemd/resolved\.conf\.d([[:space:]]|$)' "${SERVICE_FILE}" \
     || die "systemd-профиль API не разрешает сохранять конфигурацию приложения."
   [[ "$(stat -c '%U' "${COMMAND_PATH}")" == "root" ]] \
     || die "${COMMAND_PATH} должен принадлежать root."

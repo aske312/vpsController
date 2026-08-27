@@ -2446,7 +2446,8 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
         if system_original is not None:
             restore_system_dns_state(system_original)
         detail = exc.detail if isinstance(exc, HTTPException) else "Не удалось сохранить DNS; предыдущие настройки восстановлены"
-        raise HTTPException(status_code=500, detail=detail) from exc
+        status_code = exc.status_code if isinstance(exc, HTTPException) else 500
+        raise HTTPException(status_code=status_code, detail=detail) from exc
     finally:
         temporary.unlink(missing_ok=True)
     return dns_status()
@@ -2661,8 +2662,14 @@ def check_dns_provider(provider: dict) -> dict:
     if doh_url:
         started = time.monotonic()
         try:
-            result = subprocess.run(["curl", "-fsS", "--max-time", "4", "-H", "accept: application/dns-json", f"{doh_url}?name=example.com&type=A"], capture_output=True, timeout=5, check=False)
-            doh_ok = result.returncode == 0 and bool(result.stdout)
+            transaction = secrets.randbelow(65536)
+            labels = b"".join(bytes([len(part)]) + part.encode("ascii") for part in "example.com".split(".")) + b"\0"
+            doh_packet = struct.pack("!HHHHHH", transaction, 0x0100, 1, 0, 0, 0) + labels + struct.pack("!HH", 1, 1)
+            result = subprocess.run(
+                ["curl", "-fsS", "--max-time", "4", "-X", "POST", "-H", "content-type: application/dns-message", "-H", "accept: application/dns-message", "--data-binary", "@-", doh_url],
+                input=doh_packet, capture_output=True, timeout=5, check=False,
+            )
+            doh_ok = result.returncode == 0 and len(result.stdout) >= 12 and struct.unpack("!H", result.stdout[:2])[0] == transaction and bool(result.stdout[2] & 0x80)
             doh_ms = round((time.monotonic() - started) * 1000, 1) if doh_ok else None
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
