@@ -187,31 +187,31 @@ function VlessCommandCenter({ props }: { props: ProtocolViewProps }) {
     <header className="vlessCommandHero">
       <div className="vlessCommandCopy">
         <p className="eyebrow">CHANNEL 04 · XRAY CONTROL PLANE</p>
-        <div className="vlessCommandTitle"><span>V</span><div><h1>VLESS</h1><p>Управление прямым REALITY-подключением и независимым маршрутом через CDN.</p></div></div>
+        <div className="vlessCommandTitle"><span>V</span><div><h1>VLESS</h1><p>Direct REALITY + CDN WebSocket</p></div></div>
         <div className="vlessCommandState">
           <span className={activeProtocol.service_active ? "online" : "offline"}><i />{activeProtocol.service_active ? "XRAY ONLINE" : "XRAY STOPPED"}</span>
           <span>{formatModuleVersion(activeProtocolImage?.installed_version, "version n/a")}</span>
-          <span>{activeProtocol.online_peers}/{activeProtocol.peers} клиентов online</span>
+          <span>{activeProtocol.online_peers}/{activeProtocol.peers} online</span>
         </div>
         <div className="vlessCommandActions">
-          <button onClick={() => void restartProtocol(protocol)} disabled={busy}>Перезапустить Xray</button>
+          <button onClick={() => void restartProtocol(protocol)} disabled={busy}>Перезапустить</button>
           {activeProtocolImage?.update_available && <button className={activeProtocolImage.update_breaking ? "warning" : "accent"} onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy}>{installingProtocol === `update-${activeProtocolImage.id}` ? "Обновление…" : `Обновить до ${activeProtocolImage.available_version}`}</button>}
-          {activeProtocolImage?.removable && <button className="danger" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить VLESS</button>}
+          {activeProtocolImage?.removable && <button className="danger" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить</button>}
         </div>
       </div>
 
       <div className="vlessRouteBoard">
-        <header><p className="eyebrow">ROUTE BLUEPRINT</p><strong>Два независимых входа</strong><span>Изменение Direct не перестраивает CDN</span></header>
+        <header><p className="eyebrow">ROUTE BLUEPRINT</p><strong>Маршруты</strong></header>
         <article className="vlessRouteNode direct">
           <div className="vlessRouteIndex">01</div>
-          <div><em>DIRECT</em><h2>REALITY · {directTransport}</h2><p>Прямой вход на публичный IP сервера. Основной маршрут без CDN.</p></div>
-          <dl><div><dt>ENDPOINT</dt><dd>{activeProtocol.address || "—"}:{activeProtocol.listen_port || "—"}</dd></div><div><dt>SECURITY</dt><dd>REALITY</dd></div><div><dt>TRANSPORT</dt><dd>{directTransport}</dd></div></dl>
+          <div><em>DIRECT</em><h2>REALITY · {directTransport}</h2></div>
+          <dl><div><dt>ENDPOINT</dt><dd>{activeProtocol.address || "—"}:{activeProtocol.listen_port || "—"}</dd></div><div><dt>ПРОФИЛЬ</dt><dd>Direct</dd></div></dl>
         </article>
-        <div className="vlessRouteBridge"><i /><span>единые UUID клиентов</span><i /></div>
+        <div className="vlessRouteBridge"><i /><span>общие UUID</span><i /></div>
         <article className={`vlessRouteNode cdn${cdnEnabled ? " enabled" : ""}`}>
           <div className="vlessRouteIndex">02</div>
-          <div><em>{cdnEnabled ? "CDN ACTIVE" : "OPTIONAL"}</em><h2>TLS · WebSocket</h2><p>Отдельный доменный маршрут через Cloudflare и Caddy.</p></div>
-          <dl><div><dt>DOMAIN</dt><dd>{cdnDomain}</dd></div><div><dt>SECURITY</dt><dd>TLS</dd></div><div><dt>TRANSPORT</dt><dd>WebSocket</dd></div></dl>
+          <div><em>{cdnEnabled ? "CDN ACTIVE" : "OPTIONAL"}</em><h2>TLS · WebSocket</h2></div>
+          <dl><div><dt>DOMAIN</dt><dd>{cdnDomain}</dd></div><div><dt>СТАТУС</dt><dd>{cdnEnabled ? "Включён" : "Отключён"}</dd></div></dl>
         </article>
       </div>
 
@@ -222,11 +222,11 @@ function VlessCommandCenter({ props }: { props: ProtocolViewProps }) {
     </header>
 
     <section className="vlessPulse" aria-label="Телеметрия VLESS">
-      <div><small>RX NOW</small><strong>{bytes(activeProtocolRate.rx)}<em>/с</em></strong><span>{bytes(activeProtocol.history.received_bytes)} за период</span></div>
-      <div><small>TX NOW</small><strong>{bytes(activeProtocolRate.tx)}<em>/с</em></strong><span>{bytes(activeProtocol.history.transmitted_bytes)} за период</span></div>
-      <div><small>ДОСТУПНОСТЬ</small><strong>{protocolAvailability != null ? `${protocolAvailability}%` : "—"}</strong><span>{activeProtocol.history.service_interruptions} остановок</span></div>
-      <div><small>LATENCY</small><strong>{activeProtocol.history.latency_avg_ms != null ? `${activeProtocol.history.latency_avg_ms.toFixed(1)} мс` : "—"}</strong><span>max {activeProtocol.history.latency_max_ms != null ? `${activeProtocol.history.latency_max_ms.toFixed(1)} мс` : "—"}</span></div>
-      <div><small>LOSS / CLIENTS</small><strong>{activeProtocol.history.external_loss_percent != null ? `${activeProtocol.history.external_loss_percent}%` : "—"}</strong><span>{activeProtocol.online_peers}/{activeProtocol.peers} online · {duration(activeProtocol.last_handshake_age_s)}</span></div>
+      <div><small>RX</small><strong>{bytes(activeProtocolRate.rx)}<em>/с</em></strong></div>
+      <div><small>TX</small><strong>{bytes(activeProtocolRate.tx)}<em>/с</em></strong></div>
+      <div><small>ДОСТУПНОСТЬ</small><strong>{protocolAvailability != null ? `${protocolAvailability}%` : "—"}</strong></div>
+      <div><small>ЗАДЕРЖКА</small><strong>{activeProtocol.history.latency_avg_ms != null ? `${activeProtocol.history.latency_avg_ms.toFixed(1)} мс` : "—"}</strong></div>
+      <div><small>ПОТЕРИ</small><strong>{activeProtocol.history.external_loss_percent != null ? `${activeProtocol.history.external_loss_percent}%` : "—"}</strong></div>
     </section>
 
     <ProtocolSettingsPanel protocol={protocol} fields={fields} draft={draft} busy={busy}
@@ -266,7 +266,7 @@ function ProtocolSettingsPanel({
   return <article className="panel protocolConfiguration">
     <header>
       <div><p className="eyebrow">{isVless ? "VLESS CONFIGURATION" : "CHANNEL CONFIGURATION"}</p><h3>{isVless ? "Конфигурация VLESS" : `Настройки ${labels[protocol]}`}</h3>
-        <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : isVless ? "Настройки прямого REALITY-подключения и дополнительного CDN-маршрута разделены. Изменение одного маршрута не переключает другой." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
+        <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : isVless ? "Direct и CDN настраиваются отдельно." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
       <div className="configurationSafety"><i aria-hidden="true" /><p><strong>Безопасное применение</strong><small>валидация и автоматический откат</small></p></div>
     </header>
     <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} vless={isVless} onChange={onChange} onSave={onSave} />
@@ -303,7 +303,7 @@ function ProtocolSettingsEditor({
         </select>
           : field.type === "number" ? <input type="number" min={field.min} max={field.max} value={Number(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, Number(event.target.value))} />
             : <input type="text" value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)} />}
-      {field.help && <small>{field.help}</small>}
+      {field.help && (!vless || ["transport", "cdn_enabled"].includes(field.key)) && <small>{field.help}</small>}
     </label>)}
   </div>;
   const directFields = visibleFields.filter((field) => directKeys.has(field.key));
@@ -316,20 +316,20 @@ function ProtocolSettingsEditor({
         <span className={cdnEnabled ? "cdn enabled" : "cdn"}><em>{cdnEnabled ? "CDN ACTIVE" : "CDN OPTIONAL"}</em><b>VLESS + TLS + WebSocket</b><small>Отдельный маршрут через домен и Caddy</small></span>
       </div>
       <section className="vlessSettingsGroup direct">
-        <header><div><em>ПРЯМОЕ ПОДКЛЮЧЕНИЕ</em><strong>Direct · REALITY</strong></div><p>Выбранный транспорт применяется только к прямым VLESS-профилям. WebSocket с REALITY ядром Xray не поддерживается; для Direct доступны XHTTP, RAW и gRPC.</p></header>
+        <header><div><em>ПРЯМОЕ ПОДКЛЮЧЕНИЕ</em><strong>Direct · REALITY</strong></div><p>XHTTP, RAW или gRPC.</p></header>
         {renderFields(directFields)}
       </section>
       <section className="vlessSettingsGroup cdn">
-        <header><div><em>ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ</em><strong>CDN · TLS/WebSocket</strong></div><p>Включается независимо и не меняет транспорт, SNI или профили прямого REALITY-подключения.</p></header>
+        <header><div><em>ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ</em><strong>CDN · TLS/WebSocket</strong></div><p>Не изменяет Direct.</p></header>
         {renderFields(cdnFields)}
       </section>
       <section className="vlessSettingsGroup common">
-        <header><div><em>ОБЩИЕ ПАРАМЕТРЫ</em><strong>Xray runtime</strong></div><p>Журналирование и серверный DNS для службы Xray.</p></header>
+        <header><div><em>ОБЩИЕ ПАРАМЕТРЫ</em><strong>Xray runtime</strong></div><p>DNS и журнал.</p></header>
         {renderFields(commonFields)}
       </section>
     </> : renderFields(visibleFields)}
     <div className="protocolSettingsActions">
-      <span>Изменения проверяются перед применением.</span>
+      <span>Проверка и откат выполняются автоматически.</span>
       <button type="button" className="protocolSettingsSave" onClick={onSave} disabled={busy}>{busy ? "Применяем…" : "Применить настройки"}</button>
     </div>
   </div>;

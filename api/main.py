@@ -3131,7 +3131,7 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             {"value": "raw", "label": "RAW · TCP и UDP payload"},
             {"value": "grpc", "label": "gRPC · HTTP/2"},
         ],
-        "help": "Меняет только Direct-профиль с REALITY. CDN-профиль TLS/WebSocket не изменяется. После смены заново импортируйте Direct-профили.",
+        "help": "Только Direct. После смены импортируйте Direct-профили заново.",
     }, {
         "key": "transport_path", "label": "Путь прямого транспорта", "type": "text", "value": str(values.get("transportPath", "/")),
         "help": "Путь для XHTTP или service name для gRPC. В режиме RAW поле не используется.",
@@ -3160,7 +3160,7 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
         "help": "Количество одновременных запросов на HTTP-соединение. 8–16 устраняет секундные очереди; применяется к новым VRX-профилям.",
     }, {
         "key": "cdn_enabled", "label": "Дополнительный маршрут через CDN", "type": "boolean", "value": bool(values.get("cdnEnabled", False)),
-        "help": "Добавляет отдельный TLS/WebSocket-вход через Caddy на порту 443. Настройки Direct/REALITY не меняются.",
+        "help": "Отдельный TLS/WebSocket. Direct не меняется.",
     }, {
         "key": "cdn_domain", "label": "CDN-домен", "type": "text", "value": str(values.get("cdnDomain", "")),
         "help": "Например cdn.vpn.example.com. Для Cloudflare запись A должна быть в режиме Proxied.",

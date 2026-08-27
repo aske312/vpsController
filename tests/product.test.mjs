@@ -888,15 +888,15 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.match(page, /profile\.id === "cdn"/);
   assert.match(manager, /configure_vless_cdn_firewall/);
   assert.match(api, /Транспорт прямого VLESS/);
-  assert.match(api, /Меняет только Direct-профиль с REALITY/);
+  assert.match(api, /Только Direct\. После смены импортируйте Direct-профили заново/);
   assert.doesNotMatch(api, /Literal\["xhttp", "raw", "grpc", "websocket"\]/);
   assert.match(protocolView, /ПРЯМОЕ ПОДКЛЮЧЕНИЕ/);
-  assert.match(protocolView, /WebSocket с REALITY ядром Xray не поддерживается/);
+  assert.match(protocolView, /XHTTP, RAW или gRPC/);
   assert.match(protocolView, /ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ/);
   assert.match(protocolView, /CDN · TLS\/WebSocket/);
   assert.match(protocolView, /function VlessCommandCenter/);
   assert.match(protocolView, /ROUTE BLUEPRINT/);
-  assert.match(protocolView, /Два независимых входа/);
+  assert.match(protocolView, /<strong>Маршруты<\/strong>/);
   assert.match(protocolView, /vlessPulse/);
   assert.match(protocolView, /vlessOperations/);
   assert.match(protocolCss, /\.vlessSettingsGroup\.cdn/);
