@@ -52,6 +52,7 @@ AWG_H4="1400000000"
 ENABLE_UFW="yes"
 GEOLOCATION_PRIMARY_URL="https://api.2ip.io"
 GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code"
+GEOLOCATION_TERTIARY_URL="https://ip.guide"
 UPDATE_TEMP_DIR=""
 UPDATE_ROLLBACK_DIR=""
 UPDATE_SWAP_ACTIVE="no"
@@ -529,23 +530,106 @@ set_config_value() {
 }
 
 refresh_server_identity() {
-  local geo_file="${DATA_DIR}/tmp/geolocation.json"
+  local geo_file="${DATA_DIR}/tmp/geolocation"
   local public_ip city country country_code override_city override_country override_country_code
   info "Определение публичного IP и локации"
   install -d -m 0750 "${DATA_DIR}/tmp"
-  if curl -4 --fail --silent --show-error --max-time 12 \
-    "${GEOLOCATION_PRIMARY_URL}" >"${geo_file}" || curl -4 --fail --silent --show-error --max-time 12 \
-    "${GEOLOCATION_FALLBACK_URL}" >"${geo_file}"; then
-    readarray -t geo < <(python3 - "${geo_file}" <<'PY'
+  rm -f -- "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json"
+  curl -4 --fail --silent --show-error --max-time 12 \
+    "${GEOLOCATION_PRIMARY_URL}" >"${geo_file}.primary.json" || rm -f -- "${geo_file}.primary.json"
+  curl -4 --fail --silent --show-error --max-time 12 \
+    "${GEOLOCATION_FALLBACK_URL}" >"${geo_file}.fallback.json" || rm -f -- "${geo_file}.fallback.json"
+  public_ip="$(python3 - "${geo_file}.primary.json" "${geo_file}.fallback.json" <<'PY'
 import json
 import sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-if data.get("success") is False or not data.get("ip"):
-    raise SystemExit(1)
-for value in (data.get("ip"), data.get("city"), data.get("country"), data.get("country_code") or data.get("code")):
-    print(str(value or ""))
+for path in sys.argv[1:]:
+    try:
+        data = json.load(open(path, encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        continue
+    value = str(data.get("ip") or "")
+    if value:
+        print(value)
+        break
 PY
-)
+)"
+  if [[ -n "${public_ip}" ]]; then
+    curl -4 --fail --silent --show-error --max-time 12 \
+      "${GEOLOCATION_TERTIARY_URL}/${public_ip}" >"${geo_file}.tertiary.json" \
+      || rm -f -- "${geo_file}.tertiary.json"
+  fi
+  if python3 - /run/cloud-init/instance-data.json \
+    "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" \
+    >"${geo_file}.result" <<'PY'
+from collections import Counter
+import json
+import re
+import sys
+
+def load(path):
+    try:
+        return json.load(open(path, encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+def metadata_location(value):
+    if isinstance(value, dict):
+        lowered = {str(k).lower(): v for k, v in value.items()}
+        city = lowered.get("city")
+        country = lowered.get("country")
+        code = lowered.get("country_code") or lowered.get("countrycode")
+        if city and country:
+            return str(city), str(country), str(code or "").upper()
+        for child in value.values():
+            found = metadata_location(child)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = metadata_location(child)
+            if found:
+                return found
+    return None
+
+metadata = load(sys.argv[1])
+confirmed = metadata_location(metadata) if metadata else None
+records = []
+for path in sys.argv[2:]:
+    data = load(path)
+    if not data or data.get("success") is False:
+        continue
+    location = data.get("location") if isinstance(data.get("location"), dict) else data
+    network = data.get("network") if isinstance(data.get("network"), dict) else {}
+    autonomous = network.get("autonomous_system") if isinstance(network.get("autonomous_system"), dict) else {}
+    ip = str(data.get("ip") or "")
+    city = str(location.get("city") or "").strip()
+    country = str(location.get("country") or "").strip()
+    code = str(location.get("country_code") or data.get("country_code") or data.get("code") or autonomous.get("country") or "").upper().strip()
+    if ip:
+        records.append((ip, city, country, code))
+
+if not records:
+    raise SystemExit(1)
+ip = Counter(item[0] for item in records).most_common(1)[0][0]
+if confirmed:
+    city, country, code = confirmed
+else:
+    code_votes = Counter(item[3] for item in records if re.fullmatch(r"[A-Z]{2}", item[3]))
+    code, votes = code_votes.most_common(1)[0] if code_votes else ("", 0)
+    if votes < 2:
+        city, country, code = "Unknown", "Unknown", ""
+    else:
+        matching = [item for item in records if item[3] == code]
+        country = next((item[2] for item in matching if item[2]), code)
+        city_votes = Counter(item[1].casefold() for item in matching if item[1])
+        city_key, city_count = city_votes.most_common(1)[0] if city_votes else ("", 0)
+        city = next((item[1] for item in matching if item[1].casefold() == city_key), "Unknown") if city_count >= 2 else "Unknown"
+
+for value in (ip, city, country, code):
+    print(value)
+PY
+  then
+    readarray -t geo <"${geo_file}.result"
     public_ip="${geo[0]:-}"
     city="${geo[1]:-Unknown}"
     country="${geo[2]:-Unknown}"
@@ -564,14 +648,16 @@ PY
       set_env_value "SERVER_NAME" "${city}, ${country}"
       if [[ -n "${override_city}${override_country}${override_country_code}" ]]; then
         ok "применена подтверждённая локация: ${city}, ${country} (${public_ip})."
+      elif [[ "${city}" == "Unknown" ]]; then
+        warn "страна определена по согласованным сетевым источникам, но физический город не подтверждён: ${country} (${public_ip})."
       else
-        ok "определена приблизительная локация: ${city}, ${country} (${public_ip})."
+        ok "локация подтверждена metadata или несколькими источниками: ${city}, ${country} (${public_ip})."
       fi
     fi
   else
-    warn "геолокация недоступна; сохранены предыдущие значения."
+    warn "геолокация недоступна или источники не согласованы; сохранены предыдущие значения."
   fi
-  rm -f "${geo_file}"
+  rm -f -- "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" "${geo_file}.result"
   public_ip="$(env_value PUBLIC_IP)"
   [[ -n "${public_ip}" ]] || die "не удалось определить PUBLIC_IP; задайте его в ${ENV_FILE}."
   configure_access

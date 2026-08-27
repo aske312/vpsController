@@ -55,6 +55,11 @@ test("поставка содержит установщик, образы и р
   assert.match(bootstrap, /VPS_CONTROL_SERVER_COUNTRY_CODE/);
   assert.match(manager, /set_env_value "SERVER_CITY_OVERRIDE"/);
   assert.match(manager, /set_env_value "SERVER_COUNTRY_OVERRIDE"/);
+  assert.match(manager, /GEOLOCATION_TERTIARY_URL="https:\/\/ip\.guide"/);
+  assert.match(manager, /\/run\/cloud-init\/instance-data\.json/);
+  assert.match(manager, /code_votes = Counter/);
+  assert.match(manager, /if votes < 2/);
+  assert.match(manager, /if city_count >= 2/);
   assert.match(bootstrap, /command -v vps-control/);
   assert.match(bootstrap, /vps-control update/);
   assert.match(manager, /doctor\)/);
