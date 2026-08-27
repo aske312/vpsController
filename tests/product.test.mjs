@@ -597,8 +597,9 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(wgRemove, /99-vps-control-wireguard\.conf/);
   assert.match(awgRemove, /99-vps-control-amneziawg\.conf/);
   assert.match(api, /protocol-install/);
-  assert.match(api, /client_listen_port = secrets\.randbelow\(16384\) \+ 49152 if payload\.protocol == "awg" else None/);
-  assert.match(api, /endpoint_host = PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT/);
+  assert.match(api, /AWG_CLIENT_PORT = int\(os\.getenv\("AWG_CLIENT_PORT", "53020"\)\)/);
+  assert.match(api, /client_listen_port = AWG_CLIENT_PORT if payload\.protocol == "awg" else None/);
+  assert.match(api, /endpoint_host = PUBLIC_IP_ENDPOINT or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_ENDPOINT/);
   assert.match(manager, /prepare_package_manager\(\)/);
   assert.match(manager, /\n  prepare_package_manager\r?\n/);
   assert.match(manager, /dpkg --audit/);

@@ -64,6 +64,7 @@ WG_INTERFACE = os.getenv("WG_INTERFACE", "wg0")
 AWG_INTERFACE = os.getenv("AWG_INTERFACE", "awg0")
 WG_PORT = int(os.getenv("WG_PORT", "51820"))
 AWG_PORT = int(os.getenv("AWG_PORT", "51822"))
+AWG_CLIENT_PORT = int(os.getenv("AWG_CLIENT_PORT", "53020"))
 WG_SUBNET = ipaddress.ip_network(os.getenv("WG_SUBNET", "10.72.0.0/24"))
 AWG_SUBNET = ipaddress.ip_network(os.getenv("AWG_SUBNET", "10.73.0.0/24"))
 WG_CONFIG = Path(os.getenv("WG_CONFIG", f"/etc/wireguard/{WG_INTERFACE}.conf"))
@@ -2935,9 +2936,9 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     default_mtu = WG_MTU if payload.protocol == "wg" else AWG_MTU
     port = configured_int(server_settings, "ListenPort", default_port)
     mtu = configured_int(server_settings, "MTU", default_mtu)
-    client_listen_port = secrets.randbelow(16384) + 49152 if payload.protocol == "awg" else None
+    client_listen_port = AWG_CLIENT_PORT if payload.protocol == "awg" else None
     client_listen_line = f"ListenPort = {client_listen_port}\n" if client_listen_port is not None else ""
-    endpoint_host = PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT
+    endpoint_host = PUBLIC_IP_ENDPOINT or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_ENDPOINT
     client_config = (
         f"[Interface]\nAddress = {address}/32\nDNS = {current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS)}\n"
         f"PrivateKey = {private_key}\n{client_listen_line}MTU = {mtu}\n{extra}\n[Peer]\n"
