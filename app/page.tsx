@@ -978,8 +978,8 @@ export default function Home() {
     if (opening) void checkProtocolResources(protocol);
   }
 
-  async function removeProtocol(image: ProtocolImage) {
-    if (!await askConfirmation({
+  async function removeProtocol(image: ProtocolImage, alreadyConfirmed = false) {
+    if (!alreadyConfirmed && !await askConfirmation({
       title: image.id === "mihomo" ? `Удалить ${image.name}?` : "Удалить протокол?",
       message: image.id === "mihomo"
         ? "Будут удалены Mihomo Core, его профили, внутренние каналы, DNS и маршрутизация. Direct-подключения GATE.312 не изменятся."
@@ -1058,7 +1058,10 @@ export default function Home() {
   }
 
   function downloadConfig(filename: string, config: string) {
-    const blob = new Blob([config], { type: "application/x-wireguard-profile;charset=utf-8" });
+    const isAmneziaWg = /-awg\.conf$/i.test(filename);
+    const blob = new Blob([config], {
+      type: isAmneziaWg ? "application/octet-stream" : "application/x-wireguard-profile;charset=utf-8",
+    });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url; anchor.download = filename; anchor.click();
@@ -1300,7 +1303,7 @@ export default function Home() {
           coreBusy={installingProtocol === "remove-mihomo"}
           onRemoveCore={async () => {
             const image = protocolImages.find((item) => item.id === "mihomo" && item.installed);
-            if (image) await removeProtocol(image);
+            if (image) await removeProtocol(image, true);
           }}
         />
       )}
@@ -1466,7 +1469,7 @@ export default function Home() {
                 <section className="connectionQrPanel">
                   <header><span>QR CODE</span><strong>Сканирование на устройстве</strong></header>
                   {generatedQr ? <div className="connectionQrCanvas"><Image src={generatedQr} width={284} height={284} unoptimized alt={`QR-код конфигурации ${generatedName}`} /></div> : <div className="connectionQrCanvas pending"><span>{generatedQrError || "Создаём QR-код…"}</span></div>}
-                  <p>Откройте клиент протокола на устройстве и отсканируйте код.</p>
+                  <p>{selectedClientProtocol === "awg" ? "Откройте именно приложение AmneziaWG (не WireGuard) и отсканируйте код." : "Откройте клиент протокола на устройстве и отсканируйте код."}</p>
                 </section>
                 <section className="connectionTransfer">
                   <div className="connectionTransferIntro"><span>TRANSFER</span><strong>Передача конфигурации</strong><p>Используйте один из вариантов ниже. Файл и QR содержат одинаковую конфигурацию подключения.</p></div>

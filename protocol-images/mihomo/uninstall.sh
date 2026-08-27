@@ -39,7 +39,7 @@ for module in transport-reality transport-shadowsocks transport-awg transport-wg
   [[ -f "${script}" ]] || continue
   echo "Removing Mihomo dependency: ${module}"
   if ! bash "${script}"; then
-    failures+=("${module}")
+    echo "Warning: ${module} cleanup returned an error; checking residual runtime state." >&2
   fi
 done
 
