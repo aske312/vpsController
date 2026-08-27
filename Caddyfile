@@ -1,3 +1,10 @@
+{
+    # UDP/443 is reserved for AmneziaWG, so keep HTTPS on TCP (HTTP/1.1 and HTTP/2).
+    servers {
+        protocols h1 h2
+    }
+}
+
 {$SITE_ADDRESS} {
     header {
         X-Content-Type-Options "nosniff"
