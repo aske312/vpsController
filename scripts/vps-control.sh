@@ -51,7 +51,7 @@ AWG_H3="1000000000"
 AWG_H4="1400000000"
 ENABLE_UFW="yes"
 GEOLOCATION_PRIMARY_URL="https://api.2ip.io"
-GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code"
+GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code,latitude,longitude"
 GEOLOCATION_TERTIARY_URL="https://ip.guide"
 UPDATE_TEMP_DIR=""
 UPDATE_ROLLBACK_DIR=""
@@ -563,8 +563,25 @@ PY
     >"${geo_file}.result" <<'PY'
 from collections import Counter
 import json
+import math
 import re
 import sys
+
+MAX_CITY_CLUSTER_KM = 50.0
+
+def coordinates(location):
+    try:
+        return float(location.get("latitude") or location.get("lat")), float(location.get("longitude") or location.get("lon"))
+    except (TypeError, ValueError):
+        return None
+
+def distance_km(first, second):
+    lat1, lon1 = map(math.radians, first)
+    lat2, lon2 = map(math.radians, second)
+    delta_lat = lat2 - lat1
+    delta_lon = lon2 - lon1
+    value = math.sin(delta_lat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2
+    return 6371.0088 * 2 * math.asin(min(1.0, math.sqrt(value)))
 
 def load(path):
     try:
@@ -606,7 +623,7 @@ for path in sys.argv[2:]:
     country = str(location.get("country") or "").strip()
     code = str(location.get("country_code") or data.get("country_code") or data.get("code") or autonomous.get("country") or "").upper().strip()
     if ip:
-        records.append((ip, city, country, code))
+        records.append((ip, city, country, code, coordinates(location)))
 
 if not records:
     raise SystemExit(1)
@@ -623,7 +640,15 @@ else:
         country = next((item[2] for item in matching if item[2]), code)
         city_votes = Counter(item[1].casefold() for item in matching if item[1])
         city_key, city_count = city_votes.most_common(1)[0] if city_votes else ("", 0)
-        city = next((item[1] for item in matching if item[1].casefold() == city_key), "Unknown") if city_count >= 2 else "Unknown"
+        if city_count >= 2:
+            city = next((item[1] for item in matching if item[1].casefold() == city_key), "Unknown")
+        else:
+            clustered = set()
+            for left in range(len(matching)):
+                for right in range(left + 1, len(matching)):
+                    if matching[left][4] and matching[right][4] and distance_km(matching[left][4], matching[right][4]) <= MAX_CITY_CLUSTER_KM:
+                        clustered.update((left, right))
+            city = next((item[1] for index, item in enumerate(matching) if index in clustered and item[1]), "Unknown")
 
 for value in (ip, city, country, code):
     print(value)
