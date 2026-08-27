@@ -767,7 +767,7 @@ export default function Home() {
   async function installProtocol(image: ProtocolImage) {
     if (!await askConfirmation({
       title: `Установить ${image.name}?`,
-      message: `На сервер будет установлен модуль ${image.name}${image.available_version ? ` ${image.available_version}` : ""}.`,
+      message: `На сервер будет установлена последняя доступная версия модуля ${image.name}.`,
       confirmLabel: "Установить",
     })) return;
     setBusy(true); setError(""); setInstallingProtocol(image.id);

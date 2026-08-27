@@ -888,7 +888,7 @@ test("node components distinguish installable images and refresh real versions",
   const page = await read("app/page.tsx");
   assert.match(page, /!item\.installed && item\.installable/);
   assert.match(page, /!image\.installed && !image\.installable/);
-  assert.match(page, /displayedVersion = image\.installed \? installedVersion : availableVersion/);
+  assert.match(page, /displayedVersion = image\.installed[\s\S]*?installedVersion[\s\S]*?image\.installable \? "АКТУАЛЬНАЯ" : "—"/);
   assert.match(page, /await loadOverview\(\)/);
 });
 
@@ -943,7 +943,7 @@ test("failed protocol installs roll back partial state and shared packages have 
   assert.match(control, /bash "\$\{image_root\}\/\$\{uninstaller\}"/);
   assert.match(api, /modinfo", "-F", "version", "amneziawg"/);
   assert.doesNotMatch(overview, /formatModuleVersion\(image\.available_version \|\| image\.version\)/);
-  assert.match(overview, /image\.installable \? "АКТУАЛЬНАЯ" : "—"/);
+  assert.match(overview, /image\.installed[\s\S]*?installedVersion[\s\S]*?image\.installable \? "АКТУАЛЬНАЯ" : "—"/);
   assert.match(directSs, /mihomo\/shadowsocks[\s\S]*?purge -y shadowsocks-libev/);
   assert.match(mihomoWg, /wireguard[\s\S]*?purge -y wireguard-tools/);
   assert.match(mihomoAwg, /amneziawg[\s\S]*?purge -y amneziawg amneziawg-tools amneziawg-dkms/);
