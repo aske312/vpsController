@@ -894,7 +894,15 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.match(protocolView, /WebSocket с REALITY ядром Xray не поддерживается/);
   assert.match(protocolView, /ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ/);
   assert.match(protocolView, /CDN · TLS\/WebSocket/);
+  assert.match(protocolView, /function VlessCommandCenter/);
+  assert.match(protocolView, /ROUTE BLUEPRINT/);
+  assert.match(protocolView, /Два независимых входа/);
+  assert.match(protocolView, /vlessPulse/);
+  assert.match(protocolView, /vlessOperations/);
   assert.match(protocolCss, /\.vlessSettingsGroup\.cdn/);
+  assert.match(protocolCss, /\.vlessCommandHero/);
+  assert.match(protocolCss, /\.vlessRouteBoard/);
+  assert.match(protocolCss, /\.vlessCommandArt/);
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
