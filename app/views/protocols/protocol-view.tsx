@@ -49,6 +49,9 @@ export function ProtocolView(props: ProtocolViewProps) {
   const isVless = protocolTab === "vless-reality-xhttp";
   const profile = channelProfiles[protocolTab];
   return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()}`}>
+        {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные защищённые протоколы">
+          {installedProtocols.map((protocol) => <button type="button" key={protocol} className={protocol === protocolTab ? "active" : ""} aria-current={protocol === protocolTab ? "page" : undefined} onClick={() => onSelectProtocol ? onSelectProtocol(protocol) : setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : "VLESS"}</button>)}
+        </nav>}
         <header className="protocolHeader">
           <div className="protocolIdentityMark" aria-hidden="true"><span>{profile.index}</span><b>{protocolCode}</b></div>
           <div className="protocolHeaderCopy">
@@ -66,9 +69,6 @@ export function ProtocolView(props: ProtocolViewProps) {
             </div>
             <small>CHANNEL {profile.index} / {installedProtocols.length.toString().padStart(2, "0")}</small>
           </div>
-          {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные протоколы">
-            {installedProtocols.map((protocol) => <button key={protocol} className={protocol === protocolTab ? "active" : ""} onClick={() => onSelectProtocol ? onSelectProtocol(protocol) : setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : "VLESS"}</button>)}
-          </nav>}
         </header>
 
         <div className="protocolStage">
