@@ -146,7 +146,17 @@
 .applicationManagement,.applicationJournal { border-color:var(--cc-line) !important; border-radius:15px !important; background:var(--cc-surface) !important; }
 
 /* Mihomo — the protocol scene is retained as the primary command surface. */
-.mihomoCommandHero { min-height:300px !important; border-color:var(--cc-line) !important; border-radius:18px !important; box-shadow:var(--cc-shadow) !important; }
+.mihomoCommandHero {
+  min-height:300px !important;
+  padding:0 !important;
+  border-color:var(--cc-line) !important;
+  border-radius:18px !important;
+  background:
+    linear-gradient(90deg,rgba(6,14,22,.98) 0%,rgba(6,14,22,.94) 46%,rgba(6,14,22,.48) 67%,rgba(6,14,22,.12) 100%),
+    url("/gate-art/new-operator/mihomo.webp") right center / auto 112% no-repeat,
+    #071019 !important;
+  box-shadow:var(--cc-shadow) !important;
+}
 .mihomoHeroShade { display:block !important; background:linear-gradient(90deg,rgba(4,11,20,.99) 0%,rgba(4,11,20,.91) 50%,rgba(4,11,20,.14) 82%),linear-gradient(180deg,transparent,rgba(4,11,20,.68)) !important; }
 .mihomoHeroContent { width:68% !important; min-height:300px !important; padding:22px 24px !important; }
 .mihomoHeroFacts > div { background:rgba(4,11,19,.68) !important; backdrop-filter:blur(8px); }
