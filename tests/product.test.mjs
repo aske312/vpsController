@@ -63,6 +63,8 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /MAX_CITY_CLUSTER_KM = 50\.0/);
   assert.match(manager, /def distance_km\(first, second\)/);
   assert.match(manager, /distance_km\(matching\[left\]\[4\], matching\[right\]\[4\]\) <= MAX_CITY_CLUSTER_KM/);
+  assert.match(manager, /Upgrade the legacy ipwho/);
+  assert.match(manager, /country_code,latitude,longitude/);
   assert.match(bootstrap, /command -v vps-control/);
   assert.match(bootstrap, /vps-control update/);
   assert.match(manager, /doctor\)/);

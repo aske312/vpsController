@@ -299,6 +299,11 @@ load_install_config() {
     # shellcheck source=/dev/null
     source "${config}"
   fi
+  # Releases preserve /etc/vps-control-install.conf. Upgrade the legacy ipwho
+  # field list in memory so city clustering also works after an application update.
+  if [[ "${GEOLOCATION_FALLBACK_URL}" == "https://ipwho.is/?fields=success,ip,city,country,country_code" ]]; then
+    GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code,latitude,longitude"
+  fi
   [[ -z "${admin_user_override}" ]] || ADMIN_USER="${admin_user_override}"
   if [[ -n "${admin_password_override}" ]]; then
     ADMIN_PASSWORD="${admin_password_override}"
