@@ -18,49 +18,35 @@
 }
 
 .mihomoCommandHero {
-  position: relative;
-  min-height: 365px;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 250px;
   overflow: hidden;
   border: 1px solid rgba(93, 111, 147, .28);
   border-radius: 20px;
-  background:
-    linear-gradient(90deg, rgba(6, 13, 23, .98) 0%, rgba(6, 13, 23, .94) 43%, rgba(6, 13, 23, .45) 69%, rgba(6, 13, 23, .16) 100%),
-    #07101a;
-  isolation: isolate;
-}
-
-.mihomoCommandHero::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  background-image: url("/gate-art/new-operator/mihomo.webp");
-  background-repeat: no-repeat;
-  background-position: right center;
-  background-size: auto 100%;
-  opacity: .62;
-  filter: saturate(.95) brightness(.90);
-}
-
-.mihomoHeroShade {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background:
-    radial-gradient(circle at 39% 30%, rgba(79, 71, 212, .13), transparent 34%),
-    linear-gradient(90deg, rgba(4, 11, 20, .97) 0%, rgba(5, 13, 23, .91) 43%, rgba(5, 13, 23, .42) 67%, rgba(5, 13, 23, .10) 100%);
-  pointer-events: none;
+  background: #07101a;
 }
 
 .mihomoHeroContent {
-  width: min(790px, 58%);
-  min-height: 365px;
+  width: auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 18px;
   padding: 26px 28px;
 }
+
+.mihomoHeroArt {
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 18px 18px 0;
+  border-left: 1px solid rgba(93, 111, 147, .20);
+}
+
+.mihomoHeroArt img { display: block; width: 100%; max-width: 190px; height: 260px !important; object-fit: contain; object-position: center bottom; }
 
 .mihomoHeroIntro .eyebrow { margin-bottom: 8px; }
 
@@ -93,7 +79,6 @@
   border: 1px solid rgba(92, 112, 136, .20);
   border-radius: 14px;
   background: rgba(91, 111, 136, .16);
-  backdrop-filter: blur(12px);
 }
 
 .mihomoHeroFacts > div { min-width: 0; min-height: 74px; display: grid; align-content: center; gap: 4px; padding: 10px 12px; background: rgba(5, 13, 22, .78); }
@@ -380,17 +365,15 @@
 .mihomoDialog > footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; padding-top: 13px; border-top: 1px solid rgba(91,113,138,.14); }
 
 @media (max-width: 1280px) {
-.mihomoHeroContent { width: 64%; }
 .mihomoChannelGrid { grid-template-columns: repeat(2, minmax(0,1fr)); }
 .mihomoTopology { grid-template-columns: repeat(4, minmax(0,1fr)); }
 .mihomoTopologyArrow { display: none; }
 }
 
 @media (max-width: 980px) {
-.mihomoCommandHero { min-height: 330px; }
-.mihomoCommandHero::before { background-size: auto 86%; background-position: right bottom; opacity: .62; }
-.mihomoHeroShade { background: linear-gradient(90deg, rgba(5,13,23,.98) 0%, rgba(5,13,23,.91) 62%, rgba(5,13,23,.48) 100%); }
-.mihomoHeroContent { width: 75%; min-height: 330px; padding: 22px; }
+.mihomoCommandHero { grid-template-columns: minmax(0,1fr) 210px; }
+.mihomoHeroContent { padding: 22px; }
+.mihomoHeroArt img { max-width: 160px; height: 230px !important; }
 .mihomoHeroFacts { grid-template-columns: repeat(2, minmax(0,1fr)); }
 .mihomoHeroFacts > div.wide { grid-column: span 2; }
 .mihomoProfiles > div:not(.mihomoEmpty) { grid-template-columns: minmax(200px,1fr) minmax(160px,.8fr) auto; }
@@ -400,10 +383,9 @@
 }
 
 @media (max-width: 720px) {
-.mihomoCommandHero { min-height: auto; }
-.mihomoCommandHero::before { opacity: .30; background-size: auto 72%; }
-.mihomoHeroShade { background: rgba(5,13,23,.90); }
-.mihomoHeroContent { width: 100%; min-height: auto; padding: 18px; }
+.mihomoCommandHero { grid-template-columns: 1fr; }
+.mihomoHeroContent { padding: 18px; }
+.mihomoHeroArt { display: none; }
 .mihomoHeroTitleLine h1 { font-size: 34px; }
 .mihomoHeroFacts { grid-template-columns: 1fr 1fr; }
 .mihomoTopology, .mihomoChannelGrid, .mihomoQuickState, .mihomoFields { grid-template-columns: 1fr; }
@@ -422,10 +404,8 @@
 
 /* Mihomo control center: transports are installable; DNS and routing are automatic policies. */
 .mihomoWorkspace { gap: 10px; }
-.mihomoCommandHero { min-height: 285px; border-radius: 20px; }
-.mihomoCommandHero::before { background-size: auto 108%; background-position: right -22px bottom; opacity: .70; }
-.mihomoHeroShade { background: linear-gradient(90deg, rgba(4,11,20,.98) 0%, rgba(5,13,23,.94) 52%, rgba(5,13,23,.20) 82%, transparent 100%); }
-.mihomoHeroContent { width: min(900px, 70%); min-height: 285px; gap: 14px; padding: 22px 26px; }
+.mihomoCommandHero { border-radius: 20px; }
+.mihomoHeroContent { gap: 14px; padding: 22px 26px; }
 .mihomoHeroLead { max-width: 720px; }
 .mihomoHeroFacts { grid-template-columns: repeat(5,minmax(0,1fr)); }
 .mihomoHeroFacts > div, .mihomoHeroFacts > div.wide { grid-column: auto; min-height: 64px; }
@@ -451,7 +431,6 @@
   .mihomoOverview { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
-  .mihomoHeroContent { width: 100%; }
   .mihomoHeroFacts { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .mihomoPolicyPanel > header { grid-template-columns: 46px minmax(0,1fr); }
   .mihomoPolicyPanel > header .mihomoPill { grid-column: 2; justify-self: start; }

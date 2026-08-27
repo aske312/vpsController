@@ -2,6 +2,7 @@
 
 import { formatModuleVersion } from "../../lib/format-version";
 
+import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 type View = "overview" | "profiles" | "channels" | "dns" | "routing";
@@ -413,8 +414,15 @@ export function MihomoPage({
 
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
+      <nav className="mihomoHost__tabs mihomoTabs" aria-label="Разделы Mihomo">
+        <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
+        <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
+        <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Каналы</Tab>
+        <Tab id="dns" current={view} onSelect={setView} badge={policiesReady ? 1 : 0}>DNS</Tab>
+        <Tab id="routing" current={view} onSelect={setView} badge={policiesReady ? 1 : 0}>Маршрутизация</Tab>
+      </nav>
+
       <article className="mihomoCommandHero">
-        <div className="mihomoHeroShade" />
         <div className="mihomoHeroContent">
           <div className="mihomoHeroIntro">
             <p className="eyebrow">MIHOMO CONTROL</p>
@@ -451,15 +459,10 @@ export function MihomoPage({
             </button>
           </div>
         </div>
+        <aside className="mihomoHeroArt" aria-hidden="true">
+          <Image src="/gate-art/new-operator/operator_prt_1.webp" alt="" width={941} height={1672} priority />
+        </aside>
       </article>
-
-      <nav className="mihomoHost__tabs mihomoTabs" aria-label="Разделы Mihomo">
-        <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
-        <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
-        <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Каналы</Tab>
-        <Tab id="dns" current={view} onSelect={setView} badge={policiesReady ? 1 : 0}>DNS</Tab>
-        <Tab id="routing" current={view} onSelect={setView} badge={policiesReady ? 1 : 0}>Маршрутизация</Tab>
-      </nav>
 
       {error && <div className="mihomoMessage is-error">{error}</div>}
       {notice && <div className="mihomoMessage is-ok">{notice}</div>}
@@ -682,7 +685,7 @@ export function MihomoPage({
 }
 
 function Tab({ id, current, onSelect, badge, children }: { id: View; current: View; onSelect: (id: View) => void; badge?: number; children: React.ReactNode }) {
-  return <button className={current === id ? "active" : ""} onClick={() => onSelect(id)}><b>{children}</b>{badge !== undefined && <em>{badge}</em>}</button>;
+  return <button type="button" className={current === id ? "active" : ""} aria-current={current === id ? "page" : undefined} onClick={() => onSelect(id)}><b>{children}</b>{badge !== undefined && <em>{badge}</em>}</button>;
 }
 
 function HeroFact({ label, value, note, wide = false }: { label: string; value: string; note: string; wide?: boolean }) {
