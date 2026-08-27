@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ENV_FILE="${ENV_FILE:-/etc/vps-control.env}"
 AWG_INTERFACE="${AWG_INTERFACE:-awg0}"
-AWG_PORT="${AWG_PORT:-443}"
+AWG_PORT="${AWG_PORT:-51822}"
 env_value() {
   local value
   value="$(sed -n "s/^${1}=//p" "${ENV_FILE}" 2>/dev/null | tail -n 1 | tr -d '\r')"

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ENV_FILE="${ENV_FILE:-/etc/vps-control.env}"
 AWG_INTERFACE="${AWG_INTERFACE:-awg0}"
-AWG_PORT="${AWG_PORT:-443}"
+AWG_PORT="${AWG_PORT:-51822}"
 
 env_value() {
   local value
