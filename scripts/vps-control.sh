@@ -718,11 +718,42 @@ check_vpn() {
     || warn "отсутствует конфигурация ${AWG_INTERFACE}; AmneziaWG пока недоступен."
 }
 
+repair_unconfigured_grub_pc() {
+  local root_source root_type parent_name boot_disk
+  dpkg-query -W -f='${db:Status-Abbrev}' grub-pc 2>/dev/null | grep -q '^iF' || return 1
+  [[ ! -d /sys/firmware/efi ]] || return 1
+  command -v debconf-set-selections >/dev/null 2>&1 || return 1
+
+  root_source="$(findmnt -nro SOURCE / 2>/dev/null || true)"
+  [[ "${root_source}" == /dev/* ]] || return 1
+  root_source="$(readlink -f -- "${root_source}" 2>/dev/null || true)"
+  root_type="$(lsblk -ndo TYPE "${root_source}" 2>/dev/null || true)"
+  if [[ "${root_type}" == "disk" ]]; then
+    boot_disk="${root_source}"
+  elif [[ "${root_type}" == "part" ]]; then
+    parent_name="$(lsblk -ndo PKNAME "${root_source}" 2>/dev/null || true)"
+    [[ -n "${parent_name}" && "${parent_name}" != *$'\n'* ]] || return 1
+    boot_disk="/dev/${parent_name}"
+  else
+    return 1
+  fi
+  [[ -b "${boot_disk}" && "$(lsblk -ndo TYPE "${boot_disk}" 2>/dev/null)" == "disk" ]] || return 1
+
+  warn "grub-pc не настроен; для BIOS-системы однозначно определён загрузочный диск ${boot_disk}."
+  printf 'grub-pc grub-pc/install_devices multiselect %s\n' "${boot_disk}" | debconf-set-selections
+  printf 'grub-pc grub-pc/install_devices_disks_changed multiselect %s\n' "${boot_disk}" | debconf-set-selections
+  DEBIAN_FRONTEND=noninteractive dpkg --configure grub-pc
+}
+
 prepare_package_manager() {
   export DEBIAN_FRONTEND=noninteractive
   if [[ -n "$(dpkg --audit 2>/dev/null)" ]]; then
     info "Восстановление незавершённой пакетной операции"
-    apt-get -o DPkg::Lock::Timeout=300 -f install -y
+    if ! apt-get -o DPkg::Lock::Timeout=300 -f install -y; then
+      repair_unconfigured_grub_pc \
+        || die "не удалось автоматически восстановить dpkg; для неоднозначной схемы загрузочных дисков требуется ручная настройка."
+      apt-get -o DPkg::Lock::Timeout=300 -f install -y
+    fi
   fi
   [[ -z "$(dpkg --audit 2>/dev/null)" ]] \
     || die "dpkg остаётся в незавершённом состоянии; проверьте журнал пакетного менеджера."

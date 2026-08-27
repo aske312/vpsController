@@ -582,6 +582,9 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(manager, /prepare_package_manager\(\)/);
   assert.match(manager, /\n  prepare_package_manager\r?\n/);
   assert.match(manager, /dpkg --audit/);
+  assert.match(manager, /repair_unconfigured_grub_pc/);
+  assert.match(manager, /grub-pc\/install_devices multiselect/);
+  assert.match(manager, /lsblk -ndo PKNAME/);
   assert.match(manager, /DPkg::Lock::Timeout=300 -f install -y/);
   assert.match(wgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(awgInstall, /DPkg::Lock::Timeout=300/);
