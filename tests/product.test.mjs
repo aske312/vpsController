@@ -608,6 +608,8 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(awgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(wgInstall, /install -y iptables wireguard-tools/);
   assert.match(awgInstall, /install -y amneziawg/);
+  assert.match(manager, /AWG_PORT="443"/);
+  assert.match(awgInstall, /AWG_PORT="\$\{AWG_PORT:-443\}"/);
   for (const installer of [awgInstall, mihomoAwgInstall]) {
     assert.match(installer, /apt-cache show "\$\{header_package\}"/);
     assert.match(installer, /\*-cloud-\$\{architecture\}/);
