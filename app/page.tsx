@@ -30,6 +30,7 @@ function reloadWithoutCache(message: string) {
 const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-HISTORY_SAMPLES);
 export default function Home() {
   const [tab, setTab] = useState<Tab>("overview");
+  const [selectedChannel, setSelectedChannel] = useState<Protocol>("awg");
   const [token, setToken] = useState("");
   const [loginUser, setLoginUser] = useState("admin");
   const [loginPassword, setLoginPassword] = useState("");
@@ -366,6 +367,7 @@ export default function Home() {
       else if (tab === "services") await loadServices();
       else if (tab === "dns") await loadDns();
       else if (tab === "mihomo") await loadOverview();
+      else if (tab === "channels") await Promise.all([loadClients(), loadProtocolStatus(selectedChannel)]);
       else if (["wg", "awg", "shadowsocks", "vless-reality-xhttp"].includes(tab)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
       else {
         await loadClients();
@@ -374,7 +376,7 @@ export default function Home() {
     } finally {
       if (showBusy) setBusy(false);
     }
-  }, [loadApplication, loadClients, loadDns, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, tab, token]);
+  }, [loadApplication, loadClients, loadDns, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, selectedChannel, tab, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -393,7 +395,7 @@ export default function Home() {
     const updateRunning = actionRunning && ["update", "test-update", "test-rollback", "kernel-update"].includes(application?.action?.action || "");
     const delay = updateRunning ? 3000
       : tab === "overview" ? 30000
-        : ["wg", "awg", "shadowsocks", "vless-reality-xhttp", "clients"].includes(tab) ? 15000
+        : ["channels", "wg", "awg", "shadowsocks", "vless-reality-xhttp", "clients"].includes(tab) ? 15000
           : 10000;
     const timer = window.setInterval(() => void refreshCurrent(false), delay);
     return () => window.clearInterval(timer);
@@ -1201,7 +1203,9 @@ export default function Home() {
     Boolean(applicationSecurity?.control_command_protected),
     Boolean(applicationSecurity?.cors_restricted),
   ];
-  const protocolTab = (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(tab) ? tab as Protocol : undefined;
+  const protocolTab = tab === "channels"
+    ? (installedProtocols.includes(selectedChannel) ? selectedChannel : installedProtocols[0])
+    : (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(tab) ? tab as Protocol : undefined;
   const activeProtocol = protocolTab ? protocolStatuses[protocolTab] : undefined;
   const activeProtocolRate = protocolTab ? protocolRates[protocolTab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
   const activeProtocolImage = protocolTab ? protocolImages.find((image) => image.id === protocolTab) : undefined;
@@ -1245,7 +1249,10 @@ export default function Home() {
     nodeState={nodeState}
     nodeStateLabel={nodeStateLabel}
     server={overview?.server}
-    onNavigate={(id) => setTab(id as Tab)}
+    onNavigate={(id) => {
+      if (id === "channels" && !installedProtocols.includes(selectedChannel) && installedProtocols[0]) setSelectedChannel(installedProtocols[0]);
+      setTab(id as Tab);
+    }}
     operationAction={application?.action}
     operationLabel={operationLabel}
     operationActive={operationActive}
@@ -1391,6 +1398,7 @@ export default function Home() {
         protocolResourceTotal={protocolResourceTotal}
         installedProtocols={installedProtocols}
         setTab={setTab}
+        onSelectProtocol={(protocol) => { setSelectedChannel(protocol); void loadProtocolStatus(protocol); }}
         protocolSettingsDraft={protocolSettingsDraft}
         diagnosticsOpen={diagnosticsOpen}
         resourcesOpen={resourcesOpen}

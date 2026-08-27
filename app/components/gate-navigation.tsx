@@ -27,13 +27,6 @@ type Props = {
 };
 
 const protocolOrder = ["awg", "wg", "vless-reality-xhttp", "shadowsocks"];
-const protocolLabels: Record<string, string> = {
-  awg: "AmneziaWG",
-  wg: "WireGuard",
-  "vless-reality-xhttp": "VLESS Reality",
-  shadowsocks: "Shadowsocks",
-};
-
 export function GateNavigation({
   activeTab,
   protocolImages,
@@ -69,22 +62,13 @@ export function GateNavigation({
             {mihomoInstalled && (
               <NavButton active={activeTab === "mihomo"} icon="mihomo" label="Mihomo" tone="violet" onClick={() => onNavigate("mihomo")} />
             )}
-            {transports.length === 1 && (
+            {transports.length > 0 && (
               <NavButton
-                active={activeTab === transports[0].id}
-                icon="transport"
-                label={protocolLabels[transports[0].id] || transports[0].name}
-                tone="cyan"
-                onClick={() => onNavigate(transports[0].id)}
-              />
-            )}
-            {transports.length > 1 && (
-              <NavButton
-                active={transports.some((item) => activeTab === item.id)}
+                active={activeTab === "channels" || transports.some((item) => activeTab === item.id)}
                 icon="transport"
                 label="Защищённые каналы"
                 tone="cyan"
-                onClick={() => onNavigate(transports[0].id)}
+                onClick={() => onNavigate("channels")}
               />
             )}
           </NavGroup>

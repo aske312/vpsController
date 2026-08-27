@@ -2477,12 +2477,44 @@ class ProtocolSettingsUpdate(BaseModel):
     mode: Literal["tcp_only", "tcp_and_udp"] | None = None
     no_delay: bool | None = None
     xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
+    transport: Literal["xhttp", "raw", "grpc"] | None = None
+    transport_path: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$")
     dns: str | None = Field(default=None, min_length=3, max_length=512)
     keepalive: int | None = Field(default=None, ge=0, le=300)
     loglevel: Literal["debug", "info", "warning", "error", "none"] | None = None
     xpadding: str | None = Field(default=None, min_length=1, max_length=32, pattern=r"^\d+(?:-\d+)?$")
     sni: str | None = Field(default=None, min_length=4, max_length=253, pattern=r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
     xmux_concurrency: int | None = Field(default=None, ge=1, le=64)
+
+
+def configure_vless_transport(stream: dict, transport: str, path: str = "/") -> None:
+    """Switch transport without disturbing REALITY settings or client UUIDs."""
+    for key in ("xhttpSettings", "rawSettings", "grpcSettings"):
+        stream.pop(key, None)
+    stream["network"] = transport
+    if transport == "xhttp":
+        stream["xhttpSettings"] = {"path": path, "mode": "auto", "extra": {
+            "xPaddingBytes": "100-1000", "xmux": {"maxConcurrency": "8-16", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000"},
+        }}
+    elif transport == "grpc":
+        stream["grpcSettings"] = {"serviceName": path.lstrip("/") or "vless", "multiMode": False}
+    else:
+        stream["rawSettings"] = {"header": {"type": "none"}}
+
+
+def vless_client_query(config: dict, reality: dict) -> dict[str, str]:
+    stream = config["inbounds"][0]["streamSettings"]
+    transport = str(stream.get("network", "xhttp"))
+    target_host = reality.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0]
+    values = {"encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome", "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", "")}
+    if transport == "xhttp":
+        settings = stream.get("xhttpSettings", {})
+        values.update({"type": "xhttp", "host": target_host, "path": str(settings.get("path", "/")), "mode": str(settings.get("mode", "auto")), "alpn": "h2", "extra": json.dumps(settings.get("extra", {}), separators=(",", ":"))})
+    elif transport == "grpc":
+        values.update({"type": "grpc", "serviceName": str(stream.get("grpcSettings", {}).get("serviceName", "vless")), "mode": "gun", "alpn": "h2"})
+    else:
+        values["type"] = "tcp"
+    return values
 
 
 def key(command: str) -> str:
@@ -2808,23 +2840,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 tmp.replace(VLESS_CONFIG)
                 replaced = True
                 restart_vless_service()
-                target_host = reality.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0]
                 port = int(reality.get("PORT", "443"))
-                xhttp_settings = config_data["inbounds"][0]["streamSettings"].get("xhttpSettings", {})
-                xhttp_mode = str(xhttp_settings.get("mode", "auto"))
-                query_values = {
-                    "encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome",
-                    "alpn": "h2",
-                    "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", ""),
-                    "type": "xhttp", "host": target_host,
-                    "path": reality.get("XHTTP_PATH", reality.get("PATH", "/")), "mode": xhttp_mode,
-                }
-                client_extra = {
-                    "xPaddingBytes": "100-1000",
-                    "xmux": {"maxConcurrency": "8-16", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000"},
-                    **xhttp_settings.get("extra", {}),
-                }
-                query_values["extra"] = json.dumps(client_extra, separators=(",", ":"))
+                query_values = vless_client_query(config_data, reality)
                 query = urllib.parse.urlencode(query_values)
                 client_config = f"vless://{client_uuid}@{PUBLIC_ENDPOINT}:{port}?{query}#{urllib.parse.quote(payload.name)}"
                 stage = "сохранение подключения"
@@ -2968,6 +2985,17 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             {"key": "dns", "label": "Рекомендуемый DNS клиента", "type": "text", "value": current_env_value("SHADOWSOCKS_DNS", "1.1.1.1, 1.0.0.1"), "help": "Сохраняется как политика администратора. SS-сервер не может принудительно изменить DNS устройства; настройте его в клиентском приложении."},
         ]
     return [{
+        "key": "transport", "label": "Транспорт VLESS", "type": "select", "value": str(values.get("transport", "xhttp")),
+        "options": [
+            {"value": "xhttp", "label": "XHTTP · рекомендуемый"},
+            {"value": "raw", "label": "RAW · TCP и UDP payload"},
+            {"value": "grpc", "label": "gRPC · HTTP/2"},
+        ],
+        "help": "Совместимые с REALITY транспорты. После смены заново импортируйте клиентские профили.",
+    }, {
+        "key": "transport_path", "label": "Путь / service name", "type": "text", "value": str(values.get("transportPath", "/")),
+        "help": "Используется XHTTP и gRPC; для RAW не влияет на конфигурацию.",
+    }, {
         "key": "sni", "label": "SNI маскировки", "type": "text",
         "value": str(values.get("sni", "www.intel.com")),
         "help": "Публичный HTTPS-домен без https:// и порта. Изменение требует заново импортировать существующие VRX-профили.",
@@ -3079,7 +3107,7 @@ def update_protocol_settings(
     allowed = {
         "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
         "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
-        "vless-reality-xhttp": {"xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni"},
+        "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni"},
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
         raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
@@ -3144,21 +3172,24 @@ def update_protocol_settings(
         temporary = VLESS_CONFIG.with_suffix(".settings.tmp.json")
         try:
             config = json.loads(original)
+            stream = config["inbounds"][0]["streamSettings"]
+            current_transport = str(stream.get("network", "xhttp"))
+            current_path = str(stream.get("xhttpSettings", {}).get("path", "/")) if current_transport == "xhttp" else "/" + str(stream.get("grpcSettings", {}).get("serviceName", "vless"))
+            if "transport" in supplied or "transport_path" in supplied:
+                configure_vless_transport(stream, str(supplied.get("transport", current_transport)), str(supplied.get("transport_path", current_path)))
             if "sni" in supplied:
                 validate_reality_sni(supplied["sni"])
                 reality_settings = config["inbounds"][0]["streamSettings"]["realitySettings"]
                 reality_settings["target"] = f'{supplied["sni"]}:443'
                 reality_settings["serverNames"] = [supplied["sni"]]
             if "xhttp_mode" in supplied:
-                config["inbounds"][0]["streamSettings"]["xhttpSettings"]["mode"] = supplied["xhttp_mode"]
+                if stream.get("network") == "xhttp": stream["xhttpSettings"]["mode"] = supplied["xhttp_mode"]
             if "xpadding" in supplied:
-                config["inbounds"][0]["streamSettings"]["xhttpSettings"].setdefault("extra", {})["xPaddingBytes"] = supplied["xpadding"]
+                if stream.get("network") == "xhttp": stream["xhttpSettings"].setdefault("extra", {})["xPaddingBytes"] = supplied["xpadding"]
             if "xmux_concurrency" in supplied:
-                extra = config["inbounds"][0]["streamSettings"]["xhttpSettings"].setdefault("extra", {})
-                extra["xmux"] = {
-                    "maxConcurrency": str(supplied["xmux_concurrency"]),
-                    "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000",
-                }
+                if stream.get("network") == "xhttp":
+                    extra = stream["xhttpSettings"].setdefault("extra", {})
+                    extra["xmux"] = {"maxConcurrency": str(supplied["xmux_concurrency"]), "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000"}
             if "loglevel" in supplied:
                 config.setdefault("log", {})["loglevel"] = supplied["loglevel"]
             if "dns" in supplied:
@@ -3246,7 +3277,11 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                     "DNS": current_env_value("VRX_DNS", "не настроен"),
                 }
                 config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
-                xhttp_values = dict(config_data["inbounds"][0]["streamSettings"].get("xhttpSettings", {}))
+                stream_values = config_data["inbounds"][0]["streamSettings"]
+                transport = str(stream_values.get("network", "xhttp"))
+                xhttp_values = dict(stream_values.get("xhttpSettings", {}))
+                xhttp_values["transport"] = transport
+                xhttp_values["transportPath"] = xhttp_values.get("path", "/") if transport == "xhttp" else "/" + str(stream_values.get("grpcSettings", {}).get("serviceName", "vless"))
                 xhttp_values["sni"] = target.rsplit(":", 1)[0] if ":" in target else target
                 xhttp_values["loglevel"] = config_data.get("log", {}).get("loglevel", "warning")
                 xhttp_values["xPaddingBytes"] = xhttp_values.get("extra", {}).get("xPaddingBytes", "100-1000")
@@ -3269,7 +3304,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
             "interface_rx_bytes": sum(row[0] for row in stats), "interface_tx_bytes": sum(row[1] for row in stats), "rx_errors": 0, "tx_errors": 0,
             "rx_dropped": 0, "tx_dropped": 0,
             "unit": unit,
-            "transport": "TCP + UDP" if protocol == "shadowsocks" else "XHTTP over TCP",
+            "transport": "TCP + UDP" if protocol == "shadowsocks" else {"xhttp": "XHTTP over TCP", "raw": "RAW · TCP + UDP payload", "grpc": "gRPC over HTTP/2"}.get(locals().get("transport", "xhttp"), "XHTTP over TCP"),
             "security": "ChaCha20-IETF-Poly1305" if protocol == "shadowsocks" else "REALITY",
             "target": target,
             "settings": settings,

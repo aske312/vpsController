@@ -1,5 +1,5 @@
 export type Protocol = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp";
-export type Tab = "overview" | "dns" | "security" | "application" | "services" | "clients" | "access-beta" | "mihomo" | Protocol;
+export type Tab = "overview" | "channels" | "dns" | "security" | "application" | "services" | "clients" | "access-beta" | "mihomo" | Protocol;
 export type TunnelProtocol = "wg" | "awg";
 export type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
 export type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" | "network-check" | "integrity-check" | "identity" | "secure" | "kernel-update" | "vpn-firewall" | "optimize" | "reboot" | "poweroff";

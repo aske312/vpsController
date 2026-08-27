@@ -468,7 +468,7 @@ test("live monitoring uses stable low-load cadence and detailed server metrics",
   assert.match(page, /const HISTORY_SAMPLES = 100/);
   assert.match(page, /setInterval\(\(\) => void loadLiveStatus\(\), LIVE_SAMPLE_SECONDS \* 1000\)/);
   assert.match(page, /tab === "overview" \? 30000/);
-  assert.match(page, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp", "clients"\]\.includes\(tab\) \? 15000/);
+  assert.match(page, /\["channels", "wg", "awg", "shadowsocks", "vless-reality-xhttp", "clients"\]\.includes\(tab\) \? 15000/);
   assert.doesNotMatch(page, /protocolTrafficHistory/);
   assert.match(page, /label="CPU"/);
   assert.match(page, /label="MEMORY"/);
@@ -715,8 +715,10 @@ test("protocol pages safely edit channel settings and VLESS links select HTTP2",
   assert.match(api, /XRAY_BIN, "run", "-test"/);
   assert.match(api, /originals = \{path: path\.read_bytes\(\) for path in paths\}/);
   assert.match(api, /"alpn": "h2"/);
-  assert.match(api, /"mode": xhttp_mode/);
-  assert.match(api, /query_values\["extra"\]/);
+  assert.match(api, /def configure_vless_transport/);
+  assert.match(api, /def vless_client_query/);
+  assert.match(api, /Literal\["xhttp", "raw", "grpc"\]/);
+  assert.match(api, /values\["type"\] = "tcp"/);
   assert.match(api, /"maxConcurrency": "8-16"/);
   assert.match(api, /"xmux_concurrency"/);
   assert.match(api, /"dns", "keepalive"/);
@@ -736,7 +738,8 @@ test("protocol pages safely edit channel settings and VLESS links select HTTP2",
 
 test("DNS control provides Russian resolvers, live checks and protocol application", async () => {
   const [page, api, css, manager] = await Promise.all([read("app/page.tsx"), read("api/main.py"), readStyles(), read("scripts/vps-control.sh")]);
-  assert.match(page, /type Tab = "overview" \| "dns"/);
+  assert.match(page, /type Tab = "overview" \| "channels" \| "dns"/);
+  assert.match(page, /onNavigate\("channels"\)/);
   assert.match(page, /onNavigate\("overview"\)/);
   assert.match(page, /onNavigate\("clients"\)/);
   assert.match(page, /onNavigate\("dns"\)/);

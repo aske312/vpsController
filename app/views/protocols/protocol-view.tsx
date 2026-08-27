@@ -9,13 +9,13 @@ import type { EditableProtocolSetting, Protocol, ProtocolImage, ProtocolStatus, 
 
 type ProtocolViewProps = {
   protocolTab: Protocol; activeProtocol: ProtocolStatus; activeProtocolRate: { rx: number; tx: number }; activeProtocolImage?: ProtocolImage; protocolCode: string; protocolIsTunnel: boolean; protocolOperational: boolean; protocolAvailability: number; protocolDiagnosticsLabel: string; protocolResourceAvailable: number; protocolResourceTotal: number; installedProtocols: Protocol[];
-  setTab: Dispatch<SetStateAction<Tab>>; protocolSettingsDraft: Partial<Record<Protocol, Record<string, string | number | boolean>>>; diagnosticsOpen: Partial<Record<Protocol, boolean>>; resourcesOpen: Partial<Record<Protocol, boolean>>; checkingDiagnostics: Protocol | null; checkingResources: Protocol | null; installingProtocol: string; busy: boolean;
+  setTab: Dispatch<SetStateAction<Tab>>; onSelectProtocol?: (protocol: Protocol) => void; protocolSettingsDraft: Partial<Record<Protocol, Record<string, string | number | boolean>>>; diagnosticsOpen: Partial<Record<Protocol, boolean>>; resourcesOpen: Partial<Record<Protocol, boolean>>; checkingDiagnostics: Protocol | null; checkingResources: Protocol | null; installingProtocol: string; busy: boolean;
   restartProtocol: (protocol: Protocol) => Promise<void> | void; updateProtocol: (image: ProtocolImage) => Promise<void> | void; removeProtocol: (image: ProtocolImage) => Promise<void> | void; changeProtocolSetting: (protocol: Protocol, key: string, value: string | number | boolean) => void; saveProtocolSettings: (protocol: Protocol) => Promise<void> | void;
   toggleNetworkDiagnostics: (protocol: Protocol) => void; checkNetworkDiagnostics: (protocol: Protocol) => Promise<void> | void; toggleProtocolResources: (protocol: Protocol) => void; checkProtocolResources: (protocol: Protocol) => Promise<void> | void;
 };
 
 export function ProtocolView(props: ProtocolViewProps) {
-  const { protocolTab, activeProtocol, activeProtocolRate, activeProtocolImage, protocolCode, protocolIsTunnel, protocolOperational, protocolAvailability, protocolDiagnosticsLabel, protocolResourceAvailable, protocolResourceTotal, installedProtocols, setTab, protocolSettingsDraft, diagnosticsOpen, resourcesOpen, checkingDiagnostics, checkingResources, installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol, changeProtocolSetting, saveProtocolSettings, toggleNetworkDiagnostics, checkNetworkDiagnostics, toggleProtocolResources, checkProtocolResources } = props;
+  const { protocolTab, activeProtocol, activeProtocolRate, activeProtocolImage, protocolCode, protocolIsTunnel, protocolOperational, protocolAvailability, protocolDiagnosticsLabel, protocolResourceAvailable, protocolResourceTotal, installedProtocols, setTab, onSelectProtocol, protocolSettingsDraft, diagnosticsOpen, resourcesOpen, checkingDiagnostics, checkingResources, installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol, changeProtocolSetting, saveProtocolSettings, toggleNetworkDiagnostics, checkNetworkDiagnostics, toggleProtocolResources, checkProtocolResources } = props;
   const isVless = protocolTab === "vless-reality-xhttp";
   return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()}`}>
         <header className="protocolHeader">
@@ -39,7 +39,7 @@ export function ProtocolView(props: ProtocolViewProps) {
             </div>
           </div>
           {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные протоколы">
-            {installedProtocols.map((protocol) => <button key={protocol} className={protocol === protocolTab ? "active" : ""} onClick={() => setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : "VLESS"}</button>)}
+            {installedProtocols.map((protocol) => <button key={protocol} className={protocol === protocolTab ? "active" : ""} onClick={() => onSelectProtocol ? onSelectProtocol(protocol) : setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : "VLESS"}</button>)}
           </nav>}
         </header>
 
@@ -161,11 +161,15 @@ function ProtocolSettingsEditor({
   onSave: () => void;
 }) {
   if (!fields.length) return <p className="protocolSettingsEmpty">Для этого протокола нет изменяемых параметров.</p>;
+  const selectedTransport = String(draft.transport || fields.find((field) => field.key === "transport")?.value || "xhttp");
+  const visibleFields = vless && selectedTransport !== "xhttp"
+    ? fields.filter((field) => !["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key))
+    : fields;
   const fieldLayer = (key: string) => key === "sni" ? "REALITY" : ["xhttp_mode", "xpadding", "xmux_concurrency"].includes(key) ? "XHTTP" : "XRAY";
   return <div className={`protocolSettingsEditor${vless ? " vlessSettingsEditor" : ""}`}>
-    {vless && <div className="vlessStack" aria-label="Состав VLESS"><span><b>VLESS</b><small>протокол</small></span><i>+</i><span><b>REALITY</b><small>защита</small></span><i>+</i><span><b>XHTTP</b><small>транспорт</small></span><i>·</i><span><b>XRAY</b><small>ядро</small></span></div>}
+    {vless && <div className="vlessStack" aria-label="Состав VLESS"><span><b>VLESS</b><small>протокол</small></span><i>+</i><span><b>REALITY</b><small>защита</small></span><i>+</i><span><b>{selectedTransport.toUpperCase()}</b><small>транспорт</small></span><i>·</i><span><b>XRAY</b><small>ядро</small></span></div>}
     <div className="protocolSettingsFields">
-      {fields.map((field) => <label key={field.key}>
+      {visibleFields.map((field) => <label key={field.key}>
         <span>{field.label}{vless && <em>{fieldLayer(field.key)}</em>}</span>
         {field.type === "boolean" ? <input type="checkbox" checked={Boolean(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.checked)} />
           : field.type === "select" ? <select value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)}>
