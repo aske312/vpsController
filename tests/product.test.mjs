@@ -894,9 +894,9 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.match(protocolView, /XHTTP, RAW или gRPC/);
   assert.match(protocolView, /ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ/);
   assert.match(protocolView, /CDN · TLS\/WebSocket/);
-  assert.match(protocolView, /function VlessCommandCenter/);
+  assert.match(protocolView, /function ProtocolCommandCenter/);
   assert.match(protocolView, /ROUTE BLUEPRINT/);
-  assert.match(protocolView, /<strong>Маршруты<\/strong>/);
+  assert.match(protocolView, /isVless \? "Маршруты" : "Сетевой контур"/);
   assert.match(protocolView, /vlessPulse/);
   assert.match(protocolView, /vlessOperations/);
   assert.match(protocolCss, /\.vlessSettingsGroup\.cdn/);
@@ -912,6 +912,21 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.match(protocolCss, /\.vlessCommandCenter \.vlessSettingsGroup\s*\{\s*display:block/);
   assert.match(protocolCss, /\.protocolWorkspace \.protocolSettingsFields label > span[^}]*font-size:12px/s);
   assert.match(protocolCss, /\.protocolWorkspace \.protocolSettingsFields input:not[^}]*min-height:40px !important/s);
+});
+
+test("WG, AWG, Shadowsocks and VLESS share the compact protocol command center", async () => {
+  const [protocolView, protocolCss] = await Promise.all([
+    read("app/views/protocols/protocol-view.tsx"),
+    read("app/styles/pages/protocols.css"),
+  ]);
+  assert.match(protocolView, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\][^\n]+<ProtocolCommandCenter/);
+  assert.match(protocolView, /function ProtocolCommandCenter/);
+  assert.match(protocolView, /protocolWorkspace-\$\{protocolCode\.toLowerCase\(\)\} protocolCommandCenter/);
+  assert.match(protocolView, /protocol === "shadowsocks" \? "TCP \+ UDP PROXY"/);
+  assert.match(protocolView, /protocol === "awg" \? "OBFUSCATED UDP" : "NATIVE UDP"/);
+  assert.match(protocolCss, /\.protocolCommandCenter\s*\{[^}]*gap:9px/);
+  assert.match(protocolCss, /\.vlessCommandTitle h1[^}]*font-size:clamp\(30px,2\.8vw,42px\)/);
+  assert.match(protocolCss, /\.vlessPulse strong[^}]*font:750 16px/);
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {

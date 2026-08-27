@@ -850,15 +850,16 @@
   .vlessSettingsGroup.common .protocolSettingsFields { grid-template-columns:1fr; }
 }
 
-/* VLESS command center: a dedicated route-first workspace. */
-.vlessCommandCenter { --protocol-accent:#9b82ff; --protocol-soft:rgba(155,130,255,.11); --protocol-line:rgba(155,130,255,.28); gap:9px; }
-.vlessCommandHero { position:relative; min-height:330px; display:grid; grid-template-columns:minmax(260px,.78fr) minmax(400px,1.22fr) 190px; overflow:hidden; border:1px solid rgba(133,111,237,.25); border-radius:20px 8px 20px 8px; background:radial-gradient(circle at 83% 30%,rgba(61,91,236,.24),transparent 31%),linear-gradient(118deg,rgba(18,12,40,.985),rgba(5,15,25,.985) 66%); box-shadow:0 20px 55px rgba(0,0,0,.22),inset 0 1px rgba(255,255,255,.025); isolation:isolate; }
+/* Shared protocol command center. */
+.protocolCommandCenter { gap:9px; }
+.vlessCommandCenter { --protocol-accent:#9b82ff; --protocol-soft:rgba(155,130,255,.11); --protocol-line:rgba(155,130,255,.28); }
+.vlessCommandHero { position:relative; min-height:286px; display:grid; grid-template-columns:minmax(240px,.78fr) minmax(380px,1.22fr) 165px; overflow:hidden; border:1px solid var(--protocol-line); border-radius:18px 8px 18px 8px; background:radial-gradient(circle at 83% 30%,var(--protocol-soft),transparent 34%),linear-gradient(118deg,rgba(11,25,35,.985),rgba(5,15,25,.985) 66%); box-shadow:0 20px 55px rgba(0,0,0,.22),inset 0 1px rgba(255,255,255,.025); isolation:isolate; }
 .vlessCommandHero::before { content:""; position:absolute; inset:0; z-index:-1; opacity:.22; background-image:linear-gradient(rgba(150,126,255,.10) 1px,transparent 1px),linear-gradient(90deg,rgba(150,126,255,.10) 1px,transparent 1px); background-size:28px 28px; mask-image:linear-gradient(90deg,#000,transparent 72%); }
 .vlessCommandCopy { min-width:0; display:flex; flex-direction:column; justify-content:center; padding:22px 10px 22px 24px; }
-.vlessCommandCopy > .eyebrow { margin:0 0 10px; color:#8d78ea; }
+.vlessCommandCopy > .eyebrow { margin:0 0 9px; color:var(--protocol-accent); }
 .vlessCommandTitle { display:flex; align-items:center; gap:12px; }
-.vlessCommandTitle > span { flex:0 0 58px; width:58px; height:58px; display:grid; place-items:center; border:1px solid rgba(159,133,255,.42); border-radius:50%; background:radial-gradient(circle,rgba(105,78,224,.30),rgba(25,18,61,.52)); color:#e8e0ff; font:850 34px var(--font-mono); box-shadow:0 0 28px rgba(126,95,255,.20),inset 0 0 20px rgba(123,95,255,.14); }
-.vlessCommandTitle h1 { margin:0; font-size:clamp(39px,3.7vw,56px); line-height:.88; letter-spacing:-.06em; }
+.vlessCommandTitle > span { flex:0 0 50px; width:50px; height:50px; display:grid; place-items:center; border:1px solid var(--protocol-line); border-radius:50%; background:var(--protocol-soft); color:#e8f0f4; font:850 28px var(--font-mono); box-shadow:0 0 24px var(--protocol-soft),inset 0 0 18px var(--protocol-soft); }
+.vlessCommandTitle h1 { margin:0; font-size:clamp(30px,2.8vw,42px); line-height:.95; letter-spacing:-.045em; }
 .vlessCommandTitle p { margin:7px 0 0; color:#9aaab7; font-size:12px; line-height:1.35; }
 .vlessCommandState { display:flex; flex-wrap:wrap; gap:5px; margin-top:14px; }
 .vlessCommandState > span { min-height:26px; display:flex; align-items:center; gap:6px; padding:0 8px; border:1px solid rgba(114,131,153,.17); border-radius:7px; background:rgba(4,11,19,.40); color:#8295a3; font:700 10px var(--font-mono); }
@@ -866,22 +867,22 @@
 .vlessCommandState > span:first-child.online { color:#72ddbd; border-color:rgba(87,204,169,.23); background:rgba(29,98,78,.12); }
 .vlessCommandState i { width:6px; height:6px; border-radius:50%; background:currentColor; box-shadow:0 0 8px currentColor; }
 .vlessCommandActions { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
-.vlessCommandActions button { min-height:32px; padding:0 10px; border:1px solid rgba(136,113,234,.25); border-radius:8px; background:rgba(91,70,183,.10); color:#bbaaff; font-weight:750; }
+.vlessCommandActions button { min-height:32px; padding:0 10px; border:1px solid var(--protocol-line); border-radius:8px; background:var(--protocol-soft); color:var(--protocol-accent); font-weight:750; }
 .vlessCommandActions button.accent { color:#70dbbd; border-color:rgba(91,210,176,.24); background:rgba(28,104,83,.12); }
 .vlessCommandActions button.warning { color:#e9b867; border-color:rgba(233,184,103,.25); }
 .vlessCommandActions button.danger { color:#ed8989; border-color:rgba(231,110,110,.25); background:rgba(103,26,34,.10); }
 
-.vlessRouteBoard { align-self:center; min-width:0; margin:14px 6px 14px 12px; padding:10px; border:1px solid rgba(137,116,229,.18); border-radius:14px; background:rgba(4,11,21,.63); box-shadow:0 14px 40px rgba(0,0,0,.20); backdrop-filter:blur(10px); }
+.vlessRouteBoard { align-self:center; min-width:0; margin:12px 6px 12px 12px; padding:10px; border:1px solid var(--protocol-line); border-radius:14px; background:rgba(4,11,21,.63); box-shadow:0 14px 40px rgba(0,0,0,.20); backdrop-filter:blur(10px); }
 .vlessRouteBoard > header { display:grid; grid-template-columns:1fr; align-items:end; gap:2px; padding:1px 2px 8px; }
-.vlessRouteBoard > header .eyebrow { grid-column:1/-1; margin:0; color:#7665cb; }
+.vlessRouteBoard > header .eyebrow { grid-column:1/-1; margin:0; color:var(--protocol-accent); }
 .vlessRouteBoard > header strong { color:#e6edf2; font-size:15px; }
 .vlessRouteNode { position:relative; display:grid; grid-template-columns:38px minmax(140px,.7fr) minmax(180px,1.3fr); align-items:center; gap:10px; min-height:88px; padding:10px; overflow:hidden; border:1px solid rgba(111,130,151,.14); border-radius:10px; background:linear-gradient(100deg,rgba(8,20,31,.94),rgba(6,14,23,.72)); }
 .vlessRouteNode::after { content:""; position:absolute; right:-42px; top:-62px; width:180px; height:180px; border:1px solid rgba(155,130,255,.11); border-radius:50%; box-shadow:0 0 0 23px rgba(155,130,255,.025),0 0 0 46px rgba(155,130,255,.018); }
-.vlessRouteNode.direct { border-color:rgba(155,130,255,.30); background:linear-gradient(100deg,rgba(49,34,101,.36),rgba(6,14,23,.80)); }
+.vlessRouteNode.direct { border-color:var(--protocol-line); background:linear-gradient(100deg,var(--protocol-soft),rgba(6,14,23,.80)); }
 .vlessRouteNode.cdn.enabled { border-color:rgba(77,203,165,.27); background:linear-gradient(100deg,rgba(25,83,70,.27),rgba(6,14,23,.80)); }
-.vlessRouteIndex { width:32px; height:32px; display:grid; place-items:center; border:1px solid rgba(148,126,241,.27); border-radius:9px; color:#aa96fa; font:800 10px var(--font-mono); }
+.vlessRouteIndex { width:32px; height:32px; display:grid; place-items:center; border:1px solid var(--protocol-line); border-radius:9px; color:var(--protocol-accent); font:800 10px var(--font-mono); }
 .vlessRouteNode.cdn.enabled .vlessRouteIndex { color:#73dabb; border-color:rgba(83,204,169,.28); }
-.vlessRouteNode em { color:#9c85ff; font:750 10px var(--font-mono); font-style:normal; letter-spacing:.09em; }
+.vlessRouteNode em { color:var(--protocol-accent); font:750 10px var(--font-mono); font-style:normal; letter-spacing:.09em; }
 .vlessRouteNode.cdn.enabled em { color:#71d9ba; }
 .vlessRouteNode h2 { margin:4px 0 0; color:#e6eef2; font-size:15px; }
 .vlessRouteNode dl { position:relative; z-index:1; display:grid; gap:3px; margin:0; }
@@ -901,14 +902,14 @@
 .vlessPulse > div { min-width:0; min-height:68px; display:flex; flex-direction:column; justify-content:center; padding:9px 13px; border-left:1px solid rgba(100,119,140,.11); }
 .vlessPulse > div:first-child { border-left:0; }
 .vlessPulse small { color:#6f8290; font:750 9px var(--font-mono); letter-spacing:.08em; }
-.vlessPulse strong { margin-top:5px; color:#edf3f6; font:750 18px var(--font-mono); white-space:nowrap; }
+.vlessPulse strong { margin-top:5px; color:#edf3f6; font:750 16px var(--font-mono); white-space:nowrap; }
 .vlessPulse strong em { margin-left:3px; color:#788c99; font:600 9px var(--font-mono); font-style:normal; }
 .vlessPulse > div:first-child strong { color:#73dbbd; }
 .vlessPulse > div:nth-child(2) strong { color:#6bbcf2; }
 
-.vlessCommandCenter .protocolConfiguration { overflow:hidden; border-color:rgba(129,108,220,.18) !important; border-radius:16px !important; background:rgba(6,15,24,.86) !important; }
-.vlessCommandCenter .protocolConfiguration > header { padding:12px 14px !important; background:linear-gradient(90deg,rgba(56,41,116,.17),transparent); }
-.vlessCommandCenter .protocolConfiguration > header h3 { font-size:18px !important; }
+.protocolCommandCenter .protocolConfiguration { overflow:hidden; border-color:var(--protocol-line) !important; border-radius:16px !important; background:rgba(6,15,24,.86) !important; }
+.protocolCommandCenter .protocolConfiguration > header { padding:12px 14px !important; background:linear-gradient(90deg,var(--protocol-soft),transparent); }
+.protocolCommandCenter .protocolConfiguration > header h3 { font-size:17px !important; }
 .vlessCommandCenter .vlessRouteSummary { display:none; }
 .vlessCommandCenter .vlessSettingsGroup { display:block; }
 .vlessCommandCenter .vlessSettingsGroup > header { display:flex; align-items:center; justify-content:space-between; flex-direction:row; gap:18px; padding:14px 16px 11px; border-right:0; border-bottom:1px solid rgba(106,126,148,.10); }
@@ -917,12 +918,12 @@
 .vlessCommandCenter .vlessSettingsGroup > header strong { font-size:16px; }
 .vlessCommandCenter .vlessSettingsGroup > header p { max-width:none; color:#9bafbb; font-size:12px; line-height:1.45; text-align:right; }
 .vlessCommandCenter .vlessSettingsGroup .protocolSettingsFields { width:100%; align-self:center; }
-.vlessCommandCenter .protocolSettingsFields { grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:10px; padding:12px 14px 14px; }
-.vlessCommandCenter .protocolSettingsFields label { min-height:96px !important; gap:8px !important; padding:12px !important; }
-.vlessCommandCenter .protocolSettingsFields label:has(.protocolFieldHelp) { min-height:124px !important; }
-.vlessCommandCenter .protocolSettingsFields label:first-child { grid-column:auto; }
-.vlessCommandCenter .protocolSettingsFields input:not([type="checkbox"]),.vlessCommandCenter .protocolSettingsFields select { min-height:40px !important; }
-.vlessCommandCenter .protocolSettingsActions { padding:8px 10px 10px; }
+.protocolCommandCenter .protocolSettingsFields { grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:10px; padding:12px 14px 14px; }
+.protocolCommandCenter .protocolSettingsFields label { min-height:96px !important; gap:8px !important; padding:12px !important; }
+.protocolCommandCenter .protocolSettingsFields label:has(.protocolFieldHelp) { min-height:124px !important; }
+.protocolCommandCenter .protocolSettingsFields label:first-child { grid-column:auto; }
+.protocolCommandCenter .protocolSettingsFields input:not([type="checkbox"]),.protocolCommandCenter .protocolSettingsFields select { min-height:40px !important; }
+.protocolCommandCenter .protocolSettingsActions { padding:8px 10px 10px; }
 .vlessCommandCenter .vlessSettingsGroup.direct { background:linear-gradient(90deg,rgba(58,42,121,.13),transparent 40%); }
 .vlessCommandCenter .vlessSettingsGroup.cdn { background:linear-gradient(90deg,rgba(26,89,74,.10),transparent 40%); }
 
