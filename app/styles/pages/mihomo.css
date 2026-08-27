@@ -18,17 +18,36 @@
 }
 
 .mihomoCommandHero {
+  position: relative;
   min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 250px;
   overflow: hidden;
   border: 1px solid rgba(93, 111, 147, .28);
   border-radius: 20px;
   background: #07101a;
+  isolation: isolate;
+}
+
+.mihomoCommandHero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background: url("/gate-art/new-operator/mihomo.webp") center / cover no-repeat;
+}
+
+.mihomoCommandHero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(90deg, rgba(7,16,26,.98) 0%, rgba(7,16,26,.94) 45%, rgba(7,16,26,.62) 72%, rgba(7,16,26,.35) 100%),
+    linear-gradient(0deg, rgba(7,16,26,.56), rgba(7,16,26,.10));
+  pointer-events: none;
 }
 
 .mihomoHeroContent {
-  width: auto;
+  width: min(900px, 72%);
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -36,17 +55,6 @@
   gap: 18px;
   padding: 26px 28px;
 }
-
-.mihomoHeroArt {
-  min-width: 0;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 18px 18px 0;
-  border-left: 1px solid rgba(93, 111, 147, .20);
-}
-
-.mihomoHeroArt img { display: block; width: 100%; max-width: 190px; height: 260px !important; object-fit: contain; object-position: center bottom; }
 
 .mihomoHeroIntro .eyebrow { margin-bottom: 8px; }
 
@@ -371,9 +379,7 @@
 }
 
 @media (max-width: 980px) {
-.mihomoCommandHero { grid-template-columns: minmax(0,1fr) 210px; }
-.mihomoHeroContent { padding: 22px; }
-.mihomoHeroArt img { max-width: 160px; height: 230px !important; }
+.mihomoHeroContent { width: 82%; padding: 22px; }
 .mihomoHeroFacts { grid-template-columns: repeat(2, minmax(0,1fr)); }
 .mihomoHeroFacts > div.wide { grid-column: span 2; }
 .mihomoProfiles > div:not(.mihomoEmpty) { grid-template-columns: minmax(200px,1fr) minmax(160px,.8fr) auto; }
@@ -383,9 +389,8 @@
 }
 
 @media (max-width: 720px) {
-.mihomoCommandHero { grid-template-columns: 1fr; }
-.mihomoHeroContent { padding: 18px; }
-.mihomoHeroArt { display: none; }
+.mihomoCommandHero::after { background: rgba(7,16,26,.88); }
+.mihomoHeroContent { width: 100%; padding: 18px; }
 .mihomoHeroTitleLine h1 { font-size: 34px; }
 .mihomoHeroFacts { grid-template-columns: 1fr 1fr; }
 .mihomoTopology, .mihomoChannelGrid, .mihomoQuickState, .mihomoFields { grid-template-columns: 1fr; }

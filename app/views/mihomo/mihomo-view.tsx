@@ -2,7 +2,6 @@
 
 import { formatModuleVersion } from "../../lib/format-version";
 
-import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 type View = "overview" | "profiles" | "channels" | "dns" | "routing";
@@ -418,8 +417,8 @@ export function MihomoPage({
         <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
         <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
         <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Каналы</Tab>
-        <Tab id="dns" current={view} onSelect={setView} badge={policiesReady ? 1 : 0}>DNS</Tab>
-        <Tab id="routing" current={view} onSelect={setView} badge={policiesReady ? 1 : 0}>Маршрутизация</Tab>
+        <Tab id="dns" current={view} onSelect={setView}>DNS Mihomo</Tab>
+        <Tab id="routing" current={view} onSelect={setView}>Маршрутизация соединений</Tab>
       </nav>
 
       <article className="mihomoCommandHero">
@@ -459,9 +458,6 @@ export function MihomoPage({
             </button>
           </div>
         </div>
-        <aside className="mihomoHeroArt" aria-hidden="true">
-          <Image src="/gate-art/new-operator/operator_prt_1.webp" alt="" width={941} height={1672} priority />
-        </aside>
       </article>
 
       {error && <div className="mihomoMessage is-error">{error}</div>}
