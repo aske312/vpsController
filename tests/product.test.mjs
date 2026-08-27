@@ -671,7 +671,11 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /image\.description \|\| image\.category_name/);
   assert.match(page, /activeProtocolImage/);
   assert.match(page, /setTab\(protocol\)/);
-  assert.match(page, /<p className="eyebrow">PROTOCOL CONTROL<\/p>/);
+  assert.match(page, /const channelProfiles: Record<Protocol/);
+  assert.match(page, /family: "KERNEL TUNNEL"/);
+  assert.match(page, /family: "STEALTH TUNNEL"/);
+  assert.match(page, /family: "ENCRYPTED PROXY"/);
+  assert.match(page, /family: "MODULAR TRANSPORT"/);
   assert.match(page, /client\.protocol === "shadowsocks" \? "SS" : "VLESS"/);
   assert.match(page, /if \(Boolean\(current\?\.installed\) === installed\) return;/);
   assert.match(manager.match(/install_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);

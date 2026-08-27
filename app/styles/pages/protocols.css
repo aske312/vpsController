@@ -770,3 +770,103 @@
 .protocolRuntimeActions button { min-width:0; }
 .protocolConfirmActions { grid-template-columns:1fr; }
 }
+
+/* Individual secure-channel identities. The data contract stays shared, while
+   each protocol receives its own composition and visual rhythm. */
+.protocolHeader {
+  position:relative;
+  display:grid;
+  grid-template-columns:96px minmax(0,1fr) minmax(180px,auto);
+  align-items:center;
+  padding:0;
+  overflow:hidden;
+}
+
+.protocolIdentityMark {
+  align-self:stretch;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  border-right:1px solid var(--protocol-line);
+  background:var(--protocol-soft);
+}
+
+.protocolIdentityMark span { color:var(--protocol-accent); font:700 9px var(--font-mono); letter-spacing:.18em; }
+.protocolIdentityMark b { color:#eff7f8; font:850 22px var(--font-mono); letter-spacing:-.06em; }
+.protocolHeaderCopy { padding:22px 25px; }
+.protocolHeaderCopy h1 { margin:7px 0 0; font-size:clamp(34px,3.4vw,54px); line-height:.95; letter-spacing:-.055em; }
+.protocolLead { max-width:720px; margin:10px 0 0; color:#91a5b1; font-size:11px; line-height:1.5; }
+.protocolFeatureLine { display:flex; flex-wrap:wrap; gap:6px; margin-top:13px; }
+.protocolFeatureLine span { padding:5px 8px; border:1px solid var(--protocol-line); border-radius:6px; background:rgba(3,10,16,.30); color:var(--protocol-accent); font:700 7px var(--font-mono); letter-spacing:.05em; }
+.protocolHeaderMeta { align-self:stretch; display:flex; flex-direction:column; align-items:flex-end; justify-content:space-between; padding:20px 20px 15px; border-left:1px solid rgba(92,122,145,.12); }
+.protocolHeaderMeta .protocolHeaderState { max-width:280px; justify-content:flex-end; }
+.protocolHeaderMeta > small { color:#526b7b; font:700 7px var(--font-mono); letter-spacing:.14em; }
+.protocolHeader .protocolSwitcher { position:absolute; right:20px; bottom:14px; transform:translateY(calc(100% + 26px)); z-index:2; }
+
+.protocolWorkspace-wg {
+  --protocol-accent:#64d2e7;
+  --protocol-soft:rgba(76,194,218,.10);
+  --protocol-line:rgba(76,194,218,.27);
+}
+.protocolWorkspace-wg .protocolHeader { border-radius:8px 24px 8px 8px; background:linear-gradient(105deg,rgba(5,24,34,.98),rgba(7,17,26,.96) 70%); }
+.protocolWorkspace-wg .protocolIdentityMark { background:repeating-linear-gradient(135deg,rgba(76,194,218,.10) 0 8px,rgba(76,194,218,.025) 8px 16px); }
+.protocolWorkspace-wg .protocolSummaryGrid { grid-template-columns:minmax(0,1.15fr) minmax(360px,.85fr); }
+.protocolWorkspace-wg .protocolArtImage { width:122%; max-width:330px; filter:hue-rotate(135deg) saturate(.85) brightness(.82) drop-shadow(0 20px 42px rgba(0,0,0,.3)); }
+
+.protocolWorkspace-awg {
+  --protocol-accent:#72dfbd;
+  --protocol-soft:rgba(77,198,161,.10);
+  --protocol-line:rgba(77,198,161,.28);
+}
+.protocolWorkspace-awg .protocolHeader { border-radius:22px 8px 22px 8px; background:radial-gradient(circle at 10% 50%,rgba(77,198,161,.12),transparent 28%),linear-gradient(110deg,rgba(6,26,27,.98),rgba(7,16,23,.97)); }
+.protocolWorkspace-awg .protocolIdentityMark { clip-path:polygon(0 0,100% 0,82% 100%,0 100%); padding-right:12px; }
+.protocolWorkspace-awg .protocolConfiguration { border-color:rgba(77,198,161,.25) !important; }
+
+.protocolWorkspace-ss {
+  --protocol-accent:#62b8ff;
+  --protocol-soft:rgba(70,151,225,.10);
+  --protocol-line:rgba(70,151,225,.27);
+}
+.protocolWorkspace-ss .protocolHeader { border-radius:6px; background:linear-gradient(90deg,rgba(7,18,32,.98),rgba(8,15,24,.97)); box-shadow:inset 0 2px var(--protocol-accent); }
+.protocolWorkspace-ss .protocolIdentityMark { background:linear-gradient(180deg,rgba(70,151,225,.16),transparent); }
+.protocolWorkspace-ss .protocolSummaryGrid { grid-template-columns:minmax(390px,.9fr) minmax(0,1.1fr); }
+.protocolWorkspace-ss .protocolHealthMetrics > div { min-height:102px; }
+.protocolWorkspace-ss .protocolArtImage { border-radius:50%; opacity:.56; filter:hue-rotate(150deg) saturate(.75) brightness(.72); }
+
+.protocolWorkspace-vless {
+  --protocol-accent:#a58cff;
+  --protocol-soft:rgba(142,112,245,.11);
+  --protocol-line:rgba(142,112,245,.29);
+}
+.protocolWorkspace-vless .protocolHeader { grid-template-columns:112px minmax(0,1fr) minmax(210px,auto); border-radius:24px; background:radial-gradient(circle at 78% 0,rgba(142,112,245,.17),transparent 34%),linear-gradient(120deg,rgba(17,12,38,.97),rgba(7,15,24,.98) 72%); }
+.protocolWorkspace-vless .protocolIdentityMark { background:linear-gradient(145deg,rgba(142,112,245,.22),rgba(142,112,245,.035)); }
+.protocolWorkspace-vless .protocolIdentityMark b { font-size:16px; }
+.protocolWorkspace-vless .protocolSummaryGrid { grid-template-columns:1fr; }
+.protocolWorkspace-vless .protocolRuntimeFacts { grid-template-columns:repeat(5,minmax(0,1fr)); }
+.protocolWorkspace-vless .protocolArtImage { opacity:.54; filter:hue-rotate(220deg) saturate(.8) brightness(.72) drop-shadow(0 20px 42px rgba(0,0,0,.35)); }
+.protocolWorkspace-vless .vlessStack { background:linear-gradient(90deg,rgba(142,112,245,.10),transparent); }
+
+@media (max-width:1100px) {
+  .protocolHeader { grid-template-columns:76px minmax(0,1fr); }
+  .protocolHeaderMeta { grid-column:1 / -1; min-height:50px; flex-direction:row; align-items:center; padding:10px 15px; border-top:1px solid rgba(92,122,145,.12); border-left:0; }
+  .protocolHeaderMeta .protocolHeaderState { max-width:none; justify-content:flex-start; }
+  .protocolHeader .protocolSwitcher { position:static; grid-column:1 / -1; width:100%; transform:none; border-radius:0; }
+  .protocolHeader .protocolSwitcher button { flex:1; }
+  .protocolWorkspace-vless .protocolHeader { grid-template-columns:86px minmax(0,1fr); }
+  .protocolWorkspace-vless .protocolRuntimeFacts { grid-template-columns:repeat(3,minmax(0,1fr)); }
+}
+
+@media (max-width:620px) {
+  .protocolHeader,.protocolWorkspace-vless .protocolHeader { display:grid; grid-template-columns:58px minmax(0,1fr); padding:0; }
+  .protocolIdentityMark { min-height:150px; }
+  .protocolIdentityMark b { font-size:14px; }
+  .protocolHeaderCopy { padding:17px 14px; }
+  .protocolHeaderCopy h1 { font-size:31px; }
+  .protocolLead { font-size:10px; }
+  .protocolHeaderMeta { grid-column:1 / -1; }
+  .protocolHeaderMeta > small { display:none; }
+  .protocolWorkspace-wg .protocolSummaryGrid,.protocolWorkspace-ss .protocolSummaryGrid { grid-template-columns:1fr; }
+  .protocolWorkspace-vless .protocolRuntimeFacts { grid-template-columns:1fr; }
+}

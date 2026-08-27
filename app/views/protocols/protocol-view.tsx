@@ -14,29 +14,57 @@ type ProtocolViewProps = {
   toggleNetworkDiagnostics: (protocol: Protocol) => void; checkNetworkDiagnostics: (protocol: Protocol) => Promise<void> | void; toggleProtocolResources: (protocol: Protocol) => void; checkProtocolResources: (protocol: Protocol) => Promise<void> | void;
 };
 
+const channelProfiles: Record<Protocol, {
+  index: string; family: string; title: string; lead: string; signature: string;
+  features: string[]; art: string; runtimeLabel: string; healthLabel: string;
+}> = {
+  wg: {
+    index: "01", family: "KERNEL TUNNEL", title: "WireGuard",
+    lead: "Прямой минималистичный туннель. Здесь важны интерфейс, маршрут, handshake и предсказуемая скорость.",
+    signature: "LEAN / NATIVE / UDP", features: ["UDP tunnel", "Kernel interface", "Public key"],
+    art: "/gate-art/new-operator/network_1.webp", runtimeLabel: "Туннель и маршрутизация", healthLabel: "Handshake и трафик",
+  },
+  awg: {
+    index: "02", family: "STEALTH TUNNEL", title: "AmneziaWG",
+    lead: "Управляемый защищённый контур с обфускацией WireGuard-трафика и собственным интерфейсом.",
+    signature: "OBFUSCATED / CONTROLLED", features: ["UDP tunnel", "Obfuscation", "Independent keys"],
+    art: "/gate-art/new-operator/operator_prt_1.webp", runtimeLabel: "Защищённый контур", healthLabel: "Канал и доступность",
+  },
+  shadowsocks: {
+    index: "03", family: "ENCRYPTED PROXY", title: "Shadowsocks",
+    lead: "Лёгкий шифрованный proxy для TCP и UDP. Каждый профиль работает как отдельный управляемый канал.",
+    signature: "STREAM / TCP + UDP", features: ["AEAD cipher", "TCP + UDP", "Per-client port"],
+    art: "/gate-art/new-operator/connections.webp", runtimeLabel: "Proxy runtime", healthLabel: "Потоки и соединения",
+  },
+  "vless-reality-xhttp": {
+    index: "04", family: "MODULAR TRANSPORT", title: "VLESS",
+    lead: "Составной канал на Xray: VLESS отвечает за протокол, REALITY — за защиту, выбранный transport — за доставку.",
+    signature: "VLESS / REALITY / XRAY", features: ["XHTTP · RAW · gRPC", "REALITY", "Reusable UUID"],
+    art: "/gate-art/new-operator/security.webp", runtimeLabel: "Состав и runtime", healthLabel: "Потоки Xray",
+  },
+};
+
 export function ProtocolView(props: ProtocolViewProps) {
   const { protocolTab, activeProtocol, activeProtocolRate, activeProtocolImage, protocolCode, protocolIsTunnel, protocolOperational, protocolAvailability, protocolDiagnosticsLabel, protocolResourceAvailable, protocolResourceTotal, installedProtocols, setTab, onSelectProtocol, protocolSettingsDraft, diagnosticsOpen, resourcesOpen, checkingDiagnostics, checkingResources, installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol, changeProtocolSetting, saveProtocolSettings, toggleNetworkDiagnostics, checkNetworkDiagnostics, toggleProtocolResources, checkProtocolResources } = props;
   const isVless = protocolTab === "vless-reality-xhttp";
+  const profile = channelProfiles[protocolTab];
   return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()}`}>
         <header className="protocolHeader">
+          <div className="protocolIdentityMark" aria-hidden="true"><span>{profile.index}</span><b>{protocolCode}</b></div>
           <div className="protocolHeaderCopy">
-            <p className="eyebrow">PROTOCOL CONTROL</p>
-            <div className="protocolHeaderTitle">
-              <div>
-                <h1>{labels[protocolTab]}</h1>
-                <p>{isVless ? "Протокол VLESS, его транспорт, защита и подключения." : "Runtime, конфигурация, диагностика и подключения протокола."}</p>
-              </div>
-              <div className="protocolHeaderState">
-                <span className={protocolOperational ? "online" : "offline"}>{protocolOperational ? "ACTIVE" : "STOPPED"}</span>
-                <span className={activeProtocol.service_enabled ? "online" : "muted"}>{activeProtocol.service_enabled ? "AUTOSTART" : "MANUAL"}</span>
-                <span className="version">{formatModuleVersion(activeProtocolImage?.installed_version, "version n/a")}</span>
-                {activeProtocolImage?.update_available && (
-                  <span className={`version update${activeProtocolImage.update_breaking ? " breaking" : ""}`}>
-                    обновление → {formatModuleVersion(activeProtocolImage.available_version)}{activeProtocolImage.update_breaking ? "  major" : ""}
-                  </span>
-                )}
-              </div>
+            <p className="eyebrow">{profile.family} · {profile.signature}</p>
+            <h1>{profile.title}</h1>
+            <p className="protocolLead">{profile.lead}</p>
+            <div className="protocolFeatureLine">{profile.features.map((feature) => <span key={feature}>{feature}</span>)}</div>
+          </div>
+          <div className="protocolHeaderMeta">
+            <div className="protocolHeaderState">
+              <span className={protocolOperational ? "online" : "offline"}>{protocolOperational ? "ACTIVE" : "STOPPED"}</span>
+              <span className={activeProtocol.service_enabled ? "online" : "muted"}>{activeProtocol.service_enabled ? "AUTOSTART" : "MANUAL"}</span>
+              <span className="version">{formatModuleVersion(activeProtocolImage?.installed_version, "version n/a")}</span>
+              {activeProtocolImage?.update_available && <span className={`version update${activeProtocolImage.update_breaking ? " breaking" : ""}`}>UPDATE → {formatModuleVersion(activeProtocolImage.available_version)}</span>}
             </div>
+            <small>CHANNEL {profile.index} / {installedProtocols.length.toString().padStart(2, "0")}</small>
           </div>
           {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные протоколы">
             {installedProtocols.map((protocol) => <button key={protocol} className={protocol === protocolTab ? "active" : ""} onClick={() => onSelectProtocol ? onSelectProtocol(protocol) : setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : "VLESS"}</button>)}
@@ -48,7 +76,7 @@ export function ProtocolView(props: ProtocolViewProps) {
             <div className="protocolSummaryGrid">
               <article className="protocolRuntime">
                 <header>
-                  <div><p className="eyebrow">PROTOCOL RUNTIME</p><h2>Состояние протокола</h2></div>
+                  <div><p className="eyebrow">{profile.family}</p><h2>{profile.runtimeLabel}</h2></div>
                   <span className={protocolOperational ? "state online" : "state offline"}>{protocolOperational ? "Работает" : "Остановлен"}</span>
                 </header>
                 <dl className="protocolRuntimeFacts">
@@ -75,7 +103,7 @@ export function ProtocolView(props: ProtocolViewProps) {
               </article>
 
               <article className="protocolHealth">
-                <header><div><p className="eyebrow">TRAFFIC & HEALTH</p><h2>Трафик и здоровье</h2></div><span>{activeProtocol.history.samples} замеров / {activeProtocol.history.period_hours || 24}ч</span></header>
+                <header><div><p className="eyebrow">TRAFFIC & HEALTH</p><h2>{profile.healthLabel}</h2></div><span>{activeProtocol.history.samples} замеров / {activeProtocol.history.period_hours || 24}ч</span></header>
                 <div className="protocolHealthMetrics">
                   <div className="rx"><small>RX NOW</small><strong>{bytes(activeProtocolRate.rx)}<em>/с</em></strong><span>{bytes(activeProtocol.history.received_bytes)} за период</span></div>
                   <div className="tx"><small>TX NOW</small><strong>{bytes(activeProtocolRate.tx)}<em>/с</em></strong><span>{bytes(activeProtocol.history.transmitted_bytes)} за период</span></div>
@@ -127,7 +155,7 @@ export function ProtocolView(props: ProtocolViewProps) {
           <aside className="protocolArtRail" aria-hidden="true">
             <span className="protocolArtCode">{protocolCode}</span>
             <div className="protocolArtGlow" />
-            <Image className="protocolArtImage" src="/gate-art/new-operator/operator_prt_1.webp" alt="" width={941} height={1672} priority />
+            <Image className="protocolArtImage" src={profile.art} alt="" width={941} height={1672} priority />
           </aside>
         </div>
       </section>;
