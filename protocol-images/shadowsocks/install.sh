@@ -17,7 +17,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=300 update
 apt-get -o DPkg::Lock::Timeout=300 install -y shadowsocks-libev
 ss_installed_version="$(dpkg-query -W -f='${Version}' shadowsocks-libev 2>/dev/null || true)"
-ss_candidate_version="$(apt-cache policy shadowsocks-libev | awk '/Candidate:/ {print $2; exit}')"
+ss_candidate_version="$(LC_ALL=C apt-cache policy shadowsocks-libev | awk '/Candidate:/ {print $2; exit}')"
 [[ -n "${ss_installed_version}" && "${ss_installed_version}" == "${ss_candidate_version}" ]] \
   || { echo "Shadowsocks не обновлён до актуальной версии репозитория" >&2; exit 1; }
 command -v ss-server >/dev/null 2>&1 || { echo "ss-server не установлен" >&2; exit 1; }

@@ -28,7 +28,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=300 update
 apt-get -o DPkg::Lock::Timeout=300 install -y iptables wireguard-tools
 wg_installed_version="$(dpkg-query -W -f='${Version}' wireguard-tools 2>/dev/null || true)"
-wg_candidate_version="$(apt-cache policy wireguard-tools | awk '/Candidate:/ {print $2; exit}')"
+wg_candidate_version="$(LC_ALL=C apt-cache policy wireguard-tools | awk '/Candidate:/ {print $2; exit}')"
 [[ -n "${wg_installed_version}" && "${wg_installed_version}" == "${wg_candidate_version}" ]] \
   || { echo "WireGuard tools не обновлены до актуальной версии репозитория" >&2; exit 1; }
 

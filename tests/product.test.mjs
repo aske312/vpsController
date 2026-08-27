@@ -845,6 +845,7 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(manager, /start_legacy_containers\(\)/);
   assert.match(manager, /cleanup_legacy_runtime/);
   assert.match(manager, /requirements_changed="no"/);
+  assert.match(manager, /LC_ALL=C apt-cache policy nodejs/);
   assert.match(manager, /cp -a -- "\$\{INSTALL_DIR\}\/venv" "\$\{payload\}\/venv"/);
   assert.match(manager, /"\$\{candidate_python\}" -m pip install/);
   assert.doesNotMatch(manager, /Python-зависимости изменились; подготовьте полный системный релиз/);
@@ -926,7 +927,9 @@ test("WG, AWG and Shadowsocks install the latest repository candidates", async (
     assert.match(script, new RegExp(`dpkg-query -W -f='\\$\\{Version\\}' ${packageName}`));
     assert.match(script, new RegExp(`apt-cache policy ${packageName}`));
   }
-  assert.match(awg, /LC_ALL=C apt-cache policy amneziawg/);
+  for (const [script, packageName] of [[wg, "wireguard-tools"], [awg, "amneziawg"], [shadowsocks, "shadowsocks-libev"]]) {
+    assert.match(script, new RegExp(`LC_ALL=C apt-cache policy ${packageName}`));
+  }
 });
 
 test("failed protocol installs roll back partial state and shared packages have owners", async () => {

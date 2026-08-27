@@ -625,7 +625,7 @@ install_packages() {
   prepare_package_manager
   run_with_status "Загрузка списка пакетов" apt-get -o DPkg::Lock::Timeout=300 update
   # Не завершаем awk досрочно: с pipefail apt-cache получает SIGPIPE (141).
-  node_candidate="$(apt-cache policy nodejs 2>/dev/null | awk '/Candidate:/ && !found {print $2; found=1}')"
+  node_candidate="$(LC_ALL=C apt-cache policy nodejs 2>/dev/null | awk '/Candidate:/ && !found {print $2; found=1}')"
   node_major="$(sed -n 's/^[^0-9]*\([0-9][0-9]*\).*/\1/p' <<<"${node_candidate}")"
   if [[ "${node_major:-0}" -ge 22 ]] && command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
     # NodeSource bundles npm in nodejs; asking Debian for its separate npm
