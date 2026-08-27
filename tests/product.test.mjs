@@ -853,11 +853,12 @@ test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", a
 });
 
 test("VLESS image supports independent direct and CDN profiles", async () => {
-  const [bootstrap, manager, install, uninstall, api, caddy, config, page] = await Promise.all([
+  const [bootstrap, manager, install, uninstall, api, caddy, config, page, protocolView, protocolCss] = await Promise.all([
     read("scripts/install-panel.sh"), read("scripts/vps-control.sh"),
     read("protocol-images/vless-reality-xhttp/install.sh"),
     read("protocol-images/vless-reality-xhttp/uninstall.sh"), read("api/main.py"),
     read("Caddyfile"), read("install.conf"), read("app/page.tsx"),
+    read("app/views/protocols/protocol-view.tsx"), read("app/styles/pages/protocols.css"),
   ]);
   assert.match(manager, /set_env_value "VLESS_CDN_DOMAIN"/);
   assert.match(manager, /VLESS_CDN_PORT/);
@@ -886,6 +887,14 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.match(page, /generatedProfiles/);
   assert.match(page, /profile\.id === "cdn"/);
   assert.match(manager, /configure_vless_cdn_firewall/);
+  assert.match(api, /Транспорт прямого VLESS/);
+  assert.match(api, /Меняет только Direct-профиль с REALITY/);
+  assert.doesNotMatch(api, /Literal\["xhttp", "raw", "grpc", "websocket"\]/);
+  assert.match(protocolView, /ПРЯМОЕ ПОДКЛЮЧЕНИЕ/);
+  assert.match(protocolView, /WebSocket с REALITY ядром Xray не поддерживается/);
+  assert.match(protocolView, /ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ/);
+  assert.match(protocolView, /CDN · TLS\/WebSocket/);
+  assert.match(protocolCss, /\.vlessSettingsGroup\.cdn/);
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {

@@ -199,3 +199,9 @@
   .applicationControlPlane,.mihomoCommandHero { min-height:0 !important; }
   .applicationControlContent,.mihomoHeroContent { width:100% !important; min-height:0 !important; padding:15px !important; }
 }
+
+/* Readability floor for secondary interface text. */
+.shell small { font-size:10px !important; line-height:1.4; }
+.shell .eyebrow { font-size:10px !important; }
+.shell :is(button,input,select,textarea) { font-size:max(11px,.72rem); }
+.shell :is(.protocolRuntimeFacts dt,.protocolSettingsFields label > span,.protocolSettingsActions > span,.protocolDiagnosticToggle small,.protocolEventHead small,.protocolDiagnosticChecks strong,.protocolDiagnosticChecks small,.protocolEventRows strong,.protocolEventRows small,.protocolResourceList span) { font-size:10px !important; line-height:1.4; }

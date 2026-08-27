@@ -787,6 +787,23 @@
 .protocolWorkspace-vless .protocolRuntimeFacts { grid-template-columns:repeat(5,minmax(0,1fr)); }
 .protocolWorkspace-vless .vlessStack { background:linear-gradient(90deg,rgba(142,112,245,.10),transparent); }
 
+.vlessRouteSummary { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:12px 14px; border-bottom:1px solid rgba(92,122,145,.10); background:rgba(4,12,18,.34); }
+.vlessRouteSummary > span { display:grid; gap:3px; padding:10px 12px; border:1px solid rgba(92,122,145,.15); border-radius:10px; background:rgba(4,11,18,.38); }
+.vlessRouteSummary > span.direct { border-color:var(--protocol-line); background:var(--protocol-soft); }
+.vlessRouteSummary > span.cdn.enabled { border-color:rgba(87,204,169,.25); background:rgba(33,105,84,.10); }
+.vlessRouteSummary em { color:var(--protocol-accent); font:750 9px var(--font-mono); font-style:normal; letter-spacing:.09em; }
+.vlessRouteSummary b { color:#e3edf1; font-size:12px; }
+.vlessRouteSummary small { color:#8298a6; }
+.vlessSettingsGroup { border-bottom:1px solid rgba(92,122,145,.10); }
+.vlessSettingsGroup > header { display:grid; grid-template-columns:minmax(180px,.36fr) minmax(0,1fr); gap:18px; align-items:center; padding:13px 14px 4px; }
+.vlessSettingsGroup > header div { display:grid; gap:3px; }
+.vlessSettingsGroup > header em { color:var(--protocol-accent); font:750 9px var(--font-mono); font-style:normal; letter-spacing:.08em; }
+.vlessSettingsGroup > header strong { color:#e0eaef; font-size:14px; }
+.vlessSettingsGroup > header p { margin:0; color:#8298a6; font-size:11px; line-height:1.5; }
+.vlessSettingsGroup.cdn { background:rgba(20,45,48,.09); }
+.vlessSettingsGroup.common { border-bottom:0; }
+.vlessSettingsGroup.common .protocolSettingsFields { grid-template-columns:repeat(2,minmax(0,1fr)); }
+
 @media (max-width:1100px) {
   .protocolHeader { grid-template-columns:76px minmax(0,1fr); }
   .protocolHeaderMeta { grid-column:1 / -1; min-height:50px; flex-direction:row; align-items:center; padding:10px 15px; border-top:1px solid rgba(92,122,145,.12); border-left:0; }
@@ -808,4 +825,7 @@
   .protocolHeaderMeta > small { display:none; }
   .protocolWorkspace-wg .protocolSummaryGrid,.protocolWorkspace-ss .protocolSummaryGrid { grid-template-columns:1fr; }
   .protocolWorkspace-vless .protocolRuntimeFacts { grid-template-columns:1fr; }
+  .vlessRouteSummary { grid-template-columns:1fr; }
+  .vlessSettingsGroup > header { grid-template-columns:1fr; gap:6px; }
+  .vlessSettingsGroup.common .protocolSettingsFields { grid-template-columns:1fr; }
 }

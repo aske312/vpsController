@@ -38,7 +38,7 @@ const channelProfiles: Record<Protocol, {
   },
   "vless-reality-xhttp": {
     index: "04", family: "MODULAR TRANSPORT", title: "VLESS",
-    lead: "Составной канал на Xray: VLESS отвечает за протокол, REALITY — за защиту, выбранный transport — за доставку.",
+    lead: "Прямой VLESS работает через REALITY и выбранный транспорт. Отдельный TLS/WebSocket-маршрут через CDN включается независимо.",
     signature: "VLESS / REALITY / XRAY", features: ["XHTTP · RAW · gRPC", "REALITY", "Reusable UUID"],
     runtimeLabel: "Состав и runtime", healthLabel: "Потоки Xray",
   },
@@ -170,7 +170,7 @@ function ProtocolSettingsPanel({
   return <article className="panel protocolConfiguration">
     <header>
       <div><p className="eyebrow">{isVless ? "VLESS CONFIGURATION" : "CHANNEL CONFIGURATION"}</p><h3>{isVless ? "Конфигурация VLESS" : `Настройки ${labels[protocol]}`}</h3>
-        <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : isVless ? "VLESS поддерживает независимые маршруты: прямой REALITY и дополнительный TLS/WebSocket через CDN. Ядро Xray обновляется отдельно." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
+        <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : isVless ? "Настройки прямого REALITY-подключения и дополнительного CDN-маршрута разделены. Изменение одного маршрута не переключает другой." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
       <div className="configurationSafety"><i aria-hidden="true" /><p><strong>Безопасное применение</strong><small>валидация и автоматический откат</small></p></div>
     </header>
     <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} vless={isVless} onChange={onChange} onSave={onSave} />
@@ -192,21 +192,46 @@ function ProtocolSettingsEditor({
   const visibleFields = vless && selectedTransport !== "xhttp"
     ? fields.filter((field) => !["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key))
     : fields;
-  const fieldLayer = (key: string) => key.startsWith("cdn_") ? "CDN" : key === "sni" ? "REALITY" : ["xhttp_mode", "xpadding", "xmux_concurrency"].includes(key) ? "XHTTP" : "XRAY";
+  const directKeys = new Set(["transport", "transport_path", "sni", "xhttp_mode", "xpadding", "xmux_concurrency"]);
+  const cdnKeys = new Set(["cdn_enabled", "cdn_domain"]);
+  const fieldLayer = (key: string) => key.startsWith("cdn_") ? "CDN" : key === "sni" ? "REALITY" : ["xhttp_mode", "xpadding", "xmux_concurrency"].includes(key) ? "XHTTP" : directKeys.has(key) ? "DIRECT" : "XRAY";
+  const fieldLabel = (field: EditableProtocolSetting) => field.key === "transport_path"
+    ? selectedTransport === "grpc" ? "Service name прямого gRPC" : selectedTransport === "raw" ? "Путь (не используется в RAW)" : "Путь прямого XHTTP"
+    : field.label;
+  const renderFields = (items: EditableProtocolSetting[]) => <div className="protocolSettingsFields">
+    {items.map((field) => <label key={field.key}>
+      <span>{fieldLabel(field)}{vless && <em>{fieldLayer(field.key)}</em>}</span>
+      {field.type === "boolean" ? <input type="checkbox" checked={Boolean(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.checked)} />
+        : field.type === "select" ? <select value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)}>
+          {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+          : field.type === "number" ? <input type="number" min={field.min} max={field.max} value={Number(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, Number(event.target.value))} />
+            : <input type="text" value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)} />}
+      {field.help && <small>{field.help}</small>}
+    </label>)}
+  </div>;
+  const directFields = visibleFields.filter((field) => directKeys.has(field.key));
+  const cdnFields = visibleFields.filter((field) => cdnKeys.has(field.key));
+  const commonFields = visibleFields.filter((field) => !directKeys.has(field.key) && !cdnKeys.has(field.key));
   return <div className={`protocolSettingsEditor${vless ? " vlessSettingsEditor" : ""}`}>
-    {vless && <div className="vlessStack" aria-label="Состав VLESS"><span><b>VLESS</b><small>протокол</small></span><i>+</i><span><b>REALITY</b><small>прямой маршрут</small></span><i>+</i><span><b>{selectedTransport.toUpperCase()}</b><small>транспорт</small></span>{cdnEnabled && <><i>+</i><span><b>CDN</b><small>TLS/WebSocket</small></span></>}<i>·</i><span><b>XRAY</b><small>ядро</small></span></div>}
-    <div className="protocolSettingsFields">
-      {visibleFields.map((field) => <label key={field.key}>
-        <span>{field.label}{vless && <em>{fieldLayer(field.key)}</em>}</span>
-        {field.type === "boolean" ? <input type="checkbox" checked={Boolean(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.checked)} />
-          : field.type === "select" ? <select value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)}>
-            {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-            : field.type === "number" ? <input type="number" min={field.min} max={field.max} value={Number(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, Number(event.target.value))} />
-              : <input type="text" value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)} />}
-        {field.help && <small>{field.help}</small>}
-      </label>)}
-    </div>
+    {vless ? <>
+      <div className="vlessRouteSummary" aria-label="Маршруты VLESS">
+        <span className="direct"><em>DIRECT</em><b>VLESS + REALITY + {selectedTransport.toUpperCase()}</b><small>Прямое подключение к IP сервера</small></span>
+        <span className={cdnEnabled ? "cdn enabled" : "cdn"}><em>{cdnEnabled ? "CDN ACTIVE" : "CDN OPTIONAL"}</em><b>VLESS + TLS + WebSocket</b><small>Отдельный маршрут через домен и Caddy</small></span>
+      </div>
+      <section className="vlessSettingsGroup direct">
+        <header><div><em>ПРЯМОЕ ПОДКЛЮЧЕНИЕ</em><strong>Direct · REALITY</strong></div><p>Выбранный транспорт применяется только к прямым VLESS-профилям. WebSocket с REALITY ядром Xray не поддерживается; для Direct доступны XHTTP, RAW и gRPC.</p></header>
+        {renderFields(directFields)}
+      </section>
+      <section className="vlessSettingsGroup cdn">
+        <header><div><em>ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ</em><strong>CDN · TLS/WebSocket</strong></div><p>Включается независимо и не меняет транспорт, SNI или профили прямого REALITY-подключения.</p></header>
+        {renderFields(cdnFields)}
+      </section>
+      <section className="vlessSettingsGroup common">
+        <header><div><em>ОБЩИЕ ПАРАМЕТРЫ</em><strong>Xray runtime</strong></div><p>Журналирование и серверный DNS для службы Xray.</p></header>
+        {renderFields(commonFields)}
+      </section>
+    </> : renderFields(visibleFields)}
     <div className="protocolSettingsActions">
       <span>Изменения проверяются перед применением.</span>
       <button type="button" className="protocolSettingsSave" onClick={onSave} disabled={busy}>{busy ? "Применяем…" : "Применить настройки"}</button>

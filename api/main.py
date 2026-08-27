@@ -3125,16 +3125,16 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             {"key": "dns", "label": "Рекомендуемый DNS клиента", "type": "text", "value": current_env_value("SHADOWSOCKS_DNS", "1.1.1.1, 1.0.0.1"), "help": "Сохраняется как политика администратора. SS-сервер не может принудительно изменить DNS устройства; настройте его в клиентском приложении."},
         ]
     return [{
-        "key": "transport", "label": "Транспорт VLESS", "type": "select", "value": str(values.get("transport", "xhttp")),
+        "key": "transport", "label": "Транспорт прямого VLESS", "type": "select", "value": str(values.get("transport", "xhttp")),
         "options": [
             {"value": "xhttp", "label": "XHTTP · рекомендуемый"},
             {"value": "raw", "label": "RAW · TCP и UDP payload"},
             {"value": "grpc", "label": "gRPC · HTTP/2"},
         ],
-        "help": "Совместимые с REALITY транспорты. После смены заново импортируйте клиентские профили.",
+        "help": "Меняет только Direct-профиль с REALITY. CDN-профиль TLS/WebSocket не изменяется. После смены заново импортируйте Direct-профили.",
     }, {
-        "key": "transport_path", "label": "Путь / service name", "type": "text", "value": str(values.get("transportPath", "/")),
-        "help": "Используется XHTTP и gRPC; для RAW не влияет на конфигурацию.",
+        "key": "transport_path", "label": "Путь прямого транспорта", "type": "text", "value": str(values.get("transportPath", "/")),
+        "help": "Путь для XHTTP или service name для gRPC. В режиме RAW поле не используется.",
     }, {
         "key": "sni", "label": "SNI маскировки", "type": "text",
         "value": str(values.get("sni", "www.intel.com")),
@@ -3160,7 +3160,7 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
         "help": "Количество одновременных запросов на HTTP-соединение. 8–16 устраняет секундные очереди; применяется к новым VRX-профилям.",
     }, {
         "key": "cdn_enabled", "label": "Дополнительный маршрут через CDN", "type": "boolean", "value": bool(values.get("cdnEnabled", False)),
-        "help": "Добавляет TLS/WebSocket-вход через Caddy на порту 443. Прямой REALITY-профиль сохраняется.",
+        "help": "Добавляет отдельный TLS/WebSocket-вход через Caddy на порту 443. Настройки Direct/REALITY не меняются.",
     }, {
         "key": "cdn_domain", "label": "CDN-домен", "type": "text", "value": str(values.get("cdnDomain", "")),
         "help": "Например cdn.vpn.example.com. Для Cloudflare запись A должна быть в режиме Proxied.",
