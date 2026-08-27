@@ -19,20 +19,15 @@
 
 .mihomoCommandHero {
   position: relative;
-  min-height: 0;
+  min-height: 300px;
   overflow: hidden;
   border: 1px solid rgba(93, 111, 147, .28);
   border-radius: 20px;
-  background: #07101a;
+  background:
+    linear-gradient(90deg, rgba(7,16,26,.98) 0%, rgba(7,16,26,.94) 46%, rgba(7,16,26,.48) 67%, rgba(7,16,26,.12) 100%),
+    url("/gate-art/new-operator/mihomo.webp") right center / auto 112% no-repeat,
+    #07101a;
   isolation: isolate;
-}
-
-.mihomoCommandHero::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  background: url("/gate-art/new-operator/mihomo.webp") center / cover no-repeat;
 }
 
 .mihomoCommandHero::after {
@@ -40,15 +35,13 @@
   position: absolute;
   inset: 0;
   z-index: -1;
-  background:
-    linear-gradient(90deg, rgba(7,16,26,.98) 0%, rgba(7,16,26,.94) 45%, rgba(7,16,26,.62) 72%, rgba(7,16,26,.35) 100%),
-    linear-gradient(0deg, rgba(7,16,26,.56), rgba(7,16,26,.10));
+  background: linear-gradient(180deg, rgba(30,24,70,.08), transparent 54%, rgba(4,10,16,.30));
   pointer-events: none;
 }
 
 .mihomoHeroContent {
-  width: min(900px, 72%);
-  min-height: 0;
+  width: min(900px, 68%);
+  min-height: 300px;
   display: flex;
   flex-direction: column;
   justify-content: center;
