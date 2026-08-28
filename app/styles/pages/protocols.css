@@ -910,7 +910,10 @@
 .protocolCommandCenter .protocolConfiguration { overflow:hidden; border-color:var(--protocol-line) !important; border-radius:16px !important; background:rgba(6,15,24,.86) !important; }
 .protocolCommandCenter .protocolConfiguration > header { padding:12px 14px !important; background:linear-gradient(90deg,var(--protocol-soft),transparent); }
 .protocolCommandCenter .protocolConfiguration > header h3 { font-size:17px !important; }
-.vlessCommandCenter .vlessRouteSummary { display:none; }
+.vlessCommandCenter .vlessRouteSummary { display:grid; }
+.vlessCommandCenter .vlessRouteSummary > span { position:relative; min-height:104px; padding:14px 120px 14px 16px; }
+.vlessCommandCenter .vlessRouteSummary > span > i { position:absolute; top:14px; right:14px; padding:5px 7px; border:1px solid currentColor; border-radius:999px; color:#89a2b2; font:750 8px var(--font-mono); font-style:normal; letter-spacing:.06em; }
+.vlessCommandCenter .vlessRouteSummary > span.direct > i,.vlessCommandCenter .vlessRouteSummary > span.cdn.enabled > i { color:var(--protocol-accent); }
 .vlessCommandCenter .vlessSettingsGroup { display:block; }
 .vlessCommandCenter .vlessSettingsGroup > header { display:flex; align-items:center; justify-content:space-between; flex-direction:row; gap:18px; padding:14px 16px 11px; border-right:0; border-bottom:1px solid rgba(106,126,148,.10); }
 .vlessCommandCenter .vlessSettingsGroup > header div { display:flex; align-items:baseline; gap:10px; }

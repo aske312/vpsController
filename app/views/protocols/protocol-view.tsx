@@ -38,7 +38,7 @@ const channelProfiles: Record<Protocol, {
   },
   "vless-reality-xhttp": {
     index: "04", family: "MODULAR TRANSPORT", title: "VLESS",
-    lead: "Прямой VLESS работает через REALITY и выбранный транспорт. Отдельный TLS/WebSocket-маршрут через CDN включается независимо.",
+    lead: "Два независимых маршрута: прямой VLESS через REALITY и дополнительная точка входа через CDN.",
     signature: "VLESS / REALITY / XRAY", features: ["XHTTP · RAW · gRPC", "REALITY", "Reusable UUID"],
     runtimeLabel: "Состав и runtime", healthLabel: "Потоки Xray",
   },
@@ -298,6 +298,7 @@ function ProtocolSettingsEditor({
     ? fields.filter((field) => !["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key))
     : fields;
   if (vless) visibleFields = visibleFields.filter((field) => field.key !== "cdn_xhttp_mode" || (cdnEnabled && selectedCdnTransport === "xhttp"));
+  if (vless) visibleFields = visibleFields.filter((field) => !["cdn_domain", "cdn_transport"].includes(field.key) || cdnEnabled);
   const directKeys = new Set(["transport", "transport_path", "sni", "xhttp_mode", "xpadding", "xmux_concurrency"]);
   const cdnKeys = new Set(["cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"]);
   const fieldLayer = (key: string) => key.startsWith("cdn_") ? "CDN" : key === "sni" ? "REALITY" : ["xhttp_mode", "xpadding", "xmux_concurrency"].includes(key) ? "XHTTP" : directKeys.has(key) ? "DIRECT" : "XRAY";
@@ -322,15 +323,15 @@ function ProtocolSettingsEditor({
   return <div className={`protocolSettingsEditor${vless ? " vlessSettingsEditor" : ""}`}>
     {vless ? <>
       <div className="vlessRouteSummary" aria-label="Маршруты VLESS">
-        <span className="direct"><em>DIRECT</em><b>VLESS + REALITY + {selectedTransport.toUpperCase()}</b><small>Прямое подключение к IP сервера</small></span>
-        <span className={cdnEnabled ? "cdn enabled" : "cdn"}><em>{cdnEnabled ? "CDN ACTIVE" : "CDN OPTIONAL"}</em><b>VLESS + TLS + {selectedCdnTransport.toUpperCase()}</b><small>Отдельный маршрут через домен и Caddy</small></span>
+        <span className="direct"><em>ОСНОВНОЙ · DIRECT</em><b>REALITY / {selectedTransport.toUpperCase()}</b><small>Подключение напрямую к серверу. Не зависит от CDN.</small><i>{selectedTransport === "xhttp" ? "РЕКОМЕНДУЕТСЯ" : "СОВМЕСТИМО"}</i></span>
+        <span className={cdnEnabled ? "cdn enabled" : "cdn"}><em>{cdnEnabled ? "РЕЗЕРВНЫЙ · CDN ВКЛЮЧЁН" : "РЕЗЕРВНЫЙ · CDN ВЫКЛЮЧЕН"}</em><b>TLS / {selectedCdnTransport.toUpperCase()}</b><small>{cdnEnabled ? "Отдельная точка входа через CDN-домен." : "Включите маршрут ниже, если нужен доступ через CDN."}</small><i>{selectedCdnTransport === "xhttp" ? "РЕКОМЕНДУЕТСЯ" : selectedCdnTransport === "grpc" ? "НУЖЕН gRPC У CDN" : "LEGACY / FALLBACK"}</i></span>
       </div>
       <section className="vlessSettingsGroup direct">
-        <header><div><em>ПРЯМОЕ ПОДКЛЮЧЕНИЕ</em><strong>Direct · REALITY</strong></div><p>XHTTP, RAW или gRPC.</p></header>
+        <header><div><em>1 · ПРЯМОЕ ПОДКЛЮЧЕНИЕ</em><strong>Direct · REALITY</strong></div><p>Выберите транспорт и маскировочный SNI. XHTTP подходит для большинства случаев.</p></header>
         {renderFields(directFields)}
       </section>
       <section className="vlessSettingsGroup cdn">
-        <header><div><em>ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ</em><strong>CDN · TLS</strong></div><p>WebSocket, XHTTP или gRPC; Direct не изменяется.</p></header>
+        <header><div><em>2 · ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ</em><strong>CDN · TLS</strong></div><p>Включается независимо. WS и gRPC оставлены для совместимости; основной вариант — XHTTP.</p></header>
         {renderFields(cdnFields)}
       </section>
       <section className="vlessSettingsGroup common">

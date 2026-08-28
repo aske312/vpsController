@@ -1374,6 +1374,10 @@ def apply_reality_config(config_path: Path, config: dict[str, Any]) -> None:
         candidate.unlink(missing_ok=True)
         raise RuntimeError((result.stderr or result.stdout).strip() or "Xray rejected VLESS configuration")
     os.replace(candidate, config_path)
+    # Profile mutations can legitimately restart Xray several times in a
+    # short transaction. Clear systemd's start-rate counter before applying
+    # the next validated configuration.
+    run("systemctl", "reset-failed", "vps-control-mihomo-reality.service")
     run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
 
 

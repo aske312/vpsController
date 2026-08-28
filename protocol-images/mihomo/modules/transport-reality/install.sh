@@ -71,8 +71,8 @@ ExecStartPre=+/usr/local/sbin/vps-control-mihomo-vless-firewall add
 ExecStart=${MODULE_DIR}/xray run -config ${CONFIG_DIR}/config.json
 ExecStopPost=+/usr/local/sbin/vps-control-mihomo-vless-firewall remove
 Restart=on-failure
-User=nobody
-Group=nogroup
+DynamicUser=yes
+SupplementaryGroups=nogroup
 NoNewPrivileges=true
 PrivateTmp=true
 [Install]

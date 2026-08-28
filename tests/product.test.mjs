@@ -848,6 +848,7 @@ test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", a
 });
 
 test("VLESS image supports independent direct and CDN profiles", async () => {
+  const mihomoManager = await read("protocol-images/mihomo/manager.py");
   const [bootstrap, manager, install, uninstall, api, caddy, config, page, protocolView, protocolCss] = await Promise.all([
     read("scripts/install-panel.sh"), read("scripts/vps-control.sh"),
     read("protocol-images/vless-reality-xhttp/install.sh"),
@@ -889,9 +890,11 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.match(api, /Только Direct\. После смены импортируйте Direct-профили заново/);
   assert.doesNotMatch(api, /Literal\["xhttp", "raw", "grpc", "websocket"\]/);
   assert.match(protocolView, /ПРЯМОЕ ПОДКЛЮЧЕНИЕ/);
-  assert.match(protocolView, /XHTTP, RAW или gRPC/);
+  assert.match(protocolView, /XHTTP подходит для большинства случаев/);
   assert.match(protocolView, /ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ/);
-  assert.match(protocolView, /WebSocket, XHTTP или gRPC/);
+  assert.match(protocolView, /основной вариант — XHTTP/);
+  assert.match(mihomoManager, /systemctl", "reset-failed", "vps-control-mihomo-reality\.service/);
+  assert.match(install, /DynamicUser=yes/);
   assert.match(protocolView, /function ProtocolCommandCenter/);
   assert.match(protocolView, /ROUTE BLUEPRINT/);
   assert.match(protocolView, /isVless \? "Маршруты" : "Сетевой контур"/);
