@@ -1204,3 +1204,10 @@ test("legacy users beta surface and orchestration are removed", async () => {
   await assert.rejects(readFileText("api/access_beta.py"), { code: "ENOENT" });
   await assert.rejects(readFileText("app/views/users/users-view.tsx"), { code: "ENOENT" });
 });
+
+test("direct DNS follows installed protected channels and security lives under system", async () => {
+  const navigation = await read("app/components/gate-navigation.tsx");
+  assert.match(navigation, /transports\.length > 0[\s\S]*Защищённые каналы[\s\S]*DNS прямых каналов/);
+  assert.match(navigation, /<NavGroup label="SYSTEM">[\s\S]*label="Безопасность"[\s\S]*label="Приложение"/);
+  assert.doesNotMatch(navigation, /<NavGroup label="INFRASTRUCTURE">/);
+});

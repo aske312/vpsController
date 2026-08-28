@@ -62,23 +62,22 @@ export function GateNavigation({
               <NavButton active={activeTab === "mihomo"} icon="mihomo" label="Mihomo" tone="violet" onClick={() => onNavigate("mihomo")} />
             )}
             {transports.length > 0 && (
-              <NavButton
-                active={activeTab === "channels" || transports.some((item) => activeTab === item.id)}
-                icon="transport"
-                label="Защищённые каналы"
-                tone="cyan"
-                onClick={() => onNavigate("channels")}
-              />
+              <>
+                <NavButton
+                  active={activeTab === "channels" || transports.some((item) => activeTab === item.id)}
+                  icon="transport"
+                  label="Защищённые каналы"
+                  tone="cyan"
+                  onClick={() => onNavigate("channels")}
+                />
+                <NavButton active={activeTab === "dns"} icon="network" label="DNS прямых каналов" onClick={() => onNavigate("dns")} />
+              </>
             )}
           </NavGroup>
         )}
 
-        <NavGroup label="INFRASTRUCTURE">
-          <NavButton active={activeTab === "dns"} icon="network" label="Сеть и DNS" badge="BETA" onClick={() => onNavigate("dns")} />
-          <NavButton active={activeTab === "security"} icon="security" label="Безопасность" onClick={() => onNavigate("security")} />
-        </NavGroup>
-
         <NavGroup label="SYSTEM">
+          <NavButton active={activeTab === "security"} icon="security" label="Безопасность" onClick={() => onNavigate("security")} />
           <NavButton active={activeTab === "application"} icon="application" label="Приложение" onClick={() => onNavigate("application")} />
           <NavButton active={activeTab === "services"} icon="services" label="Службы" onClick={() => onNavigate("services")} />
         </NavGroup>
