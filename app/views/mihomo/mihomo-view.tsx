@@ -510,6 +510,44 @@ export function MihomoPage({
     }
   }
 
+  async function removeProfileDevice(profile: Profile, device: ProfileDevice) {
+    const devices = profile.devices?.length ? profile.devices : [{ id: "device-1", name: "Устройство" }];
+    if (devices.length <= 1) {
+      setError("В профиле должно остаться хотя бы одно устройство. Удалите профиль целиком, если он больше не нужен.");
+      return;
+    }
+    const deviceConnections = profile.connections.filter((connection) => (connection.device_id || devices[0].id) === device.id);
+    const confirmed = await confirmAction({
+      title: `Удалить устройство «${device.name}»?`,
+      message: `Будут удалены устройство и ${deviceConnections.length} связанных подключений. Остальные устройства профиля не изменятся.`,
+      confirmLabel: "Удалить устройство",
+      danger: true,
+    });
+    if (!confirmed) return;
+    const operationId = `device:${profile.id}:${device.id}`;
+    publishMihomoOperation(operationId, `Удаление устройства ${device.name}`, "running", "Удаляем устройство и его credentials…");
+    setBusy(operationId);
+    setError("");
+    try {
+      await request(`/mihomo/profiles/${profile.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          devices: devices.filter((item) => item.id !== device.id),
+          connections: profile.connections.filter((connection) => (connection.device_id || devices[0].id) !== device.id),
+        }),
+      });
+      await refresh();
+      setNotice(`Устройство «${device.name}» удалено из профиля «${profile.name}».`);
+      publishMihomoOperation(operationId, `Удаление устройства ${device.name}`, "success", "Устройство удалено");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Устройство не удалено";
+      setError(message);
+      publishMihomoOperation(operationId, `Удаление устройства ${device.name}`, "error", message);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function downloadConfig(profile: Profile, device?: ProfileDevice) {
     setBusy(`download:${profile.id}`);
     setError("");
@@ -723,10 +761,22 @@ export function MihomoPage({
                   <div className="mihomoRowActions"><button onClick={() => editProfile(profile)}>Настроить</button><button className="dangerButton" onClick={() => void removeProfile(profile)} disabled={busy === `profile:${profile.id}`}>Удалить</button></div>
                 </header>
                 <div className="mihomoProfileDevices">
-                  {devices.map((device) => { const connections = profile.connections.filter((connection) => (connection.device_id || devices[0].id) === device.id); return <section key={device.id} className="mihomoProfileDevice">
-                    <header><div><b>{device.name}</b><small>{connections.length} подключений · подписка обновляется без повторного импорта</small></div><nav><button className="primaryButton" onClick={() => void copySubscription(profile, device)} disabled={busy === `subscription:${profile.id}:${device.id}`}>Ссылка подписки</button><button onClick={() => void copyConfig(profile, device)} disabled={busy === `config:${profile.id}`}>Копировать YAML</button><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>Скачать YAML</button></nav></header>
-                    <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0)); return <div key={connection.id}><span className={online ? "online" : ""}>{channelShort[connection.component] || "CH"}<i /></span><p><b>{connection.name}</b><small>Получено {bytes(item?.rx_bytes || 0)} · Отдано {bytes(item?.tx_bytes || 0)}</small>{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Подключения не настроены.</p>}</div>
-                  </section>; })}
+                  {devices.map((device, deviceIndex) => {
+                    const connections = profile.connections.filter((connection) => (connection.device_id || devices[0].id) === device.id);
+                    const connectionStats = connections.map((connection) => profileStats[profile.id]?.connections?.[connection.id]);
+                    const onlineCount = connectionStats.filter((item) => Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0))).length;
+                    const deviceRx = connectionStats.reduce((sum, item) => sum + Number(item?.rx_bytes || 0), 0);
+                    const deviceTx = connectionStats.reduce((sum, item) => sum + Number(item?.tx_bytes || 0), 0);
+                    const deleting = busy === `device:${profile.id}:${device.id}`;
+                    return <section key={device.id} className="mihomoProfileDevice">
+                      <header className="mihomoDeviceHeader">
+                        <div className="mihomoDeviceIdentity"><span>{String(deviceIndex + 1).padStart(2, "0")}</span><p><b>{device.name}</b><small>Отдельная конфигурация и постоянная подписка</small></p></div>
+                        <div className="mihomoDeviceTotals"><span><small>КАНАЛЫ</small><b>{onlineCount}/{connections.length}</b></span><span><small>ТРАФИК</small><b>↓ {bytes(deviceRx)} · ↑ {bytes(deviceTx)}</b></span></div>
+                        <nav className="mihomoDeviceActions"><button className="primaryButton" onClick={() => void copySubscription(profile, device)} disabled={busy === `subscription:${profile.id}:${device.id}`}>Скопировать подписку</button><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>Скачать YAML</button><button onClick={() => void copyConfig(profile, device)} disabled={busy === `config:${profile.id}`}>Копировать YAML</button><button className="dangerButton" onClick={() => void removeProfileDevice(profile, device)} disabled={deleting || devices.length <= 1} title={devices.length <= 1 ? "Нельзя удалить единственное устройство профиля" : "Удалить это устройство и его подключения"}>{deleting ? "Удаление…" : "Удалить устройство"}</button></nav>
+                      </header>
+                      <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0)); return <div key={connection.id}><span className={online ? "online" : ""}>{channelShort[connection.component] || "CH"}<i /></span><p><b>{connection.name}</b><small>Получено {bytes(item?.rx_bytes || 0)} · Отдано {bytes(item?.tx_bytes || 0)}</small>{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Для устройства пока нет подключений.</p>}</div>
+                    </section>;
+                  })}
                 </div>
               </section>
             ); })}
