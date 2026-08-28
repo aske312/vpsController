@@ -1142,6 +1142,7 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(view, /connections: profileConnections/);
   assert.match(view, /cdn_enabled/);
   assert.match(view, /\["xhttp_mode", "xpadding", "xmux_concurrency"\]/);
+  assert.doesNotMatch(view, /const module = modules\.find/, "Next.js reserves the local variable name module");
 });
 
 test("SSH management does not start socket activation and the daemon together", async () => {

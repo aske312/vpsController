@@ -724,12 +724,12 @@ export function MihomoPage({
               </div>
               <div className="mihomoConnectionList">
                 {profileConnections.map((connection, index) => {
-                  const module = modules.find((item) => item.id === connection.component);
-                  const schema = module?.connection_settings || [];
+                  const protocolModule = modules.find((item) => item.id === connection.component);
+                  const schema = protocolModule?.connection_settings || [];
                   return <article key={connection.id} className="mihomoConnectionCard">
                     <header>
                       <span>{channelShort[connection.component] || "CH"}</span>
-                      <div><b>{module?.name || connection.component}</b><small>Подключение {index + 1}</small></div>
+                      <div><b>{protocolModule?.name || connection.component}</b><small>Подключение {index + 1}</small></div>
                       <button type="button" className="dangerButton" onClick={() => setProfileConnections((current) => current.filter((item) => item.id !== connection.id))}>Удалить</button>
                     </header>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
