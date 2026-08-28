@@ -76,8 +76,10 @@ type ProfileConnection = {
 
 type PolicySettings = {
   schema: SettingField[];
-  values: Record<string, string | number>;
+  values: Record<string, string | number | boolean>;
 };
+
+type ProfilePreset = { id: string; name: string; description: string; components: Array<{ id: string; cdn?: boolean; label?: string }> };
 
 const channelShort: Record<string, string> = {
   "transport-awg": "AW",
@@ -369,6 +371,27 @@ export function MihomoPage({
     setProfileConnections((current) => current.map((connection) => connection.id === id ? { ...connection, ...patch } : connection));
   }
 
+  function applyProfilePreset(preset: ProfilePreset) {
+    const cdnDomain = String(routingPolicy?.values.preset_cdn_domain || "").trim();
+    const usedSingletons = new Set<string>();
+    const connections: ProfileConnection[] = [];
+    for (const definition of preset.components) {
+      const componentId = definition.id === "$primary" ? String(routingPolicy?.values.preset_primary || "transport-reality")
+        : definition.id === "$fallback" ? String(routingPolicy?.values.preset_fallback || "transport-awg") : definition.id;
+      const componentModule = modules.find((item) => item.installed && item.id === componentId);
+      if (!componentModule || (componentId !== "transport-reality" && usedSingletons.has(componentId))) continue;
+      usedSingletons.add(componentId);
+      const settings = Object.fromEntries((componentModule.connection_settings || []).map((field) => [field.key, field.default]));
+      if (componentId === "transport-reality" && definition.cdn) {
+        settings.cdn_enabled = true;
+        settings.cdn_domain = cdnDomain;
+      }
+      connections.push({ id: `connection-${crypto.randomUUID()}`, component: componentId, name: definition.label || `${componentModule.name}${definition.cdn ? " · CDN" : " · Direct"}`, settings });
+    }
+    setProfileConnections(connections);
+    if (!profileName.trim()) setProfileName(preset.name);
+  }
+
   function updateConnectionSetting(id: string, key: string, value: string | number | boolean) {
     setProfileConnections((current) => current.map((connection) => connection.id === id
       ? { ...connection, settings: { ...connection.settings, [key]: value } }
@@ -454,6 +477,13 @@ export function MihomoPage({
     [modules],
   );
   const installedChannels = transportModules.filter((item) => item.installed);
+  const profilePresets: ProfilePreset[] = [
+    { id: "reliable", name: "Надёжный", description: "Direct VLESS, CDN VLESS, AWG и SS", components: [{ id: "transport-reality", label: "VLESS · Direct" }, { id: "transport-reality", cdn: true, label: "VLESS · CDN" }, { id: "transport-awg" }, { id: "transport-shadowsocks" }] },
+    { id: "direct-fallback", name: "Direct + резерв", description: "Основной и резервный транспорт из настроек маршрутизации", components: [{ id: "$primary", label: "Основной" }, { id: "$fallback", label: "Резерв" }] },
+    { id: "cdn-first", name: "CDN-first", description: "VLESS через CDN с резервным транспортом", components: [{ id: "transport-reality", cdn: true, label: "VLESS · CDN" }, { id: "$fallback", label: "Резерв" }] },
+    { id: "low-latency", name: "Минимальная задержка", description: "AWG с резервным Shadowsocks", components: [{ id: "transport-awg" }, { id: "transport-shadowsocks" }] },
+    { id: "all", name: "Все установленные", description: "По одному соединению каждого установленного компонента", components: installedChannels.map((item) => ({ id: item.id })) },
+  ];
   const policiesReady = installedChannels.length > 0 && Boolean(dnsPolicy && routingPolicy);
 
   return (
@@ -708,12 +738,20 @@ export function MihomoPage({
         <div className="mihomoDialogBackdrop" onMouseDown={(event) => {
           if (event.target === event.currentTarget) setProfileDialog(null);
         }}>
-          <form className="mihomoDialog" onSubmit={saveProfile}>
+          <form className="mihomoDialog mihomoProfileDialog" onSubmit={saveProfile}>
             <header>
               <div><p className="eyebrow">MIHOMO PROFILE</p><h2>{profileDialog === "new" ? "Новый профиль" : "Настройка профиля"}</h2></div>
               <button type="button" className="iconButton" onClick={() => setProfileDialog(null)}>x</button>
             </header>
             <label className="mihomoProfileName"><span>Название устройства</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} /></label>
+            {profileDialog === "new" && <section className="mihomoPresetPicker">
+              <header><div><b>Быстрый старт</b><small>Выберите готовую схему, затем при необходимости измените соединения ниже.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настройки пресетов</button></header>
+              <div>{profilePresets.map((preset) => {
+                const needsCdn = preset.components.some((item) => item.cdn);
+                const unavailable = needsCdn && !String(routingPolicy?.values.preset_cdn_domain || "").trim();
+                return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><b>{preset.name}</b><small>{unavailable ? "Укажите CDN-домен в маршрутизации" : preset.description}</small></button>;
+              })}</div>
+            </section>}
             <section className="mihomoConnectionBuilder">
               <header><div><b>Подключения профиля</b><small>Один профиль может содержать несколько VLESS с разными маршрутами и CDN.</small></div></header>
               <div className="mihomoConnectionAdd">
@@ -807,7 +845,7 @@ function ModuleCatalog({ title, description, modules, busy, onToggle, onUpdate, 
   );
 }
 
-function PolicyPanel({ code, title, description, ready, values, onSettings }: { code: string; title: string; description: string; ready: boolean; values?: Record<string, string | number>; onSettings: () => void }) {
+function PolicyPanel({ code, title, description, ready, values, onSettings }: { code: string; title: string; description: string; ready: boolean; values?: Record<string, string | number | boolean>; onSettings: () => void }) {
   return (
     <article className="mihomoPolicyPanel">
       <header>

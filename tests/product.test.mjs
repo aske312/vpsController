@@ -1139,6 +1139,9 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /class ProfileConnectionInput/);
   assert.match(manager, /def validate_connection_inputs/);
   assert.match(manager, /def render_vless_cdn/);
+  assert.match(manager, /def rebuild_vless_cdn_snippet/);
+  assert.match(manager, /VLESS_CDN_ROUTE_ROOT/);
+  assert.match(manager, /original_config = config_path\.read_bytes\(\)/);
   assert.match(manager, /component != "transport-reality" and component in used_singletons/);
   assert.match(manager, /network: \{'tcp' if transport == 'raw' else transport\}/);
   assert.match(manager, /grpc-service-name/);
@@ -1146,6 +1149,9 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(view, /connections: profileConnections/);
   assert.match(view, /cdn_enabled/);
   assert.match(view, /\["xhttp_mode", "xpadding", "xmux_concurrency"\]/);
+  assert.match(view, /Надёжный/);
+  assert.match(view, /Настройки пресетов/);
+  assert.match(view, /preset_cdn_domain/);
   assert.doesNotMatch(view, /const module = modules\.find/, "Next.js reserves the local variable name module");
 });
 

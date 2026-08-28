@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import fcntl
 import base64
 import ipaddress
 import json
@@ -96,6 +97,7 @@ VLESS_CONFIG = VLESS_CONFIG_DIR / "config.json"
 VLESS_ENV = VLESS_CONFIG_DIR / "reality.env"
 VLESS_CDN_DOMAIN = os.getenv("VLESS_CDN_DOMAIN", "")
 VLESS_CDN_SNIPPET = Path("/etc/caddy/vps-control.d/vless-cdn.caddy")
+MIHOMO_VLESS_CDN_ROUTES = Path("/etc/vps-control/mihomo/reality/caddy-routes")
 VLESS_CDN_PORT = int(os.getenv("VLESS_CDN_PORT", "10087"))
 AWG_PROFILE = {
     "Jc": os.getenv("AWG_JC", "6"), "Jmin": os.getenv("AWG_JMIN", "8"), "Jmax": os.getenv("AWG_JMAX", "80"),
@@ -2595,17 +2597,36 @@ def configure_vless_cdn(config: dict, reality: dict, enabled: bool, domain: str)
 
 
 def write_vless_cdn_snippet(enabled: bool, domain: str, ws_path: str) -> None:
+    routes: list[dict] = []
+    if enabled:
+        routes.append({"domain": domain, "path": ws_path, "port": VLESS_CDN_PORT})
+    if MIHOMO_VLESS_CDN_ROUTES.exists():
+        for descriptor in MIHOMO_VLESS_CDN_ROUTES.glob("*.json"):
+            try:
+                value = json.loads(descriptor.read_text(encoding="utf-8"))
+                if value.get("domain") and value.get("path") and value.get("port"):
+                    routes.append(value)
+            except (OSError, ValueError, TypeError):
+                continue
+    grouped: dict[str, list[dict]] = {}
+    for route in routes:
+        grouped.setdefault(str(route["domain"]), []).append(route)
     VLESS_CDN_SNIPPET.parent.mkdir(parents=True, exist_ok=True)
-    if not enabled:
-        VLESS_CDN_SNIPPET.unlink(missing_ok=True)
-        return
-    temporary = VLESS_CDN_SNIPPET.with_suffix(".tmp")
-    temporary.write_text(
-        f"{domain} {{\n    handle {ws_path} {{\n        reverse_proxy 127.0.0.1:{VLESS_CDN_PORT}\n    }}\n    respond 404\n}}\n",
-        encoding="utf-8",
-    )
-    os.chmod(temporary, 0o644)
-    temporary.replace(VLESS_CDN_SNIPPET)
+    with VLESS_CDN_SNIPPET.with_suffix(".lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not grouped:
+            VLESS_CDN_SNIPPET.unlink(missing_ok=True)
+            return
+        lines: list[str] = []
+        for route_domain, items in grouped.items():
+            lines.append(f"{route_domain} {{")
+            for item in items:
+                lines.extend([f"    handle {item['path']} {{", f"        reverse_proxy 127.0.0.1:{int(item['port'])}", "    }"])
+            lines.extend(["    respond 404", "}"])
+        temporary = VLESS_CDN_SNIPPET.with_suffix(".tmp")
+        temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.chmod(temporary, 0o644)
+        temporary.replace(VLESS_CDN_SNIPPET)
 
 
 def key(command: str) -> str:

@@ -47,6 +47,36 @@
       "max": 3600
     },
     {
+      "key": "preset_primary",
+      "label": "Основной транспорт пресетов",
+      "type": "select",
+      "default": "transport-reality",
+      "options": [
+        {"value": "transport-reality", "label": "VLESS"},
+        {"value": "transport-awg", "label": "AmneziaWG"},
+        {"value": "transport-wg", "label": "WireGuard"},
+        {"value": "transport-shadowsocks", "label": "Shadowsocks"}
+      ]
+    },
+    {
+      "key": "preset_fallback",
+      "label": "Резервный транспорт пресетов",
+      "type": "select",
+      "default": "transport-awg",
+      "options": [
+        {"value": "transport-awg", "label": "AmneziaWG"},
+        {"value": "transport-reality", "label": "VLESS"},
+        {"value": "transport-wg", "label": "WireGuard"},
+        {"value": "transport-shadowsocks", "label": "Shadowsocks"}
+      ]
+    },
+    {
+      "key": "preset_cdn_domain",
+      "label": "CDN-домен для быстрых профилей",
+      "type": "text",
+      "default": ""
+    },
+    {
       "key": "rules",
       "label": "Дополнительные правила",
       "type": "textarea",

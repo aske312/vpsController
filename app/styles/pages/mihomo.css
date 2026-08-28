@@ -396,6 +396,18 @@
 }
 
 .mihomoConnectionBuilder { display: grid; gap: 14px; }
+.mihomoProfileDialog { width:min(980px,100%); }
+.mihomoPresetPicker { display:grid; gap:10px; margin:14px 0; padding:12px; border:1px solid var(--line); border-radius:14px; background:rgba(8,17,26,.72); }
+.mihomoPresetPicker > header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.mihomoPresetPicker > header div { display:grid; gap:3px; }
+.mihomoPresetPicker > header small { color:var(--muted); font-weight:400; }
+.mihomoPresetPicker > header button { border:0; background:none; color:#b9abff; cursor:pointer; font-size:10px; }
+.mihomoPresetPicker > div { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; }
+.mihomoPresetPicker > div > button { min-width:0; display:grid; gap:4px; padding:10px; border:1px solid var(--line); border-radius:10px; background:var(--surface-raised); color:var(--text); text-align:left; cursor:pointer; }
+.mihomoPresetPicker > div > button:hover { border-color:rgba(116,94,223,.55); }
+.mihomoPresetPicker > div > button:disabled { opacity:.45; cursor:not-allowed; }
+.mihomoPresetPicker b,.mihomoPresetPicker small { overflow:hidden; text-overflow:ellipsis; }
+.mihomoPresetPicker small { color:var(--muted); font-size:9px; line-height:1.35; }
 .mihomoConnectionBuilder > header div { display: grid; gap: 4px; }
 .mihomoConnectionBuilder > header small { color: var(--muted); font-weight: 400; }
 .mihomoConnectionAdd { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -411,7 +423,8 @@
 .mihomoConnectionFields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
 .mihomoConnectionFields .is-toggle { grid-template-columns: 1fr auto; align-items: center; }
 .mihomoConnectionEmpty { margin: 0; padding: 18px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); text-align: center; }
-@media (max-width: 640px) { .mihomoConnectionFields { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .mihomoPresetPicker > div { grid-template-columns:1fr 1fr; } }
+@media (max-width: 640px) { .mihomoConnectionFields,.mihomoPresetPicker > div { grid-template-columns: 1fr; } }
 
 .gateOperationCard.mihomo { border-color:rgba(162,123,255,.30); }
 

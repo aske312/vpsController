@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import functools
+import fcntl
 import hmac
 import ipaddress
 import json
@@ -39,6 +40,9 @@ CORE_HOME = DATA_ROOT / "core-home"
 ACTION_FILE = DATA_ROOT / "action.json"
 REALITY_XRAY_BIN = Path("/usr/local/lib/vps-control-mihomo-reality/xray")
 REALITY_API_SERVER = "127.0.0.1:10086"
+VLESS_CDN_SNIPPET = Path("/etc/caddy/vps-control.d/vless-cdn.caddy")
+VLESS_CDN_ROUTE_ROOT = CONFIG_ROOT / "reality" / "caddy-routes"
+DIRECT_VLESS_ENV = Path("/etc/vps-control/vless-reality-xhttp/reality.env")
 XRAY_GITHUB_REPO = "XTLS/Xray-core"
 MIHOMO_GITHUB_REPO = "MetaCubeX/mihomo"
 github_release_lock = threading.Lock()
@@ -1197,12 +1201,49 @@ def vless_stream(settings: dict[str, Any], private_key: str, short_id: str) -> d
 
 
 def write_mihomo_vless_cdn(connection_id: str, enabled: bool, domain: str, path: str, port: int) -> None:
-    snippet = Path("/etc/caddy/vps-control.d") / f"mihomo-vless-{connection_id}.caddy"
-    if not enabled:
-        snippet.unlink(missing_ok=True)
-        return
-    snippet.parent.mkdir(parents=True, exist_ok=True)
-    snippet.write_text(f"{domain} {{\n    handle {path} {{\n        reverse_proxy 127.0.0.1:{port}\n    }}\n    respond 404\n}}\n", encoding="utf-8")
+    VLESS_CDN_ROUTE_ROOT.mkdir(parents=True, exist_ok=True)
+    descriptor = VLESS_CDN_ROUTE_ROOT / f"{connection_id}.json"
+    if enabled:
+        atomic_json(descriptor, {"domain": domain, "path": path, "port": int(port)}, mode=0o600)
+    else:
+        descriptor.unlink(missing_ok=True)
+    rebuild_vless_cdn_snippet()
+
+
+def rebuild_vless_cdn_snippet() -> None:
+    routes: list[dict[str, Any]] = []
+    direct = {}
+    try:
+        direct = dict(line.split("=", 1) for line in DIRECT_VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+    except OSError:
+        pass
+    if direct.get("CDN_ENABLED") == "yes" and direct.get("CDN_DOMAIN") and direct.get("WS_PATH"):
+        routes.append({"domain": direct["CDN_DOMAIN"], "path": direct["WS_PATH"], "port": int(direct.get("CDN_PORT", "10087"))})
+    for descriptor in VLESS_CDN_ROUTE_ROOT.glob("*.json") if VLESS_CDN_ROUTE_ROOT.exists() else []:
+        value = load_json(descriptor, {})
+        if value.get("domain") and value.get("path") and value.get("port"):
+            routes.append(value)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for route in routes:
+        grouped.setdefault(str(route["domain"]), []).append(route)
+    VLESS_CDN_SNIPPET.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = VLESS_CDN_SNIPPET.with_suffix(".lock")
+    with lock_path.open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not grouped:
+            VLESS_CDN_SNIPPET.unlink(missing_ok=True)
+        else:
+            lines: list[str] = []
+            for domain, items in grouped.items():
+                lines.append(f"{domain} {{")
+                for item in items:
+                    lines.extend([f"    handle {item['path']} {{", f"        reverse_proxy 127.0.0.1:{int(item['port'])}", "    }"])
+                lines.extend(["    respond 404", "}"])
+            temporary = VLESS_CDN_SNIPPET.with_suffix(".tmp")
+            temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            os.replace(temporary, VLESS_CDN_SNIPPET)
+        for legacy in VLESS_CDN_SNIPPET.parent.glob("mihomo-vless-*.caddy"):
+            legacy.unlink(missing_ok=True)
 
 
 def apply_reality_config(config_path: Path, config: dict[str, Any]) -> None:
@@ -1242,11 +1283,21 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     ws_path = "/" + secrets.token_hex(16)
     if settings["cdn_enabled"]:
         config["inbounds"].append({"tag": f"mihomo-vless-cdn-{connection_id}", "listen": "127.0.0.1", "port": cdn_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": {"network": "websocket", "security": "none", "wsSettings": {"path": ws_path}}})
-    write_mihomo_vless_cdn(connection_id, settings["cdn_enabled"], settings["cdn_domain"], ws_path, cdn_port)
-    apply_reality_config(config_path, config)
-    if settings["cdn_enabled"]:
-        run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
-        run("systemctl", "reload", "caddy.service", check=True)
+    original_config = config_path.read_bytes()
+    try:
+        write_mihomo_vless_cdn(connection_id, settings["cdn_enabled"], settings["cdn_domain"], ws_path, cdn_port)
+        apply_reality_config(config_path, config)
+        if settings["cdn_enabled"]:
+            run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
+            run("systemctl", "reload", "caddy.service", check=True)
+    except Exception:
+        write_mihomo_vless_cdn(connection_id, False, "", "", 0)
+        config_path.write_bytes(original_config)
+        os.chmod(config_path, 0o640)
+        shutil.chown(config_path, user="root", group="nogroup")
+        run("systemctl", "restart", "vps-control-mihomo-reality.service")
+        run("systemctl", "reload", "caddy.service")
+        raise
     return {"uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": ws_path}
 
 
