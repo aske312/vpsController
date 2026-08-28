@@ -1228,17 +1228,22 @@ export default function Home() {
   const operationActive = ["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(application?.action?.state || "");
   const operationName = application?.action?.action || "";
   const operationLabel = actionLabels[operationName.split(":")[0]] || operationName;
-  const nodeHasError = Boolean(error) || application?.action?.state === "failed" || application?.action?.result === "failed";
-  const nodeDegraded = application?.api.active === false
-    || Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
+  const nodeHasError = Boolean(error) || application?.api.active === false || application?.action?.state === "failed" || application?.action?.result === "failed";
+  const nodeDegraded = Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
   const serviceModeActive = Boolean(services?.service_mode?.active || application?.service_mode?.active);
-  const nodeState = nodeHasError ? "error" : operationActive || nodeDegraded || serviceModeActive ? "working" : "healthy";
-  const nodeStateLabel = nodeState === "error" ? "УЗЕЛ С ОШИБКОЙ" : nodeState === "working" ? "ТРЕБУЕТ ВНИМАНИЯ" : "УЗЕЛ В СЕТИ";
-  const applicationStateTitle = nodeState === "error"
+  const nodeState = !application ? "gray" : nodeHasError ? "red" : serviceModeActive ? "blue" : operationActive || nodeDegraded ? "yellow" : "green";
+  const nodeStateLabel = nodeState === "gray" ? "ПРОВЕРКА УЗЛА"
+    : nodeState === "red" ? "УЗЕЛ С ОШИБКОЙ"
+    : nodeState === "blue" ? "СЕРВИСНЫЙ РЕЖИМ"
+    : nodeState === "yellow" ? "ТРЕБУЕТ ВНИМАНИЯ"
+    : "УЗЕЛ В СЕТИ";
+  const applicationStateTitle = nodeState === "gray"
+    ? "Проверка состояния"
+    : nodeState === "red"
     ? "Есть ошибки"
+    : nodeState === "blue" ? "Сервисный режим"
     : operationActive ? operationLabel
-    : serviceModeActive ? "Сервисный режим"
-    : nodeDegraded ? "Нарушение работы"
+    : nodeState === "yellow" ? "Нарушение работы"
     : "В сети";
 
   const visualArt =

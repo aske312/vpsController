@@ -75,7 +75,7 @@ export function GateNavigation({
         )}
 
         <NavGroup label="INFRASTRUCTURE">
-          <NavButton active={activeTab === "dns"} icon="network" label="Сеть и DNS" onClick={() => onNavigate("dns")} />
+          <NavButton active={activeTab === "dns"} icon="network" label="Сеть и DNS" badge="BETA" onClick={() => onNavigate("dns")} />
           <NavButton active={activeTab === "security"} icon="security" label="Безопасность" onClick={() => onNavigate("security")} />
         </NavGroup>
 
@@ -90,7 +90,8 @@ export function GateNavigation({
         <div>
           <small>{nodeStateLabel}</small>
           <strong>{server?.city || "VPS"}</strong>
-          <span>{server?.country || "—"}  {server?.public_endpoint || server?.public_ip || "—"}</span>
+          <span className="gateNodeLocation">{server?.country || "—"}</span>
+          <span className="gateNodeAddress">{server?.public_endpoint || server?.public_ip || "—"}</span>
         </div>
       </div>
     </aside>

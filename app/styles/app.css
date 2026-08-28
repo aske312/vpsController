@@ -317,15 +317,11 @@
   border-top: 1px solid var(--line);
 }
 
-.gateSidebarNode.working .gateNodePulse {
-  background: var(--amber);
-  color: var(--amber);
-}
-
-.gateSidebarNode.error .gateNodePulse {
-  background: var(--red);
-  color: var(--red);
-}
+.gateSidebarNode.gray .gateNodePulse { background:#6e7b83; color:#6e7b83; box-shadow:none; }
+.gateSidebarNode.yellow .gateNodePulse { background:var(--amber); color:var(--amber); }
+.gateSidebarNode.red .gateNodePulse { background:var(--red); color:var(--red); }
+.gateSidebarNode.green .gateNodePulse { background:var(--green); color:var(--green); }
+.gateSidebarNode.blue .gateNodePulse { background:var(--blue); color:var(--blue); }
 
 .gateSidebarNode > div {
   min-width: 0;
@@ -373,17 +369,21 @@
   min-width: 0;
 }
 
-.gateMastState.working {
+.gateMastState.yellow {
   color: var(--amber);
   border-color: rgba(232,183,97,.20);
   background: rgba(232,183,97,.05);
 }
 
-.gateMastState.error {
+.gateMastState.red {
   color: var(--red);
   border-color: rgba(240,123,123,.20);
   background: rgba(240,123,123,.05);
 }
+
+.gateMastState.gray { color:#84939b; border-color:rgba(132,147,155,.20); background:rgba(132,147,155,.05); }
+.gateMastState.green { color:var(--green); border-color:rgba(98,215,180,.20); background:rgba(98,215,180,.06); }
+.gateMastState.blue { color:var(--blue); border-color:rgba(100,184,255,.24); background:rgba(100,184,255,.07); }
 
 .gateMastFacts {
   display: flex;
@@ -534,13 +534,22 @@
   font-size: 13px;
 }
 
-.gateSidebarNode span:last-child {
+.gateSidebarNode .gateNodeLocation,
+.gateSidebarNode .gateNodeAddress {
+  display:block;
+  min-width:0;
   color: #8499a6;
   font: 500 9px/1.35 var(--font-sans);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 10.5px;
+}
+
+.gateSidebarNode .gateNodeAddress {
+  color:#6f8796;
+  font-family:var(--font-mono);
+  font-size:9.5px;
 }
 
 .gateMastNode h2 {
@@ -554,12 +563,12 @@
   margin: 3px 0 0;
   color: var(--muted);
   font: 500 10px/1.35 var(--font-sans);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   font-size: 11px;
   line-height: 1.4;
 }
+
+.gateMastNode p > span { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gateMastNode p > .mono { margin-top:1px; color:#718897; font-size:10px; }
 
 .gateMastState {
   margin-left: 4px;

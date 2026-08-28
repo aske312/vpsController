@@ -111,7 +111,7 @@ export function AppWorkspace({
             <div className="gateMastIdentity">
               <span>PRIMARY NODE</span>
               <h2>{server?.city || server?.name || "Primary Node"}</h2>
-              <p>{server?.country || "—"} <span className="mono">{server?.public_endpoint || server?.public_ip || "—"}</span></p>
+              <p><span>{server?.country || "—"}</span><span className="mono">{server?.public_endpoint || server?.public_ip || "—"}</span></p>
             </div>
             <div className={`gateMastState ${nodeState}`}>{applicationStateTitle}</div>
           </div>
