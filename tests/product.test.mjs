@@ -879,6 +879,7 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(api, /def vless_tls_client_query/);
   assert.match(api, /def configure_vless_tls/);
   assert.match(api, /DNS only.*Cloudflare/);
+  assert.ok(api.indexOf('cdn_enabled = bool(supplied.get("cdn_enabled", current_cdn_enabled))') < api.indexOf('if tls_changed:'), "TLS-only updates must initialize the current CDN state");
   assert.ok(api.indexOf('if isinstance(exc, HTTPException):\n                raise exc') < api.indexOf('logger.exception("VLESS settings transaction failed")'), "validation errors must not restart a healthy VLESS service");
   assert.match(install, /VLESS_TLS_DOMAIN/);
   assert.ok(install.indexOf('CDN_PATH="${CDN_PATH:-${WS_PATH}}"') < install.indexOf('TLS_PATH=${CDN_PATH}-tls'), "TLS path must be written only after CDN_PATH is initialized");

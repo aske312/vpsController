@@ -3391,6 +3391,8 @@ def update_protocol_settings(
                 config.setdefault("routing", {})["domainStrategy"] = "IPIfNonMatch"
             cdn_changed = bool({"cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"} & supplied.keys())
             tls_changed = bool({"tls_enabled", "tls_domain", "tls_transport", "tls_xhttp_mode"} & supplied.keys())
+            current_cdn_enabled = reality.get("CDN_ENABLED", "yes" if reality.get("CDN_DOMAIN") else "no") == "yes"
+            cdn_enabled = bool(supplied.get("cdn_enabled", current_cdn_enabled))
             if tls_changed:
                 tls_enabled = bool(supplied.get("tls_enabled", reality.get("TLS_ENABLED", "no") == "yes"))
                 tls_domain = str(supplied.get("tls_domain", reality.get("TLS_DOMAIN", ""))).strip().lower()
@@ -3404,8 +3406,6 @@ def update_protocol_settings(
                     raise HTTPException(status_code=422, detail="Для прямого TLS и CDN нужны разные домены")
                 configure_vless_tls(config, reality, tls_enabled, tls_domain, tls_transport, tls_xhttp_mode)
             if cdn_changed:
-                current_cdn_enabled = reality.get("CDN_ENABLED", "yes" if reality.get("CDN_DOMAIN") else "no") == "yes"
-                cdn_enabled = bool(supplied.get("cdn_enabled", current_cdn_enabled))
                 cdn_domain = str(supplied.get("cdn_domain", reality.get("CDN_DOMAIN", ""))).strip().lower()
                 cdn_transport = str(supplied.get("cdn_transport", reality.get("CDN_TRANSPORT", "websocket")))
                 cdn_xhttp_mode = str(supplied.get("cdn_xhttp_mode", reality.get("CDN_XHTTP_MODE", "auto")))
