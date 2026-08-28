@@ -798,14 +798,14 @@ export function MihomoPage({
             </header>
             <label className="mihomoProfileName"><span>Название профиля</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} /></label>
             <section className="mihomoDeviceBuilder"><header><div><b>Устройства профиля</b><small>У каждого устройства собственные credentials и отдельный YAML.</small></div><button type="button" onClick={() => { const id = `device-${crypto.randomUUID()}`; setProfileDevices((current) => [...current, { id, name: `Устройство ${current.length + 1}` }]); setActiveDeviceId(id); }}>+ Устройство</button></header><div>{profileDevices.map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => setActiveDeviceId(device.id)}><input value={device.name} maxLength={80} onClick={(event) => event.stopPropagation()} onChange={(event) => setProfileDevices((current) => current.map((item) => item.id === device.id ? { ...item, name: event.target.value } : item))} />{profileDevices.length > 1 && <span onClick={(event) => { event.stopPropagation(); const next = profileDevices.filter((item) => item.id !== device.id); setProfileDevices(next); setProfileConnections((current) => current.filter((connection) => connection.device_id !== device.id)); if (activeDeviceId === device.id) setActiveDeviceId(next[0].id); }}>×</span>}</button>)}</div></section>
-            {profileDialog === "new" && <section className="mihomoPresetPicker">
-              <header><div><b>Быстрый старт</b><small>Выберите готовую схему, затем при необходимости измените соединения ниже.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настройки пресетов</button></header>
+            <section className="mihomoPresetPicker">
+              <header><div><b>Пресет для {profileDevices.find((device) => device.id === activeDeviceId)?.name || "устройства"}</b><small>Пресет заменит подключения только выбранного устройства. Остальные устройства профиля не изменятся.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настройки пресетов</button></header>
               <div>{profilePresets.map((preset) => {
                 const needsCdn = preset.components.some((item) => item.cdn);
                 const unavailable = needsCdn && !String(routingPolicy?.values.preset_cdn_domain || "").trim();
                 return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><b>{preset.name}</b><small>{unavailable ? "Укажите CDN-домен в маршрутизации" : preset.description}</small></button>;
               })}</div>
-            </section>}
+            </section>
             <section className="mihomoConnectionBuilder">
               <header><div><b>Подключения профиля</b><small>Один профиль может содержать несколько VLESS с разными маршрутами и CDN.</small></div></header>
               <div className="mihomoConnectionAdd">

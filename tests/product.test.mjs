@@ -1164,6 +1164,8 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(view, /mihomoProfileDevices/);
   assert.match(view, /Настройки пресетов/);
   assert.match(view, /preset_cdn_domain/);
+  assert.match(view, /Пресет для \{profileDevices\.find/);
+  assert.doesNotMatch(view, /profileDialog === "new" && <section className="mihomoPresetPicker"/);
   assert.doesNotMatch(view, /const module = modules\.find/, "Next.js reserves the local variable name module");
 });
 
