@@ -1580,7 +1580,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/caddy/vps-control.d -/etc/wireguard -/etc/amnezia -/etc/systemd/resolved.conf.d ${DATA_DIR}
+ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/caddy/vps-control.d -/etc/wireguard -/etc/amnezia ${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -1590,7 +1590,7 @@ EOF
 }
 
 ensure_api_write_access() {
-  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/caddy/vps-control.d -/etc/wireguard -/etc/amnezia -/etc/systemd/resolved.conf.d ${DATA_DIR}"
+  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/caddy/vps-control.d -/etc/wireguard -/etc/amnezia ${DATA_DIR}"
   if ! grep -Fxq "${expected}" "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
     systemctl daemon-reload
@@ -2581,7 +2581,10 @@ main() {
   load_install_config
   case "${1:-help}" in
     install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
-      begin_operation "${1}"
+      case "${1}" in
+        protocol-install|protocol-remove|protocol-update) begin_operation "${1}${2:+:${2}}" ;;
+        *) begin_operation "${1}" ;;
+      esac
       trap handle_exit EXIT
       trap 'exit 124' TERM INT
       ;;

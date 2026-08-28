@@ -70,7 +70,7 @@ export function GateNavigation({
                   tone="cyan"
                   onClick={() => onNavigate("channels")}
                 />
-                <NavButton active={activeTab === "dns"} icon="network" label="DNS прямых каналов" onClick={() => onNavigate("dns")} />
+                <NavButton active={activeTab === "dns"} icon="network" label="DNS каналов" onClick={() => onNavigate("dns")} />
               </>
             )}
           </NavGroup>

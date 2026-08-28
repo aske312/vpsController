@@ -96,6 +96,14 @@ const channelShort: Record<string, string> = {
 };
 
 const MIHOMO_OPERATION_EVENT = "gate312:mihomo-operation";
+const TECHNICAL_ERROR = /(?:\n|traceback|systemctl|journalctl|apt(?:-get)?|dpkg|stderr|stdout|exit status|failed to start|reading package lists|building dependency tree)/i;
+
+function publicError(message: string, status: number) {
+  const value = message.trim();
+  return status >= 500 || TECHNICAL_ERROR.test(value) || /^(?:bad gateway|internal server error)$/i.test(value)
+    ? "Команда завершилась с ошибкой. Технические сведения сохранены в журнале."
+    : value || "Команда не выполнена.";
+}
 
 function publishMihomoOperation(id: string, label: string, state: "running" | "success" | "error", message?: string) {
   if (typeof window === "undefined") return;
@@ -153,7 +161,7 @@ export function MihomoPage({
       } catch {
         // Preserve status text for non-JSON responses.
       }
-      throw new Error(message);
+      throw new Error(publicError(message, response.status));
     }
     if ((response.headers.get("content-type") || "").includes("text/plain")) {
       return response.text();

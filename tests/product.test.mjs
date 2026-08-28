@@ -795,17 +795,13 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /env_updates\["VRX_DNS"\]/);
   assert.match(api, /vrx_servers\.insert\(0, selected\["doh_url"\]\)/);
   assert.match(page, /DoH для VLESS/);
-  assert.match(page, /DNS самого VPS/);
-  assert.match(api, /def apply_system_dns/);
-  assert.match(api, /systemd-resolved/);
-  assert.match(api, /restore_system_dns_state/);
+  assert.match(page, /DNS каналов/);
+  assert.doesNotMatch(api, /apply_system|system_resolver|def apply_system_dns/);
   assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
   assert.match(api, /def apply_vrx_dns/);
   assert.match(api, /content-type: application\/dns-message/);
   assert.doesNotMatch(api, /application\/dns-json/);
   assert.match(api, /status_code = exc\.status_code if isinstance\(exc, HTTPException\) else 500/);
-  assert.match(manager, /ReadWritePaths=.*-\/etc\/systemd\/resolved\.conf\.d/);
-  assert.match(manager, /grep -Eq '\^ReadWritePaths=.*resolved\\\.conf\\\.d/);
   assert.match(api, /"scope": "new_profiles"/);
   assert.match(api, /"scope": "client_recommendation"/);
   assert.match(api, /"scope": "server_xray"/);
@@ -930,8 +926,8 @@ test("WG, AWG, Shadowsocks and VLESS share the compact protocol command center",
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
   const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), readStyles()]);
-  assert.match(page, /Локальный resolver VPS настраивается автоматически/);
-  assert.match(page, /DNS самого VPS будет настроен автоматически с проверкой и откатом/);
+  assert.match(page, /Настройка будет применена только к выбранным защищённым каналам/);
+  assert.doesNotMatch(page, /DNS самого VPS|system_resolver|apply_system/);
   assert.match(page, /DNS новых профилей/);
   assert.match(page, /clientProtocolFilter/);
   assert.match(page, /clientStateFilter/);
@@ -1205,9 +1201,9 @@ test("legacy users beta surface and orchestration are removed", async () => {
   await assert.rejects(readFileText("app/views/users/users-view.tsx"), { code: "ENOENT" });
 });
 
-test("direct DNS follows installed protected channels and security lives under system", async () => {
+test("channel DNS follows installed protected channels and security lives under system", async () => {
   const navigation = await read("app/components/gate-navigation.tsx");
-  assert.match(navigation, /transports\.length > 0[\s\S]*Защищённые каналы[\s\S]*DNS прямых каналов/);
+  assert.match(navigation, /transports\.length > 0[\s\S]*Защищённые каналы[\s\S]*DNS каналов/);
   assert.match(navigation, /<NavGroup label="SYSTEM">[\s\S]*label="Безопасность"[\s\S]*label="Приложение"/);
   assert.doesNotMatch(navigation, /<NavGroup label="INFRASTRUCTURE">/);
 });

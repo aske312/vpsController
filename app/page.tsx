@@ -26,6 +26,15 @@ function reloadWithoutCache(message: string) {
   target.searchParams.set("_refresh", Date.now().toString());
   window.location.replace(target.toString());
 }
+
+const TECHNICAL_ERROR = /(?:\n|traceback|systemctl|journalctl|apt(?:-get)?|dpkg|stderr|stdout|exit status|failed to start|reading package lists|building dependency tree)/i;
+function publicError(message: string, status: number) {
+  const value = message.trim();
+  if (status >= 500 || TECHNICAL_ERROR.test(value) || /^(?:bad gateway|internal server error)$/i.test(value)) {
+    return "Команда завершилась с ошибкой. Технические сведения сохранены в журнале.";
+  }
+  return value || "Команда не выполнена.";
+}
 const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-HISTORY_SAMPLES);
 type GeneratedProfile = { id: string; name: string; filename: string; config: string };
 export default function Home() {
@@ -130,7 +139,7 @@ export default function Home() {
       const raw = await response.text();
       let detail = raw;
       try { detail = (JSON.parse(raw) as { detail?: string }).detail || raw; } catch { /* Plain-text API error. */ }
-      throw new Error(response.status === 401 ? "Неверный токен администратора" : detail || `Ошибка ${response.status}`);
+      throw new Error(response.status === 401 ? "Неверный токен администратора" : publicError(detail, response.status));
     }
     return response.json();
   }, [token]);

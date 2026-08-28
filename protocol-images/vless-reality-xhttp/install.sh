@@ -240,6 +240,9 @@ ${CDN_DOMAIN} {
 }
 EOF
   mv -f -- "${CADDY_SNIPPET}.tmp" "${CADDY_SNIPPET}"
+  # reality.env is deliberately created under umask 077.  Do not let that
+  # private umask make the imported Caddy snippet unreadable by User=caddy.
+  chmod 0644 "${CADDY_SNIPPET}"
 else
   rm -f -- "${CADDY_SNIPPET}" "${CADDY_SNIPPET}.tmp"
 fi

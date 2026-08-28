@@ -2351,7 +2351,6 @@ class DnsCustomResolver(BaseModel):
 
 class DnsSettingsUpdate(BaseModel):
     selected_id: str = Field(min_length=2, max_length=64, pattern=r"^[a-z0-9-]+$")
-    apply_system: bool = True
     apply_wg: bool = True
     apply_awg: bool = True
     apply_shadowsocks: bool = True
@@ -2396,7 +2395,6 @@ def dns_status(_: None = Depends(require_token)) -> dict:
     }
     return {
         "settings": settings,
-        "system_resolver": system_dns_status(),
         "providers": providers,
         "protocol_effect": effects,
         "protocol_effect_details": {
@@ -2442,15 +2440,12 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
     env_original = ENV_FILE.read_bytes() if ENV_FILE.exists() else None
     vrx_original = VLESS_CONFIG.read_bytes() if data["apply_vrx"] and VLESS_CONFIG.exists() else None
     settings_original = DNS_SETTINGS_FILE.read_bytes() if DNS_SETTINGS_FILE.exists() else None
-    system_original = capture_system_dns_state() if data["apply_system"] else None
     temporary = DNS_SETTINGS_FILE.with_suffix(".tmp")
     try:
         if env_updates:
             persist_env_values(env_updates)
         if vrx_original is not None:
             apply_vrx_dns(vrx_servers)
-        if data["apply_system"]:
-            apply_system_dns(selected_addresses)
         DNS_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
         temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         os.chmod(temporary, 0o600)
@@ -2476,8 +2471,6 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
                 restart_vless_service()
             except Exception:
                 logger.exception("VRX restart failed during DNS rollback")
-        if system_original is not None:
-            restore_system_dns_state(system_original)
         detail = exc.detail if isinstance(exc, HTTPException) else "Не удалось сохранить DNS; предыдущие настройки восстановлены"
         status_code = exc.status_code if isinstance(exc, HTTPException) else 500
         raise HTTPException(status_code=status_code, detail=detail) from exc
@@ -2690,97 +2683,12 @@ def configured_int(values: dict[str, str], name: str, fallback: int) -> int:
         return fallback
 
 
-SYSTEM_DNS_DROPIN = Path("/etc/systemd/resolved.conf.d/312-net.conf")
-SYSTEM_RESOLV_CONF = Path("/etc/resolv.conf")
-
-
-def system_dns_mode() -> str:
-    resolved = subprocess.run(
-        ["systemctl", "is-active", "systemd-resolved.service"],
-        capture_output=True, text=True, timeout=5, check=False,
-    )
-    return "systemd-resolved" if resolved.stdout.strip() == "active" else "resolv.conf"
-
-
-def system_dns_status() -> dict:
-    mode = system_dns_mode()
-    servers: list[str] = []
-    if mode == "systemd-resolved":
-        result = subprocess.run(["resolvectl", "dns"], capture_output=True, text=True, timeout=5, check=False)
-        for value in re.findall(r"(?<![\w:])(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-fA-F:]{2,})(?![\w:])", result.stdout):
-            try:
-                servers.append(str(ipaddress.ip_address(value)))
-            except ValueError:
-                continue
-    try:
-        source = SYSTEM_RESOLV_CONF.read_text(encoding="utf-8", errors="replace")
-        for value in re.findall(r"^nameserver\s+(\S+)", source, re.MULTILINE):
-            try:
-                servers.append(str(ipaddress.ip_address(value.split("%", 1)[0])))
-            except ValueError:
-                continue
-    except OSError:
-        pass
-    return {
-        "mode": mode,
-        "servers": list(dict.fromkeys(servers)),
-        "managed": SYSTEM_DNS_DROPIN.exists() if mode == "systemd-resolved" else "312.net managed DNS" in (source if "source" in locals() else ""),
-        "available": mode == "systemd-resolved" or (SYSTEM_RESOLV_CONF.exists() and not SYSTEM_RESOLV_CONF.is_symlink()),
-    }
-
-
-def capture_system_dns_state() -> dict:
-    return {
-        "mode": system_dns_mode(),
-        "dropin": SYSTEM_DNS_DROPIN.read_bytes() if SYSTEM_DNS_DROPIN.exists() else None,
-        "resolv": SYSTEM_RESOLV_CONF.read_bytes() if SYSTEM_RESOLV_CONF.exists() and not SYSTEM_RESOLV_CONF.is_symlink() else None,
-    }
-
-
-def apply_system_dns(addresses: list[str]) -> None:
-    values = [str(ipaddress.ip_address(value)) for value in addresses]
-    if not values:
-        raise HTTPException(status_code=422, detail="Для DNS самого VPS нужен хотя бы один IP-адрес")
-    if system_dns_mode() == "systemd-resolved":
-        SYSTEM_DNS_DROPIN.parent.mkdir(parents=True, exist_ok=True)
-        temporary = SYSTEM_DNS_DROPIN.with_suffix(".tmp")
-        temporary.write_text("[Resolve]\nDNS=" + " ".join(values) + "\nFallbackDNS=\n", encoding="utf-8")
-        os.chmod(temporary, 0o644)
-        temporary.replace(SYSTEM_DNS_DROPIN)
-        result = subprocess.run(["systemctl", "restart", "systemd-resolved.service"], capture_output=True, text=True, timeout=20, check=False)
-        if result.returncode:
-            raise RuntimeError(result.stderr.strip() or "systemd-resolved не перезапустился")
-    else:
-        if SYSTEM_RESOLV_CONF.is_symlink():
-            raise HTTPException(status_code=409, detail="DNS VPS управляется внешним resolver; автоматическое изменение отключено")
-        temporary = SYSTEM_RESOLV_CONF.with_name("resolv.conf.312-net.tmp")
-        temporary.write_text("# 312.net managed DNS\n" + "".join(f"nameserver {value}\n" for value in values), encoding="utf-8")
-        os.chmod(temporary, 0o644)
-        temporary.replace(SYSTEM_RESOLV_CONF)
-    socket.getaddrinfo("github.com", 443)
-
-
-def restore_system_dns_state(state: dict) -> None:
-    try:
-        if state.get("mode") == "systemd-resolved":
-            if state.get("dropin") is None:
-                SYSTEM_DNS_DROPIN.unlink(missing_ok=True)
-            else:
-                SYSTEM_DNS_DROPIN.parent.mkdir(parents=True, exist_ok=True)
-                SYSTEM_DNS_DROPIN.write_bytes(state["dropin"])
-            subprocess.run(["systemctl", "restart", "systemd-resolved.service"], capture_output=True, timeout=20, check=False)
-        elif state.get("resolv") is not None and not SYSTEM_RESOLV_CONF.is_symlink():
-            SYSTEM_RESOLV_CONF.write_bytes(state["resolv"])
-            os.chmod(SYSTEM_RESOLV_CONF, 0o644)
-    except OSError:
-        logger.exception("Unable to restore system DNS state")
-
-
 def read_dns_settings() -> dict:
-    defaults = {"selected_id": "yandex-basic", "apply_system": True, "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "prefer_encrypted": False, "fallback_enabled": True, "custom": None}
+    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "prefer_encrypted": False, "fallback_enabled": True, "custom": None}
     try:
         saved = json.loads(DNS_SETTINGS_FILE.read_text(encoding="utf-8"))
-        return {**defaults, **saved}
+        # Keep only supported channel keys when reading older settings files.
+        return {key: value for key, value in {**defaults, **saved}.items() if key in defaults}
     except (OSError, json.JSONDecodeError, TypeError):
         return defaults
 
