@@ -3,7 +3,7 @@
 import { formatModuleVersion } from "../../lib/format-version";
 import { bytes, duration } from "../../lib/control-plane-ui";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type View = "overview" | "profiles" | "channels" | "dns" | "routing";
@@ -127,6 +127,9 @@ export function MihomoPage({
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [dnsPolicy, setDnsPolicy] = useState<PolicySettings | null>(null);
   const [routingPolicy, setRoutingPolicy] = useState<PolicySettings | null>(null);
+  const [routingDraft, setRoutingDraft] = useState<Record<string, string | number | boolean>>({});
+  const [routingDirty, setRoutingDirty] = useState(false);
+  const routingDirtyRef = useRef(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -184,6 +187,7 @@ export function MihomoPage({
       setProfiles((nextProfiles as { items: Profile[] }).items || []);
       setDnsPolicy(nextDns as PolicySettings);
       setRoutingPolicy(nextRouting as PolicySettings);
+      if (!routingDirtyRef.current) setRoutingDraft({ ...(nextRouting as PolicySettings).values });
       const profileItems = (nextProfiles as { items: Profile[] }).items || [];
       const statsEntries = await Promise.all(profileItems.map(async (profile) => {
         try { return [profile.id, await request(`/mihomo/profiles/${profile.id}/stats`)] as const; }
@@ -200,6 +204,34 @@ export function MihomoPage({
     const timer = window.setInterval(() => void refresh(), 15000);
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [refresh]);
+
+  function updateRoutingDraft(key: string, value: string | number | boolean) {
+    setRoutingDraft((current) => ({ ...current, [key]: value }));
+    routingDirtyRef.current = true;
+    setRoutingDirty(true);
+  }
+
+  async function saveRoutingWorkspace(event: FormEvent) {
+    event.preventDefault();
+    const operationId = "settings:routing-policy";
+    publishMihomoOperation(operationId, "Маршрутизация Mihomo", "running", "Сохраняем правила маршрутизации…");
+    setBusy(operationId);
+    setError("");
+    try {
+      await request("/mihomo/routing/settings", { method: "PATCH", body: JSON.stringify({ values: routingDraft }) });
+      routingDirtyRef.current = false;
+      setRoutingDirty(false);
+      await refresh();
+      setNotice("Маршрутизация Mihomo сохранена. Обновите подписку в клиенте.");
+      publishMihomoOperation(operationId, "Маршрутизация Mihomo", "success", "Правила сохранены");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Маршрутизация не сохранена";
+      setError(message);
+      publishMihomoOperation(operationId, "Маршрутизация Mihomo", "error", message);
+    } finally {
+      setBusy("");
+    }
+  }
 
   async function requestCoreRemoval() {
     setError("");
@@ -809,14 +841,43 @@ export function MihomoPage({
       )}
 
       {view === "routing" && (
-        <><PolicyPanel
-          code="RT"
-          title="Маршрутизация Mihomo"
-          description="Создаётся автоматически вместе с первым каналом. Здесь задаётся базовая стратегия выбора внутренних каналов для всех профилей."
-          ready={policiesReady}
-          values={routingPolicy?.values}
-          onSettings={() => void openPolicySettings("routing")}
-        /><article className="mihomoPresetRoutingPanel"><header><div><p className="eyebrow">PROFILE PRESETS</p><h2>Быстрые профили</h2><p>У каждого пресета собственный набор соединений и стратегия переключения.</p></div><button className="primaryButton" type="button" onClick={openPresetSettings}>Настроить пресеты</button></header><div>{profilePresets.map((preset) => <div key={preset.id}><b>{preset.name}</b><small>{preset.strategy}</small><span>{preset.components.map((item) => `${channelShort[item.id] || item.id}${item.cdn ? " CDN" : ""}`).join(" · ")}</span></div>)}</div></article></>
+        <form className="mihomoRoutingWorkspace" onSubmit={saveRoutingWorkspace}>
+          <header className="mihomoRoutingHeader">
+            <div><p className="eyebrow">TRAFFIC ROUTING</p><h2>Маршрутизация соединений</h2><p>Выберите, что открывать напрямую. Остальной трафик будет передан в защищённую группу GATE.312.</p></div>
+            <span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "АКТИВНА" : "ОЖИДАНИЕ"}</span>
+          </header>
+
+          <section className="mihomoRoutingSection">
+            <div className="mihomoRoutingSectionTitle"><div><b>Открывать без VPN</b><small>Готовые списки поддерживаются панелью и применяются ко всем Mihomo-профилям.</small></div><span>{["direct_ru_sites", "direct_ru_banks", "direct_ru_marketplaces"].filter((key) => Boolean(routingDraft[key])).length} из 3 включено</span></div>
+            <div className="mihomoRouteCards">
+              {[
+                { key: "direct_ru_sites", code: "RU", title: "Российские сайты", text: "Домены .ru, .рф, .su, VK, Яндекс и российские IP-адреса." },
+                { key: "direct_ru_banks", code: "BANK", title: "Банки и платежи", text: "Банки РФ, СБП, НСПК, карты Мир и финансовые сервисы." },
+                { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины и маркетплейсы", text: "Ozon, Wildberries, Маркет, Avito и крупные интернет-магазины." },
+              ].map((item) => <label key={item.key} className={Boolean(routingDraft[item.key]) ? "is-enabled" : ""}>
+                <span className="mihomoRouteCode">{item.code}</span><span><b>{item.title}</b><small>{item.text}</small></span>
+                <input type="checkbox" checked={Boolean(routingDraft[item.key])} onChange={(event) => updateRoutingDraft(item.key, event.target.checked)} />
+              </label>)}
+            </div>
+          </section>
+
+          <section className="mihomoRoutingColumns">
+            <article><div className="mihomoRoutingSectionTitle"><div><b>Выбор защищённого канала</b><small>Как Mihomo выбирает соединение внутри профиля.</small></div></div><div className="mihomoRoutingFields">
+              <label><span>Режим</span><select value={String(routingDraft.mode || "rule")} onChange={(event) => updateRoutingDraft("mode", event.target.value)}><option value="rule">По правилам</option><option value="global">Весь трафик через VPN</option></select></label>
+              <label><span>Стратегия</span><select value={String(routingDraft.strategy || "fallback")} onChange={(event) => updateRoutingDraft("strategy", event.target.value)}><option value="fallback">Надёжный канал + резерв</option><option value="url-test">Самый быстрый канал</option><option value="select">Выбирать вручную</option></select></label>
+              <label><span>Адрес проверки</span><input value={String(routingDraft.test_url || "")} onChange={(event) => updateRoutingDraft("test_url", event.target.value)} /></label>
+              <label><span>Проверять каждые, сек.</span><input type="number" min={30} max={3600} value={Number(routingDraft.interval || 180)} onChange={(event) => updateRoutingDraft("interval", Number(event.target.value))} /></label>
+            </div></article>
+            <article><div className="mihomoRoutingSectionTitle"><div><b>Быстрые профили</b><small>Транспорты по умолчанию и отдельные пресеты.</small></div><button type="button" className="ghostButton" onClick={openPresetSettings}>Настроить пресеты</button></div><div className="mihomoRoutingFields">
+              <label><span>Основной транспорт</span><select value={String(routingDraft.preset_primary || "transport-reality")} onChange={(event) => updateRoutingDraft("preset_primary", event.target.value)}>{[{v:"transport-reality",l:"VLESS"},{v:"transport-awg",l:"AmneziaWG"},{v:"transport-wg",l:"WireGuard"},{v:"transport-shadowsocks",l:"Shadowsocks"}].map((item) => <option key={item.v} value={item.v}>{item.l}</option>)}</select></label>
+              <label><span>Резервный транспорт</span><select value={String(routingDraft.preset_fallback || "transport-awg")} onChange={(event) => updateRoutingDraft("preset_fallback", event.target.value)}>{[{v:"transport-awg",l:"AmneziaWG"},{v:"transport-reality",l:"VLESS"},{v:"transport-wg",l:"WireGuard"},{v:"transport-shadowsocks",l:"Shadowsocks"}].map((item) => <option key={item.v} value={item.v}>{item.l}</option>)}</select></label>
+              <label className="is-wide"><span>CDN-домен для новых профилей</span><input value={String(routingDraft.preset_cdn_domain || "")} onChange={(event) => updateRoutingDraft("preset_cdn_domain", event.target.value)} /></label>
+            </div></article>
+          </section>
+
+          <details className="mihomoAdvancedRules"><summary><span><b>Дополнительные правила</b><small>Для опытных пользователей</small></span><i>Открыть редактор</i></summary><label><span>По одному правилу Mihomo на строку</span><textarea rows={7} value={String(routingDraft.rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nDOMAIN,api.example.com,DIRECT"} onChange={(event) => updateRoutingDraft("rules", event.target.value)} /></label></details>
+          <footer className="mihomoRoutingFooter"><span>{routingDirty ? "Есть несохранённые изменения" : "Настройки сохранены. После изменения обновите подписку в клиенте."}</span><button className="primaryButton" type="submit" disabled={!routingDirty || busy === "settings:routing-policy"}>{busy === "settings:routing-policy" ? "Сохранение…" : "Сохранить маршрутизацию"}</button></footer>
+        </form>
       )}
 
       {editing && createPortal(
