@@ -11,6 +11,7 @@ import os
 import secrets
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
@@ -560,11 +561,12 @@ def validate_profile_presets(values: list[dict[str, Any]]) -> list[dict[str, Any
                 continue
             used_singletons.add(component_id)
             is_cdn = bool(component.get("cdn", False))
+            is_tls = bool(component.get("tls", False))
             transport = str(component.get("transport", ""))
-            allowed_transports = {"xhttp", "websocket", "httpupgrade", "grpc"} if is_cdn else {"xhttp", "raw", "grpc"}
+            allowed_transports = {"xhttp", "websocket", "httpupgrade", "grpc"} if is_cdn or is_tls else {"xhttp", "raw", "grpc"}
             if transport and transport not in allowed_transports:
                 raise HTTPException(status_code=422, detail=f"Unsupported VLESS transport in preset {preset_id}")
-            components.append({"id": component_id, "cdn": is_cdn, "transport": transport, "label": str(component.get("label", ""))[:80]})
+            components.append({"id": component_id, "cdn": is_cdn, "tls": is_tls, "transport": transport, "label": str(component.get("label", ""))[:80]})
         if not components:
             raise HTTPException(status_code=422, detail=f"Preset {preset_id} has no connections")
         result.append({"id": preset_id, "name": str(value.get("name") or f"Preset {index + 1}")[:80], "description": str(value.get("description", ""))[:160], "strategy": strategy, "components": components})
@@ -720,6 +722,20 @@ def public_endpoint() -> str:
         if value:
             return value
     return "SERVER_IP"
+
+
+def direct_tls_domain_ready(domain: str) -> bool:
+    try:
+        target = {row[4][0] for row in socket.getaddrinfo(domain, 443, type=socket.SOCK_STREAM)}
+        endpoint = public_endpoint().strip("[]")
+        try:
+            ipaddress.ip_address(endpoint)
+            expected = {endpoint}
+        except ValueError:
+            expected = {row[4][0] for row in socket.getaddrinfo(endpoint, 443, type=socket.SOCK_STREAM)}
+        return bool(target & expected)
+    except socket.gaierror:
+        return False
 
 
 def module_is_installed(module_id: str) -> bool:
@@ -1374,9 +1390,19 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
     if not 1 <= concurrency <= 64:
         raise HTTPException(status_code=422, detail="XHTTP concurrency must be between 1 and 64")
     route_mode = str(result.get("route_mode", "direct")) if "route_mode" in values else ("both" if bool(result.get("cdn_enabled", False)) else "direct")
-    if route_mode not in {"direct", "cdn", "both"}:
+    if route_mode not in {"direct", "tls", "cdn", "both"}:
         raise HTTPException(status_code=422, detail="Unsupported VLESS route mode")
     cdn_enabled = route_mode in {"cdn", "both"}
+    tls_enabled = route_mode == "tls"
+    tls_domain = str(result.get("tls_domain", "")).strip().lower()
+    tls_transport = str(result.get("tls_transport", "xhttp"))
+    tls_xhttp_mode = str(result.get("tls_xhttp_mode", "auto"))
+    if tls_transport not in {"websocket", "xhttp", "httpupgrade", "grpc"} or tls_xhttp_mode not in {"auto", "stream-one", "stream-up", "packet-up"}:
+        raise HTTPException(status_code=422, detail="Unsupported TLS transport")
+    if tls_enabled and not re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", tls_domain):
+        raise HTTPException(status_code=422, detail="For TLS specify a valid direct hostname")
+    if tls_enabled and not direct_tls_domain_ready(tls_domain):
+        raise HTTPException(status_code=422, detail="TLS hostname must point directly to this VPS")
     cdn_domain = str(result.get("cdn_domain", "")).strip().lower()
     cdn_transport = str(result.get("cdn_transport", "websocket"))
     if cdn_transport not in {"websocket", "xhttp", "httpupgrade", "grpc"}:
@@ -1386,7 +1412,7 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
         raise HTTPException(status_code=422, detail="Unsupported CDN XHTTP mode")
     if cdn_enabled and not re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", cdn_domain):
         raise HTTPException(status_code=422, detail="For CDN specify a valid hostname")
-    result.update({"route_mode": route_mode, "port": port, "target": target, "transport": transport, "transport_path": path, "xhttp_mode": mode, "xpadding": padding, "xmux_concurrency": concurrency, "cdn_enabled": cdn_enabled, "cdn_domain": cdn_domain, "cdn_transport": cdn_transport, "cdn_xhttp_mode": cdn_xhttp_mode})
+    result.update({"route_mode": route_mode, "port": port, "target": target, "transport": transport, "transport_path": path, "xhttp_mode": mode, "xpadding": padding, "xmux_concurrency": concurrency, "tls_enabled": tls_enabled, "tls_domain": tls_domain, "tls_transport": tls_transport, "tls_xhttp_mode": tls_xhttp_mode, "cdn_enabled": cdn_enabled, "cdn_domain": cdn_domain, "cdn_transport": cdn_transport, "cdn_xhttp_mode": cdn_xhttp_mode})
     return result
 
 
@@ -1425,6 +1451,15 @@ def write_mihomo_vless_cdn(connection_id: str, enabled: bool, domain: str, path:
     else:
         descriptor.unlink(missing_ok=True)
     rebuild_vless_cdn_snippet()
+
+
+def edge_stream(transport: str, path: str, xhttp_mode: str) -> dict[str, Any]:
+    stream: dict[str, Any] = {"network": transport, "security": "none"}
+    if transport == "xhttp": stream["xhttpSettings"] = {"path": path, "mode": xhttp_mode}
+    elif transport == "grpc": stream["grpcSettings"] = {"serviceName": path.lstrip("/"), "multiMode": False}
+    elif transport == "httpupgrade": stream["httpupgradeSettings"] = {"path": path}
+    else: stream.update({"network": "websocket", "wsSettings": {"path": path}})
+    return stream
 
 
 def rebuild_vless_cdn_snippet() -> None:
@@ -1496,6 +1531,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         raise RuntimeError(f"VLESS port {direct_port} is already used")
     port_allocation_config = {**config, "inbounds": [*config.get("inbounds", []), {"port": direct_port}]}
     cdn_port = next_vless_port(port_allocation_config, int(core["cdn_port_start"])) if settings["cdn_enabled"] else 0
+    tls_port = next_vless_port(port_allocation_config, int(core.get("tls_port_start", 11443))) if settings["tls_enabled"] else 0
     env = reality_env()
     private_key, public_key = env.get("PRIVATE_KEY", ""), env.get("PUBLIC_KEY", "")
     if not private_key or not public_key:
@@ -1505,6 +1541,9 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     direct_tag = f"mihomo-vless-{connection_id}"
     config["inbounds"].append({"tag": direct_tag, "listen": "::", "port": direct_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": vless_stream(settings, private_key, env.get("SHORT_ID", "")), "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}})
     cdn_path = "/" + secrets.token_hex(16)
+    tls_path = "/" + secrets.token_hex(16)
+    if settings["tls_enabled"]:
+        config["inbounds"].append({"tag": f"mihomo-vless-tls-{connection_id}", "listen": "127.0.0.1", "port": tls_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": edge_stream(settings["tls_transport"], tls_path, settings["tls_xhttp_mode"])})
     if settings["cdn_enabled"]:
         transport = settings["cdn_transport"]
         cdn_settings: dict[str, Any] = {"network": transport, "security": "none"}
@@ -1521,19 +1560,21 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     original_config = config_path.read_bytes()
     try:
         write_mihomo_vless_cdn(connection_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"])
+        write_mihomo_vless_cdn(f"tls-{connection_id}", settings["tls_enabled"], settings["tls_domain"], tls_path, tls_port, settings["tls_transport"])
         apply_reality_config(config_path, config)
-        if settings["cdn_enabled"]:
+        if settings["cdn_enabled"] or settings["tls_enabled"]:
             run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
             run("systemctl", "reload", "caddy.service", check=True)
     except Exception:
         write_mihomo_vless_cdn(connection_id, False, "", "", 0)
+        write_mihomo_vless_cdn(f"tls-{connection_id}", False, "", "", 0)
         config_path.write_bytes(original_config)
         os.chmod(config_path, 0o640)
         shutil.chown(config_path, user="root", group="nogroup")
         run("systemctl", "restart", "vps-control-mihomo-reality.service")
         run("systemctl", "reload", "caddy.service")
         raise
-    return {"uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "route_mode": settings["route_mode"], "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": cdn_path, "cdn_transport": settings["cdn_transport"], "cdn_xhttp_mode": settings["cdn_xhttp_mode"]}
+    return {"uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "route_mode": settings["route_mode"], "tls_enabled": settings["tls_enabled"], "tls_domain": settings["tls_domain"], "tls_port": tls_port, "tls_path": tls_path, "tls_transport": settings["tls_transport"], "tls_xhttp_mode": settings["tls_xhttp_mode"], "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": cdn_path, "cdn_transport": settings["cdn_transport"], "cdn_xhttp_mode": settings["cdn_xhttp_mode"]}
 
 
 def remove_reality_credential(profile_id: str, credential: dict[str, Any]) -> None:
@@ -1542,12 +1583,13 @@ def remove_reality_credential(profile_id: str, credential: dict[str, Any]) -> No
     try:
         user_id = credential.get("uuid")
         direct_tag = credential.get("direct_tag")
-        config["inbounds"] = [item for item in config.get("inbounds", []) if not (direct_tag and item.get("tag") in {direct_tag, str(direct_tag).replace("mihomo-vless-", "mihomo-vless-cdn-")}) and not (not direct_tag and any(client.get("id") == user_id for client in item.get("settings", {}).get("clients", [])))]
+        config["inbounds"] = [item for item in config.get("inbounds", []) if not (direct_tag and item.get("tag") in {direct_tag, str(direct_tag).replace("mihomo-vless-", "mihomo-vless-cdn-"), str(direct_tag).replace("mihomo-vless-", "mihomo-vless-tls-")}) and not (not direct_tag and any(client.get("id") == user_id for client in item.get("settings", {}).get("clients", [])))]
         connection_id = str(direct_tag or "").removeprefix("mihomo-vless-")
         if connection_id:
             write_mihomo_vless_cdn(connection_id, False, "", "", 0)
+            write_mihomo_vless_cdn(f"tls-{connection_id}", False, "", "", 0)
         apply_reality_config(config_path, config)
-        if credential.get("cdn_enabled"):
+        if credential.get("cdn_enabled") or credential.get("tls_enabled"):
             run("systemctl", "reload", "caddy.service")
     except (TypeError, KeyError, IndexError):
         pass
@@ -1994,6 +2036,10 @@ def render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
     return lines
 
 
+def render_vless_tls(credential: dict[str, Any], proxy_name: str) -> list[str]:
+    return render_vless_cdn({**credential, "cdn_domain": credential.get("tls_domain", ""), "cdn_path": credential.get("tls_path", "/"), "cdn_transport": credential.get("tls_transport", "xhttp"), "cdn_xhttp_mode": credential.get("tls_xhttp_mode", "auto")}, proxy_name)
+
+
 def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     default_names = {
         "transport-awg": "AWG",
@@ -2007,7 +2053,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     if not connections:
         raise HTTPException(status_code=409, detail="У профиля нет подключений Mihomo")
     used_names: set[str] = set()
-    rendered: list[tuple[dict[str, Any], str | None, str | None]] = []
+    rendered: list[tuple[dict[str, Any], str | None, str | None, str | None]] = []
     for index, connection in enumerate(connections):
         component = str(connection["component"])
         base = str(connection.get("name") or default_names[component]).strip()
@@ -2018,6 +2064,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
             suffix += 1
         used_names.add(name)
         direct_name: str | None = name
+        tls_name: str | None = None
         cdn_name: str | None = None
         credential = connection.get("credential", {})
         if component == "transport-reality" and credential.get("cdn_enabled"):
@@ -2028,7 +2075,9 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
             elif route_mode == "both":
                 cdn_name = f"{name} · CDN"
                 used_names.add(cdn_name)
-        rendered.append((connection, direct_name, cdn_name))
+        if component == "transport-reality" and str(connection.get("settings", {}).get("route_mode") or credential.get("route_mode")) == "tls":
+            direct_name, cdn_name, tls_name = None, None, name
+        rendered.append((connection, direct_name, cdn_name, tls_name))
     routing = {**routing_settings(), **item.get("routing", {})}
     mode = str(routing.get("mode", "rule"))
     lines = [
@@ -2059,11 +2108,13 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         f"    - {q(dns['fallback'])}",
     ]
     lines.append("proxies:")
-    for connection, name, cdn_name in rendered:
+    for connection, name, cdn_name, tls_name in rendered:
         if name:
             lines.extend(render_proxy(str(connection["component"]), connection.get("credential", {}), name))
         if cdn_name:
             lines.extend(render_vless_cdn(connection.get("credential", {}), cdn_name))
+        if tls_name:
+            lines.extend(render_vless_tls(connection.get("credential", {}), tls_name))
     group_type = str(routing.get("strategy", "fallback"))
     lines += [
         "proxy-groups:",
@@ -2071,11 +2122,13 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         f"    type: {group_type}",
         "    proxies:",
     ]
-    for _, name, cdn_name in rendered:
+    for _, name, cdn_name, tls_name in rendered:
         if name:
             lines.append(f"      - {q(name)}")
         if cdn_name:
             lines.append(f"      - {q(cdn_name)}")
+        if tls_name:
+            lines.append(f"      - {q(tls_name)}")
     if group_type in ("fallback", "url-test"):
         lines += [
             f"    url: {q(routing.get('test_url', 'https://www.gstatic.com/generate_204'))}",

@@ -851,7 +851,7 @@ test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", a
   assert.match(manager, /--retry 18 --retry-all-errors --retry-delay 5/);
 });
 
-test("VLESS image supports independent direct and CDN profiles", async () => {
+test("VLESS image supports independent REALITY, TLS and CDN profiles", async () => {
   const mihomoManager = await read("protocol-images/mihomo/manager.py");
   const [bootstrap, manager, install, uninstall, api, caddy, config, page, protocolView, protocolCss] = await Promise.all([
     read("scripts/install-panel.sh"), read("scripts/vps-control.sh"),
@@ -876,6 +876,9 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.match(uninstall, /vless-cdn\.caddy/);
   assert.match(api, /def vless_reality_inbound/);
   assert.match(api, /def vless_cdn_client_query/);
+  assert.match(api, /def vless_tls_client_query/);
+  assert.match(api, /def configure_vless_tls/);
+  assert.match(install, /VLESS_TLS_DOMAIN/);
   assert.match(api, /"key": "cdn_enabled"/);
   assert.match(api, /"key": "cdn_domain"/);
   assert.match(api, /"key": "cdn_transport"/);
@@ -1140,7 +1143,7 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   const settingKeys = manifest.settings.map((item) => item.key);
   const connectionKeys = manifest.connection_settings.map((item) => item.key);
   assert.equal(manifest.name, "VLESS");
-  assert.equal(manifest.version, "1.1.0");
+  assert.equal(manifest.version, "1.2.0");
   for (const key of ["port_start", "cdn_port_start", "dns", "loglevel"]) {
     assert.ok(settingKeys.includes(key), `missing Mihomo VLESS core setting ${key}`);
   }
@@ -1176,6 +1179,8 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(view, /\["xhttp_mode", "xpadding", "xmux_concurrency"\]/);
   assert.match(manager, /Все VLESS/);
   assert.match(manager, /httpupgrade/);
+  assert.match(manager, /render_vless_tls/);
+  assert.match(manager, /mihomo-vless-tls-/);
   assert.match(view, /VLESS CDN · HTTPUpgrade/);
   assert.match(manager, /def default_profile_presets/);
   assert.match(manager, /\/api\/mihomo\/routing\/presets/);

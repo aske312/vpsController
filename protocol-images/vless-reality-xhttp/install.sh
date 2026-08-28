@@ -17,6 +17,12 @@ CDN_DOMAIN="$(setting VLESS_CDN_DOMAIN '')"
 CDN_PORT="$(setting VLESS_CDN_PORT 10087)"
 CDN_TRANSPORT="$(setting VLESS_CDN_TRANSPORT websocket)"
 CDN_XHTTP_MODE="$(setting VLESS_CDN_XHTTP_MODE auto)"
+TLS_DOMAIN="$(setting VLESS_TLS_DOMAIN '')"
+TLS_PORT="$(setting VLESS_TLS_PORT 10088)"
+TLS_TRANSPORT="$(setting VLESS_TLS_TRANSPORT xhttp)"
+TLS_XHTTP_MODE="$(setting VLESS_TLS_XHTTP_MODE auto)"
+TLS_ENABLED="no"
+[[ -z "${TLS_DOMAIN}" ]] || TLS_ENABLED="yes"
 CDN_ENABLED="no"
 [[ -z "${CDN_DOMAIN}" ]] || CDN_ENABLED="yes"
 if [[ -s "${CONFIG_DIR}/reality.env" ]]; then
@@ -25,11 +31,17 @@ if [[ -s "${CONFIG_DIR}/reality.env" ]]; then
   saved_cdn_enabled="$(sed -n 's/^CDN_ENABLED=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
   saved_cdn_transport="$(sed -n 's/^CDN_TRANSPORT=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
   saved_cdn_xhttp_mode="$(sed -n 's/^CDN_XHTTP_MODE=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
+  saved_tls_domain="$(sed -n 's/^TLS_DOMAIN=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
+  saved_tls_enabled="$(sed -n 's/^TLS_ENABLED=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
+  saved_tls_transport="$(sed -n 's/^TLS_TRANSPORT=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
   [[ -z "${saved_cdn_domain}" ]] || CDN_DOMAIN="${saved_cdn_domain}"
   [[ -z "${saved_cdn_port}" ]] || CDN_PORT="${saved_cdn_port}"
   [[ -z "${saved_cdn_enabled}" ]] || CDN_ENABLED="${saved_cdn_enabled}"
   [[ -z "${saved_cdn_transport}" ]] || CDN_TRANSPORT="${saved_cdn_transport}"
   [[ -z "${saved_cdn_xhttp_mode}" ]] || CDN_XHTTP_MODE="${saved_cdn_xhttp_mode}"
+  [[ -z "${saved_tls_domain}" ]] || TLS_DOMAIN="${saved_tls_domain}"
+  [[ -z "${saved_tls_enabled}" ]] || TLS_ENABLED="${saved_tls_enabled}"
+  [[ -z "${saved_tls_transport}" ]] || TLS_TRANSPORT="${saved_tls_transport}"
 fi
 [[ "${TARGET}" != "www.microsoft.com:443" && "${TARGET}" != "www.apple.com:443" ]] || TARGET="www.intel.com:443"
 [[ "${PORT}" =~ ^[0-9]+$ && "${PORT}" -ge 1 && "${PORT}" -le 65535 ]] || { echo "Некорректный VLESS_REALITY_PORT" >&2; exit 1; }
@@ -42,6 +54,21 @@ fi
 [[ "${CDN_TRANSPORT}" == "websocket" || "${CDN_TRANSPORT}" == "xhttp" || "${CDN_TRANSPORT}" == "httpupgrade" || "${CDN_TRANSPORT}" == "grpc" ]] || { echo "Некорректный CDN transport" >&2; exit 1; }
 [[ "${CDN_XHTTP_MODE}" == "auto" || "${CDN_XHTTP_MODE}" == "stream-one" || "${CDN_XHTTP_MODE}" == "stream-up" || "${CDN_XHTTP_MODE}" == "packet-up" ]] || { echo "Некорректный CDN XHTTP mode" >&2; exit 1; }
 [[ "${CDN_ENABLED}" != "yes" || -n "${CDN_DOMAIN}" ]] || { echo "Для включения CDN необходим домен" >&2; exit 1; }
+[[ -z "${TLS_DOMAIN}" || "${TLS_DOMAIN}" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || { echo "Некорректный VLESS_TLS_DOMAIN" >&2; exit 1; }
+[[ "${TLS_PORT}" =~ ^[0-9]+$ && "${TLS_PORT}" -ge 1024 && "${TLS_PORT}" -le 65535 && "${TLS_PORT}" != "${CDN_PORT}" ]] || { echo "Некорректный VLESS_TLS_PORT" >&2; exit 1; }
+[[ "${TLS_TRANSPORT}" == "websocket" || "${TLS_TRANSPORT}" == "xhttp" || "${TLS_TRANSPORT}" == "httpupgrade" || "${TLS_TRANSPORT}" == "grpc" ]] || { echo "Некорректный TLS transport" >&2; exit 1; }
+if [[ "${TLS_ENABLED}" == "yes" ]]; then
+  if [[ -n "${CDN_DOMAIN}" && "${TLS_DOMAIN}" == "${CDN_DOMAIN}" ]]; then
+    echo "VLESS TLS пропущен: прямой TLS и CDN требуют разные домены." >&2
+    TLS_ENABLED="no"
+  fi
+  public_ipv4="$(setting PUBLIC_IPV4 '')"
+  resolved_ipv4="$(getent ahostsv4 "${TLS_DOMAIN}" 2>/dev/null | awk 'NR==1{print $1}')"
+  if [[ -z "${public_ipv4}" || "${resolved_ipv4}" != "${public_ipv4}" ]]; then
+    echo "VLESS TLS пропущен: домен ${TLS_DOMAIN} пока не указывает на IPv4 этого VPS." >&2
+    TLS_ENABLED="no"
+  fi
+fi
 TARGET_HOST="${TARGET%:*}"
 
 if ss -H -ltn "sport = :${PORT}" | grep -q . && ! systemctl is-active --quiet vps-control-vless-reality-xhttp.service 2>/dev/null; then
@@ -160,6 +187,10 @@ for pair in "CDN_TRANSPORT=${CDN_TRANSPORT}" "CDN_XHTTP_MODE=${CDN_XHTTP_MODE}";
   key="${pair%%=*}"; value="${pair#*=}"
   if grep -q "^${key}=" "${CONFIG_DIR}/reality.env"; then sed -i "s|^${key}=.*|${key}=${value}|" "${CONFIG_DIR}/reality.env"; else printf '%s=%s\n' "${key}" "${value}" >>"${CONFIG_DIR}/reality.env"; fi
 done
+for pair in "TLS_ENABLED=${TLS_ENABLED}" "TLS_DOMAIN=${TLS_DOMAIN}" "TLS_PORT=${TLS_PORT}" "TLS_PATH=${CDN_PATH}-tls" "TLS_TRANSPORT=${TLS_TRANSPORT}" "TLS_XHTTP_MODE=${TLS_XHTTP_MODE}"; do
+  key="${pair%%=*}"
+  if grep -q "^${key}=" "${CONFIG_DIR}/reality.env"; then sed -i "s|^${key}=.*|${pair}|" "${CONFIG_DIR}/reality.env"; else printf '%s\n' "${pair}" >>"${CONFIG_DIR}/reality.env"; fi
+done
 
 env_setting() {
   sed -n "s/^${1}=//p" "${CONFIG_DIR}/reality.env" | tail -n 1
@@ -181,9 +212,9 @@ if ! grep -q '^CDN_PATH=' "${CONFIG_DIR}/reality.env"; then printf 'CDN_PATH=%s\
 if ! grep -q '^XHTTP_PATH=' "${CONFIG_DIR}/reality.env"; then
   sed -i "s|^PATH=.*|XHTTP_PATH=${XHTTP_PATH}|" "${CONFIG_DIR}/reality.env"
 fi
-python3 - "${CONFIG_DIR}/config.json" "${PORT}" "${TARGET}" "${TARGET_HOST}" "${PRIVATE_KEY}" "${SHORT_ID}" "${XHTTP_PATH}" "${CDN_DOMAIN}" "${CDN_PORT}" "${CDN_PATH}" "${CDN_ENABLED}" "${CDN_TRANSPORT}" "${CDN_XHTTP_MODE}" <<'PY'
+python3 - "${CONFIG_DIR}/config.json" "${PORT}" "${TARGET}" "${TARGET_HOST}" "${PRIVATE_KEY}" "${SHORT_ID}" "${XHTTP_PATH}" "${CDN_DOMAIN}" "${CDN_PORT}" "${CDN_PATH}" "${CDN_ENABLED}" "${CDN_TRANSPORT}" "${CDN_XHTTP_MODE}" "${TLS_DOMAIN}" "${TLS_PORT}" "${CDN_PATH}-tls" "${TLS_ENABLED}" "${TLS_TRANSPORT}" "${TLS_XHTTP_MODE}" <<'PY'
 import json, sys
-output, port, target, host, private_key, short_id, path, cdn_domain, cdn_port, cdn_path, cdn_enabled, cdn_transport, cdn_xhttp_mode = sys.argv[1:]
+output, port, target, host, private_key, short_id, path, cdn_domain, cdn_port, cdn_path, cdn_enabled, cdn_transport, cdn_xhttp_mode, tls_domain, tls_port, tls_path, tls_enabled, tls_transport, tls_xhttp_mode = sys.argv[1:]
 existing_clients_by_id = {}
 try:
     with open(output, encoding="utf-8") as handle:
@@ -229,6 +260,13 @@ if cdn_enabled == "yes" and cdn_domain:
       "streamSettings": cdn_stream,
       "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}
     })
+if tls_enabled == "yes" and tls_domain:
+    tls_stream = {"network": tls_transport, "security": "none"}
+    if tls_transport == "xhttp": tls_stream["xhttpSettings"] = {"path": tls_path, "mode": tls_xhttp_mode}
+    elif tls_transport == "grpc": tls_stream["grpcSettings"] = {"serviceName": tls_path.lstrip("/"), "multiMode": False}
+    elif tls_transport == "httpupgrade": tls_stream["httpupgradeSettings"] = {"path": tls_path}
+    else: tls_stream.update({"network": "websocket", "wsSettings": {"path": tls_path}})
+    inbounds.append({"tag": "vless-tls", "listen": "127.0.0.1", "port": int(tls_port), "protocol": "vless", "settings": {"clients": existing_clients, "decryption": "none"}, "streamSettings": tls_stream})
 config = {
   "log": {"loglevel": "warning"},
   "stats": {},
@@ -255,6 +293,7 @@ if [[ -f "${CADDY_SNIPPET}" ]]; then
   cp -p -- "${CADDY_SNIPPET}" "${PREVIOUS_CADDY_SNIPPET}"
   HAD_CADDY_SNIPPET="yes"
 fi
+rm -f -- "${CADDY_SNIPPET}.tmp"
 if [[ "${CDN_ENABLED}" == "yes" && -n "${CDN_DOMAIN}" ]]; then
   cat >"${CADDY_SNIPPET}.tmp" <<EOF
 ${CDN_DOMAIN} {
@@ -264,10 +303,20 @@ ${CDN_DOMAIN} {
     respond 404
 }
 EOF
+fi
+if [[ "${TLS_ENABLED}" == "yes" && -n "${TLS_DOMAIN}" ]]; then
+  cat >>"${CADDY_SNIPPET}.tmp" <<EOF
+${TLS_DOMAIN} {
+    handle ${CDN_PATH}-tls$([[ "${TLS_TRANSPORT}" == "websocket" || "${TLS_TRANSPORT}" == "httpupgrade" ]] || printf '*') {
+        reverse_proxy $([[ "${TLS_TRANSPORT}" == "grpc" ]] && printf 'h2c://')127.0.0.1:${TLS_PORT}
+    }
+    respond 404
+}
+EOF
+fi
+if [[ -s "${CADDY_SNIPPET}.tmp" ]]; then
+  chmod 0644 "${CADDY_SNIPPET}.tmp"
   mv -f -- "${CADDY_SNIPPET}.tmp" "${CADDY_SNIPPET}"
-  # reality.env is deliberately created under umask 077.  Do not let that
-  # private umask make the imported Caddy snippet unreadable by User=caddy.
-  chmod 0644 "${CADDY_SNIPPET}"
 else
   rm -f -- "${CADDY_SNIPPET}" "${CADDY_SNIPPET}.tmp"
 fi

@@ -76,6 +76,7 @@
       "type": "text",
       "default": ""
     },
+    { "key": "preset_tls_domain", "label": "Прямой TLS-домен для быстрых профилей", "type": "text", "default": "" },
     {
       "key": "direct_ru_sites",
       "label": "Российские сайты — напрямую",

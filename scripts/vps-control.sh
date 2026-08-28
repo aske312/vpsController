@@ -35,6 +35,8 @@ VLESS_REALITY_PORT="8443"
 VLESS_REALITY_TARGET="www.intel.com:443"
 VLESS_CDN_DOMAIN=""
 VLESS_CDN_PORT="10087"
+VLESS_TLS_DOMAIN=""
+VLESS_TLS_PORT="10088"
 WG_INTERFACE="wg0"
 AWG_INTERFACE="awg0"
 WG_MTU="1280"
@@ -332,6 +334,8 @@ load_install_config() {
   [[ "${VLESS_CDN_PORT}" != "${VLESS_REALITY_PORT}" ]] || die "VLESS_CDN_PORT and VLESS_REALITY_PORT must differ."
   [[ -z "${VLESS_CDN_DOMAIN}" || "${VLESS_CDN_DOMAIN}" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] \
     || die "VLESS_CDN_DOMAIN must be a hostname without scheme, path or port."
+  [[ -z "${VLESS_TLS_DOMAIN}" || "${VLESS_TLS_DOMAIN}" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || die "VLESS_TLS_DOMAIN must be a hostname."
+  [[ "${VLESS_TLS_PORT}" =~ ^[0-9]+$ && "${VLESS_TLS_PORT}" -ge 1024 && "${VLESS_TLS_PORT}" -le 65535 ]] || die "VLESS_TLS_PORT must be between 1024 and 65535."
   [[ -z "${SERVER_COUNTRY_CODE_OVERRIDE:-}" || "${SERVER_COUNTRY_CODE_OVERRIDE}" =~ ^[A-Z]{2}$ ]] \
     || die "SERVER_COUNTRY_CODE_OVERRIDE должен содержать две латинские буквы."
 }
@@ -396,6 +400,8 @@ configure_access() {
   set_env_value "VLESS_REALITY_TARGET" "${VLESS_REALITY_TARGET}"
   set_env_value "VLESS_CDN_DOMAIN" "${VLESS_CDN_DOMAIN}"
   set_env_value "VLESS_CDN_PORT" "${VLESS_CDN_PORT}"
+  set_env_value "VLESS_TLS_DOMAIN" "${VLESS_TLS_DOMAIN}"
+  set_env_value "VLESS_TLS_PORT" "${VLESS_TLS_PORT}"
   set_env_value "WG_INTERFACE" "${WG_INTERFACE}"
   set_env_value "AWG_INTERFACE" "${AWG_INTERFACE}"
   set_env_value "WG_MTU" "${WG_MTU}"

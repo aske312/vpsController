@@ -85,7 +85,7 @@ type PolicySettings = {
   presets?: ProfilePreset[];
 };
 
-type ProfilePreset = { id: string; name: string; description: string; strategy: "fallback" | "url-test" | "select"; components: Array<{ id: string; cdn?: boolean; transport?: string; label?: string }> };
+type ProfilePreset = { id: string; name: string; description: string; strategy: "fallback" | "url-test" | "select"; components: Array<{ id: string; cdn?: boolean; tls?: boolean; transport?: string; label?: string }> };
 const presetConnectionOptions: ProfilePreset["components"] = [
   { id: "transport-reality", transport: "xhttp", label: "VLESS · XHTTP" },
   { id: "transport-reality", transport: "raw", label: "VLESS · RAW" },
@@ -439,17 +439,18 @@ export function MihomoPage({
     setActiveDeviceId(devices[0].id);
   }
 
-  function addProfileConnection(module: Module, vlessRoute: "direct" | "cdn" = "direct") {
+  function addProfileConnection(module: Module, vlessRoute: "direct" | "tls" | "cdn" = "direct") {
     const settings = Object.fromEntries((module.connection_settings || []).map((field) => [field.key, field.default]));
     if (module.id === "transport-reality") {
       settings.route_mode = vlessRoute;
       settings.cdn_enabled = vlessRoute === "cdn";
       if (vlessRoute === "cdn") settings.cdn_domain = String(routingPolicy?.values.preset_cdn_domain || "").trim();
+      if (vlessRoute === "tls") settings.tls_domain = String(routingPolicy?.values.preset_tls_domain || "").trim();
     }
     setProfileConnections((current) => [...current, {
       id: `connection-${crypto.randomUUID()}`,
       component: module.id,
-      name: module.id === "transport-reality" ? `VLESS · ${vlessRoute === "cdn" ? "CDN" : "Direct"}` : module.name,
+      name: module.id === "transport-reality" ? (vlessRoute === "cdn" ? "VLESS CDN" : vlessRoute === "tls" ? "VLESS TLS" : "VLESS REALITY") : module.name,
       device_id: activeDeviceId,
       settings,
     }]);
@@ -461,6 +462,7 @@ export function MihomoPage({
 
   function applyProfilePreset(preset: ProfilePreset) {
     const cdnDomain = String(routingPolicy?.values.preset_cdn_domain || "").trim();
+    const tlsDomain = String(routingPolicy?.values.preset_tls_domain || "").trim();
     const usedSingletons = new Set<string>();
     const connections: ProfileConnection[] = [];
     for (const definition of preset.components) {
@@ -470,7 +472,11 @@ export function MihomoPage({
       if (!componentModule || (componentId !== "transport-reality" && usedSingletons.has(componentId))) continue;
       usedSingletons.add(componentId);
       const settings = Object.fromEntries((componentModule.connection_settings || []).map((field) => [field.key, field.default]));
-      if (componentId === "transport-reality" && definition.cdn) {
+      if (componentId === "transport-reality" && definition.tls) {
+        settings.route_mode = "tls";
+        settings.tls_domain = tlsDomain;
+        settings.tls_transport = definition.transport || "xhttp";
+      } else if (componentId === "transport-reality" && definition.cdn) {
         settings.route_mode = "cdn";
         settings.cdn_enabled = true;
         settings.cdn_domain = cdnDomain;
@@ -898,6 +904,7 @@ export function MihomoPage({
               <label><span>Основной транспорт</span><select value={String(routingDraft.preset_primary || "transport-reality")} onChange={(event) => updateRoutingDraft("preset_primary", event.target.value)}>{[{v:"transport-reality",l:"VLESS"},{v:"transport-awg",l:"AmneziaWG"},{v:"transport-wg",l:"WireGuard"},{v:"transport-shadowsocks",l:"Shadowsocks"}].map((item) => <option key={item.v} value={item.v}>{item.l}</option>)}</select></label>
               <label><span>Резервный транспорт</span><select value={String(routingDraft.preset_fallback || "transport-awg")} onChange={(event) => updateRoutingDraft("preset_fallback", event.target.value)}>{[{v:"transport-awg",l:"AmneziaWG"},{v:"transport-reality",l:"VLESS"},{v:"transport-wg",l:"WireGuard"},{v:"transport-shadowsocks",l:"Shadowsocks"}].map((item) => <option key={item.v} value={item.v}>{item.l}</option>)}</select></label>
               <label className="is-wide"><span>CDN-домен для новых профилей</span><input value={String(routingDraft.preset_cdn_domain || "")} onChange={(event) => updateRoutingDraft("preset_cdn_domain", event.target.value)} /></label>
+              <label className="is-wide"><span>Прямой TLS-домен для новых профилей</span><input value={String(routingDraft.preset_tls_domain || "")} onChange={(event) => updateRoutingDraft("preset_tls_domain", event.target.value)} /></label>
             </div></article>
           </section>
 
@@ -971,6 +978,7 @@ export function MihomoPage({
                 {installedChannels.flatMap((module) => {
                   if (module.id === "transport-reality") return [
                     <button key="vless-direct" type="button" onClick={() => addProfileConnection(module, "direct")}>+ VLESS</button>,
+                    <button key="vless-tls" type="button" disabled={!String(routingPolicy?.values.preset_tls_domain || "").trim()} title={!String(routingPolicy?.values.preset_tls_domain || "").trim() ? "Сначала укажите прямой TLS-домен в Настройках" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
                     <button key="vless-cdn" type="button" disabled={!String(routingPolicy?.values.preset_cdn_domain || "").trim()} title={!String(routingPolicy?.values.preset_cdn_domain || "").trim() ? "Сначала укажите CDN-домен в маршрутизации" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
                   ];
                   const singletonUsed = profileConnections.some((item) => item.device_id === activeDeviceId && item.component === module.id);
@@ -985,7 +993,7 @@ export function MihomoPage({
                   return <article key={connection.id} className={`mihomoConnectionCard${vlessRoute ? ` is-vless-${vlessRoute}` : ""}`}>
                     <header>
                       <span>{channelShort[connection.component] || "CH"}</span>
-                      <div><b>{vlessRoute === "cdn" ? "VLESS CDN" : vlessRoute === "direct" ? "VLESS" : vlessRoute === "both" ? "VLESS + CDN · прежний формат" : protocolModule?.name || connection.component}</b><small>{vlessRoute === "cdn" ? "Через CDN-домен" : vlessRoute === "direct" ? "Прямое REALITY-подключение" : vlessRoute === "both" ? "Можно заменить двумя независимыми подключениями" : `Подключение ${index + 1}`}</small></div>
+                      <div><b>{vlessRoute === "cdn" ? "VLESS CDN" : vlessRoute === "tls" ? "VLESS TLS" : vlessRoute === "direct" ? "VLESS REALITY" : vlessRoute === "both" ? "VLESS + CDN · прежний формат" : protocolModule?.name || connection.component}</b><small>{vlessRoute === "cdn" ? "Через CDN-домен" : vlessRoute === "tls" ? "Прямой домен с TLS" : vlessRoute === "direct" ? "Прямое REALITY-подключение" : vlessRoute === "both" ? "Можно заменить двумя независимыми подключениями" : `Подключение ${index + 1}`}</small></div>
                       <button type="button" className="dangerButton" onClick={() => setProfileConnections((current) => current.filter((item) => item.id !== connection.id))}>Удалить</button>
                     </header>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
@@ -994,6 +1002,8 @@ export function MihomoPage({
                         if (field.key === "route_mode" || field.key === "cdn_enabled") return false;
                         if (connection.component === "transport-reality" && vlessRoute === "cdn" && ["port", "target", "transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute === "direct" && ["cdn_domain", "cdn_transport", "cdn_xhttp_mode"].includes(field.key)) return false;
+                        if (connection.component === "transport-reality" && vlessRoute !== "tls" && ["tls_domain", "tls_transport", "tls_xhttp_mode"].includes(field.key)) return false;
+                        if (connection.component === "transport-reality" && vlessRoute === "tls" && !["route_mode", "tls_domain", "tls_transport", "tls_xhttp_mode"].includes(field.key)) return false;
                         if (["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return connection.settings.transport === "xhttp";
                         if (["cdn_domain", "cdn_transport"].includes(field.key)) return Boolean(connection.settings.cdn_enabled);
                         if (field.key === "cdn_xhttp_mode") return Boolean(connection.settings.cdn_enabled) && connection.settings.cdn_transport === "xhttp";

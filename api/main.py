@@ -110,6 +110,7 @@ VLESS_CDN_DOMAIN = os.getenv("VLESS_CDN_DOMAIN", "")
 VLESS_CDN_SNIPPET = Path("/etc/caddy/vps-control.d/vless-cdn.caddy")
 MIHOMO_VLESS_CDN_ROUTES = Path("/etc/vps-control/mihomo/reality/caddy-routes")
 VLESS_CDN_PORT = int(os.getenv("VLESS_CDN_PORT", "10087"))
+VLESS_TLS_PORT = int(os.getenv("VLESS_TLS_PORT", "10088"))
 AWG_PROFILE = {
     "Jc": os.getenv("AWG_JC", "6"), "Jmin": os.getenv("AWG_JMIN", "8"), "Jmax": os.getenv("AWG_JMAX", "80"),
     "S1": os.getenv("AWG_S1", "64"), "S2": os.getenv("AWG_S2", "112"),
@@ -2515,6 +2516,10 @@ class ProtocolSettingsUpdate(BaseModel):
     cdn_domain: str | None = Field(default=None, max_length=253)
     cdn_transport: Literal["websocket", "xhttp", "httpupgrade", "grpc"] | None = None
     cdn_xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
+    tls_enabled: bool | None = None
+    tls_domain: str | None = Field(default=None, max_length=253)
+    tls_transport: Literal["websocket", "xhttp", "httpupgrade", "grpc"] | None = None
+    tls_xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
 
 
 def configure_vless_transport(stream: dict, transport: str, path: str = "/") -> None:
@@ -2572,8 +2577,23 @@ def vless_cdn_client_query(reality: dict) -> dict[str, str]:
     return values
 
 
+def vless_tls_client_query(reality: dict) -> dict[str, str]:
+    mapped = dict(reality)
+    mapped.update({"CDN_DOMAIN": reality.get("TLS_DOMAIN", ""), "CDN_PATH": reality.get("TLS_PATH", "/"), "CDN_TRANSPORT": reality.get("TLS_TRANSPORT", "xhttp"), "CDN_XHTTP_MODE": reality.get("TLS_XHTTP_MODE", "auto")})
+    return vless_cdn_client_query(mapped)
+
+
 def valid_hostname(value: str) -> bool:
     return bool(re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", value))
+
+
+def direct_tls_domain_ready(domain: str) -> bool:
+    try:
+        resolved = {row[4][0] for row in socket.getaddrinfo(domain, 443, type=socket.SOCK_STREAM)}
+    except socket.gaierror:
+        return False
+    expected = {value for value in (PUBLIC_IPV4, PUBLIC_IPV6) if value}
+    return bool(expected and resolved & expected)
 
 
 def update_key_value_file(path: Path, values: dict[str, str], quoted: bool) -> None:
@@ -2637,10 +2657,30 @@ def configure_vless_cdn(config: dict, reality: dict, enabled: bool, domain: str,
     reality["WS_PATH"] = cdn_path
 
 
+def configure_vless_tls(config: dict, reality: dict, enabled: bool, domain: str, transport: str = "xhttp", xhttp_mode: str = "auto") -> None:
+    """Configure a direct TLS hostname terminated by Caddy, independently from CDN."""
+    inbounds = config.get("inbounds", [])
+    existing = next((item for item in inbounds if item.get("tag") == "vless-tls"), None)
+    reality.update({"TLS_ENABLED": "yes" if enabled else "no", "TLS_DOMAIN": domain, "TLS_PORT": str(VLESS_TLS_PORT), "TLS_TRANSPORT": transport, "TLS_XHTTP_MODE": xhttp_mode})
+    if not enabled:
+        config["inbounds"] = [item for item in inbounds if item.get("tag") != "vless-tls"]
+        return
+    clients = {str(client["id"]): client for inbound in inbounds if inbound.get("protocol") == "vless" for client in inbound.get("settings", {}).get("clients", []) if client.get("id")}
+    path = reality.get("TLS_PATH") or "/" + secrets.token_hex(16)
+    inbound = existing or {}
+    inbound.update({"tag": "vless-tls", "listen": "127.0.0.1", "port": VLESS_TLS_PORT, "protocol": "vless", "settings": {"clients": list(clients.values()), "decryption": "none"}, "streamSettings": cdn_stream(transport, path, xhttp_mode), "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}})
+    if existing is None:
+        inbounds.append(inbound)
+    reality["TLS_PATH"] = path
+
+
 def write_vless_cdn_snippet(enabled: bool, domain: str, path: str, transport: str = "websocket") -> None:
     routes: list[dict] = []
     if enabled:
         routes.append({"domain": domain, "path": path, "port": VLESS_CDN_PORT, "transport": transport})
+    direct = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line) if VLESS_ENV.exists() else {}
+    if direct.get("TLS_ENABLED") == "yes" and direct.get("TLS_DOMAIN") and direct.get("TLS_PATH"):
+        routes.append({"domain": direct["TLS_DOMAIN"], "path": direct["TLS_PATH"], "port": int(direct.get("TLS_PORT", VLESS_TLS_PORT)), "transport": direct.get("TLS_TRANSPORT", "xhttp")})
     if MIHOMO_VLESS_CDN_ROUTES.exists():
         for descriptor in MIHOMO_VLESS_CDN_ROUTES.glob("*.json"):
             try:
@@ -2945,6 +2985,11 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 direct_config = f"vless://{client_uuid}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}?{direct_query}#{urllib.parse.quote(payload.name + ' Direct')}"
                 direct_transport = str(vless_reality_inbound(config_data).get("streamSettings", {}).get("network", "xhttp")).upper()
                 profiles = [{"id": "direct", "name": f"Direct · REALITY/{direct_transport}", "filename": f"{safe_name}-vless-direct.txt", "config": direct_config}]
+                tls_domain = reality.get("TLS_DOMAIN", "")
+                if tls_domain and any(item.get("tag") == "vless-tls" for item in vless_inbounds):
+                    tls_query = urllib.parse.urlencode(vless_tls_client_query(reality))
+                    tls_config = f"vless://{client_uuid}@{tls_domain}:443?{tls_query}#{urllib.parse.quote(payload.name + ' TLS')}"
+                    profiles.append({"id": "tls", "name": f"TLS · {reality.get('TLS_TRANSPORT', 'xhttp').upper()}", "filename": f"{safe_name}-vless-tls.txt", "config": tls_config})
                 cdn_domain = reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
                 if cdn_domain and any(item.get("tag") in {"vless-cdn", "vless-cdn-websocket", "vless-tls-websocket"} for item in vless_inbounds):
                     cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality))
@@ -3139,6 +3184,18 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
         "key": "xmux_concurrency", "label": "Параллелизм XHTTP", "type": "number", "value": int(values.get("xmuxConcurrency", 12)), "min": 1, "max": 64,
         "help": "Количество одновременных запросов на HTTP-соединение. 8–16 устраняет секундные очереди; применяется к новым VRX-профилям.",
     }, {
+        "key": "tls_enabled", "label": "Прямой VLESS TLS", "type": "boolean", "value": bool(values.get("tlsEnabled", False)),
+        "help": "Отдельный TLS-маршрут по прямому DNS-домену без CDN.",
+    }, {
+        "key": "tls_domain", "label": "TLS-домен", "type": "text", "value": str(values.get("tlsDomain", "")),
+        "help": "A/AAAA-запись должна указывать прямо на VPS; CDN-проксирование отключено.",
+    }, {
+        "key": "tls_transport", "label": "TLS-транспорт", "type": "select", "value": str(values.get("tlsTransport", "xhttp")),
+        "options": [{"value": "xhttp", "label": "XHTTP · рекомендуемый"}, {"value": "websocket", "label": "WebSocket"}, {"value": "httpupgrade", "label": "HTTPUpgrade"}, {"value": "grpc", "label": "gRPC · HTTP/2"}],
+    }, {
+        "key": "tls_xhttp_mode", "label": "Режим TLS XHTTP", "type": "select", "value": str(values.get("tlsXhttpMode", "auto")),
+        "options": [{"value": value, "label": value} for value in ("auto", "stream-one", "stream-up", "packet-up")],
+    }, {
         "key": "cdn_enabled", "label": "Дополнительный маршрут через CDN", "type": "boolean", "value": bool(values.get("cdnEnabled", False)),
         "help": "Отдельный TLS-маршрут через WebSocket, XHTTP или gRPC. Direct не меняется.",
     }, {
@@ -3240,7 +3297,7 @@ def update_protocol_settings(
     allowed = {
         "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
         "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
-        "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni", "cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"},
+        "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni", "tls_enabled", "tls_domain", "tls_transport", "tls_xhttp_mode", "cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"},
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
         raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
@@ -3333,6 +3390,19 @@ def update_protocol_settings(
                 config["dns"] = {"servers": dns_addresses, "queryStrategy": "UseIP"}
                 config.setdefault("routing", {})["domainStrategy"] = "IPIfNonMatch"
             cdn_changed = bool({"cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"} & supplied.keys())
+            tls_changed = bool({"tls_enabled", "tls_domain", "tls_transport", "tls_xhttp_mode"} & supplied.keys())
+            if tls_changed:
+                tls_enabled = bool(supplied.get("tls_enabled", reality.get("TLS_ENABLED", "no") == "yes"))
+                tls_domain = str(supplied.get("tls_domain", reality.get("TLS_DOMAIN", ""))).strip().lower()
+                tls_transport = str(supplied.get("tls_transport", reality.get("TLS_TRANSPORT", "xhttp")))
+                tls_xhttp_mode = str(supplied.get("tls_xhttp_mode", reality.get("TLS_XHTTP_MODE", "auto")))
+                if tls_enabled and not valid_hostname(tls_domain):
+                    raise HTTPException(status_code=422, detail="Укажите корректный TLS-домен")
+                if tls_enabled and not direct_tls_domain_ready(tls_domain):
+                    raise HTTPException(status_code=422, detail="TLS-домен должен указывать прямо на IP этого VPS")
+                if tls_enabled and tls_domain == str(reality.get("CDN_DOMAIN", "")).lower():
+                    raise HTTPException(status_code=422, detail="Для прямого TLS и CDN нужны разные домены")
+                configure_vless_tls(config, reality, tls_enabled, tls_domain, tls_transport, tls_xhttp_mode)
             if cdn_changed:
                 current_cdn_enabled = reality.get("CDN_ENABLED", "yes" if reality.get("CDN_DOMAIN") else "no") == "yes"
                 cdn_enabled = bool(supplied.get("cdn_enabled", current_cdn_enabled))
@@ -3365,8 +3435,12 @@ def update_protocol_settings(
                 }, quoted=False)
                 write_vless_cdn_snippet(cdn_enabled, cdn_domain, reality.get("CDN_PATH", reality.get("WS_PATH", "/")), cdn_transport)
                 run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", timeout=15, check=True)
+            if tls_changed:
+                update_key_value_file(VLESS_ENV, {key: reality.get(key, "") for key in ("TLS_ENABLED", "TLS_DOMAIN", "TLS_PORT", "TLS_PATH", "TLS_TRANSPORT", "TLS_XHTTP_MODE")}, quoted=False)
+                write_vless_cdn_snippet(reality.get("CDN_ENABLED") == "yes", reality.get("CDN_DOMAIN", ""), reality.get("CDN_PATH", reality.get("WS_PATH", "/")), reality.get("CDN_TRANSPORT", "websocket"))
+                run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", timeout=15, check=True)
             restart_vless_service()
-            if cdn_changed:
+            if cdn_changed or tls_changed:
                 run("systemctl", "reload", "caddy.service", timeout=20, check=True)
                 if cdn_enabled and Path("/usr/sbin/ufw").exists():
                     run(
@@ -3449,6 +3523,8 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                     "SNI": target.rsplit(":", 1)[0] if ":" in target else target,
                     "CDN hostname": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN) or "не настроен",
                     "CDN transport": f"TLS/{reality.get('CDN_TRANSPORT', 'websocket').upper()}" if reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN) else "отключён",
+                    "TLS hostname": reality.get("TLS_DOMAIN", "") or "не настроен",
+                    "TLS transport": reality.get("TLS_TRANSPORT", "xhttp").upper() if reality.get("TLS_ENABLED") == "yes" else "отключён",
                     "DNS": current_env_value("VRX_DNS", "не настроен"),
                 }
                 config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
@@ -3467,6 +3543,11 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 xhttp_values["cdnDomain"] = reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
                 xhttp_values["cdnTransport"] = reality.get("CDN_TRANSPORT", "websocket")
                 xhttp_values["cdnXhttpMode"] = reality.get("CDN_XHTTP_MODE", "auto")
+                tls_inbound = next((item for item in config_data.get("inbounds", []) if item.get("tag") == "vless-tls"), None)
+                xhttp_values["tlsEnabled"] = tls_inbound is not None and reality.get("TLS_ENABLED", "no") == "yes"
+                xhttp_values["tlsDomain"] = reality.get("TLS_DOMAIN", "")
+                xhttp_values["tlsTransport"] = reality.get("TLS_TRANSPORT", "xhttp")
+                xhttp_values["tlsXhttpMode"] = reality.get("TLS_XHTTP_MODE", "auto")
                 editable_settings = editable_protocol_settings(protocol, xhttp_values)
                 direct_path = (
                     str(stream_values.get("xhttpSettings", {}).get("path", "/"))
@@ -3483,6 +3564,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                         "server_name": target.rsplit(":", 1)[0] if ":" in target else target,
                         "path": direct_path,
                     },
+                    "tls": {"enabled": tls_inbound is not None and reality.get("TLS_ENABLED", "no") == "yes", "security": "TLS", "transport": reality.get("TLS_TRANSPORT", "xhttp"), "endpoint": f"{reality.get('TLS_DOMAIN', '')}:443" if tls_inbound else "", "server_name": reality.get("TLS_DOMAIN", "") if tls_inbound else "", "path": reality.get("TLS_PATH", "/") if tls_inbound else ""},
                     "cdn": {
                         "enabled": cdn_enabled, "security": "TLS",
                         "transport": reality.get("CDN_TRANSPORT", "websocket"),
