@@ -652,7 +652,7 @@ export function MihomoPage({
         <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
         <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Компоненты</Tab>
         <Tab id="dns" current={view} onSelect={setView}>DNS Mihomo</Tab>
-        <Tab id="routing" current={view} onSelect={setView}>Маршрутизация соединений</Tab>
+        <Tab id="routing" current={view} onSelect={setView}>Настройки</Tab>
       </nav>
 
       <article className="mihomoCommandHero">
@@ -857,7 +857,7 @@ export function MihomoPage({
       {view === "routing" && (
         <form className="mihomoRoutingWorkspace" onSubmit={saveRoutingWorkspace}>
           <header className="mihomoRoutingHeader">
-            <div><p className="eyebrow">TRAFFIC ROUTING</p><h2>Маршрутизация соединений</h2><p>Выберите, что открывать напрямую. Остальной трафик будет передан в защищённую группу GATE.312.</p></div>
+            <div><p className="eyebrow">MIHOMO SETTINGS</p><h2>Настройки</h2><p>Управляйте исключениями, выбором защищённого канала и быстрыми профилями Mihomo.</p></div>
             <span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "АКТИВНА" : "ОЖИДАНИЕ"}</span>
           </header>
 
