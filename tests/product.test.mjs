@@ -879,6 +879,7 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(api, /def vless_tls_client_query/);
   assert.match(api, /def configure_vless_tls/);
   assert.match(install, /VLESS_TLS_DOMAIN/);
+  assert.ok(install.indexOf('CDN_PATH="${CDN_PATH:-${WS_PATH}}"') < install.indexOf('TLS_PATH=${CDN_PATH}-tls'), "TLS path must be written only after CDN_PATH is initialized");
   assert.match(api, /"key": "cdn_enabled"/);
   assert.match(api, /"key": "cdn_domain"/);
   assert.match(api, /"key": "cdn_transport"/);

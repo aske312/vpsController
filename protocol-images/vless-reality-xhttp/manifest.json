@@ -1,7 +1,7 @@
 {
   "id": "vless-reality-xhttp",
   "name": "VLESS",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "installable": true,
   "description": "Три независимых контура VLESS на Xray: REALITY, прямой TLS и CDN",
   "category": "secure-tunnels",

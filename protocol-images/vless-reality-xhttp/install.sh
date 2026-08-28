@@ -187,11 +187,6 @@ for pair in "CDN_TRANSPORT=${CDN_TRANSPORT}" "CDN_XHTTP_MODE=${CDN_XHTTP_MODE}";
   key="${pair%%=*}"; value="${pair#*=}"
   if grep -q "^${key}=" "${CONFIG_DIR}/reality.env"; then sed -i "s|^${key}=.*|${key}=${value}|" "${CONFIG_DIR}/reality.env"; else printf '%s=%s\n' "${key}" "${value}" >>"${CONFIG_DIR}/reality.env"; fi
 done
-for pair in "TLS_ENABLED=${TLS_ENABLED}" "TLS_DOMAIN=${TLS_DOMAIN}" "TLS_PORT=${TLS_PORT}" "TLS_PATH=${CDN_PATH}-tls" "TLS_TRANSPORT=${TLS_TRANSPORT}" "TLS_XHTTP_MODE=${TLS_XHTTP_MODE}"; do
-  key="${pair%%=*}"
-  if grep -q "^${key}=" "${CONFIG_DIR}/reality.env"; then sed -i "s|^${key}=.*|${pair}|" "${CONFIG_DIR}/reality.env"; else printf '%s\n' "${pair}" >>"${CONFIG_DIR}/reality.env"; fi
-done
-
 env_setting() {
   sed -n "s/^${1}=//p" "${CONFIG_DIR}/reality.env" | tail -n 1
 }
@@ -208,6 +203,10 @@ if [[ -z "${WS_PATH}" ]]; then
 fi
 CDN_PATH="${CDN_PATH:-${WS_PATH}}"
 if ! grep -q '^CDN_PATH=' "${CONFIG_DIR}/reality.env"; then printf 'CDN_PATH=%s\n' "${CDN_PATH}" >>"${CONFIG_DIR}/reality.env"; fi
+for pair in "TLS_ENABLED=${TLS_ENABLED}" "TLS_DOMAIN=${TLS_DOMAIN}" "TLS_PORT=${TLS_PORT}" "TLS_PATH=${CDN_PATH}-tls" "TLS_TRANSPORT=${TLS_TRANSPORT}" "TLS_XHTTP_MODE=${TLS_XHTTP_MODE}"; do
+  key="${pair%%=*}"
+  if grep -q "^${key}=" "${CONFIG_DIR}/reality.env"; then sed -i "s|^${key}=.*|${pair}|" "${CONFIG_DIR}/reality.env"; else printf '%s\n' "${pair}" >>"${CONFIG_DIR}/reality.env"; fi
+done
 [[ -n "${PRIVATE_KEY}" && -n "${PUBLIC_KEY}" && -n "${SHORT_ID}" && -n "${XHTTP_PATH}" && -n "${WS_PATH}" ]] || { echo "Конфигурация VLESS неполна" >&2; exit 1; }
 if ! grep -q '^XHTTP_PATH=' "${CONFIG_DIR}/reality.env"; then
   sed -i "s|^PATH=.*|XHTTP_PATH=${XHTTP_PATH}|" "${CONFIG_DIR}/reality.env"
