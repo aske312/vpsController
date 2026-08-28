@@ -895,6 +895,7 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.match(protocolView, /основной вариант — XHTTP/);
   assert.match(protocolView, /TLS · \{actualCdnTransport\}/);
   assert.match(protocolView, /PATH \/ SERVICE/);
+  assert.match(page, /await loadProtocolStatus\(protocol\)/);
   assert.match(api, /"routes": routes/);
   assert.match(api, /Direct · REALITY\/\{direct_transport\}/);
   assert.match(mihomoManager, /systemctl", "reset-failed", "vps-control-mihomo-reality\.service/);
@@ -938,18 +939,20 @@ test("WG, AWG, Shadowsocks and VLESS share the compact protocol command center",
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
-  const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), readStyles()]);
-  assert.match(page, /Настройка будет применена только к выбранным защищённым каналам/);
+  const [page, dnsView, api, css] = await Promise.all([read("app/page.tsx"), read("app/views/dns/dns-view.tsx"), read("api/main.py"), readStyles()]);
+  assert.match(dnsView, /Изменения применяются только к отмеченным каналам/);
   assert.doesNotMatch(page, /DNS самого VPS|system_resolver|apply_system/);
-  assert.match(page, /DNS новых профилей/);
+  assert.match(dnsView, /Только новые конфиги клиентов/);
+  assert.match(dnsView, /Xray получит выбранные resolver-ы и перезапустится/);
+  assert.match(dnsView, /серверный трафик не изменяется/);
   assert.match(page, /clientProtocolFilter/);
   assert.match(page, /clientStateFilter/);
   assert.match(page, /clientSearch/);
   assert.match(page, /НЕСТАБИЛЬНО/);
   assert.match(api, /protocol_effect_details/);
   assert.match(api, /"installed": installed\["wg"\]/);
-  assert.match(page, /filter\(\(\[, effect\]\) => effect\.installed\)/);
-  assert.match(page, /Нет установленных протоколов/);
+  assert.match(dnsView, /filter\(\(\[, effect\]\) => effect\.installed\)/);
+  assert.match(dnsView, /Нет установленных протоколов/);
   assert.match(api, /matches_selected/);
   assert.match(css, /\.connectionsWorkspace/);
   assert.match(css, /\.connectionsFilters/);

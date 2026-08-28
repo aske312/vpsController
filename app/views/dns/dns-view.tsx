@@ -5,10 +5,10 @@ import type { DnsCheck, DnsSettings, DnsStatus } from "../../types/control-plane
 
 type Props = { dns: DnsStatus | null; dnsDraft: DnsSettings | null; dnsChecks: Record<string, DnsCheck>; checkingDns: boolean; busy: boolean; setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>>; checkDnsProviders: (providerId?: string) => Promise<void> | void; saveDnsSettings: () => Promise<void> | void };
 const scope = [
-  ["apply_wg", "WG", "WireGuard", "DNS новых профилей"],
-  ["apply_awg", "AWG", "AmneziaWG", "DNS новых профилей"],
-  ["apply_shadowsocks", "SS", "Shadowsocks", "Рекомендация клиенту"],
-  ["apply_vrx", "VLESS", "Xray core", "Серверный resolver"],
+  ["apply_wg", "WG", "WireGuard", "Только новые конфиги клиентов"],
+  ["apply_awg", "AWG", "AmneziaWG", "Только новые конфиги клиентов"],
+  ["apply_shadowsocks", "SS", "Shadowsocks", "Рекомендация; трафик SS не меняется"],
+  ["apply_vrx", "VLESS", "Прямой VLESS", "Сразу меняет DNS внутри Xray"],
 ] as const;
 const protocolByScope = { apply_wg: "wg", apply_awg: "awg", apply_shadowsocks: "shadowsocks", apply_vrx: "vless-reality-xhttp" } as const;
 
@@ -18,6 +18,7 @@ export function DnsView({ dns, dnsDraft, dnsChecks, checkingDns, busy, setDnsDra
   const installedEffects = Object.entries(dns?.protocol_effect_details || {}).filter(([, effect]) => effect.installed);
   const scopeAvailable = (key: typeof scope[number][0]) => Boolean(dns?.protocol_effect_details?.[protocolByScope[key]]?.installed);
   const enabledScopes = scope.filter(([key]) => scopeAvailable(key) && Boolean(dnsDraft?.[key])).length;
+  const effectScope = (scopeName: string) => scopeName === "server_xray" ? "ПРИМЕНЕНО СРАЗУ" : scopeName === "new_profiles" ? "ТОЛЬКО НОВЫЕ КОНФИГИ" : "РЕКОМЕНДАЦИЯ";
 
   return <section className="dnsWorkspace dnsWorkspaceV2">
     <header className="dnsPageHead plainPageHead"><div><p className="eyebrow">CHANNEL DNS</p><h1>DNS каналов</h1><p>Выбор DNS для установленных защищённых каналов и создаваемых профилей.</p></div><div className="dnsPageFacts"><span><small>ПРОФИЛЬ</small><strong>{selectedName}</strong></span><span><small>КАНАЛЫ</small><strong>{enabledScopes}</strong></span></div></header>
@@ -31,9 +32,10 @@ export function DnsView({ dns, dnsDraft, dnsChecks, checkingDns, busy, setDnsDra
     <div className="dnsLowerGrid">
       <article className="dnsCustomPanel"><header><div><p className="eyebrow">EXTERNAL RESOLVER</p><h3>Сторонний DNS</h3><span>Добавьте внешний DNS для защищённых каналов, которого нет в каталоге.</span></div><button type="button" className={dnsDraft?.selected_id === "custom" ? "active" : ""} onClick={() => setDnsDraft((value) => value ? { ...value, selected_id: "custom", custom: value.custom || { name: "Сторонний DNS", addresses: [""], doh_url: "" } } : value)}>{dnsDraft?.selected_id === "custom" ? "Выбран" : "Добавить DNS"}</button></header>{dnsDraft?.selected_id === "custom" && <div><label><span>Название</span><input value={dnsDraft.custom?.name || ""} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { addresses: [""], doh_url: "" }), name: event.target.value } } : value)} /></label><label><span>IP-адреса</span><input placeholder="1.1.1.1, 1.0.0.1" value={(dnsDraft.custom?.addresses || []).join(", ")} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { name: "DNS", doh_url: "" }), addresses: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) } } : value)} /></label><label><span>DoH URL, необязательно</span><input placeholder="https://…/dns-query" value={dnsDraft.custom?.doh_url || ""} onChange={(event) => setDnsDraft((value) => value ? { ...value, custom: { ...(value.custom || { name: "DNS", addresses: [""] }), doh_url: event.target.value } } : value)} /></label></div>}</article>
 
-      <article className="dnsEffectivePanel"><header><div><p className="eyebrow">EFFECTIVE STATE</p><h3>DNS установленных протоколов</h3></div><span>{installedEffects.length ? `${installedEffects.length} активных контуров` : "Нет установленных протоколов"}</span></header><div>{installedEffects.length ? installedEffects.map(([protocol, effect]) => <span className={effect.matches_selected ? "matches" : "differs"} key={protocol}><b>{protocol === "vless-reality-xhttp" ? "VLESS" : protocol === "shadowsocks" ? "SS" : protocol.toUpperCase()}</b><code>{effect.value}</code><em>{effect.matches_selected ? "MATCH" : "DIFF"}</em></span>) : <p className="dnsEffectiveEmpty">После установки протокола здесь появится его фактический DNS и соответствие выбранной политике.</p>}</div></article>
+      <article className="dnsEffectivePanel"><header><div><p className="eyebrow">EFFECTIVE STATE</p><h3>Как DNS влияет на прямые подключения</h3></div><span>{installedEffects.length ? `${installedEffects.length} установленных протокола` : "Нет установленных протоколов"}</span></header><div>{installedEffects.length ? installedEffects.map(([protocol, effect]) => <span className={effect.matches_selected ? "matches" : "differs"} key={protocol}><b>{protocol === "vless-reality-xhttp" ? "VLESS" : protocol === "shadowsocks" ? "SS" : protocol.toUpperCase()}</b><code>{effect.value}</code><em>{effectScope(effect.scope)} · {effect.matches_selected ? "СОВПАДАЕТ" : "НЕ СОВПАДАЕТ"}</em></span>) : <p className="dnsEffectiveEmpty">После установки протокола здесь появится его фактический DNS и область применения.</p>}</div></article>
     </div>
 
-    <footer className="dnsApplyDock"><div><p className="eyebrow">READY TO APPLY</p><strong>{selectedName}</strong><span>Настройка будет применена только к выбранным защищённым каналам.</span></div><button type="button" onClick={() => void saveDnsSettings()} disabled={busy || !dnsDraft}>{busy ? "Применяем…" : "Применить политику"}</button></footer>
+    <div className="dnsImpactNotice"><strong>Что произойдёт после применения</strong><span><b>VLESS</b> — Xray получит выбранные resolver-ы и перезапустится.</span><span><b>WG/AWG</b> — DNS попадёт только в конфиги, созданные после изменения.</span><span><b>Shadowsocks</b> — сохраняется рекомендация для клиента; серверный трафик не изменяется.</span></div>
+    <footer className="dnsApplyDock"><div><p className="eyebrow">READY TO APPLY</p><strong>{selectedName}</strong><span>Изменения применяются только к отмеченным каналам с областью действия, указанной выше.</span></div><button type="button" onClick={() => void saveDnsSettings()} disabled={busy || !dnsDraft}>{busy ? "Применяем…" : "Применить политику"}</button></footer>
   </section>;
 }

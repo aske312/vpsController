@@ -354,13 +354,9 @@ export default function Home() {
     const body = Object.fromEntries(fields.map((field) => [field.key, draft[field.key] ?? field.value]));
     setBusy(true); setError("");
     try {
-      const next = await request(`/protocols/${protocol}/settings`, { method: "PATCH", body: JSON.stringify(body) }) as ProtocolStatus;
+      await request(`/protocols/${protocol}/settings`, { method: "PATCH", body: JSON.stringify(body) });
       protocolSettingsDirty.current[protocol] = false;
-      setProtocolStatuses((statuses) => ({ ...statuses, [protocol]: next }));
-      setProtocolSettingsDraft((drafts) => ({
-        ...drafts,
-        [protocol]: Object.fromEntries((next.editable_settings || []).map((setting) => [setting.key, setting.value])),
-      }));
+      await loadProtocolStatus(protocol);
       setNotice(`Настройки ${labels[protocol]} применены`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось применить настройки протокола"); }
     finally { setBusy(false); }
