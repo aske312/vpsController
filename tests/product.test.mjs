@@ -1111,6 +1111,32 @@ test("successful protocol installs are immediately reachable and health-checked"
   }
 });
 
+test("Mihomo VLESS follows direct VLESS transport settings and exports effective profiles", async () => {
+  const [manifestText, installer, manager, view] = await Promise.all([
+    read("protocol-images/mihomo/modules/transport-reality/manifest.json"),
+    read("protocol-images/mihomo/modules/transport-reality/install.sh"),
+    read("protocol-images/mihomo/manager.py"),
+    read("app/views/mihomo/mihomo-view.tsx"),
+  ]);
+  const manifest = JSON.parse(manifestText);
+  const settingKeys = manifest.settings.map((item) => item.key);
+  assert.equal(manifest.name, "VLESS");
+  assert.equal(manifest.version, "1.1.0");
+  for (const key of ["transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency", "dns", "loglevel"]) {
+    assert.ok(settingKeys.includes(key), `missing Mihomo VLESS setting ${key}`);
+  }
+  assert.match(installer, /transport == "xhttp"/);
+  assert.match(installer, /transport == "grpc"/);
+  assert.match(installer, /rawSettings/);
+  assert.match(installer, /config\.json\.candidate/);
+  assert.match(installer, /run -test -config "\$\{CANDIDATE\}"/);
+  assert.match(manager, /def reality_connection_settings/);
+  assert.match(manager, /network: \{'tcp' if transport == 'raw' else transport\}/);
+  assert.match(manager, /grpc-service-name/);
+  assert.match(manager, /call_module_script\(module_id, "install"\)[\s\S]*rollback failed/);
+  assert.match(view, /\["xhttp_mode", "xpadding", "xmux_concurrency"\]/);
+});
+
 test("SSH management does not start socket activation and the daemon together", async () => {
   const [api, manager] = await Promise.all([
     read("api/main.py"), read("scripts/vps-control.sh"),

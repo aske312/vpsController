@@ -1,9 +1,9 @@
 {
   "id": "transport-reality",
-  "name": "VLESS Reality + XHTTP",
-  "version": "1.0.0",
+  "name": "VLESS",
+  "version": "1.1.0",
   "installable": true,
-  "description": "Отдельный Xray/Reality-инстанс для Mihomo-профилей.",
+  "description": "Отдельный VLESS/REALITY-инстанс Xray для Mihomo-профилей с XHTTP, RAW или gRPC.",
   "category": "transport",
   "category_name": "Каналы",
   "default_enabled": false,
@@ -26,6 +26,62 @@
       "label": "REALITY target",
       "type": "text",
       "default": "www.intel.com:443"
+    },
+    {
+      "key": "transport",
+      "label": "Прямой транспорт",
+      "type": "select",
+      "default": "xhttp",
+      "help": "После изменения экспортируйте Mihomo-профили заново.",
+      "options": [
+        { "value": "xhttp", "label": "XHTTP" },
+        { "value": "raw", "label": "RAW · TCP" },
+        { "value": "grpc", "label": "gRPC · HTTP/2" }
+      ]
+    },
+    {
+      "key": "transport_path",
+      "label": "Путь / service name",
+      "type": "text",
+      "default": "/vless",
+      "help": "Путь XHTTP или service name gRPC; для RAW не используется."
+    },
+    {
+      "key": "xhttp_mode",
+      "label": "Режим XHTTP",
+      "type": "select",
+      "default": "auto",
+      "options": ["auto", "stream-one", "stream-up", "packet-up"],
+      "help": "Применяется только к XHTTP."
+    },
+    {
+      "key": "xpadding",
+      "label": "XHTTP padding, байт",
+      "type": "text",
+      "default": "100-1000",
+      "help": "Одно число или возрастающий диапазон; только XHTTP."
+    },
+    {
+      "key": "xmux_concurrency",
+      "label": "Параллелизм XHTTP",
+      "type": "number",
+      "default": 12,
+      "min": 1,
+      "max": 64
+    },
+    {
+      "key": "dns",
+      "label": "DNS Xray",
+      "type": "text",
+      "default": "1.1.1.1, 1.0.0.1",
+      "help": "Список DNS Xray через запятую."
+    },
+    {
+      "key": "loglevel",
+      "label": "Уровень журнала",
+      "type": "select",
+      "default": "warning",
+      "options": ["debug", "info", "warning", "error", "none"]
     }
   ]
 }

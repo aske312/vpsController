@@ -36,6 +36,7 @@ type SettingField = {
   min?: number;
   max?: number;
   options?: Array<string | { value: string; label: string }>;
+  help?: string;
 };
 
 type Module = {
@@ -72,7 +73,7 @@ type PolicySettings = {
 const channelShort: Record<string, string> = {
   "transport-awg": "AW",
   "transport-wg": "WG",
-  "transport-reality": "VX",
+  "transport-reality": "VL",
   "transport-shadowsocks": "SS",
 };
 
@@ -645,7 +646,7 @@ export function MihomoPage({
             </header>
             <p>{editing.description}</p>
             <div className="mihomoFields">
-              {(editing.settings || []).map((field) => (
+              {(editing.settings || []).filter((field) => editing.id !== "transport-reality" || String(settingsDraft.transport || "xhttp") === "xhttp" || !["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)).map((field) => (
                 <label key={field.key}>
                   <span>{field.label}</span>
                   {field.type === "select" ? (
@@ -661,6 +662,7 @@ export function MihomoPage({
                   ) : (
                     <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(settingsDraft[field.key] ?? field.default)} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field.key]: field.type === "number" ? Number(event.target.value) : event.target.value }))} />
                   )}
+                  {field.help && <small>{field.help}</small>}
                 </label>
               ))}
             </div>

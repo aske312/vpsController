@@ -135,7 +135,7 @@ type Props = {
 const channelShort: Record<string, string> = {
   "transport-awg": "AWG",
   "transport-wg": "WG",
-  "transport-reality": "VRX",
+  "transport-reality": "VL",
   "transport-shadowsocks": "SS",
 };
 

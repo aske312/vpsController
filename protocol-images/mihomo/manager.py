@@ -287,6 +287,21 @@ def validate_settings(module_id: str, values: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(status_code=422, detail=f"Invalid subnet: {exc}") from exc
         if network.version != 4 or network.prefixlen > 28:
             raise HTTPException(status_code=422, detail="Use an IPv4 subnet /28 or larger")
+    elif module_id == "transport-reality":
+        target = str(current.get("target", ""))
+        match = re.fullmatch(r"([A-Za-z0-9.-]+):(\d{1,5})", target)
+        if not match or not 1 <= int(match.group(2)) <= 65535:
+            raise HTTPException(status_code=422, detail="REALITY target must be hostname:port")
+        path = str(current.get("transport_path", ""))
+        if not re.fullmatch(r"/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*", path):
+            raise HTTPException(status_code=422, detail="Transport path must start with / and contain URL-safe characters")
+        padding = str(current.get("xpadding", ""))
+        padding_match = re.fullmatch(r"(\d+)(?:-(\d+))?", padding)
+        if not padding_match or (padding_match.group(2) and int(padding_match.group(1)) > int(padding_match.group(2))):
+            raise HTTPException(status_code=422, detail="XHTTP padding must be a number or an ascending range")
+        dns_servers = [value.strip() for value in str(current.get("dns", "")).split(",") if value.strip()]
+        if not dns_servers:
+            raise HTTPException(status_code=422, detail="At least one Xray DNS server is required")
     return current
 
 
@@ -754,6 +769,7 @@ def get_module_settings(module_id: str) -> dict[str, Any]:
 
 @app.patch("/api/mihomo/modules/{module_id}/settings", dependencies=[Depends(auth_required)])
 def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[str, Any]:
+    previous_values = module_settings(module_id)
     next_values = validate_settings(module_id, patch.values)
     SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
     atomic_json(SETTINGS_ROOT / f"{module_id}.json", next_values)
@@ -762,6 +778,15 @@ def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[st
         try:
             call_module_script(module_id, "install")
         except RuntimeError as exc:
+            # Keep persisted settings and the generated runtime configuration
+            # in sync. Re-applying the previous validated settings also rolls
+            # back a candidate that passed static validation but failed its
+            # runtime probe or service restart.
+            atomic_json(SETTINGS_ROOT / f"{module_id}.json", previous_values)
+            try:
+                call_module_script(module_id, "install")
+            except RuntimeError as rollback_exc:
+                exc = RuntimeError(f"{exc}; rollback failed: {rollback_exc}")
             write_action(f"module-settings:{module_id}", str(exc), state="failed", progress=100)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         write_action(f"module-settings:{module_id}", f"Настройки {manifest(module_id)['name']} применены", state="done", progress=100)
@@ -1026,6 +1051,38 @@ def reality_inbound(config: dict[str, Any]) -> dict[str, Any]:
     raise KeyError("mihomo-reality inbound missing")
 
 
+def reality_connection_settings() -> dict[str, Any]:
+    """Read the effective VLESS client parameters from the live Xray config.
+
+    Profiles keep only identity-bound credentials. Transport settings can be
+    changed later, so exported Mihomo configs must not rely on a stale copy
+    captured when the profile was created.
+    """
+    config = load_json(CONFIG_ROOT / "reality" / "config.json", {})
+    env = reality_env()
+    try:
+        stream = reality_inbound(config)["streamSettings"]
+    except (TypeError, KeyError, IndexError):
+        stream = {}
+    transport = str(stream.get("network", env.get("TRANSPORT", "xhttp")))
+    result: dict[str, Any] = {
+        "port": int(env.get("PORT", module_settings("transport-reality")["port"])),
+        "public_key": env.get("PUBLIC_KEY", ""),
+        "short_id": env.get("SHORT_ID", ""),
+        "servername": env.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0],
+        "transport": transport,
+    }
+    if transport == "xhttp":
+        xhttp = stream.get("xhttpSettings", {})
+        result.update({"path": xhttp.get("path", env.get("TRANSPORT_PATH", env.get("XHTTP_PATH", "/"))), "xhttp_mode": xhttp.get("mode", "auto")})
+    elif transport == "grpc":
+        grpc = stream.get("grpcSettings", {})
+        result["path"] = "/" + str(grpc.get("serviceName", env.get("TRANSPORT_PATH", "/vless")).lstrip("/"))
+    else:
+        result["path"] = "/"
+    return result
+
+
 def add_reality_credential(profile_id: str) -> dict[str, Any]:
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
@@ -1038,15 +1095,7 @@ def add_reality_credential(profile_id: str) -> dict[str, Any]:
     atomic_json(config_path, config, mode=0o640)
     shutil.chown(config_path, user="root", group="nogroup")
     run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
-    env = reality_env()
-    return {
-        "uuid": user_id,
-        "port": int(env.get("PORT", module_settings("transport-reality")["port"])),
-        "public_key": env.get("PUBLIC_KEY", ""),
-        "short_id": env.get("SHORT_ID", ""),
-        "path": env.get("XHTTP_PATH", "/"),
-        "servername": env.get("TARGET", "www.intel.com:443").split(":", 1)[0],
-    }
+    return {"uuid": user_id, **reality_connection_settings()}
 
 
 def remove_reality_credential(profile_id: str, credential: dict[str, Any]) -> None:
@@ -1345,25 +1394,39 @@ def render_proxy(module_id: str, credential: dict[str, Any]) -> list[str]:
             "    udp: true",
         ]
     if module_id == "transport-reality":
-        return [
+        # Read transport/SNI/path from the current module configuration. A
+        # settings change applies to all profiles served by this Xray instance.
+        # UUID remains profile-specific and comes from the stored credential.
+        effective = {**credential, **reality_connection_settings()}
+        transport = str(effective.get("transport", "xhttp"))
+        lines = [
             '  - name: "VRX"',
             "    type: vless",
             f"    server: {q(server)}",
-            f"    port: {int(credential['port'])}",
+            f"    port: {int(effective['port'])}",
             f"    uuid: {q(credential['uuid'])}",
             '    encryption: ""',
             "    udp: true",
             "    tls: true",
-            f"    servername: {q(credential['servername'])}",
+            f"    servername: {q(effective['servername'])}",
             "    client-fingerprint: chrome",
-            "    network: xhttp",
+            f"    network: {'tcp' if transport == 'raw' else transport}",
             "    reality-opts:",
-            f"      public-key: {q(credential['public_key'])}",
-            f"      short-id: {q(credential['short_id'])}",
-            "    xhttp-opts:",
-            f"      path: {q(credential['path'])}",
-            "      mode: auto",
+            f"      public-key: {q(effective['public_key'])}",
+            f"      short-id: {q(effective['short_id'])}",
         ]
+        if transport == "xhttp":
+            lines += [
+                "    xhttp-opts:",
+                f"      path: {q(effective.get('path', '/'))}",
+                f"      mode: {q(effective.get('xhttp_mode', 'auto'))}",
+            ]
+        elif transport == "grpc":
+            lines += [
+                "    grpc-opts:",
+                f"      grpc-service-name: {q(str(effective.get('path', '/vless')).lstrip('/'))}",
+            ]
+        return lines
     return []
 
 
