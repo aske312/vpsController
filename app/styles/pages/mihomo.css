@@ -395,6 +395,24 @@
 .mihomoSectionHead { align-items: flex-start; flex-direction: column; }
 }
 
+.mihomoConnectionBuilder { display: grid; gap: 14px; }
+.mihomoConnectionBuilder > header div { display: grid; gap: 4px; }
+.mihomoConnectionBuilder > header small { color: var(--muted); font-weight: 400; }
+.mihomoConnectionAdd { display: flex; flex-wrap: wrap; gap: 8px; }
+.mihomoConnectionAdd button { border: 1px solid var(--line); border-radius: 999px; background: var(--surface-raised); color: var(--text); padding: 8px 12px; cursor: pointer; }
+.mihomoConnectionAdd button:disabled { opacity: .4; cursor: default; }
+.mihomoConnectionList { display: grid; gap: 12px; max-height: min(52vh,560px); overflow: auto; padding-right: 3px; }
+.mihomoConnectionCard { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(14,25,36,.72); }
+.mihomoConnectionCard > header { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; }
+.mihomoConnectionCard > header > span { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: rgba(111,93,213,.16); color: #cfc5ff; font-weight: 800; }
+.mihomoConnectionCard > header > div { display: grid; gap: 2px; }
+.mihomoConnectionCard > header small, .mihomoConnectionFields label > small { color: var(--muted); }
+.mihomoConnectionCard > label, .mihomoConnectionFields label { display: grid; gap: 6px; }
+.mihomoConnectionFields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.mihomoConnectionFields .is-toggle { grid-template-columns: 1fr auto; align-items: center; }
+.mihomoConnectionEmpty { margin: 0; padding: 18px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); text-align: center; }
+@media (max-width: 640px) { .mihomoConnectionFields { grid-template-columns: 1fr; } }
+
 .gateOperationCard.mihomo { border-color:rgba(162,123,255,.30); }
 
 .gateOperationCard.mihomo .gateOperationIcon { color:#c4b2ff; border-color:rgba(162,123,255,.26); background:rgba(162,123,255,.09); }

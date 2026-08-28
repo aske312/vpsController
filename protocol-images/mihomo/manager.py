@@ -104,15 +104,24 @@ class ModuleSettingsPatch(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
 
 
+class ProfileConnectionInput(BaseModel):
+    id: str | None = Field(default=None, max_length=48, pattern=r"^[a-zA-Z0-9_-]+$")
+    component: str = Field(min_length=1, max_length=64)
+    name: str = Field(default="", max_length=80)
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
 class ProfileCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     channels: list[str] = Field(default_factory=list)
+    connections: list[ProfileConnectionInput] | None = None
     routing: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProfileUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
     channels: list[str] | None = None
+    connections: list[ProfileConnectionInput] | None = None
     routing: dict[str, Any] | None = None
 
 
@@ -203,9 +212,46 @@ def save_state(value: dict[str, Any]) -> None:
     atomic_json(STATE_FILE, value)
 
 
+def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
+    """Expose legacy profiles through the connection-instance model."""
+    result = dict(item)
+    connections = result.get("connections")
+    if not isinstance(connections, list):
+        credentials = result.get("credentials", {}) if isinstance(result.get("credentials"), dict) else {}
+        connections = []
+        for index, component in enumerate(result.get("channels", [])):
+            if component not in TRANSPORTS:
+                continue
+            connections.append({
+                "id": f"legacy-{index + 1}",
+                "component": component,
+                "name": manifest(component).get("name", component),
+                "settings": {},
+                "credential": credentials.get(component, {}),
+            })
+    result["connections"] = [entry for entry in connections if isinstance(entry, dict)]
+    sync_legacy_profile_fields(result)
+    return result
+
+
+def sync_legacy_profile_fields(item: dict[str, Any]) -> None:
+    """Keep older panel/access-beta consumers operational during migration."""
+    channels: list[str] = []
+    credentials: dict[str, Any] = {}
+    for connection in item.get("connections", []):
+        component = str(connection.get("component", ""))
+        if component not in TRANSPORTS:
+            continue
+        if component not in channels:
+            channels.append(component)
+            credentials[component] = connection.get("credential", {})
+    item["channels"] = channels
+    item["credentials"] = credentials
+
+
 def profiles() -> list[dict[str, Any]]:
     value = load_json(PROFILE_FILE, [])
-    return value if isinstance(value, list) else []
+    return [normalize_profile(item) for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
 def save_profiles(value: list[dict[str, Any]]) -> None:
@@ -288,17 +334,8 @@ def validate_settings(module_id: str, values: dict[str, Any]) -> dict[str, Any]:
         if network.version != 4 or network.prefixlen > 28:
             raise HTTPException(status_code=422, detail="Use an IPv4 subnet /28 or larger")
     elif module_id == "transport-reality":
-        target = str(current.get("target", ""))
-        match = re.fullmatch(r"([A-Za-z0-9.-]+):(\d{1,5})", target)
-        if not match or not 1 <= int(match.group(2)) <= 65535:
-            raise HTTPException(status_code=422, detail="REALITY target must be hostname:port")
-        path = str(current.get("transport_path", ""))
-        if not re.fullmatch(r"/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*", path):
-            raise HTTPException(status_code=422, detail="Transport path must start with / and contain URL-safe characters")
-        padding = str(current.get("xpadding", ""))
-        padding_match = re.fullmatch(r"(\d+)(?:-(\d+))?", padding)
-        if not padding_match or (padding_match.group(2) and int(padding_match.group(1)) > int(padding_match.group(2))):
-            raise HTTPException(status_code=422, detail="XHTTP padding must be a number or an ascending range")
+        if int(current.get("port_start", 0)) == int(current.get("cdn_port_start", 0)):
+            raise HTTPException(status_code=422, detail="Direct and CDN port ranges must start at different ports")
         dns_servers = [value.strip() for value in str(current.get("dns", "")).split(",") if value.strip()]
         if not dns_servers:
             raise HTTPException(status_code=422, detail="At least one Xray DNS server is required")
@@ -677,20 +714,17 @@ def core_status() -> dict[str, Any]:
     module_state = state()
     installed_modules = [module_id for module_id in KNOWN_MODULES if module_is_installed(module_id)]
     profile_items = profiles()
-    credentials_count = sum(
-        len(profile.get("credentials", {}))
-        for profile in profile_items
-        if isinstance(profile.get("credentials", {}), dict)
-    )
+    credentials_count = sum(len(profile.get("connections", [])) for profile in profile_items)
     profiles_in_use = sum(
         1
         for profile in profile_items
-        if profile.get("channels") or profile.get("credentials")
+        if profile.get("connections")
     )
     channels_in_use = sorted({
         str(channel)
         for profile in profile_items
-        for channel in profile.get("channels", [])
+        for connection in profile.get("connections", [])
+        for channel in [str(connection.get("component", ""))]
         if channel in TRANSPORTS
     })
     core_version = ""
@@ -839,7 +873,7 @@ def remove_module(module_id: str) -> dict[str, Any]:
     in_use = [
         profile["name"]
         for profile in profiles()
-        if module_id in profile.get("channels", [])
+        if any(connection.get("component") == module_id for connection in profile.get("connections", []))
     ]
     if in_use:
         raise HTTPException(
@@ -896,9 +930,10 @@ def next_tunnel_address(module_id: str) -> tuple[str, str]:
     network = ipaddress.ip_network(str(settings["subnet"]))
     used = set()
     for profile in profiles():
-        credential = profile.get("credentials", {}).get(module_id, {})
-        if credential.get("ip"):
-            used.add(str(credential["ip"]).split("/", 1)[0])
+        for connection in profile.get("connections", []):
+            credential = connection.get("credential", {})
+            if connection.get("component") == module_id and credential.get("ip"):
+                used.add(str(credential["ip"]).split("/", 1)[0])
     hosts = list(network.hosts())
     if len(hosts) < 3:
         raise RuntimeError("Mihomo subnet is too small")
@@ -983,11 +1018,12 @@ def remove_wg_credential(profile_id: str, module_id: str, credential: dict[str, 
 def used_ss_ports() -> set[int]:
     result: set[int] = set()
     for profile in profiles():
-        credential = profile.get("credentials", {}).get("transport-shadowsocks", {})
-        try:
-            result.add(int(credential.get("port", 0)))
-        except (TypeError, ValueError):
-            pass
+        for connection in profile.get("connections", []):
+            if connection.get("component") == "transport-shadowsocks":
+                try:
+                    result.add(int(connection.get("credential", {}).get("port", 0)))
+                except (TypeError, ValueError):
+                    pass
     return result
 
 
@@ -1083,33 +1119,148 @@ def reality_connection_settings() -> dict[str, Any]:
     return result
 
 
-def add_reality_credential(profile_id: str) -> dict[str, Any]:
+def connection_defaults(component: str) -> dict[str, Any]:
+    return {
+        str(field["key"]): field.get("default")
+        for field in manifest(component).get("connection_settings", [])
+        if isinstance(field, dict) and field.get("key")
+    }
+
+
+def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any]:
+    if component not in TRANSPORTS:
+        raise HTTPException(status_code=422, detail=f"{component} is not a Mihomo component")
+    if not module_is_installed(component):
+        raise HTTPException(status_code=409, detail=f"Сначала установите компонент {manifest(component)['name']}")
+    result = {**connection_defaults(component), **values}
+    if component != "transport-reality":
+        return result
+    try:
+        port = int(result.get("port", 0))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="VLESS port must be numeric") from exc
+    if not 0 <= port <= 65535 or 0 < port < 1024:
+        raise HTTPException(status_code=422, detail="VLESS port must be 0 or between 1024 and 65535")
+    target = str(result.get("target", ""))
+    target_match = re.fullmatch(r"([A-Za-z0-9.-]+):(\d{1,5})", target)
+    if not target_match or not 1 <= int(target_match.group(2)) <= 65535:
+        raise HTTPException(status_code=422, detail="REALITY target must be hostname:port")
+    transport = str(result.get("transport", "xhttp"))
+    if transport not in {"xhttp", "raw", "grpc"}:
+        raise HTTPException(status_code=422, detail="Unsupported VLESS transport")
+    path = str(result.get("transport_path", "/vless"))
+    if not re.fullmatch(r"/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*", path):
+        raise HTTPException(status_code=422, detail="Transport path must start with /")
+    mode = str(result.get("xhttp_mode", "auto"))
+    if mode not in {"auto", "stream-one", "stream-up", "packet-up"}:
+        raise HTTPException(status_code=422, detail="Unsupported XHTTP mode")
+    padding = str(result.get("xpadding", "100-1000"))
+    padding_match = re.fullmatch(r"(\d+)(?:-(\d+))?", padding)
+    if not padding_match or (padding_match.group(2) and int(padding_match.group(1)) > int(padding_match.group(2))):
+        raise HTTPException(status_code=422, detail="Invalid XHTTP padding")
+    concurrency = int(result.get("xmux_concurrency", 12))
+    if not 1 <= concurrency <= 64:
+        raise HTTPException(status_code=422, detail="XHTTP concurrency must be between 1 and 64")
+    cdn_enabled = bool(result.get("cdn_enabled", False))
+    cdn_domain = str(result.get("cdn_domain", "")).strip().lower()
+    if cdn_enabled and not re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", cdn_domain):
+        raise HTTPException(status_code=422, detail="For CDN specify a valid hostname")
+    result.update({"port": port, "target": target, "transport": transport, "transport_path": path, "xhttp_mode": mode, "xpadding": padding, "xmux_concurrency": concurrency, "cdn_enabled": cdn_enabled, "cdn_domain": cdn_domain})
+    return result
+
+
+def used_vless_ports(config: dict[str, Any]) -> set[int]:
+    return {int(item.get("port", 0)) for item in config.get("inbounds", []) if isinstance(item, dict) and int(item.get("port", 0) or 0) > 0}
+
+
+def next_vless_port(config: dict[str, Any], start: int) -> int:
+    used = used_vless_ports(config)
+    for port in range(start, min(start + 4000, 65536)):
+        if port not in used:
+            return port
+    raise RuntimeError("No free VLESS ports in the configured range")
+
+
+def vless_stream(settings: dict[str, Any], private_key: str, short_id: str) -> dict[str, Any]:
+    transport = str(settings["transport"])
+    path = str(settings["transport_path"])
+    stream: dict[str, Any] = {"network": transport, "security": "reality"}
+    if transport == "xhttp":
+        stream["xhttpSettings"] = {"path": path, "mode": settings["xhttp_mode"], "extra": {"xPaddingBytes": settings["xpadding"], "xmux": {"maxConcurrency": str(settings["xmux_concurrency"]), "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000"}}}
+    elif transport == "grpc":
+        stream["grpcSettings"] = {"serviceName": path.lstrip("/") or "vless", "multiMode": False}
+    else:
+        stream["rawSettings"] = {"header": {"type": "none"}}
+    host = str(settings["target"]).rsplit(":", 1)[0]
+    stream["realitySettings"] = {"show": False, "target": settings["target"], "xver": 0, "serverNames": [host], "privateKey": private_key, "shortIds": [short_id]}
+    return stream
+
+
+def write_mihomo_vless_cdn(connection_id: str, enabled: bool, domain: str, path: str, port: int) -> None:
+    snippet = Path("/etc/caddy/vps-control.d") / f"mihomo-vless-{connection_id}.caddy"
+    if not enabled:
+        snippet.unlink(missing_ok=True)
+        return
+    snippet.parent.mkdir(parents=True, exist_ok=True)
+    snippet.write_text(f"{domain} {{\n    handle {path} {{\n        reverse_proxy 127.0.0.1:{port}\n    }}\n    respond 404\n}}\n", encoding="utf-8")
+
+
+def apply_reality_config(config_path: Path, config: dict[str, Any]) -> None:
+    candidate = config_path.with_suffix(".candidate")
+    atomic_json(candidate, config, mode=0o640)
+    shutil.chown(candidate, user="root", group="nogroup")
+    result = run(str(REALITY_XRAY_BIN), "run", "-test", "-config", str(candidate))
+    if result.returncode:
+        candidate.unlink(missing_ok=True)
+        raise RuntimeError((result.stderr or result.stdout).strip() or "Xray rejected VLESS configuration")
+    os.replace(candidate, config_path)
+    run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
+
+
+def add_reality_credential(profile_id: str, connection_id: str, connection_settings: dict[str, Any]) -> dict[str, Any]:
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
-    try:
-        clients = reality_inbound(config)["settings"]["clients"]
-    except (TypeError, KeyError, IndexError):
+    if not isinstance(config.get("inbounds"), list):
         raise RuntimeError("Mihomo Reality server configuration is invalid")
+    settings = validate_connection("transport-reality", connection_settings)
+    core = module_settings("transport-reality")
+    direct_port = int(settings["port"]) or next_vless_port(config, int(core["port_start"]))
+    if direct_port in used_vless_ports(config):
+        raise RuntimeError(f"VLESS port {direct_port} is already used")
+    port_allocation_config = {**config, "inbounds": [*config.get("inbounds", []), {"port": direct_port}]}
+    cdn_port = next_vless_port(port_allocation_config, int(core["cdn_port_start"])) if settings["cdn_enabled"] else 0
+    env = reality_env()
+    private_key, public_key = env.get("PRIVATE_KEY", ""), env.get("PUBLIC_KEY", "")
+    if not private_key or not public_key:
+        raise RuntimeError("Mihomo VLESS key material is missing")
     user_id = str(uuid.uuid4())
-    clients.append({"id": user_id, "email": f"mihomo-{profile_id}", "flow": ""})
-    atomic_json(config_path, config, mode=0o640)
-    shutil.chown(config_path, user="root", group="nogroup")
-    run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
-    return {"uuid": user_id, **reality_connection_settings()}
+    email = f"mihomo-{profile_id}-{connection_id}"
+    direct_tag = f"mihomo-vless-{connection_id}"
+    config["inbounds"].append({"tag": direct_tag, "listen": "::", "port": direct_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": vless_stream(settings, private_key, env.get("SHORT_ID", "")), "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}})
+    ws_path = "/" + secrets.token_hex(16)
+    if settings["cdn_enabled"]:
+        config["inbounds"].append({"tag": f"mihomo-vless-cdn-{connection_id}", "listen": "127.0.0.1", "port": cdn_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": {"network": "websocket", "security": "none", "wsSettings": {"path": ws_path}}})
+    write_mihomo_vless_cdn(connection_id, settings["cdn_enabled"], settings["cdn_domain"], ws_path, cdn_port)
+    apply_reality_config(config_path, config)
+    if settings["cdn_enabled"]:
+        run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
+        run("systemctl", "reload", "caddy.service", check=True)
+    return {"uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": ws_path}
 
 
 def remove_reality_credential(profile_id: str, credential: dict[str, Any]) -> None:
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
     try:
-        inbound = reality_inbound(config)
         user_id = credential.get("uuid")
-        inbound["settings"]["clients"] = [
-            item for item in inbound["settings"]["clients"] if item.get("id") != user_id
-        ]
-        atomic_json(config_path, config, mode=0o640)
-        shutil.chown(config_path, user="root", group="nogroup")
-        run("systemctl", "restart", "vps-control-mihomo-reality.service")
+        direct_tag = credential.get("direct_tag")
+        config["inbounds"] = [item for item in config.get("inbounds", []) if not (direct_tag and item.get("tag") in {direct_tag, str(direct_tag).replace("mihomo-vless-", "mihomo-vless-cdn-")}) and not (not direct_tag and any(client.get("id") == user_id for client in item.get("settings", {}).get("clients", [])))]
+        connection_id = str(direct_tag or "").removeprefix("mihomo-vless-")
+        if connection_id:
+            write_mihomo_vless_cdn(connection_id, False, "", "", 0)
+        apply_reality_config(config_path, config)
+        if credential.get("cdn_enabled"):
+            run("systemctl", "reload", "caddy.service")
     except (TypeError, KeyError, IndexError):
         pass
 
@@ -1154,11 +1305,11 @@ def shadowsocks_profile_stats(profile_id: str, port: int) -> dict[str, Any]:
     }
 
 
-def reality_profile_stats(profile_id: str) -> dict[str, Any]:
+def reality_profile_stats(profile_id: str, connection_id: str | None = None) -> dict[str, Any]:
     active = systemctl_active("vps-control-mihomo-reality.service")
     if not REALITY_XRAY_BIN.is_file() or not active:
         return {"active": active, "rx_bytes": 0, "tx_bytes": 0}
-    email = f"mihomo-{profile_id}"
+    email = f"mihomo-{profile_id}" + (f"-{connection_id}" if connection_id else "")
     output = run(
         str(REALITY_XRAY_BIN), "api", "statsquery",
         f"-server={REALITY_API_SERVER}", "-pattern", f"user>>>{email}>>>traffic>>>",
@@ -1185,33 +1336,34 @@ def profile_stats(profile_id: str) -> dict[str, Any]:
     item = next((entry for entry in profiles() if entry.get("id") == profile_id), None)
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
-    credentials = item.get("credentials", {})
-    channels: dict[str, Any] = {}
+    connections: dict[str, Any] = {}
     wg_dump: dict[str, dict[str, Any]] | None = None
     awg_dump: dict[str, dict[str, Any]] | None = None
     empty_peer = {"endpoint": None, "rx_bytes": 0, "tx_bytes": 0, "handshake_age_s": None}
-    for module_id in item.get("channels", []):
-        credential = credentials.get(module_id, {})
+    for connection in normalize_profile(item).get("connections", []):
+        connection_id = str(connection.get("id", ""))
+        module_id = str(connection.get("component", ""))
+        credential = connection.get("credential", {})
         if module_id == "transport-wg":
             wg_dump = wg_like_dump("transport-wg") if wg_dump is None else wg_dump
-            channels[module_id] = wg_dump.get(str(credential.get("public_key", "")), empty_peer)
+            connections[connection_id] = wg_dump.get(str(credential.get("public_key", "")), empty_peer)
         elif module_id == "transport-awg":
             awg_dump = wg_like_dump("transport-awg") if awg_dump is None else awg_dump
-            channels[module_id] = awg_dump.get(str(credential.get("public_key", "")), empty_peer)
+            connections[connection_id] = awg_dump.get(str(credential.get("public_key", "")), empty_peer)
         elif module_id == "transport-shadowsocks":
-            channels[module_id] = shadowsocks_profile_stats(profile_id, int(credential.get("port", 0)))
+            connections[connection_id] = shadowsocks_profile_stats(profile_id, int(credential.get("port", 0)))
         elif module_id == "transport-reality":
-            channels[module_id] = reality_profile_stats(profile_id)
-    return {"id": profile_id, "channels": channels}
+            connections[connection_id] = reality_profile_stats(profile_id, connection_id)
+    return {"id": profile_id, "connections": connections, "channels": connections}
 
 
-def provision(profile_id: str, module_id: str) -> dict[str, Any]:
+def provision(profile_id: str, module_id: str, connection_id: str = "default", settings: dict[str, Any] | None = None) -> dict[str, Any]:
     if module_id in ("transport-wg", "transport-awg"):
         return add_wg_credential(profile_id, module_id)
     if module_id == "transport-shadowsocks":
         return add_ss_credential(profile_id)
     if module_id == "transport-reality":
-        return add_reality_credential(profile_id)
+        return add_reality_credential(profile_id, connection_id, settings or {})
     raise RuntimeError(f"{module_id} is not a transport")
 
 
@@ -1234,6 +1386,45 @@ def validate_channels(channels: list[str]) -> list[str]:
         if module_id not in result:
             result.append(module_id)
     return result
+
+
+def validate_connection_inputs(values: list[ProfileConnectionInput]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    used_ids: set[str] = set()
+    used_singletons: set[str] = set()
+    for index, value in enumerate(values):
+        component = value.component
+        validate_channels([component])
+        if component != "transport-reality" and component in used_singletons:
+            raise HTTPException(status_code=422, detail=f"Only VLESS can currently be added more than once: {manifest(component)['name']}")
+        used_singletons.add(component)
+        connection_id = value.id or f"connection-{index + 1}-{uuid.uuid4().hex[:6]}"
+        if connection_id in used_ids:
+            raise HTTPException(status_code=422, detail=f"Duplicate connection id: {connection_id}")
+        used_ids.add(connection_id)
+        settings = validate_connection(component, value.settings)
+        result.append({"id": connection_id, "component": component, "name": value.name.strip() or manifest(component).get("name", component), "settings": settings})
+    return result
+
+
+def legacy_connection_inputs(channels: list[str]) -> list[dict[str, Any]]:
+    return [{"id": f"connection-{index + 1}-{uuid.uuid4().hex[:6]}", "component": component, "name": manifest(component).get("name", component), "settings": connection_defaults(component)} for index, component in enumerate(validate_channels(channels))]
+
+
+def provision_connections(profile_id: str, definitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    completed: list[dict[str, Any]] = []
+    try:
+        for definition in definitions:
+            credential = provision(profile_id, definition["component"], definition["id"], definition.get("settings", {}))
+            completed.append({**definition, "credential": credential})
+    except Exception:
+        for connection in reversed(completed):
+            try:
+                deprovision(profile_id, connection["component"], connection.get("credential", {}))
+            except Exception:
+                pass
+        raise
+    return completed
 
 
 def create_profile_credentials(profile_id: str, channels: list[str]) -> dict[str, Any]:
@@ -1261,24 +1452,24 @@ def list_profiles() -> dict[str, Any]:
 @app.post("/api/mihomo/profiles", dependencies=[Depends(auth_required)])
 @serialized_profile_mutation
 def create_profile(payload: ProfileCreate) -> dict[str, Any]:
-    channels = validate_channels(payload.channels)
+    definitions = validate_connection_inputs(payload.connections) if payload.connections is not None else legacy_connection_inputs(payload.channels)
     routing = validate_routing(payload.routing, current={})
     profile_id = uuid.uuid4().hex[:12]
     write_action(f"profile-create:{profile_id}", f"Создание профиля «{payload.name}»…", progress=15)
     try:
-        credentials = create_profile_credentials(profile_id, channels)
+        connections = provision_connections(profile_id, definitions)
     except Exception as exc:
         write_action(f"profile-create:{profile_id}", str(exc), state="failed", progress=100)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     item = {
         "id": profile_id,
         "name": payload.name.strip(),
-        "channels": channels,
+        "connections": connections,
         "routing": routing,
-        "credentials": credentials,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
+    sync_legacy_profile_fields(item)
     data = profiles()
     data.append(item)
     save_profiles(data)
@@ -1298,7 +1489,25 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         item["name"] = payload.name.strip()
     if payload.routing is not None:
         item["routing"] = validate_routing(payload.routing, current=item.get("routing", {}))
-    if payload.channels is not None:
+    if payload.connections is not None:
+        definitions = validate_connection_inputs(payload.connections)
+        current_connections = {str(connection.get("id")): connection for connection in item.get("connections", [])}
+        next_ids = {definition["id"] for definition in definitions}
+        for connection_id, connection in current_connections.items():
+            if connection_id not in next_ids:
+                deprovision(profile_id, connection["component"], connection.get("credential", {}))
+        next_connections: list[dict[str, Any]] = []
+        for definition in definitions:
+            current_connection = current_connections.get(definition["id"])
+            if current_connection and current_connection.get("component") == definition["component"] and current_connection.get("settings", {}) == definition.get("settings", {}):
+                next_connections.append({**definition, "credential": current_connection.get("credential", {})})
+            else:
+                if current_connection:
+                    deprovision(profile_id, current_connection["component"], current_connection.get("credential", {}))
+                next_connections.append({**definition, "credential": provision(profile_id, definition["component"], definition["id"], definition.get("settings", {}))})
+        item["connections"] = next_connections
+        sync_legacy_profile_fields(item)
+    elif payload.channels is not None:
         next_channels = validate_channels(payload.channels)
         current = list(item.get("channels", []))
         credentials = dict(item.get("credentials", {}))
@@ -1315,6 +1524,10 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         item["channels"] = next_channels
         item["credentials"] = credentials
+        item.pop("connections", None)
+        normalized = normalize_profile(item)
+        item.clear()
+        item.update(normalized)
     item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     save_profiles(data)
     write_action(f"profile-update:{profile_id}", f"Профиль «{item['name']}» обновлён", state="done", progress=100)
@@ -1330,11 +1543,11 @@ def delete_profile(profile_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Profile not found")
     write_action(f"profile-delete:{profile_id}", f"Удаление профиля «{item.get('name', '')}»…", progress=20)
     errors: list[str] = []
-    for module_id, credential in dict(item.get("credentials", {})).items():
+    for connection in item.get("connections", []):
         try:
-            deprovision(profile_id, module_id, credential)
+            deprovision(profile_id, connection.get("component", ""), connection.get("credential", {}))
         except Exception as exc:
-            errors.append(f"{module_id}: {exc}")
+            errors.append(f"{connection.get('name') or connection.get('component')}: {exc}")
     if errors:
         detail = "; ".join(errors)
         write_action(f"profile-delete:{profile_id}", detail, state="failed", progress=100)
@@ -1351,12 +1564,12 @@ def q(value: Any) -> str:
     return json.dumps(str(value), ensure_ascii=False)
 
 
-def render_proxy(module_id: str, credential: dict[str, Any]) -> list[str]:
+def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) -> list[str]:
     server = public_endpoint()
     if module_id in ("transport-wg", "transport-awg"):
         name = "AWG" if module_id == "transport-awg" else "WG"
         lines = [
-            f"  - name: {q(name)}",
+            f"  - name: {q(proxy_name or name)}",
             "    type: wireguard",
             f"    server: {q(server)}",
             f"    port: {int(credential['port'])}",
@@ -1385,7 +1598,7 @@ def render_proxy(module_id: str, credential: dict[str, Any]) -> list[str]:
         return lines
     if module_id == "transport-shadowsocks":
         return [
-            '  - name: "SS"',
+            f"  - name: {q(proxy_name or 'SS')}",
             "    type: ss",
             f"    server: {q(server)}",
             f"    port: {int(credential['port'])}",
@@ -1397,10 +1610,12 @@ def render_proxy(module_id: str, credential: dict[str, Any]) -> list[str]:
         # Read transport/SNI/path from the current module configuration. A
         # settings change applies to all profiles served by this Xray instance.
         # UUID remains profile-specific and comes from the stored credential.
-        effective = {**credential, **reality_connection_settings()}
+        effective = dict(credential)
+        if not effective.get("direct_tag"):
+            effective = {**effective, **reality_connection_settings()}
         transport = str(effective.get("transport", "xhttp"))
         lines = [
-            '  - name: "VRX"',
+            f"  - name: {q(proxy_name or 'VLESS')}",
             "    type: vless",
             f"    server: {q(server)}",
             f"    port: {int(effective['port'])}",
@@ -1430,17 +1645,53 @@ def render_proxy(module_id: str, credential: dict[str, Any]) -> list[str]:
     return []
 
 
+def render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
+    return [
+        f"  - name: {q(proxy_name)}",
+        "    type: vless",
+        f"    server: {q(credential['cdn_domain'])}",
+        "    port: 443",
+        f"    uuid: {q(credential['uuid'])}",
+        '    encryption: ""',
+        "    udp: true",
+        "    tls: true",
+        f"    servername: {q(credential['cdn_domain'])}",
+        "    client-fingerprint: chrome",
+        "    network: ws",
+        "    ws-opts:",
+        f"      path: {q(credential['cdn_path'])}",
+        "      headers:",
+        f"        Host: {q(credential['cdn_domain'])}",
+    ]
+
+
 def render_profile(item: dict[str, Any]) -> str:
-    proxy_names = {
+    default_names = {
         "transport-awg": "AWG",
         "transport-wg": "WG",
         "transport-reality": "VRX",
         "transport-shadowsocks": "SS",
     }
-    channels = [channel for channel in item.get("channels", []) if channel in proxy_names]
-    if not channels:
-        raise HTTPException(status_code=409, detail="У профиля нет установленных каналов Mihomo")
-    credentials = item.get("credentials", {})
+    connections = [connection for connection in normalize_profile(item).get("connections", []) if connection.get("component") in default_names]
+    if not connections:
+        raise HTTPException(status_code=409, detail="У профиля нет подключений Mihomo")
+    used_names: set[str] = set()
+    rendered: list[tuple[dict[str, Any], str, str | None]] = []
+    for index, connection in enumerate(connections):
+        component = str(connection["component"])
+        base = str(connection.get("name") or default_names[component]).strip()
+        name = base
+        suffix = 2
+        while name in used_names:
+            name = f"{base} {suffix}"
+            suffix += 1
+        used_names.add(name)
+        cdn_name = None
+        credential = connection.get("credential", {})
+        if component == "transport-reality" and credential.get("cdn_enabled"):
+            cdn_name = f"{name} · CDN"
+            used_names.add(cdn_name)
+        rendered.append((connection, name, cdn_name))
     routing = {**routing_settings(), **item.get("routing", {})}
     mode = str(routing.get("mode", "rule"))
     lines = [
@@ -1471,8 +1722,10 @@ def render_profile(item: dict[str, Any]) -> str:
         f"    - {q(dns['fallback'])}",
     ]
     lines.append("proxies:")
-    for module_id in channels:
-        lines.extend(render_proxy(module_id, credentials[module_id]))
+    for connection, name, cdn_name in rendered:
+        lines.extend(render_proxy(str(connection["component"]), connection.get("credential", {}), name))
+        if cdn_name:
+            lines.extend(render_vless_cdn(connection.get("credential", {}), cdn_name))
     group_type = str(routing.get("strategy", "fallback"))
     lines += [
         "proxy-groups:",
@@ -1480,8 +1733,10 @@ def render_profile(item: dict[str, Any]) -> str:
         f"    type: {group_type}",
         "    proxies:",
     ]
-    for module_id in channels:
-        lines.append(f"      - {q(proxy_names[module_id])}")
+    for _, name, cdn_name in rendered:
+        lines.append(f"      - {q(name)}")
+        if cdn_name:
+            lines.append(f"      - {q(cdn_name)}")
     if group_type in ("fallback", "url-test"):
         lines += [
             f"    url: {q(routing.get('test_url', 'https://www.gstatic.com/generate_204'))}",

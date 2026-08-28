@@ -31,8 +31,8 @@ type Status = {
 type SettingField = {
   key: string;
   label: string;
-  type: "text" | "number" | "select" | "textarea";
-  default: string | number;
+  type: "text" | "number" | "select" | "textarea" | "boolean";
+  default: string | number | boolean;
   min?: number;
   max?: number;
   options?: Array<string | { value: string; label: string }>;
@@ -50,7 +50,8 @@ type Module = {
   active: boolean;
   service?: string;
   settings?: SettingField[];
-  settings_values: Record<string, string | number>;
+  connection_settings?: SettingField[];
+  settings_values: Record<string, string | number | boolean>;
   installed_version?: string;
   available_version?: string;
   update_available?: boolean;
@@ -61,8 +62,16 @@ type Profile = {
   id: string;
   name: string;
   channels: string[];
+  connections: ProfileConnection[];
   created_at: string;
   updated_at: string;
+};
+
+type ProfileConnection = {
+  id: string;
+  component: string;
+  name: string;
+  settings: Record<string, string | number | boolean>;
 };
 
 type PolicySettings = {
@@ -105,10 +114,10 @@ export function MihomoPage({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<Module | null>(null);
-  const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number>>({});
+  const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number | boolean>>({});
   const [profileDialog, setProfileDialog] = useState<Profile | "new" | null>(null);
   const [profileName, setProfileName] = useState("");
-  const [profileChannels, setProfileChannels] = useState<string[]>([]);
+  const [profileConnections, setProfileConnections] = useState<ProfileConnection[]>([]);
 
   const request = useCallback(async (path: string, init?: RequestInit) => {
     if (!token) throw new Error("Сессия панели завершена. Войдите заново.");
@@ -187,8 +196,8 @@ export function MihomoPage({
         title: "Mihomo используется подключениями",
         message:
           `Найдено профилей с подключениями: ${usedProfiles}. Credentials: ${credentials}.` +
-          (channels ? ` Используемые каналы: ${channels}.` : "") +
-          " Удаление каскадно отзовёт эти credentials, удалит профили, внутренние каналы, DNS и маршрутизацию Mihomo.",
+          (channels ? ` Используемые компоненты: ${channels}.` : "") +
+          " Удаление каскадно отзовёт эти credentials, удалит профили, компоненты, DNS и маршрутизацию Mihomo.",
         confirmLabel: "Продолжить удаление",
         phrase: "УДАЛИТЬ MIHOMO",
         danger: true,
@@ -205,8 +214,8 @@ export function MihomoPage({
       title: `${install ? "Установить" : "Удалить"} ${module.name}?`,
       message:
         install
-          ? "Будет установлен внутренний канал Mihomo. При первом канале автоматически создаются базовые DNS и маршрутизация. Прямые модули GATE.312 не изменяются."
-          : "Будет удалён только внутренний канал Mihomo. Прямые подключения и одноимённые модули GATE.312 не изменяются.",
+          ? "Будет установлено ядро протокола Mihomo. С первым компонентом активируются базовые DNS и маршрутизация."
+          : "Будет удалён только компонент Mihomo. Прямые подключения GATE.312 не изменяются.",
       confirmLabel: install ? "Установить" : "Удалить модуль",
       danger: !install,
     });
@@ -337,13 +346,33 @@ export function MihomoPage({
   function newProfile() {
     setProfileDialog("new");
     setProfileName("");
-    setProfileChannels([]);
+    setProfileConnections([]);
   }
 
   function editProfile(profile: Profile) {
     setProfileDialog(profile);
     setProfileName(profile.name);
-    setProfileChannels([...profile.channels]);
+    setProfileConnections((profile.connections || []).map((connection) => ({ ...connection, settings: { ...connection.settings } })));
+  }
+
+  function addProfileConnection(module: Module) {
+    const settings = Object.fromEntries((module.connection_settings || []).map((field) => [field.key, field.default]));
+    setProfileConnections((current) => [...current, {
+      id: `connection-${crypto.randomUUID()}`,
+      component: module.id,
+      name: module.name,
+      settings,
+    }]);
+  }
+
+  function updateProfileConnection(id: string, patch: Partial<ProfileConnection>) {
+    setProfileConnections((current) => current.map((connection) => connection.id === id ? { ...connection, ...patch } : connection));
+  }
+
+  function updateConnectionSetting(id: string, key: string, value: string | number | boolean) {
+    setProfileConnections((current) => current.map((connection) => connection.id === id
+      ? { ...connection, settings: { ...connection.settings, [key]: value } }
+      : connection));
   }
 
   async function saveProfile(event: FormEvent) {
@@ -358,12 +387,12 @@ export function MihomoPage({
       if (profileDialog === "new") {
         await request("/mihomo/profiles", {
           method: "POST",
-          body: JSON.stringify({ name: profileName, channels: profileChannels }),
+          body: JSON.stringify({ name: profileName, connections: profileConnections }),
         });
       } else if (profileDialog) {
         await request(`/mihomo/profiles/${profileDialog.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ name: profileName, channels: profileChannels }),
+          body: JSON.stringify({ name: profileName, connections: profileConnections }),
         });
       }
       setProfileDialog(null);
@@ -432,7 +461,7 @@ export function MihomoPage({
       <nav className="mihomoHost__tabs mihomoTabs" aria-label="Разделы Mihomo">
         <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
         <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
-        <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Каналы</Tab>
+        <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Компоненты</Tab>
         <Tab id="dns" current={view} onSelect={setView}>DNS Mihomo</Tab>
         <Tab id="routing" current={view} onSelect={setView}>Маршрутизация соединений</Tab>
       </nav>
@@ -448,7 +477,7 @@ export function MihomoPage({
               </span>
             </div>
             <p className="mihomoHeroLead">
-              Отдельный routing-компонент со своими профилями, внутренними каналами, DNS и политиками маршрутизации.
+              Контроль и управление профилями, компонентами подключений, DNS и политиками маршрутизации.
             </p>
           </div>
 
@@ -456,7 +485,7 @@ export function MihomoPage({
             <HeroFact label="CORE" value={status?.core_version || "—"} note={status?.active ? "runtime active" : "status unavailable"} />
             <HeroFact label="PROFILES" value={String(status?.profiles ?? profiles.length)} note={`${status?.profiles_in_use || 0} in use`} />
             <HeroFact label="CREDENTIALS" value={String(status?.credentials || 0)} note="internal only" />
-            <HeroFact label="CHANNELS" value={`${status?.channels_installed ?? installedChannels.length}/4`} note={`${status?.channels_in_use?.length || 0} in use`} />
+            <HeroFact label="COMPONENTS" value={`${status?.channels_installed ?? installedChannels.length}/4`} note={`${status?.channels_in_use?.length || 0} in use`} />
             <HeroFact label="ENDPOINT" value={status?.endpoint || "—"} note="Mihomo node" wide />
           </div>
 
@@ -507,7 +536,7 @@ export function MihomoPage({
               </div>
               <div className="mihomoTopologyArrow" aria-hidden="true" />
               <div className="mihomoTopologyNode">
-                <small>INTERNAL CHANNELS</small>
+                <small>COMPONENTS</small>
                 <strong>{status?.channels_installed ?? installedChannels.length} / 4</strong>
                 <span>{status?.channels_in_use?.length || 0} используются</span>
               </div>
@@ -515,7 +544,7 @@ export function MihomoPage({
               <div className="mihomoTopologyNode policy">
                 <small>POLICY</small>
                 <strong>{policiesReady ? "ACTIVE" : "WAIT"}</strong>
-                <span>DNS + routing создаются с первым каналом</span>
+                <span>DNS + routing активируются с первым компонентом</span>
               </div>
             </div>
           </article>
@@ -523,11 +552,11 @@ export function MihomoPage({
           <article className="mihomoChannelsBoard">
             <header className="mihomoSectionHead compact">
               <div>
-                <p className="eyebrow">INTERNAL CHANNELS</p>
-                <h2>Каналы Mihomo</h2>
-                <p>Установка здесь создаёт внутренний transport Mihomo и не изменяет Direct Channels.</p>
+                <p className="eyebrow">PROTOCOL COMPONENTS</p>
+                <h2>Компоненты Mihomo</h2>
+                <p>Здесь устанавливаются ядра протоколов. Конкретные подключения создаются внутри профиля.</p>
               </div>
-              <button className="ghostButton" type="button" onClick={() => setView("channels")}>Каталог каналов</button>
+              <button className="ghostButton" type="button" onClick={() => setView("channels")}>Каталог компонентов</button>
             </header>
             <div className="mihomoChannelGrid">
               {transportModules.map((module) => (
@@ -546,12 +575,12 @@ export function MihomoPage({
           <article className="mihomoQuickState">
             <div>
               <small>DNS MODULE</small>
-              <strong>{policiesReady ? "Активен" : "Ожидает канал"}</strong>
+              <strong>{policiesReady ? "Активен" : "Ожидает компонент"}</strong>
               <span>Общая DNS-политика всех профилей</span>
             </div>
             <div>
               <small>ROUTING MODULE</small>
-              <strong>{policiesReady ? "Активна" : "Ожидает канал"}</strong>
+              <strong>{policiesReady ? "Активна" : "Ожидает компонент"}</strong>
               <span>Базовая стратегия всех профилей</span>
             </div>
             <div>
@@ -569,12 +598,12 @@ export function MihomoPage({
             <div>
               <p className="eyebrow">MIHOMO PROFILES</p>
               <h2>Профили устройств</h2>
-              <p>Каждый профиль использует только выбранные внутренние каналы Mihomo и получает собственные credentials.</p>
+              <p>Каждый профиль собирается из независимых подключений на базе установленных компонентов.</p>
             </div>
             <button className="primaryButton" onClick={newProfile} disabled={!installedChannels.length}>Новый профиль</button>
           </header>
           {!installedChannels.length && (
-            <div className="mihomoHint">Сначала установите хотя бы один внутренний канал Mihomo. Direct-каналы здесь не используются.</div>
+            <div className="mihomoHint">Сначала установите хотя бы один компонент протокола Mihomo.</div>
           )}
           <div className="mihomoProfiles">
             {profiles.map((profile) => (
@@ -584,9 +613,9 @@ export function MihomoPage({
                   <p><b>{profile.name}</b><small>{profile.id}</small></p>
                 </div>
                 <div className="mihomoProfileChannels">
-                  {profile.channels.length
-                    ? profile.channels.map((id) => <span key={id}>{channelShort[id] || id}</span>)
-                    : <em>Нет каналов</em>}
+                  {profile.connections?.length
+                    ? profile.connections.map((connection) => <span key={connection.id}>{connection.name || channelShort[connection.component] || connection.component}</span>)
+                    : <em>Нет подключений</em>}
                 </div>
                 <small className="mihomoProfileUpdated">{new Date(profile.updated_at || profile.created_at).toLocaleString("ru-RU")}</small>
                 <div className="mihomoRowActions">
@@ -596,15 +625,15 @@ export function MihomoPage({
                 </div>
               </div>
             ))}
-            {!profiles.length && <Empty title="Профилей пока нет" text="Создайте профиль после установки хотя бы одного внутреннего канала Mihomo." />}
+            {!profiles.length && <Empty title="Профилей пока нет" text="Установите компонент и соберите первое подключение в профиле." />}
           </div>
         </article>
       )}
 
       {view === "channels" && (
         <ModuleCatalog
-          title="Каналы подключения Mihomo"
-          description="Каждый transport устанавливается только внутри Mihomo и получает собственный instance, конфигурацию, порт и credentials."
+          title="Компоненты подключений Mihomo"
+          description="Установите ядра нужных протоколов. Порты, транспорт, credentials и CDN задаются отдельно для каждого подключения в профиле."
           modules={transportModules}
           busy={busy}
           onToggle={toggleModule}
@@ -659,6 +688,8 @@ export function MihomoPage({
                     </select>
                   ) : field.type === "textarea" ? (
                     <textarea rows={6} value={String(settingsDraft[field.key] ?? field.default)} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nGEOIP,PRIVATE,DIRECT"} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field.key]: event.target.value }))} />
+                  ) : field.type === "boolean" ? (
+                    <input type="checkbox" checked={Boolean(settingsDraft[field.key] ?? field.default)} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field.key]: event.target.checked }))} />
                   ) : (
                     <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(settingsDraft[field.key] ?? field.default)} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field.key]: field.type === "number" ? Number(event.target.value) : event.target.value }))} />
                   )}
@@ -683,18 +714,46 @@ export function MihomoPage({
               <button type="button" className="iconButton" onClick={() => setProfileDialog(null)}>x</button>
             </header>
             <label className="mihomoProfileName"><span>Название устройства</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} /></label>
-            <fieldset>
-              <legend>Внутренние каналы</legend>
-              {installedChannels.map((module) => (
-                <label key={module.id} className={profileChannels.includes(module.id) ? "is-selected" : ""}>
-                  <input type="checkbox" checked={profileChannels.includes(module.id)} onChange={(event) => setProfileChannels((current) => event.target.checked ? [...current, module.id] : current.filter((id) => id !== module.id))} />
-                  <span>{channelShort[module.id] || "CH"}</span>
-                  <p><b>{module.name}</b><small>{module.description}</small></p>
-                </label>
-              ))}
-            </fieldset>
-            <aside>Для каждого выбранного канала создаётся отдельный Mihomo credential. Он не появляется на странице «Подключения».</aside>
-            <footer><button type="button" className="ghostButton" onClick={() => setProfileDialog(null)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "profile" || !profileName.trim()}>{profileDialog === "new" ? "Создать профиль" : "Сохранить профиль"}</button></footer>
+            <section className="mihomoConnectionBuilder">
+              <header><div><b>Подключения профиля</b><small>Один профиль может содержать несколько VLESS с разными маршрутами и CDN.</small></div></header>
+              <div className="mihomoConnectionAdd">
+                {installedChannels.map((module) => {
+                  const singletonUsed = module.id !== "transport-reality" && profileConnections.some((item) => item.component === module.id);
+                  return <button key={module.id} type="button" disabled={singletonUsed} onClick={() => addProfileConnection(module)}>+ {module.name}</button>;
+                })}
+              </div>
+              <div className="mihomoConnectionList">
+                {profileConnections.map((connection, index) => {
+                  const module = modules.find((item) => item.id === connection.component);
+                  const schema = module?.connection_settings || [];
+                  return <article key={connection.id} className="mihomoConnectionCard">
+                    <header>
+                      <span>{channelShort[connection.component] || "CH"}</span>
+                      <div><b>{module?.name || connection.component}</b><small>Подключение {index + 1}</small></div>
+                      <button type="button" className="dangerButton" onClick={() => setProfileConnections((current) => current.filter((item) => item.id !== connection.id))}>Удалить</button>
+                    </header>
+                    <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
+                    <div className="mihomoConnectionFields">
+                      {schema.filter((field) => {
+                        if (["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return connection.settings.transport === "xhttp";
+                        if (field.key === "cdn_domain") return Boolean(connection.settings.cdn_enabled);
+                        return true;
+                      }).map((field) => <label key={field.key} className={field.type === "boolean" ? "is-toggle" : ""}>
+                        <span>{field.label}</span>
+                        {field.type === "select" ? <select value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>
+                          {(field.options || []).map((option) => { const value = typeof option === "string" ? option : option.value; const label = typeof option === "string" ? option : option.label; return <option key={value} value={value}>{label}</option>; })}
+                        </select> : field.type === "boolean" ? <input type="checkbox" checked={Boolean(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.checked)} />
+                          : <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, field.type === "number" ? Number(event.target.value) : event.target.value)} />}
+                        {field.help && <small>{field.help}</small>}
+                      </label>)}
+                    </div>
+                  </article>;
+                })}
+                {!profileConnections.length && <p className="mihomoConnectionEmpty">Добавьте хотя бы одно подключение из установленного компонента.</p>}
+              </div>
+            </section>
+            <aside>Компонент устанавливает ядро протокола один раз. Каждая карточка выше создаёт независимые параметры и credential только для этого профиля.</aside>
+            <footer><button type="button" className="ghostButton" onClick={() => setProfileDialog(null)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "profile" || !profileName.trim() || !profileConnections.length}>{profileDialog === "new" ? "Создать профиль" : "Сохранить профиль"}</button></footer>
           </form>
         </div>
       )}
