@@ -42,7 +42,8 @@ try:
 except (OSError,ValueError):old={}
 ins=[x for x in old.get('inbounds',[]) if str(x.get('tag','')).startswith('mihomo-vless-')]
 ins.append({'tag':'api','listen':'127.0.0.1','port':10086,'protocol':'dokodemo-door','settings':{'address':'127.0.0.1'}})
-c={'log':{'loglevel':sys.argv[4]},'api':{'tag':'api','services':['StatsService']},'stats':{},'policy':{'levels':{'0':{'statsUserUplink':True,'statsUserDownlink':True}}},'inbounds':ins,'dns':{'servers':[x.strip() for x in sys.argv[3].split(',') if x.strip()],'queryStrategy':'UseIP'},'routing':{'domainStrategy':'IPIfNonMatch','rules':[{'type':'field','inboundTag':['api'],'outboundTag':'api'},{'type':'field','ip':['geoip:private'],'outboundTag':'blocked'}]},'outbounds':[{'protocol':'freedom','tag':'direct'},{'protocol':'blackhole','tag':'blocked'}]}
+private_networks=['10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','127.0.0.0/8','169.254.0.0/16','::1/128','fc00::/7','fe80::/10']
+c={'log':{'loglevel':sys.argv[4]},'api':{'tag':'api','services':['StatsService']},'stats':{},'policy':{'levels':{'0':{'statsUserUplink':True,'statsUserDownlink':True}}},'inbounds':ins,'dns':{'servers':[x.strip() for x in sys.argv[3].split(',') if x.strip()],'queryStrategy':'UseIP'},'routing':{'domainStrategy':'IPIfNonMatch','rules':[{'type':'field','inboundTag':['api'],'outboundTag':'api'},{'type':'field','ip':private_networks,'outboundTag':'blocked'}]},'outbounds':[{'protocol':'freedom','tag':'direct'},{'protocol':'blackhole','tag':'blocked'}]}
 with open(sys.argv[2],'w',encoding='utf-8') as h:json.dump(c,h,ensure_ascii=False,indent=2)
 os.chmod(sys.argv[2],0o640)
 PY

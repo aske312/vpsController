@@ -1130,6 +1130,8 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
     assert.ok(connectionKeys.includes(key), `missing Mihomo VLESS connection setting ${key}`);
   }
   assert.match(installer, /startsWith\('mihomo-vless-'\)|startswith\('mihomo-vless-'\)/);
+  assert.doesNotMatch(installer, /geoip:private/, "the minimal Xray install does not include geoip.dat");
+  assert.match(installer, /'10\.0\.0\.0\/8'.*'fc00::\/7'/s);
   assert.match(installer, /config\.json\.candidate/);
   assert.match(installer, /run -test -config "\$\{candidate\}"/);
   assert.match(manager, /class ProfileConnectionInput/);
