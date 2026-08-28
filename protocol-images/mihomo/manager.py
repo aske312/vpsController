@@ -431,6 +431,10 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
             if maximum is not None and value > int(maximum):
                 raise HTTPException(status_code=422, detail=f"{key} is above maximum")
             result[key] = value
+        elif kind == "boolean":
+            if not isinstance(raw, bool):
+                raise HTTPException(status_code=422, detail=f"{key} must be boolean")
+            result[key] = raw
         elif kind == "select":
             options = [option_value(option) for option in item.get("options", [])]
             if raw not in options:
@@ -441,6 +445,49 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
             # allowed to be empty: a profile without extra rules is valid.
             result[key] = str(raw)
     return result
+
+
+DIRECT_RULE_PRESETS: dict[str, list[str]] = {
+    "direct_ru_sites": [
+        "DOMAIN-SUFFIX,ru,DIRECT", "DOMAIN-SUFFIX,xn--p1ai,DIRECT", "DOMAIN-SUFFIX,su,DIRECT",
+        "DOMAIN-SUFFIX,yandex.com,DIRECT", "DOMAIN-SUFFIX,yandex.net,DIRECT", "DOMAIN-SUFFIX,yastatic.net,DIRECT",
+        "DOMAIN-SUFFIX,yandexcloud.net,DIRECT", "DOMAIN-SUFFIX,vk.com,DIRECT", "DOMAIN-SUFFIX,userapi.com,DIRECT",
+        "DOMAIN-SUFFIX,vkuseraudio.net,DIRECT", "DOMAIN-SUFFIX,mycdn.me,DIRECT", "DOMAIN-SUFFIX,mail.com,DIRECT",
+        "DOMAIN-SUFFIX,2gis.com,DIRECT", "DOMAIN-SUFFIX,kaspersky.com,DIRECT", "DOMAIN-SUFFIX,kinopoisk.com,DIRECT",
+        "GEOIP,RU,DIRECT,no-resolve",
+    ],
+    "direct_ru_banks": [
+        "DOMAIN-SUFFIX,sberbank.com,DIRECT", "DOMAIN-SUFFIX,sberdevices.ru,DIRECT", "DOMAIN-SUFFIX,tinkoff.ru,DIRECT",
+        "DOMAIN-SUFFIX,tbank.ru,DIRECT", "DOMAIN-SUFFIX,alfabank.ru,DIRECT", "DOMAIN-SUFFIX,vtb.ru,DIRECT",
+        "DOMAIN-SUFFIX,gazprombank.ru,DIRECT", "DOMAIN-SUFFIX,raiffeisen.ru,DIRECT", "DOMAIN-SUFFIX,open.ru,DIRECT",
+        "DOMAIN-SUFFIX,psbank.ru,DIRECT", "DOMAIN-SUFFIX,sovcombank.ru,DIRECT", "DOMAIN-SUFFIX,domrfbank.ru,DIRECT",
+        "DOMAIN-SUFFIX,rshb.ru,DIRECT", "DOMAIN-SUFFIX,pochtabank.ru,DIRECT", "DOMAIN-SUFFIX,mkb.ru,DIRECT",
+        "DOMAIN-SUFFIX,uralsib.ru,DIRECT", "DOMAIN-SUFFIX,akbars.ru,DIRECT", "DOMAIN-SUFFIX,rencredit.ru,DIRECT",
+        "DOMAIN-SUFFIX,otpbank.ru,DIRECT", "DOMAIN-SUFFIX,unistream.ru,DIRECT", "DOMAIN-SUFFIX,mironline.ru,DIRECT",
+        "DOMAIN-SUFFIX,nspk.ru,DIRECT", "DOMAIN-SUFFIX,sbp.nspk.ru,DIRECT",
+    ],
+    "direct_ru_marketplaces": [
+        "DOMAIN-SUFFIX,ozon.ru,DIRECT", "DOMAIN-SUFFIX,ozon.com,DIRECT", "DOMAIN-SUFFIX,ozone.ru,DIRECT",
+        "DOMAIN-SUFFIX,wildberries.ru,DIRECT", "DOMAIN-SUFFIX,wbbasket.ru,DIRECT", "DOMAIN-SUFFIX,wb.ru,DIRECT",
+        "DOMAIN-SUFFIX,market.yandex.ru,DIRECT", "DOMAIN-SUFFIX,beru.ru,DIRECT", "DOMAIN-SUFFIX,megamarket.ru,DIRECT",
+        "DOMAIN-SUFFIX,goods.ru,DIRECT", "DOMAIN-SUFFIX,avito.ru,DIRECT", "DOMAIN-SUFFIX,avito.st,DIRECT",
+        "DOMAIN-SUFFIX,aliexpress.ru,DIRECT", "DOMAIN-SUFFIX,kazanexpress.ru,DIRECT", "DOMAIN-SUFFIX,magnitmarket.ru,DIRECT",
+        "DOMAIN-SUFFIX,lamoda.ru,DIRECT", "DOMAIN-SUFFIX,detmir.ru,DIRECT", "DOMAIN-SUFFIX,leroymerlin.ru,DIRECT",
+        "DOMAIN-SUFFIX,lemanapro.ru,DIRECT", "DOMAIN-SUFFIX,vseinstrumenti.ru,DIRECT", "DOMAIN-SUFFIX,citilink.ru,DIRECT",
+        "DOMAIN-SUFFIX,dns-shop.ru,DIRECT", "DOMAIN-SUFFIX,mvideo.ru,DIRECT", "DOMAIN-SUFFIX,eldorado.ru,DIRECT",
+        "DOMAIN-SUFFIX,onlinetrade.ru,DIRECT",
+    ],
+}
+
+
+def profile_rules(routing: dict[str, Any]) -> list[str]:
+    rules: list[str] = []
+    for setting, preset_rules in DIRECT_RULE_PRESETS.items():
+        if routing.get(setting, False):
+            rules.extend(preset_rules)
+    raw_rules = str(routing.get("rules", "")).replace("\r", "")
+    rules.extend(rule.strip() for rule in raw_rules.split("\n") if rule.strip() and not rule.strip().startswith("#"))
+    return list(dict.fromkeys(rules))
 
 
 DNS_SETTINGS_FILE = SETTINGS_ROOT / f"{DNS_MODULE_ID}.json"
@@ -1973,11 +2020,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
             f"    interval: {int(routing.get('interval', 180))}",
         ]
     lines.append("rules:")
-    raw_rules = str(routing.get("rules", "")).replace("\r", "")
-    for rule in raw_rules.split("\n"):
-        rule = rule.strip()
-        if rule and not rule.startswith("#"):
-            lines.append(f"  - {q(rule)}")
+    for rule in profile_rules(routing):
+        lines.append(f"  - {q(rule)}")
     lines.append('  - "MATCH,GATE.312"')
     return "\n".join(lines) + "\n"
 
