@@ -34,7 +34,7 @@ if [[ ! -s "${CONFIG_DIR}/reality.env" ]]; then
  keys="$("${MODULE_DIR}/xray" x25519)"; private="$(sed -n 's/^PrivateKey:[[:space:]]*//p'<<<"${keys}"|head -n1)"; public="$(sed -n -E 's/^(Password( \(PublicKey\))?|PublicKey):[[:space:]]*//p'<<<"${keys}"|head -n1)"
  printf 'PRIVATE_KEY=%s\nPUBLIC_KEY=%s\nSHORT_ID=%s\n' "${private}" "${public}" "$(openssl rand -hex 8)" >"${CONFIG_DIR}/reality.env"
 fi
-chmod 0600 "${CONFIG_DIR}/reality.env"; candidate="${CONFIG_DIR}/config.json.candidate"
+chmod 0600 "${CONFIG_DIR}/reality.env"; candidate="${CONFIG_DIR}/config.candidate.json"
 python3 - "${CONFIG_DIR}/config.json" "${candidate}" "${XRAY_DNS}" "${LOGLEVEL}" <<'PY'
 import json,os,sys
 try:
