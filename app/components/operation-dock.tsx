@@ -64,7 +64,7 @@ export function OperationDock({ action, label, active }: Props) {
             <div className="gateOperationText">
               <span>SYSTEM OPERATION</span>
               <strong>{label || action?.action || "Системная операция"}</strong>
-              <small>{action?.message || action?.unit || "Сервер выполняет команду…"}</small>
+              <small>Команда выполняется. Итог появится после завершения.</small>
             </div>
             <b className="gateOperationPercent">{systemFailed ? "ERR" : `${systemProgress}%`}</b>
           </div>

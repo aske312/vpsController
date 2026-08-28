@@ -1175,3 +1175,19 @@ test("SSH management does not start socket activation and the daemon together", 
   assert.match(api, /def manage_ssh_units/);
   assert.match(manager, /start_preferred_ssh/);
 });
+
+test("command UI exposes only final public outcomes while technical errors stay in journals", async () => {
+  const [api, mihomo, dock] = await Promise.all([
+    read("api/main.py"),
+    read("protocol-images/mihomo/manager.py"),
+    read("app/components/operation-dock.tsx"),
+  ]);
+  for (const backend of [api, mihomo]) {
+    assert.match(backend, /PUBLIC_COMMAND_ERROR/);
+    assert.match(backend, /public_http_exception_handler/);
+    assert.match(backend, /Suppressed technical/);
+  }
+  assert.match(mihomo, /if state == "failed":[\s\S]*message = PUBLIC_COMMAND_ERROR/);
+  assert.match(dock, /Команда выполняется\. Итог появится после завершения\./);
+  assert.doesNotMatch(dock, /action\?\.message \|\| action\?\.unit/);
+});

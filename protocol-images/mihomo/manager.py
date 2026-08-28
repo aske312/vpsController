@@ -6,6 +6,7 @@ import fcntl
 import hmac
 import ipaddress
 import json
+import logging
 import os
 import secrets
 import re
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 APP_ROOT = Path("/opt/vps-control")
@@ -102,6 +103,23 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+logger = logging.getLogger("vps-control.mihomo")
+PUBLIC_COMMAND_ERROR = "Команда завершилась с ошибкой. Технические сведения сохранены в журнале."
+TECHNICAL_ERROR_MARKERS = ("traceback", "systemctl", "journalctl", "apt-get", "dpkg", "stderr", "stdout", "command failed", "exit status", "failed to start")
+
+
+def public_http_error(status_code: int, detail: object) -> str:
+    message = str(detail or "").strip()
+    technical = "\n" in message or any(marker in message.lower() for marker in TECHNICAL_ERROR_MARKERS)
+    return PUBLIC_COMMAND_ERROR if status_code >= 500 or technical else (message or "Команда не выполнена.")
+
+
+@app.exception_handler(HTTPException)
+async def public_http_exception_handler(_, exc: HTTPException) -> JSONResponse:
+    detail = public_http_error(exc.status_code, exc.detail)
+    if detail == PUBLIC_COMMAND_ERROR:
+        logger.error("Suppressed technical Mihomo error (%s): %s", exc.status_code, exc.detail)
+    return JSONResponse(status_code=exc.status_code, content={"detail": detail}, headers=exc.headers)
 
 
 class ModuleSettingsPatch(BaseModel):
@@ -196,6 +214,9 @@ def write_action(action: str, message: str, state: str = "running", progress: in
     # FastAPI dispatches these sync endpoints to a threadpool, so a client can
     # poll get_action() from a separate request while a long install/profile
     # operation is still running on another worker thread.
+    if state == "failed":
+        logger.error("Mihomo action %s failed: %s", action, message)
+        message = PUBLIC_COMMAND_ERROR
     atomic_json(ACTION_FILE, {
         "action": action,
         "message": message,
