@@ -417,19 +417,29 @@ export function MihomoPage({
   function editProfile(profile: Profile) {
     setProfileDialog(profile);
     setProfileName(profile.name);
-    setProfileConnections((profile.connections || []).map((connection) => ({ ...connection, settings: { ...connection.settings } })));
+    setProfileConnections((profile.connections || []).map((connection) => ({
+      ...connection,
+      settings: connection.component === "transport-reality"
+        ? { ...connection.settings, route_mode: connection.settings.route_mode || (connection.settings.cdn_enabled ? "both" : "direct") }
+        : { ...connection.settings },
+    })));
     setProfileRouting({ ...(profile.routing || {}) });
     const devices = profile.devices?.length ? profile.devices : [{ id: "device-1", name: "Основное устройство" }];
     setProfileDevices(devices);
     setActiveDeviceId(devices[0].id);
   }
 
-  function addProfileConnection(module: Module) {
+  function addProfileConnection(module: Module, vlessRoute: "direct" | "cdn" = "direct") {
     const settings = Object.fromEntries((module.connection_settings || []).map((field) => [field.key, field.default]));
+    if (module.id === "transport-reality") {
+      settings.route_mode = vlessRoute;
+      settings.cdn_enabled = vlessRoute === "cdn";
+      if (vlessRoute === "cdn") settings.cdn_domain = String(routingPolicy?.values.preset_cdn_domain || "").trim();
+    }
     setProfileConnections((current) => [...current, {
       id: `connection-${crypto.randomUUID()}`,
       component: module.id,
-      name: module.name,
+      name: module.id === "transport-reality" ? `VLESS · ${vlessRoute === "cdn" ? "CDN" : "Direct"}` : module.name,
       device_id: activeDeviceId,
       settings,
     }]);
@@ -451,8 +461,12 @@ export function MihomoPage({
       usedSingletons.add(componentId);
       const settings = Object.fromEntries((componentModule.connection_settings || []).map((field) => [field.key, field.default]));
       if (componentId === "transport-reality" && definition.cdn) {
+        settings.route_mode = "cdn";
         settings.cdn_enabled = true;
         settings.cdn_domain = cdnDomain;
+      } else if (componentId === "transport-reality") {
+        settings.route_mode = "direct";
+        settings.cdn_enabled = false;
       }
       connections.push({ id: `connection-${crypto.randomUUID()}`, component: componentId, name: definition.label || `${componentModule.name}${definition.cdn ? " · CDN" : " · Direct"}`, device_id: activeDeviceId, settings });
     }
@@ -942,24 +956,32 @@ export function MihomoPage({
             <section className="mihomoConnectionBuilder">
               <header><div><b>Подключения профиля</b><small>Один профиль может содержать несколько VLESS с разными маршрутами и CDN.</small></div></header>
               <div className="mihomoConnectionAdd">
-                {installedChannels.map((module) => {
-                  const singletonUsed = module.id !== "transport-reality" && profileConnections.some((item) => item.device_id === activeDeviceId && item.component === module.id);
-                  return <button key={module.id} type="button" disabled={singletonUsed} onClick={() => addProfileConnection(module)}>+ {module.name}</button>;
+                {installedChannels.flatMap((module) => {
+                  if (module.id === "transport-reality") return [
+                    <button key="vless-direct" type="button" onClick={() => addProfileConnection(module, "direct")}>+ VLESS Direct</button>,
+                    <button key="vless-cdn" type="button" disabled={!String(routingPolicy?.values.preset_cdn_domain || "").trim()} title={!String(routingPolicy?.values.preset_cdn_domain || "").trim() ? "Сначала укажите CDN-домен в маршрутизации" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
+                  ];
+                  const singletonUsed = profileConnections.some((item) => item.device_id === activeDeviceId && item.component === module.id);
+                  return [<button key={module.id} type="button" disabled={singletonUsed} onClick={() => addProfileConnection(module)}>+ {module.name}</button>];
                 })}
               </div>
               <div className="mihomoConnectionList">
                 {profileConnections.filter((connection) => connection.device_id === activeDeviceId).map((connection, index) => {
                   const protocolModule = modules.find((item) => item.id === connection.component);
                   const schema = protocolModule?.connection_settings || [];
-                  return <article key={connection.id} className="mihomoConnectionCard">
+                  const vlessRoute = connection.component === "transport-reality" ? String(connection.settings.route_mode || (connection.settings.cdn_enabled ? "both" : "direct")) : "";
+                  return <article key={connection.id} className={`mihomoConnectionCard${vlessRoute ? ` is-vless-${vlessRoute}` : ""}`}>
                     <header>
                       <span>{channelShort[connection.component] || "CH"}</span>
-                      <div><b>{protocolModule?.name || connection.component}</b><small>Подключение {index + 1}</small></div>
+                      <div><b>{vlessRoute === "cdn" ? "VLESS CDN" : vlessRoute === "direct" ? "VLESS Direct" : vlessRoute === "both" ? "VLESS Direct + CDN · прежний формат" : protocolModule?.name || connection.component}</b><small>{vlessRoute === "cdn" ? "Через CDN-домен" : vlessRoute === "direct" ? "Прямое REALITY-подключение" : vlessRoute === "both" ? "Можно заменить двумя независимыми подключениями" : `Подключение ${index + 1}`}</small></div>
                       <button type="button" className="dangerButton" onClick={() => setProfileConnections((current) => current.filter((item) => item.id !== connection.id))}>Удалить</button>
                     </header>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
                     <div className="mihomoConnectionFields">
                       {schema.filter((field) => {
+                        if (field.key === "route_mode" || field.key === "cdn_enabled") return false;
+                        if (connection.component === "transport-reality" && vlessRoute === "cdn" && ["port", "target", "transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return false;
+                        if (connection.component === "transport-reality" && vlessRoute === "direct" && ["cdn_domain", "cdn_transport", "cdn_xhttp_mode"].includes(field.key)) return false;
                         if (["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return connection.settings.transport === "xhttp";
                         if (["cdn_domain", "cdn_transport"].includes(field.key)) return Boolean(connection.settings.cdn_enabled);
                         if (field.key === "cdn_xhttp_mode") return Boolean(connection.settings.cdn_enabled) && connection.settings.cdn_transport === "xhttp";

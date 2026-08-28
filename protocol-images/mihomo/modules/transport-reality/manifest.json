@@ -45,6 +45,7 @@
     }
   ],
   "connection_settings": [
+    { "key": "route_mode", "label": "Маршрут", "type": "select", "default": "direct", "options": [{"value":"direct","label":"VLESS Direct"},{"value":"cdn","label":"VLESS CDN"}] },
     { "key": "port", "label": "Direct-порт", "type": "number", "default": 0, "min": 0, "max": 65535, "help": "0 — выбрать свободный порт автоматически." },
     { "key": "target", "label": "REALITY target", "type": "text", "default": "www.intel.com:443" },
     { "key": "transport", "label": "Direct-транспорт", "type": "select", "default": "xhttp", "options": [{"value":"xhttp","label":"XHTTP"},{"value":"raw","label":"RAW · TCP"},{"value":"grpc","label":"gRPC · HTTP/2"}] },

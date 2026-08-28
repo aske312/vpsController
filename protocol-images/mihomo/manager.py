@@ -1360,7 +1360,10 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
     concurrency = int(result.get("xmux_concurrency", 12))
     if not 1 <= concurrency <= 64:
         raise HTTPException(status_code=422, detail="XHTTP concurrency must be between 1 and 64")
-    cdn_enabled = bool(result.get("cdn_enabled", False))
+    route_mode = str(result.get("route_mode", "direct")) if "route_mode" in values else ("both" if bool(result.get("cdn_enabled", False)) else "direct")
+    if route_mode not in {"direct", "cdn", "both"}:
+        raise HTTPException(status_code=422, detail="Unsupported VLESS route mode")
+    cdn_enabled = route_mode in {"cdn", "both"}
     cdn_domain = str(result.get("cdn_domain", "")).strip().lower()
     cdn_transport = str(result.get("cdn_transport", "websocket"))
     if cdn_transport not in {"websocket", "xhttp", "grpc"}:
@@ -1370,7 +1373,7 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
         raise HTTPException(status_code=422, detail="Unsupported CDN XHTTP mode")
     if cdn_enabled and not re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", cdn_domain):
         raise HTTPException(status_code=422, detail="For CDN specify a valid hostname")
-    result.update({"port": port, "target": target, "transport": transport, "transport_path": path, "xhttp_mode": mode, "xpadding": padding, "xmux_concurrency": concurrency, "cdn_enabled": cdn_enabled, "cdn_domain": cdn_domain, "cdn_transport": cdn_transport, "cdn_xhttp_mode": cdn_xhttp_mode})
+    result.update({"route_mode": route_mode, "port": port, "target": target, "transport": transport, "transport_path": path, "xhttp_mode": mode, "xpadding": padding, "xmux_concurrency": concurrency, "cdn_enabled": cdn_enabled, "cdn_domain": cdn_domain, "cdn_transport": cdn_transport, "cdn_xhttp_mode": cdn_xhttp_mode})
     return result
 
 
@@ -1515,7 +1518,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         run("systemctl", "restart", "vps-control-mihomo-reality.service")
         run("systemctl", "reload", "caddy.service")
         raise
-    return {"uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": cdn_path, "cdn_transport": settings["cdn_transport"], "cdn_xhttp_mode": settings["cdn_xhttp_mode"]}
+    return {"uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "route_mode": settings["route_mode"], "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": cdn_path, "cdn_transport": settings["cdn_transport"], "cdn_xhttp_mode": settings["cdn_xhttp_mode"]}
 
 
 def remove_reality_credential(profile_id: str, credential: dict[str, Any]) -> None:
@@ -1987,7 +1990,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     if not connections:
         raise HTTPException(status_code=409, detail="У профиля нет подключений Mihomo")
     used_names: set[str] = set()
-    rendered: list[tuple[dict[str, Any], str, str | None]] = []
+    rendered: list[tuple[dict[str, Any], str | None, str | None]] = []
     for index, connection in enumerate(connections):
         component = str(connection["component"])
         base = str(connection.get("name") or default_names[component]).strip()
@@ -1997,12 +2000,18 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
             name = f"{base} {suffix}"
             suffix += 1
         used_names.add(name)
-        cdn_name = None
+        direct_name: str | None = name
+        cdn_name: str | None = None
         credential = connection.get("credential", {})
         if component == "transport-reality" and credential.get("cdn_enabled"):
-            cdn_name = f"{name} · CDN"
-            used_names.add(cdn_name)
-        rendered.append((connection, name, cdn_name))
+            route_mode = str(connection.get("settings", {}).get("route_mode") or credential.get("route_mode") or "both")
+            if route_mode == "cdn":
+                direct_name = None
+                cdn_name = name
+            else:
+                cdn_name = f"{name} · CDN"
+                used_names.add(cdn_name)
+        rendered.append((connection, direct_name, cdn_name))
     routing = {**routing_settings(), **item.get("routing", {})}
     mode = str(routing.get("mode", "rule"))
     lines = [
@@ -2034,7 +2043,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     ]
     lines.append("proxies:")
     for connection, name, cdn_name in rendered:
-        lines.extend(render_proxy(str(connection["component"]), connection.get("credential", {}), name))
+        if name:
+            lines.extend(render_proxy(str(connection["component"]), connection.get("credential", {}), name))
         if cdn_name:
             lines.extend(render_vless_cdn(connection.get("credential", {}), cdn_name))
     group_type = str(routing.get("strategy", "fallback"))
@@ -2045,7 +2055,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "    proxies:",
     ]
     for _, name, cdn_name in rendered:
-        lines.append(f"      - {q(name)}")
+        if name:
+            lines.append(f"      - {q(name)}")
         if cdn_name:
             lines.append(f"      - {q(cdn_name)}")
     if group_type in ("fallback", "url-test"):
