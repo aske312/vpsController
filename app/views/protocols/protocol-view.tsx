@@ -220,7 +220,7 @@ function ProtocolCommandCenter({ props }: { props: ProtocolViewProps }) {
           <div><em>{isVless ? "DIRECT" : "PRIMARY"}</em><h2>{routeKind}</h2></div>
           <dl><div><dt>{protocol === "shadowsocks" || isVless ? "ENDPOINT" : "ADDRESS"}</dt><dd>{routeAddress}</dd></div><div><dt>{routeDetailLabel}</dt><dd>{routeDetail}</dd></div></dl>
         </article>
-        {isVless && <><div className="vlessRouteBridge"><i /><span>общие UUID</span><i /></div>
+        {isVless && actualCdnEnabled && <><div className="vlessRouteBridge"><i /><span>общие серверные параметры</span><i /></div>
         <article className={`vlessRouteNode cdn${actualCdnEnabled ? " enabled" : ""}`}>
           <div className="vlessRouteIndex">02</div>
           <div><em>{actualCdnEnabled ? "CDN ACTIVE" : "CDN DISABLED"}</em><h2>TLS · {actualCdnTransport}</h2></div>
@@ -329,16 +329,16 @@ function ProtocolSettingsEditor({
     {vless ? <>
       <div className="vlessRouteSummary" aria-label="Маршруты VLESS">
         <span className="direct"><em>ОСНОВНОЙ · DIRECT</em><b>REALITY / {selectedTransport.toUpperCase()}</b><small>Подключение напрямую к серверу. Не зависит от CDN.</small><i>{selectedTransport === "xhttp" ? "РЕКОМЕНДУЕТСЯ" : "СОВМЕСТИМО"}</i></span>
-        <span className={cdnEnabled ? "cdn enabled" : "cdn"}><em>{cdnEnabled ? "РЕЗЕРВНЫЙ · CDN ВКЛЮЧЁН" : "РЕЗЕРВНЫЙ · CDN ВЫКЛЮЧЕН"}</em><b>TLS / {selectedCdnTransport.toUpperCase()}</b><small>{cdnEnabled ? "Отдельная точка входа через CDN-домен." : "Включите маршрут ниже, если нужен доступ через CDN."}</small><i>{selectedCdnTransport === "xhttp" ? "РЕКОМЕНДУЕТСЯ" : selectedCdnTransport === "grpc" ? "НУЖЕН gRPC У CDN" : "LEGACY / FALLBACK"}</i></span>
+        {cdnEnabled && <span className="cdn enabled"><em>ДОПОЛНИТЕЛЬНЫЙ · CDN</em><b>TLS / {selectedCdnTransport.toUpperCase()}</b><small>Отдельная точка входа через CDN-домен.</small><i>{selectedCdnTransport === "xhttp" ? "РЕКОМЕНДУЕТСЯ" : selectedCdnTransport === "grpc" ? "НУЖЕН gRPC У CDN" : "LEGACY / FALLBACK"}</i></span>}
       </div>
       <section className="vlessSettingsGroup direct">
         <header><div><em>1 · ПРЯМОЕ ПОДКЛЮЧЕНИЕ</em><strong>Direct · REALITY</strong></div><p>Выберите транспорт и маскировочный SNI. XHTTP подходит для большинства случаев.</p></header>
         {renderFields(directFields)}
       </section>
-      <section className="vlessSettingsGroup cdn">
+      {cdnEnabled ? <section className="vlessSettingsGroup cdn">
         <header><div><em>2 · ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ</em><strong>CDN · TLS</strong></div><p>Включается независимо. WS и gRPC оставлены для совместимости; основной вариант — XHTTP.</p></header>
         {renderFields(cdnFields)}
-      </section>
+      </section> : <section className="vlessCdnEnableCard"><div><em>CDN НЕ НАСТРОЕН</em><strong>Добавить отдельный VLESS CDN</strong><p>Direct продолжит работать независимо. После включения появятся настройки CDN-домена и транспорта.</p></div>{renderFields(cdnFields.filter((field) => field.key === "cdn_enabled"))}</section>}
       <section className="vlessSettingsGroup common">
         <header><div><em>ОБЩИЕ ПАРАМЕТРЫ</em><strong>Xray runtime</strong></div><p>DNS и журнал.</p></header>
         {renderFields(commonFields)}
