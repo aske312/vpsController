@@ -3135,7 +3135,7 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
         "help": "Количество одновременных запросов на HTTP-соединение. 8–16 устраняет секундные очереди; применяется к новым VRX-профилям.",
     }, {
         "key": "cdn_enabled", "label": "Дополнительный маршрут через CDN", "type": "boolean", "value": bool(values.get("cdnEnabled", False)),
-        "help": "Отдельный TLS/WebSocket. Direct не меняется.",
+        "help": "Отдельный TLS-маршрут через WebSocket, XHTTP или gRPC. Direct не меняется.",
     }, {
         "key": "cdn_domain", "label": "CDN-домен", "type": "text", "value": str(values.get("cdnDomain", "")),
         "help": "Например cdn.vpn.example.com. Для Cloudflare запись A должна быть в режиме Proxied.",
