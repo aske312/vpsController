@@ -610,7 +610,7 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(wgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(awgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(wgInstall, /install -y iptables wireguard-tools/);
-  assert.match(awgInstall, /install -y --only-upgrade amneziawg amneziawg-tools amneziawg-dkms/);
+  assert.match(awgInstall, /install -y --only-upgrade --allow-change-held-packages amneziawg amneziawg-tools amneziawg-dkms/);
   assert.match(manager, /AWG_PORT="51822"/);
   assert.match(awgInstall, /AWG_PORT="\$\{AWG_PORT:-51822\}"/);
   for (const installer of [awgInstall, mihomoAwgInstall]) {
@@ -1057,7 +1057,7 @@ test("WG, AWG and Shadowsocks install the latest repository candidates", async (
   for (const [script, packageName] of [[wg, "wireguard-tools"], [shadowsocks, "shadowsocks-libev"]]) {
     assert.match(script, new RegExp(`LC_ALL=C apt-cache policy ${packageName}`));
   }
-  assert.match(awg, /install -y --only-upgrade amneziawg amneziawg-tools amneziawg-dkms/);
+  assert.match(awg, /install -y --only-upgrade --allow-change-held-packages amneziawg amneziawg-tools amneziawg-dkms/);
   assert.match(awg, /for awg_package in amneziawg amneziawg-tools amneziawg-dkms/);
   assert.match(awg, /LC_ALL=C apt-cache policy "\$\{awg_package\}"/);
 });

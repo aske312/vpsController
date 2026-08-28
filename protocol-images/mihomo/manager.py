@@ -989,7 +989,7 @@ def update_module(module_id: str) -> dict[str, Any]:
     try:
         if module_id == "transport-awg":
             run("apt-get", "-o", "DPkg::Lock::Timeout=300", "update", check=True)
-            run("apt-get", "-o", "DPkg::Lock::Timeout=300", "install", "--only-upgrade", "-y", "amneziawg", "amneziawg-tools", "amneziawg-dkms", check=True)
+            run("apt-get", "-o", "DPkg::Lock::Timeout=300", "install", "--only-upgrade", "--allow-change-held-packages", "-y", "amneziawg", "amneziawg-tools", "amneziawg-dkms", check=True)
             if not awg_packages_current():
                 raise RuntimeError("AmneziaWG packages did not reach repository candidates")
         elif package:

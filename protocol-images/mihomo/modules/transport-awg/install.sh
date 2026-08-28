@@ -137,7 +137,7 @@ fi
 
 # The meta package can stay unchanged while tools and DKMS receive new builds.
 apt-get -o DPkg::Lock::Timeout=300 update
-apt-get -o DPkg::Lock::Timeout=300 install -y --only-upgrade amneziawg amneziawg-tools amneziawg-dkms
+apt-get -o DPkg::Lock::Timeout=300 install -y --only-upgrade --allow-change-held-packages amneziawg amneziawg-tools amneziawg-dkms
 for awg_package in amneziawg amneziawg-tools amneziawg-dkms; do
   installed="$(dpkg-query -W -f='${Version}' "${awg_package}" 2>/dev/null || true)"
   candidate="$(LC_ALL=C apt-cache policy "${awg_package}" | awk '/Candidate:/ {print $2; exit}')"
