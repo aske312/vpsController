@@ -611,6 +611,9 @@ export function OverviewDashboard({
               const displayedVersion = image.installed
                 ? installedVersion
                 : image.installable ? "АКТУАЛЬНАЯ" : "—";
+              const availableVersion = image.available_version
+                ? formatModuleVersion(image.available_version)
+                : "НЕ ОПРЕДЕЛЕНА";
               const state = !image.installed && !image.installable
                 ? { className: "unavailable", label: "НЕДОСТУПЕН" }
                 : !image.installed

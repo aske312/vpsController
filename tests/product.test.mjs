@@ -181,6 +181,7 @@ test("control surfaces share compact headers, telemetry and modal language", asy
     readStyles(), read("app/views/overview/overview-view.tsx"), read("app/lib/format-version.ts"),
   ]);
   assert.match(overview, /overviewNodeWorkspace/);
+  assert.match(overview, /const availableVersion = image\.available_version/);
   assert.match(styles, /grid-template-columns:minmax\(0,8fr\) minmax\(260px,2fr\)/);
   assert.match(styles, /\.gateMastMetric/);
   assert.match(styles, /\.confirmBackdrop,.accessBetaModalBackdrop,.mihomoDialogBackdrop,.legalBackdrop/);
