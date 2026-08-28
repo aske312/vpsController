@@ -2939,7 +2939,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 port = int(reality.get("PORT", "443"))
                 direct_query = urllib.parse.urlencode(vless_client_query(config_data, reality))
                 direct_config = f"vless://{client_uuid}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}?{direct_query}#{urllib.parse.quote(payload.name + ' Direct')}"
-                profiles = [{"id": "direct", "name": "Direct · REALITY/XHTTP", "filename": f"{safe_name}-vless-direct.txt", "config": direct_config}]
+                direct_transport = str(vless_reality_inbound(config_data).get("streamSettings", {}).get("network", "xhttp")).upper()
+                profiles = [{"id": "direct", "name": f"Direct · REALITY/{direct_transport}", "filename": f"{safe_name}-vless-direct.txt", "config": direct_config}]
                 cdn_domain = reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
                 if cdn_domain and any(item.get("tag") in {"vless-cdn", "vless-cdn-websocket", "vless-tls-websocket"} for item in vless_inbounds):
                     cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality))
@@ -3463,9 +3464,33 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 xhttp_values["cdnTransport"] = reality.get("CDN_TRANSPORT", "websocket")
                 xhttp_values["cdnXhttpMode"] = reality.get("CDN_XHTTP_MODE", "auto")
                 editable_settings = editable_protocol_settings(protocol, xhttp_values)
+                direct_path = (
+                    str(stream_values.get("xhttpSettings", {}).get("path", "/"))
+                    if transport == "xhttp"
+                    else str(stream_values.get("grpcSettings", {}).get("serviceName", "vless"))
+                    if transport == "grpc"
+                    else "—"
+                )
+                cdn_enabled = cdn_inbound is not None and reality.get("CDN_ENABLED", "yes") == "yes"
+                routes = {
+                    "direct": {
+                        "enabled": True, "security": "REALITY", "transport": transport,
+                        "endpoint": f"{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{listen_port}",
+                        "server_name": target.rsplit(":", 1)[0] if ":" in target else target,
+                        "path": direct_path,
+                    },
+                    "cdn": {
+                        "enabled": cdn_enabled, "security": "TLS",
+                        "transport": reality.get("CDN_TRANSPORT", "websocket"),
+                        "endpoint": f"{reality.get('CDN_DOMAIN', VLESS_CDN_DOMAIN)}:443" if cdn_enabled else "",
+                        "server_name": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN) if cdn_enabled else "",
+                        "path": reality.get("CDN_PATH", reality.get("WS_PATH", "/")) if cdn_enabled else "",
+                    },
+                }
             except (OSError, ValueError, json.JSONDecodeError, KeyError, IndexError):
                 listen_port = 8443
                 editable_settings = editable_protocol_settings(protocol, {})
+                routes = {}
         service_active = run("systemctl", "is-active", unit) == "active"
         return {
             "protocol": protocol, "interface": "systemd", "active": service_active,
@@ -3482,6 +3507,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
             "transport": "TCP + UDP" if protocol == "shadowsocks" else {"xhttp": "XHTTP over TCP", "raw": "RAW · TCP + UDP payload", "grpc": "gRPC over HTTP/2"}.get(locals().get("transport", "xhttp"), "XHTTP over TCP"),
             "security": "ChaCha20-IETF-Poly1305" if protocol == "shadowsocks" else "REALITY",
             "target": target,
+            "routes": routes if protocol == "vless-reality-xhttp" else {},
             "settings": settings,
             "editable_settings": editable_settings,
         }

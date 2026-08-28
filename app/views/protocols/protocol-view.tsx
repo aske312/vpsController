@@ -39,7 +39,7 @@ const channelProfiles: Record<Protocol, {
   "vless-reality-xhttp": {
     index: "04", family: "MODULAR TRANSPORT", title: "VLESS",
     lead: "Два независимых маршрута: прямой VLESS через REALITY и дополнительная точка входа через CDN.",
-    signature: "VLESS / REALITY / XRAY", features: ["XHTTP · RAW · gRPC", "REALITY", "Reusable UUID"],
+    signature: "VLESS / REALITY + TLS / XRAY", features: ["Direct: XHTTP · RAW · gRPC", "CDN: XHTTP · WS · gRPC", "Shared UUID"],
     runtimeLabel: "Состав и runtime", healthLabel: "Потоки Xray",
   },
 };
@@ -177,15 +177,20 @@ function ProtocolCommandCenter({ props }: { props: ProtocolViewProps }) {
   const draft = protocolSettingsDraft[protocol] || {};
   const fields = activeProtocol.editable_settings || [];
   const setting = (key: string, fallback: string | number | boolean = "—") => draft[key] ?? fields.find((field) => field.key === key)?.value ?? fallback;
-  const directTransport = String(setting("transport", activeProtocol.transport || "xhttp")).toUpperCase();
   const cdnEnabled = Boolean(setting("cdn_enabled", false));
   const cdnDomain = String(setting("cdn_domain", "")) || "Домен не задан";
+  const runtimeRoutes = (activeProtocol as ProtocolStatus & { routes?: Record<"direct" | "cdn", { enabled: boolean; security: string; transport: string; endpoint: string; server_name: string; path: string }> }).routes;
+  const directRoute = runtimeRoutes?.direct;
+  const cdnRoute = runtimeRoutes?.cdn;
+  const actualDirectTransport = String(directRoute?.transport || setting("transport", "xhttp")).toUpperCase();
+  const actualCdnTransport = String(cdnRoute?.transport || setting("cdn_transport", "websocket")).toUpperCase();
+  const actualCdnEnabled = cdnRoute?.enabled ?? cdnEnabled;
   const events = activeProtocol.history.events || [];
-  const routeKind = isVless ? `REALITY · ${directTransport}` : protocol === "shadowsocks" ? "TCP + UDP PROXY" : protocol === "awg" ? "OBFUSCATED UDP" : "NATIVE UDP";
+  const routeKind = isVless ? `REALITY · ${actualDirectTransport}` : protocol === "shadowsocks" ? "TCP + UDP PROXY" : protocol === "awg" ? "OBFUSCATED UDP" : "NATIVE UDP";
   const runtimeName = isVless ? "Xray" : activeProtocol.interface || profile.title;
-  const routeAddress = isVless || protocol === "shadowsocks" ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port || "—"}` : activeProtocol.address || "—";
-  const routeDetailLabel = isVless ? "ПРОФИЛЬ" : protocol === "shadowsocks" ? "SECURITY" : "INTERFACE";
-  const routeDetail = isVless ? "Direct" : protocol === "shadowsocks" ? activeProtocol.security || "AEAD" : activeProtocol.interface || "—";
+  const routeAddress = isVless ? directRoute?.endpoint || `${activeProtocol.address || "—"}:${activeProtocol.listen_port || "—"}` : protocol === "shadowsocks" ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port || "—"}` : activeProtocol.address || "—";
+  const routeDetailLabel = isVless ? "SNI / TARGET" : protocol === "shadowsocks" ? "SECURITY" : "INTERFACE";
+  const routeDetail = isVless ? directRoute?.server_name || activeProtocol.target?.replace(/:443$/, "") || "—" : protocol === "shadowsocks" ? activeProtocol.security || "AEAD" : activeProtocol.interface || "—";
 
   return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()} protocolCommandCenter${isVless ? " vlessCommandCenter" : ""}`}>
     {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные защищённые протоколы">
@@ -216,10 +221,10 @@ function ProtocolCommandCenter({ props }: { props: ProtocolViewProps }) {
           <dl><div><dt>{protocol === "shadowsocks" || isVless ? "ENDPOINT" : "ADDRESS"}</dt><dd>{routeAddress}</dd></div><div><dt>{routeDetailLabel}</dt><dd>{routeDetail}</dd></div></dl>
         </article>
         {isVless && <><div className="vlessRouteBridge"><i /><span>общие UUID</span><i /></div>
-        <article className={`vlessRouteNode cdn${cdnEnabled ? " enabled" : ""}`}>
+        <article className={`vlessRouteNode cdn${actualCdnEnabled ? " enabled" : ""}`}>
           <div className="vlessRouteIndex">02</div>
-          <div><em>{cdnEnabled ? "CDN ACTIVE" : "OPTIONAL"}</em><h2>TLS · WebSocket</h2></div>
-          <dl><div><dt>DOMAIN</dt><dd>{cdnDomain}</dd></div><div><dt>СТАТУС</dt><dd>{cdnEnabled ? "Включён" : "Отключён"}</dd></div></dl>
+          <div><em>{actualCdnEnabled ? "CDN ACTIVE" : "CDN DISABLED"}</em><h2>TLS · {actualCdnTransport}</h2></div>
+          <dl><div><dt>ENDPOINT</dt><dd>{actualCdnEnabled ? cdnRoute?.endpoint || `${cdnDomain}:443` : "Не настроен"}</dd></div><div><dt>PATH / SERVICE</dt><dd>{actualCdnEnabled ? cdnRoute?.path || "—" : "—"}</dd></div></dl>
         </article></>}
       </div>
 
