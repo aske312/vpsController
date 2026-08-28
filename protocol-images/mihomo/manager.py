@@ -116,13 +116,20 @@ class ProfileConnectionInput(BaseModel):
     id: str | None = Field(default=None, max_length=48, pattern=r"^[a-zA-Z0-9_-]+$")
     component: str = Field(min_length=1, max_length=64)
     name: str = Field(default="", max_length=80)
+    device_id: str = Field(default="device-1", max_length=48, pattern=r"^[a-zA-Z0-9_-]+$")
     settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProfileDeviceInput(BaseModel):
+    id: str = Field(max_length=48, pattern=r"^[a-zA-Z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=80)
 
 
 class ProfileCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     channels: list[str] = Field(default_factory=list)
     connections: list[ProfileConnectionInput] | None = None
+    devices: list[ProfileDeviceInput] = Field(default_factory=lambda: [ProfileDeviceInput(id="device-1", name="Основное устройство")], min_length=1)
     routing: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -130,6 +137,7 @@ class ProfileUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
     channels: list[str] | None = None
     connections: list[ProfileConnectionInput] | None = None
+    devices: list[ProfileDeviceInput] | None = Field(default=None, min_length=1)
     routing: dict[str, Any] | None = None
 
 
@@ -238,6 +246,13 @@ def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
                 "credential": credentials.get(component, {}),
             })
     result["connections"] = [entry for entry in connections if isinstance(entry, dict)]
+    devices = result.get("devices")
+    if not isinstance(devices, list) or not devices:
+        devices = [{"id": "device-1", "name": "Основное устройство"}]
+    result["devices"] = devices
+    default_device = str(devices[0].get("id", "device-1"))
+    for connection in result["connections"]:
+        connection.setdefault("device_id", default_device)
     sync_legacy_profile_fields(result)
     return result
 
@@ -613,6 +628,14 @@ def apt_package_versions(package: str) -> tuple[str, str]:
     return "" if installed == "(none)" else installed, "" if candidate == "(none)" else candidate
 
 
+def awg_packages_current() -> bool:
+    for package in ("amneziawg", "amneziawg-tools", "amneziawg-dkms"):
+        installed, candidate = apt_package_versions(package)
+        if not installed or not candidate or installed != candidate:
+            return False
+    return True
+
+
 def version_major(value: str) -> str:
     match = re.match(r"\d+", value.split(":")[-1])
     return match.group(0) if match else ""
@@ -678,7 +701,7 @@ def module_version_info(module_id: str, info: dict[str, Any], installed: bool) -
         installed_package, candidate_package = apt_package_versions(package)
         installed_version = awg_installed_version() if installed else ""
         available_version = ""
-        update_available_override = bool(installed and installed_package and candidate_package and installed_package != candidate_package)
+        update_available_override = bool(installed and not awg_packages_current())
     elif package:
         installed_version, available_version = apt_package_versions(package)
         if not installed:
@@ -964,7 +987,12 @@ def update_module(module_id: str) -> dict[str, Any]:
     write_action(f"module-update:{module_id}", f"Обновление {info['name']}…", progress=10)
     package = str(info.get("package", ""))
     try:
-        if package:
+        if module_id == "transport-awg":
+            run("apt-get", "-o", "DPkg::Lock::Timeout=300", "update", check=True)
+            run("apt-get", "-o", "DPkg::Lock::Timeout=300", "install", "--only-upgrade", "-y", "amneziawg", "amneziawg-tools", "amneziawg-dkms", check=True)
+            if not awg_packages_current():
+                raise RuntimeError("AmneziaWG packages did not reach repository candidates")
+        elif package:
             # Package upgrade only, same as the direct protocol's update:
             # the running tunnel/service is left untouched so live
             # connections aren't dropped by an unattended restart.
@@ -1017,7 +1045,7 @@ def interface_private_key(path: Path) -> str:
     raise RuntimeError(f"PrivateKey missing in {path}")
 
 
-def add_wg_credential(profile_id: str, module_id: str) -> dict[str, Any]:
+def add_wg_credential(profile_id: str, module_id: str, connection_id: str = "default") -> dict[str, Any]:
     if module_id == "transport-wg":
         tool, interface = "wg", "mh-wg0"
         config = Path("/etc/wireguard/mh-wg0.conf")
@@ -1032,7 +1060,7 @@ def add_wg_credential(profile_id: str, module_id: str) -> dict[str, Any]:
     prefix = ipaddress.ip_network(str(module_settings(module_id)["subnet"])).prefixlen
     with config.open("a", encoding="utf-8") as handle:
         handle.write(
-            f"\n# mihomo-profile:{profile_id}\n"
+            f"\n# mihomo-profile:{profile_id}:{connection_id}\n"
             f"[Peer]\nPublicKey = {public}\nAllowedIPs = {client_ip}/32\n"
         )
     run(tool, "set", interface, "peer", public, "allowed-ips", f"{client_ip}/32", check=True)
@@ -1043,6 +1071,7 @@ def add_wg_credential(profile_id: str, module_id: str) -> dict[str, Any]:
         "ip": f"{client_ip}/{prefix}",
         "port": int(module_settings(module_id)["port"]),
         "mtu": int(module_settings(module_id)["mtu"]),
+        "marker": f"{profile_id}:{connection_id}",
     }
     if module_id == "transport-awg":
         settings = module_settings(module_id)
@@ -1060,7 +1089,7 @@ def remove_wg_credential(profile_id: str, module_id: str, credential: dict[str, 
         run(tool, "set", interface, "peer", public, "remove")
     if config.is_file():
         lines = config.read_text(encoding="utf-8").splitlines()
-        marker = f"# mihomo-profile:{profile_id}"
+        marker = f"# mihomo-profile:{credential.get('marker') or profile_id}"
         output: list[str] = []
         skipping = False
         for line in lines:
@@ -1087,7 +1116,7 @@ def used_ss_ports() -> set[int]:
     return result
 
 
-def add_ss_credential(profile_id: str) -> dict[str, Any]:
+def add_ss_credential(profile_id: str, connection_id: str = "default") -> dict[str, Any]:
     settings = module_settings("transport-shadowsocks")
     start = int(settings["port_start"])
     used = used_ss_ports()
@@ -1107,17 +1136,19 @@ def add_ss_credential(profile_id: str) -> dict[str, Any]:
         "mtu": 1200,
         "no_delay": True,
     }
-    atomic_json(config_dir / f"{profile_id}.json", config)
-    run("systemctl", "enable", "--now", f"vps-control-mihomo-ss@{profile_id}.service", check=True)
+    instance_id = f"{profile_id}-{connection_id}"
+    atomic_json(config_dir / f"{instance_id}.json", config)
+    run("systemctl", "enable", "--now", f"vps-control-mihomo-ss@{instance_id}.service", check=True)
     if shutil.which("ufw") and run("ufw", "status").stdout.startswith("Status: active"):
         run("ufw", "allow", f"{port}/tcp")
         run("ufw", "allow", f"{port}/udp")
-    return {"port": port, "password": password, "method": settings["method"]}
+    return {"port": port, "password": password, "method": settings["method"], "instance_id": instance_id}
 
 
 def remove_ss_credential(profile_id: str, credential: dict[str, Any]) -> None:
-    run("systemctl", "disable", "--now", f"vps-control-mihomo-ss@{profile_id}.service")
-    path = CONFIG_ROOT / "shadowsocks" / f"{profile_id}.json"
+    instance_id = str(credential.get("instance_id") or profile_id)
+    run("systemctl", "disable", "--now", f"vps-control-mihomo-ss@{instance_id}.service")
+    path = CONFIG_ROOT / "shadowsocks" / f"{instance_id}.json"
     path.unlink(missing_ok=True)
     port = credential.get("port")
     if port and shutil.which("ufw"):
@@ -1395,8 +1426,8 @@ def wg_like_dump(module_id: str) -> dict[str, dict[str, Any]]:
     return peers
 
 
-def shadowsocks_profile_stats(profile_id: str, port: int) -> dict[str, Any]:
-    unit = f"vps-control-mihomo-ss@{profile_id}.service"
+def shadowsocks_profile_stats(profile_id: str, port: int, instance_id: str | None = None) -> dict[str, Any]:
+    unit = f"vps-control-mihomo-ss@{instance_id or profile_id}.service"
 
     def counter(name: str) -> int:
         try:
@@ -1460,7 +1491,7 @@ def profile_stats(profile_id: str) -> dict[str, Any]:
             awg_dump = wg_like_dump("transport-awg") if awg_dump is None else awg_dump
             connections[connection_id] = awg_dump.get(str(credential.get("public_key", "")), empty_peer)
         elif module_id == "transport-shadowsocks":
-            connections[connection_id] = shadowsocks_profile_stats(profile_id, int(credential.get("port", 0)))
+            connections[connection_id] = shadowsocks_profile_stats(profile_id, int(credential.get("port", 0)), credential.get("instance_id"))
         elif module_id == "transport-reality":
             connections[connection_id] = reality_profile_stats(profile_id, connection_id)
     values = list(connections.values())
@@ -1468,14 +1499,21 @@ def profile_stats(profile_id: str) -> dict[str, Any]:
     tx_bytes = sum(int(value.get("tx_bytes", 0) or 0) for value in values)
     active = sum(1 for value in values if value.get("active") or value.get("endpoint") or int(value.get("active_connections", 0) or 0) > 0)
     handshake_ages = [int(value["handshake_age_s"]) for value in values if value.get("handshake_age_s") is not None]
-    return {"id": profile_id, "connections": connections, "channels": connections, "summary": {"configured": len(values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None}}
+    device_summaries: dict[str, dict[str, Any]] = {}
+    for device in item.get("devices", [{"id": "device-1"}]):
+        device_id = str(device.get("id", "device-1"))
+        ids = [str(connection.get("id")) for connection in item.get("connections", []) if connection.get("device_id", "device-1") == device_id]
+        rows = [connections[value] for value in ids if value in connections]
+        ages = [int(row["handshake_age_s"]) for row in rows if row.get("handshake_age_s") is not None]
+        device_summaries[device_id] = {"configured": len(rows), "active": sum(1 for row in rows if row.get("active") or row.get("endpoint") or int(row.get("active_connections", 0) or 0) > 0), "rx_bytes": sum(int(row.get("rx_bytes", 0) or 0) for row in rows), "tx_bytes": sum(int(row.get("tx_bytes", 0) or 0) for row in rows), "last_handshake_age_s": min(ages) if ages else None}
+    return {"id": profile_id, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None}}
 
 
 def provision(profile_id: str, module_id: str, connection_id: str = "default", settings: dict[str, Any] | None = None) -> dict[str, Any]:
     if module_id in ("transport-wg", "transport-awg"):
-        return add_wg_credential(profile_id, module_id)
+        return add_wg_credential(profile_id, module_id, connection_id)
     if module_id == "transport-shadowsocks":
-        return add_ss_credential(profile_id)
+        return add_ss_credential(profile_id, connection_id)
     if module_id == "transport-reality":
         return add_reality_credential(profile_id, connection_id, settings or {})
     raise RuntimeError(f"{module_id} is not a transport")
@@ -1505,19 +1543,20 @@ def validate_channels(channels: list[str]) -> list[str]:
 def validate_connection_inputs(values: list[ProfileConnectionInput]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     used_ids: set[str] = set()
-    used_singletons: set[str] = set()
+    used_singletons: set[tuple[str, str]] = set()
     for index, value in enumerate(values):
         component = value.component
         validate_channels([component])
-        if component != "transport-reality" and component in used_singletons:
+        singleton_key = (value.device_id, component)
+        if component != "transport-reality" and singleton_key in used_singletons:
             raise HTTPException(status_code=422, detail=f"Only VLESS can currently be added more than once: {manifest(component)['name']}")
-        used_singletons.add(component)
+        used_singletons.add(singleton_key)
         connection_id = value.id or f"connection-{index + 1}-{uuid.uuid4().hex[:6]}"
         if connection_id in used_ids:
             raise HTTPException(status_code=422, detail=f"Duplicate connection id: {connection_id}")
         used_ids.add(connection_id)
         settings = validate_connection(component, value.settings)
-        result.append({"id": connection_id, "component": component, "name": value.name.strip() or manifest(component).get("name", component), "settings": settings})
+        result.append({"id": connection_id, "component": component, "name": value.name.strip() or manifest(component).get("name", component), "device_id": value.device_id, "settings": settings})
     return result
 
 
@@ -1567,6 +1606,10 @@ def list_profiles() -> dict[str, Any]:
 @serialized_profile_mutation
 def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     definitions = validate_connection_inputs(payload.connections) if payload.connections is not None else legacy_connection_inputs(payload.channels)
+    devices = [device.model_dump() for device in payload.devices]
+    device_ids = {device["id"] for device in devices}
+    if len(device_ids) != len(devices) or any(definition.get("device_id", "device-1") not in device_ids for definition in definitions):
+        raise HTTPException(status_code=422, detail="Profile devices are invalid or a connection references a missing device")
     routing = validate_routing(payload.routing, current={})
     profile_id = uuid.uuid4().hex[:12]
     write_action(f"profile-create:{profile_id}", f"Создание профиля «{payload.name}»…", progress=15)
@@ -1579,6 +1622,7 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
         "id": profile_id,
         "name": payload.name.strip(),
         "connections": connections,
+        "devices": devices,
         "routing": routing,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1603,8 +1647,16 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         item["name"] = payload.name.strip()
     if payload.routing is not None:
         item["routing"] = validate_routing(payload.routing, current=item.get("routing", {}))
+    if payload.devices is not None:
+        devices = [device.model_dump() for device in payload.devices]
+        if len({device["id"] for device in devices}) != len(devices):
+            raise HTTPException(status_code=422, detail="Duplicate profile device id")
+        item["devices"] = devices
     if payload.connections is not None:
         definitions = validate_connection_inputs(payload.connections)
+        device_ids = {str(device.get("id")) for device in item.get("devices", [])}
+        if any(definition.get("device_id") not in device_ids for definition in definitions):
+            raise HTTPException(status_code=422, detail="A connection references a missing profile device")
         current_connections = {str(connection.get("id")): connection for connection in item.get("connections", [])}
         next_ids = {definition["id"] for definition in definitions}
         for connection_id, connection in current_connections.items():
@@ -1621,6 +1673,9 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
                 next_connections.append({**definition, "credential": provision(profile_id, definition["component"], definition["id"], definition.get("settings", {}))})
         item["connections"] = next_connections
         sync_legacy_profile_fields(item)
+    device_ids = {str(device.get("id")) for device in item.get("devices", [])}
+    if any(connection.get("device_id", "device-1") not in device_ids for connection in item.get("connections", [])):
+        raise HTTPException(status_code=422, detail="A connection references a missing profile device")
     elif payload.channels is not None:
         next_channels = validate_channels(payload.channels)
         current = list(item.get("channels", []))
@@ -1779,14 +1834,16 @@ def render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
     ]
 
 
-def render_profile(item: dict[str, Any]) -> str:
+def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     default_names = {
         "transport-awg": "AWG",
         "transport-wg": "WG",
         "transport-reality": "VRX",
         "transport-shadowsocks": "SS",
     }
-    connections = [connection for connection in normalize_profile(item).get("connections", []) if connection.get("component") in default_names]
+    normalized = normalize_profile(item)
+    selected_device = device_id or str(normalized.get("devices", [{"id": "device-1"}])[0].get("id", "device-1"))
+    connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
     if not connections:
         raise HTTPException(status_code=409, detail="У профиля нет подключений Mihomo")
     used_names: set[str] = set()
@@ -1871,11 +1928,15 @@ def render_profile(item: dict[str, Any]) -> str:
     response_class=PlainTextResponse,
     dependencies=[Depends(auth_required)],
 )
-def profile_config(profile_id: str) -> str:
+def profile_config(profile_id: str, device_id: str | None = None) -> str:
     item = next((entry for entry in profiles() if entry.get("id") == profile_id), None)
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
-    config = render_profile(item)
+    normalized = normalize_profile(item)
+    selected_device = device_id or str(normalized.get("devices", [{"id": "device-1"}])[0].get("id", "device-1"))
+    if selected_device not in {str(device.get("id")) for device in normalized.get("devices", [])}:
+        raise HTTPException(status_code=404, detail="Profile device not found")
+    config = render_profile(normalized, selected_device)
     if CORE_BIN.is_file():
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", encoding="utf-8", delete=False) as handle:
             handle.write(config)

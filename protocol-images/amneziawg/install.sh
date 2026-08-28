@@ -112,11 +112,13 @@ else
 fi
 
 apt-get -o DPkg::Lock::Timeout=300 update
-apt-get -o DPkg::Lock::Timeout=300 install -y amneziawg
-awg_installed_package="$(dpkg-query -W -f='${Version}' amneziawg 2>/dev/null || true)"
-awg_candidate_package="$(LC_ALL=C apt-cache policy amneziawg | awk '/Candidate:/ {print $2; exit}')"
-[[ -n "${awg_installed_package}" && "${awg_installed_package}" == "${awg_candidate_package}" ]] \
-  || { echo "AmneziaWG не обновлён до актуальной версии репозитория" >&2; exit 1; }
+apt-get -o DPkg::Lock::Timeout=300 install -y --only-upgrade amneziawg amneziawg-tools amneziawg-dkms
+for awg_package in amneziawg amneziawg-tools amneziawg-dkms; do
+  awg_installed_package="$(dpkg-query -W -f='${Version}' "${awg_package}" 2>/dev/null || true)"
+  awg_candidate_package="$(LC_ALL=C apt-cache policy "${awg_package}" | awk '/Candidate:/ {print $2; exit}')"
+  [[ -n "${awg_installed_package}" && "${awg_installed_package}" == "${awg_candidate_package}" ]] \
+    || { echo "${awg_package} не обновлён до актуальной версии репозитория" >&2; exit 1; }
+done
 
 command -v awg >/dev/null || { echo "Пакет не установил awg" >&2; exit 1; }
 command -v awg-quick >/dev/null || { echo "Пакет не установил awg-quick" >&2; exit 1; }

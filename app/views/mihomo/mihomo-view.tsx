@@ -65,6 +65,7 @@ type Profile = {
   channels: string[];
   connections: ProfileConnection[];
   routing?: Record<string, string | number | boolean>;
+  devices?: ProfileDevice[];
   created_at: string;
   updated_at: string;
 };
@@ -73,8 +74,10 @@ type ProfileConnection = {
   id: string;
   component: string;
   name: string;
+  device_id: string;
   settings: Record<string, string | number | boolean>;
 };
+type ProfileDevice = { id: string; name: string };
 
 type PolicySettings = {
   schema: SettingField[];
@@ -125,6 +128,8 @@ export function MihomoPage({
   const [profileName, setProfileName] = useState("");
   const [profileConnections, setProfileConnections] = useState<ProfileConnection[]>([]);
   const [profileRouting, setProfileRouting] = useState<Record<string, string | number | boolean>>({});
+  const [profileDevices, setProfileDevices] = useState<ProfileDevice[]>([{ id: "device-1", name: "Основное устройство" }]);
+  const [activeDeviceId, setActiveDeviceId] = useState("device-1");
   const [profileStats, setProfileStats] = useState<Record<string, ProfileStats>>({});
   const [createdProfile, setCreatedProfile] = useState<Profile | null>(null);
   const [presetDialog, setPresetDialog] = useState(false);
@@ -365,6 +370,8 @@ export function MihomoPage({
     setProfileName("");
     setProfileConnections([]);
     setProfileRouting({});
+    setProfileDevices([{ id: "device-1", name: "Основное устройство" }]);
+    setActiveDeviceId("device-1");
   }
 
   function editProfile(profile: Profile) {
@@ -372,6 +379,9 @@ export function MihomoPage({
     setProfileName(profile.name);
     setProfileConnections((profile.connections || []).map((connection) => ({ ...connection, settings: { ...connection.settings } })));
     setProfileRouting({ ...(profile.routing || {}) });
+    const devices = profile.devices?.length ? profile.devices : [{ id: "device-1", name: "Основное устройство" }];
+    setProfileDevices(devices);
+    setActiveDeviceId(devices[0].id);
   }
 
   function addProfileConnection(module: Module) {
@@ -380,6 +390,7 @@ export function MihomoPage({
       id: `connection-${crypto.randomUUID()}`,
       component: module.id,
       name: module.name,
+      device_id: activeDeviceId,
       settings,
     }]);
   }
@@ -403,9 +414,9 @@ export function MihomoPage({
         settings.cdn_enabled = true;
         settings.cdn_domain = cdnDomain;
       }
-      connections.push({ id: `connection-${crypto.randomUUID()}`, component: componentId, name: definition.label || `${componentModule.name}${definition.cdn ? " · CDN" : " · Direct"}`, settings });
+      connections.push({ id: `connection-${crypto.randomUUID()}`, component: componentId, name: definition.label || `${componentModule.name}${definition.cdn ? " · CDN" : " · Direct"}`, device_id: activeDeviceId, settings });
     }
-    setProfileConnections(connections);
+    setProfileConnections((current) => [...current.filter((connection) => connection.device_id !== activeDeviceId), ...connections]);
     setProfileRouting((current) => ({ ...current, strategy: preset.strategy }));
     if (!profileName.trim()) setProfileName(preset.name);
   }
@@ -428,13 +439,13 @@ export function MihomoPage({
       if (profileDialog === "new") {
         const created = await request("/mihomo/profiles", {
           method: "POST",
-          body: JSON.stringify({ name: profileName, connections: profileConnections, routing: profileRouting }),
+          body: JSON.stringify({ name: profileName, devices: profileDevices, connections: profileConnections, routing: profileRouting }),
         }) as Profile;
         setCreatedProfile(created);
       } else if (profileDialog) {
         await request(`/mihomo/profiles/${profileDialog.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ name: profileName, connections: profileConnections, routing: profileRouting }),
+          body: JSON.stringify({ name: profileName, devices: profileDevices, connections: profileConnections, routing: profileRouting }),
         });
       }
       setProfileDialog(null);
@@ -491,14 +502,14 @@ export function MihomoPage({
     }
   }
 
-  async function downloadConfig(profile: Profile) {
+  async function downloadConfig(profile: Profile, device?: ProfileDevice) {
     setBusy(`download:${profile.id}`);
     setError("");
     try {
-      const config = (await request(`/mihomo/profiles/${profile.id}/config`)) as string;
+      const config = (await request(`/mihomo/profiles/${profile.id}/config${device ? `?device_id=${encodeURIComponent(device.id)}` : ""}`)) as string;
       const link = document.createElement("a");
       link.href = URL.createObjectURL(new Blob([config], { type: "application/yaml;charset=utf-8" }));
-      link.download = `${profile.name.trim().replace(/[^a-zA-Z0-9а-яА-Я._-]+/g, "-") || "mihomo"}.yaml`;
+      link.download = `${[profile.name, device?.name].filter(Boolean).join("-").trim().replace(/[^a-zA-Z0-9а-яА-Я._-]+/g, "-") || "mihomo"}.yaml`;
       document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(link.href);
       setNotice(`Профиль «${profile.name}» скачан.`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось скачать профиль"); }
@@ -693,10 +704,11 @@ export function MihomoPage({
                 <small className="mihomoProfileUpdated">{new Date(profile.updated_at || profile.created_at).toLocaleString("ru-RU")}</small>
                 <div className="mihomoRowActions">
                   <button onClick={() => editProfile(profile)}>Настроить</button>
-                  <button onClick={() => void downloadConfig(profile)} disabled={busy === `download:${profile.id}`}>Скачать YAML</button>
+                  {(profile.devices?.length ? profile.devices : [{ id: "device-1", name: "Устройство" }]).map((device) => <button key={device.id} onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>YAML · {device.name}</button>)}
                   <button onClick={() => void copyConfig(profile)} disabled={busy === `config:${profile.id}`}>Копировать</button>
                   <button className="dangerButton" onClick={() => void removeProfile(profile)} disabled={busy === `profile:${profile.id}`}>Удалить</button>
                 </div>
+                <div className="mihomoProfileProtocolStats">{profile.connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0)); return <div key={connection.id}><span className={online ? "online" : ""}>{channelShort[connection.component] || "CH"}<i /></span><p><b>{connection.name}</b><small>↓ {bytes(item?.rx_bytes || 0)} · ↑ {bytes(item?.tx_bytes || 0)}{item?.handshake_age_s != null ? ` · ${duration(item.handshake_age_s)}` : ""}</small></p></div>; })}</div>
               </div>
             ))}
             {!profiles.length && <Empty title="Профилей пока нет" text="Установите компонент и соберите первое подключение в профиле." />}
@@ -787,7 +799,8 @@ export function MihomoPage({
               <div><p className="eyebrow">MIHOMO PROFILE</p><h2>{profileDialog === "new" ? "Новый профиль" : "Настройка профиля"}</h2></div>
               <button type="button" className="iconButton" onClick={() => setProfileDialog(null)}>x</button>
             </header>
-            <label className="mihomoProfileName"><span>Название устройства</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} /></label>
+            <label className="mihomoProfileName"><span>Название профиля</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} /></label>
+            <section className="mihomoDeviceBuilder"><header><div><b>Устройства профиля</b><small>У каждого устройства собственные credentials и отдельный YAML.</small></div><button type="button" onClick={() => { const id = `device-${crypto.randomUUID()}`; setProfileDevices((current) => [...current, { id, name: `Устройство ${current.length + 1}` }]); setActiveDeviceId(id); }}>+ Устройство</button></header><div>{profileDevices.map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => setActiveDeviceId(device.id)}><input value={device.name} maxLength={80} onClick={(event) => event.stopPropagation()} onChange={(event) => setProfileDevices((current) => current.map((item) => item.id === device.id ? { ...item, name: event.target.value } : item))} />{profileDevices.length > 1 && <span onClick={(event) => { event.stopPropagation(); const next = profileDevices.filter((item) => item.id !== device.id); setProfileDevices(next); setProfileConnections((current) => current.filter((connection) => connection.device_id !== device.id)); if (activeDeviceId === device.id) setActiveDeviceId(next[0].id); }}>×</span>}</button>)}</div></section>
             {profileDialog === "new" && <section className="mihomoPresetPicker">
               <header><div><b>Быстрый старт</b><small>Выберите готовую схему, затем при необходимости измените соединения ниже.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настройки пресетов</button></header>
               <div>{profilePresets.map((preset) => {
@@ -800,12 +813,12 @@ export function MihomoPage({
               <header><div><b>Подключения профиля</b><small>Один профиль может содержать несколько VLESS с разными маршрутами и CDN.</small></div></header>
               <div className="mihomoConnectionAdd">
                 {installedChannels.map((module) => {
-                  const singletonUsed = module.id !== "transport-reality" && profileConnections.some((item) => item.component === module.id);
+                  const singletonUsed = module.id !== "transport-reality" && profileConnections.some((item) => item.device_id === activeDeviceId && item.component === module.id);
                   return <button key={module.id} type="button" disabled={singletonUsed} onClick={() => addProfileConnection(module)}>+ {module.name}</button>;
                 })}
               </div>
               <div className="mihomoConnectionList">
-                {profileConnections.map((connection, index) => {
+                {profileConnections.filter((connection) => connection.device_id === activeDeviceId).map((connection, index) => {
                   const protocolModule = modules.find((item) => item.id === connection.component);
                   const schema = protocolModule?.connection_settings || [];
                   return <article key={connection.id} className="mihomoConnectionCard">
@@ -831,15 +844,15 @@ export function MihomoPage({
                     </div>
                   </article>;
                 })}
-                {!profileConnections.length && <p className="mihomoConnectionEmpty">Добавьте хотя бы одно подключение из установленного компонента.</p>}
+                {!profileConnections.some((connection) => connection.device_id === activeDeviceId) && <p className="mihomoConnectionEmpty">Добавьте хотя бы одно подключение для выбранного устройства.</p>}
               </div>
             </section>
             <aside>Компонент устанавливает ядро протокола один раз. Каждая карточка выше создаёт независимые параметры и credential только для этого профиля.</aside>
-            <footer><button type="button" className="ghostButton" onClick={() => setProfileDialog(null)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "profile" || !profileName.trim() || !profileConnections.length}>{profileDialog === "new" ? "Создать профиль" : "Сохранить профиль"}</button></footer>
+            <footer><button type="button" className="ghostButton" onClick={() => setProfileDialog(null)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "profile" || !profileName.trim() || profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить профиль"}</button></footer>
           </form>
         </div>
       )}
-      {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile"><header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль создан</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header><p>Скачайте готовый YAML и импортируйте его в Mihomo-клиент. Файл также всегда доступен в списке профилей.</p><div><b>{createdProfile.name}</b><span>{createdProfile.connections.length} соединений</span></div><footer><button className="ghostButton" onClick={() => setCreatedProfile(null)}>Закрыть</button><button className="primaryButton" onClick={() => void downloadConfig(createdProfile)}>Скачать config.yaml</button></footer></div></div>}
+      {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile"><header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль создан</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header><p>Скачайте отдельный YAML для каждого устройства. Файлы также всегда доступны в списке профилей.</p><div><b>{createdProfile.name}</b><span>{createdProfile.connections.length} соединений · {createdProfile.devices?.length || 1} устройств</span></div><footer><button className="ghostButton" onClick={() => setCreatedProfile(null)}>Закрыть</button>{(createdProfile.devices || [{ id: "device-1", name: "Устройство" }]).map((device) => <button key={device.id} className="primaryButton" onClick={() => void downloadConfig(createdProfile, device)}>YAML · {device.name}</button>)}</footer></div></div>}
       {presetDialog && <div className="mihomoDialogBackdrop"><form className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}><header><div><p className="eyebrow">PRESET ROUTING</p><h2>Настройки быстрых профилей</h2></div><button type="button" className="iconButton" onClick={() => setPresetDialog(false)}>x</button></header><p>Для каждого пресета отдельно выберите стратегию и соединения. VLESS Direct и VLESS CDN независимы.</p><div className="mihomoPresetEditor">{presetDraft.map((preset, index) => <article key={preset.id}><label><span>Название</span><input value={preset.name} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></label><label><span>Стратегия</span><select value={preset.strategy} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, strategy: event.target.value as ProfilePreset["strategy"] } : item))}><option value="fallback">Fallback</option><option value="url-test">Автовыбор по задержке</option><option value="select">Ручной выбор</option></select></label><div>{[{ id: "transport-reality", label: "VLESS Direct" }, { id: "transport-reality", label: "VLESS CDN", cdn: true }, { id: "transport-awg", label: "AWG" }, { id: "transport-wg", label: "WG" }, { id: "transport-shadowsocks", label: "SS" }].map((option) => { const selected = preset.components.some((item) => item.id === option.id && Boolean(item.cdn) === Boolean(option.cdn)); return <label key={`${option.id}-${option.cdn ? "cdn" : "direct"}`}><input type="checkbox" checked={selected} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i !== index ? item : { ...item, components: event.target.checked ? [...item.components, option] : item.components.filter((component) => !(component.id === option.id && Boolean(component.cdn) === Boolean(option.cdn))) }))} /><span>{option.label}</span></label>; })}</div></article>)}</div><footer><button type="button" className="ghostButton" onClick={() => setPresetDialog(false)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "presets" || presetDraft.some((item) => !item.components.length)}>Сохранить пресеты</button></footer></form></div>}
     </section>
   );

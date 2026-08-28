@@ -610,7 +610,7 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(wgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(awgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(wgInstall, /install -y iptables wireguard-tools/);
-  assert.match(awgInstall, /install -y amneziawg/);
+  assert.match(awgInstall, /install -y --only-upgrade amneziawg amneziawg-tools amneziawg-dkms/);
   assert.match(manager, /AWG_PORT="51822"/);
   assert.match(awgInstall, /AWG_PORT="\$\{AWG_PORT:-51822\}"/);
   for (const installer of [awgInstall, mihomoAwgInstall]) {
@@ -1048,15 +1048,18 @@ test("WG, AWG and Shadowsocks install the latest repository candidates", async (
     read("protocol-images/amneziawg/install.sh"),
     read("protocol-images/shadowsocks/install.sh"),
   ]);
-  for (const [script, packageName] of [[wg, "wireguard-tools"], [awg, "amneziawg"], [shadowsocks, "shadowsocks-libev"]]) {
+  for (const [script, packageName] of [[wg, "wireguard-tools"], [shadowsocks, "shadowsocks-libev"]]) {
     assert.match(script, /apt-get -o DPkg::Lock::Timeout=300 update/);
     assert.match(script, new RegExp(`apt-get -o DPkg::Lock::Timeout=300 install -y(?: [a-z-]+)* ${packageName}`));
     assert.match(script, new RegExp(`dpkg-query -W -f='\\$\\{Version\\}' ${packageName}`));
     assert.match(script, new RegExp(`apt-cache policy ${packageName}`));
   }
-  for (const [script, packageName] of [[wg, "wireguard-tools"], [awg, "amneziawg"], [shadowsocks, "shadowsocks-libev"]]) {
+  for (const [script, packageName] of [[wg, "wireguard-tools"], [shadowsocks, "shadowsocks-libev"]]) {
     assert.match(script, new RegExp(`LC_ALL=C apt-cache policy ${packageName}`));
   }
+  assert.match(awg, /install -y --only-upgrade amneziawg amneziawg-tools amneziawg-dkms/);
+  assert.match(awg, /for awg_package in amneziawg amneziawg-tools amneziawg-dkms/);
+  assert.match(awg, /LC_ALL=C apt-cache policy "\$\{awg_package\}"/);
 });
 
 test("failed protocol installs roll back partial state and shared packages have owners", async () => {
@@ -1142,7 +1145,10 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /def rebuild_vless_cdn_snippet/);
   assert.match(manager, /VLESS_CDN_ROUTE_ROOT/);
   assert.match(manager, /original_config = config_path\.read_bytes\(\)/);
-  assert.match(manager, /component != "transport-reality" and component in used_singletons/);
+  assert.match(manager, /component != "transport-reality" and singleton_key in used_singletons/);
+  assert.match(manager, /class ProfileDeviceInput/);
+  assert.match(manager, /device_id: str/);
+  assert.match(manager, /render_profile\(item: dict\[str, Any\], device_id/);
   assert.match(manager, /network: \{'tcp' if transport == 'raw' else transport\}/);
   assert.match(manager, /grpc-service-name/);
   assert.match(manager, /call_module_script\(module_id, "install"\)[\s\S]*rollback failed/);
@@ -1153,7 +1159,7 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /def default_profile_presets/);
   assert.match(manager, /\/api\/mihomo\/routing\/presets/);
   assert.match(manager, /"summary": \{"configured": len\(values\)/);
-  assert.match(view, /Скачать config\.yaml/);
+  assert.match(view, /downloadConfig\(createdProfile, device\)/);
   assert.match(view, /mihomoProfileStats/);
   assert.match(view, /Настройки пресетов/);
   assert.match(view, /preset_cdn_domain/);

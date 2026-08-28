@@ -1349,6 +1349,14 @@ def apt_package_versions(package: str) -> tuple[str, str]:
     return "" if installed == "(none)" else installed, "" if candidate == "(none)" else candidate
 
 
+def awg_packages_current() -> bool:
+    for package in ("amneziawg", "amneziawg-tools", "amneziawg-dkms"):
+        installed, candidate = apt_package_versions(package)
+        if not installed or not candidate or installed != candidate:
+            return False
+    return True
+
+
 def version_major(value: str) -> str:
     # Best-effort leading numeral from a Debian version string (drop any
     # epoch prefix like "2:") or a plain semver-ish tag.
@@ -1435,7 +1443,7 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
         installed_package, candidate_package = apt_package_versions(package)
         installed_version = awg_installed_version() if installed else ""
         available_version = ""
-        update_available_override = bool(installed and installed_package and candidate_package and installed_package != candidate_package)
+        update_available_override = bool(installed and not awg_packages_current())
     elif package:
         installed_version, available_version = apt_package_versions(package)
         if not installed:
