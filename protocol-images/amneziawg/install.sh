@@ -112,7 +112,7 @@ else
 fi
 
 apt-get -o DPkg::Lock::Timeout=300 update
-apt-get -o DPkg::Lock::Timeout=300 install -y --only-upgrade --allow-change-held-packages amneziawg amneziawg-tools amneziawg-dkms
+apt-get -o DPkg::Lock::Timeout=300 install -y --allow-change-held-packages amneziawg amneziawg-tools amneziawg-dkms
 for awg_package in amneziawg amneziawg-tools amneziawg-dkms; do
   awg_installed_package="$(dpkg-query -W -f='${Version}' "${awg_package}" 2>/dev/null || true)"
   awg_candidate_package="$(LC_ALL=C apt-cache policy "${awg_package}" | awk '/Candidate:/ {print $2; exit}')"
