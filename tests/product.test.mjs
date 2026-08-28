@@ -1174,7 +1174,9 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(view, /connections: profileConnections/);
   assert.match(view, /cdn_enabled/);
   assert.match(view, /\["xhttp_mode", "xpadding", "xmux_concurrency"\]/);
-  assert.match(manager, /Надёжный/);
+  assert.match(manager, /Все VLESS/);
+  assert.match(manager, /httpupgrade/);
+  assert.match(view, /VLESS CDN · HTTPUpgrade/);
   assert.match(manager, /def default_profile_presets/);
   assert.match(manager, /\/api\/mihomo\/routing\/presets/);
   assert.match(manager, /"summary": \{"configured": len\(values\)/);

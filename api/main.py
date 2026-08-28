@@ -29,7 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="312.net Infrastructure API", version="0.1.0")
+app = FastAPI(title="312.net Infrastructure API", version="0.2.0")
 logger = logging.getLogger("vps-control.api")
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
 app.add_middleware(
@@ -2513,7 +2513,7 @@ class ProtocolSettingsUpdate(BaseModel):
     xmux_concurrency: int | None = Field(default=None, ge=1, le=64)
     cdn_enabled: bool | None = None
     cdn_domain: str | None = Field(default=None, max_length=253)
-    cdn_transport: Literal["websocket", "xhttp", "grpc"] | None = None
+    cdn_transport: Literal["websocket", "xhttp", "httpupgrade", "grpc"] | None = None
     cdn_xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
 
 
@@ -2565,6 +2565,8 @@ def vless_cdn_client_query(reality: dict) -> dict[str, str]:
         values.update({"type": "xhttp", "path": path, "mode": reality.get("CDN_XHTTP_MODE", "auto"), "alpn": "h2"})
     elif transport == "grpc":
         values.update({"type": "grpc", "serviceName": path.lstrip("/"), "mode": "gun", "alpn": "h2"})
+    elif transport == "httpupgrade":
+        values.update({"type": "httpupgrade", "path": path, "alpn": "http/1.1"})
     else:
         values.update({"type": "ws", "path": path, "alpn": "http/1.1"})
     return values
@@ -2593,6 +2595,8 @@ def cdn_stream(transport: str, path: str, xhttp_mode: str = "auto") -> dict:
         stream["xhttpSettings"] = {"path": path, "mode": xhttp_mode}
     elif transport == "grpc":
         stream["grpcSettings"] = {"serviceName": path.lstrip("/") or "vless", "multiMode": False}
+    elif transport == "httpupgrade":
+        stream["httpupgradeSettings"] = {"path": path}
     else:
         stream["network"] = "websocket"
         stream["wsSettings"] = {"path": path}
@@ -3142,7 +3146,7 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
         "help": "Например cdn.vpn.example.com. Для Cloudflare запись A должна быть в режиме Proxied.",
     }, {
         "key": "cdn_transport", "label": "CDN-транспорт", "type": "select", "value": str(values.get("cdnTransport", "websocket")),
-        "options": [{"value": "websocket", "label": "WebSocket · совместимый"}, {"value": "xhttp", "label": "XHTTP · рекомендуемый"}, {"value": "grpc", "label": "gRPC · HTTP/2"}],
+        "options": [{"value": "websocket", "label": "WebSocket · совместимый"}, {"value": "xhttp", "label": "XHTTP · рекомендуемый"}, {"value": "httpupgrade", "label": "HTTPUpgrade · HTTP/1.1"}, {"value": "grpc", "label": "gRPC · HTTP/2"}],
         "help": "Не влияет на Direct-транспорт. Для gRPC включите поддержку gRPC у CDN-провайдера.",
     }, {
         "key": "cdn_xhttp_mode", "label": "Режим CDN XHTTP", "type": "select", "value": str(values.get("cdnXhttpMode", "auto")),

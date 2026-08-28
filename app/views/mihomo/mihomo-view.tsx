@@ -85,7 +85,17 @@ type PolicySettings = {
   presets?: ProfilePreset[];
 };
 
-type ProfilePreset = { id: string; name: string; description: string; strategy: "fallback" | "url-test" | "select"; components: Array<{ id: string; cdn?: boolean; label?: string }> };
+type ProfilePreset = { id: string; name: string; description: string; strategy: "fallback" | "url-test" | "select"; components: Array<{ id: string; cdn?: boolean; transport?: string; label?: string }> };
+const presetConnectionOptions: ProfilePreset["components"] = [
+  { id: "transport-reality", transport: "xhttp", label: "VLESS · XHTTP" },
+  { id: "transport-reality", transport: "raw", label: "VLESS · RAW" },
+  { id: "transport-reality", transport: "grpc", label: "VLESS · gRPC" },
+  { id: "transport-reality", cdn: true, transport: "xhttp", label: "VLESS CDN · XHTTP" },
+  { id: "transport-reality", cdn: true, transport: "websocket", label: "VLESS CDN · WS" },
+  { id: "transport-reality", cdn: true, transport: "httpupgrade", label: "VLESS CDN · HTTPUpgrade" },
+  { id: "transport-reality", cdn: true, transport: "grpc", label: "VLESS CDN · gRPC" },
+  { id: "transport-awg", label: "AWG" }, { id: "transport-wg", label: "WG" }, { id: "transport-shadowsocks", label: "SS" },
+];
 type ProfileStats = { summary: { configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null }; connections: Record<string, { active?: boolean; endpoint?: string | null; active_connections?: number; rx_bytes?: number; tx_bytes?: number; handshake_age_s?: number | null }> };
 
 const channelShort: Record<string, string> = {
@@ -464,11 +474,13 @@ export function MihomoPage({
         settings.route_mode = "cdn";
         settings.cdn_enabled = true;
         settings.cdn_domain = cdnDomain;
+        if (definition.transport) settings.cdn_transport = definition.transport;
       } else if (componentId === "transport-reality") {
         settings.route_mode = "direct";
         settings.cdn_enabled = false;
+        if (definition.transport) settings.transport = definition.transport;
       }
-      connections.push({ id: `connection-${crypto.randomUUID()}`, component: componentId, name: definition.label || `${componentModule.name}${definition.cdn ? " · CDN" : " · Direct"}`, device_id: activeDeviceId, settings });
+      connections.push({ id: `connection-${crypto.randomUUID()}`, component: componentId, name: definition.label || `${componentModule.name}${definition.cdn ? " · CDN" : ""}`, device_id: activeDeviceId, settings });
     }
     setProfileConnections((current) => [...current.filter((connection) => connection.device_id !== activeDeviceId), ...connections]);
     setProfileRouting((current) => ({ ...current, strategy: preset.strategy }));
@@ -958,7 +970,7 @@ export function MihomoPage({
               <div className="mihomoConnectionAdd">
                 {installedChannels.flatMap((module) => {
                   if (module.id === "transport-reality") return [
-                    <button key="vless-direct" type="button" onClick={() => addProfileConnection(module, "direct")}>+ VLESS Direct</button>,
+                    <button key="vless-direct" type="button" onClick={() => addProfileConnection(module, "direct")}>+ VLESS</button>,
                     <button key="vless-cdn" type="button" disabled={!String(routingPolicy?.values.preset_cdn_domain || "").trim()} title={!String(routingPolicy?.values.preset_cdn_domain || "").trim() ? "Сначала укажите CDN-домен в маршрутизации" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
                   ];
                   const singletonUsed = profileConnections.some((item) => item.device_id === activeDeviceId && item.component === module.id);
@@ -973,7 +985,7 @@ export function MihomoPage({
                   return <article key={connection.id} className={`mihomoConnectionCard${vlessRoute ? ` is-vless-${vlessRoute}` : ""}`}>
                     <header>
                       <span>{channelShort[connection.component] || "CH"}</span>
-                      <div><b>{vlessRoute === "cdn" ? "VLESS CDN" : vlessRoute === "direct" ? "VLESS Direct" : vlessRoute === "both" ? "VLESS Direct + CDN · прежний формат" : protocolModule?.name || connection.component}</b><small>{vlessRoute === "cdn" ? "Через CDN-домен" : vlessRoute === "direct" ? "Прямое REALITY-подключение" : vlessRoute === "both" ? "Можно заменить двумя независимыми подключениями" : `Подключение ${index + 1}`}</small></div>
+                      <div><b>{vlessRoute === "cdn" ? "VLESS CDN" : vlessRoute === "direct" ? "VLESS" : vlessRoute === "both" ? "VLESS + CDN · прежний формат" : protocolModule?.name || connection.component}</b><small>{vlessRoute === "cdn" ? "Через CDN-домен" : vlessRoute === "direct" ? "Прямое REALITY-подключение" : vlessRoute === "both" ? "Можно заменить двумя независимыми подключениями" : `Подключение ${index + 1}`}</small></div>
                       <button type="button" className="dangerButton" onClick={() => setProfileConnections((current) => current.filter((item) => item.id !== connection.id))}>Удалить</button>
                     </header>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
@@ -1006,7 +1018,7 @@ export function MihomoPage({
         </div>
       )}
       {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile"><header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль создан</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header><p>Скачайте отдельный YAML для каждого устройства. Файлы также всегда доступны в списке профилей.</p><div><b>{createdProfile.name}</b><span>{createdProfile.connections.length} соединений · {createdProfile.devices?.length || 1} устройств</span></div><footer><button className="ghostButton" onClick={() => setCreatedProfile(null)}>Закрыть</button>{(createdProfile.devices || [{ id: "device-1", name: "Устройство" }]).map((device) => <button key={device.id} className="primaryButton" onClick={() => void downloadConfig(createdProfile, device)}>YAML · {device.name}</button>)}</footer></div></div>}
-      {presetDialog && <div className="mihomoDialogBackdrop"><form className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}><header><div><p className="eyebrow">PRESET ROUTING</p><h2>Настройки быстрых профилей</h2></div><button type="button" className="iconButton" onClick={() => setPresetDialog(false)}>x</button></header><p>Для каждого пресета отдельно выберите стратегию и соединения. VLESS Direct и VLESS CDN независимы.</p><div className="mihomoPresetEditor">{presetDraft.map((preset, index) => <article key={preset.id}><label><span>Название</span><input value={preset.name} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></label><label><span>Стратегия</span><select value={preset.strategy} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, strategy: event.target.value as ProfilePreset["strategy"] } : item))}><option value="fallback">Fallback</option><option value="url-test">Автовыбор по задержке</option><option value="select">Ручной выбор</option></select></label><div>{[{ id: "transport-reality", label: "VLESS Direct" }, { id: "transport-reality", label: "VLESS CDN", cdn: true }, { id: "transport-awg", label: "AWG" }, { id: "transport-wg", label: "WG" }, { id: "transport-shadowsocks", label: "SS" }].map((option) => { const selected = preset.components.some((item) => item.id === option.id && Boolean(item.cdn) === Boolean(option.cdn)); return <label key={`${option.id}-${option.cdn ? "cdn" : "direct"}`}><input type="checkbox" checked={selected} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i !== index ? item : { ...item, components: event.target.checked ? [...item.components, option] : item.components.filter((component) => !(component.id === option.id && Boolean(component.cdn) === Boolean(option.cdn))) }))} /><span>{option.label}</span></label>; })}</div></article>)}</div><footer><button type="button" className="ghostButton" onClick={() => setPresetDialog(false)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "presets" || presetDraft.some((item) => !item.components.length)}>Сохранить пресеты</button></footer></form></div>}
+      {presetDialog && <div className="mihomoDialogBackdrop"><form className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}><header><div><p className="eyebrow">PRESET ROUTING</p><h2>Настройки быстрых профилей</h2></div><button type="button" className="iconButton" onClick={() => setPresetDialog(false)}>x</button></header><p>Для каждого пресета отдельно выберите стратегию и соединения. VLESS и VLESS CDN независимы.</p><div className="mihomoPresetEditor">{presetDraft.map((preset, index) => <article key={preset.id}><label><span>Название</span><input value={preset.name} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></label><label><span>Стратегия</span><select value={preset.strategy} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, strategy: event.target.value as ProfilePreset["strategy"] } : item))}><option value="fallback">Fallback</option><option value="url-test">Автовыбор по задержке</option><option value="select">Ручной выбор</option></select></label><div>{presetConnectionOptions.map((option) => { const selected = preset.components.some((item) => item.id === option.id && Boolean(item.cdn) === Boolean(option.cdn) && String(item.transport || "") === String(option.transport || "")); return <label key={`${option.id}-${option.cdn ? "cdn" : "direct"}-${option.transport || "default"}`}><input type="checkbox" checked={selected} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i !== index ? item : { ...item, components: event.target.checked ? [...item.components, option] : item.components.filter((component) => !(component.id === option.id && Boolean(component.cdn) === Boolean(option.cdn) && String(component.transport || "") === String(option.transport || ""))) }))} /><span>{option.label}</span></label>; })}</div></article>)}</div><footer><button type="button" className="ghostButton" onClick={() => setPresetDialog(false)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "presets" || presetDraft.some((item) => !item.components.length)}>Сохранить пресеты</button></footer></form></div>}
     </section>
   );
 }

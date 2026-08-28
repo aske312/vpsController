@@ -39,7 +39,7 @@ fi
 [[ -z "${CDN_DOMAIN}" || "${CDN_DOMAIN}" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] \
   || { echo "Некорректный VLESS_CDN_DOMAIN" >&2; exit 1; }
 [[ "${CDN_ENABLED}" == "yes" || "${CDN_ENABLED}" == "no" ]] || { echo "Некорректный CDN_ENABLED" >&2; exit 1; }
-[[ "${CDN_TRANSPORT}" == "websocket" || "${CDN_TRANSPORT}" == "xhttp" || "${CDN_TRANSPORT}" == "grpc" ]] || { echo "Некорректный CDN transport" >&2; exit 1; }
+[[ "${CDN_TRANSPORT}" == "websocket" || "${CDN_TRANSPORT}" == "xhttp" || "${CDN_TRANSPORT}" == "httpupgrade" || "${CDN_TRANSPORT}" == "grpc" ]] || { echo "Некорректный CDN transport" >&2; exit 1; }
 [[ "${CDN_XHTTP_MODE}" == "auto" || "${CDN_XHTTP_MODE}" == "stream-one" || "${CDN_XHTTP_MODE}" == "stream-up" || "${CDN_XHTTP_MODE}" == "packet-up" ]] || { echo "Некорректный CDN XHTTP mode" >&2; exit 1; }
 [[ "${CDN_ENABLED}" != "yes" || -n "${CDN_DOMAIN}" ]] || { echo "Для включения CDN необходим домен" >&2; exit 1; }
 TARGET_HOST="${TARGET%:*}"
@@ -218,6 +218,8 @@ if cdn_enabled == "yes" and cdn_domain:
         cdn_stream["xhttpSettings"] = {"path": cdn_path, "mode": cdn_xhttp_mode}
     elif cdn_transport == "grpc":
         cdn_stream["grpcSettings"] = {"serviceName": cdn_path.lstrip("/") or "vless", "multiMode": False}
+    elif cdn_transport == "httpupgrade":
+        cdn_stream["httpupgradeSettings"] = {"path": cdn_path}
     else:
         cdn_stream["network"] = "websocket"
         cdn_stream["wsSettings"] = {"path": cdn_path}

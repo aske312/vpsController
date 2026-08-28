@@ -328,7 +328,7 @@ function ProtocolSettingsEditor({
   return <div className={`protocolSettingsEditor${vless ? " vlessSettingsEditor" : ""}`}>
     {vless ? <>
       <div className="vlessRouteSummary" aria-label="Маршруты VLESS">
-        <span className="direct"><em>ОСНОВНОЙ · DIRECT</em><b>REALITY / {selectedTransport.toUpperCase()}</b><small>Подключение напрямую к серверу. Не зависит от CDN.</small><i>{selectedTransport === "xhttp" ? "РЕКОМЕНДУЕТСЯ" : "СОВМЕСТИМО"}</i></span>
+        <span className="direct"><em>ОСНОВНОЙ · VLESS</em><b>REALITY / {selectedTransport.toUpperCase()}</b><small>Подключение напрямую к серверу. Не зависит от CDN.</small><i>{selectedTransport === "xhttp" ? "РЕКОМЕНДУЕТСЯ" : "СОВМЕСТИМО"}</i></span>
         {cdnEnabled && <span className="cdn enabled"><em>ДОПОЛНИТЕЛЬНЫЙ · CDN</em><b>TLS / {selectedCdnTransport.toUpperCase()}</b><small>Отдельная точка входа через CDN-домен.</small><i>{selectedCdnTransport === "xhttp" ? "РЕКОМЕНДУЕТСЯ" : selectedCdnTransport === "grpc" ? "НУЖЕН gRPC У CDN" : "LEGACY / FALLBACK"}</i></span>}
       </div>
       <section className="vlessSettingsGroup direct">

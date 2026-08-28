@@ -45,17 +45,17 @@
     }
   ],
   "connection_settings": [
-    { "key": "route_mode", "label": "Маршрут", "type": "select", "default": "direct", "options": [{"value":"direct","label":"VLESS Direct"},{"value":"cdn","label":"VLESS CDN"}] },
+    { "key": "route_mode", "label": "Маршрут", "type": "select", "default": "direct", "options": [{"value":"direct","label":"VLESS"},{"value":"cdn","label":"VLESS CDN"}] },
     { "key": "port", "label": "Direct-порт", "type": "number", "default": 0, "min": 0, "max": 65535, "help": "0 — выбрать свободный порт автоматически." },
     { "key": "target", "label": "REALITY target", "type": "text", "default": "www.intel.com:443" },
-    { "key": "transport", "label": "Direct-транспорт", "type": "select", "default": "xhttp", "options": [{"value":"xhttp","label":"XHTTP"},{"value":"raw","label":"RAW · TCP"},{"value":"grpc","label":"gRPC · HTTP/2"}] },
+    { "key": "transport", "label": "Транспорт VLESS", "type": "select", "default": "xhttp", "options": [{"value":"xhttp","label":"XHTTP"},{"value":"raw","label":"RAW · TCP"},{"value":"grpc","label":"gRPC · HTTP/2"}] },
     { "key": "transport_path", "label": "Путь / service name", "type": "text", "default": "/vless" },
     { "key": "xhttp_mode", "label": "Режим XHTTP", "type": "select", "default": "auto", "options": ["auto", "stream-one", "stream-up", "packet-up"] },
     { "key": "xpadding", "label": "XHTTP padding", "type": "text", "default": "100-1000" },
     { "key": "xmux_concurrency", "label": "Параллелизм XHTTP", "type": "number", "default": 12, "min": 1, "max": 64 },
     { "key": "cdn_enabled", "label": "Добавить CDN-маршрут", "type": "boolean", "default": false },
     { "key": "cdn_domain", "label": "CDN-домен", "type": "text", "default": "" },
-    { "key": "cdn_transport", "label": "CDN-транспорт", "type": "select", "default": "websocket", "options": [{"value":"websocket","label":"WebSocket · совместимый"},{"value":"xhttp","label":"XHTTP · рекомендуемый"},{"value":"grpc","label":"gRPC · HTTP/2"}] },
+    { "key": "cdn_transport", "label": "CDN-транспорт", "type": "select", "default": "websocket", "options": [{"value":"websocket","label":"WebSocket · совместимый"},{"value":"xhttp","label":"XHTTP · рекомендуемый"},{"value":"httpupgrade","label":"HTTPUpgrade · HTTP/1.1"},{"value":"grpc","label":"gRPC · HTTP/2"}] },
     { "key": "cdn_xhttp_mode", "label": "Режим CDN XHTTP", "type": "select", "default": "auto", "options": ["auto", "stream-one", "stream-up", "packet-up"] }
   ]
 }

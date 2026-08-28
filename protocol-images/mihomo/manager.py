@@ -531,8 +531,8 @@ PRESET_SETTINGS_FILE = SETTINGS_ROOT / "profile-presets.json"
 
 def default_profile_presets() -> list[dict[str, Any]]:
     return [
-        {"id": "reliable", "name": "Надёжный", "description": "Direct VLESS, CDN VLESS, AWG и SS", "strategy": "fallback", "components": [{"id": "transport-reality", "label": "VLESS · Direct"}, {"id": "transport-reality", "cdn": True, "label": "VLESS · CDN"}, {"id": "transport-awg"}, {"id": "transport-shadowsocks"}]},
-        {"id": "direct-fallback", "name": "Direct + резерв", "description": "Основной и резервный транспорт", "strategy": "fallback", "components": [{"id": "transport-reality"}, {"id": "transport-awg"}]},
+        {"id": "all-vless", "name": "Все VLESS", "description": "Все совместимые VLESS и VLESS CDN транспорты", "strategy": "select", "components": [{"id": "transport-reality", "transport": "xhttp", "label": "VLESS · XHTTP"}, {"id": "transport-reality", "transport": "raw", "label": "VLESS · RAW"}, {"id": "transport-reality", "transport": "grpc", "label": "VLESS · gRPC"}, {"id": "transport-reality", "cdn": True, "transport": "xhttp", "label": "VLESS CDN · XHTTP"}, {"id": "transport-reality", "cdn": True, "transport": "websocket", "label": "VLESS CDN · WS"}, {"id": "transport-reality", "cdn": True, "transport": "httpupgrade", "label": "VLESS CDN · HTTPUpgrade"}, {"id": "transport-reality", "cdn": True, "transport": "grpc", "label": "VLESS CDN · gRPC"}]},
+        {"id": "direct-fallback", "name": "VLESS + резерв", "description": "Основной VLESS и резервный AWG", "strategy": "fallback", "components": [{"id": "transport-reality"}, {"id": "transport-awg"}]},
         {"id": "cdn-first", "name": "CDN-first", "description": "VLESS через CDN с резервом", "strategy": "fallback", "components": [{"id": "transport-reality", "cdn": True}, {"id": "transport-awg"}]},
         {"id": "low-latency", "name": "Минимальная задержка", "description": "AWG с резервным Shadowsocks", "strategy": "url-test", "components": [{"id": "transport-awg"}, {"id": "transport-shadowsocks"}]},
         {"id": "all", "name": "Все транспортные каналы", "description": "Все доступные компоненты", "strategy": "select", "components": [{"id": "transport-reality"}, {"id": "transport-awg"}, {"id": "transport-wg"}, {"id": "transport-shadowsocks"}]},
@@ -559,7 +559,12 @@ def validate_profile_presets(values: list[dict[str, Any]]) -> list[dict[str, Any
             if component_id != "transport-reality" and component_id in used_singletons:
                 continue
             used_singletons.add(component_id)
-            components.append({"id": component_id, "cdn": bool(component.get("cdn", False)), "label": str(component.get("label", ""))[:80]})
+            is_cdn = bool(component.get("cdn", False))
+            transport = str(component.get("transport", ""))
+            allowed_transports = {"xhttp", "websocket", "httpupgrade", "grpc"} if is_cdn else {"xhttp", "raw", "grpc"}
+            if transport and transport not in allowed_transports:
+                raise HTTPException(status_code=422, detail=f"Unsupported VLESS transport in preset {preset_id}")
+            components.append({"id": component_id, "cdn": is_cdn, "transport": transport, "label": str(component.get("label", ""))[:80]})
         if not components:
             raise HTTPException(status_code=422, detail=f"Preset {preset_id} has no connections")
         result.append({"id": preset_id, "name": str(value.get("name") or f"Preset {index + 1}")[:80], "description": str(value.get("description", ""))[:160], "strategy": strategy, "components": components})
@@ -568,7 +573,15 @@ def validate_profile_presets(values: list[dict[str, Any]]) -> list[dict[str, Any
 
 def profile_presets() -> list[dict[str, Any]]:
     stored = load_json(PRESET_SETTINGS_FILE, None)
-    return validate_profile_presets(stored) if isinstance(stored, list) and stored else default_profile_presets()
+    if not isinstance(stored, list) or not stored:
+        return default_profile_presets()
+    # Upgrade the former built-in preset without overwriting user-created presets.
+    if not any(str(item.get("id", "")) == "all-vless" for item in stored if isinstance(item, dict)):
+        legacy_index = next((index for index, item in enumerate(stored) if isinstance(item, dict) and item.get("id") == "reliable"), None)
+        if legacy_index is not None:
+            stored[legacy_index] = default_profile_presets()[0]
+            atomic_json(PRESET_SETTINGS_FILE, stored)
+    return validate_profile_presets(stored)
 
 
 def dns_provider_options() -> list[dict[str, str]]:
@@ -1366,7 +1379,7 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
     cdn_enabled = route_mode in {"cdn", "both"}
     cdn_domain = str(result.get("cdn_domain", "")).strip().lower()
     cdn_transport = str(result.get("cdn_transport", "websocket"))
-    if cdn_transport not in {"websocket", "xhttp", "grpc"}:
+    if cdn_transport not in {"websocket", "xhttp", "httpupgrade", "grpc"}:
         raise HTTPException(status_code=422, detail="Unsupported CDN transport")
     cdn_xhttp_mode = str(result.get("cdn_xhttp_mode", "auto"))
     if cdn_xhttp_mode not in {"auto", "stream-one", "stream-up", "packet-up"}:
@@ -1499,6 +1512,8 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
             cdn_settings["xhttpSettings"] = {"path": cdn_path, "mode": settings["cdn_xhttp_mode"]}
         elif transport == "grpc":
             cdn_settings["grpcSettings"] = {"serviceName": cdn_path.lstrip("/"), "multiMode": False}
+        elif transport == "httpupgrade":
+            cdn_settings["httpupgradeSettings"] = {"path": cdn_path}
         else:
             cdn_settings["network"] = "websocket"
             cdn_settings["wsSettings"] = {"path": cdn_path}
@@ -1966,7 +1981,7 @@ def render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
         "    tls: true",
         f"    servername: {q(credential['cdn_domain'])}",
         "    client-fingerprint: chrome",
-        f"    network: {'ws' if transport == 'websocket' else transport}",
+        f"    network: {'ws' if transport in {'websocket', 'httpupgrade'} else transport}",
     ]
     if transport == "xhttp":
         lines += ["    xhttp-opts:", f"      path: {q(credential['cdn_path'])}", f"      mode: {q(credential.get('cdn_xhttp_mode', 'auto'))}"]
@@ -1974,6 +1989,8 @@ def render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
         lines += ["    grpc-opts:", f"      grpc-service-name: {q(str(credential['cdn_path']).lstrip('/'))}"]
     else:
         lines += ["    ws-opts:", f"      path: {q(credential['cdn_path'])}", "      headers:", f"        Host: {q(credential['cdn_domain'])}"]
+        if transport == "httpupgrade":
+            lines += ["      v2ray-http-upgrade: true"]
     return lines
 
 
