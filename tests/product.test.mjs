@@ -878,6 +878,8 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(api, /def vless_cdn_client_query/);
   assert.match(api, /def vless_tls_client_query/);
   assert.match(api, /def configure_vless_tls/);
+  assert.match(api, /DNS only.*Cloudflare/);
+  assert.ok(api.indexOf('if isinstance(exc, HTTPException):\n                raise exc') < api.indexOf('logger.exception("VLESS settings transaction failed")'), "validation errors must not restart a healthy VLESS service");
   assert.match(install, /VLESS_TLS_DOMAIN/);
   assert.ok(install.indexOf('CDN_PATH="${CDN_PATH:-${WS_PATH}}"') < install.indexOf('TLS_PATH=${CDN_PATH}-tls'), "TLS path must be written only after CDN_PATH is initialized");
   assert.match(api, /"key": "cdn_enabled"/);
@@ -920,6 +922,9 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(protocolCss, /\.vlessCommandHero/);
   assert.match(protocolCss, /\.vlessRouteBoard/);
   assert.match(protocolCss, /\.vlessCommandArt/);
+  assert.match(protocolView, /VlessConnectionTransportSettings/);
+  assert.match(protocolView, /vlessScope="connections"/);
+  assert.match(protocolView, /vlessScope=\{isVless \? "server" : "all"\}/);
   const controlCenterCss = await read("app/styles/control-center.css");
   assert.match(controlCenterCss, /\.shell small[^}]*font-size:11px !important[^}]*line-height:1\.5 !important/s);
   assert.match(controlCenterCss, /label small[^}]*font-size:12px !important[^}]*line-height:1\.5 !important/s);

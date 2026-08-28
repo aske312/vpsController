@@ -282,16 +282,35 @@ function ProtocolSettingsPanel({
         <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : isVless ? "Direct и CDN настраиваются отдельно." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
       <div className="configurationSafety"><i aria-hidden="true" /><p><strong>Безопасное применение</strong><small>валидация и автоматический откат</small></p></div>
     </header>
-    <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} vless={isVless} onChange={onChange} onSave={onSave} />
+    <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} vless={isVless} vlessScope={isVless ? "server" : "all"} onChange={onChange} onSave={onSave} />
   </article>;
 }
+
+export function VlessConnectionTransportSettings({ fields, draft, busy, onChange, onSave }: {
+  fields: EditableProtocolSetting[];
+  draft: Record<string, string | number | boolean>;
+  busy: boolean;
+  onChange: (key: string, value: string | number | boolean) => void;
+  onSave: () => void;
+}) {
+  if (!fields.length) return null;
+  return <article className="panel protocolConfiguration connectionsTransportConfiguration">
+    <header>
+      <div><p className="eyebrow">VLESS TRANSPORTS</p><h3>Транспорт подключений VLESS</h3><span>REALITY, прямой TLS и CDN настраиваются независимо. Домены и общие параметры находятся на странице VLESS.</span></div>
+      <div className="configurationSafety"><i aria-hidden="true" /><p><strong>Единая конфигурация Xray</strong><small>проверка и автоматический откат</small></p></div>
+    </header>
+    <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} vless vlessScope="connections" onChange={onChange} onSave={onSave} />
+  </article>;
+}
+
 function ProtocolSettingsEditor({
-  fields, draft, busy, vless = false, onChange, onSave,
+  fields, draft, busy, vless = false, vlessScope = "all", onChange, onSave,
 }: {
   fields: EditableProtocolSetting[];
   draft: Record<string, string | number | boolean>;
   busy: boolean;
   vless?: boolean;
+  vlessScope?: "all" | "server" | "connections";
   onChange: (key: string, value: string | number | boolean) => void;
   onSave: () => void;
 }) {
@@ -311,6 +330,9 @@ function ProtocolSettingsEditor({
   const directKeys = new Set(["transport", "transport_path", "sni", "xhttp_mode", "xpadding", "xmux_concurrency"]);
   const cdnKeys = new Set(["cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"]);
   const tlsKeys = new Set(["tls_enabled", "tls_domain", "tls_transport", "tls_xhttp_mode"]);
+  const connectionKeys = new Set(["transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency", "tls_transport", "tls_xhttp_mode", "cdn_transport", "cdn_xhttp_mode"]);
+  if (vless && vlessScope === "server") visibleFields = visibleFields.filter((field) => !connectionKeys.has(field.key));
+  if (vless && vlessScope === "connections") visibleFields = visibleFields.filter((field) => connectionKeys.has(field.key));
   const fieldLayer = (key: string) => key.startsWith("cdn_") ? "CDN" : key === "sni" ? "REALITY" : ["xhttp_mode", "xpadding", "xmux_concurrency"].includes(key) ? "XHTTP" : directKeys.has(key) ? "DIRECT" : "XRAY";
   const fieldLabel = (field: EditableProtocolSetting) => field.key === "transport_path"
     ? selectedTransport === "grpc" ? "Service name прямого gRPC" : selectedTransport === "raw" ? "Путь (не используется в RAW)" : "Путь прямого XHTTP"
@@ -332,7 +354,16 @@ function ProtocolSettingsEditor({
   const tlsFields = visibleFields.filter((field) => tlsKeys.has(field.key));
   const commonFields = visibleFields.filter((field) => !directKeys.has(field.key) && !cdnKeys.has(field.key) && !tlsKeys.has(field.key));
   return <div className={`protocolSettingsEditor${vless ? " vlessSettingsEditor" : ""}`}>
-    {vless ? <>
+    {vless && vlessScope === "connections" ? <>
+      <div className="vlessRouteSummary" aria-label="Транспортные контуры VLESS">
+        <span className="direct"><em>01 · VLESS</em><b>REALITY / {selectedTransport.toUpperCase()}</b><small>Прямое подключение к серверу.</small><i>REALITY</i></span>
+        {tlsEnabled && <span className="direct"><em>02 · VLESS TLS</em><b>TLS / {selectedTlsTransport.toUpperCase()}</b><small>Прямой TLS-домен без Cloudflare Proxy.</small><i>ACME</i></span>}
+        {cdnEnabled && <span className="cdn enabled"><em>03 · VLESS CDN</em><b>TLS / {selectedCdnTransport.toUpperCase()}</b><small>Подключение через проксируемый CDN-домен.</small><i>CDN</i></span>}
+      </div>
+      <section className="vlessSettingsGroup direct"><header><div><em>01 · REALITY</em><strong>VLESS</strong></div><p>Транспорт прямого подключения с маскировкой REALITY.</p></header>{renderFields(visibleFields.filter((field) => ["transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)))}</section>
+      {tlsEnabled && <section className="vlessSettingsGroup direct"><header><div><em>02 · ПРЯМОЙ TLS</em><strong>VLESS TLS</strong></div><p>Транспорт независимого TLS-контура.</p></header>{renderFields(visibleFields.filter((field) => ["tls_transport", "tls_xhttp_mode"].includes(field.key)))}</section>}
+      {cdnEnabled && <section className="vlessSettingsGroup cdn"><header><div><em>03 · CDN</em><strong>VLESS CDN</strong></div><p>Транспорт подключения через Cloudflare или другой CDN.</p></header>{renderFields(visibleFields.filter((field) => ["cdn_transport", "cdn_xhttp_mode"].includes(field.key)))}</section>}
+    </> : vless ? <>
       <div className="vlessRouteSummary" aria-label="Маршруты VLESS">
         <span className="direct"><em>ОСНОВНОЙ · VLESS</em><b>REALITY / {selectedTransport.toUpperCase()}</b><small>Подключение напрямую к серверу. Не зависит от CDN.</small><i>{selectedTransport === "xhttp" ? "РЕКОМЕНДУЕТСЯ" : "СОВМЕСТИМО"}</i></span>
         {tlsEnabled && <span className="direct"><em>ДОПОЛНИТЕЛЬНЫЙ · TLS</em><b>TLS / {selectedTlsTransport.toUpperCase()}</b><small>Прямой домен без CDN.</small><i>ACME</i></span>}

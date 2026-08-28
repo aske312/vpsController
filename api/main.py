@@ -3399,7 +3399,7 @@ def update_protocol_settings(
                 if tls_enabled and not valid_hostname(tls_domain):
                     raise HTTPException(status_code=422, detail="Укажите корректный TLS-домен")
                 if tls_enabled and not direct_tls_domain_ready(tls_domain):
-                    raise HTTPException(status_code=422, detail="TLS-домен должен указывать прямо на IP этого VPS")
+                    raise HTTPException(status_code=422, detail=f"TLS-домен должен быть DNS only и указывать на IP этого VPS ({PUBLIC_IPV4 or PUBLIC_IPV6}) — отключите проксирование Cloudflare для этой записи")
                 if tls_enabled and tls_domain == str(reality.get("CDN_DOMAIN", "")).lower():
                     raise HTTPException(status_code=422, detail="Для прямого TLS и CDN нужны разные домены")
                 configure_vless_tls(config, reality, tls_enabled, tls_domain, tls_transport, tls_xhttp_mode)
@@ -3448,6 +3448,10 @@ def update_protocol_settings(
                         CONTROL_COMMAND, "vless-cdn-firewall", timeout=60, check=True,
                     )
         except Exception as exc:
+            # Input validation happens before any files are replaced. Do not restart
+            # a healthy VLESS service just because a domain or field was rejected.
+            if isinstance(exc, HTTPException):
+                raise exc
             logger.exception("VLESS settings transaction failed")
             VLESS_CONFIG.write_bytes(original)
             os.chmod(VLESS_CONFIG, 0o640)
@@ -3466,8 +3470,6 @@ def update_protocol_settings(
                 run("systemctl", "reload", "caddy.service", timeout=20, check=True)
             except Exception:
                 pass
-            if isinstance(exc, HTTPException):
-                raise exc
             raise HTTPException(status_code=500, detail="Не удалось применить настройки VRX") from exc
         finally:
             temporary.unlink(missing_ok=True)

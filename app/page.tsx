@@ -1039,6 +1039,11 @@ export default function Home() {
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
 
   useEffect(() => {
+    if (tab !== "clients" || !installedProtocols.includes("vless-reality-xhttp")) return;
+    void loadProtocolStatus("vless-reality-xhttp");
+  }, [installedProtocols, loadProtocolStatus, tab]);
+
+  useEffect(() => {
     let cancelled = false;
     if (!generated) return () => { cancelled = true; };
     void QRCode.toDataURL(generated, { errorCorrectionLevel: "L", margin: 4, width: 768 })
@@ -1455,6 +1460,13 @@ export default function Home() {
         visibleClientEnd={visibleClientEnd}
         visibleClients={visibleClients}
         removeClient={removeClient}
+        vlessSettings={installedProtocols.includes("vless-reality-xhttp") ? {
+          fields: protocolStatuses["vless-reality-xhttp"]?.editable_settings || [],
+          draft: protocolSettingsDraft["vless-reality-xhttp"] || {},
+          busy,
+          onChange: (key, value) => changeProtocolSetting("vless-reality-xhttp", key, value),
+          onSave: () => void saveProtocolSettings("vless-reality-xhttp"),
+        } : undefined}
       />}
       {clientDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closeClientDialog}>
         <form className="connectionDialog addClient" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={addClient}>
