@@ -867,17 +867,14 @@ install_packages() {
     ok "Node.js ${node_major} доступен в репозитории Ubuntu; внешний репозиторий не требуется."
   fi
   run_with_status "Установка системных зависимостей" apt-get -o DPkg::Lock::Timeout=300 install -y auditd build-essential ca-certificates caddy curl fail2ban git iproute2 openssh-server openssl procps python3 python3-venv rsync tar ufw unattended-upgrades "${distro_node_packages[@]}"
+  configure_fail2ban
   if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1 || [[ "$(node -p 'process.versions.node.split(`.`)[0]' 2>/dev/null || echo 0)" -lt 22 ]]; then
     run_with_status "Подключение Node.js 22" bash -c 'curl -fsSL https://deb.nodesource.com/setup_22.x | bash -'
     run_with_status "Установка Node.js 22" apt-get -o DPkg::Lock::Timeout=300 install -y nodejs
   fi
 }
 
-secure_server() {
-  info "Настройка защиты сервера"
-  prepare_package_manager
-  apt-get -o DPkg::Lock::Timeout=300 update
-  apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw
+configure_fail2ban() {
   install -d -m 0755 /etc/fail2ban/jail.d
   cat >/etc/fail2ban/jail.d/vps-control.local <<'EOF'
 [sshd]
@@ -888,8 +885,17 @@ maxretry = 5
 bantime = 1h
 bantime.increment = true
 EOF
-  systemctl enable --now fail2ban
+  fail2ban-client -t >/dev/null
+  systemctl enable fail2ban >/dev/null
   systemctl restart fail2ban
+}
+
+secure_server() {
+  info "Настройка защиты сервера"
+  prepare_package_manager
+  apt-get -o DPkg::Lock::Timeout=300 update
+  apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw
+  configure_fail2ban
   systemctl enable --now unattended-upgrades
   systemctl enable --now auditd
   systemctl enable --now apparmor.service >/dev/null 2>&1 || warn "AppArmor установлен, но для активации может потребоваться перезагрузка."
@@ -2491,7 +2497,6 @@ integrity_check() {
   grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
     && grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
     && grep -Eq '^ReadWritePaths=.*-?/etc/caddy/vps-control\.d([[:space:]]|$)' "${SERVICE_FILE}" \
-    && grep -Eq '^ReadWritePaths=.*-?/etc/systemd/resolved\.conf\.d([[:space:]]|$)' "${SERVICE_FILE}" \
     || die "systemd-профиль API не разрешает сохранять конфигурацию приложения."
   [[ "$(stat -c '%U' "${COMMAND_PATH}")" == "root" ]] \
     || die "${COMMAND_PATH} должен принадлежать root."

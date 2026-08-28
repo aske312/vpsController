@@ -361,6 +361,9 @@ test("every security posture item has a safe repair or review action", async () 
   assert.match(section, /title="Учётные записи".*runApplicationAction\("integrity-check"\)/s);
   assert.match(section, /title="Дополнительные VPN-службы".*runApplicationAction\("network-check"\)/s);
   assert.match(manager, /apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw/);
+  assert.match(manager, /configure_fail2ban\(\)/);
+  assert.match(manager, /backend = systemd/);
+  assert.doesNotMatch(manager, /integrity_check[\s\S]*ReadWritePaths=.*resolved\.conf\.d/);
   assert.match(manager, /net\.ipv4\.tcp_syncookies = 1/);
   assert.match(manager, /kernel\.dmesg_restrict = 1/);
   assert.match(manager, /chmod 0600 "\$\{ENV_FILE\}"/);
