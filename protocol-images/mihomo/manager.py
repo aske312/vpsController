@@ -108,6 +108,10 @@ class ModuleSettingsPatch(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
 
 
+class PresetSettingsPatch(BaseModel):
+    presets: list[dict[str, Any]] = Field(default_factory=list, min_length=1, max_length=5)
+
+
 class ProfileConnectionInput(BaseModel):
     id: str | None = Field(default=None, max_length=48, pattern=r"^[a-zA-Z0-9_-]+$")
     component: str = Field(min_length=1, max_length=64)
@@ -399,6 +403,49 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
 
 DNS_SETTINGS_FILE = SETTINGS_ROOT / f"{DNS_MODULE_ID}.json"
 ROUTING_SETTINGS_FILE = SETTINGS_ROOT / f"{ROUTING_MODULE_ID}.json"
+PRESET_SETTINGS_FILE = SETTINGS_ROOT / "profile-presets.json"
+
+
+def default_profile_presets() -> list[dict[str, Any]]:
+    return [
+        {"id": "reliable", "name": "Надёжный", "description": "Direct VLESS, CDN VLESS, AWG и SS", "strategy": "fallback", "components": [{"id": "transport-reality", "label": "VLESS · Direct"}, {"id": "transport-reality", "cdn": True, "label": "VLESS · CDN"}, {"id": "transport-awg"}, {"id": "transport-shadowsocks"}]},
+        {"id": "direct-fallback", "name": "Direct + резерв", "description": "Основной и резервный транспорт", "strategy": "fallback", "components": [{"id": "transport-reality"}, {"id": "transport-awg"}]},
+        {"id": "cdn-first", "name": "CDN-first", "description": "VLESS через CDN с резервом", "strategy": "fallback", "components": [{"id": "transport-reality", "cdn": True}, {"id": "transport-awg"}]},
+        {"id": "low-latency", "name": "Минимальная задержка", "description": "AWG с резервным Shadowsocks", "strategy": "url-test", "components": [{"id": "transport-awg"}, {"id": "transport-shadowsocks"}]},
+        {"id": "all", "name": "Все транспортные каналы", "description": "Все доступные компоненты", "strategy": "select", "components": [{"id": "transport-reality"}, {"id": "transport-awg"}, {"id": "transport-wg"}, {"id": "transport-shadowsocks"}]},
+    ]
+
+
+def validate_profile_presets(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    used_ids: set[str] = set()
+    for index, value in enumerate(values[:5]):
+        preset_id = str(value.get("id") or f"preset-{index + 1}")
+        if not re.fullmatch(r"[a-z0-9-]{1,32}", preset_id) or preset_id in used_ids:
+            raise HTTPException(status_code=422, detail="Preset id is invalid or duplicated")
+        used_ids.add(preset_id)
+        strategy = str(value.get("strategy", "fallback"))
+        if strategy not in {"fallback", "url-test", "select"}:
+            raise HTTPException(status_code=422, detail=f"Unsupported strategy for preset {preset_id}")
+        components: list[dict[str, Any]] = []
+        used_singletons: set[str] = set()
+        for component in value.get("components", []):
+            component_id = str(component.get("id", ""))
+            if component_id not in TRANSPORTS:
+                raise HTTPException(status_code=422, detail=f"Unknown component in preset {preset_id}")
+            if component_id != "transport-reality" and component_id in used_singletons:
+                continue
+            used_singletons.add(component_id)
+            components.append({"id": component_id, "cdn": bool(component.get("cdn", False)), "label": str(component.get("label", ""))[:80]})
+        if not components:
+            raise HTTPException(status_code=422, detail=f"Preset {preset_id} has no connections")
+        result.append({"id": preset_id, "name": str(value.get("name") or f"Preset {index + 1}")[:80], "description": str(value.get("description", ""))[:160], "strategy": strategy, "components": components})
+    return result
+
+
+def profile_presets() -> list[dict[str, Any]]:
+    stored = load_json(PRESET_SETTINGS_FILE, None)
+    return validate_profile_presets(stored) if isinstance(stored, list) and stored else default_profile_presets()
 
 
 def dns_provider_options() -> list[dict[str, str]]:
@@ -448,6 +495,8 @@ def ensure_policy_settings() -> None:
         atomic_json(DNS_SETTINGS_FILE, dns_defaults())
     if not ROUTING_SETTINGS_FILE.exists():
         atomic_json(ROUTING_SETTINGS_FILE, routing_defaults())
+    if not PRESET_SETTINGS_FILE.exists():
+        atomic_json(PRESET_SETTINGS_FILE, default_profile_presets())
 
 
 def validate_dns(values: dict[str, Any]) -> dict[str, Any]:
@@ -498,7 +547,14 @@ def get_action() -> dict[str, Any]:
 
 @app.get("/api/mihomo/routing/schema", dependencies=[Depends(auth_required)])
 def get_routing_schema() -> dict[str, Any]:
-    return {"schema": routing_schema(), "values": routing_settings()}
+    return {"schema": routing_schema(), "values": routing_settings(), "presets": profile_presets()}
+
+
+@app.patch("/api/mihomo/routing/presets", dependencies=[Depends(auth_required)])
+def patch_profile_presets(patch: PresetSettingsPatch) -> dict[str, Any]:
+    next_presets = validate_profile_presets(patch.presets)
+    atomic_json(PRESET_SETTINGS_FILE, next_presets)
+    return {"presets": next_presets}
 
 
 @app.patch("/api/mihomo/routing/settings", dependencies=[Depends(auth_required)])
@@ -1407,7 +1463,12 @@ def profile_stats(profile_id: str) -> dict[str, Any]:
             connections[connection_id] = shadowsocks_profile_stats(profile_id, int(credential.get("port", 0)))
         elif module_id == "transport-reality":
             connections[connection_id] = reality_profile_stats(profile_id, connection_id)
-    return {"id": profile_id, "connections": connections, "channels": connections}
+    values = list(connections.values())
+    rx_bytes = sum(int(value.get("rx_bytes", 0) or 0) for value in values)
+    tx_bytes = sum(int(value.get("tx_bytes", 0) or 0) for value in values)
+    active = sum(1 for value in values if value.get("active") or value.get("endpoint") or int(value.get("active_connections", 0) or 0) > 0)
+    handshake_ages = [int(value["handshake_age_s"]) for value in values if value.get("handshake_age_s") is not None]
+    return {"id": profile_id, "connections": connections, "channels": connections, "summary": {"configured": len(values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None}}
 
 
 def provision(profile_id: str, module_id: str, connection_id: str = "default", settings: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -1,6 +1,7 @@
 "use client";
 
 import { formatModuleVersion } from "../../lib/format-version";
+import { bytes, duration } from "../../lib/control-plane-ui";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -63,6 +64,7 @@ type Profile = {
   name: string;
   channels: string[];
   connections: ProfileConnection[];
+  routing?: Record<string, string | number | boolean>;
   created_at: string;
   updated_at: string;
 };
@@ -77,9 +79,11 @@ type ProfileConnection = {
 type PolicySettings = {
   schema: SettingField[];
   values: Record<string, string | number | boolean>;
+  presets?: ProfilePreset[];
 };
 
-type ProfilePreset = { id: string; name: string; description: string; components: Array<{ id: string; cdn?: boolean; label?: string }> };
+type ProfilePreset = { id: string; name: string; description: string; strategy: "fallback" | "url-test" | "select"; components: Array<{ id: string; cdn?: boolean; label?: string }> };
+type ProfileStats = { summary: { configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null }; connections: Record<string, { active?: boolean; endpoint?: string | null; active_connections?: number; rx_bytes?: number; tx_bytes?: number; handshake_age_s?: number | null }> };
 
 const channelShort: Record<string, string> = {
   "transport-awg": "AW",
@@ -120,6 +124,11 @@ export function MihomoPage({
   const [profileDialog, setProfileDialog] = useState<Profile | "new" | null>(null);
   const [profileName, setProfileName] = useState("");
   const [profileConnections, setProfileConnections] = useState<ProfileConnection[]>([]);
+  const [profileRouting, setProfileRouting] = useState<Record<string, string | number | boolean>>({});
+  const [profileStats, setProfileStats] = useState<Record<string, ProfileStats>>({});
+  const [createdProfile, setCreatedProfile] = useState<Profile | null>(null);
+  const [presetDialog, setPresetDialog] = useState(false);
+  const [presetDraft, setPresetDraft] = useState<ProfilePreset[]>([]);
 
   const request = useCallback(async (path: string, init?: RequestInit) => {
     if (!token) throw new Error("Сессия панели завершена. Войдите заново.");
@@ -162,6 +171,12 @@ export function MihomoPage({
       setProfiles((nextProfiles as { items: Profile[] }).items || []);
       setDnsPolicy(nextDns as PolicySettings);
       setRoutingPolicy(nextRouting as PolicySettings);
+      const profileItems = (nextProfiles as { items: Profile[] }).items || [];
+      const statsEntries = await Promise.all(profileItems.map(async (profile) => {
+        try { return [profile.id, await request(`/mihomo/profiles/${profile.id}/stats`)] as const; }
+        catch { return [profile.id, null] as const; }
+      }));
+      setProfileStats(Object.fromEntries(statsEntries.filter((entry) => entry[1])) as Record<string, ProfileStats>);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось загрузить Mihomo Manager");
     }
@@ -349,12 +364,14 @@ export function MihomoPage({
     setProfileDialog("new");
     setProfileName("");
     setProfileConnections([]);
+    setProfileRouting({});
   }
 
   function editProfile(profile: Profile) {
     setProfileDialog(profile);
     setProfileName(profile.name);
     setProfileConnections((profile.connections || []).map((connection) => ({ ...connection, settings: { ...connection.settings } })));
+    setProfileRouting({ ...(profile.routing || {}) });
   }
 
   function addProfileConnection(module: Module) {
@@ -389,6 +406,7 @@ export function MihomoPage({
       connections.push({ id: `connection-${crypto.randomUUID()}`, component: componentId, name: definition.label || `${componentModule.name}${definition.cdn ? " · CDN" : " · Direct"}`, settings });
     }
     setProfileConnections(connections);
+    setProfileRouting((current) => ({ ...current, strategy: preset.strategy }));
     if (!profileName.trim()) setProfileName(preset.name);
   }
 
@@ -408,14 +426,15 @@ export function MihomoPage({
     setError("");
     try {
       if (profileDialog === "new") {
-        await request("/mihomo/profiles", {
+        const created = await request("/mihomo/profiles", {
           method: "POST",
-          body: JSON.stringify({ name: profileName, connections: profileConnections }),
-        });
+          body: JSON.stringify({ name: profileName, connections: profileConnections, routing: profileRouting }),
+        }) as Profile;
+        setCreatedProfile(created);
       } else if (profileDialog) {
         await request(`/mihomo/profiles/${profileDialog.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ name: profileName, connections: profileConnections }),
+          body: JSON.stringify({ name: profileName, connections: profileConnections, routing: profileRouting }),
         });
       }
       setProfileDialog(null);
@@ -472,18 +491,41 @@ export function MihomoPage({
     }
   }
 
+  async function downloadConfig(profile: Profile) {
+    setBusy(`download:${profile.id}`);
+    setError("");
+    try {
+      const config = (await request(`/mihomo/profiles/${profile.id}/config`)) as string;
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(new Blob([config], { type: "application/yaml;charset=utf-8" }));
+      link.download = `${profile.name.trim().replace(/[^a-zA-Z0-9а-яА-Я._-]+/g, "-") || "mihomo"}.yaml`;
+      document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(link.href);
+      setNotice(`Профиль «${profile.name}» скачан.`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось скачать профиль"); }
+    finally { setBusy(""); }
+  }
+
+  function openPresetSettings() {
+    setPresetDraft((routingPolicy?.presets || []).map((preset) => ({ ...preset, components: preset.components.map((item) => ({ ...item })) })));
+    setPresetDialog(true);
+  }
+
+  async function savePresetSettings(event: FormEvent) {
+    event.preventDefault(); setBusy("presets"); setError("");
+    try {
+      const result = await request("/mihomo/routing/presets", { method: "PATCH", body: JSON.stringify({ presets: presetDraft }) }) as { presets: ProfilePreset[] };
+      setRoutingPolicy((current) => current ? { ...current, presets: result.presets } : current);
+      setPresetDialog(false); setNotice("Настройки быстрых профилей сохранены.");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось сохранить пресеты"); }
+    finally { setBusy(""); }
+  }
+
   const transportModules = useMemo(
     () => modules.filter((item) => item.category === "transport"),
     [modules],
   );
   const installedChannels = transportModules.filter((item) => item.installed);
-  const profilePresets: ProfilePreset[] = [
-    { id: "reliable", name: "Надёжный", description: "Direct VLESS, CDN VLESS, AWG и SS", components: [{ id: "transport-reality", label: "VLESS · Direct" }, { id: "transport-reality", cdn: true, label: "VLESS · CDN" }, { id: "transport-awg" }, { id: "transport-shadowsocks" }] },
-    { id: "direct-fallback", name: "Direct + резерв", description: "Основной и резервный транспорт из настроек маршрутизации", components: [{ id: "$primary", label: "Основной" }, { id: "$fallback", label: "Резерв" }] },
-    { id: "cdn-first", name: "CDN-first", description: "VLESS через CDN с резервным транспортом", components: [{ id: "transport-reality", cdn: true, label: "VLESS · CDN" }, { id: "$fallback", label: "Резерв" }] },
-    { id: "low-latency", name: "Минимальная задержка", description: "AWG с резервным Shadowsocks", components: [{ id: "transport-awg" }, { id: "transport-shadowsocks" }] },
-    { id: "all", name: "Все установленные", description: "По одному соединению каждого установленного компонента", components: installedChannels.map((item) => ({ id: item.id })) },
-  ];
+  const profilePresets = routingPolicy?.presets || [];
   const policiesReady = installedChannels.length > 0 && Boolean(dnsPolicy && routingPolicy);
 
   return (
@@ -647,10 +689,12 @@ export function MihomoPage({
                     ? profile.connections.map((connection) => <span key={connection.id}>{connection.name || channelShort[connection.component] || connection.component}</span>)
                     : <em>Нет подключений</em>}
                 </div>
+                {(() => { const stats = profileStats[profile.id]?.summary; return <div className="mihomoProfileStats"><span className={stats?.active ? "is-online" : ""}><i />{stats ? `${stats.active}/${stats.configured} активно` : "статистика…"}</span><small>↓ {bytes(stats?.rx_bytes || 0)} · ↑ {bytes(stats?.tx_bytes || 0)}</small><small>{stats?.last_handshake_age_s != null ? `handshake: ${duration(stats.last_handshake_age_s)}` : "ожидает подключений"}</small></div>; })()}
                 <small className="mihomoProfileUpdated">{new Date(profile.updated_at || profile.created_at).toLocaleString("ru-RU")}</small>
                 <div className="mihomoRowActions">
                   <button onClick={() => editProfile(profile)}>Настроить</button>
-                  <button onClick={() => void copyConfig(profile)} disabled={busy === `config:${profile.id}`}>config.yaml</button>
+                  <button onClick={() => void downloadConfig(profile)} disabled={busy === `download:${profile.id}`}>Скачать YAML</button>
+                  <button onClick={() => void copyConfig(profile)} disabled={busy === `config:${profile.id}`}>Копировать</button>
                   <button className="dangerButton" onClick={() => void removeProfile(profile)} disabled={busy === `profile:${profile.id}`}>Удалить</button>
                 </div>
               </div>
@@ -684,14 +728,14 @@ export function MihomoPage({
       )}
 
       {view === "routing" && (
-        <PolicyPanel
+        <><PolicyPanel
           code="RT"
           title="Маршрутизация Mihomo"
           description="Создаётся автоматически вместе с первым каналом. Здесь задаётся базовая стратегия выбора внутренних каналов для всех профилей."
           ready={policiesReady}
           values={routingPolicy?.values}
           onSettings={() => void openPolicySettings("routing")}
-        />
+        /><article className="mihomoPresetRoutingPanel"><header><div><p className="eyebrow">PROFILE PRESETS</p><h2>Быстрые профили</h2><p>У каждого пресета собственный набор соединений и стратегия переключения.</p></div><button className="primaryButton" type="button" onClick={openPresetSettings}>Настроить пресеты</button></header><div>{profilePresets.map((preset) => <div key={preset.id}><b>{preset.name}</b><small>{preset.strategy}</small><span>{preset.components.map((item) => `${channelShort[item.id] || item.id}${item.cdn ? " CDN" : ""}`).join(" · ")}</span></div>)}</div></article></>
       )}
 
       {editing && createPortal(
@@ -795,6 +839,8 @@ export function MihomoPage({
           </form>
         </div>
       )}
+      {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile"><header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль создан</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header><p>Скачайте готовый YAML и импортируйте его в Mihomo-клиент. Файл также всегда доступен в списке профилей.</p><div><b>{createdProfile.name}</b><span>{createdProfile.connections.length} соединений</span></div><footer><button className="ghostButton" onClick={() => setCreatedProfile(null)}>Закрыть</button><button className="primaryButton" onClick={() => void downloadConfig(createdProfile)}>Скачать config.yaml</button></footer></div></div>}
+      {presetDialog && <div className="mihomoDialogBackdrop"><form className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}><header><div><p className="eyebrow">PRESET ROUTING</p><h2>Настройки быстрых профилей</h2></div><button type="button" className="iconButton" onClick={() => setPresetDialog(false)}>x</button></header><p>Для каждого пресета отдельно выберите стратегию и соединения. VLESS Direct и VLESS CDN независимы.</p><div className="mihomoPresetEditor">{presetDraft.map((preset, index) => <article key={preset.id}><label><span>Название</span><input value={preset.name} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></label><label><span>Стратегия</span><select value={preset.strategy} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, strategy: event.target.value as ProfilePreset["strategy"] } : item))}><option value="fallback">Fallback</option><option value="url-test">Автовыбор по задержке</option><option value="select">Ручной выбор</option></select></label><div>{[{ id: "transport-reality", label: "VLESS Direct" }, { id: "transport-reality", label: "VLESS CDN", cdn: true }, { id: "transport-awg", label: "AWG" }, { id: "transport-wg", label: "WG" }, { id: "transport-shadowsocks", label: "SS" }].map((option) => { const selected = preset.components.some((item) => item.id === option.id && Boolean(item.cdn) === Boolean(option.cdn)); return <label key={`${option.id}-${option.cdn ? "cdn" : "direct"}`}><input type="checkbox" checked={selected} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i !== index ? item : { ...item, components: event.target.checked ? [...item.components, option] : item.components.filter((component) => !(component.id === option.id && Boolean(component.cdn) === Boolean(option.cdn))) }))} /><span>{option.label}</span></label>; })}</div></article>)}</div><footer><button type="button" className="ghostButton" onClick={() => setPresetDialog(false)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "presets" || presetDraft.some((item) => !item.components.length)}>Сохранить пресеты</button></footer></form></div>}
     </section>
   );
 }

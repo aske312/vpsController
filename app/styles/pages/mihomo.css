@@ -245,7 +245,7 @@
 
 .mihomoProfiles { display: grid; margin: 0; }
 
-.mihomoProfiles > div:not(.mihomoEmpty) { min-width: 0; min-height: 72px; display: grid; grid-template-columns: minmax(210px, 1fr) minmax(180px, .85fr) 170px auto; align-items: center; gap: 12px; padding: 11px 16px; border-top: 1px solid rgba(91, 113, 138, .12); }
+.mihomoProfiles > div:not(.mihomoEmpty) { min-width: 0; min-height: 82px; display: grid; grid-template-columns: minmax(180px, .9fr) minmax(160px, .8fr) minmax(155px,.7fr) 120px auto; align-items: center; gap: 12px; padding: 11px 16px; border-top: 1px solid rgba(91, 113, 138, .12); }
 
 .mihomoProfiles > div:first-child { border-top: 0; }
 
@@ -268,6 +268,12 @@
 .mihomoProfileChannels em { color: #8094a4; font-size: 10px; }
 
 .mihomoProfileUpdated { color: #7c92a2; font: 9px var(--font-mono); }
+.mihomoProfileStats { display:grid; gap:3px; }
+.mihomoProfileStats span { display:flex; align-items:center; gap:6px; color:#91a4b2; font-size:10px; }
+.mihomoProfileStats span i { width:6px; height:6px; border-radius:50%; background:#677985; }
+.mihomoProfileStats span.is-online { color:#72dab7; }
+.mihomoProfileStats span.is-online i { background:#57d3a7; box-shadow:0 0 8px rgba(87,211,167,.5); }
+.mihomoProfileStats small { color:#748a99; font:9px var(--font-mono); }
 
 .mihomoRowActions { display: flex; justify-content: flex-end; gap: 7px; }
 
@@ -408,6 +414,23 @@
 .mihomoPresetPicker > div > button:disabled { opacity:.45; cursor:not-allowed; }
 .mihomoPresetPicker b,.mihomoPresetPicker small { overflow:hidden; text-overflow:ellipsis; }
 .mihomoPresetPicker small { color:var(--muted); font-size:9px; line-height:1.35; }
+.mihomoPresetRoutingPanel { overflow:hidden; border:1px solid rgba(91,113,138,.22); border-radius:18px; background:linear-gradient(145deg,rgba(10,20,30,.98),rgba(6,14,22,.96)); }
+.mihomoPresetRoutingPanel > header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:18px; border-bottom:1px solid var(--line); }
+.mihomoPresetRoutingPanel h2 { margin:3px 0; color:var(--text); }
+.mihomoPresetRoutingPanel header p:last-child { margin:0; color:var(--muted); font-size:10px; }
+.mihomoPresetRoutingPanel > div { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); }
+.mihomoPresetRoutingPanel > div > div { display:grid; gap:5px; padding:14px; border-right:1px solid var(--line); }
+.mihomoPresetRoutingPanel b { color:var(--text); font-size:11px; }
+.mihomoPresetRoutingPanel small { color:#b6a8ff; font:8px var(--font-mono); text-transform:uppercase; }
+.mihomoPresetRoutingPanel span { color:var(--muted); font-size:9px; line-height:1.4; }
+.mihomoPresetDialog { width:min(920px,100%); }
+.mihomoPresetEditor { display:grid; gap:10px; }
+.mihomoPresetEditor > article { display:grid; grid-template-columns:minmax(150px,.8fr) minmax(150px,.7fr) minmax(300px,1.5fr); gap:10px; padding:12px; border:1px solid var(--line); border-radius:12px; background:rgba(8,17,26,.7); }
+.mihomoPresetEditor article > label { display:grid; gap:5px; color:var(--muted); font-size:9px; }
+.mihomoPresetEditor article > div { display:flex; flex-wrap:wrap; align-items:center; gap:7px; }
+.mihomoPresetEditor article > div label { display:flex; align-items:center; gap:5px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; color:var(--muted); font-size:9px; }
+.mihomoPresetEditor input[type=checkbox] { width:14px; min-height:14px; }
+.mihomoCreatedProfile > div { display:flex; justify-content:space-between; padding:14px; border:1px solid var(--line); border-radius:12px; color:var(--text); }
 .mihomoConnectionBuilder > header div { display: grid; gap: 4px; }
 .mihomoConnectionBuilder > header small { color: var(--muted); font-weight: 400; }
 .mihomoConnectionAdd { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -424,7 +447,8 @@
 .mihomoConnectionFields .is-toggle { grid-template-columns: 1fr auto; align-items: center; }
 .mihomoConnectionEmpty { margin: 0; padding: 18px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); text-align: center; }
 @media (max-width: 760px) { .mihomoPresetPicker > div { grid-template-columns:1fr 1fr; } }
-@media (max-width: 640px) { .mihomoConnectionFields,.mihomoPresetPicker > div { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .mihomoPresetRoutingPanel > div { grid-template-columns:1fr 1fr; } .mihomoPresetEditor > article { grid-template-columns:1fr; } }
+@media (max-width: 640px) { .mihomoConnectionFields,.mihomoPresetPicker > div,.mihomoPresetRoutingPanel > div { grid-template-columns: 1fr; } }
 
 .gateOperationCard.mihomo { border-color:rgba(162,123,255,.30); }
 
