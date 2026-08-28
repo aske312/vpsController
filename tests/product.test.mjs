@@ -1106,12 +1106,12 @@ test("successful protocol installs are immediately reachable and health-checked"
   }
   assert.match(ss, /vps-control-shadowsocks-firewall add %i/);
   assert.match(mihomoSs, /vps-control-mihomo-ss-firewall add %i/);
-  for (const installer of [vless, mihomoReality]) {
-    assert.match(installer, /ExecStartPre=.*iptables -C INPUT -p tcp --dport/);
-  }
+  assert.match(vless, /ExecStartPre=.*iptables -C INPUT -p tcp --dport/);
+  assert.match(mihomoReality, /vps-control-mihomo-vless-firewall add/);
+  assert.match(mihomoReality, /iptables -C INPUT -p tcp --dport/);
 });
 
-test("Mihomo VLESS follows direct VLESS transport settings and exports effective profiles", async () => {
+test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN connections", async () => {
   const [manifestText, installer, manager, view] = await Promise.all([
     read("protocol-images/mihomo/modules/transport-reality/manifest.json"),
     read("protocol-images/mihomo/modules/transport-reality/install.sh"),
@@ -1120,20 +1120,27 @@ test("Mihomo VLESS follows direct VLESS transport settings and exports effective
   ]);
   const manifest = JSON.parse(manifestText);
   const settingKeys = manifest.settings.map((item) => item.key);
+  const connectionKeys = manifest.connection_settings.map((item) => item.key);
   assert.equal(manifest.name, "VLESS");
   assert.equal(manifest.version, "1.1.0");
-  for (const key of ["transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency", "dns", "loglevel"]) {
-    assert.ok(settingKeys.includes(key), `missing Mihomo VLESS setting ${key}`);
+  for (const key of ["port_start", "cdn_port_start", "dns", "loglevel"]) {
+    assert.ok(settingKeys.includes(key), `missing Mihomo VLESS core setting ${key}`);
   }
-  assert.match(installer, /transport == "xhttp"/);
-  assert.match(installer, /transport == "grpc"/);
-  assert.match(installer, /rawSettings/);
+  for (const key of ["port", "target", "transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency", "cdn_enabled", "cdn_domain"]) {
+    assert.ok(connectionKeys.includes(key), `missing Mihomo VLESS connection setting ${key}`);
+  }
+  assert.match(installer, /startsWith\('mihomo-vless-'\)|startswith\('mihomo-vless-'\)/);
   assert.match(installer, /config\.json\.candidate/);
-  assert.match(installer, /run -test -config "\$\{CANDIDATE\}"/);
-  assert.match(manager, /def reality_connection_settings/);
+  assert.match(installer, /run -test -config "\$\{candidate\}"/);
+  assert.match(manager, /class ProfileConnectionInput/);
+  assert.match(manager, /def validate_connection_inputs/);
+  assert.match(manager, /def render_vless_cdn/);
+  assert.match(manager, /component != "transport-reality" and component in used_singletons/);
   assert.match(manager, /network: \{'tcp' if transport == 'raw' else transport\}/);
   assert.match(manager, /grpc-service-name/);
   assert.match(manager, /call_module_script\(module_id, "install"\)[\s\S]*rollback failed/);
+  assert.match(view, /connections: profileConnections/);
+  assert.match(view, /cdn_enabled/);
   assert.match(view, /\["xhttp_mode", "xpadding", "xmux_concurrency"\]/);
 });
 
