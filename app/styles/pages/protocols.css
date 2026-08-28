@@ -862,6 +862,65 @@
 /* Shared protocol command center. */
 .protocolCommandCenter { gap:9px; }
 .vlessCommandCenter { --protocol-accent:#9b82ff; --protocol-soft:rgba(155,130,255,.11); --protocol-line:rgba(155,130,255,.28); }
+.vlessWorkspaceNew { display:grid; gap:12px; --vless-accent:#9b82ff; --vless-line:rgba(155,130,255,.24); }
+.vlessOverviewHead { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:22px; padding:22px 24px; border:1px solid var(--vless-line); border-radius:18px 8px 18px 8px; background:radial-gradient(circle at 72% 0,rgba(120,92,225,.13),transparent 33%),linear-gradient(120deg,rgba(9,23,34,.98),rgba(5,14,23,.98)); }
+.vlessOverviewIdentity { display:flex; align-items:center; gap:15px; min-width:0; }
+.vlessOverviewIdentity > span { flex:0 0 58px; height:58px; display:grid; place-items:center; border:1px solid var(--vless-line); border-radius:14px 5px 14px 5px; background:rgba(99,73,192,.13); color:#c8baff; font:850 30px var(--font-mono); }
+.vlessOverviewIdentity h1 { margin:2px 0 4px; font-size:36px; line-height:1; letter-spacing:-.04em; }
+.vlessOverviewIdentity p { margin:0; color:#8195a3; font-size:12px; }
+.vlessOverviewState { display:grid; gap:6px; min-width:150px; }
+.vlessOverviewState > span { display:flex; align-items:center; gap:7px; color:#dd7d7d; font:750 11px var(--font-mono); }
+.vlessOverviewState > span.online { color:#6ed7b8; }
+.vlessOverviewState i { width:7px; height:7px; border-radius:50%; background:currentColor; box-shadow:0 0 9px currentColor; }
+.vlessOverviewState small { color:#6f8492; font:650 10px var(--font-mono); }
+.vlessOverviewActions { display:flex; gap:7px; }
+.vlessOverviewActions button { min-height:34px; padding:0 11px; border:1px solid rgba(126,107,208,.22); border-radius:8px; background:rgba(87,66,169,.10); color:#b5a5ef; font-weight:750; }
+.vlessOverviewActions button.accent { color:#70d8ba; border-color:rgba(69,190,155,.24); }
+.vlessOverviewActions button.danger { color:#e58282; border-color:rgba(211,90,100,.22); }
+.vlessOverviewMetrics { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); overflow:hidden; border:1px solid rgba(112,129,148,.14); border-radius:12px; background:rgba(6,15,23,.83); }
+.vlessOverviewMetrics > div { min-width:0; min-height:82px; display:flex; flex-direction:column; justify-content:center; padding:12px 15px; border-left:1px solid rgba(112,129,148,.10); }
+.vlessOverviewMetrics > div:first-child { border-left:0; }
+.vlessOverviewMetrics small { color:#6c808e; font:750 9px var(--font-mono); letter-spacing:.08em; }
+.vlessOverviewMetrics strong { margin:5px 0 2px; color:#e5edf1; font:780 19px var(--font-mono); }
+.vlessOverviewMetrics strong em { margin-left:3px; color:#718692; font:600 10px var(--font-mono); font-style:normal; }
+.vlessOverviewMetrics span { overflow:hidden; color:#758996; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.vlessContourSection { padding:16px; border:1px solid rgba(112,129,148,.14); border-radius:14px; background:rgba(7,17,26,.82); }
+.vlessContourSection > header { display:flex; align-items:end; justify-content:space-between; gap:20px; margin-bottom:12px; }
+.vlessContourSection h2 { margin:3px 0 0; font-size:20px; }
+.vlessContourSection > header > p { max-width:470px; margin:0; color:#8295a2; font-size:11px; line-height:1.5; text-align:right; }
+.vlessContourGrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
+.vlessContourCard { position:relative; min-width:0; padding:14px; border:1px solid rgba(109,128,147,.14); border-radius:11px; background:linear-gradient(145deg,rgba(9,22,32,.95),rgba(5,13,21,.88)); }
+.vlessContourCard.enabled { border-color:rgba(123,101,218,.27); }
+.vlessContourCard.disabled { opacity:.68; }
+.vlessContourTop { display:flex; align-items:center; justify-content:space-between; }
+.vlessContourTop span { color:#927ee2; font:800 10px var(--font-mono); }
+.vlessContourTop b { padding:4px 6px; border-radius:5px; background:rgba(65,172,139,.10); color:#68cfae; font:750 8px var(--font-mono); letter-spacing:.06em; }
+.vlessContourCard.disabled .vlessContourTop b { background:rgba(111,125,137,.08); color:#758793; }
+.vlessContourCard > p { margin:13px 0 2px; color:#8f7bdd; font:750 9px var(--font-mono); letter-spacing:.09em; }
+.vlessContourCard h3 { margin:0; color:#e1e9ed; font-size:18px; }
+.vlessContourCard > small { display:block; margin:4px 0 12px; color:#778b98; }
+.vlessContourCard dl { display:grid; gap:4px; margin:0; }
+.vlessContourCard dl > div { display:grid; grid-template-columns:82px minmax(0,1fr); gap:8px; padding:6px 7px; border-radius:6px; background:rgba(2,8,14,.36); }
+.vlessContourCard dt { color:#617684; font:700 9px var(--font-mono); }
+.vlessContourCard dd { margin:0; overflow:hidden; color:#adbdc6; font:650 9px var(--font-mono); text-align:right; text-overflow:ellipsis; white-space:nowrap; }
+.vlessContourHint { display:block; margin-top:10px; color:#7d909c; font-size:9px; }
+.vlessHealthRow { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
+.vlessHealthRow > article { overflow:hidden; border:1px solid rgba(110,128,147,.14); border-radius:12px; background:rgba(6,15,23,.82); }
+.vlessHealthRow > article > button { width:100%; min-height:68px; display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border:0; background:transparent; color:inherit; text-align:left; }
+.vlessHealthRow button span { display:grid; gap:3px; }
+.vlessHealthRow button small { color:#806bd1; font:750 9px var(--font-mono); }
+.vlessHealthRow button strong { color:#d8e3e8; font-size:14px; }
+.vlessHealthRow button b { color:#8a9da9; font:700 10px var(--font-mono); }
+.vlessHealthBody { display:grid; gap:3px; padding:10px 12px; border-top:1px solid rgba(110,128,147,.10); }
+.vlessHealthBody p { display:flex; gap:8px; margin:0; padding:6px; border-radius:6px; background:rgba(2,8,14,.30); }
+.vlessHealthBody p > i { flex:0 0 6px; width:6px; height:6px; margin-top:4px; border-radius:50%; background:#dc7b7b; }
+.vlessHealthBody p.ok > i { background:#65cdaa; }
+.vlessHealthBody p span { display:grid; gap:2px; }
+.vlessHealthBody p strong { color:#b9c7ce; font-size:10px; }
+.vlessHealthBody p small { color:#718591; font-size:9px; }
+.vlessCheckButton { justify-self:end; min-height:28px; padding:0 8px; border:1px solid var(--vless-line); border-radius:6px; background:rgba(83,61,171,.10); color:#a995ea; }
+@media (max-width:1100px) { .vlessOverviewHead { grid-template-columns:minmax(0,1fr) auto; } .vlessOverviewActions { grid-column:1/-1; } .vlessOverviewMetrics { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media (max-width:760px) { .vlessOverviewHead { grid-template-columns:1fr; } .vlessOverviewMetrics,.vlessContourGrid,.vlessHealthRow { grid-template-columns:1fr; } .vlessOverviewMetrics > div { border-left:0; border-top:1px solid rgba(112,129,148,.10); } .vlessContourSection > header { align-items:flex-start; flex-direction:column; } .vlessContourSection > header > p { text-align:left; } }
 .vlessCommandHero { position:relative; min-height:286px; display:grid; grid-template-columns:minmax(240px,.78fr) minmax(380px,1.22fr) 165px; overflow:hidden; border:1px solid var(--protocol-line); border-radius:18px 8px 18px 8px; background:radial-gradient(circle at 83% 30%,var(--protocol-soft),transparent 34%),linear-gradient(118deg,rgba(11,25,35,.985),rgba(5,15,25,.985) 66%); box-shadow:0 20px 55px rgba(0,0,0,.22),inset 0 1px rgba(255,255,255,.025); isolation:isolate; }
 .vlessCommandHero::before { content:""; position:absolute; inset:0; z-index:-1; opacity:.22; background-image:linear-gradient(rgba(150,126,255,.10) 1px,transparent 1px),linear-gradient(90deg,rgba(150,126,255,.10) 1px,transparent 1px); background-size:28px 28px; mask-image:linear-gradient(90deg,#000,transparent 72%); }
 .vlessCommandCopy { min-width:0; display:flex; flex-direction:column; justify-content:center; padding:22px 10px 22px 24px; }

@@ -173,6 +173,7 @@ function ProtocolCommandCenter({ props }: { props: ProtocolViewProps }) {
   const protocol = protocolTab;
   const profile = channelProfiles[protocol];
   const isVless = protocol === "vless-reality-xhttp";
+  if (isVless) return <VlessControlCenter props={props} />;
   const protocolCode = protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : "VLESS";
   const draft = protocolSettingsDraft[protocol] || {};
   const fields = activeProtocol.editable_settings || [];
@@ -284,6 +285,59 @@ function ProtocolSettingsPanel({
     </header>
     <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} vless={isVless} vlessScope={isVless ? "server" : "all"} onChange={onChange} onSave={onSave} />
   </article>;
+}
+
+function VlessControlCenter({ props }: { props: ProtocolViewProps }) {
+  const {
+    activeProtocol, activeProtocolRate, activeProtocolImage, protocolAvailability,
+    protocolDiagnosticsLabel, protocolResourceAvailable, protocolResourceTotal,
+    installedProtocols, setTab, onSelectProtocol, protocolSettingsDraft,
+    diagnosticsOpen, resourcesOpen, checkingResources, installingProtocol, busy,
+    restartProtocol, updateProtocol, removeProtocol, changeProtocolSetting,
+    saveProtocolSettings, toggleNetworkDiagnostics, toggleProtocolResources, checkProtocolResources,
+  } = props;
+  const protocol: Protocol = "vless-reality-xhttp";
+  const draft = protocolSettingsDraft[protocol] || {};
+  const fields = activeProtocol.editable_settings || [];
+  const setting = (key: string, fallback: string | number | boolean = "—") => draft[key] ?? fields.find((field) => field.key === key)?.value ?? fallback;
+  type Route = { enabled: boolean; security: string; transport: string; endpoint: string; server_name: string; path: string };
+  const routes = (activeProtocol as ProtocolStatus & { routes?: Partial<Record<"direct" | "tls" | "cdn", Route>> }).routes || {};
+  const tlsEnabled = Boolean(setting("tls_enabled", false));
+  const cdnEnabled = Boolean(setting("cdn_enabled", false));
+  const contours = [
+    { id: "01", kind: "REALITY", title: "VLESS", enabled: true, route: routes.direct, domain: String(setting("sni", activeProtocol.target?.replace(/:443$/, "") || "—")), note: "Прямой вход без домена сервера" },
+    { id: "02", kind: "TLS", title: "VLESS TLS", enabled: routes.tls?.enabled ?? tlsEnabled, route: routes.tls, domain: String(setting("tls_domain", "")), note: "Прямой домен, DNS only" },
+    { id: "03", kind: "CDN", title: "VLESS CDN", enabled: routes.cdn?.enabled ?? cdnEnabled, route: routes.cdn, domain: String(setting("cdn_domain", "")), note: "Проксируемый CDN-домен" },
+  ];
+  return <section className="protocolWorkspace vlessWorkspaceNew">
+    {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные защищённые протоколы">{installedProtocols.map((item) => <button type="button" key={item} className={item === protocol ? "active" : ""} onClick={() => onSelectProtocol ? onSelectProtocol(item) : setTab(item)}>{item === "wg" ? "WG" : item === "awg" ? "AWG" : item === "shadowsocks" ? "SS" : "VLESS"}</button>)}</nav>}
+    <header className="vlessOverviewHead">
+      <div className="vlessOverviewIdentity"><span>V</span><div><p className="eyebrow">XRAY ACCESS PLATFORM</p><h1>VLESS</h1><p>Три независимых способа подключения к одному защищённому узлу.</p></div></div>
+      <div className="vlessOverviewState"><span className={activeProtocol.service_active ? "online" : "offline"}><i />{activeProtocol.service_active ? "Xray работает" : "Xray остановлен"}</span><small>{formatModuleVersion(activeProtocolImage?.installed_version, "версия не определена")}</small></div>
+      <div className="vlessOverviewActions"><button onClick={() => void restartProtocol(protocol)} disabled={busy}>Перезапустить</button>{activeProtocolImage?.update_available && <button className="accent" onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy}>{installingProtocol ? "Обновляем…" : "Обновить"}</button>}{activeProtocolImage?.removable && <button className="danger" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить</button>}</div>
+    </header>
+    <section className="vlessOverviewMetrics" aria-label="Состояние VLESS">
+      <div><small>КОНТУРЫ</small><strong>{contours.filter((item) => item.enabled).length}<em>/3</em></strong><span>доступны клиентам</span></div>
+      <div><small>КЛИЕНТЫ</small><strong>{activeProtocol.online_peers}<em>/{activeProtocol.peers}</em></strong><span>сейчас активны</span></div>
+      <div><small>ПРИЁМ</small><strong>{bytes(activeProtocolRate.rx)}<em>/с</em></strong><span>{bytes(activeProtocol.history.received_bytes)} за период</span></div>
+      <div><small>ПЕРЕДАЧА</small><strong>{bytes(activeProtocolRate.tx)}<em>/с</em></strong><span>{bytes(activeProtocol.history.transmitted_bytes)} за период</span></div>
+      <div><small>ДОСТУПНОСТЬ</small><strong>{protocolAvailability != null ? `${protocolAvailability}%` : "—"}</strong><span>{protocolDiagnosticsLabel}</span></div>
+    </section>
+    <section className="vlessContourSection">
+      <header><div><p className="eyebrow">CONNECTION MAP</p><h2>Контуры подключения</h2></div><p>Домены настраиваются ниже. Транспорт каждого контура выбирается на странице «Подключения».</p></header>
+      <div className="vlessContourGrid">{contours.map((item) => <article key={item.id} className={`vlessContourCard ${item.enabled ? "enabled" : "disabled"}`}>
+        <div className="vlessContourTop"><span>{item.id}</span><b>{item.enabled ? "ГОТОВ" : "НЕ НАСТРОЕН"}</b></div>
+        <p>{item.kind}</p><h3>{item.title}</h3><small>{item.note}</small>
+        <dl><div><dt>АДРЕС</dt><dd>{item.route?.endpoint || item.domain || "—"}</dd></div><div><dt>ЗАЩИТА</dt><dd>{item.route?.security || item.kind}</dd></div><div><dt>ТРАНСПОРТ</dt><dd>{String(item.route?.transport || setting(item.kind === "REALITY" ? "transport" : item.kind === "TLS" ? "tls_transport" : "cdn_transport", "—")).toUpperCase()}</dd></div></dl>
+        {!item.enabled && <span className="vlessContourHint">Включается в настройках VLESS</span>}
+      </article>)}</div>
+    </section>
+    <ProtocolSettingsPanel protocol={protocol} fields={fields} draft={draft} busy={busy} onChange={(key, value) => changeProtocolSetting(protocol, key, value)} onSave={() => void saveProtocolSettings(protocol)} />
+    <section className="vlessHealthRow">
+      <article><button onClick={() => toggleNetworkDiagnostics(protocol)}><span><small>XRAY HEALTH</small><strong>Диагностика runtime</strong></span><b>{protocolDiagnosticsLabel}</b></button>{diagnosticsOpen[protocol] && <div className="vlessHealthBody">{(activeProtocol.diagnostics?.checks || []).map((check) => <p className={check.ok ? "ok" : "failed"} key={check.id}><i /> <span><strong>{check.name}</strong><small>{check.value}</small></span></p>)}</div>}</article>
+      <article><button onClick={() => toggleProtocolResources(protocol)}><span><small>EXTERNAL PATH</small><strong>Внешние ресурсы</strong></span><b>{protocolResourceAvailable}/{protocolResourceTotal}</b></button>{resourcesOpen[protocol] && <div className="vlessHealthBody"><button className="vlessCheckButton" onClick={() => void checkProtocolResources(protocol)} disabled={checkingResources === protocol}>Проверить</button>{(activeProtocol.resources?.items || []).map((item) => <p className={item.available ? "ok" : "failed"} key={item.name}><i /> <span><strong>{item.name}</strong><small>{item.available ? `${item.latency_ms} мс` : "Недоступен"}</small></span></p>)}</div>}</article>
+    </section>
+  </section>;
 }
 
 export function VlessConnectionTransportSettings({ fields, draft, busy, onChange, onSave }: {

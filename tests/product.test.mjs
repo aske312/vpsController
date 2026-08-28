@@ -926,6 +926,10 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(protocolView, /VlessConnectionTransportSettings/);
   assert.match(protocolView, /vlessScope="connections"/);
   assert.match(protocolView, /vlessScope=\{isVless \? "server" : "all"\}/);
+  assert.match(protocolView, /function VlessControlCenter/);
+  assert.match(protocolView, /Контуры подключения/);
+  assert.match(protocolCss, /\.vlessWorkspaceNew/);
+  assert.match(protocolCss, /\.vlessContourGrid/);
   const controlCenterCss = await read("app/styles/control-center.css");
   assert.match(controlCenterCss, /\.shell small[^}]*font-size:11px !important[^}]*line-height:1\.5 !important/s);
   assert.match(controlCenterCss, /label small[^}]*font-size:12px !important[^}]*line-height:1\.5 !important/s);
