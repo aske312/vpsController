@@ -2008,7 +2008,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
             if route_mode == "cdn":
                 direct_name = None
                 cdn_name = name
-            else:
+            elif route_mode == "both":
                 cdn_name = f"{name} · CDN"
                 used_names.add(cdn_name)
         rendered.append((connection, direct_name, cdn_name))
