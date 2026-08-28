@@ -894,6 +894,9 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.match(protocolView, /ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ/);
   assert.match(protocolView, /основной вариант — XHTTP/);
   assert.match(mihomoManager, /systemctl", "reset-failed", "vps-control-mihomo-reality\.service/);
+  assert.match(mihomoManager, /\/api\/mihomo\/subscriptions\/\{token\}/);
+  assert.match(mihomoManager, /Profile-Update-Interval/);
+  assert.match(mihomoManager, /secrets\.token_urlsafe\(32\)/);
   assert.match(install, /DynamicUser=yes/);
   assert.match(protocolView, /function ProtocolCommandCenter/);
   assert.match(protocolView, /ROUTE BLUEPRINT/);

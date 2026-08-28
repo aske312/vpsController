@@ -271,6 +271,8 @@ def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(devices, list) or not devices:
         devices = [{"id": "device-1", "name": "Основное устройство"}]
     result["devices"] = devices
+    subscriptions = result.get("subscriptions")
+    result["subscriptions"] = subscriptions if isinstance(subscriptions, dict) else {}
     default_device = str(devices[0].get("id", "device-1"))
     for connection in result["connections"]:
         connection.setdefault("device_id", default_device)
@@ -300,6 +302,10 @@ def profiles() -> list[dict[str, Any]]:
 
 def save_profiles(value: list[dict[str, Any]]) -> None:
     atomic_json(PROFILE_FILE, value)
+
+
+def profile_response(item: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in item.items() if key != "subscriptions"}
 
 
 def manifest(module_id: str) -> dict[str, Any]:
@@ -1642,7 +1648,7 @@ def create_profile_credentials(profile_id: str, channels: list[str]) -> dict[str
 
 @app.get("/api/mihomo/profiles", dependencies=[Depends(auth_required)])
 def list_profiles() -> dict[str, Any]:
-    return {"items": profiles()}
+    return {"items": [profile_response(item) for item in profiles()]}
 
 
 @app.post("/api/mihomo/profiles", dependencies=[Depends(auth_required)])
@@ -1666,6 +1672,7 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
         "name": payload.name.strip(),
         "connections": connections,
         "devices": devices,
+        "subscriptions": {device["id"]: secrets.token_urlsafe(32) for device in devices},
         "routing": routing,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1675,7 +1682,7 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     data.append(item)
     save_profiles(data)
     write_action(f"profile-create:{profile_id}", f"Профиль «{item['name']}» создан", state="done", progress=100)
-    return item
+    return profile_response(item)
 
 
 @app.patch("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(auth_required)])
@@ -1695,6 +1702,11 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         if len({device["id"] for device in devices}) != len(devices):
             raise HTTPException(status_code=422, detail="Duplicate profile device id")
         item["devices"] = devices
+        current_subscriptions = item.get("subscriptions", {})
+        item["subscriptions"] = {
+            device["id"]: current_subscriptions.get(device["id"]) or secrets.token_urlsafe(32)
+            for device in devices
+        }
     if payload.connections is not None:
         definitions = validate_connection_inputs(payload.connections)
         device_ids = {str(device.get("id")) for device in item.get("devices", [])}
@@ -1743,7 +1755,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     save_profiles(data)
     write_action(f"profile-update:{profile_id}", f"Профиль «{item['name']}» обновлён", state="done", progress=100)
-    return item
+    return profile_response(item)
 
 
 @app.delete("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(auth_required)])
@@ -1999,3 +2011,53 @@ def profile_config(profile_id: str, device_id: str | None = None) -> str:
         finally:
             Path(temp_path).unlink(missing_ok=True)
     return config
+
+
+@app.get(
+    "/api/mihomo/profiles/{profile_id}/subscription",
+    dependencies=[Depends(auth_required)],
+)
+@serialized_profile_mutation
+def profile_subscription(profile_id: str, device_id: str | None = None) -> dict[str, str]:
+    data = profiles()
+    item = next((entry for entry in data if entry.get("id") == profile_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    normalized = normalize_profile(item)
+    selected_device = device_id or str(normalized["devices"][0].get("id", "device-1"))
+    if selected_device not in {str(device.get("id")) for device in normalized["devices"]}:
+        raise HTTPException(status_code=404, detail="Profile device not found")
+    subscriptions = normalized["subscriptions"]
+    token = str(subscriptions.get(selected_device, ""))
+    if not token:
+        token = secrets.token_urlsafe(32)
+        subscriptions[selected_device] = token
+        item["subscriptions"] = subscriptions
+        save_profiles(data)
+    return {"path": f"/api/mihomo/subscriptions/{token}"}
+
+
+@app.get("/api/mihomo/subscriptions/{token}", response_class=PlainTextResponse)
+def public_profile_subscription(token: str) -> PlainTextResponse:
+    selected_profile: dict[str, Any] | None = None
+    selected_device = ""
+    for item in profiles():
+        for device_id, saved_token in item.get("subscriptions", {}).items():
+            if isinstance(saved_token, str) and hmac.compare_digest(saved_token, token):
+                selected_profile = item
+                selected_device = str(device_id)
+                break
+        if selected_profile:
+            break
+    if not selected_profile:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    config = render_profile(selected_profile, selected_device)
+    return PlainTextResponse(
+        config,
+        media_type="text/yaml; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": 'inline; filename="mihomo.yaml"',
+            "Profile-Update-Interval": "24",
+        },
+    )

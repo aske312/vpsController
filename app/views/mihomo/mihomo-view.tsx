@@ -524,6 +524,20 @@ export function MihomoPage({
     finally { setBusy(""); }
   }
 
+  async function copySubscription(profile: Profile, device?: ProfileDevice) {
+    setBusy(`subscription:${profile.id}:${device?.id || "default"}`);
+    setError("");
+    try {
+      const result = await request(`/mihomo/profiles/${profile.id}/subscription${device ? `?device_id=${encodeURIComponent(device.id)}` : ""}`) as { path: string };
+      await navigator.clipboard.writeText(new URL(result.path, window.location.origin).toString());
+      setNotice(`Ссылка подписки для «${device?.name || profile.name}» скопирована. Добавьте её в клиент один раз — дальнейшие изменения придут при обновлении подписки.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось получить ссылку подписки");
+    } finally {
+      setBusy("");
+    }
+  }
+
   function openPresetSettings() {
     setPresetDraft((routingPolicy?.presets || []).map((preset) => ({ ...preset, components: preset.components.map((item) => ({ ...item })) })));
     setPresetDialog(true);
@@ -710,7 +724,7 @@ export function MihomoPage({
                 </header>
                 <div className="mihomoProfileDevices">
                   {devices.map((device) => { const connections = profile.connections.filter((connection) => (connection.device_id || devices[0].id) === device.id); return <section key={device.id} className="mihomoProfileDevice">
-                    <header><div><b>{device.name}</b><small>{connections.length} подключений</small></div><nav><button onClick={() => void copyConfig(profile, device)} disabled={busy === `config:${profile.id}`}>Копировать YAML</button><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>Скачать YAML</button></nav></header>
+                    <header><div><b>{device.name}</b><small>{connections.length} подключений · подписка обновляется без повторного импорта</small></div><nav><button className="primaryButton" onClick={() => void copySubscription(profile, device)} disabled={busy === `subscription:${profile.id}:${device.id}`}>Ссылка подписки</button><button onClick={() => void copyConfig(profile, device)} disabled={busy === `config:${profile.id}`}>Копировать YAML</button><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>Скачать YAML</button></nav></header>
                     <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0)); return <div key={connection.id}><span className={online ? "online" : ""}>{channelShort[connection.component] || "CH"}<i /></span><p><b>{connection.name}</b><small>Получено {bytes(item?.rx_bytes || 0)} · Отдано {bytes(item?.tx_bytes || 0)}</small>{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Подключения не настроены.</p>}</div>
                   </section>; })}
                 </div>
