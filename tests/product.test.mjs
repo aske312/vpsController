@@ -28,7 +28,6 @@ const STYLE_FILES = [
   "app/styles/pages/connections.css",
   "app/styles/pages/protocols.css",
   "app/styles/pages/mihomo.css",
-  "app/styles/pages/users.css",
   "app/styles/polish.css",
   "app/styles/control-center.css",
 ];
@@ -1193,4 +1192,15 @@ test("command UI exposes only final public outcomes while technical errors stay 
   assert.match(mihomo, /if state == "failed":[\s\S]*message = PUBLIC_COMMAND_ERROR/);
   assert.match(dock, /Команда выполняется\. Итог появится после завершения\./);
   assert.doesNotMatch(dock, /action\?\.message \|\| action\?\.unit/);
+});
+
+test("legacy users beta surface and orchestration are removed", async () => {
+  const [ui, api, navigation, globals] = await Promise.all([
+    read("app/page.tsx"), read("api/main.py"), read("app/components/gate-navigation.tsx"), read("app/globals.css"),
+  ]);
+  for (const source of [ui, api, navigation, globals]) {
+    assert.doesNotMatch(source, /access-beta|access_beta|AccessProfilesBeta|pages\/users\.css/);
+  }
+  await assert.rejects(readFileText("api/access_beta.py"), { code: "ENOENT" });
+  await assert.rejects(readFileText("app/views/users/users-view.tsx"), { code: "ENOENT" });
 });

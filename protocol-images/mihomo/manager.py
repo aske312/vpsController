@@ -279,7 +279,7 @@ def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def sync_legacy_profile_fields(item: dict[str, Any]) -> None:
-    """Keep older panel/access-beta consumers operational during migration."""
+    """Keep older stored profile formats operational during migration."""
     channels: list[str] = []
     credentials: dict[str, Any] = {}
     for connection in item.get("connections", []):

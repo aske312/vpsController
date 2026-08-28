@@ -8,7 +8,6 @@ import { MihomoPage } from "./views/mihomo/mihomo-view";
 import { OverviewDashboard } from "./views/overview/overview-view";
 import { AppWorkspace } from "./components/layout/app-workspace";
 import { ServicesDashboard } from "./views/services/services-view";
-import { AccessProfilesBeta } from "./views/users/users-view";
 import { DnsView } from "./views/dns/dns-view";
 import { SecurityView } from "./views/security/security-view";
 import { ApplicationView } from "./views/application/application-view";
@@ -1249,7 +1248,7 @@ export default function Home() {
   const visualArt =
     tab === "overview" ? "overview"
     : tab === "mihomo" ? "mihomo"
-    : tab === "clients" || tab === "access-beta" ? "direct"
+    : tab === "clients" ? "direct"
     : tab === "dns" ? "network"
     : tab === "security" || tab === "services" ? "security"
     : tab === "application" ? "modules"
@@ -1283,7 +1282,7 @@ export default function Home() {
     onRefresh={() => void refreshCurrent(true)}
     onLogout={() => { sessionStorage.removeItem("312-token"); setToken(""); }}
   >
-      {tab !== "overview" && tab !== "access-beta" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city}, {overview?.server.country}  управление инфраструктурой</p></div></div>}
+      {tab !== "overview" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city}, {overview?.server.country}  управление инфраструктурой</p></div></div>}
       {error && <div className="errorBox">{error}</div>}
       {notice && <div className="successNotice" role="status"><span>✓</span>{notice}<button onClick={() => setNotice("")} aria-label="Закрыть уведомление">×</button></div>}
       {tab === "overview" && (
@@ -1305,7 +1304,6 @@ export default function Home() {
         />
       )}
 
-      {tab === "access-beta" && <AccessProfilesBeta token={token} />}
 
       {tab === "mihomo" && (
         <MihomoPage

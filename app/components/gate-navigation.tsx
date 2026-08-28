@@ -54,7 +54,6 @@ export function GateNavigation({
           {showConnections && (
             <NavButton active={activeTab === "clients"} icon="connections" label="Подключения" onClick={() => onNavigate("clients")} />
           )}
-          <NavButton active={activeTab === "access-beta"} icon="users" label="Пользователи" badge="BETA" tone="violet" onClick={() => onNavigate("access-beta")} />
         </NavGroup>
 
         {(mihomoInstalled || transports.length > 0) && (
@@ -112,7 +111,7 @@ function NavButton({
   onClick,
 }: {
   active: boolean;
-  icon: "overview" | "connections" | "users" | "mihomo" | "transport" | "network" | "security" | "application" | "services";
+  icon: "overview" | "connections" | "mihomo" | "transport" | "network" | "security" | "application" | "services";
   label: string;
   tone?: "blue" | "violet" | "cyan";
   compact?: boolean;
@@ -131,7 +130,6 @@ function NavButton({
 function NavGlyph({ name }: { name: string }) {
   if (name === "overview") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-8.5Z" /></svg>;
   if (name === "connections") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="7" r="2.5"/><circle cx="18" cy="17" r="2.5"/><path d="m8.3 10.9 7.4-3M8.3 13.1l7.4 3"/></svg>;
-  if (name === "users") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c.5-4 2.4-6 5.5-6s5 2 5.5 6"/><circle cx="17" cy="9" r="2"/><path d="M15.5 14c3.1-.3 4.8 1.4 5 4"/></svg>;
   if (name === "mihomo") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 8 4.5v11L12 22l-8-4.5v-11L12 2Z"/><path d="m8 16V8l4 4 4-4v8"/></svg>;
   if (name === "transport") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h11M12 4l3 3-3 3M20 17H9M12 14l-3 3 3 3"/></svg>;
   if (name === "network") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.3 3 14.7 0 18M12 3c-3 3.3-3 14.7 0 18"/></svg>;

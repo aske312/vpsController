@@ -16,8 +16,6 @@ import subprocess
 import threading
 import time
 import urllib.parse
-import urllib.error
-import urllib.request
 import uuid
 import platform
 from concurrent.futures import ThreadPoolExecutor
@@ -30,11 +28,6 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-
-try:
-    from .access_beta import create_access_beta_router
-except ImportError:  # uvicorn runs with api/ as WorkingDirectory
-    from access_beta import create_access_beta_router
 
 app = FastAPI(title="312.net Infrastructure API", version="0.1.0")
 logger = logging.getLogger("vps-control.api")
@@ -3647,63 +3640,3 @@ def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-realit
             raise HTTPException(status_code=409, detail=f"{protocol} protocol is not installed")
         run("systemctl", "restart", unit, timeout=20, check=True)
     return {"protocol": protocol, "active": run("systemctl", "is-active", unit) == "active"}
-
-# Beta access profiles are mounted as a separate orchestration layer.
-# Existing direct-protocol endpoints remain the implementation adapters; the
-# beta module owns user/device relationships and never rewrites their storage
-# format. Mihomo remains a neighbouring manager process on localhost:8791.
-def access_beta_create_direct(name: str, protocol: str) -> dict:
-    return create_client(ClientCreate(name=name, protocol=protocol), None)
-
-
-def access_beta_delete_direct(client_id: str) -> dict:
-    return delete_client(client_id, None)
-
-
-def access_beta_mihomo_request(method: str, path: str, payload: dict | None = None):
-    if not path.startswith("/api/mihomo/"):
-        raise HTTPException(status_code=500, detail="Invalid Mihomo manager path")
-    password = os.getenv("ADMIN_PASSWORD", "")
-    if not password:
-        raise HTTPException(status_code=503, detail="Mihomo Manager credentials are unavailable")
-    auth = base64.b64encode(f"{ADMIN_USER}:{password}".encode("utf-8")).decode("ascii")
-    body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        f"http://127.0.0.1:8791{path}",
-        data=body,
-        method=method,
-        headers={
-            "Authorization": f"Basic {auth}",
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/plain",
-        },
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=180) as response:
-            raw = response.read().decode("utf-8")
-            content_type = response.headers.get("Content-Type", "")
-            if "application/json" in content_type:
-                return json.loads(raw) if raw else {}
-            return raw
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")
-        try:
-            detail = json.loads(raw).get("detail", raw)
-        except (json.JSONDecodeError, AttributeError):
-            detail = raw
-        raise HTTPException(status_code=exc.code, detail=str(detail or "Mihomo Manager request failed")) from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise HTTPException(status_code=503, detail="Mihomo Manager is unavailable") from exc
-
-
-app.include_router(
-    create_access_beta_router(
-        data_dir=DATA_DIR,
-        protocol_detector=protocol_image_manifests,
-        auth_dependency=require_token,
-        direct_create=access_beta_create_direct,
-        direct_delete=access_beta_delete_direct,
-        direct_list=read_clients,
-        mihomo_request=access_beta_mihomo_request,
-    )
-)
