@@ -770,7 +770,7 @@ test("protocol pages safely edit channel settings and VLESS links select HTTP2",
 });
 
 test("DNS control provides Russian resolvers, live checks and protocol application", async () => {
-  const [page, api, css, manager] = await Promise.all([read("app/page.tsx"), read("api/main.py"), readStyles(), read("scripts/vps-control.sh")]);
+  const [page, api, css] = await Promise.all([read("app/page.tsx"), read("api/main.py"), readStyles()]);
   assert.match(page, /type Tab = "overview" \| "channels" \| "dns"/);
   assert.match(page, /onNavigate\("channels"\)/);
   assert.match(page, /onNavigate\("overview"\)/);
