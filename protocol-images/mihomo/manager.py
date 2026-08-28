@@ -1275,9 +1275,15 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
         raise HTTPException(status_code=422, detail="XHTTP concurrency must be between 1 and 64")
     cdn_enabled = bool(result.get("cdn_enabled", False))
     cdn_domain = str(result.get("cdn_domain", "")).strip().lower()
+    cdn_transport = str(result.get("cdn_transport", "websocket"))
+    if cdn_transport not in {"websocket", "xhttp", "grpc"}:
+        raise HTTPException(status_code=422, detail="Unsupported CDN transport")
+    cdn_xhttp_mode = str(result.get("cdn_xhttp_mode", "auto"))
+    if cdn_xhttp_mode not in {"auto", "stream-one", "stream-up", "packet-up"}:
+        raise HTTPException(status_code=422, detail="Unsupported CDN XHTTP mode")
     if cdn_enabled and not re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", cdn_domain):
         raise HTTPException(status_code=422, detail="For CDN specify a valid hostname")
-    result.update({"port": port, "target": target, "transport": transport, "transport_path": path, "xhttp_mode": mode, "xpadding": padding, "xmux_concurrency": concurrency, "cdn_enabled": cdn_enabled, "cdn_domain": cdn_domain})
+    result.update({"port": port, "target": target, "transport": transport, "transport_path": path, "xhttp_mode": mode, "xpadding": padding, "xmux_concurrency": concurrency, "cdn_enabled": cdn_enabled, "cdn_domain": cdn_domain, "cdn_transport": cdn_transport, "cdn_xhttp_mode": cdn_xhttp_mode})
     return result
 
 
@@ -1308,11 +1314,11 @@ def vless_stream(settings: dict[str, Any], private_key: str, short_id: str) -> d
     return stream
 
 
-def write_mihomo_vless_cdn(connection_id: str, enabled: bool, domain: str, path: str, port: int) -> None:
+def write_mihomo_vless_cdn(connection_id: str, enabled: bool, domain: str, path: str, port: int, transport: str = "websocket") -> None:
     VLESS_CDN_ROUTE_ROOT.mkdir(parents=True, exist_ok=True)
     descriptor = VLESS_CDN_ROUTE_ROOT / f"{connection_id}.json"
     if enabled:
-        atomic_json(descriptor, {"domain": domain, "path": path, "port": int(port)}, mode=0o600)
+        atomic_json(descriptor, {"domain": domain, "path": path, "port": int(port), "transport": transport}, mode=0o600)
     else:
         descriptor.unlink(missing_ok=True)
     rebuild_vless_cdn_snippet()
@@ -1326,7 +1332,7 @@ def rebuild_vless_cdn_snippet() -> None:
     except OSError:
         pass
     if direct.get("CDN_ENABLED") == "yes" and direct.get("CDN_DOMAIN") and direct.get("WS_PATH"):
-        routes.append({"domain": direct["CDN_DOMAIN"], "path": direct["WS_PATH"], "port": int(direct.get("CDN_PORT", "10087"))})
+        routes.append({"domain": direct["CDN_DOMAIN"], "path": direct.get("CDN_PATH", direct["WS_PATH"]), "port": int(direct.get("CDN_PORT", "10087")), "transport": direct.get("CDN_TRANSPORT", "websocket")})
     for descriptor in VLESS_CDN_ROUTE_ROOT.glob("*.json") if VLESS_CDN_ROUTE_ROOT.exists() else []:
         value = load_json(descriptor, {})
         if value.get("domain") and value.get("path") and value.get("port"):
@@ -1345,10 +1351,13 @@ def rebuild_vless_cdn_snippet() -> None:
             for domain, items in grouped.items():
                 lines.append(f"{domain} {{")
                 for item in items:
-                    lines.extend([f"    handle {item['path']} {{", f"        reverse_proxy 127.0.0.1:{int(item['port'])}", "    }"])
+                    matcher = f"{item['path']}*" if item.get("transport") in {"xhttp", "grpc"} else str(item["path"])
+                    upstream = f"h2c://127.0.0.1:{int(item['port'])}" if item.get("transport") == "grpc" else f"127.0.0.1:{int(item['port'])}"
+                    lines.extend([f"    handle {matcher} {{", f"        reverse_proxy {upstream}", "    }"])
                 lines.extend(["    respond 404", "}"])
             temporary = VLESS_CDN_SNIPPET.with_suffix(".tmp")
             temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            os.chmod(temporary, 0o644)
             os.replace(temporary, VLESS_CDN_SNIPPET)
         for legacy in VLESS_CDN_SNIPPET.parent.glob("mihomo-vless-*.caddy"):
             legacy.unlink(missing_ok=True)
@@ -1388,12 +1397,21 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     email = f"mihomo-{profile_id}-{connection_id}"
     direct_tag = f"mihomo-vless-{connection_id}"
     config["inbounds"].append({"tag": direct_tag, "listen": "::", "port": direct_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": vless_stream(settings, private_key, env.get("SHORT_ID", "")), "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}})
-    ws_path = "/" + secrets.token_hex(16)
+    cdn_path = "/" + secrets.token_hex(16)
     if settings["cdn_enabled"]:
-        config["inbounds"].append({"tag": f"mihomo-vless-cdn-{connection_id}", "listen": "127.0.0.1", "port": cdn_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": {"network": "websocket", "security": "none", "wsSettings": {"path": ws_path}}})
+        transport = settings["cdn_transport"]
+        cdn_settings: dict[str, Any] = {"network": transport, "security": "none"}
+        if transport == "xhttp":
+            cdn_settings["xhttpSettings"] = {"path": cdn_path, "mode": settings["cdn_xhttp_mode"]}
+        elif transport == "grpc":
+            cdn_settings["grpcSettings"] = {"serviceName": cdn_path.lstrip("/"), "multiMode": False}
+        else:
+            cdn_settings["network"] = "websocket"
+            cdn_settings["wsSettings"] = {"path": cdn_path}
+        config["inbounds"].append({"tag": f"mihomo-vless-cdn-{connection_id}", "listen": "127.0.0.1", "port": cdn_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": cdn_settings})
     original_config = config_path.read_bytes()
     try:
-        write_mihomo_vless_cdn(connection_id, settings["cdn_enabled"], settings["cdn_domain"], ws_path, cdn_port)
+        write_mihomo_vless_cdn(connection_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"])
         apply_reality_config(config_path, config)
         if settings["cdn_enabled"]:
             run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
@@ -1406,7 +1424,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         run("systemctl", "restart", "vps-control-mihomo-reality.service")
         run("systemctl", "reload", "caddy.service")
         raise
-    return {"uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": ws_path}
+    return {"uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": cdn_path, "cdn_transport": settings["cdn_transport"], "cdn_xhttp_mode": settings["cdn_xhttp_mode"]}
 
 
 def remove_reality_credential(profile_id: str, credential: dict[str, Any]) -> None:
@@ -1836,7 +1854,8 @@ def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) ->
 
 
 def render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
-    return [
+    transport = str(credential.get("cdn_transport", "websocket"))
+    lines = [
         f"  - name: {q(proxy_name)}",
         "    type: vless",
         f"    server: {q(credential['cdn_domain'])}",
@@ -1847,12 +1866,15 @@ def render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
         "    tls: true",
         f"    servername: {q(credential['cdn_domain'])}",
         "    client-fingerprint: chrome",
-        "    network: ws",
-        "    ws-opts:",
-        f"      path: {q(credential['cdn_path'])}",
-        "      headers:",
-        f"        Host: {q(credential['cdn_domain'])}",
+        f"    network: {'ws' if transport == 'websocket' else transport}",
     ]
+    if transport == "xhttp":
+        lines += ["    xhttp-opts:", f"      path: {q(credential['cdn_path'])}", f"      mode: {q(credential.get('cdn_xhttp_mode', 'auto'))}"]
+    elif transport == "grpc":
+        lines += ["    grpc-opts:", f"      grpc-service-name: {q(str(credential['cdn_path']).lstrip('/'))}"]
+    else:
+        lines += ["    ws-opts:", f"      path: {q(credential['cdn_path'])}", "      headers:", f"        Host: {q(credential['cdn_domain'])}"]
+    return lines
 
 
 def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:

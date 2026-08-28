@@ -2513,6 +2513,8 @@ class ProtocolSettingsUpdate(BaseModel):
     xmux_concurrency: int | None = Field(default=None, ge=1, le=64)
     cdn_enabled: bool | None = None
     cdn_domain: str | None = Field(default=None, max_length=253)
+    cdn_transport: Literal["websocket", "xhttp", "grpc"] | None = None
+    cdn_xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
 
 
 def configure_vless_transport(stream: dict, transport: str, path: str = "/") -> None:
@@ -2553,11 +2555,19 @@ def vless_client_query(config: dict, reality: dict) -> dict[str, str]:
 
 
 def vless_cdn_client_query(reality: dict) -> dict[str, str]:
-    return {
+    transport = reality.get("CDN_TRANSPORT", "websocket")
+    path = reality.get("CDN_PATH", reality.get("WS_PATH", "/"))
+    values = {
         "encryption": "none", "security": "tls", "sni": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN),
-        "fp": "chrome", "type": "ws", "host": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN),
-        "path": reality.get("WS_PATH", "/"), "alpn": "http/1.1",
+        "fp": "chrome", "host": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN),
     }
+    if transport == "xhttp":
+        values.update({"type": "xhttp", "path": path, "mode": reality.get("CDN_XHTTP_MODE", "auto"), "alpn": "h2"})
+    elif transport == "grpc":
+        values.update({"type": "grpc", "serviceName": path.lstrip("/"), "mode": "gun", "alpn": "h2"})
+    else:
+        values.update({"type": "ws", "path": path, "alpn": "http/1.1"})
+    return values
 
 
 def valid_hostname(value: str) -> bool:
@@ -2577,14 +2587,28 @@ def update_key_value_file(path: Path, values: dict[str, str], quoted: bool) -> N
     os.chmod(path, 0o600)
 
 
-def configure_vless_cdn(config: dict, reality: dict, enabled: bool, domain: str) -> None:
+def cdn_stream(transport: str, path: str, xhttp_mode: str = "auto") -> dict:
+    stream = {"network": transport, "security": "none"}
+    if transport == "xhttp":
+        stream["xhttpSettings"] = {"path": path, "mode": xhttp_mode}
+    elif transport == "grpc":
+        stream["grpcSettings"] = {"serviceName": path.lstrip("/") or "vless", "multiMode": False}
+    else:
+        stream["network"] = "websocket"
+        stream["wsSettings"] = {"path": path}
+    return stream
+
+
+def configure_vless_cdn(config: dict, reality: dict, enabled: bool, domain: str, transport: str = "websocket", xhttp_mode: str = "auto") -> None:
     """Add or remove the CDN inbound while preserving every VLESS UUID."""
-    managed_tags = {"vless-cdn-websocket", "vless-tls-websocket"}
+    managed_tags = {"vless-cdn", "vless-cdn-websocket", "vless-tls-websocket"}
     inbounds = config.get("inbounds", [])
     existing = next((item for item in inbounds if item.get("tag") in managed_tags), None)
     reality["CDN_ENABLED"] = "yes" if enabled else "no"
     reality["CDN_DOMAIN"] = domain
     reality["CDN_PORT"] = str(VLESS_CDN_PORT)
+    reality["CDN_TRANSPORT"] = transport
+    reality["CDN_XHTTP_MODE"] = xhttp_mode
     if not enabled:
         config["inbounds"] = [item for item in inbounds if item.get("tag") not in managed_tags]
         return
@@ -2595,23 +2619,24 @@ def configure_vless_cdn(config: dict, reality: dict, enabled: bool, domain: str)
         for client in inbound.get("settings", {}).get("clients", []):
             if client.get("id"):
                 clients_by_id[str(client["id"])] = client
-    ws_path = reality.get("WS_PATH") or "/" + secrets.token_hex(16)
+    cdn_path = reality.get("CDN_PATH") or reality.get("WS_PATH") or "/" + secrets.token_hex(16)
     cdn_inbound = existing or {}
     cdn_inbound.update({
-        "tag": "vless-cdn-websocket", "listen": "127.0.0.1", "port": VLESS_CDN_PORT, "protocol": "vless",
+        "tag": "vless-cdn", "listen": "127.0.0.1", "port": VLESS_CDN_PORT, "protocol": "vless",
         "settings": {"clients": list(clients_by_id.values()), "decryption": "none"},
-        "streamSettings": {"network": "websocket", "security": "none", "wsSettings": {"path": ws_path}},
+        "streamSettings": cdn_stream(transport, cdn_path, xhttp_mode),
         "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True},
     })
     if existing is None:
         inbounds.append(cdn_inbound)
-    reality["WS_PATH"] = ws_path
+    reality["CDN_PATH"] = cdn_path
+    reality["WS_PATH"] = cdn_path
 
 
-def write_vless_cdn_snippet(enabled: bool, domain: str, ws_path: str) -> None:
+def write_vless_cdn_snippet(enabled: bool, domain: str, path: str, transport: str = "websocket") -> None:
     routes: list[dict] = []
     if enabled:
-        routes.append({"domain": domain, "path": ws_path, "port": VLESS_CDN_PORT})
+        routes.append({"domain": domain, "path": path, "port": VLESS_CDN_PORT, "transport": transport})
     if MIHOMO_VLESS_CDN_ROUTES.exists():
         for descriptor in MIHOMO_VLESS_CDN_ROUTES.glob("*.json"):
             try:
@@ -2633,7 +2658,9 @@ def write_vless_cdn_snippet(enabled: bool, domain: str, ws_path: str) -> None:
         for route_domain, items in grouped.items():
             lines.append(f"{route_domain} {{")
             for item in items:
-                lines.extend([f"    handle {item['path']} {{", f"        reverse_proxy 127.0.0.1:{int(item['port'])}", "    }"])
+                matcher = f"{item['path']}*" if item.get("transport") in {"xhttp", "grpc"} else str(item["path"])
+                upstream = f"h2c://127.0.0.1:{int(item['port'])}" if item.get("transport") == "grpc" else f"127.0.0.1:{int(item['port'])}"
+                lines.extend([f"    handle {matcher} {{", f"        reverse_proxy {upstream}", "    }"])
             lines.extend(["    respond 404", "}"])
         temporary = VLESS_CDN_SNIPPET.with_suffix(".tmp")
         temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -2914,10 +2941,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 direct_config = f"vless://{client_uuid}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}?{direct_query}#{urllib.parse.quote(payload.name + ' Direct')}"
                 profiles = [{"id": "direct", "name": "Direct · REALITY/XHTTP", "filename": f"{safe_name}-vless-direct.txt", "config": direct_config}]
                 cdn_domain = reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
-                if cdn_domain and any(item.get("tag") == "vless-cdn-websocket" for item in vless_inbounds):
+                if cdn_domain and any(item.get("tag") in {"vless-cdn", "vless-cdn-websocket", "vless-tls-websocket"} for item in vless_inbounds):
                     cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality))
                     cdn_config = f"vless://{client_uuid}@{cdn_domain}:443?{cdn_query}#{urllib.parse.quote(payload.name + ' CDN')}"
-                    profiles.append({"id": "cdn", "name": "CDN · TLS/WebSocket", "filename": f"{safe_name}-vless-cdn.txt", "config": cdn_config})
+                    profiles.append({"id": "cdn", "name": f"CDN · TLS/{reality.get('CDN_TRANSPORT', 'websocket').upper()}", "filename": f"{safe_name}-vless-cdn.txt", "config": cdn_config})
                 client_config = "\n".join(profile["config"] for profile in profiles)
                 stage = "сохранение подключения"
                 items = read_clients()
@@ -3113,6 +3140,13 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
         "key": "cdn_domain", "label": "CDN-домен", "type": "text", "value": str(values.get("cdnDomain", "")),
         "help": "Например cdn.vpn.example.com. Для Cloudflare запись A должна быть в режиме Proxied.",
     }, {
+        "key": "cdn_transport", "label": "CDN-транспорт", "type": "select", "value": str(values.get("cdnTransport", "websocket")),
+        "options": [{"value": "websocket", "label": "WebSocket · совместимый"}, {"value": "xhttp", "label": "XHTTP · рекомендуемый"}, {"value": "grpc", "label": "gRPC · HTTP/2"}],
+        "help": "Не влияет на Direct-транспорт. Для gRPC включите поддержку gRPC у CDN-провайдера.",
+    }, {
+        "key": "cdn_xhttp_mode", "label": "Режим CDN XHTTP", "type": "select", "value": str(values.get("cdnXhttpMode", "auto")),
+        "options": [{"value": value, "label": value} for value in ("auto", "stream-one", "stream-up", "packet-up")],
+    }, {
         "key": "dns", "label": "DNS VRX", "type": "text", "value": current_env_value("VRX_DNS", "1.1.1.1, 1.0.0.1"),
         "help": "Применяется к серверному резолверу Xray. DNS самого устройства задаётся в клиентском приложении.",
     }]
@@ -3201,7 +3235,7 @@ def update_protocol_settings(
     allowed = {
         "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
         "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
-        "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni", "cdn_enabled", "cdn_domain"},
+        "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni", "cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"},
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
         raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
@@ -3293,14 +3327,16 @@ def update_protocol_settings(
                 dns_addresses = [value.strip() for value in supplied["dns"].split(",") if value.strip()]
                 config["dns"] = {"servers": dns_addresses, "queryStrategy": "UseIP"}
                 config.setdefault("routing", {})["domainStrategy"] = "IPIfNonMatch"
-            cdn_changed = "cdn_enabled" in supplied or "cdn_domain" in supplied
+            cdn_changed = bool({"cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"} & supplied.keys())
             if cdn_changed:
                 current_cdn_enabled = reality.get("CDN_ENABLED", "yes" if reality.get("CDN_DOMAIN") else "no") == "yes"
                 cdn_enabled = bool(supplied.get("cdn_enabled", current_cdn_enabled))
                 cdn_domain = str(supplied.get("cdn_domain", reality.get("CDN_DOMAIN", ""))).strip().lower()
+                cdn_transport = str(supplied.get("cdn_transport", reality.get("CDN_TRANSPORT", "websocket")))
+                cdn_xhttp_mode = str(supplied.get("cdn_xhttp_mode", reality.get("CDN_XHTTP_MODE", "auto")))
                 if cdn_enabled and not valid_hostname(cdn_domain):
                     raise HTTPException(status_code=422, detail="Укажите корректный CDN-домен без схемы, пути и порта")
-                configure_vless_cdn(config, reality, cdn_enabled, cdn_domain)
+                configure_vless_cdn(config, reality, cdn_enabled, cdn_domain, cdn_transport, cdn_xhttp_mode)
             temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
             os.chmod(temporary, 0o640)
             os.chown(temporary, 0, 65534)
@@ -3318,8 +3354,11 @@ def update_protocol_settings(
                     "CDN_ENABLED": "yes" if cdn_enabled else "no",
                     "CDN_DOMAIN": cdn_domain,
                     "CDN_PORT": str(VLESS_CDN_PORT),
+                    "CDN_PATH": reality.get("CDN_PATH", reality.get("WS_PATH", "")),
+                    "CDN_TRANSPORT": cdn_transport,
+                    "CDN_XHTTP_MODE": cdn_xhttp_mode,
                 }, quoted=False)
-                write_vless_cdn_snippet(cdn_enabled, cdn_domain, reality.get("WS_PATH", "/"))
+                write_vless_cdn_snippet(cdn_enabled, cdn_domain, reality.get("CDN_PATH", reality.get("WS_PATH", "/")), cdn_transport)
                 run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", timeout=15, check=True)
             restart_vless_service()
             if cdn_changed:
@@ -3404,12 +3443,12 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                     "XHTTP path": reality.get("XHTTP_PATH", reality.get("PATH", "/")),
                     "SNI": target.rsplit(":", 1)[0] if ":" in target else target,
                     "CDN hostname": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN) or "не настроен",
-                    "CDN transport": "TLS/WebSocket" if reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN) else "отключён",
+                    "CDN transport": f"TLS/{reality.get('CDN_TRANSPORT', 'websocket').upper()}" if reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN) else "отключён",
                     "DNS": current_env_value("VRX_DNS", "не настроен"),
                 }
                 config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
                 stream_values = vless_reality_inbound(config_data)["streamSettings"]
-                cdn_inbound = next((item for item in config_data.get("inbounds", []) if item.get("tag") in {"vless-cdn-websocket", "vless-tls-websocket"}), None)
+                cdn_inbound = next((item for item in config_data.get("inbounds", []) if item.get("tag") in {"vless-cdn", "vless-cdn-websocket", "vless-tls-websocket"}), None)
                 transport = str(stream_values.get("network", "xhttp"))
                 xhttp_values = dict(stream_values.get("xhttpSettings", {}))
                 xhttp_values["transport"] = transport
@@ -3421,6 +3460,8 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 xhttp_values["xmuxConcurrency"] = int(str(max_concurrency).split("-", 1)[0])
                 xhttp_values["cdnEnabled"] = cdn_inbound is not None and reality.get("CDN_ENABLED", "yes") == "yes"
                 xhttp_values["cdnDomain"] = reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
+                xhttp_values["cdnTransport"] = reality.get("CDN_TRANSPORT", "websocket")
+                xhttp_values["cdnXhttpMode"] = reality.get("CDN_XHTTP_MODE", "auto")
                 editable_settings = editable_protocol_settings(protocol, xhttp_values)
             except (OSError, ValueError, json.JSONDecodeError, KeyError, IndexError):
                 listen_port = 8443

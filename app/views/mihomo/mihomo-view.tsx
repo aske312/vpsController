@@ -836,7 +836,8 @@ export function MihomoPage({
                     <div className="mihomoConnectionFields">
                       {schema.filter((field) => {
                         if (["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return connection.settings.transport === "xhttp";
-                        if (field.key === "cdn_domain") return Boolean(connection.settings.cdn_enabled);
+                        if (["cdn_domain", "cdn_transport"].includes(field.key)) return Boolean(connection.settings.cdn_enabled);
+                        if (field.key === "cdn_xhttp_mode") return Boolean(connection.settings.cdn_enabled) && connection.settings.cdn_transport === "xhttp";
                         return true;
                       }).map((field) => <label key={field.key} className={field.type === "boolean" ? "is-toggle" : ""}>
                         <span>{field.label}</span>

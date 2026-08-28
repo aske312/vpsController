@@ -861,7 +861,7 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.doesNotMatch(bootstrap, /--vless-cdn-domain/);
   assert.match(config, /VLESS_CDN_PORT="10087"/);
   assert.match(caddy, /import \/etc\/caddy\/vps-control\.d\/\*\.caddy/);
-  assert.match(install, /"tag": "vless-cdn-websocket"/);
+  assert.match(install, /"tag": "vless-cdn"/);
   assert.match(install, /"listen": "127\.0\.0\.1"/);
   assert.match(install, /existing_clients_by_id/);
   assert.match(install, /saved_cdn_domain/);
@@ -873,6 +873,9 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.match(api, /def vless_cdn_client_query/);
   assert.match(api, /"key": "cdn_enabled"/);
   assert.match(api, /"key": "cdn_domain"/);
+  assert.match(api, /"key": "cdn_transport"/);
+  assert.match(api, /"key": "cdn_xhttp_mode"/);
+  assert.match(api, /def cdn_stream/);
   assert.match(api, /def configure_vless_cdn/);
   assert.match(api, /write_vless_cdn_snippet/);
   assert.match(api, /CONTROL_COMMAND, "vless-cdn-firewall"/);
@@ -888,7 +891,7 @@ test("VLESS image supports independent direct and CDN profiles", async () => {
   assert.match(protocolView, /ПРЯМОЕ ПОДКЛЮЧЕНИЕ/);
   assert.match(protocolView, /XHTTP, RAW или gRPC/);
   assert.match(protocolView, /ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ/);
-  assert.match(protocolView, /CDN · TLS\/WebSocket/);
+  assert.match(protocolView, /WebSocket, XHTTP или gRPC/);
   assert.match(protocolView, /function ProtocolCommandCenter/);
   assert.match(protocolView, /ROUTE BLUEPRINT/);
   assert.match(protocolView, /isVless \? "Маршруты" : "Сетевой контур"/);
@@ -1124,7 +1127,7 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   for (const key of ["port_start", "cdn_port_start", "dns", "loglevel"]) {
     assert.ok(settingKeys.includes(key), `missing Mihomo VLESS core setting ${key}`);
   }
-  for (const key of ["port", "target", "transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency", "cdn_enabled", "cdn_domain"]) {
+  for (const key of ["port", "target", "transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency", "cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"]) {
     assert.ok(connectionKeys.includes(key), `missing Mihomo VLESS connection setting ${key}`);
   }
   assert.match(installer, /startsWith\('mihomo-vless-'\)|startswith\('mihomo-vless-'\)/);
@@ -1137,6 +1140,8 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /class ProfileConnectionInput/);
   assert.match(manager, /def validate_connection_inputs/);
   assert.match(manager, /def render_vless_cdn/);
+  assert.match(manager, /cdn_transport/);
+  assert.match(manager, /cdn_xhttp_mode/);
   assert.match(manager, /def rebuild_vless_cdn_snippet/);
   assert.match(manager, /VLESS_CDN_ROUTE_ROOT/);
   assert.match(manager, /original_config = config_path\.read_bytes\(\)/);
