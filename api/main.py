@@ -2492,10 +2492,22 @@ def check_dns(payload: DnsCheckRequest, _: None = Depends(require_token)) -> dic
     return {"checked_at": datetime.now(timezone.utc).isoformat(), "items": results}
 
 
+class ClientConnectionSettings(BaseModel):
+    dns: str | None = Field(default=None, min_length=3, max_length=512, pattern=r"^[A-Za-z0-9:., ]+$")
+    mtu: int | None = Field(default=None, ge=576, le=1500)
+    keepalive: int | None = Field(default=None, ge=0, le=300)
+    route_mode: Literal["all", "ipv4"] = "ipv4"
+    shadowsocks_mode: Literal["tcp_only", "tcp_and_udp"] = "tcp_and_udp"
+    timeout: int | None = Field(default=None, ge=30, le=3600)
+    no_delay: bool = True
+    fingerprint: Literal["chrome", "firefox", "safari"] = "chrome"
+
+
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
     protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"]
     vless_routes: list[Literal["direct", "tls", "cdn"]] | None = None
+    settings: ClientConnectionSettings = Field(default_factory=ClientConnectionSettings)
 
 
 class ProtocolSettingsUpdate(BaseModel):
@@ -2545,11 +2557,11 @@ def vless_reality_inbound(config: dict) -> dict:
     )
 
 
-def vless_client_query(config: dict, reality: dict) -> dict[str, str]:
+def vless_client_query(config: dict, reality: dict, fingerprint: str = "chrome") -> dict[str, str]:
     stream = vless_reality_inbound(config)["streamSettings"]
     transport = str(stream.get("network", "xhttp"))
     target_host = reality.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0]
-    values = {"encryption": "none", "security": "reality", "sni": target_host, "fp": "chrome", "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", "")}
+    values = {"encryption": "none", "security": "reality", "sni": target_host, "fp": fingerprint, "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", "")}
     if transport == "xhttp":
         settings = stream.get("xhttpSettings", {})
         values.update({"type": "xhttp", "host": target_host, "path": str(settings.get("path", "/")), "mode": str(settings.get("mode", "auto")), "alpn": "h2", "extra": json.dumps(settings.get("extra", {}), separators=(",", ":"))})
@@ -2560,12 +2572,12 @@ def vless_client_query(config: dict, reality: dict) -> dict[str, str]:
     return values
 
 
-def vless_cdn_client_query(reality: dict) -> dict[str, str]:
+def vless_cdn_client_query(reality: dict, fingerprint: str = "chrome") -> dict[str, str]:
     transport = reality.get("CDN_TRANSPORT", "websocket")
     path = reality.get("CDN_PATH", reality.get("WS_PATH", "/"))
     values = {
         "encryption": "none", "security": "tls", "sni": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN),
-        "fp": "chrome", "host": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN),
+        "fp": fingerprint, "host": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN),
     }
     if transport == "xhttp":
         values.update({"type": "xhttp", "path": path, "mode": reality.get("CDN_XHTTP_MODE", "auto"), "alpn": "h2"})
@@ -2578,10 +2590,10 @@ def vless_cdn_client_query(reality: dict) -> dict[str, str]:
     return values
 
 
-def vless_tls_client_query(reality: dict) -> dict[str, str]:
+def vless_tls_client_query(reality: dict, fingerprint: str = "chrome") -> dict[str, str]:
     mapped = dict(reality)
     mapped.update({"CDN_DOMAIN": reality.get("TLS_DOMAIN", ""), "CDN_PATH": reality.get("TLS_PATH", "/"), "CDN_TRANSPORT": reality.get("TLS_TRANSPORT", "xhttp"), "CDN_XHTTP_MODE": reality.get("TLS_XHTTP_MODE", "auto")})
-    return vless_cdn_client_query(mapped)
+    return vless_cdn_client_query(mapped, fingerprint)
 
 
 def valid_hostname(value: str) -> bool:
@@ -2924,8 +2936,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             SHADOWSOCKS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             config_path.write_text(json.dumps({
                 "server": "::", "server_port": port, "password": password, "method": method,
-                "timeout": 300, "mode": "tcp_and_udp", "fast_open": False,
-                "no_delay": True, "mtu": 1200,
+                "timeout": payload.settings.timeout or 300, "mode": payload.settings.shadowsocks_mode, "fast_open": False,
+                "no_delay": payload.settings.no_delay, "mtu": payload.settings.mtu or 1200,
             }, indent=2), encoding="utf-8")
             os.chmod(config_path, 0o600)
         except OSError as exc:
@@ -2946,7 +2958,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
         client_config = f"ss://{userinfo}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}#{urllib.parse.quote(payload.name)}"
         items = read_clients()
-        items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
+        items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
         write_clients(items)
         return {"id": client_id, "filename": f"{safe_name}-shadowsocks.txt", "config": client_config}
 
@@ -2994,7 +3006,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 replaced = True
                 restart_vless_service()
                 port = int(reality.get("PORT", "443"))
-                direct_query = urllib.parse.urlencode(vless_client_query(config_data, reality))
+                direct_query = urllib.parse.urlencode(vless_client_query(config_data, reality, payload.settings.fingerprint))
                 direct_config = f"vless://{client_uuid}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}?{direct_query}#{urllib.parse.quote(payload.name + ' Direct')}"
                 direct_transport = str(vless_reality_inbound(config_data).get("streamSettings", {}).get("network", "xhttp")).upper()
                 profiles = []
@@ -3002,18 +3014,18 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     profiles.append({"id": "direct", "name": f"Direct · REALITY/{direct_transport}", "filename": f"{safe_name}-vless-direct.txt", "config": direct_config})
                 tls_domain = reality.get("TLS_DOMAIN", "")
                 if "tls" in requested_routes and tls_domain:
-                    tls_query = urllib.parse.urlencode(vless_tls_client_query(reality))
+                    tls_query = urllib.parse.urlencode(vless_tls_client_query(reality, payload.settings.fingerprint))
                     tls_config = f"vless://{client_uuid}@{tls_domain}:443?{tls_query}#{urllib.parse.quote(payload.name + ' TLS')}"
                     profiles.append({"id": "tls", "name": f"TLS · {reality.get('TLS_TRANSPORT', 'xhttp').upper()}", "filename": f"{safe_name}-vless-tls.txt", "config": tls_config})
                 cdn_domain = reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
                 if "cdn" in requested_routes and cdn_domain:
-                    cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality))
+                    cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality, payload.settings.fingerprint))
                     cdn_config = f"vless://{client_uuid}@{cdn_domain}:443?{cdn_query}#{urllib.parse.quote(payload.name + ' CDN')}"
                     profiles.append({"id": "cdn", "name": f"CDN · TLS/{reality.get('CDN_TRANSPORT', 'websocket').upper()}", "filename": f"{safe_name}-vless-cdn.txt", "config": cdn_config})
                 client_config = "\n".join(profile["config"] for profile in profiles)
                 stage = "сохранение подключения"
                 items = read_clients()
-                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "vless_routes": requested_routes, "created_at": datetime.now(timezone.utc).isoformat()})
+                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "vless_routes": requested_routes, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}-vless.txt", "config": client_config, "profiles": profiles}
             except HTTPException:
@@ -3073,15 +3085,15 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     default_port = WG_PORT if payload.protocol == "wg" else AWG_PORT
     default_mtu = WG_MTU if payload.protocol == "wg" else AWG_MTU
     port = configured_int(server_settings, "ListenPort", default_port)
-    mtu = configured_int(server_settings, "MTU", default_mtu)
+    mtu = payload.settings.mtu or configured_int(server_settings, "MTU", default_mtu)
     client_listen_port = AWG_CLIENT_PORT if payload.protocol == "awg" else None
     client_listen_line = f"ListenPort = {client_listen_port}\n" if client_listen_port is not None else ""
     endpoint_host = PUBLIC_IP_ENDPOINT or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_ENDPOINT
     client_config = (
-        f"[Interface]\nAddress = {address}/32\nDNS = {current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS)}\n"
+        f"[Interface]\nAddress = {address}/32\nDNS = {payload.settings.dns or (current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS))}\n"
         f"PrivateKey = {private_key}\n{client_listen_line}MTU = {mtu}\n{extra}\n[Peer]\n"
-        f"PublicKey = {server_public}\nPresharedKey = {psk}\nAllowedIPs = 0.0.0.0/0\n"
-        f"Endpoint = {endpoint_host}:{port}\nPersistentKeepalive = {current_env_value('AWG_KEEPALIVE', str(AWG_KEEPALIVE)) if payload.protocol == 'awg' else current_env_value('WG_KEEPALIVE', str(WG_KEEPALIVE))}\n"
+        f"PublicKey = {server_public}\nPresharedKey = {psk}\nAllowedIPs = {'0.0.0.0/0, ::/0' if payload.settings.route_mode == 'all' else '0.0.0.0/0'}\n"
+        f"Endpoint = {endpoint_host}:{port}\nPersistentKeepalive = {payload.settings.keepalive if payload.settings.keepalive is not None else (current_env_value('AWG_KEEPALIVE', str(AWG_KEEPALIVE)) if payload.protocol == 'awg' else current_env_value('WG_KEEPALIVE', str(WG_KEEPALIVE)))}\n"
     )
     items = read_clients()
     items.append(
@@ -3091,6 +3103,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             "protocol": payload.protocol,
             "public_key": public_key,
             "address": f"{address}/32",
+            "settings": payload.settings.model_dump(exclude_none=True),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
     )

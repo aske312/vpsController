@@ -695,7 +695,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(api, /"type": "xhttp", "host": target_host/);
   assert.match(api, /raw byte deltas also include unauthenticated scans/);
   assert.match(api, /"rx_bps": rx_bps, "tx_bps": tx_bps/);
-  assert.match(api, /"no_delay": True, "mtu": 1200/);
+  assert.match(api, /"no_delay": payload\.settings\.no_delay, "mtu": payload\.settings\.mtu or 1200/);
   assert.match(ssInstall, /config\["mtu"\] = 1200/);
   assert.match(page, /АКТИВНОСТЬ/);
   assert.doesNotMatch(manager, /PUBLIC_IP="\$\{PUBLIC_IP\}"/);
