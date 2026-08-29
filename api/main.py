@@ -2495,6 +2495,7 @@ def check_dns(payload: DnsCheckRequest, _: None = Depends(require_token)) -> dic
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
     protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"]
+    vless_routes: list[Literal["direct", "tls", "cdn"]] | None = None
 
 
 class ProtocolSettingsUpdate(BaseModel):
@@ -2965,7 +2966,19 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 vless_inbounds = [item for item in config_data.get("inbounds", []) if item.get("protocol") == "vless"]
                 if not vless_inbounds:
                     raise KeyError("no VLESS inbound")
-                for inbound in vless_inbounds:
+                route_inbounds = {
+                    "direct": [vless_reality_inbound(config_data)],
+                    "tls": [item for item in vless_inbounds if item.get("tag") == "vless-tls"],
+                    "cdn": [item for item in vless_inbounds if item.get("tag") in {"vless-cdn", "vless-cdn-websocket", "vless-tls-websocket"}],
+                }
+                requested_routes = list(dict.fromkeys(payload.vless_routes)) if payload.vless_routes is not None else [route for route, inbounds in route_inbounds.items() if inbounds]
+                if not requested_routes:
+                    raise HTTPException(status_code=422, detail="Выберите хотя бы один маршрут VLESS")
+                unavailable = [route for route in requested_routes if not route_inbounds[route]]
+                if unavailable:
+                    raise HTTPException(status_code=409, detail=f"Маршрут VLESS не настроен: {', '.join(unavailable)}")
+                selected_inbounds = [inbound for route in requested_routes for inbound in route_inbounds[route]]
+                for inbound in selected_inbounds:
                     inbound.setdefault("settings", {}).setdefault("clients", []).append({"id": client_uuid, "email": f"{client_id}@312.net"})
                 stage = "запись временной конфигурации"
                 tmp.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -2984,24 +2997,33 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 direct_query = urllib.parse.urlencode(vless_client_query(config_data, reality))
                 direct_config = f"vless://{client_uuid}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}?{direct_query}#{urllib.parse.quote(payload.name + ' Direct')}"
                 direct_transport = str(vless_reality_inbound(config_data).get("streamSettings", {}).get("network", "xhttp")).upper()
-                profiles = [{"id": "direct", "name": f"Direct · REALITY/{direct_transport}", "filename": f"{safe_name}-vless-direct.txt", "config": direct_config}]
+                profiles = []
+                if "direct" in requested_routes:
+                    profiles.append({"id": "direct", "name": f"Direct · REALITY/{direct_transport}", "filename": f"{safe_name}-vless-direct.txt", "config": direct_config})
                 tls_domain = reality.get("TLS_DOMAIN", "")
-                if tls_domain and any(item.get("tag") == "vless-tls" for item in vless_inbounds):
+                if "tls" in requested_routes and tls_domain:
                     tls_query = urllib.parse.urlencode(vless_tls_client_query(reality))
                     tls_config = f"vless://{client_uuid}@{tls_domain}:443?{tls_query}#{urllib.parse.quote(payload.name + ' TLS')}"
                     profiles.append({"id": "tls", "name": f"TLS · {reality.get('TLS_TRANSPORT', 'xhttp').upper()}", "filename": f"{safe_name}-vless-tls.txt", "config": tls_config})
                 cdn_domain = reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
-                if cdn_domain and any(item.get("tag") in {"vless-cdn", "vless-cdn-websocket", "vless-tls-websocket"} for item in vless_inbounds):
+                if "cdn" in requested_routes and cdn_domain:
                     cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality))
                     cdn_config = f"vless://{client_uuid}@{cdn_domain}:443?{cdn_query}#{urllib.parse.quote(payload.name + ' CDN')}"
                     profiles.append({"id": "cdn", "name": f"CDN · TLS/{reality.get('CDN_TRANSPORT', 'websocket').upper()}", "filename": f"{safe_name}-vless-cdn.txt", "config": cdn_config})
                 client_config = "\n".join(profile["config"] for profile in profiles)
                 stage = "сохранение подключения"
                 items = read_clients()
-                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "created_at": datetime.now(timezone.utc).isoformat()})
+                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "vless_routes": requested_routes, "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}-vless.txt", "config": client_config, "profiles": profiles}
-            except (OSError, json.JSONDecodeError, KeyError, ValueError, RuntimeError, subprocess.SubprocessError, HTTPException) as exc:
+            except HTTPException:
+                if replaced:
+                    try:
+                        restore_vless_config(original, client_id)
+                    except Exception:
+                        pass
+                raise
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
                 if replaced:
                     try:
                         restore_vless_config(original, client_id)

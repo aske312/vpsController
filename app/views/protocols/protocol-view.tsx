@@ -340,23 +340,6 @@ function VlessControlCenter({ props }: { props: ProtocolViewProps }) {
   </section>;
 }
 
-export function VlessConnectionTransportSettings({ fields, draft, busy, onChange, onSave }: {
-  fields: EditableProtocolSetting[];
-  draft: Record<string, string | number | boolean>;
-  busy: boolean;
-  onChange: (key: string, value: string | number | boolean) => void;
-  onSave: () => void;
-}) {
-  if (!fields.length) return null;
-  return <article className="panel protocolConfiguration connectionsTransportConfiguration">
-    <header>
-      <div><p className="eyebrow">VLESS TRANSPORTS</p><h3>Транспорт подключений VLESS</h3><span>REALITY, прямой TLS и CDN настраиваются независимо. Домены и общие параметры находятся на странице VLESS.</span></div>
-      <div className="configurationSafety"><i aria-hidden="true" /><p><strong>Единая конфигурация Xray</strong><small>проверка и автоматический откат</small></p></div>
-    </header>
-    <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} vless vlessScope="connections" onChange={onChange} onSave={onSave} />
-  </article>;
-}
-
 function ProtocolSettingsEditor({
   fields, draft, busy, vless = false, vlessScope = "all", onChange, onSave,
 }: {

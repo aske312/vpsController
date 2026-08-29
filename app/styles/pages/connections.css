@@ -1312,6 +1312,100 @@
   margin: 0 !important;
 }
 
+.connectionProtocolPicker,
+.connectionVlessPicker {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.connectionProtocolPicker legend,
+.connectionVlessPicker legend {
+  margin-bottom: 8px;
+  color: #9bb0bd;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.connectionProtocolPicker > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.connectionProtocolPicker button {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 10px;
+  min-height: 60px;
+  padding: 10px;
+  text-align: left;
+  border: 1px solid rgba(91, 116, 141, .22);
+  border-radius: 11px;
+  background: rgba(5, 14, 21, .72);
+  color: #8ea2ae;
+}
+
+.connectionProtocolPicker button > b {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: #10212b;
+  color: #6f8998;
+  font: 800 10px/1 var(--font-mono), monospace;
+}
+
+.connectionProtocolPicker button span { display: grid; gap: 3px; }
+.connectionProtocolPicker button strong { color: #d3e0e6; font-size: 11px; }
+.connectionProtocolPicker button small { color: #69808e; font-size: 8px; }
+.connectionProtocolPicker button > i,
+.connectionVlessPicker button > i { width: 9px; height: 9px; border: 1px solid #49606d; border-radius: 50%; }
+.connectionProtocolPicker button.active { border-color: rgba(91, 218, 180, .55); background: rgba(24, 66, 57, .35); }
+.connectionProtocolPicker button.active > b { background: #174637; color: #72e3bf; }
+.connectionProtocolPicker button.active > i,
+.connectionVlessPicker button.active > i { border-color: #65dfba; background: #65dfba; box-shadow: 0 0 0 3px rgba(101, 223, 186, .12); }
+
+.connectionVlessPicker {
+  padding: 13px;
+  border: 1px solid rgba(90, 119, 145, .18);
+  border-radius: 12px;
+  background: rgba(7, 17, 25, .68);
+}
+
+.connectionVlessPicker > p { margin: -3px 0 10px; color: #6e8491; font-size: 9px; }
+.connectionVlessPicker > div { display: grid; gap: 7px; }
+.connectionVlessPicker button { display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, .9fr) 12px; align-items: center; gap: 10px; min-height: 48px; padding: 9px 11px; text-align: left; border: 1px solid rgba(91, 116, 141, .18); border-radius: 9px; background: #08131c; color: #8da1ad; }
+.connectionVlessPicker button span { display: flex; align-items: center; gap: 9px; }
+.connectionVlessPicker button span b { min-width: 48px; color: #6c8796; font: 750 8px/1 var(--font-mono), monospace; }
+.connectionVlessPicker button span strong { color: #cbd9df; font-size: 10px; }
+.connectionVlessPicker button small { color: #6b808c; font-size: 8px; }
+.connectionVlessPicker button.active { border-color: rgba(101, 223, 186, .4); background: rgba(20, 59, 51, .28); }
+.connectionVlessPicker button:disabled { cursor: not-allowed; opacity: .42; }
+
+.connectionTypeSettings {
+  min-width: 0;
+  margin: 0;
+  padding: 13px;
+  border: 1px solid rgba(91, 116, 141, .18);
+  border-radius: 12px;
+  background: rgba(7, 17, 25, .68);
+}
+
+.connectionTypeSettings legend { color: #9bb0bd; font-size: 10px; font-weight: 700; }
+.connectionTypeSettings > header { display: flex; align-items: center; gap: 10px; margin-bottom: 11px; }
+.connectionTypeSettings > header > span { display: grid; place-items: center; min-width: 52px; height: 30px; border-radius: 8px; background: #153d33; color: #6fe0bc; font: 800 8px/1 var(--font-mono), monospace; }
+.connectionTypeSettings > header > div { display: grid; gap: 2px; }
+.connectionTypeSettings > header strong { color: #d7e4e9; font-size: 11px; }
+.connectionTypeSettings > header small { color: #6e8491; font-size: 8px; }
+.connectionTypeSettings dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0; overflow: hidden; border: 1px solid rgba(91, 116, 141, .14); border-radius: 9px; background: rgba(91, 116, 141, .14); }
+.connectionTypeSettings dl > div { display: grid; gap: 3px; min-width: 0; padding: 9px 10px; background: #08131c; }
+.connectionTypeSettings dt { color: #617987; font: 700 7px/1 var(--font-mono), monospace; text-transform: uppercase; }
+.connectionTypeSettings dd { min-width: 0; margin: 0; overflow: hidden; color: #bdcdd4; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+
 .connectionDialogActions {
   margin-top: 17px !important;
 }
@@ -1574,8 +1668,12 @@
     border-top: 1px solid rgba(91, 116, 141, .12);
   }
 .connectionGeneratedSummary > :first-child { border-top: 0; }
-.generatedActions,
+  .generatedActions,
   .connectionDialogActions {
     grid-template-columns: 1fr !important;
   }
+  .connectionProtocolPicker > div { grid-template-columns: 1fr; }
+  .connectionVlessPicker button { grid-template-columns: minmax(0, 1fr) 12px; }
+  .connectionVlessPicker button > small { grid-column: 1 / -1; grid-row: 2; }
+  .connectionTypeSettings dl { grid-template-columns: 1fr; }
 }

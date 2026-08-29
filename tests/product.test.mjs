@@ -892,10 +892,14 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(api, /write_vless_cdn_snippet/);
   assert.match(api, /CONTROL_COMMAND, "vless-cdn-firewall"/);
   assert.match(api, /VLESS_CDN_SNIPPET/);
-  assert.match(api, /for inbound in vless_inbounds/);
+  assert.match(api, /vless_routes: list\[Literal\["direct", "tls", "cdn"\]\]/);
+  assert.match(api, /for inbound in selected_inbounds/);
   assert.match(api, /"profiles": profiles/);
   assert.match(page, /generatedProfiles/);
   assert.match(page, /profile\.id === "cdn"/);
+  assert.match(page, /VLESS REALITY/);
+  assert.match(page, /Тип подключения/);
+  assert.match(page, /Настройки подключения/);
   assert.match(manager, /configure_vless_cdn_firewall/);
   assert.match(api, /Транспорт прямого VLESS/);
   assert.match(api, /Только Direct\. После смены импортируйте Direct-профили заново/);
@@ -925,8 +929,8 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(protocolCss, /\.vlessCommandHero/);
   assert.match(protocolCss, /\.vlessRouteBoard/);
   assert.match(protocolCss, /\.vlessCommandArt/);
-  assert.match(protocolView, /VlessConnectionTransportSettings/);
-  assert.match(protocolView, /vlessScope="connections"/);
+  assert.doesNotMatch(protocolView, /VlessConnectionTransportSettings/);
+  assert.doesNotMatch(protocolView, /vlessScope="connections"/);
   assert.match(protocolView, /vlessScope=\{isVless \? "server" : "all"\}/);
   assert.match(protocolView, /function VlessControlCenter/);
   assert.match(protocolView, /Контуры подключения/);

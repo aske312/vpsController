@@ -3,8 +3,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { ConnectionGuide } from "../../connection-guide";
 import { bytes, CLIENTS_PER_PAGE, duration, labels } from "../../lib/control-plane-ui";
-import type { Client, DeviceProbe, EditableProtocolSetting, Protocol } from "../../types/control-plane";
-import { VlessConnectionTransportSettings } from "../protocols/protocol-view";
+import type { Client, DeviceProbe, Protocol } from "../../types/control-plane";
 
 type ClientStateFilter = "all" | "online" | "attention" | "offline";
 type ConnectionsViewProps = {
@@ -13,10 +12,9 @@ type ConnectionsViewProps = {
   measureDeviceRoute: (force?: boolean) => Promise<void> | void; openClientDialog: () => void; protocolClients: Client[]; clientSearch: string; setClientSearch: Dispatch<SetStateAction<string>>;
   clientProtocolFilter: "all" | Protocol; setClientProtocolFilter: Dispatch<SetStateAction<"all" | Protocol>>; currentClientPage: number; clientPageCount: number; visibleClientStart: number; visibleClientEnd: number; visibleClients: Client[];
   removeClient: (id: string) => Promise<void> | void;
-  vlessSettings?: { fields: EditableProtocolSetting[]; draft: Record<string, string | number | boolean>; busy: boolean; onChange: (key: string, value: string | number | boolean) => void; onSave: () => void };
 };
 
-export function ConnectionsView({ installedProtocols, clientStateFilter, setClientStateFilter, setClientPage, clientSummary, deviceProbe, probingDevice, measureDeviceRoute, openClientDialog, protocolClients, clientSearch, setClientSearch, clientProtocolFilter, setClientProtocolFilter, currentClientPage, clientPageCount, visibleClientStart, visibleClientEnd, visibleClients, removeClient, vlessSettings }: ConnectionsViewProps) {
+export function ConnectionsView({ installedProtocols, clientStateFilter, setClientStateFilter, setClientPage, clientSummary, deviceProbe, probingDevice, measureDeviceRoute, openClientDialog, protocolClients, clientSearch, setClientSearch, clientProtocolFilter, setClientProtocolFilter, currentClientPage, clientPageCount, visibleClientStart, visibleClientEnd, visibleClients, removeClient }: ConnectionsViewProps) {
   return <section className="connectionsWorkspace">
         <article className="connectionsHero">
           <div className="connectionsHeroContent">
@@ -51,8 +49,6 @@ export function ConnectionsView({ installedProtocols, clientStateFilter, setClie
           </div>
           <div className="connectionsHeroArt" aria-hidden="true" />
         </article>
-
-        {vlessSettings && <VlessConnectionTransportSettings {...vlessSettings} />}
 
         <article className="connectionsInventory">
           <header className="connectionsInventoryHead">

@@ -95,6 +95,7 @@ export default function Home() {
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
   const [confirmationInput, setConfirmationInput] = useState("");
   const [newClient, setNewClient] = useState({ name: "", protocol: "wg" as Protocol });
+  const [newClientVlessRoutes, setNewClientVlessRoutes] = useState<Array<"direct" | "tls" | "cdn">>(["direct"]);
   const [generated, setGenerated] = useState("");
   const [generatedName, setGeneratedName] = useState("client.conf");
   const [generatedProfiles, setGeneratedProfiles] = useState<GeneratedProfile[]>([]);
@@ -1037,6 +1038,21 @@ export default function Home() {
     [protocolImages],
   );
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
+  const vlessRouteStatus = protocolStatuses["vless-reality-xhttp"]?.routes || {};
+  const connectionTypeOptions = installedProtocols.flatMap((protocol) => {
+    if (protocol !== "vless-reality-xhttp") return [{
+      id: protocol, protocol, routeId: undefined, name: labels[protocol],
+      badge: protocol === "shadowsocks" ? "SS" : protocol.toUpperCase(),
+      description: protocol === "shadowsocks" ? "Шифрованный прокси TCP и UDP" : "Отдельный VPN-туннель",
+    }];
+    return ([
+      ["direct", "VLESS REALITY", "REALITY", "Прямой маршрут с маскировкой REALITY"],
+      ["tls", "VLESS TLS", "TLS", "Прямой домен с TLS-сертификатом"],
+      ["cdn", "VLESS CDN", "CDN", "Маршрут через настроенный CDN-домен"],
+    ] as const).filter(([id]) => id === "direct" ? vlessRouteStatus[id]?.enabled !== false : Boolean(vlessRouteStatus[id]?.enabled)).map(([routeId, name, badge, description]) => ({ id: `vless-${routeId}`, protocol, routeId, name, badge, description }));
+  });
+  const selectedConnectionType = connectionTypeOptions.find((option) => option.protocol === selectedClientProtocol && (option.protocol !== "vless-reality-xhttp" || option.routeId === newClientVlessRoutes[0])) || connectionTypeOptions[0];
+  const selectedVlessRoute = selectedConnectionType?.routeId ? vlessRouteStatus[selectedConnectionType.routeId] : undefined;
 
   useEffect(() => {
     if (tab !== "clients" || !installedProtocols.includes("vless-reality-xhttp")) return;
@@ -1058,7 +1074,7 @@ export default function Home() {
       setBusy(false); setError("Сначала установите выбранный протокол"); return;
     }
     try {
-      const payload = { ...newClient, protocol: selectedClientProtocol };
+      const payload = { ...newClient, protocol: selectedClientProtocol, ...(selectedClientProtocol === "vless-reality-xhttp" ? { vless_routes: newClientVlessRoutes } : {}) };
       const result = await request("/clients", { method: "POST", body: JSON.stringify(payload) }) as { config: string; filename?: string; profiles?: GeneratedProfile[] };
       const profiles = result.profiles?.filter((profile) => profile.config && profile.filename) || [];
       const preferred = profiles.find((profile) => profile.id === "cdn") || profiles[0];
@@ -1460,13 +1476,6 @@ export default function Home() {
         visibleClientEnd={visibleClientEnd}
         visibleClients={visibleClients}
         removeClient={removeClient}
-        vlessSettings={installedProtocols.includes("vless-reality-xhttp") ? {
-          fields: protocolStatuses["vless-reality-xhttp"]?.editable_settings || [],
-          draft: protocolSettingsDraft["vless-reality-xhttp"] || {},
-          busy,
-          onChange: (key, value) => changeProtocolSetting("vless-reality-xhttp", key, value),
-          onSave: () => void saveProtocolSettings("vless-reality-xhttp"),
-        } : undefined}
       />}
       {clientDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closeClientDialog}>
         <form className="connectionDialog addClient" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={addClient}>
@@ -1480,10 +1489,11 @@ export default function Home() {
               </div>
               <div className="connectionForm">
                 <label>Название устройства<input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов</small></label>
-                <label>Протокол<select value={selectedClientProtocol} onChange={(event) => setNewClient({ ...newClient, protocol: event.target.value as Protocol })}>{installedProtocols.map((protocol) => <option key={protocol} value={protocol}>{labels[protocol]}</option>)}</select><small className="fieldHint">Только установленные протоколы</small></label>
               </div>
+              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} className={selectedConnectionType?.id === option.id ? "active" : ""} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); }}><b>{option.badge}</b><span><strong>{option.name}</strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
+              {selectedConnectionType && <fieldset className="connectionTypeSettings"><legend>Настройки подключения</legend><header><span>{selectedConnectionType.badge}</span><div><strong>{selectedConnectionType.name}</strong><small>Параметры сформируются для выбранного типа подключения</small></div></header><dl>{selectedConnectionType.protocol === "vless-reality-xhttp" ? <><div><dt>Защита</dt><dd>{selectedVlessRoute?.security || selectedConnectionType.badge}</dd></div><div><dt>Транспорт</dt><dd>{selectedVlessRoute?.transport?.toUpperCase() || "XHTTP"}</dd></div><div><dt>Точка входа</dt><dd>{selectedVlessRoute?.endpoint || "адрес сервера"}</dd></div>{selectedVlessRoute?.path && <div><dt>Путь</dt><dd>{selectedVlessRoute.path}</dd></div>}</> : <><div><dt>Протокол</dt><dd>{labels[selectedConnectionType.protocol]}</dd></div><div><dt>Режим</dt><dd>{selectedConnectionType.protocol === "shadowsocks" ? "TCP + UDP" : "Полный туннель"}</dd></div><div><dt>Профиль</dt><dd>Отдельный ключ для устройства</dd></div></>}</dl></fieldset>}
             </div>
-            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy}>{busy ? "Создаём…" : "Создать подключение"}</button></div>
+            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy || !selectedConnectionType}>{busy ? "Создаём…" : "Создать подключение"}</button></div>
           </> : <>
             <div className="connectionGenerated">
               <div className="connectionGeneratedSummary">
