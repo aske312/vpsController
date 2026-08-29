@@ -717,7 +717,9 @@ def patch_dns_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
 
 
 def public_endpoint() -> str:
-    for key in ("PUBLIC_ENDPOINT", "PUBLIC_IPV4", "PUBLIC_IP"):
+    # A panel hostname may intentionally be proxied by Cloudflare. Direct TLS
+    # records must be compared with the VPS address, not with the proxy edge.
+    for key in ("PUBLIC_IPV4", "PUBLIC_IP", "PUBLIC_ENDPOINT"):
         value = os.getenv(key, "").strip()
         if value:
             return value

@@ -902,8 +902,10 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.doesNotMatch(api, /Literal\["xhttp", "raw", "grpc", "websocket"\]/);
   assert.match(protocolView, /ПРЯМОЕ ПОДКЛЮЧЕНИЕ/);
   assert.match(protocolView, /XHTTP подходит для большинства случаев/);
-  assert.match(protocolView, /ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ/);
-  assert.match(protocolView, /основной вариант — XHTTP/);
+  assert.match(protocolView, /vlessServerSettingsGrid/);
+  assert.match(protocolView, /Маскировка соединения/);
+  assert.match(protocolView, /Прямой TLS-домен/);
+  assert.match(protocolView, /Домен через CDN/);
   assert.match(protocolView, /TLS · \{actualCdnTransport\}/);
   assert.match(protocolView, /PATH \/ SERVICE/);
   assert.match(page, /await loadProtocolStatus\(protocol\)/);
@@ -1192,6 +1194,7 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /httpupgrade/);
   assert.match(manager, /render_vless_tls/);
   assert.match(manager, /mihomo-vless-tls-/);
+  assert.ok(manager.indexOf('("PUBLIC_IPV4", "PUBLIC_IP", "PUBLIC_ENDPOINT")') > -1, "Mihomo TLS must compare DNS with the VPS IP before a proxied panel hostname");
   assert.match(view, /VLESS CDN · HTTPUpgrade/);
   assert.match(manager, /def default_profile_presets/);
   assert.match(manager, /\/api\/mihomo\/routing\/presets/);

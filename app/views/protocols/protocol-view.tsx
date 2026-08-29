@@ -393,7 +393,7 @@ function ProtocolSettingsEditor({
     : field.label;
   const renderFields = (items: EditableProtocolSetting[]) => <div className="protocolSettingsFields">
     {items.map((field) => <label key={field.key}>
-      <span>{fieldLabel(field)}{vless && <em>{fieldLayer(field.key)}</em>}</span>
+      <span>{fieldLabel(field)}{vless && vlessScope === "connections" && <em>{fieldLayer(field.key)}</em>}</span>
       {field.type === "boolean" ? <input type="checkbox" checked={Boolean(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.checked)} />
         : field.type === "select" ? <select value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)}>
           {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -408,7 +408,26 @@ function ProtocolSettingsEditor({
   const tlsFields = visibleFields.filter((field) => tlsKeys.has(field.key));
   const commonFields = visibleFields.filter((field) => !directKeys.has(field.key) && !cdnKeys.has(field.key) && !tlsKeys.has(field.key));
   return <div className={`protocolSettingsEditor${vless ? " vlessSettingsEditor" : ""}`}>
-    {vless && vlessScope === "connections" ? <>
+    {vless && vlessScope === "server" ? <>
+      <div className="vlessServerSettingsGrid">
+        <section className="vlessServerSettingCard reality">
+          <header><span>REALITY</span><div><strong>Маскировка соединения</strong><p>Публичный HTTPS-сайт, под который маскируется прямой вход.</p></div></header>
+          {renderFields(directFields)}
+        </section>
+        <section className={`vlessServerSettingCard tls ${tlsEnabled ? "enabled" : "disabled"}`}>
+          <header><span>TLS</span><div><strong>Прямой TLS-домен</strong><p>DNS-запись без проксирования, сертификат выпускается автоматически.</p></div></header>
+          {renderFields(tlsFields)}
+        </section>
+        <section className={`vlessServerSettingCard cdn ${cdnEnabled ? "enabled" : "disabled"}`}>
+          <header><span>CDN</span><div><strong>Домен через CDN</strong><p>Проксируемая точка входа Cloudflare или другого провайдера.</p></div></header>
+          {renderFields(cdnFields)}
+        </section>
+      </div>
+      <section className="vlessRuntimeSettings">
+        <header><div><strong>Параметры Xray</strong><p>Серверный DNS и детализация журнала.</p></div></header>
+        {renderFields(commonFields)}
+      </section>
+    </> : vless && vlessScope === "connections" ? <>
       <div className="vlessRouteSummary" aria-label="Транспортные контуры VLESS">
         <span className="direct"><em>01 · VLESS</em><b>REALITY / {selectedTransport.toUpperCase()}</b><small>Прямое подключение к серверу.</small><i>REALITY</i></span>
         {tlsEnabled && <span className="direct"><em>02 · VLESS TLS</em><b>TLS / {selectedTlsTransport.toUpperCase()}</b><small>Прямой TLS-домен без Cloudflare Proxy.</small><i>ACME</i></span>}
