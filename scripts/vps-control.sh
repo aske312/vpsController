@@ -293,6 +293,7 @@ load_install_config() {
   local access_override="${VPS_CONTROL_ACCESS_MODE:-}"
   local http_port_override="${VPS_CONTROL_HTTP_PORT:-}"
   local vless_port_override="${VPS_CONTROL_VLESS_PORT:-}"
+  local server_datacenter_override="${VPS_CONTROL_SERVER_DATACENTER:-}"
   local server_city_override="${VPS_CONTROL_SERVER_CITY:-}"
   local server_country_override="${VPS_CONTROL_SERVER_COUNTRY:-}"
   local server_country_code_override="${VPS_CONTROL_SERVER_COUNTRY_CODE:-}"
@@ -319,6 +320,7 @@ load_install_config() {
   [[ -z "${access_override}" ]] || ACCESS_MODE="${access_override}"
   [[ -z "${http_port_override}" ]] || HTTP_PORT="${http_port_override}"
   [[ -z "${vless_port_override}" ]] || VLESS_REALITY_PORT="${vless_port_override}"
+  [[ -z "${server_datacenter_override}" ]] || SERVER_DATACENTER_OVERRIDE="${server_datacenter_override}"
   [[ -z "${server_city_override}" ]] || SERVER_CITY_OVERRIDE="${server_city_override}"
   [[ -z "${server_country_override}" ]] || SERVER_COUNTRY_OVERRIDE="${server_country_override}"
   [[ -z "${server_country_code_override}" ]] || SERVER_COUNTRY_CODE_OVERRIDE="${server_country_code_override^^}"
@@ -553,7 +555,7 @@ set_config_value() {
 
 refresh_server_identity() {
   local geo_file="${DATA_DIR}/tmp/geolocation"
-  local public_ip city country country_code override_city override_country override_country_code
+  local public_ip city country country_code datacenter override_city override_country override_country_code
   info "Определение публичного IP и локации"
   install -d -m 0750 "${DATA_DIR}/tmp"
   rm -f -- "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json"
@@ -682,6 +684,7 @@ PY
     country="${geo[2]:-Unknown}"
     country_code="${geo[3]:-}"
     override_city="$(env_value SERVER_CITY_OVERRIDE)"
+    datacenter="$(env_value SERVER_DATACENTER_OVERRIDE)"
     override_country="$(env_value SERVER_COUNTRY_OVERRIDE)"
     override_country_code="$(env_value SERVER_COUNTRY_CODE_OVERRIDE)"
     [[ -n "${override_city}" ]] && city="${override_city}"
@@ -690,9 +693,10 @@ PY
     if [[ -n "${public_ip}" ]]; then
       set_env_value "PUBLIC_IP" "${public_ip}"
       set_env_value "SERVER_CITY" "${city}"
+      set_env_value "SERVER_DATACENTER" "${datacenter:-${country}}"
       set_env_value "SERVER_COUNTRY" "${country}"
       set_env_value "SERVER_COUNTRY_CODE" "${country_code^^}"
-      set_env_value "SERVER_NAME" "${city}, ${country}"
+      set_env_value "SERVER_NAME" "${datacenter:-${country}}"
       if [[ -n "${override_city}${override_country}${override_country_code}" ]]; then
         ok "применена подтверждённая локация: ${city}, ${country} (${public_ip})."
       elif [[ "${city}" == "Unknown" ]]; then
@@ -1530,6 +1534,7 @@ PY
     fi
   fi
   [[ -z "${SERVER_CITY_OVERRIDE:-}" ]] || set_env_value "SERVER_CITY_OVERRIDE" "${SERVER_CITY_OVERRIDE}"
+  [[ -z "${SERVER_DATACENTER_OVERRIDE:-}" ]] || set_env_value "SERVER_DATACENTER_OVERRIDE" "${SERVER_DATACENTER_OVERRIDE}"
   [[ -z "${SERVER_COUNTRY_OVERRIDE:-}" ]] || set_env_value "SERVER_COUNTRY_OVERRIDE" "${SERVER_COUNTRY_OVERRIDE}"
   [[ -z "${SERVER_COUNTRY_CODE_OVERRIDE:-}" ]] || set_env_value "SERVER_COUNTRY_CODE_OVERRIDE" "${SERVER_COUNTRY_CODE_OVERRIDE^^}"
   if [[ -z "$(env_value PUBLIC_IP)" ]]; then

@@ -21,8 +21,9 @@ usage() {
 
 Параметры:
   --domain DOMAIN   настроить панель и HTTPS для указанного домена
+  --datacenter NAME название дата-центра по данным провайдера
   --location-city CITY
-                    физический город сервера по данным провайдера
+                    устаревший параметр совместимости
   --location-country COUNTRY
                     физическая страна сервера по данным провайдера
   --location-country-code CODE
@@ -62,6 +63,11 @@ while (($#)); do
     --location-city)
       [[ $# -ge 2 && -n "$2" && "$2" != *$'\n'* ]] || { printf 'Ошибка: после --location-city укажите город.\n' >&2; exit 2; }
       export VPS_CONTROL_SERVER_CITY="$2"
+      shift
+      ;;
+    --datacenter)
+      [[ $# -ge 2 && -n "$2" && "$2" != *$'\n'* ]] || { printf 'Ошибка: после --datacenter укажите название дата-центра.\n' >&2; exit 2; }
+      export VPS_CONTROL_SERVER_DATACENTER="$2"
       shift
       ;;
     --location-country)

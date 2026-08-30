@@ -779,7 +779,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(page, /onNavigate\("channels"\)/);
   assert.match(page, /onNavigate\("overview"\)/);
   assert.match(page, /onNavigate\("clients"\)/);
-  assert.match(page, /onNavigate\("dns"\)/);
+  assert.match(page, /setTab\("dns"\)/);
   assert.match(page, /onNavigate\("security"\)/);
   assert.match(page, /onNavigate\("application"\)/);
   assert.match(page, /onNavigate\("services"\)/);
@@ -1254,12 +1254,13 @@ test("legacy users beta surface and orchestration are removed", async () => {
 
 test("channel DNS follows installed protected channels and security lives under system", async () => {
   const navigation = await read("app/components/gate-navigation.tsx");
-  assert.match(navigation, /transports\.length > 0[\s\S]*Защищённые каналы[\s\S]*gateChannelChildren[\s\S]*label="DNS"/);
+  assert.match(navigation, /activeTab === "channels" \|\| activeTab === "dns"/);
+  assert.doesNotMatch(navigation, /label="DNS"/);
   assert.match(navigation, /<NavGroup label="SYSTEM">[\s\S]*label="Безопасность"[\s\S]*label="Приложение"/);
   assert.doesNotMatch(navigation, /<NavGroup label="INFRASTRUCTURE">/);
 });
 
-test("managed services artwork scales to the complete block", async () => {
+test("managed services artwork fills the block without distortion", async () => {
   const servicesCss = await read("app/styles/pages/services.css");
-  assert.match(servicesCss, /\.servicesManagedBackdrop[^}]*background-size:100% 100%[^}]*background-repeat:no-repeat/s);
+  assert.match(servicesCss, /\.servicesManagedBackdrop[^}]*background-size:cover[^}]*background-repeat:no-repeat/s);
 });

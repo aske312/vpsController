@@ -10,6 +10,8 @@ type ProtocolImage = {
 };
 
 type ServerInfo = {
+  name?: string;
+  datacenter?: string;
   city?: string;
   country?: string;
   public_endpoint?: string;
@@ -64,15 +66,12 @@ export function GateNavigation({
             {transports.length > 0 && (
               <>
                 <NavButton
-                  active={activeTab === "channels" || transports.some((item) => activeTab === item.id)}
+                  active={activeTab === "channels" || activeTab === "dns" || transports.some((item) => activeTab === item.id)}
                   icon="transport"
                   label="Защищённые каналы"
                   tone="cyan"
                   onClick={() => onNavigate("channels")}
                 />
-                <div className="gateChannelChildren">
-                  <NavButton active={activeTab === "dns"} icon="network" label="DNS" compact onClick={() => onNavigate("dns")} />
-                </div>
               </>
             )}
           </NavGroup>
@@ -89,7 +88,7 @@ export function GateNavigation({
         <span className="gateNodePulse" />
         <div>
           <small>{nodeStateLabel}</small>
-          <strong>{server?.city || "VPS"}</strong>
+          <strong>{server?.datacenter || server?.name || "VPS"}</strong>
           <span className="gateNodeLocation">{server?.country || "—"}</span>
           <span className="gateNodeAddress">{server?.public_endpoint || server?.public_ip || "—"}</span>
         </div>

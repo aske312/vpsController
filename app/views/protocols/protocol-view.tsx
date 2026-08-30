@@ -343,7 +343,7 @@ function ProtocolSettingsEditor({
     ? selectedTransport === "grpc" ? "Service name прямого gRPC" : selectedTransport === "raw" ? "Путь (не используется в RAW)" : "Путь прямого XHTTP"
     : field.label;
   const renderFields = (items: EditableProtocolSetting[]) => <div className="protocolSettingsFields">
-    {items.map((field) => <label key={field.key}>
+    {items.map((field) => <label key={field.key} className={["tls_enabled", "cdn_enabled"].includes(field.key) ? "vlessRouteToggle" : undefined}>
       <span>{fieldLabel(field)}{vless && vlessScope === "connections" && <em>{fieldLayer(field.key)}</em>}</span>
       {field.type === "boolean" ? <input type="checkbox" checked={Boolean(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.checked)} />
         : field.type === "select" ? <select value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)}>

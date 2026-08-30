@@ -1309,7 +1309,7 @@ export default function Home() {
     onRefresh={() => void refreshCurrent(true)}
     onLogout={() => { sessionStorage.removeItem("312-token"); setToken(""); }}
   >
-      {tab !== "overview" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city}, {overview?.server.country}  управление инфраструктурой</p></div></div>}
+      {tab !== "overview" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.datacenter || overview?.server.name || overview?.server.country || "Дата-центр"} · управление инфраструктурой</p></div></div>}
       {error && <div className="errorBox">{error}</div>}
       {notice && <div className="successNotice" role="status"><span>✓</span>{notice}<button onClick={() => setNotice("")} aria-label="Закрыть уведомление">×</button></div>}
       {tab === "overview" && (
@@ -1343,6 +1343,11 @@ export default function Home() {
           }}
         />
       )}
+
+      {(tab === "channels" || tab === "dns") && <nav className="protocolSwitcher channelPageSwitcher" aria-label="Защищённые каналы">
+        {installedProtocols.map((protocol) => <button type="button" key={protocol} className={tab === "channels" && selectedChannel === protocol ? "active" : ""} onClick={() => { setSelectedChannel(protocol); setTab("channels"); void loadProtocolStatus(protocol); }}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : "VLESS"}</button>)}
+        <button type="button" className={tab === "dns" ? "active" : ""} onClick={() => setTab("dns")}>DNS</button>
+      </nav>}
 
       {tab === "dns" && <DnsView
         dns={dns}
@@ -1435,7 +1440,7 @@ export default function Home() {
         protocolDiagnosticsLabel={protocolDiagnosticsLabel}
         protocolResourceAvailable={protocolResourceAvailable}
         protocolResourceTotal={protocolResourceTotal}
-        installedProtocols={installedProtocols}
+        installedProtocols={tab === "channels" ? [] : installedProtocols}
         setTab={setTab}
         onSelectProtocol={(protocol) => { setSelectedChannel(protocol); void loadProtocolStatus(protocol); }}
         protocolSettingsDraft={protocolSettingsDraft}
