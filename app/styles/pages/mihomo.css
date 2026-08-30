@@ -280,7 +280,7 @@
 .mihomoDeviceIdentity b,.mihomoDeviceIdentity small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mihomoDeviceIdentity b { color:#dce8ef; font-size:11px; }
 .mihomoDeviceIdentity small { margin-top:3px; color:#657a89; font:8px var(--font-mono); }
-.mihomoDeviceTotals { display:grid; grid-template-columns:90px minmax(120px,1fr); gap:7px; }
+.mihomoDeviceTotals { display:grid; grid-template-columns:72px 72px minmax(120px,1fr); gap:7px; }
 .mihomoDeviceTotals > span { min-width:0; padding:7px 9px; border-left:2px solid rgba(134,117,227,.35); background:rgba(10,20,29,.52); }
 .mihomoDeviceTotals small,.mihomoDeviceTotals b { display:block; }
 .mihomoDeviceTotals small { color:#607482; font:700 7px var(--font-mono); letter-spacing:.08em; }
@@ -425,7 +425,7 @@
 .mihomoProfileSummary { grid-template-columns:1fr 1fr; }
 .mihomoProfileSummary > div:last-child { grid-column:1/-1; }
 .mihomoDeviceHeader { grid-template-columns:1fr; align-items:stretch; }
-.mihomoDeviceTotals { grid-template-columns:1fr 1fr; }
+.mihomoDeviceTotals { grid-template-columns:1fr 1fr 1.4fr; }
 .mihomoDeviceActions { grid-column:auto; justify-content:flex-start; }
 .mihomoModuleCatalog > div:not(.mihomoEmpty) { grid-template-columns: 1fr; padding: 13px 14px; }
 .mihomoProfileIdentity { align-items: flex-start; }

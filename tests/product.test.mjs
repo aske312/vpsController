@@ -248,6 +248,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /toggleDirectGame/);
   assert.match(page, /mihomoProfileRuleSwitch/);
   assert.match(page, /profileDirectRules/);
+  assert.match(page, /const ruleCount = profileDirectRules\.filter/);
+  assert.match(page, /<small>ПРАВИЛА<\/small><b>\{ruleCount\}<\/b>/);
   assert.match(page, /UDP напрямую/);
   assert.match(page, /toggleProfileRule/);
   assert.match(page, /Каждое правило применяется только к этому профилю/);
