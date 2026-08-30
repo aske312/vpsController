@@ -62,7 +62,7 @@
   background:#071019;
   box-shadow:0 18px 50px rgba(0,0,0,.26);
 }
-.servicesManagedBackdrop { position:absolute; inset:0; z-index:-2; background:url('/gate-art/new-operator/services.webp') right center/contain no-repeat; opacity:.78; }
+.servicesManagedBackdrop { position:absolute; inset:0; z-index:-2; background-image:url('/gate-art/new-operator/services.webp'); background-position:center; background-size:100% 100%; background-repeat:no-repeat; opacity:.78; }
 .servicesManaged::before { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,rgba(4,11,18,.99) 0%,rgba(4,11,18,.96) 48%,rgba(4,11,18,.72) 62%,rgba(4,11,18,.16) 100%); }
 .servicesManagedHead { padding:15px 18px 13px; border-bottom:1px solid rgba(105,137,162,.12); }
 .servicesManagedHead h2 { margin:0; color:#edf5f9; font-size:21px; }

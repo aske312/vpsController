@@ -278,6 +278,16 @@
   min-height: 38px;
 }
 
+.gateChannelChildren {
+  margin: 1px 0 3px 18px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(86, 217, 233, .18);
+}
+
+.gateChannelChildren .gateNavButton {
+  min-height: 36px;
+}
+
 .gateNavGlyph {
   width: 24px;
   height: 24px;

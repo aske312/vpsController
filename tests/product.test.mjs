@@ -799,7 +799,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /env_updates\["VRX_DNS"\]/);
   assert.match(api, /vrx_servers\.insert\(0, selected\["doh_url"\]\)/);
   assert.match(page, /DoH для VLESS/);
-  assert.match(page, /DNS каналов/);
+  assert.match(page, /SECURE CHANNELS · DNS/);
   assert.doesNotMatch(api, /apply_system|system_resolver|def apply_system_dns/);
   assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
   assert.match(api, /def apply_vrx_dns/);
@@ -910,8 +910,9 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(protocolView, /Маскировка соединения/);
   assert.match(protocolView, /Прямой TLS-домен/);
   assert.match(protocolView, /Домен через CDN/);
-  assert.match(protocolView, /TLS · \{actualCdnTransport\}/);
-  assert.match(protocolView, /PATH \/ SERVICE/);
+  assert.doesNotMatch(protocolView, /ОСНОВНОЙ · VLESS/);
+  assert.doesNotMatch(protocolView, /ДОПОЛНИТЕЛЬНЫЙ · TLS/);
+  assert.doesNotMatch(protocolView, /ДОПОЛНИТЕЛЬНЫЙ · CDN/);
   assert.match(page, /await loadProtocolStatus\(protocol\)/);
   assert.match(api, /"routes": routes/);
   assert.match(api, /Direct · REALITY\/\{direct_transport\}/);
@@ -921,9 +922,9 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(mihomoManager, /secrets\.token_urlsafe\(32\)/);
   assert.match(install, /DynamicUser=yes/);
   assert.match(protocolView, /function ProtocolCommandCenter/);
-  assert.match(protocolView, /ROUTE BLUEPRINT/);
-  assert.match(protocolView, /isVless \? "Маршруты" : "Сетевой контур"/);
-  assert.match(protocolView, /vlessPulse/);
+  assert.match(protocolView, /className="vlessOverviewHead"/);
+  assert.match(protocolView, /className="vlessContourSection protocolContourSection"/);
+  assert.match(protocolView, /Рабочие параметры канала и его публичная точка подключения/);
   assert.match(protocolView, /vlessOperations/);
   assert.match(protocolCss, /\.vlessSettingsGroup\.cdn/);
   assert.match(protocolCss, /\.vlessCommandHero/);
@@ -958,8 +959,9 @@ test("WG, AWG, Shadowsocks and VLESS share the compact protocol command center",
   assert.match(protocolView, /protocol === "shadowsocks" \? "TCP \+ UDP PROXY"/);
   assert.match(protocolView, /protocol === "awg" \? "OBFUSCATED UDP" : "NATIVE UDP"/);
   assert.match(protocolCss, /\.protocolCommandCenter\s*\{[^}]*gap:9px/);
-  assert.match(protocolCss, /\.vlessCommandTitle h1[^}]*font-size:clamp\(30px,2\.8vw,42px\)/);
-  assert.match(protocolCss, /\.vlessPulse strong[^}]*font:750 16px/);
+  assert.match(protocolView, /vlessOverviewMetrics/);
+  assert.match(protocolView, /vlessContourGrid single/);
+  assert.match(protocolView, /vlessWorkspaceNew/);
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
@@ -1252,7 +1254,12 @@ test("legacy users beta surface and orchestration are removed", async () => {
 
 test("channel DNS follows installed protected channels and security lives under system", async () => {
   const navigation = await read("app/components/gate-navigation.tsx");
-  assert.match(navigation, /transports\.length > 0[\s\S]*Защищённые каналы[\s\S]*DNS каналов/);
+  assert.match(navigation, /transports\.length > 0[\s\S]*Защищённые каналы[\s\S]*gateChannelChildren[\s\S]*label="DNS"/);
   assert.match(navigation, /<NavGroup label="SYSTEM">[\s\S]*label="Безопасность"[\s\S]*label="Приложение"/);
   assert.doesNotMatch(navigation, /<NavGroup label="INFRASTRUCTURE">/);
+});
+
+test("managed services artwork scales to the complete block", async () => {
+  const servicesCss = await read("app/styles/pages/services.css");
+  assert.match(servicesCss, /\.servicesManagedBackdrop[^}]*background-size:100% 100%[^}]*background-repeat:no-repeat/s);
 });

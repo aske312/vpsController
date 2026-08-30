@@ -172,75 +172,43 @@ function ProtocolCommandCenter({ props }: { props: ProtocolViewProps }) {
   } = props;
   const protocol = protocolTab;
   const profile = channelProfiles[protocol];
-  const isVless = protocol === "vless-reality-xhttp";
-  if (isVless) return <VlessControlCenter props={props} />;
+  if (protocol === "vless-reality-xhttp") return <VlessControlCenter props={props} />;
   const protocolCode = protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : "VLESS";
   const draft = protocolSettingsDraft[protocol] || {};
   const fields = activeProtocol.editable_settings || [];
-  const setting = (key: string, fallback: string | number | boolean = "—") => draft[key] ?? fields.find((field) => field.key === key)?.value ?? fallback;
-  const cdnEnabled = Boolean(setting("cdn_enabled", false));
-  const cdnDomain = String(setting("cdn_domain", "")) || "Домен не задан";
-  const runtimeRoutes = (activeProtocol as ProtocolStatus & { routes?: Record<"direct" | "cdn", { enabled: boolean; security: string; transport: string; endpoint: string; server_name: string; path: string }> }).routes;
-  const directRoute = runtimeRoutes?.direct;
-  const cdnRoute = runtimeRoutes?.cdn;
-  const actualDirectTransport = String(directRoute?.transport || setting("transport", "xhttp")).toUpperCase();
-  const actualCdnTransport = String(cdnRoute?.transport || setting("cdn_transport", "websocket")).toUpperCase();
-  const actualCdnEnabled = cdnRoute?.enabled ?? cdnEnabled;
   const events = activeProtocol.history.events || [];
-  const routeKind = isVless ? `REALITY · ${actualDirectTransport}` : protocol === "shadowsocks" ? "TCP + UDP PROXY" : protocol === "awg" ? "OBFUSCATED UDP" : "NATIVE UDP";
-  const runtimeName = isVless ? "Xray" : activeProtocol.interface || profile.title;
-  const routeAddress = isVless ? directRoute?.endpoint || `${activeProtocol.address || "—"}:${activeProtocol.listen_port || "—"}` : protocol === "shadowsocks" ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port || "—"}` : activeProtocol.address || "—";
-  const routeDetailLabel = isVless ? "SNI / TARGET" : protocol === "shadowsocks" ? "SECURITY" : "INTERFACE";
-  const routeDetail = isVless ? directRoute?.server_name || activeProtocol.target?.replace(/:443$/, "") || "—" : protocol === "shadowsocks" ? activeProtocol.security || "AEAD" : activeProtocol.interface || "—";
+  const routeKind = protocol === "shadowsocks" ? "TCP + UDP PROXY" : protocol === "awg" ? "OBFUSCATED UDP" : "NATIVE UDP";
+  const runtimeName = activeProtocol.interface || profile.title;
+  const routeAddress = protocol === "shadowsocks" ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port || "—"}` : activeProtocol.address || "—";
+  const routeDetailLabel = protocol === "shadowsocks" ? "SECURITY" : "INTERFACE";
+  const routeDetail = protocol === "shadowsocks" ? activeProtocol.security || "AEAD" : activeProtocol.interface || "—";
 
-  return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()} protocolCommandCenter${isVless ? " vlessCommandCenter" : ""}`}>
+  return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()} protocolCommandCenter vlessWorkspaceNew`}>
     {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные защищённые протоколы">
       {installedProtocols.map((item) => <button type="button" key={item} className={item === protocol ? "active" : ""} aria-current={item === protocol ? "page" : undefined} onClick={() => onSelectProtocol ? onSelectProtocol(item) : setTab(item)}>{item === "wg" ? "WG" : item === "awg" ? "AWG" : item === "shadowsocks" ? "SS" : "VLESS"}</button>)}
     </nav>}
 
-    <header className="vlessCommandHero protocolCommandHero">
-      <div className="vlessCommandCopy">
-        <p className="eyebrow">CHANNEL {profile.index} · {profile.family}</p>
-        <div className="vlessCommandTitle"><span>{protocolCode.slice(0, 1)}</span><div><h1>{profile.title}</h1><p>{profile.signature}</p></div></div>
-        <div className="vlessCommandState">
-          <span className={activeProtocol.service_active ? "online" : "offline"}><i />{activeProtocol.service_active ? `${runtimeName} ONLINE` : `${runtimeName} STOPPED`}</span>
-          <span>{formatModuleVersion(activeProtocolImage?.installed_version, "version n/a")}</span>
-          <span>{activeProtocol.online_peers}/{activeProtocol.peers} online</span>
-        </div>
-        <div className="vlessCommandActions">
-          <button onClick={() => void restartProtocol(protocol)} disabled={busy}>Перезапустить</button>
-          {activeProtocolImage?.update_available && <button className={activeProtocolImage.update_breaking ? "warning" : "accent"} onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy}>{installingProtocol === `update-${activeProtocolImage.id}` ? "Обновление…" : `Обновить до ${activeProtocolImage.available_version}`}</button>}
-          {activeProtocolImage?.removable && <button className="danger" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить</button>}
-        </div>
-      </div>
-
-      <div className="vlessRouteBoard">
-        <header><p className="eyebrow">{isVless ? "ROUTE BLUEPRINT" : "CHANNEL BLUEPRINT"}</p><strong>{isVless ? "Маршруты" : "Сетевой контур"}</strong></header>
-        <article className="vlessRouteNode direct">
-          <div className="vlessRouteIndex">01</div>
-          <div><em>{isVless ? "DIRECT" : "PRIMARY"}</em><h2>{routeKind}</h2></div>
-          <dl><div><dt>{protocol === "shadowsocks" || isVless ? "ENDPOINT" : "ADDRESS"}</dt><dd>{routeAddress}</dd></div><div><dt>{routeDetailLabel}</dt><dd>{routeDetail}</dd></div></dl>
-        </article>
-        {isVless && actualCdnEnabled && <><div className="vlessRouteBridge"><i /><span>общие серверные параметры</span><i /></div>
-        <article className={`vlessRouteNode cdn${actualCdnEnabled ? " enabled" : ""}`}>
-          <div className="vlessRouteIndex">02</div>
-          <div><em>{actualCdnEnabled ? "CDN ACTIVE" : "CDN DISABLED"}</em><h2>TLS · {actualCdnTransport}</h2></div>
-          <dl><div><dt>ENDPOINT</dt><dd>{actualCdnEnabled ? cdnRoute?.endpoint || `${cdnDomain}:443` : "Не настроен"}</dd></div><div><dt>PATH / SERVICE</dt><dd>{actualCdnEnabled ? cdnRoute?.path || "—" : "—"}</dd></div></dl>
-        </article></>}
-      </div>
-
-      <div className="vlessCommandArt" aria-hidden="true">
-        <Image src="/gate-art/new-operator/operator_prt_1.webp" alt="" width={941} height={1672} priority />
-        <span>{protocolCode}<br />OPERATOR</span>
-      </div>
+    <header className="vlessOverviewHead">
+      <div className="vlessOverviewIdentity"><span>{protocolCode.slice(0, 1)}</span><div><p className="eyebrow">{profile.family}</p><h1>{profile.title}</h1><p>{profile.lead}</p></div></div>
+      <div className="vlessOverviewState"><span className={activeProtocol.service_active ? "online" : "offline"}><i />{activeProtocol.service_active ? `${runtimeName} работает` : `${runtimeName} остановлен`}</span><small>{formatModuleVersion(activeProtocolImage?.installed_version, "версия не определена")}</small></div>
+      <div className="vlessOverviewActions"><button onClick={() => void restartProtocol(protocol)} disabled={busy}>Перезапустить</button>{activeProtocolImage?.update_available && <button className="accent" onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy}>{installingProtocol === `update-${activeProtocolImage.id}` ? "Обновляем…" : "Обновить"}</button>}{activeProtocolImage?.removable && <button className="danger" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить</button>}</div>
     </header>
 
-    <section className="vlessPulse" aria-label={`Телеметрия ${profile.title}`}>
-      <div><small>RX</small><strong>{bytes(activeProtocolRate.rx)}<em>/с</em></strong></div>
-      <div><small>TX</small><strong>{bytes(activeProtocolRate.tx)}<em>/с</em></strong></div>
-      <div><small>ДОСТУПНОСТЬ</small><strong>{protocolAvailability != null ? `${protocolAvailability}%` : "—"}</strong></div>
-      <div><small>ЗАДЕРЖКА</small><strong>{activeProtocol.history.latency_avg_ms != null ? `${activeProtocol.history.latency_avg_ms.toFixed(1)} мс` : "—"}</strong></div>
-      <div><small>ПОТЕРИ</small><strong>{activeProtocol.history.external_loss_percent != null ? `${activeProtocol.history.external_loss_percent}%` : "—"}</strong></div>
+    <section className="vlessOverviewMetrics" aria-label={`Состояние ${profile.title}`}>
+      <div><small>КЛИЕНТЫ</small><strong>{activeProtocol.online_peers}<em>/{activeProtocol.peers}</em></strong><span>сейчас активны</span></div>
+      <div><small>ПРИЁМ</small><strong>{bytes(activeProtocolRate.rx)}<em>/с</em></strong><span>{bytes(activeProtocol.history.received_bytes)} за период</span></div>
+      <div><small>ПЕРЕДАЧА</small><strong>{bytes(activeProtocolRate.tx)}<em>/с</em></strong><span>{bytes(activeProtocol.history.transmitted_bytes)} за период</span></div>
+      <div><small>ДОСТУПНОСТЬ</small><strong>{protocolAvailability != null ? `${protocolAvailability}%` : "—"}</strong><span>{protocolDiagnosticsLabel}</span></div>
+      <div><small>ЗАДЕРЖКА</small><strong>{activeProtocol.history.latency_avg_ms != null ? `${activeProtocol.history.latency_avg_ms.toFixed(1)} мс` : "—"}</strong><span>потери {activeProtocol.history.external_loss_percent != null ? `${activeProtocol.history.external_loss_percent}%` : "—"}</span></div>
+    </section>
+
+    <section className="vlessContourSection protocolContourSection">
+      <header><div><p className="eyebrow">CONNECTION MAP</p><h2>Сетевой контур</h2></div><p>Рабочие параметры канала и его публичная точка подключения.</p></header>
+      <div className="vlessContourGrid single"><article className="vlessContourCard enabled">
+        <div className="vlessContourTop"><span>01</span><b>{activeProtocol.service_active ? "ГОТОВ" : "ОСТАНОВЛЕН"}</b></div>
+        <p>{profile.signature}</p><h3>{routeKind}</h3><small>{profile.runtimeLabel}</small>
+        <dl><div><dt>{protocol === "shadowsocks" ? "ENDPOINT" : "АДРЕС"}</dt><dd>{routeAddress}</dd></div><div><dt>{routeDetailLabel}</dt><dd>{routeDetail}</dd></div><div><dt>ТРАНСПОРТ</dt><dd>{activeProtocol.transport || (protocol === "shadowsocks" ? "TCP + UDP" : "UDP")}</dd></div></dl>
+      </article></div>
     </section>
 
     <ProtocolSettingsPanel protocol={protocol} fields={fields} draft={draft} busy={busy}
@@ -251,7 +219,7 @@ function ProtocolCommandCenter({ props }: { props: ProtocolViewProps }) {
         <button className="vlessOperationHead" onClick={() => toggleNetworkDiagnostics(protocol)} aria-expanded={Boolean(diagnosticsOpen[protocol])}>
           <span><small>RUNTIME HEALTH</small><strong>Состояние {runtimeName}</strong><em>{protocolDiagnosticsLabel}{activeProtocol.diagnostics?.score != null ? ` · ${activeProtocol.diagnostics.score}/100` : ""}</em></span><b>{diagnosticsOpen[protocol] ? "Скрыть" : "Открыть"}</b>
         </button>
-        {diagnosticsOpen[protocol] && <div className="vlessOperationBody">{!isVless && <div className="vlessOperationTools"><span>{activeProtocol.diagnostics?.checked_at ? `Проверено ${safeDateTime(activeProtocol.diagnostics.checked_at)}` : "Ожидание проверки"}</span><button onClick={() => void checkNetworkDiagnostics(protocol)} disabled={checkingDiagnostics === protocol}>{checkingDiagnostics === protocol ? "Проверяем…" : "Проверить"}</button></div>}<div className="protocolDiagnosticChecks">{(activeProtocol.diagnostics?.checks || []).map((check) => <div className={check.ok ? "ok" : "failed"} key={check.id}><i /><p><strong>{check.name}</strong><small>{check.value}</small></p></div>)}{!activeProtocol.diagnostics?.checks?.length && <p className="protocolDiagnosticEmpty">Данные появятся после проверки.</p>}</div></div>}
+        {diagnosticsOpen[protocol] && <div className="vlessOperationBody"><div className="vlessOperationTools"><span>{activeProtocol.diagnostics?.checked_at ? `Проверено ${safeDateTime(activeProtocol.diagnostics.checked_at)}` : "Ожидание проверки"}</span><button onClick={() => void checkNetworkDiagnostics(protocol)} disabled={checkingDiagnostics === protocol}>{checkingDiagnostics === protocol ? "Проверяем…" : "Проверить"}</button></div><div className="protocolDiagnosticChecks">{(activeProtocol.diagnostics?.checks || []).map((check) => <div className={check.ok ? "ok" : "failed"} key={check.id}><i /><p><strong>{check.name}</strong><small>{check.value}</small></p></div>)}{!activeProtocol.diagnostics?.checks?.length && <p className="protocolDiagnosticEmpty">Данные появятся после проверки.</p>}</div></div>}
       </article>
 
       <article className={`vlessOperationCard resources ${resourcesOpen[protocol] ? "open" : ""}`}>
@@ -309,7 +277,7 @@ function VlessControlCenter({ props }: { props: ProtocolViewProps }) {
     { id: "02", kind: "TLS", title: "VLESS TLS", enabled: routes.tls?.enabled ?? tlsEnabled, route: routes.tls, domain: String(setting("tls_domain", "")), note: "Прямой домен, DNS only" },
     { id: "03", kind: "CDN", title: "VLESS CDN", enabled: routes.cdn?.enabled ?? cdnEnabled, route: routes.cdn, domain: String(setting("cdn_domain", "")), note: "Проксируемый CDN-домен" },
   ];
-  return <section className="protocolWorkspace vlessWorkspaceNew">
+  return <section className="protocolWorkspace protocolWorkspace-vless vlessWorkspaceNew">
     {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные защищённые протоколы">{installedProtocols.map((item) => <button type="button" key={item} className={item === protocol ? "active" : ""} onClick={() => onSelectProtocol ? onSelectProtocol(item) : setTab(item)}>{item === "wg" ? "WG" : item === "awg" ? "AWG" : item === "shadowsocks" ? "SS" : "VLESS"}</button>)}</nav>}
     <header className="vlessOverviewHead">
       <div className="vlessOverviewIdentity"><span>V</span><div><p className="eyebrow">XRAY ACCESS PLATFORM</p><h1>VLESS</h1><p>Три независимых способа подключения к одному защищённому узлу.</p></div></div>
@@ -420,11 +388,6 @@ function ProtocolSettingsEditor({
       {tlsEnabled && <section className="vlessSettingsGroup direct"><header><div><em>02 · ПРЯМОЙ TLS</em><strong>VLESS TLS</strong></div><p>Транспорт независимого TLS-контура.</p></header>{renderFields(visibleFields.filter((field) => ["tls_transport", "tls_xhttp_mode"].includes(field.key)))}</section>}
       {cdnEnabled && <section className="vlessSettingsGroup cdn"><header><div><em>03 · CDN</em><strong>VLESS CDN</strong></div><p>Транспорт подключения через Cloudflare или другой CDN.</p></header>{renderFields(visibleFields.filter((field) => ["cdn_transport", "cdn_xhttp_mode"].includes(field.key)))}</section>}
     </> : vless ? <>
-      <div className="vlessRouteSummary" aria-label="Маршруты VLESS">
-        <span className="direct"><em>ОСНОВНОЙ · VLESS</em><b>REALITY / {selectedTransport.toUpperCase()}</b><small>Подключение напрямую к серверу. Не зависит от CDN.</small><i>{selectedTransport === "xhttp" ? "РЕКОМЕНДУЕТСЯ" : "СОВМЕСТИМО"}</i></span>
-        {tlsEnabled && <span className="direct"><em>ДОПОЛНИТЕЛЬНЫЙ · TLS</em><b>TLS / {selectedTlsTransport.toUpperCase()}</b><small>Прямой домен без CDN.</small><i>ACME</i></span>}
-        {cdnEnabled && <span className="cdn enabled"><em>ДОПОЛНИТЕЛЬНЫЙ · CDN</em><b>TLS / {selectedCdnTransport.toUpperCase()}</b><small>Отдельная точка входа через CDN-домен.</small><i>{selectedCdnTransport === "xhttp" ? "РЕКОМЕНДУЕТСЯ" : selectedCdnTransport === "grpc" ? "НУЖЕН gRPC У CDN" : "LEGACY / FALLBACK"}</i></span>}
-      </div>
       <section className="vlessSettingsGroup direct">
         <header><div><em>1 · ПРЯМОЕ ПОДКЛЮЧЕНИЕ</em><strong>Direct · REALITY</strong></div><p>Выберите транспорт и маскировочный SNI. XHTTP подходит для большинства случаев.</p></header>
         {renderFields(directFields)}
