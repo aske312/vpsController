@@ -449,6 +449,54 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
 
 
 DIRECT_RULE_PRESETS: dict[str, list[str]] = {
+    "block_ads": [
+        "GEOSITE,category-ads-all,REJECT",
+        "GEOSITE,tracker,REJECT",
+        # Common ad exchanges and regional networks kept as a fallback when a
+        # client's geosite database is stale or uses a reduced build.
+        "DOMAIN-SUFFIX,doubleclick.net,REJECT",
+        "DOMAIN-SUFFIX,googlesyndication.com,REJECT",
+        "DOMAIN-SUFFIX,googleadservices.com,REJECT",
+        "DOMAIN-SUFFIX,google-analytics.com,REJECT",
+        "DOMAIN-SUFFIX,googletagmanager.com,REJECT",
+        "DOMAIN-SUFFIX,googletagservices.com,REJECT",
+        "DOMAIN-SUFFIX,adnxs.com,REJECT",
+        "DOMAIN-SUFFIX,scorecardresearch.com,REJECT",
+        "DOMAIN-SUFFIX,criteo.com,REJECT",
+        "DOMAIN-SUFFIX,criteo.net,REJECT",
+        "DOMAIN-SUFFIX,taboola.com,REJECT",
+        "DOMAIN-SUFFIX,outbrain.com,REJECT",
+        "DOMAIN-SUFFIX,amazon-adsystem.com,REJECT",
+        "DOMAIN-SUFFIX,adsrvr.org,REJECT",
+        "DOMAIN-SUFFIX,adform.net,REJECT",
+        "DOMAIN-SUFFIX,adroll.com,REJECT",
+        "DOMAIN-SUFFIX,openx.net,REJECT",
+        "DOMAIN-SUFFIX,pubmatic.com,REJECT",
+        "DOMAIN-SUFFIX,rubiconproject.com,REJECT",
+        "DOMAIN-SUFFIX,casalemedia.com,REJECT",
+        "DOMAIN-SUFFIX,moatads.com,REJECT",
+        "DOMAIN-SUFFIX,serving-sys.com,REJECT",
+        "DOMAIN-SUFFIX,adsafeprotected.com,REJECT",
+        "DOMAIN-SUFFIX,yandexadexchange.net,REJECT",
+        "DOMAIN,an.yandex.ru,REJECT",
+        "DOMAIN-SUFFIX,adfox.ru,REJECT",
+        "DOMAIN-SUFFIX,mytarget.ru,REJECT",
+        "DOMAIN-SUFFIX,between.digital,REJECT",
+        "DOMAIN-SUFFIX,adriver.ru,REJECT",
+        "DOMAIN-SUFFIX,soloway.ru,REJECT",
+        "DOMAIN-SUFFIX,hotjar.com,REJECT",
+        "DOMAIN-SUFFIX,hotjar.io,REJECT",
+        "DOMAIN-SUFFIX,mixpanel.com,REJECT",
+        "DOMAIN-SUFFIX,amplitude.com,REJECT",
+        "DOMAIN-SUFFIX,fullstory.com,REJECT",
+        "DOMAIN-SUFFIX,app-measurement.com,REJECT",
+        # External anti-adblock vendors can be stopped at the network layer.
+        # Inline/first-party detection still requires a browser content blocker.
+        "DOMAIN-SUFFIX,pagefair.com,REJECT",
+        "DOMAIN-SUFFIX,pagefair.net,REJECT",
+        "DOMAIN-SUFFIX,blockadblock.com,REJECT",
+        "DOMAIN-SUFFIX,getadmiral.com,REJECT",
+    ],
     "direct_ru_sites": [
         "DOMAIN-SUFFIX,ru,DIRECT", "DOMAIN-SUFFIX,xn--p1ai,DIRECT", "DOMAIN-SUFFIX,su,DIRECT",
         "DOMAIN,vk.ru,DIRECT", "DOMAIN-SUFFIX,vk.ru,DIRECT",
@@ -551,6 +599,7 @@ DIRECT_GAME_PROCESSES: dict[str, list[str]] = {
 }
 
 DIRECT_RULE_META = {
+    "block_ads": ("Блокировка рекламы", "Рекламные сети, трекеры и внешние anti-adblock-сервисы блокируются внутри Mihomo."),
     "direct_ru_sites": ("Российские сайты", "Домены РФ, российские сервисы и IP-адреса."),
     "direct_ru_banks": ("Банки и платежи", "Банки РФ, СБП, НСПК и финансовые сервисы."),
     "direct_ru_marketplaces": ("Магазины и маркетплейсы", "Маркетплейсы и крупные интернет-магазины."),
@@ -601,10 +650,11 @@ def direct_game_rules(routing: dict[str, Any]) -> list[str]:
 
 
 def profile_rules(routing: dict[str, Any]) -> list[str]:
-    rules: list[str] = direct_game_rules(routing)
+    rules: list[str] = []
     for setting in DIRECT_RULE_PRESETS:
         if routing.get(setting, False):
             rules.extend(configured_preset_rules(routing, setting))
+    rules.extend(direct_game_rules(routing))
     raw_rules = str(routing.get("rules", "")).replace("\r", "")
     rules.extend(rule.strip() for rule in raw_rules.split("\n") if rule.strip() and not rule.strip().startswith("#"))
     return list(dict.fromkeys(rules))

@@ -78,6 +78,13 @@
     },
     { "key": "preset_tls_domain", "label": "Прямой TLS-домен для быстрых профилей", "type": "text", "default": "" },
     {
+      "key": "block_ads",
+      "label": "Блокировка рекламы",
+      "type": "boolean",
+      "default": false,
+      "help": "Блокирует рекламные сети, трекеры и внешние anti-adblock-сервисы только в профилях, где включено это правило."
+    },
+    {
       "key": "direct_ru_sites",
       "label": "Российские сайты — напрямую",
       "type": "boolean",
@@ -98,6 +105,7 @@
       "default": false,
       "help": "Ozon, Wildberries, Яндекс Маркет, Мегамаркет, Avito, AliExpress Россия и крупные интернет-магазины."
     },
+    { "key": "block_ads_rules", "label": "Список блокировки рекламы", "type": "textarea", "default": "@default" },
     { "key": "direct_ru_sites_rules", "label": "Список российских сайтов", "type": "textarea", "default": "@default" },
     { "key": "direct_ru_banks_rules", "label": "Список банков и платежей", "type": "textarea", "default": "@default" },
     { "key": "direct_ru_marketplaces_rules", "label": "Список магазинов и маркетплейсов", "type": "textarea", "default": "@default" },
