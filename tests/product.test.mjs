@@ -216,8 +216,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /atomic_json\(ROUTING_SETTINGS_FILE, routing_defaults\(\)\)/);
   assert.match(manager, /ensure_policy_settings\(\)[\s\S]+value\["modules"\]\[module_id\] = True/);
   assert.match(manager, /@app\.patch\("\/api\/mihomo\/routing\/settings"/);
-  assert.match(manager, /routing = \{\*\*routing_settings\(\), \*\*item\.get\("routing", \{\}\)\}/);
+  assert.match(manager, /routing = \{\*\*routing_settings\(\), \*\*profile_routing\}/);
   assert.match(manager, /DIRECT_GAME_PROCESSES/);
+  assert.match(manager, /direct_games_enabled/);
+  assert.match(manager, /profile_routing\.get\(key, False\)/);
   assert.match(manager, /PROCESS-NAME-WILDCARD/);
   assert.match(manager, /find-process-mode: strict/);
   assert.match(page, /request\("\/mihomo\/dns\/settings"\)/);
@@ -230,7 +232,11 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /MetaCubeX\/ClashMetaForAndroid\/releases/);
   assert.match(page, /Игры без VPN/);
   assert.match(page, /toggleDirectGame/);
+  assert.match(page, /mihomoProfileRuleSwitch/);
+  assert.match(page, /profileDirectRules/);
+  assert.match(page, /Каждое правило применяется только к этому профилю/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games/);
+  assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games_enabled/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_game_processes/);
   assert.match(page, /DNS и маршрутизация Mihomo готовы/);
   assert.match(styles, /\.mihomoPolicyPanel/);

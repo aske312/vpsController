@@ -116,6 +116,28 @@ const directGameCatalog = [
   { id: "roblox", code: "RBX", name: "Roblox" },
   { id: "wot", code: "WOT", name: "World of Tanks" },
   { id: "tarkov", code: "EFT", name: "Escape from Tarkov" },
+  { id: "apex", code: "APEX", name: "Apex Legends" },
+  { id: "rainbow6", code: "R6", name: "Rainbow Six Siege" },
+  { id: "overwatch2", code: "OW2", name: "Overwatch 2" },
+  { id: "rocketleague", code: "RL", name: "Rocket League" },
+  { id: "lol", code: "LOL", name: "League of Legends" },
+  { id: "destiny2", code: "D2", name: "Destiny 2" },
+  { id: "helldivers2", code: "HD2", name: "Helldivers 2" },
+  { id: "rust", code: "RUST", name: "Rust" },
+  { id: "warthunder", code: "WT", name: "War Thunder" },
+  { id: "dbd", code: "DBD", name: "Dead by Daylight" },
+  { id: "thefinals", code: "TF", name: "The Finals" },
+  { id: "battlefield2042", code: "BF", name: "Battlefield 2042" },
+  { id: "brawlstars", code: "BS", name: "Brawl Stars" },
+  { id: "freefire", code: "FF", name: "Free Fire" },
+  { id: "mobilelegends", code: "ML", name: "Mobile Legends" },
+];
+
+const profileDirectRules = [
+  { key: "direct_ru_sites", code: "RU", title: "Российские сайты", text: "Домены РФ, российские сервисы и IP-адреса." },
+  { key: "direct_ru_banks", code: "BANK", title: "Банки и платежи", text: "Банки РФ, СБП, НСПК и карты Мир." },
+  { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Маркетплейсы и крупные интернет-магазины." },
+  { key: "direct_games_enabled", code: "GAME", title: "Игры", text: "Выбранные игры, их UDP-трафик и голосовой чат." },
 ];
 
 const MIHOMO_OPERATION_EVENT = "gate312:mihomo-operation";
@@ -909,16 +931,11 @@ export function MihomoPage({
           </header>
 
           <section className="mihomoRoutingSection">
-            <div className="mihomoRoutingSectionTitle"><div><b>Открывать без VPN</b><small>Готовые списки поддерживаются панелью и применяются ко всем Mihomo-профилям.</small></div><span>{["direct_ru_sites", "direct_ru_banks", "direct_ru_marketplaces"].filter((key) => Boolean(routingDraft[key])).length} из 3 включено</span></div>
-            <div className="mihomoRouteCards">
-              {[
-                { key: "direct_ru_sites", code: "RU", title: "Российские сайты", text: "Домены .ru, .рф, .su, VK, Яндекс и российские IP-адреса." },
-                { key: "direct_ru_banks", code: "BANK", title: "Банки и платежи", text: "Банки РФ, СБП, НСПК, карты Мир и финансовые сервисы." },
-                { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины и маркетплейсы", text: "Ozon, Wildberries, Маркет, Avito и крупные интернет-магазины." },
-              ].map((item) => <label key={item.key} className={Boolean(routingDraft[item.key]) ? "is-enabled" : ""}>
-                <span className="mihomoRouteCode">{item.code}</span><span><b>{item.title}</b><small>{item.text}</small></span>
-                <input type="checkbox" checked={Boolean(routingDraft[item.key])} onChange={(event) => updateRoutingDraft(item.key, event.target.checked)} />
-              </label>)}
+            <div className="mihomoRoutingSectionTitle"><div><b>Списки прямого подключения</b><small>Здесь хранятся готовые наборы. Нужные правила включаются отдельно в настройках каждого профиля.</small></div><span>4 набора</span></div>
+            <div className="mihomoRouteCards mihomoRuleCatalog">
+              {profileDirectRules.map((item) => <article key={item.key}>
+                <span className="mihomoRouteCode">{item.code}</span><span><b>{item.title}</b><small>{item.text}</small></span><i>Включается в профиле</i>
+              </article>)}
             </div>
           </section>
 
@@ -1001,6 +1018,7 @@ export function MihomoPage({
               <button type="button" className="iconButton" onClick={() => setProfileDialog(null)}>x</button>
             </header>
             <label className="mihomoProfileName"><span>Название профиля</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} /></label>
+            <section className="mihomoProfileRules"><header><div><b>Правила прямого подключения</b><small>Каждое правило применяется только к этому профилю. Состав списков задаётся в разделе «Настройки».</small></div><span>{profileDirectRules.filter((rule) => Boolean(profileRouting[rule.key])).length} из {profileDirectRules.length}</span></header><div>{profileDirectRules.map((rule) => <label key={rule.key} className={`mihomoProfileRuleSwitch${Boolean(profileRouting[rule.key]) ? " is-enabled" : ""}`}><span><b>{rule.title}</b><small>{rule.text}</small></span><input type="checkbox" checked={Boolean(profileRouting[rule.key])} onChange={(event) => setProfileRouting((current) => ({ ...current, [rule.key]: event.target.checked }))} /></label>)}</div></section>
             <section className="mihomoDeviceBuilder"><header><div><b>Устройства профиля</b><small>У каждого устройства собственные credentials и отдельный YAML.</small></div><button type="button" onClick={() => { const id = `device-${crypto.randomUUID()}`; setProfileDevices((current) => [...current, { id, name: `Устройство ${current.length + 1}` }]); setActiveDeviceId(id); }}>+ Устройство</button></header><div>{profileDevices.map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => setActiveDeviceId(device.id)}><input value={device.name} maxLength={80} onClick={(event) => event.stopPropagation()} onChange={(event) => setProfileDevices((current) => current.map((item) => item.id === device.id ? { ...item, name: event.target.value } : item))} />{profileDevices.length > 1 && <span onClick={(event) => { event.stopPropagation(); const next = profileDevices.filter((item) => item.id !== device.id); setProfileDevices(next); setProfileConnections((current) => current.filter((connection) => connection.device_id !== device.id)); if (activeDeviceId === device.id) setActiveDeviceId(next[0].id); }}>×</span>}</button>)}</div></section>
             <section className="mihomoPresetPicker">
               <header><div><b>Пресет для {profileDevices.find((device) => device.id === activeDeviceId)?.name || "устройства"}</b><small>Пресет заменит подключения только выбранного устройства. Остальные устройства профиля не изменятся.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настройки пресетов</button></header>

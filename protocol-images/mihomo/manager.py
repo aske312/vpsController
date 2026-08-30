@@ -525,10 +525,27 @@ DIRECT_GAME_PROCESSES: dict[str, list[str]] = {
     "roblox": ["RobloxPlayerBeta.exe", "com.roblox.client"],
     "wot": ["WorldOfTanks.exe"],
     "tarkov": ["EscapeFromTarkov.exe"],
+    "apex": ["r5apex.exe"],
+    "rainbow6": ["RainbowSix.exe", "RainbowSix_Vulkan.exe"],
+    "overwatch2": ["Overwatch.exe"],
+    "rocketleague": ["RocketLeague.exe"],
+    "lol": ["League of Legends.exe"],
+    "destiny2": ["destiny2.exe"],
+    "helldivers2": ["helldivers2.exe"],
+    "rust": ["RustClient.exe"],
+    "warthunder": ["aces.exe"],
+    "dbd": ["DeadByDaylight-Win64-Shipping.exe"],
+    "thefinals": ["Discovery.exe"],
+    "battlefield2042": ["bf2042.exe"],
+    "brawlstars": ["com.supercell.brawlstars"],
+    "freefire": ["com.dts.freefireth", "com.dts.freefiremax"],
+    "mobilelegends": ["com.mobile.legends"],
 }
 
 
 def direct_game_rules(routing: dict[str, Any]) -> list[str]:
+    if not routing.get("direct_games_enabled", False):
+        return []
     selected = {value.strip().lower() for value in str(routing.get("direct_games", "")).replace("\r", "").replace("\n", ",").split(",") if value.strip()}
     processes: list[str] = []
     for game_id in selected:
@@ -2109,7 +2126,13 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         if component == "transport-reality" and str(connection.get("settings", {}).get("route_mode") or credential.get("route_mode")) == "tls":
             direct_name, cdn_name, tls_name = None, None, name
         rendered.append((connection, direct_name, cdn_name, tls_name))
-    routing = {**routing_settings(), **item.get("routing", {})}
+    profile_routing = item.get("routing", {}) if isinstance(item.get("routing"), dict) else {}
+    routing = {**routing_settings(), **profile_routing}
+    # Ready-made bypass lists are selected per profile. Never inherit legacy
+    # global switches from routing settings; that would silently affect every
+    # existing subscription.
+    for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled"):
+        routing[key] = bool(profile_routing.get(key, False))
     mode = str(routing.get("mode", "rule"))
     lines = [
         "mixed-port: 7890",
