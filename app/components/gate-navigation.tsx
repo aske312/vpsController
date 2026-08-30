@@ -10,8 +10,6 @@ type ProtocolImage = {
 };
 
 type ServerInfo = {
-  name?: string;
-  datacenter?: string;
   city?: string;
   country?: string;
   public_endpoint?: string;
@@ -88,7 +86,7 @@ export function GateNavigation({
         <span className="gateNodePulse" />
         <div>
           <small>{nodeStateLabel}</small>
-          <strong>{server?.datacenter || server?.name || "VPS"}</strong>
+          <strong>{server?.city || "VPS"}</strong>
           <span className="gateNodeLocation">{server?.country || "—"}</span>
           <span className="gateNodeAddress">{server?.public_endpoint || server?.public_ip || "—"}</span>
         </div>

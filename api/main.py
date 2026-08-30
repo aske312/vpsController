@@ -70,7 +70,6 @@ PUBLIC_DOMAIN_ENDPOINT = os.getenv("PUBLIC_DOMAIN_ENDPOINT", PUBLIC_DOMAIN)
 PUBLIC_ENDPOINTS = tuple(value for value in os.getenv("PUBLIC_ENDPOINTS", "").split(",") if value) or tuple(dict.fromkeys(value for value in (PUBLIC_IP_ENDPOINT, PUBLIC_DOMAIN_ENDPOINT) if value))
 DOMAIN_ROUTE_MODE = os.getenv("DOMAIN_ROUTE_MODE", "direct" if PUBLIC_DOMAIN else "none")
 SERVER_CITY = os.getenv("SERVER_CITY", "Unknown")
-SERVER_DATACENTER = os.getenv("SERVER_DATACENTER", os.getenv("SERVER_COUNTRY", "Unknown"))
 SERVER_COUNTRY = os.getenv("SERVER_COUNTRY", "Unknown")
 SERVER_COUNTRY_CODE = os.getenv("SERVER_COUNTRY_CODE", "")
 WG_INTERFACE = os.getenv("WG_INTERFACE", "wg0")
@@ -1013,7 +1012,6 @@ def overview(_: None = Depends(require_token)) -> dict:
             "public_endpoints": list(PUBLIC_ENDPOINTS),
             "domain_route_mode": DOMAIN_ROUTE_MODE,
             "city": SERVER_CITY,
-            "datacenter": SERVER_DATACENTER,
             "country": SERVER_COUNTRY,
             "country_code": SERVER_COUNTRY_CODE,
             "uptime_s": uptime_s,

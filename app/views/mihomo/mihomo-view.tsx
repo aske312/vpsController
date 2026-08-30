@@ -136,6 +136,9 @@ export function MihomoPage({
   const [modules, setModules] = useState<Module[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [dnsPolicy, setDnsPolicy] = useState<PolicySettings | null>(null);
+  const [dnsDraft, setDnsDraft] = useState<Record<string, string | number | boolean>>({});
+  const [dnsDirty, setDnsDirty] = useState(false);
+  const dnsDirtyRef = useRef(false);
   const [routingPolicy, setRoutingPolicy] = useState<PolicySettings | null>(null);
   const [routingDraft, setRoutingDraft] = useState<Record<string, string | number | boolean>>({});
   const [routingDirty, setRoutingDirty] = useState(false);
@@ -196,6 +199,7 @@ export function MihomoPage({
       setModules((nextModules as { items: Module[] }).items || []);
       setProfiles((nextProfiles as { items: Profile[] }).items || []);
       setDnsPolicy(nextDns as PolicySettings);
+      if (!dnsDirtyRef.current) setDnsDraft({ ...(nextDns as PolicySettings).values });
       setRoutingPolicy(nextRouting as PolicySettings);
       if (!routingDirtyRef.current) setRoutingDraft({ ...(nextRouting as PolicySettings).values });
       const profileItems = (nextProfiles as { items: Profile[] }).items || [];
@@ -208,6 +212,34 @@ export function MihomoPage({
       setError(cause instanceof Error ? cause.message : "Не удалось загрузить Mihomo Manager");
     }
   }, [request]);
+
+  function updateDnsDraft(key: string, value: string | number | boolean) {
+    setDnsDraft((current) => ({ ...current, [key]: value }));
+    dnsDirtyRef.current = true;
+    setDnsDirty(true);
+  }
+
+  async function saveDnsWorkspace(event: FormEvent) {
+    event.preventDefault();
+    const operationId = "settings:dns-private";
+    publishMihomoOperation(operationId, "DNS Mihomo", "running", "Сохраняем DNS для профилей Mihomo…");
+    setBusy(operationId);
+    setError("");
+    try {
+      await request("/mihomo/dns/settings", { method: "PATCH", body: JSON.stringify({ values: dnsDraft }) });
+      dnsDirtyRef.current = false;
+      setDnsDirty(false);
+      await refresh();
+      setNotice("DNS для соединений Mihomo сохранён. Обновите подписку в клиенте.");
+      publishMihomoOperation(operationId, "DNS Mihomo", "success", "DNS-настройки сохранены");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "DNS-настройки не сохранены";
+      setError(message);
+      publishMihomoOperation(operationId, "DNS Mihomo", "error", message);
+    } finally {
+      setBusy("");
+    }
+  }
 
   useEffect(() => {
     const initial = window.setTimeout(() => void refresh(), 0);
@@ -349,38 +381,6 @@ export function MihomoPage({
   function openSettings(module: Module) {
     setEditing(module);
     setSettingsDraft({ ...module.settings_values });
-  }
-
-  async function openPolicySettings(kind: "dns" | "routing") {
-    let policy = kind === "dns" ? dnsPolicy : routingPolicy;
-    setError("");
-    if (!policy) {
-      const operationId = `policy:${kind}`;
-      setBusy(operationId);
-      try {
-        policy = await request(kind === "dns" ? "/mihomo/dns/settings" : "/mihomo/routing/schema") as PolicySettings;
-        if (kind === "dns") setDnsPolicy(policy);
-        else setRoutingPolicy(policy);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : `Не удалось загрузить настройки ${kind === "dns" ? "DNS" : "маршрутизации"} Mihomo`);
-        return;
-      } finally {
-        setBusy("");
-      }
-    }
-    openSettings({
-      id: kind === "dns" ? "dns-private" : "routing-policy",
-      name: kind === "dns" ? "DNS Mihomo" : "Маршрутизация Mihomo",
-      description: kind === "dns"
-        ? "Базовая DNS-политика применяется ко всем конфигурациям Mihomo."
-        : "Базовая стратегия маршрутизации применяется ко всем профилям без собственных переопределений.",
-      category: kind === "dns" ? "dns" : "routing",
-      category_name: kind === "dns" ? "DNS" : "Маршрутизация",
-      installed: installedChannels.length > 0,
-      active: installedChannels.length > 0,
-      settings: policy.schema,
-      settings_values: policy.values,
-    });
   }
 
   async function saveSettings(event: FormEvent) {
@@ -669,7 +669,7 @@ export function MihomoPage({
         <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
         <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
         <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Компоненты</Tab>
-        <Tab id="dns" current={view} onSelect={setView}>DNS Mihomo</Tab>
+        <Tab id="dns" current={view} onSelect={setView}>DNS</Tab>
         <Tab id="routing" current={view} onSelect={setView}>Настройки</Tab>
       </nav>
 
@@ -846,6 +846,16 @@ export function MihomoPage({
             ); })}
             {!profiles.length && <Empty title="Профилей пока нет" text="Установите компонент и соберите первое подключение в профиле." />}
           </div>
+          <section className="mihomoClientGuide">
+            <header><p className="eyebrow">CLIENT SETUP</p><h3>Настройка и подключение</h3><p>Создайте профиль и устройство, скопируйте ссылку подписки и добавьте её в клиент как удалённый профиль. После изменений обновляйте подписку в приложении.</p></header>
+            <ol><li><b>1</b><span>Нажмите «Скопировать подписку» у нужного устройства.</span></li><li><b>2</b><span>В клиенте добавьте профиль по URL и вставьте ссылку.</span></li><li><b>3</b><span>Обновите профиль, выберите канал и включите подключение.</span></li></ol>
+            <div className="mihomoClientApps">
+              <a href="https://github.com/clash-verge-rev/clash-verge-rev/releases" target="_blank" rel="noreferrer"><small>PC · WINDOWS / LINUX</small><strong>Clash Verge Rev</strong><span>Официальные релизы ↗</span></a>
+              <a href="https://apps.apple.com/us/app/clash-mi/id6744321968" target="_blank" rel="noreferrer"><small>IPHONE / IPAD</small><strong>Clash Mi</strong><span>Скачать в App Store ↗</span></a>
+              <a href="https://github.com/MetaCubeX/ClashMetaForAndroid/releases" target="_blank" rel="noreferrer"><small>ANDROID</small><strong>Clash Meta for Android</strong><span>Официальные APK-релизы ↗</span></a>
+              <a href="https://github.com/clash-verge-rev/clash-verge-rev/releases" target="_blank" rel="noreferrer"><small>MAC · INTEL / APPLE SILICON</small><strong>Clash Verge Rev</strong><span>Скачать DMG ↗</span></a>
+            </div>
+          </section>
         </article>
       )}
 
@@ -862,14 +872,14 @@ export function MihomoPage({
       )}
 
       {view === "dns" && (
-        <PolicyPanel
-          code="DNS"
-          title="DNS-политика Mihomo"
-          description="Создаётся автоматически вместе с первым каналом. Настройки применяются только к конфигурациям Mihomo и не меняют системный DNS VPS."
-          ready={policiesReady}
-          values={dnsPolicy?.values}
-          onSettings={() => void openPolicySettings("dns")}
-        />
+        <form className="mihomoDnsWorkspace" onSubmit={saveDnsWorkspace}>
+          <header className="mihomoDnsHeader"><div><p className="eyebrow">MIHOMO DNS</p><h2>DNS</h2><p>Настройте разрешение доменов для всех соединений через Mihomo. Эти параметры входят в конфигурации профилей и не меняют системный DNS VPS.</p></div><span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "АКТИВЕН" : "ОЖИДАНИЕ"}</span></header>
+          <section className="mihomoDnsFields">
+            {(dnsPolicy?.schema || []).map((field) => <label key={field.key}><span>{field.label}</span>{field.type === "select" ? <select value={String(dnsDraft[field.key] ?? field.default)} onChange={(event) => updateDnsDraft(field.key, event.target.value)}>{(field.options || []).map((option) => { const value = typeof option === "string" ? option : option.value; const label = typeof option === "string" ? option : option.label; return <option key={value} value={value}>{label}</option>; })}</select> : <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(dnsDraft[field.key] ?? field.default)} onChange={(event) => updateDnsDraft(field.key, field.type === "number" ? Number(event.target.value) : event.target.value)} />}{field.help && <small>{field.help}</small>}</label>)}
+          </section>
+          <aside className="mihomoDnsNote"><b>Как применяется DNS</b><span>Основной сервер используется первым, резервный — при недоступности или неподходящем ответе. После сохранения обновите подписку на устройствах.</span></aside>
+          <footer className="mihomoDnsFooter"><span>{dnsDirty ? "Есть несохранённые изменения" : "Настройки синхронизированы"}</span><button className="primaryButton" type="submit" disabled={!dnsDirty || busy === "settings:dns-private"}>{busy === "settings:dns-private" ? "Сохранение…" : "Сохранить DNS"}</button></footer>
+        </form>
       )}
 
       {view === "routing" && (
@@ -1075,25 +1085,6 @@ function ModuleCatalog({ title, description, modules, busy, onToggle, onUpdate, 
         ))}
         {!modules.length && <Empty title="Каталог пуст" text="Mihomo Manager не получил manifest внутренних модулей." />}
       </div>
-    </article>
-  );
-}
-
-function PolicyPanel({ code, title, description, ready, values, onSettings }: { code: string; title: string; description: string; ready: boolean; values?: Record<string, string | number | boolean>; onSettings: () => void }) {
-  return (
-    <article className="mihomoPolicyPanel">
-      <header>
-        <span className="mihomoPolicyMark">{code}</span>
-        <div><p className="eyebrow">AUTOMATIC POLICY</p><h2>{title}</h2><p>{description}</p></div>
-        <span className={ready ? "mihomoPill is-online" : "mihomoPill"}><i />{ready ? "ACTIVE" : "WAITING"}</span>
-      </header>
-      <div className="mihomoPolicyValues">
-        {Object.entries(values || {}).map(([key, value]) => <div key={key}><small>{key.replaceAll("_", " ")}</small><strong>{String(value) || "—"}</strong></div>)}
-      </div>
-      <footer>
-        <span>{ready ? "Политика подключена ко всем новым конфигурациям Mihomo." : "Установите первый внутренний канал, чтобы активировать policy-слой."}</span>
-        <button className="primaryButton" type="button" onClick={onSettings}>Настроить</button>
-      </footer>
     </article>
   );
 }

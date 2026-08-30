@@ -564,7 +564,7 @@ export function OverviewDashboard({
 
         <div className="overviewSystemFacts">
           <FactCard label="DISK USED" value={`${diskUsed.toFixed(0)}%`} detail={`${bytes(diskUsedBytes)} / ${bytes(diskTotal)}  free ${bytes(diskFree)}`} />
-          <FactCard label="UPTIME" value={duration(overview?.server.uptime_s || 0)} detail={`${overview?.server.datacenter || overview?.server.name || "Дата-центр"}  ${overview?.server.country || "—"}`} />
+          <FactCard label="UPTIME" value={duration(overview?.server.uptime_s || 0)} detail={`${overview?.server.city || "Город не определён"}  ${overview?.server.country || "—"}`} />
           <FactCard label="LOAD 1M" value={overview?.resources.load1?.toFixed(2) || "—"} detail={`${overview?.resources.cpu_count || 0} CPU cores`} />
           <FactCard label="TRAFFIC TOTAL" value={bytes(networkTotal)} detail={`↓ ${bytes(overview?.resources.network_rx || 0)}  ↑ ${bytes(overview?.resources.network_tx || 0)}`} />
           <FactCard label="DIRECT CLIENTS" value={`${clients.length}`} detail={`${stableDirectClients} stable  ${attentionDirectClients} attention  ${offlineDirectClients} offline`} />

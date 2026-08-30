@@ -11,7 +11,6 @@ type ProtocolImage = {
 };
 
 type ServerInfo = {
-  datacenter?: string;
   city?: string;
   name?: string;
   country?: string;
@@ -111,7 +110,7 @@ export function AppWorkspace({
             <CountryFlag code={countryCode} label={server?.country || "Страна не определена"} />
             <div className="gateMastIdentity">
               <span>PRIMARY NODE</span>
-              <h2>{server?.datacenter || server?.name || "Primary Node"}</h2>
+              <h2>{server?.city || server?.name || "Primary Node"}</h2>
               <p><span>{server?.country || "—"}</span><span className="mono">{server?.public_endpoint || server?.public_ip || "—"}</span></p>
             </div>
             <div className={`gateMastState ${nodeState}`}>{applicationStateTitle}</div>

@@ -343,7 +343,7 @@ function ProtocolSettingsEditor({
     ? selectedTransport === "grpc" ? "Service name прямого gRPC" : selectedTransport === "raw" ? "Путь (не используется в RAW)" : "Путь прямого XHTTP"
     : field.label;
   const renderFields = (items: EditableProtocolSetting[]) => <div className="protocolSettingsFields">
-    {items.map((field) => <label key={field.key} className={["tls_enabled", "cdn_enabled"].includes(field.key) ? "vlessRouteToggle" : undefined}>
+    {items.map((field) => <label key={field.key} className={field.type === "boolean" ? "protocolBooleanField" : undefined}>
       <span>{fieldLabel(field)}{vless && vlessScope === "connections" && <em>{fieldLayer(field.key)}</em>}</span>
       {field.type === "boolean" ? <input type="checkbox" checked={Boolean(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.checked)} />
         : field.type === "select" ? <select value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)}>
@@ -389,16 +389,16 @@ function ProtocolSettingsEditor({
       {cdnEnabled && <section className="vlessSettingsGroup cdn"><header><div><em>03 · CDN</em><strong>VLESS CDN</strong></div><p>Транспорт подключения через Cloudflare или другой CDN.</p></header>{renderFields(visibleFields.filter((field) => ["cdn_transport", "cdn_xhttp_mode"].includes(field.key)))}</section>}
     </> : vless ? <>
       <section className="vlessSettingsGroup direct">
-        <header><div><em>1 · ПРЯМОЕ ПОДКЛЮЧЕНИЕ</em><strong>Direct · REALITY</strong></div><p>Выберите транспорт и маскировочный SNI. XHTTP подходит для большинства случаев.</p></header>
+        <header><div><em>01 · REALITY</em><strong>Подключение по REALITY</strong></div><p>Транспорт, путь и маскировочный SNI.</p></header>
         {renderFields(directFields)}
       </section>
-      <section className="vlessSettingsGroup direct"><header><div><em>2 · ПРЯМОЙ TLS</em><strong>VLESS TLS</strong></div><p>Независимый прямой домен. Сертификат автоматически выпускает и продлевает Caddy.</p></header>{renderFields(tlsFields)}</section>
-      {cdnEnabled ? <section className="vlessSettingsGroup cdn">
-        <header><div><em>2 · ДОПОЛНИТЕЛЬНЫЙ МАРШРУТ</em><strong>CDN · TLS</strong></div><p>Включается независимо. WS и gRPC оставлены для совместимости; основной вариант — XHTTP.</p></header>
+      <section className="vlessSettingsGroup direct"><header><div><em>02 · TLS</em><strong>Подключение через TLS-домен</strong></div><p>Независимое подключение с автоматическим сертификатом.</p></header>{renderFields(tlsFields)}</section>
+      <section className="vlessSettingsGroup cdn">
+        <header><div><em>03 · CDN</em><strong>Подключение через CDN-домен</strong></div><p>Проксируемый домен и совместимый транспорт.</p></header>
         {renderFields(cdnFields)}
-      </section> : <section className="vlessCdnEnableCard"><div><em>CDN НЕ НАСТРОЕН</em><strong>Добавить отдельный VLESS CDN</strong><p>Direct продолжит работать независимо. После включения появятся настройки CDN-домена и транспорта.</p></div>{renderFields(cdnFields.filter((field) => field.key === "cdn_enabled"))}</section>}
+      </section>
       <section className="vlessSettingsGroup common">
-        <header><div><em>ОБЩИЕ ПАРАМЕТРЫ</em><strong>Xray runtime</strong></div><p>DNS и журнал.</p></header>
+        <header><div><em>XRAY</em><strong>Общие параметры</strong></div><p>DNS и журнал.</p></header>
         {renderFields(commonFields)}
       </section>
     </> : renderFields(visibleFields)}

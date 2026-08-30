@@ -1309,7 +1309,7 @@ export default function Home() {
     onRefresh={() => void refreshCurrent(true)}
     onLogout={() => { sessionStorage.removeItem("312-token"); setToken(""); }}
   >
-      {tab !== "overview" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.datacenter || overview?.server.name || overview?.server.country || "Дата-центр"} · управление инфраструктурой</p></div></div>}
+      {tab !== "overview" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
       {error && <div className="errorBox">{error}</div>}
       {notice && <div className="successNotice" role="status"><span>✓</span>{notice}<button onClick={() => setNotice("")} aria-label="Закрыть уведомление">×</button></div>}
       {tab === "overview" && (

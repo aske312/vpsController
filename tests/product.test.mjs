@@ -219,7 +219,12 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /routing = \{\*\*routing_settings\(\), \*\*item\.get\("routing", \{\}\)\}/);
   assert.match(page, /request\("\/mihomo\/dns\/settings"\)/);
   assert.match(page, /request\("\/mihomo\/routing\/schema"\)/);
-  assert.match(page, /<PolicyPanel[\s\S]+code="DNS"/);
+  assert.match(page, /className="mihomoDnsWorkspace"/);
+  assert.match(page, /<Tab id="dns"[^>]*>DNS<\/Tab>/);
+  assert.doesNotMatch(page, />DNS Mihomo<\/Tab>/);
+  assert.match(page, /Clash Verge Rev/);
+  assert.match(page, /apps\.apple\.com\/us\/app\/clash-mi\/id6744321968/);
+  assert.match(page, /MetaCubeX\/ClashMetaForAndroid\/releases/);
   assert.match(page, /DNS и маршрутизация Mihomo готовы/);
   assert.match(styles, /\.mihomoPolicyPanel/);
   for (const policy of [dnsManifest, routingManifest]) {
@@ -543,7 +548,7 @@ test("application updates reuse unchanged components", async () => {
   const manager = await read("scripts/vps-control.sh");
   assert.match(manager, /requirements_marker="\$\{INSTALL_DIR\}\/venv\/\.requirements\.sha256"/);
   assert.match(manager, /Python-зависимости не изменились/);
-  assert.match(manager, /if \[\[ -z "\$\(env_value PUBLIC_IP\)" \]\]; then\s+refresh_server_identity\s+else\s+.*configure_access/s);
+  assert.match(manager, /Re-evaluate the hosting location from the current public IP on every deploy[\s\S]*refresh_server_identity/);
   const deployBody = manager.match(/deploy\(\) \{([\s\S]*?)\n\}/)?.[1] || "";
   assert.match(deployBody, /build_web/);
   assert.match(deployBody, /install_web/);
@@ -904,8 +909,11 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(api, /Транспорт прямого VLESS/);
   assert.match(api, /Только Direct\. После смены импортируйте Direct-профили заново/);
   assert.doesNotMatch(api, /Literal\["xhttp", "raw", "grpc", "websocket"\]/);
-  assert.match(protocolView, /ПРЯМОЕ ПОДКЛЮЧЕНИЕ/);
-  assert.match(protocolView, /XHTTP подходит для большинства случаев/);
+  assert.match(protocolView, /Подключение по REALITY/);
+  assert.match(protocolView, /Подключение через TLS-домен/);
+  assert.match(protocolView, /Подключение через CDN-домен/);
+  assert.doesNotMatch(protocolView, /Основной маршрут/);
+  assert.doesNotMatch(protocolView, /Маршрут через CDN/);
   assert.match(protocolView, /Домены и транспорт каждого контура настраиваются ниже/);
   assert.match(protocolView, /Маскировка соединения/);
   assert.match(protocolView, /Прямой TLS-домен/);
@@ -941,8 +949,8 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(controlCenterCss, /\.shell small[^}]*font-size:11px !important[^}]*line-height:1\.5 !important/s);
   assert.match(controlCenterCss, /label small[^}]*font-size:12px !important[^}]*line-height:1\.5 !important/s);
   assert.match(protocolView, /className="protocolFieldHelp"/);
-  assert.match(protocolCss, /\.protocolFieldHelp\s*\{[^}]*font-size:13px[^}]*line-height:1\.45/s);
-  assert.match(protocolCss, /label:has\(\.protocolFieldHelp\)[^}]*min-height:124px !important/s);
+  assert.match(protocolCss, /\.protocolFieldHelp\s*\{[^}]*font-size:9px[^}]*line-height:1\.3/s);
+  assert.match(protocolCss, /label\.protocolBooleanField[^}]*min-height:42px !important/s);
   assert.match(protocolCss, /\.vlessCommandCenter \.vlessSettingsGroup\s*\{\s*display:block/);
   assert.match(protocolCss, /\.protocolWorkspace \.protocolSettingsFields label > span[^}]*font-size:12px/s);
   assert.match(protocolCss, /\.protocolWorkspace \.protocolSettingsFields input:not[^}]*min-height:40px !important/s);

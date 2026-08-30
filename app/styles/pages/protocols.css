@@ -825,17 +825,6 @@
 .vlessSettingsGroup.cdn { background:rgba(20,45,48,.09); }
 .vlessSettingsGroup.common { border-bottom:0; }
 .vlessSettingsGroup.common .protocolSettingsFields { grid-template-columns:repeat(2,minmax(0,1fr)); }
-.vlessCdnEnableCard { display:grid; grid-template-columns:minmax(0,1fr) minmax(260px,.42fr); align-items:center; gap:18px; padding:14px; border-bottom:1px solid rgba(92,122,145,.10); background:rgba(20,45,48,.07); }
-.vlessCdnEnableCard > div:first-child { display:grid; gap:4px; }
-.vlessCdnEnableCard em { color:#6fcdb1; font:750 9px var(--font-mono); font-style:normal; letter-spacing:.08em; }
-.vlessCdnEnableCard strong { color:#e0eaef; font-size:14px; }
-.vlessCdnEnableCard p { margin:0; color:#8298a6; font-size:11px; line-height:1.5; }
-.vlessCdnEnableCard .protocolSettingsFields { grid-template-columns:1fr !important; padding:0 !important; }
-.vlessCdnEnableCard .protocolSettingsFields label { min-height:68px !important; }
-.protocolWorkspace-vless .protocolSettingsFields label.vlessRouteToggle { min-height:48px !important; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; padding:9px 11px !important; }
-.protocolWorkspace-vless .protocolSettingsFields label.vlessRouteToggle > span { min-height:0; font-size:11px; }
-.protocolWorkspace-vless .protocolSettingsFields label.vlessRouteToggle input[type="checkbox"] { margin:0; }
-.protocolWorkspace-vless .vlessSettingsGroup .protocolSettingsFields:has(.vlessRouteToggle) { align-items:start; }
 
 @media (max-width:1100px) {
   .protocolHeader { grid-template-columns:76px minmax(0,1fr); }
@@ -861,7 +850,6 @@
   .vlessRouteSummary { grid-template-columns:1fr; }
   .vlessSettingsGroup > header { grid-template-columns:1fr; gap:6px; }
   .vlessSettingsGroup.common .protocolSettingsFields { grid-template-columns:1fr; }
-  .vlessCdnEnableCard { grid-template-columns:1fr; }
 }
 
 /* Shared protocol command center. */
@@ -1024,6 +1012,49 @@
 .protocolCommandCenter .protocolSettingsActions { padding:8px 10px 10px; }
 .vlessCommandCenter .vlessSettingsGroup.direct { background:linear-gradient(90deg,rgba(58,42,121,.13),transparent 40%); }
 .vlessCommandCenter .vlessSettingsGroup.cdn { background:linear-gradient(90deg,rgba(26,89,74,.10),transparent 40%); }
+
+/* Compact protocol configuration shared by every channel. */
+.protocolWorkspace .protocolConfiguration.panel { border-radius:12px !important; }
+.protocolWorkspace .protocolConfiguration > header { min-height:48px !important; padding:9px 12px !important; }
+.protocolWorkspace .protocolConfiguration h3 { margin-top:2px !important; font-size:15px !important; }
+.protocolWorkspace .protocolConfiguration > header > div:first-child > span { margin-top:2px; font-size:8px; }
+.protocolWorkspace .configurationSafety { padding:5px 7px !important; border-radius:7px !important; }
+.protocolWorkspace .configurationSafety small { display:none; }
+.protocolWorkspace .protocolSettingsFields,
+.protocolCommandCenter .protocolSettingsFields { grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:6px; padding:8px 10px !important; }
+.protocolWorkspace .protocolSettingsFields label,
+.protocolCommandCenter .protocolSettingsFields label { min-height:60px !important; gap:5px !important; padding:8px 9px !important; border-radius:7px; background:rgba(4,12,18,.28); }
+.protocolWorkspace .protocolSettingsFields label:has(.protocolFieldHelp),
+.protocolCommandCenter .protocolSettingsFields label:has(.protocolFieldHelp) { min-height:82px !important; }
+.protocolWorkspace .protocolSettingsFields label > span { font-size:10px; line-height:1.2; }
+.protocolWorkspace .protocolSettingsFields input:not([type="checkbox"]),
+.protocolWorkspace .protocolSettingsFields select,
+.protocolCommandCenter .protocolSettingsFields input:not([type="checkbox"]),
+.protocolCommandCenter .protocolSettingsFields select { min-height:32px !important; padding:0 9px !important; border-radius:6px !important; font-size:11px !important; }
+.protocolWorkspace .protocolSettingsFields label.protocolBooleanField { min-height:42px !important; display:grid !important; grid-template-columns:minmax(0,1fr) 32px; align-items:center; gap:10px !important; }
+.protocolWorkspace .protocolSettingsFields label.protocolBooleanField > span { min-height:0; }
+.protocolWorkspace .protocolSettingsFields label.protocolBooleanField input[type="checkbox"] { appearance:none; width:30px !important; height:16px !important; margin:0; border-radius:999px; background:#263640; cursor:pointer; transition:.15s; }
+.protocolWorkspace .protocolSettingsFields label.protocolBooleanField input[type="checkbox"]::before { content:""; display:block; width:12px; height:12px; margin:2px; border-radius:50%; background:#788b96; transition:.15s; }
+.protocolWorkspace .protocolSettingsFields label.protocolBooleanField input[type="checkbox"]:checked { background:color-mix(in srgb,var(--protocol-accent) 35%,#16252e); }
+.protocolWorkspace .protocolSettingsFields label.protocolBooleanField input[type="checkbox"]:checked::before { transform:translateX(14px); background:var(--protocol-accent); }
+.protocolFieldHelp { margin-top:0; padding:5px 6px; grid-template-columns:14px minmax(0,1fr); gap:5px; border:0; background:rgba(20,37,49,.48); font-size:9px; line-height:1.3; }
+.protocolFieldHelp > i { width:14px; height:14px; border-radius:4px; font-size:8px; }
+.protocolSettingsActions { padding:7px 10px 9px; border-top:1px solid rgba(92,122,145,.09); }
+.protocolWorkspace .protocolSettingsSave { min-width:148px !important; min-height:32px !important; border-radius:7px !important; }
+.vlessSettingsGroup > header { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:8px 10px 4px; }
+.vlessSettingsGroup > header div { display:flex; align-items:baseline; gap:8px; }
+.vlessSettingsGroup > header em { font-size:8px; }
+.vlessSettingsGroup > header strong { font-size:12px; }
+.vlessSettingsGroup > header p { max-width:390px; font-size:9px; line-height:1.3; text-align:right; }
+.protocolWorkspace-vless .protocolSettingsFields { grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
+.protocolWorkspace-vless .protocolSettingsFields label:first-child { grid-column:auto; }
+.vlessSettingsGroup.common .protocolSettingsFields { grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
+
+@media (max-width:620px) {
+  .vlessSettingsGroup > header { align-items:flex-start; flex-direction:column; gap:3px; }
+  .vlessSettingsGroup > header p { text-align:left; }
+  .protocolWorkspace .configurationSafety { display:none !important; }
+}
 
 .vlessOperations { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
 .vlessOperationCard { min-width:0; overflow:hidden; border:1px solid rgba(107,127,148,.13); border-radius:13px; background:rgba(6,15,23,.80); }
