@@ -143,12 +143,12 @@ const directGameCatalog = [
 ];
 
 const profileDirectRules = [
-  { key: "block_ads", code: "AD", title: "Блокировка рекламы", text: "Рекламные сети, трекеры и внешние anti-adblock-сервисы блокируются через REJECT." },
-  { key: "direct_ru_sites", code: "RU", title: "Российские сайты", text: "Домены РФ, российские сервисы и IP-адреса." },
-  { key: "direct_ru_banks", code: "BANK", title: "Банки и платежи", text: "Банки РФ, СБП, НСПК и карты Мир." },
-  { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Маркетплейсы и крупные интернет-магазины." },
-  { key: "direct_games_enabled", code: "GAME", title: "Игры полностью", text: "Весь трафик выбранных игровых процессов без VPN." },
-  { key: "direct_games_udp_enabled", code: "UDP", title: "Игровой UDP", text: "Только UDP и голосовой трафик выбранных процессов напрямую." },
+  { key: "block_ads", code: "AD", title: "Блокировка рекламы", text: "Реклама и трекеры." },
+  { key: "direct_ru_sites", code: "RU", title: "Российские сайты", text: "Домены и IP России." },
+  { key: "direct_ru_banks", code: "BANK", title: "Банки и платежи", text: "Банки и платёжные сервисы." },
+  { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Магазины и маркетплейсы." },
+  { key: "direct_games_enabled", code: "GAME", title: "Игры полностью", text: "Выбранные игры без VPN." },
+  { key: "direct_games_udp_enabled", code: "UDP", title: "UDP напрямую", text: "Весь UDP без VPN." },
 ];
 
 const MIHOMO_OPERATION_EVENT = "gate312:mihomo-operation";
@@ -307,12 +307,7 @@ export function MihomoPage({
   }
 
   function toggleProfileRule(key: string, checked: boolean) {
-    setProfileRouting((current) => ({
-      ...current,
-      [key]: checked,
-      ...(checked && key === "direct_games_enabled" ? { direct_games_udp_enabled: false } : {}),
-      ...(checked && key === "direct_games_udp_enabled" ? { direct_games_enabled: false } : {}),
-    }));
+    setProfileRouting((current) => ({ ...current, [key]: checked }));
   }
 
   async function saveRoutingWorkspace(event: FormEvent) {
@@ -958,8 +953,11 @@ export function MihomoPage({
           <section className="mihomoRuleStudio">
             <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small></header>{profileDirectRules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</aside>
             <article>
-              {["direct_games_enabled", "direct_games_udp_enabled"].includes(activeRuleList) ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>{activeRuleList === "direct_games_udp_enabled" ? "Игровой UDP напрямую" : "Игры полностью без VPN"}</h3><p>{activeRuleList === "direct_games_udp_enabled" ? "Правило PROCESS-NAME + NETWORK,UDP направляет напрямую UDP выбранных игр, включая большинство голосовых чатов. Каталог не зависит от магазина или лаунчера и может включать ещё не установленные игры." : "Весь сетевой трафик выбранных игровых процессов направляется напрямую. Каталог не зависит от магазина или лаунчера и может включать ещё не установленные игры."}</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} выбрано</span></header>
+              {activeRuleList === "direct_games_udp_enabled" ? <>
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">NETWORK RULE</p><h3>UDP напрямую</h3><p>Весь UDP-трафик профиля направляется напрямую одним правилом, без определения процесса и выбора игры.</p></div><span>1 правило</span></header>
+                <div className="mihomoHint">NETWORK,UDP,DIRECT</div>
+              </> : activeRuleList === "direct_games_enabled" ? <>
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Игры полностью без VPN</h3><p>Весь сетевой трафик выбранных игровых процессов направляется напрямую. Каталог не зависит от магазина или лаунчера и может включать ещё не установленные игры.</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} выбрано</span></header>
                 <div className="mihomoGameCatalog">
                   {directGameCatalog.map((game) => { const selected = String(routingDraft.direct_games || "").split(",").includes(game.id); return <button type="button" key={game.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleDirectGame(game.id)}><span>{game.code}</span><b>{game.name}</b><i>{selected ? "Напрямую" : "Через VPN"}</i></button>; })}
                 </div>

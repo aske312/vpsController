@@ -118,10 +118,10 @@
     },
     {
       "key": "direct_games_udp_enabled",
-      "label": "UDP выбранных игр без VPN",
+      "label": "UDP напрямую",
       "type": "boolean",
       "default": false,
-      "help": "Направляет напрямую только UDP-трафик процессов выбранных игр."
+      "help": "Направляет напрямую весь UDP-трафик профиля без выбора приложений или игр."
     },
     {
       "key": "direct_games",

@@ -229,7 +229,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /"marathon": \["Marathon\.exe"\]/);
   assert.match(manager, /direct_games_enabled/);
   assert.match(manager, /direct_games_udp_enabled/);
-  assert.match(manager, /AND,\(\(\{process_rule\}\),\(NETWORK,UDP\)\),DIRECT/);
+  assert.match(manager, /NETWORK,UDP,DIRECT/);
+  assert.doesNotMatch(manager, /AND,\(\(\{process_rule\}\),\(NETWORK,UDP\)\),DIRECT/);
   assert.match(manager, /profile_routing\.get\(key, False\)/);
   assert.match(manager, /def configured_preset_rules/);
   assert.match(manager, /"rule_lists": routing_rule_lists\(values\)/);
@@ -247,7 +248,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /toggleDirectGame/);
   assert.match(page, /mihomoProfileRuleSwitch/);
   assert.match(page, /profileDirectRules/);
-  assert.match(page, /Игровой UDP/);
+  assert.match(page, /UDP напрямую/);
   assert.match(page, /toggleProfileRule/);
   assert.match(page, /Каждое правило применяется только к этому профилю/);
   assert.match(page, /mihomoRuleStudio/);

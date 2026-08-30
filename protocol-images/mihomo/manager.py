@@ -633,19 +633,21 @@ def direct_game_rules(routing: dict[str, Any]) -> list[str]:
     direct_udp = bool(routing.get("direct_games_udp_enabled", False))
     if not direct_all and not direct_udp:
         return []
+    rules: list[str] = ["NETWORK,UDP,DIRECT"] if direct_udp else []
+    if not direct_all:
+        return rules
     selected = {value.strip().lower() for value in str(routing.get("direct_games", "")).replace("\r", "").replace("\n", ",").split(",") if value.strip()}
     processes: list[str] = []
     for game_id in selected:
         processes.extend(DIRECT_GAME_PROCESSES.get(game_id, []))
     custom = str(routing.get("direct_game_processes", "")).replace("\r", "")
     processes.extend(value.strip() for value in custom.split("\n") if value.strip())
-    rules: list[str] = []
     for process in dict.fromkeys(processes):
         if len(process) > 160 or "," in process or not re.fullmatch(r"[A-Za-z0-9._*? +()-]+", process):
             continue
         kind = "PROCESS-NAME-WILDCARD" if "*" in process or "?" in process else "PROCESS-NAME"
         process_rule = f"{kind},{process}"
-        rules.append(f"{process_rule},DIRECT" if direct_all else f"AND,(({process_rule}),(NETWORK,UDP)),DIRECT")
+        rules.append(f"{process_rule},DIRECT")
     return rules
 
 
@@ -2241,7 +2243,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "  dns-hijack:",
         '    - "any:53"',
     ]
-    if direct_game_rules(routing):
+    if routing.get("direct_games_enabled", False):
         lines.insert(4, "find-process-mode: strict")
     dns = dns_settings()
     lines += [
