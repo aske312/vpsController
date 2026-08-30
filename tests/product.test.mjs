@@ -217,6 +217,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /ensure_policy_settings\(\)[\s\S]+value\["modules"\]\[module_id\] = True/);
   assert.match(manager, /@app\.patch\("\/api\/mihomo\/routing\/settings"/);
   assert.match(manager, /routing = \{\*\*routing_settings\(\), \*\*item\.get\("routing", \{\}\)\}/);
+  assert.match(manager, /DIRECT_GAME_PROCESSES/);
+  assert.match(manager, /PROCESS-NAME-WILDCARD/);
+  assert.match(manager, /find-process-mode: strict/);
   assert.match(page, /request\("\/mihomo\/dns\/settings"\)/);
   assert.match(page, /request\("\/mihomo\/routing\/schema"\)/);
   assert.match(page, /className="mihomoDnsWorkspace"/);
@@ -225,6 +228,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /Clash Verge Rev/);
   assert.match(page, /apps\.apple\.com\/us\/app\/clash-mi\/id6744321968/);
   assert.match(page, /MetaCubeX\/ClashMetaForAndroid\/releases/);
+  assert.match(page, /Игры без VPN/);
+  assert.match(page, /toggleDirectGame/);
+  assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games/);
+  assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_game_processes/);
   assert.match(page, /DNS и маршрутизация Mihomo готовы/);
   assert.match(styles, /\.mihomoPolicyPanel/);
   for (const policy of [dnsManifest, routingManifest]) {

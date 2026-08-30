@@ -99,6 +99,20 @@
       "help": "Ozon, Wildberries, Яндекс Маркет, Мегамаркет, Avito, AliExpress Россия и крупные интернет-магазины."
     },
     {
+      "key": "direct_games",
+      "label": "Игры без VPN",
+      "type": "textarea",
+      "default": "",
+      "help": "Идентификаторы игр из встроенного списка, трафик процессов которых направляется напрямую."
+    },
+    {
+      "key": "direct_game_processes",
+      "label": "Дополнительные игровые процессы",
+      "type": "textarea",
+      "default": "",
+      "help": "Имя процесса Windows/macOS или package name Android — по одному на строку."
+    },
+    {
       "key": "rules",
       "label": "Дополнительные правила (для опытных пользователей)",
       "type": "textarea",

@@ -1033,10 +1033,10 @@
 .protocolCommandCenter .protocolSettingsFields select { min-height:32px !important; padding:0 9px !important; border-radius:6px !important; font-size:11px !important; }
 .protocolWorkspace .protocolSettingsFields label.protocolBooleanField { min-height:42px !important; display:grid !important; grid-template-columns:minmax(0,1fr) 32px; align-items:center; gap:10px !important; }
 .protocolWorkspace .protocolSettingsFields label.protocolBooleanField > span { min-height:0; }
-.protocolWorkspace .protocolSettingsFields label.protocolBooleanField input[type="checkbox"] { appearance:none; width:30px !important; height:16px !important; margin:0; border-radius:999px; background:#263640; cursor:pointer; transition:.15s; }
-.protocolWorkspace .protocolSettingsFields label.protocolBooleanField input[type="checkbox"]::before { content:""; display:block; width:12px; height:12px; margin:2px; border-radius:50%; background:#788b96; transition:.15s; }
+.protocolWorkspace .protocolSettingsFields label.protocolBooleanField input[type="checkbox"] { appearance:none; position:relative; box-sizing:border-box; width:30px !important; height:16px !important; margin:0; padding:0; overflow:hidden; border:0; border-radius:999px; background:#263640; cursor:pointer; transition:background .15s; }
+.protocolWorkspace .protocolSettingsFields label.protocolBooleanField input[type="checkbox"]::before { content:""; position:absolute; top:2px; left:2px; width:12px; height:12px; margin:0; border-radius:50%; background:#788b96; transition:transform .15s,background .15s; }
 .protocolWorkspace .protocolSettingsFields label.protocolBooleanField input[type="checkbox"]:checked { background:color-mix(in srgb,var(--protocol-accent) 35%,#16252e); }
-.protocolWorkspace .protocolSettingsFields label.protocolBooleanField input[type="checkbox"]:checked::before { transform:translateX(14px); background:var(--protocol-accent); }
+.protocolWorkspace .protocolSettingsFields label.protocolBooleanField input[type="checkbox"]:checked::before { transform:translateX(12px); background:var(--protocol-accent); }
 .protocolFieldHelp { margin-top:0; padding:5px 6px; grid-template-columns:14px minmax(0,1fr); gap:5px; border:0; background:rgba(20,37,49,.48); font-size:9px; line-height:1.3; }
 .protocolFieldHelp > i { width:14px; height:14px; border-radius:4px; font-size:8px; }
 .protocolSettingsActions { padding:7px 10px 9px; border-top:1px solid rgba(92,122,145,.09); }

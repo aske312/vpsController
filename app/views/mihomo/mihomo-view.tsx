@@ -105,6 +105,19 @@ const channelShort: Record<string, string> = {
   "transport-shadowsocks": "SS",
 };
 
+const directGameCatalog = [
+  { id: "cs2", code: "CS2", name: "Counter-Strike 2" },
+  { id: "dota2", code: "DOTA", name: "Dota 2" },
+  { id: "valorant", code: "VAL", name: "Valorant" },
+  { id: "fortnite", code: "FN", name: "Fortnite" },
+  { id: "pubg", code: "PUBG", name: "PUBG" },
+  { id: "warzone", code: "COD", name: "Call of Duty / Warzone" },
+  { id: "gta5", code: "GTA", name: "GTA V" },
+  { id: "roblox", code: "RBX", name: "Roblox" },
+  { id: "wot", code: "WOT", name: "World of Tanks" },
+  { id: "tarkov", code: "EFT", name: "Escape from Tarkov" },
+];
+
 const MIHOMO_OPERATION_EVENT = "gate312:mihomo-operation";
 const TECHNICAL_ERROR = /(?:\n|traceback|systemctl|journalctl|apt(?:-get)?|dpkg|stderr|stdout|exit status|failed to start|reading package lists|building dependency tree)/i;
 
@@ -251,6 +264,12 @@ export function MihomoPage({
     setRoutingDraft((current) => ({ ...current, [key]: value }));
     routingDirtyRef.current = true;
     setRoutingDirty(true);
+  }
+
+  function toggleDirectGame(gameId: string) {
+    const selected = new Set(String(routingDraft.direct_games || "").split(",").map((value) => value.trim()).filter(Boolean));
+    if (selected.has(gameId)) selected.delete(gameId); else selected.add(gameId);
+    updateRoutingDraft("direct_games", [...selected].join(","));
   }
 
   async function saveRoutingWorkspace(event: FormEvent) {
@@ -901,6 +920,15 @@ export function MihomoPage({
                 <input type="checkbox" checked={Boolean(routingDraft[item.key])} onChange={(event) => updateRoutingDraft(item.key, event.target.checked)} />
               </label>)}
             </div>
+          </section>
+
+          <section className="mihomoRoutingSection mihomoGamesSection">
+            <div className="mihomoRoutingSectionTitle"><div><b>Игры без VPN</b><small>Весь трафик выбранных игровых процессов, включая голосовой чат, будет идти напрямую.</small></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} выбрано</span></div>
+            <div className="mihomoGameCatalog">
+              {directGameCatalog.map((game) => { const selected = String(routingDraft.direct_games || "").split(",").includes(game.id); return <button type="button" key={game.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleDirectGame(game.id)}><span>{game.code}</span><b>{game.name}</b><i>{selected ? "Напрямую" : "Через VPN"}</i></button>; })}
+            </div>
+            <label className="mihomoCustomGames"><span><b>Дополнить список</b><small>Укажите имя процесса, например <code>game.exe</code>, либо package name Android. По одному значению на строку.</small></span><textarea rows={4} value={String(routingDraft.direct_game_processes || "")} placeholder={"mygame.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("direct_game_processes", event.target.value)} /></label>
+            <p className="mihomoGamesHint">Для определения игры клиент должен работать в TUN-режиме. На iPhone сопоставление по приложению может быть недоступно.</p>
           </section>
 
           <section className="mihomoRoutingColumns">

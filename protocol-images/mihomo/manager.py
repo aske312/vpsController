@@ -514,9 +514,38 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
     ],
 }
 
+DIRECT_GAME_PROCESSES: dict[str, list[str]] = {
+    "cs2": ["cs2.exe"],
+    "dota2": ["dota2.exe"],
+    "valorant": ["VALORANT-Win64-Shipping.exe"],
+    "fortnite": ["FortniteClient-Win64-Shipping.exe", "com.epicgames.fortnite"],
+    "pubg": ["TslGame.exe", "com.tencent.ig"],
+    "warzone": ["cod.exe", "com.activision.callofduty.shooter"],
+    "gta5": ["GTA5.exe"],
+    "roblox": ["RobloxPlayerBeta.exe", "com.roblox.client"],
+    "wot": ["WorldOfTanks.exe"],
+    "tarkov": ["EscapeFromTarkov.exe"],
+}
+
+
+def direct_game_rules(routing: dict[str, Any]) -> list[str]:
+    selected = {value.strip().lower() for value in str(routing.get("direct_games", "")).replace("\r", "").replace("\n", ",").split(",") if value.strip()}
+    processes: list[str] = []
+    for game_id in selected:
+        processes.extend(DIRECT_GAME_PROCESSES.get(game_id, []))
+    custom = str(routing.get("direct_game_processes", "")).replace("\r", "")
+    processes.extend(value.strip() for value in custom.split("\n") if value.strip())
+    rules: list[str] = []
+    for process in dict.fromkeys(processes):
+        if len(process) > 160 or "," in process or not re.fullmatch(r"[A-Za-z0-9._*? +()-]+", process):
+            continue
+        kind = "PROCESS-NAME-WILDCARD" if "*" in process or "?" in process else "PROCESS-NAME"
+        rules.append(f"{kind},{process},DIRECT")
+    return rules
+
 
 def profile_rules(routing: dict[str, Any]) -> list[str]:
-    rules: list[str] = []
+    rules: list[str] = direct_game_rules(routing)
     for setting, preset_rules in DIRECT_RULE_PRESETS.items():
         if routing.get(setting, False):
             rules.extend(preset_rules)
@@ -2099,6 +2128,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "  dns-hijack:",
         '    - "any:53"',
     ]
+    if direct_game_rules(routing):
+        lines.insert(4, "find-process-mode: strict")
     dns = dns_settings()
     lines += [
         "dns:",
