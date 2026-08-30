@@ -540,6 +540,14 @@ DIRECT_GAME_PROCESSES: dict[str, list[str]] = {
     "brawlstars": ["com.supercell.brawlstars"],
     "freefire": ["com.dts.freefireth", "com.dts.freefiremax"],
     "mobilelegends": ["com.mobile.legends"],
+    "diablo4": ["Diablo IV.exe"],
+    "arenabreakoutinfinite": ["UAGame.exe"],
+    "marathon": ["Marathon.exe"],
+    "repo": ["REPO.exe"],
+    "mistfallhunter": ["MistfallHunter.exe", "MistfallHunter-Win64-Shipping.exe"],
+    "residentevilrequiem": ["re9.exe"],
+    "stardewvalley": ["Stardew Valley.exe"],
+    "mecchachameleon": ["PenguinHotel.exe", "PenguinHotel-Win64-Shipping.exe"],
 }
 
 DIRECT_RULE_META = {
@@ -572,7 +580,9 @@ def routing_rule_lists(values: dict[str, Any] | None = None) -> list[dict[str, A
 
 
 def direct_game_rules(routing: dict[str, Any]) -> list[str]:
-    if not routing.get("direct_games_enabled", False):
+    direct_all = bool(routing.get("direct_games_enabled", False))
+    direct_udp = bool(routing.get("direct_games_udp_enabled", False))
+    if not direct_all and not direct_udp:
         return []
     selected = {value.strip().lower() for value in str(routing.get("direct_games", "")).replace("\r", "").replace("\n", ",").split(",") if value.strip()}
     processes: list[str] = []
@@ -585,7 +595,8 @@ def direct_game_rules(routing: dict[str, Any]) -> list[str]:
         if len(process) > 160 or "," in process or not re.fullmatch(r"[A-Za-z0-9._*? +()-]+", process):
             continue
         kind = "PROCESS-NAME-WILDCARD" if "*" in process or "?" in process else "PROCESS-NAME"
-        rules.append(f"{kind},{process},DIRECT")
+        process_rule = f"{kind},{process}"
+        rules.append(f"{process_rule},DIRECT" if direct_all else f"AND,(({process_rule}),(NETWORK,UDP)),DIRECT")
     return rules
 
 
@@ -2160,7 +2171,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     # Ready-made bypass lists are selected per profile. Never inherit legacy
     # global switches from routing settings; that would silently affect every
     # existing subscription.
-    for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled"):
+    for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled"):
         routing[key] = bool(profile_routing.get(key, False))
     mode = str(routing.get("mode", "rule"))
     lines = [

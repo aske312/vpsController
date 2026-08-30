@@ -109,6 +109,13 @@
       "help": "Включается отдельно в настройках каждого профиля."
     },
     {
+      "key": "direct_games_udp_enabled",
+      "label": "UDP выбранных игр без VPN",
+      "type": "boolean",
+      "default": false,
+      "help": "Направляет напрямую только UDP-трафик процессов выбранных игр."
+    },
+    {
       "key": "direct_games",
       "label": "Игры без VPN",
       "type": "textarea",

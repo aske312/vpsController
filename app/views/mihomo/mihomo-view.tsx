@@ -132,13 +132,22 @@ const directGameCatalog = [
   { id: "brawlstars", code: "BS", name: "Brawl Stars" },
   { id: "freefire", code: "FF", name: "Free Fire" },
   { id: "mobilelegends", code: "ML", name: "Mobile Legends" },
+  { id: "diablo4", code: "D4", name: "Diablo IV" },
+  { id: "arenabreakoutinfinite", code: "ABI", name: "Arena Breakout: Infinite" },
+  { id: "marathon", code: "MAR", name: "Marathon" },
+  { id: "repo", code: "REPO", name: "R.E.P.O." },
+  { id: "mistfallhunter", code: "MFH", name: "Mistfall Hunter" },
+  { id: "residentevilrequiem", code: "RE9", name: "Resident Evil Requiem" },
+  { id: "stardewvalley", code: "SDV", name: "Stardew Valley" },
+  { id: "mecchachameleon", code: "MC", name: "MECCHA CHAMELEON" },
 ];
 
 const profileDirectRules = [
   { key: "direct_ru_sites", code: "RU", title: "Российские сайты", text: "Домены РФ, российские сервисы и IP-адреса." },
   { key: "direct_ru_banks", code: "BANK", title: "Банки и платежи", text: "Банки РФ, СБП, НСПК и карты Мир." },
   { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Маркетплейсы и крупные интернет-магазины." },
-  { key: "direct_games_enabled", code: "GAME", title: "Игры", text: "Выбранные игры, их UDP-трафик и голосовой чат." },
+  { key: "direct_games_enabled", code: "GAME", title: "Игры полностью", text: "Весь трафик выбранных игровых процессов без VPN." },
+  { key: "direct_games_udp_enabled", code: "UDP", title: "Игровой UDP", text: "Только UDP и голосовой трафик выбранных процессов напрямую." },
 ];
 
 const MIHOMO_OPERATION_EVENT = "gate312:mihomo-operation";
@@ -294,6 +303,15 @@ export function MihomoPage({
     const selected = new Set(String(routingDraft.direct_games || "").split(",").map((value) => value.trim()).filter(Boolean));
     if (selected.has(gameId)) selected.delete(gameId); else selected.add(gameId);
     updateRoutingDraft("direct_games", [...selected].join(","));
+  }
+
+  function toggleProfileRule(key: string, checked: boolean) {
+    setProfileRouting((current) => ({
+      ...current,
+      [key]: checked,
+      ...(checked && key === "direct_games_enabled" ? { direct_games_udp_enabled: false } : {}),
+      ...(checked && key === "direct_games_udp_enabled" ? { direct_games_enabled: false } : {}),
+    }));
   }
 
   async function saveRoutingWorkspace(event: FormEvent) {
@@ -939,8 +957,8 @@ export function MihomoPage({
           <section className="mihomoRuleStudio">
             <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small></header>{profileDirectRules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</aside>
             <article>
-              {activeRuleList === "direct_games_enabled" ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Игры без VPN</h3><p>Выберите игры или дополните список собственными именами процессов и Android package name.</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} выбрано</span></header>
+              {["direct_games_enabled", "direct_games_udp_enabled"].includes(activeRuleList) ? <>
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>{activeRuleList === "direct_games_udp_enabled" ? "Игровой UDP напрямую" : "Игры полностью без VPN"}</h3><p>{activeRuleList === "direct_games_udp_enabled" ? "Правило PROCESS-NAME + NETWORK,UDP направляет напрямую UDP выбранных игр, включая большинство голосовых чатов. Каталог может включать игры из библиотеки Steam, даже если сейчас они не установлены." : "Весь сетевой трафик выбранных игровых процессов направляется напрямую. Каталог может включать игры из библиотеки Steam, даже если сейчас они не установлены."}</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} выбрано</span></header>
                 <div className="mihomoGameCatalog">
                   {directGameCatalog.map((game) => { const selected = String(routingDraft.direct_games || "").split(",").includes(game.id); return <button type="button" key={game.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleDirectGame(game.id)}><span>{game.code}</span><b>{game.name}</b><i>{selected ? "Напрямую" : "Через VPN"}</i></button>; })}
                 </div>
@@ -1027,7 +1045,7 @@ export function MihomoPage({
               <button type="button" className="iconButton" onClick={() => setProfileDialog(null)}>x</button>
             </header>
             <label className="mihomoProfileName"><span>Название профиля</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} /></label>
-            <section className="mihomoProfileRules"><header><div><b>Правила прямого подключения</b><small>Каждое правило применяется только к этому профилю. Состав списков задаётся в разделе «Настройки».</small></div><span>{profileDirectRules.filter((rule) => Boolean(profileRouting[rule.key])).length} из {profileDirectRules.length}</span></header><div>{profileDirectRules.map((rule) => <label key={rule.key} className={`mihomoProfileRuleSwitch${Boolean(profileRouting[rule.key]) ? " is-enabled" : ""}`}><span><b>{rule.title}</b><small>{rule.text}</small></span><input type="checkbox" checked={Boolean(profileRouting[rule.key])} onChange={(event) => setProfileRouting((current) => ({ ...current, [rule.key]: event.target.checked }))} /></label>)}</div></section>
+            <section className="mihomoProfileRules"><header><div><b>Правила прямого подключения</b><small>Каждое правило применяется только к этому профилю. Состав списков задаётся в разделе «Настройки».</small></div><span>{profileDirectRules.filter((rule) => Boolean(profileRouting[rule.key])).length} из {profileDirectRules.length}</span></header><div>{profileDirectRules.map((rule) => <label key={rule.key} className={`mihomoProfileRuleSwitch${Boolean(profileRouting[rule.key]) ? " is-enabled" : ""}`}><span><b>{rule.title}</b><small>{rule.text}</small></span><input type="checkbox" checked={Boolean(profileRouting[rule.key])} onChange={(event) => toggleProfileRule(rule.key, event.target.checked)} /></label>)}</div></section>
             <section className="mihomoDeviceBuilder"><header><div><b>Устройства профиля</b><small>У каждого устройства собственные credentials и отдельный YAML.</small></div><button type="button" onClick={() => { const id = `device-${crypto.randomUUID()}`; setProfileDevices((current) => [...current, { id, name: `Устройство ${current.length + 1}` }]); setActiveDeviceId(id); }}>+ Устройство</button></header><div>{profileDevices.map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => setActiveDeviceId(device.id)}><input value={device.name} maxLength={80} onClick={(event) => event.stopPropagation()} onChange={(event) => setProfileDevices((current) => current.map((item) => item.id === device.id ? { ...item, name: event.target.value } : item))} />{profileDevices.length > 1 && <span onClick={(event) => { event.stopPropagation(); const next = profileDevices.filter((item) => item.id !== device.id); setProfileDevices(next); setProfileConnections((current) => current.filter((connection) => connection.device_id !== device.id)); if (activeDeviceId === device.id) setActiveDeviceId(next[0].id); }}>×</span>}</button>)}</div></section>
             <section className="mihomoPresetPicker">
               <header><div><b>Пресет для {profileDevices.find((device) => device.id === activeDeviceId)?.name || "устройства"}</b><small>Пресет заменит подключения только выбранного устройства. Остальные устройства профиля не изменятся.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настройки пресетов</button></header>
