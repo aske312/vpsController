@@ -2,11 +2,14 @@
 
 import { formatModuleVersion } from "../../lib/format-version";
 import { bytes, duration } from "../../lib/control-plane-ui";
+import QRCode from "qrcode";
+import Image from "next/image";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type View = "overview" | "profiles" | "channels" | "dns" | "routing";
+type ReadyDevice = ProfileDevice & { subscription: string; qr: string };
 
 type ConfirmOptions = {
   title: string;
@@ -196,6 +199,7 @@ export function MihomoPage({
   const [editing, setEditing] = useState<Module | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number | boolean>>({});
   const [profileDialog, setProfileDialog] = useState<Profile | "new" | null>(null);
+  const [profileStep, setProfileStep] = useState(1);
   const [profileName, setProfileName] = useState("");
   const [profileConnections, setProfileConnections] = useState<ProfileConnection[]>([]);
   const [profileRouting, setProfileRouting] = useState<Record<string, string | number | boolean>>({});
@@ -203,6 +207,7 @@ export function MihomoPage({
   const [activeDeviceId, setActiveDeviceId] = useState("device-1");
   const [profileStats, setProfileStats] = useState<Record<string, ProfileStats>>({});
   const [createdProfile, setCreatedProfile] = useState<Profile | null>(null);
+  const [readyDevices, setReadyDevices] = useState<ReadyDevice[]>([]);
   const [presetDialog, setPresetDialog] = useState(false);
   const [presetDraft, setPresetDraft] = useState<ProfilePreset[]>([]);
 
@@ -293,6 +298,21 @@ export function MihomoPage({
     const timer = window.setInterval(() => void refresh(), 15000);
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [refresh]);
+
+  useEffect(() => {
+    if (!createdProfile) return;
+    let cancelled = false;
+    const devices = createdProfile.devices?.length ? createdProfile.devices : [{ id: "device-1", name: "Устройство" }];
+    void Promise.all(devices.map(async (device) => {
+      const result = await request(`/mihomo/profiles/${createdProfile.id}/subscription?device_id=${encodeURIComponent(device.id)}`) as { path: string };
+      const subscription = new URL(result.path, window.location.origin).toString();
+      const qr = await QRCode.toDataURL(subscription, { errorCorrectionLevel: "M", margin: 2, width: 360 });
+      return { ...device, subscription, qr };
+    })).then((items) => { if (!cancelled) setReadyDevices(items); }).catch((cause) => {
+      if (!cancelled) setError(cause instanceof Error ? cause.message : "Не удалось подготовить QR-коды подписок");
+    });
+    return () => { cancelled = true; };
+  }, [createdProfile, request]);
 
   function updateRoutingDraft(key: string, value: string | number | boolean) {
     setRoutingDraft((current) => ({ ...current, [key]: value }));
@@ -473,6 +493,7 @@ export function MihomoPage({
   }
 
   function newProfile() {
+    setProfileStep(1);
     setProfileDialog("new");
     setProfileName("");
     setProfileConnections([]);
@@ -482,6 +503,7 @@ export function MihomoPage({
   }
 
   function editProfile(profile: Profile) {
+    setProfileStep(1);
     setProfileDialog(profile);
     setProfileName(profile.name);
     setProfileConnections((profile.connections || []).map((connection) => ({
@@ -570,12 +592,15 @@ export function MihomoPage({
           method: "POST",
           body: JSON.stringify({ name: profileName, devices: profileDevices, connections: profileConnections, routing: profileRouting }),
         }) as Profile;
+        setReadyDevices([]);
         setCreatedProfile(created);
       } else if (profileDialog) {
-        await request(`/mihomo/profiles/${profileDialog.id}`, {
+        const updated = await request(`/mihomo/profiles/${profileDialog.id}`, {
           method: "PATCH",
           body: JSON.stringify({ name: profileName, devices: profileDevices, connections: profileConnections, routing: profileRouting }),
-        });
+        }) as Profile;
+        setReadyDevices([]);
+        setCreatedProfile(updated);
       }
       setProfileDialog(null);
       await refresh();
@@ -1038,11 +1063,14 @@ export function MihomoPage({
         <div className="mihomoDialogBackdrop" onMouseDown={(event) => {
           if (event.target === event.currentTarget) setProfileDialog(null);
         }}>
-          <form className="mihomoDialog mihomoProfileDialog" onSubmit={saveProfile}>
+          <form className={`mihomoDialog mihomoProfileDialog is-step-${profileStep}`} onSubmit={saveProfile}>
             <header>
               <div><p className="eyebrow">MIHOMO PROFILE</p><h2>{profileDialog === "new" ? "Новый профиль" : "Настройка профиля"}</h2></div>
               <button type="button" className="iconButton" onClick={() => setProfileDialog(null)}>x</button>
             </header>
+            <nav className="mihomoProfileSteps" aria-label="Этапы настройки профиля">
+              {[{ id: 1, title: "Профиль", note: "Название и правила" }, { id: 2, title: "Устройства", note: "Кому выдаём доступ" }, { id: 3, title: "Подключения", note: "Каналы и параметры" }].map((step) => <button key={step.id} type="button" className={profileStep === step.id ? "is-active" : profileStep > step.id ? "is-done" : ""} disabled={step.id > 1 && !profileName.trim()} onClick={() => setProfileStep(step.id)}><i>{profileStep > step.id ? "✓" : step.id}</i><span><b>{step.title}</b><small>{step.note}</small></span></button>)}
+            </nav>
             <label className="mihomoProfileName"><span>Название профиля</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} /></label>
             <section className="mihomoProfileRules"><header><div><b>Правила профиля</b><small>Каждое правило применяется только к этому профилю. Состав списков задаётся в разделе «Настройки».</small></div><span>{profileDirectRules.filter((rule) => Boolean(profileRouting[rule.key])).length} из {profileDirectRules.length}</span></header><div>{profileDirectRules.map((rule) => <label key={rule.key} className={`mihomoProfileRuleSwitch${Boolean(profileRouting[rule.key]) ? " is-enabled" : ""}`}><span><b>{rule.title}</b><small>{rule.text}</small></span><input type="checkbox" checked={Boolean(profileRouting[rule.key])} onChange={(event) => toggleProfileRule(rule.key, event.target.checked)} /></label>)}</div></section>
             <section className="mihomoDeviceBuilder"><header><div><b>Устройства профиля</b><small>У каждого устройства собственные credentials и отдельный YAML.</small></div><button type="button" onClick={() => { const id = `device-${crypto.randomUUID()}`; setProfileDevices((current) => [...current, { id, name: `Устройство ${current.length + 1}` }]); setActiveDeviceId(id); }}>+ Устройство</button></header><div>{profileDevices.map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => setActiveDeviceId(device.id)}><input value={device.name} maxLength={80} onClick={(event) => event.stopPropagation()} onChange={(event) => setProfileDevices((current) => current.map((item) => item.id === device.id ? { ...item, name: event.target.value } : item))} />{profileDevices.length > 1 && <span onClick={(event) => { event.stopPropagation(); const next = profileDevices.filter((item) => item.id !== device.id); setProfileDevices(next); setProfileConnections((current) => current.filter((connection) => connection.device_id !== device.id)); if (activeDeviceId === device.id) setActiveDeviceId(next[0].id); }}>×</span>}</button>)}</div></section>
@@ -1105,11 +1133,11 @@ export function MihomoPage({
               </div>
             </section>
             <aside>Компонент устанавливает ядро протокола один раз. Каждая карточка выше создаёт независимые параметры и credential только для этого профиля.</aside>
-            <footer><button type="button" className="ghostButton" onClick={() => setProfileDialog(null)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "profile" || !profileName.trim() || profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить профиль"}</button></footer>
+            <footer><button type="button" className="ghostButton" onClick={() => profileStep === 1 ? setProfileDialog(null) : setProfileStep((current) => current - 1)}>{profileStep === 1 ? "Отмена" : "Назад"}</button>{profileStep < 3 ? <button type="button" className="primaryButton" disabled={!profileName.trim() || profileDevices.some((device) => !device.name.trim())} onClick={() => setProfileStep((current) => current + 1)}>Далее</button> : <button type="submit" className="primaryButton" disabled={busy === "profile" || !profileName.trim() || profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить изменения"}</button>}</footer>
           </form>
         </div>
       )}
-      {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile"><header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль создан</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header><p>Скачайте отдельный YAML для каждого устройства. Файлы также всегда доступны в списке профилей.</p><div><b>{createdProfile.name}</b><span>{createdProfile.connections.length} соединений · {createdProfile.devices?.length || 1} устройств</span></div><footer><button className="ghostButton" onClick={() => setCreatedProfile(null)}>Закрыть</button>{(createdProfile.devices || [{ id: "device-1", name: "Устройство" }]).map((device) => <button key={device.id} className="primaryButton" onClick={() => void downloadConfig(createdProfile, device)}>YAML · {device.name}</button>)}</footer></div></div>}
+      {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile"><header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль готов</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header><p>Отсканируйте QR в Mihomo-клиенте или скопируйте постоянную ссылку подписки. Изменения профиля появятся после обновления подписки.</p><div className="mihomoReadySummary"><b>{createdProfile.name}</b><span>{createdProfile.connections.length} подключений · {createdProfile.devices?.length || 1} устройств · {profileDirectRules.filter((rule) => Boolean(createdProfile.routing?.[rule.key])).length} правил</span></div><div className="mihomoReadyDevices">{readyDevices.map((device) => <article key={device.id}><Image src={device.qr} alt={`QR подписки ${device.name}`} width={148} height={148} unoptimized /><div><b>{device.name}</b><small>Постоянная подписка Mihomo</small><code>{device.subscription}</code><nav><button className="primaryButton" onClick={() => void navigator.clipboard.writeText(device.subscription)}>Скопировать ссылку</button><button className="ghostButton" onClick={() => void downloadConfig(createdProfile, device)}>Скачать YAML</button></nav></div></article>)}{!readyDevices.length && <div className="mihomoHint">Подготавливаем QR-коды подписок…</div>}</div><footer><button className="primaryButton" onClick={() => setCreatedProfile(null)}>Готово</button></footer></div></div>}
       {presetDialog && <div className="mihomoDialogBackdrop"><form className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}><header><div><p className="eyebrow">PRESET ROUTING</p><h2>Настройки быстрых профилей</h2></div><button type="button" className="iconButton" onClick={() => setPresetDialog(false)}>x</button></header><p>Для каждого пресета отдельно выберите стратегию и соединения. VLESS и VLESS CDN независимы.</p><div className="mihomoPresetEditor">{presetDraft.map((preset, index) => <article key={preset.id}><label><span>Название</span><input value={preset.name} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></label><label><span>Стратегия</span><select value={preset.strategy} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, strategy: event.target.value as ProfilePreset["strategy"] } : item))}><option value="fallback">Fallback</option><option value="url-test">Автовыбор по задержке</option><option value="select">Ручной выбор</option></select></label><div>{presetConnectionOptions.map((option) => { const selected = preset.components.some((item) => item.id === option.id && Boolean(item.cdn) === Boolean(option.cdn) && String(item.transport || "") === String(option.transport || "")); return <label key={`${option.id}-${option.cdn ? "cdn" : "direct"}-${option.transport || "default"}`}><input type="checkbox" checked={selected} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i !== index ? item : { ...item, components: event.target.checked ? [...item.components, option] : item.components.filter((component) => !(component.id === option.id && Boolean(component.cdn) === Boolean(option.cdn) && String(component.transport || "") === String(option.transport || ""))) }))} /><span>{option.label}</span></label>; })}</div></article>)}</div><footer><button type="button" className="ghostButton" onClick={() => setPresetDialog(false)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "presets" || presetDraft.some((item) => !item.components.length)}>Сохранить пресеты</button></footer></form></div>}
     </section>
   );
