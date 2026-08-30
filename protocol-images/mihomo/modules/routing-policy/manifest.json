@@ -98,6 +98,9 @@
       "default": false,
       "help": "Ozon, Wildberries, Яндекс Маркет, Мегамаркет, Avito, AliExpress Россия и крупные интернет-магазины."
     },
+    { "key": "direct_ru_sites_rules", "label": "Список российских сайтов", "type": "textarea", "default": "@default" },
+    { "key": "direct_ru_banks_rules", "label": "Список банков и платежей", "type": "textarea", "default": "@default" },
+    { "key": "direct_ru_marketplaces_rules", "label": "Список магазинов и маркетплейсов", "type": "textarea", "default": "@default" },
     {
       "key": "direct_games_enabled",
       "label": "Применять правило игр к профилю",

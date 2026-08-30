@@ -590,6 +590,25 @@ import re
 import sys
 
 MAX_CITY_CLUSTER_KM = 50.0
+MAJOR_CITY_ANCHORS = (
+    ("NL", "Amsterdam", 52.3676, 4.9041, 55),
+    ("DE", "Frankfurt", 50.1109, 8.6821, 65), ("DE", "Berlin", 52.5200, 13.4050, 55),
+    ("FR", "Paris", 48.8566, 2.3522, 65), ("GB", "London", 51.5074, -0.1278, 70),
+    ("FI", "Helsinki", 60.1699, 24.9384, 55), ("SE", "Stockholm", 59.3293, 18.0686, 55),
+    ("NO", "Oslo", 59.9139, 10.7522, 55), ("DK", "Copenhagen", 55.6761, 12.5683, 55),
+    ("PL", "Warsaw", 52.2297, 21.0122, 55), ("CZ", "Prague", 50.0755, 14.4378, 50),
+    ("AT", "Vienna", 48.2082, 16.3738, 55), ("CH", "Zurich", 47.3769, 8.5417, 50),
+    ("LV", "Riga", 56.9496, 24.1052, 50), ("LT", "Vilnius", 54.6872, 25.2797, 50),
+    ("EE", "Tallinn", 59.4370, 24.7536, 50), ("RO", "Bucharest", 44.4268, 26.1025, 55),
+    ("BG", "Sofia", 42.6977, 23.3219, 50), ("ES", "Madrid", 40.4168, -3.7038, 65),
+    ("ES", "Barcelona", 41.3874, 2.1686, 55), ("IT", "Milan", 45.4642, 9.1900, 60),
+    ("US", "Ashburn", 39.0438, -77.4874, 70), ("US", "New York", 40.7128, -74.0060, 70),
+    ("US", "Chicago", 41.8781, -87.6298, 70), ("US", "Dallas", 32.7767, -96.7970, 80),
+    ("US", "Los Angeles", 34.0522, -118.2437, 80), ("US", "Miami", 25.7617, -80.1918, 70),
+    ("CA", "Toronto", 43.6532, -79.3832, 70), ("CA", "Montreal", 45.5019, -73.5674, 65),
+    ("CA", "Vancouver", 49.2827, -123.1207, 65), ("SG", "Singapore", 1.3521, 103.8198, 55),
+    ("JP", "Tokyo", 35.6762, 139.6503, 70), ("HK", "Hong Kong", 22.3193, 114.1694, 55),
+)
 
 def coordinates(location):
     try:
@@ -604,6 +623,19 @@ def distance_km(first, second):
     delta_lon = lon2 - lon1
     value = math.sin(delta_lat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2
     return 6371.0088 * 2 * math.asin(min(1.0, math.sqrt(value)))
+
+def nearest_major_city(code, points):
+    if not points:
+        return "Unknown"
+    center = (sum(point[0] for point in points) / len(points), sum(point[1] for point in points) / len(points))
+    candidates = []
+    for anchor_code, city, latitude, longitude, radius in MAJOR_CITY_ANCHORS:
+        if anchor_code != code:
+            continue
+        distance = distance_km(center, (latitude, longitude))
+        if distance <= radius:
+            candidates.append((distance, city))
+    return min(candidates)[1] if candidates else "Unknown"
 
 def load(path):
     try:
@@ -670,7 +702,8 @@ else:
                 for right in range(left + 1, len(matching)):
                     if matching[left][4] and matching[right][4] and distance_km(matching[left][4], matching[right][4]) <= MAX_CITY_CLUSTER_KM:
                         clustered.update((left, right))
-            city = next((item[1] for index, item in enumerate(matching) if index in clustered and item[1]), "Unknown")
+            cluster_points = [item[4] for index, item in enumerate(matching) if index in clustered and item[4]]
+            city = nearest_major_city(code, cluster_points)
 
 for value in (ip, city, country, code):
     print(value)

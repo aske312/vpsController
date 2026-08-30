@@ -62,6 +62,9 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /MAX_CITY_CLUSTER_KM = 50\.0/);
   assert.match(manager, /def distance_km\(first, second\)/);
   assert.match(manager, /distance_km\(matching\[left\]\[4\], matching\[right\]\[4\]\) <= MAX_CITY_CLUSTER_KM/);
+  assert.match(manager, /MAJOR_CITY_ANCHORS/);
+  assert.match(manager, /\("NL", "Amsterdam", 52\.3676, 4\.9041, 55\)/);
+  assert.match(manager, /city = nearest_major_city\(code, cluster_points\)/);
   assert.match(manager, /Upgrade the legacy ipwho/);
   assert.match(manager, /country_code,latitude,longitude/);
   assert.match(bootstrap, /command -v vps-control/);
@@ -220,6 +223,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /DIRECT_GAME_PROCESSES/);
   assert.match(manager, /direct_games_enabled/);
   assert.match(manager, /profile_routing\.get\(key, False\)/);
+  assert.match(manager, /def configured_preset_rules/);
+  assert.match(manager, /"rule_lists": routing_rule_lists\(values\)/);
   assert.match(manager, /PROCESS-NAME-WILDCARD/);
   assert.match(manager, /find-process-mode: strict/);
   assert.match(page, /request\("\/mihomo\/dns\/settings"\)/);
@@ -235,9 +240,15 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /mihomoProfileRuleSwitch/);
   assert.match(page, /profileDirectRules/);
   assert.match(page, /Каждое правило применяется только к этому профилю/);
+  assert.match(page, /mihomoRuleStudio/);
+  assert.match(page, /Восстановить стандартный/);
+  assert.match(page, /routingDraft\[selectedRuleList\.key\]/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games_enabled/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_game_processes/);
+  assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_ru_sites_rules/);
+  assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_ru_banks_rules/);
+  assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_ru_marketplaces_rules/);
   assert.match(page, /DNS и маршрутизация Mihomo готовы/);
   assert.match(styles, /\.mihomoPolicyPanel/);
   for (const policy of [dnsManifest, routingManifest]) {

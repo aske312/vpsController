@@ -542,6 +542,34 @@ DIRECT_GAME_PROCESSES: dict[str, list[str]] = {
     "mobilelegends": ["com.mobile.legends"],
 }
 
+DIRECT_RULE_META = {
+    "direct_ru_sites": ("Российские сайты", "Домены РФ, российские сервисы и IP-адреса."),
+    "direct_ru_banks": ("Банки и платежи", "Банки РФ, СБП, НСПК и финансовые сервисы."),
+    "direct_ru_marketplaces": ("Магазины и маркетплейсы", "Маркетплейсы и крупные интернет-магазины."),
+}
+
+
+def configured_preset_rules(routing: dict[str, Any], setting: str) -> list[str]:
+    raw = str(routing.get(f"{setting}_rules", "@default")).replace("\r", "")
+    if raw.strip() == "@default":
+        return DIRECT_RULE_PRESETS[setting]
+    return [rule.strip() for rule in raw.split("\n") if rule.strip() and not rule.strip().startswith("#")]
+
+
+def routing_rule_lists(values: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    routing = values or routing_settings()
+    return [
+        {
+            "id": setting,
+            "key": f"{setting}_rules",
+            "title": DIRECT_RULE_META[setting][0],
+            "description": DIRECT_RULE_META[setting][1],
+            "default_rules": "\n".join(DIRECT_RULE_PRESETS[setting]),
+            "using_default": str(routing.get(f"{setting}_rules", "@default")).strip() == "@default",
+        }
+        for setting in DIRECT_RULE_PRESETS
+    ]
+
 
 def direct_game_rules(routing: dict[str, Any]) -> list[str]:
     if not routing.get("direct_games_enabled", False):
@@ -563,9 +591,9 @@ def direct_game_rules(routing: dict[str, Any]) -> list[str]:
 
 def profile_rules(routing: dict[str, Any]) -> list[str]:
     rules: list[str] = direct_game_rules(routing)
-    for setting, preset_rules in DIRECT_RULE_PRESETS.items():
+    for setting in DIRECT_RULE_PRESETS:
         if routing.get(setting, False):
-            rules.extend(preset_rules)
+            rules.extend(configured_preset_rules(routing, setting))
     raw_rules = str(routing.get("rules", "")).replace("\r", "")
     rules.extend(rule.strip() for rule in raw_rules.split("\n") if rule.strip() and not rule.strip().startswith("#"))
     return list(dict.fromkeys(rules))
@@ -731,7 +759,8 @@ def get_action() -> dict[str, Any]:
 
 @app.get("/api/mihomo/routing/schema", dependencies=[Depends(auth_required)])
 def get_routing_schema() -> dict[str, Any]:
-    return {"schema": routing_schema(), "values": routing_settings(), "presets": profile_presets()}
+    values = routing_settings()
+    return {"schema": routing_schema(), "values": values, "presets": profile_presets(), "rule_lists": routing_rule_lists(values)}
 
 
 @app.patch("/api/mihomo/routing/presets", dependencies=[Depends(auth_required)])
@@ -746,7 +775,7 @@ def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
     next_values = validate_routing(patch.values, current=routing_settings())
     SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
     atomic_json(ROUTING_SETTINGS_FILE, next_values)
-    return {"schema": routing_schema(), "values": next_values}
+    return {"schema": routing_schema(), "values": next_values, "rule_lists": routing_rule_lists(next_values)}
 
 
 @app.get("/api/mihomo/dns/settings", dependencies=[Depends(auth_required)])

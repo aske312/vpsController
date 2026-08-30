@@ -83,6 +83,7 @@ type PolicySettings = {
   schema: SettingField[];
   values: Record<string, string | number | boolean>;
   presets?: ProfilePreset[];
+  rule_lists?: Array<{ id: string; key: string; title: string; description: string; default_rules: string; using_default: boolean }>;
 };
 
 type ProfilePreset = { id: string; name: string; description: string; strategy: "fallback" | "url-test" | "select"; components: Array<{ id: string; cdn?: boolean; tls?: boolean; transport?: string; label?: string }> };
@@ -177,6 +178,7 @@ export function MihomoPage({
   const [routingPolicy, setRoutingPolicy] = useState<PolicySettings | null>(null);
   const [routingDraft, setRoutingDraft] = useState<Record<string, string | number | boolean>>({});
   const [routingDirty, setRoutingDirty] = useState(false);
+  const [activeRuleList, setActiveRuleList] = useState("direct_ru_sites");
   const routingDirtyRef = useRef(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -703,6 +705,10 @@ export function MihomoPage({
   const installedChannels = transportModules.filter((item) => item.installed);
   const profilePresets = routingPolicy?.presets || [];
   const policiesReady = installedChannels.length > 0 && Boolean(dnsPolicy && routingPolicy);
+  const editableRuleLists = routingPolicy?.rule_lists || [];
+  const selectedRuleList = editableRuleLists.find((item) => item.id === activeRuleList) || editableRuleLists[0];
+  const selectedRuleValue = selectedRuleList ? String(routingDraft[selectedRuleList.key] ?? "@default") : "";
+  const selectedRuleText = selectedRuleList ? (selectedRuleValue === "@default" ? selectedRuleList.default_rules : selectedRuleValue) : "";
 
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
@@ -926,41 +932,44 @@ export function MihomoPage({
       {view === "routing" && (
         <form className="mihomoRoutingWorkspace" onSubmit={saveRoutingWorkspace}>
           <header className="mihomoRoutingHeader">
-            <div><p className="eyebrow">MIHOMO SETTINGS</p><h2>Настройки</h2><p>Управляйте исключениями, выбором защищённого канала и быстрыми профилями Mihomo.</p></div>
+            <div><p className="eyebrow">MIHOMO ROUTING STUDIO</p><h2>Маршрутизация</h2><p>Редактируйте готовые наборы правил, игровой каталог и поведение защищённых каналов. Применение каждого набора включается отдельно в профиле.</p></div>
             <span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "АКТИВНА" : "ОЖИДАНИЕ"}</span>
           </header>
 
-          <section className="mihomoRoutingSection">
-            <div className="mihomoRoutingSectionTitle"><div><b>Списки прямого подключения</b><small>Здесь хранятся готовые наборы. Нужные правила включаются отдельно в настройках каждого профиля.</small></div><span>4 набора</span></div>
-            <div className="mihomoRouteCards mihomoRuleCatalog">
-              {profileDirectRules.map((item) => <article key={item.key}>
-                <span className="mihomoRouteCode">{item.code}</span><span><b>{item.title}</b><small>{item.text}</small></span><i>Включается в профиле</i>
-              </article>)}
-            </div>
+          <section className="mihomoRuleStudio">
+            <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small></header>{profileDirectRules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</aside>
+            <article>
+              {activeRuleList === "direct_games_enabled" ? <>
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Игры без VPN</h3><p>Выберите игры или дополните список собственными именами процессов и Android package name.</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} выбрано</span></header>
+                <div className="mihomoGameCatalog">
+                  {directGameCatalog.map((game) => { const selected = String(routingDraft.direct_games || "").split(",").includes(game.id); return <button type="button" key={game.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleDirectGame(game.id)}><span>{game.code}</span><b>{game.name}</b><i>{selected ? "Напрямую" : "Через VPN"}</i></button>; })}
+                </div>
+                <label className="mihomoCustomGames"><span><b>Дополнительные процессы</b><small>По одному имени процесса или package name на строку.</small></span><textarea rows={5} value={String(routingDraft.direct_game_processes || "")} placeholder={"mygame.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("direct_game_processes", event.target.value)} /></label>
+                <p className="mihomoGamesHint">Для определения процесса нужен TUN-режим. На iPhone сопоставление по приложению может быть недоступно.</p>
+              </> : selectedRuleList ? <>
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">DOMAIN / IP RULES</p><h3>{selectedRuleList.title}</h3><p>{selectedRuleList.description} По одному правилу Mihomo на строку.</p></div><span>{selectedRuleText.split("\n").filter(Boolean).length} правил</span></header>
+                <label className="mihomoRuleTextarea"><textarea rows={16} value={selectedRuleText} spellCheck={false} onChange={(event) => updateRoutingDraft(selectedRuleList.key, event.target.value)} /></label>
+                <footer className="mihomoRuleEditorActions"><span>{selectedRuleValue === "@default" ? "Используется стандартный список" : "Список изменён вручную"}</span><button type="button" className="ghostButton" disabled={selectedRuleValue === "@default"} onClick={() => updateRoutingDraft(selectedRuleList.key, "@default")}>Восстановить стандартный</button></footer>
+              </> : <div className="mihomoHint">Списки правил загружаются…</div>}
+            </article>
           </section>
 
-          <section className="mihomoRoutingSection mihomoGamesSection">
-            <div className="mihomoRoutingSectionTitle"><div><b>Игры без VPN</b><small>Весь трафик выбранных игровых процессов, включая голосовой чат, будет идти напрямую.</small></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} выбрано</span></div>
-            <div className="mihomoGameCatalog">
-              {directGameCatalog.map((game) => { const selected = String(routingDraft.direct_games || "").split(",").includes(game.id); return <button type="button" key={game.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleDirectGame(game.id)}><span>{game.code}</span><b>{game.name}</b><i>{selected ? "Напрямую" : "Через VPN"}</i></button>; })}
+          <section className="mihomoRoutingSection mihomoRoutingBehavior">
+            <div className="mihomoRoutingSectionTitle"><div><b>Поведение соединения</b><small>Общие параметры, которые входят во все профили Mihomo.</small></div></div>
+            <div className="mihomoRoutingColumns">
+              <article><div className="mihomoRoutingSectionTitle"><div><b>Выбор защищённого канала</b><small>Как Mihomo выбирает соединение внутри профиля.</small></div></div><div className="mihomoRoutingFields">
+                <label><span>Режим</span><select value={String(routingDraft.mode || "rule")} onChange={(event) => updateRoutingDraft("mode", event.target.value)}><option value="rule">По правилам</option><option value="global">Весь трафик через VPN</option></select></label>
+                <label><span>Стратегия</span><select value={String(routingDraft.strategy || "fallback")} onChange={(event) => updateRoutingDraft("strategy", event.target.value)}><option value="fallback">Надёжный канал + резерв</option><option value="url-test">Самый быстрый канал</option><option value="select">Выбирать вручную</option></select></label>
+                <label><span>Адрес проверки</span><input value={String(routingDraft.test_url || "")} onChange={(event) => updateRoutingDraft("test_url", event.target.value)} /></label>
+                <label><span>Проверять каждые, сек.</span><input type="number" min={30} max={3600} value={Number(routingDraft.interval || 180)} onChange={(event) => updateRoutingDraft("interval", Number(event.target.value))} /></label>
+              </div></article>
+              <article><div className="mihomoRoutingSectionTitle"><div><b>Новые профили</b><small>Транспорты и домены для быстрых пресетов.</small></div><button type="button" className="ghostButton" onClick={openPresetSettings}>Пресеты</button></div><div className="mihomoRoutingFields">
+                <label><span>Основной транспорт</span><select value={String(routingDraft.preset_primary || "transport-reality")} onChange={(event) => updateRoutingDraft("preset_primary", event.target.value)}>{[{v:"transport-reality",l:"VLESS"},{v:"transport-awg",l:"AmneziaWG"},{v:"transport-wg",l:"WireGuard"},{v:"transport-shadowsocks",l:"Shadowsocks"}].map((item) => <option key={item.v} value={item.v}>{item.l}</option>)}</select></label>
+                <label><span>Резервный транспорт</span><select value={String(routingDraft.preset_fallback || "transport-awg")} onChange={(event) => updateRoutingDraft("preset_fallback", event.target.value)}>{[{v:"transport-awg",l:"AmneziaWG"},{v:"transport-reality",l:"VLESS"},{v:"transport-wg",l:"WireGuard"},{v:"transport-shadowsocks",l:"Shadowsocks"}].map((item) => <option key={item.v} value={item.v}>{item.l}</option>)}</select></label>
+                <label className="is-wide"><span>CDN-домен</span><input value={String(routingDraft.preset_cdn_domain || "")} onChange={(event) => updateRoutingDraft("preset_cdn_domain", event.target.value)} /></label>
+                <label className="is-wide"><span>Прямой TLS-домен</span><input value={String(routingDraft.preset_tls_domain || "")} onChange={(event) => updateRoutingDraft("preset_tls_domain", event.target.value)} /></label>
+              </div></article>
             </div>
-            <label className="mihomoCustomGames"><span><b>Дополнить список</b><small>Укажите имя процесса, например <code>game.exe</code>, либо package name Android. По одному значению на строку.</small></span><textarea rows={4} value={String(routingDraft.direct_game_processes || "")} placeholder={"mygame.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("direct_game_processes", event.target.value)} /></label>
-            <p className="mihomoGamesHint">Для определения игры клиент должен работать в TUN-режиме. На iPhone сопоставление по приложению может быть недоступно.</p>
-          </section>
-
-          <section className="mihomoRoutingColumns">
-            <article><div className="mihomoRoutingSectionTitle"><div><b>Выбор защищённого канала</b><small>Как Mihomo выбирает соединение внутри профиля.</small></div></div><div className="mihomoRoutingFields">
-              <label><span>Режим</span><select value={String(routingDraft.mode || "rule")} onChange={(event) => updateRoutingDraft("mode", event.target.value)}><option value="rule">По правилам</option><option value="global">Весь трафик через VPN</option></select></label>
-              <label><span>Стратегия</span><select value={String(routingDraft.strategy || "fallback")} onChange={(event) => updateRoutingDraft("strategy", event.target.value)}><option value="fallback">Надёжный канал + резерв</option><option value="url-test">Самый быстрый канал</option><option value="select">Выбирать вручную</option></select></label>
-              <label><span>Адрес проверки</span><input value={String(routingDraft.test_url || "")} onChange={(event) => updateRoutingDraft("test_url", event.target.value)} /></label>
-              <label><span>Проверять каждые, сек.</span><input type="number" min={30} max={3600} value={Number(routingDraft.interval || 180)} onChange={(event) => updateRoutingDraft("interval", Number(event.target.value))} /></label>
-            </div></article>
-            <article><div className="mihomoRoutingSectionTitle"><div><b>Быстрые профили</b><small>Транспорты по умолчанию и отдельные пресеты.</small></div><button type="button" className="ghostButton" onClick={openPresetSettings}>Настроить пресеты</button></div><div className="mihomoRoutingFields">
-              <label><span>Основной транспорт</span><select value={String(routingDraft.preset_primary || "transport-reality")} onChange={(event) => updateRoutingDraft("preset_primary", event.target.value)}>{[{v:"transport-reality",l:"VLESS"},{v:"transport-awg",l:"AmneziaWG"},{v:"transport-wg",l:"WireGuard"},{v:"transport-shadowsocks",l:"Shadowsocks"}].map((item) => <option key={item.v} value={item.v}>{item.l}</option>)}</select></label>
-              <label><span>Резервный транспорт</span><select value={String(routingDraft.preset_fallback || "transport-awg")} onChange={(event) => updateRoutingDraft("preset_fallback", event.target.value)}>{[{v:"transport-awg",l:"AmneziaWG"},{v:"transport-reality",l:"VLESS"},{v:"transport-wg",l:"WireGuard"},{v:"transport-shadowsocks",l:"Shadowsocks"}].map((item) => <option key={item.v} value={item.v}>{item.l}</option>)}</select></label>
-              <label className="is-wide"><span>CDN-домен для новых профилей</span><input value={String(routingDraft.preset_cdn_domain || "")} onChange={(event) => updateRoutingDraft("preset_cdn_domain", event.target.value)} /></label>
-              <label className="is-wide"><span>Прямой TLS-домен для новых профилей</span><input value={String(routingDraft.preset_tls_domain || "")} onChange={(event) => updateRoutingDraft("preset_tls_domain", event.target.value)} /></label>
-            </div></article>
           </section>
 
           <details className="mihomoAdvancedRules"><summary><span><b>Дополнительные правила</b><small>Для опытных пользователей</small></span><i>Открыть редактор</i></summary><label><span>По одному правилу Mihomo на строку</span><textarea rows={7} value={String(routingDraft.rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nDOMAIN,api.example.com,DIRECT"} onChange={(event) => updateRoutingDraft("rules", event.target.value)} /></label></details>
