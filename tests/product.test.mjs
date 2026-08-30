@@ -906,7 +906,7 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.doesNotMatch(api, /Literal\["xhttp", "raw", "grpc", "websocket"\]/);
   assert.match(protocolView, /ПРЯМОЕ ПОДКЛЮЧЕНИЕ/);
   assert.match(protocolView, /XHTTP подходит для большинства случаев/);
-  assert.match(protocolView, /vlessServerSettingsGrid/);
+  assert.match(protocolView, /Домены и транспорт каждого контура настраиваются ниже/);
   assert.match(protocolView, /Маскировка соединения/);
   assert.match(protocolView, /Прямой TLS-домен/);
   assert.match(protocolView, /Домен через CDN/);
@@ -931,7 +931,7 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(protocolCss, /\.vlessCommandArt/);
   assert.doesNotMatch(protocolView, /VlessConnectionTransportSettings/);
   assert.doesNotMatch(protocolView, /vlessScope="connections"/);
-  assert.match(protocolView, /vlessScope=\{isVless \? "server" : "all"\}/);
+  assert.doesNotMatch(protocolView, /vlessScope=\{isVless \? "server" : "all"\}/);
   assert.match(protocolView, /function VlessControlCenter/);
   assert.match(protocolView, /Контуры подключения/);
   assert.match(protocolCss, /\.vlessWorkspaceNew/);

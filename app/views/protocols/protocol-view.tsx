@@ -283,7 +283,7 @@ function ProtocolSettingsPanel({
         <span>{tunnel ? "MTU применяется сразу; DNS и keepalive — к новым профилям." : isVless ? "Direct и CDN настраиваются отдельно." : "Перед применением конфигурация проверяется, службы перезапускаются автоматически."}</span></div>
       <div className="configurationSafety"><i aria-hidden="true" /><p><strong>Безопасное применение</strong><small>валидация и автоматический откат</small></p></div>
     </header>
-    <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} vless={isVless} vlessScope={isVless ? "server" : "all"} onChange={onChange} onSave={onSave} />
+    <ProtocolSettingsEditor fields={fields} draft={draft} busy={busy} vless={isVless} onChange={onChange} onSave={onSave} />
   </article>;
 }
 
@@ -324,7 +324,7 @@ function VlessControlCenter({ props }: { props: ProtocolViewProps }) {
       <div><small>ДОСТУПНОСТЬ</small><strong>{protocolAvailability != null ? `${protocolAvailability}%` : "—"}</strong><span>{protocolDiagnosticsLabel}</span></div>
     </section>
     <section className="vlessContourSection">
-      <header><div><p className="eyebrow">CONNECTION MAP</p><h2>Контуры подключения</h2></div><p>Домены настраиваются ниже. Транспорт каждого контура выбирается на странице «Подключения».</p></header>
+      <header><div><p className="eyebrow">CONNECTION MAP</p><h2>Контуры подключения</h2></div><p>Домены и транспорт каждого контура настраиваются ниже.</p></header>
       <div className="vlessContourGrid">{contours.map((item) => <article key={item.id} className={`vlessContourCard ${item.enabled ? "enabled" : "disabled"}`}>
         <div className="vlessContourTop"><span>{item.id}</span><b>{item.enabled ? "ГОТОВ" : "НЕ НАСТРОЕН"}</b></div>
         <p>{item.kind}</p><h3>{item.title}</h3><small>{item.note}</small>
