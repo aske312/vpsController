@@ -261,13 +261,13 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /mihomoProfileDraftSummary/);
   assert.match(page, /mihomoProfileCanvas/);
   assert.match(page, /setProfileStrategy/);
-  assert.match(page, /Как в общих настройках/);
-  assert.match(page, /Надёжный \+ резерв/);
+  assert.match(page, /title: "Общие"/);
+  assert.match(page, /title: "Резерв"/);
   assert.match(page, /Показывать Selector в Mihomo-клиенте/);
   assert.match(page, /if \(!profileStrategyTouched\) setProfileRouting/);
   assert.match(page, /Профиль готов/);
   assert.match(page, /Скопировать ссылку/);
-  assert.match(page, /UDP напрямую/);
+  assert.match(page, /title: "UDP"/);
   assert.match(page, /toggleProfileRule/);
   assert.match(page, /Каждое правило применяется только к этому профилю/);
   assert.match(page, /mihomoRuleStudio/);
@@ -1098,6 +1098,9 @@ test("manual releases are prebuilt and installed without Docker or package upgra
     /PYTHONPATH="\$\{payload\}" "\$\{candidate_python\}" -c 'import api\.main'/,
   );
   assert.match(manager, /http:\/\/127\.0\.0\.1:8000\/api\/health/);
+  assert.match(manager, /ensure_mihomo_profile_runtimes/);
+  assert.match(manager, /shadowsocks-libev/);
+  assert.match(manager, /vps-control-mihomo-ss\.target/);
   assert.match(manager, /install -d -m 0755 "\$\{INSTALL_DIR\}"\s+chmod 0755 "\$\{INSTALL_DIR\}"/);
 });
 

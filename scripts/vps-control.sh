@@ -1792,6 +1792,25 @@ restart_mihomo_manager_if_present() {
     && systemctl restart vps-control-mihomo-manager.service 2>/dev/null || true
 }
 
+# Profiles survive application releases, while their package-backed transport
+# may have been removed by an older uninstaller or an administrator. Repair the
+# runtime before restarting preserved instances; otherwise systemd enters an
+# unbounded restart loop because the generated units still reference ss-server.
+ensure_mihomo_profile_runtimes() {
+  local config_dir="/etc/vps-control/mihomo/shadowsocks"
+  find "${config_dir}" -maxdepth 1 -type f -name '*.json' -print -quit 2>/dev/null | grep -q . || return 0
+  command -v ss-server >/dev/null 2>&1 && return 0
+
+  info "Восстановление runtime Mihomo/Shadowsocks для сохранённых профилей"
+  if ! apt-get -o DPkg::Lock::Timeout=300 install -y shadowsocks-libev; then
+    apt-get -o DPkg::Lock::Timeout=300 update
+    apt-get -o DPkg::Lock::Timeout=300 install -y shadowsocks-libev
+  fi
+  command -v ss-server >/dev/null 2>&1 || die "не удалось восстановить ss-server для профилей Mihomo."
+  systemctl reset-failed 'vps-control-mihomo-ss@*.service' 2>/dev/null || true
+  systemctl restart vps-control-mihomo-ss.target 2>/dev/null || true
+}
+
 deploy() {
   check_source
   ensure_runtime_dependencies
@@ -1818,6 +1837,7 @@ PY
   install_web
   ensure_api_write_access
   install_protocol_monitor
+  ensure_mihomo_profile_runtimes
   info "Запуск обновлённой версии 312.net"
   stop_legacy_containers
   systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
@@ -1983,6 +2003,7 @@ install_prebuilt_release() {
   if ! install_api \
     || ! install_web \
     || ! ensure_api_write_access \
+    || ! ensure_mihomo_profile_runtimes \
     || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
     || ! build_commit="$(awk -F= '$1 == "commit" {print $2}' "${INSTALL_DIR}/.prebuilt-release")" \
     || ! printf '%s\n' "${build_commit:-manual}" >"${INSTALL_DIR}/.build-commit" \
@@ -2163,7 +2184,7 @@ restore_test_app() {
     mv -- "${failed_install}/venv" "${INSTALL_DIR}/venv"
   fi
   PROJECT_DIR="${INSTALL_DIR}"
-  if ! install_api || ! install_web || ! ensure_api_write_access \
+  if ! install_api || ! install_web || ! ensure_api_write_access || ! ensure_mihomo_profile_runtimes \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! restart_mihomo_manager_if_present \
