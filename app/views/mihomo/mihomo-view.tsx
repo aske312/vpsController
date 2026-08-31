@@ -237,15 +237,20 @@ const ruleIconGroups: Record<string, RuleIconGroup[]> = {
     { id: "zones", code: "RU", name: "Домены и IP России", tokens: ["DOMAIN-SUFFIX,ru,", "xn--p1ai", "DOMAIN-SUFFIX,su,", "GEOIP,RU"] },
     { id: "yandex", code: "YA", name: "Яндекс", tokens: ["yandex", "yastatic"] },
     { id: "vk", code: "VK", name: "VK и Mail", tokens: ["vk.ru", "vk.com", "userapi", "vkuseraudio", "mycdn", "mail.com"] },
-    { id: "services", code: "RU+", name: "Другие сервисы РФ", tokens: ["2gis", "kaspersky", "kinopoisk"] },
+    { id: "maps", code: "MAP", name: "Карты и навигация", tokens: ["2gis"] },
+    { id: "media", code: "MEDIA", name: "Кино и медиа", tokens: ["kinopoisk"] },
+    { id: "security", code: "SAFE", name: "Безопасность", tokens: ["kaspersky"] },
   ],
   direct_ru_banks: [
-    { id: "leaders", code: "BANK", name: "Крупные банки", tokens: ["sber", "tinkoff", "tbank", "alfabank", "alfa-bank", "vtb", "gazprombank", "raiffeisen", "psbank", "sovcombank"] },
+    { id: "sber_t", code: "S/T", name: "Сбер и Т-Банк", tokens: ["sber", "tinkoff", "tbank"] },
+    { id: "alfa_vtb", code: "A/V", name: "Альфа и ВТБ", tokens: ["alfabank", "alfa-bank", "vtb"] },
+    { id: "major", code: "BANK", name: "Крупные банки", tokens: ["gazprombank", "raiffeisen", "psbank", "sovcombank", "open.ru", "rshb", "pochtabank", "mkb.ru", "uralsib"] },
     { id: "payments", code: "PAY", name: "Платежи и регуляторы", tokens: ["nspk", "mironline", "unistream", "coronapay", "cbr.ru", "fincult", "banki.ru", "finuslugi"] },
-    { id: "regional", code: "BANK+", name: "Остальные банки", tokens: [] },
+    { id: "regional", code: "BANK+", name: "Региональные банки", tokens: [] },
   ],
   direct_ru_marketplaces: [
-    { id: "marketplaces", code: "MARKET", name: "Маркетплейсы", tokens: ["ozon", "wildberries", "wbbasket", "wb.ru", "market.yandex", "beru", "megamarket", "goods.ru", "aliexpress", "kazanexpress", "magnitmarket"] },
+    { id: "ozon_wb", code: "O/WB", name: "Ozon и Wildberries", tokens: ["ozon", "wildberries", "wbbasket", "wb.ru"] },
+    { id: "marketplaces", code: "MARKET", name: "Другие маркетплейсы", tokens: ["market.yandex", "beru", "megamarket", "goods.ru", "aliexpress", "kazanexpress", "magnitmarket"] },
     { id: "classifieds", code: "AVITO", name: "Объявления", tokens: ["avito"] },
     { id: "fashion", code: "SHOP", name: "Магазины и товары", tokens: ["lamoda", "detmir", "leroymerlin", "lemanapro", "vseinstrumenti"] },
     { id: "electronics", code: "TECH", name: "Электроника", tokens: ["citilink", "dns-shop", "mvideo", "eldorado", "onlinetrade"] },
@@ -257,6 +262,12 @@ const ruleIconGroups: Record<string, RuleIconGroup[]> = {
     { id: "steam", code: "STEAM", name: "Загрузки Steam", tokens: ["steamcontent", "steamserver", "steamstatic", "steamcdn"] },
     { id: "games", code: "GAME", name: "Epic, EA и Battle.net", tokens: ["epicgames", "origin-a", "eaassets", "level3.blizzard", "blzddist"] },
     { id: "packages", code: "DEV", name: "Linux, GitHub и Docker", tokens: ["ubuntu", "debian", "kernel.org", "githubusercontent", "docker"] },
+  ],
+  direct_local_network: [
+    { id: "names", code: "LAN", name: "Локальные имена", tokens: ["localhost", "DOMAIN-SUFFIX,local", "DOMAIN-SUFFIX,lan", "home.arpa"] },
+    { id: "private_v4", code: "IPv4", name: "Приватные IPv4", tokens: ["10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"] },
+    { id: "private_v6", code: "IPv6", name: "Локальные IPv6", tokens: ["::1/128", "fc00::/7", "fe80::/10"] },
+    { id: "discovery", code: "CAST", name: "Обнаружение устройств", tokens: ["224.0.0.0/4", "ff00::/8"] },
   ],
 };
 
@@ -462,7 +473,23 @@ export function MihomoPage({
       else selected.add(line);
     }
     const custom = current.filter((line) => !defaults.includes(line) && selected.has(line));
-    updateRoutingDraft(ruleList.key, [...defaults.filter((line) => selected.has(line)), ...custom].join("\n"));
+    const selectedDefaults = defaults.filter((line) => selected.has(line));
+    updateRoutingDraft(ruleList.key, selectedDefaults.length === defaults.length && !custom.length ? "@default" : [...selectedDefaults, ...custom].join("\n"));
+  }
+
+  function ruleExtraLines(ruleList: NonNullable<PolicySettings["rule_lists"]>[number]) {
+    const defaults = new Set(ruleList.default_rules.split("\n").map((line) => line.trim()).filter(Boolean));
+    const current = String(routingDraft[ruleList.key] ?? "@default").trim() === "@default" ? [] : String(routingDraft[ruleList.key] || "").split("\n").map((line) => line.trim()).filter(Boolean);
+    return current.filter((line) => !defaults.has(line));
+  }
+
+  function updateRuleExtras(ruleList: NonNullable<PolicySettings["rule_lists"]>[number], value: string) {
+    const defaults = ruleList.default_rules.split("\n").map((line) => line.trim()).filter(Boolean);
+    const raw = String(routingDraft[ruleList.key] ?? "@default").trim();
+    const current = raw === "@default" ? new Set(defaults) : new Set(raw.split("\n").map((line) => line.trim()).filter(Boolean));
+    const selectedDefaults = defaults.filter((line) => current.has(line));
+    const extras = value.replace(/\r/g, "").split("\n").map((line) => line.trim()).filter(Boolean);
+    updateRoutingDraft(ruleList.key, selectedDefaults.length === defaults.length && !extras.length ? "@default" : [...selectedDefaults, ...extras].join("\n"));
   }
 
   function setGameRoute(gameId: string, route: "direct" | "tunnel" | "off") {
@@ -1169,7 +1196,6 @@ export function MihomoPage({
             <article>
               {activeRuleList === "direct_games_udp_enabled" ? <>
                 <header className="mihomoRuleEditorHead"><div><p className="eyebrow">NETWORK RULE</p><h3>UDP напрямую</h3><p>Выбранные исключения остаются в GATE.312, остальной UDP идёт напрямую.</p></div><span>{selectedUdpExclusions.size} искл.</span></header>
-                <div className="mihomoHint">NETWORK,UDP,DIRECT</div>
                 <div className="mihomoGameCatalog">
                   {udpExclusionCatalog.map((resource) => { const selected = selectedUdpExclusions.has(resource.id); return <button type="button" key={resource.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleUdpExclusion(resource.id)}><span>{resource.code}</span><b>{resource.name}</b><i>{selected ? "Через VPN" : "Напрямую"}</i></button>; })}
                 </div>
@@ -1184,9 +1210,9 @@ export function MihomoPage({
                 <label className="mihomoCustomGames"><span><b>Дополнительные процессы напрямую</b><small>По одному имени процесса или package name на строку.</small></span><textarea rows={5} value={String(routingDraft.direct_game_processes || "")} placeholder={"mygame.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("direct_game_processes", event.target.value)} /></label>
                 <p className="mihomoGamesHint">Для определения процесса нужен TUN-режим. На iPhone сопоставление по приложению может быть недоступно.</p>
               </> : selectedRuleList ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">DOMAIN / IP RULES</p><h3>{selectedRuleList.title}</h3><p>{selectedRuleList.description} По одному правилу Mihomo на строку.</p></div><span>{selectedRuleText.split("\n").filter(Boolean).length} правил</span></header>
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">DOMAIN / IP RULES</p><h3>{selectedRuleList.title}</h3><p>{selectedRuleList.description} Выберите нужные группы.</p></div><span>{selectedRuleText.split("\n").filter(Boolean).length} правил</span></header>
                 {ruleIconGroups[selectedRuleList.id] && <div className="mihomoGameCatalog">{ruleIconGroups[selectedRuleList.id].map((group) => { const lines = ruleGroupLines(selectedRuleList, group); const current = new Set(selectedRuleText.split("\n").map((line) => line.trim()).filter(Boolean)); const enabled = lines.length > 0 && lines.every((line) => current.has(line)); return <button type="button" key={group.id} className={enabled ? "is-selected" : ""} aria-pressed={enabled} onClick={() => toggleRuleIconGroup(selectedRuleList, group)}><span>{group.code}</span><b>{group.name}</b><i>{enabled ? "Включено" : "Выключено"}</i></button>; })}</div>}
-                <label className="mihomoRuleTextarea"><textarea rows={16} value={selectedRuleText} spellCheck={false} onChange={(event) => updateRoutingDraft(selectedRuleList.key, event.target.value)} /></label>
+                <label className="mihomoCustomGames"><span><b>Дополнительные правила</b><small>Собственные правила Mihomo, по одному на строку. Они дополняют выбранные выше группы.</small></span><textarea rows={5} value={ruleExtraLines(selectedRuleList).join("\n")} spellCheck={false} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nIP-CIDR,203.0.113.0/24,DIRECT,no-resolve"} onChange={(event) => updateRuleExtras(selectedRuleList, event.target.value)} /></label>
                 <footer className="mihomoRuleEditorActions"><span>{selectedRuleValue === "@default" ? "Используется стандартный список" : "Список изменён вручную"}</span><button type="button" className="ghostButton" disabled={selectedRuleValue === "@default"} onClick={() => updateRoutingDraft(selectedRuleList.key, "@default")}>Восстановить стандартный</button></footer>
               </> : <div className="mihomoHint">Списки правил загружаются…</div>}
             </article>

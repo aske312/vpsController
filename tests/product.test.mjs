@@ -274,6 +274,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /setGameRoute/);
   assert.match(page, /const ruleIconGroups/);
   assert.match(page, /toggleRuleIconGroup/);
+  assert.match(page, /ruleExtraLines/);
+  assert.match(page, /updateRuleExtras/);
+  assert.doesNotMatch(page, /mihomoHint">NETWORK,UDP,DIRECT/);
   assert.match(page, /mihomoCatalogToolbar/);
   assert.match(page, /visibleRuleGroups/);
   assert.match(page, /direct_downloads/);
