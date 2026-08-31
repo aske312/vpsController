@@ -240,6 +240,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /"direct_local_network": \[/);
   assert.match(manager, /IP-CIDR,192\.168\.0\.0\/16,DIRECT,no-resolve/);
   assert.match(manager, /IP-CIDR6,fc00::\/7,DIRECT,no-resolve/);
+  assert.match(manager, /"direct_downloads": \[/);
+  assert.match(manager, /DOMAIN-SUFFIX,windowsupdate\.com,DIRECT/);
+  assert.match(manager, /DOMAIN-SUFFIX,steamcontent\.com,DIRECT/);
   assert.match(manager, /"atomicheart": \["AtomicHeart-Win64-Shipping\.exe"\]/);
   assert.match(manager, /"stalcraft": \["stalcraft\.exe", "STALCRAFT\.exe"\]/);
   assert.match(manager, /direct_games_enabled/);
@@ -257,6 +260,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /"rule_lists": routing_rule_lists\(values\)/);
   assert.match(manager, /PROCESS-NAME-WILDCARD/);
   assert.match(manager, /find-process-mode: strict/);
+  assert.match(manager, /def endpoint_latency_ms/);
+  assert.match(manager, /"latency_ms": min\(latencies\) if latencies else None/);
   assert.match(page, /request\("\/mihomo\/dns\/settings"\)/);
   assert.match(page, /request\("\/mihomo\/routing\/schema"\)/);
   assert.match(page, /className="mihomoDnsWorkspace"/);
@@ -269,6 +274,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /setGameRoute/);
   assert.match(page, /const ruleIconGroups/);
   assert.match(page, /toggleRuleIconGroup/);
+  assert.match(page, /mihomoCatalogToolbar/);
+  assert.match(page, /visibleRuleGroups/);
+  assert.match(page, /direct_downloads/);
   assert.doesNotMatch(page, /<b>Дополнительные процессы через VPN<\/b>/);
   assert.match(page, /mihomoProfileRuleSwitch/);
   assert.match(page, /profileDirectRules/);
@@ -279,6 +287,11 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /mihomoProfileWorkspace/);
   assert.match(page, /mihomoProfileRail/);
   assert.match(page, /mihomoProfileDraftSummary/);
+  assert.match(page, /collapsedDeviceLists/);
+  assert.match(page, /collapsedProtocolLists/);
+  assert.match(page, /Скрыть устройства/);
+  assert.match(page, /Скрыть каналы/);
+  assert.doesNotMatch(page, /Получено \{bytes\(item\?\.rx_bytes/);
   assert.match(page, /mihomoProfileCanvas/);
   assert.match(styles, /\.mihomoProfileDialog \{ width:94vw; height:92dvh;/);
   assert.match(polish, /\.mihomoDialog:not\(\.mihomoProfileDialog\)/);

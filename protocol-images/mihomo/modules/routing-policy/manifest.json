@@ -112,11 +112,19 @@
       "default": false,
       "help": "Сохраняет прямой доступ к роутерам, NAS, принтерам, умному дому и приватным IPv4/IPv6-адресам."
     },
+    {
+      "key": "direct_downloads",
+      "label": "Загрузки напрямую",
+      "type": "boolean",
+      "default": false,
+      "help": "Направляет напрямую только CDN крупных обновлений ОС, драйверов, игровых файлов и пакетов; авторизация и API остаются в туннеле."
+    },
     { "key": "block_ads_rules", "label": "Список блокировки рекламы", "type": "textarea", "default": "@default" },
     { "key": "direct_ru_sites_rules", "label": "Список российских сайтов", "type": "textarea", "default": "@default" },
     { "key": "direct_ru_banks_rules", "label": "Список банков и платежей", "type": "textarea", "default": "@default" },
     { "key": "direct_ru_marketplaces_rules", "label": "Список магазинов и маркетплейсов", "type": "textarea", "default": "@default" },
     { "key": "direct_local_network_rules", "label": "Локальные адреса", "type": "textarea", "default": "@default" },
+    { "key": "direct_downloads_rules", "label": "CDN загрузок", "type": "textarea", "default": "@default" },
     {
       "key": "udp_tunnel_exclusions",
       "label": "Каталог исключений UDP",

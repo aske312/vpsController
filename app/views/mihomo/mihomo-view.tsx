@@ -5,7 +5,7 @@ import { bytes, duration } from "../../lib/control-plane-ui";
 import QRCode from "qrcode";
 import Image from "next/image";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 
 type View = "overview" | "profiles" | "channels" | "dns" | "routing";
@@ -100,7 +100,8 @@ const presetConnectionOptions: ProfilePreset["components"] = [
   { id: "transport-reality", cdn: true, transport: "grpc", label: "VLESS CDN · gRPC" },
   { id: "transport-awg", label: "AWG" }, { id: "transport-wg", label: "WG" }, { id: "transport-shadowsocks", label: "SS" },
 ];
-type ProfileStats = { summary: { configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null }; connections: Record<string, { active?: boolean; endpoint?: string | null; active_connections?: number; rx_bytes?: number; tx_bytes?: number; handshake_age_s?: number | null }> };
+type ConnectionStats = { active?: boolean; endpoint?: string | null; active_connections?: number; rx_bytes?: number; tx_bytes?: number; handshake_age_s?: number | null; latency_ms?: number | null };
+type ProfileStats = { summary: { configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null; latency_ms?: number | null }; connections: Record<string, ConnectionStats>; devices?: Record<string, { configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null; latency_ms?: number | null }> };
 
 const channelShort: Record<string, string> = {
   "transport-awg": "AW",
@@ -187,8 +188,8 @@ const tunnelGameCatalog = [
   { id: "battlefront2", code: "SW", name: "Star Wars Battlefront II", family: "EA" },
 ];
 const gameRoutingCatalog = [...new Map([
-  ...tunnelGameCatalog,
   ...directGameCatalog.map((game) => ({ ...game, family: "Обычный маршрут" })),
+  ...tunnelGameCatalog,
 ].map((game) => [game.id, game])).values()];
 
 const udpExclusionCatalog = [
@@ -213,13 +214,14 @@ const udpExclusionCatalog = [
 ];
 
 const profileDirectRules = [
-  { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и рекламные трекеры." },
-  { key: "direct_ru_sites", code: "RU", title: "Сайты РФ", text: "Домены и IP России." },
-  { key: "direct_ru_banks", code: "BANK", title: "Банки", text: "Банки и платёжные сервисы." },
-  { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Магазины и маркетплейсы." },
-  { key: "direct_local_network", code: "LAN", title: "Локальная сеть", text: "Домашние устройства напрямую." },
-  { key: "direct_games_enabled", code: "GAME", title: "Игры", text: "Выбранные игры без VPN." },
-  { key: "direct_games_udp_enabled", code: "UDP", title: "UDP", text: "Весь UDP без VPN." },
+  { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и рекламные трекеры.", group: "Защита" },
+  { key: "direct_ru_sites", code: "RU", title: "Сайты РФ", text: "Домены и IP России.", group: "Напрямую" },
+  { key: "direct_ru_banks", code: "BANK", title: "Банки", text: "Банки и платёжные сервисы.", group: "Напрямую" },
+  { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Магазины и маркетплейсы.", group: "Напрямую" },
+  { key: "direct_downloads", code: "DL", title: "Загрузки", text: "Крупные файлы без VPN.", group: "Напрямую" },
+  { key: "direct_local_network", code: "LAN", title: "Локальная сеть", text: "Домашние устройства напрямую.", group: "Сеть" },
+  { key: "direct_games_enabled", code: "GAME", title: "Игры", text: "Выбранные игры без VPN.", group: "Сеть" },
+  { key: "direct_games_udp_enabled", code: "UDP", title: "UDP", text: "Весь UDP без VPN.", group: "Сеть" },
 ];
 
 type RuleIconGroup = { id: string; code: string; name: string; tokens: string[] };
@@ -247,6 +249,14 @@ const ruleIconGroups: Record<string, RuleIconGroup[]> = {
     { id: "classifieds", code: "AVITO", name: "Объявления", tokens: ["avito"] },
     { id: "fashion", code: "SHOP", name: "Магазины и товары", tokens: ["lamoda", "detmir", "leroymerlin", "lemanapro", "vseinstrumenti"] },
     { id: "electronics", code: "TECH", name: "Электроника", tokens: ["citilink", "dns-shop", "mvideo", "eldorado", "onlinetrade"] },
+  ],
+  direct_downloads: [
+    { id: "windows", code: "WIN", name: "Windows и Microsoft", tokens: ["windowsupdate", "update.microsoft", "delivery.mp.microsoft", "download.microsoft"] },
+    { id: "apple", code: "APPLE", name: "Обновления Apple", tokens: ["swcdn.apple", "swdownload.apple", "swdist.apple", "appldnld.apple", "mesu.apple"] },
+    { id: "drivers", code: "GPU", name: "Драйверы NVIDIA и AMD", tokens: ["nvidia", "drivers.amd"] },
+    { id: "steam", code: "STEAM", name: "Загрузки Steam", tokens: ["steamcontent", "steamserver", "steamstatic", "steamcdn"] },
+    { id: "games", code: "GAME", name: "Epic, EA и Battle.net", tokens: ["epicgames", "origin-a", "eaassets", "level3.blizzard", "blzddist"] },
+    { id: "packages", code: "DEV", name: "Linux, GitHub и Docker", tokens: ["ubuntu", "debian", "kernel.org", "githubusercontent", "docker"] },
   ],
 };
 
@@ -295,6 +305,9 @@ export function MihomoPage({
   const [routingDraft, setRoutingDraft] = useState<Record<string, string | number | boolean>>({});
   const [routingDirty, setRoutingDirty] = useState(false);
   const [activeRuleList, setActiveRuleList] = useState("direct_ru_sites");
+  const [ruleSearch, setRuleSearch] = useState("");
+  const [gameSearch, setGameSearch] = useState("");
+  const [gameFilter, setGameFilter] = useState<"all" | "direct" | "vpn" | "restricted">("all");
   const routingDirtyRef = useRef(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -311,6 +324,8 @@ export function MihomoPage({
   const [profileDevices, setProfileDevices] = useState<ProfileDevice[]>([{ id: "device-1", name: "Основное устройство" }]);
   const [activeDeviceId, setActiveDeviceId] = useState("device-1");
   const [profileStats, setProfileStats] = useState<Record<string, ProfileStats>>({});
+  const [collapsedDeviceLists, setCollapsedDeviceLists] = useState<Set<string>>(() => new Set());
+  const [collapsedProtocolLists, setCollapsedProtocolLists] = useState<Set<string>>(() => new Set());
   const [createdProfile, setCreatedProfile] = useState<Profile | null>(null);
   const [readyDevices, setReadyDevices] = useState<ReadyDevice[]>([]);
   const [presetDialog, setPresetDialog] = useState(false);
@@ -470,6 +485,14 @@ export function MihomoPage({
 
   function toggleProfileRule(key: string, checked: boolean) {
     setProfileRouting((current) => ({ ...current, [key]: checked }));
+  }
+
+  function toggleCollapsed(setter: Dispatch<SetStateAction<Set<string>>>, key: string) {
+    setter((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
   }
 
   function setProfileStrategy(value: string) {
@@ -902,6 +925,21 @@ export function MihomoPage({
   const selectedRuleValue = selectedRuleList ? String(routingDraft[selectedRuleList.key] ?? "@default") : "";
   const selectedRuleText = selectedRuleList ? (selectedRuleValue === "@default" ? selectedRuleList.default_rules : selectedRuleValue) : "";
   const selectedUdpExclusions = new Set(String(routingDraft.udp_tunnel_exclusions || "").split(",").filter(Boolean));
+  const directGames = new Set(String(routingDraft.direct_games || "").split(",").filter(Boolean));
+  const normalizedGameSearch = gameSearch.trim().toLocaleLowerCase("ru");
+  const visibleGames = gameRoutingCatalog.filter((game) => {
+    const direct = directGames.has(game.id);
+    if (normalizedGameSearch && !`${game.name} ${game.code} ${game.family}`.toLocaleLowerCase("ru").includes(normalizedGameSearch)) return false;
+    if (gameFilter === "direct") return direct;
+    if (gameFilter === "vpn") return !direct;
+    if (gameFilter === "restricted") return game.family !== "Обычный маршрут";
+    return true;
+  });
+  const normalizedRuleSearch = ruleSearch.trim().toLocaleLowerCase("ru");
+  const visibleRuleGroups = [...new Set(profileDirectRules.map((rule) => rule.group))].map((group) => ({
+    group,
+    rules: profileDirectRules.filter((rule) => rule.group === group && (!normalizedRuleSearch || `${rule.title} ${rule.text} ${rule.code}`.toLocaleLowerCase("ru").includes(normalizedRuleSearch))),
+  })).filter((section) => section.rules.length);
 
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
@@ -1062,26 +1100,29 @@ export function MihomoPage({
                     <div><small>Трафик</small><strong>↓ {bytes(stats?.rx_bytes || 0)}</strong><span>↑ {bytes(stats?.tx_bytes || 0)}</span></div>
                     <div><small>Последняя связь</small><strong>{stats?.last_handshake_age_s != null ? duration(stats.last_handshake_age_s) : "—"}</strong><span>{stats?.last_handshake_age_s != null ? "назад" : "подключений нет"}</span></div>
                   </div>
-                  <div className="mihomoRowActions"><button onClick={() => editProfile(profile)}>Настроить</button><button className="dangerButton" onClick={() => void removeProfile(profile)} disabled={busy === `profile:${profile.id}`}>Удалить</button></div>
+                  <div className="mihomoRowActions"><button onClick={() => toggleCollapsed(setCollapsedDeviceLists, profile.id)}>{collapsedDeviceLists.has(profile.id) ? `Показать устройства (${devices.length})` : "Скрыть устройства"}</button><button onClick={() => editProfile(profile)}>Настроить</button><button className="dangerButton" onClick={() => void removeProfile(profile)} disabled={busy === `profile:${profile.id}`}>Удалить</button></div>
                 </header>
-                <div className="mihomoProfileDevices">
+                {!collapsedDeviceLists.has(profile.id) && <div className="mihomoProfileDevices">
                   {devices.map((device, deviceIndex) => {
                     const connections = profile.connections.filter((connection) => (connection.device_id || devices[0].id) === device.id);
                     const connectionStats = connections.map((connection) => profileStats[profile.id]?.connections?.[connection.id]);
                     const onlineCount = connectionStats.filter((item) => Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0))).length;
                     const deviceRx = connectionStats.reduce((sum, item) => sum + Number(item?.rx_bytes || 0), 0);
                     const deviceTx = connectionStats.reduce((sum, item) => sum + Number(item?.tx_bytes || 0), 0);
+                    const deviceLatency = profileStats[profile.id]?.devices?.[device.id]?.latency_ms;
+                    const protocolListKey = `${profile.id}:${device.id}`;
+                    const protocolsCollapsed = collapsedProtocolLists.has(protocolListKey);
                     const deleting = busy === `device:${profile.id}:${device.id}`;
                     return <section key={device.id} className="mihomoProfileDevice">
                       <header className="mihomoDeviceHeader">
                         <div className="mihomoDeviceIdentity"><span>{String(deviceIndex + 1).padStart(2, "0")}</span><p><b>{device.name}</b><small>Отдельная конфигурация и постоянная подписка</small></p></div>
-                        <div className="mihomoDeviceTotals"><span><small>КАНАЛЫ</small><b>{onlineCount}/{connections.length}</b></span><span><small>ПРАВИЛА</small><b>{ruleCount}</b></span><span><small>ТРАФИК</small><b>↓ {bytes(deviceRx)} · ↑ {bytes(deviceTx)}</b></span></div>
-                        <nav className="mihomoDeviceActions"><button className="primaryButton" onClick={() => void copySubscription(profile, device)} disabled={busy === `subscription:${profile.id}:${device.id}`}>Скопировать подписку</button><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>Скачать YAML</button><button onClick={() => void copyConfig(profile, device)} disabled={busy === `config:${profile.id}`}>Копировать YAML</button><button className="dangerButton" onClick={() => void removeProfileDevice(profile, device)} disabled={deleting || devices.length <= 1} title={devices.length <= 1 ? "Нельзя удалить единственное устройство профиля" : "Удалить это устройство и его подключения"}>{deleting ? "Удаление…" : "Удалить устройство"}</button></nav>
+                        <div className="mihomoDeviceTotals"><span><small>КАНАЛЫ</small><b>{onlineCount}/{connections.length}</b></span><span><small>ПРАВИЛА</small><b>{ruleCount}</b></span><span><small>ТРАФИК</small><b>↓ {bytes(deviceRx)} · ↑ {bytes(deviceTx)}</b></span><span><small>PING</small><b>{deviceLatency != null ? `${Math.round(deviceLatency)} ms` : "—"}</b></span></div>
+                        <nav className="mihomoDeviceActions"><button onClick={() => toggleCollapsed(setCollapsedProtocolLists, protocolListKey)}>{protocolsCollapsed ? `Показать каналы (${connections.length})` : "Скрыть каналы"}</button><button className="primaryButton" onClick={() => void copySubscription(profile, device)} disabled={busy === `subscription:${profile.id}:${device.id}`}>Скопировать подписку</button><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>Скачать YAML</button><button onClick={() => void copyConfig(profile, device)} disabled={busy === `config:${profile.id}`}>Копировать YAML</button><button className="dangerButton" onClick={() => void removeProfileDevice(profile, device)} disabled={deleting || devices.length <= 1} title={devices.length <= 1 ? "Нельзя удалить единственное устройство профиля" : "Удалить это устройство и его подключения"}>{deleting ? "Удаление…" : "Удалить устройство"}</button></nav>
                       </header>
-                      <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0)); return <div key={connection.id}><span className={online ? "online" : ""}>{channelShort[connection.component] || "CH"}<i /></span><p><b>{connection.name}</b><small>Получено {bytes(item?.rx_bytes || 0)} · Отдано {bytes(item?.tx_bytes || 0)}</small>{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Для устройства пока нет подключений.</p>}</div>
+                      {!protocolsCollapsed && <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0)); return <div key={connection.id}><span className={online ? "online" : ""}>{channelShort[connection.component] || "CH"}<i /></span><p><b>{connection.name}</b><small>↓ {bytes(item?.rx_bytes || 0)} · ↑ {bytes(item?.tx_bytes || 0)}{item?.latency_ms != null ? ` · ${Math.round(item.latency_ms)} ms` : ""}</small>{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Для устройства пока нет подключений.</p>}</div>}
                     </section>;
                   })}
-                </div>
+                </div>}
               </section>
             ); })}
             {!profiles.length && <Empty title="Профилей пока нет" text="Установите компонент и соберите первое подключение в профиле." />}
@@ -1130,7 +1171,7 @@ export function MihomoPage({
           </header>
 
           <section className="mihomoRuleStudio">
-            <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small></header>{profileDirectRules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</aside>
+            <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small><input aria-label="Поиск правил" value={ruleSearch} placeholder="Найти правило…" onChange={(event) => setRuleSearch(event.target.value)} /></header><div className="mihomoRuleLibrary">{visibleRuleGroups.map((section) => <section key={section.group}><h4>{section.group}</h4>{section.rules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</section>)}</div></aside>
             <article>
               {activeRuleList === "direct_games_udp_enabled" ? <>
                 <header className="mihomoRuleEditorHead"><div><p className="eyebrow">NETWORK RULE</p><h3>UDP напрямую</h3><p>Выбранные исключения остаются в GATE.312, остальной UDP идёт напрямую.</p></div><span>{selectedUdpExclusions.size} искл.</span></header>
@@ -1141,9 +1182,11 @@ export function MihomoPage({
                 <label className="mihomoCustomGames"><span><b>Дополнительные исключения</b><small>Полные правила Mihomo через GATE.312, по одному на строку.</small></span><textarea rows={5} value={String(routingDraft.udp_tunnel_exclusions_rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,GATE.312\nDST-PORT,3478,GATE.312"} onChange={(event) => updateRoutingDraft("udp_tunnel_exclusions_rules", event.target.value)} /></label>
               </> : activeRuleList === "direct_games_enabled" ? <>
                 <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Маршруты игр</h3><p>Нажмите на игру, чтобы переключить её между прямым маршрутом и GATE.312. При включённом правиле отмеченные игры идут напрямую.</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} напрямую</span></header>
-                <div className="mihomoGameCatalog">
-                  {gameRoutingCatalog.map((game) => { const direct = String(routingDraft.direct_games || "").split(",").includes(game.id); return <button type="button" key={game.id} className={direct ? "is-selected" : ""} aria-pressed={direct} title={game.family} onClick={() => setGameRoute(game.id, direct ? "tunnel" : "direct")}><span>{game.code}</span><b>{game.name}</b><i>{direct ? "Напрямую" : "Через VPN"}</i></button>; })}
+                <div className="mihomoCatalogToolbar"><input aria-label="Поиск игр" value={gameSearch} placeholder="Найти игру…" onChange={(event) => setGameSearch(event.target.value)} /><nav>{([['all', 'Все'], ['direct', 'Напрямую'], ['vpn', 'VPN'], ['restricted', 'Ограничения РФ']] as const).map(([value, label]) => <button type="button" key={value} className={gameFilter === value ? "is-active" : ""} onClick={() => setGameFilter(value)}>{label}</button>)}</nav><span>{visibleGames.length} из {gameRoutingCatalog.length}</span></div>
+                <div className="mihomoGameCatalog mihomoLargeCatalog">
+                  {visibleGames.map((game) => { const direct = directGames.has(game.id); return <button type="button" key={game.id} className={direct ? "is-selected" : ""} aria-pressed={direct} title={game.family} onClick={() => setGameRoute(game.id, direct ? "tunnel" : "direct")}><span>{game.code}</span><b>{game.name}</b><i>{direct ? "Напрямую" : "Через VPN"}</i></button>; })}
                 </div>
+                {!visibleGames.length && <div className="mihomoHint">Игры по этому запросу не найдены.</div>}
                 <label className="mihomoCustomGames"><span><b>Дополнительные процессы напрямую</b><small>По одному имени процесса или package name на строку.</small></span><textarea rows={5} value={String(routingDraft.direct_game_processes || "")} placeholder={"mygame.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("direct_game_processes", event.target.value)} /></label>
                 <p className="mihomoGamesHint">Для определения процесса нужен TUN-режим. На iPhone сопоставление по приложению может быть недоступно.</p>
               </> : selectedRuleList ? <>

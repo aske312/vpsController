@@ -50,6 +50,8 @@ MIHOMO_GITHUB_REPO = "MetaCubeX/mihomo"
 github_release_lock = threading.Lock()
 profile_mutation_lock = threading.Lock()
 github_release_cache: dict[str, dict[str, Any]] = {}
+latency_cache: dict[str, tuple[float, float | None]] = {}
+latency_cache_lock = threading.Lock()
 
 
 def serialized_profile_mutation(function):
@@ -601,6 +603,42 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "IP-CIDR6,fe80::/10,DIRECT,no-resolve",
         "IP-CIDR6,ff00::/8,DIRECT,no-resolve",
     ],
+    "direct_downloads": [
+        # Operating-system and driver payloads. Authentication/API traffic is
+        # deliberately not included, only well-known delivery hosts.
+        "DOMAIN-SUFFIX,windowsupdate.com,DIRECT",
+        "DOMAIN,update.microsoft.com,DIRECT",
+        "DOMAIN-SUFFIX,delivery.mp.microsoft.com,DIRECT",
+        "DOMAIN,dl.delivery.mp.microsoft.com,DIRECT",
+        "DOMAIN-SUFFIX,download.microsoft.com,DIRECT",
+        "DOMAIN,swcdn.apple.com,DIRECT",
+        "DOMAIN,swdownload.apple.com,DIRECT",
+        "DOMAIN,swdist.apple.com,DIRECT",
+        "DOMAIN,appldnld.apple.com,DIRECT",
+        "DOMAIN,mesu.apple.com,DIRECT",
+        "DOMAIN-SUFFIX,download.nvidia.com,DIRECT",
+        "DOMAIN,drivers.amd.com,DIRECT",
+        # Game payload CDNs; stores, login and multiplayer remain tunneled.
+        "DOMAIN-SUFFIX,steamcontent.com,DIRECT",
+        "DOMAIN-SUFFIX,steamserver.net,DIRECT",
+        "DOMAIN-SUFFIX,steamstatic.com,DIRECT",
+        "DOMAIN-SUFFIX,steamcdn-a.akamaihd.net,DIRECT",
+        "DOMAIN,download.epicgames.com,DIRECT",
+        "DOMAIN-SUFFIX,epicgames-download1.akamaized.net,DIRECT",
+        "DOMAIN,origin-a.akamaihd.net,DIRECT",
+        "DOMAIN,eaassets-a.akamaihd.net,DIRECT",
+        "DOMAIN,level3.blizzard.com,DIRECT",
+        "DOMAIN,blzddist1-a.akamaihd.net,DIRECT",
+        # Common public package repositories and large development artifacts.
+        "DOMAIN,archive.ubuntu.com,DIRECT",
+        "DOMAIN,security.ubuntu.com,DIRECT",
+        "DOMAIN,deb.debian.org,DIRECT",
+        "DOMAIN,mirrors.edge.kernel.org,DIRECT",
+        "DOMAIN-SUFFIX,objects.githubusercontent.com,DIRECT",
+        "DOMAIN-SUFFIX,github-releases.githubusercontent.com,DIRECT",
+        "DOMAIN,registry-1.docker.io,DIRECT",
+        "DOMAIN,production.cloudflare.docker.com,DIRECT",
+    ],
 }
 
 DIRECT_GAME_PROCESSES: dict[str, list[str]] = {
@@ -691,6 +729,7 @@ DIRECT_RULE_META = {
     "direct_ru_banks": ("Банки и платежи", "Банки РФ, СБП, НСПК и финансовые сервисы."),
     "direct_ru_marketplaces": ("Магазины и маркетплейсы", "Маркетплейсы и крупные интернет-магазины."),
     "direct_local_network": ("Локальная сеть", "Роутеры, NAS, принтеры, умный дом и приватные адреса направляются напрямую."),
+    "direct_downloads": ("Загрузки напрямую", "Крупные обновления ОС, драйверы, игровые файлы и пакеты загружаются без VPN."),
 }
 
 UDP_TUNNEL_EXCLUSION_CATALOG: dict[str, list[str]] = {
@@ -1907,6 +1946,33 @@ def wg_like_dump(module_id: str) -> dict[str, dict[str, Any]]:
     return peers
 
 
+def endpoint_latency_ms(endpoint: str | None) -> float | None:
+    """Best-effort ICMP RTT for active peer endpoints, cached to keep stats cheap."""
+    if not endpoint:
+        return None
+    value = endpoint.strip()
+    host = value[1:value.find("]")] if value.startswith("[") and "]" in value else value.rsplit(":", 1)[0]
+    if not host:
+        return None
+    now = time.monotonic()
+    with latency_cache_lock:
+        cached = latency_cache.get(host)
+        if cached and now - cached[0] < 30:
+            return cached[1]
+    command = ["ping", "-n", "-c", "1", "-W", "1", host]
+    if ":" in host:
+        command.insert(1, "-6")
+    try:
+        result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=2, check=False)
+        match = re.search(r"time[=<]([0-9.]+)\s*ms", result.stdout)
+        latency = round(float(match.group(1)), 1) if result.returncode == 0 and match else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        latency = None
+    with latency_cache_lock:
+        latency_cache[host] = (now, latency)
+    return latency
+
+
 def shadowsocks_profile_stats(profile_id: str, port: int, instance_id: str | None = None) -> dict[str, Any]:
     unit = f"vps-control-mihomo-ss@{instance_id or profile_id}.service"
 
@@ -1976,6 +2042,9 @@ def profile_stats(profile_id: str) -> dict[str, Any]:
         elif module_id == "transport-reality":
             connections[connection_id] = reality_profile_stats(profile_id, connection_id)
     values = list(connections.values())
+    for value in values:
+        if value.get("endpoint") and (value.get("active") or int(value.get("active_connections", 0) or 0) > 0 or value.get("handshake_age_s") is not None):
+            value["latency_ms"] = endpoint_latency_ms(str(value["endpoint"]))
     rx_bytes = sum(int(value.get("rx_bytes", 0) or 0) for value in values)
     tx_bytes = sum(int(value.get("tx_bytes", 0) or 0) for value in values)
     active = sum(1 for value in values if value.get("active") or value.get("endpoint") or int(value.get("active_connections", 0) or 0) > 0)
@@ -1986,8 +2055,10 @@ def profile_stats(profile_id: str) -> dict[str, Any]:
         ids = [str(connection.get("id")) for connection in item.get("connections", []) if connection.get("device_id", "device-1") == device_id]
         rows = [connections[value] for value in ids if value in connections]
         ages = [int(row["handshake_age_s"]) for row in rows if row.get("handshake_age_s") is not None]
-        device_summaries[device_id] = {"configured": len(rows), "active": sum(1 for row in rows if row.get("active") or row.get("endpoint") or int(row.get("active_connections", 0) or 0) > 0), "rx_bytes": sum(int(row.get("rx_bytes", 0) or 0) for row in rows), "tx_bytes": sum(int(row.get("tx_bytes", 0) or 0) for row in rows), "last_handshake_age_s": min(ages) if ages else None}
-    return {"id": profile_id, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None}}
+        latencies = [float(row["latency_ms"]) for row in rows if row.get("latency_ms") is not None]
+        device_summaries[device_id] = {"configured": len(rows), "active": sum(1 for row in rows if row.get("active") or row.get("endpoint") or int(row.get("active_connections", 0) or 0) > 0), "rx_bytes": sum(int(row.get("rx_bytes", 0) or 0) for row in rows), "tx_bytes": sum(int(row.get("tx_bytes", 0) or 0) for row in rows), "last_handshake_age_s": min(ages) if ages else None, "latency_ms": min(latencies) if latencies else None}
+    latencies = [float(value["latency_ms"]) for value in values if value.get("latency_ms") is not None]
+    return {"id": profile_id, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None, "latency_ms": min(latencies) if latencies else None}}
 
 
 def provision(profile_id: str, module_id: str, connection_id: str = "default", settings: dict[str, Any] | None = None) -> dict[str, Any]:
