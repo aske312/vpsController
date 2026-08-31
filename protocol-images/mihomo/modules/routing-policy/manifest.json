@@ -85,6 +85,13 @@
       "help": "Отсекает доступные на сетевом уровне баннерные и видеорекламные сети, рекламные SDK и профильные трекеры. Агрессивная общая блокировка аналитики не используется, чтобы не ломать сайты."
     },
     {
+      "key": "block_privacy",
+      "label": "Приватность",
+      "type": "boolean",
+      "default": false,
+      "help": "Блокирует стороннюю аналитику, профилирование, запись сессий и мобильную атрибуцию. Системы диагностики ошибок не затрагиваются."
+    },
+    {
       "key": "direct_ru_sites",
       "label": "Российские сайты — напрямую",
       "type": "boolean",
@@ -120,6 +127,7 @@
       "help": "Направляет напрямую только CDN крупных обновлений ОС, драйверов, игровых файлов и пакетов; авторизация и API остаются в туннеле."
     },
     { "key": "block_ads_rules", "label": "Список блокировки рекламы", "type": "textarea", "default": "@default" },
+    { "key": "block_privacy_rules", "label": "Список защиты приватности", "type": "textarea", "default": "@default" },
     { "key": "direct_ru_sites_rules", "label": "Список российских сайтов", "type": "textarea", "default": "@default" },
     { "key": "direct_ru_banks_rules", "label": "Список банков и платежей", "type": "textarea", "default": "@default" },
     { "key": "direct_ru_marketplaces_rules", "label": "Список магазинов и маркетплейсов", "type": "textarea", "default": "@default" },

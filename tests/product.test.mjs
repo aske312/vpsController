@@ -228,6 +228,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /DIRECT_GAME_PROCESSES/);
   assert.match(manager, /TUNNEL_GAME_PROCESSES/);
   assert.match(manager, /"block_ads": \[/);
+  assert.match(manager, /"block_privacy": \[/);
+  assert.match(manager, /DOMAIN-SUFFIX,google-analytics\.com,REJECT/);
+  assert.match(manager, /DOMAIN-SUFFIX,appsflyer\.com,REJECT/);
+  assert.doesNotMatch(manager, /DOMAIN-SUFFIX,sentry\.io,REJECT/);
   assert.match(manager, /GEOSITE,category-ads-all,REJECT/);
   assert.match(manager, /DOMAIN-SUFFIX,smartadserver\.com,REJECT/);
   assert.match(manager, /DOMAIN-SUFFIX,buzzoola\.com,REJECT/);

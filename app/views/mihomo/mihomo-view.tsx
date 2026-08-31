@@ -215,6 +215,7 @@ const udpExclusionCatalog = [
 
 const profileDirectRules = [
   { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и рекламные трекеры.", group: "Защита" },
+  { key: "block_privacy", code: "PRIV", title: "Приватность", text: "Аналитика и профилирование.", group: "Защита" },
   { key: "direct_ru_sites", code: "RU", title: "Сайты РФ", text: "Домены и IP России.", group: "Напрямую" },
   { key: "direct_ru_banks", code: "BANK", title: "Банки", text: "Банки и платёжные сервисы.", group: "Напрямую" },
   { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Магазины и маркетплейсы.", group: "Напрямую" },
@@ -239,6 +240,26 @@ const ruleIconGroups: Record<string, RuleIconGroup[]> = {
     { id: "mobile", code: "APP", name: "Реклама в приложениях", tokens: ["applovin", "applvn", "vungle", "ironsrc", "chartboost", "inmobi", "adcolony", "startappservice", "mintegral", "unityads"] },
     { id: "video", code: "VIDEO", name: "Реклама в видео", tokens: ["springserve", "spotx", "freewheel", "fwmrm", "innovid", "tremorhub", "unrulymedia", "cedato", "connatix", "aniview", "teads", "smartclip", "lkqd"] },
     { id: "metrics", code: "TRACK", name: "Рекламные измерения", tokens: ["scorecardresearch", "moatads", "adsafeprotected"] },
+  ],
+  block_privacy: [
+    { id: "google", code: "GA", name: "Google Analytics", tokens: ["google-analytics"] },
+    { id: "yandex", code: "YM", name: "Яндекс Метрика", tokens: ["mc.yandex"] },
+    { id: "clarity", code: "CLARITY", name: "Microsoft Clarity", tokens: ["clarity.ms"] },
+    { id: "hotjar", code: "HOTJAR", name: "Hotjar", tokens: ["hotjar"] },
+    { id: "fullstory", code: "FS", name: "FullStory", tokens: ["fullstory"] },
+    { id: "mixpanel", code: "MIX", name: "Mixpanel", tokens: ["mixpanel"] },
+    { id: "amplitude", code: "AMP", name: "Amplitude", tokens: ["amplitude"] },
+    { id: "heap", code: "HEAP", name: "Heap", tokens: ["heap.io"] },
+    { id: "segment", code: "SEG", name: "Segment", tokens: ["segment.com", "segment.io"] },
+    { id: "firebase", code: "FBA", name: "Firebase Analytics", tokens: ["app-measurement"] },
+    { id: "appsflyer", code: "AF", name: "AppsFlyer", tokens: ["appsflyer"] },
+    { id: "adjust", code: "ADJ", name: "Adjust", tokens: ["adjust.com", "adjust.net.in"] },
+    { id: "branch", code: "BR", name: "Branch", tokens: ["branch.io"] },
+    { id: "singular", code: "SG", name: "Singular", tokens: ["singular.net"] },
+    { id: "kochava", code: "KO", name: "Kochava", tokens: ["kochava"] },
+    { id: "tiktok", code: "TT", name: "TikTok Analytics", tokens: ["analytics.tiktok"] },
+    { id: "social", code: "SOC", name: "Другие соцсети", tokens: ["analytics.twitter", "snap.licdn", "tr.snapchat"] },
+    { id: "scorecard", code: "SCR", name: "Comscore", tokens: ["scorecardresearch"] },
   ],
   direct_ru_sites: [
     { id: "zones", code: "RU", name: "Домены и IP России", tokens: ["DOMAIN-SUFFIX,ru,", "xn--p1ai", "DOMAIN-SUFFIX,su,", "GEOIP,RU"] },
@@ -1250,7 +1271,7 @@ export function MihomoPage({
                 <p className="mihomoGamesHint">Для определения процесса нужен TUN-режим. На iPhone сопоставление по приложению может быть недоступно.</p>
               </> : selectedRuleList ? <>
                 <header className="mihomoRuleEditorHead"><div><p className="eyebrow">DOMAIN / IP RULES</p><h3>{selectedRuleList.title}</h3><p>{selectedRuleList.description} Выберите нужные группы.</p></div><span>{selectedRuleText.split("\n").filter(Boolean).length} правил</span></header>
-                {ruleIconGroups[selectedRuleList.id] && <div className="mihomoGameCatalog">{ruleIconGroups[selectedRuleList.id].map((group) => { const lines = ruleGroupLines(selectedRuleList, group); const current = new Set(selectedRuleText.split("\n").map((line) => line.trim()).filter(Boolean)); const enabled = lines.length > 0 && lines.every((line) => current.has(line)); return <button type="button" key={group.id} className={enabled ? "is-selected" : ""} aria-pressed={enabled} onClick={() => toggleRuleIconGroup(selectedRuleList, group)}><span>{group.code}</span><b>{group.name}</b><i>{enabled ? "Включено" : "Выключено"}</i></button>; })}</div>}
+                {ruleIconGroups[selectedRuleList.id] && <div className={`mihomoGameCatalog${ruleIconGroups[selectedRuleList.id].length > 12 ? " mihomoLargeCatalog" : ""}`}>{ruleIconGroups[selectedRuleList.id].map((group) => { const lines = ruleGroupLines(selectedRuleList, group); const current = new Set(selectedRuleText.split("\n").map((line) => line.trim()).filter(Boolean)); const enabled = lines.length > 0 && lines.every((line) => current.has(line)); return <button type="button" key={group.id} className={enabled ? "is-selected" : ""} aria-pressed={enabled} onClick={() => toggleRuleIconGroup(selectedRuleList, group)}><span>{group.code}</span><b>{group.name}</b><i>{enabled ? "Включено" : "Выключено"}</i></button>; })}</div>}
                 <label className="mihomoCustomGames"><span><b>Дополнительные правила</b><small>Собственные правила Mihomo, по одному на строку. Они дополняют выбранные выше группы.</small></span><textarea rows={5} value={ruleExtraLines(selectedRuleList).join("\n")} spellCheck={false} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nIP-CIDR,203.0.113.0/24,DIRECT,no-resolve"} onChange={(event) => updateRuleExtras(selectedRuleList, event.target.value)} /></label>
                 <footer className="mihomoRuleEditorActions"><span>{selectedRuleValue === "@default" ? "Используется стандартный список" : "Список изменён вручную"}</span><button type="button" className="ghostButton" disabled={selectedRuleValue === "@default"} onClick={() => updateRoutingDraft(selectedRuleList.key, "@default")}>Восстановить стандартный</button></footer>
               </> : <div className="mihomoHint">Списки правил загружаются…</div>}

@@ -523,6 +523,35 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN-SUFFIX,lkqd.net,REJECT",
         "DOMAIN-SUFFIX,advertising.com,REJECT",
     ],
+    "block_privacy": [
+        # Analytics and profiling endpoints that are normally independent of
+        # core site functionality. Crash reporting is intentionally excluded.
+        "DOMAIN-SUFFIX,google-analytics.com,REJECT",
+        "DOMAIN,mc.yandex.ru,REJECT",
+        "DOMAIN,mc.yandex.com,REJECT",
+        "DOMAIN-SUFFIX,clarity.ms,REJECT",
+        "DOMAIN-SUFFIX,hotjar.com,REJECT",
+        "DOMAIN-SUFFIX,hotjar.io,REJECT",
+        "DOMAIN-SUFFIX,fullstory.com,REJECT",
+        "DOMAIN-SUFFIX,mixpanel.com,REJECT",
+        "DOMAIN-SUFFIX,amplitude.com,REJECT",
+        "DOMAIN-SUFFIX,heap.io,REJECT",
+        "DOMAIN-SUFFIX,segment.com,REJECT",
+        "DOMAIN-SUFFIX,segment.io,REJECT",
+        "DOMAIN-SUFFIX,app-measurement.com,REJECT",
+        "DOMAIN-SUFFIX,appsflyer.com,REJECT",
+        "DOMAIN-SUFFIX,appsflyersdk.com,REJECT",
+        "DOMAIN-SUFFIX,adjust.com,REJECT",
+        "DOMAIN-SUFFIX,adjust.net.in,REJECT",
+        "DOMAIN-SUFFIX,branch.io,REJECT",
+        "DOMAIN-SUFFIX,singular.net,REJECT",
+        "DOMAIN-SUFFIX,kochava.com,REJECT",
+        "DOMAIN,analytics.tiktok.com,REJECT",
+        "DOMAIN,analytics.twitter.com,REJECT",
+        "DOMAIN,snap.licdn.com,REJECT",
+        "DOMAIN,tr.snapchat.com,REJECT",
+        "DOMAIN-SUFFIX,scorecardresearch.com,REJECT",
+    ],
     "direct_ru_sites": [
         "DOMAIN-SUFFIX,ru,DIRECT", "DOMAIN-SUFFIX,xn--p1ai,DIRECT", "DOMAIN-SUFFIX,su,DIRECT",
         "DOMAIN,vk.ru,DIRECT", "DOMAIN-SUFFIX,vk.ru,DIRECT",
@@ -738,6 +767,7 @@ TUNNEL_GAME_PROCESSES: dict[str, list[str]] = {
 
 DIRECT_RULE_META = {
     "block_ads": ("Блокировка рекламы", "Блокирует рекламные сети, видеорекламу и безопасно отделяемые рекламные трекеры внутри Mihomo."),
+    "block_privacy": ("Приватность", "Блокирует стороннюю аналитику, профилирование, запись сессий и мобильную атрибуцию."),
     "direct_ru_sites": ("Российские сайты", "Домены РФ, российские сервисы и IP-адреса."),
     "direct_ru_banks": ("Банки и платежи", "Банки РФ, СБП, НСПК и финансовые сервисы."),
     "direct_ru_marketplaces": ("Магазины и маркетплейсы", "Маркетплейсы и крупные интернет-магазины."),
