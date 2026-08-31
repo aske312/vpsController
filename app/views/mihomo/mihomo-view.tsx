@@ -1079,7 +1079,7 @@ export function MihomoPage({
       )}
 
       {profileDialog && (
-        <div className="mihomoDialogBackdrop" onMouseDown={(event) => {
+        <div className="mihomoDialogBackdrop mihomoProfileBackdrop" onMouseDown={(event) => {
           if (event.target === event.currentTarget) setProfileDialog(null);
         }}>
           <form className={`mihomoDialog mihomoProfileDialog is-step-${profileStep}`} onSubmit={saveProfile}>
