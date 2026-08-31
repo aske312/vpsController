@@ -154,6 +154,13 @@ const profileDirectRules = [
   { key: "direct_games_udp_enabled", code: "UDP", title: "UDP напрямую", text: "Весь UDP без VPN." },
 ];
 
+const profileStrategies = [
+  { value: "", code: "AUTO", title: "Как в общих настройках", text: "Наследовать стратегию маршрутизации." },
+  { value: "fallback", code: "SAFE", title: "Надёжный + резерв", text: "Переключаться при недоступности канала." },
+  { value: "url-test", code: "FAST", title: "Минимальная задержка", text: "Автоматически выбирать самый быстрый канал." },
+  { value: "select", code: "MAN", title: "Ручной выбор", text: "Показывать Selector в Mihomo-клиенте." },
+];
+
 const MIHOMO_OPERATION_EVENT = "gate312:mihomo-operation";
 const TECHNICAL_ERROR = /(?:\n|traceback|systemctl|journalctl|apt(?:-get)?|dpkg|stderr|stdout|exit status|failed to start|reading package lists|building dependency tree)/i;
 
@@ -203,6 +210,7 @@ export function MihomoPage({
   const [profileName, setProfileName] = useState("");
   const [profileConnections, setProfileConnections] = useState<ProfileConnection[]>([]);
   const [profileRouting, setProfileRouting] = useState<Record<string, string | number | boolean>>({});
+  const [profileStrategyTouched, setProfileStrategyTouched] = useState(false);
   const [profileDevices, setProfileDevices] = useState<ProfileDevice[]>([{ id: "device-1", name: "Основное устройство" }]);
   const [activeDeviceId, setActiveDeviceId] = useState("device-1");
   const [profileStats, setProfileStats] = useState<Record<string, ProfileStats>>({});
@@ -328,6 +336,15 @@ export function MihomoPage({
 
   function toggleProfileRule(key: string, checked: boolean) {
     setProfileRouting((current) => ({ ...current, [key]: checked }));
+  }
+
+  function setProfileStrategy(value: string) {
+    setProfileStrategyTouched(true);
+    setProfileRouting((current) => {
+      const next = { ...current };
+      if (value) next.strategy = value; else delete next.strategy;
+      return next;
+    });
   }
 
   async function saveRoutingWorkspace(event: FormEvent) {
@@ -494,6 +511,7 @@ export function MihomoPage({
 
   function newProfile() {
     setProfileStep(1);
+    setProfileStrategyTouched(false);
     setProfileDialog("new");
     setProfileName("");
     setProfileConnections([]);
@@ -504,6 +522,7 @@ export function MihomoPage({
 
   function editProfile(profile: Profile) {
     setProfileStep(1);
+    setProfileStrategyTouched(true);
     setProfileDialog(profile);
     setProfileName(profile.name);
     setProfileConnections((profile.connections || []).map((connection) => ({
@@ -568,7 +587,7 @@ export function MihomoPage({
       connections.push({ id: `connection-${crypto.randomUUID()}`, component: componentId, name: definition.label || `${componentModule.name}${definition.cdn ? " · CDN" : ""}`, device_id: activeDeviceId, settings });
     }
     setProfileConnections((current) => [...current.filter((connection) => connection.device_id !== activeDeviceId), ...connections]);
-    setProfileRouting((current) => ({ ...current, strategy: preset.strategy }));
+    if (!profileStrategyTouched) setProfileRouting((current) => ({ ...current, strategy: preset.strategy }));
     if (!profileName.trim()) setProfileName(preset.name);
   }
 
@@ -1069,9 +1088,11 @@ export function MihomoPage({
               <button type="button" className="iconButton" onClick={() => setProfileDialog(null)}>x</button>
             </header>
             <nav className="mihomoProfileSteps" aria-label="Этапы настройки профиля">
-              {[{ id: 1, title: "Профиль", note: "Название и правила" }, { id: 2, title: "Устройства", note: "Кому выдаём доступ" }, { id: 3, title: "Подключения", note: "Каналы и параметры" }].map((step) => <button key={step.id} type="button" className={profileStep === step.id ? "is-active" : profileStep > step.id ? "is-done" : ""} disabled={step.id > 1 && !profileName.trim()} onClick={() => setProfileStep(step.id)}><i>{profileStep > step.id ? "✓" : step.id}</i><span><b>{step.title}</b><small>{step.note}</small></span></button>)}
+              {[{ id: 1, title: "Основа", note: "Стратегия и правила" }, { id: 2, title: "Устройства", note: "Отдельные подписки" }, { id: 3, title: "Подключения", note: "Каналы и проверка" }].map((step) => <button key={step.id} type="button" className={profileStep === step.id ? "is-active" : profileStep > step.id ? "is-done" : ""} disabled={(step.id > 1 && !profileName.trim()) || (step.id === 3 && profileDevices.some((device) => !device.name.trim()))} onClick={() => setProfileStep(step.id)}><i>{profileStep > step.id ? "✓" : step.id}</i><span><b>{step.title}</b><small>{step.note}</small></span></button>)}
             </nav>
+            <section className="mihomoProfileStageIntro"><span>0{profileStep}</span><div><b>{profileStep === 1 ? "Как должен работать профиль" : profileStep === 2 ? "Кто будет использовать профиль" : "Через какие каналы подключаться"}</b><small>{profileStep === 1 ? "Задайте понятное имя, поведение переключения и нужные правила." : profileStep === 2 ? "Для каждого устройства будет создана отдельная постоянная подписка." : "Выберите устройство, примените готовый набор или соберите подключения вручную."}</small></div></section>
             <label className="mihomoProfileName"><span>Название профиля</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} /></label>
+            <section className="mihomoProfileStrategy"><header><div><b>Стратегия каналов</b><small>Определяет тип группы GATE.312 в Clash Verge и других Mihomo-клиентах.</small></div><span>{profileStrategies.find((item) => item.value === String(profileRouting.strategy || ""))?.title}</span></header><div>{profileStrategies.map((strategy) => { const selected = String(profileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>
             <section className="mihomoProfileRules"><header><div><b>Правила профиля</b><small>Каждое правило применяется только к этому профилю. Состав списков задаётся в разделе «Настройки».</small></div><span>{profileDirectRules.filter((rule) => Boolean(profileRouting[rule.key])).length} из {profileDirectRules.length}</span></header><div>{profileDirectRules.map((rule) => <label key={rule.key} className={`mihomoProfileRuleSwitch${Boolean(profileRouting[rule.key]) ? " is-enabled" : ""}`}><span><b>{rule.title}</b><small>{rule.text}</small></span><input type="checkbox" checked={Boolean(profileRouting[rule.key])} onChange={(event) => toggleProfileRule(rule.key, event.target.checked)} /></label>)}</div></section>
             <section className="mihomoDeviceBuilder"><header><div><b>Устройства профиля</b><small>У каждого устройства собственные credentials и отдельный YAML.</small></div><button type="button" onClick={() => { const id = `device-${crypto.randomUUID()}`; setProfileDevices((current) => [...current, { id, name: `Устройство ${current.length + 1}` }]); setActiveDeviceId(id); }}>+ Устройство</button></header><div>{profileDevices.map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => setActiveDeviceId(device.id)}><input value={device.name} maxLength={80} onClick={(event) => event.stopPropagation()} onChange={(event) => setProfileDevices((current) => current.map((item) => item.id === device.id ? { ...item, name: event.target.value } : item))} />{profileDevices.length > 1 && <span onClick={(event) => { event.stopPropagation(); const next = profileDevices.filter((item) => item.id !== device.id); setProfileDevices(next); setProfileConnections((current) => current.filter((connection) => connection.device_id !== device.id)); if (activeDeviceId === device.id) setActiveDeviceId(next[0].id); }}>×</span>}</button>)}</div></section>
             <section className="mihomoPresetPicker">
@@ -1083,7 +1104,7 @@ export function MihomoPage({
               })}</div>
             </section>
             <section className="mihomoConnectionBuilder">
-              <header><div><b>Подключения профиля</b><small>Один профиль может содержать несколько VLESS с разными маршрутами и CDN.</small></div></header>
+              <header><div><b>Подключения профиля</b><small>Один профиль может содержать несколько VLESS с разными маршрутами и CDN.</small></div><span className="mihomoStrategyBadge">{profileStrategies.find((item) => item.value === String(profileRouting.strategy || ""))?.code} · {profileStrategies.find((item) => item.value === String(profileRouting.strategy || ""))?.title}</span></header>
               <div className="mihomoConnectionAdd">
                 {installedChannels.flatMap((module) => {
                   if (module.id === "transport-reality") return [

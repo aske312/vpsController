@@ -252,6 +252,11 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /<small>ПРАВИЛА<\/small><b>\{ruleCount\}<\/b>/);
   assert.match(page, /QRCode\.toDataURL\(subscription/);
   assert.match(page, /mihomoProfileSteps/);
+  assert.match(page, /setProfileStrategy/);
+  assert.match(page, /Как в общих настройках/);
+  assert.match(page, /Надёжный \+ резерв/);
+  assert.match(page, /Показывать Selector в Mihomo-клиенте/);
+  assert.match(page, /if \(!profileStrategyTouched\) setProfileRouting/);
   assert.match(page, /Профиль готов/);
   assert.match(page, /Скопировать ссылку/);
   assert.match(page, /UDP напрямую/);
