@@ -58,6 +58,9 @@ ENABLE_UFW="yes"
 GEOLOCATION_PRIMARY_URL="https://api.2ip.io"
 GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code,latitude,longitude"
 GEOLOCATION_TERTIARY_URL="https://ip.guide"
+GEOLOCATION_QUATERNARY_URL="https://ipapi.co"
+GEOLOCATION_QUINARY_URL="https://free.freeipapi.com/api/json"
+GEOLOCATION_SENARY_URL="https://iplocation.info"
 UPDATE_TEMP_DIR=""
 UPDATE_ROLLBACK_DIR=""
 UPDATE_SWAP_ACTIVE="no"
@@ -556,7 +559,8 @@ refresh_server_identity() {
   local public_ip city country country_code override_city override_country override_country_code
   info "Определение публичного IP и локации"
   install -d -m 0750 "${DATA_DIR}/tmp"
-  rm -f -- "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json"
+  rm -f -- "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" \
+    "${geo_file}.quaternary.json" "${geo_file}.quinary.json" "${geo_file}.senary.json"
   curl -4 --fail --silent --show-error --max-time 12 \
     "${GEOLOCATION_PRIMARY_URL}" >"${geo_file}.primary.json" || rm -f -- "${geo_file}.primary.json"
   curl -4 --fail --silent --show-error --max-time 12 \
@@ -579,9 +583,19 @@ PY
     curl -4 --fail --silent --show-error --max-time 12 \
       "${GEOLOCATION_TERTIARY_URL}/${public_ip}" >"${geo_file}.tertiary.json" \
       || rm -f -- "${geo_file}.tertiary.json"
+    curl -4 --fail --silent --show-error --max-time 12 -H "Accept: application/json" \
+      "${GEOLOCATION_QUATERNARY_URL}/${public_ip}/json/" >"${geo_file}.quaternary.json" \
+      || rm -f -- "${geo_file}.quaternary.json"
+    curl -4 --fail --silent --show-error --max-time 12 -H "Accept: application/json" \
+      "${GEOLOCATION_QUINARY_URL}/${public_ip}" >"${geo_file}.quinary.json" \
+      || rm -f -- "${geo_file}.quinary.json"
+    curl -4 --fail --silent --show-error --max-time 12 -H "Accept: application/json" \
+      "${GEOLOCATION_SENARY_URL}/${public_ip}" >"${geo_file}.senary.json" \
+      || rm -f -- "${geo_file}.senary.json"
   fi
   if python3 - /run/cloud-init/instance-data.json \
     "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" \
+    "${geo_file}.quaternary.json" "${geo_file}.quinary.json" "${geo_file}.senary.json" \
     >"${geo_file}.result" <<'PY'
 from collections import Counter
 import json
@@ -672,10 +686,10 @@ for path in sys.argv[2:]:
     location = data.get("location") if isinstance(data.get("location"), dict) else data
     network = data.get("network") if isinstance(data.get("network"), dict) else {}
     autonomous = network.get("autonomous_system") if isinstance(network.get("autonomous_system"), dict) else {}
-    ip = str(data.get("ip") or "")
-    city = str(location.get("city") or "").strip()
-    country = str(location.get("country") or "").strip()
-    code = str(location.get("country_code") or data.get("country_code") or data.get("code") or autonomous.get("country") or "").upper().strip()
+    ip = str(data.get("ip") or data.get("ipAddress") or data.get("ip_address") or data.get("query") or "")
+    city = str(location.get("city") or location.get("cityName") or location.get("city_name") or "").strip()
+    country = str(location.get("country_name") or location.get("countryName") or location.get("country") or "").strip()
+    code = str(location.get("country_code") or location.get("countryCode") or location.get("country_code2") or data.get("country_code") or data.get("code") or autonomous.get("country") or "").upper().strip()
     if ip:
         records.append((ip, city, country, code, coordinates(location)))
 
@@ -687,14 +701,16 @@ if confirmed:
 else:
     code_votes = Counter(item[3] for item in records if re.fullmatch(r"[A-Z]{2}", item[3]))
     code, votes = code_votes.most_common(1)[0] if code_votes else ("", 0)
-    if votes < 2:
+    country_quorum = max(2, len(records) // 2 + 1)
+    if votes < country_quorum:
         city, country, code = "Unknown", "Unknown", ""
     else:
         matching = [item for item in records if item[3] == code]
         country = next((item[2] for item in matching if item[2]), code)
         city_votes = Counter(item[1].casefold() for item in matching if item[1])
         city_key, city_count = city_votes.most_common(1)[0] if city_votes else ("", 0)
-        if city_count >= 2:
+        city_quorum = max(2, len(matching) // 2 + 1)
+        if city_count >= city_quorum:
             city = next((item[1] for item in matching if item[1].casefold() == city_key), "Unknown")
         else:
             clustered = set()
@@ -737,7 +753,8 @@ PY
   else
     warn "геолокация недоступна или источники не согласованы; сохранены предыдущие значения."
   fi
-  rm -f -- "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" "${geo_file}.result"
+  rm -f -- "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" \
+    "${geo_file}.quaternary.json" "${geo_file}.quinary.json" "${geo_file}.senary.json" "${geo_file}.result"
   public_ip="$(env_value PUBLIC_IP)"
   [[ -n "${public_ip}" ]] || die "не удалось определить PUBLIC_IP; задайте его в ${ENV_FILE}."
   configure_access

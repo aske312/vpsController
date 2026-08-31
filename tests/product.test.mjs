@@ -55,10 +55,14 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /set_env_value "SERVER_CITY_OVERRIDE"/);
   assert.match(manager, /set_env_value "SERVER_COUNTRY_OVERRIDE"/);
   assert.match(manager, /GEOLOCATION_TERTIARY_URL="https:\/\/ip\.guide"/);
+  assert.match(manager, /GEOLOCATION_QUATERNARY_URL="https:\/\/ipapi\.co"/);
+  assert.match(manager, /GEOLOCATION_QUINARY_URL="https:\/\/free\.freeipapi\.com\/api\/json"/);
+  assert.match(manager, /GEOLOCATION_SENARY_URL="https:\/\/iplocation\.info"/);
   assert.match(manager, /\/run\/cloud-init\/instance-data\.json/);
   assert.match(manager, /code_votes = Counter/);
-  assert.match(manager, /if votes < 2/);
-  assert.match(manager, /if city_count >= 2/);
+  assert.match(manager, /country_quorum = max\(2, len\(records\) \/\/ 2 \+ 1\)/);
+  assert.match(manager, /city_quorum = max\(2, len\(matching\) \/\/ 2 \+ 1\)/);
+  assert.match(manager, /if city_count >= city_quorum:[\s\S]+else:[\s\S]+city = nearest_major_city\(code, cluster_points\)/);
   assert.match(manager, /MAX_CITY_CLUSTER_KM = 50\.0/);
   assert.match(manager, /def distance_km\(first, second\)/);
   assert.match(manager, /distance_km\(matching\[left\]\[4\], matching\[right\]\[4\]\) <= MAX_CITY_CLUSTER_KM/);
@@ -252,6 +256,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /<small>ПРАВИЛА<\/small><b>\{ruleCount\}<\/b>/);
   assert.match(page, /QRCode\.toDataURL\(subscription/);
   assert.match(page, /mihomoProfileSteps/);
+  assert.match(page, /mihomoProfileWorkspace/);
+  assert.match(page, /mihomoProfileRail/);
+  assert.match(page, /mihomoProfileDraftSummary/);
+  assert.match(page, /mihomoProfileCanvas/);
   assert.match(page, /setProfileStrategy/);
   assert.match(page, /Как в общих настройках/);
   assert.match(page, /Надёжный \+ резерв/);
