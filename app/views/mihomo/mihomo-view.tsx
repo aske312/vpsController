@@ -146,19 +146,19 @@ const directGameCatalog = [
 ];
 
 const profileDirectRules = [
-  { key: "block_ads", code: "AD", title: "Блокировка рекламы", text: "Реклама и трекеры." },
-  { key: "direct_ru_sites", code: "RU", title: "Российские сайты", text: "Домены и IP России." },
-  { key: "direct_ru_banks", code: "BANK", title: "Банки и платежи", text: "Банки и платёжные сервисы." },
+  { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и трекеры." },
+  { key: "direct_ru_sites", code: "RU", title: "Сайты РФ", text: "Домены и IP России." },
+  { key: "direct_ru_banks", code: "BANK", title: "Банки", text: "Банки и платёжные сервисы." },
   { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Магазины и маркетплейсы." },
-  { key: "direct_games_enabled", code: "GAME", title: "Игры полностью", text: "Выбранные игры без VPN." },
-  { key: "direct_games_udp_enabled", code: "UDP", title: "UDP напрямую", text: "Весь UDP без VPN." },
+  { key: "direct_games_enabled", code: "GAME", title: "Игры", text: "Выбранные игры без VPN." },
+  { key: "direct_games_udp_enabled", code: "UDP", title: "UDP", text: "Весь UDP без VPN." },
 ];
 
 const profileStrategies = [
-  { value: "", code: "AUTO", title: "Как в общих настройках", text: "Наследовать стратегию маршрутизации." },
-  { value: "fallback", code: "SAFE", title: "Надёжный + резерв", text: "Переключаться при недоступности канала." },
-  { value: "url-test", code: "FAST", title: "Минимальная задержка", text: "Автоматически выбирать самый быстрый канал." },
-  { value: "select", code: "MAN", title: "Ручной выбор", text: "Показывать Selector в Mihomo-клиенте." },
+  { value: "", code: "AUTO", title: "Общие", text: "Наследовать стратегию маршрутизации." },
+  { value: "fallback", code: "SAFE", title: "Резерв", text: "Переключаться при недоступности канала." },
+  { value: "url-test", code: "FAST", title: "Автовыбор", text: "Автоматически выбирать самый быстрый канал." },
+  { value: "select", code: "MAN", title: "Вручную", text: "Показывать Selector в Mihomo-клиенте." },
 ];
 
 const MIHOMO_OPERATION_EVENT = "gate312:mihomo-operation";
