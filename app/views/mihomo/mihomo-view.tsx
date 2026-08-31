@@ -213,6 +213,17 @@ const udpExclusionCatalog = [
   { id: "battlenet", code: "BN", name: "Battle.net" },
 ];
 
+const p2pClientCatalog = [
+  { id: "qbittorrent", code: "QBIT", name: "qBittorrent" },
+  { id: "transmission", code: "TR", name: "Transmission" },
+  { id: "deluge", code: "DEL", name: "Deluge" },
+  { id: "utorrent", code: "µT", name: "µTorrent" },
+  { id: "bittorrent", code: "BT", name: "BitTorrent" },
+  { id: "biglybt", code: "BIG", name: "BiglyBT" },
+  { id: "tribler", code: "TRIB", name: "Tribler" },
+  { id: "frostwire", code: "FW", name: "FrostWire" },
+];
+
 const profileDirectRules = [
   { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и рекламные трекеры.", group: "Защита" },
   { key: "block_privacy", code: "PRIV", title: "Приватность", text: "Аналитика и профилирование.", group: "Защита" },
@@ -223,6 +234,7 @@ const profileDirectRules = [
   { key: "direct_local_network", code: "LAN", title: "Локальная сеть", text: "Домашние устройства напрямую.", group: "Сеть" },
   { key: "direct_games_enabled", code: "GAME", title: "Игры", text: "Выбранные игры без VPN.", group: "Сеть" },
   { key: "direct_games_udp_enabled", code: "UDP", title: "UDP", text: "Весь UDP без VPN.", group: "Сеть" },
+  { key: "direct_p2p_enabled", code: "P2P", title: "P2P и торренты", text: "Выбранные клиенты напрямую.", group: "Сеть" },
 ];
 
 type RuleIconGroup = { id: string; code: string; name: string; tokens: string[] };
@@ -260,6 +272,13 @@ const ruleIconGroups: Record<string, RuleIconGroup[]> = {
     { id: "tiktok", code: "TT", name: "TikTok Analytics", tokens: ["analytics.tiktok"] },
     { id: "social", code: "SOC", name: "Другие соцсети", tokens: ["analytics.twitter", "snap.licdn", "tr.snapchat"] },
     { id: "scorecard", code: "SCR", name: "Comscore", tokens: ["scorecardresearch"] },
+    { id: "windows", code: "WIN", name: "Телеметрия Windows", tokens: ["microsoft.com"] },
+    { id: "nvidia", code: "NV", name: "Телеметрия NVIDIA", tokens: ["gfe.nvidia"] },
+    { id: "amd", code: "AMD", name: "Телеметрия AMD", tokens: ["metrics.amd"] },
+    { id: "mozilla", code: "FF", name: "Телеметрия Firefox", tokens: ["telemetry.mozilla"] },
+    { id: "jetbrains", code: "JB", name: "Статистика JetBrains", tokens: ["data.services.jetbrains"] },
+    { id: "ubuntu", code: "UBU", name: "Отчёты Ubuntu", tokens: ["errors.ubuntu"] },
+    { id: "unity", code: "UNITY", name: "Unity Analytics", tokens: ["cloud.unity3d"] },
   ],
   direct_ru_sites: [
     { id: "zones", code: "RU", name: "Домены и IP России", tokens: ["DOMAIN-SUFFIX,ru,", "xn--p1ai", "DOMAIN-SUFFIX,su,", "GEOIP,RU"] },
@@ -568,6 +587,12 @@ export function MihomoPage({
     const selected = new Set(String(routingDraft.udp_tunnel_exclusions || "").split(",").map((value) => value.trim()).filter(Boolean));
     if (selected.has(resourceId)) selected.delete(resourceId); else selected.add(resourceId);
     updateRoutingDraft("udp_tunnel_exclusions", [...selected].join(","));
+  }
+
+  function toggleP2pClient(clientId: string) {
+    const selected = new Set(String(routingDraft.direct_p2p_clients || "").split(",").map((value) => value.trim()).filter(Boolean));
+    if (selected.has(clientId)) selected.delete(clientId); else selected.add(clientId);
+    updateRoutingDraft("direct_p2p_clients", [...selected].join(","));
   }
 
   function toggleProfileRule(key: string, checked: boolean) {
@@ -1012,6 +1037,7 @@ export function MihomoPage({
   const selectedRuleValue = selectedRuleList ? String(routingDraft[selectedRuleList.key] ?? "@default") : "";
   const selectedRuleText = selectedRuleList ? (selectedRuleValue === "@default" ? selectedRuleList.default_rules : selectedRuleValue) : "";
   const selectedUdpExclusions = new Set(String(routingDraft.udp_tunnel_exclusions || "").split(",").filter(Boolean));
+  const selectedP2pClients = new Set(String(routingDraft.direct_p2p_clients || "").split(",").filter(Boolean));
   const directGames = new Set(String(routingDraft.direct_games || "").split(",").filter(Boolean));
   const normalizedGameSearch = gameSearch.trim().toLocaleLowerCase("ru");
   const visibleGames = gameRoutingCatalog.filter((game) => {
@@ -1027,6 +1053,18 @@ export function MihomoPage({
     group,
     rules: profileDirectRules.filter((rule) => rule.group === group && (!normalizedRuleSearch || `${rule.title} ${rule.text} ${rule.code}`.toLocaleLowerCase("ru").includes(normalizedRuleSearch))),
   })).filter((section) => section.rules.length);
+  const overviewDevices = profiles.reduce((sum, profile) => sum + (profile.devices?.length || 1), 0);
+  const overviewConnections = profiles.reduce((sum, profile) => sum + profile.connections.length, 0);
+  const overviewActiveConnections = Object.values(profileStats).reduce((sum, item) => sum + Number(item.summary.active || 0), 0);
+  const overviewRx = Object.values(profileStats).reduce((sum, item) => sum + Number(item.summary.rx_bytes || 0), 0);
+  const overviewTx = Object.values(profileStats).reduce((sum, item) => sum + Number(item.summary.tx_bytes || 0), 0);
+  const overviewIssues = [
+    !status?.active ? { title: "Ядро Mihomo не отвечает", text: "Проверьте состояние сервиса перед выдачей профилей.", view: "channels" as View } : null,
+    !installedChannels.length ? { title: "Нет компонентов подключения", text: "Установите хотя бы один транспорт.", view: "channels" as View } : null,
+    installedChannels.length > 0 && !policiesReady ? { title: "Политики ещё не готовы", text: "Проверьте DNS и настройки маршрутизации.", view: "dns" as View } : null,
+    installedChannels.length > 0 && !profiles.length ? { title: "Нет профилей", text: "Создайте профиль и добавьте устройство.", view: "profiles" as View } : null,
+    profiles.length > 0 && overviewActiveConnections === 0 ? { title: "Нет активных подключений", text: "Профили созданы, но клиенты сейчас не подключены.", view: "profiles" as View } : null,
+  ].filter(Boolean) as Array<{ title: string; text: string; view: View }>;
 
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
@@ -1081,86 +1119,36 @@ export function MihomoPage({
       {notice && <div className="mihomoMessage is-ok">{notice}</div>}
 
       {view === "overview" && (
-        <div className="mihomoOverview">
-          <article className="mihomoStatusBoard">
-            <header className="mihomoSectionHead">
-              <div>
-                <p className="eyebrow">MIHOMO WORKSPACE</p>
-                <h2>Состояние внутреннего контура</h2>
-                <p>Mihomo изолирован от одноимённых Direct-модулей. Здесь отображаются только его собственные sub-modules и профили.</p>
-              </div>
-              <span className={status?.active ? "mihomoPill is-online" : "mihomoPill"}>
-                <i /> {status?.active ? "Runtime работает" : "Нет runtime"}
-              </span>
-            </header>
+        <div className="mihomoOverviewV2">
+          <section className="mihomoOverviewLead">
+            <div><p className="eyebrow">ТЕКУЩЕЕ СОСТОЯНИЕ</p><h2>{status?.active ? "Mihomo работает" : "Mihomo требует внимания"}</h2><p>{status?.active ? `Ядро ${status.core_version || "установлено"} принимает подключения${status.endpoint ? ` на ${status.endpoint}` : ""}.` : "Нет подтверждения, что ядро готово принимать подключения."}</p></div>
+            <span className={status?.active ? "mihomoPill is-online" : "mihomoPill"}><i />{status?.active ? "В РАБОТЕ" : "ПРОВЕРИТЬ"}</span>
+          </section>
 
-            <div className="mihomoTopology">
-              <div className="mihomoTopologyNode core">
-                <small>CORE</small>
-                <strong>Mihomo {status?.core_version || ""}</strong>
-                <span>{status?.endpoint || "endpoint определяется"}</span>
-              </div>
-              <div className="mihomoTopologyArrow" aria-hidden="true" />
-              <div className="mihomoTopologyNode">
-                <small>PROFILES</small>
-                <strong>{status?.profiles ?? profiles.length}</strong>
-                <span>{status?.profiles_in_use || 0} используются</span>
-              </div>
-              <div className="mihomoTopologyArrow" aria-hidden="true" />
-              <div className="mihomoTopologyNode">
-                <small>COMPONENTS</small>
-                <strong>{status?.channels_installed ?? installedChannels.length} / 4</strong>
-                <span>{status?.channels_in_use?.length || 0} используются</span>
-              </div>
-              <div className="mihomoTopologyArrow" aria-hidden="true" />
-              <div className="mihomoTopologyNode policy">
-                <small>POLICY</small>
-                <strong>{policiesReady ? "ACTIVE" : "WAIT"}</strong>
-                <span>DNS + routing активируются с первым компонентом</span>
-              </div>
-            </div>
-          </article>
+          <section className="mihomoOverviewMetrics">
+            <button type="button" onClick={() => setView("profiles")}><small>ПРОФИЛИ</small><strong>{profiles.length}</strong><span>{status?.profiles_in_use || 0} используются сейчас</span></button>
+            <button type="button" onClick={() => setView("profiles")}><small>УСТРОЙСТВА</small><strong>{overviewDevices}</strong><span>{overviewConnections} настроенных каналов</span></button>
+            <button type="button" onClick={() => setView("profiles")}><small>ПОДКЛЮЧЕНИЯ</small><strong>{overviewActiveConnections}<i> / {overviewConnections}</i></strong><span>активно по живой статистике</span></button>
+            <div><small>ТРАФИК</small><strong>↓ {bytes(overviewRx)}</strong><span>↑ {bytes(overviewTx)}</span></div>
+          </section>
 
-          <article className="mihomoChannelsBoard">
-            <header className="mihomoSectionHead compact">
-              <div>
-                <p className="eyebrow">PROTOCOL COMPONENTS</p>
-                <h2>Компоненты Mihomo</h2>
-                <p>Здесь устанавливаются ядра протоколов. Конкретные подключения создаются внутри профиля.</p>
-              </div>
-              <button className="ghostButton" type="button" onClick={() => setView("channels")}>Каталог компонентов</button>
-            </header>
-            <div className="mihomoChannelGrid">
-              {transportModules.map((module) => (
-                <div key={module.id} className={`mihomoChannelCard ${module.installed ? "installed" : "empty"} ${module.active ? "active" : ""}`}>
-                  <span className="mihomoChannelCode">{channelShort[module.id] || "CH"}</span>
-                  <div>
-                    <strong>{module.name}</strong>
-                    <small>{module.installed ? module.service || "внутренний модуль установлен" : "не установлен"}</small>
-                  </div>
-                  <em>{module.active ? "ACTIVE" : module.installed ? "READY" : "EMPTY"}</em>
-                </div>
-              ))}
-            </div>
-          </article>
+          <section className="mihomoOverviewMain">
+            <article className="mihomoOverviewProfiles">
+              <header><div><p className="eyebrow">ПРОФИЛИ</p><h3>Подключения по профилям</h3></div><button type="button" onClick={() => setView("profiles")}>Открыть все</button></header>
+              <div>{profiles.slice(0, 6).map((profile) => { const item = profileStats[profile.id]?.summary; const devices = profile.devices?.length || 1; return <button type="button" key={profile.id} onClick={() => setView("profiles")}><span className={item?.active ? "is-online" : ""}><i /></span><p><b>{profile.name}</b><small>{devices} устройств · {profile.connections.length} каналов</small></p><strong>{item ? `${item.active}/${item.configured}` : "—"}<small>активно</small></strong><em>↓ {bytes(item?.rx_bytes || 0)}<small>↑ {bytes(item?.tx_bytes || 0)}</small></em></button>; })}{!profiles.length && <div className="mihomoOverviewEmpty"><b>Профилей пока нет</b><span>Создайте первый профиль после установки компонента подключения.</span><button type="button" onClick={newProfile} disabled={!installedChannels.length}>Создать профиль</button></div>}</div>
+            </article>
 
-          <article className="mihomoQuickState">
-            <div>
-              <small>DNS MODULE</small>
-              <strong>{policiesReady ? "Активен" : "Ожидает компонент"}</strong>
-              <span>Общая DNS-политика всех профилей</span>
-            </div>
-            <div>
-              <small>ROUTING MODULE</small>
-              <strong>{policiesReady ? "Активна" : "Ожидает компонент"}</strong>
-              <span>Базовая стратегия всех профилей</span>
-            </div>
-            <div>
-              <small>PROFILES IN USE</small>
-              <strong>{status?.profiles_in_use || 0}</strong>
-              <span>{status?.credentials || 0} credentials</span>
-            </div>
-          </article>
+            <article className="mihomoOverviewAttention">
+              <header><p className="eyebrow">КОНТРОЛЬ</p><h3>{overviewIssues.length ? "Требует внимания" : "Всё готово"}</h3></header>
+              <div>{overviewIssues.length ? overviewIssues.map((issue) => <button type="button" key={issue.title} onClick={() => setView(issue.view)}><i /><span><b>{issue.title}</b><small>{issue.text}</small></span><em>→</em></button>) : <div className="is-ready"><i /><span><b>Ошибок не обнаружено</b><small>Ядро, политики и подключения находятся в рабочем состоянии.</small></span></div>}</div>
+              <footer><button type="button" onClick={() => void refresh()} disabled={Boolean(busy)}>Обновить данные</button><small>Статистика обновляется по активным профилям</small></footer>
+            </article>
+          </section>
+
+          <section className="mihomoOverviewBottom">
+            <article className="mihomoOverviewComponents"><header><div><p className="eyebrow">КОМПОНЕНТЫ</p><h3>Каналы подключения</h3></div><button type="button" onClick={() => setView("channels")}>Управление</button></header><div>{transportModules.map((module) => <button type="button" key={module.id} onClick={() => setView("channels")}><span>{channelShort[module.id] || "CH"}</span><p><b>{module.name}</b><small>{module.installed ? (module.active ? "Работает" : "Установлен") : "Не установлен"}</small></p><i className={module.active ? "is-online" : module.installed ? "is-ready" : ""} /></button>)}</div></article>
+            <article className="mihomoOverviewActions"><header><p className="eyebrow">БЫСТРЫЕ ДЕЙСТВИЯ</p><h3>Настройка</h3></header><div><button type="button" onClick={newProfile} disabled={!installedChannels.length}><b>Новый профиль</b><span>Подключения и устройства</span></button><button type="button" onClick={() => setView("dns")}><b>DNS</b><span>Резолверы и фильтрация</span></button><button type="button" onClick={() => setView("routing")}><b>Правила</b><span>Маршрутизация профилей</span></button></div></article>
+          </section>
         </div>
       )}
 
@@ -1260,6 +1248,13 @@ export function MihomoPage({
                   {udpExclusionCatalog.map((resource) => { const selected = selectedUdpExclusions.has(resource.id); return <button type="button" key={resource.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleUdpExclusion(resource.id)}><span>{resource.code}</span><b>{resource.name}</b><i>{selected ? "Через VPN" : "Напрямую"}</i></button>; })}
                 </div>
                 <label className="mihomoCustomGames"><span><b>Дополнительные исключения</b><small>Полные правила Mihomo через GATE.312, по одному на строку.</small></span><textarea rows={5} value={String(routingDraft.udp_tunnel_exclusions_rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,GATE.312\nDST-PORT,3478,GATE.312"} onChange={(event) => updateRoutingDraft("udp_tunnel_exclusions_rules", event.target.value)} /></label>
+              </> : activeRuleList === "direct_p2p_enabled" ? <>
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>P2P и торренты напрямую</h3><p>Выбранные клиенты обходят GATE.312. Используйте только если провайдер разрешает P2P.</p></div><span>{selectedP2pClients.size} напрямую</span></header>
+                <div className="mihomoMessage is-error">Прямой маршрут раскрывает ваш публичный IP участникам раздачи и не обходит ограничения провайдера.</div>
+                <div className="mihomoGameCatalog">
+                  {p2pClientCatalog.map((client) => { const selected = selectedP2pClients.has(client.id); return <button type="button" key={client.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleP2pClient(client.id)}><span>{client.code}</span><b>{client.name}</b><i>{selected ? "Напрямую" : "Через VPN"}</i></button>; })}
+                </div>
+                <label className="mihomoCustomGames"><span><b>Дополнительные P2P-процессы</b><small>Имена процессов напрямую, по одному на строку.</small></span><textarea rows={5} value={String(routingDraft.direct_p2p_processes || "")} placeholder={"client.exe\np2p-client"} onChange={(event) => updateRoutingDraft("direct_p2p_processes", event.target.value)} /></label>
               </> : activeRuleList === "direct_games_enabled" ? <>
                 <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Маршруты игр</h3><p>Нажмите на игру, чтобы переключить её между прямым маршрутом и GATE.312. При включённом правиле отмеченные игры идут напрямую.</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} напрямую</span></header>
                 <div className="mihomoCatalogToolbar"><input aria-label="Поиск игр" value={gameSearch} placeholder="Найти игру…" onChange={(event) => setGameSearch(event.target.value)} /><nav>{([['all', 'Все'], ['direct', 'Напрямую'], ['vpn', 'VPN'], ['restricted', 'Ограничения РФ']] as const).map(([value, label]) => <button type="button" key={value} className={gameFilter === value ? "is-active" : ""} onClick={() => setGameFilter(value)}>{label}</button>)}</nav><span>{visibleGames.length} из {gameRoutingCatalog.length}</span></div>

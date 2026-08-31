@@ -162,6 +162,25 @@
       "help": "Направляет напрямую весь UDP-трафик профиля без выбора приложений или игр."
     },
     {
+      "key": "direct_p2p_enabled",
+      "label": "P2P и торренты — напрямую",
+      "type": "boolean",
+      "default": false,
+      "help": "Направляет выбранные торрент-клиенты напрямую и раскрывает публичный IP пользователя участникам раздачи."
+    },
+    {
+      "key": "direct_p2p_clients",
+      "label": "P2P-клиенты напрямую",
+      "type": "textarea",
+      "default": ""
+    },
+    {
+      "key": "direct_p2p_processes",
+      "label": "Дополнительные P2P-процессы",
+      "type": "textarea",
+      "default": ""
+    },
+    {
       "key": "tunnel_games",
       "label": "Игры, направляемые через туннель",
       "type": "textarea",

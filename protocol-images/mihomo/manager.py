@@ -463,6 +463,21 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN-SUFFIX,googletagservices.com,REJECT",
         "DOMAIN-SUFFIX,adnxs.com,REJECT",
         "DOMAIN-SUFFIX,scorecardresearch.com,REJECT",
+        # Optional system/application telemetry kept as separate UI groups.
+        "DOMAIN,settings-win.data.microsoft.com,REJECT",
+        "DOMAIN,vortex.data.microsoft.com,REJECT",
+        "DOMAIN,self.events.data.microsoft.com,REJECT",
+        "DOMAIN,watson.telemetry.microsoft.com,REJECT",
+        "DOMAIN-SUFFIX,telemetry.microsoft.com,REJECT",
+        "DOMAIN,telemetry.gfe.nvidia.com,REJECT",
+        "DOMAIN,events.gfe.nvidia.com,REJECT",
+        "DOMAIN,metrics.amd.com,REJECT",
+        "DOMAIN,incoming.telemetry.mozilla.org,REJECT",
+        "DOMAIN,data.services.jetbrains.com,REJECT",
+        "DOMAIN,errors.ubuntu.com,REJECT",
+        "DOMAIN,analytics.cloud.unity3d.com,REJECT",
+        "DOMAIN,config.uca.cloud.unity3d.com,REJECT",
+        "DOMAIN,cdp.cloud.unity3d.com,REJECT",
         "DOMAIN-SUFFIX,criteo.com,REJECT",
         "DOMAIN-SUFFIX,criteo.net,REJECT",
         "DOMAIN-SUFFIX,taboola.com,REJECT",
@@ -765,6 +780,17 @@ TUNNEL_GAME_PROCESSES: dict[str, list[str]] = {
     "battlefront2": ["starwarsbattlefrontii.exe"],
 }
 
+DIRECT_P2P_PROCESSES: dict[str, list[str]] = {
+    "qbittorrent": ["qbittorrent.exe", "qbittorrent"],
+    "transmission": ["transmission-qt.exe", "transmission-gtk", "transmission-daemon"],
+    "deluge": ["deluge.exe", "deluge-gtk", "deluged"],
+    "utorrent": ["uTorrent.exe"],
+    "bittorrent": ["BitTorrent.exe"],
+    "biglybt": ["BiglyBT.exe", "biglybt"],
+    "tribler": ["tribler.exe", "tribler"],
+    "frostwire": ["FrostWire.exe", "frostwire"],
+}
+
 DIRECT_RULE_META = {
     "block_ads": ("Блокировка рекламы", "Блокирует рекламные сети, видеорекламу и безопасно отделяемые рекламные трекеры внутри Mihomo."),
     "block_privacy": ("Приватность", "Блокирует стороннюю аналитику, профилирование, запись сессий и мобильную атрибуцию."),
@@ -875,6 +901,12 @@ def direct_game_rules(routing: dict[str, Any]) -> list[str]:
     return rules
 
 
+def direct_p2p_rules(routing: dict[str, Any]) -> list[str]:
+    if not routing.get("direct_p2p_enabled", False):
+        return []
+    return process_rules(routing, "direct_p2p_clients", "direct_p2p_processes", DIRECT_P2P_PROCESSES, "DIRECT")
+
+
 def profile_rules(routing: dict[str, Any]) -> list[str]:
     rules: list[str] = []
     # Local destinations must win over blocking and tunnel rules so that a
@@ -890,6 +922,7 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
     # UDP bypass when a user accidentally enables overlapping rules.
     rules.extend(tunnel_game_rules(routing))
     rules.extend(direct_game_rules(routing))
+    rules.extend(direct_p2p_rules(routing))
     raw_rules = str(routing.get("rules", "")).replace("\r", "")
     rules.extend(rule.strip() for rule in raw_rules.split("\n") if rule.strip() and not rule.strip().startswith("#"))
     return list(dict.fromkeys(rules))
@@ -2488,7 +2521,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     # Ready-made bypass lists are selected per profile. Never inherit legacy
     # global switches from routing settings; that would silently affect every
     # existing subscription.
-    for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled"):
+    for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"):
         routing[key] = bool(profile_routing.get(key, False))
     mode = str(routing.get("mode", "rule"))
     lines = [

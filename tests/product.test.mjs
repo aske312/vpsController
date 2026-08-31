@@ -253,6 +253,11 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /DOMAIN,assets1\.xboxlive\.com,DIRECT/);
   assert.match(manager, /"atomicheart": \["AtomicHeart-Win64-Shipping\.exe"\]/);
   assert.match(manager, /"stalcraft": \["stalcraft\.exe", "STALCRAFT\.exe"\]/);
+  assert.match(manager, /DIRECT_P2P_PROCESSES/);
+  assert.match(manager, /"qbittorrent": \["qbittorrent\.exe", "qbittorrent"\]/);
+  assert.match(manager, /direct_p2p_rules\(routing\)/);
+  assert.match(manager, /DOMAIN,settings-win\.data\.microsoft\.com,REJECT/);
+  assert.match(manager, /DOMAIN,incoming\.telemetry\.mozilla\.org,REJECT/);
   assert.match(manager, /direct_games_enabled/);
   assert.match(manager, /direct_games_udp_enabled/);
   assert.match(manager, /UDP_TUNNEL_EXCLUSION_CATALOG/);
@@ -288,6 +293,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /mihomoCatalogToolbar/);
   assert.match(page, /visibleRuleGroups/);
   assert.match(page, /direct_downloads/);
+  assert.match(page, /p2pClientCatalog/);
+  assert.match(page, /toggleP2pClient/);
   assert.doesNotMatch(page, /<b>Дополнительные процессы через VPN<\/b>/);
   assert.match(page, /mihomoProfileRuleSwitch/);
   assert.match(page, /profileDirectRules/);
@@ -298,6 +305,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /mihomoProfileWorkspace/);
   assert.match(page, /mihomoProfileRail/);
   assert.match(page, /mihomoProfileDraftSummary/);
+  assert.match(page, /mihomoOverviewV2/);
+  assert.match(page, /overviewActiveConnections/);
+  assert.match(page, /overviewIssues/);
   assert.match(page, /expandedDeviceLists/);
   assert.match(page, /expandedProtocolLists/);
   assert.match(page, /mihomoProfileToggle/);
