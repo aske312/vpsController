@@ -243,6 +243,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /"direct_downloads": \[/);
   assert.match(manager, /DOMAIN-SUFFIX,windowsupdate\.com,DIRECT/);
   assert.match(manager, /DOMAIN-SUFFIX,steamcontent\.com,DIRECT/);
+  assert.match(manager, /DOMAIN-SUFFIX,gosuslugi\.ru,DIRECT/);
+  assert.match(manager, /DOMAIN-SUFFIX,rutube\.ru,DIRECT/);
+  assert.match(manager, /DOMAIN-SUFFIX,samokat\.ru,DIRECT/);
+  assert.match(manager, /DOMAIN,assets1\.xboxlive\.com,DIRECT/);
   assert.match(manager, /"atomicheart": \["AtomicHeart-Win64-Shipping\.exe"\]/);
   assert.match(manager, /"stalcraft": \["stalcraft\.exe", "STALCRAFT\.exe"\]/);
   assert.match(manager, /direct_games_enabled/);

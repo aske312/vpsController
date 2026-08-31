@@ -530,6 +530,9 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN-SUFFIX,yandexcloud.net,DIRECT", "DOMAIN-SUFFIX,vk.com,DIRECT", "DOMAIN-SUFFIX,userapi.com,DIRECT",
         "DOMAIN-SUFFIX,vkuseraudio.net,DIRECT", "DOMAIN-SUFFIX,mycdn.me,DIRECT", "DOMAIN-SUFFIX,mail.com,DIRECT",
         "DOMAIN-SUFFIX,2gis.com,DIRECT", "DOMAIN-SUFFIX,kaspersky.com,DIRECT", "DOMAIN-SUFFIX,kinopoisk.com,DIRECT",
+        "DOMAIN-SUFFIX,ok.ru,DIRECT", "DOMAIN-SUFFIX,odnoklassniki.ru,DIRECT", "DOMAIN-SUFFIX,dzen.ru,DIRECT",
+        "DOMAIN-SUFFIX,rutube.ru,DIRECT", "DOMAIN-SUFFIX,rutube.video,DIRECT", "DOMAIN-SUFFIX,smotrim.ru,DIRECT",
+        "DOMAIN-SUFFIX,gosuslugi.ru,DIRECT", "DOMAIN-SUFFIX,mos.ru,DIRECT", "DOMAIN-SUFFIX,nalog.gov.ru,DIRECT",
         "GEOIP,RU,DIRECT,no-resolve",
     ],
     "direct_ru_banks": [
@@ -585,6 +588,9 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN-SUFFIX,lemanapro.ru,DIRECT", "DOMAIN-SUFFIX,vseinstrumenti.ru,DIRECT", "DOMAIN-SUFFIX,citilink.ru,DIRECT",
         "DOMAIN-SUFFIX,dns-shop.ru,DIRECT", "DOMAIN-SUFFIX,mvideo.ru,DIRECT", "DOMAIN-SUFFIX,eldorado.ru,DIRECT",
         "DOMAIN-SUFFIX,onlinetrade.ru,DIRECT",
+        "DOMAIN-SUFFIX,samokat.ru,DIRECT", "DOMAIN-SUFFIX,kuper.ru,DIRECT", "DOMAIN-SUFFIX,vprok.ru,DIRECT",
+        "DOMAIN-SUFFIX,petrovich.ru,DIRECT", "DOMAIN-SUFFIX,hoff.ru,DIRECT", "DOMAIN-SUFFIX,sportmaster.ru,DIRECT",
+        "DOMAIN-SUFFIX,goldapple.ru,DIRECT", "DOMAIN-SUFFIX,lenta.com,DIRECT",
     ],
     "direct_local_network": [
         "DOMAIN,localhost,DIRECT",
@@ -629,6 +635,11 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN,eaassets-a.akamaihd.net,DIRECT",
         "DOMAIN,level3.blizzard.com,DIRECT",
         "DOMAIN,blzddist1-a.akamaihd.net,DIRECT",
+        "DOMAIN,assets1.xboxlive.com,DIRECT",
+        "DOMAIN,dlassets.xboxlive.com,DIRECT",
+        "DOMAIN,packagespc.xboxlive.com,DIRECT",
+        "DOMAIN,gs2.ww.prod.dl.playstation.net,DIRECT",
+        "DOMAIN,atum.hac.lp1.d4c.nintendo.net,DIRECT",
         # Common public package repositories and large development artifacts.
         "DOMAIN,archive.ubuntu.com,DIRECT",
         "DOMAIN,security.ubuntu.com,DIRECT",
@@ -638,6 +649,8 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN-SUFFIX,github-releases.githubusercontent.com,DIRECT",
         "DOMAIN,registry-1.docker.io,DIRECT",
         "DOMAIN,production.cloudflare.docker.com,DIRECT",
+        "DOMAIN,download.jetbrains.com,DIRECT",
+        "DOMAIN,nodejs.org,DIRECT",
     ],
 }
 
