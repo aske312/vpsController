@@ -636,14 +636,27 @@ DIRECT_RULE_META = {
     "direct_ru_marketplaces": ("Магазины и маркетплейсы", "Маркетплейсы и крупные интернет-магазины."),
 }
 
-UDP_TUNNEL_EXCLUSION_RULES = [
-    "DST-PORT,53,GATE.312",
-    "DOMAIN-SUFFIX,telegram.org,GATE.312", "DOMAIN-SUFFIX,t.me,GATE.312",
-    "DOMAIN-SUFFIX,discord.com,GATE.312", "DOMAIN-SUFFIX,discord.gg,GATE.312", "DOMAIN-SUFFIX,discord.media,GATE.312",
-    "DOMAIN-SUFFIX,whatsapp.com,GATE.312", "DOMAIN-SUFFIX,whatsapp.net,GATE.312",
-    "DOMAIN-SUFFIX,signal.org,GATE.312", "DOMAIN-SUFFIX,zoom.us,GATE.312",
-    "DOMAIN,meet.google.com,GATE.312", "DOMAIN-SUFFIX,teams.microsoft.com,GATE.312",
-]
+UDP_TUNNEL_EXCLUSION_CATALOG: dict[str, list[str]] = {
+    "dns": ["DST-PORT,53,GATE.312"],
+    "telegram": ["DOMAIN-SUFFIX,telegram.org,GATE.312", "DOMAIN-SUFFIX,t.me,GATE.312"],
+    "discord": ["DOMAIN-SUFFIX,discord.com,GATE.312", "DOMAIN-SUFFIX,discord.gg,GATE.312", "DOMAIN-SUFFIX,discord.media,GATE.312"],
+    "whatsapp": ["DOMAIN-SUFFIX,whatsapp.com,GATE.312", "DOMAIN-SUFFIX,whatsapp.net,GATE.312"],
+    "signal": ["DOMAIN-SUFFIX,signal.org,GATE.312"],
+    "zoom": ["DOMAIN-SUFFIX,zoom.us,GATE.312"],
+    "meet": ["DOMAIN,meet.google.com,GATE.312"],
+    "teams": ["DOMAIN-SUFFIX,teams.microsoft.com,GATE.312", "DOMAIN-SUFFIX,skype.com,GATE.312"],
+    "apple": ["DOMAIN-SUFFIX,facetime.apple.com,GATE.312", "DOMAIN-SUFFIX,ess.apple.com,GATE.312"],
+    "steam": ["DOMAIN-SUFFIX,steamcontent.com,GATE.312", "DOMAIN-SUFFIX,steamserver.net,GATE.312"],
+    "ea": ["DOMAIN-SUFFIX,ea.com,GATE.312", "DOMAIN-SUFFIX,eaplay.com,GATE.312"],
+    "supercell": ["DOMAIN-SUFFIX,supercell.com,GATE.312", "DOMAIN-SUFFIX,supercell.net,GATE.312"],
+    "riot": ["DOMAIN-SUFFIX,riotgames.com,GATE.312", "DOMAIN-SUFFIX,playvalorant.com,GATE.312"],
+    "epic": ["DOMAIN-SUFFIX,epicgames.com,GATE.312", "DOMAIN-SUFFIX,fortnite.com,GATE.312"],
+    "xbox": ["DOMAIN-SUFFIX,xboxlive.com,GATE.312", "DOMAIN-SUFFIX,xboxservices.com,GATE.312"],
+    "playstation": ["DOMAIN-SUFFIX,playstation.net,GATE.312", "DOMAIN-SUFFIX,playstation.com,GATE.312"],
+    "nintendo": ["DOMAIN-SUFFIX,nintendo.net,GATE.312", "DOMAIN-SUFFIX,nintendo.com,GATE.312"],
+    "battlenet": ["DOMAIN-SUFFIX,battle.net,GATE.312", "DOMAIN-SUFFIX,blizzard.com,GATE.312"],
+}
+DEFAULT_UDP_TUNNEL_EXCLUSIONS = ",".join(UDP_TUNNEL_EXCLUSION_CATALOG)
 
 
 def configured_preset_rules(routing: dict[str, Any], setting: str) -> list[str]:
@@ -671,16 +684,20 @@ def routing_rule_lists(values: dict[str, Any] | None = None) -> list[dict[str, A
         "key": "udp_tunnel_exclusions_rules",
         "title": "Исключения UDP",
         "description": "Ресурсы, которые остаются в защищённом канале при включённом правиле UDP напрямую.",
-        "default_rules": "\n".join(UDP_TUNNEL_EXCLUSION_RULES),
+        "default_rules": "\n".join(rule for rules in UDP_TUNNEL_EXCLUSION_CATALOG.values() for rule in rules),
         "using_default": str(routing.get("udp_tunnel_exclusions_rules", "@default")).strip() == "@default",
     })
     return lists
 
 
 def udp_tunnel_exclusion_rules(routing: dict[str, Any]) -> list[str]:
-    raw = str(routing.get("udp_tunnel_exclusions_rules", "@default")).replace("\r", "")
-    source = UDP_TUNNEL_EXCLUSION_RULES if raw.strip() == "@default" else raw.split("\n")
-    return [rule.strip() for rule in source if rule.strip() and not rule.strip().startswith("#")]
+    selected = str(routing.get("udp_tunnel_exclusions", DEFAULT_UDP_TUNNEL_EXCLUSIONS)).replace("\r", "").replace("\n", ",")
+    rules: list[str] = []
+    for resource_id in dict.fromkeys(value.strip().lower() for value in selected.split(",") if value.strip()):
+        rules.extend(UDP_TUNNEL_EXCLUSION_CATALOG.get(resource_id, []))
+    custom = str(routing.get("udp_tunnel_exclusions_rules", "")).replace("\r", "")
+    rules.extend(rule.strip() for rule in custom.split("\n") if rule.strip() and not rule.strip().startswith("#"))
+    return list(dict.fromkeys(rules))
 
 
 def process_rules(routing: dict[str, Any], selection_key: str, custom_key: str, catalog: dict[str, list[str]], target: str) -> list[str]:
@@ -700,7 +717,7 @@ def process_rules(routing: dict[str, Any], selection_key: str, custom_key: str, 
 
 
 def tunnel_game_rules(routing: dict[str, Any]) -> list[str]:
-    if not routing.get("tunnel_restricted_games_enabled", False):
+    if not routing.get("direct_games_enabled", False):
         return []
     return process_rules(routing, "tunnel_games", "tunnel_game_processes", TUNNEL_GAME_PROCESSES, "GATE.312")
 
@@ -2294,7 +2311,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     # Ready-made bypass lists are selected per profile. Never inherit legacy
     # global switches from routing settings; that would silently affect every
     # existing subscription.
-    for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled", "tunnel_restricted_games_enabled"):
+    for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled"):
         routing[key] = bool(profile_routing.get(key, False))
     mode = str(routing.get("mode", "rule"))
     lines = [
@@ -2314,7 +2331,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "  dns-hijack:",
         '    - "any:53"',
     ]
-    if routing.get("direct_games_enabled", False) or routing.get("tunnel_restricted_games_enabled", False):
+    if routing.get("direct_games_enabled", False):
         lines.insert(4, "find-process-mode: strict")
     dns = dns_settings()
     lines += [

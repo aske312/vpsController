@@ -110,11 +110,18 @@
     { "key": "direct_ru_banks_rules", "label": "Список банков и платежей", "type": "textarea", "default": "@default" },
     { "key": "direct_ru_marketplaces_rules", "label": "Список магазинов и маркетплейсов", "type": "textarea", "default": "@default" },
     {
-      "key": "udp_tunnel_exclusions_rules",
-      "label": "Исключения для UDP напрямую",
+      "key": "udp_tunnel_exclusions",
+      "label": "Каталог исключений UDP",
       "type": "textarea",
-      "default": "@default",
-      "help": "Правила ресурсов, которые должны продолжать идти через GATE.312. Они располагаются выше общего NETWORK,UDP,DIRECT."
+      "default": "dns,telegram,discord,whatsapp,signal,zoom,meet,teams,apple,steam,ea,supercell,riot,epic,xbox,playstation,nintendo,battlenet",
+      "help": "Идентификаторы ресурсов, которые остаются через GATE.312 при включённом UDP напрямую."
+    },
+    {
+      "key": "udp_tunnel_exclusions_rules",
+      "label": "Дополнительные исключения UDP",
+      "type": "textarea",
+      "default": "",
+      "help": "Собственные правила ресурсов через GATE.312, по одному на строку."
     },
     {
       "key": "direct_games_enabled",
@@ -131,18 +138,11 @@
       "help": "Направляет напрямую весь UDP-трафик профиля без выбора приложений или игр."
     },
     {
-      "key": "tunnel_restricted_games_enabled",
-      "label": "Игры с региональными ограничениями — через туннель",
-      "type": "boolean",
-      "default": false,
-      "help": "Включается отдельно в профиле и имеет приоритет над UDP напрямую и играми без VPN."
-    },
-    {
       "key": "tunnel_games",
-      "label": "Игры через туннель",
+      "label": "Игры, направляемые через туннель",
       "type": "textarea",
       "default": "",
-      "help": "Идентификаторы выбранных игр Supercell и EA, для которых российский IP может ограничивать доступ."
+      "help": "Направление выбирается в общем каталоге правила «Игры»."
     },
     {
       "key": "tunnel_game_processes",

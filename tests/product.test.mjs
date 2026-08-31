@@ -235,7 +235,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /"marathon": \["Marathon\.exe"\]/);
   assert.match(manager, /direct_games_enabled/);
   assert.match(manager, /direct_games_udp_enabled/);
-  assert.match(manager, /UDP_TUNNEL_EXCLUSION_RULES/);
+  assert.match(manager, /UDP_TUNNEL_EXCLUSION_CATALOG/);
   assert.match(manager, /udp_tunnel_exclusion_rules\(routing\)/);
   assert.match(manager, /tunnel_game_rules\(routing\)/);
   assert.ok(manager.indexOf("rules.extend(tunnel_game_rules(routing))") < manager.indexOf("rules.extend(direct_game_rules(routing))"), "tunnel-required games must win over direct game rules");
@@ -256,8 +256,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /Clash Verge Rev/);
   assert.match(page, /apps\.apple\.com\/us\/app\/clash-mi\/id6744321968/);
   assert.match(page, /MetaCubeX\/ClashMetaForAndroid\/releases/);
-  assert.match(page, /Игры полностью без VPN/);
-  assert.match(page, /toggleDirectGame/);
+  assert.match(page, /Маршруты игр/);
+  assert.match(page, /setGameRoute/);
   assert.match(page, /mihomoProfileRuleSwitch/);
   assert.match(page, /profileDirectRules/);
   assert.match(page, /const ruleCount = profileDirectRules\.filter/);
@@ -279,10 +279,11 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /Профиль готов/);
   assert.match(page, /Скопировать ссылку/);
   assert.match(page, /title: "UDP"/);
-  assert.match(page, /Остаются через туннель/);
+  assert.match(page, /udpExclusionCatalog/);
   assert.match(page, /udp_tunnel_exclusions_rules/);
-  assert.match(page, /Игры через туннель/);
-  assert.match(page, /toggleTunnelGame/);
+  assert.match(page, /Маршруты игр/);
+  assert.match(page, /setGameRoute/);
+  assert.doesNotMatch(page, /title: "Игры через VPN"/);
   assert.match(page, /EA Sports FC 26/);
   assert.match(page, /toggleProfileRule/);
   assert.match(page, /Каждое правило применяется только к этому профилю/);
@@ -293,7 +294,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games_enabled/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games_udp_enabled/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /udp_tunnel_exclusions_rules/);
-  assert.match(routingManifest.settings.map((item) => item.key).join(","), /tunnel_restricted_games_enabled/);
+  assert.match(routingManifest.settings.map((item) => item.key).join(","), /udp_tunnel_exclusions/);
+  assert.doesNotMatch(routingManifest.settings.map((item) => item.key).join(","), /tunnel_restricted_games_enabled/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /tunnel_games/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_game_processes/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_ru_sites_rules/);

@@ -171,6 +171,31 @@ const tunnelGameCatalog = [
   { id: "nfsunbound", code: "NFS", name: "Need for Speed Unbound", family: "EA" },
   { id: "battlefront2", code: "SW", name: "Star Wars Battlefront II", family: "EA" },
 ];
+const gameRoutingCatalog = [...new Map([
+  ...tunnelGameCatalog,
+  ...directGameCatalog.map((game) => ({ ...game, family: "Обычный маршрут" })),
+].map((game) => [game.id, game])).values()];
+
+const udpExclusionCatalog = [
+  { id: "dns", code: "DNS", name: "Защищённый DNS" },
+  { id: "telegram", code: "TG", name: "Telegram" },
+  { id: "discord", code: "DS", name: "Discord" },
+  { id: "whatsapp", code: "WA", name: "WhatsApp" },
+  { id: "signal", code: "SG", name: "Signal" },
+  { id: "zoom", code: "ZM", name: "Zoom" },
+  { id: "meet", code: "GM", name: "Google Meet" },
+  { id: "teams", code: "MS", name: "Teams / Skype" },
+  { id: "apple", code: "AP", name: "FaceTime / iMessage" },
+  { id: "steam", code: "ST", name: "Steam" },
+  { id: "ea", code: "EA", name: "EA" },
+  { id: "supercell", code: "SC", name: "Supercell" },
+  { id: "riot", code: "RI", name: "Riot Games" },
+  { id: "epic", code: "EP", name: "Epic / Fortnite" },
+  { id: "xbox", code: "XB", name: "Xbox Live" },
+  { id: "playstation", code: "PS", name: "PlayStation Network" },
+  { id: "nintendo", code: "NS", name: "Nintendo" },
+  { id: "battlenet", code: "BN", name: "Battle.net" },
+];
 
 const profileDirectRules = [
   { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и трекеры." },
@@ -179,7 +204,6 @@ const profileDirectRules = [
   { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Магазины и маркетплейсы." },
   { key: "direct_games_enabled", code: "GAME", title: "Игры", text: "Выбранные игры без VPN." },
   { key: "direct_games_udp_enabled", code: "UDP", title: "UDP", text: "Весь UDP без VPN." },
-  { key: "tunnel_restricted_games_enabled", code: "VPN", title: "Игры через VPN", text: "Игры с ограничениями российского IP." },
 ];
 
 const profileStrategies = [
@@ -361,16 +385,22 @@ export function MihomoPage({
     setRoutingDirty(true);
   }
 
-  function toggleDirectGame(gameId: string) {
-    const selected = new Set(String(routingDraft.direct_games || "").split(",").map((value) => value.trim()).filter(Boolean));
-    if (selected.has(gameId)) selected.delete(gameId); else selected.add(gameId);
-    updateRoutingDraft("direct_games", [...selected].join(","));
+  function setGameRoute(gameId: string, route: "direct" | "tunnel" | "off") {
+    const direct = new Set(String(routingDraft.direct_games || "").split(",").map((value) => value.trim()).filter(Boolean));
+    const tunnel = new Set(String(routingDraft.tunnel_games || "").split(",").map((value) => value.trim()).filter(Boolean));
+    direct.delete(gameId);
+    tunnel.delete(gameId);
+    if (route === "direct") direct.add(gameId);
+    if (route === "tunnel") tunnel.add(gameId);
+    setRoutingDraft((current) => ({ ...current, direct_games: [...direct].join(","), tunnel_games: [...tunnel].join(",") }));
+    routingDirtyRef.current = true;
+    setRoutingDirty(true);
   }
 
-  function toggleTunnelGame(gameId: string) {
-    const selected = new Set(String(routingDraft.tunnel_games || "").split(",").map((value) => value.trim()).filter(Boolean));
-    if (selected.has(gameId)) selected.delete(gameId); else selected.add(gameId);
-    updateRoutingDraft("tunnel_games", [...selected].join(","));
+  function toggleUdpExclusion(resourceId: string) {
+    const selected = new Set(String(routingDraft.udp_tunnel_exclusions || "").split(",").map((value) => value.trim()).filter(Boolean));
+    if (selected.has(resourceId)) selected.delete(resourceId); else selected.add(resourceId);
+    updateRoutingDraft("udp_tunnel_exclusions", [...selected].join(","));
   }
 
   function toggleProfileRule(key: string, checked: boolean) {
@@ -806,9 +836,7 @@ export function MihomoPage({
   const selectedRuleList = editableRuleLists.find((item) => item.id === activeRuleList) || editableRuleLists[0];
   const selectedRuleValue = selectedRuleList ? String(routingDraft[selectedRuleList.key] ?? "@default") : "";
   const selectedRuleText = selectedRuleList ? (selectedRuleValue === "@default" ? selectedRuleList.default_rules : selectedRuleValue) : "";
-  const udpExclusionList = editableRuleLists.find((item) => item.id === "udp_tunnel_exclusions");
-  const udpExclusionValue = String(routingDraft.udp_tunnel_exclusions_rules ?? "@default");
-  const udpExclusionText = udpExclusionValue === "@default" ? udpExclusionList?.default_rules || "" : udpExclusionValue;
+  const selectedUdpExclusions = new Set(String(routingDraft.udp_tunnel_exclusions || "").split(",").filter(Boolean));
 
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
@@ -1040,23 +1068,18 @@ export function MihomoPage({
             <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small></header>{profileDirectRules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</aside>
             <article>
               {activeRuleList === "direct_games_udp_enabled" ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">NETWORK RULE</p><h3>UDP напрямую</h3><p>Весь UDP направляется напрямую, кроме ресурсов из списка ниже. Исключения проверяются первыми и остаются в GATE.312.</p></div><span>{udpExclusionText.split("\n").filter(Boolean).length} искл.</span></header>
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">NETWORK RULE</p><h3>UDP напрямую</h3><p>Выбранные исключения остаются в GATE.312, остальной UDP идёт напрямую.</p></div><span>{selectedUdpExclusions.size} искл.</span></header>
                 <div className="mihomoHint">NETWORK,UDP,DIRECT</div>
-                <label className="mihomoRuleTextarea"><span>Остаются через туннель</span><textarea rows={12} value={udpExclusionText} spellCheck={false} placeholder={"DOMAIN-SUFFIX,example.com,GATE.312\nDST-PORT,53,GATE.312"} onChange={(event) => updateRoutingDraft("udp_tunnel_exclusions_rules", event.target.value)} /></label>
-                <footer className="mihomoRuleEditorActions"><span>{udpExclusionValue === "@default" ? "Стандартные исключения: DNS, Telegram, Discord, WhatsApp, Signal, Zoom, Meet и Teams" : "Список исключений изменён вручную"}</span><button type="button" className="ghostButton" disabled={udpExclusionValue === "@default"} onClick={() => updateRoutingDraft("udp_tunnel_exclusions_rules", "@default")}>Восстановить стандартный</button></footer>
-              </> : activeRuleList === "tunnel_restricted_games_enabled" ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROTECTED GAME RULES</p><h3>Игры через туннель</h3><p>Весь трафик выбранных процессов остаётся в GATE.312. Это правило имеет приоритет над «UDP напрямую» и «Игры без VPN».</p></div><span>{String(routingDraft.tunnel_games || "").split(",").filter(Boolean).length} выбрано</span></header>
                 <div className="mihomoGameCatalog">
-                  {tunnelGameCatalog.map((game) => { const selected = String(routingDraft.tunnel_games || "").split(",").includes(game.id); return <button type="button" key={game.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleTunnelGame(game.id)}><span>{game.code}</span><b>{game.name}</b><i>{selected ? "Через VPN" : game.family}</i></button>; })}
+                  {udpExclusionCatalog.map((resource) => { const selected = selectedUdpExclusions.has(resource.id); return <button type="button" key={resource.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleUdpExclusion(resource.id)}><span>{resource.code}</span><b>{resource.name}</b><i>{selected ? "Через VPN" : "Напрямую"}</i></button>; })}
                 </div>
-                <label className="mihomoCustomGames"><span><b>Дополнительные процессы через VPN</b><small>По одному имени процесса или package name на строку.</small></span><textarea rows={5} value={String(routingDraft.tunnel_game_processes || "")} placeholder={"game.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("tunnel_game_processes", event.target.value)} /></label>
-                <p className="mihomoGamesHint">Каталог основан на официально заявленных региональных ограничениях Supercell и EA. Выбор остаётся профильным и не включается автоматически.</p>
+                <label className="mihomoCustomGames"><span><b>Дополнительные исключения</b><small>Полные правила Mihomo через GATE.312, по одному на строку.</small></span><textarea rows={5} value={String(routingDraft.udp_tunnel_exclusions_rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,GATE.312\nDST-PORT,3478,GATE.312"} onChange={(event) => updateRoutingDraft("udp_tunnel_exclusions_rules", event.target.value)} /></label>
               </> : activeRuleList === "direct_games_enabled" ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Игры полностью без VPN</h3><p>Весь сетевой трафик выбранных игровых процессов направляется напрямую. Каталог не зависит от магазина или лаунчера и может включать ещё не установленные игры.</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} выбрано</span></header>
-                <div className="mihomoGameCatalog">
-                  {directGameCatalog.map((game) => { const selected = String(routingDraft.direct_games || "").split(",").includes(game.id); return <button type="button" key={game.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleDirectGame(game.id)}><span>{game.code}</span><b>{game.name}</b><i>{selected ? "Напрямую" : "Через VPN"}</i></button>; })}
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Маршруты игр</h3><p>Для каждой игры выберите прямой маршрут или GATE.312. Игры с ограничениями российского IP уже доступны в этом же каталоге.</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length + String(routingDraft.tunnel_games || "").split(",").filter(Boolean).length} настроено</span></header>
+                <div className="mihomoGameCatalog mihomoGameRouteCatalog">
+                  {gameRoutingCatalog.map((game) => { const direct = String(routingDraft.direct_games || "").split(",").includes(game.id); const tunnel = String(routingDraft.tunnel_games || "").split(",").includes(game.id); return <article key={game.id} className={direct || tunnel ? "is-selected" : ""}><span>{game.code}</span><b>{game.name}</b><i>{game.family}</i><nav><button type="button" className={direct ? "is-active" : ""} onClick={() => setGameRoute(game.id, direct ? "off" : "direct")}>Напрямую</button><button type="button" className={tunnel ? "is-active is-tunnel" : ""} onClick={() => setGameRoute(game.id, tunnel ? "off" : "tunnel")}>VPN</button></nav></article>; })}
                 </div>
-                <label className="mihomoCustomGames"><span><b>Дополнительные процессы</b><small>По одному имени процесса или package name на строку.</small></span><textarea rows={5} value={String(routingDraft.direct_game_processes || "")} placeholder={"mygame.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("direct_game_processes", event.target.value)} /></label>
+                <div className="mihomoRoutingColumns"><label className="mihomoCustomGames"><span><b>Дополнительные процессы напрямую</b><small>По одному имени процесса или package name на строку.</small></span><textarea rows={5} value={String(routingDraft.direct_game_processes || "")} placeholder={"mygame.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("direct_game_processes", event.target.value)} /></label><label className="mihomoCustomGames"><span><b>Дополнительные процессы через VPN</b><small>Используйте для игр с региональными ограничениями.</small></span><textarea rows={5} value={String(routingDraft.tunnel_game_processes || "")} placeholder={"restricted-game.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("tunnel_game_processes", event.target.value)} /></label></div>
                 <p className="mihomoGamesHint">Для определения процесса нужен TUN-режим. На iPhone сопоставление по приложению может быть недоступно.</p>
               </> : selectedRuleList ? <>
                 <header className="mihomoRuleEditorHead"><div><p className="eyebrow">DOMAIN / IP RULES</p><h3>{selectedRuleList.title}</h3><p>{selectedRuleList.description} По одному правилу Mihomo на строку.</p></div><span>{selectedRuleText.split("\n").filter(Boolean).length} правил</span></header>
