@@ -211,10 +211,11 @@ test("operational pages keep their artwork, 70/30 workspace and real country fla
 });
 
 test("Mihomo transports automatically provision DNS and routing policies", async () => {
-  const [manager, page, styles, dnsManifest, routingManifest] = await Promise.all([
+  const [manager, page, styles, polish, dnsManifest, routingManifest] = await Promise.all([
     read("protocol-images/mihomo/manager.py"),
     read("app/views/mihomo/mihomo-view.tsx"),
     read("app/styles/pages/mihomo.css"),
+    read("app/styles/polish.css"),
     read("protocol-images/mihomo/modules/dns-private/manifest.json").then(JSON.parse),
     read("protocol-images/mihomo/modules/routing-policy/manifest.json").then(JSON.parse),
   ]);
@@ -260,6 +261,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /mihomoProfileRail/);
   assert.match(page, /mihomoProfileDraftSummary/);
   assert.match(page, /mihomoProfileCanvas/);
+  assert.match(styles, /\.mihomoProfileDialog \{ width:94vw; height:92dvh;/);
+  assert.match(polish, /\.mihomoDialog:not\(\.mihomoProfileDialog\)/);
+  assert.doesNotMatch(polish, /\.mihomoDialog\) \{\s*width:min\(620px/);
   assert.match(page, /setProfileStrategy/);
   assert.match(page, /title: "Общие"/);
   assert.match(page, /title: "Резерв"/);
