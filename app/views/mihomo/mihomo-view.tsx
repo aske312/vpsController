@@ -198,7 +198,7 @@ const udpExclusionCatalog = [
 ];
 
 const profileDirectRules = [
-  { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и трекеры." },
+  { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и рекламные трекеры." },
   { key: "direct_ru_sites", code: "RU", title: "Сайты РФ", text: "Домены и IP России." },
   { key: "direct_ru_banks", code: "BANK", title: "Банки", text: "Банки и платёжные сервисы." },
   { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Магазины и маркетплейсы." },
@@ -1075,9 +1075,9 @@ export function MihomoPage({
                 </div>
                 <label className="mihomoCustomGames"><span><b>Дополнительные исключения</b><small>Полные правила Mihomo через GATE.312, по одному на строку.</small></span><textarea rows={5} value={String(routingDraft.udp_tunnel_exclusions_rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,GATE.312\nDST-PORT,3478,GATE.312"} onChange={(event) => updateRoutingDraft("udp_tunnel_exclusions_rules", event.target.value)} /></label>
               </> : activeRuleList === "direct_games_enabled" ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Маршруты игр</h3><p>Для каждой игры выберите прямой маршрут или GATE.312. Игры с ограничениями российского IP уже доступны в этом же каталоге.</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length + String(routingDraft.tunnel_games || "").split(",").filter(Boolean).length} настроено</span></header>
-                <div className="mihomoGameCatalog mihomoGameRouteCatalog">
-                  {gameRoutingCatalog.map((game) => { const direct = String(routingDraft.direct_games || "").split(",").includes(game.id); const tunnel = String(routingDraft.tunnel_games || "").split(",").includes(game.id); return <article key={game.id} className={direct || tunnel ? "is-selected" : ""}><span>{game.code}</span><b>{game.name}</b><i>{game.family}</i><nav><button type="button" className={direct ? "is-active" : ""} onClick={() => setGameRoute(game.id, direct ? "off" : "direct")}>Напрямую</button><button type="button" className={tunnel ? "is-active is-tunnel" : ""} onClick={() => setGameRoute(game.id, tunnel ? "off" : "tunnel")}>VPN</button></nav></article>; })}
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Маршруты игр</h3><p>Нажмите на игру, чтобы переключить её между прямым маршрутом и GATE.312. При включённом правиле отмеченные игры идут напрямую.</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} напрямую</span></header>
+                <div className="mihomoGameCatalog">
+                  {gameRoutingCatalog.map((game) => { const direct = String(routingDraft.direct_games || "").split(",").includes(game.id); return <button type="button" key={game.id} className={direct ? "is-selected" : ""} aria-pressed={direct} title={game.family} onClick={() => setGameRoute(game.id, direct ? "tunnel" : "direct")}><span>{game.code}</span><b>{game.name}</b><i>{direct ? "Напрямую" : "Через VPN"}</i></button>; })}
                 </div>
                 <div className="mihomoRoutingColumns"><label className="mihomoCustomGames"><span><b>Дополнительные процессы напрямую</b><small>По одному имени процесса или package name на строку.</small></span><textarea rows={5} value={String(routingDraft.direct_game_processes || "")} placeholder={"mygame.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("direct_game_processes", event.target.value)} /></label><label className="mihomoCustomGames"><span><b>Дополнительные процессы через VPN</b><small>Используйте для игр с региональными ограничениями.</small></span><textarea rows={5} value={String(routingDraft.tunnel_game_processes || "")} placeholder={"restricted-game.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("tunnel_game_processes", event.target.value)} /></label></div>
                 <p className="mihomoGamesHint">Для определения процесса нужен TUN-режим. На iPhone сопоставление по приложению может быть недоступно.</p>

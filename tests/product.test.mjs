@@ -229,8 +229,12 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /TUNNEL_GAME_PROCESSES/);
   assert.match(manager, /"block_ads": \[/);
   assert.match(manager, /GEOSITE,category-ads-all,REJECT/);
-  assert.match(manager, /GEOSITE,tracker,REJECT/);
-  assert.match(manager, /DOMAIN-SUFFIX,getadmiral\.com,REJECT/);
+  assert.match(manager, /DOMAIN-SUFFIX,smartadserver\.com,REJECT/);
+  assert.match(manager, /DOMAIN-SUFFIX,buzzoola\.com,REJECT/);
+  assert.match(manager, /DOMAIN-SUFFIX,freewheel\.tv,REJECT/);
+  assert.match(manager, /DOMAIN-SUFFIX,springserve\.com,REJECT/);
+  assert.doesNotMatch(manager, /GEOSITE,tracker,REJECT/);
+  assert.doesNotMatch(manager, /DOMAIN-SUFFIX,getadmiral\.com,REJECT/);
   assert.match(manager, /"arenabreakoutinfinite": \["UAGame\.exe"\]/);
   assert.match(manager, /"marathon": \["Marathon\.exe"\]/);
   assert.match(manager, /direct_games_enabled/);

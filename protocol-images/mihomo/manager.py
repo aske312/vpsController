@@ -451,14 +451,13 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
 DIRECT_RULE_PRESETS: dict[str, list[str]] = {
     "block_ads": [
         "GEOSITE,category-ads-all,REJECT",
-        "GEOSITE,tracker,REJECT",
-        # Common ad exchanges and regional networks kept as a fallback when a
-        # client's geosite database is stale or uses a reduced build.
+        # Keep this preset limited to ad delivery. Broad tracker/analytics and
+        # anti-adblock domains cause false positives and can trigger the very
+        # anti-adblock overlays users are trying to avoid.
+        # Explicit networks are a fallback for stale/reduced geosite databases.
         "DOMAIN-SUFFIX,doubleclick.net,REJECT",
         "DOMAIN-SUFFIX,googlesyndication.com,REJECT",
         "DOMAIN-SUFFIX,googleadservices.com,REJECT",
-        "DOMAIN-SUFFIX,google-analytics.com,REJECT",
-        "DOMAIN-SUFFIX,googletagmanager.com,REJECT",
         "DOMAIN-SUFFIX,googletagservices.com,REJECT",
         "DOMAIN-SUFFIX,adnxs.com,REJECT",
         "DOMAIN-SUFFIX,scorecardresearch.com,REJECT",
@@ -484,18 +483,43 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN-SUFFIX,between.digital,REJECT",
         "DOMAIN-SUFFIX,adriver.ru,REJECT",
         "DOMAIN-SUFFIX,soloway.ru,REJECT",
-        "DOMAIN-SUFFIX,hotjar.com,REJECT",
-        "DOMAIN-SUFFIX,hotjar.io,REJECT",
-        "DOMAIN-SUFFIX,mixpanel.com,REJECT",
-        "DOMAIN-SUFFIX,amplitude.com,REJECT",
-        "DOMAIN-SUFFIX,fullstory.com,REJECT",
-        "DOMAIN-SUFFIX,app-measurement.com,REJECT",
-        # External anti-adblock vendors can be stopped at the network layer.
-        # Inline/first-party detection still requires a browser content blocker.
-        "DOMAIN-SUFFIX,pagefair.com,REJECT",
-        "DOMAIN-SUFFIX,pagefair.net,REJECT",
-        "DOMAIN-SUFFIX,blockadblock.com,REJECT",
-        "DOMAIN-SUFFIX,getadmiral.com,REJECT",
+        "DOMAIN-SUFFIX,buzzoola.com,REJECT",
+        "DOMAIN-SUFFIX,hybrid.ai,REJECT",
+        "DOMAIN-SUFFIX,otm-r.com,REJECT",
+        "DOMAIN-SUFFIX,videonow.ru,REJECT",
+        "DOMAIN-SUFFIX,smartadserver.com,REJECT",
+        "DOMAIN-SUFFIX,smaato.net,REJECT",
+        "DOMAIN-SUFFIX,yieldmo.com,REJECT",
+        "DOMAIN-SUFFIX,lijit.com,REJECT",
+        "DOMAIN-SUFFIX,media.net,REJECT",
+        "DOMAIN-SUFFIX,applovin.com,REJECT",
+        "DOMAIN-SUFFIX,applvn.com,REJECT",
+        "DOMAIN-SUFFIX,vungle.com,REJECT",
+        "DOMAIN-SUFFIX,ironsrc.com,REJECT",
+        "DOMAIN-SUFFIX,chartboost.com,REJECT",
+        "DOMAIN-SUFFIX,inmobi.com,REJECT",
+        "DOMAIN-SUFFIX,adcolony.com,REJECT",
+        "DOMAIN-SUFFIX,startappservice.com,REJECT",
+        "DOMAIN-SUFFIX,mintegral.com,REJECT",
+        "DOMAIN-SUFFIX,unityads.unity3d.com,REJECT",
+        # Dedicated instream video advertising / SSAI decision platforms.
+        # Blocking their delivery hosts removes many pre-roll and mid-roll ads
+        # without blocking the video CDN of the site itself.
+        "DOMAIN-SUFFIX,springserve.com,REJECT",
+        "DOMAIN-SUFFIX,spotxchange.com,REJECT",
+        "DOMAIN-SUFFIX,spotx.tv,REJECT",
+        "DOMAIN-SUFFIX,freewheel.tv,REJECT",
+        "DOMAIN-SUFFIX,fwmrm.net,REJECT",
+        "DOMAIN-SUFFIX,innovid.com,REJECT",
+        "DOMAIN-SUFFIX,tremorhub.com,REJECT",
+        "DOMAIN-SUFFIX,unrulymedia.com,REJECT",
+        "DOMAIN-SUFFIX,cedato.com,REJECT",
+        "DOMAIN-SUFFIX,connatix.com,REJECT",
+        "DOMAIN-SUFFIX,aniview.com,REJECT",
+        "DOMAIN-SUFFIX,teads.tv,REJECT",
+        "DOMAIN-SUFFIX,smartclip.net,REJECT",
+        "DOMAIN-SUFFIX,lkqd.net,REJECT",
+        "DOMAIN-SUFFIX,advertising.com,REJECT",
     ],
     "direct_ru_sites": [
         "DOMAIN-SUFFIX,ru,DIRECT", "DOMAIN-SUFFIX,xn--p1ai,DIRECT", "DOMAIN-SUFFIX,su,DIRECT",
@@ -630,7 +654,7 @@ TUNNEL_GAME_PROCESSES: dict[str, list[str]] = {
 }
 
 DIRECT_RULE_META = {
-    "block_ads": ("Блокировка рекламы", "Рекламные сети, трекеры и внешние anti-adblock-сервисы блокируются внутри Mihomo."),
+    "block_ads": ("Блокировка рекламы", "Блокирует рекламные сети, видеорекламу и безопасно отделяемые рекламные трекеры внутри Mihomo."),
     "direct_ru_sites": ("Российские сайты", "Домены РФ, российские сервисы и IP-адреса."),
     "direct_ru_banks": ("Банки и платежи", "Банки РФ, СБП, НСПК и финансовые сервисы."),
     "direct_ru_marketplaces": ("Магазины и маркетплейсы", "Маркетплейсы и крупные интернет-магазины."),
