@@ -207,6 +207,7 @@ export function MihomoPage({
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number | boolean>>({});
   const [profileDialog, setProfileDialog] = useState<Profile | "new" | null>(null);
   const [profileStep, setProfileStep] = useState(1);
+  const profileCanvasRef = useRef<HTMLElement>(null);
   const [profileName, setProfileName] = useState("");
   const [profileConnections, setProfileConnections] = useState<ProfileConnection[]>([]);
   const [profileRouting, setProfileRouting] = useState<Record<string, string | number | boolean>>({});
@@ -218,6 +219,10 @@ export function MihomoPage({
   const [readyDevices, setReadyDevices] = useState<ReadyDevice[]>([]);
   const [presetDialog, setPresetDialog] = useState(false);
   const [presetDraft, setPresetDraft] = useState<ProfilePreset[]>([]);
+
+  useEffect(() => {
+    profileCanvasRef.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [profileStep, profileDialog]);
 
   const request = useCallback(async (path: string, init?: RequestInit) => {
     if (!token) throw new Error("Сессия панели завершена. Войдите заново.");
@@ -1095,7 +1100,7 @@ export function MihomoPage({
                 <section className="mihomoProfileDraftSummary"><small>ТЕКУЩИЙ ПРОФИЛЬ</small><b>{profileName.trim() || "Без названия"}</b><dl><div><dt>Стратегия</dt><dd>{profileStrategies.find((item) => item.value === String(profileRouting.strategy || ""))?.code}</dd></div><div><dt>Правила</dt><dd>{profileDirectRules.filter((rule) => Boolean(profileRouting[rule.key])).length}</dd></div><div><dt>Устройства</dt><dd>{profileDevices.length}</dd></div><div><dt>Подключения</dt><dd>{profileConnections.length}</dd></div></dl></section>
                 <p className="mihomoProfileRailHint">Каждое устройство получит отдельную ссылку подписки и QR-код.</p>
               </aside>
-              <main className="mihomoProfileCanvas">
+              <main ref={profileCanvasRef} className="mihomoProfileCanvas">
             <section className="mihomoProfileStageIntro"><span>0{profileStep}</span><div><b>{profileStep === 1 ? "Как должен работать профиль" : profileStep === 2 ? "Кто будет использовать профиль" : "Через какие каналы подключаться"}</b><small>{profileStep === 1 ? "Задайте понятное имя, поведение переключения и нужные правила." : profileStep === 2 ? "Для каждого устройства будет создана отдельная постоянная подписка." : "Выберите устройство, примените готовый набор или соберите подключения вручную."}</small></div></section>
             <label className="mihomoProfileName"><span>Название профиля</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} /></label>
             <section className="mihomoProfileStrategy"><header><div><b>Стратегия каналов</b><small>Определяет тип группы GATE.312 в Clash Verge и других Mihomo-клиентах.</small></div><span>{profileStrategies.find((item) => item.value === String(profileRouting.strategy || ""))?.title}</span></header><div>{profileStrategies.map((strategy) => { const selected = String(profileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>
