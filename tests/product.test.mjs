@@ -226,6 +226,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /@app\.patch\("\/api\/mihomo\/routing\/settings"/);
   assert.match(manager, /routing = \{\*\*routing_settings\(\), \*\*profile_routing\}/);
   assert.match(manager, /DIRECT_GAME_PROCESSES/);
+  assert.match(manager, /TUNNEL_GAME_PROCESSES/);
   assert.match(manager, /"block_ads": \[/);
   assert.match(manager, /GEOSITE,category-ads-all,REJECT/);
   assert.match(manager, /GEOSITE,tracker,REJECT/);
@@ -234,6 +235,12 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /"marathon": \["Marathon\.exe"\]/);
   assert.match(manager, /direct_games_enabled/);
   assert.match(manager, /direct_games_udp_enabled/);
+  assert.match(manager, /UDP_TUNNEL_EXCLUSION_RULES/);
+  assert.match(manager, /udp_tunnel_exclusion_rules\(routing\)/);
+  assert.match(manager, /tunnel_game_rules\(routing\)/);
+  assert.ok(manager.indexOf("rules.extend(tunnel_game_rules(routing))") < manager.indexOf("rules.extend(direct_game_rules(routing))"), "tunnel-required games must win over direct game rules");
+  assert.match(manager, /\[\*udp_tunnel_exclusion_rules\(routing\), "NETWORK,UDP,DIRECT"\]/);
+  assert.ok(manager.indexOf("udp_tunnel_exclusion_rules(routing)") < manager.indexOf('"NETWORK,UDP,DIRECT"'), "UDP tunnel exclusions must precede the catch-all direct rule");
   assert.match(manager, /NETWORK,UDP,DIRECT/);
   assert.doesNotMatch(manager, /AND,\(\(\{process_rule\}\),\(NETWORK,UDP\)\),DIRECT/);
   assert.match(manager, /profile_routing\.get\(key, False\)/);
@@ -272,6 +279,11 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /Профиль готов/);
   assert.match(page, /Скопировать ссылку/);
   assert.match(page, /title: "UDP"/);
+  assert.match(page, /Остаются через туннель/);
+  assert.match(page, /udp_tunnel_exclusions_rules/);
+  assert.match(page, /Игры через туннель/);
+  assert.match(page, /toggleTunnelGame/);
+  assert.match(page, /EA Sports FC 26/);
   assert.match(page, /toggleProfileRule/);
   assert.match(page, /Каждое правило применяется только к этому профилю/);
   assert.match(page, /mihomoRuleStudio/);
@@ -280,6 +292,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games_enabled/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games_udp_enabled/);
+  assert.match(routingManifest.settings.map((item) => item.key).join(","), /udp_tunnel_exclusions_rules/);
+  assert.match(routingManifest.settings.map((item) => item.key).join(","), /tunnel_restricted_games_enabled/);
+  assert.match(routingManifest.settings.map((item) => item.key).join(","), /tunnel_games/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_game_processes/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_ru_sites_rules/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_ru_banks_rules/);

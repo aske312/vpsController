@@ -143,6 +143,33 @@ const directGameCatalog = [
   { id: "residentevilrequiem", code: "RE9", name: "Resident Evil Requiem" },
   { id: "stardewvalley", code: "SDV", name: "Stardew Valley" },
   { id: "mecchachameleon", code: "MC", name: "MECCHA CHAMELEON" },
+  { id: "minecraft", code: "MC", name: "Minecraft" },
+  { id: "warface", code: "WF", name: "Warface" },
+  { id: "enlisted", code: "ENL", name: "Enlisted" },
+  { id: "worldofwarships", code: "WOWS", name: "World of Warships" },
+  { id: "pathofexile2", code: "POE", name: "Path of Exile 2" },
+  { id: "warframe", code: "WF", name: "Warframe" },
+  { id: "genshin", code: "GI", name: "Genshin Impact" },
+  { id: "honkai", code: "HSR", name: "Honkai: Star Rail" },
+  { id: "deltaforce", code: "DF", name: "Delta Force" },
+  { id: "marvelrivals", code: "MR", name: "Marvel Rivals" },
+  { id: "deadlock", code: "DL", name: "Deadlock" },
+];
+
+const tunnelGameCatalog = [
+  { id: "brawlstars", code: "BS", name: "Brawl Stars", family: "Supercell" },
+  { id: "clashofclans", code: "COC", name: "Clash of Clans", family: "Supercell" },
+  { id: "clashroyale", code: "CR", name: "Clash Royale", family: "Supercell" },
+  { id: "boombeach", code: "BB", name: "Boom Beach", family: "Supercell" },
+  { id: "hayday", code: "HD", name: "Hay Day", family: "Supercell" },
+  { id: "apex", code: "APEX", name: "Apex Legends", family: "EA" },
+  { id: "battlefield2042", code: "BF42", name: "Battlefield 2042", family: "EA" },
+  { id: "battlefield6", code: "BF6", name: "Battlefield 6", family: "EA" },
+  { id: "eafc25", code: "FC25", name: "EA Sports FC 25", family: "EA" },
+  { id: "eafc26", code: "FC26", name: "EA Sports FC 26", family: "EA" },
+  { id: "f125", code: "F1", name: "F1 25", family: "EA" },
+  { id: "nfsunbound", code: "NFS", name: "Need for Speed Unbound", family: "EA" },
+  { id: "battlefront2", code: "SW", name: "Star Wars Battlefront II", family: "EA" },
 ];
 
 const profileDirectRules = [
@@ -152,6 +179,7 @@ const profileDirectRules = [
   { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Магазины и маркетплейсы." },
   { key: "direct_games_enabled", code: "GAME", title: "Игры", text: "Выбранные игры без VPN." },
   { key: "direct_games_udp_enabled", code: "UDP", title: "UDP", text: "Весь UDP без VPN." },
+  { key: "tunnel_restricted_games_enabled", code: "VPN", title: "Игры через VPN", text: "Игры с ограничениями российского IP." },
 ];
 
 const profileStrategies = [
@@ -337,6 +365,12 @@ export function MihomoPage({
     const selected = new Set(String(routingDraft.direct_games || "").split(",").map((value) => value.trim()).filter(Boolean));
     if (selected.has(gameId)) selected.delete(gameId); else selected.add(gameId);
     updateRoutingDraft("direct_games", [...selected].join(","));
+  }
+
+  function toggleTunnelGame(gameId: string) {
+    const selected = new Set(String(routingDraft.tunnel_games || "").split(",").map((value) => value.trim()).filter(Boolean));
+    if (selected.has(gameId)) selected.delete(gameId); else selected.add(gameId);
+    updateRoutingDraft("tunnel_games", [...selected].join(","));
   }
 
   function toggleProfileRule(key: string, checked: boolean) {
@@ -772,6 +806,9 @@ export function MihomoPage({
   const selectedRuleList = editableRuleLists.find((item) => item.id === activeRuleList) || editableRuleLists[0];
   const selectedRuleValue = selectedRuleList ? String(routingDraft[selectedRuleList.key] ?? "@default") : "";
   const selectedRuleText = selectedRuleList ? (selectedRuleValue === "@default" ? selectedRuleList.default_rules : selectedRuleValue) : "";
+  const udpExclusionList = editableRuleLists.find((item) => item.id === "udp_tunnel_exclusions");
+  const udpExclusionValue = String(routingDraft.udp_tunnel_exclusions_rules ?? "@default");
+  const udpExclusionText = udpExclusionValue === "@default" ? udpExclusionList?.default_rules || "" : udpExclusionValue;
 
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
@@ -1003,8 +1040,17 @@ export function MihomoPage({
             <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small></header>{profileDirectRules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</aside>
             <article>
               {activeRuleList === "direct_games_udp_enabled" ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">NETWORK RULE</p><h3>UDP напрямую</h3><p>Весь UDP-трафик профиля направляется напрямую одним правилом, без определения процесса и выбора игры.</p></div><span>1 правило</span></header>
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">NETWORK RULE</p><h3>UDP напрямую</h3><p>Весь UDP направляется напрямую, кроме ресурсов из списка ниже. Исключения проверяются первыми и остаются в GATE.312.</p></div><span>{udpExclusionText.split("\n").filter(Boolean).length} искл.</span></header>
                 <div className="mihomoHint">NETWORK,UDP,DIRECT</div>
+                <label className="mihomoRuleTextarea"><span>Остаются через туннель</span><textarea rows={12} value={udpExclusionText} spellCheck={false} placeholder={"DOMAIN-SUFFIX,example.com,GATE.312\nDST-PORT,53,GATE.312"} onChange={(event) => updateRoutingDraft("udp_tunnel_exclusions_rules", event.target.value)} /></label>
+                <footer className="mihomoRuleEditorActions"><span>{udpExclusionValue === "@default" ? "Стандартные исключения: DNS, Telegram, Discord, WhatsApp, Signal, Zoom, Meet и Teams" : "Список исключений изменён вручную"}</span><button type="button" className="ghostButton" disabled={udpExclusionValue === "@default"} onClick={() => updateRoutingDraft("udp_tunnel_exclusions_rules", "@default")}>Восстановить стандартный</button></footer>
+              </> : activeRuleList === "tunnel_restricted_games_enabled" ? <>
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROTECTED GAME RULES</p><h3>Игры через туннель</h3><p>Весь трафик выбранных процессов остаётся в GATE.312. Это правило имеет приоритет над «UDP напрямую» и «Игры без VPN».</p></div><span>{String(routingDraft.tunnel_games || "").split(",").filter(Boolean).length} выбрано</span></header>
+                <div className="mihomoGameCatalog">
+                  {tunnelGameCatalog.map((game) => { const selected = String(routingDraft.tunnel_games || "").split(",").includes(game.id); return <button type="button" key={game.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleTunnelGame(game.id)}><span>{game.code}</span><b>{game.name}</b><i>{selected ? "Через VPN" : game.family}</i></button>; })}
+                </div>
+                <label className="mihomoCustomGames"><span><b>Дополнительные процессы через VPN</b><small>По одному имени процесса или package name на строку.</small></span><textarea rows={5} value={String(routingDraft.tunnel_game_processes || "")} placeholder={"game.exe\ncom.publisher.game"} onChange={(event) => updateRoutingDraft("tunnel_game_processes", event.target.value)} /></label>
+                <p className="mihomoGamesHint">Каталог основан на официально заявленных региональных ограничениях Supercell и EA. Выбор остаётся профильным и не включается автоматически.</p>
               </> : activeRuleList === "direct_games_enabled" ? <>
                 <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Игры полностью без VPN</h3><p>Весь сетевой трафик выбранных игровых процессов направляется напрямую. Каталог не зависит от магазина или лаунчера и может включать ещё не установленные игры.</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} выбрано</span></header>
                 <div className="mihomoGameCatalog">

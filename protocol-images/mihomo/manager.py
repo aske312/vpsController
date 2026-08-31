@@ -596,6 +596,37 @@ DIRECT_GAME_PROCESSES: dict[str, list[str]] = {
     "residentevilrequiem": ["re9.exe"],
     "stardewvalley": ["Stardew Valley.exe"],
     "mecchachameleon": ["PenguinHotel.exe", "PenguinHotel-Win64-Shipping.exe"],
+    "minecraft": ["javaw.exe", "Minecraft.Windows.exe", "com.mojang.minecraftpe"],
+    "warface": ["Game.exe"],
+    "enlisted": ["enlisted.exe"],
+    "worldofwarships": ["WorldOfWarships64.exe"],
+    "pathofexile2": ["PathOfExileSteam.exe", "PathOfExile.exe"],
+    "warframe": ["Warframe.x64.exe"],
+    "genshin": ["GenshinImpact.exe", "YuanShen.exe"],
+    "honkai": ["StarRail.exe"],
+    "deltaforce": ["DeltaForceClient-Win64-Shipping.exe", "com.proxima.dfm"],
+    "marvelrivals": ["Marvel-Win64-Shipping.exe"],
+    "deadlock": ["project8.exe"],
+}
+
+TUNNEL_GAME_PROCESSES: dict[str, list[str]] = {
+    # Supercell suspended access from Russia and Belarus. Mobile package names
+    # are stable enough for Mihomo process matching in supported TUN clients.
+    "brawlstars": ["com.supercell.brawlstars"],
+    "clashofclans": ["com.supercell.clashofclans"],
+    "clashroyale": ["com.supercell.clashroyale"],
+    "boombeach": ["com.supercell.boombeach"],
+    "hayday": ["com.supercell.hayday"],
+    # EA officially lists Russia among regions where some or all titles may be
+    # unavailable. Keep the catalog explicit so users opt in per profile.
+    "apex": ["r5apex.exe"],
+    "battlefield2042": ["bf2042.exe"],
+    "battlefield6": ["bf6.exe"],
+    "eafc25": ["FC25.exe"],
+    "eafc26": ["FC26.exe"],
+    "f125": ["F1_25.exe"],
+    "nfsunbound": ["NeedForSpeedUnbound.exe"],
+    "battlefront2": ["starwarsbattlefrontii.exe"],
 }
 
 DIRECT_RULE_META = {
@@ -604,6 +635,15 @@ DIRECT_RULE_META = {
     "direct_ru_banks": ("Банки и платежи", "Банки РФ, СБП, НСПК и финансовые сервисы."),
     "direct_ru_marketplaces": ("Магазины и маркетплейсы", "Маркетплейсы и крупные интернет-магазины."),
 }
+
+UDP_TUNNEL_EXCLUSION_RULES = [
+    "DST-PORT,53,GATE.312",
+    "DOMAIN-SUFFIX,telegram.org,GATE.312", "DOMAIN-SUFFIX,t.me,GATE.312",
+    "DOMAIN-SUFFIX,discord.com,GATE.312", "DOMAIN-SUFFIX,discord.gg,GATE.312", "DOMAIN-SUFFIX,discord.media,GATE.312",
+    "DOMAIN-SUFFIX,whatsapp.com,GATE.312", "DOMAIN-SUFFIX,whatsapp.net,GATE.312",
+    "DOMAIN-SUFFIX,signal.org,GATE.312", "DOMAIN-SUFFIX,zoom.us,GATE.312",
+    "DOMAIN,meet.google.com,GATE.312", "DOMAIN-SUFFIX,teams.microsoft.com,GATE.312",
+]
 
 
 def configured_preset_rules(routing: dict[str, Any], setting: str) -> list[str]:
@@ -615,7 +655,7 @@ def configured_preset_rules(routing: dict[str, Any], setting: str) -> list[str]:
 
 def routing_rule_lists(values: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     routing = values or routing_settings()
-    return [
+    lists = [
         {
             "id": setting,
             "key": f"{setting}_rules",
@@ -626,6 +666,43 @@ def routing_rule_lists(values: dict[str, Any] | None = None) -> list[dict[str, A
         }
         for setting in DIRECT_RULE_PRESETS
     ]
+    lists.append({
+        "id": "udp_tunnel_exclusions",
+        "key": "udp_tunnel_exclusions_rules",
+        "title": "Исключения UDP",
+        "description": "Ресурсы, которые остаются в защищённом канале при включённом правиле UDP напрямую.",
+        "default_rules": "\n".join(UDP_TUNNEL_EXCLUSION_RULES),
+        "using_default": str(routing.get("udp_tunnel_exclusions_rules", "@default")).strip() == "@default",
+    })
+    return lists
+
+
+def udp_tunnel_exclusion_rules(routing: dict[str, Any]) -> list[str]:
+    raw = str(routing.get("udp_tunnel_exclusions_rules", "@default")).replace("\r", "")
+    source = UDP_TUNNEL_EXCLUSION_RULES if raw.strip() == "@default" else raw.split("\n")
+    return [rule.strip() for rule in source if rule.strip() and not rule.strip().startswith("#")]
+
+
+def process_rules(routing: dict[str, Any], selection_key: str, custom_key: str, catalog: dict[str, list[str]], target: str) -> list[str]:
+    selected = {value.strip().lower() for value in str(routing.get(selection_key, "")).replace("\r", "").replace("\n", ",").split(",") if value.strip()}
+    processes: list[str] = []
+    for game_id in selected:
+        processes.extend(catalog.get(game_id, []))
+    custom = str(routing.get(custom_key, "")).replace("\r", "")
+    processes.extend(value.strip() for value in custom.split("\n") if value.strip())
+    rules: list[str] = []
+    for process in dict.fromkeys(processes):
+        if len(process) > 160 or "," in process or not re.fullmatch(r"[A-Za-z0-9._*? +()-]+", process):
+            continue
+        kind = "PROCESS-NAME-WILDCARD" if "*" in process or "?" in process else "PROCESS-NAME"
+        rules.append(f"{kind},{process},{target}")
+    return rules
+
+
+def tunnel_game_rules(routing: dict[str, Any]) -> list[str]:
+    if not routing.get("tunnel_restricted_games_enabled", False):
+        return []
+    return process_rules(routing, "tunnel_games", "tunnel_game_processes", TUNNEL_GAME_PROCESSES, "GATE.312")
 
 
 def direct_game_rules(routing: dict[str, Any]) -> list[str]:
@@ -633,21 +710,12 @@ def direct_game_rules(routing: dict[str, Any]) -> list[str]:
     direct_udp = bool(routing.get("direct_games_udp_enabled", False))
     if not direct_all and not direct_udp:
         return []
-    rules: list[str] = ["NETWORK,UDP,DIRECT"] if direct_udp else []
+    # Mihomo uses the first matching rule. Tunnel exclusions must therefore be
+    # emitted before the catch-all UDP direct rule.
+    rules: list[str] = [*udp_tunnel_exclusion_rules(routing), "NETWORK,UDP,DIRECT"] if direct_udp else []
     if not direct_all:
         return rules
-    selected = {value.strip().lower() for value in str(routing.get("direct_games", "")).replace("\r", "").replace("\n", ",").split(",") if value.strip()}
-    processes: list[str] = []
-    for game_id in selected:
-        processes.extend(DIRECT_GAME_PROCESSES.get(game_id, []))
-    custom = str(routing.get("direct_game_processes", "")).replace("\r", "")
-    processes.extend(value.strip() for value in custom.split("\n") if value.strip())
-    for process in dict.fromkeys(processes):
-        if len(process) > 160 or "," in process or not re.fullmatch(r"[A-Za-z0-9._*? +()-]+", process):
-            continue
-        kind = "PROCESS-NAME-WILDCARD" if "*" in process or "?" in process else "PROCESS-NAME"
-        process_rule = f"{kind},{process}"
-        rules.append(f"{process_rule},DIRECT")
+    rules.extend(process_rules(routing, "direct_games", "direct_game_processes", DIRECT_GAME_PROCESSES, "DIRECT"))
     return rules
 
 
@@ -656,6 +724,9 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
     for setting in DIRECT_RULE_PRESETS:
         if routing.get(setting, False):
             rules.extend(configured_preset_rules(routing, setting))
+    # Tunnel-required games win over both process-level DIRECT and the global
+    # UDP bypass when a user accidentally enables overlapping rules.
+    rules.extend(tunnel_game_rules(routing))
     rules.extend(direct_game_rules(routing))
     raw_rules = str(routing.get("rules", "")).replace("\r", "")
     rules.extend(rule.strip() for rule in raw_rules.split("\n") if rule.strip() and not rule.strip().startswith("#"))
@@ -2223,7 +2294,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     # Ready-made bypass lists are selected per profile. Never inherit legacy
     # global switches from routing settings; that would silently affect every
     # existing subscription.
-    for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled"):
+    for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled", "tunnel_restricted_games_enabled"):
         routing[key] = bool(profile_routing.get(key, False))
     mode = str(routing.get("mode", "rule"))
     lines = [
@@ -2243,7 +2314,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "  dns-hijack:",
         '    - "any:53"',
     ]
-    if routing.get("direct_games_enabled", False):
+    if routing.get("direct_games_enabled", False) or routing.get("tunnel_restricted_games_enabled", False):
         lines.insert(4, "find-process-mode: strict")
     dns = dns_settings()
     lines += [
