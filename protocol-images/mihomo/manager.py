@@ -584,6 +584,23 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN-SUFFIX,dns-shop.ru,DIRECT", "DOMAIN-SUFFIX,mvideo.ru,DIRECT", "DOMAIN-SUFFIX,eldorado.ru,DIRECT",
         "DOMAIN-SUFFIX,onlinetrade.ru,DIRECT",
     ],
+    "direct_local_network": [
+        "DOMAIN,localhost,DIRECT",
+        "DOMAIN-SUFFIX,local,DIRECT",
+        "DOMAIN-SUFFIX,lan,DIRECT",
+        "DOMAIN-SUFFIX,home.arpa,DIRECT",
+        "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
+        "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+        "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,224.0.0.0/4,DIRECT,no-resolve",
+        "IP-CIDR6,::1/128,DIRECT,no-resolve",
+        "IP-CIDR6,fc00::/7,DIRECT,no-resolve",
+        "IP-CIDR6,fe80::/10,DIRECT,no-resolve",
+        "IP-CIDR6,ff00::/8,DIRECT,no-resolve",
+    ],
 }
 
 DIRECT_GAME_PROCESSES: dict[str, list[str]] = {
@@ -631,6 +648,21 @@ DIRECT_GAME_PROCESSES: dict[str, list[str]] = {
     "deltaforce": ["DeltaForceClient-Win64-Shipping.exe", "com.proxima.dfm"],
     "marvelrivals": ["Marvel-Win64-Shipping.exe"],
     "deadlock": ["project8.exe"],
+    "atomicheart": ["AtomicHeart-Win64-Shipping.exe"],
+    "stalcraft": ["stalcraft.exe", "STALCRAFT.exe"],
+    "crossout": ["crossout.exe"],
+    "lostark": ["LOSTARK.exe"],
+    "blackdesert": ["BlackDesert64.exe"],
+    "albion": ["Albion-Online.exe"],
+    "eveonline": ["exefile.exe"],
+    "dayz": ["DayZ_x64.exe"],
+    "arma3": ["arma3_x64.exe"],
+    "huntshowdown": ["HuntGame.exe"],
+    "remnant2": ["Remnant2-Win64-Shipping.exe"],
+    "palworld": ["Palworld-Win64-Shipping.exe"],
+    "oncehuman": ["ONCE_HUMAN.exe"],
+    "throneandliberty": ["TL.exe"],
+    "escapefromduckov": ["EscapeFromDuckov.exe"],
 }
 
 TUNNEL_GAME_PROCESSES: dict[str, list[str]] = {
@@ -658,6 +690,7 @@ DIRECT_RULE_META = {
     "direct_ru_sites": ("Российские сайты", "Домены РФ, российские сервисы и IP-адреса."),
     "direct_ru_banks": ("Банки и платежи", "Банки РФ, СБП, НСПК и финансовые сервисы."),
     "direct_ru_marketplaces": ("Магазины и маркетплейсы", "Маркетплейсы и крупные интернет-магазины."),
+    "direct_local_network": ("Локальная сеть", "Роутеры, NAS, принтеры, умный дом и приватные адреса направляются напрямую."),
 }
 
 UDP_TUNNEL_EXCLUSION_CATALOG: dict[str, list[str]] = {
@@ -762,7 +795,13 @@ def direct_game_rules(routing: dict[str, Any]) -> list[str]:
 
 def profile_rules(routing: dict[str, Any]) -> list[str]:
     rules: list[str] = []
+    # Local destinations must win over blocking and tunnel rules so that a
+    # router, NAS or smart-home device never disappears behind the profile.
+    if routing.get("direct_local_network", False):
+        rules.extend(configured_preset_rules(routing, "direct_local_network"))
     for setting in DIRECT_RULE_PRESETS:
+        if setting == "direct_local_network":
+            continue
         if routing.get(setting, False):
             rules.extend(configured_preset_rules(routing, setting))
     # Tunnel-required games win over both process-level DIRECT and the global

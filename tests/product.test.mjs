@@ -237,6 +237,11 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.doesNotMatch(manager, /DOMAIN-SUFFIX,getadmiral\.com,REJECT/);
   assert.match(manager, /"arenabreakoutinfinite": \["UAGame\.exe"\]/);
   assert.match(manager, /"marathon": \["Marathon\.exe"\]/);
+  assert.match(manager, /"direct_local_network": \[/);
+  assert.match(manager, /IP-CIDR,192\.168\.0\.0\/16,DIRECT,no-resolve/);
+  assert.match(manager, /IP-CIDR6,fc00::\/7,DIRECT,no-resolve/);
+  assert.match(manager, /"atomicheart": \["AtomicHeart-Win64-Shipping\.exe"\]/);
+  assert.match(manager, /"stalcraft": \["stalcraft\.exe", "STALCRAFT\.exe"\]/);
   assert.match(manager, /direct_games_enabled/);
   assert.match(manager, /direct_games_udp_enabled/);
   assert.match(manager, /UDP_TUNNEL_EXCLUSION_CATALOG/);
@@ -262,6 +267,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /MetaCubeX\/ClashMetaForAndroid\/releases/);
   assert.match(page, /Маршруты игр/);
   assert.match(page, /setGameRoute/);
+  assert.match(page, /const ruleIconGroups/);
+  assert.match(page, /toggleRuleIconGroup/);
+  assert.doesNotMatch(page, /<b>Дополнительные процессы через VPN<\/b>/);
   assert.match(page, /mihomoProfileRuleSwitch/);
   assert.match(page, /profileDirectRules/);
   assert.match(page, /const ruleCount = profileDirectRules\.filter/);
