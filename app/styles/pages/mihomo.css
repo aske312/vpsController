@@ -245,7 +245,10 @@
 
 .mihomoProfiles { display:grid; gap:12px; padding:14px; border-top:1px solid rgba(91,113,138,.12); }
 .mihomoProfileCard { min-width:0; overflow:hidden; border:1px solid rgba(91,113,138,.18); border-radius:14px; background:linear-gradient(145deg,rgba(10,22,33,.86),rgba(6,14,22,.74)); }
-.mihomoProfileHeader { display:grid; grid-template-columns:minmax(220px,1fr) minmax(360px,1.4fr) auto; align-items:center; gap:18px; padding:16px; border-bottom:1px solid rgba(91,113,138,.14); }
+.mihomoProfileHeader { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; padding:11px 13px; border-bottom:1px solid rgba(91,113,138,.14); }
+.mihomoProfileToggle { min-width:0; display:grid; grid-template-columns:minmax(220px,1fr) minmax(360px,1.4fr) 18px; align-items:center; gap:16px; padding:4px; border:0; border-radius:10px; background:transparent; color:inherit; text-align:left; cursor:pointer; }
+.mihomoProfileToggle:hover { background:rgba(92,75,180,.06); }
+.mihomoProfileToggle:focus-visible,.mihomoDeviceToggle:focus-visible { outline:2px solid rgba(134,117,227,.55); outline-offset:2px; }
 
 .mihomoProfileIdentity { min-width: 0; display: flex; align-items: center; gap: 10px; }
 
@@ -273,7 +276,11 @@
 .mihomoRowActions button { min-height: 33px; padding: 0 10px; border: 1px solid rgba(91, 113, 138, .20); border-radius: 9px; background: rgba(9, 18, 27, .72); color: #a0b1bd; font-size: 10px; cursor: pointer; }
 .mihomoProfileDevices { display:grid; gap:12px; padding:14px 16px 16px; }
 .mihomoProfileDevice { min-width:0; overflow:hidden; border:1px solid rgba(91,113,138,.14); border-radius:12px; background:rgba(5,13,21,.48); }
-.mihomoDeviceHeader { display:grid; grid-template-columns:minmax(180px,1.1fr) minmax(210px,.9fr) auto; align-items:center; gap:16px; padding:12px; border-bottom:1px solid rgba(91,113,138,.12); background:linear-gradient(90deg,rgba(92,75,180,.09),transparent 58%); }
+.mihomoDeviceHeader { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; padding:9px 10px; border-bottom:1px solid rgba(91,113,138,.12); background:linear-gradient(90deg,rgba(92,75,180,.09),transparent 58%); }
+.mihomoDeviceToggle { min-width:0; display:grid; grid-template-columns:minmax(170px,.8fr) minmax(300px,1.2fr) 18px; align-items:center; gap:12px; padding:3px; border:0; border-radius:9px; background:transparent; color:inherit; text-align:left; cursor:pointer; }
+.mihomoDeviceToggle:hover { background:rgba(92,75,180,.07); }
+.mihomoCollapseChevron { width:8px; height:8px; justify-self:center; border-right:1px solid #8f82db; border-bottom:1px solid #8f82db; transform:rotate(45deg); transition:transform .18s; }
+[aria-expanded="true"] > .mihomoCollapseChevron { transform:rotate(225deg); }
 .mihomoDeviceIdentity { display:flex; align-items:center; gap:10px; min-width:0; }
 .mihomoDeviceIdentity > span { display:grid; place-items:center; width:34px; height:34px; flex:0 0 34px; border:1px solid rgba(134,117,227,.28); border-radius:9px; background:rgba(92,75,180,.13); color:#b8adf4; font:800 9px var(--font-mono); }
 .mihomoDeviceIdentity p { min-width:0; margin:0; }
@@ -405,9 +412,9 @@
 .mihomoHeroContent { width: 82%; padding: 22px; }
 .mihomoHeroFacts { grid-template-columns: repeat(2, minmax(0,1fr)); }
 .mihomoHeroFacts > div.wide { grid-column: span 2; }
-.mihomoProfileHeader { grid-template-columns:minmax(190px,.8fr) minmax(330px,1.4fr); }
+.mihomoProfileToggle { grid-template-columns:minmax(190px,.8fr) minmax(330px,1.4fr) 18px; }
 .mihomoProfileHeader > .mihomoRowActions { grid-column:1/-1; justify-content:flex-end; }
-.mihomoDeviceHeader { grid-template-columns:minmax(180px,1fr) minmax(210px,1fr); }
+.mihomoDeviceToggle { grid-template-columns:minmax(180px,1fr) minmax(300px,1.2fr) 18px; }
 .mihomoDeviceActions { grid-column:1/-1; justify-content:flex-start; max-width:none; }
 .mihomoModuleCatalog > div:not(.mihomoEmpty) { grid-template-columns: 44px minmax(220px,1fr) 105px auto; }
 .mihomoModuleCatalog > div > .mihomoModuleActions { grid-column: 2 / -1; justify-self: start; }
@@ -421,10 +428,16 @@
 .mihomoTopology, .mihomoChannelGrid, .mihomoQuickState, .mihomoFields { grid-template-columns: 1fr; }
 .mihomoProfiles { padding:10px; }
 .mihomoProfileHeader { grid-template-columns:1fr; padding:13px; }
+.mihomoProfileToggle { grid-template-columns:1fr 18px; }
+.mihomoProfileToggle .mihomoProfileSummary { grid-column:1/-1; }
+.mihomoProfileToggle > .mihomoCollapseChevron { grid-column:2; grid-row:1; }
 .mihomoProfileHeader > .mihomoRowActions { grid-column:auto; justify-content:flex-start; }
 .mihomoProfileSummary { grid-template-columns:1fr 1fr; }
 .mihomoProfileSummary > div:last-child { grid-column:1/-1; }
 .mihomoDeviceHeader { grid-template-columns:1fr; align-items:stretch; }
+.mihomoDeviceToggle { grid-template-columns:1fr 18px; }
+.mihomoDeviceToggle .mihomoDeviceTotals { grid-column:1/-1; }
+.mihomoDeviceToggle > .mihomoCollapseChevron { grid-column:2; grid-row:1; }
 .mihomoDeviceTotals { grid-template-columns:1fr 1fr; }
 .mihomoDeviceActions { grid-column:auto; justify-content:flex-start; }
 .mihomoModuleCatalog > div:not(.mihomoEmpty) { grid-template-columns: 1fr; padding: 13px 14px; }

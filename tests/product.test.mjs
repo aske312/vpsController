@@ -287,10 +287,12 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /mihomoProfileWorkspace/);
   assert.match(page, /mihomoProfileRail/);
   assert.match(page, /mihomoProfileDraftSummary/);
-  assert.match(page, /collapsedDeviceLists/);
-  assert.match(page, /collapsedProtocolLists/);
-  assert.match(page, /Скрыть устройства/);
-  assert.match(page, /Скрыть каналы/);
+  assert.match(page, /expandedDeviceLists/);
+  assert.match(page, /expandedProtocolLists/);
+  assert.match(page, /mihomoProfileToggle/);
+  assert.match(page, /mihomoDeviceToggle/);
+  assert.doesNotMatch(page, /Скрыть устройства/);
+  assert.doesNotMatch(page, /Скрыть каналы/);
   assert.doesNotMatch(page, /Получено \{bytes\(item\?\.rx_bytes/);
   assert.match(page, /mihomoProfileCanvas/);
   assert.match(styles, /\.mihomoProfileDialog \{ width:94vw; height:92dvh;/);
