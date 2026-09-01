@@ -60,7 +60,8 @@ GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,count
 GEOLOCATION_TERTIARY_URL="https://ip.guide"
 GEOLOCATION_QUATERNARY_URL="https://ipapi.co"
 GEOLOCATION_QUINARY_URL="https://free.freeipapi.com/api/json"
-GEOLOCATION_SENARY_URL="https://iplocation.info"
+GEOLOCATION_SENARY_URL="https://ipinfo.io"
+PUBLIC_IP_DISCOVERY_URL="https://api64.ipify.org"
 UPDATE_TEMP_DIR=""
 UPDATE_ROLLBACK_DIR=""
 UPDATE_SWAP_ACTIVE="no"
@@ -312,6 +313,9 @@ load_install_config() {
   if [[ "${GEOLOCATION_FALLBACK_URL}" == "https://ipwho.is/?fields=success,ip,city,country,country_code" ]]; then
     GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code,latitude,longitude"
   fi
+  if [[ "${GEOLOCATION_SENARY_URL}" == "https://iplocation.info" ]]; then
+    GEOLOCATION_SENARY_URL="https://ipinfo.io"
+  fi
   [[ -z "${admin_user_override}" ]] || ADMIN_USER="${admin_user_override}"
   if [[ -n "${admin_password_override}" ]]; then
     ADMIN_PASSWORD="${admin_password_override}"
@@ -561,9 +565,9 @@ refresh_server_identity() {
   install -d -m 0750 "${DATA_DIR}/tmp"
   rm -f -- "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" \
     "${geo_file}.quaternary.json" "${geo_file}.quinary.json" "${geo_file}.senary.json"
-  curl -4 --fail --silent --show-error --max-time 12 \
+  curl -4 --fail --silent --show-error --retry 2 --retry-all-errors --max-time 12 \
     "${GEOLOCATION_PRIMARY_URL}" >"${geo_file}.primary.json" || rm -f -- "${geo_file}.primary.json"
-  curl -4 --fail --silent --show-error --max-time 12 \
+  curl -4 --fail --silent --show-error --retry 2 --retry-all-errors --max-time 12 \
     "${GEOLOCATION_FALLBACK_URL}" >"${geo_file}.fallback.json" || rm -f -- "${geo_file}.fallback.json"
   public_ip="$(python3 - "${geo_file}.primary.json" "${geo_file}.fallback.json" <<'PY'
 import json
@@ -579,18 +583,22 @@ for path in sys.argv[1:]:
         break
 PY
 )"
+  if [[ ! "${public_ip}" =~ ^[0-9a-fA-F:.]+$ ]]; then
+    public_ip="$(curl -4 --fail --silent --show-error --retry 2 --retry-all-errors --max-time 12 \
+      "${PUBLIC_IP_DISCOVERY_URL}" 2>/dev/null || true)"
+  fi
   if [[ -n "${public_ip}" ]]; then
-    curl -4 --fail --silent --show-error --max-time 12 \
+    curl -4 --fail --silent --show-error --retry 2 --retry-all-errors --max-time 12 \
       "${GEOLOCATION_TERTIARY_URL}/${public_ip}" >"${geo_file}.tertiary.json" \
       || rm -f -- "${geo_file}.tertiary.json"
-    curl -4 --fail --silent --show-error --max-time 12 -H "Accept: application/json" \
+    curl -4 --fail --silent --show-error --retry 2 --retry-all-errors --max-time 12 -H "Accept: application/json" \
       "${GEOLOCATION_QUATERNARY_URL}/${public_ip}/json/" >"${geo_file}.quaternary.json" \
       || rm -f -- "${geo_file}.quaternary.json"
-    curl -4 --fail --silent --show-error --max-time 12 -H "Accept: application/json" \
+    curl -4 --fail --silent --show-error --retry 2 --retry-all-errors --max-time 12 -H "Accept: application/json" \
       "${GEOLOCATION_QUINARY_URL}/${public_ip}" >"${geo_file}.quinary.json" \
       || rm -f -- "${geo_file}.quinary.json"
-    curl -4 --fail --silent --show-error --max-time 12 -H "Accept: application/json" \
-      "${GEOLOCATION_SENARY_URL}/${public_ip}" >"${geo_file}.senary.json" \
+    curl -4 --fail --silent --show-error --retry 2 --retry-all-errors --max-time 12 -H "Accept: application/json" \
+      "${GEOLOCATION_SENARY_URL}/${public_ip}/json" >"${geo_file}.senary.json" \
       || rm -f -- "${geo_file}.senary.json"
   fi
   if python3 - /run/cloud-init/instance-data.json \
@@ -626,6 +634,9 @@ MAJOR_CITY_ANCHORS = (
 
 def coordinates(location):
     try:
+        if location.get("loc"):
+            latitude, longitude = str(location["loc"]).split(",", 1)
+            return float(latitude), float(longitude)
         return float(location.get("latitude") or location.get("lat")), float(location.get("longitude") or location.get("lon"))
     except (TypeError, ValueError):
         return None
@@ -689,8 +700,9 @@ for path in sys.argv[2:]:
     ip = str(data.get("ip") or data.get("ipAddress") or data.get("ip_address") or data.get("query") or "")
     city = str(location.get("city") or location.get("cityName") or location.get("city_name") or "").strip()
     country = str(location.get("country_name") or location.get("countryName") or location.get("country") or "").strip()
-    code = str(location.get("country_code") or location.get("countryCode") or location.get("country_code2") or data.get("country_code") or data.get("code") or autonomous.get("country") or "").upper().strip()
-    if ip:
+    raw_country = str(location.get("country") or "").strip()
+    code = str(location.get("country_code") or location.get("countryCode") or location.get("country_code2") or data.get("country_code") or data.get("code") or autonomous.get("country") or (raw_country if re.fullmatch(r"[A-Za-z]{2}", raw_country) else "")).upper().strip()
+    if ip and re.fullmatch(r"[A-Z]{2}", code):
         records.append((ip, city, country, code, coordinates(location)))
 
 if not records:

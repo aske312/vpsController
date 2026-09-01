@@ -57,7 +57,9 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /GEOLOCATION_TERTIARY_URL="https:\/\/ip\.guide"/);
   assert.match(manager, /GEOLOCATION_QUATERNARY_URL="https:\/\/ipapi\.co"/);
   assert.match(manager, /GEOLOCATION_QUINARY_URL="https:\/\/free\.freeipapi\.com\/api\/json"/);
-  assert.match(manager, /GEOLOCATION_SENARY_URL="https:\/\/iplocation\.info"/);
+  assert.match(manager, /GEOLOCATION_SENARY_URL="https:\/\/ipinfo\.io"/);
+  assert.match(manager, /PUBLIC_IP_DISCOVERY_URL="https:\/\/api64\.ipify\.org"/);
+  assert.match(manager, /if ip and re\.fullmatch\(r"\[A-Z\]\{2\}", code\):/);
   assert.match(manager, /\/run\/cloud-init\/instance-data\.json/);
   assert.match(manager, /code_votes = Counter/);
   assert.match(manager, /country_quorum = max\(2, len\(records\) \/\/ 2 \+ 1\)/);
