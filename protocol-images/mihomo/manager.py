@@ -136,7 +136,7 @@ class ModuleSettingsPatch(BaseModel):
 
 
 class PresetSettingsPatch(BaseModel):
-    presets: list[dict[str, Any]] = Field(default_factory=list, min_length=1, max_length=5)
+    presets: list[dict[str, Any]] = Field(default_factory=list, min_length=1, max_length=12)
 
 
 class ProfileConnectionInput(BaseModel):
@@ -957,18 +957,16 @@ PRESET_SETTINGS_FILE = SETTINGS_ROOT / "profile-presets.json"
 
 def default_profile_presets() -> list[dict[str, Any]]:
     return [
-        {"id": "all-vless", "name": "Все VLESS", "description": "Все совместимые VLESS и VLESS CDN транспорты", "strategy": "select", "components": [{"id": "transport-reality", "transport": "xhttp", "label": "VLESS · XHTTP"}, {"id": "transport-reality", "transport": "raw", "label": "VLESS · RAW"}, {"id": "transport-reality", "transport": "grpc", "label": "VLESS · gRPC"}, {"id": "transport-reality", "cdn": True, "transport": "xhttp", "label": "VLESS CDN · XHTTP"}, {"id": "transport-reality", "cdn": True, "transport": "websocket", "label": "VLESS CDN · WS"}, {"id": "transport-reality", "cdn": True, "transport": "httpupgrade", "label": "VLESS CDN · HTTPUpgrade"}, {"id": "transport-reality", "cdn": True, "transport": "grpc", "label": "VLESS CDN · gRPC"}]},
+        {"id": "all-vless", "name": "Все VLESS", "description": "REALITY, прямой TLS и CDN со всеми транспортами", "strategy": "select", "components": [{"id": "transport-reality", "transport": "xhttp", "label": "VLESS REALITY · XHTTP"}, {"id": "transport-reality", "transport": "raw", "label": "VLESS REALITY · RAW"}, {"id": "transport-reality", "transport": "grpc", "label": "VLESS REALITY · gRPC"}, {"id": "transport-reality", "tls": True, "transport": "xhttp", "label": "VLESS TLS · XHTTP"}, {"id": "transport-reality", "tls": True, "transport": "websocket", "label": "VLESS TLS · WS"}, {"id": "transport-reality", "tls": True, "transport": "httpupgrade", "label": "VLESS TLS · HTTPUpgrade"}, {"id": "transport-reality", "tls": True, "transport": "grpc", "label": "VLESS TLS · gRPC"}, {"id": "transport-reality", "cdn": True, "transport": "xhttp", "label": "VLESS CDN · XHTTP"}, {"id": "transport-reality", "cdn": True, "transport": "websocket", "label": "VLESS CDN · WS"}, {"id": "transport-reality", "cdn": True, "transport": "httpupgrade", "label": "VLESS CDN · HTTPUpgrade"}, {"id": "transport-reality", "cdn": True, "transport": "grpc", "label": "VLESS CDN · gRPC"}]},
         {"id": "direct-fallback", "name": "VLESS + резерв", "description": "Основной VLESS и резервный AWG", "strategy": "fallback", "components": [{"id": "transport-reality"}, {"id": "transport-awg"}]},
         {"id": "cdn-first", "name": "CDN-first", "description": "VLESS через CDN с резервом", "strategy": "fallback", "components": [{"id": "transport-reality", "cdn": True}, {"id": "transport-awg"}]},
-        {"id": "low-latency", "name": "Минимальная задержка", "description": "AWG с резервным Shadowsocks", "strategy": "url-test", "components": [{"id": "transport-awg"}, {"id": "transport-shadowsocks"}]},
-        {"id": "all", "name": "Все транспортные каналы", "description": "Все доступные компоненты", "strategy": "select", "components": [{"id": "transport-reality"}, {"id": "transport-awg"}, {"id": "transport-wg"}, {"id": "transport-shadowsocks"}, {"id": "transport-hysteria2"}, {"id": "transport-tuic"}]},
     ]
 
 
 def validate_profile_presets(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     used_ids: set[str] = set()
-    for index, value in enumerate(values[:5]):
+    for index, value in enumerate(values[:12]):
         preset_id = str(value.get("id") or f"preset-{index + 1}")
         if not re.fullmatch(r"[a-z0-9-]{1,32}", preset_id) or preset_id in used_ids:
             raise HTTPException(status_code=422, detail="Preset id is invalid or duplicated")
@@ -1002,6 +1000,11 @@ def profile_presets() -> list[dict[str, Any]]:
     stored = load_json(PRESET_SETTINGS_FILE, None)
     if not isinstance(stored, list) or not stored:
         return default_profile_presets()
+    legacy_ids = {"all-vless", "direct-fallback", "cdn-first", "low-latency", "all"}
+    stored_ids = {str(item.get("id", "")) for item in stored if isinstance(item, dict)}
+    if stored_ids == legacy_ids and len(stored) == len(legacy_ids):
+        stored = default_profile_presets()
+        atomic_json(PRESET_SETTINGS_FILE, stored)
     # Upgrade the former built-in preset without overwriting user-created presets.
     if not any(str(item.get("id", "")) == "all-vless" for item in stored if isinstance(item, dict)):
         legacy_index = next((index for index, item in enumerate(stored) if isinstance(item, dict) and item.get("id") == "reliable"), None)

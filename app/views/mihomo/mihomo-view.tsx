@@ -8,7 +8,7 @@ import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 
-type View = "overview" | "profiles" | "channels" | "dns" | "routing";
+type View = "overview" | "profiles" | "channels" | "dns" | "rules" | "routing";
 type ReadyDevice = ProfileDevice & { subscription: string; qr: string };
 
 type ConfirmOptions = {
@@ -94,6 +94,10 @@ const presetConnectionOptions: ProfilePreset["components"] = [
   { id: "transport-reality", transport: "xhttp", label: "VLESS · XHTTP" },
   { id: "transport-reality", transport: "raw", label: "VLESS · RAW" },
   { id: "transport-reality", transport: "grpc", label: "VLESS · gRPC" },
+  { id: "transport-reality", tls: true, transport: "xhttp", label: "VLESS TLS · XHTTP" },
+  { id: "transport-reality", tls: true, transport: "websocket", label: "VLESS TLS · WS" },
+  { id: "transport-reality", tls: true, transport: "httpupgrade", label: "VLESS TLS · HTTPUpgrade" },
+  { id: "transport-reality", tls: true, transport: "grpc", label: "VLESS TLS · gRPC" },
   { id: "transport-reality", cdn: true, transport: "xhttp", label: "VLESS CDN · XHTTP" },
   { id: "transport-reality", cdn: true, transport: "websocket", label: "VLESS CDN · WS" },
   { id: "transport-reality", cdn: true, transport: "httpupgrade", label: "VLESS CDN · HTTPUpgrade" },
@@ -102,7 +106,8 @@ const presetConnectionOptions: ProfilePreset["components"] = [
   { id: "transport-hysteria2", label: "Hysteria2" }, { id: "transport-tuic", label: "TUIC v5" },
 ];
 const presetOptionGroups = [
-  { id: "direct", title: "Прямой VLESS", note: "REALITY без CDN", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && !item.cdn) },
+  { id: "direct", title: "VLESS REALITY", note: "Прямое подключение", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && !item.cdn && !item.tls) },
+  { id: "tls", title: "VLESS TLS", note: "Прямой TLS-домен", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && item.tls) },
   { id: "cdn", title: "VLESS через CDN", note: "TLS завершается на CDN", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && item.cdn) },
   { id: "tunnels", title: "Туннели и QUIC", note: "Независимые каналы", options: presetConnectionOptions.filter((item) => item.id !== "transport-reality") },
 ];
@@ -1096,11 +1101,28 @@ export function MihomoPage({
     setPresetDialog(true);
   }
 
+  function addPresetDraft() {
+    if (presetDraft.length >= 12) return;
+    const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID().slice(0, 8) : String(Date.now()).slice(-8);
+    setPresetDraft((current) => [...current, {
+      id: `preset-${suffix}`,
+      name: `Новый пресет ${current.length + 1}`,
+      description: "Пользовательская схема подключений",
+      strategy: "select",
+      components: [{ ...presetConnectionOptions[0] }],
+    }]);
+  }
+
+  function removePresetDraft(index: number) {
+    setPresetDraft((current) => current.length > 1 ? current.filter((_, itemIndex) => itemIndex !== index) : current);
+  }
+
   function togglePresetComponent(presetIndex: number, option: ProfilePreset["components"][number], checked: boolean) {
     setPresetDraft((current) => current.map((preset, index) => {
       if (index !== presetIndex) return preset;
       const matches = (component: ProfilePreset["components"][number]) => component.id === option.id
         && Boolean(component.cdn) === Boolean(option.cdn)
+        && Boolean(component.tls) === Boolean(option.tls)
         && String(component.transport || "") === String(option.transport || "");
       return { ...preset, components: checked ? [...preset.components.filter((item) => !matches(item)), { ...option }] : preset.components.filter((item) => !matches(item)) };
     }));
@@ -1172,6 +1194,7 @@ export function MihomoPage({
         <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
         <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Компоненты</Tab>
         <Tab id="dns" current={view} onSelect={setView}>DNS</Tab>
+        <Tab id="rules" current={view} onSelect={setView}>Правила</Tab>
         <Tab id="routing" current={view} onSelect={setView}>Настройки</Tab>
       </nav>
 
@@ -1326,13 +1349,14 @@ export function MihomoPage({
         </form>
       )}
 
-      {view === "routing" && (
+      {(view === "routing" || view === "rules") && (
         <form className="mihomoRoutingWorkspace" onSubmit={saveRoutingWorkspace}>
           <header className="mihomoRoutingHeader">
-            <div><p className="eyebrow">MIHOMO ROUTING STUDIO</p><h2>Маршрутизация</h2><p>Редактируйте готовые наборы правил, игровой каталог и поведение защищённых каналов. Применение каждого набора включается отдельно в профиле.</p></div>
+            {view === "rules" ? <div><p className="eyebrow">MIHOMO RULE STUDIO</p><h2>Правила</h2><p>Домены, игровые маршруты, UDP и P2P вынесены в отдельную библиотеку. Каждый набор включается отдельно в профиле.</p></div> : <div><p className="eyebrow">MIHOMO SETTINGS</p><h2>Настройки Mihomo</h2><p>Общее поведение профилей, проверка каналов, домены TLS/CDN и редактируемые шаблоны подключений.</p></div>}
             <span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "АКТИВНА" : "ОЖИДАНИЕ"}</span>
           </header>
 
+          {view === "rules" && <>
           <section className="mihomoRuleStudio">
             <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small><input aria-label="Поиск правил" value={ruleSearch} placeholder="Найти правило…" onChange={(event) => setRuleSearch(event.target.value)} /></header><div className="mihomoRuleLibrary">{visibleRuleGroups.map((section) => <section key={section.group}><h4>{section.group}</h4>{section.rules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</section>)}</div></aside>
             <article>
@@ -1367,26 +1391,40 @@ export function MihomoPage({
             </article>
           </section>
 
-          <section className="mihomoRoutingSection mihomoRoutingBehavior">
-            <div className="mihomoRoutingSectionTitle"><div><b>Поведение соединения</b><small>Общие параметры, которые входят во все профили Mihomo.</small></div></div>
-            <div className="mihomoRoutingColumns">
-              <article><div className="mihomoRoutingSectionTitle"><div><b>Выбор защищённого канала</b><small>Как Mihomo выбирает соединение внутри профиля.</small></div></div><div className="mihomoRoutingFields">
+          <details className="mihomoAdvancedRules"><summary><span><b>Дополнительные правила</b><small>Для опытных пользователей</small></span><i>Открыть редактор</i></summary><label><span>По одному правилу Mihomo на строку</span><textarea rows={7} value={String(routingDraft.rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nDOMAIN,api.example.com,DIRECT"} onChange={(event) => updateRoutingDraft("rules", event.target.value)} /></label></details>
+          </>}
+
+          {view === "routing" && <>
+          <section className="mihomoSettingsBoard">
+            <div className="mihomoSettingsSummary">
+              <div><small>РЕЖИМ</small><b>{routingDraft.mode === "global" ? "Global" : "Rule"}</b><span>маршрутизация трафика</span></div>
+              <div><small>СТРАТЕГИЯ</small><b>{routingDraft.strategy === "url-test" ? "Latency" : routingDraft.strategy === "select" ? "Manual" : "Fallback"}</b><span>выбор защищённого канала</span></div>
+              <div><small>ПРЕСЕТЫ</small><b>{profilePresets.length}</b><span>{profilePresets.reduce((sum, item) => sum + item.components.length, 0)} каналов в шаблонах</span></div>
+              <button type="button" className="primaryButton" onClick={openPresetSettings}>Редактировать пресеты</button>
+            </div>
+            <div className="mihomoSettingsGrid">
+              <article><header><span>01</span><div><b>Поведение трафика</b><small>Базовый режим всех профилей</small></div></header><div className="mihomoRoutingFields">
                 <label><span>Режим</span><select value={String(routingDraft.mode || "rule")} onChange={(event) => updateRoutingDraft("mode", event.target.value)}><option value="rule">По правилам</option><option value="global">Весь трафик через VPN</option></select></label>
-                <label><span>Стратегия</span><select value={String(routingDraft.strategy || "fallback")} onChange={(event) => updateRoutingDraft("strategy", event.target.value)}><option value="fallback">Надёжный канал + резерв</option><option value="url-test">Самый быстрый канал</option><option value="select">Выбирать вручную</option></select></label>
-                <label><span>Адрес проверки</span><input value={String(routingDraft.test_url || "")} onChange={(event) => updateRoutingDraft("test_url", event.target.value)} /></label>
-                <label><span>Проверять каждые, сек.</span><input type="number" min={30} max={3600} value={Number(routingDraft.interval || 180)} onChange={(event) => updateRoutingDraft("interval", Number(event.target.value))} /></label>
+                <label><span>Стратегия по умолчанию</span><select value={String(routingDraft.strategy || "fallback")} onChange={(event) => updateRoutingDraft("strategy", event.target.value)}><option value="fallback">Надёжный канал + резерв</option><option value="url-test">Самый быстрый канал</option><option value="select">Выбирать вручную</option></select></label>
               </div></article>
-              <article><div className="mihomoRoutingSectionTitle"><div><b>Новые профили</b><small>Транспорты и домены для быстрых пресетов.</small></div><button type="button" className="ghostButton" onClick={openPresetSettings}>Пресеты</button></div><div className="mihomoRoutingFields">
-                <label><span>Основной транспорт</span><select value={String(routingDraft.preset_primary || "transport-reality")} onChange={(event) => updateRoutingDraft("preset_primary", event.target.value)}>{[{v:"transport-reality",l:"VLESS"},{v:"transport-awg",l:"AmneziaWG"},{v:"transport-wg",l:"WireGuard"},{v:"transport-shadowsocks",l:"Shadowsocks"}].map((item) => <option key={item.v} value={item.v}>{item.l}</option>)}</select></label>
-                <label><span>Резервный транспорт</span><select value={String(routingDraft.preset_fallback || "transport-awg")} onChange={(event) => updateRoutingDraft("preset_fallback", event.target.value)}>{[{v:"transport-awg",l:"AmneziaWG"},{v:"transport-reality",l:"VLESS"},{v:"transport-wg",l:"WireGuard"},{v:"transport-shadowsocks",l:"Shadowsocks"}].map((item) => <option key={item.v} value={item.v}>{item.l}</option>)}</select></label>
-                <label className="is-wide"><span>CDN-домен</span><input value={String(routingDraft.preset_cdn_domain || "")} onChange={(event) => updateRoutingDraft("preset_cdn_domain", event.target.value)} /></label>
-                <label className="is-wide"><span>Прямой TLS-домен</span><input value={String(routingDraft.preset_tls_domain || "")} onChange={(event) => updateRoutingDraft("preset_tls_domain", event.target.value)} /></label>
+              <article><header><span>02</span><div><b>Проверка доступности</b><small>Health check защищённых каналов</small></div></header><div className="mihomoRoutingFields">
+                <label className="is-wide"><span>Адрес проверки</span><input value={String(routingDraft.test_url || "")} onChange={(event) => updateRoutingDraft("test_url", event.target.value)} /></label>
+                <label className="is-wide"><span>Интервал, секунд</span><input type="number" min={30} max={3600} value={Number(routingDraft.interval || 180)} onChange={(event) => updateRoutingDraft("interval", Number(event.target.value))} /></label>
+              </div></article>
+              <article className="is-wide"><header><span>03</span><div><b>Домены VLESS</b><small>Используются каналами прямого TLS и CDN внутри пресетов</small></div></header><div className="mihomoRoutingFields mihomoDomainFields">
+                <label><span>CDN-домен</span><input value={String(routingDraft.preset_cdn_domain || "")} placeholder="cdn.example.com" onChange={(event) => updateRoutingDraft("preset_cdn_domain", event.target.value)} /><small>{routingDraft.preset_cdn_domain ? "Готов для CDN-транспортов" : "Нужен для CDN-каналов"}</small></label>
+                <label><span>Прямой TLS-домен</span><input value={String(routingDraft.preset_tls_domain || "")} placeholder="tls.example.com" onChange={(event) => updateRoutingDraft("preset_tls_domain", event.target.value)} /><small>{routingDraft.preset_tls_domain ? "Готов для прямого TLS" : "Нужен для TLS-каналов"}</small></label>
               </div></article>
             </div>
           </section>
 
-          <details className="mihomoAdvancedRules"><summary><span><b>Дополнительные правила</b><small>Для опытных пользователей</small></span><i>Открыть редактор</i></summary><label><span>По одному правилу Mihomo на строку</span><textarea rows={7} value={String(routingDraft.rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nDOMAIN,api.example.com,DIRECT"} onChange={(event) => updateRoutingDraft("rules", event.target.value)} /></label></details>
-          <footer className="mihomoRoutingFooter"><span>{routingDirty ? "Есть несохранённые изменения" : "Настройки сохранены. После изменения обновите подписку в клиенте."}</span><button className="primaryButton" type="submit" disabled={!routingDirty || busy === "settings:routing-policy"}>{busy === "settings:routing-policy" ? "Сохранение…" : "Сохранить маршрутизацию"}</button></footer>
+          <section className="mihomoPresetCatalogSettings">
+            <header><div><p className="eyebrow">PROFILE BLUEPRINTS</p><h3>Шаблоны новых профилей</h3><small>Встроенные пресеты не заблокированы: их можно переименовать, изменить или удалить.</small></div><button type="button" className="ghostButton" onClick={openPresetSettings}>Управлять</button></header>
+            <div>{profilePresets.map((preset, index) => <article key={preset.id}><span>{String(index + 1).padStart(2, "0")}</span><p><b>{preset.name}</b><small>{preset.description || "Без описания"}</small></p><em>{preset.components.length} каналов</em><i>{preset.strategy === "url-test" ? "по задержке" : preset.strategy === "select" ? "вручную" : "резерв"}</i></article>)}</div>
+          </section>
+          </>}
+
+          <footer className="mihomoRoutingFooter"><span>{routingDirty ? "Есть несохранённые изменения" : "Настройки сохранены. После изменения обновите подписку в клиенте."}</span><button className="primaryButton" type="submit" disabled={!routingDirty || busy === "settings:routing-policy"}>{busy === "settings:routing-policy" ? "Сохранение…" : view === "rules" ? "Сохранить правила" : "Сохранить настройки"}</button></footer>
         </form>
       )}
 
@@ -1457,8 +1495,11 @@ export function MihomoPage({
               <header><div><b>Пресет для {profileDevices.find((device) => device.id === activeDeviceId)?.name || "устройства"}</b><small>Пресет заменит подключения только выбранного устройства. Остальные устройства профиля не изменятся.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настройки пресетов</button></header>
               <div>{profilePresets.map((preset) => {
                 const needsCdn = preset.components.some((item) => item.cdn);
-                const unavailable = needsCdn && !String(routingPolicy?.values.preset_cdn_domain || "").trim();
-                return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><b>{preset.name}</b><small>{unavailable ? "Укажите CDN-домен в маршрутизации" : preset.description}</small></button>;
+                const needsTls = preset.components.some((item) => item.tls);
+                const missingCdn = needsCdn && !String(routingPolicy?.values.preset_cdn_domain || "").trim();
+                const missingTls = needsTls && !String(routingPolicy?.values.preset_tls_domain || "").trim();
+                const unavailable = missingCdn || missingTls;
+                return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><b>{preset.name}</b><small>{missingCdn && missingTls ? "Укажите CDN- и TLS-домены в Настройках" : missingCdn ? "Укажите CDN-домен в Настройках" : missingTls ? "Укажите TLS-домен в Настройках" : preset.description}</small></button>;
               })}</div>
             </section>
             <section className="mihomoConnectionBuilder">
@@ -1523,7 +1564,7 @@ export function MihomoPage({
         <form className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}>
           <header>
             <div><p className="eyebrow">PROFILE BLUEPRINTS</p><h2>Пресеты Mihomo</h2><small>Готовые схемы подключений для новых устройств и профилей</small></div>
-            <div className="mihomoPresetHeaderStats"><span><b>{presetDraft.length}</b> пресета</span><span><b>{presetDraft.reduce((sum, item) => sum + item.components.length, 0)}</b> каналов</span></div>
+            <div className="mihomoPresetHeaderStats"><span><b>{presetDraft.length}</b> пресета</span><span><b>{presetDraft.reduce((sum, item) => sum + item.components.length, 0)}</b> каналов</span><button type="button" className="primaryButton" onClick={addPresetDraft} disabled={presetDraft.length >= 12}>+ Новый пресет</button></div>
             <button type="button" className="iconButton" aria-label="Закрыть" onClick={() => setPresetDialog(false)}>×</button>
           </header>
           <div className="mihomoPresetIntro"><span>01</span><p><b>Каждый пресет — независимый шаблон.</b><small>Название отображается при создании профиля. Стратегия управляет выбором канала, а список ниже определяет состав подключений.</small></p></div>
@@ -1534,13 +1575,15 @@ export function MihomoPage({
                 <label><small>Название пресета</small><input value={preset.name} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></label>
                 <label><small>Логика переключения</small><select value={preset.strategy} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, strategy: event.target.value as ProfilePreset["strategy"] } : item))}><option value="fallback">Резервирование по порядку</option><option value="url-test">Лучший по задержке</option><option value="select">Ручной выбор</option></select></label>
                 <em>{preset.components.length} выбрано</em>
+                <button type="button" className="mihomoPresetDelete" aria-label={`Удалить пресет ${preset.name}`} title={presetDraft.length <= 1 ? "Нужен хотя бы один пресет" : "Удалить пресет"} disabled={presetDraft.length <= 1} onClick={() => removePresetDraft(index)}>×</button>
               </header>
+              <label className="mihomoPresetDescription"><small>Описание</small><input value={preset.description} placeholder="Когда использовать этот пресет" onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, description: event.target.value } : item))} /></label>
               <div className="mihomoPresetGroups">
                 {presetOptionGroups.map((group) => <section key={group.id}>
                   <header><b>{group.title}</b><small>{group.note}</small></header>
                   <div>{group.options.map((option) => {
-                    const selected = preset.components.some((item) => item.id === option.id && Boolean(item.cdn) === Boolean(option.cdn) && String(item.transport || "") === String(option.transport || ""));
-                    return <label key={`${option.id}-${option.cdn ? "cdn" : "direct"}-${option.transport || "default"}`} className={selected ? "is-selected" : ""}><input type="checkbox" checked={selected} onChange={(event) => togglePresetComponent(index, option, event.target.checked)} /><span>{option.label}</span><i>{selected ? "ON" : "OFF"}</i></label>;
+                    const selected = preset.components.some((item) => item.id === option.id && Boolean(item.cdn) === Boolean(option.cdn) && Boolean(item.tls) === Boolean(option.tls) && String(item.transport || "") === String(option.transport || ""));
+                    return <label key={`${option.id}-${option.cdn ? "cdn" : option.tls ? "tls" : "direct"}-${option.transport || "default"}`} className={selected ? "is-selected" : ""}><input type="checkbox" checked={selected} onChange={(event) => togglePresetComponent(index, option, event.target.checked)} /><span>{option.label}</span><i>{selected ? "ON" : "OFF"}</i></label>;
                   })}</div>
                 </section>)}
               </div>
