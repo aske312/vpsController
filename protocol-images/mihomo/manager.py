@@ -68,7 +68,18 @@ def serialized_profile_mutation(function):
 def transactional_profile_mutation(function):
     @functools.wraps(function)
     def wrapped(*args, **kwargs):
-        with profile_runtime_transaction(set(TRANSPORTS)):
+        modules: set[str] = set()
+        if function.__name__ == "repair_reconciliation":
+            modules = set(TRANSPORTS)
+        else:
+            profile_id = str(kwargs.get("profile_id") or (args[0] if args else ""))
+            current = next((item for item in profiles() if str(item.get("id")) == profile_id), None)
+            if current:
+                modules.update(str(connection.get("component")) for connection in current.get("connections", []))
+            payload = kwargs.get("payload") or (args[1] if len(args) > 1 else None)
+            if payload is not None and getattr(payload, "connections", None) is not None:
+                modules.update(str(connection.component) for connection in payload.connections)
+        with profile_runtime_transaction(modules):
             return function(*args, **kwargs)
     return wrapped
 
