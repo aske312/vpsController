@@ -1032,8 +1032,13 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(install, /saved_cdn_domain/);
   assert.match(install, /CDN_ENABLED/);
   assert.match(install, /vless-cdn\.caddy/);
+  assert.match(install, /mihomo\/reality\/caddy-routes/);
+  assert.match(install, /Always rebuild it/);
+  assert.match(install, /fcntl\.LOCK_EX/);
   assert.match(install, /caddy validate/);
   assert.match(uninstall, /vless-cdn\.caddy/);
+  assert.match(uninstall, /mihomo\/reality\/caddy-routes/);
+  assert.match(uninstall, /fcntl\.LOCK_EX/);
   assert.match(api, /def vless_reality_inbound/);
   assert.match(api, /def vless_cdn_client_query/);
   assert.match(api, /def vless_tls_client_query/);

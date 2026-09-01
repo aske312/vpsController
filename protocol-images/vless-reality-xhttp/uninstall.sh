@@ -8,8 +8,43 @@ if [[ -s "${CONFIG_DIR}/reality.env" ]]; then
 fi
 systemctl disable --now vps-control-vless-reality-xhttp.service 2>/dev/null || true
 rm -f -- /etc/systemd/system/vps-control-vless-reality-xhttp.service
-rm -f -- /etc/caddy/vps-control.d/vless-cdn.caddy
 rm -rf -- /etc/vps-control/vless-reality-xhttp /usr/local/lib/vps-control-vless-reality-xhttp
+python3 - <<'PY'
+import fcntl, json, os
+from pathlib import Path
+snippet = Path("/etc/caddy/vps-control.d/vless-cdn.caddy")
+root = Path("/etc/vps-control/mihomo/reality/caddy-routes")
+routes = []
+if root.exists():
+    for descriptor in root.glob("*.json"):
+        try:
+            route = json.loads(descriptor.read_text(encoding="utf-8"))
+            if route.get("domain") and route.get("path") and route.get("port"):
+                routes.append(route)
+        except (OSError, ValueError, TypeError):
+            continue
+grouped = {}
+for route in routes:
+    grouped.setdefault(str(route["domain"]), []).append(route)
+snippet.parent.mkdir(parents=True, exist_ok=True)
+with snippet.with_suffix(".lock").open("w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    if not grouped:
+        snippet.unlink(missing_ok=True)
+    else:
+        lines = []
+        for domain, items in grouped.items():
+            lines.append(f"{domain} {{")
+            for item in items:
+                matcher = f"{item['path']}*" if item.get("transport") in {"xhttp", "grpc"} else str(item["path"])
+                upstream = f"h2c://127.0.0.1:{int(item['port'])}" if item.get("transport") == "grpc" else f"127.0.0.1:{int(item['port'])}"
+                lines += [f"    handle {matcher} {{", f"        reverse_proxy {upstream}", "    }"]
+            lines += ["    respond 404", "}"]
+        temporary = snippet.with_suffix(".tmp")
+        temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, snippet)
+PY
 python3 - <<'PY'
 import json, os
 path = "/var/lib/vps-control/clients.json"

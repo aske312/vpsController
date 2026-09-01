@@ -292,33 +292,55 @@ if [[ -f "${CADDY_SNIPPET}" ]]; then
   cp -p -- "${CADDY_SNIPPET}" "${PREVIOUS_CADDY_SNIPPET}"
   HAD_CADDY_SNIPPET="yes"
 fi
-rm -f -- "${CADDY_SNIPPET}.tmp"
-if [[ "${CDN_ENABLED}" == "yes" && -n "${CDN_DOMAIN}" ]]; then
-  cat >"${CADDY_SNIPPET}.tmp" <<EOF
-${CDN_DOMAIN} {
-    handle ${CDN_PATH}$([[ "${CDN_TRANSPORT}" == "websocket" ]] || printf '*') {
-        reverse_proxy $([[ "${CDN_TRANSPORT}" == "grpc" ]] && printf 'h2c://')127.0.0.1:${CDN_PORT}
-    }
-    respond 404
-}
-EOF
-fi
-if [[ "${TLS_ENABLED}" == "yes" && -n "${TLS_DOMAIN}" ]]; then
-  cat >>"${CADDY_SNIPPET}.tmp" <<EOF
-${TLS_DOMAIN} {
-    handle ${CDN_PATH}-tls$([[ "${TLS_TRANSPORT}" == "websocket" || "${TLS_TRANSPORT}" == "httpupgrade" ]] || printf '*') {
-        reverse_proxy $([[ "${TLS_TRANSPORT}" == "grpc" ]] && printf 'h2c://')127.0.0.1:${TLS_PORT}
-    }
-    respond 404
-}
-EOF
-fi
-if [[ -s "${CADDY_SNIPPET}.tmp" ]]; then
-  chmod 0644 "${CADDY_SNIPPET}.tmp"
-  mv -f -- "${CADDY_SNIPPET}.tmp" "${CADDY_SNIPPET}"
-else
-  rm -f -- "${CADDY_SNIPPET}" "${CADDY_SNIPPET}.tmp"
-fi
+# This file is shared intentionally: direct VLESS and Mihomo may use the same
+# hostname, so separate Caddy site blocks would be invalid. Always rebuild it
+# from every owner's persistent descriptors instead of overwriting it.
+python3 - "${CADDY_SNIPPET}" "${CONFIG_DIR}/reality.env" "/etc/vps-control/mihomo/reality/caddy-routes" <<'PY'
+import fcntl, json, os, sys
+from pathlib import Path
+
+snippet, env_path, mihomo_root = map(Path, sys.argv[1:])
+values = {}
+try:
+    values = dict(line.split("=", 1) for line in env_path.read_text(encoding="utf-8").splitlines() if "=" in line)
+except OSError:
+    pass
+routes = []
+if values.get("CDN_ENABLED") == "yes" and values.get("CDN_DOMAIN") and values.get("CDN_PATH"):
+    routes.append({"domain": values["CDN_DOMAIN"], "path": values["CDN_PATH"], "port": int(values.get("CDN_PORT", "10087")), "transport": values.get("CDN_TRANSPORT", "websocket")})
+if values.get("TLS_ENABLED") == "yes" and values.get("TLS_DOMAIN") and values.get("TLS_PATH"):
+    routes.append({"domain": values["TLS_DOMAIN"], "path": values["TLS_PATH"], "port": int(values.get("TLS_PORT", "10443")), "transport": values.get("TLS_TRANSPORT", "xhttp")})
+if mihomo_root.exists():
+    for descriptor in mihomo_root.glob("*.json"):
+        try:
+            route = json.loads(descriptor.read_text(encoding="utf-8"))
+            if route.get("domain") and route.get("path") and route.get("port"):
+                routes.append(route)
+        except (OSError, ValueError, TypeError):
+            continue
+grouped = {}
+for route in routes:
+    grouped.setdefault(str(route["domain"]), []).append(route)
+snippet.parent.mkdir(parents=True, exist_ok=True)
+lock_path = snippet.with_suffix(".lock")
+with lock_path.open("w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    if not grouped:
+        snippet.unlink(missing_ok=True)
+        raise SystemExit
+    lines = []
+    for domain, items in grouped.items():
+        lines.append(f"{domain} {{")
+        for item in items:
+            matcher = f"{item['path']}*" if item.get("transport") in {"xhttp", "grpc"} else str(item["path"])
+            upstream = f"h2c://127.0.0.1:{int(item['port'])}" if item.get("transport") == "grpc" else f"127.0.0.1:{int(item['port'])}"
+            lines += [f"    handle {matcher} {{", f"        reverse_proxy {upstream}", "    }"]
+        lines += ["    respond 404", "}"]
+    temporary = snippet.with_suffix(".tmp")
+    temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.chmod(temporary, 0o644)
+    os.replace(temporary, snippet)
+PY
 if command -v caddy >/dev/null 2>&1 && [[ -s /etc/caddy/Caddyfile ]]; then
   if ! caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
     if [[ "${HAD_CADDY_SNIPPET}" == "yes" ]]; then
