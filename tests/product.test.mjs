@@ -1378,6 +1378,7 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(view, /Удалить устройство/);
   assert.match(manager, /def rebuild_vless_cdn_snippet/);
   assert.match(manager, /VLESS_CDN_ROUTE_ROOT/);
+  assert.match(manager, /route_id = f"\{profile_id\}-\{connection_id\}"/);
   assert.match(manager, /original_config = config_path\.read_bytes\(\)/);
   assert.match(manager, /component != "transport-reality" and singleton_key in used_singletons/);
   assert.match(manager, /class ProfileDeviceInput/);

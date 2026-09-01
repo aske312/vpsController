@@ -1995,12 +1995,16 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         raise RuntimeError("Mihomo VLESS key material is missing")
     user_id = str(uuid.uuid4())
     email = f"mihomo-{profile_id}-{connection_id}"
-    direct_tag = f"mihomo-vless-{connection_id}"
+    # Connection ids come from the client draft and can be reused when a user
+    # retries creation or creates another profile from the same open form.
+    # Xray tags and Caddy descriptors are global, so scope them by profile too.
+    route_id = f"{profile_id}-{connection_id}"
+    direct_tag = f"mihomo-vless-{route_id}"
     config["inbounds"].append({"tag": direct_tag, "listen": "::", "port": direct_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": vless_stream(settings, private_key, env.get("SHORT_ID", "")), "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}})
     cdn_path = "/" + secrets.token_hex(16)
     tls_path = "/" + secrets.token_hex(16)
     if settings["tls_enabled"]:
-        config["inbounds"].append({"tag": f"mihomo-vless-tls-{connection_id}", "listen": "127.0.0.1", "port": tls_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": edge_stream(settings["tls_transport"], tls_path, settings["tls_xhttp_mode"])})
+        config["inbounds"].append({"tag": f"mihomo-vless-tls-{route_id}", "listen": "127.0.0.1", "port": tls_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": edge_stream(settings["tls_transport"], tls_path, settings["tls_xhttp_mode"])})
     if settings["cdn_enabled"]:
         transport = settings["cdn_transport"]
         cdn_settings: dict[str, Any] = {"network": transport, "security": "none"}
@@ -2013,18 +2017,18 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         else:
             cdn_settings["network"] = "websocket"
             cdn_settings["wsSettings"] = {"path": cdn_path}
-        config["inbounds"].append({"tag": f"mihomo-vless-cdn-{connection_id}", "listen": "127.0.0.1", "port": cdn_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": cdn_settings})
+        config["inbounds"].append({"tag": f"mihomo-vless-cdn-{route_id}", "listen": "127.0.0.1", "port": cdn_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": cdn_settings})
     original_config = config_path.read_bytes()
     try:
-        write_mihomo_vless_cdn(connection_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"])
-        write_mihomo_vless_cdn(f"tls-{connection_id}", settings["tls_enabled"], settings["tls_domain"], tls_path, tls_port, settings["tls_transport"])
+        write_mihomo_vless_cdn(route_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"])
+        write_mihomo_vless_cdn(f"tls-{route_id}", settings["tls_enabled"], settings["tls_domain"], tls_path, tls_port, settings["tls_transport"])
         apply_reality_config(config_path, config)
         if settings["cdn_enabled"] or settings["tls_enabled"]:
             run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
             run("systemctl", "reload", "caddy.service", check=True)
     except Exception:
-        write_mihomo_vless_cdn(connection_id, False, "", "", 0)
-        write_mihomo_vless_cdn(f"tls-{connection_id}", False, "", "", 0)
+        write_mihomo_vless_cdn(route_id, False, "", "", 0)
+        write_mihomo_vless_cdn(f"tls-{route_id}", False, "", "", 0)
         config_path.write_bytes(original_config)
         os.chmod(config_path, 0o640)
         shutil.chown(config_path, user="root", group="nogroup")
