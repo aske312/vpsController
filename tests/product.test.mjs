@@ -258,6 +258,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /direct_p2p_rules\(routing\)/);
   assert.match(manager, /DOMAIN,settings-win\.data\.microsoft\.com,REJECT/);
   assert.match(manager, /DOMAIN,incoming\.telemetry\.mozilla\.org,REJECT/);
+  assert.ok(manager.indexOf("DOMAIN,settings-win.data.microsoft.com,REJECT") > manager.indexOf('"block_privacy": ['), "system telemetry must belong to privacy preset");
   assert.match(manager, /direct_games_enabled/);
   assert.match(manager, /direct_games_udp_enabled/);
   assert.match(manager, /UDP_TUNNEL_EXCLUSION_CATALOG/);
@@ -277,7 +278,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /"latency_ms": min\(latencies\) if latencies else None/);
   assert.match(page, /request\("\/mihomo\/dns\/settings"\)/);
   assert.match(page, /request\("\/mihomo\/routing\/schema"\)/);
-  assert.match(page, /className="mihomoDnsWorkspace"/);
+  assert.match(page, /className="mihomoDnsWorkspace mihomoDnsV2"/);
   assert.match(page, /<Tab id="dns"[^>]*>DNS<\/Tab>/);
   assert.doesNotMatch(page, />DNS Mihomo<\/Tab>/);
   assert.match(page, /Clash Verge Rev/);
@@ -308,6 +309,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /mihomoOverviewV2/);
   assert.match(page, /overviewActiveConnections/);
   assert.match(page, /overviewIssues/);
+  assert.match(page, /mihomoDnsV2/);
+  assert.match(page, /mihomoDnsProviders/);
+  assert.match(page, /mihomoModuleCatalogV2/);
+  assert.match(page, /moduleCapabilities/);
   assert.match(page, /expandedDeviceLists/);
   assert.match(page, /expandedProtocolLists/);
   assert.match(page, /mihomoProfileToggle/);

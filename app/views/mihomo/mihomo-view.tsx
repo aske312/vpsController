@@ -109,6 +109,26 @@ const channelShort: Record<string, string> = {
   "transport-reality": "VL",
   "transport-shadowsocks": "SS",
 };
+const dnsProviderMeta: Record<string, { code: string; note: string }> = {
+  "https://cloudflare-dns.com/dns-query": { code: "CF", note: "Быстрый DoH без фильтрации" },
+  "https://dns.google/dns-query": { code: "G", note: "Публичный DoH Google" },
+  "https://dns.quad9.net/dns-query": { code: "Q9", note: "Блокировка вредоносных доменов" },
+  "https://dns.adguard-dns.com/dns-query": { code: "AG", note: "Реклама и трекеры" },
+  "208.67.222.222": { code: "OD", note: "Базовая защита OpenDNS" },
+  "185.228.168.9": { code: "CB", note: "Фильтрация опасных ресурсов" },
+  "https://common.dot.dns.yandex.net/dns-query": { code: "YA", note: "Яндекс DNS без фильтрации" },
+  "77.88.8.88": { code: "YA", note: "Безопасный режим Яндекс" },
+  "77.88.8.7": { code: "FAM", note: "Семейная фильтрация" },
+  "193.58.251.251": { code: "SKY", note: "Фильтрация SkyDNS" },
+  "195.208.4.1": { code: "NS", note: "Российский резолвер НСДИ" },
+  "195.46.39.39": { code: "SAFE", note: "Категорийная фильтрация" },
+};
+const moduleCapabilities: Record<string, string[]> = {
+  "transport-reality": ["VLESS", "REALITY", "TLS", "CDN", "XHTTP", "RAW", "gRPC", "WebSocket"],
+  "transport-awg": ["UDP", "Обфускация", "Низкая задержка"],
+  "transport-wg": ["UDP", "WireGuard", "Низкие накладные расходы"],
+  "transport-shadowsocks": ["TCP + UDP", "AEAD", "Простой клиент"],
+};
 
 const directGameCatalog = [
   { id: "cs2", code: "CS2", name: "Counter-Strike 2" },
@@ -1065,6 +1085,10 @@ export function MihomoPage({
     installedChannels.length > 0 && !profiles.length ? { title: "Нет профилей", text: "Создайте профиль и добавьте устройство.", view: "profiles" as View } : null,
     profiles.length > 0 && overviewActiveConnections === 0 ? { title: "Нет активных подключений", text: "Профили созданы, но клиенты сейчас не подключены.", view: "profiles" as View } : null,
   ].filter(Boolean) as Array<{ title: string; text: string; view: View }>;
+  const dnsModeField = dnsPolicy?.schema.find((field) => field.key === "enhanced_mode");
+  const dnsPrimaryField = dnsPolicy?.schema.find((field) => field.key === "nameserver");
+  const dnsFallbackField = dnsPolicy?.schema.find((field) => field.key === "fallback");
+  const dnsOptions = (dnsPrimaryField?.options || []).map((option) => typeof option === "string" ? { value: option, label: option } : option);
 
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
@@ -1126,16 +1150,16 @@ export function MihomoPage({
           </section>
 
           <section className="mihomoOverviewMetrics">
-            <button type="button" onClick={() => setView("profiles")}><small>ПРОФИЛИ</small><strong>{profiles.length}</strong><span>{status?.profiles_in_use || 0} используются сейчас</span></button>
-            <button type="button" onClick={() => setView("profiles")}><small>УСТРОЙСТВА</small><strong>{overviewDevices}</strong><span>{overviewConnections} настроенных каналов</span></button>
-            <button type="button" onClick={() => setView("profiles")}><small>ПОДКЛЮЧЕНИЯ</small><strong>{overviewActiveConnections}<i> / {overviewConnections}</i></strong><span>активно по живой статистике</span></button>
+            <div><small>ПРОФИЛИ</small><strong>{profiles.length}</strong><span>{status?.profiles_in_use || 0} используются сейчас</span></div>
+            <div><small>УСТРОЙСТВА</small><strong>{overviewDevices}</strong><span>{overviewConnections} настроенных каналов</span></div>
+            <div><small>ПОДКЛЮЧЕНИЯ</small><strong>{overviewActiveConnections}<i> / {overviewConnections}</i></strong><span>активно по живой статистике</span></div>
             <div><small>ТРАФИК</small><strong>↓ {bytes(overviewRx)}</strong><span>↑ {bytes(overviewTx)}</span></div>
           </section>
 
           <section className="mihomoOverviewMain">
             <article className="mihomoOverviewProfiles">
               <header><div><p className="eyebrow">ПРОФИЛИ</p><h3>Подключения по профилям</h3></div><button type="button" onClick={() => setView("profiles")}>Открыть все</button></header>
-              <div>{profiles.slice(0, 6).map((profile) => { const item = profileStats[profile.id]?.summary; const devices = profile.devices?.length || 1; return <button type="button" key={profile.id} onClick={() => setView("profiles")}><span className={item?.active ? "is-online" : ""}><i /></span><p><b>{profile.name}</b><small>{devices} устройств · {profile.connections.length} каналов</small></p><strong>{item ? `${item.active}/${item.configured}` : "—"}<small>активно</small></strong><em>↓ {bytes(item?.rx_bytes || 0)}<small>↑ {bytes(item?.tx_bytes || 0)}</small></em></button>; })}{!profiles.length && <div className="mihomoOverviewEmpty"><b>Профилей пока нет</b><span>Создайте первый профиль после установки компонента подключения.</span><button type="button" onClick={newProfile} disabled={!installedChannels.length}>Создать профиль</button></div>}</div>
+              <div>{profiles.slice(0, 6).map((profile) => { const item = profileStats[profile.id]?.summary; const devices = profile.devices?.length || 1; return <div className="mihomoOverviewProfileRow" key={profile.id}><span className={item?.active ? "is-online" : ""}><i /></span><p><b>{profile.name}</b><small>{devices} устройств · {profile.connections.length} каналов</small></p><strong>{item ? `${item.active}/${item.configured}` : "—"}<small>активно</small></strong><em>↓ {bytes(item?.rx_bytes || 0)}<small>↑ {bytes(item?.tx_bytes || 0)}</small></em></div>; })}{!profiles.length && <div className="mihomoOverviewEmpty"><b>Профилей пока нет</b><span>Создайте первый профиль после установки компонента подключения.</span></div>}</div>
             </article>
 
             <article className="mihomoOverviewAttention">
@@ -1146,7 +1170,7 @@ export function MihomoPage({
           </section>
 
           <section className="mihomoOverviewBottom">
-            <article className="mihomoOverviewComponents"><header><div><p className="eyebrow">КОМПОНЕНТЫ</p><h3>Каналы подключения</h3></div><button type="button" onClick={() => setView("channels")}>Управление</button></header><div>{transportModules.map((module) => <button type="button" key={module.id} onClick={() => setView("channels")}><span>{channelShort[module.id] || "CH"}</span><p><b>{module.name}</b><small>{module.installed ? (module.active ? "Работает" : "Установлен") : "Не установлен"}</small></p><i className={module.active ? "is-online" : module.installed ? "is-ready" : ""} /></button>)}</div></article>
+            <article className="mihomoOverviewComponents"><header><div><p className="eyebrow">КОМПОНЕНТЫ</p><h3>Каналы подключения</h3></div><button type="button" onClick={() => setView("channels")}>Управление</button></header><div>{transportModules.map((module) => <div key={module.id}><span>{channelShort[module.id] || "CH"}</span><p><b>{module.name}</b><small>{module.installed ? (module.active ? "Работает" : "Установлен") : "Не установлен"}</small></p><i className={module.active ? "is-online" : module.installed ? "is-ready" : ""} /></div>)}</div></article>
             <article className="mihomoOverviewActions"><header><p className="eyebrow">БЫСТРЫЕ ДЕЙСТВИЯ</p><h3>Настройка</h3></header><div><button type="button" onClick={newProfile} disabled={!installedChannels.length}><b>Новый профиль</b><span>Подключения и устройства</span></button><button type="button" onClick={() => setView("dns")}><b>DNS</b><span>Резолверы и фильтрация</span></button><button type="button" onClick={() => setView("routing")}><b>Правила</b><span>Маршрутизация профилей</span></button></div></article>
           </section>
         </div>
@@ -1222,13 +1246,13 @@ export function MihomoPage({
       )}
 
       {view === "dns" && (
-        <form className="mihomoDnsWorkspace" onSubmit={saveDnsWorkspace}>
-          <header className="mihomoDnsHeader"><div><p className="eyebrow">MIHOMO DNS</p><h2>DNS</h2><p>Настройте разрешение доменов для всех соединений через Mihomo. Эти параметры входят в конфигурации профилей и не меняют системный DNS VPS.</p></div><span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "АКТИВЕН" : "ОЖИДАНИЕ"}</span></header>
-          <section className="mihomoDnsFields">
-            {(dnsPolicy?.schema || []).map((field) => <label key={field.key}><span>{field.label}</span>{field.type === "select" ? <select value={String(dnsDraft[field.key] ?? field.default)} onChange={(event) => updateDnsDraft(field.key, event.target.value)}>{(field.options || []).map((option) => { const value = typeof option === "string" ? option : option.value; const label = typeof option === "string" ? option : option.label; return <option key={value} value={value}>{label}</option>; })}</select> : <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(dnsDraft[field.key] ?? field.default)} onChange={(event) => updateDnsDraft(field.key, field.type === "number" ? Number(event.target.value) : event.target.value)} />}{field.help && <small>{field.help}</small>}</label>)}
-          </section>
-          <aside className="mihomoDnsNote"><b>Как применяется DNS</b><span>Основной сервер используется первым, резервный — при недоступности или неподходящем ответе. После сохранения обновите подписку на устройствах.</span></aside>
-          <footer className="mihomoDnsFooter"><span>{dnsDirty ? "Есть несохранённые изменения" : "Настройки синхронизированы"}</span><button className="primaryButton" type="submit" disabled={!dnsDirty || busy === "settings:dns-private"}>{busy === "settings:dns-private" ? "Сохранение…" : "Сохранить DNS"}</button></footer>
+        <form className="mihomoDnsWorkspace mihomoDnsV2" onSubmit={saveDnsWorkspace}>
+          <header className="mihomoDnsHeader"><div><p className="eyebrow">DNS ПРОФИЛЕЙ</p><h2>Разрешение доменов</h2><p>Выберите режим и два независимых резолвера для подписок Mihomo.</p></div><span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "ГОТОВ" : "ОЖИДАНИЕ"}</span></header>
+          <section className="mihomoDnsSummary"><div><small>РЕЖИМ</small><b>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" ? "Fake IP" : "Redir host"}</b><span>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" ? "Быстрее и точнее для правил" : "Максимальная совместимость"}</span></div><div><small>ОСНОВНОЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.nameserver || ""))?.label || "Не выбран"}</b><span>{dnsProviderMeta[String(dnsDraft.nameserver || "")]?.note || "DNS профиля"}</span></div><div><small>РЕЗЕРВНЫЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.fallback || ""))?.label || "Не выбран"}</b><span>{dnsProviderMeta[String(dnsDraft.fallback || "")]?.note || "Используется при сбое"}</span></div></section>
+          <section className="mihomoDnsMode"><header><div><b>Режим обработки</b><small>Как Mihomo сопоставляет домены с правилами маршрутизации.</small></div></header><div>{(dnsModeField?.options || ["fake-ip", "redir-host"]).map((option) => { const value = typeof option === "string" ? option : option.value; const selected = String(dnsDraft.enhanced_mode || dnsModeField?.default || "fake-ip") === value; return <button type="button" key={value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft("enhanced_mode", value)}><span>{value === "fake-ip" ? "FAST" : "COMPAT"}</span><p><b>{value === "fake-ip" ? "Fake IP" : "Redir host"}</b><small>{value === "fake-ip" ? "Рекомендуется для TUN и правил по доменам" : "Для приложений, несовместимых с Fake IP"}</small></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>
+          {([['nameserver', 'Основной DNS', 'Используется для обычных запросов.'], ['fallback', 'Резервный DNS', 'Подхватывает запросы при недоступности основного.']] as const).map(([key, title, note]) => <section className="mihomoDnsProviders" key={key}><header><div><b>{title}</b><small>{note}</small></div></header><div>{dnsOptions.map((option) => { const selected = String(dnsDraft[key] || (key === 'nameserver' ? dnsPrimaryField?.default : dnsFallbackField?.default) || "") === option.value; const meta = dnsProviderMeta[option.value] || { code: "DNS", note: "Пользовательский резолвер" }; return <button type="button" key={option.value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft(key, option.value)}><span>{meta.code}</span><p><b>{option.label}</b><small>{meta.note}</small></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>)}
+          <aside className="mihomoDnsNote"><b>Применение настроек</b><span>Основной и резервный DNS должны отличаться. После сохранения обновите подписку в клиенте, чтобы устройство получило новую конфигурацию.</span></aside>
+          <footer className="mihomoDnsFooter"><span>{dnsDirty ? "Есть несохранённые изменения" : "Настройки синхронизированы"}</span><button className="primaryButton" type="submit" disabled={!dnsDirty || busy === "settings:dns-private" || dnsDraft.nameserver === dnsDraft.fallback}>{busy === "settings:dns-private" ? "Сохранение…" : dnsDraft.nameserver === dnsDraft.fallback ? "Выберите разные DNS" : "Сохранить DNS"}</button></footer>
         </form>
       )}
 
@@ -1445,30 +1469,20 @@ function ModuleCatalog({ title, description, modules, busy, onToggle, onUpdate, 
         <div><p className="eyebrow">MIHOMO SUB-MODULES</p><h2>{title}</h2><p>{description}</p></div>
         <span className="mihomoCatalogCount">{modules.filter((item) => item.installed).length} / {modules.length} установлено</span>
       </header>
-      <div className="mihomoModuleCatalog">
+      <div className="mihomoModuleCatalog mihomoModuleCatalogV2">
         {modules.map((module) => (
-          <div key={module.id} className={module.installed ? "is-installed" : ""}>
-            <span className="mihomoModuleCode">{channelShort[module.id] || (module.category === "dns" ? "DNS" : "RT")}</span>
-            <p>
-              <b>{module.name}</b>
-              <small>{module.description}</small>
-              <code>{module.service || "config-only module"}</code>
-              {module.installed && module.installed_version && (
-                <span className="mihomoModuleVersionRow">
-                  <i>{formatModuleVersion(module.installed_version)}</i>
-                  {module.update_available && <em className={module.update_breaking ? "breaking" : ""}>→ {module.id === "transport-awg" ? "репозиторий" : formatModuleVersion(module.available_version)}{module.update_breaking ? "  major" : ""}</em>}
-                </span>
-              )}
-            </p>
-            <span className={module.active ? "onlinePill" : module.installed ? "warningPill" : "disabledPill"}>{module.active ? "Активен" : module.installed ? "Установлен" : "Не установлен"}</span>
-            <span className="mihomoModuleActions">
+          <article key={module.id} className={module.installed ? "is-installed" : ""}>
+            <header><span className="mihomoModuleCode">{channelShort[module.id] || (module.category === "dns" ? "DNS" : "RT")}</span><div><b>{module.name}</b><small>{module.description}</small></div><i className={module.active ? "is-online" : module.installed ? "is-ready" : ""} /></header>
+            <div className="mihomoModuleCapabilities">{(moduleCapabilities[module.id] || []).map((capability) => <span key={capability}>{capability}</span>)}</div>
+            <dl><div><dt>Состояние</dt><dd>{module.active ? "Работает" : module.installed ? "Готов" : "Не установлен"}</dd></div><div><dt>Версия</dt><dd>{module.installed_version ? formatModuleVersion(module.installed_version) : "—"}</dd></div><div><dt>Сервис</dt><dd>{module.service || "Внутренний"}</dd></div></dl>
+            <footer className="mihomoModuleActions">
               <button className="ghostButton" onClick={() => onSettings(module)}>Настройки</button>
               {module.installed && module.update_available && (
                 <button className={`ghostButton${module.update_breaking ? " breaking" : ""}`} disabled={Boolean(busy)} onClick={() => void onUpdate(module)}>{busy === `update:${module.id}` ? "Обновление…" : "Обновить"}</button>
               )}
               <button className={module.installed ? "dangerButton" : "primaryButton"} disabled={module.installable === false || Boolean(busy)} onClick={() => void onToggle(module)}>{module.installable === false ? "В разработке" : busy === module.id ? "Выполняется…" : module.installed ? "Удалить" : "Установить"}</button>
-            </span>
-          </div>
+            </footer>
+          </article>
         ))}
         {!modules.length && <Empty title="Каталог пуст" text="Mihomo Manager не получил manifest внутренних модулей." />}
       </div>
