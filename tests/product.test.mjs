@@ -1592,3 +1592,17 @@ test("direct IKEv2 is installable and reloads isolated EAP users", async () => {
   assert.match(api, /render_ikev2_users/); assert.match(api, /reload_ikev2/); assert.match(api, /payload\.protocol == "ikev2"/);
   assert.match(view, /title:"IKEv2"/);
 });
+
+test("direct protocol updates preserve client state and activate the new runtime", async () => {
+  const [hy2, tuic, trojan, openvpn, ikev2] = await Promise.all([
+    read("protocol-images/hysteria2/install.sh"), read("protocol-images/tuic/install.sh"),
+    read("protocol-images/trojan/install.sh"), read("protocol-images/openvpn/install.sh"),
+    read("protocol-images/ikev2/install.sh"),
+  ]);
+  assert.match(hy2, /\[\[ -s "\$\{ROOT\}\/users\.json" \]\] \|\|/);
+  assert.match(tuic, /\[\[ -s "\$\{ROOT\}\/config\.json" \]\] \|\|/);
+  assert.match(trojan, /\[\[ -s "\$ROOT\/config\.json" \]\] \|\|/);
+  assert.match(openvpn, /if \[\[ -s "\$ROOT\/settings\.json" \]\]/);
+  assert.match(ikev2, /if \[\[ ! -s "\$ROOT\/users\.conf" \]\]/);
+  for (const installer of [hy2, tuic, trojan, openvpn, ikev2]) assert.match(installer, /systemctl restart/);
+});

@@ -57,4 +57,4 @@ PrivateTmp=true
 WantedBy=multi-user.target
 EOF
 "${BIN}" check -c "${ROOT}/config.json"
-systemctl daemon-reload; systemctl enable --now vps-control-tuic.service; systemctl is-active --quiet vps-control-tuic.service
+systemctl daemon-reload; systemctl enable vps-control-tuic.service; systemctl restart vps-control-tuic.service; systemctl is-active --quiet vps-control-tuic.service

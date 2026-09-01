@@ -38,4 +38,4 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 EOF
-"$BIN" check -c "$ROOT/config.json"; systemctl daemon-reload; systemctl enable --now vps-control-trojan.service; systemctl is-active --quiet vps-control-trojan.service
+"$BIN" check -c "$ROOT/config.json"; systemctl daemon-reload; systemctl enable vps-control-trojan.service; systemctl restart vps-control-trojan.service; systemctl is-active --quiet vps-control-trojan.service

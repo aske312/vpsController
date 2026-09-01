@@ -97,6 +97,7 @@ PrivateTmp=true
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-systemctl enable --now vps-control-hysteria2-auth.service vps-control-hysteria2.service
+systemctl enable vps-control-hysteria2-auth.service vps-control-hysteria2.service
+systemctl restart vps-control-hysteria2-auth.service vps-control-hysteria2.service
 "${BIN}" server -c "${CONFIG}" --test >/dev/null
 systemctl is-active --quiet vps-control-hysteria2.service

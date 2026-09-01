@@ -20,10 +20,11 @@ if [[ ! -s "$SWAN/x509/serverCert.pem" ]]; then
 fi
 [[ -s "$ROOT/users.json" ]] || printf '{}\n' >"$ROOT/users.json"
 printf '{"pool":"%s","dns":"%s","endpoint":"%s"}\n' "$POOL" "$DNS" "$ENDPOINT" >"$ROOT/settings.json"
-cat >"$ROOT/users.conf" <<'EOF'
+if [[ ! -s "$ROOT/users.conf" ]]; then cat >"$ROOT/users.conf" <<'EOF'
 secrets {
 }
 EOF
+fi
 cat >"$ROOT/swanctl.conf" <<EOF
 connections {
   ikev2-eap {
@@ -68,4 +69,4 @@ IPAccounting=true
 [Install]
 WantedBy=multi-user.target
 EOF
-systemctl daemon-reload; systemctl enable --now vps-control-ikev2.service; systemctl is-active --quiet vps-control-ikev2.service
+systemctl daemon-reload; systemctl enable vps-control-ikev2.service; systemctl restart vps-control-ikev2.service; systemctl is-active --quiet vps-control-ikev2.service

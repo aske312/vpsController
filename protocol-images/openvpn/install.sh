@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT=/etc/vps-control/openvpn; PKI="$ROOT/pki"; PORT="${OPENVPN_PORT:-1194}"
+PROTO=udp; DNS=1.1.1.1
+if [[ -s "$ROOT/settings.json" ]]; then read -r PORT PROTO DNS < <(python3 - "$ROOT/settings.json" <<'PY'
+import json,sys
+s=json.load(open(sys.argv[1])); print(int(s.get('port',1194)),s.get('protocol','udp'),s.get('dns','1.1.1.1'))
+PY
+); fi
 apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openvpn easy-rsa iptables
 install -d -m 0700 "$ROOT/easy-rsa"; cp -a /usr/share/easy-rsa/. "$ROOT/easy-rsa/"; chmod -R go-rwx "$ROOT/easy-rsa"
 cd "$ROOT/easy-rsa"; export EASYRSA_BATCH=1 EASYRSA_PKI="$PKI" EASYRSA_REQ_CN='312.net OpenVPN CA'
@@ -9,10 +15,10 @@ cd "$ROOT/easy-rsa"; export EASYRSA_BATCH=1 EASYRSA_PKI="$PKI" EASYRSA_REQ_CN='3
 [[ -s "$PKI/dh.pem" ]] || ./easyrsa gen-dh
 ./easyrsa gen-crl; install -m 0644 "$PKI/crl.pem" "$ROOT/crl.pem"
 [[ -s "$ROOT/tls-crypt.key" ]] || openvpn --genkey secret "$ROOT/tls-crypt.key"
-printf '{"port":%s,"protocol":"udp","subnet":"10.74.0.0/24","dns":"1.1.1.1"}\n' "$PORT" >"$ROOT/settings.json"
+printf '{"port":%s,"protocol":"%s","subnet":"10.74.0.0/24","dns":"%s"}\n' "$PORT" "$PROTO" "$DNS" >"$ROOT/settings.json"
 cat >"$ROOT/server.conf" <<EOF
 port $PORT
-proto udp
+proto $([[ "$PROTO" == tcp ]] && echo tcp-server || echo udp)
 dev tun
 topology subnet
 server 10.74.0.0 255.255.255.0
@@ -35,7 +41,7 @@ group nogroup
 status /run/vps-control-openvpn/status 5
 status-version 3
 push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS 1.1.1.1"
+push "dhcp-option DNS $DNS"
 verb 3
 EOF
 chmod 0600 "$ROOT"/*.key "$ROOT/settings.json" "$ROOT/server.conf"
@@ -60,4 +66,4 @@ RuntimeDirectory=vps-control-openvpn
 [Install]
 WantedBy=multi-user.target
 EOF
-systemctl daemon-reload; systemctl enable --now vps-control-openvpn.service; systemctl is-active --quiet vps-control-openvpn.service
+systemctl daemon-reload; systemctl enable vps-control-openvpn.service; systemctl restart vps-control-openvpn.service; systemctl is-active --quiet vps-control-openvpn.service
