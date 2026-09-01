@@ -450,6 +450,7 @@ export function MihomoPage({
   const [editing, setEditing] = useState<Module | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number | boolean>>({});
   const [profileDialog, setProfileDialog] = useState<Profile | "new" | null>(null);
+  const profileMutationId = useRef(crypto.randomUUID());
   const [profileStep, setProfileStep] = useState(1);
   const profileCanvasRef = useRef<HTMLElement>(null);
   const [profileName, setProfileName] = useState("");
@@ -487,6 +488,7 @@ export function MihomoPage({
       try {
         const body = await response.json();
         message = body?.detail || body?.message || message;
+        if (body?.operation_id) message += ` · операция ${body.operation_id}`;
       } catch {
         // Preserve status text for non-JSON responses.
       }
@@ -866,6 +868,7 @@ export function MihomoPage({
   }
 
   function newProfile() {
+    profileMutationId.current = crypto.randomUUID();
     setProfileStep(1);
     setProfileStrategyTouched(false);
     setProfileDialog("new");
@@ -877,6 +880,7 @@ export function MihomoPage({
   }
 
   function editProfile(profile: Profile) {
+    profileMutationId.current = crypto.randomUUID();
     setProfileStep(1);
     setProfileStrategyTouched(true);
     setProfileDialog(profile);
@@ -965,14 +969,14 @@ export function MihomoPage({
       if (profileDialog === "new") {
         const created = await request("/mihomo/profiles", {
           method: "POST",
-          body: JSON.stringify({ name: profileName, devices: profileDevices, connections: profileConnections, routing: profileDevices[0]?.routing || profileRouting }),
+          body: JSON.stringify({ name: profileName, devices: profileDevices, connections: profileConnections, routing: profileDevices[0]?.routing || profileRouting, operation_id: profileMutationId.current }),
         }) as Profile;
         setReadyDevices([]);
         setCreatedProfile(created);
       } else if (profileDialog) {
         const updated = await request(`/mihomo/profiles/${profileDialog.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ name: profileName, devices: profileDevices, connections: profileConnections, routing: profileDevices[0]?.routing || profileRouting }),
+          body: JSON.stringify({ name: profileName, devices: profileDevices, connections: profileConnections, routing: profileDevices[0]?.routing || profileRouting, operation_id: profileMutationId.current }),
         }) as Profile;
         setReadyDevices([]);
         setCreatedProfile(updated);
@@ -1503,8 +1507,9 @@ export function MihomoPage({
                 const needsTls = preset.components.some((item) => item.tls);
                 const missingCdn = needsCdn && !String(routingPolicy?.values.preset_cdn_domain || "").trim();
                 const missingTls = needsTls && !String(routingPolicy?.values.preset_tls_domain || "").trim();
-                const unavailable = missingCdn || missingTls;
-                return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><b>{preset.name}</b><small>{missingCdn && missingTls ? "Укажите CDN- и TLS-домены в Настройках" : missingCdn ? "Укажите CDN-домен в Настройках" : missingTls ? "Укажите TLS-домен в Настройках" : preset.description}</small></button>;
+                const missingModules = preset.components.filter((definition) => !modules.some((item) => item.id === definition.id && item.installed));
+                const unavailable = missingCdn || missingTls || missingModules.length > 0;
+                return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><b>{preset.name}</b><small>{missingModules.length ? `Сначала установите: ${missingModules.map((item) => item.id.replace("transport-", "")).join(", ")}` : missingCdn && missingTls ? "Укажите CDN- и TLS-домены в Настройках" : missingCdn ? "Укажите CDN-домен в Настройках" : missingTls ? "Укажите TLS-домен в Настройках" : preset.description}</small></button>;
               })}</div>
             </section>
             <section className="mihomoConnectionBuilder">

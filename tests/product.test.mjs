@@ -1320,8 +1320,9 @@ test("successful protocol installs are immediately reachable and health-checked"
   assert.match(ss, /vps-control-shadowsocks-firewall add %i/);
   assert.match(mihomoSs, /vps-control-mihomo-ss-firewall add %i/);
   assert.match(vless, /ExecStartPre=.*iptables -C INPUT -p tcp --dport/);
-  assert.match(mihomoReality, /vps-control-mihomo-vless-firewall add/);
-  assert.match(mihomoReality, /iptables -C INPUT -p tcp --dport/);
+  assert.match(mihomoReality, /vps-control-mihomo-vless-firewall sync/);
+  assert.match(mihomoReality, /VPS_MIHOMO_VLESS/);
+  assert.match(mihomoReality, /for tool in iptables ip6tables/);
 });
 
 test("Mihomo QUIC transports use the release asset digest instead of a removed checksum file", async () => {
@@ -1379,7 +1380,7 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /def rebuild_vless_cdn_snippet/);
   assert.match(manager, /VLESS_CDN_ROUTE_ROOT/);
   assert.match(manager, /route_id = f"\{profile_id\}-\{connection_id\}"/);
-  assert.match(manager, /batch_reality = sum\(definition\["component"\] == "transport-reality" for definition in definitions\) > 1/);
+  assert.match(manager, /batch_reality = any\(definition\["component"\] == "transport-reality" for definition in definitions\)/);
   assert.match(manager, /defer_reality_restart=batch_reality/);
   assert.match(manager, /original_config = config_path\.read_bytes\(\)/);
   assert.match(manager, /component != "transport-reality" and singleton_key in used_singletons/);
@@ -1409,6 +1410,27 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(view, /Пресет для \{profileDevices\.find/);
   assert.doesNotMatch(view, /profileDialog === "new" && <section className="mihomoPresetPicker"/);
   assert.doesNotMatch(view, /const module = modules\.find/, "Next.js reserves the local variable name module");
+});
+
+test("Mihomo profile lifecycle is transactional, idempotent and reconciled", async () => {
+  const [manager, view, uninstall] = await Promise.all([
+    read("protocol-images/mihomo/manager.py"),
+    read("app/views/mihomo/mihomo-view.tsx"),
+    read("protocol-images/mihomo/uninstall.sh"),
+  ]);
+  assert.match(manager, /def profile_runtime_transaction/);
+  assert.match(manager, /@transactional_profile_mutation/);
+  assert.match(manager, /create_operation_id/);
+  assert.match(view, /operation_id: profileMutationId\.current/);
+  assert.match(manager, /def apply_batched_reality_runtime/);
+  assert.match(manager, /def reconciliation_report/);
+  assert.match(manager, /\/api\/mihomo\/reconciliation/);
+  assert.match(manager, /validate_rendered_profile\(config\)/);
+  assert.match(manager, /f"ipv6: \{str\(bool\(dns\.get\('ipv6', False\)\)\)\.lower\(\)\}"/);
+  assert.match(manager, /Hysteria2 and TUIC must use different UDP ports/);
+  assert.match(uninstall, /modules\/transport-\*/);
+  assert.match(uninstall, /vps-control-mihomo-hysteria2\.service/);
+  assert.match(uninstall, /vps-control-mihomo-tuic\.service/);
 });
 
 test("SSH management does not start socket activation and the daemon together", async () => {

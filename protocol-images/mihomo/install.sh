@@ -66,6 +66,8 @@ modules = {
     "transport-awg": False,
     "transport-shadowsocks": False,
     "transport-reality": False,
+    "transport-hysteria2": False,
+    "transport-tuic": False,
 }
 try:
     with open(path, encoding="utf-8") as handle:
@@ -130,4 +132,4 @@ systemctl is-active --quiet vps-control-mihomo-manager.service
 ss -Hltn | grep -Eq '127\.0\.0\.1:8791[[:space:]]'
 "${CORE}" -v
 
-echo "Mihomo Manager установлен. Внутренние каналы: 0/4 — устанавливаются отдельно в разделе Mihomo."
+echo "Mihomo Manager установлен. Транспортные модули независимы и устанавливаются отдельно в разделе Mihomo."

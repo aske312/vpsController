@@ -51,13 +51,28 @@ chown root:nogroup "${candidate}"; "${MODULE_DIR}/xray" run -test -config "${can
 cat >/usr/local/sbin/vps-control-mihomo-vless-firewall <<'SH'
 #!/usr/bin/env bash
 set -eu
-python3 - /etc/vps-control/mihomo/reality/config.json <<'PY' | while read -r port; do
+action="${1:-sync}"
+ports="$(python3 - /etc/vps-control/mihomo/reality/config.json <<'PY'
 import json,sys
 with open(sys.argv[1],encoding='utf-8') as h:c=json.load(h)
 for x in c.get('inbounds',[]):
  if str(x.get('tag','')).startswith('mihomo-vless-') and x.get('listen')=='::':print(int(x['port']))
 PY
- if [[ "${1:-add}" == add ]];then iptables -C INPUT -p tcp --dport "${port}" -j ACCEPT 2>/dev/null||iptables -I INPUT 1 -p tcp --dport "${port}" -j ACCEPT;else while iptables -C INPUT -p tcp --dport "${port}" -j ACCEPT 2>/dev/null;do iptables -D INPUT -p tcp --dport "${port}" -j ACCEPT;done;fi
+)"
+for tool in iptables ip6tables; do
+ command -v "${tool}" >/dev/null 2>&1 || continue
+ chain="VPS_MIHOMO_VLESS"
+ "${tool}" -N "${chain}" 2>/dev/null || true
+ "${tool}" -C INPUT -j "${chain}" 2>/dev/null || "${tool}" -I INPUT 1 -j "${chain}"
+ "${tool}" -F "${chain}"
+ if [[ "${action}" != remove ]]; then
+  while read -r port; do
+   [[ -n "${port}" ]] && "${tool}" -A "${chain}" -p tcp --dport "${port}" -j ACCEPT
+  done <<<"${ports}"
+ else
+  while "${tool}" -C INPUT -j "${chain}" 2>/dev/null; do "${tool}" -D INPUT -j "${chain}"; done
+  "${tool}" -X "${chain}" 2>/dev/null || true
+ fi
 done
 SH
 chmod 0755 /usr/local/sbin/vps-control-mihomo-vless-firewall
@@ -67,7 +82,7 @@ Description=GATE.312 Mihomo VLESS component
 After=network-online.target
 [Service]
 Type=simple
-ExecStartPre=+/usr/local/sbin/vps-control-mihomo-vless-firewall add
+ExecStartPre=+/usr/local/sbin/vps-control-mihomo-vless-firewall sync
 ExecStart=${MODULE_DIR}/xray run -config ${CONFIG_DIR}/config.json
 ExecStopPost=+/usr/local/sbin/vps-control-mihomo-vless-firewall remove
 Restart=on-failure

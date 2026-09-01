@@ -20,7 +20,11 @@ if not isinstance(profiles, list):
     profiles = []
 credentials = 0
 for profile in profiles:
-    if isinstance(profile, dict) and isinstance(profile.get("credentials"), dict):
+    if not isinstance(profile, dict):
+        continue
+    if isinstance(profile.get("connections"), list):
+        credentials += len(profile["connections"])
+    elif isinstance(profile.get("credentials"), dict):
         credentials += len(profile["credentials"])
 print(f"{len(profiles)} {credentials}")
 PY
@@ -34,8 +38,10 @@ systemctl stop "${MANAGER_SERVICE}" >/dev/null 2>&1 || true
 
 failures=()
 # Remove config consumers first, then all transport instances.
-for module in transport-reality transport-shadowsocks transport-awg transport-wg; do
-  script="${MODULE_DIR}/modules/${module}/uninstall.sh"
+for module_dir in "${MODULE_DIR}"/modules/transport-*; do
+  [[ -d "${module_dir}" ]] || continue
+  module="$(basename "${module_dir}")"
+  script="${module_dir}/uninstall.sh"
   [[ -f "${script}" ]] || continue
   echo "Removing Mihomo dependency: ${module}"
   if ! bash "${script}"; then
@@ -44,7 +50,7 @@ for module in transport-reality transport-shadowsocks transport-awg transport-wg
 done
 
 # Verify that no Mihomo-owned runtime survived the dependency cascade.
-for unit in   wg-quick@mh-wg0.service   awg-quick@mh-awg0.service   vps-control-mihomo-reality.service   vps-control-mihomo-ss.target; do
+for unit in   wg-quick@mh-wg0.service   awg-quick@mh-awg0.service   vps-control-mihomo-reality.service   vps-control-mihomo-ss.target   vps-control-mihomo-hysteria2.service   vps-control-mihomo-tuic.service; do
   if systemctl is-active --quiet "${unit}" 2>/dev/null; then
     failures+=("active:${unit}")
   fi

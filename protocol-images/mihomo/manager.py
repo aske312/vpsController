@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -63,7 +64,59 @@ def serialized_profile_mutation(function):
             return function(*args, **kwargs)
     return wrapped
 
-TRANSPORTS = {
+
+def transactional_profile_mutation(function):
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        with profile_runtime_transaction(set(TRANSPORTS)):
+            return function(*args, **kwargs)
+    return wrapped
+
+
+@contextmanager
+def profile_runtime_transaction(modules: set[str]):
+    """Restore persisted adapter state and affected services after any failed mutation."""
+    backup_root = Path(tempfile.mkdtemp(prefix="mihomo-profile-transaction-"))
+    config_backup = backup_root / "config"
+    profile_backup = backup_root / "profiles.json"
+    service_was_active = {
+        module_id: systemctl_active(service)
+        for module_id in modules
+        if (service := SERVICE_BY_MODULE.get(module_id))
+    }
+    if CONFIG_ROOT.exists():
+        shutil.copytree(CONFIG_ROOT, config_backup)
+    if PROFILE_FILE.exists():
+        shutil.copy2(PROFILE_FILE, profile_backup)
+    try:
+        yield
+    except Exception:
+        if CONFIG_ROOT.exists():
+            shutil.rmtree(CONFIG_ROOT)
+        if config_backup.exists():
+            shutil.copytree(config_backup, CONFIG_ROOT)
+        if profile_backup.exists():
+            PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(profile_backup, PROFILE_FILE)
+        elif PROFILE_FILE.exists():
+            PROFILE_FILE.unlink()
+        # Restarts happen only on rollback. Each independent adapter is restored
+        # from its own persisted configuration and restarted at most once.
+        for module_id in sorted(modules):
+            service = SERVICE_BY_MODULE.get(module_id)
+            if service and service_was_active.get(module_id, False):
+                run("systemctl", "reset-failed", service)
+                run("systemctl", "restart", service)
+            elif service and systemctl_active(service):
+                run("systemctl", "stop", service)
+        if service_was_active.get("transport-reality", False):
+            rebuild_vless_cdn_snippet()
+            run("systemctl", "reload", "caddy.service")
+        raise
+    finally:
+        shutil.rmtree(backup_root, ignore_errors=True)
+
+BUILTIN_TRANSPORTS = {
     "transport-wg",
     "transport-awg",
     "transport-shadowsocks",
@@ -71,6 +124,10 @@ TRANSPORTS = {
     "transport-hysteria2",
     "transport-tuic",
 }
+TRANSPORTS = {
+    path.name for path in SUBMODULE_ROOT.glob("transport-*")
+    if path.is_dir() and (path / "manifest.json").is_file()
+} or BUILTIN_TRANSPORTS
 # DNS and routing are mandatory policy layers, not toggleable modules. Their
 # settings are created with the first transport and edited on dedicated pages.
 # Profiles may override individual routing values without replacing defaults.
@@ -104,6 +161,13 @@ SERVICE_BY_MODULE = {
     "transport-hysteria2": "vps-control-mihomo-hysteria2.service",
     "transport-tuic": "vps-control-mihomo-tuic.service",
 }
+for _module_id in TRANSPORTS:
+    try:
+        _manifest_value = json.loads((SUBMODULE_ROOT / _module_id / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        continue
+    if isinstance(_manifest_value, dict) and _manifest_value.get("service"):
+        SERVICE_BY_MODULE[_module_id] = str(_manifest_value["service"])
 
 app = FastAPI(
     title="GATE.312 Mihomo Manager",
@@ -128,7 +192,9 @@ async def public_http_exception_handler(_, exc: HTTPException) -> JSONResponse:
     detail = public_http_error(exc.status_code, exc.detail)
     if detail == PUBLIC_COMMAND_ERROR:
         logger.error("Suppressed technical Mihomo error (%s): %s", exc.status_code, exc.detail)
-    return JSONResponse(status_code=exc.status_code, content={"detail": detail}, headers=exc.headers)
+    action = get_action_payload()
+    operation_id = str(action.get("action", ""))
+    return JSONResponse(status_code=exc.status_code, content={"detail": detail, "operation_id": operation_id}, headers=exc.headers)
 
 
 class ModuleSettingsPatch(BaseModel):
@@ -159,6 +225,7 @@ class ProfileCreate(BaseModel):
     connections: list[ProfileConnectionInput] | None = None
     devices: list[ProfileDeviceInput] = Field(default_factory=lambda: [ProfileDeviceInput(id="device-1", name="Основное устройство")], min_length=1)
     routing: dict[str, Any] = Field(default_factory=dict)
+    operation_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
 
 
 class ProfileUpdate(BaseModel):
@@ -167,6 +234,7 @@ class ProfileUpdate(BaseModel):
     connections: list[ProfileConnectionInput] | None = None
     devices: list[ProfileDeviceInput] | None = Field(default=None, min_length=1)
     routing: dict[str, Any] | None = None
+    operation_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
 
 
 def run(*args: str, check: bool = False, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -385,6 +453,15 @@ def validate_settings(module_id: str, values: dict[str, Any]) -> dict[str, Any]:
             if raw not in options:
                 raise HTTPException(status_code=422, detail=f"Unsupported value for {key}")
             current[key] = raw
+        elif kind == "boolean":
+            if isinstance(raw, bool):
+                current[key] = raw
+            elif str(raw).strip().lower() in {"true", "1", "yes", "on"}:
+                current[key] = True
+            elif str(raw).strip().lower() in {"false", "0", "no", "off"}:
+                current[key] = False
+            else:
+                raise HTTPException(status_code=422, detail=f"{key} must be boolean")
         else:
             value = str(raw).strip()
             if not value:
@@ -399,11 +476,16 @@ def validate_settings(module_id: str, values: dict[str, Any]) -> dict[str, Any]:
         if network.version != 4 or network.prefixlen > 28:
             raise HTTPException(status_code=422, detail="Use an IPv4 subnet /28 or larger")
     elif module_id == "transport-reality":
-        if int(current.get("port_start", 0)) == int(current.get("cdn_port_start", 0)):
-            raise HTTPException(status_code=422, detail="Direct and CDN port ranges must start at different ports")
+        starts = [int(current.get(key, 0)) for key in ("port_start", "cdn_port_start", "tls_port_start")]
+        if len(set(starts)) != len(starts):
+            raise HTTPException(status_code=422, detail="Direct, CDN and TLS port ranges must start at different ports")
         dns_servers = [value.strip() for value in str(current.get("dns", "")).split(",") if value.strip()]
         if not dns_servers:
             raise HTTPException(status_code=422, detail="At least one Xray DNS server is required")
+    elif module_id in {"transport-hysteria2", "transport-tuic"}:
+        other = "transport-tuic" if module_id == "transport-hysteria2" else "transport-hysteria2"
+        if int(current.get("port", 0)) == int(module_settings(other).get("port", -1)):
+            raise HTTPException(status_code=422, detail="Hysteria2 and TUIC must use different UDP ports")
     return current
 
 
@@ -959,7 +1041,7 @@ def default_profile_presets() -> list[dict[str, Any]]:
     return [
         {"id": "all-vless", "name": "Все VLESS", "description": "REALITY, прямой TLS и CDN со всеми транспортами", "strategy": "select", "components": [{"id": "transport-reality", "transport": "xhttp", "label": "VLESS REALITY · XHTTP"}, {"id": "transport-reality", "transport": "raw", "label": "VLESS REALITY · RAW"}, {"id": "transport-reality", "transport": "grpc", "label": "VLESS REALITY · gRPC"}, {"id": "transport-reality", "tls": True, "transport": "xhttp", "label": "VLESS TLS · XHTTP"}, {"id": "transport-reality", "tls": True, "transport": "websocket", "label": "VLESS TLS · WS"}, {"id": "transport-reality", "tls": True, "transport": "httpupgrade", "label": "VLESS TLS · HTTPUpgrade"}, {"id": "transport-reality", "tls": True, "transport": "grpc", "label": "VLESS TLS · gRPC"}, {"id": "transport-reality", "cdn": True, "transport": "xhttp", "label": "VLESS CDN · XHTTP"}, {"id": "transport-reality", "cdn": True, "transport": "websocket", "label": "VLESS CDN · WS"}, {"id": "transport-reality", "cdn": True, "transport": "httpupgrade", "label": "VLESS CDN · HTTPUpgrade"}, {"id": "transport-reality", "cdn": True, "transport": "grpc", "label": "VLESS CDN · gRPC"}]},
         {"id": "direct-fallback", "name": "VLESS + резерв", "description": "Основной VLESS и резервный AWG", "strategy": "fallback", "components": [{"id": "transport-reality"}, {"id": "transport-awg"}]},
-        {"id": "cdn-first", "name": "CDN-first", "description": "VLESS через CDN с резервом", "strategy": "fallback", "components": [{"id": "transport-reality", "cdn": True}, {"id": "transport-awg"}]},
+        {"id": "cdn-first", "name": "CDN-first", "description": "VLESS WebSocket через CDN с резервом", "strategy": "fallback", "components": [{"id": "transport-reality", "cdn": True, "transport": "websocket"}, {"id": "transport-awg"}]},
     ]
 
 
@@ -985,6 +1067,8 @@ def validate_profile_presets(values: list[dict[str, Any]]) -> list[dict[str, Any
             used_singletons.add(component_id)
             is_cdn = bool(component.get("cdn", False))
             is_tls = bool(component.get("tls", False))
+            if is_cdn and is_tls:
+                raise HTTPException(status_code=422, detail=f"VLESS route in preset {preset_id} cannot be TLS and CDN at the same time")
             transport = str(component.get("transport", ""))
             allowed_transports = {"xhttp", "websocket", "httpupgrade", "grpc"} if is_cdn or is_tls else {"xhttp", "raw", "grpc"}
             if transport and transport not in allowed_transports:
@@ -1900,14 +1984,15 @@ def vless_stream(settings: dict[str, Any], private_key: str, short_id: str) -> d
     return stream
 
 
-def write_mihomo_vless_cdn(connection_id: str, enabled: bool, domain: str, path: str, port: int, transport: str = "websocket") -> None:
+def write_mihomo_vless_cdn(connection_id: str, enabled: bool, domain: str, path: str, port: int, transport: str = "websocket", rebuild: bool = True) -> None:
     VLESS_CDN_ROUTE_ROOT.mkdir(parents=True, exist_ok=True)
     descriptor = VLESS_CDN_ROUTE_ROOT / f"{connection_id}.json"
     if enabled:
         atomic_json(descriptor, {"domain": domain, "path": path, "port": int(port), "transport": transport}, mode=0o600)
     else:
         descriptor.unlink(missing_ok=True)
-    rebuild_vless_cdn_snippet()
+    if rebuild:
+        rebuild_vless_cdn_snippet()
 
 
 def edge_stream(transport: str, path: str, xhttp_mode: str) -> dict[str, Any]:
@@ -1978,17 +2063,18 @@ def apply_reality_config(config_path: Path, config: dict[str, Any], restart_serv
     run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
 
 
-def add_reality_credential(profile_id: str, connection_id: str, connection_settings: dict[str, Any], restart_service: bool = True) -> dict[str, Any]:
+def add_reality_credential(profile_id: str, connection_id: str, connection_settings: dict[str, Any], restart_service: bool = True, reload_caddy: bool = True) -> dict[str, Any]:
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
     if not isinstance(config.get("inbounds"), list):
         raise RuntimeError("Mihomo Reality server configuration is invalid")
     settings = validate_connection("transport-reality", connection_settings)
     core = module_settings("transport-reality")
-    direct_port = int(settings["port"]) or next_vless_port(config, int(core["port_start"]))
-    if direct_port in used_vless_ports(config):
+    direct_enabled = settings["route_mode"] in {"direct", "both"}
+    direct_port = (int(settings["port"]) or next_vless_port(config, int(core["port_start"]))) if direct_enabled else 0
+    if direct_enabled and direct_port in used_vless_ports(config):
         raise RuntimeError(f"VLESS port {direct_port} is already used")
-    port_allocation_config = {**config, "inbounds": [*config.get("inbounds", []), {"port": direct_port}]}
+    port_allocation_config = {**config, "inbounds": [*config.get("inbounds", []), *([{"port": direct_port}] if direct_enabled else [])]}
     cdn_port = next_vless_port(port_allocation_config, int(core["cdn_port_start"])) if settings["cdn_enabled"] else 0
     tls_port = next_vless_port(port_allocation_config, int(core.get("tls_port_start", 11443))) if settings["tls_enabled"] else 0
     env = reality_env()
@@ -2002,7 +2088,8 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     # Xray tags and Caddy descriptors are global, so scope them by profile too.
     route_id = f"{profile_id}-{connection_id}"
     direct_tag = f"mihomo-vless-{route_id}"
-    config["inbounds"].append({"tag": direct_tag, "listen": "::", "port": direct_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": vless_stream(settings, private_key, env.get("SHORT_ID", "")), "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}})
+    if direct_enabled:
+        config["inbounds"].append({"tag": direct_tag, "listen": "::", "port": direct_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": vless_stream(settings, private_key, env.get("SHORT_ID", "")), "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}})
     cdn_path = "/" + secrets.token_hex(16)
     tls_path = "/" + secrets.token_hex(16)
     if settings["tls_enabled"]:
@@ -2022,26 +2109,27 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         config["inbounds"].append({"tag": f"mihomo-vless-cdn-{route_id}", "listen": "127.0.0.1", "port": cdn_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": cdn_settings})
     original_config = config_path.read_bytes()
     try:
-        write_mihomo_vless_cdn(route_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"])
-        write_mihomo_vless_cdn(f"tls-{route_id}", settings["tls_enabled"], settings["tls_domain"], tls_path, tls_port, settings["tls_transport"])
+        write_mihomo_vless_cdn(route_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"], rebuild=reload_caddy)
+        write_mihomo_vless_cdn(f"tls-{route_id}", settings["tls_enabled"], settings["tls_domain"], tls_path, tls_port, settings["tls_transport"], rebuild=reload_caddy)
         apply_reality_config(config_path, config, restart_service=restart_service)
-        if settings["cdn_enabled"] or settings["tls_enabled"]:
+        if reload_caddy and (settings["cdn_enabled"] or settings["tls_enabled"]):
             run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
             run("systemctl", "reload", "caddy.service", check=True)
     except Exception:
-        write_mihomo_vless_cdn(route_id, False, "", "", 0)
-        write_mihomo_vless_cdn(f"tls-{route_id}", False, "", "", 0)
+        write_mihomo_vless_cdn(route_id, False, "", "", 0, rebuild=reload_caddy)
+        write_mihomo_vless_cdn(f"tls-{route_id}", False, "", "", 0, rebuild=reload_caddy)
         config_path.write_bytes(original_config)
         os.chmod(config_path, 0o640)
         shutil.chown(config_path, user="root", group="nogroup")
         if restart_service:
             run("systemctl", "restart", "vps-control-mihomo-reality.service")
-        run("systemctl", "reload", "caddy.service")
+        if reload_caddy:
+            run("systemctl", "reload", "caddy.service")
         raise
     return {"uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "route_mode": settings["route_mode"], "tls_enabled": settings["tls_enabled"], "tls_domain": settings["tls_domain"], "tls_port": tls_port, "tls_path": tls_path, "tls_transport": settings["tls_transport"], "tls_xhttp_mode": settings["tls_xhttp_mode"], "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": cdn_path, "cdn_transport": settings["cdn_transport"], "cdn_xhttp_mode": settings["cdn_xhttp_mode"]}
 
 
-def remove_reality_credential(profile_id: str, credential: dict[str, Any], restart_service: bool = True) -> None:
+def remove_reality_credential(profile_id: str, credential: dict[str, Any], restart_service: bool = True, reload_caddy: bool = True) -> None:
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
     try:
@@ -2050,10 +2138,10 @@ def remove_reality_credential(profile_id: str, credential: dict[str, Any], resta
         config["inbounds"] = [item for item in config.get("inbounds", []) if not (direct_tag and item.get("tag") in {direct_tag, str(direct_tag).replace("mihomo-vless-", "mihomo-vless-cdn-"), str(direct_tag).replace("mihomo-vless-", "mihomo-vless-tls-")}) and not (not direct_tag and any(client.get("id") == user_id for client in item.get("settings", {}).get("clients", [])))]
         connection_id = str(direct_tag or "").removeprefix("mihomo-vless-")
         if connection_id:
-            write_mihomo_vless_cdn(connection_id, False, "", "", 0)
-            write_mihomo_vless_cdn(f"tls-{connection_id}", False, "", "", 0)
+            write_mihomo_vless_cdn(connection_id, False, "", "", 0, rebuild=reload_caddy)
+            write_mihomo_vless_cdn(f"tls-{connection_id}", False, "", "", 0, rebuild=reload_caddy)
         apply_reality_config(config_path, config, restart_service=restart_service)
-        if credential.get("cdn_enabled") or credential.get("tls_enabled"):
+        if reload_caddy and (credential.get("cdn_enabled") or credential.get("tls_enabled")):
             run("systemctl", "reload", "caddy.service")
     except (TypeError, KeyError, IndexError):
         pass
@@ -2326,7 +2414,7 @@ def provision(profile_id: str, module_id: str, connection_id: str = "default", s
     if module_id == "transport-shadowsocks":
         return add_ss_credential(profile_id, connection_id)
     if module_id == "transport-reality":
-        return add_reality_credential(profile_id, connection_id, settings or {}, restart_service=not defer_reality_restart)
+        return add_reality_credential(profile_id, connection_id, settings or {}, restart_service=not defer_reality_restart, reload_caddy=not defer_reality_restart)
     if module_id in {"transport-hysteria2", "transport-tuic"}:
         return add_quic_credential(profile_id, module_id, connection_id)
     raise RuntimeError(f"{module_id} is not a transport")
@@ -2338,7 +2426,7 @@ def deprovision(profile_id: str, module_id: str, credential: dict[str, Any], def
     elif module_id == "transport-shadowsocks":
         remove_ss_credential(profile_id, credential)
     elif module_id == "transport-reality":
-        remove_reality_credential(profile_id, credential, restart_service=not defer_reality_restart)
+        remove_reality_credential(profile_id, credential, restart_service=not defer_reality_restart, reload_caddy=not defer_reality_restart)
     elif module_id in {"transport-hysteria2", "transport-tuic"}:
         remove_quic_credential(module_id, credential)
 
@@ -2379,9 +2467,28 @@ def legacy_connection_inputs(channels: list[str]) -> list[dict[str, Any]]:
     return [{"id": f"connection-{index + 1}-{uuid.uuid4().hex[:6]}", "component": component, "name": manifest(component).get("name", component), "settings": connection_defaults(component)} for index, component in enumerate(validate_channels(channels))]
 
 
+def apply_batched_reality_runtime() -> None:
+    """Validate both consumers before one short Xray restart and one Caddy reload."""
+    config_path = CONFIG_ROOT / "reality" / "config.json"
+    config = load_json(config_path, {})
+    if not isinstance(config, dict):
+        raise RuntimeError("Mihomo Reality server configuration is invalid")
+    apply_reality_config(config_path, config, restart_service=False)
+    rebuild_vless_cdn_snippet()
+    run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
+    firewall_helper = Path("/usr/local/sbin/vps-control-mihomo-vless-firewall")
+    if firewall_helper.is_file():
+        run(str(firewall_helper), "sync", check=True)
+    run("systemctl", "reset-failed", "vps-control-mihomo-reality.service")
+    run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
+    if not service_stably_active("vps-control-mihomo-reality.service"):
+        raise RuntimeError("Mihomo VLESS service did not remain active after applying the profile")
+    run("systemctl", "reload", "caddy.service", check=True)
+
+
 def provision_connections(profile_id: str, definitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     completed: list[dict[str, Any]] = []
-    batch_reality = sum(definition["component"] == "transport-reality" for definition in definitions) > 1
+    batch_reality = any(definition["component"] == "transport-reality" for definition in definitions)
     try:
         for definition in definitions:
             credential = provision(
@@ -2393,10 +2500,7 @@ def provision_connections(profile_id: str, definitions: list[dict[str, Any]]) ->
             )
             completed.append({**definition, "credential": credential})
         if batch_reality:
-            run("systemctl", "reset-failed", "vps-control-mihomo-reality.service")
-            run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
-            if not service_stably_active("vps-control-mihomo-reality.service"):
-                raise RuntimeError("Mihomo VLESS service did not remain active after applying the profile")
+            apply_batched_reality_runtime()
     except Exception:
         for connection in reversed(completed):
             try:
@@ -2409,8 +2513,10 @@ def provision_connections(profile_id: str, definitions: list[dict[str, Any]]) ->
             except Exception:
                 pass
         if batch_reality:
-            run("systemctl", "reset-failed", "vps-control-mihomo-reality.service")
-            run("systemctl", "restart", "vps-control-mihomo-reality.service")
+            try:
+                apply_batched_reality_runtime()
+            except Exception:
+                pass
         raise
     return completed
 
@@ -2432,6 +2538,94 @@ def create_profile_credentials(profile_id: str, channels: list[str]) -> dict[str
     return credentials
 
 
+def reconciliation_report(repair: bool = False) -> dict[str, Any]:
+    saved_profiles = profiles()
+    expected_reality_tags: set[str] = set()
+    expected_route_ids: set[str] = set()
+    expected_quic: dict[str, set[str]] = {"transport-hysteria2": set(), "transport-tuic": set()}
+    for profile in saved_profiles:
+        for connection in profile.get("connections", []):
+            component = str(connection.get("component", ""))
+            credential = connection.get("credential", {})
+            if component == "transport-reality":
+                direct_tag = str(credential.get("direct_tag", ""))
+                if direct_tag:
+                    route_id = direct_tag.removeprefix("mihomo-vless-")
+                    if int(credential.get("port", 0) or 0) > 0:
+                        expected_reality_tags.add(direct_tag)
+                    if credential.get("cdn_enabled"):
+                        expected_reality_tags.add(f"mihomo-vless-cdn-{route_id}")
+                        expected_route_ids.add(route_id)
+                    if credential.get("tls_enabled"):
+                        expected_reality_tags.add(f"mihomo-vless-tls-{route_id}")
+                        expected_route_ids.add(f"tls-{route_id}")
+            elif component in expected_quic and credential.get("instance_id"):
+                expected_quic[component].add(str(credential["instance_id"]))
+
+    reality_path = CONFIG_ROOT / "reality" / "config.json"
+    reality_config = load_json(reality_path, {})
+    managed_inbounds = {
+        str(inbound.get("tag")) for inbound in reality_config.get("inbounds", [])
+        if isinstance(inbound, dict) and str(inbound.get("tag", "")).startswith("mihomo-vless-")
+    } if isinstance(reality_config, dict) else set()
+    actual_routes = {path.stem for path in VLESS_CDN_ROUTE_ROOT.glob("*.json")} if VLESS_CDN_ROUTE_ROOT.exists() else set()
+    orphan_tags = sorted(managed_inbounds - expected_reality_tags)
+    missing_tags = sorted(expected_reality_tags - managed_inbounds)
+    orphan_routes = sorted(actual_routes - expected_route_ids)
+    missing_routes = sorted(expected_route_ids - actual_routes)
+    quic: dict[str, Any] = {}
+    changed_reality = False
+
+    if repair and orphan_tags and isinstance(reality_config, dict):
+        reality_config["inbounds"] = [inbound for inbound in reality_config.get("inbounds", []) if str(inbound.get("tag", "")) not in set(orphan_tags)]
+        apply_reality_config(reality_path, reality_config, restart_service=False)
+        changed_reality = True
+    if repair:
+        for route_id in orphan_routes:
+            (VLESS_CDN_ROUTE_ROOT / f"{route_id}.json").unlink(missing_ok=True)
+            changed_reality = True
+
+    for module_id, expected_ids in expected_quic.items():
+        root = quic_root(module_id) / "credentials"
+        actual_ids = {path.stem for path in root.glob("*.json")} if root.exists() else set()
+        orphan = sorted(actual_ids - expected_ids)
+        missing = sorted(expected_ids - actual_ids)
+        if repair:
+            for instance_id in orphan:
+                (root / f"{instance_id}.json").unlink(missing_ok=True)
+            if orphan:
+                write_quic_runtime(module_id)
+        quic[module_id] = {"orphan_credentials": orphan, "missing_credentials": missing}
+
+    if repair and changed_reality:
+        apply_batched_reality_runtime()
+    services = {}
+    for module_id in sorted(TRANSPORTS):
+        service = SERVICE_BY_MODULE.get(module_id)
+        installed = module_is_installed(module_id)
+        active = bool(service and systemctl_active(service))
+        if repair and installed and service and not active:
+            run("systemctl", "reset-failed", service)
+            run("systemctl", "restart", service)
+            active = systemctl_active(service)
+        services[module_id] = {"installed": installed, "service": service or "", "active": active}
+    issues = len(orphan_tags) + len(missing_tags) + len(orphan_routes) + len(missing_routes)
+    issues += sum(len(value["orphan_credentials"]) + len(value["missing_credentials"]) for value in quic.values())
+    return {"healthy": issues == 0 and all(not value["installed"] or value["active"] for value in services.values()), "repaired": repair, "reality": {"orphan_tags": orphan_tags, "missing_tags": missing_tags, "orphan_routes": orphan_routes, "missing_routes": missing_routes}, "quic": quic, "services": services}
+
+
+@app.get("/api/mihomo/reconciliation", dependencies=[Depends(auth_required)])
+def get_reconciliation() -> dict[str, Any]:
+    return reconciliation_report(False)
+
+
+@app.post("/api/mihomo/reconciliation", dependencies=[Depends(auth_required)])
+@serialized_profile_mutation
+@transactional_profile_mutation
+def repair_reconciliation() -> dict[str, Any]:
+    return reconciliation_report(True)
+
+
 @app.get("/api/mihomo/profiles", dependencies=[Depends(auth_required)])
 def list_profiles() -> dict[str, Any]:
     return {"items": [profile_response(item) for item in profiles()]}
@@ -2440,6 +2634,10 @@ def list_profiles() -> dict[str, Any]:
 @app.post("/api/mihomo/profiles", dependencies=[Depends(auth_required)])
 @serialized_profile_mutation
 def create_profile(payload: ProfileCreate) -> dict[str, Any]:
+    if payload.operation_id:
+        existing = next((entry for entry in profiles() if entry.get("create_operation_id") == payload.operation_id), None)
+        if existing:
+            return profile_response(existing)
     definitions = validate_connection_inputs(payload.connections) if payload.connections is not None else legacy_connection_inputs(payload.channels)
     devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
     device_ids = {device["id"] for device in devices}
@@ -2449,35 +2647,40 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     profile_id = uuid.uuid4().hex[:12]
     write_action(f"profile-create:{profile_id}", f"Создание профиля «{payload.name}»…", progress=15)
     try:
-        connections = provision_connections(profile_id, definitions)
+        with profile_runtime_transaction({definition["component"] for definition in definitions}):
+            connections = provision_connections(profile_id, definitions)
+            item = {
+                "id": profile_id,
+                "name": payload.name.strip(),
+                "connections": connections,
+                "devices": devices,
+                "subscriptions": {device["id"]: secrets.token_urlsafe(32) for device in devices},
+                "routing": routing,
+                "create_operation_id": payload.operation_id or "",
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+            sync_legacy_profile_fields(item)
+            data = profiles()
+            data.append(item)
+            save_profiles(data)
     except Exception as exc:
         write_action(f"profile-create:{profile_id}", str(exc), state="failed", progress=100)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    item = {
-        "id": profile_id,
-        "name": payload.name.strip(),
-        "connections": connections,
-        "devices": devices,
-        "subscriptions": {device["id"]: secrets.token_urlsafe(32) for device in devices},
-        "routing": routing,
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    }
-    sync_legacy_profile_fields(item)
-    data = profiles()
-    data.append(item)
-    save_profiles(data)
     write_action(f"profile-create:{profile_id}", f"Профиль «{item['name']}» создан", state="done", progress=100)
     return profile_response(item)
 
 
 @app.patch("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(auth_required)])
 @serialized_profile_mutation
+@transactional_profile_mutation
 def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     data = profiles()
     item = next((entry for entry in data if entry.get("id") == profile_id), None)
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
+    if payload.operation_id and item.get("last_operation_id") == payload.operation_id:
+        return profile_response(item)
     write_action(f"profile-update:{profile_id}", f"Обновление профиля «{item.get('name', '')}»…", progress=15)
     if payload.name is not None:
         item["name"] = payload.name.strip()
@@ -2494,6 +2697,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
             for device in devices
         }
     if payload.connections is not None:
+        reality_changed = False
         definitions = validate_connection_inputs(payload.connections)
         device_ids = {str(device.get("id")) for device in item.get("devices", [])}
         if any(definition.get("device_id") not in device_ids for definition in definitions):
@@ -2502,7 +2706,9 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         next_ids = {definition["id"] for definition in definitions}
         for connection_id, connection in current_connections.items():
             if connection_id not in next_ids:
-                deprovision(profile_id, connection["component"], connection.get("credential", {}))
+                defer = connection["component"] == "transport-reality"
+                reality_changed = reality_changed or defer
+                deprovision(profile_id, connection["component"], connection.get("credential", {}), defer_reality_restart=defer)
         next_connections: list[dict[str, Any]] = []
         for definition in definitions:
             current_connection = current_connections.get(definition["id"])
@@ -2510,8 +2716,14 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
                 next_connections.append({**definition, "credential": current_connection.get("credential", {})})
             else:
                 if current_connection:
-                    deprovision(profile_id, current_connection["component"], current_connection.get("credential", {}))
-                next_connections.append({**definition, "credential": provision(profile_id, definition["component"], definition["id"], definition.get("settings", {}))})
+                    defer = current_connection["component"] == "transport-reality"
+                    reality_changed = reality_changed or defer
+                    deprovision(profile_id, current_connection["component"], current_connection.get("credential", {}), defer_reality_restart=defer)
+                defer = definition["component"] == "transport-reality"
+                reality_changed = reality_changed or defer
+                next_connections.append({**definition, "credential": provision(profile_id, definition["component"], definition["id"], definition.get("settings", {}), defer_reality_restart=defer)})
+        if reality_changed:
+            apply_batched_reality_runtime()
         item["connections"] = next_connections
         sync_legacy_profile_fields(item)
     device_ids = {str(device.get("id")) for device in item.get("devices", [])}
@@ -2539,6 +2751,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         item.clear()
         item.update(normalized)
     item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    item["last_operation_id"] = payload.operation_id or ""
     save_profiles(data)
     write_action(f"profile-update:{profile_id}", f"Профиль «{item['name']}» обновлён", state="done", progress=100)
     return profile_response(item)
@@ -2546,16 +2759,20 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
 
 @app.delete("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(auth_required)])
 @serialized_profile_mutation
+@transactional_profile_mutation
 def delete_profile(profile_id: str) -> dict[str, Any]:
     data = profiles()
     item = next((entry for entry in data if entry.get("id") == profile_id), None)
     if not item:
-        raise HTTPException(status_code=404, detail="Profile not found")
+        return {"removed": profile_id, "already_removed": True}
     write_action(f"profile-delete:{profile_id}", f"Удаление профиля «{item.get('name', '')}»…", progress=20)
     errors: list[str] = []
+    reality_changed = False
     for connection in item.get("connections", []):
         try:
-            deprovision(profile_id, connection.get("component", ""), connection.get("credential", {}))
+            defer = connection.get("component") == "transport-reality"
+            reality_changed = reality_changed or defer
+            deprovision(profile_id, connection.get("component", ""), connection.get("credential", {}), defer_reality_restart=defer)
         except Exception as exc:
             errors.append(f"{connection.get('name') or connection.get('component')}: {exc}")
     if errors:
@@ -2565,6 +2782,8 @@ def delete_profile(profile_id: str) -> dict[str, Any]:
         # administrator can retry deletion instead of losing track of a live
         # credential that failed to deprovision.
         raise HTTPException(status_code=500, detail=f"Не удалось полностью удалить профиль: {detail}")
+    if reality_changed:
+        apply_batched_reality_runtime()
     save_profiles([entry for entry in data if entry.get("id") != profile_id])
     write_action(f"profile-delete:{profile_id}", "Профиль удалён", state="done", progress=100)
     return {"removed": profile_id}
@@ -2767,12 +2986,13 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"):
         routing[key] = bool(profile_routing.get(key, False))
     mode = str(routing.get("mode", "rule"))
+    dns = dns_settings()
     lines = [
         "mixed-port: 7890",
         "allow-lan: false",
         f"mode: {mode}",
         "log-level: warning",
-        "ipv6: false",
+        f"ipv6: {str(bool(dns.get('ipv6', False))).lower()}",
         "tun:",
         # A portable profile must start without a privileged TUN driver.
         # Desktop clients can enable TUN explicitly after import; mixed-port
@@ -2786,7 +3006,6 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     ]
     if routing.get("direct_games_enabled", False):
         lines.insert(4, "find-process-mode: strict")
-    dns = dns_settings()
     lines += [
         "dns:",
         "  enable: true",
@@ -2838,6 +3057,21 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def validate_rendered_profile(config: str) -> None:
+    if not CORE_BIN.is_file():
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", encoding="utf-8", delete=False) as handle:
+        handle.write(config)
+        temp_path = handle.name
+    try:
+        CORE_HOME.mkdir(parents=True, exist_ok=True)
+        result = run(str(CORE_BIN), "-t", "-d", str(CORE_HOME), "-f", temp_path)
+        if result.returncode:
+            raise HTTPException(status_code=500, detail=(result.stderr or result.stdout).strip() or "Mihomo rejected generated config")
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+
+
 @app.get(
     "/api/mihomo/profiles/{profile_id}/config",
     response_class=PlainTextResponse,
@@ -2852,20 +3086,7 @@ def profile_config(profile_id: str, device_id: str | None = None) -> str:
     if selected_device not in {str(device.get("id")) for device in normalized.get("devices", [])}:
         raise HTTPException(status_code=404, detail="Profile device not found")
     config = render_profile(normalized, selected_device)
-    if CORE_BIN.is_file():
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", encoding="utf-8", delete=False) as handle:
-            handle.write(config)
-            temp_path = handle.name
-        try:
-            CORE_HOME.mkdir(parents=True, exist_ok=True)
-            result = run(str(CORE_BIN), "-t", "-d", str(CORE_HOME), "-f", temp_path)
-            if result.returncode:
-                raise HTTPException(
-                    status_code=500,
-                    detail=(result.stderr or result.stdout).strip() or "Mihomo rejected generated config",
-                )
-        finally:
-            Path(temp_path).unlink(missing_ok=True)
+    validate_rendered_profile(config)
     return config
 
 
@@ -2908,6 +3129,7 @@ def public_profile_subscription(token: str) -> PlainTextResponse:
     if not selected_profile:
         raise HTTPException(status_code=404, detail="Subscription not found")
     config = render_profile(selected_profile, selected_device)
+    validate_rendered_profile(config)
     return PlainTextResponse(
         config,
         media_type="text/yaml; charset=utf-8",
