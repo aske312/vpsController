@@ -466,6 +466,7 @@ export function MihomoPage({
   const [readyDevices, setReadyDevices] = useState<ReadyDevice[]>([]);
   const [presetDialog, setPresetDialog] = useState(false);
   const [presetDraft, setPresetDraft] = useState<ProfilePreset[]>([]);
+  const [presetEditorIndex, setPresetEditorIndex] = useState(0);
 
   useEffect(() => {
     profileCanvasRef.current?.scrollTo({ top: 0, behavior: "auto" });
@@ -1098,12 +1099,14 @@ export function MihomoPage({
 
   function openPresetSettings() {
     setPresetDraft((routingPolicy?.presets || []).map((preset) => ({ ...preset, components: preset.components.map((item) => ({ ...item })) })));
+    setPresetEditorIndex(0);
     setPresetDialog(true);
   }
 
   function addPresetDraft() {
     if (presetDraft.length >= 12) return;
     const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID().slice(0, 8) : String(Date.now()).slice(-8);
+    setPresetEditorIndex(presetDraft.length);
     setPresetDraft((current) => [...current, {
       id: `preset-${suffix}`,
       name: `Новый пресет ${current.length + 1}`,
@@ -1114,7 +1117,9 @@ export function MihomoPage({
   }
 
   function removePresetDraft(index: number) {
-    setPresetDraft((current) => current.length > 1 ? current.filter((_, itemIndex) => itemIndex !== index) : current);
+    if (presetDraft.length <= 1) return;
+    setPresetEditorIndex((active) => Math.max(0, active > index ? active - 1 : Math.min(active, presetDraft.length - 2)));
+    setPresetDraft((current) => current.filter((_, itemIndex) => itemIndex !== index));
   }
 
   function togglePresetComponent(presetIndex: number, option: ProfilePreset["components"][number], checked: boolean) {
@@ -1569,7 +1574,12 @@ export function MihomoPage({
           </header>
           <div className="mihomoPresetIntro"><span>01</span><p><b>Каждый пресет — независимый шаблон.</b><small>Название отображается при создании профиля. Стратегия управляет выбором канала, а список ниже определяет состав подключений.</small></p></div>
           <div className="mihomoPresetEditor">
-            {presetDraft.map((preset, index) => <article key={preset.id} className="mihomoPresetCard">
+            <aside className="mihomoPresetRail">
+              <header><b>Пресеты</b><small>Выберите шаблон</small></header>
+              <div>{presetDraft.map((preset, index) => <button type="button" key={preset.id} className={presetEditorIndex === index ? "is-active" : ""} onClick={() => setPresetEditorIndex(index)}><span>{String(index + 1).padStart(2, "0")}</span><p><b>{preset.name}</b><small>{preset.components.length} каналов · {preset.strategy === "url-test" ? "по задержке" : preset.strategy === "select" ? "вручную" : "резерв"}</small></p><i>›</i></button>)}</div>
+              <button type="button" className="mihomoPresetRailAdd" onClick={addPresetDraft} disabled={presetDraft.length >= 12}>+ Добавить пресет</button>
+            </aside>
+            {presetDraft[presetEditorIndex] && ((preset, index) => <article key={preset.id} className="mihomoPresetCard mihomoPresetCanvas">
               <header>
                 <span>{String(index + 1).padStart(2, "0")}</span>
                 <label><small>Название пресета</small><input value={preset.name} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></label>
@@ -1587,7 +1597,7 @@ export function MihomoPage({
                   })}</div>
                 </section>)}
               </div>
-            </article>)}
+            </article>)(presetDraft[presetEditorIndex], presetEditorIndex)}
           </div>
           <footer><p>{presetDraft.some((item) => !item.components.length) ? "В каждом пресете нужен хотя бы один канал" : "Изменения применятся только к новым конфигурациям"}</p><button type="button" className="ghostButton" onClick={() => setPresetDialog(false)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "presets" || presetDraft.some((item) => !item.components.length)}>Сохранить пресеты</button></footer>
         </form>
