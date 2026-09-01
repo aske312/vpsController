@@ -2374,11 +2374,8 @@ def reality_profile_stats(profile_id: str, connection_id: str | None = None) -> 
     return {"active": True, "rx_bytes": downlink, "tx_bytes": uplink}
 
 
-@app.get("/api/mihomo/profiles/{profile_id}/stats", dependencies=[Depends(auth_required)])
-def profile_stats(profile_id: str) -> dict[str, Any]:
-    item = next((entry for entry in profiles() if entry.get("id") == profile_id), None)
-    if not item:
-        raise HTTPException(status_code=404, detail="Profile not found")
+def profile_stats_payload(item: dict[str, Any]) -> dict[str, Any]:
+    profile_id = str(item.get("id", ""))
     connections: dict[str, Any] = {}
     wg_dump: dict[str, dict[str, Any]] | None = None
     awg_dump: dict[str, dict[str, Any]] | None = None
@@ -2417,6 +2414,20 @@ def profile_stats(profile_id: str) -> dict[str, Any]:
         device_summaries[device_id] = {"configured": len(rows), "active": sum(1 for row in rows if row.get("active") or row.get("endpoint") or int(row.get("active_connections", 0) or 0) > 0), "rx_bytes": sum(int(row.get("rx_bytes", 0) or 0) for row in rows), "tx_bytes": sum(int(row.get("tx_bytes", 0) or 0) for row in rows), "last_handshake_age_s": min(ages) if ages else None, "latency_ms": min(latencies) if latencies else None}
     latencies = [float(value["latency_ms"]) for value in values if value.get("latency_ms") is not None]
     return {"id": profile_id, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None, "latency_ms": min(latencies) if latencies else None}}
+
+
+@app.get("/api/mihomo/stats", dependencies=[Depends(auth_required)])
+def profiles_stats() -> dict[str, Any]:
+    """Return all profile counters in one request for overview consumers."""
+    return {"items": [profile_stats_payload(item) for item in profiles()]}
+
+
+@app.get("/api/mihomo/profiles/{profile_id}/stats", dependencies=[Depends(auth_required)])
+def profile_stats(profile_id: str) -> dict[str, Any]:
+    item = next((entry for entry in profiles() if entry.get("id") == profile_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return profile_stats_payload(item)
 
 
 def provision(profile_id: str, module_id: str, connection_id: str = "default", settings: dict[str, Any] | None = None, defer_reality_restart: bool = False) -> dict[str, Any]:

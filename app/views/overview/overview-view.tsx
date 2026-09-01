@@ -98,6 +98,11 @@ type MihomoProfile = {
   updated_at: string;
 };
 
+type MihomoProfileStats = {
+  id: string;
+  summary: { rx_bytes: number; tx_bytes: number };
+};
+
 type DirectProtocolStatus = {
   protocol: ProtocolId;
   interface?: string;
@@ -223,6 +228,7 @@ export function OverviewDashboard({
   const [mihomoStatus, setMihomoStatus] = useState<MihomoStatus | null>(null);
   const [mihomoModules, setMihomoModules] = useState<MihomoModule[]>([]);
   const [mihomoProfiles, setMihomoProfiles] = useState<MihomoProfile[]>([]);
+  const [mihomoProfileStats, setMihomoProfileStats] = useState<Record<string, MihomoProfileStats["summary"]>>({});
   const [mihomoSummaryError, setMihomoSummaryError] = useState("");
   const [directStatuses, setDirectStatuses] = useState<Partial<Record<ProtocolId, DirectProtocolStatus>>>({});
   const [directStatusFailures, setDirectStatusFailures] = useState<Partial<Record<ProtocolId, boolean>>>({});
@@ -242,25 +248,29 @@ export function OverviewDashboard({
       setMihomoStatus(null);
       setMihomoModules([]);
       setMihomoProfiles([]);
+      setMihomoProfileStats({});
       setMihomoSummaryError("");
       return;
     }
     try {
       const headers = { Authorization: `Basic ${token}` };
-      const [statusResponse, modulesResponse, profilesResponse] = await Promise.all([
+      const [statusResponse, modulesResponse, profilesResponse, statsResponse] = await Promise.all([
         fetch("/api/mihomo/status", { headers }),
         fetch("/api/mihomo/modules", { headers }),
         fetch("/api/mihomo/profiles", { headers }),
+        fetch("/api/mihomo/stats", { headers }),
       ]);
       if (!statusResponse.ok || !modulesResponse.ok || !profilesResponse.ok) throw new Error("summary unavailable");
-      const [status, modules, profiles] = await Promise.all([
+      const [status, modules, profiles, stats] = await Promise.all([
         statusResponse.json() as Promise<MihomoStatus>,
         modulesResponse.json() as Promise<{ items: MihomoModule[] }>,
         profilesResponse.json() as Promise<{ items: MihomoProfile[] }>,
+        statsResponse.ok ? statsResponse.json() as Promise<{ items: MihomoProfileStats[] }> : Promise.resolve({ items: [] }),
       ]);
       setMihomoStatus(status);
       setMihomoModules(modules.items || []);
       setMihomoProfiles(profiles.items || []);
+      setMihomoProfileStats(Object.fromEntries((stats.items || []).map((item) => [item.id, item.summary])));
       setMihomoSummaryError("");
     } catch {
       setMihomoSummaryError("Сводка Mihomo временно недоступна");
@@ -369,8 +379,9 @@ export function OverviewDashboard({
     const rate = directRates[protocol] || { rx: 0, tx: 0 };
     const clientRx = protocolClients.reduce((sum, client) => sum + (client.rx_bps || 0), 0);
     const clientTx = protocolClients.reduce((sum, client) => sum + (client.tx_bps || 0), 0);
-    const rx = Math.max(rate.rx, clientRx);
-    const tx = Math.max(rate.tx, clientTx);
+    const hasClientRates = protocolClients.some((client) => client.rx_bps !== undefined || client.tx_bps !== undefined);
+    const rx = hasClientRates ? clientRx : rate.rx;
+    const tx = hasClientRates ? clientTx : rate.tx;
     const serviceActive = statusFailed ? null : status ? Boolean(status.service_active ?? status.active) : null;
     const configured = statusFailed ? null : status ? Boolean(status.interface || status.address || status.listen_port || status.unit) : null;
     const trafficNow = rx + tx > 64;
@@ -439,6 +450,7 @@ export function OverviewDashboard({
                     <div className="overviewManagedProfileList">
                       {mihomoProfiles.map((profile) => {
                         const assignedComponents = [...new Set(profile.connections?.length ? profile.connections.map((connection) => connection.component) : profile.channels)];
+                        const traffic = mihomoProfileStats[profile.id];
                         return <div className="overviewManagedProfileRow" key={profile.id}>
                           <span className="profileDot" />
                           <p><b>{profile.name}</b><small>{profile.connections?.length || profile.channels.length} подключений</small></p>
@@ -446,6 +458,7 @@ export function OverviewDashboard({
                             {assignedComponents.map((component) => <span key={component} title={component.replace("transport-", "")}>{component === "transport-reality" ? "VLESS" : channelShort[component] || component.replace("transport-", "").toUpperCase()}</span>)}
                             {!assignedComponents.length && <em>—</em>}
                           </div>
+                          <span className="overviewManagedTraffic"><b>↓ {traffic ? bytes(traffic.rx_bytes) : "—"}</b><small>↑ {traffic ? bytes(traffic.tx_bytes) : "—"}</small></span>
                         </div>;
                       })}
                       {!mihomoProfiles.length && <p className="overviewEmpty">Профили ещё не созданы.</p>}

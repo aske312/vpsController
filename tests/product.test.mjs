@@ -1433,6 +1433,22 @@ test("Mihomo profile lifecycle is transactional, idempotent and reconciled", asy
   assert.match(uninstall, /vps-control-mihomo-tuic\.service/);
 });
 
+test("overview aggregates network usage for Mihomo profiles and direct protocols", async () => {
+  const [manager, overview, styles] = await Promise.all([
+    read("protocol-images/mihomo/manager.py"),
+    read("app/views/overview/overview-view.tsx"),
+    readStyles(),
+  ]);
+  assert.match(manager, /@app\.get\("\/api\/mihomo\/stats"/);
+  assert.match(manager, /profile_stats_payload\(item\)/);
+  assert.match(overview, /fetch\("\/api\/mihomo\/stats"/);
+  assert.match(overview, /mihomoProfileStats\[profile\.id\]/);
+  assert.match(overview, /protocolClients\.reduce\(\(sum, client\) => sum \+ \(client\.rx_bps \|\| 0\)/);
+  assert.match(overview, /hasClientRates \? clientRx : rate\.rx/);
+  assert.match(styles, /\.overviewManagedTraffic/);
+  assert.doesNotMatch(styles, /\.overviewRoute\.direct \.overviewDirectTraffic,\.overviewRoute\.direct \.overviewDirectLatency \{ display:none/);
+});
+
 test("SSH management does not start socket activation and the daemon together", async () => {
   const [api, manager] = await Promise.all([
     read("api/main.py"), read("scripts/vps-control.sh"),
