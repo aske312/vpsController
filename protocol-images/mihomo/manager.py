@@ -794,6 +794,12 @@ TUNNEL_GAME_PROCESSES: dict[str, list[str]] = {
     "battlefront2": ["starwarsbattlefrontii.exe"],
 }
 
+# The Games rule is useful without hand-picking dozens of titles: games known
+# to work from Russian IPs bypass the tunnel, while explicitly restricted
+# titles stay protected. Explicit per-profile selections replace these sets.
+DEFAULT_TUNNEL_GAMES = tuple(TUNNEL_GAME_PROCESSES)
+DEFAULT_DIRECT_GAMES = tuple(game_id for game_id in DIRECT_GAME_PROCESSES if game_id not in TUNNEL_GAME_PROCESSES)
+
 DIRECT_P2P_PROCESSES: dict[str, list[str]] = {
     "qbittorrent": ["qbittorrent.exe", "qbittorrent"],
     "transmission": ["transmission-qt.exe", "transmission-gtk", "transmission-daemon"],
@@ -880,8 +886,9 @@ def udp_tunnel_exclusion_rules(routing: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(rules))
 
 
-def process_rules(routing: dict[str, Any], selection_key: str, custom_key: str, catalog: dict[str, list[str]], target: str) -> list[str]:
-    selected = {value.strip().lower() for value in str(routing.get(selection_key, "")).replace("\r", "").replace("\n", ",").split(",") if value.strip()}
+def process_rules(routing: dict[str, Any], selection_key: str, custom_key: str, catalog: dict[str, list[str]], target: str, default_ids: tuple[str, ...] = ()) -> list[str]:
+    raw_selection = str(routing.get(selection_key, "")).replace("\r", "").replace("\n", ",").strip()
+    selected = set(default_ids) if not raw_selection or raw_selection == "@default" else {value.strip().lower() for value in raw_selection.split(",") if value.strip()}
     processes: list[str] = []
     for game_id in selected:
         processes.extend(catalog.get(game_id, []))
@@ -899,7 +906,7 @@ def process_rules(routing: dict[str, Any], selection_key: str, custom_key: str, 
 def tunnel_game_rules(routing: dict[str, Any]) -> list[str]:
     if not routing.get("direct_games_enabled", False):
         return []
-    return process_rules(routing, "tunnel_games", "tunnel_game_processes", TUNNEL_GAME_PROCESSES, "GATE.312")
+    return process_rules(routing, "tunnel_games", "tunnel_game_processes", TUNNEL_GAME_PROCESSES, "GATE.312", DEFAULT_TUNNEL_GAMES)
 
 
 def direct_game_rules(routing: dict[str, Any]) -> list[str]:
@@ -912,7 +919,7 @@ def direct_game_rules(routing: dict[str, Any]) -> list[str]:
     rules: list[str] = [*udp_tunnel_exclusion_rules(routing), "NETWORK,UDP,DIRECT"] if direct_udp else []
     if not direct_all:
         return rules
-    rules.extend(process_rules(routing, "direct_games", "direct_game_processes", DIRECT_GAME_PROCESSES, "DIRECT"))
+    rules.extend(process_rules(routing, "direct_games", "direct_game_processes", DIRECT_GAME_PROCESSES, "DIRECT", DEFAULT_DIRECT_GAMES))
     return rules
 
 

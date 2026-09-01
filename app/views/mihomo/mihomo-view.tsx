@@ -216,6 +216,13 @@ const gameRoutingCatalog = [...new Map([
   ...directGameCatalog.map((game) => ({ ...game, family: "Обычный маршрут" })),
   ...tunnelGameCatalog,
 ].map((game) => [game.id, game])).values()];
+const defaultTunnelGameIds = new Set(tunnelGameCatalog.map((game) => game.id));
+const defaultDirectGameIds = new Set(directGameCatalog.map((game) => game.id).filter((id) => !defaultTunnelGameIds.has(id)));
+
+function selectedGameIds(value: unknown, defaults: Set<string>) {
+  const raw = String(value ?? "").trim();
+  return !raw || raw === "@default" ? new Set(defaults) : new Set(raw.split(",").map((item) => item.trim()).filter(Boolean));
+}
 
 const udpExclusionCatalog = [
   { id: "dns", code: "DNS", name: "Защищённый DNS" },
@@ -634,8 +641,8 @@ export function MihomoPage({
   }
 
   function setGameRoute(gameId: string, route: "direct" | "tunnel" | "off") {
-    const direct = new Set(String(routingDraft.direct_games || "").split(",").map((value) => value.trim()).filter(Boolean));
-    const tunnel = new Set(String(routingDraft.tunnel_games || "").split(",").map((value) => value.trim()).filter(Boolean));
+    const direct = selectedGameIds(routingDraft.direct_games, defaultDirectGameIds);
+    const tunnel = selectedGameIds(routingDraft.tunnel_games, defaultTunnelGameIds);
     direct.delete(gameId);
     tunnel.delete(gameId);
     if (route === "direct") direct.add(gameId);
@@ -1107,7 +1114,7 @@ export function MihomoPage({
   const selectedRuleText = selectedRuleList ? (selectedRuleValue === "@default" ? selectedRuleList.default_rules : selectedRuleValue) : "";
   const selectedUdpExclusions = new Set(String(routingDraft.udp_tunnel_exclusions || "").split(",").filter(Boolean));
   const selectedP2pClients = new Set(String(routingDraft.direct_p2p_clients || "").split(",").filter(Boolean));
-  const directGames = new Set(String(routingDraft.direct_games || "").split(",").filter(Boolean));
+  const directGames = selectedGameIds(routingDraft.direct_games, defaultDirectGameIds);
   const normalizedGameSearch = gameSearch.trim().toLocaleLowerCase("ru");
   const visibleGames = gameRoutingCatalog.filter((game) => {
     const direct = directGames.has(game.id);
@@ -1328,7 +1335,7 @@ export function MihomoPage({
                 </div>
                 <label className="mihomoCustomGames"><span><b>Дополнительные P2P-процессы</b><small>Имена процессов напрямую, по одному на строку.</small></span><textarea rows={5} value={String(routingDraft.direct_p2p_processes || "")} placeholder={"client.exe\np2p-client"} onChange={(event) => updateRoutingDraft("direct_p2p_processes", event.target.value)} /></label>
               </> : activeRuleList === "direct_games_enabled" ? <>
-                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Маршруты игр</h3><p>Нажмите на игру, чтобы переключить её между прямым маршрутом и GATE.312. При включённом правиле отмеченные игры идут напрямую.</p></div><span>{String(routingDraft.direct_games || "").split(",").filter(Boolean).length} напрямую</span></header>
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PROCESS RULES</p><h3>Маршруты игр</h3><p>Игры без ограничений для российских IP идут напрямую. Игры с известными ограничениями заранее направлены через GATE.312; любое направление можно изменить.</p></div><span>{directGames.size} напрямую</span></header>
                 <div className="mihomoCatalogToolbar"><input aria-label="Поиск игр" value={gameSearch} placeholder="Найти игру…" onChange={(event) => setGameSearch(event.target.value)} /><nav>{([['all', 'Все'], ['direct', 'Напрямую'], ['vpn', 'VPN'], ['restricted', 'Ограничения РФ']] as const).map(([value, label]) => <button type="button" key={value} className={gameFilter === value ? "is-active" : ""} onClick={() => setGameFilter(value)}>{label}</button>)}</nav><span>{visibleGames.length} из {gameRoutingCatalog.length}</span></div>
                 <div className="mihomoGameCatalog mihomoLargeCatalog">
                   {visibleGames.map((game) => { const direct = directGames.has(game.id); return <button type="button" key={game.id} className={direct ? "is-selected" : ""} aria-pressed={direct} title={game.family} onClick={() => setGameRoute(game.id, direct ? "tunnel" : "direct")}><span>{game.code}</span><b>{game.name}</b><i>{direct ? "Напрямую" : "Через VPN"}</i></button>; })}
