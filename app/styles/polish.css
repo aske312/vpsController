@@ -220,9 +220,21 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
   overflow:hidden;
 }
 
+/* Preset blueprints are a full workspace as well: the compact 620px action
+   dialog clips transport names and forces a horizontal scrollbar. */
+.mihomoDialog.mihomoPresetDialog {
+  width:min(1500px,calc(100vw - 48px));
+  height:min(940px,calc(100dvh - 48px));
+  max-width:none;
+  max-height:none;
+  overflow:hidden;
+}
+
 @media (max-width:860px) {
   .mihomoDialogBackdrop.mihomoProfileBackdrop { padding:0 !important; }
   .mihomoProfileDialog { width:100%; height:100dvh; max-width:none; max-height:none; border-radius:0 !important; }
+  .mihomoDialogBackdrop.mihomoPresetBackdrop { padding:0 !important; }
+  .mihomoDialog.mihomoPresetDialog { width:100%; height:100dvh; border-radius:0 !important; }
 }
 
 .standardConfirmDialog {
