@@ -1500,4 +1500,6 @@ test("Mihomo provides verified Hysteria2 and TUIC v5 transports", async () => {
   assert.match(view, /Hysteria2/);
   assert.match(view, /TUIC v5/);
   assert.match(installer, /asset_digest[\s\S]*sha256sum -c -/);
+  assert.match(installer, /quic\/hysteria2\/config\.json[\s\S]*quic\/tuic\/config\.json/);
+  assert.match(installer, /"\$candidate" check -c "\$existing_config"/);
 });

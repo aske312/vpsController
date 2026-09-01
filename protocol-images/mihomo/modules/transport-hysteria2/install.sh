@@ -38,7 +38,12 @@ base="sing-box-${version}-linux-${arch}"
 curl -fsSL --retry 4 "$asset_url" -o "$tmp/sing-box.tgz"
 printf '%s  %s\n' "$asset_digest" "$tmp/sing-box.tgz" | sha256sum -c -
 tar -xzf "$tmp/sing-box.tgz" -C "$tmp"
-install -m 0755 "$tmp/$base/sing-box" /usr/local/bin/sing-box
+candidate="$tmp/$base/sing-box"
+for existing_config in /etc/vps-control/mihomo/quic/hysteria2/config.json /etc/vps-control/mihomo/quic/tuic/config.json; do
+  [[ -s "$existing_config" ]] || continue
+  "$candidate" check -c "$existing_config"
+done
+install -m 0755 "$candidate" /usr/local/bin/sing-box
 [[ "${SINGBOX_UPDATE_ONLY:-0}" == 1 ]] && exit 0
 root="/etc/vps-control/mihomo/quic"
 install -d -m 0700 "$root/$MODULE/credentials"
