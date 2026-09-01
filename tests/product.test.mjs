@@ -203,6 +203,10 @@ test("operational pages keep their artwork, 70/30 workspace and real country fla
     assert.match(styles, new RegExp(asset.replace(".", "\\.")));
   }
   assert.match(styles, /\.overviewNodeWorkspace\s*\{[\s\S]*?grid-template-columns:minmax\(0,8fr\) minmax\(260px,2fr\)/);
+  assert.match(styles, /\.overviewFlow \{ width:min\(1180px,100%\)/);
+  const overview = await read("app/views/overview/overview-view.tsx");
+  assert.match(overview, /"transport-hysteria2": "HY2"/);
+  assert.match(overview, /"transport-tuic": "TUIC"/);
   assert.match(workspace, /function CountryFlag/);
   assert.match(workspace, /<svg viewBox="0 0 27 18"/);
   assert.match(workspace, /country === "nl"/);

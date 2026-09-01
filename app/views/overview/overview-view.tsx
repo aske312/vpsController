@@ -137,6 +137,8 @@ const channelShort: Record<string, string> = {
   "transport-wg": "WG",
   "transport-reality": "VL",
   "transport-shadowsocks": "SS",
+  "transport-hysteria2": "HY2",
+  "transport-tuic": "TUIC",
 };
 
 const directShort: Record<ProtocolId, string> = {
@@ -177,6 +179,8 @@ const channelAliases: Record<string, string[]> = {
   "transport-wg": ["transport-wg", "wg", "wireguard"],
   "transport-reality": ["transport-reality", "vrx", "reality", "vlessreality", "vlessrealityxhttp"],
   "transport-shadowsocks": ["transport-shadowsocks", "ss", "shadowsocks"],
+  "transport-hysteria2": ["transport-hysteria2", "hysteria2", "hy2"],
+  "transport-tuic": ["transport-tuic", "tuic"],
 };
 
 function valueMatchesChannel(value: string, module: MihomoModule) {
@@ -390,9 +394,9 @@ export function OverviewDashboard({
             <h1>Доступ и маршруты</h1>
           </div>
           <div className="overviewTopologyStats">
-            <span><small>CONFIGURED</small><strong>{totalAccessObjects}</strong></span>
+            <span><small>ACCESS OBJECTS</small><strong>{totalAccessObjects}</strong></span>
             {mihomoInstalled && <span className="violet"><small>PROFILES</small><strong>{profileCount}</strong></span>}
-            {mihomoInstalled && <span className="violet"><small>CREDENTIALS</small><strong>{mihomoStatus?.credentials || 0}</strong></span>}
+            {mihomoInstalled && <span className="violet"><small>CHANNELS</small><strong>{installedMihomoChannels.length}</strong></span>}
             <span className={routesInUse ? "cyan" : ""}><small>ROUTES IN USE</small><strong>{routesInUse}</strong></span>
           </div>
         </header>
