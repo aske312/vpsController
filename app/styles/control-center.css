@@ -225,8 +225,13 @@
 .overviewAccess dl { margin-top:10px; }
 .overviewRouteStack { align-content:start; }
 .overviewRoute { background:rgba(5,13,21,.84); backdrop-filter:blur(10px); }
+.overviewRoute.mihomo > header { min-height:56px; padding:9px 12px; }
+.overviewRoute.mihomo .overviewRouteFacts span { padding:7px 10px; }
 .overviewMihomoBody { grid-template-columns:minmax(190px,.55fr) minmax(420px,1.45fr); }
-.overviewChannelList > div { grid-template-columns:42px minmax(0,1fr) auto; min-height:38px; }
+.overviewRoute.mihomo .overviewProfiles,.overviewRoute.mihomo .overviewChannels { padding-top:7px; padding-bottom:7px; }
+.overviewRoute.mihomo .overviewChannelList { grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; }
+.overviewChannelList > div { grid-template-columns:42px minmax(0,1fr) auto; min-height:36px; }
+.overviewRoute.mihomo .overviewChannelList > div:nth-child(2) { border-top:0; }
 .overviewChannelList .overviewProtocolMark { width:38px; height:28px; white-space:nowrap; overflow:hidden; }
 .overviewExit { display:none !important; }
 
@@ -238,6 +243,8 @@
 @media (max-width:900px) {
   .overviewFlow { grid-template-columns:105px minmax(0,1fr) !important; }
   .overviewMihomoBody { grid-template-columns:1fr; }
+  .overviewRoute.mihomo .overviewChannelList { grid-template-columns:1fr; }
+  .overviewRoute.mihomo .overviewChannelList > div:nth-child(2) { border-top:1px solid rgba(105,135,160,.09); }
 }
 @media (max-width:680px) {
   .overviewFlow { grid-template-columns:1fr !important; }
