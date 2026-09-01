@@ -16,6 +16,7 @@ import subprocess
 import threading
 import time
 import urllib.parse
+import urllib.request
 import uuid
 import platform
 from concurrent.futures import ThreadPoolExecutor
@@ -111,6 +112,10 @@ VLESS_CDN_SNIPPET = Path("/etc/caddy/vps-control.d/vless-cdn.caddy")
 MIHOMO_VLESS_CDN_ROUTES = Path("/etc/vps-control/mihomo/reality/caddy-routes")
 VLESS_CDN_PORT = int(os.getenv("VLESS_CDN_PORT", "10087"))
 VLESS_TLS_PORT = int(os.getenv("VLESS_TLS_PORT", "10088"))
+HYSTERIA2_DIR = Path("/etc/vps-control/hysteria2")
+HYSTERIA2_SETTINGS = HYSTERIA2_DIR / "settings.json"
+HYSTERIA2_USERS = HYSTERIA2_DIR / "users.json"
+HYSTERIA2_CONFIG = HYSTERIA2_DIR / "config.yaml"
 AWG_PROFILE = {
     "Jc": os.getenv("AWG_JC", "6"), "Jmin": os.getenv("AWG_JMIN", "8"), "Jmax": os.getenv("AWG_JMAX", "80"),
     "S1": os.getenv("AWG_S1", "64"), "S2": os.getenv("AWG_S2", "112"),
@@ -236,14 +241,14 @@ def run_with_input(args: list[str], value: str) -> str:
 
 
 def cached_resource_availability(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"],
 ) -> dict:
     cached = resource_check_cache.get(protocol)
     return {key: value for key, value in (cached or {}).items() if not key.startswith("_")}
 
 
 def check_resource_availability(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"],
 ) -> dict:
     cached = resource_check_cache.get(protocol)
     if not resource_check_lock.acquire(blocking=False):
@@ -439,9 +444,22 @@ def shadowsocks_connections(port: int) -> int:
     return shadowsocks_connection_details(port)[0]
 
 
+def hysteria2_stats() -> tuple[dict[str, dict], dict[str, int]]:
+    def request(path: str) -> dict:
+        try:
+            call = urllib.request.Request(f"http://127.0.0.1:18082{path}", headers={"Authorization": "vps-control-local"})
+            with urllib.request.urlopen(call, timeout=2) as response:
+                value = json.loads(response.read(1024 * 1024))
+                return value if isinstance(value, dict) else {}
+        except (OSError, ValueError, json.JSONDecodeError):
+            return {}
+    return request("/traffic"), request("/online")
+
+
 def stream_proxy_dump() -> list[dict]:
     peers = []
     xray_activity = recent_xray_activity()
+    hysteria_traffic, hysteria_online = hysteria2_stats()
     for item in read_clients():
         protocol = item.get("protocol")
         if protocol == "shadowsocks":
@@ -454,6 +472,15 @@ def stream_proxy_dump() -> list[dict]:
             email = f'{item.get("id", "")}@312.net'
             rx_bytes, tx_bytes, handshake_age, rx_bps, tx_bps = xray_user_stats(email, xray_activity.get(email))
             active_connections = 1 if handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S else 0
+        elif protocol == "hysteria2":
+            active = run("systemctl", "is-active", "vps-control-hysteria2.service") == "active"
+            address = f'{item.get("domain") or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{item.get("port", 8443)}'
+            counters = hysteria_traffic.get(str(item.get("id", "")), {})
+            rx_bytes, tx_bytes = int(counters.get("rx", 0) or 0), int(counters.get("tx", 0) or 0)
+            active_connections = int(hysteria_online.get(str(item.get("id", "")), 0) or 0)
+            handshake_age, rx_bps, tx_bps = stream_sample(f'hy2:{item.get("id", "")}', rx_bytes, tx_bytes)
+            if not active_connections:
+                handshake_age = None
         else:
             continue
         if protocol == "shadowsocks":
@@ -2521,7 +2548,7 @@ class ClientConnectionSettings(BaseModel):
 
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"]
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"]
     vless_routes: list[Literal["direct", "tls", "cdn"]] | None = None
     settings: ClientConnectionSettings = Field(default_factory=ClientConnectionSettings)
 
@@ -2549,6 +2576,11 @@ class ProtocolSettingsUpdate(BaseModel):
     tls_domain: str | None = Field(default=None, max_length=253)
     tls_transport: Literal["websocket", "xhttp", "httpupgrade", "grpc"] | None = None
     tls_xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
+    port: int | None = Field(default=None, ge=1024, le=65535)
+    tls_mode: Literal["pinned", "acme"] | None = None
+    domain: str | None = Field(default=None, max_length=253)
+    obfs_enabled: bool | None = None
+    obfs_password: str | None = Field(default=None, max_length=128)
 
 
 def configure_vless_transport(stream: dict, transport: str, path: str = "/") -> None:
@@ -2938,6 +2970,39 @@ def append_peer(config: Path, client_id: str, public_key: str, psk: str, address
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
     client_id = secrets.token_hex(8)
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
+    if payload.protocol == "hysteria2":
+        if not HYSTERIA2_SETTINGS.exists() or run("systemctl", "is-enabled", "vps-control-hysteria2.service") != "enabled":
+            raise HTTPException(status_code=409, detail="Hysteria2 protocol is not installed")
+        with client_mutation_lock:
+            try:
+                settings = json.loads(HYSTERIA2_SETTINGS.read_text(encoding="utf-8"))
+                users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8")) if HYSTERIA2_USERS.exists() else {}
+                password = secrets.token_urlsafe(32)
+                users[client_id] = password
+                temporary = HYSTERIA2_USERS.with_suffix(".tmp")
+                temporary.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(temporary, 0o600)
+                temporary.replace(HYSTERIA2_USERS)
+                port = int(settings.get("port", 8443))
+                domain = str(settings.get("domain", "")).strip()
+                endpoint = domain or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT
+                tls_mode = str(settings.get("tls_mode", "pinned"))
+                fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt")).partition("=")[2].strip()
+                client_config = "\n".join([
+                    f"server: {endpoint}:{port}",
+                    f"auth: {client_id}:{password}",
+                    "tls:",
+                    f"  sni: {domain or 'hysteria2.local'}",
+                    f"  insecure: {'false' if tls_mode == 'acme' else 'true'}",
+                    *([f"  pinSHA256: {fingerprint}"] if tls_mode != "acme" and fingerprint else []),
+                    "socks5:", "  listen: 127.0.0.1:1080", "  disableUDP: false",
+                ]) + "\n"
+                items = read_clients()
+                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "domain": domain, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+                write_clients(items)
+                return {"id": client_id, "filename": f"{safe_name}-hysteria2.yaml", "config": client_config}
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                raise HTTPException(status_code=500, detail="Unable to create Hysteria2 connection") from exc
     if payload.protocol == "shadowsocks":
         if run("systemctl", "show", "vps-control-shadowsocks.target", "--property=LoadState", "--value") != "loaded":
             raise HTTPException(status_code=409, detail="shadowsocks protocol is not installed")
@@ -3163,6 +3228,19 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
             raise HTTPException(status_code=409, detail="VLESS module configuration is invalid") from exc
         write_clients([entry for entry in items if entry["id"] != client_id])
         return {"deleted": client_id}
+    if protocol == "hysteria2":
+        with client_mutation_lock:
+            try:
+                users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8"))
+                users.pop(client_id, None)
+                temporary = HYSTERIA2_USERS.with_suffix(".tmp")
+                temporary.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(temporary, 0o600)
+                temporary.replace(HYSTERIA2_USERS)
+            except (OSError, json.JSONDecodeError) as exc:
+                raise HTTPException(status_code=500, detail="Unable to remove Hysteria2 connection") from exc
+        write_clients([entry for entry in items if entry["id"] != client_id])
+        return {"deleted": client_id}
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
     config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
@@ -3190,6 +3268,16 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             "value": int(values.get("keepalive", current_env_value(f"{prefix}_KEEPALIVE", "25"))), "min": 0, "max": 300,
             "help": "0 отключает keepalive; 25 секунд подходит для NAT и мобильных сетей.",
         }]
+    if protocol == "hysteria2":
+        return [
+            {"key": "port", "label": "UDP-порт", "type": "number", "value": int(values.get("port", 8443)), "min": 1024, "max": 65535},
+            {"key": "tls_mode", "label": "TLS", "type": "select", "value": str(values.get("tls_mode", "pinned")), "options": [
+                {"value": "pinned", "label": "Закреплённый сертификат · без домена"}, {"value": "acme", "label": "Публичный сертификат · домен"},
+            ]},
+            {"key": "domain", "label": "Домен Hysteria2", "type": "text", "value": str(values.get("domain", "")), "help": "Нужен только для ACME. A/AAAA-запись должна указывать прямо на этот VPS."},
+            {"key": "obfs_enabled", "label": "Salamander obfuscation", "type": "boolean", "value": bool(values.get("obfs_enabled", False))},
+            {"key": "obfs_password", "label": "Пароль obfuscation", "type": "text", "value": str(values.get("obfs_password", "")), "help": "Изменение требует повторного импорта существующих подключений."},
+        ]
     if protocol == "shadowsocks":
         return [
             {"key": "timeout", "label": "Таймаут соединения, с", "type": "number", "value": int(values.get("timeout", 300)), "min": 30, "max": 3600},
@@ -3340,7 +3428,7 @@ def persist_vrx_target(host: str) -> None:
 
 @app.patch("/api/protocols/{protocol}/settings")
 def update_protocol_settings(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"],
     payload: ProtocolSettingsUpdate,
     _: None = Depends(require_token),
 ) -> dict:
@@ -3348,6 +3436,7 @@ def update_protocol_settings(
     allowed = {
         "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
         "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
+        "hysteria2": {"port", "tls_mode", "domain", "obfs_enabled", "obfs_password"},
         "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni", "tls_enabled", "tls_domain", "tls_transport", "tls_xhttp_mode", "cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"},
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
@@ -3375,6 +3464,53 @@ def update_protocol_settings(
             **({f"{prefix}_DNS": supplied["dns"]} if "dns" in supplied else {}),
             **({f"{prefix}_KEEPALIVE": supplied["keepalive"]} if "keepalive" in supplied else {}),
         })
+    elif protocol == "hysteria2":
+        if not HYSTERIA2_SETTINGS.exists():
+            raise HTTPException(status_code=409, detail="Hysteria2 не установлен")
+        original_settings = HYSTERIA2_SETTINGS.read_bytes()
+        original_config = HYSTERIA2_CONFIG.read_bytes()
+        temporary = HYSTERIA2_CONFIG.with_suffix(".tmp.yaml")
+        try:
+            settings = json.loads(original_settings)
+            settings.update(supplied)
+            tls_mode = str(settings.get("tls_mode", "pinned"))
+            domain = str(settings.get("domain", "")).strip().lower()
+            port = int(settings.get("port", 8443))
+            if tls_mode == "acme":
+                if not valid_hostname(domain):
+                    raise HTTPException(status_code=422, detail="Для ACME укажите корректный домен Hysteria2")
+                if not direct_tls_domain_ready(domain):
+                    raise HTTPException(status_code=422, detail="Домен Hysteria2 должен напрямую указывать на IP этого VPS")
+            if settings.get("obfs_enabled") and not str(settings.get("obfs_password", "")):
+                raise HTTPException(status_code=422, detail="Укажите пароль Salamander obfuscation")
+            tls = (f"acme:\n  domains:\n    - {json.dumps(domain)}\n" if tls_mode == "acme" else
+                   f"tls:\n  cert: {HYSTERIA2_DIR}/server.crt\n  key: {HYSTERIA2_DIR}/server.key\n  sniGuard: disable\n")
+            obfs = (f"obfs:\n  type: salamander\n  salamander:\n    password: {json.dumps(str(settings.get('obfs_password', '')))}\n" if settings.get("obfs_enabled") else "")
+            config_text = f"listen: :{port}\n{tls}auth:\n  type: http\n  http:\n    url: http://127.0.0.1:18081/auth\ntrafficStats:\n  listen: 127.0.0.1:18082\n  secret: vps-control-local\n{obfs}masquerade:\n  type: string\n  string:\n    content: Not Found\n    statusCode: 404\n"
+            temporary.write_text(config_text, encoding="utf-8")
+            os.chmod(temporary, 0o600)
+            result = subprocess.run(["/usr/local/lib/vps-control-hysteria2/hysteria", "server", "-c", str(temporary), "--test"], capture_output=True, text=True, timeout=15, check=False)
+            if result.returncode:
+                raise RuntimeError(result.stderr.strip() or "Hysteria2 rejected configuration")
+            old_port = int(json.loads(original_settings).get("port", 8443))
+            temporary.replace(HYSTERIA2_CONFIG)
+            atomic = HYSTERIA2_SETTINGS.with_suffix(".tmp")
+            atomic.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.chmod(atomic, 0o600); atomic.replace(HYSTERIA2_SETTINGS)
+            if old_port != port:
+                run("iptables", "-I", "INPUT", "-p", "udp", "--dport", str(port), "-m", "comment", "--comment", "vps-control-hysteria2", "-j", "ACCEPT", check=True)
+            run("systemctl", "restart", "vps-control-hysteria2.service", timeout=20, check=True)
+            if old_port != port:
+                run("iptables", "-D", "INPUT", "-p", "udp", "--dport", str(old_port), "-m", "comment", "--comment", "vps-control-hysteria2", "-j", "ACCEPT")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            HYSTERIA2_SETTINGS.write_bytes(original_settings)
+            HYSTERIA2_CONFIG.write_bytes(original_config)
+            run("systemctl", "restart", "vps-control-hysteria2.service", timeout=20)
+            raise HTTPException(status_code=500, detail="Не удалось применить настройки Hysteria2") from exc
+        finally:
+            temporary.unlink(missing_ok=True)
     elif protocol == "shadowsocks":
         if "dns" in supplied:
             persist_env_values({"SHADOWSOCKS_DNS": supplied["dns"]})
@@ -3528,7 +3664,32 @@ def update_protocol_settings(
 
 
 @app.get("/api/protocols/{protocol}/status")
-def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"], _: None = Depends(require_token)) -> dict:
+def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"], _: None = Depends(require_token)) -> dict:
+    if protocol == "hysteria2":
+        unit = "vps-control-hysteria2.service"
+        try:
+            values = json.loads(HYSTERIA2_SETTINGS.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            values = {}
+        traffic, online = hysteria2_stats()
+        protocol_clients = [item for item in read_clients() if item.get("protocol") == protocol]
+        rx = sum(int(traffic.get(str(item.get("id", "")), {}).get("rx", 0) or 0) for item in protocol_clients)
+        tx = sum(int(traffic.get(str(item.get("id", "")), {}).get("tx", 0) or 0) for item in protocol_clients)
+        active = run("systemctl", "is-active", unit) == "active"
+        domain = str(values.get("domain", ""))
+        return {
+            "protocol": protocol, "interface": "QUIC/UDP", "active": active, "service_active": active,
+            "service_enabled": run("systemctl", "is-enabled", unit) == "enabled",
+            "active_since": run("systemctl", "show", unit, "--property=ActiveEnterTimestamp", "--value"),
+            "address": domain or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, "listen_port": int(values.get("port", 8443)), "mtu": 0,
+            "peers": len(protocol_clients), "online_peers": sum(1 for item in protocol_clients if int(online.get(str(item.get("id", "")), 0) or 0) > 0),
+            "endpoints": sum(int(value or 0) for value in online.values()), "last_handshake_age_s": None,
+            "peer_rx_bytes": rx, "peer_tx_bytes": tx, "interface_rx_bytes": rx, "interface_tx_bytes": tx,
+            "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0, "unit": unit,
+            "transport": "QUIC / UDP", "security": "TLS 1.3", "target": domain,
+            "settings": {"TLS": "ACME" if values.get("tls_mode") == "acme" else "Pinned certificate", "Домен": domain or "не требуется", "Obfuscation": "Salamander" if values.get("obfs_enabled") else "выключена"},
+            "editable_settings": editable_protocol_settings(protocol, values),
+        }
     if protocol in ("shadowsocks", "vless-reality-xhttp"):
         unit = "vps-control-shadowsocks.target" if protocol == "shadowsocks" else "vps-control-vless-reality-xhttp.service"
         protocol_clients = [item for item in read_clients() if item.get("protocol") == protocol]
@@ -3724,7 +3885,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
 
 @app.post("/api/protocols/{protocol}/resources/check")
 def check_protocol_resources(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"],
     _: None = Depends(require_token),
 ) -> dict:
     return check_resource_availability(protocol)
@@ -3736,7 +3897,7 @@ def check_network_diagnostics(protocol: Literal["wg", "awg"], _: None = Depends(
 
 
 @app.post("/api/protocols/{protocol}/restart")
-def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp"], _: None = Depends(require_token)) -> dict:
+def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"], _: None = Depends(require_token)) -> dict:
     if protocol == "shadowsocks":
         unit = "vps-control-shadowsocks.target"
         if run("systemctl", "show", unit, "--property=LoadState", "--value") != "loaded":
@@ -3748,6 +3909,7 @@ def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-realit
         unit = (
             f"wg-quick@{WG_INTERFACE}.service" if protocol == "wg"
             else f"awg-quick@{AWG_INTERFACE}.service" if protocol == "awg"
+            else "vps-control-hysteria2.service" if protocol == "hysteria2"
             else "vps-control-vless-reality-xhttp.service"
         )
         if run("systemctl", "show", unit, "--property=LoadState", "--value") != "loaded":

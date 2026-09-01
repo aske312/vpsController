@@ -145,18 +145,18 @@ test("protocol installers declare OS support and keep per-module diagnostics", a
 test("protocol catalog distinguishes installable modules from safe placeholders", async () => {
   const ids = ["wireguard", "amneziawg", "shadowsocks", "vless-reality-xhttp", "mihomo", "hysteria2", "ikev2", "openvpn", "trojan"];
   const manifests = await Promise.all(ids.map((id) => read(`protocol-images/${id}/manifest.json`).then(JSON.parse)));
-  for (const manifest of manifests.slice(0, 5)) {
+  for (const manifest of manifests.slice(0, 6)) {
     assert.equal(manifest.installable, true);
     assert.deepEqual(manifest.supported_os, ["ubuntu", "debian"]);
     assert.ok(Array.isArray(manifest.preflight_packages));
     assert.ok(manifest.minimum_free_mb >= 128);
     assert.equal(typeof manifest.requires_kernel_headers, "boolean");
   }
-  for (const [index, manifest] of manifests.slice(5).entries()) {
+  for (const [index, manifest] of manifests.slice(6).entries()) {
     assert.equal(manifest.installable, false);
     assert.equal(manifest.installer, "install.sh");
     assert.equal(manifest.uninstaller, "uninstall.sh");
-    const directory = ids[index + 5];
+    const directory = ids[index + 6];
     const [install, uninstall] = await Promise.all([
       read(`protocol-images/${directory}/install.sh`),
       read(`protocol-images/${directory}/uninstall.sh`),
@@ -871,7 +871,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /family: "STEALTH TUNNEL"/);
   assert.match(page, /family: "ENCRYPTED PROXY"/);
   assert.match(page, /family: "MODULAR TRANSPORT"/);
-  assert.match(page, /client\.protocol === "shadowsocks" \? "SS" : "VLESS"/);
+  assert.match(page, /client\.protocol === "shadowsocks" \? "SS" : client\.protocol === "hysteria2" \? "HY2" : "VLESS"/);
   assert.match(page, /if \(Boolean\(current\?\.installed\) === installed\) return;/);
   assert.match(manager.match(/install_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
   assert.match(manager.match(/remove_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
@@ -1118,16 +1118,16 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(protocolCss, /\.protocolWorkspace \.protocolSettingsFields input:not[^}]*min-height:40px !important/s);
 });
 
-test("WG, AWG, Shadowsocks and VLESS share the compact protocol command center", async () => {
+test("direct protocols share the compact protocol command center", async () => {
   const [protocolView, protocolCss] = await Promise.all([
     read("app/views/protocols/protocol-view.tsx"),
     read("app/styles/pages/protocols.css"),
   ]);
-  assert.match(protocolView, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\][^\n]+<ProtocolCommandCenter/);
+  assert.match(protocolView, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"\][^\n]+<ProtocolCommandCenter/);
   assert.match(protocolView, /function ProtocolCommandCenter/);
   assert.match(protocolView, /protocolWorkspace-\$\{protocolCode\.toLowerCase\(\)\} protocolCommandCenter/);
   assert.match(protocolView, /protocol === "shadowsocks" \? "TCP \+ UDP PROXY"/);
-  assert.match(protocolView, /protocol === "awg" \? "OBFUSCATED UDP" : "NATIVE UDP"/);
+  assert.match(protocolView, /protocol === "hysteria2" \? "QUIC \+ UDP PROXY"/);
   assert.match(protocolCss, /\.protocolCommandCenter\s*\{[^}]*gap:9px/);
   assert.match(protocolView, /vlessOverviewMetrics/);
   assert.match(protocolView, /vlessContourGrid single/);
@@ -1518,4 +1518,28 @@ test("Mihomo provides verified Hysteria2 and TUIC v5 transports", async () => {
   assert.match(installer, /asset_digest[\s\S]*sha256sum -c -/);
   assert.match(installer, /quic\/hysteria2\/config\.json[\s\S]*quic\/tuic\/config\.json/);
   assert.match(installer, /"\$candidate" check -c "\$existing_config"/);
+});
+
+test("direct Hysteria2 is installable and manages authenticated clients", async () => {
+  const [manifestText, install, firewall, auth, api, view] = await Promise.all([
+    read("protocol-images/hysteria2/manifest.json"),
+    read("protocol-images/hysteria2/install.sh"),
+    read("protocol-images/hysteria2/firewall.sh"),
+    read("protocol-images/hysteria2/user-api.py"),
+    read("api/main.py"),
+    read("app/views/protocols/protocol-view.tsx"),
+  ]);
+  const manifest = JSON.parse(manifestText);
+  assert.equal(manifest.id, "hysteria2");
+  assert.equal(manifest.installable, true);
+  assert.equal(manifest.service, "vps-control-hysteria2.service");
+  assert.match(install, /apernet\/hysteria\/releases\/latest/);
+  assert.match(install, /trafficStats:/);
+  assert.match(install, /vps-control-hysteria2-auth\.service/);
+  assert.match(firewall, /vps-control-hysteria2/);
+  assert.match(auth, /hmac\.compare_digest/);
+  assert.match(api, /payload\.protocol == "hysteria2"/);
+  assert.match(api, /def hysteria2_stats/);
+  assert.match(api, /tls_mode == "acme"/);
+  assert.match(view, /title: "Hysteria2"/);
 });

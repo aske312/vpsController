@@ -1,15 +1,16 @@
 {
-  "id": "hy",
+  "id": "hysteria2",
   "name": "Hysteria2",
-  "version": "1.0.0",
-  "installable": false,
-  "description": "Временно не доступно",
+  "version": "2.12.2",
+  "installable": true,
+  "description": "QUIC-прокси с отдельной учётной записью и статистикой для каждого подключения",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
   "supported_os": ["ubuntu", "debian"],
-  "interface_env": "",
-  "service": "",
-  "package": ""
+  "preflight_packages": ["ca-certificates", "curl", "iptables", "openssl"],
+  "minimum_free_mb": 192,
+  "requires_kernel_headers": false,
+  "service": "vps-control-hysteria2.service"
 }
