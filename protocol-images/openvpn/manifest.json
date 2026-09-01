@@ -1,15 +1,1 @@
-{
-  "id": "ov",
-  "name": "OpenVPN",
-  "version": "0.0.0",
-  "installable": false,
-  "description": "Временно не доступно",
-  "category": "secure-tunnels",
-  "category_name": "Защищённые туннели",
-  "installer": "install.sh",
-  "uninstaller": "uninstall.sh",
-  "supported_os": ["ubuntu", "debian"],
-  "interface_env": "",
-  "service": "",
-  "package": ""
-}
+{"id":"openvpn","name":"OpenVPN","version":"2.6","installable":true,"description":"Классический VPN с отдельным сертификатом и возможностью отзыва каждого клиента","category":"secure-tunnels","category_name":"Защищённые туннели","installer":"install.sh","uninstaller":"uninstall.sh","supported_os":["ubuntu","debian"],"preflight_packages":["openvpn","easy-rsa","iptables"],"minimum_free_mb":256,"requires_kernel_headers":false,"service":"vps-control-openvpn.service","package":"openvpn"}

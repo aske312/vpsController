@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatModuleVersion } from "../../lib/format-version";
 
-type ProtocolId = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2" | "tuic" | "trojan";
+type ProtocolId = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2" | "tuic" | "trojan" | "openvpn";
 type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
 
 type OverviewData = {
@@ -155,6 +155,7 @@ const directShort: Record<ProtocolId, string> = {
   hysteria2: "HY2",
   tuic: "TUIC",
   trojan: "TRJ",
+  openvpn: "OVPN",
 };
 
 const directName: Record<ProtocolId, string> = {
@@ -165,6 +166,7 @@ const directName: Record<ProtocolId, string> = {
   hysteria2: "Hysteria2",
   tuic: "TUIC v5",
   trojan: "Trojan",
+  openvpn: "OpenVPN",
 };
 
 const bytes = (value = 0) => {
@@ -245,7 +247,7 @@ export function OverviewDashboard({
     () => protocolImages.filter((item) =>
       item.installed &&
       item.id !== "mihomo" &&
-      (["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan"] as string[]).includes(item.id),
+      (["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"] as string[]).includes(item.id),
     ),
     [protocolImages],
   );

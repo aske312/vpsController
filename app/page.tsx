@@ -1043,7 +1043,7 @@ export default function Home() {
   const connectionTypeOptions = installedProtocols.flatMap((protocol) => {
     if (protocol !== "vless-reality-xhttp") return [{
       id: protocol, protocol, routeId: undefined, name: labels[protocol],
-      badge: protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol.toUpperCase(),
+      badge: protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol.toUpperCase(),
       description: protocol === "shadowsocks" ? "Шифрованный прокси TCP и UDP" : "Отдельный VPN-туннель",
     }];
     return ([
@@ -1245,7 +1245,7 @@ export default function Home() {
   const activeProtocolRate = protocolTab ? protocolRates[protocolTab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
   const activeProtocolImage = protocolTab ? protocolImages.find((image) => image.id === protocolTab) : undefined;
   const protocolCode = protocolTab === "wg" ? "WG" : protocolTab === "awg" ? "AWG" : protocolTab === "shadowsocks" ? "SS" : protocolTab === "vless-reality-xhttp" ? "VLESS" : "";
-  const protocolIsTunnel = protocolTab === "wg" || protocolTab === "awg";
+  const protocolIsTunnel = protocolTab === "wg" || protocolTab === "awg" || protocolTab === "openvpn";
   const protocolOperational = Boolean(activeProtocol && (protocolIsTunnel ? activeProtocol.active && activeProtocol.service_active : activeProtocol.service_active));
   const protocolAvailability = activeProtocol?.history.availability_percent ?? (protocolOperational ? 100 : 0);
   const protocolDiagnosticsLabel = activeProtocol?.diagnostics?.status === "healthy" ? "Стабильно" : activeProtocol?.diagnostics?.status === "critical" ? "Критично" : activeProtocol?.diagnostics?.status === "warning" ? "Требует внимания" : "Не проверено";
@@ -1345,7 +1345,7 @@ export default function Home() {
       )}
 
       {(tab === "channels" || tab === "dns") && <nav className="protocolSwitcher channelPageSwitcher" aria-label="Защищённые каналы">
-        {installedProtocols.map((protocol) => <button type="button" key={protocol} className={tab === "channels" && selectedChannel === protocol ? "active" : ""} onClick={() => { setSelectedChannel(protocol); setTab("channels"); void loadProtocolStatus(protocol); }}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : "VLESS"}</button>)}
+        {installedProtocols.map((protocol) => <button type="button" key={protocol} className={tab === "channels" && selectedChannel === protocol ? "active" : ""} onClick={() => { setSelectedChannel(protocol); setTab("channels"); void loadProtocolStatus(protocol); }}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : "VLESS"}</button>)}
         <button type="button" className={tab === "dns" ? "active" : ""} onClick={() => setTab("dns")}>DNS</button>
       </nav>}
 

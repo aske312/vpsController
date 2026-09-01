@@ -1,4 +1,4 @@
-export type Protocol = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2" | "tuic" | "trojan";
+export type Protocol = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2" | "tuic" | "trojan" | "openvpn";
 export type Tab = "overview" | "channels" | "dns" | "security" | "application" | "services" | "clients" | "mihomo" | Protocol;
 export type TunnelProtocol = "wg" | "awg";
 export type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };

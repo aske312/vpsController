@@ -122,6 +122,11 @@ TUIC_CONFIG = TUIC_DIR / "config.json"
 TROJAN_DIR = Path("/etc/vps-control/trojan")
 TROJAN_SETTINGS = TROJAN_DIR / "settings.json"
 TROJAN_CONFIG = TROJAN_DIR / "config.json"
+OPENVPN_DIR = Path("/etc/vps-control/openvpn")
+OPENVPN_SETTINGS = OPENVPN_DIR / "settings.json"
+OPENVPN_CONFIG = OPENVPN_DIR / "server.conf"
+OPENVPN_PKI = OPENVPN_DIR / "pki"
+OPENVPN_STATUS = Path("/run/vps-control-openvpn/status")
 AWG_PROFILE = {
     "Jc": os.getenv("AWG_JC", "6"), "Jmin": os.getenv("AWG_JMIN", "8"), "Jmax": os.getenv("AWG_JMAX", "80"),
     "S1": os.getenv("AWG_S1", "64"), "S2": os.getenv("AWG_S2", "112"),
@@ -247,14 +252,14 @@ def run_with_input(args: list[str], value: str) -> str:
 
 
 def cached_resource_availability(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"],
 ) -> dict:
     cached = resource_check_cache.get(protocol)
     return {key: value for key, value in (cached or {}).items() if not key.startswith("_")}
 
 
 def check_resource_availability(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"],
 ) -> dict:
     cached = resource_check_cache.get(protocol)
     if not resource_check_lock.acquire(blocking=False):
@@ -462,10 +467,52 @@ def hysteria2_stats() -> tuple[dict[str, dict], dict[str, int]]:
     return request("/traffic"), request("/online")
 
 
+def openvpn_stats() -> dict[str, dict[str, int | str]]:
+    """Read OpenVPN status-version 3 without coupling client lifecycle to management TCP."""
+    result: dict[str, dict[str, int | str]] = {}
+    try:
+        with OPENVPN_STATUS.open(encoding="utf-8", errors="replace", newline="") as handle:
+            for row in csv.reader(handle):
+                if len(row) < 7 or row[0] != "CLIENT_LIST":
+                    continue
+                result[row[1]] = {
+                    "remote": row[2], "virtual": row[3],
+                    "rx": int(row[5] or 0), "tx": int(row[6] or 0),
+                }
+    except (OSError, ValueError, csv.Error):
+        return {}
+    return result
+
+
+def run_easyrsa(*args: str) -> subprocess.CompletedProcess[str]:
+    executable = OPENVPN_DIR / "easy-rsa" / "easyrsa"
+    env = {**os.environ, "EASYRSA_BATCH": "1", "EASYRSA_PKI": str(OPENVPN_PKI)}
+    return subprocess.run(
+        [str(executable), *args], cwd=executable.parent, env=env,
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+
+
+def revoke_openvpn_certificate(common_name: str) -> None:
+    revoked = run_easyrsa("revoke", common_name)
+    # EasyRSA reports an already-revoked/missing certificate as a failure. A
+    # missing issued certificate is already the desired idempotent state.
+    if revoked.returncode and (OPENVPN_PKI / "issued" / f"{common_name}.crt").exists():
+        raise RuntimeError(revoked.stderr.strip() or "Unable to revoke OpenVPN certificate")
+    generated = run_easyrsa("gen-crl")
+    if generated.returncode:
+        raise RuntimeError(generated.stderr.strip() or "Unable to update OpenVPN CRL")
+    temporary = OPENVPN_DIR / ".crl.pem.tmp"
+    temporary.write_bytes((OPENVPN_PKI / "crl.pem").read_bytes())
+    os.chmod(temporary, 0o644)
+    temporary.replace(OPENVPN_DIR / "crl.pem")
+
+
 def stream_proxy_dump() -> list[dict]:
     peers = []
     xray_activity = recent_xray_activity()
     hysteria_traffic, hysteria_online = hysteria2_stats()
+    openvpn_traffic = openvpn_stats()
     for item in read_clients():
         protocol = item.get("protocol")
         if protocol == "shadowsocks":
@@ -492,6 +539,15 @@ def stream_proxy_dump() -> list[dict]:
             address = f'{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{item.get("port", 8444 if protocol == "tuic" else 8445)}'
             rx_bytes = tx_bytes = active_connections = 0
             handshake_age = rx_bps = tx_bps = None
+        elif protocol == "openvpn":
+            active = run("systemctl", "is-active", "vps-control-openvpn.service") == "active"
+            address = f'{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{item.get("port", 1194)}'
+            counters = openvpn_traffic.get(str(item.get("id", "")), {})
+            rx_bytes, tx_bytes = int(counters.get("rx", 0)), int(counters.get("tx", 0))
+            active_connections = 1 if counters else 0
+            handshake_age, rx_bps, tx_bps = stream_sample(f'openvpn:{item.get("id", "")}', rx_bytes, tx_bytes)
+            if not active_connections:
+                handshake_age = None
         else:
             continue
         if protocol == "shadowsocks":
@@ -504,11 +560,10 @@ def stream_proxy_dump() -> list[dict]:
         # Only an established TCP socket proves a live client. Xray activity is
         # authenticated and can safely use the recent-activity window.
         online = active and (
-            active_connections > 0
-            and handshake_age is not None
-            and handshake_age < STREAM_ACTIVITY_WINDOW_S
-            if protocol == "shadowsocks"
-            else handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S
+            active_connections > 0 if protocol == "openvpn" else
+            active_connections > 0 and handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S
+            if protocol == "shadowsocks" else
+            handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S
         )
         peers.append({
             "id": item.get("id", ""), "name": item.get("name", "Подключение"), "protocol": protocol,
@@ -2559,7 +2614,7 @@ class ClientConnectionSettings(BaseModel):
 
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan"]
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"]
     vless_routes: list[Literal["direct", "tls", "cdn"]] | None = None
     settings: ClientConnectionSettings = Field(default_factory=ClientConnectionSettings)
 
@@ -2593,6 +2648,7 @@ class ProtocolSettingsUpdate(BaseModel):
     obfs_enabled: bool | None = None
     obfs_password: str | None = Field(default=None, max_length=128)
     congestion_control: Literal["bbr", "cubic", "new_reno"] | None = None
+    vpn_transport: Literal["udp", "tcp"] | None = None
 
 
 def configure_vless_transport(stream: dict, transport: str, path: str = "/") -> None:
@@ -2982,6 +3038,43 @@ def append_peer(config: Path, client_id: str, public_key: str, psk: str, address
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
     client_id = secrets.token_hex(8)
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
+    if payload.protocol == "openvpn":
+        if not OPENVPN_CONFIG.exists() or run("systemctl", "is-enabled", "vps-control-openvpn.service") != "enabled":
+            raise HTTPException(status_code=409, detail="OpenVPN protocol is not installed")
+        with client_mutation_lock:
+            issued = False
+            try:
+                settings = json.loads(OPENVPN_SETTINGS.read_text(encoding="utf-8"))
+                generated = run_easyrsa("build-client-full", client_id, "nopass")
+                if generated.returncode:
+                    raise RuntimeError(generated.stderr.strip() or "EasyRSA failed to issue a client certificate")
+                issued = True
+                ca = (OPENVPN_PKI / "ca.crt").read_text(encoding="utf-8")
+                certificate = (OPENVPN_PKI / "issued" / f"{client_id}.crt").read_text(encoding="utf-8")
+                private_key = (OPENVPN_PKI / "private" / f"{client_id}.key").read_text(encoding="utf-8")
+                tls_crypt = (OPENVPN_DIR / "tls-crypt.key").read_text(encoding="utf-8")
+                endpoint = PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT
+                port = int(settings.get("port", 1194))
+                transport = str(settings.get("protocol", "udp"))
+                client_config = "\n".join([
+                    "client", "dev tun", f"proto {'tcp-client' if transport == 'tcp' else 'udp'}",
+                    f"remote {endpoint} {port}", "resolv-retry infinite", "nobind", "persist-key", "persist-tun",
+                    "remote-cert-tls server", "auth SHA256",
+                    "data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305", "verb 3",
+                    "<ca>", ca.strip(), "</ca>", "<cert>", certificate.strip(), "</cert>",
+                    "<key>", private_key.strip(), "</key>", "<tls-crypt>", tls_crypt.strip(), "</tls-crypt>", "",
+                ])
+                items = read_clients()
+                items.append({"id": client_id, "name": payload.name, "protocol": "openvpn", "public_key": client_id, "port": port, "transport": transport, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+                write_clients(items)
+                return {"id": client_id, "filename": f"{safe_name}-openvpn.ovpn", "config": client_config}
+            except Exception as exc:
+                if issued:
+                    try:
+                        revoke_openvpn_certificate(client_id)
+                    except Exception:
+                        logger.exception("OpenVPN certificate rollback failed for %s", client_id)
+                raise HTTPException(status_code=500, detail="Unable to create OpenVPN connection") from exc
     if payload.protocol == "hysteria2":
         if not HYSTERIA2_SETTINGS.exists() or run("systemctl", "is-enabled", "vps-control-hysteria2.service") != "enabled":
             raise HTTPException(status_code=409, detail="Hysteria2 protocol is not installed")
@@ -3264,6 +3357,15 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     if not item:
         raise HTTPException(status_code=404, detail="Client not found")
     protocol = item["protocol"]
+    if protocol == "openvpn":
+        with client_mutation_lock:
+            try:
+                revoke_openvpn_certificate(str(item.get("public_key") or client_id))
+                run("systemctl", "kill", "--signal=HUP", "vps-control-openvpn.service", timeout=20, check=True)
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail="Unable to revoke OpenVPN connection") from exc
+            write_clients([entry for entry in items if entry["id"] != client_id])
+        return {"deleted": client_id}
     if protocol == "shadowsocks":
         port = int(item.get("port", 0))
         run("systemctl", "disable", "--now", f"vps-control-shadowsocks@{client_id}.service", timeout=20)
@@ -3367,6 +3469,12 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             {"key": "domain", "label": "Домен Hysteria2", "type": "text", "value": str(values.get("domain", "")), "help": "Нужен только для ACME. A/AAAA-запись должна указывать прямо на этот VPS."},
             {"key": "obfs_enabled", "label": "Salamander obfuscation", "type": "boolean", "value": bool(values.get("obfs_enabled", False))},
             {"key": "obfs_password", "label": "Пароль obfuscation", "type": "text", "value": str(values.get("obfs_password", "")), "help": "Изменение требует повторного импорта существующих подключений."},
+        ]
+    if protocol == "openvpn":
+        return [
+            {"key": "port", "label": "OpenVPN port", "type": "number", "value": int(values.get("port", 1194)), "min": 1024, "max": 65535},
+            {"key": "vpn_transport", "label": "Transport", "type": "select", "value": str(values.get("protocol", "udp")), "options": [{"value": "udp", "label": "UDP · recommended"}, {"value": "tcp", "label": "TCP"}]},
+            {"key": "dns", "label": "Client DNS", "type": "text", "value": str(values.get("dns", "1.1.1.1"))},
         ]
     if protocol == "trojan":
         return [{"key":"port","label":"TCP-порт","type":"number","value":int(values.get("port",8445)),"min":1024,"max":65535}]
@@ -3525,7 +3633,7 @@ def persist_vrx_target(host: str) -> None:
 
 @app.patch("/api/protocols/{protocol}/settings")
 def update_protocol_settings(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"],
     payload: ProtocolSettingsUpdate,
     _: None = Depends(require_token),
 ) -> dict:
@@ -3536,6 +3644,7 @@ def update_protocol_settings(
         "hysteria2": {"port", "tls_mode", "domain", "obfs_enabled", "obfs_password"},
         "tuic": {"port", "congestion_control"},
         "trojan": {"port"},
+        "openvpn": {"port", "vpn_transport", "dns"},
         "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni", "tls_enabled", "tls_domain", "tls_transport", "tls_xhttp_mode", "cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"},
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
@@ -3563,6 +3672,42 @@ def update_protocol_settings(
             **({f"{prefix}_DNS": supplied["dns"]} if "dns" in supplied else {}),
             **({f"{prefix}_KEEPALIVE": supplied["keepalive"]} if "keepalive" in supplied else {}),
         })
+    elif protocol == "openvpn":
+        if not OPENVPN_CONFIG.exists() or not OPENVPN_SETTINGS.exists():
+            raise HTTPException(status_code=409, detail="OpenVPN is not installed")
+        original_config, original_settings = OPENVPN_CONFIG.read_bytes(), OPENVPN_SETTINGS.read_bytes()
+        temporary_config = OPENVPN_CONFIG.with_suffix(".conf.tmp")
+        temporary_settings = OPENVPN_SETTINGS.with_suffix(".json.tmp")
+        firewall = "/usr/local/lib/vps-control-openvpn/firewall.sh"
+        changed = False
+        try:
+            settings = json.loads(original_settings)
+            if "vpn_transport" in supplied:
+                settings["protocol"] = supplied["vpn_transport"]
+            settings.update({key: value for key, value in supplied.items() if key != "vpn_transport"})
+            config_text = original_config.decode("utf-8")
+            config_text = re.sub(r"(?m)^port\s+\d+$", f"port {int(settings.get('port', 1194))}", config_text)
+            config_text = re.sub(r"(?m)^proto\s+\S+$", f"proto {'tcp-server' if settings.get('protocol') == 'tcp' else 'udp'}", config_text)
+            config_text = re.sub(r'(?m)^push "dhcp-option DNS [^"]+"$', f'push "dhcp-option DNS {settings.get("dns", "1.1.1.1")}"', config_text)
+            temporary_config.write_text(config_text, encoding="utf-8")
+            temporary_settings.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.chmod(temporary_config, 0o600); os.chmod(temporary_settings, 0o600)
+            run(firewall, "delete", timeout=20)
+            temporary_config.replace(OPENVPN_CONFIG); temporary_settings.replace(OPENVPN_SETTINGS); changed = True
+            run("systemctl", "restart", "vps-control-openvpn.service", timeout=30, check=True)
+            if run("systemctl", "is-active", "vps-control-openvpn.service") != "active":
+                raise RuntimeError("OpenVPN service did not become active")
+        except Exception as exc:
+            if changed:
+                try:
+                    run(firewall, "delete", timeout=20)
+                    OPENVPN_CONFIG.write_bytes(original_config); OPENVPN_SETTINGS.write_bytes(original_settings)
+                    run("systemctl", "restart", "vps-control-openvpn.service", timeout=30)
+                except Exception:
+                    logger.exception("OpenVPN settings rollback failed")
+            raise HTTPException(status_code=500, detail="Unable to apply OpenVPN settings") from exc
+        finally:
+            temporary_config.unlink(missing_ok=True); temporary_settings.unlink(missing_ok=True)
     elif protocol == "trojan":
         if not TROJAN_CONFIG.exists(): raise HTTPException(status_code=409,detail="Trojan не установлен")
         original_config,original_settings=TROJAN_CONFIG.read_bytes(),TROJAN_SETTINGS.read_bytes(); temporary=TROJAN_CONFIG.with_suffix(".tmp.json")
@@ -3795,7 +3940,31 @@ def update_protocol_settings(
 
 
 @app.get("/api/protocols/{protocol}/status")
-def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan"], _: None = Depends(require_token)) -> dict:
+def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"], _: None = Depends(require_token)) -> dict:
+    if protocol == "openvpn":
+        unit = "vps-control-openvpn.service"
+        try:
+            values = json.loads(OPENVPN_SETTINGS.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            values = {}
+        clients = [item for item in read_clients() if item.get("protocol") == protocol]
+        traffic = openvpn_stats()
+        rx = sum(int(traffic.get(str(item.get("id", "")), {}).get("rx", 0)) for item in clients)
+        tx = sum(int(traffic.get(str(item.get("id", "")), {}).get("tx", 0)) for item in clients)
+        active = run("systemctl", "is-active", unit) == "active"
+        return {
+            "protocol": protocol, "interface": "tun", "active": active, "service_active": active,
+            "service_enabled": run("systemctl", "is-enabled", unit) == "enabled",
+            "active_since": run("systemctl", "show", unit, "--property=ActiveEnterTimestamp", "--value"),
+            "address": str(values.get("subnet", "10.74.0.0/24")), "listen_port": int(values.get("port", 1194)), "mtu": 0,
+            "peers": len(clients), "online_peers": sum(1 for item in clients if str(item.get("id", "")) in traffic),
+            "endpoints": len(traffic), "last_handshake_age_s": None,
+            "peer_rx_bytes": rx, "peer_tx_bytes": tx, "interface_rx_bytes": rx, "interface_tx_bytes": tx,
+            "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0, "unit": unit,
+            "transport": str(values.get("protocol", "udp")).upper(), "security": "TLS / client certificate", "target": "",
+            "settings": {"PKI": "EasyRSA", "Revocation": "CRL", "tls-crypt": "enabled"},
+            "editable_settings": editable_protocol_settings(protocol, values),
+        }
     if protocol in {"tuic", "trojan"}:
         unit = f"vps-control-{protocol}.service"; settings_file = TUIC_SETTINGS if protocol == "tuic" else TROJAN_SETTINGS
         try: values = json.loads(settings_file.read_text(encoding="utf-8"))
@@ -4023,7 +4192,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
 
 @app.post("/api/protocols/{protocol}/resources/check")
 def check_protocol_resources(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"],
     _: None = Depends(require_token),
 ) -> dict:
     return check_resource_availability(protocol)
@@ -4035,7 +4204,7 @@ def check_network_diagnostics(protocol: Literal["wg", "awg"], _: None = Depends(
 
 
 @app.post("/api/protocols/{protocol}/restart")
-def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan"], _: None = Depends(require_token)) -> dict:
+def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"], _: None = Depends(require_token)) -> dict:
     if protocol == "shadowsocks":
         unit = "vps-control-shadowsocks.target"
         if run("systemctl", "show", unit, "--property=LoadState", "--value") != "loaded":
@@ -4050,6 +4219,7 @@ def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-realit
             else "vps-control-hysteria2.service" if protocol == "hysteria2"
             else "vps-control-tuic.service" if protocol == "tuic"
             else "vps-control-trojan.service" if protocol == "trojan"
+            else "vps-control-openvpn.service" if protocol == "openvpn"
             else "vps-control-vless-reality-xhttp.service"
         )
         if run("systemctl", "show", unit, "--property=LoadState", "--value") != "loaded":
