@@ -225,6 +225,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /ensure_policy_settings\(\)[\s\S]+value\["modules"\]\[module_id\] = True/);
   assert.match(manager, /@app\.patch\("\/api\/mihomo\/routing\/settings"/);
   assert.match(manager, /routing = \{\*\*routing_settings\(\), \*\*profile_routing\}/);
+  assert.match(manager, /routing: dict\[str, Any\] = Field\(default_factory=dict\)/);
+  assert.match(manager, /device\.get\("routing"\).*dict\(legacy_routing\)/s);
+  assert.match(manager, /selected_device_data = next/);
+  assert.match(manager, /profile_routing = device_routing if device_routing is not None/);
   assert.match(manager, /DIRECT_GAME_PROCESSES/);
   assert.match(manager, /TUNNEL_GAME_PROCESSES/);
   assert.match(manager, /"block_ads": \[/);
@@ -258,7 +262,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /direct_p2p_rules\(routing\)/);
   assert.match(manager, /DOMAIN,settings-win\.data\.microsoft\.com,REJECT/);
   assert.match(manager, /DOMAIN,incoming\.telemetry\.mozilla\.org,REJECT/);
-  assert.ok(manager.indexOf("DOMAIN,settings-win.data.microsoft.com,REJECT") > manager.indexOf('"block_privacy": ['), "system telemetry must belong to privacy preset");
+  const privacyDefaults = manager.slice(manager.indexOf('"block_privacy": ['), manager.indexOf('"direct_ru_sites": ['));
+  assert.doesNotMatch(privacyDefaults, /settings-win\.data\.microsoft\.com/, "system telemetry must be opt-in");
+  assert.match(manager, /PRIVACY_TELEMETRY_RULES/);
+  assert.match(manager, /"available_rules":/);
   assert.match(manager, /direct_games_enabled/);
   assert.match(manager, /direct_games_udp_enabled/);
   assert.match(manager, /UDP_TUNNEL_EXCLUSION_CATALOG/);
@@ -306,7 +313,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /mihomoProfileWorkspace/);
   assert.match(page, /mihomoProfileRail/);
   assert.match(page, /mihomoProfileDraftSummary/);
-  assert.match(page, /mihomoOverviewV2/);
+  assert.match(page, /mihomoOverviewV3/);
+  assert.match(page, /mihomoOverviewPulse/);
+  assert.match(page, /overviewIssueTargets/);
   assert.match(page, /overviewActiveConnections/);
   assert.match(page, /overviewIssues/);
   assert.match(page, /mihomoDnsV2/);
@@ -328,7 +337,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /title: "Общие"/);
   assert.match(page, /title: "Резерв"/);
   assert.match(page, /Показывать Selector в Mihomo-клиенте/);
-  assert.match(page, /if \(!profileStrategyTouched\) setProfileRouting/);
+  assert.match(page, /if \(!profileStrategyTouched\) setProfileDevices/);
+  assert.match(page, /activeProfileRouting/);
+  assert.match(page, /Правила устройства/);
   assert.match(page, /Профиль готов/);
   assert.match(page, /Скопировать ссылку/);
   assert.match(page, /title: "UDP"/);
@@ -339,9 +350,11 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.doesNotMatch(page, /title: "Игры через VPN"/);
   assert.match(page, /EA Sports FC 26/);
   assert.match(page, /toggleProfileRule/);
-  assert.match(page, /Каждое правило применяется только к этому профилю/);
+  assert.match(page, /Применяются только к подписке и YAML выбранного устройства/);
   assert.match(page, /mihomoRuleStudio/);
-  assert.match(page, /Восстановить стандартный/);
+  assert.match(page, /сохраняется автоматически/);
+  assert.match(page, /routingAutosaveRef/);
+  assert.match(page, /available_rules/);
   assert.match(page, /routingDraft\[selectedRuleList\.key\]/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games_enabled/);

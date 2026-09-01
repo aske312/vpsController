@@ -3,7 +3,7 @@
   "name": "WireGuard",
   "version": "1.0.0",
   "installable": true,
-  "description": "Отдельный WireGuard-инстанс только для профилей Mihomo.",
+  "description": "Сервер WireGuard для подключений Mihomo.",
   "category": "transport",
   "category_name": "Каналы",
   "default_enabled": false,

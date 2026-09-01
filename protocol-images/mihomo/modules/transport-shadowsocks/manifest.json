@@ -3,7 +3,7 @@
   "name": "Shadowsocks",
   "version": "1.0.0",
   "installable": true,
-  "description": "Собственные Shadowsocks-инстансы Mihomo; direct-клиенты не используются.",
+  "description": "Сервер Shadowsocks для подключений Mihomo.",
   "category": "transport",
   "category_name": "Каналы",
   "default_enabled": false,

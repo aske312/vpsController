@@ -3,7 +3,7 @@
   "name": "VLESS",
   "version": "1.2.0",
   "installable": true,
-  "description": "Ядро VLESS/REALITY для независимых подключений профиля с XHTTP, RAW, gRPC и CDN.",
+  "description": "Сервер VLESS с REALITY, TLS и CDN.",
   "category": "transport",
   "category_name": "Компоненты",
   "default_enabled": false,

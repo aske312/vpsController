@@ -144,6 +144,7 @@ class ProfileConnectionInput(BaseModel):
 class ProfileDeviceInput(BaseModel):
     id: str = Field(max_length=48, pattern=r"^[a-zA-Z0-9_-]+$")
     name: str = Field(min_length=1, max_length=80)
+    routing: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProfileCreate(BaseModel):
@@ -273,6 +274,11 @@ def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
     devices = result.get("devices")
     if not isinstance(devices, list) or not devices:
         devices = [{"id": "device-1", "name": "Основное устройство"}]
+    legacy_routing = result.get("routing", {}) if isinstance(result.get("routing"), dict) else {}
+    devices = [
+        {**device, "routing": device.get("routing") if isinstance(device.get("routing"), dict) else dict(legacy_routing)}
+        for device in devices if isinstance(device, dict)
+    ]
     result["devices"] = devices
     subscriptions = result.get("subscriptions")
     result["subscriptions"] = subscriptions if isinstance(subscriptions, dict) else {}
@@ -551,21 +557,6 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN,snap.licdn.com,REJECT",
         "DOMAIN,tr.snapchat.com,REJECT",
         "DOMAIN-SUFFIX,scorecardresearch.com,REJECT",
-        # Optional system/application telemetry kept as separate UI groups.
-        "DOMAIN,settings-win.data.microsoft.com,REJECT",
-        "DOMAIN,vortex.data.microsoft.com,REJECT",
-        "DOMAIN,self.events.data.microsoft.com,REJECT",
-        "DOMAIN,watson.telemetry.microsoft.com,REJECT",
-        "DOMAIN-SUFFIX,telemetry.microsoft.com,REJECT",
-        "DOMAIN,telemetry.gfe.nvidia.com,REJECT",
-        "DOMAIN,events.gfe.nvidia.com,REJECT",
-        "DOMAIN,metrics.amd.com,REJECT",
-        "DOMAIN,incoming.telemetry.mozilla.org,REJECT",
-        "DOMAIN,data.services.jetbrains.com,REJECT",
-        "DOMAIN,errors.ubuntu.com,REJECT",
-        "DOMAIN,analytics.cloud.unity3d.com,REJECT",
-        "DOMAIN,config.uca.cloud.unity3d.com,REJECT",
-        "DOMAIN,cdp.cloud.unity3d.com,REJECT",
     ],
     "direct_ru_sites": [
         "DOMAIN-SUFFIX,ru,DIRECT", "DOMAIN-SUFFIX,xn--p1ai,DIRECT", "DOMAIN-SUFFIX,su,DIRECT",
@@ -697,6 +688,23 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN,nodejs.org,DIRECT",
     ],
 }
+
+PRIVACY_TELEMETRY_RULES = [
+    "DOMAIN,settings-win.data.microsoft.com,REJECT",
+    "DOMAIN,vortex.data.microsoft.com,REJECT",
+    "DOMAIN,self.events.data.microsoft.com,REJECT",
+    "DOMAIN,watson.telemetry.microsoft.com,REJECT",
+    "DOMAIN-SUFFIX,telemetry.microsoft.com,REJECT",
+    "DOMAIN,telemetry.gfe.nvidia.com,REJECT",
+    "DOMAIN,events.gfe.nvidia.com,REJECT",
+    "DOMAIN,metrics.amd.com,REJECT",
+    "DOMAIN,incoming.telemetry.mozilla.org,REJECT",
+    "DOMAIN,data.services.jetbrains.com,REJECT",
+    "DOMAIN,errors.ubuntu.com,REJECT",
+    "DOMAIN,analytics.cloud.unity3d.com,REJECT",
+    "DOMAIN,config.uca.cloud.unity3d.com,REJECT",
+    "DOMAIN,cdp.cloud.unity3d.com,REJECT",
+]
 
 DIRECT_GAME_PROCESSES: dict[str, list[str]] = {
     "cs2": ["cs2.exe"],
@@ -840,6 +848,7 @@ def routing_rule_lists(values: dict[str, Any] | None = None) -> list[dict[str, A
             "title": DIRECT_RULE_META[setting][0],
             "description": DIRECT_RULE_META[setting][1],
             "default_rules": "\n".join(DIRECT_RULE_PRESETS[setting]),
+            "available_rules": "\n".join(DIRECT_RULE_PRESETS[setting] + (PRIVACY_TELEMETRY_RULES if setting == "block_privacy" else [])),
             "using_default": str(routing.get(f"{setting}_rules", "@default")).strip() == "@default",
         }
         for setting in DIRECT_RULE_PRESETS
@@ -2234,7 +2243,7 @@ def list_profiles() -> dict[str, Any]:
 @serialized_profile_mutation
 def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     definitions = validate_connection_inputs(payload.connections) if payload.connections is not None else legacy_connection_inputs(payload.channels)
-    devices = [device.model_dump() for device in payload.devices]
+    devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
     device_ids = {device["id"] for device in devices}
     if len(device_ids) != len(devices) or any(definition.get("device_id", "device-1") not in device_ids for definition in definitions):
         raise HTTPException(status_code=422, detail="Profile devices are invalid or a connection references a missing device")
@@ -2277,7 +2286,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     if payload.routing is not None:
         item["routing"] = validate_routing(payload.routing, current=item.get("routing", {}))
     if payload.devices is not None:
-        devices = [device.model_dump() for device in payload.devices]
+        devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
         if len({device["id"] for device in devices}) != len(devices):
             raise HTTPException(status_code=422, detail="Duplicate profile device id")
         item["devices"] = devices
@@ -2516,7 +2525,9 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         if component == "transport-reality" and str(connection.get("settings", {}).get("route_mode") or credential.get("route_mode")) == "tls":
             direct_name, cdn_name, tls_name = None, None, name
         rendered.append((connection, direct_name, cdn_name, tls_name))
-    profile_routing = item.get("routing", {}) if isinstance(item.get("routing"), dict) else {}
+    selected_device_data = next((device for device in normalized.get("devices", []) if str(device.get("id")) == selected_device), {})
+    device_routing = selected_device_data.get("routing") if isinstance(selected_device_data.get("routing"), dict) else None
+    profile_routing = device_routing if device_routing is not None else (item.get("routing", {}) if isinstance(item.get("routing"), dict) else {})
     routing = {**routing_settings(), **profile_routing}
     # Ready-made bypass lists are selected per profile. Never inherit legacy
     # global switches from routing settings; that would silently affect every

@@ -3,7 +3,7 @@
   "name": "AmneziaWG",
   "version": "1.0.0",
   "installable": true,
-  "description": "Отдельный AmneziaWG-инстанс только для профилей Mihomo.",
+  "description": "Сервер AmneziaWG для подключений Mihomo.",
   "category": "transport",
   "category_name": "Каналы",
   "default_enabled": false,
