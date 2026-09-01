@@ -1043,7 +1043,7 @@ export default function Home() {
   const connectionTypeOptions = installedProtocols.flatMap((protocol) => {
     if (protocol !== "vless-reality-xhttp") return [{
       id: protocol, protocol, routeId: undefined, name: labels[protocol],
-      badge: protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol.toUpperCase(),
+      badge: protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol.toUpperCase(),
       description: protocol === "shadowsocks" ? "Шифрованный прокси TCP и UDP" : "Отдельный VPN-туннель",
     }];
     return ([
@@ -1345,7 +1345,7 @@ export default function Home() {
       )}
 
       {(tab === "channels" || tab === "dns") && <nav className="protocolSwitcher channelPageSwitcher" aria-label="Защищённые каналы">
-        {installedProtocols.map((protocol) => <button type="button" key={protocol} className={tab === "channels" && selectedChannel === protocol ? "active" : ""} onClick={() => { setSelectedChannel(protocol); setTab("channels"); void loadProtocolStatus(protocol); }}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : "VLESS"}</button>)}
+        {installedProtocols.map((protocol) => <button type="button" key={protocol} className={tab === "channels" && selectedChannel === protocol ? "active" : ""} onClick={() => { setSelectedChannel(protocol); setTab("channels"); void loadProtocolStatus(protocol); }}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : "VLESS"}</button>)}
         <button type="button" className={tab === "dns" ? "active" : ""} onClick={() => setTab("dns")}>DNS</button>
       </nav>}
 

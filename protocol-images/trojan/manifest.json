@@ -1,15 +1,1 @@
-{
-  "id": "tr",
-  "name": "Trojan",
-  "version": "1.0.0",
-  "installable": false,
-  "description": "Временно не доступно",
-  "category": "secure-tunnels",
-  "category_name": "Защищённые туннели",
-  "installer": "install.sh",
-  "uninstaller": "uninstall.sh",
-  "supported_os": ["ubuntu", "debian"],
-  "interface_env": "",
-  "service": "",
-  "package": ""
-}
+{"id":"trojan","name":"Trojan","version":"1.14.0","installable":true,"description":"TLS-прокси с отдельным паролем для каждого подключения","category":"secure-tunnels","category_name":"Защищённые туннели","installer":"install.sh","uninstaller":"uninstall.sh","supported_os":["ubuntu","debian"],"preflight_packages":["ca-certificates","curl","iptables","openssl","tar"],"minimum_free_mb":192,"requires_kernel_headers":false,"service":"vps-control-trojan.service"}

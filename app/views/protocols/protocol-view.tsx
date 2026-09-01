@@ -54,16 +54,17 @@ const channelProfiles: Record<Protocol, {
     signature: "TUIC V5 / QUIC / TLS 1.3", features: ["TCP + UDP", "Per-client UUID", "Replay-safe handshake"],
     runtimeLabel: "TUIC runtime", healthLabel: "Служба и общий трафик",
   },
+  trojan: { index:"07", family:"TLS PROXY", title:"Trojan", lead:"Независимый TLS-прокси с индивидуальными паролями и встроенным доверием к серверному сертификату.", signature:"TROJAN / TCP / TLS 1.3", features:["TCP proxy","Per-client password","Pinned certificate"], runtimeLabel:"Trojan runtime", healthLabel:"Служба и общий трафик" },
 };
 
 export function ProtocolView(props: ProtocolViewProps) {
   const { protocolTab, activeProtocol, activeProtocolRate, activeProtocolImage, protocolCode, protocolIsTunnel, protocolOperational, protocolAvailability, protocolDiagnosticsLabel, protocolResourceAvailable, protocolResourceTotal, installedProtocols, setTab, onSelectProtocol, protocolSettingsDraft, diagnosticsOpen, resourcesOpen, checkingDiagnostics, checkingResources, installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol, changeProtocolSetting, saveProtocolSettings, toggleNetworkDiagnostics, checkNetworkDiagnostics, toggleProtocolResources, checkProtocolResources } = props;
   const isVless = protocolTab === "vless-reality-xhttp";
   const profile = channelProfiles[protocolTab];
-  if (["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic"].includes(protocolTab)) return <ProtocolCommandCenter props={props} />;
+  if (["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan"].includes(protocolTab)) return <ProtocolCommandCenter props={props} />;
   return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()}`}>
         {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные защищённые протоколы">
-          {installedProtocols.map((protocol) => <button type="button" key={protocol} className={protocol === protocolTab ? "active" : ""} aria-current={protocol === protocolTab ? "page" : undefined} onClick={() => onSelectProtocol ? onSelectProtocol(protocol) : setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : "VLESS"}</button>)}
+          {installedProtocols.map((protocol) => <button type="button" key={protocol} className={protocol === protocolTab ? "active" : ""} aria-current={protocol === protocolTab ? "page" : undefined} onClick={() => onSelectProtocol ? onSelectProtocol(protocol) : setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : "VLESS"}</button>)}
         </nav>}
         <header className="protocolHeader">
           <div className="protocolIdentityMark" aria-hidden="true"><span>{profile.index}</span><b>{protocolCode}</b></div>
@@ -185,15 +186,15 @@ function ProtocolCommandCenter({ props }: { props: ProtocolViewProps }) {
   const protocol = protocolTab;
   const profile = channelProfiles[protocol];
   if (protocol === "vless-reality-xhttp") return <VlessControlCenter props={props} />;
-  const protocolCode = protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : "VLESS";
+  const protocolCode = protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : "VLESS";
   const draft = protocolSettingsDraft[protocol] || {};
   const fields = activeProtocol.editable_settings || [];
   const events = activeProtocol.history.events || [];
-  const routeKind = protocol === "shadowsocks" ? "TCP + UDP PROXY" : protocol === "hysteria2" || protocol === "tuic" ? "QUIC + UDP PROXY" : protocol === "awg" ? "OBFUSCATED UDP" : "NATIVE UDP";
+  const routeKind = protocol === "shadowsocks" ? "TCP + UDP PROXY" : protocol === "trojan" ? "TCP + TLS PROXY" : protocol === "hysteria2" || protocol === "tuic" ? "QUIC + UDP PROXY" : protocol === "awg" ? "OBFUSCATED UDP" : "NATIVE UDP";
   const runtimeName = activeProtocol.interface || profile.title;
-  const routeAddress = protocol === "shadowsocks" || protocol === "hysteria2" || protocol === "tuic" ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port || "—"}` : activeProtocol.address || "—";
-  const routeDetailLabel = protocol === "shadowsocks" || protocol === "hysteria2" || protocol === "tuic" ? "SECURITY" : "INTERFACE";
-  const routeDetail = protocol === "shadowsocks" ? activeProtocol.security || "AEAD" : protocol === "hysteria2" || protocol === "tuic" ? activeProtocol.security || "TLS 1.3" : activeProtocol.interface || "—";
+  const routeAddress = ["shadowsocks","hysteria2","tuic","trojan"].includes(protocol) ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port || "—"}` : activeProtocol.address || "—";
+  const routeDetailLabel = ["shadowsocks","hysteria2","tuic","trojan"].includes(protocol) ? "SECURITY" : "INTERFACE";
+  const routeDetail = protocol === "shadowsocks" ? activeProtocol.security || "AEAD" : ["hysteria2","tuic","trojan"].includes(protocol) ? activeProtocol.security || "TLS 1.3" : activeProtocol.interface || "—";
 
   return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()} protocolCommandCenter vlessWorkspaceNew`}>
     {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные защищённые протоколы">
