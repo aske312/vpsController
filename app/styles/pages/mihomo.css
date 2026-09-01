@@ -594,8 +594,8 @@
 .mihomoProfileDialog > header h2 { font-size:18px; }
 .mihomoProfileWorkspace { min-height:0; display:grid; grid-template-columns:190px minmax(0,1fr); }
 .mihomoProfileRail { min-width:0; display:grid; grid-template-rows:auto auto; align-content:start; gap:10px; padding:14px; border-right:1px solid var(--line); background:linear-gradient(180deg,rgba(10,20,31,.98),rgba(5,13,21,.98)); }
-.mihomoProfileCanvas { min-width:0; overflow-x:hidden; overflow-y:auto; padding:18px 22px 24px; scrollbar-gutter:stable; background:linear-gradient(145deg,rgba(8,17,26,.98),rgba(5,12,19,.96)); }
-.mihomoProfileCanvas > * { width:100%; max-width:1120px; margin-right:auto; margin-left:auto; }
+.mihomoProfileCanvas { min-width:0; overflow-x:hidden; overflow-y:auto; display:grid; align-content:start; gap:10px; padding:16px 20px 22px; scrollbar-gutter:stable; background:linear-gradient(145deg,rgba(8,17,26,.98),rgba(5,12,19,.96)); }
+.mihomoProfileCanvas > * { width:100%; max-width:none; margin:0; }
 .mihomoProfileDialog > footer { margin:0; padding:9px 16px; background:rgba(8,17,26,.98); }
 .mihomoProfileSteps { display:grid; gap:6px; margin:0; }
 .mihomoProfileSteps button { display:grid; grid-template-columns:24px minmax(0,1fr); align-items:center; gap:7px; min-width:0; padding:7px; border:1px solid var(--line); border-radius:9px; background:rgba(5,13,21,.58); color:var(--muted); text-align:left; cursor:pointer; }
@@ -615,7 +615,7 @@
 .mihomoProfileDraftSummary dt { color:var(--muted); font-size:8px; }
 .mihomoProfileDraftSummary dd { margin:0; color:#c6bcff; font:800 8px var(--font-mono); }
 .mihomoProfileRailHint { display:none; }
-.mihomoProfileStageIntro { display:none; }
+.mihomoProfileStageIntro { order:-3; display:flex; align-items:center; gap:10px; padding:2px 2px 4px; }
 .mihomoProfileStageIntro > span { display:grid; place-items:center; width:36px; height:36px; border-radius:10px; background:rgba(92,75,180,.18); color:#c8beff; font:800 10px var(--font-mono); }
 .mihomoProfileStageIntro div { display:grid; gap:3px; }
 .mihomoProfileStageIntro b { color:var(--text); font-size:11px; }
@@ -638,6 +638,10 @@
 .mihomoProfileDialog.is-step-1 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-1 .mihomoProfileRules,.mihomoProfileDialog.is-step-1 .mihomoPresetPicker,.mihomoProfileDialog.is-step-1 .mihomoConnectionBuilder,.mihomoProfileDialog.is-step-1 .mihomoProfileTechnicalNote { display:none; }
 .mihomoProfileDialog.is-step-2 .mihomoProfileName,.mihomoProfileDialog.is-step-2 .mihomoPresetPicker,.mihomoProfileDialog.is-step-2 .mihomoConnectionBuilder,.mihomoProfileDialog.is-step-2 .mihomoProfileTechnicalNote { display:none; }
 .mihomoProfileDialog.is-step-3 .mihomoProfileName,.mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-3 .mihomoProfileRules { display:none; }
+.mihomoProfileDialog.is-step-1 .mihomoProfileDraftSummary { display:none; }
+.mihomoProfileDialog.is-step-2 .mihomoDeviceBuilder,.mihomoProfileDialog.is-step-3 .mihomoDeviceBuilder { order:-2; margin:0; padding:0 0 10px; border:0; border-bottom:1px solid rgba(91,113,138,.14); border-radius:0; background:transparent; }
+.mihomoProfileDialog.is-step-2 .mihomoDeviceBuilder > header,.mihomoProfileDialog.is-step-3 .mihomoDeviceBuilder > header { display:none; }
+.mihomoProfileDialog.is-step-2 .mihomoDeviceBuilder > div,.mihomoProfileDialog.is-step-3 .mihomoDeviceBuilder > div { grid-template-columns:repeat(auto-fit,minmax(190px,260px)); }
 .mihomoProfileRules { display:grid; gap:7px; margin-top:8px; padding:9px; border:1px solid var(--line); border-radius:11px; background:rgba(8,17,26,.72); }
 .mihomoProfileRules > header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .mihomoProfileRules > header > div { display:grid; gap:3px; }
@@ -655,7 +659,7 @@
 .mihomoProfileRuleSwitch input::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#78909f; transition:transform .18s,background .18s; }
 .mihomoProfileRuleSwitch input:checked { border-color:rgba(89,199,146,.58); background:rgba(42,137,92,.62); }
 .mihomoProfileRuleSwitch input:checked::after { transform:translateX(16px); background:#e6fff3; }
-.mihomoDeviceBuilder { display:grid; gap:7px; margin:8px 0; padding:9px; border:1px solid var(--line); border-radius:11px; background:rgba(8,17,26,.72); }
+.mihomoDeviceBuilder { display:grid; gap:8px; margin:0; padding:12px; border:1px solid var(--line); border-radius:12px; background:rgba(8,17,26,.72); }
 .mihomoDeviceBuilder > header { display:flex; justify-content:space-between; align-items:center; gap:12px; }
 .mihomoDeviceBuilder > header div { display:grid; gap:3px; }
 .mihomoDeviceBuilder > header small { display:none; }
@@ -668,7 +672,7 @@
 .mihomoDeviceBuilder input { min-height:27px; width:100%; padding:0; border:0; background:transparent; font-weight:700; }
 .mihomoDeviceBuilder button small { color:var(--muted); font-size:8px; }
 .mihomoDeviceBuilder button em { padding:5px 8px; color:#dc8c91; font-style:normal; cursor:pointer; }
-.mihomoPresetPicker { display:grid; gap:7px; margin:8px 0; padding:9px; border:1px solid var(--line); border-radius:11px; background:rgba(8,17,26,.72); }
+.mihomoPresetPicker { display:grid; gap:7px; margin:0; padding:10px; border:1px solid var(--line); border-radius:11px; background:rgba(8,17,26,.72); }
 .mihomoPresetPicker > header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .mihomoPresetPicker > header div { display:grid; gap:3px; }
 .mihomoPresetPicker > header small { display:none; }
@@ -829,7 +833,7 @@
 .mihomoConnectionAdd button { border:1px solid var(--line); border-radius:999px; background:var(--surface-raised); color:var(--text); padding:6px 10px; cursor:pointer; }
 .mihomoConnectionAdd button:disabled { opacity: .4; cursor: default; }
 .mihomoConnectionList { display:grid; grid-template-columns:1fr; align-items:start; gap:8px; min-width:0; }
-.mihomoConnectionCard { display:grid; gap:8px; padding:10px; border:1px solid var(--line); border-radius:11px; background:rgba(14,25,36,.72); }
+.mihomoConnectionCard { display:grid; gap:10px; padding:12px; border:1px solid var(--line); border-radius:12px; background:rgba(14,25,36,.72); }
 .mihomoConnectionCard.is-vless-direct { border-color:rgba(116,94,223,.32); }
 .mihomoConnectionCard.is-vless-cdn { border-color:rgba(69,157,202,.38); background:linear-gradient(145deg,rgba(13,34,47,.78),rgba(10,23,34,.72)); }
 .mihomoConnectionCard.is-vless-both { border-style:dashed; }
@@ -839,16 +843,16 @@
 .mihomoConnectionCard > header small, .mihomoConnectionFields label > small { color: var(--muted); }
 .mihomoProfileDialog .mihomoConnectionFields label > small { display:none; }
 .mihomoConnectionCard > label, .mihomoConnectionFields label { display: grid; gap: 6px; }
-.mihomoConnectionFields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; min-width:0; }
+.mihomoConnectionFields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; min-width:0; }
 .mihomoProfileDialog input:not([type=checkbox]),.mihomoProfileDialog select { min-height:36px; }
-.mihomoProfileName { grid-template-columns:130px minmax(0,1fr); align-items:center; gap:10px; }
+.mihomoProfileName { grid-template-columns:1fr; align-items:stretch; gap:7px; padding:12px; border:1px solid var(--line); border-radius:12px; background:rgba(8,17,26,.72); }
 .mihomoConnectionCard,.mihomoConnectionCard > label,.mihomoConnectionFields label { min-width:0; }
 .mihomoConnectionFields .is-toggle { grid-template-columns: 1fr auto; align-items: center; }
 .mihomoConnectionEmpty { grid-column:1/-1; margin:0; padding:14px; border:1px dashed var(--line); border-radius:10px; color:var(--muted); text-align:center; }
 @media (max-width: 760px) { .mihomoPresetPicker > div { grid-template-columns:1fr 1fr; } }
 @media (max-width: 1100px) { .mihomoGameCatalog { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media (max-width: 900px) { .mihomoPresetRoutingPanel > div { grid-template-columns:1fr 1fr; } .mihomoPresetEditor > article { grid-template-columns:1fr; } .mihomoRouteCards,.mihomoRoutingColumns { grid-template-columns:1fr; } .mihomoCustomGames { grid-template-columns:1fr; } .mihomoRuleStudio { grid-template-columns:1fr; } .mihomoRuleStudio > aside { border-right:0; border-bottom:1px solid var(--line); } .mihomoRuleLibrary { max-height:280px; } }
-@media (max-width: 1100px) { .mihomoProfileWorkspace { grid-template-columns:170px minmax(0,1fr); } .mihomoProfileStrategy > div,.mihomoProfileRules > div,.mihomoDeviceBuilder > div { grid-template-columns:repeat(2,minmax(0,1fr)); } .mihomoPresetPicker > div { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media (max-width: 1100px) { .mihomoProfileWorkspace { grid-template-columns:170px minmax(0,1fr); } .mihomoProfileStrategy > div,.mihomoProfileRules > div,.mihomoDeviceBuilder > div,.mihomoConnectionFields { grid-template-columns:repeat(2,minmax(0,1fr)); } .mihomoPresetPicker > div { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media (max-width: 640px) { .mihomoConnectionFields,.mihomoPresetPicker > div,.mihomoPresetRoutingPanel > div,.mihomoRoutingFields,.mihomoGameCatalog,.mihomoProfileRules > div,.mihomoRuleStudio > aside,.mihomoProfileName { grid-template-columns:1fr; } .mihomoRoutingHeader,.mihomoRoutingFooter,.mihomoRuleEditorHead,.mihomoRuleEditorActions { align-items:flex-start; flex-direction:column; } .mihomoRouteCards > label { grid-template-columns:40px minmax(0,1fr) auto; } .mihomoCatalogToolbar { grid-template-columns:1fr; } }
 @media (max-width: 860px) { .mihomoProfileBackdrop { padding:0; } .mihomoProfileDialog { width:100%; height:100dvh; border:0; border-radius:0; } .mihomoProfileDialog > header { min-height:58px; padding:11px 14px; } .mihomoProfileWorkspace { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); } .mihomoProfileRail { display:block; padding:9px 12px; border-right:0; border-bottom:1px solid var(--line); } .mihomoProfileSteps { grid-template-columns:repeat(3,1fr); } .mihomoProfileSteps button { grid-template-columns:24px minmax(0,1fr); padding:7px; } .mihomoProfileSteps button i { width:23px; height:23px; } .mihomoProfileSteps button small,.mihomoProfileDraftSummary,.mihomoProfileRailHint { display:none; } .mihomoProfileCanvas { padding:16px 16px 24px; scrollbar-gutter:auto; } .mihomoProfileDialog > footer { padding:10px 14px; } }
 @media (max-width: 640px) { .mihomoProfileStrategy > div { grid-template-columns:1fr; } .mihomoReadyDevices > article { grid-template-columns:1fr; } .mihomoReadyDevices img { width:132px; height:132px; justify-self:center; } .mihomoCreatedProfile .mihomoReadySummary,.mihomoProfileStrategy > header { align-items:flex-start; flex-direction:column; } }
@@ -916,6 +920,21 @@
 .mihomoDnsSummary b { overflow:hidden; color:var(--text); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
 .mihomoDnsSummary span { color:var(--muted); font-size:8px; }
 .mihomoDnsMode,.mihomoDnsProviders { display:grid; gap:11px; padding:17px 20px; border-bottom:1px solid var(--line); }
+.mihomoDnsAdvanced { display:grid; gap:10px; padding:17px 20px; border-bottom:1px solid var(--line); }
+.mihomoDnsAdvanced > header div { display:grid; gap:3px; }
+.mihomoDnsAdvanced > header b { color:var(--text); font-size:12px; }
+.mihomoDnsAdvanced > header small { color:var(--muted); font-size:9px; }
+.mihomoDnsAdvanced > div { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.mihomoDnsAdvanced > div > label { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:10px; padding:11px; border:1px solid var(--line); border-radius:11px; background:rgba(5,13,21,.62); }
+.mihomoDnsAdvanced > div > label.is-enabled { border-color:rgba(89,199,146,.45); background:rgba(37,112,79,.12); }
+.mihomoDnsAdvanced label > span { min-width:0; display:grid; gap:3px; }
+.mihomoDnsAdvanced label b { color:var(--text); font-size:9px; }
+.mihomoDnsAdvanced label small { color:var(--muted); font-size:8px; }
+.mihomoDnsAdvanced input[type=checkbox] { width:17px; min-height:17px; margin:0; accent-color:#59c792; }
+.mihomoDnsAdvanced select { min-width:150px; min-height:36px; padding:0 9px; border:1px solid var(--line); border-radius:8px; background:#07111a; color:var(--text); font-size:9px; }
+.mihomoDnsFakeIp { display:grid; grid-template-columns:minmax(180px,.45fr) minmax(0,1.55fr); align-items:start; gap:14px; padding:11px; border:1px solid var(--line); border-radius:11px; background:rgba(5,13,21,.48); }
+.mihomoDnsFakeIp textarea { width:100%; min-height:82px; padding:9px 10px; border:1px solid var(--line); border-radius:9px; outline:none; resize:vertical; background:#050d15; color:var(--text); font:9px/1.5 var(--font-mono); }
+.mihomoDnsFakeIp textarea:focus { border-color:rgba(116,94,223,.52); }
 .mihomoDnsMode > header div,.mihomoDnsProviders > header div { display:grid; gap:3px; }
 .mihomoDnsMode > header b,.mihomoDnsProviders > header b { color:var(--text); font-size:12px; }
 .mihomoDnsMode > header small,.mihomoDnsProviders > header small { color:var(--muted); font-size:9px; }
@@ -943,7 +962,7 @@
   .mihomoPolicyPanel > header { grid-template-columns: 46px minmax(0,1fr); }
   .mihomoPolicyPanel > header .mihomoPill { grid-column: 2; justify-self: start; }
   .mihomoPolicyPanel > footer { align-items: flex-start; flex-direction: column; }
-  .mihomoClientGuide ol,.mihomoClientApps,.mihomoDnsFields,.mihomoDnsSummary,.mihomoDnsMode > div { grid-template-columns:1fr; }
+  .mihomoClientGuide ol,.mihomoClientApps,.mihomoDnsFields,.mihomoDnsSummary,.mihomoDnsMode > div,.mihomoDnsAdvanced > div,.mihomoDnsFakeIp { grid-template-columns:1fr; }
   .mihomoDnsProviders > div { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .mihomoDnsHeader,.mihomoDnsFooter { align-items:flex-start; flex-direction:column; }
 }

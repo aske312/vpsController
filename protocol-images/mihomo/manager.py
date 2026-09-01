@@ -47,6 +47,8 @@ VLESS_CDN_ROUTE_ROOT = CONFIG_ROOT / "reality" / "caddy-routes"
 DIRECT_VLESS_ENV = Path("/etc/vps-control/vless-reality-xhttp/reality.env")
 XRAY_GITHUB_REPO = "XTLS/Xray-core"
 MIHOMO_GITHUB_REPO = "MetaCubeX/mihomo"
+SINGBOX_GITHUB_REPO = "SagerNet/sing-box"
+SINGBOX_BIN = Path("/usr/local/bin/sing-box")
 github_release_lock = threading.Lock()
 profile_mutation_lock = threading.Lock()
 github_release_cache: dict[str, dict[str, Any]] = {}
@@ -66,6 +68,8 @@ TRANSPORTS = {
     "transport-awg",
     "transport-shadowsocks",
     "transport-reality",
+    "transport-hysteria2",
+    "transport-tuic",
 }
 # DNS and routing are mandatory policy layers, not toggleable modules. Their
 # settings are created with the first transport and edited on dedicated pages.
@@ -97,6 +101,8 @@ SERVICE_BY_MODULE = {
     "transport-awg": "awg-quick@mh-awg0.service",
     "transport-shadowsocks": "vps-control-mihomo-ss.target",
     "transport-reality": "vps-control-mihomo-reality.service",
+    "transport-hysteria2": "vps-control-mihomo-hysteria2.service",
+    "transport-tuic": "vps-control-mihomo-tuic.service",
 }
 
 app = FastAPI(
@@ -948,7 +954,7 @@ def default_profile_presets() -> list[dict[str, Any]]:
         {"id": "direct-fallback", "name": "VLESS + резерв", "description": "Основной VLESS и резервный AWG", "strategy": "fallback", "components": [{"id": "transport-reality"}, {"id": "transport-awg"}]},
         {"id": "cdn-first", "name": "CDN-first", "description": "VLESS через CDN с резервом", "strategy": "fallback", "components": [{"id": "transport-reality", "cdn": True}, {"id": "transport-awg"}]},
         {"id": "low-latency", "name": "Минимальная задержка", "description": "AWG с резервным Shadowsocks", "strategy": "url-test", "components": [{"id": "transport-awg"}, {"id": "transport-shadowsocks"}]},
-        {"id": "all", "name": "Все транспортные каналы", "description": "Все доступные компоненты", "strategy": "select", "components": [{"id": "transport-reality"}, {"id": "transport-awg"}, {"id": "transport-wg"}, {"id": "transport-shadowsocks"}]},
+        {"id": "all", "name": "Все транспортные каналы", "description": "Все доступные компоненты", "strategy": "select", "components": [{"id": "transport-reality"}, {"id": "transport-awg"}, {"id": "transport-wg"}, {"id": "transport-shadowsocks"}, {"id": "transport-hysteria2"}, {"id": "transport-tuic"}]},
     ]
 
 
@@ -1060,10 +1066,15 @@ def validate_dns(values: dict[str, Any]) -> dict[str, Any]:
         if key not in definition:
             raise HTTPException(status_code=422, detail=f"Unknown DNS setting: {key}")
         item = definition[key]
-        if item.get("type", "text") == "select":
+        kind = item.get("type", "text")
+        if kind == "select":
             options = [option_value(option) for option in item.get("options", [])]
             if raw not in options:
                 raise HTTPException(status_code=422, detail=f"Unsupported value for {key}")
+            result[key] = raw
+        elif kind == "boolean":
+            if not isinstance(raw, bool):
+                raise HTTPException(status_code=422, detail=f"{key} must be boolean")
             result[key] = raw
         else:
             value = str(raw).strip()
@@ -1201,6 +1212,14 @@ def xray_installed_version(binary: Path) -> str:
     return match.group(1) if match else ""
 
 
+def singbox_installed_version() -> str:
+    if not SINGBOX_BIN.is_file():
+        return ""
+    output = run(str(SINGBOX_BIN), "version").stdout
+    match = re.search(r"\bversion\s+v?(\d+\.\d+\.\d+)\b", output, re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
 def awg_installed_version() -> str:
     module = run("modinfo", "-F", "version", "amneziawg", check=False).stdout
     match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", module)
@@ -1261,6 +1280,9 @@ def module_version_info(module_id: str, info: dict[str, Any], installed: bool) -
     elif module_id == "transport-reality":
         installed_version = xray_installed_version(REALITY_XRAY_BIN) if installed else ""
         available_version = github_latest_tag(XRAY_GITHUB_REPO)
+    elif module_id in {"transport-hysteria2", "transport-tuic"}:
+        installed_version = singbox_installed_version() if installed else ""
+        available_version = github_latest_tag(SINGBOX_GITHUB_REPO)
     else:
         installed_version = available_version = ""
     update_available = update_available_override if update_available_override is not None else bool(installed_version and available_version and installed_version != available_version)
@@ -1421,6 +1443,8 @@ def get_modules() -> dict[str, Any]:
         "transport-wg",
         "transport-reality",
         "transport-shadowsocks",
+        "transport-hysteria2",
+        "transport-tuic",
     ]
     return {"items": [module_payload(module_id) for module_id in order]}
 
@@ -1445,7 +1469,10 @@ def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[st
     if module_is_installed(module_id) and module_id in TRANSPORTS:
         write_action(f"module-settings:{module_id}", f"Применение настроек {manifest(module_id)['name']}…")
         try:
-            call_module_script(module_id, "install")
+            if module_id in {"transport-hysteria2", "transport-tuic"}:
+                write_quic_runtime(module_id)
+            else:
+                call_module_script(module_id, "install")
         except RuntimeError as exc:
             # Keep persisted settings and the generated runtime configuration
             # in sync. Re-applying the previous validated settings also rolls
@@ -1453,7 +1480,10 @@ def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[st
             # runtime probe or service restart.
             atomic_json(SETTINGS_ROOT / f"{module_id}.json", previous_values)
             try:
-                call_module_script(module_id, "install")
+                if module_id in {"transport-hysteria2", "transport-tuic"}:
+                    write_quic_runtime(module_id)
+                else:
+                    call_module_script(module_id, "install")
             except RuntimeError as rollback_exc:
                 exc = RuntimeError(f"{exc}; rollback failed: {rollback_exc}")
             write_action(f"module-settings:{module_id}", str(exc), state="failed", progress=100)
@@ -1550,6 +1580,8 @@ def update_module(module_id: str) -> dict[str, Any]:
             # connections aren't dropped by an unattended restart.
             run("apt-get", "-o", "DPkg::Lock::Timeout=300", "update", check=True)
             run("apt-get", "-o", "DPkg::Lock::Timeout=300", "install", "--only-upgrade", "-y", package, check=True)
+        elif module_id in {"transport-hysteria2", "transport-tuic"}:
+            call_module_script(module_id, "install", extra_env={"SINGBOX_UPDATE_ONLY": "1"})
         else:
             # Self-fetching module (transport-reality's bundled Xray): its
             # installer already downloads and verifies the latest official
@@ -2010,6 +2042,129 @@ def remove_reality_credential(profile_id: str, credential: dict[str, Any]) -> No
         pass
 
 
+def quic_module_name(module_id: str) -> str:
+    if module_id == "transport-hysteria2":
+        return "hysteria2"
+    if module_id == "transport-tuic":
+        return "tuic"
+    raise RuntimeError(f"{module_id} is not a QUIC transport")
+
+
+def quic_root(module_id: str) -> Path:
+    return CONFIG_ROOT / "quic" / quic_module_name(module_id)
+
+
+def quic_credentials(module_id: str) -> list[dict[str, Any]]:
+    root = quic_root(module_id) / "credentials"
+    return [value for path in sorted(root.glob("*.json")) if isinstance((value := load_json(path, {})), dict)] if root.exists() else []
+
+
+def quic_obfs_secret() -> str:
+    path = CONFIG_ROOT / "quic" / "hysteria2" / "obfs.secret"
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        value = ""
+    if not value:
+        value = secrets.token_urlsafe(32)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(value + "\n", encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    return value
+
+
+def write_quic_runtime(module_id: str) -> None:
+    module = quic_module_name(module_id)
+    root = quic_root(module_id)
+    config_path = root / "config.json"
+    settings = module_settings(module_id)
+    users = quic_credentials(module_id)
+    inbound: dict[str, Any] = {
+        "type": module,
+        "tag": f"{module}-in",
+        "listen": "::",
+        "listen_port": int(settings["port"]),
+        "users": ([{"name": row["instance_id"], "password": row["password"]} for row in users] if module == "hysteria2" else [{"name": row["instance_id"], "uuid": row["uuid"], "password": row["password"]} for row in users]),
+        "tls": {
+            "enabled": True,
+            "server_name": "gate.312",
+            "certificate_path": str(CONFIG_ROOT / "quic" / "server.crt"),
+            "key_path": str(CONFIG_ROOT / "quic" / "server.key"),
+        },
+    }
+    if module == "hysteria2":
+        inbound.update({"up_mbps": int(settings["up_mbps"]), "down_mbps": int(settings["down_mbps"])})
+        if bool(settings.get("obfs", True)):
+            inbound["obfs"] = {"type": "salamander", "password": quic_obfs_secret()}
+    else:
+        inbound.update({"congestion_control": settings["congestion_control"], "auth_timeout": "3s", "zero_rtt_handshake": False, "heartbeat": settings["heartbeat"]})
+    candidate = root / "config.candidate.json"
+    atomic_json(candidate, {"log": {"level": "warn"}, "inbounds": [inbound], "outbounds": [{"type": "direct"}]})
+    result = run(str(SINGBOX_BIN), "check", "-c", str(candidate))
+    if result.returncode:
+        candidate.unlink(missing_ok=True)
+        raise RuntimeError((result.stderr or result.stdout).strip() or f"sing-box rejected {module} configuration")
+    previous_config = load_json(config_path, {})
+    previous = config_path.read_bytes() if config_path.exists() else None
+    os.replace(candidate, config_path)
+    service = SERVICE_BY_MODULE[module_id]
+    try:
+        run("systemctl", "reset-failed", service)
+        run("systemctl", "restart", service, check=True)
+        if not service_stably_active(service):
+            raise RuntimeError(f"{manifest(module_id)['name']} service did not remain active")
+        if shutil.which("ufw") and run("ufw", "status").stdout.startswith("Status: active"):
+            run("ufw", "allow", f"{int(settings['port'])}/udp", "comment", f"GATE.312 Mihomo {module}")
+            old_inbounds = previous_config.get("inbounds", []) if isinstance(previous_config, dict) else []
+            old_port = int(old_inbounds[0].get("listen_port", 0)) if old_inbounds and isinstance(old_inbounds[0], dict) else 0
+            if old_port and old_port != int(settings["port"]):
+                run("ufw", "delete", "allow", f"{old_port}/udp")
+    except Exception:
+        if previous is not None:
+            config_path.write_bytes(previous)
+            os.chmod(config_path, 0o600)
+            run("systemctl", "restart", service)
+        raise
+
+
+def add_quic_credential(profile_id: str, module_id: str, connection_id: str) -> dict[str, Any]:
+    module = quic_module_name(module_id)
+    instance_id = uuid.uuid4().hex
+    credential: dict[str, Any] = {
+        "instance_id": instance_id,
+        "password": secrets.token_urlsafe(32),
+        "port": int(module_settings(module_id)["port"]),
+        "sni": "gate.312",
+        "skip_cert_verify": True,
+    }
+    if module == "tuic":
+        credential["uuid"] = str(uuid.uuid4())
+        credential["congestion_control"] = module_settings(module_id)["congestion_control"]
+        credential["heartbeat"] = module_settings(module_id)["heartbeat"]
+    else:
+        settings = module_settings(module_id)
+        credential.update({"up_mbps": int(settings["up_mbps"]), "down_mbps": int(settings["down_mbps"]), "obfs": bool(settings.get("obfs", True))})
+        if credential["obfs"]:
+            credential["obfs_password"] = quic_obfs_secret()
+    path = quic_root(module_id) / "credentials" / f"{instance_id}.json"
+    atomic_json(path, credential)
+    try:
+        write_quic_runtime(module_id)
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    return credential
+
+
+def remove_quic_credential(module_id: str, credential: dict[str, Any]) -> None:
+    instance_id = str(credential.get("instance_id", ""))
+    if re.fullmatch(r"[0-9a-f]{32}", instance_id):
+        (quic_root(module_id) / "credentials" / f"{instance_id}.json").unlink(missing_ok=True)
+        write_quic_runtime(module_id)
+
+
 def wg_like_dump(module_id: str) -> dict[str, dict[str, Any]]:
     tool = "wg" if module_id == "transport-wg" else "awg"
     interface = "mh-wg0" if module_id == "transport-wg" else "mh-awg0"
@@ -2126,6 +2281,8 @@ def profile_stats(profile_id: str) -> dict[str, Any]:
             connections[connection_id] = shadowsocks_profile_stats(profile_id, int(credential.get("port", 0)), credential.get("instance_id"))
         elif module_id == "transport-reality":
             connections[connection_id] = reality_profile_stats(profile_id, connection_id)
+        elif module_id in {"transport-hysteria2", "transport-tuic"}:
+            connections[connection_id] = {"active": systemctl_active(SERVICE_BY_MODULE[module_id]), "rx_bytes": 0, "tx_bytes": 0}
     values = list(connections.values())
     for value in values:
         if value.get("endpoint") and (value.get("active") or int(value.get("active_connections", 0) or 0) > 0 or value.get("handshake_age_s") is not None):
@@ -2153,6 +2310,8 @@ def provision(profile_id: str, module_id: str, connection_id: str = "default", s
         return add_ss_credential(profile_id, connection_id)
     if module_id == "transport-reality":
         return add_reality_credential(profile_id, connection_id, settings or {})
+    if module_id in {"transport-hysteria2", "transport-tuic"}:
+        return add_quic_credential(profile_id, module_id, connection_id)
     raise RuntimeError(f"{module_id} is not a transport")
 
 
@@ -2163,6 +2322,8 @@ def deprovision(profile_id: str, module_id: str, credential: dict[str, Any]) -> 
         remove_ss_credential(profile_id, credential)
     elif module_id == "transport-reality":
         remove_reality_credential(profile_id, credential)
+    elif module_id in {"transport-hysteria2", "transport-tuic"}:
+        remove_quic_credential(module_id, credential)
 
 
 def validate_channels(channels: list[str]) -> list[str]:
@@ -2454,6 +2615,38 @@ def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) ->
                 f"      grpc-service-name: {q(str(effective.get('path', '/vless')).lstrip('/'))}",
             ]
         return lines
+    if module_id == "transport-hysteria2":
+        lines = [
+            f"  - name: {q(proxy_name or 'HY2')}",
+            "    type: hysteria2",
+            f"    server: {q(server)}",
+            f"    port: {int(credential['port'])}",
+            f"    password: {q(credential['password'])}",
+            f"    up: {q(str(credential['up_mbps']) + ' Mbps')}",
+            f"    down: {q(str(credential['down_mbps']) + ' Mbps')}",
+            f"    sni: {q(credential.get('sni', 'gate.312'))}",
+            "    skip-cert-verify: true",
+            "    alpn: [h3]",
+        ]
+        if credential.get("obfs"):
+            lines += ["    obfs: salamander", f"    obfs-password: {q(credential['obfs_password'])}"]
+        return lines
+    if module_id == "transport-tuic":
+        heartbeat_ms = int(str(credential.get("heartbeat", "10s")).removesuffix("s")) * 1000
+        return [
+            f"  - name: {q(proxy_name or 'TUIC')}",
+            "    type: tuic",
+            f"    server: {q(server)}",
+            f"    port: {int(credential['port'])}",
+            f"    uuid: {q(credential['uuid'])}",
+            f"    password: {q(credential['password'])}",
+            f"    heartbeat-interval: {heartbeat_ms}",
+            "    udp-relay-mode: native",
+            f"    congestion-controller: {q(credential.get('congestion_control', 'bbr'))}",
+            f"    sni: {q(credential.get('sni', 'gate.312'))}",
+            "    skip-cert-verify: true",
+            "    alpn: [h3]",
+        ]
     return []
 
 
@@ -2493,6 +2686,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "transport-wg": "WG",
         "transport-reality": "VRX",
         "transport-shadowsocks": "SS",
+        "transport-hysteria2": "HY2",
+        "transport-tuic": "TUIC",
     }
     normalized = normalize_profile(item)
     selected_device = device_id or str(normalized.get("devices", [{"id": "device-1"}])[0].get("id", "device-1"))
@@ -2558,12 +2753,20 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     lines += [
         "dns:",
         "  enable: true",
+        f"  ipv6: {str(bool(dns.get('ipv6', False))).lower()}",
         f"  enhanced-mode: {dns['enhanced_mode']}",
+        f"  prefer-h3: {str(bool(dns.get('prefer_h3', False))).lower()}",
+        f"  cache-algorithm: {dns.get('cache_algorithm', 'lru')}",
         "  nameserver:",
         f"    - {q(dns['nameserver'])}",
         "  fallback:",
         f"    - {q(dns['fallback'])}",
     ]
+    if dns.get("enhanced_mode") == "fake-ip":
+        fake_ip_filter = [line.strip() for line in str(dns.get("fake_ip_filter", "")).replace("\r", "").split("\n") if line.strip()]
+        if fake_ip_filter:
+            lines.append("  fake-ip-filter:")
+            lines.extend(f"    - {q(line)}" for line in fake_ip_filter)
     lines.append("proxies:")
     for connection, name, cdn_name, tls_name in rendered:
         if name:

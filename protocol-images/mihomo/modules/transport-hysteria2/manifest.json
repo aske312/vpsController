@@ -1,0 +1,20 @@
+{
+  "id": "transport-hysteria2",
+  "name": "Hysteria2",
+  "version": "1.0.0",
+  "installable": true,
+  "description": "QUIC-транспорт Hysteria2 для подключений Mihomo.",
+  "category": "transport",
+  "category_name": "Каналы",
+  "default_enabled": false,
+  "scope": "mihomo",
+  "supported_os": ["ubuntu", "debian"],
+  "preflight_packages": ["ca-certificates", "curl", "openssl", "python3", "tar"],
+  "minimum_free_mb": 128,
+  "settings": [
+    { "key": "port", "label": "UDP-порт", "type": "number", "default": 8443, "min": 1024, "max": 65535 },
+    { "key": "up_mbps", "label": "Скорость загрузки, Мбит/с", "type": "number", "default": 100, "min": 1, "max": 10000 },
+    { "key": "down_mbps", "label": "Скорость отдачи, Мбит/с", "type": "number", "default": 100, "min": 1, "max": 10000 },
+    { "key": "obfs", "label": "Salamander-обфускация", "type": "boolean", "default": true }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "id": "dns-private",
   "name": "Private DNS",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "installable": false,
   "automatic": true,
   "settings_only": true,
@@ -30,6 +30,37 @@
       "label": "Резервный DNS",
       "type": "select",
       "default": "https://dns.google/dns-query"
+    },
+    {
+      "key": "ipv6",
+      "label": "IPv6 в DNS",
+      "type": "boolean",
+      "default": false,
+      "help": "Возвращать клиентам записи AAAA."
+    },
+    {
+      "key": "prefer_h3",
+      "label": "HTTP/3 для DoH",
+      "type": "boolean",
+      "default": false,
+      "help": "Использовать HTTP/3, если DNS-провайдер его поддерживает."
+    },
+    {
+      "key": "cache_algorithm",
+      "label": "Кэш DNS",
+      "type": "select",
+      "default": "lru",
+      "options": [
+        { "value": "lru", "label": "LRU · совместимый" },
+        { "value": "arc", "label": "ARC · адаптивный" }
+      ]
+    },
+    {
+      "key": "fake_ip_filter",
+      "label": "Исключения Fake IP",
+      "type": "textarea",
+      "default": "*.lan\n*.local\ntime.*.com\nlocalhost.ptlogin2.qq.com",
+      "help": "Домены, для которых Mihomo должен возвращать реальный IP."
     }
   ]
 }

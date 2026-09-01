@@ -1,0 +1,19 @@
+{
+  "id": "transport-tuic",
+  "name": "TUIC",
+  "version": "1.0.0",
+  "installable": true,
+  "description": "QUIC-транспорт TUIC v5 для подключений Mihomo.",
+  "category": "transport",
+  "category_name": "Каналы",
+  "default_enabled": false,
+  "scope": "mihomo",
+  "supported_os": ["ubuntu", "debian"],
+  "preflight_packages": ["ca-certificates", "curl", "openssl", "python3", "tar"],
+  "minimum_free_mb": 128,
+  "settings": [
+    { "key": "port", "label": "UDP-порт", "type": "number", "default": 10443, "min": 1024, "max": 65535 },
+    { "key": "congestion_control", "label": "Контроль перегрузки", "type": "select", "default": "bbr", "options": ["bbr", "cubic", "new_reno"] },
+    { "key": "heartbeat", "label": "Heartbeat", "type": "select", "default": "10s", "options": ["5s", "10s", "15s", "30s"] }
+  ]
+}

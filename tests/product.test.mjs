@@ -320,6 +320,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /overviewIssues/);
   assert.match(page, /mihomoDnsV2/);
   assert.match(page, /mihomoDnsProviders/);
+  assert.match(page, /mihomoDnsAdvanced/);
+  assert.match(manager, /cache-algorithm:/);
+  assert.match(manager, /fake-ip-filter:/);
+  assert.match(dnsManifest.settings.map((item) => item.key).join(","), /ipv6,prefer_h3,cache_algorithm,fake_ip_filter/);
   assert.match(page, /mihomoModuleCatalogV2/);
   assert.match(page, /moduleCapabilities/);
   assert.match(page, /expandedDeviceLists/);
@@ -1416,4 +1420,23 @@ test("channel DNS follows installed protected channels and security lives under 
 test("managed services artwork fills the block without distortion", async () => {
   const servicesCss = await read("app/styles/pages/services.css");
   assert.match(servicesCss, /\.servicesManagedBackdrop[^}]*background-size:cover[^}]*background-repeat:no-repeat/s);
+});
+
+test("Mihomo provides verified Hysteria2 and TUIC v5 transports", async () => {
+  const [manager, view, hysteriaManifest, tuicManifest, installer] = await Promise.all([
+    read("protocol-images/mihomo/manager.py"),
+    read("app/views/mihomo/mihomo-view.tsx"),
+    read("protocol-images/mihomo/modules/transport-hysteria2/manifest.json"),
+    read("protocol-images/mihomo/modules/transport-tuic/manifest.json"),
+    read("protocol-images/mihomo/modules/transport-hysteria2/install.sh"),
+  ]);
+  assert.equal(JSON.parse(hysteriaManifest).id, "transport-hysteria2");
+  assert.equal(JSON.parse(tuicManifest).id, "transport-tuic");
+  assert.match(manager, /def write_quic_runtime/);
+  assert.match(manager, /type: hysteria2/);
+  assert.match(manager, /type: tuic/);
+  assert.match(manager, /zero_rtt_handshake": False/);
+  assert.match(view, /Hysteria2/);
+  assert.match(view, /TUIC v5/);
+  assert.match(installer, /checksums.*sha256sum -c/s);
 });
