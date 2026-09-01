@@ -101,6 +101,11 @@ const presetConnectionOptions: ProfilePreset["components"] = [
   { id: "transport-awg", label: "AWG" }, { id: "transport-wg", label: "WG" }, { id: "transport-shadowsocks", label: "SS" },
   { id: "transport-hysteria2", label: "Hysteria2" }, { id: "transport-tuic", label: "TUIC v5" },
 ];
+const presetOptionGroups = [
+  { id: "direct", title: "Прямой VLESS", note: "REALITY без CDN", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && !item.cdn) },
+  { id: "cdn", title: "VLESS через CDN", note: "TLS завершается на CDN", options: presetConnectionOptions.filter((item) => item.id === "transport-reality" && item.cdn) },
+  { id: "tunnels", title: "Туннели и QUIC", note: "Независимые каналы", options: presetConnectionOptions.filter((item) => item.id !== "transport-reality") },
+];
 type ConnectionStats = { active?: boolean; endpoint?: string | null; active_connections?: number; rx_bytes?: number; tx_bytes?: number; handshake_age_s?: number | null; latency_ms?: number | null };
 type ProfileStats = { summary: { configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null; latency_ms?: number | null }; connections: Record<string, ConnectionStats>; devices?: Record<string, { configured: number; active: number; rx_bytes: number; tx_bytes: number; last_handshake_age_s: number | null; latency_ms?: number | null }> };
 
@@ -1091,6 +1096,16 @@ export function MihomoPage({
     setPresetDialog(true);
   }
 
+  function togglePresetComponent(presetIndex: number, option: ProfilePreset["components"][number], checked: boolean) {
+    setPresetDraft((current) => current.map((preset, index) => {
+      if (index !== presetIndex) return preset;
+      const matches = (component: ProfilePreset["components"][number]) => component.id === option.id
+        && Boolean(component.cdn) === Boolean(option.cdn)
+        && String(component.transport || "") === String(option.transport || "");
+      return { ...preset, components: checked ? [...preset.components.filter((item) => !matches(item)), { ...option }] : preset.components.filter((item) => !matches(item)) };
+    }));
+  }
+
   async function savePresetSettings(event: FormEvent) {
     event.preventDefault(); setBusy("presets"); setError("");
     try {
@@ -1504,7 +1519,36 @@ export function MihomoPage({
         </div>
       )}
       {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile"><header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль готов</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header><p>Отсканируйте QR в Mihomo-клиенте или скопируйте постоянную ссылку подписки. Изменения профиля появятся после обновления подписки.</p><div className="mihomoReadySummary"><b>{createdProfile.name}</b><span>{createdProfile.connections.length} подключений · {createdProfile.devices?.length || 1} устройств · {profileDirectRules.filter((rule) => Boolean(createdProfile.routing?.[rule.key])).length} правил</span></div><div className="mihomoReadyDevices">{readyDevices.map((device) => <article key={device.id}><Image src={device.qr} alt={`QR подписки ${device.name}`} width={148} height={148} unoptimized /><div><b>{device.name}</b><small>Постоянная подписка Mihomo</small><code>{device.subscription}</code><nav><button className="primaryButton" onClick={() => void navigator.clipboard.writeText(device.subscription)}>Скопировать ссылку</button><button className="ghostButton" onClick={() => void downloadConfig(createdProfile, device)}>Скачать YAML</button></nav></div></article>)}{!readyDevices.length && <div className="mihomoHint">Подготавливаем QR-коды подписок…</div>}</div><footer><button className="primaryButton" onClick={() => setCreatedProfile(null)}>Готово</button></footer></div></div>}
-      {presetDialog && <div className="mihomoDialogBackdrop"><form className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}><header><div><p className="eyebrow">PRESET ROUTING</p><h2>Настройки быстрых профилей</h2></div><button type="button" className="iconButton" onClick={() => setPresetDialog(false)}>x</button></header><p>Для каждого пресета отдельно выберите стратегию и соединения. VLESS и VLESS CDN независимы.</p><div className="mihomoPresetEditor">{presetDraft.map((preset, index) => <article key={preset.id}><label><span>Название</span><input value={preset.name} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></label><label><span>Стратегия</span><select value={preset.strategy} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, strategy: event.target.value as ProfilePreset["strategy"] } : item))}><option value="fallback">Fallback</option><option value="url-test">Автовыбор по задержке</option><option value="select">Ручной выбор</option></select></label><div>{presetConnectionOptions.map((option) => { const selected = preset.components.some((item) => item.id === option.id && Boolean(item.cdn) === Boolean(option.cdn) && String(item.transport || "") === String(option.transport || "")); return <label key={`${option.id}-${option.cdn ? "cdn" : "direct"}-${option.transport || "default"}`}><input type="checkbox" checked={selected} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i !== index ? item : { ...item, components: event.target.checked ? [...item.components, option] : item.components.filter((component) => !(component.id === option.id && Boolean(component.cdn) === Boolean(option.cdn) && String(component.transport || "") === String(option.transport || ""))) }))} /><span>{option.label}</span></label>; })}</div></article>)}</div><footer><button type="button" className="ghostButton" onClick={() => setPresetDialog(false)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "presets" || presetDraft.some((item) => !item.components.length)}>Сохранить пресеты</button></footer></form></div>}
+      {presetDialog && <div className="mihomoDialogBackdrop mihomoPresetBackdrop">
+        <form className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}>
+          <header>
+            <div><p className="eyebrow">PROFILE BLUEPRINTS</p><h2>Пресеты Mihomo</h2><small>Готовые схемы подключений для новых устройств и профилей</small></div>
+            <div className="mihomoPresetHeaderStats"><span><b>{presetDraft.length}</b> пресета</span><span><b>{presetDraft.reduce((sum, item) => sum + item.components.length, 0)}</b> каналов</span></div>
+            <button type="button" className="iconButton" aria-label="Закрыть" onClick={() => setPresetDialog(false)}>×</button>
+          </header>
+          <div className="mihomoPresetIntro"><span>01</span><p><b>Каждый пресет — независимый шаблон.</b><small>Название отображается при создании профиля. Стратегия управляет выбором канала, а список ниже определяет состав подключений.</small></p></div>
+          <div className="mihomoPresetEditor">
+            {presetDraft.map((preset, index) => <article key={preset.id} className="mihomoPresetCard">
+              <header>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <label><small>Название пресета</small><input value={preset.name} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></label>
+                <label><small>Логика переключения</small><select value={preset.strategy} onChange={(event) => setPresetDraft((current) => current.map((item, i) => i === index ? { ...item, strategy: event.target.value as ProfilePreset["strategy"] } : item))}><option value="fallback">Резервирование по порядку</option><option value="url-test">Лучший по задержке</option><option value="select">Ручной выбор</option></select></label>
+                <em>{preset.components.length} выбрано</em>
+              </header>
+              <div className="mihomoPresetGroups">
+                {presetOptionGroups.map((group) => <section key={group.id}>
+                  <header><b>{group.title}</b><small>{group.note}</small></header>
+                  <div>{group.options.map((option) => {
+                    const selected = preset.components.some((item) => item.id === option.id && Boolean(item.cdn) === Boolean(option.cdn) && String(item.transport || "") === String(option.transport || ""));
+                    return <label key={`${option.id}-${option.cdn ? "cdn" : "direct"}-${option.transport || "default"}`} className={selected ? "is-selected" : ""}><input type="checkbox" checked={selected} onChange={(event) => togglePresetComponent(index, option, event.target.checked)} /><span>{option.label}</span><i>{selected ? "ON" : "OFF"}</i></label>;
+                  })}</div>
+                </section>)}
+              </div>
+            </article>)}
+          </div>
+          <footer><p>{presetDraft.some((item) => !item.components.length) ? "В каждом пресете нужен хотя бы один канал" : "Изменения применятся только к новым конфигурациям"}</p><button type="button" className="ghostButton" onClick={() => setPresetDialog(false)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "presets" || presetDraft.some((item) => !item.components.length)}>Сохранить пресеты</button></footer>
+        </form>
+      </div>}
     </section>
   );
 }

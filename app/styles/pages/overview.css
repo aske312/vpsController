@@ -29,8 +29,8 @@
 
 .overviewTopology {
   overflow:hidden;
-  min-height:455px;
-  padding:20px;
+  min-height:390px;
+  padding:16px 20px;
   isolation:isolate;
   border-color:transparent;
   border-radius:0;
@@ -87,42 +87,42 @@
 .overviewTopologyStats strong { display:block; margin-top:5px; color:#dce9ee; font:700 15px/1 var(--font-mono); }
 .overviewTopologyStats .violet strong { color:#b299ff; }
 .overviewTopologyStats .cyan strong { color:#73dfe9; }
-.overviewFlow { position:relative; z-index:2; margin-top:18px; display:grid; grid-template-columns:150px minmax(490px,850px) 108px; align-items:stretch; gap:13px; max-width:1150px; }
-.overviewAccess { position:relative; align-self:center; min-height:260px; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:12px 8px; text-align:center; }
+.overviewFlow { position:relative; z-index:2; margin-top:12px; display:grid; grid-template-columns:130px minmax(490px,850px) 96px; align-items:stretch; gap:10px; max-width:1110px; }
+.overviewAccess { position:relative; align-self:center; min-height:210px; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:8px 5px; text-align:center; }
 .overviewAccess::after { content:""; position:absolute; right:-14px; top:50%; width:28px; height:1px; background:linear-gradient(90deg, rgba(100,184,255,.45), rgba(162,123,255,.7)); box-shadow:0 0 10px rgba(100,184,255,.16); }
-.overviewAccessGlyph { width:50px; height:50px; display:grid; place-items:center; margin:10px 0 9px; border-radius:14px; border:1px solid rgba(100,184,255,.22); background:rgba(71,128,180,.09); color:#7cbdf4; }
+.overviewAccessGlyph { width:42px; height:42px; display:grid; place-items:center; margin:7px 0; border-radius:12px; border:0; background:rgba(71,128,180,.09); color:#7cbdf4; }
 .overviewAccessGlyph svg { width:33px; height:33px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; }
 .overviewAccess > strong { font:680 13px/1.2 var(--font-sans); }
 .overviewAccess > small { margin-top:4px; color:var(--muted); font:500 9px/1.35 var(--font-sans); }
-.overviewAccess dl { width:100%; margin:13px 0 0; display:grid; gap:0; border:1px solid rgba(105,135,160,.13); border-radius:10px; overflow:hidden; background:rgba(5,12,18,.26); }
-.overviewAccess dl > div { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:30px; padding:0 8px; border-top:1px solid rgba(105,135,160,.10); }
+.overviewAccess dl { width:100%; margin:9px 0 0; display:grid; gap:1px; border:0; border-radius:0; overflow:visible; background:transparent; }
+.overviewAccess dl > div { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:24px; padding:0 4px; border-top:0; }
 .overviewAccess dl > div:first-child { border-top:0; }
 .overviewAccess dt { color:#718794; font:500 7px/1.2 var(--font-sans); text-align:left; }
 .overviewAccess dd { margin:0; color:#d7e6ec; font:700 9px/1 var(--font-mono); }
 .overviewAccess dd.ok { color:var(--green); }
 .overviewAccess dd.warn { color:var(--amber); }
-.overviewRouteStack { display:grid; grid-auto-rows:max-content; align-content:center; gap:10px; min-width:0; }
+.overviewRouteStack { display:grid; grid-auto-rows:max-content; align-content:center; gap:7px; min-width:0; }
 .overviewRoute { position:relative; overflow:hidden; min-width:0; border:1px solid rgba(105,135,160,.19); border-radius:13px; background:rgba(6,14,21,.72); }
 .overviewRoute.direct { border-color:rgba(86,217,233,.24); background:linear-gradient(120deg, rgba(10,37,42,.58), rgba(7,15,22,.86) 68%); }
-.overviewRoute > header { min-height:64px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 12px; padding:11px 13px; border-bottom:1px solid rgba(105,135,160,.14); }
+.overviewRoute > header { min-height:52px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 10px; padding:8px 11px; border-bottom:1px solid rgba(105,135,160,.14); }
 .overviewRouteIdentity { min-width:0; flex:1 1 220px; display:flex; align-items:center; gap:11px; }
 .overviewRouteIdentity > div { min-width:0; }
-.overviewRouteMark { width:38px; height:38px; flex:0 0 auto; display:grid; place-items:center; border-radius:11px; color:#c8b8ff; border:1px solid rgba(162,123,255,.38); background:rgba(162,123,255,.11); font:750 17px/1 var(--font-mono); }
+.overviewRouteMark { width:32px; height:32px; flex:0 0 auto; display:grid; place-items:center; border-radius:9px; color:#c8b8ff; border:1px solid rgba(162,123,255,.38); background:rgba(162,123,255,.11); font:750 14px/1 var(--font-mono); }
 .overviewRoute.direct .overviewRouteMark { color:#88edf4; border-color:rgba(86,217,233,.34); background:rgba(86,217,233,.08); }
-.overviewRouteIdentity h2 { margin:1px 0; color:var(--text); font:700 17px/1.15 var(--font-sans); letter-spacing:-.35px; }
-.overviewRouteIdentity small { display:block; color:var(--muted); font:500 8px/1.3 var(--font-sans); overflow-wrap:anywhere; }
+.overviewRouteIdentity h2 { margin:0; color:var(--text); font:700 15px/1.15 var(--font-sans); letter-spacing:-.25px; }
+.overviewRouteIdentity small { display:none; }
 .overviewState { flex:0 0 auto; display:inline-flex; align-items:center; gap:6px; max-width:100%; padding:6px 8px; border:1px solid rgba(105,135,160,.22); border-radius:999px; color:var(--muted); font:750 7px/1.2 var(--font-mono); letter-spacing:.06em; white-space:normal; }
 .overviewState::before { content:""; width:5px; height:5px; border-radius:50%; background:currentColor; box-shadow:0 0 8px currentColor; }
 .overviewState.online { color:var(--green); border-color:rgba(98,215,180,.20); }
 .overviewState.idle { color:var(--amber); }
 .overviewRouteFacts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); border-bottom:1px solid rgba(105,135,160,.12); background:rgba(4,10,16,.18); }
-.overviewRouteFacts span { min-width:0; padding:8px 11px; border-left:1px solid rgba(105,135,160,.10); }
+.overviewRouteFacts span { min-width:0; padding:6px 10px; border-left:1px solid rgba(105,135,160,.10); }
 .overviewRouteFacts span:first-child { border-left:0; }
 .overviewRouteFacts small { display:block; color:#526a79; font:700 6px/1 var(--font-mono); letter-spacing:.09em; }
 .overviewRouteFacts strong { display:block; margin-top:4px; color:#dce9ee; font:700 12px/1 var(--font-mono); }
-.overviewMihomoBody { display:grid; grid-template-columns:minmax(190px,.72fr) minmax(300px,1.28fr); min-height:116px; }
+.overviewMihomoBody { display:grid; grid-template-columns:minmax(170px,.62fr) minmax(300px,1.38fr); min-height:84px; }
 .overviewProfiles,
-.overviewChannels { min-width:0; padding:9px 11px 10px; }
+.overviewChannels { min-width:0; padding:6px 10px 7px; }
 .overviewChannels { border-left:1px solid rgba(105,135,160,.12); }
 .overviewSectionLabel { min-height:23px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .overviewSectionLabel > b { color:#aebec7; font:650 9px/1 var(--font-sans); }
@@ -130,7 +130,7 @@
 .overviewProfileList,
 .overviewChannelList { display:grid; }
 .overviewProfileList > div,
-.overviewChannelList > div { min-width:0; min-height:32px; border-top:1px solid rgba(105,135,160,.09); }
+.overviewChannelList > div { min-width:0; min-height:27px; border-top:1px solid rgba(105,135,160,.09); }
 .overviewProfileList > div:first-child,
 .overviewChannelList > div:first-child { border-top:0; }
 .overviewProfileList > div { display:grid; grid-template-columns:8px minmax(0,1fr); align-items:center; gap:7px; }
@@ -164,13 +164,13 @@
 
 .overviewEmpty { margin:8px 0 0; color:#607686; font:500 8px/1.4 var(--font-sans); }
 
-.overviewRoute > footer { min-height:30px; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 11px; border-top:1px solid rgba(105,135,160,.11); color:#5c7281; font:500 7px/1 var(--font-mono); }
+.overviewRoute > footer { display:none; }
 
 .overviewRoute > footer code { max-width:62%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#738999; font:500 7px/1 var(--font-mono); background:none; }
 
 .overviewDirectList { padding:3px 11px 7px; }
 
-.overviewDirectList > div { min-width:0; min-height:47px; display:grid; grid-template-columns:31px minmax(125px,1fr) 92px 70px auto; align-items:center; gap:9px; border-top:1px solid rgba(105,135,160,.10); }
+.overviewDirectList > div { min-width:0; min-height:39px; display:grid; grid-template-columns:31px minmax(125px,1fr) 92px 70px auto; align-items:center; gap:9px; border-top:1px solid rgba(105,135,160,.10); }
 
 .overviewDirectList > div:first-child { border-top:0; }
 
@@ -191,7 +191,7 @@
 
 .overviewExit { align-self:stretch; display:grid; align-content:center; gap:10px; }
 
-.overviewExit > div { position:relative; min-height:106px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:1px solid rgba(105,135,160,.16); border-radius:12px; background:rgba(5,12,18,.44); }
+.overviewExit > div { position:relative; min-height:84px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; border:1px solid rgba(105,135,160,.16); border-radius:10px; background:rgba(5,12,18,.44); }
 
 .overviewExit > div::before { content:""; position:absolute; left:-14px; top:50%; width:14px; height:1px; background:currentColor; opacity:.45; }
 
