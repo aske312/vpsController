@@ -433,36 +433,18 @@ export function OverviewDashboard({
                   </span>
                 </header>
 
-                <div className="overviewRouteFacts">
-                  <span><small>PROFILES</small><strong>{profileCount}</strong></span>
-                  <span><small>IN USE</small><strong>{mihomoStatus?.profiles_in_use || 0}</strong></span>
-                  <span><small>CHANNELS</small><strong>{installedMihomoChannels.length}</strong></span>
-                  <span><small>ROUTES USED</small><strong>{mihomoInUseCount}</strong></span>
-                </div>
-
                 <div className="overviewMihomoBody">
                   <section className="overviewManagedProfiles">
-                    <div className="overviewManagedHead">
-                      <div className="overviewSectionLabel"><b>Профили и назначенные протоколы</b><span>{profileCount}</span></div>
-                      <div className="overviewManagedChannelLegend">
-                        {mihomoChannelStates.map(({ module, profileRefs, inUse, runtimeReady }) => (
-                          <span key={module.id} className={inUse ? "inuse" : profileRefs ? "assigned" : runtimeReady ? "ready" : "stopped"} title={`${module.name}: ${profileRefs} профилей`}>
-                            <b>{channelShort[module.id] || module.id}</b><small>{profileRefs}</small>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
+                    <div className="overviewManagedHead"><div className="overviewSectionLabel"><b>Профили</b><span>{profileCount}</span></div></div>
                     <div className="overviewManagedProfileList">
                       {mihomoProfiles.map((profile) => {
-                        const assigned = profile.connections?.length
-                          ? profile.connections.map((connection) => ({ id: connection.id, label: connection.name || channelShort[connection.component] || connection.component.replace("transport-", "") }))
-                          : profile.channels.map((channel) => ({ id: channel, label: channelShort[channel] || channel.replace("transport-", "") }));
+                        const assignedComponents = [...new Set(profile.connections?.length ? profile.connections.map((connection) => connection.component) : profile.channels)];
                         return <div className="overviewManagedProfileRow" key={profile.id}>
                           <span className="profileDot" />
-                          <p><b>{profile.name}</b><small>{assigned.length} подключений настроено</small></p>
+                          <p><b>{profile.name}</b><small>{profile.connections?.length || profile.channels.length} подключений</small></p>
                           <div className="overviewManagedProtocolSet">
-                            {assigned.map((connection) => <span key={connection.id}>{connection.label}</span>)}
-                            {!assigned.length && <em>БЕЗ КАНАЛОВ</em>}
+                            {assignedComponents.map((component) => <span key={component} title={component.replace("transport-", "")}>{component === "transport-reality" ? "VLESS" : channelShort[component] || component.replace("transport-", "").toUpperCase()}</span>)}
+                            {!assignedComponents.length && <em>—</em>}
                           </div>
                         </div>;
                       })}
