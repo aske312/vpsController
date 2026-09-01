@@ -1958,7 +1958,7 @@ def rebuild_vless_cdn_snippet() -> None:
             legacy.unlink(missing_ok=True)
 
 
-def apply_reality_config(config_path: Path, config: dict[str, Any]) -> None:
+def apply_reality_config(config_path: Path, config: dict[str, Any], restart_service: bool = True) -> None:
     # Xray determines the config loader from the final extension. Keep .json
     # last; names such as config.json.candidate are rejected by newer Xray.
     candidate = config_path.with_name(f"{config_path.stem}.candidate.json")
@@ -1969,6 +1969,8 @@ def apply_reality_config(config_path: Path, config: dict[str, Any]) -> None:
         candidate.unlink(missing_ok=True)
         raise RuntimeError((result.stderr or result.stdout).strip() or "Xray rejected VLESS configuration")
     os.replace(candidate, config_path)
+    if not restart_service:
+        return
     # Profile mutations can legitimately restart Xray several times in a
     # short transaction. Clear systemd's start-rate counter before applying
     # the next validated configuration.
@@ -1976,7 +1978,7 @@ def apply_reality_config(config_path: Path, config: dict[str, Any]) -> None:
     run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
 
 
-def add_reality_credential(profile_id: str, connection_id: str, connection_settings: dict[str, Any]) -> dict[str, Any]:
+def add_reality_credential(profile_id: str, connection_id: str, connection_settings: dict[str, Any], restart_service: bool = True) -> dict[str, Any]:
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
     if not isinstance(config.get("inbounds"), list):
@@ -2022,7 +2024,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     try:
         write_mihomo_vless_cdn(route_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"])
         write_mihomo_vless_cdn(f"tls-{route_id}", settings["tls_enabled"], settings["tls_domain"], tls_path, tls_port, settings["tls_transport"])
-        apply_reality_config(config_path, config)
+        apply_reality_config(config_path, config, restart_service=restart_service)
         if settings["cdn_enabled"] or settings["tls_enabled"]:
             run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
             run("systemctl", "reload", "caddy.service", check=True)
@@ -2032,13 +2034,14 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         config_path.write_bytes(original_config)
         os.chmod(config_path, 0o640)
         shutil.chown(config_path, user="root", group="nogroup")
-        run("systemctl", "restart", "vps-control-mihomo-reality.service")
+        if restart_service:
+            run("systemctl", "restart", "vps-control-mihomo-reality.service")
         run("systemctl", "reload", "caddy.service")
         raise
     return {"uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "route_mode": settings["route_mode"], "tls_enabled": settings["tls_enabled"], "tls_domain": settings["tls_domain"], "tls_port": tls_port, "tls_path": tls_path, "tls_transport": settings["tls_transport"], "tls_xhttp_mode": settings["tls_xhttp_mode"], "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": cdn_path, "cdn_transport": settings["cdn_transport"], "cdn_xhttp_mode": settings["cdn_xhttp_mode"]}
 
 
-def remove_reality_credential(profile_id: str, credential: dict[str, Any]) -> None:
+def remove_reality_credential(profile_id: str, credential: dict[str, Any], restart_service: bool = True) -> None:
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
     try:
@@ -2049,7 +2052,7 @@ def remove_reality_credential(profile_id: str, credential: dict[str, Any]) -> No
         if connection_id:
             write_mihomo_vless_cdn(connection_id, False, "", "", 0)
             write_mihomo_vless_cdn(f"tls-{connection_id}", False, "", "", 0)
-        apply_reality_config(config_path, config)
+        apply_reality_config(config_path, config, restart_service=restart_service)
         if credential.get("cdn_enabled") or credential.get("tls_enabled"):
             run("systemctl", "reload", "caddy.service")
     except (TypeError, KeyError, IndexError):
@@ -2317,25 +2320,25 @@ def profile_stats(profile_id: str) -> dict[str, Any]:
     return {"id": profile_id, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None, "latency_ms": min(latencies) if latencies else None}}
 
 
-def provision(profile_id: str, module_id: str, connection_id: str = "default", settings: dict[str, Any] | None = None) -> dict[str, Any]:
+def provision(profile_id: str, module_id: str, connection_id: str = "default", settings: dict[str, Any] | None = None, defer_reality_restart: bool = False) -> dict[str, Any]:
     if module_id in ("transport-wg", "transport-awg"):
         return add_wg_credential(profile_id, module_id, connection_id)
     if module_id == "transport-shadowsocks":
         return add_ss_credential(profile_id, connection_id)
     if module_id == "transport-reality":
-        return add_reality_credential(profile_id, connection_id, settings or {})
+        return add_reality_credential(profile_id, connection_id, settings or {}, restart_service=not defer_reality_restart)
     if module_id in {"transport-hysteria2", "transport-tuic"}:
         return add_quic_credential(profile_id, module_id, connection_id)
     raise RuntimeError(f"{module_id} is not a transport")
 
 
-def deprovision(profile_id: str, module_id: str, credential: dict[str, Any]) -> None:
+def deprovision(profile_id: str, module_id: str, credential: dict[str, Any], defer_reality_restart: bool = False) -> None:
     if module_id in ("transport-wg", "transport-awg"):
         remove_wg_credential(profile_id, module_id, credential)
     elif module_id == "transport-shadowsocks":
         remove_ss_credential(profile_id, credential)
     elif module_id == "transport-reality":
-        remove_reality_credential(profile_id, credential)
+        remove_reality_credential(profile_id, credential, restart_service=not defer_reality_restart)
     elif module_id in {"transport-hysteria2", "transport-tuic"}:
         remove_quic_credential(module_id, credential)
 
@@ -2378,16 +2381,36 @@ def legacy_connection_inputs(channels: list[str]) -> list[dict[str, Any]]:
 
 def provision_connections(profile_id: str, definitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     completed: list[dict[str, Any]] = []
+    batch_reality = sum(definition["component"] == "transport-reality" for definition in definitions) > 1
     try:
         for definition in definitions:
-            credential = provision(profile_id, definition["component"], definition["id"], definition.get("settings", {}))
+            credential = provision(
+                profile_id,
+                definition["component"],
+                definition["id"],
+                definition.get("settings", {}),
+                defer_reality_restart=batch_reality and definition["component"] == "transport-reality",
+            )
             completed.append({**definition, "credential": credential})
+        if batch_reality:
+            run("systemctl", "reset-failed", "vps-control-mihomo-reality.service")
+            run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
+            if not service_stably_active("vps-control-mihomo-reality.service"):
+                raise RuntimeError("Mihomo VLESS service did not remain active after applying the profile")
     except Exception:
         for connection in reversed(completed):
             try:
-                deprovision(profile_id, connection["component"], connection.get("credential", {}))
+                deprovision(
+                    profile_id,
+                    connection["component"],
+                    connection.get("credential", {}),
+                    defer_reality_restart=batch_reality and connection["component"] == "transport-reality",
+                )
             except Exception:
                 pass
+        if batch_reality:
+            run("systemctl", "reset-failed", "vps-control-mihomo-reality.service")
+            run("systemctl", "restart", "vps-control-mihomo-reality.service")
         raise
     return completed
 
