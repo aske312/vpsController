@@ -143,20 +143,20 @@ test("protocol installers declare OS support and keep per-module diagnostics", a
 });
 
 test("protocol catalog distinguishes installable modules from safe placeholders", async () => {
-  const ids = ["wireguard", "amneziawg", "shadowsocks", "vless-reality-xhttp", "mihomo", "hysteria2", "ikev2", "openvpn", "trojan"];
+  const ids = ["wireguard", "amneziawg", "shadowsocks", "vless-reality-xhttp", "mihomo", "hysteria2", "tuic", "ikev2", "openvpn", "trojan"];
   const manifests = await Promise.all(ids.map((id) => read(`protocol-images/${id}/manifest.json`).then(JSON.parse)));
-  for (const manifest of manifests.slice(0, 6)) {
+  for (const manifest of manifests.slice(0, 7)) {
     assert.equal(manifest.installable, true);
     assert.deepEqual(manifest.supported_os, ["ubuntu", "debian"]);
     assert.ok(Array.isArray(manifest.preflight_packages));
     assert.ok(manifest.minimum_free_mb >= 128);
     assert.equal(typeof manifest.requires_kernel_headers, "boolean");
   }
-  for (const [index, manifest] of manifests.slice(6).entries()) {
+  for (const [index, manifest] of manifests.slice(7).entries()) {
     assert.equal(manifest.installable, false);
     assert.equal(manifest.installer, "install.sh");
     assert.equal(manifest.uninstaller, "uninstall.sh");
-    const directory = ids[index + 6];
+    const directory = ids[index + 7];
     const [install, uninstall] = await Promise.all([
       read(`protocol-images/${directory}/install.sh`),
       read(`protocol-images/${directory}/uninstall.sh`),
@@ -838,10 +838,10 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(vlessInstall, /sed -i "s\|\^TARGET=\.\*\|TARGET=\$\{TARGET\}\|"/);
   assert.match(manager, /VLESS_REALITY_TARGET="www\.intel\.com:443"/);
   assert.doesNotMatch(vlessInstall + vlessRemove, /wg-quick|awg-quick|shadowsocks/);
-  assert.match(api, /Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\]/);
+  assert.match(api, /Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"[^\]]*\]/);
   assert.match(api, /vless:\/\//);
   assert.match(api, /ss:\/\//);
-  assert.match(api, /Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\]/);
+  assert.match(api, /Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"[^\]]*\]/);
   assert.match(api, /vps-control-shadowsocks@/);
   assert.match(api, /client_mutation_lock/);
   assert.match(api, /restore_vless_config/);
@@ -871,7 +871,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /family: "STEALTH TUNNEL"/);
   assert.match(page, /family: "ENCRYPTED PROXY"/);
   assert.match(page, /family: "MODULAR TRANSPORT"/);
-  assert.match(page, /client\.protocol === "shadowsocks" \? "SS" : client\.protocol === "hysteria2" \? "HY2" : "VLESS"/);
+  assert.match(page, /client\.protocol === "hysteria2" \? "HY2" : client\.protocol === "tuic" \? "TUIC" : "VLESS"/);
   assert.match(page, /if \(Boolean\(current\?\.installed\) === installed\) return;/);
   assert.match(manager.match(/install_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
   assert.match(manager.match(/remove_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
@@ -922,7 +922,7 @@ test("protocol pages safely edit channel settings and VLESS links select HTTP2",
   assert.match(api, /"xmux_concurrency"/);
   assert.match(api, /"dns", "keepalive"/);
   assert.match(api, /"loglevel", "xpadding"/);
-  assert.match(api, /protocol: Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\]/);
+  assert.match(api, /protocol: Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"[^\]]*\]/);
   assert.match(api, /@app\.post\("\/api\/protocols\/\{protocol\}\/resources\/check"\)/);
   assert.match(api, /allow_methods=\["GET", "POST", "PUT", "PATCH", "DELETE"\]/);
   assert.match(api, /"editable_settings": editable_settings/);
@@ -1123,11 +1123,11 @@ test("direct protocols share the compact protocol command center", async () => {
     read("app/views/protocols/protocol-view.tsx"),
     read("app/styles/pages/protocols.css"),
   ]);
-  assert.match(protocolView, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"\][^\n]+<ProtocolCommandCenter/);
+  assert.match(protocolView, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic"\][^\n]+<ProtocolCommandCenter/);
   assert.match(protocolView, /function ProtocolCommandCenter/);
   assert.match(protocolView, /protocolWorkspace-\$\{protocolCode\.toLowerCase\(\)\} protocolCommandCenter/);
   assert.match(protocolView, /protocol === "shadowsocks" \? "TCP \+ UDP PROXY"/);
-  assert.match(protocolView, /protocol === "hysteria2" \? "QUIC \+ UDP PROXY"/);
+  assert.match(protocolView, /protocol === "hysteria2" \|\| protocol === "tuic" \? "QUIC \+ UDP PROXY"/);
   assert.match(protocolCss, /\.protocolCommandCenter\s*\{[^}]*gap:9px/);
   assert.match(protocolView, /vlessOverviewMetrics/);
   assert.match(protocolView, /vlessContourGrid single/);
@@ -1542,4 +1542,20 @@ test("direct Hysteria2 is installable and manages authenticated clients", async 
   assert.match(api, /def hysteria2_stats/);
   assert.match(api, /tls_mode == "acme"/);
   assert.match(view, /title: "Hysteria2"/);
+});
+
+test("direct TUIC v5 is installable and keeps clients isolated", async () => {
+  const [manifestText, install, firewall, api, view] = await Promise.all([
+    read("protocol-images/tuic/manifest.json"), read("protocol-images/tuic/install.sh"),
+    read("protocol-images/tuic/firewall.sh"), read("api/main.py"), read("app/views/protocols/protocol-view.tsx"),
+  ]);
+  const manifest = JSON.parse(manifestText);
+  assert.equal(manifest.id, "tuic"); assert.equal(manifest.installable, true);
+  assert.match(install, /SagerNet\/sing-box\/releases\/latest/);
+  assert.match(install, /asset_digest[\s\S]*sha256sum -c -/);
+  assert.match(install, /zero_rtt_handshake':False/);
+  assert.match(firewall, /vps-control-tuic/);
+  assert.match(api, /payload\.protocol == "tuic"/);
+  assert.match(api, /"udp_relay_mode": "native"/);
+  assert.match(view, /title: "TUIC v5"/);
 });

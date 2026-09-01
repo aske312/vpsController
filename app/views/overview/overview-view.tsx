@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatModuleVersion } from "../../lib/format-version";
 
-type ProtocolId = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2";
+type ProtocolId = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2" | "tuic";
 type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
 
 type OverviewData = {
@@ -153,6 +153,7 @@ const directShort: Record<ProtocolId, string> = {
   shadowsocks: "SS",
   "vless-reality-xhttp": "VLESS",
   hysteria2: "HY2",
+  tuic: "TUIC",
 };
 
 const directName: Record<ProtocolId, string> = {
@@ -161,6 +162,7 @@ const directName: Record<ProtocolId, string> = {
   shadowsocks: "Shadowsocks",
   "vless-reality-xhttp": "VLESS Reality",
   hysteria2: "Hysteria2",
+  tuic: "TUIC v5",
 };
 
 const bytes = (value = 0) => {
@@ -241,7 +243,7 @@ export function OverviewDashboard({
     () => protocolImages.filter((item) =>
       item.installed &&
       item.id !== "mihomo" &&
-      (["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"] as string[]).includes(item.id),
+      (["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic"] as string[]).includes(item.id),
     ),
     [protocolImages],
   );

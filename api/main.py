@@ -116,6 +116,9 @@ HYSTERIA2_DIR = Path("/etc/vps-control/hysteria2")
 HYSTERIA2_SETTINGS = HYSTERIA2_DIR / "settings.json"
 HYSTERIA2_USERS = HYSTERIA2_DIR / "users.json"
 HYSTERIA2_CONFIG = HYSTERIA2_DIR / "config.yaml"
+TUIC_DIR = Path("/etc/vps-control/tuic")
+TUIC_SETTINGS = TUIC_DIR / "settings.json"
+TUIC_CONFIG = TUIC_DIR / "config.json"
 AWG_PROFILE = {
     "Jc": os.getenv("AWG_JC", "6"), "Jmin": os.getenv("AWG_JMIN", "8"), "Jmax": os.getenv("AWG_JMAX", "80"),
     "S1": os.getenv("AWG_S1", "64"), "S2": os.getenv("AWG_S2", "112"),
@@ -241,14 +244,14 @@ def run_with_input(args: list[str], value: str) -> str:
 
 
 def cached_resource_availability(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic"],
 ) -> dict:
     cached = resource_check_cache.get(protocol)
     return {key: value for key, value in (cached or {}).items() if not key.startswith("_")}
 
 
 def check_resource_availability(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic"],
 ) -> dict:
     cached = resource_check_cache.get(protocol)
     if not resource_check_lock.acquire(blocking=False):
@@ -481,6 +484,11 @@ def stream_proxy_dump() -> list[dict]:
             handshake_age, rx_bps, tx_bps = stream_sample(f'hy2:{item.get("id", "")}', rx_bytes, tx_bytes)
             if not active_connections:
                 handshake_age = None
+        elif protocol == "tuic":
+            active = run("systemctl", "is-active", "vps-control-tuic.service") == "active"
+            address = f'{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{item.get("port", 8444)}'
+            rx_bytes = tx_bytes = active_connections = 0
+            handshake_age = rx_bps = tx_bps = None
         else:
             continue
         if protocol == "shadowsocks":
@@ -2548,7 +2556,7 @@ class ClientConnectionSettings(BaseModel):
 
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"]
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic"]
     vless_routes: list[Literal["direct", "tls", "cdn"]] | None = None
     settings: ClientConnectionSettings = Field(default_factory=ClientConnectionSettings)
 
@@ -2581,6 +2589,7 @@ class ProtocolSettingsUpdate(BaseModel):
     domain: str | None = Field(default=None, max_length=253)
     obfs_enabled: bool | None = None
     obfs_password: str | None = Field(default=None, max_length=128)
+    congestion_control: Literal["bbr", "cubic", "new_reno"] | None = None
 
 
 def configure_vless_transport(stream: dict, transport: str, path: str = "/") -> None:
@@ -3003,6 +3012,41 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 return {"id": client_id, "filename": f"{safe_name}-hysteria2.yaml", "config": client_config}
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 raise HTTPException(status_code=500, detail="Unable to create Hysteria2 connection") from exc
+    if payload.protocol == "tuic":
+        if not TUIC_CONFIG.exists() or run("systemctl", "is-enabled", "vps-control-tuic.service") != "enabled":
+            raise HTTPException(status_code=409, detail="TUIC protocol is not installed")
+        with client_mutation_lock:
+            original = TUIC_CONFIG.read_bytes()
+            temporary = TUIC_CONFIG.with_suffix(".tmp.json")
+            try:
+                config = json.loads(original)
+                inbound = next(item for item in config.get("inbounds", []) if item.get("type") == "tuic")
+                user_uuid, password = str(uuid.uuid4()), secrets.token_urlsafe(32)
+                inbound.setdefault("users", []).append({"name": client_id, "uuid": user_uuid, "password": password})
+                temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(temporary, 0o600)
+                result = subprocess.run(["/usr/local/lib/vps-control-tuic/sing-box", "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
+                if result.returncode:
+                    raise RuntimeError(result.stderr.strip() or "sing-box rejected TUIC configuration")
+                temporary.replace(TUIC_CONFIG)
+                run("systemctl", "restart", "vps-control-tuic.service", timeout=20, check=True)
+                settings = json.loads(TUIC_SETTINGS.read_text(encoding="utf-8"))
+                endpoint = PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT
+                certificate = (TUIC_DIR / "server.crt").read_text(encoding="utf-8")
+                client = {
+                    "log": {"level": "warn"},
+                    "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080}],
+                    "outbounds": [{"type": "tuic", "tag": "tuic-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "uuid": user_uuid, "password": password, "congestion_control": settings.get("congestion_control", "bbr"), "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": "10s", "tls": {"enabled": True, "server_name": "tuic.local", "certificate": certificate}}],
+                    "route": {"final": "tuic-out"},
+                }
+                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "port": int(settings.get("port", 8444)), "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
+                return {"id": client_id, "filename": f"{safe_name}-tuic.json", "config": json.dumps(client, ensure_ascii=False, indent=2)}
+            except Exception as exc:
+                TUIC_CONFIG.write_bytes(original); os.chmod(TUIC_CONFIG, 0o600)
+                run("systemctl", "restart", "vps-control-tuic.service", timeout=20)
+                raise HTTPException(status_code=500, detail="Unable to create TUIC connection") from exc
+            finally:
+                temporary.unlink(missing_ok=True)
     if payload.protocol == "shadowsocks":
         if run("systemctl", "show", "vps-control-shadowsocks.target", "--property=LoadState", "--value") != "loaded":
             raise HTTPException(status_code=409, detail="shadowsocks protocol is not installed")
@@ -3241,6 +3285,21 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
                 raise HTTPException(status_code=500, detail="Unable to remove Hysteria2 connection") from exc
         write_clients([entry for entry in items if entry["id"] != client_id])
         return {"deleted": client_id}
+    if protocol == "tuic":
+        with client_mutation_lock:
+            try:
+                config = json.loads(TUIC_CONFIG.read_text(encoding="utf-8"))
+                inbound = next(row for row in config.get("inbounds", []) if row.get("type") == "tuic")
+                inbound["users"] = [user for user in inbound.get("users", []) if user.get("name") != client_id]
+                temporary = TUIC_CONFIG.with_suffix(".tmp.json")
+                temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(temporary, 0o600)
+                result = subprocess.run(["/usr/local/lib/vps-control-tuic/sing-box", "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
+                if result.returncode: raise RuntimeError("invalid TUIC config")
+                temporary.replace(TUIC_CONFIG); run("systemctl", "restart", "vps-control-tuic.service", timeout=20, check=True)
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail="Unable to remove TUIC connection") from exc
+        write_clients([entry for entry in items if entry["id"] != client_id])
+        return {"deleted": client_id}
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
     config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
@@ -3277,6 +3336,11 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             {"key": "domain", "label": "Домен Hysteria2", "type": "text", "value": str(values.get("domain", "")), "help": "Нужен только для ACME. A/AAAA-запись должна указывать прямо на этот VPS."},
             {"key": "obfs_enabled", "label": "Salamander obfuscation", "type": "boolean", "value": bool(values.get("obfs_enabled", False))},
             {"key": "obfs_password", "label": "Пароль obfuscation", "type": "text", "value": str(values.get("obfs_password", "")), "help": "Изменение требует повторного импорта существующих подключений."},
+        ]
+    if protocol == "tuic":
+        return [
+            {"key": "port", "label": "UDP-порт", "type": "number", "value": int(values.get("port", 8444)), "min": 1024, "max": 65535},
+            {"key": "congestion_control", "label": "Управление перегрузкой", "type": "select", "value": str(values.get("congestion_control", "bbr")), "options": [{"value": "bbr", "label": "BBR"}, {"value": "cubic", "label": "CUBIC"}, {"value": "new_reno", "label": "New Reno"}]},
         ]
     if protocol == "shadowsocks":
         return [
@@ -3428,7 +3492,7 @@ def persist_vrx_target(host: str) -> None:
 
 @app.patch("/api/protocols/{protocol}/settings")
 def update_protocol_settings(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic"],
     payload: ProtocolSettingsUpdate,
     _: None = Depends(require_token),
 ) -> dict:
@@ -3437,6 +3501,7 @@ def update_protocol_settings(
         "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
         "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
         "hysteria2": {"port", "tls_mode", "domain", "obfs_enabled", "obfs_password"},
+        "tuic": {"port", "congestion_control"},
         "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni", "tls_enabled", "tls_domain", "tls_transport", "tls_xhttp_mode", "cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"},
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
@@ -3464,6 +3529,26 @@ def update_protocol_settings(
             **({f"{prefix}_DNS": supplied["dns"]} if "dns" in supplied else {}),
             **({f"{prefix}_KEEPALIVE": supplied["keepalive"]} if "keepalive" in supplied else {}),
         })
+    elif protocol == "tuic":
+        if not TUIC_CONFIG.exists(): raise HTTPException(status_code=409, detail="TUIC не установлен")
+        original_config, original_settings = TUIC_CONFIG.read_bytes(), TUIC_SETTINGS.read_bytes()
+        temporary = TUIC_CONFIG.with_suffix(".tmp.json")
+        try:
+            settings = json.loads(original_settings); settings.update(supplied)
+            config = json.loads(original_config); inbound = next(row for row in config.get("inbounds", []) if row.get("type") == "tuic")
+            old_port = int(inbound.get("listen_port", 8444)); inbound["listen_port"] = int(settings.get("port", old_port)); inbound["congestion_control"] = settings.get("congestion_control", "bbr")
+            temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(temporary, 0o600)
+            result = subprocess.run(["/usr/local/lib/vps-control-tuic/sing-box", "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
+            if result.returncode: raise RuntimeError(result.stderr.strip())
+            temporary.replace(TUIC_CONFIG)
+            stage = TUIC_SETTINGS.with_suffix(".tmp"); stage.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(stage, 0o600); stage.replace(TUIC_SETTINGS)
+            run("systemctl", "restart", "vps-control-tuic.service", timeout=20, check=True)
+            if old_port != int(settings.get("port", old_port)):
+                run("iptables", "-D", "INPUT", "-p", "udp", "--dport", str(old_port), "-m", "comment", "--comment", "vps-control-tuic", "-j", "ACCEPT")
+        except Exception as exc:
+            TUIC_CONFIG.write_bytes(original_config); TUIC_SETTINGS.write_bytes(original_settings); run("systemctl", "restart", "vps-control-tuic.service", timeout=20)
+            raise HTTPException(status_code=500, detail="Не удалось применить настройки TUIC") from exc
+        finally: temporary.unlink(missing_ok=True)
     elif protocol == "hysteria2":
         if not HYSTERIA2_SETTINGS.exists():
             raise HTTPException(status_code=409, detail="Hysteria2 не установлен")
@@ -3664,7 +3749,14 @@ def update_protocol_settings(
 
 
 @app.get("/api/protocols/{protocol}/status")
-def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"], _: None = Depends(require_token)) -> dict:
+def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic"], _: None = Depends(require_token)) -> dict:
+    if protocol == "tuic":
+        unit = "vps-control-tuic.service"
+        try: values = json.loads(TUIC_SETTINGS.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError): values = {}
+        rx, tx = service_bytes(unit); active = run("systemctl", "is-active", unit) == "active"
+        protocol_clients = [item for item in read_clients() if item.get("protocol") == protocol]
+        return {"protocol": protocol, "interface": "QUIC/UDP", "active": active, "service_active": active, "service_enabled": run("systemctl", "is-enabled", unit) == "enabled", "active_since": run("systemctl", "show", unit, "--property=ActiveEnterTimestamp", "--value"), "address": PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, "listen_port": int(values.get("port", 8444)), "mtu": 0, "peers": len(protocol_clients), "online_peers": 0, "endpoints": 0, "last_handshake_age_s": None, "peer_rx_bytes": rx, "peer_tx_bytes": tx, "interface_rx_bytes": rx, "interface_tx_bytes": tx, "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0, "unit": unit, "transport": "QUIC / UDP", "security": "TLS 1.3", "target": "", "settings": {"Версия": "TUIC v5", "Congestion control": str(values.get("congestion_control", "bbr")).upper(), "0-RTT": "выключен"}, "editable_settings": editable_protocol_settings(protocol, values)}
     if protocol == "hysteria2":
         unit = "vps-control-hysteria2.service"
         try:
@@ -3885,7 +3977,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
 
 @app.post("/api/protocols/{protocol}/resources/check")
 def check_protocol_resources(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic"],
     _: None = Depends(require_token),
 ) -> dict:
     return check_resource_availability(protocol)
@@ -3897,7 +3989,7 @@ def check_network_diagnostics(protocol: Literal["wg", "awg"], _: None = Depends(
 
 
 @app.post("/api/protocols/{protocol}/restart")
-def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2"], _: None = Depends(require_token)) -> dict:
+def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic"], _: None = Depends(require_token)) -> dict:
     if protocol == "shadowsocks":
         unit = "vps-control-shadowsocks.target"
         if run("systemctl", "show", unit, "--property=LoadState", "--value") != "loaded":
@@ -3910,6 +4002,7 @@ def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-realit
             f"wg-quick@{WG_INTERFACE}.service" if protocol == "wg"
             else f"awg-quick@{AWG_INTERFACE}.service" if protocol == "awg"
             else "vps-control-hysteria2.service" if protocol == "hysteria2"
+            else "vps-control-tuic.service" if protocol == "tuic"
             else "vps-control-vless-reality-xhttp.service"
         )
         if run("systemctl", "show", unit, "--property=LoadState", "--value") != "loaded":

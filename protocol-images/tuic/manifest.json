@@ -1,0 +1,16 @@
+{
+  "id": "tuic",
+  "name": "TUIC v5",
+  "version": "1.14.0",
+  "installable": true,
+  "description": "Быстрый QUIC-прокси TUIC v5 с отдельными учётными данными клиентов",
+  "category": "secure-tunnels",
+  "category_name": "Защищённые туннели",
+  "installer": "install.sh",
+  "uninstaller": "uninstall.sh",
+  "supported_os": ["ubuntu", "debian"],
+  "preflight_packages": ["ca-certificates", "curl", "iptables", "openssl", "tar"],
+  "minimum_free_mb": 192,
+  "requires_kernel_headers": false,
+  "service": "vps-control-tuic.service"
+}
