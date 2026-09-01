@@ -698,14 +698,14 @@
 .mihomoRoutingHeader { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:22px; border-bottom:1px solid var(--line); }
 .mihomoRoutingHeader h2 { margin:4px 0 7px; color:var(--text); font-size:24px; }
 .mihomoRoutingHeader p:last-child { max-width:720px; margin:0; color:var(--muted); font-size:11px; line-height:1.55; }
-.mihomoRuleStudio { display:grid; grid-template-columns:260px minmax(0,1fr); min-height:520px; border-bottom:1px solid var(--line); }
-.mihomoRuleStudio > aside { display:grid; align-content:start; gap:7px; padding:16px; border-right:1px solid var(--line); background:rgba(5,13,21,.72); }
+.mihomoRuleStudio { height:680px; display:grid; grid-template-columns:260px minmax(0,1fr); border-bottom:1px solid var(--line); }
+.mihomoRuleStudio > aside { min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr); gap:7px; padding:16px; overflow:hidden; border-right:1px solid var(--line); background:rgba(5,13,21,.72); }
 .mihomoRuleStudio > aside > header { display:grid; gap:3px; padding:4px 4px 9px; }
 .mihomoRuleStudio > aside > header b { color:var(--text); font-size:12px; }
 .mihomoRuleStudio > aside > header small { color:var(--muted); font-size:9px; }
 .mihomoRuleStudio > aside > header input,.mihomoCatalogToolbar input { width:100%; min-width:0; padding:9px 10px; border:1px solid var(--line); border-radius:9px; outline:none; background:#07111a; color:var(--text); font-size:10px; }
 .mihomoRuleStudio > aside > header input:focus,.mihomoCatalogToolbar input:focus { border-color:rgba(116,94,223,.52); }
-.mihomoRuleLibrary { max-height:560px; display:grid; align-content:start; gap:12px; overflow:auto; padding-right:3px; scrollbar-width:thin; }
+.mihomoRuleLibrary { min-height:0; display:grid; align-content:start; gap:12px; overflow:auto; padding-right:3px; scrollbar-width:thin; }
 .mihomoRuleLibrary > section { display:grid; gap:6px; }
 .mihomoRuleLibrary h4 { margin:0; padding:2px 3px; color:#8176bd; font:800 8px var(--font-mono); letter-spacing:.12em; text-transform:uppercase; }
 .mihomoRuleLibrary button { min-width:0; display:grid; grid-template-columns:38px minmax(0,1fr) auto; align-items:center; gap:9px; padding:9px; border:1px solid var(--line); border-radius:11px; background:rgba(10,21,31,.64); color:inherit; text-align:left; cursor:pointer; }
@@ -722,7 +722,7 @@
 .mihomoRuleStudio > aside b { overflow:hidden; color:var(--text); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
 .mihomoRuleStudio > aside small { color:var(--muted); font-size:8px; line-height:1.35; }
 .mihomoRuleStudio > aside i { color:#8e7ee9; font-size:8px; font-style:normal; white-space:nowrap; }
-.mihomoRuleStudio > article { min-width:0; display:grid; align-content:start; gap:14px; padding:20px; background:linear-gradient(145deg,rgba(9,19,29,.96),rgba(6,14,22,.92)); }
+.mihomoRuleStudio > article { min-width:0; min-height:0; display:flex; flex-direction:column; gap:14px; padding:20px; overflow:auto; scrollbar-gutter:stable; background:linear-gradient(145deg,rgba(9,19,29,.96),rgba(6,14,22,.92)); }
 .mihomoRuleEditorHead { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
 .mihomoRuleEditorHead h3 { margin:3px 0 5px; color:var(--text); font-size:18px; }
 .mihomoRuleEditorHead p:last-child { max-width:680px; margin:0; color:var(--muted); font-size:9px; line-height:1.5; }
@@ -814,7 +814,7 @@
 .mihomoGameRouteCatalog > article > nav button { display:block; padding:6px 5px; border-radius:7px; color:var(--muted); font-size:8px; text-align:center; }
 .mihomoGameRouteCatalog > article > nav button.is-active { border-color:rgba(89,199,146,.45); background:rgba(37,112,79,.18); color:#8ce0ba; }
 .mihomoGameRouteCatalog > article > nav button.is-active.is-tunnel { border-color:rgba(116,94,223,.5); background:rgba(86,68,180,.2); color:#c8beff; }
-.mihomoCustomGames { display:grid; grid-template-columns:minmax(210px,.55fr) minmax(0,1.45fr); align-items:start; gap:16px; padding:13px; border:1px solid var(--line); border-radius:12px; background:rgba(5,13,21,.48); }
+.mihomoCustomGames { position:sticky; bottom:0; z-index:2; flex:0 0 auto; display:grid; grid-template-columns:minmax(210px,.55fr) minmax(0,1.45fr); align-items:start; gap:16px; margin-top:auto; padding:13px; border:1px solid var(--line); border-radius:12px; background:rgba(5,13,21,.97); box-shadow:0 -10px 24px rgba(3,9,15,.38); }
 .mihomoCustomGames > span { display:grid; gap:5px; }
 .mihomoCustomGames b { color:var(--text); font-size:11px; }
 .mihomoCustomGames small { color:var(--muted); font-size:9px; line-height:1.5; }
