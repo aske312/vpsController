@@ -1316,6 +1316,18 @@ test("Mihomo QUIC transports use the release asset digest instead of a removed c
   assert.doesNotMatch(installer, /sing-box-\$\{version\}-checksums\.txt/);
 });
 
+test("installed Mihomo module services are discovered from manifests", async () => {
+  const api = await read("api/main.py");
+  const moduleIds = ["transport-wg", "transport-awg", "transport-shadowsocks", "transport-reality", "transport-hysteria2", "transport-tuic"];
+  assert.match(api, /def mihomo_module_services/);
+  assert.match(api, /module_root\.glob\("\*\/manifest\.json"\)/);
+  assert.doesNotMatch(api, /MIHOMO_MODULE_SERVICES/);
+  for (const moduleId of moduleIds) {
+    const manifest = JSON.parse(await read(`protocol-images/mihomo/modules/${moduleId}/manifest.json`));
+    assert.match(manifest.service, /\.(?:service|target)$/);
+  }
+});
+
 test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN connections", async () => {
   const [manifestText, installer, manager, view] = await Promise.all([
     read("protocol-images/mihomo/modules/transport-reality/manifest.json"),

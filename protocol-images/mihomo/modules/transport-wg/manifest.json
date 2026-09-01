@@ -8,6 +8,7 @@
   "category_name": "Каналы",
   "default_enabled": false,
   "scope": "mihomo",
+  "service": "wg-quick@mh-wg0.service",
   "supported_os": ["ubuntu", "debian"],
   "preflight_packages": ["iptables", "wireguard-tools"],
   "minimum_free_mb": 128,

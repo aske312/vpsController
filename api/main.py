@@ -1816,15 +1816,31 @@ def application_logs(lines: int = 160, _: None = Depends(require_token)) -> dict
 
 
 MIHOMO_STATE_FILE = Path("/var/lib/vps-control/mihomo/state.json")
-# Mirrors manager.py's SERVICE_BY_MODULE. The two files run as separate
-# processes with no shared import, so this small map is kept in sync by hand
-# rather than reading it back over HTTP from a service that might be down.
-MIHOMO_MODULE_SERVICES = {
-    "transport-wg": ("Mihomo · WireGuard", "wg-quick@mh-wg0.service"),
-    "transport-awg": ("Mihomo · AmneziaWG", "awg-quick@mh-awg0.service"),
-    "transport-shadowsocks": ("Mihomo · Shadowsocks", "vps-control-mihomo-ss.target"),
-    "transport-reality": ("Mihomo · VLESS Reality", "vps-control-mihomo-reality.service"),
-}
+
+
+def mihomo_module_services() -> dict[str, dict]:
+    """Discover manageable services declared by Mihomo module manifests."""
+    services: dict[str, dict] = {}
+    module_root = PROTOCOL_IMAGES_DIR / "mihomo" / "modules"
+    if not module_root.is_dir():
+        return services
+    for manifest_path in module_root.glob("*/manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        module_id = str(manifest.get("id", ""))
+        unit = str(manifest.get("service", ""))
+        if manifest_path.parent.name != module_id or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", module_id):
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9@_.:-]+\.(?:service|target|timer|socket)", unit):
+            continue
+        services[module_id] = {
+            "name": f"Mihomo · {manifest.get('name') or module_id}",
+            "unit": unit,
+            "controls": ["start", "stop", "restart"],
+        }
+    return services
 
 
 def protocol_managed_services() -> dict[str, dict]:
@@ -1843,9 +1859,9 @@ def protocol_managed_services() -> dict[str, dict]:
         mihomo_state = {}
     mihomo_modules = mihomo_state.get("modules") if isinstance(mihomo_state, dict) else {}
     mihomo_modules = mihomo_modules if isinstance(mihomo_modules, dict) else {}
-    for module_id, (name, unit) in MIHOMO_MODULE_SERVICES.items():
+    for module_id, service in mihomo_module_services().items():
         if mihomo_modules.get(module_id):
-            services[f"mihomo-{module_id}"] = {"name": name, "unit": unit, "controls": ["start", "stop", "restart"]}
+            services[f"mihomo-{module_id}"] = service
     return services
 
 

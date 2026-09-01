@@ -8,6 +8,7 @@
   "category_name": "Каналы",
   "default_enabled": false,
   "scope": "mihomo",
+  "service": "vps-control-mihomo-tuic.service",
   "supported_os": ["ubuntu", "debian"],
   "preflight_packages": ["ca-certificates", "curl", "openssl", "python3", "tar"],
   "minimum_free_mb": 128,

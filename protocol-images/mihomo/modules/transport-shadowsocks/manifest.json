@@ -8,6 +8,7 @@
   "category_name": "Каналы",
   "default_enabled": false,
   "scope": "mihomo",
+  "service": "vps-control-mihomo-ss.target",
   "supported_os": ["ubuntu", "debian"],
   "preflight_packages": ["iptables", "shadowsocks-libev"],
   "minimum_free_mb": 128,
