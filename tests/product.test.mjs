@@ -1308,6 +1308,14 @@ test("successful protocol installs are immediately reachable and health-checked"
   assert.match(mihomoReality, /iptables -C INPUT -p tcp --dport/);
 });
 
+test("Mihomo QUIC transports use the release asset digest instead of a removed checksum file", async () => {
+  const installer = await read("protocol-images/mihomo/modules/transport-hysteria2/install.sh");
+  assert.match(installer, /asset\.get\("digest",""\)/);
+  assert.match(installer, /asset\["browser_download_url"\]/);
+  assert.match(installer, /sha256sum -c -/);
+  assert.doesNotMatch(installer, /sing-box-\$\{version\}-checksums\.txt/);
+});
+
 test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN connections", async () => {
   const [manifestText, installer, manager, view] = await Promise.all([
     read("protocol-images/mihomo/modules/transport-reality/manifest.json"),
@@ -1438,5 +1446,5 @@ test("Mihomo provides verified Hysteria2 and TUIC v5 transports", async () => {
   assert.match(manager, /zero_rtt_handshake": False/);
   assert.match(view, /Hysteria2/);
   assert.match(view, /TUIC v5/);
-  assert.match(installer, /checksums.*sha256sum -c/s);
+  assert.match(installer, /asset_digest[\s\S]*sha256sum -c -/);
 });
