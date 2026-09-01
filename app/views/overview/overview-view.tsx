@@ -93,6 +93,7 @@ type MihomoProfile = {
   id: string;
   name: string;
   channels: string[];
+  connections?: Array<{ id: string; component: string; name: string }>;
   created_at: string;
   updated_at: string;
 };
@@ -440,36 +441,32 @@ export function OverviewDashboard({
                 </div>
 
                 <div className="overviewMihomoBody">
-                  <section className="overviewProfiles">
-                    <div className="overviewSectionLabel"><b>Профили</b><span>{profileCount}</span></div>
-                    <div className="overviewProfileList">
-                      {mihomoProfiles.slice(0, 5).map((profile) => (
-                        <div key={profile.id}>
-                          <span className="profileDot" />
-                          <p><b>{profile.name}</b><small>{profile.channels.length ? profile.channels.map((channel) => channelShort[channel] || channel).join("  ") : "каналы не назначены"}</small></p>
-                        </div>
-                      ))}
-                      {!mihomoProfiles.length && <p className="overviewEmpty">Профили ещё не созданы.</p>}
+                  <section className="overviewManagedProfiles">
+                    <div className="overviewManagedHead">
+                      <div className="overviewSectionLabel"><b>Профили и назначенные протоколы</b><span>{profileCount}</span></div>
+                      <div className="overviewManagedChannelLegend">
+                        {mihomoChannelStates.map(({ module, profileRefs, inUse, runtimeReady }) => (
+                          <span key={module.id} className={inUse ? "inuse" : profileRefs ? "assigned" : runtimeReady ? "ready" : "stopped"} title={`${module.name}: ${profileRefs} профилей`}>
+                            <b>{channelShort[module.id] || module.id}</b><small>{profileRefs}</small>
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                  </section>
-
-                  <section className="overviewChannels">
-                    <div className="overviewSectionLabel"><b>Внутренние каналы</b><span>{mihomoInUseCount}/{installedMihomoChannels.length} used</span></div>
-                    <div className="overviewChannelList">
-                      {mihomoChannelStates.map(({ module, profileRefs, inUse, runtimeReady }) => {
-                        const state = inUse ? "inuse" : profileRefs > 0 && runtimeReady ? "assigned" : runtimeReady ? "ready" : "stopped";
-                        return (
-                          <div key={module.id}>
-                            <span className="overviewProtocolMark violet">{channelShort[module.id] || module.id}</span>
-                            <p>
-                              <b>{module.name}</b>
-                              <small>{profileRefs ? `${profileRefs} проф.  назначен` : runtimeReady ? "готов, профили не используют" : "runtime не активен"}</small>
-                            </p>
-                            <em className={state}>{inUse ? "IN USE" : profileRefs > 0 && runtimeReady ? "ASSIGNED" : runtimeReady ? "READY" : "STOPPED"}</em>
+                    <div className="overviewManagedProfileList">
+                      {mihomoProfiles.map((profile) => {
+                        const assigned = profile.connections?.length
+                          ? profile.connections.map((connection) => ({ id: connection.id, label: connection.name || channelShort[connection.component] || connection.component.replace("transport-", "") }))
+                          : profile.channels.map((channel) => ({ id: channel, label: channelShort[channel] || channel.replace("transport-", "") }));
+                        return <div className="overviewManagedProfileRow" key={profile.id}>
+                          <span className="profileDot" />
+                          <p><b>{profile.name}</b><small>{assigned.length} подключений настроено</small></p>
+                          <div className="overviewManagedProtocolSet">
+                            {assigned.map((connection) => <span key={connection.id}>{connection.label}</span>)}
+                            {!assigned.length && <em>БЕЗ КАНАЛОВ</em>}
                           </div>
-                        );
+                        </div>;
                       })}
-                      {!installedMihomoChannels.length && <p className="overviewEmpty">Внутренние transport-модули не установлены.</p>}
+                      {!mihomoProfiles.length && <p className="overviewEmpty">Профили ещё не созданы.</p>}
                     </div>
                   </section>
                 </div>

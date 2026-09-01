@@ -235,6 +235,36 @@
 .overviewChannelList .overviewProtocolMark { width:38px; height:28px; white-space:nowrap; overflow:hidden; }
 .overviewExit { display:none !important; }
 
+/* Dense route inventory for many Mihomo profiles and protocol assignments. */
+.overviewRoute > header { min-height:46px; padding:7px 11px; }
+.overviewRouteIdentity { gap:9px; }
+.overviewRouteMark { width:30px; height:30px; }
+.overviewRouteFacts span { padding:5px 10px; }
+.overviewMihomoBody { display:block; min-height:0; }
+.overviewManagedProfiles { min-width:0; padding:7px 10px 9px; }
+.overviewManagedHead { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; padding-bottom:6px; border-bottom:1px solid rgba(105,135,160,.10); }
+.overviewManagedHead .overviewSectionLabel { flex:0 1 auto; min-width:180px; }
+.overviewManagedChannelLegend { min-width:0; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:4px; }
+.overviewManagedChannelLegend > span { height:22px; display:inline-flex; align-items:center; gap:5px; padding:0 7px; border:1px solid rgba(162,123,255,.16); border-radius:7px; background:rgba(162,123,255,.06); color:#8f84c6; }
+.overviewManagedChannelLegend b { font:750 8px/1 var(--font-mono); }
+.overviewManagedChannelLegend small { color:#647b89; font:700 7px/1 var(--font-mono); }
+.overviewManagedChannelLegend .inuse { border-color:rgba(98,215,180,.22); color:var(--green); }
+.overviewManagedChannelLegend .assigned { color:#c5b6ff; }
+.overviewManagedChannelLegend .ready { color:#77909e; }
+.overviewManagedChannelLegend .stopped { color:#8b6d72; }
+.overviewManagedProfileList { max-height:230px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-content:start; gap:0 12px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:rgba(162,123,255,.25) transparent; }
+.overviewManagedProfileRow { min-width:0; min-height:42px; display:grid; grid-template-columns:7px minmax(105px,.72fr) minmax(150px,1.28fr); align-items:center; gap:8px; border-bottom:1px solid rgba(105,135,160,.09); }
+.overviewManagedProfileRow > p { min-width:0; margin:0; }
+.overviewManagedProfileRow > p b,.overviewManagedProfileRow > p small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.overviewManagedProfileRow > p b { color:#dce8ee; font:650 9px/1.2 var(--font-sans); }
+.overviewManagedProfileRow > p small { margin-top:3px; color:#647b89; font:500 7px/1.2 var(--font-sans); }
+.overviewManagedProtocolSet { min-width:0; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:3px; }
+.overviewManagedProtocolSet span,.overviewManagedProtocolSet em { padding:4px 5px; border-radius:5px; background:rgba(162,123,255,.10); color:#c6b8ff; font:750 7px/1 var(--font-mono); font-style:normal; white-space:nowrap; }
+.overviewManagedProtocolSet em { background:rgba(105,135,160,.07); color:#6c818e; }
+.overviewRoute.direct .overviewDirectList { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:0 10px; padding:3px 10px 7px; }
+.overviewRoute.direct .overviewDirectList > div { min-height:44px; grid-template-columns:31px minmax(0,1fr) auto; gap:8px; padding:0 2px; }
+.overviewRoute.direct .overviewDirectTraffic,.overviewRoute.direct .overviewDirectLatency { display:none; }
+
 @media (max-width:1180px) {
   .overviewTopologyHead,.overviewFlow { width:100% !important; max-width:100% !important; }
   .overviewFlow { grid-template-columns:160px minmax(0,1fr) !important; }
@@ -245,7 +275,13 @@
   .overviewMihomoBody { grid-template-columns:1fr; }
   .overviewRoute.mihomo .overviewChannelList { grid-template-columns:1fr; }
   .overviewRoute.mihomo .overviewChannelList > div:nth-child(2) { border-top:1px solid rgba(105,135,160,.09); }
+  .overviewManagedProfileList { grid-template-columns:1fr; max-height:280px; }
+  .overviewManagedHead { align-items:flex-start; }
 }
 @media (max-width:680px) {
   .overviewFlow { grid-template-columns:1fr !important; }
+  .overviewManagedHead { display:grid; }
+  .overviewManagedChannelLegend { justify-content:flex-start; }
+  .overviewManagedProfileRow { grid-template-columns:7px minmax(0,1fr); padding:7px 0; }
+  .overviewManagedProtocolSet { grid-column:2; justify-content:flex-start; }
 }
