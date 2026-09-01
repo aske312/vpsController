@@ -145,18 +145,18 @@ test("protocol installers declare OS support and keep per-module diagnostics", a
 test("protocol catalog distinguishes installable modules from safe placeholders", async () => {
   const ids = ["wireguard", "amneziawg", "shadowsocks", "vless-reality-xhttp", "mihomo", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"];
   const manifests = await Promise.all(ids.map((id) => read(`protocol-images/${id}/manifest.json`).then(JSON.parse)));
-  for (const manifest of manifests.slice(0, 9)) {
+  for (const manifest of manifests.slice(0, 10)) {
     assert.equal(manifest.installable, true);
     assert.deepEqual(manifest.supported_os, ["ubuntu", "debian"]);
     assert.ok(Array.isArray(manifest.preflight_packages));
     assert.ok(manifest.minimum_free_mb >= 128);
     assert.equal(typeof manifest.requires_kernel_headers, "boolean");
   }
-  for (const [index, manifest] of manifests.slice(9).entries()) {
+  for (const [index, manifest] of manifests.slice(10).entries()) {
     assert.equal(manifest.installable, false);
     assert.equal(manifest.installer, "install.sh");
     assert.equal(manifest.uninstaller, "uninstall.sh");
-    const directory = ids[index + 9];
+    const directory = ids[index + 10];
     const [install, uninstall] = await Promise.all([
       read(`protocol-images/${directory}/install.sh`),
       read(`protocol-images/${directory}/uninstall.sh`),
@@ -871,7 +871,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /family: "STEALTH TUNNEL"/);
   assert.match(page, /family: "ENCRYPTED PROXY"/);
   assert.match(page, /family: "MODULAR TRANSPORT"/);
-  assert.match(page, /client\.protocol === "tuic" \? "TUIC" : client\.protocol === "trojan" \? "TRJ" : client\.protocol === "openvpn" \? "OVPN" : "VLESS"/);
+  assert.match(page, /client\.protocol === "tuic" \? "TUIC" : client\.protocol === "trojan" \? "TRJ" : client\.protocol === "openvpn" \? "OVPN" : client\.protocol === "ikev2" \? "IKE" : "VLESS"/);
   assert.match(page, /if \(Boolean\(current\?\.installed\) === installed\) return;/);
   assert.match(manager.match(/install_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
   assert.match(manager.match(/remove_protocol_image\(\) \{[\s\S]*?\n\}/)?.[0] || "", /ensure_api_write_access[\s\S]*?systemctl restart "\$\{APP_NAME\}-api\.service"/);
@@ -1123,7 +1123,7 @@ test("direct protocols share the compact protocol command center", async () => {
     read("app/views/protocols/protocol-view.tsx"),
     read("app/styles/pages/protocols.css"),
   ]);
-  assert.match(protocolView, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"\][^\n]+<ProtocolCommandCenter/);
+  assert.match(protocolView, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"\][^\n]+<ProtocolCommandCenter/);
   assert.match(protocolView, /function ProtocolCommandCenter/);
   assert.match(protocolView, /protocolWorkspace-\$\{protocolCode\.toLowerCase\(\)\} protocolCommandCenter/);
   assert.match(protocolView, /protocol === "shadowsocks" \? "TCP \+ UDP PROXY"/);
@@ -1578,4 +1578,17 @@ test("direct OpenVPN is installable and uses per-client PKI with CRL revocation"
   assert.match(firewall, /MASQUERADE/); assert.match(uninstall, /protocol.*openvpn/);
   assert.match(api, /build-client-full", client_id, "nopass"/); assert.match(api, /revoke_openvpn_certificate/); assert.match(api, /openvpn_stats/);
   assert.match(view, /title:"OpenVPN"/);
+});
+
+test("direct IKEv2 is installable and reloads isolated EAP users", async () => {
+  const [manifestText, install, firewall, api, view] = await Promise.all([
+    read("protocol-images/ikev2/manifest.json"), read("protocol-images/ikev2/install.sh"),
+    read("protocol-images/ikev2/firewall.sh"), read("api/main.py"), read("app/views/protocols/protocol-view.tsx"),
+  ]);
+  const manifest = JSON.parse(manifestText);
+  assert.equal(manifest.id, "ikev2"); assert.equal(manifest.installable, true);
+  assert.match(install, /Another strongSwan runtime is active/); assert.match(install, /EAP|eap-dynamic/);
+  assert.match(install, /charon\.vici/); assert.match(firewall, /--dport 500/); assert.match(firewall, /--dport 4500/);
+  assert.match(api, /render_ikev2_users/); assert.match(api, /reload_ikev2/); assert.match(api, /payload\.protocol == "ikev2"/);
+  assert.match(view, /title:"IKEv2"/);
 });

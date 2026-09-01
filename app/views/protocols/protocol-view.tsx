@@ -56,16 +56,17 @@ const channelProfiles: Record<Protocol, {
   },
   trojan: { index:"07", family:"TLS PROXY", title:"Trojan", lead:"Независимый TLS-прокси с индивидуальными паролями и встроенным доверием к серверному сертификату.", signature:"TROJAN / TCP / TLS 1.3", features:["TCP proxy","Per-client password","Pinned certificate"], runtimeLabel:"Trojan runtime", healthLabel:"Служба и общий трафик" },
   openvpn: { index:"08", family:"CERTIFICATE VPN", title:"OpenVPN", lead:"Классический VPN-туннель с отдельным сертификатом для каждого устройства и отзывом через CRL.", signature:"OPENVPN / TLS / TUN", features:["Client certificate","tls-crypt","CRL revocation"], runtimeLabel:"OpenVPN runtime", healthLabel:"Служба и трафик клиентов" },
+  ikev2: { index:"09", family:"SYSTEM VPN", title:"IKEv2", lead:"Нативный системный VPN на strongSwan с сертификатом сервера и отдельной EAP-учётной записью на устройство.", signature:"IKEV2 / IPSEC / X.509", features:["Native OS clients","EAP-MSCHAPv2","NAT traversal"], runtimeLabel:"strongSwan runtime", healthLabel:"IKE SA и общий трафик" },
 };
 
 export function ProtocolView(props: ProtocolViewProps) {
   const { protocolTab, activeProtocol, activeProtocolRate, activeProtocolImage, protocolCode, protocolIsTunnel, protocolOperational, protocolAvailability, protocolDiagnosticsLabel, protocolResourceAvailable, protocolResourceTotal, installedProtocols, setTab, onSelectProtocol, protocolSettingsDraft, diagnosticsOpen, resourcesOpen, checkingDiagnostics, checkingResources, installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol, changeProtocolSetting, saveProtocolSettings, toggleNetworkDiagnostics, checkNetworkDiagnostics, toggleProtocolResources, checkProtocolResources } = props;
   const isVless = protocolTab === "vless-reality-xhttp";
   const profile = channelProfiles[protocolTab];
-  if (["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"].includes(protocolTab)) return <ProtocolCommandCenter props={props} />;
+  if (["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"].includes(protocolTab)) return <ProtocolCommandCenter props={props} />;
   return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()}`}>
         {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные защищённые протоколы">
-          {installedProtocols.map((protocol) => <button type="button" key={protocol} className={protocol === protocolTab ? "active" : ""} aria-current={protocol === protocolTab ? "page" : undefined} onClick={() => onSelectProtocol ? onSelectProtocol(protocol) : setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : "VLESS"}</button>)}
+          {installedProtocols.map((protocol) => <button type="button" key={protocol} className={protocol === protocolTab ? "active" : ""} aria-current={protocol === protocolTab ? "page" : undefined} onClick={() => onSelectProtocol ? onSelectProtocol(protocol) : setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : "VLESS"}</button>)}
         </nav>}
         <header className="protocolHeader">
           <div className="protocolIdentityMark" aria-hidden="true"><span>{profile.index}</span><b>{protocolCode}</b></div>
@@ -187,13 +188,13 @@ function ProtocolCommandCenter({ props }: { props: ProtocolViewProps }) {
   const protocol = protocolTab;
   const profile = channelProfiles[protocol];
   if (protocol === "vless-reality-xhttp") return <VlessControlCenter props={props} />;
-  const protocolCode = protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : "VLESS";
+  const protocolCode = protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : "VLESS";
   const draft = protocolSettingsDraft[protocol] || {};
   const fields = activeProtocol.editable_settings || [];
   const events = activeProtocol.history.events || [];
-  const routeKind = protocol === "shadowsocks" ? "TCP + UDP PROXY" : protocol === "trojan" ? "TCP + TLS PROXY" : protocol === "openvpn" ? "CERTIFICATE VPN" : protocol === "hysteria2" || protocol === "tuic" ? "QUIC + UDP PROXY" : protocol === "awg" ? "OBFUSCATED UDP" : "NATIVE UDP";
+  const routeKind = protocol === "shadowsocks" ? "TCP + UDP PROXY" : protocol === "trojan" ? "TCP + TLS PROXY" : protocol === "openvpn" ? "CERTIFICATE VPN" : protocol === "ikev2" ? "SYSTEM IPSEC VPN" : protocol === "hysteria2" || protocol === "tuic" ? "QUIC + UDP PROXY" : protocol === "awg" ? "OBFUSCATED UDP" : "NATIVE UDP";
   const runtimeName = activeProtocol.interface || profile.title;
-  const routeAddress = ["shadowsocks","hysteria2","tuic","trojan","openvpn"].includes(protocol) ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port || "—"}` : activeProtocol.address || "—";
+  const routeAddress = ["shadowsocks","hysteria2","tuic","trojan","openvpn","ikev2"].includes(protocol) ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port || "—"}` : activeProtocol.address || "—";
   const routeDetailLabel = ["shadowsocks","hysteria2","tuic","trojan","openvpn"].includes(protocol) ? "SECURITY" : "INTERFACE";
   const routeDetail = protocol === "shadowsocks" ? activeProtocol.security || "AEAD" : ["hysteria2","tuic","trojan","openvpn"].includes(protocol) ? activeProtocol.security || "TLS 1.3" : activeProtocol.interface || "—";
 

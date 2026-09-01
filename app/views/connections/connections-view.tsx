@@ -64,7 +64,7 @@ export function ConnectionsView({ installedProtocols, clientStateFilter, setClie
           <div className="connectionsRows">
             {protocolClients.length ? visibleClients.map((client) => {
               const clientStateLabel = client.quality === "stable" ? "ОНЛАЙН" : client.quality === "offline" ? "ОФЛАЙН" : "НЕСТАБИЛЬНО";
-              const protocolLabel = client.protocol === "wg" ? "WG" : client.protocol === "awg" ? "AWG" : client.protocol === "shadowsocks" ? "SS" : client.protocol === "hysteria2" ? "HY2" : client.protocol === "tuic" ? "TUIC" : client.protocol === "trojan" ? "TRJ" : client.protocol === "openvpn" ? "OVPN" : "VLESS";
+              const protocolLabel = client.protocol === "wg" ? "WG" : client.protocol === "awg" ? "AWG" : client.protocol === "shadowsocks" ? "SS" : client.protocol === "hysteria2" ? "HY2" : client.protocol === "tuic" ? "TUIC" : client.protocol === "trojan" ? "TRJ" : client.protocol === "openvpn" ? "OVPN" : client.protocol === "ikev2" ? "IKE" : "VLESS";
               return <div className={`connectionRow quality-${client.quality || "offline"}`} key={client.id}>
                 <div className="connectionIdentity"><span className={`protocol ${client.protocol}`}>{protocolLabel}</span><div><strong>{client.name}</strong><small>{client.address}{client.active_sources?.length ? `  ${client.active_sources.join(", ")}` : ""}</small></div></div>
                 <div className="connectionState"><span className={`connectionStateBadge ${client.quality || "offline"}`}>{clientStateLabel}</span><small>{client.quality_reason || "состояние уточняется"}</small></div>

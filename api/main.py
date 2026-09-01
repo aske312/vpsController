@@ -127,6 +127,12 @@ OPENVPN_SETTINGS = OPENVPN_DIR / "settings.json"
 OPENVPN_CONFIG = OPENVPN_DIR / "server.conf"
 OPENVPN_PKI = OPENVPN_DIR / "pki"
 OPENVPN_STATUS = Path("/run/vps-control-openvpn/status")
+IKEV2_DIR = Path("/etc/vps-control/ikev2")
+IKEV2_SETTINGS = IKEV2_DIR / "settings.json"
+IKEV2_USERS = IKEV2_DIR / "users.json"
+IKEV2_USERS_CONFIG = IKEV2_DIR / "users.conf"
+IKEV2_CONFIG = IKEV2_DIR / "swanctl.conf"
+IKEV2_VICI_URI = "unix:///run/vps-control-ikev2/charon.vici"
 AWG_PROFILE = {
     "Jc": os.getenv("AWG_JC", "6"), "Jmin": os.getenv("AWG_JMIN", "8"), "Jmax": os.getenv("AWG_JMAX", "80"),
     "S1": os.getenv("AWG_S1", "64"), "S2": os.getenv("AWG_S2", "112"),
@@ -252,14 +258,14 @@ def run_with_input(args: list[str], value: str) -> str:
 
 
 def cached_resource_availability(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"],
 ) -> dict:
     cached = resource_check_cache.get(protocol)
     return {key: value for key, value in (cached or {}).items() if not key.startswith("_")}
 
 
 def check_resource_availability(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"],
 ) -> dict:
     cached = resource_check_cache.get(protocol)
     if not resource_check_lock.acquire(blocking=False):
@@ -508,6 +514,33 @@ def revoke_openvpn_certificate(common_name: str) -> None:
     temporary.replace(OPENVPN_DIR / "crl.pem")
 
 
+def render_ikev2_users(users: dict[str, str]) -> str:
+    lines = ["secrets {"]
+    for username, password in sorted(users.items()):
+        if not re.fullmatch(r"[a-f0-9]{16}", username):
+            raise ValueError("Invalid IKEv2 username")
+        lines.extend([f"  eap-{username} {{", f"    id = {username}", f"    secret = {json.dumps(password)}", "  }"])
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def reload_ikev2() -> None:
+    result = subprocess.run(
+        ["swanctl", "--uri", IKEV2_VICI_URI, "--load-all", "--file", str(IKEV2_CONFIG), "--noprompt"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "strongSwan rejected IKEv2 configuration")
+
+
+def ikev2_sas() -> str:
+    try:
+        result = subprocess.run(["swanctl", "--uri", IKEV2_VICI_URI, "--list-sas"], capture_output=True, text=True, timeout=5, check=False)
+        return result.stdout if result.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def stream_proxy_dump() -> list[dict]:
     peers = []
     xray_activity = recent_xray_activity()
@@ -548,6 +581,13 @@ def stream_proxy_dump() -> list[dict]:
             handshake_age, rx_bps, tx_bps = stream_sample(f'openvpn:{item.get("id", "")}', rx_bytes, tx_bytes)
             if not active_connections:
                 handshake_age = None
+        elif protocol == "ikev2":
+            active = run("systemctl", "is-active", "vps-control-ikev2.service") == "active"
+            address = str(item.get("endpoint") or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
+            sas = ikev2_sas()
+            active_connections = 1 if str(item.get("id", "")) in sas else 0
+            rx_bytes = tx_bytes = 0
+            handshake_age = rx_bps = tx_bps = None
         else:
             continue
         if protocol == "shadowsocks":
@@ -560,7 +600,7 @@ def stream_proxy_dump() -> list[dict]:
         # Only an established TCP socket proves a live client. Xray activity is
         # authenticated and can safely use the recent-activity window.
         online = active and (
-            active_connections > 0 if protocol == "openvpn" else
+            active_connections > 0 if protocol in {"openvpn", "ikev2"} else
             active_connections > 0 and handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S
             if protocol == "shadowsocks" else
             handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S
@@ -2614,7 +2654,7 @@ class ClientConnectionSettings(BaseModel):
 
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"]
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"]
     vless_routes: list[Literal["direct", "tls", "cdn"]] | None = None
     settings: ClientConnectionSettings = Field(default_factory=ClientConnectionSettings)
 
@@ -3038,6 +3078,45 @@ def append_peer(config: Path, client_id: str, public_key: str, psk: str, address
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
     client_id = secrets.token_hex(8)
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
+    if payload.protocol == "ikev2":
+        if not IKEV2_CONFIG.exists() or run("systemctl", "is-enabled", "vps-control-ikev2.service") != "enabled":
+            raise HTTPException(status_code=409, detail="IKEv2 protocol is not installed")
+        with client_mutation_lock:
+            original_users = IKEV2_USERS.read_bytes()
+            original_config = IKEV2_USERS_CONFIG.read_bytes()
+            temporary_users = IKEV2_USERS.with_suffix(".json.tmp")
+            temporary_config = IKEV2_USERS_CONFIG.with_suffix(".conf.tmp")
+            replaced = False
+            try:
+                users = json.loads(original_users)
+                password = secrets.token_urlsafe(32)
+                users[client_id] = password
+                temporary_users.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
+                temporary_config.write_text(render_ikev2_users(users), encoding="utf-8")
+                os.chmod(temporary_users, 0o600); os.chmod(temporary_config, 0o600)
+                temporary_users.replace(IKEV2_USERS); temporary_config.replace(IKEV2_USERS_CONFIG); replaced = True
+                reload_ikev2()
+                settings = json.loads(IKEV2_SETTINGS.read_text(encoding="utf-8"))
+                endpoint = str(settings.get("endpoint") or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
+                ca = (IKEV2_DIR / "swanctl" / "x509ca" / "caCert.pem").read_text(encoding="utf-8")
+                client_config = "\n".join([
+                    "IKEv2 connection", f"Server: {endpoint}", "Remote ID: " + endpoint,
+                    f"Username: {client_id}", f"Password: {password}", "Authentication: EAP-MSCHAPv2",
+                    "Install the CA certificate below as a trusted VPN root certificate:", "", ca.strip(), "",
+                ])
+                items = read_clients()
+                items.append({"id": client_id, "name": payload.name, "protocol": "ikev2", "public_key": client_id, "endpoint": endpoint, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+                write_clients(items)
+                return {"id": client_id, "filename": f"{safe_name}-ikev2.txt", "config": client_config}
+            except Exception as exc:
+                if replaced:
+                    try:
+                        IKEV2_USERS.write_bytes(original_users); IKEV2_USERS_CONFIG.write_bytes(original_config); reload_ikev2()
+                    except Exception:
+                        logger.exception("IKEv2 client rollback failed for %s", client_id)
+                raise HTTPException(status_code=500, detail="Unable to create IKEv2 connection") from exc
+            finally:
+                temporary_users.unlink(missing_ok=True); temporary_config.unlink(missing_ok=True)
     if payload.protocol == "openvpn":
         if not OPENVPN_CONFIG.exists() or run("systemctl", "is-enabled", "vps-control-openvpn.service") != "enabled":
             raise HTTPException(status_code=409, detail="OpenVPN protocol is not installed")
@@ -3357,6 +3436,26 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     if not item:
         raise HTTPException(status_code=404, detail="Client not found")
     protocol = item["protocol"]
+    if protocol == "ikev2":
+        with client_mutation_lock:
+            original_users = IKEV2_USERS.read_bytes(); original_config = IKEV2_USERS_CONFIG.read_bytes()
+            temporary_users = IKEV2_USERS.with_suffix(".json.tmp"); temporary_config = IKEV2_USERS_CONFIG.with_suffix(".conf.tmp")
+            try:
+                users = json.loads(original_users); users.pop(client_id, None)
+                temporary_users.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
+                temporary_config.write_text(render_ikev2_users(users), encoding="utf-8")
+                os.chmod(temporary_users, 0o600); os.chmod(temporary_config, 0o600)
+                temporary_users.replace(IKEV2_USERS); temporary_config.replace(IKEV2_USERS_CONFIG)
+                reload_ikev2()
+                write_clients([entry for entry in items if entry["id"] != client_id])
+            except Exception as exc:
+                IKEV2_USERS.write_bytes(original_users); IKEV2_USERS_CONFIG.write_bytes(original_config)
+                try: reload_ikev2()
+                except Exception: logger.exception("IKEv2 delete rollback failed for %s", client_id)
+                raise HTTPException(status_code=500, detail="Unable to remove IKEv2 connection") from exc
+            finally:
+                temporary_users.unlink(missing_ok=True); temporary_config.unlink(missing_ok=True)
+        return {"deleted": client_id}
     if protocol == "openvpn":
         with client_mutation_lock:
             try:
@@ -3470,6 +3569,8 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             {"key": "obfs_enabled", "label": "Salamander obfuscation", "type": "boolean", "value": bool(values.get("obfs_enabled", False))},
             {"key": "obfs_password", "label": "Пароль obfuscation", "type": "text", "value": str(values.get("obfs_password", "")), "help": "Изменение требует повторного импорта существующих подключений."},
         ]
+    if protocol == "ikev2":
+        return [{"key": "dns", "label": "Client DNS", "type": "text", "value": str(values.get("dns", "1.1.1.1")), "help": "Applied to new and reconnecting IKEv2 sessions."}]
     if protocol == "openvpn":
         return [
             {"key": "port", "label": "OpenVPN port", "type": "number", "value": int(values.get("port", 1194)), "min": 1024, "max": 65535},
@@ -3633,7 +3734,7 @@ def persist_vrx_target(host: str) -> None:
 
 @app.patch("/api/protocols/{protocol}/settings")
 def update_protocol_settings(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"],
     payload: ProtocolSettingsUpdate,
     _: None = Depends(require_token),
 ) -> dict:
@@ -3645,6 +3746,7 @@ def update_protocol_settings(
         "tuic": {"port", "congestion_control"},
         "trojan": {"port"},
         "openvpn": {"port", "vpn_transport", "dns"},
+        "ikev2": {"dns"},
         "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni", "tls_enabled", "tls_domain", "tls_transport", "tls_xhttp_mode", "cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"},
     }[protocol]
     if not supplied or not set(supplied).issubset(allowed):
@@ -3672,6 +3774,27 @@ def update_protocol_settings(
             **({f"{prefix}_DNS": supplied["dns"]} if "dns" in supplied else {}),
             **({f"{prefix}_KEEPALIVE": supplied["keepalive"]} if "keepalive" in supplied else {}),
         })
+    elif protocol == "ikev2":
+        if not IKEV2_CONFIG.exists() or not IKEV2_SETTINGS.exists():
+            raise HTTPException(status_code=409, detail="IKEv2 is not installed")
+        original_config, original_settings = IKEV2_CONFIG.read_bytes(), IKEV2_SETTINGS.read_bytes()
+        temporary_config = IKEV2_CONFIG.with_suffix(".conf.tmp"); temporary_settings = IKEV2_SETTINGS.with_suffix(".json.tmp")
+        replaced = False
+        try:
+            settings = json.loads(original_settings); settings.update(supplied)
+            config_text = re.sub(r"(?m)^(\s*pools \{ vpn-pool \{ addrs = [^;]+; dns = )[^;]+", rf"\g<1>{settings['dns']}", original_config.decode("utf-8"))
+            temporary_config.write_text(config_text, encoding="utf-8"); temporary_settings.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.chmod(temporary_config, 0o600); os.chmod(temporary_settings, 0o600)
+            temporary_config.replace(IKEV2_CONFIG); temporary_settings.replace(IKEV2_SETTINGS); replaced = True
+            reload_ikev2()
+        except Exception as exc:
+            if replaced:
+                IKEV2_CONFIG.write_bytes(original_config); IKEV2_SETTINGS.write_bytes(original_settings)
+                try: reload_ikev2()
+                except Exception: logger.exception("IKEv2 settings rollback failed")
+            raise HTTPException(status_code=500, detail="Unable to apply IKEv2 settings") from exc
+        finally:
+            temporary_config.unlink(missing_ok=True); temporary_settings.unlink(missing_ok=True)
     elif protocol == "openvpn":
         if not OPENVPN_CONFIG.exists() or not OPENVPN_SETTINGS.exists():
             raise HTTPException(status_code=409, detail="OpenVPN is not installed")
@@ -3940,7 +4063,26 @@ def update_protocol_settings(
 
 
 @app.get("/api/protocols/{protocol}/status")
-def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"], _: None = Depends(require_token)) -> dict:
+def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"], _: None = Depends(require_token)) -> dict:
+    if protocol == "ikev2":
+        unit = "vps-control-ikev2.service"
+        try: values = json.loads(IKEV2_SETTINGS.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError): values = {}
+        clients = [item for item in read_clients() if item.get("protocol") == protocol]
+        sas = ikev2_sas(); active = run("systemctl", "is-active", unit) == "active"; rx, tx = service_bytes(unit)
+        return {
+            "protocol": protocol, "interface": "XFRM", "active": active, "service_active": active,
+            "service_enabled": run("systemctl", "is-enabled", unit) == "enabled",
+            "active_since": run("systemctl", "show", unit, "--property=ActiveEnterTimestamp", "--value"),
+            "address": str(values.get("pool", "10.75.0.0/24")), "listen_port": 500, "mtu": 0,
+            "peers": len(clients), "online_peers": sum(1 for item in clients if str(item.get("id", "")) in sas),
+            "endpoints": sas.count("ikev2-eap:"), "last_handshake_age_s": None,
+            "peer_rx_bytes": rx, "peer_tx_bytes": tx, "interface_rx_bytes": rx, "interface_tx_bytes": tx,
+            "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0, "unit": unit,
+            "transport": "IKEv2 / UDP 500 + 4500", "security": "EAP-MSCHAPv2 / X.509", "target": str(values.get("endpoint", "")),
+            "settings": {"Authentication": "EAP-MSCHAPv2", "Server identity": str(values.get("endpoint", "")), "NAT traversal": "UDP 4500"},
+            "editable_settings": editable_protocol_settings(protocol, values),
+        }
     if protocol == "openvpn":
         unit = "vps-control-openvpn.service"
         try:
@@ -4192,7 +4334,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
 
 @app.post("/api/protocols/{protocol}/resources/check")
 def check_protocol_resources(
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"],
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"],
     _: None = Depends(require_token),
 ) -> dict:
     return check_resource_availability(protocol)
@@ -4204,7 +4346,7 @@ def check_network_diagnostics(protocol: Literal["wg", "awg"], _: None = Depends(
 
 
 @app.post("/api/protocols/{protocol}/restart")
-def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn"], _: None = Depends(require_token)) -> dict:
+def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"], _: None = Depends(require_token)) -> dict:
     if protocol == "shadowsocks":
         unit = "vps-control-shadowsocks.target"
         if run("systemctl", "show", unit, "--property=LoadState", "--value") != "loaded":
@@ -4220,6 +4362,7 @@ def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-realit
             else "vps-control-tuic.service" if protocol == "tuic"
             else "vps-control-trojan.service" if protocol == "trojan"
             else "vps-control-openvpn.service" if protocol == "openvpn"
+            else "vps-control-ikev2.service" if protocol == "ikev2"
             else "vps-control-vless-reality-xhttp.service"
         )
         if run("systemctl", "show", unit, "--property=LoadState", "--value") != "loaded":
