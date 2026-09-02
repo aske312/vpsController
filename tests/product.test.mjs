@@ -1471,7 +1471,7 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /def default_profile_presets/);
   assert.match(manager, /\/api\/mihomo\/routing\/presets/);
   assert.match(manager, /"summary": \{"configured": len\(values\)/);
-  assert.match(view, /downloadConfig\(createdProfile, device\)/);
+  assert.match(view, /downloadConfig\(createdProfile\)/);
   assert.match(view, /mihomoProfileSummary/);
   assert.match(view, /mihomoProfileDevices/);
   assert.match(view, /Настройки пресетов/);
@@ -1479,6 +1479,23 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(view, /Пресет для \{profileDevices\.find/);
   assert.doesNotMatch(view, /profileDialog === "new" && <section className="mihomoPresetPicker"/);
   assert.doesNotMatch(view, /const module = modules\.find/, "Next.js reserves the local variable name module");
+});
+
+test("Mihomo profiles expose one subscription and register optional HWID devices", async () => {
+  const [manager, view] = await Promise.all([
+    read("protocol-images/mihomo/manager.py"), read("app/views/mihomo/mihomo-view.tsx"),
+  ]);
+  assert.match(manager, /"subscription_token": secrets\.token_urlsafe\(32\)/);
+  assert.match(manager, /"obsolete" if result\["subscriptions"\]/);
+  assert.match(manager, /request\.headers\.get\("x-device-id"\)/);
+  assert.match(manager, /request\.headers\.get\("x-hwid"\)/);
+  assert.match(manager, /request\.query_params\.get\("hwid"\)/);
+  assert.match(manager, /hmac\.new\(token\.encode\(\), raw_hwid\.encode\(\), hashlib\.sha256\)/);
+  assert.match(manager, /def subscription_device/);
+  assert.match(manager, /provision_connections\(str\(profile\["id"\]\), definitions\)/);
+  assert.match(view, /подписка устарела, требуется новая установка/);
+  assert.match(view, /Клиент с HWID появится как отдельное устройство/);
+  assert.doesNotMatch(view, /subscription\?device_id=/);
 });
 
 test("Mihomo profile lifecycle is transactional, idempotent and reconciled", async () => {

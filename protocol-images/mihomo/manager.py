@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import functools
 import fcntl
+import hashlib
 import hmac
 import ipaddress
 import json
@@ -21,7 +22,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -367,6 +368,7 @@ def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
     result["devices"] = devices
     subscriptions = result.get("subscriptions")
     result["subscriptions"] = subscriptions if isinstance(subscriptions, dict) else {}
+    result["subscription_status"] = "active" if result.get("subscription_token") else ("obsolete" if result["subscriptions"] else "missing")
     default_device = str(devices[0].get("id", "device-1"))
     for connection in result["connections"]:
         connection.setdefault("device_id", default_device)
@@ -399,7 +401,7 @@ def save_profiles(value: list[dict[str, Any]]) -> None:
 
 
 def profile_response(item: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in item.items() if key != "subscriptions"}
+    return {key: value for key, value in normalize_profile(item).items() if key not in {"subscriptions", "subscription_token"}}
 
 
 def manifest(module_id: str) -> dict[str, Any]:
@@ -2676,7 +2678,8 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
                 "name": payload.name.strip(),
                 "connections": connections,
                 "devices": devices,
-                "subscriptions": {device["id"]: secrets.token_urlsafe(32) for device in devices},
+                "subscriptions": {},
+                "subscription_token": secrets.token_urlsafe(32),
                 "routing": routing,
                 "create_operation_id": payload.operation_id or "",
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -2713,11 +2716,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         if len({device["id"] for device in devices}) != len(devices):
             raise HTTPException(status_code=422, detail="Duplicate profile device id")
         item["devices"] = devices
-        current_subscriptions = item.get("subscriptions", {})
-        item["subscriptions"] = {
-            device["id"]: current_subscriptions.get(device["id"]) or secrets.token_urlsafe(32)
-            for device in devices
-        }
+        item["subscriptions"] = {}
     if payload.connections is not None:
         reality_changed = False
         definitions = validate_connection_inputs(payload.connections)
@@ -3122,34 +3121,74 @@ def profile_subscription(profile_id: str, device_id: str | None = None) -> dict[
     item = next((entry for entry in data if entry.get("id") == profile_id), None)
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
-    normalized = normalize_profile(item)
-    selected_device = device_id or str(normalized["devices"][0].get("id", "device-1"))
-    if selected_device not in {str(device.get("id")) for device in normalized["devices"]}:
-        raise HTTPException(status_code=404, detail="Profile device not found")
-    subscriptions = normalized["subscriptions"]
-    token = str(subscriptions.get(selected_device, ""))
+    token = str(item.get("subscription_token", ""))
     if not token:
         token = secrets.token_urlsafe(32)
-        subscriptions[selected_device] = token
-        item["subscriptions"] = subscriptions
+        item["subscription_token"] = token
+        item["subscriptions"] = {}
+        item["subscription_migrated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         save_profiles(data)
     return {"path": f"/api/mihomo/subscriptions/{token}"}
 
 
-@app.get("/api/mihomo/subscriptions/{token}", response_class=PlainTextResponse)
-def public_profile_subscription(token: str) -> PlainTextResponse:
-    selected_profile: dict[str, Any] | None = None
-    selected_device = ""
-    for item in profiles():
-        for device_id, saved_token in item.get("subscriptions", {}).items():
-            if isinstance(saved_token, str) and hmac.compare_digest(saved_token, token):
-                selected_profile = item
-                selected_device = str(device_id)
+def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str) -> tuple[dict[str, Any], str]:
+    hwid_hash = hmac.new(token.encode(), raw_hwid.encode(), hashlib.sha256).hexdigest()
+    normalized = normalize_profile(profile)
+    existing = next((device for device in normalized["devices"] if hmac.compare_digest(str(device.get("hwid_hash", "")), hwid_hash)), None)
+    if existing:
+        return normalized, str(existing["id"])
+    template_device = normalized["devices"][0]
+    template_id = str(template_device.get("id", "device-1"))
+    device_id = f"hwid-{hwid_hash[:16]}"
+    definitions = []
+    for connection in normalized["connections"]:
+        if str(connection.get("device_id", template_id)) != template_id:
+            continue
+        definitions.append({
+            "id": f"hwid-{hwid_hash[:10]}-{uuid.uuid4().hex[:8]}",
+            "component": connection["component"], "name": connection.get("name", ""),
+            "device_id": device_id, "settings": dict(connection.get("settings", {})),
+        })
+    if not definitions:
+        raise HTTPException(status_code=409, detail="У профиля нет общего набора подключений")
+    components = {str(definition["component"]) for definition in definitions}
+    with profile_runtime_transaction(components):
+        provisioned = provision_connections(str(profile["id"]), definitions)
+        profile.setdefault("devices", []).append({
+            "id": device_id, "name": f"HWID {hwid_hash[:8].upper()}",
+            "hwid_hash": hwid_hash, "routing": dict(profile.get("routing", {})),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        })
+        profile.setdefault("connections", []).extend(provisioned)
+        profile["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        sync_legacy_profile_fields(profile)
+        data = profiles()
+        for index, saved in enumerate(data):
+            if saved.get("id") == profile.get("id"):
+                data[index] = profile
                 break
-        if selected_profile:
+        save_profiles(data)
+    return normalize_profile(profile), device_id
+
+
+@app.get("/api/mihomo/subscriptions/{token}", response_class=PlainTextResponse)
+def public_profile_subscription(token: str, request: Request) -> PlainTextResponse:
+    selected_profile: dict[str, Any] | None = None
+    for item in profiles():
+        saved_token = item.get("subscription_token")
+        if isinstance(saved_token, str) and hmac.compare_digest(saved_token, token):
+            selected_profile = item
             break
     if not selected_profile:
         raise HTTPException(status_code=404, detail="Subscription not found")
+    raw_hwid = (request.headers.get("x-device-id") or request.headers.get("x-hwid") or request.query_params.get("hwid") or "").strip()
+    selected_device = str(normalize_profile(selected_profile)["devices"][0].get("id", "device-1"))
+    if raw_hwid:
+        if len(raw_hwid) > 256:
+            raise HTTPException(status_code=422, detail="HWID is too long")
+        with profile_mutation_lock:
+            latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
+            selected_profile, selected_device = subscription_device(latest, raw_hwid, token)
     config = render_profile(selected_profile, selected_device)
     validate_rendered_profile(config)
     return PlainTextResponse(
@@ -3159,5 +3198,6 @@ def public_profile_subscription(token: str) -> PlainTextResponse:
             "Cache-Control": "no-store",
             "Content-Disposition": 'inline; filename="mihomo.yaml"',
             "Profile-Update-Interval": "24",
+            "X-Profile-Device": selected_device,
         },
     )

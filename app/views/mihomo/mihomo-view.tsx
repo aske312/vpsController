@@ -69,6 +69,7 @@ type Profile = {
   connections: ProfileConnection[];
   routing?: Record<string, string | number | boolean>;
   devices?: ProfileDevice[];
+  subscription_status?: "active" | "obsolete" | "missing";
   created_at: string;
   updated_at: string;
 };
@@ -569,13 +570,12 @@ export function MihomoPage({
   useEffect(() => {
     if (!createdProfile) return;
     let cancelled = false;
-    const devices = createdProfile.devices?.length ? createdProfile.devices : [{ id: "device-1", name: "Устройство" }];
-    void Promise.all(devices.map(async (device) => {
-      const result = await request(`/mihomo/profiles/${createdProfile.id}/subscription?device_id=${encodeURIComponent(device.id)}`) as { path: string };
+    void (async () => {
+      const result = await request(`/mihomo/profiles/${createdProfile.id}/subscription`) as { path: string };
       const subscription = new URL(result.path, window.location.origin).toString();
       const qr = await QRCode.toDataURL(subscription, { errorCorrectionLevel: "M", margin: 2, width: 360 });
-      return { ...device, subscription, qr };
-    })).then((items) => { if (!cancelled) setReadyDevices(items); }).catch((cause) => {
+      return [{ id: "profile", name: createdProfile.name, subscription, qr }];
+    })().then((items) => { if (!cancelled) setReadyDevices(items); }).catch((cause) => {
       if (!cancelled) setError(cause instanceof Error ? cause.message : "Не удалось подготовить QR-коды подписок");
     });
     return () => { cancelled = true; };
@@ -1087,13 +1087,13 @@ export function MihomoPage({
     finally { setBusy(""); }
   }
 
-  async function copySubscription(profile: Profile, device?: ProfileDevice) {
-    setBusy(`subscription:${profile.id}:${device?.id || "default"}`);
+  async function copySubscription(profile: Profile) {
+    setBusy(`subscription:${profile.id}`);
     setError("");
     try {
-      const result = await request(`/mihomo/profiles/${profile.id}/subscription${device ? `?device_id=${encodeURIComponent(device.id)}` : ""}`) as { path: string };
+      const result = await request(`/mihomo/profiles/${profile.id}/subscription`) as { path: string };
       await navigator.clipboard.writeText(new URL(result.path, window.location.origin).toString());
-      setNotice(`Ссылка подписки для «${device?.name || profile.name}» скопирована. Добавьте её в клиент один раз — дальнейшие изменения придут при обновлении подписки.`);
+      setNotice(`Единая ссылка профиля «${profile.name}» скопирована. Клиент с HWID появится как отдельное устройство, без HWID получит общие правила.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось получить ссылку подписки");
     } finally {
@@ -1294,8 +1294,8 @@ export function MihomoPage({
             {profiles.map((profile) => { const devices = profile.devices?.length ? profile.devices : [{ id: "device-1", name: "Устройство" }]; const stats = profileStats[profile.id]?.summary; const ruleCount = profileDirectRules.filter((rule) => Boolean(profile.routing?.[rule.key])).length; return (
               <section className="mihomoProfileCard" key={profile.id}>
                 <header className="mihomoProfileHeader">
-                  <button type="button" className="mihomoProfileToggle" aria-expanded={expandedDeviceLists.has(profile.id)} onClick={() => toggleCollapsed(setExpandedDeviceLists, profile.id)}><div className="mihomoProfileIdentity"><span className="mihomoProfileIcon">M</span><p><b>{profile.name}</b><small>{devices.length} устройств · {profile.connections.length} подключений</small><em>ID {profile.id} · обновлён {new Date(profile.updated_at || profile.created_at).toLocaleString("ru-RU")}</em></p></div><div className="mihomoProfileSummary"><div><small>Состояние</small><strong className={stats?.active ? "is-online" : ""}><i />{stats ? `${stats.active} из ${stats.configured}` : "—"}</strong><span>активных каналов</span></div><div><small>Трафик</small><strong>↓ {bytes(stats?.rx_bytes || 0)}</strong><span>↑ {bytes(stats?.tx_bytes || 0)}</span></div><div><small>Последняя связь</small><strong>{stats?.last_handshake_age_s != null ? duration(stats.last_handshake_age_s) : "—"}</strong><span>{stats?.last_handshake_age_s != null ? "назад" : "подключений нет"}</span></div></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
-                  <div className="mihomoRowActions"><button onClick={() => editProfile(profile)}>Настроить</button><button className="dangerButton" onClick={() => void removeProfile(profile)} disabled={busy === `profile:${profile.id}`}>Удалить</button></div>
+                  <button type="button" className="mihomoProfileToggle" aria-expanded={expandedDeviceLists.has(profile.id)} onClick={() => toggleCollapsed(setExpandedDeviceLists, profile.id)}><div className="mihomoProfileIdentity"><span className="mihomoProfileIcon">M</span><p><b>{profile.name}</b><small>{devices.length} устройств · {profile.connections.length} подключений{profile.subscription_status === "obsolete" ? " · подписка устарела, требуется новая установка" : ""}</small><em>ID {profile.id} · обновлён {new Date(profile.updated_at || profile.created_at).toLocaleString("ru-RU")}</em></p></div><div className="mihomoProfileSummary"><div><small>Состояние</small><strong className={stats?.active ? "is-online" : ""}><i />{stats ? `${stats.active} из ${stats.configured}` : "—"}</strong><span>активных каналов</span></div><div><small>Трафик</small><strong>↓ {bytes(stats?.rx_bytes || 0)}</strong><span>↑ {bytes(stats?.tx_bytes || 0)}</span></div><div><small>Последняя связь</small><strong>{stats?.last_handshake_age_s != null ? duration(stats.last_handshake_age_s) : "—"}</strong><span>{stats?.last_handshake_age_s != null ? "назад" : "подключений нет"}</span></div></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
+                  <div className="mihomoRowActions"><button className="primaryButton" onClick={() => void copySubscription(profile)} disabled={busy === `subscription:${profile.id}`}>{profile.subscription_status === "obsolete" ? "Обновить подписку" : "Скопировать подписку"}</button><button onClick={() => editProfile(profile)}>Настроить</button><button className="dangerButton" onClick={() => void removeProfile(profile)} disabled={busy === `profile:${profile.id}`}>Удалить</button></div>
                 </header>
                 {expandedDeviceLists.has(profile.id) && <div className="mihomoProfileDevices">
                   {devices.map((device, deviceIndex) => {
@@ -1310,8 +1310,8 @@ export function MihomoPage({
                     const deleting = busy === `device:${profile.id}:${device.id}`;
                     return <section key={device.id} className="mihomoProfileDevice">
                       <header className="mihomoDeviceHeader">
-                        <button type="button" className="mihomoDeviceToggle" aria-expanded={protocolsExpanded} onClick={() => toggleCollapsed(setExpandedProtocolLists, protocolListKey)}><div className="mihomoDeviceIdentity"><span>{String(deviceIndex + 1).padStart(2, "0")}</span><p><b>{device.name}</b><small>{connections.length} каналов · отдельная подписка</small></p></div><div className="mihomoDeviceTotals"><span><small>КАНАЛЫ</small><b>{onlineCount}/{connections.length}</b></span><span><small>ПРАВИЛА</small><b>{ruleCount}</b></span><span><small>ТРАФИК</small><b>↓ {bytes(deviceRx)} · ↑ {bytes(deviceTx)}</b></span><span><small>PING</small><b>{deviceLatency != null ? `${Math.round(deviceLatency)} ms` : "—"}</b></span></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
-                        <nav className="mihomoDeviceActions"><button className="primaryButton" onClick={() => void copySubscription(profile, device)} disabled={busy === `subscription:${profile.id}:${device.id}`}>Скопировать подписку</button><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>Скачать YAML</button><button onClick={() => void copyConfig(profile, device)} disabled={busy === `config:${profile.id}`}>Копировать YAML</button><button className="dangerButton" onClick={() => void removeProfileDevice(profile, device)} disabled={deleting || devices.length <= 1} title={devices.length <= 1 ? "Нельзя удалить единственное устройство профиля" : "Удалить это устройство и его подключения"}>{deleting ? "Удаление…" : "Удалить устройство"}</button></nav>
+                        <button type="button" className="mihomoDeviceToggle" aria-expanded={protocolsExpanded} onClick={() => toggleCollapsed(setExpandedProtocolLists, protocolListKey)}><div className="mihomoDeviceIdentity"><span>{String(deviceIndex + 1).padStart(2, "0")}</span><p><b>{device.name}</b><small>{connections.length} каналов · {device.id.startsWith("hwid-") ? "определено по HWID" : "общий профиль"}</small></p></div><div className="mihomoDeviceTotals"><span><small>КАНАЛЫ</small><b>{onlineCount}/{connections.length}</b></span><span><small>ПРАВИЛА</small><b>{ruleCount}</b></span><span><small>ТРАФИК</small><b>↓ {bytes(deviceRx)} · ↑ {bytes(deviceTx)}</b></span><span><small>PING</small><b>{deviceLatency != null ? `${Math.round(deviceLatency)} ms` : "—"}</b></span></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
+                        <nav className="mihomoDeviceActions"><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>Скачать YAML</button><button onClick={() => void copyConfig(profile, device)} disabled={busy === `config:${profile.id}`}>Копировать YAML</button><button className="dangerButton" onClick={() => void removeProfileDevice(profile, device)} disabled={deleting || devices.length <= 1} title={devices.length <= 1 ? "Нельзя удалить единственное устройство профиля" : "Удалить это устройство и его подключения"}>{deleting ? "Удаление…" : "Удалить устройство"}</button></nav>
                       </header>
                     {protocolsExpanded && <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0)); return <div key={connection.id}><span className={`protocol-${connection.component}${online ? " online" : ""}`}>{channelShort[connection.component] || "CH"}<i /></span><p><b>{connection.name}</b><small>↓ {bytes(item?.rx_bytes || 0)} · ↑ {bytes(item?.tx_bytes || 0)}{item?.latency_ms != null ? ` · ${Math.round(item.latency_ms)} ms` : ""}</small>{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Для устройства пока нет подключений.</p>}</div>}
                     </section>;
@@ -1569,7 +1569,7 @@ export function MihomoPage({
           </form>
         </div>
       )}
-      {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile"><header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль готов</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header><p>Отсканируйте QR в Mihomo-клиенте или скопируйте постоянную ссылку подписки. Изменения профиля появятся после обновления подписки.</p><div className="mihomoReadySummary"><b>{createdProfile.name}</b><span>{createdProfile.connections.length} подключений · {createdProfile.devices?.length || 1} устройств · {profileDirectRules.filter((rule) => Boolean(createdProfile.routing?.[rule.key])).length} правил</span></div><div className="mihomoReadyDevices">{readyDevices.map((device) => <article key={device.id}><Image src={device.qr} alt={`QR подписки ${device.name}`} width={148} height={148} unoptimized /><div><b>{device.name}</b><small>Постоянная подписка Mihomo</small><code>{device.subscription}</code><nav><button className="primaryButton" onClick={() => void navigator.clipboard.writeText(device.subscription)}>Скопировать ссылку</button><button className="ghostButton" onClick={() => void downloadConfig(createdProfile, device)}>Скачать YAML</button></nav></div></article>)}{!readyDevices.length && <div className="mihomoHint">Подготавливаем QR-коды подписок…</div>}</div><footer><button className="primaryButton" onClick={() => setCreatedProfile(null)}>Готово</button></footer></div></div>}
+      {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile"><header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль готов</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header><p>Одна ссылка работает для всего профиля. Клиенты с HWID появятся отдельными устройствами, остальные получат общий набор правил.</p><div className="mihomoReadySummary"><b>{createdProfile.name}</b><span>{createdProfile.connections.length} подключений · единая подписка · {profileDirectRules.filter((rule) => Boolean(createdProfile.routing?.[rule.key])).length} правил</span></div><div className="mihomoReadyDevices">{readyDevices.map((device) => <article key={device.id}><Image src={device.qr} alt={`QR подписки ${device.name}`} width={148} height={148} unoptimized /><div><b>{device.name}</b><small>Единая постоянная подписка Mihomo</small><code>{device.subscription}</code><nav><button className="primaryButton" onClick={() => void navigator.clipboard.writeText(device.subscription)}>Скопировать ссылку</button><button className="ghostButton" onClick={() => void downloadConfig(createdProfile)}>Скачать общий YAML</button></nav></div></article>)}{!readyDevices.length && <div className="mihomoHint">Подготавливаем QR-код подписки…</div>}</div><footer><button className="primaryButton" onClick={() => setCreatedProfile(null)}>Готово</button></footer></div></div>}
       {presetDialog && <div className="mihomoDialogBackdrop mihomoPresetBackdrop">
         <form className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}>
           <header>
