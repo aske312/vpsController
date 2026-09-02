@@ -1,18 +1,18 @@
 /* Shared protocol identity palette. */
-.protocol-wg,.protocol-transport-wg{--protocol-color:#72a7ff;--protocol-rgb:114,167,255}
-.protocol-awg,.protocol-transport-awg{--protocol-color:#b68cff;--protocol-rgb:182,140,255}
-.protocol-vless-reality-xhttp,.protocol-transport-reality{--protocol-color:#ffad66;--protocol-rgb:255,173,102}
-.protocol-shadowsocks,.protocol-transport-shadowsocks{--protocol-color:#56d9bd;--protocol-rgb:86,217,189}
-.protocol-hysteria2,.protocol-transport-hysteria2{--protocol-color:#f06fc1;--protocol-rgb:240,111,193}
-.protocol-tuic,.protocol-transport-tuic{--protocol-color:#4ed7e8;--protocol-rgb:78,215,232}
-.protocol-trojan{--protocol-color:#ef7181;--protocol-rgb:239,113,129}
-.protocol-openvpn{--protocol-color:#f2c45f;--protocol-rgb:242,196,95}
-.protocol-ikev2{--protocol-color:#73d77d;--protocol-rgb:115,215,125}
-.protocol-mihomo{--protocol-color:#a78bfa;--protocol-rgb:167,139,250}
+.protocol-wg,.protocol-transport-wg{--protocol-color:#7695c7;--protocol-rgb:118,149,199}
+.protocol-awg,.protocol-transport-awg{--protocol-color:#9880c5;--protocol-rgb:152,128,197}
+.protocol-vless-reality-xhttp,.protocol-transport-reality{--protocol-color:#c58b5c;--protocol-rgb:197,139,92}
+.protocol-shadowsocks,.protocol-transport-shadowsocks{--protocol-color:#62ad9c;--protocol-rgb:98,173,156}
+.protocol-hysteria2,.protocol-transport-hysteria2{--protocol-color:#bc6f9f;--protocol-rgb:188,111,159}
+.protocol-tuic,.protocol-transport-tuic{--protocol-color:#5eabb5;--protocol-rgb:94,171,181}
+.protocol-trojan{--protocol-color:#bd727c;--protocol-rgb:189,114,124}
+.protocol-openvpn{--protocol-color:#bba366;--protocol-rgb:187,163,102}
+.protocol-ikev2{--protocol-color:#75ad7a;--protocol-rgb:117,173,122}
+.protocol-mihomo{--protocol-color:#9282bd;--protocol-rgb:146,130,189}
 
 .overviewProtocolMark[class*="protocol-"],.connectionIdentity .protocol[class*="protocol-"],
 .mihomoModuleCode[class*="protocol-"],.mihomoProfileProtocolStats>div>span[class*="protocol-"],
 .mihomoConnectionCard>header>span[class*="protocol-"]{
- color:var(--protocol-color);border:1px solid rgba(var(--protocol-rgb),.34);
- background:rgba(var(--protocol-rgb),.11);box-shadow:inset 0 0 14px rgba(var(--protocol-rgb),.035)
+ color:var(--protocol-color);border:1px solid rgba(var(--protocol-rgb),.24);
+ background:rgba(var(--protocol-rgb),.07);box-shadow:inset 0 0 12px rgba(var(--protocol-rgb),.02)
 }

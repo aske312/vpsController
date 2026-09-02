@@ -109,6 +109,16 @@
 
 .protocolWorkspace-ss { --protocol-accent:#63bfe8; --protocol-soft:rgba(99,191,232,.10); --protocol-line:rgba(99,191,232,.25); }
 
+.protocolWorkspace.protocol-wg,.protocolWorkspace.protocol-awg,
+.protocolWorkspace.protocol-vless-reality-xhttp,.protocolWorkspace.protocol-shadowsocks,
+.protocolWorkspace.protocol-hysteria2,.protocolWorkspace.protocol-tuic,
+.protocolWorkspace.protocol-trojan,.protocolWorkspace.protocol-openvpn,
+.protocolWorkspace.protocol-ikev2 {
+  --protocol-accent:var(--protocol-color);
+  --protocol-soft:rgba(var(--protocol-rgb),.08);
+  --protocol-line:rgba(var(--protocol-rgb),.22);
+}
+
 .protocolWorkspace .eyebrow {
   margin:0;
   color:#698091;

@@ -187,7 +187,7 @@ const duration = (seconds = 0) => {
   return `${minutes}м`;
 };
 
-const protocolMark = (id: string) => id === "mihomo" ? "M" : id === "vless-reality-xhttp" ? "VLESS" : id === "shadowsocks" ? "SS" : id.toUpperCase();
+const protocolMark = (id: string) => id === "mihomo" ? "M" : directShort[id as ProtocolId] || id.toUpperCase();
 const normalize = (value = "") => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 const channelAliases: Record<string, string[]> = {
