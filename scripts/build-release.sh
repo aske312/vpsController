@@ -18,6 +18,17 @@ rsync -a --delete \
   --exclude '.wrangler/' --exclude 'node_modules/' --exclude 'dist/' --exclude 'outputs/' \
   --exclude '.env*' --exclude 'venv/' \
   "${ROOT_DIR}/" "${STAGE}/"
+
+# A release manager with CRLF line endings cannot even enter its rollback path:
+# bash parses the carriage return as part of `pipefail`. Fail the build before
+# publishing an archive that would strand the update action on the server.
+while IFS= read -r -d '' shell_script; do
+  if LC_ALL=C grep -q $'\r' "${shell_script}"; then
+    echo "Shell script contains CRLF line endings: ${shell_script#${STAGE}/}" >&2
+    exit 1
+  fi
+done < <(find "${STAGE}" -type f -name '*.sh' -print0)
+
 find "${STAGE}/protocol-images" -type f \( -name 'install.sh' -o -name 'uninstall.sh' \) -exec chmod 0755 {} +
 
 # Mihomo is bundled into the prepared release. The server module uses the same

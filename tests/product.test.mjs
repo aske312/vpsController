@@ -33,6 +33,19 @@ const STYLE_FILES = [
 ];
 const readStyles = async () => (await Promise.all(STYLE_FILES.map(read))).join("\n");
 
+test("Unix shell entrypoints are protected from Windows line endings", async () => {
+  const [attributes, manager, bootstrap, releaseBuilder] = await Promise.all([
+    read(".gitattributes"),
+    read("scripts/vps-control.sh"),
+    read("scripts/install-panel.sh"),
+    read("scripts/build-release.sh"),
+  ]);
+  assert.match(attributes, /^\*\.sh text eol=lf$/m);
+  assert.doesNotMatch(manager, /\r/);
+  assert.doesNotMatch(bootstrap, /\r/);
+  assert.match(releaseBuilder, /Shell script contains CRLF line endings/);
+});
+
 test("поставка содержит установщик, образы и русскую документацию", async () => {
   const [bootstrap, manager, readme, wg, awg] = await Promise.all([
     read("scripts/install-panel.sh"),
