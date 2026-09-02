@@ -383,6 +383,10 @@
 
 .mihomoRowActions button { min-height: 33px; padding: 0 10px; border: 1px solid rgba(91, 113, 138, .20); border-radius: 9px; background: rgba(9, 18, 27, .72); color: #a0b1bd; font-size: 10px; cursor: pointer; }
 .mihomoProfileDevices { display:grid; gap:12px; padding:14px 16px 16px; }
+.mihomoCommonAccessNotice { display:grid; gap:3px; padding:11px 13px; border:1px solid rgba(226,174,84,.2); border-radius:10px; background:rgba(100,68,18,.12); }
+.mihomoCommonAccessNotice b { color:#f1d397; font-size:11px; }
+.mihomoCommonAccessNotice span { color:#d7e3e9; font-size:10px; }
+.mihomoCommonAccessNotice small { color:#8fa0aa; font-size:9px; }
 .mihomoProfileDevice { min-width:0; overflow:hidden; border:1px solid rgba(91,113,138,.14); border-radius:12px; background:rgba(5,13,21,.48); }
 .mihomoDeviceHeader { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; padding:9px 10px; border-bottom:1px solid rgba(91,113,138,.12); background:linear-gradient(90deg,rgba(92,75,180,.09),transparent 58%); }
 .mihomoDeviceToggle { min-width:0; display:grid; grid-template-columns:minmax(170px,.8fr) minmax(300px,1.2fr) 18px; align-items:center; gap:12px; padding:3px; border:0; border-radius:9px; background:transparent; color:inherit; text-align:left; cursor:pointer; }

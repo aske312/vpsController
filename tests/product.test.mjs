@@ -1539,6 +1539,18 @@ test("Mihomo UI does not count the common configuration as a device", async () =
   assert.match(view, /У профиля одна ссылка\. Без HWID действует общий пул/);
 });
 
+test("Mihomo deduplicates migrated common devices and explains clients without HWID", async () => {
+  const [manager, view] = await Promise.all([
+    read("protocol-images/mihomo/manager.py"), read("app/views/mihomo/mihomo-view.tsx"),
+  ]);
+  assert.match(manager, /seen_device_ids: set\[str\] = set\(\)/);
+  assert.match(manager, /if not device_id or device_id in seen_device_ids:/);
+  assert.match(manager, /def record_common_subscription_access/);
+  assert.match(manager, /"reason": "hwid_missing"/);
+  assert.match(view, /\.filter\(\(device\) => device\.scope === "common"\)\.slice\(0, 1\)/);
+  assert.match(view, /HWID не передан — персональное устройство/);
+});
+
 test("Mihomo profile lifecycle is transactional, idempotent and reconciled", async () => {
   const [manager, view, uninstall] = await Promise.all([
     read("protocol-images/mihomo/manager.py"),

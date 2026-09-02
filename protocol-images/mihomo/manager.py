@@ -376,13 +376,23 @@ def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
     common_device_id = str(result.get("common_device_id", ""))
     if common_device_id not in device_ids:
         common_device_id = str(devices[0].get("id", "profile-common"))
+    unique_devices: list[dict[str, Any]] = []
+    seen_device_ids: set[str] = set()
+    for device in devices:
+        device_id = str(device.get("id", ""))
+        if not device_id or device_id in seen_device_ids:
+            continue
+        seen_device_ids.add(device_id)
+        unique_devices.append(device)
+    if not unique_devices:
+        unique_devices = [{"id": "profile-common", "name": "Общие настройки профиля", "routing": dict(legacy_routing)}]
     devices = [
         {
             **device,
             "name": "Общие настройки профиля" if str(device.get("id")) == common_device_id else device.get("name", "Устройство"),
             "scope": "common" if str(device.get("id")) == common_device_id else ("hwid" if device.get("hwid_hash") else "legacy"),
         }
-        for device in devices
+        for device in unique_devices
     ]
     result["devices"] = devices
     result["common_device_id"] = common_device_id
@@ -3184,6 +3194,8 @@ def subscription_device_metadata(request: Request) -> dict[str, str]:
     client_name = clean(request.headers.get("x-client-name"), 80)
     if not client_name and "clash-verge" in user_agent.lower():
         client_name = "Clash Verge"
+    if not client_name and ("clashmi" in user_agent.lower() or "clash mi" in user_agent.lower()):
+        client_name = "Clash Mi"
     return {
         "os": device_os,
         "device_name": clean(request.headers.get("x-device-name"), 80),
@@ -3200,6 +3212,17 @@ def save_subscription_profile(profile: dict[str, Any]) -> None:
             data[index] = profile
             save_profiles(data)
             return
+
+
+def record_common_subscription_access(profile: dict[str, Any], metadata: dict[str, str]) -> dict[str, Any]:
+    normalized = normalize_profile(profile)
+    normalized["common_access"] = {
+        **{key: value for key, value in metadata.items() if value and key != "device_name"},
+        "last_seen_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "reason": "hwid_missing",
+    }
+    save_subscription_profile(normalized)
+    return normalized
 
 
 def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, metadata: dict[str, str]) -> tuple[dict[str, Any], str]:
@@ -3262,6 +3285,10 @@ def public_profile_subscription(token: str, request: Request) -> PlainTextRespon
         with profile_mutation_lock:
             latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
             selected_profile, selected_device = subscription_device(latest, raw_hwid, token, subscription_device_metadata(request))
+    else:
+        with profile_mutation_lock:
+            latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
+            selected_profile = record_common_subscription_access(latest, subscription_device_metadata(request))
     config = render_profile(selected_profile, selected_device)
     validate_rendered_profile(config)
     return PlainTextResponse(
