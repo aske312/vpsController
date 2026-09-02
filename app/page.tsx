@@ -688,8 +688,14 @@ export default function Home() {
   }
 
   async function changePanelAccess(mode: "external" | "vpn") {
+    const protectedUrl = services?.panel_access?.internal_url || "http://admin.312.net:8080";
+    const channels = services?.panel_access?.available_channels || [];
+    if (mode === "vpn" && !channels.length) {
+      setError("Сначала настройте хотя бы одно защищённое подключение");
+      return;
+    }
     const message = mode === "vpn"
-      ? "Закрыть публичный доступ? Панель останется доступна только через защищённый туннель по локальным адресам. Текущее подключение может завершиться."
+      ? `Панель будет доступна по адресу ${protectedUrl} через: ${channels.join(" / ")}. Убедитесь, что подключение включено; текущее публичное подключение может завершиться.`
       : "Открыть публичный доступ к панели из интернета?";
     if (!await askConfirmation({
       title: mode === "vpn" ? "Ограничить доступ к панели?" : "Открыть публичный доступ?",
@@ -700,7 +706,7 @@ export default function Home() {
     try {
       await request("/services/panel-access", { method: "PUT", body: JSON.stringify({ mode }) });
       setServices((current) => current ? {
-        ...current, panel_access: { vpn_urls: current.panel_access?.vpn_urls || [], mode, public: mode === "external" },
+        ...current, panel_access: { ...current.panel_access, vpn_urls: current.panel_access?.vpn_urls || [], mode, public: mode === "external" },
       } : current);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось изменить доступ к панели"); }
     finally { setBusy(false); }
@@ -1163,8 +1169,8 @@ export default function Home() {
     active?: boolean; rules?: string[]; forwarding_enabled?: boolean; stateful_return?: boolean;
     uplink_interface?: string; vpn_policy_healthy?: boolean;
     panel_access?: {
-      mode?: "external" | "vpn"; port?: number; listening?: boolean; public_rule?: boolean;
-      publicly_accessible?: boolean; vpn_only?: boolean; allowed_interfaces?: string[]; consistent?: boolean;
+      mode?: "external" | "vpn"; port?: number; listening?: boolean; public_rule?: boolean; internal_url?: string;
+      publicly_accessible?: boolean; vpn_only?: boolean; allowed_interfaces?: string[]; allowed_channels?: string[]; consistent?: boolean;
     };
     protocol_policies?: Record<string, { installed?: boolean; route_allowed?: boolean; nat_enabled?: boolean; healthy?: boolean }>;
   } | undefined;

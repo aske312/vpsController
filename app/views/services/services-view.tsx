@@ -33,7 +33,7 @@ type ServicesStatus = {
   reboot_required: boolean;
   automation: { reboot: AutomationSchedule; cleanup: AutomationSchedule; update: AutomationSchedule };
   timers: Record<"reboot" | "cleanup" | "update", { installed: boolean; active: boolean; last_trigger: string; next_run: string }>;
-  panel_access?: { mode: "external" | "vpn"; public: boolean; vpn_urls: string[] };
+  panel_access?: { mode: "external" | "vpn"; public: boolean; vpn_urls: string[]; internal_url?: string; available_channels?: string[]; can_enable?: boolean };
   service_mode?: { active: boolean };
   logging?: { persistent: boolean; retention_days: number; automatic_cleanup: boolean; disk_usage: string };
 };

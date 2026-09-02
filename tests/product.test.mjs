@@ -704,7 +704,8 @@ test("authentication and VPN controls preserve consistent UI states", async () =
   assert.match(api, /categories < 3/);
   assert.match(page, /runApplicationAction\("identity"\)/);
   assert.match(api, /"installed": properties\.get\("LoadState"\) == "loaded"/);
-  assert.match(api, /if not available_interfaces:/);
+  assert.match(api, /channels = configured_panel_channels\(\)/);
+  assert.match(api, /if not channels:/);
   assert.doesNotMatch(api, /for interface in \(WG_INTERFACE, AWG_INTERFACE\):\s+if not Path\(f"\/sys\/class\/net/);
   assert.match(api, /"web": \{"name": "Web 312\.net"/);
   assert.match(api, /The last active VPN cannot be stopped while panel access is VPN-only/);
@@ -1336,6 +1337,49 @@ test("successful protocol installs are immediately reachable and health-checked"
   assert.match(mihomoReality, /vps-control-mihomo-vless-firewall sync/);
   assert.match(mihomoReality, /VPS_MIHOMO_VLESS/);
   assert.match(mihomoReality, /for tool in iptables ip6tables/);
+});
+
+test("protected panel access uses one stable host through every configured channel", async () => {
+  const [api, page, view, manager, caddy] = await Promise.all([
+    read("api/main.py"), read("app/page.tsx"), read("app/views/application/application-view.tsx"),
+    read("scripts/vps-control.sh"), read("Caddyfile"),
+  ]);
+  assert.match(api, /PUBLIC_DOMAIN\.lower\(\)\.startswith\("admin\."\)/);
+  assert.match(api, /else "admin\.312\.net"/);
+  assert.match(api, /"can_enable": bool\(panel_channels\)/);
+  assert.match(page, /Панель будет доступна по адресу/);
+  assert.match(view, /panel_access\?\.can_enable === false/);
+  assert.match(manager, /configured_panel_channel_count/);
+  assert.match(manager, /127\.0\.0\.1 %s # 312\.net internal panel/);
+  assert.match(caddy, /http:\/\/{INTERNAL_PANEL_HOST}:\{\$HTTP_PORT\}/);
+});
+
+test("protected panel access follows every routable managed VPN", async () => {
+  const [api, manager, securityView] = await Promise.all([
+    read("api/main.py"), read("scripts/vps-control.sh"), read("app/views/security/security-view.tsx"),
+  ]);
+  assert.match(api, /panel_allowed_channels/);
+  assert.match(api, /panel_allowed_channels\.add\("OpenVPN"\)/);
+  assert.match(api, /panel_allowed_channels\.add\("IKEv2"\)/);
+  assert.match(api, /"allowed_channels": sorted\(panel_allowed_channels\)/);
+  assert.match(manager, /panel via OpenVPN/);
+  assert.match(manager, /panel via IKEv2/);
+  assert.match(securityView, /allowed_channels/);
+  assert.doesNotMatch(securityView, /"WG \/ AWG"/);
+});
+
+test("application network check covers every installed protected protocol", async () => {
+  const [view, manager] = await Promise.all([
+    read("app/views/application/application-view.tsx"),
+    read("scripts/vps-control.sh"),
+  ]);
+  assert.match(view, /Internet и все установленные протоколы/);
+  for (const protocol of ["vless-reality-xhttp", "shadowsocks", "openvpn", "ikev2", "mihomo-manager"]) {
+    assert.match(manager, new RegExp(`vps-control-${protocol}`));
+  }
+  assert.match(manager, /for protocol in hysteria2 tuic trojan/);
+  assert.match(manager, /check_protocol_port/);
+  assert.match(manager, /все установленные защищённые протоколы/);
 });
 
 test("Mihomo QUIC transports use the release asset digest instead of a removed checksum file", async () => {

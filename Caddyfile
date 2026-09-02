@@ -49,6 +49,29 @@ http://{WG_PANEL_ADDRESS}, http://{AWG_PANEL_ADDRESS} {
     }
 }
 
+# Stable panel address for full tunnels and HTTP/SOCKS proxy connections.
+http://{INTERNAL_PANEL_HOST}:{$HTTP_PORT} {
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+    handle /api/mihomo/* {
+        reverse_proxy 127.0.0.1:8791
+    }
+    handle /api/protocols/mihomo/status {
+        reverse_proxy 127.0.0.1:8791
+    }
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+
 # Protocol images may add isolated virtual hosts here. A glob with no matches
 # is valid, so a clean installation does not need placeholder configuration.
 import /etc/caddy/vps-control.d/*.caddy

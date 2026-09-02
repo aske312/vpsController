@@ -67,7 +67,7 @@ export function ApplicationView({ application, services, applicationVersion, upd
             <div className="applicationPrimaryActions">
               <button onClick={() => void runApplicationAction("restart")} disabled={busy}><span>RESTART</span><strong>Перезапустить</strong><small>Панель и API без reboot VPS</small></button>
               <button onClick={() => void runApplicationAction("update")} disabled={busy}><span>UPDATE</span><strong>Обновить</strong><small>Установить проверенный релиз</small></button>
-              <button onClick={() => void runApplicationAction("network-check")} disabled={busy}><span>NETWORK</span><strong>Проверить сеть</strong><small>Internet, WG/AWG и порты</small></button>
+              <button onClick={() => void runApplicationAction("network-check")} disabled={busy}><span>NETWORK</span><strong>Проверить сеть</strong><small>Internet и все установленные протоколы</small></button>
               <button onClick={() => void runApplicationAction("integrity-check")} disabled={busy}><span>VERIFY</span><strong>Целостность</strong><small>Файлы, права и конфигурация</small></button>
             </div>
 
@@ -89,8 +89,8 @@ export function ApplicationView({ application, services, applicationVersion, upd
                 <span className="applicationSwitch"><input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy} /><i /></span>
               </label>
               <label>
-                <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? "Публичный адрес панели открыт" : `Доступ через ${(services?.panel_access?.vpn_urls || []).join("  ") || "VPN"}`}</small></span>
-                <span className="applicationSwitch"><input type="checkbox" checked={!services?.panel_access?.public} onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")} disabled={busy || !services || serviceModeActive} /><i /></span>
+                <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? `Выключен · адрес после включения ${services?.panel_access?.internal_url || "http://admin.312.net:8080"}` : `Доступ через ${services?.panel_access?.internal_url || (services?.panel_access?.vpn_urls || []).join("  ") || "защищённое подключение"}`}</small></span>
+                <span className="applicationSwitch"><input type="checkbox" checked={!services?.panel_access?.public} onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")} disabled={busy || !services || serviceModeActive || (services.panel_access?.public !== false && services.panel_access?.can_enable === false)} /><i /></span>
               </label>
             </div>
             <div className="applicationRelease">

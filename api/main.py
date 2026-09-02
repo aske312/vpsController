@@ -66,6 +66,10 @@ PUBLIC_IPV4 = os.getenv("PUBLIC_IPV4", PUBLIC_IP)
 PUBLIC_IPV6 = os.getenv("PUBLIC_IPV6", "")
 PUBLIC_DOMAIN = os.getenv("PUBLIC_DOMAIN", "")
 PUBLIC_ENDPOINT = os.getenv("PUBLIC_ENDPOINT", PUBLIC_DOMAIN or PUBLIC_IPV4 or (f"[{PUBLIC_IPV6}]" if PUBLIC_IPV6 else PUBLIC_IP))
+INTERNAL_PANEL_HOST = os.getenv(
+    "INTERNAL_PANEL_HOST",
+    PUBLIC_DOMAIN if PUBLIC_DOMAIN.lower().startswith("admin.") else "admin.312.net",
+)
 PUBLIC_IP_ENDPOINT = os.getenv("PUBLIC_IP_ENDPOINT", PUBLIC_IPV4 or (f"[{PUBLIC_IPV6}]" if PUBLIC_IPV6 else PUBLIC_IP))
 PUBLIC_DOMAIN_ENDPOINT = os.getenv("PUBLIC_DOMAIN_ENDPOINT", PUBLIC_DOMAIN)
 PUBLIC_ENDPOINTS = tuple(value for value in os.getenv("PUBLIC_ENDPOINTS", "").split(",") if value) or tuple(dict.fromkeys(value for value in (PUBLIC_IP_ENDPOINT, PUBLIC_DOMAIN_ENDPOINT) if value))
@@ -315,6 +319,39 @@ def read_clients() -> list[dict]:
         return json.loads(CLIENTS_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return []
+
+
+PANEL_PROTOCOL_LABELS = {
+    "wg": "WireGuard", "awg": "AmneziaWG", "shadowsocks": "Shadowsocks",
+    "vless-reality-xhttp": "VLESS", "hysteria2": "Hysteria2", "tuic": "TUIC v5",
+    "trojan": "Trojan", "openvpn": "OpenVPN", "ikev2": "IKEv2",
+}
+
+
+def configured_panel_channels() -> list[str]:
+    """Return protocols that can carry a request to the internal panel host."""
+    channels = {
+        PANEL_PROTOCOL_LABELS.get(str(item.get("protocol", "")), str(item.get("protocol", "")))
+        for item in read_clients()
+        if item.get("protocol")
+    }
+    try:
+        profiles = json.loads((DATA_DIR / "mihomo" / "profiles.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        profiles = []
+    if isinstance(profiles, list):
+        for profile in profiles:
+            if not isinstance(profile, dict):
+                continue
+            for connection in profile.get("connections", []):
+                if isinstance(connection, dict) and connection.get("component"):
+                    component = str(connection["component"])
+                    channels.add(PANEL_PROTOCOL_LABELS.get(component, component))
+    return sorted(channel for channel in channels if channel)
+
+
+def internal_panel_url() -> str:
+    return f"http://{INTERNAL_PANEL_HOST}:{os.getenv('HTTP_PORT', '8080')}"
 
 
 def write_clients(items: list[dict]) -> None:
@@ -1241,6 +1278,14 @@ def security(_: None = Depends(require_token)) -> dict:
     )
     panel_public_rule = False
     panel_vpn_interfaces = set()
+    panel_allowed_channels = set()
+    if access_mode == "vpn":
+        panel_allowed_channels.update(configured_panel_channels())
+    openvpn_interface = run("bash", "-lc", "ip -o -4 route show 10.74.0.0/24 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i==\"dev\") {print $(i+1); exit}}'")
+    try:
+        ikev2_pool = str(json.loads(IKEV2_SETTINGS.read_text(encoding="utf-8")).get("pool", ""))
+    except (OSError, json.JSONDecodeError):
+        ikev2_pool = ""
     for rule in ufw_rules:
         parts = rule.split()
         if len(parts) < 6 or parts[2] != http_port or parts[0] != "allow":
@@ -1252,6 +1297,15 @@ def security(_: None = Depends(require_token)) -> dict:
         }
         vpn_interfaces = interface_tokens.intersection({WG_INTERFACE, AWG_INTERFACE})
         panel_vpn_interfaces.update(vpn_interfaces)
+        if WG_INTERFACE in vpn_interfaces:
+            panel_allowed_channels.add("WireGuard")
+        if AWG_INTERFACE in vpn_interfaces:
+            panel_allowed_channels.add("AmneziaWG")
+        if openvpn_interface and openvpn_interface in interface_tokens:
+            panel_vpn_interfaces.add(openvpn_interface)
+            panel_allowed_channels.add("OpenVPN")
+        if ikev2_pool and parts[5] == ikev2_pool:
+            panel_allowed_channels.add("IKEv2")
         if parts[5] in ("0.0.0.0/0", "::/0") and not vpn_interfaces:
             panel_public_rule = True
     panel_publicly_accessible = (
@@ -1261,7 +1315,7 @@ def security(_: None = Depends(require_token)) -> dict:
         panel_publicly_accessible
         if access_mode == "external"
         else not panel_publicly_accessible
-        and {WG_INTERFACE, AWG_INTERFACE}.issubset(panel_vpn_interfaces)
+        and bool(panel_allowed_channels)
     )
     legacy_services = {}
     for name in ("openvpn.service", "strongswan-starter.service", "xl2tpd.service"):
@@ -1362,6 +1416,8 @@ def security(_: None = Depends(require_token)) -> dict:
                 "publicly_accessible": panel_publicly_accessible,
                 "vpn_only": not panel_publicly_accessible,
                 "allowed_interfaces": sorted(panel_vpn_interfaces),
+                "allowed_channels": sorted(panel_allowed_channels),
+                "internal_url": internal_panel_url(),
                 "consistent": panel_access_consistent,
             },
             "vpn_policy_healthy": (
@@ -2218,13 +2274,19 @@ def services_status(_: None = Depends(require_token)) -> dict:
         if details["installed"]:
             items.append(details)
     vpn_urls = []
+    panel_channels = configured_panel_channels()
+    openvpn_interface = run("bash", "-lc", "ip -o -4 route show 10.74.0.0/24 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i==\"dev\") {print $(i+1); exit}}'")
     if PUBLIC_DOMAIN:
         vpn_urls.append(f"https://{PUBLIC_DOMAIN}")
     else:
-        for interface in (WG_INTERFACE, AWG_INTERFACE):
+        for interface in (WG_INTERFACE, AWG_INTERFACE, openvpn_interface):
+            if not interface:
+                continue
             address = run("bash", "-lc", f"ip -o -4 addr show dev {interface} 2>/dev/null | awk 'NR==1 {{split($4,a,\"/\"); print a[1]}}'")
             if address:
                 vpn_urls.append(f"http://{address}:{os.getenv('HTTP_PORT', '80')}")
+        if IKEV2_SETTINGS.exists() and run("systemctl", "is-active", "vps-control-ikev2.service") == "active":
+            vpn_urls.append(f"https://{PUBLIC_DOMAIN}" if PUBLIC_DOMAIN else f"http://{PUBLIC_ENDPOINT}:{os.getenv('HTTP_PORT', '80')}")
     logging_values = {}
     if LOGGING_CONFIG_FILE.exists():
         for line in LOGGING_CONFIG_FILE.read_text(encoding="utf-8").splitlines():
@@ -2248,6 +2310,9 @@ def services_status(_: None = Depends(require_token)) -> dict:
             "mode": os.getenv("ACCESS_MODE", "external"),
             "public": os.getenv("ACCESS_MODE", "external") != "vpn",
             "vpn_urls": vpn_urls,
+            "internal_url": internal_panel_url(),
+            "available_channels": panel_channels,
+            "can_enable": bool(panel_channels),
         },
         "service_mode": {"active": SERVICE_MODE_FILE.exists()},
         "logging": {
@@ -2390,12 +2455,9 @@ class PanelAccessSettings(BaseModel):
 @app.put("/api/services/panel-access")
 def update_panel_access(payload: PanelAccessSettings, _: None = Depends(require_token)) -> dict:
     if payload.mode == "vpn":
-        available_interfaces = [
-            interface for interface in (WG_INTERFACE, AWG_INTERFACE)
-            if Path(f"/sys/class/net/{interface}").exists()
-        ]
-        if not available_interfaces:
-            raise HTTPException(status_code=409, detail="No active VPN interface is available")
+        channels = configured_panel_channels()
+        if not channels:
+            raise HTTPException(status_code=409, detail="Сначала настройте хотя бы одно защищённое подключение")
     unit = f"vps-control-access-{int(time.time())}"
     result = subprocess.run(
         [
@@ -2406,7 +2468,10 @@ def update_panel_access(payload: PanelAccessSettings, _: None = Depends(require_
     )
     if result.returncode:
         raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to change panel access")
-    return {"mode": payload.mode, "state": "activating", "unit": f"{unit}.service"}
+    return {
+        "mode": payload.mode, "state": "activating", "unit": f"{unit}.service",
+        "internal_url": internal_panel_url(), "available_channels": configured_panel_channels(),
+    }
 
 
 class ServiceModeSettings(BaseModel):

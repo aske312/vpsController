@@ -28,6 +28,7 @@ ADMIN_PASSWORD="VpsAdmin-2026-7Qm!rK2#"
 LOCAL_ADDRESS=""
 LOCAL_CIDR=""
 HTTP_PORT="8080"
+INTERNAL_PANEL_HOST="admin.312.net"
 WG_PORT="51820"
 AWG_PORT="51822"
 SHADOWSOCKS_PORT_START="30000"
@@ -347,6 +348,39 @@ load_install_config() {
     || die "SERVER_COUNTRY_CODE_OVERRIDE должен содержать две латинские буквы."
 }
 
+configured_panel_channel_count() {
+  python3 - "${DATA_DIR}/clients.json" "${DATA_DIR}/mihomo/profiles.json" <<'PY'
+import json, sys
+count = 0
+for path in sys.argv[1:]:
+    try:
+        data = json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError):
+        continue
+    if path.endswith("clients.json") and isinstance(data, list):
+        count += sum(1 for item in data if isinstance(item, dict) and item.get("protocol"))
+    elif isinstance(data, list):
+        count += sum(len(item.get("connections", [])) for item in data if isinstance(item, dict))
+print(count)
+PY
+}
+
+configure_internal_panel_host() {
+  local configured_domain hosts_tmp
+  configured_domain="$(env_value PUBLIC_DOMAIN)"
+  if [[ "${configured_domain,,}" == admin.* ]]; then
+    INTERNAL_PANEL_HOST="${configured_domain}"
+  else
+    INTERNAL_PANEL_HOST="admin.312.net"
+  fi
+  set_env_value "INTERNAL_PANEL_HOST" "${INTERNAL_PANEL_HOST}"
+  hosts_tmp="$(mktemp)"
+  awk '$0 !~ /# 312.net internal panel$/ { print }' /etc/hosts >"${hosts_tmp}"
+  printf '127.0.0.1 %s # 312.net internal panel\n' "${INTERNAL_PANEL_HOST}" >>"${hosts_tmp}"
+  install -m 0644 "${hosts_tmp}" /etc/hosts
+  rm -f -- "${hosts_tmp}"
+}
+
 detect_local_network() {
   if [[ -z "${LOCAL_ADDRESS}" ]]; then
     LOCAL_ADDRESS="$(ip -o -4 route get 1.1.1.1 | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
@@ -363,25 +397,32 @@ configure_access() {
   detect_public_endpoints
   public_ip="$(env_value PUBLIC_ENDPOINT)"
   [[ -n "${public_ip}" ]] || public_ip="$(env_value PUBLIC_IP)"
+  configure_internal_panel_host
   if [[ "${ACCESS_MODE}" == "local" ]]; then
     detect_local_network
     set_env_value "PANEL_HOST" "${LOCAL_ADDRESS}"
     set_env_value "CORS_ORIGINS" "http://${LOCAL_ADDRESS}:${HTTP_PORT}"
     PANEL_URL="http://${LOCAL_ADDRESS}:${HTTP_PORT}"
   elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
-    local wg_address awg_address
+    local wg_address awg_address openvpn_address openvpn_interface ike_pool vpn_origin
     wg_address="$({ ip -o -4 addr show dev "${WG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
     awg_address="$({ ip -o -4 addr show dev "${AWG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
-    [[ -n "${wg_address}" || -n "${awg_address}" ]] || die "у WG/AWG нет IPv4-адресов для доступа к панели."
-    local vpn_origins=""
-    [[ -z "${wg_address}" ]] || vpn_origins="http://${wg_address}:${HTTP_PORT}"
-    if [[ -n "${awg_address}" ]]; then
+    openvpn_interface="$(ip -o -4 route show 10.74.0.0/24 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')"
+    openvpn_address="$({ [[ -z "${openvpn_interface}" ]] || ip -o -4 addr show dev "${openvpn_interface}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
+    ike_pool="$(python3 -c 'import json; print(json.load(open("/etc/vps-control/ikev2/settings.json")).get("pool",""))' 2>/dev/null || true)"
+    [[ "$(configured_panel_channel_count)" -gt 0 ]] || die "Сначала настройте хотя бы одно защищённое подключение."
+    local vpn_origins="http://${INTERNAL_PANEL_HOST}:${HTTP_PORT}"
+    for vpn_origin in ${wg_address:+http://${wg_address}:${HTTP_PORT}} ${awg_address:+http://${awg_address}:${HTTP_PORT}} ${openvpn_address:+http://${openvpn_address}:${HTTP_PORT}}; do
       [[ -z "${vpn_origins}" ]] || vpn_origins+=","
-      vpn_origins+="http://${awg_address}:${HTTP_PORT}"
+      vpn_origins+="${vpn_origin}"
+    done
+    if [[ -n "${ike_pool}" ]]; then
+      [[ -z "${vpn_origins}" ]] || vpn_origins+=","
+      [[ -n "$(env_value PUBLIC_DOMAIN)" ]] && vpn_origins+="https://$(env_value PUBLIC_DOMAIN)" || vpn_origins+="http://${public_ip}:${HTTP_PORT}"
     fi
     set_env_value "PANEL_HOST" "0.0.0.0"
     set_env_value "CORS_ORIGINS" "${vpn_origins}"
-    PANEL_URL="${vpn_origins%%,*}"
+    PANEL_URL="http://${INTERNAL_PANEL_HOST}:${HTTP_PORT}"
   else
     local wg_address awg_address origins
     wg_address="$({ ip -o -4 addr show dev "${WG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
@@ -492,8 +533,10 @@ PY
 }
 
 write_caddy_config() {
-  local domain wg_panel_address awg_panel_address
+  local domain internal_panel_host wg_panel_address awg_panel_address
   domain="$(env_value PUBLIC_DOMAIN)"
+  internal_panel_host="$(env_value INTERNAL_PANEL_HOST)"
+  [[ -n "${internal_panel_host}" ]] || internal_panel_host="admin.312.net"
   wg_panel_address="$(python3 - "$(env_value WG_SUBNET)" <<'PY'
 import ipaddress
 import sys
@@ -510,10 +553,12 @@ PY
   if [[ -n "${domain}" && "${ACCESS_MODE}" == "external" ]]; then
     sed -e "s|{\$SITE_ADDRESS}|${domain}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
+      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   else
     sed -e "s|{\$SITE_ADDRESS}|:${HTTP_PORT}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
+      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   fi
 }
@@ -1387,7 +1432,7 @@ configure_firewall() {
     ufw allow from "${LOCAL_CIDR}" to any port "${HTTP_PORT}" proto tcp
     ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
   elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
-    local vpn_interface_available="no"
+    local vpn_interface_available="no" openvpn_interface ike_pool
     if ip link show "${WG_INTERFACE}" >/dev/null 2>&1; then
       ufw allow in on "${WG_INTERFACE}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via WG'
       [[ -z "$(env_value PUBLIC_DOMAIN)" ]] \
@@ -1400,7 +1445,19 @@ configure_firewall() {
         || ufw allow in on "${AWG_INTERFACE}" to any port 443 proto tcp comment '312.net HTTPS panel via AWG'
       vpn_interface_available="yes"
     fi
-    [[ "${vpn_interface_available}" == "yes" ]] || die "нет доступного интерфейса WG/AWG для панели."
+    openvpn_interface="$(ip -o -4 route show 10.74.0.0/24 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')"
+    if [[ -n "${openvpn_interface}" ]] && systemctl is-active --quiet vps-control-openvpn.service; then
+      ufw allow in on "${openvpn_interface}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via OpenVPN'
+      [[ -z "$(env_value PUBLIC_DOMAIN)" ]] || ufw allow in on "${openvpn_interface}" to any port 443 proto tcp comment '312.net HTTPS panel via OpenVPN'
+      vpn_interface_available="yes"
+    fi
+    ike_pool="$(python3 -c 'import json; print(json.load(open("/etc/vps-control/ikev2/settings.json")).get("pool",""))' 2>/dev/null || true)"
+    if [[ -n "${ike_pool}" ]] && systemctl is-active --quiet vps-control-ikev2.service; then
+      ufw allow from "${ike_pool}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via IKEv2'
+      [[ -z "$(env_value PUBLIC_DOMAIN)" ]] || ufw allow from "${ike_pool}" to any port 443 proto tcp comment '312.net HTTPS panel via IKEv2'
+      vpn_interface_available="yes"
+    fi
+    [[ "${vpn_interface_available}" == "yes" || "$(configured_panel_channel_count)" -gt 0 ]] || die "Сначала настройте хотя бы одно защищённое подключение."
     ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
     ufw delete allow 443/tcp >/dev/null 2>&1 || true
   else
@@ -2233,7 +2290,7 @@ change_access_mode() {
   systemctl restart caddy.service
   systemctl restart "${APP_NAME}-api.service"
   if [[ "${ACCESS_MODE}" == "vpn" ]]; then
-    ok "панель доступна только через WG/AWG."
+    ok "панель доступна через защищённые подключения: http://${INTERNAL_PANEL_HOST}:${HTTP_PORT}"
   else
     ok "публичный доступ к панели открыт."
   fi
@@ -2550,7 +2607,7 @@ network_check() {
     [[ "${value}" -eq 0 ]] || warn "${uplink}: ${counter}=${value}."
   done
   verify_app
-  local found="no" interface service tool port
+  local found="no" interface service tool port protocol unit transport settings_file
   for tuple in "wg:${WG_INTERFACE}:wg-quick:${WG_PORT}" "awg:${AWG_INTERFACE}:awg-quick:${AWG_PORT}"; do
     IFS=':' read -r tool interface service port <<<"${tuple}"
     ip link show "${interface}" >/dev/null 2>&1 || continue
@@ -2565,6 +2622,98 @@ network_check() {
       || die "${tool^^}: UDP-порт ${port} не прослушивается."
     ok "${tool^^}: ${interface} работает, UDP ${port} прослушивается."
   done
+
+  check_protocol_unit() {
+    local label="$1" check_unit="$2"
+    systemctl is-enabled --quiet "${check_unit}" 2>/dev/null || return 0
+    found="yes"
+    systemctl is-active --quiet "${check_unit}" \
+      || die "${label}: установленная служба ${check_unit} не запущена."
+    ok "${label}: служба ${check_unit} работает."
+  }
+
+  check_protocol_port() {
+    local label="$1" check_transport="$2" check_port="$3"
+    [[ "${check_port}" =~ ^[0-9]+$ && "${check_port}" -ge 1 && "${check_port}" -le 65535 ]] \
+      || die "${label}: не удалось определить порт."
+    if [[ "${check_transport}" == "udp" ]]; then
+      ss -Hlun | grep -Eq "[:.]${check_port}[[:space:]]" \
+        || die "${label}: UDP-порт ${check_port} не прослушивается."
+    else
+      ss -Hltn | grep -Eq "[:.]${check_port}[[:space:]]" \
+        || die "${label}: TCP-порт ${check_port} не прослушивается."
+    fi
+    ok "${label}: ${check_transport^^} ${check_port} прослушивается."
+  }
+
+  json_protocol_value() {
+    local path="$1" key="$2" fallback="$3"
+    python3 - "${path}" "${key}" "${fallback}" <<'PY'
+import json,sys
+try:
+    value=json.load(open(sys.argv[1],encoding='utf-8')).get(sys.argv[2],sys.argv[3])
+except (OSError,ValueError,TypeError):
+    value=sys.argv[3]
+print(value)
+PY
+  }
+
+  unit="vps-control-vless-reality-xhttp.service"
+  if systemctl is-enabled --quiet "${unit}" 2>/dev/null; then
+    check_protocol_unit "VLESS" "${unit}"
+    port="$(sed -n 's/^PORT=//p' /etc/vps-control/xray/reality.env 2>/dev/null | tail -n 1)"
+    check_protocol_port "VLESS" tcp "${port:-443}"
+  fi
+
+  unit="vps-control-shadowsocks.target"
+  if systemctl is-enabled --quiet "${unit}" 2>/dev/null; then
+    check_protocol_unit "Shadowsocks" "${unit}"
+    while IFS= read -r port; do
+      [[ -z "${port}" ]] || check_protocol_port "Shadowsocks" tcp "${port}"
+    done < <(python3 - <<'PY'
+import glob,json
+for path in glob.glob('/etc/vps-control/shadowsocks/clients/*.json'):
+    try: print(int(json.load(open(path)).get('server_port',0)))
+    except (OSError,ValueError,TypeError): pass
+PY
+)
+  fi
+
+  for protocol in hysteria2 tuic trojan; do
+    unit="vps-control-${protocol}.service"
+    systemctl is-enabled --quiet "${unit}" 2>/dev/null || continue
+    check_protocol_unit "${protocol^^}" "${unit}"
+    settings_file="/etc/vps-control/${protocol}/settings.json"
+    case "${protocol}" in
+      hysteria2) port=8443 ;;
+      tuic) port=8444 ;;
+      trojan) port=8445 ;;
+    esac
+    port="$(json_protocol_value "${settings_file}" port "${port}")"
+    [[ "${protocol}" == trojan ]] && transport=tcp || transport=udp
+    check_protocol_port "${protocol^^}" "${transport}" "${port}"
+  done
+
+  unit="vps-control-openvpn.service"
+  if systemctl is-enabled --quiet "${unit}" 2>/dev/null; then
+    check_protocol_unit "OpenVPN" "${unit}"
+    port="$(json_protocol_value /etc/vps-control/openvpn/settings.json port 1194)"
+    transport="$(json_protocol_value /etc/vps-control/openvpn/settings.json protocol udp)"
+    check_protocol_port "OpenVPN" "${transport}" "${port}"
+  fi
+
+  unit="vps-control-ikev2.service"
+  if systemctl is-enabled --quiet "${unit}" 2>/dev/null; then
+    check_protocol_unit "IKEv2" "${unit}"
+    check_protocol_port "IKEv2" udp 500
+    check_protocol_port "IKEv2 NAT-T" udp 4500
+  fi
+
+  check_protocol_unit "Mihomo Manager" "vps-control-mihomo-manager.service"
+  while IFS= read -r unit; do
+    [[ -z "${unit}" ]] || check_protocol_unit "Mihomo runtime" "${unit}"
+  done < <(systemctl list-unit-files 'vps-control-mihomo-*.service' --state=enabled --no-legend 2>/dev/null | awk '{print $1}' | grep -v '^vps-control-mihomo-manager.service$' || true)
+
   [[ "${found}" == "yes" ]] || warn "защищённые туннели не установлены; проверена только внешняя сеть и панель."
   ok "сеть, панель и установленные защищённые туннели работают."
 }
@@ -2633,7 +2782,7 @@ usage() {
   logs [api|web|gateway]
                    показать журналы (для выбранного сервиса — в реальном времени)
   verify           проверить API, веб-панель и привязку порта
-  network-check    проверить интернет, панель и установленные WG/AWG-туннели
+  network-check    проверить интернет, панель и все установленные защищённые протоколы
   integrity-check  проверить файлы, права, конфигурацию и компоненты приложения
   identity         повторно определить IP и геолокацию сервера
   secure           установить и включить базовую защиту Ubuntu
