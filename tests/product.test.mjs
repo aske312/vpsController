@@ -1533,6 +1533,17 @@ test("Mihomo provides verified Hysteria2 and TUIC v5 transports", async () => {
   assert.match(installer, /"\$candidate" check -c "\$existing_config"/);
 });
 
+test("standalone direct protocols report installed and available binary versions", async () => {
+  const api = await read("api/main.py");
+  assert.match(api, /HYSTERIA2_BIN = Path\("\/usr\/local\/lib\/vps-control-hysteria2\/hysteria"\)/);
+  assert.match(api, /TUIC_BIN = Path\("\/usr\/local\/lib\/vps-control-tuic\/sing-box"\)/);
+  assert.match(api, /TROJAN_BIN = Path\("\/usr\/local\/lib\/vps-control-trojan\/sing-box"\)/);
+  assert.match(api, /image_id == "hysteria2"[\s\S]*standalone_binary_version\(HYSTERIA2_BIN, "version"\)/);
+  assert.match(api, /image_id in \{"tuic", "trojan"\}[\s\S]*standalone_binary_version\(binary, "version"\)/);
+  assert.match(api, /github_latest_tag\(HYSTERIA2_GITHUB_REPO\)/);
+  assert.match(api, /github_latest_tag\(SING_BOX_GITHUB_REPO\)/);
+});
+
 test("direct Hysteria2 is installable and manages authenticated clients", async () => {
   const [manifestText, install, firewall, auth, api, view] = await Promise.all([
     read("protocol-images/hysteria2/manifest.json"),

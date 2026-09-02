@@ -1345,7 +1345,7 @@ export default function Home() {
       )}
 
       {(tab === "channels" || tab === "dns") && <nav className="protocolSwitcher channelPageSwitcher" aria-label="Защищённые каналы">
-        {installedProtocols.map((protocol) => <button type="button" key={protocol} className={tab === "channels" && selectedChannel === protocol ? "active" : ""} onClick={() => { setSelectedChannel(protocol); setTab("channels"); void loadProtocolStatus(protocol); }}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : "VLESS"}</button>)}
+        {installedProtocols.map((protocol) => <button type="button" key={protocol} className={`protocol-${protocol}${tab === "channels" && selectedChannel === protocol ? " active" : ""}`} onClick={() => { setSelectedChannel(protocol); setTab("channels"); void loadProtocolStatus(protocol); }}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : "VLESS"}</button>)}
         <button type="button" className={tab === "dns" ? "active" : ""} onClick={() => setTab("dns")}>DNS</button>
       </nav>}
 

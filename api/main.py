@@ -1554,6 +1554,11 @@ def github_latest_tag(repo: str) -> str:
 MIHOMO_RUNTIME_CORE_BIN = Path("/var/lib/vps-control/mihomo/bin/mihomo")
 MIHOMO_BUNDLED_CORE_BIN = INSTALL_DIR / "api" / "bin" / "mihomo"
 MIHOMO_GITHUB_REPO = "MetaCubeX/mihomo"
+HYSTERIA2_BIN = Path("/usr/local/lib/vps-control-hysteria2/hysteria")
+HYSTERIA2_GITHUB_REPO = "apernet/hysteria"
+TUIC_BIN = Path("/usr/local/lib/vps-control-tuic/sing-box")
+TROJAN_BIN = Path("/usr/local/lib/vps-control-trojan/sing-box")
+SING_BOX_GITHUB_REPO = "SagerNet/sing-box"
 
 
 def mihomo_core_installed_version() -> str:
@@ -1575,6 +1580,15 @@ def awg_installed_version() -> str:
         return match.group(1)
     output = run("awg", "--version", timeout=5)
     match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
+    return match.group(1) if match else ""
+
+
+def standalone_binary_version(binary: Path, *arguments: str) -> str:
+    """Read a semantic version from a release binary without starting it."""
+    if not binary.is_file():
+        return ""
+    output = run(str(binary), *arguments, timeout=5)
+    match = re.search(r"\bv?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b", output)
     return match.group(1) if match else ""
 
 
@@ -1602,6 +1616,13 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
     elif image_id == "mihomo":
         installed_version = mihomo_core_installed_version() if installed else ""
         available_version = github_latest_tag(MIHOMO_GITHUB_REPO)
+    elif image_id == "hysteria2":
+        installed_version = standalone_binary_version(HYSTERIA2_BIN, "version") if installed else ""
+        available_version = github_latest_tag(HYSTERIA2_GITHUB_REPO)
+    elif image_id in {"tuic", "trojan"}:
+        binary = TUIC_BIN if image_id == "tuic" else TROJAN_BIN
+        installed_version = standalone_binary_version(binary, "version") if installed else ""
+        available_version = github_latest_tag(SING_BOX_GITHUB_REPO)
     else:
         installed_version = available_version = ""
     update_available = update_available_override if update_available_override is not None else bool(installed_version and available_version and installed_version != available_version)
