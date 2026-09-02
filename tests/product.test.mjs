@@ -1523,10 +1523,14 @@ test("Mihomo HWID devices retain client and platform metadata", async () => {
   assert.match(manager, /device_os = "android"/);
   assert.match(manager, /device_os = "ios"/);
   assert.match(manager, /device_os = "windows"/);
+  assert.match(manager, /request\.headers\.get\("x-os-version"\)/);
+  assert.match(manager, /iPhone OS\|iOS/);
+  assert.match(manager, /os_version = version_match\.group\(1\)\.replace\("_", "\."\)/);
   assert.match(manager, /existing\["last_seen_at"\]/);
   assert.match(manager, /class ProfileDeviceInput[\s\S]*hwid_hash[\s\S]*client_name[\s\S]*last_seen_at/);
   assert.match(view, /const devicePlatform/);
-  assert.match(view, /devicePlatformMeta\(device\)\.label/);
+  assert.match(view, /function deviceSystemLabel/);
+  assert.match(view, /deviceSystemLabel\(device\)/);
   assert.match(view, /Последний запрос/);
 });
 

@@ -234,6 +234,7 @@ class ProfileDeviceInput(BaseModel):
     os: str | None = Field(default=None, max_length=16)
     client_name: str | None = Field(default=None, max_length=80)
     client_version: str | None = Field(default=None, max_length=40)
+    os_version: str | None = Field(default=None, max_length=40)
     user_agent: str | None = Field(default=None, max_length=256)
     last_seen_at: str | None = Field(default=None, max_length=32)
 
@@ -3216,6 +3217,17 @@ def subscription_device_metadata(request: Request) -> dict[str, str]:
             device_os = "linux"
         else:
             device_os = "unknown"
+    os_version = clean(request.headers.get("x-os-version"), 40)
+    if not os_version:
+        version_patterns = {
+            "ios": r"(?:CPU (?:iPhone )?OS|iPhone OS|iOS)[ /]([0-9]+(?:[_\.][0-9]+){0,3})",
+            "android": r"Android[ /]([0-9]+(?:\.[0-9]+){0,3})",
+            "macos": r"Mac OS X[ /]([0-9]+(?:[_\.]\d+){0,3})",
+            "windows": r"Windows NT[ /]([0-9]+(?:\.\d+){0,3})",
+        }
+        version_match = re.search(version_patterns.get(device_os, r"$^"), user_agent, re.IGNORECASE)
+        if version_match:
+            os_version = version_match.group(1).replace("_", ".")
     client_name = clean(request.headers.get("x-client-name"), 80)
     if not client_name and "clash-verge" in user_agent.lower():
         client_name = "Clash Verge"
@@ -3223,8 +3235,9 @@ def subscription_device_metadata(request: Request) -> dict[str, str]:
         client_name = "Clash Mi"
     return {
         "os": device_os,
+        "os_version": os_version,
         "device_name": clean(request.headers.get("x-device-name"), 80),
-        "client_name": client_name or "Неизвестный клиент",
+        "client_name": client_name,
         "client_version": clean(request.headers.get("x-client-version"), 40),
         "user_agent": user_agent,
     }
