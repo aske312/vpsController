@@ -1588,7 +1588,7 @@ test("direct IKEv2 is installable and reloads isolated EAP users", async () => {
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.id, "ikev2"); assert.equal(manifest.installable, true);
   assert.match(install, /Another strongSwan runtime is active/); assert.match(install, /EAP|eap-dynamic/);
-  assert.match(install, /charon\.vici/); assert.match(firewall, /--dport 500/); assert.match(firewall, /--dport 4500/);
+  assert.match(install, /libstrongswan-standard-plugins/); assert.match(install, /SWAN=\/etc\/swanctl/); assert.match(firewall, /--dport 500/); assert.match(firewall, /--dport 4500/);
   assert.match(api, /render_ikev2_users/); assert.match(api, /reload_ikev2/); assert.match(api, /payload\.protocol == "ikev2"/);
   assert.match(view, /title:"IKEv2"/);
 });
@@ -1603,6 +1603,8 @@ test("direct protocol updates preserve client state and activate the new runtime
   assert.match(tuic, /\[\[ -s "\$\{ROOT\}\/config\.json" \]\] \|\|/);
   assert.match(trojan, /\[\[ -s "\$ROOT\/config\.json" \]\] \|\|/);
   assert.match(openvpn, /if \[\[ -s "\$ROOT\/settings\.json" \]\]/);
-  assert.match(ikev2, /if \[\[ ! -s "\$ROOT\/users\.conf" \]\]/);
+  assert.match(ikev2, /if \[\[ ! -s "\$SWAN\/users\.conf" \]\]/);
   for (const installer of [hy2, tuic, trojan, openvpn, ikev2]) assert.match(installer, /systemctl restart/);
+  assert.match(hy2, /CAP_NET_ADMIN CAP_NET_BIND_SERVICE/); assert.doesNotMatch(hy2, /server -c "\$\{CONFIG\}" --test/);
+  assert.match(openvpn, /dh none/); assert.doesNotMatch(openvpn, /easyrsa gen-dh/); assert.match(openvpn, /tmp-dir \/run\/vps-control-openvpn/);
 });

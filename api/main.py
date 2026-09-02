@@ -130,9 +130,9 @@ OPENVPN_STATUS = Path("/run/vps-control-openvpn/status")
 IKEV2_DIR = Path("/etc/vps-control/ikev2")
 IKEV2_SETTINGS = IKEV2_DIR / "settings.json"
 IKEV2_USERS = IKEV2_DIR / "users.json"
-IKEV2_USERS_CONFIG = IKEV2_DIR / "users.conf"
-IKEV2_CONFIG = IKEV2_DIR / "swanctl.conf"
-IKEV2_VICI_URI = "unix:///run/vps-control-ikev2/charon.vici"
+IKEV2_SWANCTL_DIR = Path("/etc/swanctl")
+IKEV2_USERS_CONFIG = IKEV2_SWANCTL_DIR / "users.conf"
+IKEV2_CONFIG = IKEV2_SWANCTL_DIR / "swanctl.conf"
 AWG_PROFILE = {
     "Jc": os.getenv("AWG_JC", "6"), "Jmin": os.getenv("AWG_JMIN", "8"), "Jmax": os.getenv("AWG_JMAX", "80"),
     "S1": os.getenv("AWG_S1", "64"), "S2": os.getenv("AWG_S2", "112"),
@@ -526,7 +526,7 @@ def render_ikev2_users(users: dict[str, str]) -> str:
 
 def reload_ikev2() -> None:
     result = subprocess.run(
-        ["swanctl", "--uri", IKEV2_VICI_URI, "--load-all", "--file", str(IKEV2_CONFIG), "--noprompt"],
+        ["swanctl", "--load-all", "--file", str(IKEV2_CONFIG), "--noprompt"],
         capture_output=True, text=True, timeout=30, check=False,
     )
     if result.returncode:
@@ -535,7 +535,7 @@ def reload_ikev2() -> None:
 
 def ikev2_sas() -> str:
     try:
-        result = subprocess.run(["swanctl", "--uri", IKEV2_VICI_URI, "--list-sas"], capture_output=True, text=True, timeout=5, check=False)
+        result = subprocess.run(["swanctl", "--list-sas"], capture_output=True, text=True, timeout=5, check=False)
         return result.stdout if result.returncode == 0 else ""
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -3098,7 +3098,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 reload_ikev2()
                 settings = json.loads(IKEV2_SETTINGS.read_text(encoding="utf-8"))
                 endpoint = str(settings.get("endpoint") or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
-                ca = (IKEV2_DIR / "swanctl" / "x509ca" / "caCert.pem").read_text(encoding="utf-8")
+                ca = (IKEV2_SWANCTL_DIR / "x509ca" / "caCert.pem").read_text(encoding="utf-8")
                 client_config = "\n".join([
                     "IKEv2 connection", f"Server: {endpoint}", "Remote ID: " + endpoint,
                     f"Username: {client_id}", f"Password: {password}", "Authentication: EAP-MSCHAPv2",
@@ -3116,7 +3116,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                         logger.exception("IKEv2 client rollback failed for %s", client_id)
                 raise HTTPException(status_code=500, detail="Unable to create IKEv2 connection") from exc
             finally:
-                temporary_users.unlink(missing_ok=True); temporary_config.unlink(missing_ok=True)
+                try:
+                    temporary_users.unlink(missing_ok=True); temporary_config.unlink(missing_ok=True)
+                except OSError:
+                    pass
     if payload.protocol == "openvpn":
         if not OPENVPN_CONFIG.exists() or run("systemctl", "is-enabled", "vps-control-openvpn.service") != "enabled":
             raise HTTPException(status_code=409, detail="OpenVPN protocol is not installed")
@@ -3454,7 +3457,10 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
                 except Exception: logger.exception("IKEv2 delete rollback failed for %s", client_id)
                 raise HTTPException(status_code=500, detail="Unable to remove IKEv2 connection") from exc
             finally:
-                temporary_users.unlink(missing_ok=True); temporary_config.unlink(missing_ok=True)
+                try:
+                    temporary_users.unlink(missing_ok=True); temporary_config.unlink(missing_ok=True)
+                except OSError:
+                    pass
         return {"deleted": client_id}
     if protocol == "openvpn":
         with client_mutation_lock:
@@ -3782,7 +3788,7 @@ def update_protocol_settings(
         replaced = False
         try:
             settings = json.loads(original_settings); settings.update(supplied)
-            config_text = re.sub(r"(?m)^(\s*pools \{ vpn-pool \{ addrs = [^;]+; dns = )[^;]+", rf"\g<1>{settings['dns']}", original_config.decode("utf-8"))
+            config_text = re.sub(r"(?m)^(\s*dns\s*=\s*).+$", rf"\g<1>{settings['dns']}", original_config.decode("utf-8"))
             temporary_config.write_text(config_text, encoding="utf-8"); temporary_settings.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
             os.chmod(temporary_config, 0o600); os.chmod(temporary_settings, 0o600)
             temporary_config.replace(IKEV2_CONFIG); temporary_settings.replace(IKEV2_SETTINGS); replaced = True

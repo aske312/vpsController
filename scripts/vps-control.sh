@@ -1650,7 +1650,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/caddy/vps-control.d -/etc/wireguard -/etc/amnezia ${DATA_DIR}
+ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/swanctl -/etc/caddy/vps-control.d -/etc/wireguard -/etc/amnezia ${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -1660,7 +1660,7 @@ EOF
 }
 
 ensure_api_write_access() {
-  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/caddy/vps-control.d -/etc/wireguard -/etc/amnezia ${DATA_DIR}"
+  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/swanctl -/etc/caddy/vps-control.d -/etc/wireguard -/etc/amnezia ${DATA_DIR}"
   if ! grep -Fxq "${expected}" "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
     systemctl daemon-reload

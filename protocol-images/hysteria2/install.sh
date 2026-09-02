@@ -5,6 +5,9 @@ STATE=/var/lib/vps-control/hysteria2
 BIN=/usr/local/lib/vps-control-hysteria2/hysteria
 CONFIG="${ROOT}/config.yaml"
 PORT="${HYSTERIA2_PORT:-8443}"
+if [[ ! -s "${ROOT}/settings.json" ]]; then
+  while ss -H -lun "sport = :${PORT}" | grep -q .; do PORT=$((PORT + 1)); [[ ${PORT} -le 65535 ]] || { echo 'No free UDP port for Hysteria2' >&2; exit 1; }; done
+fi
 
 case "$(dpkg --print-architecture)" in amd64) asset_arch=amd64;; arm64) asset_arch=arm64;; *) echo 'Unsupported architecture' >&2; exit 2;; esac
 apt-get update
@@ -87,8 +90,8 @@ ExecStopPost=/usr/local/lib/vps-control-hysteria2/firewall.sh delete
 Restart=on-failure
 RestartSec=2
 LimitNOFILE=1048576
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadOnlyPaths=${ROOT}
@@ -99,5 +102,4 @@ EOF
 systemctl daemon-reload
 systemctl enable vps-control-hysteria2-auth.service vps-control-hysteria2.service
 systemctl restart vps-control-hysteria2-auth.service vps-control-hysteria2.service
-"${BIN}" server -c "${CONFIG}" --test >/dev/null
 systemctl is-active --quiet vps-control-hysteria2.service
