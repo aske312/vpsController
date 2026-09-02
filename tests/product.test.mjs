@@ -333,10 +333,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /const ruleCount = profileDirectRules\.filter/);
   assert.match(page, /<small>ПРАВИЛА<\/small><b>\{ruleCount\}<\/b>/);
   assert.match(page, /QRCode\.toDataURL\(subscription/);
-  assert.match(page, /mihomoProfileSteps/);
+  assert.match(page, /mihomoProfileEditorHead/);
   assert.match(page, /mihomoProfileWorkspace/);
   assert.match(page, /mihomoProfileRail/);
-  assert.match(page, /mihomoProfileDraftSummary/);
+  assert.match(page, /aria-label="Раздел настроек"/);
   assert.match(page, /mihomoOverviewV3/);
   assert.match(page, /mihomoOverviewPulse/);
   assert.match(page, /overviewIssueTargets/);
@@ -1508,7 +1508,7 @@ test("Mihomo profiles have an explicit common configuration layer", async () => 
   assert.match(manager, /template_id = str\(normalized\["common_device_id"\]\)/);
   assert.match(manager, /Общие настройки профиля нельзя удалить/);
   assert.match(view, /Общие настройки профиля/);
-  assert.match(view, /Зарегистрированные устройства/);
+  assert.match(view, /HWID-устройства/);
   assert.match(view, /для клиентов без HWID и новых устройств/);
   assert.doesNotMatch(view, />\+ Устройство<\/button>/);
 });
@@ -1539,11 +1539,11 @@ test("Mihomo UI does not count the common configuration as a device", async () =
   assert.match(view, /function registeredProfileDevices/);
   assert.match(view, /device\.scope !== "common" && device\.id !== profile\.common_device_id/);
   assert.match(view, /HWID-устройства пока не зарегистрированы/);
-  assert.match(view, /Общие настройки профиля[\s\S]*Зарегистрированные устройства/);
-  assert.match(view, /У профиля одна ссылка\. Без HWID действует общий пул/);
+  assert.match(view, /Общий пул[\s\S]*HWID-устройства/);
+  assert.match(view, /profileDevices\.filter\(\(device\) => device\.scope === "common"\)/);
 });
 
-test("Mihomo deduplicates migrated common devices and explains clients without HWID", async () => {
+test("Mihomo deduplicates migrated common devices and keeps clients without HWID in the common pool", async () => {
   const [manager, view] = await Promise.all([
     read("protocol-images/mihomo/manager.py"), read("app/views/mihomo/mihomo-view.tsx"),
   ]);
@@ -1554,7 +1554,8 @@ test("Mihomo deduplicates migrated common devices and explains clients without H
   assert.match(manager, /def record_common_subscription_access/);
   assert.match(manager, /"reason": "hwid_missing"/);
   assert.match(view, /\.filter\(\(device\) => device\.scope === "common"\)\.slice\(0, 1\)/);
-  assert.match(view, /HWID не передан — персональное устройство/);
+  assert.doesNotMatch(view, /HWID не передан — персональное устройство/);
+  assert.doesNotMatch(view, /mihomoCommonAccessNotice/);
 });
 
 test("Mihomo profile lifecycle is transactional, idempotent and reconciled", async () => {
