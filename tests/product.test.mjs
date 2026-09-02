@@ -1498,6 +1498,37 @@ test("Mihomo profiles expose one subscription and register optional HWID devices
   assert.doesNotMatch(view, /subscription\?device_id=/);
 });
 
+test("Mihomo profiles have an explicit common configuration layer", async () => {
+  const [manager, view] = await Promise.all([
+    read("protocol-images/mihomo/manager.py"), read("app/views/mihomo/mihomo-view.tsx"),
+  ]);
+  assert.match(manager, /result\["common_device_id"\] = common_device_id/);
+  assert.match(manager, /"scope": "common" if/);
+  assert.match(manager, /selected_device = device_id or str\(normalized\["common_device_id"\]\)/);
+  assert.match(manager, /template_id = str\(normalized\["common_device_id"\]\)/);
+  assert.match(manager, /Общие настройки профиля нельзя удалить/);
+  assert.match(view, /Общие настройки и устройства/);
+  assert.match(view, /для клиентов без HWID и новых устройств/);
+  assert.doesNotMatch(view, />\+ Устройство<\/button>/);
+});
+
+test("Mihomo HWID devices retain client and platform metadata", async () => {
+  const [manager, view] = await Promise.all([
+    read("protocol-images/mihomo/manager.py"), read("app/views/mihomo/mihomo-view.tsx"),
+  ]);
+  for (const header of ["x-device-os", "x-device-name", "x-client-name", "x-client-version", "user-agent"]) {
+    assert.match(manager, new RegExp(`request\\.headers\\.get\\("${header}"\\)`));
+  }
+  assert.match(manager, /device_os = "android"/);
+  assert.match(manager, /device_os = "ios"/);
+  assert.match(manager, /device_os = "windows"/);
+  assert.match(manager, /existing\["last_seen_at"\]/);
+  assert.match(manager, /class ProfileDeviceInput[\s\S]*hwid_hash[\s\S]*client_name[\s\S]*last_seen_at/);
+  assert.match(view, /const devicePlatform/);
+  assert.match(view, /devicePlatformMeta\(device\)\.label/);
+  assert.match(view, /Последний запрос/);
+});
+
 test("Mihomo profile lifecycle is transactional, idempotent and reconciled", async () => {
   const [manager, view, uninstall] = await Promise.all([
     read("protocol-images/mihomo/manager.py"),

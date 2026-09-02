@@ -221,7 +221,7 @@ class ProfileConnectionInput(BaseModel):
     id: str | None = Field(default=None, max_length=48, pattern=r"^[a-zA-Z0-9_-]+$")
     component: str = Field(min_length=1, max_length=64)
     name: str = Field(default="", max_length=80)
-    device_id: str = Field(default="device-1", max_length=48, pattern=r"^[a-zA-Z0-9_-]+$")
+    device_id: str = Field(default="profile-common", max_length=48, pattern=r"^[a-zA-Z0-9_-]+$")
     settings: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -229,13 +229,20 @@ class ProfileDeviceInput(BaseModel):
     id: str = Field(max_length=48, pattern=r"^[a-zA-Z0-9_-]+$")
     name: str = Field(min_length=1, max_length=80)
     routing: dict[str, Any] = Field(default_factory=dict)
+    hwid_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    created_at: str | None = Field(default=None, max_length=32)
+    os: str | None = Field(default=None, max_length=16)
+    client_name: str | None = Field(default=None, max_length=80)
+    client_version: str | None = Field(default=None, max_length=40)
+    user_agent: str | None = Field(default=None, max_length=256)
+    last_seen_at: str | None = Field(default=None, max_length=32)
 
 
 class ProfileCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     channels: list[str] = Field(default_factory=list)
     connections: list[ProfileConnectionInput] | None = None
-    devices: list[ProfileDeviceInput] = Field(default_factory=lambda: [ProfileDeviceInput(id="device-1", name="Основное устройство")], min_length=1)
+    devices: list[ProfileDeviceInput] = Field(default_factory=lambda: [ProfileDeviceInput(id="profile-common", name="Общие настройки профиля")], min_length=1)
     routing: dict[str, Any] = Field(default_factory=dict)
     operation_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
 
@@ -359,17 +366,30 @@ def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
     result["connections"] = [entry for entry in connections if isinstance(entry, dict)]
     devices = result.get("devices")
     if not isinstance(devices, list) or not devices:
-        devices = [{"id": "device-1", "name": "Основное устройство"}]
+        devices = [{"id": "profile-common", "name": "Общие настройки профиля"}]
     legacy_routing = result.get("routing", {}) if isinstance(result.get("routing"), dict) else {}
     devices = [
         {**device, "routing": device.get("routing") if isinstance(device.get("routing"), dict) else dict(legacy_routing)}
         for device in devices if isinstance(device, dict)
     ]
+    device_ids = {str(device.get("id", "")) for device in devices}
+    common_device_id = str(result.get("common_device_id", ""))
+    if common_device_id not in device_ids:
+        common_device_id = str(devices[0].get("id", "profile-common"))
+    devices = [
+        {
+            **device,
+            "name": "Общие настройки профиля" if str(device.get("id")) == common_device_id else device.get("name", "Устройство"),
+            "scope": "common" if str(device.get("id")) == common_device_id else ("hwid" if device.get("hwid_hash") else "legacy"),
+        }
+        for device in devices
+    ]
     result["devices"] = devices
+    result["common_device_id"] = common_device_id
     subscriptions = result.get("subscriptions")
     result["subscriptions"] = subscriptions if isinstance(subscriptions, dict) else {}
     result["subscription_status"] = "active" if result.get("subscription_token") else ("obsolete" if result["subscriptions"] else "missing")
-    default_device = str(devices[0].get("id", "device-1"))
+    default_device = common_device_id
     for connection in result["connections"]:
         connection.setdefault("device_id", default_device)
     sync_legacy_profile_fields(result)
@@ -2678,6 +2698,7 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
                 "name": payload.name.strip(),
                 "connections": connections,
                 "devices": devices,
+                "common_device_id": devices[0]["id"],
                 "subscriptions": {},
                 "subscription_token": secrets.token_urlsafe(32),
                 "routing": routing,
@@ -2715,6 +2736,9 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
         if len({device["id"] for device in devices}) != len(devices):
             raise HTTPException(status_code=422, detail="Duplicate profile device id")
+        common_device_id = str(item.get("common_device_id") or item.get("devices", [{}])[0].get("id", ""))
+        if common_device_id not in {device["id"] for device in devices}:
+            raise HTTPException(status_code=422, detail="Общие настройки профиля нельзя удалить")
         item["devices"] = devices
         item["subscriptions"] = {}
     if payload.connections is not None:
@@ -2967,7 +2991,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "transport-tuic": "TUIC",
     }
     normalized = normalize_profile(item)
-    selected_device = device_id or str(normalized.get("devices", [{"id": "device-1"}])[0].get("id", "device-1"))
+    selected_device = device_id or str(normalized["common_device_id"])
     connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
     if not connections:
         raise HTTPException(status_code=409, detail="У профиля нет подключений Mihomo")
@@ -3103,7 +3127,7 @@ def profile_config(profile_id: str, device_id: str | None = None) -> str:
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
     normalized = normalize_profile(item)
-    selected_device = device_id or str(normalized.get("devices", [{"id": "device-1"}])[0].get("id", "device-1"))
+    selected_device = device_id or str(normalized["common_device_id"])
     if selected_device not in {str(device.get("id")) for device in normalized.get("devices", [])}:
         raise HTTPException(status_code=404, detail="Profile device not found")
     config = render_profile(normalized, selected_device)
@@ -3131,14 +3155,66 @@ def profile_subscription(profile_id: str, device_id: str | None = None) -> dict[
     return {"path": f"/api/mihomo/subscriptions/{token}"}
 
 
-def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str) -> tuple[dict[str, Any], str]:
+def subscription_device_metadata(request: Request) -> dict[str, str]:
+    def clean(value: str | None, limit: int) -> str:
+        return " ".join((value or "").split())[:limit]
+
+    user_agent = clean(request.headers.get("user-agent"), 256)
+    requested_os = clean(request.headers.get("x-device-os"), 16).lower()
+    aliases = {
+        "iphone": "ios", "ipad": "ios", "ios": "ios", "android": "android",
+        "mac": "macos", "macos": "macos", "osx": "macos", "darwin": "macos",
+        "win": "windows", "windows": "windows", "linux": "linux",
+    }
+    device_os = aliases.get(requested_os, "")
+    if not device_os:
+        ua = user_agent.lower()
+        if "android" in ua:
+            device_os = "android"
+        elif "iphone" in ua or "ipad" in ua or "ios" in ua:
+            device_os = "ios"
+        elif "windows" in ua:
+            device_os = "windows"
+        elif "macintosh" in ua or "mac os" in ua:
+            device_os = "macos"
+        elif "linux" in ua:
+            device_os = "linux"
+        else:
+            device_os = "unknown"
+    client_name = clean(request.headers.get("x-client-name"), 80)
+    if not client_name and "clash-verge" in user_agent.lower():
+        client_name = "Clash Verge"
+    return {
+        "os": device_os,
+        "device_name": clean(request.headers.get("x-device-name"), 80),
+        "client_name": client_name or "Неизвестный клиент",
+        "client_version": clean(request.headers.get("x-client-version"), 40),
+        "user_agent": user_agent,
+    }
+
+
+def save_subscription_profile(profile: dict[str, Any]) -> None:
+    data = profiles()
+    for index, saved in enumerate(data):
+        if saved.get("id") == profile.get("id"):
+            data[index] = profile
+            save_profiles(data)
+            return
+
+
+def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, metadata: dict[str, str]) -> tuple[dict[str, Any], str]:
     hwid_hash = hmac.new(token.encode(), raw_hwid.encode(), hashlib.sha256).hexdigest()
     normalized = normalize_profile(profile)
     existing = next((device for device in normalized["devices"] if hmac.compare_digest(str(device.get("hwid_hash", "")), hwid_hash)), None)
     if existing:
+        existing.update({key: value for key, value in metadata.items() if value and key != "device_name"})
+        if metadata.get("device_name"):
+            existing["name"] = metadata["device_name"]
+        existing["last_seen_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        save_subscription_profile(normalized)
         return normalized, str(existing["id"])
-    template_device = normalized["devices"][0]
-    template_id = str(template_device.get("id", "device-1"))
+    template_id = str(normalized["common_device_id"])
+    template_device = next(device for device in normalized["devices"] if str(device.get("id")) == template_id)
     device_id = f"hwid-{hwid_hash[:16]}"
     definitions = []
     for connection in normalized["connections"]:
@@ -3155,19 +3231,16 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str) -> t
     with profile_runtime_transaction(components):
         provisioned = provision_connections(str(profile["id"]), definitions)
         profile.setdefault("devices", []).append({
-            "id": device_id, "name": f"HWID {hwid_hash[:8].upper()}",
+            "id": device_id, "name": metadata.get("device_name") or f"HWID {hwid_hash[:8].upper()}",
             "hwid_hash": hwid_hash, "routing": dict(profile.get("routing", {})),
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "last_seen_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            **{key: value for key, value in metadata.items() if value and key != "device_name"},
         })
         profile.setdefault("connections", []).extend(provisioned)
         profile["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         sync_legacy_profile_fields(profile)
-        data = profiles()
-        for index, saved in enumerate(data):
-            if saved.get("id") == profile.get("id"):
-                data[index] = profile
-                break
-        save_profiles(data)
+        save_subscription_profile(profile)
     return normalize_profile(profile), device_id
 
 
@@ -3182,13 +3255,13 @@ def public_profile_subscription(token: str, request: Request) -> PlainTextRespon
     if not selected_profile:
         raise HTTPException(status_code=404, detail="Subscription not found")
     raw_hwid = (request.headers.get("x-device-id") or request.headers.get("x-hwid") or request.query_params.get("hwid") or "").strip()
-    selected_device = str(normalize_profile(selected_profile)["devices"][0].get("id", "device-1"))
+    selected_device = str(normalize_profile(selected_profile)["common_device_id"])
     if raw_hwid:
         if len(raw_hwid) > 256:
             raise HTTPException(status_code=422, detail="HWID is too long")
         with profile_mutation_lock:
             latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
-            selected_profile, selected_device = subscription_device(latest, raw_hwid, token)
+            selected_profile, selected_device = subscription_device(latest, raw_hwid, token, subscription_device_metadata(request))
     config = render_profile(selected_profile, selected_device)
     validate_rendered_profile(config)
     return PlainTextResponse(
