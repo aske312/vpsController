@@ -1507,7 +1507,8 @@ test("Mihomo profiles have an explicit common configuration layer", async () => 
   assert.match(manager, /selected_device = device_id or str\(normalized\["common_device_id"\]\)/);
   assert.match(manager, /template_id = str\(normalized\["common_device_id"\]\)/);
   assert.match(manager, /Общие настройки профиля нельзя удалить/);
-  assert.match(view, /Общие настройки и устройства/);
+  assert.match(view, /Общие настройки профиля/);
+  assert.match(view, /Зарегистрированные устройства/);
   assert.match(view, /для клиентов без HWID и новых устройств/);
   assert.doesNotMatch(view, />\+ Устройство<\/button>/);
 });
@@ -1527,6 +1528,15 @@ test("Mihomo HWID devices retain client and platform metadata", async () => {
   assert.match(view, /const devicePlatform/);
   assert.match(view, /devicePlatformMeta\(device\)\.label/);
   assert.match(view, /Последний запрос/);
+});
+
+test("Mihomo UI does not count the common configuration as a device", async () => {
+  const view = await read("app/views/mihomo/mihomo-view.tsx");
+  assert.match(view, /function registeredProfileDevices/);
+  assert.match(view, /device\.scope !== "common" && device\.id !== profile\.common_device_id/);
+  assert.match(view, /HWID-устройства пока не зарегистрированы/);
+  assert.match(view, /Общие настройки профиля[\s\S]*Зарегистрированные устройства/);
+  assert.match(view, /У профиля одна ссылка\. Без HWID действует общий пул/);
 });
 
 test("Mihomo profile lifecycle is transactional, idempotent and reconciled", async () => {
