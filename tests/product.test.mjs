@@ -328,7 +328,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /p2pClientCatalog/);
   assert.match(page, /toggleP2pClient/);
   assert.doesNotMatch(page, /<b>Дополнительные процессы через VPN<\/b>/);
-  assert.match(page, /mihomoProfileRuleSwitch/);
+  assert.match(page, /mihomoProfileRuleButton/);
   assert.match(page, /profileDirectRules/);
   assert.match(page, /const ruleCount = profileDirectRules\.filter/);
   assert.match(page, /<small>ПРАВИЛА<\/small><b>\{ruleCount\}<\/b>/);
@@ -465,6 +465,9 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(page, /connection-guide-wg-awg\.pdf/);
   assert.match(page, /installedProtocols\.length > 0/);
   assert.match(page, /waitForProtocolState/);
+  assert.match(page, /const nextProtocol = image\.id === "mihomo"/);
+  assert.match(page, /loadProtocolStatus\(nextProtocol\)/);
+  assert.match(page, /setSelectedChannel\(nextProtocol\)[\s\S]*setTab\("channels"\)/);
   assert.match(page, /2–48 символов/);
 });
 
@@ -1471,12 +1474,13 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /def default_profile_presets/);
   assert.match(manager, /\/api\/mihomo\/routing\/presets/);
   assert.match(manager, /"summary": \{"configured": len\(values\)/);
-  assert.match(view, /downloadConfig\(createdProfile\)/);
+  assert.doesNotMatch(view, /downloadConfig\(createdProfile\)/);
+  assert.match(view, /width=\{240\} height=\{240\}/);
   assert.match(view, /mihomoProfileSummary/);
   assert.match(view, /mihomoProfileDevices/);
-  assert.match(view, /Настройки пресетов/);
+  assert.match(view, /Настроить пресеты/);
   assert.match(view, /preset_cdn_domain/);
-  assert.match(view, /Пресет для \{profileDevices\.find/);
+  assert.match(view, /Создать подключения из пресета/);
   assert.doesNotMatch(view, /profileDialog === "new" && <section className="mihomoPresetPicker"/);
   assert.doesNotMatch(view, /const module = modules\.find/, "Next.js reserves the local variable name module");
 });
@@ -1539,7 +1543,7 @@ test("Mihomo UI does not count the common configuration as a device", async () =
   assert.match(view, /function registeredProfileDevices/);
   assert.match(view, /device\.scope !== "common" && device\.id !== profile\.common_device_id/);
   assert.match(view, /HWID-устройства пока не зарегистрированы/);
-  assert.match(view, /Общий пул[\s\S]*HWID-устройства/);
+  assert.match(view, /Параметры профиля[\s\S]*HWID-устройства/);
   assert.match(view, /profileDevices\.filter\(\(device\) => device\.scope === "common"\)/);
 });
 
@@ -1634,6 +1638,9 @@ test("legacy users beta surface and orchestration are removed", async () => {
 
 test("channel DNS follows installed protected channels and security lives under system", async () => {
   const navigation = await read("app/components/gate-navigation.tsx");
+  assert.match(navigation, /import \{ directProtocolOrder \} from "\.\.\/lib\/control-plane-ui"/);
+  assert.match(navigation, /const transports = directProtocolOrder/);
+  assert.doesNotMatch(navigation, /const protocolOrder =/);
   assert.match(navigation, /activeTab === "channels" \|\| activeTab === "dns"/);
   assert.doesNotMatch(navigation, /label="DNS"/);
   assert.match(navigation, /<NavGroup label="SYSTEM">[\s\S]*label="Безопасность"[\s\S]*label="Приложение"/);

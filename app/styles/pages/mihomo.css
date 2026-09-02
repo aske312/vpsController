@@ -946,9 +946,10 @@
 /* Profile editor: persistent level rail with routing/connection tabs. */
 .mihomoProfileDialog { width:calc(100vw - 32px); height:calc(100dvh - 32px); max-width:none; max-height:none; }
 .mihomoProfileDialog > header { gap:18px; }
-.mihomoProfileHeading { min-width:0; display:flex; align-items:center; gap:14px; flex:1; }
+.mihomoProfileHeading { min-width:0; display:grid; grid-template-columns:minmax(210px,auto) minmax(280px,460px); align-items:end; gap:18px; flex:1; }
+.mihomoProfileHeading > div { display:grid; gap:2px; }
 .mihomoProfileHeading h2 { white-space:nowrap; }
-.mihomoProfileHeading label { min-width:240px; max-width:460px; display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:9px; flex:1; }
+.mihomoProfileHeading label { min-width:0; display:grid; gap:5px; }
 .mihomoProfileHeading label span { color:var(--muted); font-size:9px; }
 .mihomoProfileHeading input { min-height:34px !important; }
 .mihomoProfileWorkspace { grid-template-columns:280px minmax(0,1fr); }
@@ -977,24 +978,49 @@
 .mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-3 .mihomoProfileRules { display:none; }
 .mihomoProfileDialog.is-step-3 .mihomoPresetPicker,.mihomoProfileDialog.is-step-3 .mihomoConnectionBuilder { display:grid; }
 .mihomoProfileDialog .mihomoProfileStrategy > div { grid-template-columns:repeat(4,minmax(180px,1fr)); }
+.mihomoProfileDialog .mihomoProfileStrategy > div { display:flex; flex-wrap:wrap; }
+.mihomoProfileDialog .mihomoProfileStrategy button { width:190px; flex:0 1 190px; }
 .mihomoProfileDialog .mihomoProfileRules > div { grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); }
 .mihomoProfileDialog .mihomoPresetPicker > div { grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
 .mihomoProfileDialog .mihomoConnectionFields { grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); }
 .mihomoProfileDialog .mihomoConnectionList { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .mihomoProfileDialog > footer { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:12px; }
 .mihomoProfileDialog > footer > span { color:var(--muted); font-size:9px; text-align:right; }
-.mihomoConnectionCard { position:relative; padding:0; }
-.mihomoConnectionCard > summary { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; padding:11px 12px; list-style:none; cursor:pointer; }
+.mihomoConnectionCard { position:relative; padding:0; border-color:rgba(var(--protocol-rgb,91,113,138),.22); background:linear-gradient(145deg,rgba(var(--protocol-rgb,91,113,138),.055),rgba(8,17,26,.78)); }
+.mihomoConnectionCard > summary { display:grid; grid-template-columns:auto 1fr auto auto; align-items:center; gap:10px; padding:11px 12px; list-style:none; cursor:pointer; }
 .mihomoConnectionCard > summary::-webkit-details-marker { display:none; }
-.mihomoConnectionCard > summary > span:first-child { box-sizing:border-box; display:grid; place-items:center; width:42px; min-width:42px; height:32px; padding:0 3px; border-radius:8px; background:rgba(111,93,213,.16); color:#cfc5ff; font:800 8px/1 var(--font-mono); }
+.mihomoConnectionCard > summary > span:first-child { box-sizing:border-box; display:grid; place-items:center; width:42px; min-width:42px; height:32px; padding:0 3px; border-radius:8px; font:800 8px/1 var(--font-mono); }
 .mihomoConnectionCard > summary > div { display:grid; gap:2px; }
 .mihomoConnectionCard > summary small { color:var(--muted); }
 .mihomoConnectionChevron { color:#8295a2; font-size:22px; transition:transform .18s; }
+.mihomoConnectionQuickDelete { display:grid; place-items:center; width:27px; height:27px; padding:0; border:1px solid transparent; border-radius:7px; background:transparent; color:#765f65; font-size:16px; cursor:pointer; }
+.mihomoConnectionQuickDelete:hover { border-color:rgba(230,91,106,.28); background:rgba(111,31,42,.18); color:#e58c98; }
 .mihomoConnectionCard[open] .mihomoConnectionChevron { transform:rotate(90deg); }
 .mihomoConnectionCard[open] { padding:0 12px 12px; }
 .mihomoProfileDialog .mihomoConnectionCard[open] { grid-column:1/-1; }
 .mihomoConnectionCard[open] > summary { margin:0 -12px 10px; border-bottom:1px solid var(--line); }
-.mihomoConnectionDelete { justify-self:end; }
+.mihomoProfileRuleButton { min-width:0; display:grid; grid-template-columns:38px minmax(0,1fr); align-items:center; gap:8px; padding:8px; border:1px solid var(--line); border-radius:9px; background:rgba(5,13,21,.58); color:var(--muted); text-align:left; cursor:pointer; }
+.mihomoProfileRuleButton > i { display:grid; place-items:center; min-height:26px; border-radius:7px; background:rgba(91,113,138,.12); color:#8197a6; font:800 8px var(--font-mono); }
+.mihomoProfileRuleButton > span { min-width:0; display:grid; gap:2px; }
+.mihomoProfileRuleButton b { color:#b9c8d1; font-size:10px; }
+.mihomoProfileRuleButton small { display:none; }
+.mihomoProfileRuleButton.is-enabled { border-color:rgba(89,199,146,.38); background:rgba(37,112,79,.11); }
+.mihomoProfileRuleButton.is-enabled > i { background:rgba(42,137,92,.24); color:#b9f3d8; }
+.mihomoProfileRuleButton.is-enabled b { color:#d9f5e8; }
+
+.mihomoProfileDialog .mihomoPresetPicker > div > button { grid-template-columns:28px minmax(0,1fr); align-items:center; gap:8px; border-style:dashed; }
+.mihomoProfileDialog .mihomoPresetPicker > div > button > i { display:grid; place-items:center; width:28px; height:28px; border-radius:8px; background:rgba(92,75,180,.18); color:#c7bcff; font:normal 18px/1 sans-serif; }
+.mihomoProfileDialog .mihomoPresetPicker > div > button > span { min-width:0; display:grid; gap:2px; }
+.mihomoProfileDialog .mihomoPresetPicker > div > button:hover { border-style:solid; background:rgba(92,75,180,.1); }
+
+.mihomoCreatedProfile { width:min(720px,calc(100vw - 32px)); }
+.mihomoCreatedProfile > header { margin-bottom:4px; }
+.mihomoCreatedProfile .mihomoReadyDevices { margin-top:0; }
+.mihomoCreatedProfile .mihomoReadyDevices > article { grid-template-columns:240px minmax(0,1fr); gap:24px; padding:18px; }
+.mihomoCreatedProfile .mihomoReadyDevices img { width:240px; height:240px; padding:7px; }
+.mihomoCreatedProfile .mihomoReadyDevices b { font-size:16px; }
+.mihomoCreatedProfile .mihomoReadyDevices small { max-width:280px; font-size:10px; line-height:1.5; }
+.mihomoCreatedProfile .mihomoReadyDevices nav { margin-top:10px; }
 
 @media (max-width:1200px) {
   .mihomoProfileDialog .mihomoProfileStrategy > div { grid-template-columns:repeat(2,minmax(180px,1fr)); }
@@ -1021,6 +1047,8 @@
   .mihomoProfileHeading label span,.mihomoProfileDialog > footer > span { display:none; }
   .mihomoProfileDialog > footer { grid-template-columns:auto 1fr; }
   .mihomoProfileDialog > footer .primaryButton { justify-self:end; }
+  .mihomoCreatedProfile .mihomoReadyDevices > article { grid-template-columns:1fr; }
+  .mihomoCreatedProfile .mihomoReadyDevices img { width:200px; height:200px; justify-self:center; }
 }
 
 .gateOperationCard.mihomo .gateOperationTrack > i { background:linear-gradient(90deg,#8060df,#b292ff); box-shadow:0 0 9px rgba(162,123,255,.30); }

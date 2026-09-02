@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { BrandGlyph } from "./brand-glyph";
+import { directProtocolOrder } from "../lib/control-plane-ui";
 
 type ProtocolImage = {
   id: string;
@@ -26,7 +27,6 @@ type Props = {
   onNavigate: (tab: string) => void;
 };
 
-const protocolOrder = ["awg", "wg", "vless-reality-xhttp", "shadowsocks"];
 export function GateNavigation({
   activeTab,
   protocolImages,
@@ -37,7 +37,7 @@ export function GateNavigation({
   onNavigate,
 }: Props) {
   const mihomoInstalled = protocolImages.some((item) => item.id === "mihomo" && item.installed);
-  const transports = protocolOrder
+  const transports = directProtocolOrder
     .map((id) => protocolImages.find((item) => item.id === id && item.installed))
     .filter((item): item is ProtocolImage => Boolean(item));
 

@@ -1000,6 +1000,9 @@ export default function Home() {
         : `${image.name} будет удалён из панели. Его конфигурация и связанные подключения станут недоступны; модуль можно установить повторно.`,
       confirmLabel: image.id === "mihomo" ? "Удалить модуль" : "Удалить", phrase: image.id === "mihomo" ? "УДАЛИТЬ" : undefined, danger: true,
     })) return;
+    const nextProtocol = image.id === "mihomo"
+      ? undefined
+      : directProtocolOrder.find((protocol) => protocol !== image.id && protocolImages.some((candidate) => candidate.id === protocol && candidate.installed));
     setBusy(true); setError(""); setInstallingProtocol(`remove-${image.id}`);
     try {
       const started = await request(`/protocol-images/${image.id}`, { method: "DELETE" });
@@ -1008,9 +1011,24 @@ export default function Home() {
         containers: current?.containers || [],
         action: started,
       }));
-      setTab("overview");
       await waitForProtocolState(image, false);
-      await Promise.all([loadOverview(), loadClients(), loadServices()]);
+      setProtocolStatuses((current) => {
+        const next = { ...current };
+        delete next[image.id as Protocol];
+        return next;
+      });
+      await Promise.all([
+        loadOverview(),
+        loadClients(),
+        loadServices(),
+        ...(nextProtocol ? [loadProtocolStatus(nextProtocol)] : []),
+      ]);
+      if (nextProtocol) {
+        setSelectedChannel(nextProtocol);
+        setTab("channels");
+      } else {
+        setTab("overview");
+      }
       setNotice(`${image.name} удалён`);
     } catch (cause) {
       setInstallingProtocol("");
@@ -1296,7 +1314,11 @@ export default function Home() {
     nodeStateLabel={nodeStateLabel}
     server={overview?.server}
     onNavigate={(id) => {
-      if (id === "channels" && !installedProtocols.includes(selectedChannel) && installedProtocols[0]) setSelectedChannel(installedProtocols[0]);
+      if (id === "channels" && installedProtocols[0]) {
+        const channel = installedProtocols.includes(selectedChannel) ? selectedChannel : installedProtocols[0];
+        setSelectedChannel(channel);
+        void loadProtocolStatus(channel);
+      }
       setTab(id as Tab);
     }}
     operationAction={application?.action}
