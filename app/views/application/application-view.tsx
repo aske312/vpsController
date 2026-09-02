@@ -89,7 +89,7 @@ export function ApplicationView({ application, services, applicationVersion, upd
                 <span className="applicationSwitch"><input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy} /><i /></span>
               </label>
               <label>
-                <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? `Выключен · адрес после включения ${services?.panel_access?.internal_url || "http://admin.312.net:8080"}` : `Доступ через ${services?.panel_access?.internal_url || (services?.panel_access?.vpn_urls || []).join("  ") || "защищённое подключение"}`}</small></span>
+                <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? `Выключен · адрес после включения ${services?.panel_access?.internal_url || "http://admin.312.net"}` : `Доступ через ${services?.panel_access?.internal_url || (services?.panel_access?.vpn_urls || []).join("  ") || "защищённое подключение"}`}</small></span>
                 <span className="applicationSwitch"><input type="checkbox" checked={!services?.panel_access?.public} onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")} disabled={busy || !services || serviceModeActive || (services.panel_access?.public !== false && services.panel_access?.can_enable === false)} /><i /></span>
               </label>
             </div>

@@ -688,7 +688,7 @@ export default function Home() {
   }
 
   async function changePanelAccess(mode: "external" | "vpn") {
-    const protectedUrl = services?.panel_access?.internal_url || "http://admin.312.net:8080";
+    const protectedUrl = services?.panel_access?.internal_url || "http://admin.312.net";
     const channels = services?.panel_access?.available_channels || [];
     if (mode === "vpn" && !channels.length) {
       setError("Сначала настройте хотя бы одно защищённое подключение");

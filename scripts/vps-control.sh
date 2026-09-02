@@ -366,13 +366,8 @@ PY
 }
 
 configure_internal_panel_host() {
-  local configured_domain hosts_tmp
-  configured_domain="$(env_value PUBLIC_DOMAIN)"
-  if [[ "${configured_domain,,}" == admin.* ]]; then
-    INTERNAL_PANEL_HOST="${configured_domain}"
-  else
-    INTERNAL_PANEL_HOST="admin.312.net"
-  fi
+  local hosts_tmp
+  INTERNAL_PANEL_HOST="admin.312.net"
   set_env_value "INTERNAL_PANEL_HOST" "${INTERNAL_PANEL_HOST}"
   hosts_tmp="$(mktemp)"
   awk '$0 !~ /# 312.net internal panel$/ { print }' /etc/hosts >"${hosts_tmp}"
@@ -411,7 +406,7 @@ configure_access() {
     openvpn_address="$({ [[ -z "${openvpn_interface}" ]] || ip -o -4 addr show dev "${openvpn_interface}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
     ike_pool="$(python3 -c 'import json; print(json.load(open("/etc/vps-control/ikev2/settings.json")).get("pool",""))' 2>/dev/null || true)"
     [[ "$(configured_panel_channel_count)" -gt 0 ]] || die "Сначала настройте хотя бы одно защищённое подключение."
-    local vpn_origins="http://${INTERNAL_PANEL_HOST}:${HTTP_PORT}"
+    local vpn_origins="http://${INTERNAL_PANEL_HOST}"
     for vpn_origin in ${wg_address:+http://${wg_address}:${HTTP_PORT}} ${awg_address:+http://${awg_address}:${HTTP_PORT}} ${openvpn_address:+http://${openvpn_address}:${HTTP_PORT}}; do
       [[ -z "${vpn_origins}" ]] || vpn_origins+=","
       vpn_origins+="${vpn_origin}"
@@ -422,7 +417,7 @@ configure_access() {
     fi
     set_env_value "PANEL_HOST" "0.0.0.0"
     set_env_value "CORS_ORIGINS" "${vpn_origins}"
-    PANEL_URL="http://${INTERNAL_PANEL_HOST}:${HTTP_PORT}"
+    PANEL_URL="http://${INTERNAL_PANEL_HOST}"
   else
     local wg_address awg_address origins
     wg_address="$({ ip -o -4 addr show dev "${WG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
@@ -535,8 +530,7 @@ PY
 write_caddy_config() {
   local domain internal_panel_host wg_panel_address awg_panel_address
   domain="$(env_value PUBLIC_DOMAIN)"
-  internal_panel_host="$(env_value INTERNAL_PANEL_HOST)"
-  [[ -n "${internal_panel_host}" ]] || internal_panel_host="admin.312.net"
+  internal_panel_host="admin.312.net"
   wg_panel_address="$(python3 - "$(env_value WG_SUBNET)" <<'PY'
 import ipaddress
 import sys
@@ -1435,12 +1429,14 @@ configure_firewall() {
     local vpn_interface_available="no" openvpn_interface ike_pool
     if ip link show "${WG_INTERFACE}" >/dev/null 2>&1; then
       ufw allow in on "${WG_INTERFACE}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via WG'
+      ufw allow in on "${WG_INTERFACE}" to any port 80 proto tcp comment '312.net admin host via WG'
       [[ -z "$(env_value PUBLIC_DOMAIN)" ]] \
         || ufw allow in on "${WG_INTERFACE}" to any port 443 proto tcp comment '312.net HTTPS panel via WG'
       vpn_interface_available="yes"
     fi
     if ip link show "${AWG_INTERFACE}" >/dev/null 2>&1; then
       ufw allow in on "${AWG_INTERFACE}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via AWG'
+      ufw allow in on "${AWG_INTERFACE}" to any port 80 proto tcp comment '312.net admin host via AWG'
       [[ -z "$(env_value PUBLIC_DOMAIN)" ]] \
         || ufw allow in on "${AWG_INTERFACE}" to any port 443 proto tcp comment '312.net HTTPS panel via AWG'
       vpn_interface_available="yes"
@@ -1448,12 +1444,14 @@ configure_firewall() {
     openvpn_interface="$(ip -o -4 route show 10.74.0.0/24 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')"
     if [[ -n "${openvpn_interface}" ]] && systemctl is-active --quiet vps-control-openvpn.service; then
       ufw allow in on "${openvpn_interface}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via OpenVPN'
+      ufw allow in on "${openvpn_interface}" to any port 80 proto tcp comment '312.net admin host via OpenVPN'
       [[ -z "$(env_value PUBLIC_DOMAIN)" ]] || ufw allow in on "${openvpn_interface}" to any port 443 proto tcp comment '312.net HTTPS panel via OpenVPN'
       vpn_interface_available="yes"
     fi
     ike_pool="$(python3 -c 'import json; print(json.load(open("/etc/vps-control/ikev2/settings.json")).get("pool",""))' 2>/dev/null || true)"
     if [[ -n "${ike_pool}" ]] && systemctl is-active --quiet vps-control-ikev2.service; then
       ufw allow from "${ike_pool}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via IKEv2'
+      ufw allow from "${ike_pool}" to any port 80 proto tcp comment '312.net admin host via IKEv2'
       [[ -z "$(env_value PUBLIC_DOMAIN)" ]] || ufw allow from "${ike_pool}" to any port 443 proto tcp comment '312.net HTTPS panel via IKEv2'
       vpn_interface_available="yes"
     fi
@@ -2290,7 +2288,7 @@ change_access_mode() {
   systemctl restart caddy.service
   systemctl restart "${APP_NAME}-api.service"
   if [[ "${ACCESS_MODE}" == "vpn" ]]; then
-    ok "панель доступна через защищённые подключения: http://${INTERNAL_PANEL_HOST}:${HTTP_PORT}"
+    ok "панель доступна через защищённые подключения: http://${INTERNAL_PANEL_HOST}"
   else
     ok "публичный доступ к панели открыт."
   fi

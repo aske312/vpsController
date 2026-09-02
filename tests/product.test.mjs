@@ -1339,19 +1339,31 @@ test("successful protocol installs are immediately reachable and health-checked"
   assert.match(mihomoReality, /for tool in iptables ip6tables/);
 });
 
+test("expanded security journal uses the full diagnostics workspace", async () => {
+  const [view, styles] = await Promise.all([
+    read("app/views/security/security-view.tsx"), read("app/styles/pages/security.css"),
+  ]);
+  assert.match(view, /securityLogsOpen \? "open" : ""/);
+  assert.match(styles, /\.securityLogs\.open\{grid-column:1\/-1\}/);
+  assert.match(styles, /\.securityLogs\.open \.securityLogsBody pre\{height:auto;min-height:260px;max-height:none;overflow:visible\}/);
+});
+
 test("protected panel access uses one stable host through every configured channel", async () => {
   const [api, page, view, manager, caddy] = await Promise.all([
     read("api/main.py"), read("app/page.tsx"), read("app/views/application/application-view.tsx"),
     read("scripts/vps-control.sh"), read("Caddyfile"),
   ]);
-  assert.match(api, /PUBLIC_DOMAIN\.lower\(\)\.startswith\("admin\."\)/);
-  assert.match(api, /else "admin\.312\.net"/);
+  assert.match(api, /INTERNAL_PANEL_HOST = "admin\.312\.net"/);
+  assert.match(api, /return f"http:\/\/\{INTERNAL_PANEL_HOST\}"/);
   assert.match(api, /"can_enable": bool\(panel_channels\)/);
   assert.match(page, /Панель будет доступна по адресу/);
   assert.match(view, /panel_access\?\.can_enable === false/);
   assert.match(manager, /configured_panel_channel_count/);
   assert.match(manager, /127\.0\.0\.1 %s # 312\.net internal panel/);
-  assert.match(caddy, /http:\/\/{INTERNAL_PANEL_HOST}:\{\$HTTP_PORT\}/);
+  assert.match(manager, /admin host via WG/);
+  assert.match(manager, /admin host via OpenVPN/);
+  assert.match(caddy, /http:\/\/{INTERNAL_PANEL_HOST} \{/);
+  assert.match(caddy, /not remote_ip 127\.0\.0\.0\/8 10\.0\.0\.0\/8/);
 });
 
 test("protected panel access follows every routable managed VPN", async () => {

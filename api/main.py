@@ -66,10 +66,7 @@ PUBLIC_IPV4 = os.getenv("PUBLIC_IPV4", PUBLIC_IP)
 PUBLIC_IPV6 = os.getenv("PUBLIC_IPV6", "")
 PUBLIC_DOMAIN = os.getenv("PUBLIC_DOMAIN", "")
 PUBLIC_ENDPOINT = os.getenv("PUBLIC_ENDPOINT", PUBLIC_DOMAIN or PUBLIC_IPV4 or (f"[{PUBLIC_IPV6}]" if PUBLIC_IPV6 else PUBLIC_IP))
-INTERNAL_PANEL_HOST = os.getenv(
-    "INTERNAL_PANEL_HOST",
-    PUBLIC_DOMAIN if PUBLIC_DOMAIN.lower().startswith("admin.") else "admin.312.net",
-)
+INTERNAL_PANEL_HOST = "admin.312.net"
 PUBLIC_IP_ENDPOINT = os.getenv("PUBLIC_IP_ENDPOINT", PUBLIC_IPV4 or (f"[{PUBLIC_IPV6}]" if PUBLIC_IPV6 else PUBLIC_IP))
 PUBLIC_DOMAIN_ENDPOINT = os.getenv("PUBLIC_DOMAIN_ENDPOINT", PUBLIC_DOMAIN)
 PUBLIC_ENDPOINTS = tuple(value for value in os.getenv("PUBLIC_ENDPOINTS", "").split(",") if value) or tuple(dict.fromkeys(value for value in (PUBLIC_IP_ENDPOINT, PUBLIC_DOMAIN_ENDPOINT) if value))
@@ -351,7 +348,7 @@ def configured_panel_channels() -> list[str]:
 
 
 def internal_panel_url() -> str:
-    return f"http://{INTERNAL_PANEL_HOST}:{os.getenv('HTTP_PORT', '8080')}"
+    return f"http://{INTERNAL_PANEL_HOST}"
 
 
 def write_clients(items: list[dict]) -> None:
