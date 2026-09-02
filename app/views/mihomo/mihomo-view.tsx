@@ -471,7 +471,7 @@ export function MihomoPage({
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number | boolean>>({});
   const [profileDialog, setProfileDialog] = useState<Profile | "new" | null>(null);
   const profileMutationId = useRef(crypto.randomUUID());
-  const [profileStep, setProfileStep] = useState(2);
+  const [profileStep, setProfileStep] = useState(1);
   const profileCanvasRef = useRef<HTMLElement>(null);
   const [profileName, setProfileName] = useState("");
   const [profileConnections, setProfileConnections] = useState<ProfileConnection[]>([]);
@@ -888,7 +888,7 @@ export function MihomoPage({
 
   function newProfile() {
     profileMutationId.current = crypto.randomUUID();
-    setProfileStep(2);
+    setProfileStep(1);
     setProfileStrategyTouched(false);
     setProfileDialog("new");
     setProfileName("");
@@ -900,7 +900,7 @@ export function MihomoPage({
 
   function editProfile(profile: Profile) {
     profileMutationId.current = crypto.randomUUID();
-    setProfileStep(2);
+    setProfileStep(1);
     setProfileStrategyTouched(true);
     setProfileDialog(profile);
     setProfileName(profile.name);
@@ -1507,7 +1507,7 @@ export function MihomoPage({
         }}>
           <form className={`mihomoDialog mihomoProfileDialog is-step-${profileStep}`} onSubmit={saveProfile}>
             <header>
-              <div className="mihomoProfileHeading"><div><p className="eyebrow">MIHOMO PROFILE</p><h2>{profileDialog === "new" ? "Новый профиль" : "Настройка профиля"}</h2></div><label><span>Название профиля</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} placeholder="Например, Основной" /></label></div>
+              <div className="mihomoProfileHeading"><div><p className="eyebrow">MIHOMO PROFILE</p><h2>{profileDialog === "new" ? "Новый профиль" : "Настройка профиля"}</h2></div></div>
               <button type="button" className="iconButton" onClick={() => setProfileDialog(null)}>x</button>
             </header>
             <div className="mihomoProfileWorkspace">
@@ -1516,12 +1516,21 @@ export function MihomoPage({
                 <section className="mihomoDeviceBuilder">
                   <div className="mihomoCommonSettings">{profileDevices.filter((device) => device.scope === "common").slice(0, 1).map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => { setProfileStrategyTouched(Boolean(device.routing?.strategy)); setActiveDeviceId(device.id); }}><i>ALL</i><span><b>Параметры профиля</b></span></button>)}</div>
                   <header><div><b>HWID-устройства</b><small>Регистрируются автоматически.</small></div></header>
-                  <div>{profileDevices.filter((device) => device.scope !== "common").map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => { setProfileStrategyTouched(Boolean(device.routing?.strategy)); setActiveDeviceId(device.id); }}><i>{devicePlatformMeta(device).code}</i><span><input aria-label={`Название устройства ${device.name}`} value={device.name} maxLength={80} onClick={(event) => event.stopPropagation()} onChange={(event) => setProfileDevices((current) => current.map((item) => item.id === device.id ? { ...item, name: event.target.value } : item))} /><small>{profileConnections.filter((connection) => connection.device_id === device.id).length} подключений · {deviceSystemLabel(device)}</small></span><em title="Удалить устройство" onClick={(event) => { event.stopPropagation(); const next = profileDevices.filter((item) => item.id !== device.id); setProfileDevices(next); setProfileConnections((current) => current.filter((connection) => connection.device_id !== device.id)); if (activeDeviceId === device.id) setActiveDeviceId(next.find((item) => item.scope === "common")?.id || next[0].id); }}>×</em></button>)}</div>
+                  <div>{profileDevices.filter((device) => device.scope !== "common").map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => { setProfileStrategyTouched(Boolean(device.routing?.strategy)); setActiveDeviceId(device.id); }}><i>{devicePlatformMeta(device).code}</i><span><b>{device.name}</b><small>{profileConnections.filter((connection) => connection.device_id === device.id).length} подключений · {deviceSystemLabel(device)}</small></span><em title="Удалить устройство" onClick={(event) => { event.stopPropagation(); const next = profileDevices.filter((item) => item.id !== device.id); setProfileDevices(next); setProfileConnections((current) => current.filter((connection) => connection.device_id !== device.id)); if (activeDeviceId === device.id) setActiveDeviceId(next.find((item) => item.scope === "common")?.id || next[0].id); }}>×</em></button>)}</div>
                   {!profileDevices.some((device) => device.scope !== "common") && <p className="mihomoConnectionEmpty">Нет зарегистрированных устройств.</p>}
                 </section>
               </aside>
               <main ref={profileCanvasRef} className="mihomoProfileCanvas">
-            <section className="mihomoProfileEditorHead"><div><small>ВЫБРАННАЯ КОНФИГУРАЦИЯ</small><b>{profileDevices.find((device) => device.id === activeDeviceId)?.scope === "common" ? "Параметры профиля" : profileDevices.find((device) => device.id === activeDeviceId)?.name}</b></div><nav aria-label="Раздел настроек"><button type="button" className={profileStep === 2 ? "is-active" : ""} onClick={() => setProfileStep(2)}>Маршрутизация</button><button type="button" className={profileStep === 3 ? "is-active" : ""} onClick={() => setProfileStep(3)}>Подключения <i>{profileConnections.filter((connection) => connection.device_id === activeDeviceId).length}</i></button></nav></section>
+            <section className="mihomoProfileEditorHead"><div><small>ВЫБРАННАЯ КОНФИГУРАЦИЯ</small><b>{profileDevices.find((device) => device.id === activeDeviceId)?.scope === "common" ? "Параметры профиля" : profileDevices.find((device) => device.id === activeDeviceId)?.name}</b></div><nav aria-label="Раздел настроек"><button type="button" className={profileStep === 1 ? "is-active" : ""} onClick={() => setProfileStep(1)}>Общие</button><button type="button" className={profileStep === 2 ? "is-active" : ""} onClick={() => setProfileStep(2)}>Маршрутизация</button><button type="button" className={profileStep === 3 ? "is-active" : ""} onClick={() => setProfileStep(3)}>Подключения <i>{profileConnections.filter((connection) => connection.device_id === activeDeviceId).length}</i></button></nav></section>
+            <section className="mihomoProfileName mihomoProfileGeneral">
+              {profileDevices.find((device) => device.id === activeDeviceId)?.scope === "common" ? <>
+                <header><div><b>Название профиля</b><small>Отображается в панели и помогает отличать подписки.</small></div></header>
+                <label><span>Название профиля</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} placeholder="Например, Основной" /></label>
+              </> : <>
+                <header><div><b>Название HWID-устройства</b><small>Используется для идентификации выбранного устройства.</small></div></header>
+                <label><span>Название устройства</span><input value={profileDevices.find((device) => device.id === activeDeviceId)?.name || ""} maxLength={80} onChange={(event) => setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, name: event.target.value } : device))} /></label>
+              </>}
+            </section>
             <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа GATE.312 для YAML выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{profileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>
             <section className="mihomoProfileRules"><header><div><b>Правила устройства</b><small>Применяются только к подписке и YAML выбранного устройства.</small></div><span>{profileDirectRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length} из {profileDirectRules.length}</span></header><div>{profileDirectRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div></section>
             <section className="mihomoPresetPicker">
@@ -1558,7 +1567,7 @@ export function MihomoPage({
                     <summary>
                       <span className={`protocol-${connection.component}`}>{channelShort[connection.component] || "CH"}</span>
                       <div><b>{vlessRoute === "cdn" ? "VLESS CDN" : vlessRoute === "tls" ? "VLESS TLS" : vlessRoute === "direct" ? "VLESS REALITY" : vlessRoute === "both" ? "VLESS + CDN · прежний формат" : protocolModule?.name || connection.component}</b><small>{vlessRoute === "cdn" ? "Через CDN-домен" : vlessRoute === "tls" ? "Прямой домен с TLS" : vlessRoute === "direct" ? "Прямое REALITY-подключение" : vlessRoute === "both" ? "Можно заменить двумя независимыми подключениями" : `Подключение ${index + 1}`}</small></div>
-                      <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}>×</button><span className="mihomoConnectionChevron">›</span>
+                      <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}><span aria-hidden="true">×</span>Удалить</button><span className="mihomoConnectionChevron">›</span>
                     </summary>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
                     <div className="mihomoConnectionFields">

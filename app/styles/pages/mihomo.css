@@ -946,7 +946,7 @@
 /* Profile editor: persistent level rail with routing/connection tabs. */
 .mihomoProfileDialog { width:calc(100vw - 32px); height:calc(100dvh - 32px); max-width:none; max-height:none; }
 .mihomoProfileDialog > header { gap:18px; }
-.mihomoProfileHeading { min-width:0; display:grid; grid-template-columns:minmax(210px,auto) minmax(280px,460px); align-items:end; gap:18px; flex:1; }
+.mihomoProfileHeading { min-width:0; display:grid; align-items:end; gap:18px; flex:1; }
 .mihomoProfileHeading > div { display:grid; gap:2px; }
 .mihomoProfileHeading h2 { white-space:nowrap; }
 .mihomoProfileHeading label { min-width:0; display:grid; gap:5px; }
@@ -973,6 +973,13 @@
 .mihomoProfileEditorHead nav button { display:flex; align-items:center; gap:7px; padding:8px 12px; border:0; border-radius:7px; background:transparent; color:var(--muted); cursor:pointer; }
 .mihomoProfileEditorHead nav button.is-active { background:rgba(92,75,180,.22); color:#e4edff; }
 .mihomoProfileEditorHead nav i { display:grid; place-items:center; min-width:18px; height:18px; padding:0 4px; border-radius:999px; background:rgba(91,113,138,.18); font:800 8px var(--font-mono); }
+.mihomoProfileGeneral { gap:14px; padding:18px; }
+.mihomoProfileGeneral > header > div { display:grid; gap:4px; }
+.mihomoProfileGeneral > header b { color:var(--text); font-size:14px; }
+.mihomoProfileGeneral > header small { color:var(--muted); font-size:10px; }
+.mihomoProfileGeneral > label { display:grid; gap:6px; max-width:680px; }
+.mihomoProfileGeneral > label > span { color:#8297a6; font-size:10px; }
+.mihomoProfileGeneral input { min-height:42px; font-size:13px; }
 .mihomoProfileDialog.is-step-2 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-2 .mihomoProfileRules { display:grid; }
 .mihomoProfileDialog.is-step-2 .mihomoPresetPicker,.mihomoProfileDialog.is-step-2 .mihomoConnectionBuilder { display:none; }
 .mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-3 .mihomoProfileRules { display:none; }
@@ -993,8 +1000,9 @@
 .mihomoConnectionCard > summary > div { display:grid; gap:2px; }
 .mihomoConnectionCard > summary small { color:var(--muted); }
 .mihomoConnectionChevron { color:#8295a2; font-size:22px; transition:transform .18s; }
-.mihomoConnectionQuickDelete { display:grid; place-items:center; width:27px; height:27px; padding:0; border:1px solid transparent; border-radius:7px; background:transparent; color:#765f65; font-size:16px; cursor:pointer; }
-.mihomoConnectionQuickDelete:hover { border-color:rgba(230,91,106,.28); background:rgba(111,31,42,.18); color:#e58c98; }
+.mihomoConnectionQuickDelete { display:flex; align-items:center; justify-content:center; gap:5px; min-height:29px; padding:5px 9px; border:1px solid rgba(230,91,106,.3); border-radius:7px; background:rgba(111,31,42,.18); color:#e58c98; font-size:9px; font-weight:700; cursor:pointer; }
+.mihomoConnectionQuickDelete > span { font-size:15px; line-height:1; }
+.mihomoConnectionQuickDelete:hover { border-color:rgba(230,91,106,.62); background:rgba(139,37,51,.3); color:#ffd7dc; }
 .mihomoConnectionCard[open] .mihomoConnectionChevron { transform:rotate(90deg); }
 .mihomoConnectionCard[open] { padding:0 12px 12px; }
 .mihomoProfileDialog .mihomoConnectionCard[open] { grid-column:1/-1; }

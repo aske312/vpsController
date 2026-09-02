@@ -1478,6 +1478,10 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(view, /width=\{240\} height=\{240\}/);
   assert.match(view, /mihomoProfileSummary/);
   assert.match(view, /mihomoProfileDevices/);
+  assert.match(view, /setProfileStep\(1\)[\s\S]*>Общие<\/button>/);
+  assert.match(view, /mihomoProfileGeneral/);
+  assert.match(view, /Название HWID-устройства/);
+  assert.match(view, /mihomoConnectionQuickDelete[\s\S]*Удалить<\/button>/);
   assert.match(view, /Настроить пресеты/);
   assert.match(view, /preset_cdn_domain/);
   assert.match(view, /Создать подключения из пресета/);
