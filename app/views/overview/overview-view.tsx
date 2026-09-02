@@ -103,6 +103,21 @@ type MihomoProfileStats = {
   summary: { rx_bytes: number; tx_bytes: number };
 };
 
+type MihomoSummarySnapshot = {
+  status: MihomoStatus;
+  modules: MihomoModule[];
+  profiles: MihomoProfile[];
+  profileStats: Record<string, MihomoProfileStats["summary"]>;
+};
+
+const MIHOMO_SUMMARY_CACHE_TTL_MS = 15_000;
+let mihomoSummaryCache: { token: string; cachedAt: number; data: MihomoSummarySnapshot } | null = null;
+let mihomoSummaryRequest: { token: string; promise: Promise<MihomoSummarySnapshot> } | null = null;
+
+function cachedMihomoSummary(token: string) {
+  return token && mihomoSummaryCache?.token === token ? mihomoSummaryCache : null;
+}
+
 type DirectProtocolStatus = {
   protocol: ProtocolId;
   interface?: string;
@@ -235,10 +250,11 @@ export function OverviewDashboard({
 }: Props) {
   const mihomoImage = protocolImages.find((item) => item.id === "mihomo");
   const mihomoInstalled = Boolean(mihomoImage?.installed);
-  const [mihomoStatus, setMihomoStatus] = useState<MihomoStatus | null>(null);
-  const [mihomoModules, setMihomoModules] = useState<MihomoModule[]>([]);
-  const [mihomoProfiles, setMihomoProfiles] = useState<MihomoProfile[]>([]);
-  const [mihomoProfileStats, setMihomoProfileStats] = useState<Record<string, MihomoProfileStats["summary"]>>({});
+  const initialMihomoSummary = useMemo(() => cachedMihomoSummary(token)?.data, [token]);
+  const [mihomoStatus, setMihomoStatus] = useState<MihomoStatus | null>(() => initialMihomoSummary?.status || null);
+  const [mihomoModules, setMihomoModules] = useState<MihomoModule[]>(() => initialMihomoSummary?.modules || []);
+  const [mihomoProfiles, setMihomoProfiles] = useState<MihomoProfile[]>(() => initialMihomoSummary?.profiles || []);
+  const [mihomoProfileStats, setMihomoProfileStats] = useState<Record<string, MihomoProfileStats["summary"]>>(() => initialMihomoSummary?.profileStats || {});
   const [mihomoSummaryError, setMihomoSummaryError] = useState("");
   const [directStatuses, setDirectStatuses] = useState<Partial<Record<ProtocolId, DirectProtocolStatus>>>({});
   const [directStatusFailures, setDirectStatusFailures] = useState<Partial<Record<ProtocolId, boolean>>>({});
@@ -253,8 +269,9 @@ export function OverviewDashboard({
     ),
     [protocolImages],
   );
-  const loadMihomoSummary = useCallback(async () => {
+  const loadMihomoSummary = useCallback(async (force = false) => {
     if (!token || !mihomoInstalled) {
+      if (!token || mihomoSummaryCache?.token === token) mihomoSummaryCache = null;
       setMihomoStatus(null);
       setMihomoModules([]);
       setMihomoProfiles([]);
@@ -262,28 +279,45 @@ export function OverviewDashboard({
       setMihomoSummaryError("");
       return;
     }
+    const cached = cachedMihomoSummary(token);
+    if (cached) {
+      setMihomoStatus(cached.data.status);
+      setMihomoModules(cached.data.modules);
+      setMihomoProfiles(cached.data.profiles);
+      setMihomoProfileStats(cached.data.profileStats);
+      setMihomoSummaryError("");
+      if (!force && Date.now() - cached.cachedAt < MIHOMO_SUMMARY_CACHE_TTL_MS) return;
+    }
     try {
-      const headers = { Authorization: `Basic ${token}` };
-      const [statusResponse, modulesResponse, profilesResponse, statsResponse] = await Promise.all([
-        fetch("/api/mihomo/status", { headers }),
-        fetch("/api/mihomo/modules", { headers }),
-        fetch("/api/mihomo/profiles", { headers }),
-        fetch("/api/mihomo/stats", { headers }),
-      ]);
-      if (!statusResponse.ok || !modulesResponse.ok || !profilesResponse.ok) throw new Error("summary unavailable");
-      const [status, modules, profiles, stats] = await Promise.all([
-        statusResponse.json() as Promise<MihomoStatus>,
-        modulesResponse.json() as Promise<{ items: MihomoModule[] }>,
-        profilesResponse.json() as Promise<{ items: MihomoProfile[] }>,
-        statsResponse.ok ? statsResponse.json() as Promise<{ items: MihomoProfileStats[] }> : Promise.resolve({ items: [] }),
-      ]);
-      setMihomoStatus(status);
-      setMihomoModules(modules.items || []);
-      setMihomoProfiles(profiles.items || []);
-      setMihomoProfileStats(Object.fromEntries((stats.items || []).map((item) => [item.id, item.summary])));
+      let request = mihomoSummaryRequest?.token === token ? mihomoSummaryRequest.promise : null;
+      if (!request) {
+        request = (async () => {
+          const headers = { Authorization: `Basic ${token}` };
+          const [statusResponse, modulesResponse, profilesResponse, statsResponse] = await Promise.all([
+            fetch("/api/mihomo/status", { headers }), fetch("/api/mihomo/modules", { headers }),
+            fetch("/api/mihomo/profiles", { headers }), fetch("/api/mihomo/stats", { headers }),
+          ]);
+          if (!statusResponse.ok || !modulesResponse.ok || !profilesResponse.ok) throw new Error("summary unavailable");
+          const [status, modules, profiles, stats] = await Promise.all([
+            statusResponse.json() as Promise<MihomoStatus>, modulesResponse.json() as Promise<{ items: MihomoModule[] }>,
+            profilesResponse.json() as Promise<{ items: MihomoProfile[] }>,
+            statsResponse.ok ? statsResponse.json() as Promise<{ items: MihomoProfileStats[] }> : Promise.resolve({ items: [] }),
+          ]);
+          return { status, modules: modules.items || [], profiles: profiles.items || [], profileStats: Object.fromEntries((stats.items || []).map((item) => [item.id, item.summary])) };
+        })();
+        mihomoSummaryRequest = { token, promise: request };
+      }
+      const snapshot = await request;
+      mihomoSummaryCache = { token, cachedAt: Date.now(), data: snapshot };
+      if (mihomoSummaryRequest?.promise === request) mihomoSummaryRequest = null;
+      setMihomoStatus(snapshot.status);
+      setMihomoModules(snapshot.modules);
+      setMihomoProfiles(snapshot.profiles);
+      setMihomoProfileStats(snapshot.profileStats);
       setMihomoSummaryError("");
     } catch {
-      setMihomoSummaryError("Сводка Mihomo временно недоступна");
+      mihomoSummaryRequest = null;
+      if (!cached) setMihomoSummaryError("Сводка Mihomo временно недоступна");
     }
   }, [mihomoInstalled, token]);
 
@@ -333,9 +367,9 @@ export function OverviewDashboard({
   }, [directChannels, token]);
 
   useEffect(() => {
-    const initial = window.setTimeout(() => void loadMihomoSummary(), 0);
+    const initial = window.setTimeout(() => void loadMihomoSummary(false), 0);
     if (!mihomoInstalled) return () => window.clearTimeout(initial);
-    const timer = window.setInterval(() => void loadMihomoSummary(), 12000);
+    const timer = window.setInterval(() => void loadMihomoSummary(true), 12000);
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [loadMihomoSummary, mihomoInstalled]);
 
