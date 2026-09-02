@@ -1369,6 +1369,11 @@
 .connectionProtocolPicker button.active > i,
 .connectionVlessPicker button.active > i { border-color: #65dfba; background: #65dfba; box-shadow: 0 0 0 3px rgba(101, 223, 186, .12); }
 
+.connectionProtocolPicker button[class*="protocol-"] > b { color:var(--protocol-color); border:1px solid rgba(var(--protocol-rgb),.25); background:rgba(var(--protocol-rgb),.09); }
+.connectionProtocolPicker button[class*="protocol-"].active { border-color:rgba(var(--protocol-rgb),.55); background:rgba(var(--protocol-rgb),.13); }
+.connectionProtocolPicker button[class*="protocol-"].active > b { color:var(--protocol-color); background:rgba(var(--protocol-rgb),.20); }
+.connectionProtocolPicker button[class*="protocol-"].active > i { border-color:var(--protocol-color); background:var(--protocol-color); box-shadow:0 0 0 3px rgba(var(--protocol-rgb),.12); }
+
 .connectionVlessPicker {
   padding: 13px;
   border: 1px solid rgba(90, 119, 145, .18);

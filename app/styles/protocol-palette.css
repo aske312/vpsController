@@ -1,0 +1,18 @@
+/* Shared protocol identity palette. */
+.protocol-wg,.protocol-transport-wg{--protocol-color:#72a7ff;--protocol-rgb:114,167,255}
+.protocol-awg,.protocol-transport-awg{--protocol-color:#b68cff;--protocol-rgb:182,140,255}
+.protocol-vless-reality-xhttp,.protocol-transport-reality{--protocol-color:#ffad66;--protocol-rgb:255,173,102}
+.protocol-shadowsocks,.protocol-transport-shadowsocks{--protocol-color:#56d9bd;--protocol-rgb:86,217,189}
+.protocol-hysteria2,.protocol-transport-hysteria2{--protocol-color:#f06fc1;--protocol-rgb:240,111,193}
+.protocol-tuic,.protocol-transport-tuic{--protocol-color:#4ed7e8;--protocol-rgb:78,215,232}
+.protocol-trojan{--protocol-color:#ef7181;--protocol-rgb:239,113,129}
+.protocol-openvpn{--protocol-color:#f2c45f;--protocol-rgb:242,196,95}
+.protocol-ikev2{--protocol-color:#73d77d;--protocol-rgb:115,215,125}
+.protocol-mihomo{--protocol-color:#a78bfa;--protocol-rgb:167,139,250}
+
+.overviewProtocolMark[class*="protocol-"],.connectionIdentity .protocol[class*="protocol-"],
+.mihomoModuleCode[class*="protocol-"],.mihomoProfileProtocolStats>div>span[class*="protocol-"],
+.mihomoConnectionCard>header>span[class*="protocol-"]{
+ color:var(--protocol-color);border:1px solid rgba(var(--protocol-rgb),.34);
+ background:rgba(var(--protocol-rgb),.11);box-shadow:inset 0 0 14px rgba(var(--protocol-rgb),.035)
+}

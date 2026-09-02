@@ -213,6 +213,9 @@
 .protocolSwitcher button:hover { color:#c9d8df; background:rgba(94,124,148,.06); }
 
 .protocolSwitcher button.active { color:var(--protocol-accent); background:var(--protocol-soft); box-shadow:inset 0 -2px var(--protocol-accent); }
+.protocolSwitcher button[class*="protocol-"] { color:rgba(var(--protocol-rgb),.64); }
+.protocolSwitcher button[class*="protocol-"]:hover { color:var(--protocol-color); background:rgba(var(--protocol-rgb),.07); }
+.protocolSwitcher button[class*="protocol-"].active { color:var(--protocol-color); background:rgba(var(--protocol-rgb),.12); box-shadow:inset 0 -2px var(--protocol-color); }
 .channelPageSwitcher { --protocol-accent:#66cfe1; --protocol-soft:rgba(102,207,225,.10); --protocol-line:rgba(102,207,225,.25); margin-bottom:12px; }
 
 .protocolStage {

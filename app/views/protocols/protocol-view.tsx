@@ -66,7 +66,7 @@ export function ProtocolView(props: ProtocolViewProps) {
   if (["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"].includes(protocolTab)) return <ProtocolCommandCenter props={props} />;
   return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()}`}>
         {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные защищённые протоколы">
-          {installedProtocols.map((protocol) => <button type="button" key={protocol} className={protocol === protocolTab ? "active" : ""} aria-current={protocol === protocolTab ? "page" : undefined} onClick={() => onSelectProtocol ? onSelectProtocol(protocol) : setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : "VLESS"}</button>)}
+          {installedProtocols.map((protocol) => <button type="button" key={protocol} className={`protocol-${protocol}${protocol === protocolTab ? " active" : ""}`} aria-current={protocol === protocolTab ? "page" : undefined} onClick={() => onSelectProtocol ? onSelectProtocol(protocol) : setTab(protocol)}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : "VLESS"}</button>)}
         </nav>}
         <header className="protocolHeader">
           <div className="protocolIdentityMark" aria-hidden="true"><span>{profile.index}</span><b>{protocolCode}</b></div>
@@ -200,7 +200,7 @@ function ProtocolCommandCenter({ props }: { props: ProtocolViewProps }) {
 
   return <section className={`protocolWorkspace protocolWorkspace-${protocolCode.toLowerCase()} protocolCommandCenter vlessWorkspaceNew`}>
     {installedProtocols.length > 1 && <nav className="protocolSwitcher" aria-label="Установленные защищённые протоколы">
-      {installedProtocols.map((item) => <button type="button" key={item} className={item === protocol ? "active" : ""} aria-current={item === protocol ? "page" : undefined} onClick={() => onSelectProtocol ? onSelectProtocol(item) : setTab(item)}>{item === "wg" ? "WG" : item === "awg" ? "AWG" : item === "shadowsocks" ? "SS" : "VLESS"}</button>)}
+      {installedProtocols.map((item) => <button type="button" key={item} className={`protocol-${item}${item === protocol ? " active" : ""}`} aria-current={item === protocol ? "page" : undefined} onClick={() => onSelectProtocol ? onSelectProtocol(item) : setTab(item)}>{item === "wg" ? "WG" : item === "awg" ? "AWG" : item === "shadowsocks" ? "SS" : item === "hysteria2" ? "HY2" : item === "tuic" ? "TUIC" : item === "trojan" ? "TRJ" : item === "openvpn" ? "OVPN" : item === "ikev2" ? "IKE" : "VLESS"}</button>)}
     </nav>}
 
     <header className="vlessOverviewHead">

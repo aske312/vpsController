@@ -502,7 +502,7 @@ export function OverviewDashboard({
                     const stateLabel = statusFailed ? "NO STATUS" : inUse ? "IN USE" : serviceActive === true ? "READY" : serviceActive === false ? "STOPPED" : "CHECKING";
                     return (
                       <div key={image.id}>
-                        <span className="overviewProtocolMark cyan">{directShort[protocol]}</span>
+                        <span className={`overviewProtocolMark protocol-${protocol}`}>{directShort[protocol]}</span>
                         <p>
                           <b>{directName[protocol]}</b>
                           <small>{statusFailed ? "runtime status недоступен" : configured === null ? "проверяем конфигурацию" : configured ? `${protocolClients.length} clients  ${sessions} sessions` : "установлен, конфигурация не обнаружена"}</small>
@@ -635,7 +635,7 @@ export function OverviewDashboard({
               return (
                 <div className="overviewComponentRow" key={image.id}>
                   <div className="overviewComponentIdentity">
-                    <span className={`overviewProtocolMark ${image.id === "mihomo" ? "violet" : "cyan"}`}>{protocolMark(image.id)}</span>
+                    <span className={`overviewProtocolMark protocol-${image.id}`}>{protocolMark(image.id)}</span>
                     <p><b>{image.name}</b><small>{image.description || image.category_name}</small></p>
                   </div>
                   <div className="overviewComponentVersion">
