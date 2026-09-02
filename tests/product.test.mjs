@@ -1543,8 +1543,10 @@ test("Mihomo deduplicates migrated common devices and explains clients without H
   const [manager, view] = await Promise.all([
     read("protocol-images/mihomo/manager.py"), read("app/views/mihomo/mihomo-view.tsx"),
   ]);
-  assert.match(manager, /seen_device_ids: set\[str\] = set\(\)/);
-  assert.match(manager, /if not device_id or device_id in seen_device_ids:/);
+  assert.match(manager, /unique_devices_by_id: dict\[str, dict\[str, Any\]\] = \{\}/);
+  assert.match(manager, /device\.get\("hwid_hash"\) and not current\.get\("hwid_hash"\)/);
+  assert.match(manager, /not stored_common_id\.startswith\("hwid-"\)/);
+  assert.match(manager, /not str\(connection\.get\("id", ""\)\)\.startswith\("hwid-"\)/);
   assert.match(manager, /def record_common_subscription_access/);
   assert.match(manager, /"reason": "hwid_missing"/);
   assert.match(view, /\.filter\(\(device\) => device\.scope === "common"\)\.slice\(0, 1\)/);

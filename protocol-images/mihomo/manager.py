@@ -372,20 +372,45 @@ def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
         {**device, "routing": device.get("routing") if isinstance(device.get("routing"), dict) else dict(legacy_routing)}
         for device in devices if isinstance(device, dict)
     ]
-    device_ids = {str(device.get("id", "")) for device in devices}
-    common_device_id = str(result.get("common_device_id", ""))
-    if common_device_id not in device_ids:
-        common_device_id = str(devices[0].get("id", "profile-common"))
-    unique_devices: list[dict[str, Any]] = []
-    seen_device_ids: set[str] = set()
+    # Prefer a real HWID record when an older migration accidentally assigned
+    # the same id to both it and the synthetic common-pool row.
+    unique_devices_by_id: dict[str, dict[str, Any]] = {}
     for device in devices:
         device_id = str(device.get("id", ""))
-        if not device_id or device_id in seen_device_ids:
+        if not device_id:
             continue
-        seen_device_ids.add(device_id)
-        unique_devices.append(device)
-    if not unique_devices:
-        unique_devices = [{"id": "profile-common", "name": "Общие настройки профиля", "routing": dict(legacy_routing)}]
+        current = unique_devices_by_id.get(device_id)
+        if current is None or (device.get("hwid_hash") and not current.get("hwid_hash")):
+            unique_devices_by_id[device_id] = device
+    unique_devices = list(unique_devices_by_id.values())
+    stored_common_id = str(result.get("common_device_id", ""))
+    common_device = next((
+        device for device in unique_devices
+        if str(device.get("id")) == stored_common_id
+        and not device.get("hwid_hash")
+        and not stored_common_id.startswith("hwid-")
+    ), None)
+    if common_device is None and not stored_common_id:
+        common_device = next((
+            device for device in unique_devices
+            if not device.get("hwid_hash") and not str(device.get("id", "")).startswith("hwid-")
+        ), None)
+    if common_device is None:
+        common_device_id = "profile-common"
+        suffix = 2
+        while common_device_id in unique_devices_by_id:
+            common_device_id = f"profile-common-{suffix}"
+            suffix += 1
+        common_device = {"id": common_device_id, "name": "Общие настройки профиля", "routing": dict(legacy_routing)}
+        unique_devices.insert(0, common_device)
+        # HWID copies use generated `hwid-*` connection ids. Only move the
+        # original common-pool connections away from the collided HWID id.
+        if stored_common_id:
+            for connection in result["connections"]:
+                if str(connection.get("device_id", "")) == stored_common_id and not str(connection.get("id", "")).startswith("hwid-"):
+                    connection["device_id"] = common_device_id
+    else:
+        common_device_id = str(common_device["id"])
     devices = [
         {
             **device,
