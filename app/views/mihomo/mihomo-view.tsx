@@ -71,7 +71,6 @@ type Profile = {
   devices?: ProfileDevice[];
   common_device_id?: string;
   subscription_status?: "active" | "obsolete" | "missing";
-  common_access?: { os?: string; os_version?: string; client_name?: string; client_version?: string; user_agent?: string; last_seen_at?: string; reason?: "hwid_missing" };
   created_at: string;
   updated_at: string;
 };
@@ -472,7 +471,7 @@ export function MihomoPage({
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number | boolean>>({});
   const [profileDialog, setProfileDialog] = useState<Profile | "new" | null>(null);
   const profileMutationId = useRef(crypto.randomUUID());
-  const [profileStep, setProfileStep] = useState(1);
+  const [profileStep, setProfileStep] = useState(2);
   const profileCanvasRef = useRef<HTMLElement>(null);
   const [profileName, setProfileName] = useState("");
   const [profileConnections, setProfileConnections] = useState<ProfileConnection[]>([]);
@@ -889,7 +888,7 @@ export function MihomoPage({
 
   function newProfile() {
     profileMutationId.current = crypto.randomUUID();
-    setProfileStep(1);
+    setProfileStep(2);
     setProfileStrategyTouched(false);
     setProfileDialog("new");
     setProfileName("");
@@ -901,7 +900,7 @@ export function MihomoPage({
 
   function editProfile(profile: Profile) {
     profileMutationId.current = crypto.randomUUID();
-    setProfileStep(1);
+    setProfileStep(2);
     setProfileStrategyTouched(true);
     setProfileDialog(profile);
     setProfileName(profile.name);
@@ -1322,7 +1321,6 @@ export function MihomoPage({
                   <div className="mihomoRowActions"><button className="primaryButton" onClick={() => void copySubscription(profile)} disabled={busy === `subscription:${profile.id}`}>{profile.subscription_status === "obsolete" ? "Обновить подписку" : "Скопировать подписку"}</button><button onClick={() => editProfile(profile)}>Настроить</button><button className="dangerButton" onClick={() => void removeProfile(profile)} disabled={busy === `profile:${profile.id}`}>Удалить</button></div>
                 </header>
                 {expandedDeviceLists.has(profile.id) && <div className="mihomoProfileDevices">
-                  {profile.common_access?.reason === "hwid_missing" && <div className="mihomoCommonAccessNotice"><b>Последнее устройство общего пула</b><span>{deviceSystemLabel(profile.common_access)}</span><small>HWID не передан — персональное устройство и отдельные credentials не создавались{profile.common_access.last_seen_at ? ` · ${new Date(profile.common_access.last_seen_at).toLocaleString("ru-RU")}` : ""}</small></div>}
                   {devices.map((device) => {
                     const connections = profile.connections.filter((connection) => connection.device_id === device.id);
                     const connectionStats = connections.map((connection) => profileStats[profile.id]?.connections?.[connection.id]);
@@ -1509,29 +1507,23 @@ export function MihomoPage({
         }}>
           <form className={`mihomoDialog mihomoProfileDialog is-step-${profileStep}`} onSubmit={saveProfile}>
             <header>
-              <div><p className="eyebrow">MIHOMO PROFILE</p><h2>{profileDialog === "new" ? "Новый профиль" : "Настройка профиля"}</h2></div>
+              <div className="mihomoProfileHeading"><p className="eyebrow">MIHOMO PROFILE</p><h2>{profileDialog === "new" ? "Новый профиль" : "Настройка профиля"}</h2><label><span>Название</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} placeholder="Название профиля" /></label></div>
               <button type="button" className="iconButton" onClick={() => setProfileDialog(null)}>x</button>
             </header>
             <div className="mihomoProfileWorkspace">
               <aside className="mihomoProfileRail">
-                <nav className="mihomoProfileSteps" aria-label="Этапы настройки профиля">
-                  {[{ id: 1, title: "Профиль", note: "Общие и HWID-настройки" }, { id: 2, title: "Правила", note: "Общие или индивидуальные" }, { id: 3, title: "Подключения", note: "Каналы выбранного уровня" }].map((step) => <button key={step.id} type="button" className={profileStep === step.id ? "is-active" : profileStep > step.id ? "is-done" : ""} disabled={(step.id > 1 && !profileName.trim()) || (step.id === 3 && profileDevices.some((device) => !device.name.trim()))} onClick={() => setProfileStep(step.id)}><i>{profileStep > step.id ? "✓" : step.id}</i><span><b>{step.title}</b><small>{step.note}</small></span></button>)}
-                </nav>
-                <section className="mihomoProfileDraftSummary"><small>ВЫБРАННЫЙ УРОВЕНЬ</small><b>{profileDevices.find((device) => device.id === activeDeviceId)?.name || "Без названия"}</b><dl><div><dt>Стратегия</dt><dd>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.code}</dd></div><div><dt>Правила</dt><dd>{profileDirectRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length}</dd></div><div><dt>HWID-устройства</dt><dd>{profileDevices.filter((device) => device.scope !== "common").length}</dd></div><div><dt>Подключения</dt><dd>{profileConnections.filter((connection) => connection.device_id === activeDeviceId).length}</dd></div></dl></section>
-                <p className="mihomoProfileRailHint">У профиля одна ссылка. Без HWID действует общий пул, с HWID появляется отдельное устройство.</p>
+                <header><small>УРОВЕНЬ НАСТРОЕК</small><b>Общий пул и устройства</b></header>
+                <section className="mihomoDeviceBuilder">
+                  <div className="mihomoCommonSettings">{profileDevices.filter((device) => device.scope === "common").slice(0, 1).map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => { setProfileStrategyTouched(Boolean(device.routing?.strategy)); setActiveDeviceId(device.id); }}><i>ALL</i><span><b>Общий пул</b><small>{profileConnections.filter((connection) => connection.device_id === device.id).length} подключений · {profileDirectRules.filter((rule) => Boolean(device.routing?.[rule.key])).length} правил</small></span></button>)}</div>
+                  <header><div><b>HWID-устройства</b><small>Регистрируются автоматически.</small></div></header>
+                  <div>{profileDevices.filter((device) => device.scope !== "common").map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => { setProfileStrategyTouched(Boolean(device.routing?.strategy)); setActiveDeviceId(device.id); }}><i>{devicePlatformMeta(device).code}</i><span><input aria-label={`Название устройства ${device.name}`} value={device.name} maxLength={80} onClick={(event) => event.stopPropagation()} onChange={(event) => setProfileDevices((current) => current.map((item) => item.id === device.id ? { ...item, name: event.target.value } : item))} /><small>{profileConnections.filter((connection) => connection.device_id === device.id).length} подключений · {deviceSystemLabel(device)}</small></span><em title="Удалить устройство" onClick={(event) => { event.stopPropagation(); const next = profileDevices.filter((item) => item.id !== device.id); setProfileDevices(next); setProfileConnections((current) => current.filter((connection) => connection.device_id !== device.id)); if (activeDeviceId === device.id) setActiveDeviceId(next.find((item) => item.scope === "common")?.id || next[0].id); }}>×</em></button>)}</div>
+                  {!profileDevices.some((device) => device.scope !== "common") && <p className="mihomoConnectionEmpty">Нет зарегистрированных устройств.</p>}
+                </section>
               </aside>
               <main ref={profileCanvasRef} className="mihomoProfileCanvas">
-            <section className="mihomoProfileStageIntro"><span>0{profileStep}</span><div><b>{profileStep === 1 ? "Профиль и устройства" : profileStep === 2 ? "Маршрутизация устройства" : "Подключения устройства"}</b><small>{profileStep === 1 ? "Назовите профиль и добавьте устройства." : profileStep === 2 ? "Выберите устройство, стратегию и правила." : "Выберите устройство и настройте его каналы."}</small></div></section>
-            <label className="mihomoProfileName"><span>Название профиля</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} /></label>
+            <section className="mihomoProfileEditorHead"><div><small>ВЫБРАННЫЙ УРОВЕНЬ</small><b>{profileDevices.find((device) => device.id === activeDeviceId)?.scope === "common" ? "Общий пул" : profileDevices.find((device) => device.id === activeDeviceId)?.name}</b></div><nav aria-label="Раздел настроек"><button type="button" className={profileStep === 2 ? "is-active" : ""} onClick={() => setProfileStep(2)}>Маршрутизация</button><button type="button" className={profileStep === 3 ? "is-active" : ""} onClick={() => setProfileStep(3)}>Подключения <i>{profileConnections.filter((connection) => connection.device_id === activeDeviceId).length}</i></button></nav></section>
             <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа GATE.312 для YAML выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{profileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>
             <section className="mihomoProfileRules"><header><div><b>Правила устройства</b><small>Применяются только к подписке и YAML выбранного устройства.</small></div><span>{profileDirectRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length} из {profileDirectRules.length}</span></header><div>{profileDirectRules.map((rule) => <label key={rule.key} className={`mihomoProfileRuleSwitch${Boolean(activeProfileRouting[rule.key]) ? " is-enabled" : ""}`}><span><b>{rule.title}</b><small>{rule.text}</small></span><input type="checkbox" checked={Boolean(activeProfileRouting[rule.key])} onChange={(event) => toggleProfileRule(rule.key, event.target.checked)} /></label>)}</div></section>
-            <section className="mihomoDeviceBuilder">
-              <header><div><b>Общие настройки профиля</b><small>Используются клиентами без HWID и служат шаблоном для новых устройств.</small></div></header>
-              <div className="mihomoCommonSettings">{profileDevices.filter((device) => device.scope === "common").slice(0, 1).map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => { setProfileStrategyTouched(Boolean(device.routing?.strategy)); setActiveDeviceId(device.id); }}><i>ALL</i><span><b>Общий пул настроек</b><small>{profileConnections.filter((connection) => connection.device_id === device.id).length} подключений · {profileDirectRules.filter((rule) => Boolean(device.routing?.[rule.key])).length} правил</small></span></button>)}</div>
-              <header><div><b>Зарегистрированные устройства</b><small>Появляются автоматически только при передаче HWID.</small></div></header>
-              <div>{profileDevices.filter((device) => device.scope !== "common").map((device) => <button key={device.id} type="button" className={activeDeviceId === device.id ? "active" : ""} onClick={() => { setProfileStrategyTouched(Boolean(device.routing?.strategy)); setActiveDeviceId(device.id); }}><i>{devicePlatformMeta(device).code}</i><span><input value={device.name} maxLength={80} onClick={(event) => event.stopPropagation()} onChange={(event) => setProfileDevices((current) => current.map((item) => item.id === device.id ? { ...item, name: event.target.value } : item))} /><small>{profileConnections.filter((connection) => connection.device_id === device.id).length} подключений · {deviceSystemLabel(device)}</small></span><em onClick={(event) => { event.stopPropagation(); const next = profileDevices.filter((item) => item.id !== device.id); setProfileDevices(next); setProfileConnections((current) => current.filter((connection) => connection.device_id !== device.id)); if (activeDeviceId === device.id) setActiveDeviceId(next.find((item) => item.scope === "common")?.id || next[0].id); }}>×</em></button>)}</div>
-              {!profileDevices.some((device) => device.scope !== "common") && <p className="mihomoConnectionEmpty">Нет зарегистрированных HWID-устройств.</p>}
-            </section>
             <section className="mihomoPresetPicker">
               <header><div><b>Пресет для {profileDevices.find((device) => device.id === activeDeviceId)?.name || "устройства"}</b><small>Пресет заменит подключения только выбранного устройства. Остальные устройства профиля не изменятся.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настройки пресетов</button></header>
               <div>{profilePresets.map((preset) => {
@@ -1562,12 +1554,13 @@ export function MihomoPage({
                   const protocolModule = modules.find((item) => item.id === connection.component);
                   const schema = protocolModule?.connection_settings || [];
                   const vlessRoute = connection.component === "transport-reality" ? String(connection.settings.route_mode || (connection.settings.cdn_enabled ? "both" : "direct")) : "";
-                  return <article key={connection.id} className={`mihomoConnectionCard${vlessRoute ? ` is-vless-${vlessRoute}` : ""}`}>
-                    <header>
+                  return <details key={connection.id} className={`mihomoConnectionCard${vlessRoute ? ` is-vless-${vlessRoute}` : ""}`}>
+                    <summary>
                       <span className={`protocol-${connection.component}`}>{channelShort[connection.component] || "CH"}</span>
                       <div><b>{vlessRoute === "cdn" ? "VLESS CDN" : vlessRoute === "tls" ? "VLESS TLS" : vlessRoute === "direct" ? "VLESS REALITY" : vlessRoute === "both" ? "VLESS + CDN · прежний формат" : protocolModule?.name || connection.component}</b><small>{vlessRoute === "cdn" ? "Через CDN-домен" : vlessRoute === "tls" ? "Прямой домен с TLS" : vlessRoute === "direct" ? "Прямое REALITY-подключение" : vlessRoute === "both" ? "Можно заменить двумя независимыми подключениями" : `Подключение ${index + 1}`}</small></div>
-                      <button type="button" className="dangerButton" onClick={() => setProfileConnections((current) => current.filter((item) => item.id !== connection.id))}>Удалить</button>
-                    </header>
+                      <span className="mihomoConnectionChevron">›</span>
+                    </summary>
+                    <button type="button" className="dangerButton mihomoConnectionDelete" onClick={() => setProfileConnections((current) => current.filter((item) => item.id !== connection.id))}>Удалить подключение</button>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
                     <div className="mihomoConnectionFields">
                       {schema.filter((field) => {
@@ -1589,7 +1582,7 @@ export function MihomoPage({
                         {field.help && <small>{field.help}</small>}
                       </label>)}
                     </div>
-                  </article>;
+                  </details>;
                 })}
                 {!profileConnections.some((connection) => connection.device_id === activeDeviceId) && <p className="mihomoConnectionEmpty">Добавьте хотя бы одно подключение для выбранного устройства.</p>}
               </div>
@@ -1597,7 +1590,7 @@ export function MihomoPage({
                 <aside className="mihomoProfileTechnicalNote">Компонент устанавливает ядро протокола один раз. Каждая карточка создаёт независимые параметры и credential только для этого профиля.</aside>
               </main>
             </div>
-            <footer><button type="button" className="ghostButton" onClick={() => profileStep === 1 ? setProfileDialog(null) : setProfileStep((current) => current - 1)}>{profileStep === 1 ? "Отмена" : "Назад"}</button>{profileStep < 3 ? <button type="button" className="primaryButton" disabled={!profileName.trim() || profileDevices.some((device) => !device.name.trim())} onClick={() => setProfileStep((current) => current + 1)}>Далее</button> : <button type="submit" className="primaryButton" disabled={busy === "profile" || !profileName.trim() || profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить изменения"}</button>}</footer>
+            <footer><button type="button" className="ghostButton" onClick={() => setProfileDialog(null)}>Отмена</button><span>{profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id)) ? "Для каждого уровня нужно хотя бы одно подключение" : "Изменения применятся после сохранения"}</span><button type="submit" className="primaryButton" disabled={busy === "profile" || !profileName.trim() || profileDevices.some((device) => !device.name.trim() || !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить изменения"}</button></footer>
           </form>
         </div>
       )}
