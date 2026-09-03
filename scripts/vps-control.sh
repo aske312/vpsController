@@ -77,6 +77,8 @@ BUILD_COMMIT="unknown"
 PRESERVE_MANAGER="no"
 PRODUCTION_BRANCH="stabl"
 ACTION_FILE="${DATA_DIR}/application-action.json"
+RECOVERY_DIR="${DATA_DIR}/recovery"
+SAFE_UPDATE_REPORT="${RECOVERY_DIR}/safe-update-report.txt"
 AUTOMATION_FILE="${DATA_DIR}/automation.json"
 SERVICE_MODE_FILE="${DATA_DIR}/service-mode.json"
 CURRENT_ACTION=""
@@ -204,6 +206,7 @@ finish_operation() {
     case "${CURRENT_ACTION}" in
       reboot) write_action_status "rebooting" 100 "Сервер перезагружается" ;;
       poweroff) write_action_status "powering-off" 100 "Сервер выключается" ;;
+      safe-update) write_action_status "succeeded" 100 "Безопасное обновление завершено; точка восстановления сохранена" ;;
       kernel-update)
         if [[ "${REBOOT_AFTER_UPDATE}" == "yes" ]]; then
           write_action_status "rebooting" 100 "Kernel updated; server is rebooting"
@@ -217,10 +220,116 @@ finish_operation() {
   else
     if [[ "${CURRENT_ACTION}" == "test-update" || "${CURRENT_ACTION}" == "update" ]]; then
       write_action_status "failed" "${ACTION_PROGRESS}" "Обновление остановлено по ошибке или таймауту; рабочая версия восстановлена"
+    elif [[ "${CURRENT_ACTION}" == "safe-update" ]]; then
+      write_action_status "failed" "${ACTION_PROGRESS}" "Безопасное обновление завершилось с ошибкой; доступен отчёт"
     else
       write_action_status "failed" "${ACTION_PROGRESS}" "Операция завершилась с ошибкой"
     fi
   fi
+}
+
+create_recovery_point() {
+  local stamp raw archive key manifest path
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  install -d -m 0700 "${RECOVERY_DIR}"
+  key="${RECOVERY_DIR}/recovery.key"
+  [[ -s "${key}" ]] || { openssl rand -hex 32 >"${key}"; chmod 0600 "${key}"; }
+  raw="${RECOVERY_DIR}/.${stamp}.tar.gz"
+  archive="${RECOVERY_DIR}/recovery-${stamp}.tar.gz.enc"
+  manifest="${archive}.sha256"
+  local -a paths=("${INSTALL_DIR}" "${CONFIG_DIR}" "${INSTALL_CONFIG}" /etc/wireguard /etc/amnezia /etc/caddy /etc/ufw)
+  for path in /etc/systemd/system/vps-control-*.service /etc/systemd/system/vps-control-*.timer; do
+    [[ -e "${path}" ]] && paths+=("${path}")
+  done
+  tar --ignore-failed-read --exclude="${DATA_DIR#/}/recovery" --exclude="${DATA_DIR#/}/tmp" \
+    --exclude="${DATA_DIR#/}/logs" --exclude="${DATA_DIR#/}/application-action.json" \
+    -czf "${raw}" "${paths[@]}" "${DATA_DIR}"
+  openssl enc -aes-256-cbc -salt -pbkdf2 -in "${raw}" -out "${archive}" -pass "file:${key}"
+  rm -f -- "${raw}"
+  sha256sum "${archive}" >"${manifest}"
+  chmod 0600 "${archive}" "${manifest}"
+  sha256sum -c "${manifest}" >/dev/null
+  openssl enc -d -aes-256-cbc -pbkdf2 -in "${archive}" -pass "file:${key}" | tar -tzf - >/dev/null
+  find "${RECOVERY_DIR}" -maxdepth 1 -type f -name 'recovery-*.tar.gz.enc' -printf '%T@ %p\n' \
+    | sort -rn | awk 'NR > 3 {sub(/^[^ ]+ /, ""); print}' | while IFS= read -r path; do rm -f -- "${path}" "${path}.sha256"; done
+  printf '%s\n' "${archive}"
+}
+
+restore_recovery_point() {
+  local archive="$1" key="${RECOVERY_DIR}/recovery.key"
+  [[ "${archive}" == "${RECOVERY_DIR}/recovery-"*.tar.gz.enc && -f "${archive}" && -s "${key}" ]] || die "точка восстановления недоступна"
+  sha256sum -c "${archive}.sha256" >/dev/null
+  openssl enc -d -aes-256-cbc -pbkdf2 -in "${archive}" -pass "file:${key}" | tar -xzf - -C /
+  systemctl daemon-reload
+  systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
+  restart_mihomo_manager_if_present
+}
+
+auto_safe_update_server() {
+  local archive candidates installed package
+  install -d -m 0700 "${RECOVERY_DIR}"
+  : >"${SAFE_UPDATE_REPORT}"
+  chmod 0600 "${SAFE_UPDATE_REPORT}"
+  exec > >(tee -a "${SAFE_UPDATE_REPORT}") 2>&1
+  printf '312.net safe update\nStarted: %s\nPolicy: no kernel, bootloader, libc, systemd, SSH, major or package removal\n\n' "$(date --iso-8601=seconds)"
+  info "Создание и проверка зашифрованной точки восстановления"
+  archive="$(create_recovery_point)"
+  info "Обновление индекса пакетов"
+  apt-get update
+  candidates="$(apt list --upgradable 2>/dev/null | awk -F/ 'NR>1 {print $1}' | grep -E '^(ca-certificates|curl|libcurl[0-9a-z.+-]*|openssl|libssl[0-9a-z.+-]*|tzdata)$' || true)"
+  if [[ -n "${candidates}" ]]; then
+    info "Установка разрешённых обновлений без удаления пакетов"
+    installed=""
+    while IFS= read -r package; do [[ -z "${package}" ]] || installed+=" ${package}"; done <<<"${candidates}"
+    DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade --no-remove -y ${installed}
+    printf 'Updated packages:%s\n' "${installed}"
+  else
+    ok "Разрешённые безопасные пакеты уже актуальны"
+  fi
+  info "Проверка приложения, панели и защищённых каналов"
+  if ! (integrity_check && network_check); then
+    warn "Проверка после обновления не пройдена; выполняется автоматический откат"
+    restore_recovery_point "${archive}"
+    printf '\nResult: failed; recovery point restored\nFinished: %s\n' "$(date --iso-8601=seconds)"
+    write_action_status "failed" "${ACTION_PROGRESS}" "Обновление содержит ошибки; предыдущая конфигурация восстановлена, доступен отчёт"
+    return 1
+  fi
+  printf '\nResult: success\nRecovery point: retained locally\nFinished: %s\n' "$(date --iso-8601=seconds)"
+  ok "Безопасное обновление установлено; точка восстановления сохранена"
+}
+
+safe_update_server() {
+  local archive before_packages after_packages
+  install -d -m 0700 "${RECOVERY_DIR}"
+  : >"${SAFE_UPDATE_REPORT}"
+  chmod 0600 "${SAFE_UPDATE_REPORT}"
+  exec > >(tee -a "${SAFE_UPDATE_REPORT}") 2>&1
+  printf '312.net full server update\nStarted: %s\nPolicy: all available Debian packages; package removals are prohibited\nRecovery scope: application, personal data and configuration; not a VPS disk snapshot or package downgrade\n\n' "$(date --iso-8601=seconds)"
+  info "Creating and verifying the encrypted recovery point"
+  archive="$(create_recovery_point)"
+  before_packages="${RECOVERY_DIR}/packages-before-update.txt"
+  after_packages="${RECOVERY_DIR}/packages-after-update.txt"
+  dpkg-query -W -f='${Package}\t${Version}\n' | sort >"${before_packages}"
+  chmod 0600 "${before_packages}"
+  info "Refreshing the Debian package index"
+  apt-get update
+  info "Installing all available Debian updates without removing packages"
+  DEBIAN_FRONTEND=noninteractive apt-get full-upgrade --no-remove -y
+  dpkg-query -W -f='${Package}\t${Version}\n' | sort >"${after_packages}"
+  chmod 0600 "${after_packages}"
+  printf '\nChanged packages:\n'
+  diff -u "${before_packages}" "${after_packages}" || true
+  info "Checking the application, panel and protected channels"
+  if ! (integrity_check && network_check); then
+    warn "Post-update checks failed; restoring the application, data and configuration"
+    restore_recovery_point "${archive}"
+    printf '\nResult: failed; application recovery point restored\nFinished: %s\n' "$(date --iso-8601=seconds)"
+    write_action_status "failed" "${ACTION_PROGRESS}" "Обновление содержит ошибки; приложение и конфигурация восстановлены, доступен отчёт"
+    return 1
+  fi
+  [[ -e /var/run/reboot-required ]] && printf '\nReboot required: yes\n' || printf '\nReboot required: no\n'
+  printf 'Result: success\nRecovery point: retained locally\nFinished: %s\n' "$(date --iso-8601=seconds)"
+  ok "Full server update completed; recovery point retained"
 }
 
 handle_exit() {
@@ -2662,8 +2771,6 @@ PY
   read -r reboot_enabled reboot_cadence reboot_weekday reboot_hour reboot_minute <<<"$(sed -n '1p' <<<"${values}")"
   read -r cleanup_enabled cleanup_cadence cleanup_weekday cleanup_hour cleanup_minute <<<"$(sed -n '2p' <<<"${values}")"
   read -r update_enabled update_cadence update_weekday update_hour update_minute <<<"$(sed -n '3p' <<<"${values}")"
-  update_enabled="false"
-
   automation_calendar() {
     local cadence="$1" weekday="$2" hour="$3" minute="$4"
     [[ "${hour}" =~ ^([0-9]|1[0-9]|2[0-3])$ && "${minute}" =~ ^([0-9]|[1-5][0-9])$ ]] \
@@ -2716,7 +2823,7 @@ EOF
   update_calendar="$(automation_calendar "${update_cadence}" "${update_weekday}" "${update_hour}" "${update_minute}")"
   install_automation_timer "reboot" "Scheduled VPS reboot by 312.net" "reboot" "${reboot_enabled}" "${reboot_calendar}"
   install_automation_timer "cleanup" "Scheduled VPS cleanup by 312.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}"
-  install_automation_timer "update" "Scheduled 312.net application update" "update" "${update_enabled}" "${update_calendar}"
+  install_automation_timer "update" "Scheduled conservative server update by 312.net" "auto-safe-update" "${update_enabled}" "${update_calendar}"
   ok "расписания обслуживания применены."
 }
 
@@ -3012,7 +3119,7 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update|ssh-key-add|ssh-key-reset|ssh-access-begin|ssh-access-confirm|ssh-access-rollback)
+    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|safe-update|auto-safe-update|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update|ssh-key-add|ssh-key-reset|ssh-access-begin|ssh-access-confirm|ssh-access-rollback)
       case "${1}" in
         protocol-install|protocol-remove|protocol-update) begin_operation "${1}${2:+:${2}}" ;;
         *) begin_operation "${1}" ;;
@@ -3085,6 +3192,8 @@ main() {
       verify_app
       ;;
     secure) secure_server ;;
+    safe-update) safe_update_server ;;
+    auto-safe-update) auto_safe_update_server ;;
     kernel-update) update_kernel ;;
     vpn-firewall) configure_vpn_firewall_policy ;;
     vless-cdn-firewall) configure_vless_cdn_firewall ;;

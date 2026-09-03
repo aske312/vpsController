@@ -676,7 +676,7 @@ test("main preview is built off-VPS and interrupted updates cannot report succes
   assert.match(manager, /Update was interrupted after the application swap; restoring the previous release/);
   assert.match(manager, /UPDATE_SWAP_ACTIVE="yes"/);
   assert.match(manager, /trap 'exit 124' TERM INT/);
-  assert.match(api, /--property=RuntimeMaxSec=20min/);
+  assert.match(api, /RuntimeMaxSec=.*60min.*safe-update/);
   assert.match(api, /--property=TimeoutStopSec=45s/);
   assert.match(api, /Операция прервана перезагрузкой/);
   assert.match(api, /int\(action\.get\("progress"/);
@@ -727,7 +727,7 @@ test("live monitoring uses stable low-load cadence and detailed server metrics",
   assert.match(page, /function reloadWithoutCache\(message: string\)/);
   assert.match(page, /target\.searchParams\.set\("_refresh", Date\.now\(\)\.toString\(\)\)/);
   assert.match(page, /window\.location\.replace\(target\.toString\(\)\)/);
-  assert.match(page, /\["update", "test-update", "test-rollback", "kernel-update"\]\.includes/);
+  assert.match(page, /\["update", "test-update", "test-rollback", "safe-update", "kernel-update"\]\.includes/);
   assert.match(page, /Сервисный режим \$\{active \? "включён" : "выключен"\}\. Кэш интерфейса сброшен/);
   assert.match(page, /успешно завершено/);
 });
@@ -1453,6 +1453,25 @@ test("protected panel access follows every routable managed VPN", async () => {
   assert.match(manager, /panel via IKEv2/);
   assert.match(securityView, /allowed_channels/);
   assert.doesNotMatch(securityView, /"WG \/ AWG"/);
+});
+
+test("manual full update and conservative automatic update use separate policies", async () => {
+  const [manager, api, page, view] = await Promise.all([
+    read("scripts/vps-control.sh"), read("api/main.py"), read("app/page.tsx"), read("app/views/application/application-view.tsx"),
+  ]);
+  assert.match(manager, /safe_update_server\(\)/);
+  assert.match(manager, /openssl enc -aes-256-cbc -salt -pbkdf2/);
+  assert.match(manager, /apt-get full-upgrade --no-remove -y/);
+  assert.match(manager, /auto_safe_update_server\(\)/);
+  assert.match(manager, /apt-get install --only-upgrade --no-remove/);
+  assert.match(manager, /no kernel, bootloader, libc, systemd, SSH, major or package removal/);
+  assert.match(manager, /"auto-safe-update" "\$\{update_enabled\}"/);
+  assert.doesNotMatch(manager, /update_enabled="false"/);
+  assert.match(manager, /restore_recovery_point "\$\{archive\}"/);
+  assert.match(api, /@app\.get\("\/api\/application\/update-report"\)/);
+  assert.match(page, /downloadUpdateReport/);
+  assert.match(view, /runApplicationAction\("safe-update"\)/);
+  assert.match(view, /Скачать отчёт и логи/);
 });
 
 test("application network check covers every installed protected protocol", async () => {

@@ -13,9 +13,10 @@ type ApplicationViewProps = {
   changeServiceMode: (enabled: boolean) => Promise<void> | void;
   changePanelAccess: (mode: "vpn" | "external") => Promise<void> | void;
   loadApplicationLogs: () => Promise<void> | void; downloadLogs: (filename: string, lines: string[]) => void;
+  downloadUpdateReport: () => Promise<void> | void;
 };
 
-export function ApplicationView({ application, services, applicationVersion, updates, serviceModeActive, busy, applicationLogs, runApplicationAction, changeServiceMode, changePanelAccess, loadApplicationLogs, downloadLogs }: ApplicationViewProps) {
+export function ApplicationView({ application, services, applicationVersion, updates, serviceModeActive, busy, applicationLogs, runApplicationAction, changeServiceMode, changePanelAccess, loadApplicationLogs, downloadLogs, downloadUpdateReport }: ApplicationViewProps) {
   return <section className="applicationWorkspace">
         <article className="applicationSummary">
           <div className="applicationSummaryCopy">
@@ -103,9 +104,13 @@ export function ApplicationView({ application, services, applicationVersion, upd
           <section className="applicationLifecycle">
             <header><div><p className="eyebrow">SYSTEM LIFECYCLE</p><h2>VPS и системные пакеты</h2></div></header>
             <div className="applicationLifecycleActions">
-              <button onClick={() => void runApplicationAction("kernel-update")} disabled={busy}><strong>Обновить сервер</strong><small>{updates?.kernel_available ? "Доступны обновления ядра или пакетов" : "Ядро и системные пакеты"}</small></button>
+              <button onClick={() => void runApplicationAction("safe-update")} disabled={busy}><strong>Обновить сервер</strong><small>{updates?.total ? `${updates.total} доступных обновлений · полный Debian upgrade` : "Все пакеты Debian · точка восстановления · проверка"}</small></button>
               <button onClick={() => void runApplicationAction("reboot")} disabled={busy}><strong>Перезагрузить VPS</strong><small>Корректно завершить службы и reboot</small></button>
               <button className="danger" onClick={() => void runApplicationAction("poweroff")} disabled={busy}><strong>Выключить VPS</strong><small>Повторный запуск потребуется у провайдера</small></button>
+            </div>
+            <div className="applicationRecoveryState">
+              <span><strong>{application?.recovery?.available ? "Точка восстановления готова" : "Точка будет создана автоматически"}</strong><small>Хранятся три зашифрованные копии приложения, личных данных и конфигурации. Это не снимок диска и не откат пакетов Debian.</small></span>
+              {application?.recovery?.report_available && <button onClick={() => void downloadUpdateReport()} disabled={busy}>Скачать отчёт и логи</button>}
             </div>
           </section>
         </article>

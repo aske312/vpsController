@@ -125,7 +125,7 @@ export function ServicesDashboard({
   const active = installed.filter((item) => item.active);
   const enabled = installed.filter((item) => item.enabled);
   const totalRestarts = installed.reduce((sum, item) => sum + Number(item.restarts || 0), 0);
-  const schedulesActive = [automationDraft?.reboot?.enabled, automationDraft?.cleanup?.enabled].filter(Boolean).length;
+  const schedulesActive = [automationDraft?.reboot?.enabled, automationDraft?.cleanup?.enabled, automationDraft?.update?.enabled].filter(Boolean).length;
 
   const orderedItems = useMemo(() => {
     const groupOrder: Record<ServiceGroupId, number> = { control: 0, network: 1, security: 2, system: 3 };
@@ -188,7 +188,7 @@ export function ServicesDashboard({
           </div>
           <div className="servicesOperationsFacts">
             <span><small>JOURNAL</small><b>{services?.logging?.disk_usage || "—"}</b></span>
-            <span><small>SCHEDULES</small><b>{schedulesActive}/2</b></span>
+            <span><small>SCHEDULES</small><b>{schedulesActive}/3</b></span>
           </div>
         </header>
 
@@ -231,13 +231,14 @@ export function ServicesDashboard({
             <div className="operationsTitle">
               <p className="eyebrow">MAINTENANCE</p>
               <h3>Плановые задачи</h3>
-              <small>Перезагрузка и очистка в заданное окно.</small>
+              <small>Перезагрузка, очистка и консервативные обновления в заданное окно.</small>
             </div>
             <button type="button" className="servicePrimary ghost" onClick={onSaveAutomation} disabled={busy || !services}>Сохранить расписание</button>
           </header>
           <div className="maintenanceRows">
             <ScheduleRow title="Перезагрузка" value={automationDraft?.reboot} timer={services?.timers.reboot} busy={busy} onChange={(patch) => onAutomationChange("reboot", patch)} />
             <ScheduleRow title="Очистка" value={automationDraft?.cleanup} timer={services?.timers.cleanup} busy={busy} onChange={(patch) => onAutomationChange("cleanup", patch)} />
+            <ScheduleRow title="Безопасные автообновления" value={automationDraft?.update} timer={services?.timers.update} busy={busy} onChange={(patch) => onAutomationChange("update", patch)} />
           </div>
         </section>
         </div>

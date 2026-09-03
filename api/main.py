@@ -2039,6 +2039,10 @@ def application_status(_: None = Depends(require_token)) -> dict:
             "active": SERVICE_MODE_FILE.exists(),
             "rollback_available": (DATA_DIR / "test-app-backup").is_dir(),
         },
+        "recovery": {
+            "available": any((DATA_DIR / "recovery").glob("recovery-*.tar.gz.enc")),
+            "report_available": (DATA_DIR / "recovery" / "safe-update-report.txt").is_file(),
+        },
         "runtime": {
             "mode": "systemd" if web_unit_loaded and caddy_unit_loaded else "legacy-docker" if legacy_runtime else "incomplete",
             "migration_required": legacy_runtime,
@@ -2047,7 +2051,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
 
 
 class ApplicationAction(BaseModel):
-    action: Literal["restart", "update", "test-update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
+    action: Literal["restart", "update", "test-update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "safe-update", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
 
 
 @app.post("/api/application/action")
@@ -2072,7 +2076,7 @@ def application_action(payload: ApplicationAction, _: None = Depends(require_tok
     result = subprocess.run(
         [
             "systemd-run", f"--unit={unit}", "--collect",
-            "--property=Type=exec", "--property=RuntimeMaxSec=20min",
+            "--property=Type=exec", f"--property=RuntimeMaxSec={'60min' if payload.action == 'safe-update' else '20min'}",
             "--property=TimeoutStopSec=45s", *command,
         ],
         capture_output=True, text=True, timeout=10, check=False,
@@ -2109,6 +2113,14 @@ def application_logs(lines: int = 160, _: None = Depends(require_token)) -> dict
         args.extend(["-u", unit])
     args.extend(["-n", str(lines), "--no-pager", "-o", "short-iso"])
     return {"lines": run(*args, timeout=12).splitlines()}
+
+
+@app.get("/api/application/update-report")
+def application_update_report(_: None = Depends(require_token)) -> dict:
+    report = DATA_DIR / "recovery" / "safe-update-report.txt"
+    if not report.is_file():
+        raise HTTPException(status_code=404, detail="Отчёт обновления ещё не создан")
+    return {"filename": "vps-control-safe-update-report.txt", "lines": report.read_text(encoding="utf-8", errors="replace").splitlines()[-1200:]}
 
 
 MIHOMO_STATE_FILE = Path("/var/lib/vps-control/mihomo/state.json")

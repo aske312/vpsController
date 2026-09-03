@@ -406,7 +406,7 @@ export default function Home() {
     // its checks are expensive and the page displays the last known snapshot.
     if (tab === "security") return;
     const actionRunning = ["queued", "active", "activating", "running", "rebooting", "powering-off"].includes(application?.action?.state || "");
-    const updateRunning = actionRunning && ["update", "test-update", "test-rollback", "kernel-update"].includes(application?.action?.action || "");
+    const updateRunning = actionRunning && ["update", "test-update", "test-rollback", "safe-update", "kernel-update"].includes(application?.action?.action || "");
     const delay = updateRunning ? 3000
       : tab === "overview" ? 30000
         : ["channels", "wg", "awg", "shadowsocks", "vless-reality-xhttp", "clients"].includes(tab) ? 15000
@@ -438,7 +438,7 @@ export default function Home() {
         return;
       }
       const message = `${label}: успешно завершено`;
-      if (["update", "test-update", "test-rollback", "kernel-update"].includes(action.action || "")) {
+      if (["update", "test-update", "test-rollback", "safe-update", "kernel-update"].includes(action.action || "")) {
         window.setTimeout(() => reloadWithoutCache(`${message}. Кэш интерфейса сброшен`), 600);
         return;
       }
@@ -582,11 +582,13 @@ export default function Home() {
       message: "Сервер, VPN-каналы и панель станут недоступны до запуска через кабинет провайдера.",
       confirmLabel: "Выключить сервер", phrase: "ВЫКЛЮЧИТЬ", danger: true,
     })) return;
-    const risky = action === "restart" || action === "update" || action === "test-update" || action === "test-rollback" || action === "identity" || action === "kernel-update" || action === "reboot";
+    const risky = action === "restart" || action === "update" || action === "test-update" || action === "test-rollback" || action === "identity" || action === "safe-update" || action === "kernel-update" || action === "reboot";
     if (!automatic && risky && !await askConfirmation({
       title: actionLabels[action] || "Выполнить команду?",
-      message: `Будет выполнена команда «vps-control ${action}». Во время операции возможен кратковременный перерыв в работе.`,
-      confirmLabel: "Выполнить", danger: action === "reboot",
+      message: action === "safe-update"
+        ? "Будут установлены все доступные обновления Debian, включая ядро. Перед установкой создаётся зашифрованная копия приложения, личных данных и конфигурации. Это не снимок диска: он не сможет вернуть старые системные пакеты, если VPS перестанет загружаться. Удаление пакетов запрещено."
+        : `Будет выполнена команда «vps-control ${action}». Во время операции возможен кратковременный перерыв в работе.`,
+      confirmLabel: action === "safe-update" ? "Создать точку и обновить" : "Выполнить", danger: action === "reboot",
     })) return;
     setBusy(true); setError("");
     try {
@@ -633,6 +635,15 @@ export default function Home() {
   async function fixSecurity(action: "secure" | "kernel-update" | "vpn-firewall") {
     await runApplicationAction(action);
     await loadSecurity();
+  }
+
+  async function downloadUpdateReport() {
+    setBusy(true); setError("");
+    try {
+      const report = await request("/application/update-report") as { filename: string; lines: string[] };
+      downloadLogs(report.filename, report.lines);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось получить отчёт обновления"); }
+    finally { setBusy(false); }
   }
 
   const loadSshAccess = useCallback(async () => {
@@ -1509,6 +1520,7 @@ export default function Home() {
         changePanelAccess={changePanelAccess}
         loadApplicationLogs={loadApplicationLogs}
         downloadLogs={downloadLogs}
+        downloadUpdateReport={downloadUpdateReport}
       />}
 
       {tab === "services" && <ServicesDashboard
