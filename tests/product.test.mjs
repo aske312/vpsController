@@ -1342,13 +1342,14 @@ test("successful protocol installs are immediately reachable and health-checked"
   assert.match(mihomoReality, /for tool in iptables ip6tables/);
 });
 
-test("expanded security journal uses the full diagnostics workspace", async () => {
+test("expanded security journal stays beside the live port list", async () => {
   const [view, styles] = await Promise.all([
     read("app/views/security/security-view.tsx"), read("app/styles/pages/security.css"),
   ]);
   assert.match(view, /securityLogsOpen \? "open" : ""/);
-  assert.match(styles, /\.securityLogs\.open\{grid-column:1\/-1\}/);
-  assert.match(styles, /\.securityLogs\.open \.securityLogsBody pre\{height:auto;min-height:260px;max-height:none;overflow:visible\}/);
+  assert.match(styles, /\.securityDiagnosticsGrid \{[^}]*grid-template-columns:minmax\(0,\.88fr\) minmax\(0,1\.12fr\)[^}]*align-items:start/s);
+  assert.doesNotMatch(styles, /\.securityLogs\.open\s*\{[^}]*grid-column/);
+  assert.match(styles, /\.securityLogs\.open \.securityLogsBody pre\{height:clamp\(260px,42vh,520px\);overflow:auto\}/);
 });
 
 test("protected panel access uses one stable host through every configured channel", async () => {
@@ -1478,10 +1479,10 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(view, /width=\{240\} height=\{240\}/);
   assert.match(view, /mihomoProfileSummary/);
   assert.match(view, /mihomoProfileDevices/);
-  assert.match(view, /setProfileStep\(1\)[\s\S]*>Общие<\/button>/);
+  assert.match(view, /setProfileStep\(1\)[\s\S]*>Общее<\/button>/);
   assert.match(view, /mihomoProfileGeneral/);
   assert.match(view, /Название HWID-устройства/);
-  assert.match(view, /mihomoConnectionQuickDelete[\s\S]*Удалить<\/button>/);
+  assert.match(view, /mihomoConnectionQuickDelete[^>]*title="Удалить подключение"[\s\S]*<span aria-hidden="true">×<\/span><\/button>/);
   assert.match(view, /Настроить пресеты/);
   assert.match(view, /preset_cdn_domain/);
   assert.match(view, /Создать подключения из пресета/);

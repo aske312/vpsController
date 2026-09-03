@@ -235,7 +235,7 @@
 
 .securityDiagnosticsStats strong{color:#e7f0f5;font:800 13px var(--font-mono),monospace}
 
-.securityDiagnosticsGrid { display:grid; grid-template-columns:minmax(0,.88fr) minmax(0,1.12fr); gap:10px; padding:10px; }
+.securityDiagnosticsGrid { display:grid; grid-template-columns:minmax(0,.88fr) minmax(0,1.12fr); align-items:start; gap:10px; padding:10px; }
 
 .securityListeners,.securityLogs { min-width:0; overflow:hidden; border:1px solid rgba(91,116,141,.12); border-radius:11px; background:rgba(3,10,16,.34); }
 
@@ -263,9 +263,7 @@
 
 .securityLogsBody pre{height:188px;margin:0;overflow:auto;padding:11px 13px;background:#030a10;color:#62c8ff;font:9.5px/1.5 var(--font-mono),monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 
-.securityLogs.open{grid-column:1/-1}
-
-.securityLogs.open .securityLogsBody pre{height:auto;min-height:260px;max-height:none;overflow:visible}
+.securityLogs.open .securityLogsBody pre{height:clamp(260px,42vh,520px);overflow:auto}
 
 @media (max-width:1280px) {
 .securityMatrixContent{width:min(78%,980px)}

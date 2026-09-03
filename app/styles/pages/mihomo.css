@@ -1000,7 +1000,7 @@
 .mihomoConnectionCard > summary > div { display:grid; gap:2px; }
 .mihomoConnectionCard > summary small { color:var(--muted); }
 .mihomoConnectionChevron { color:#8295a2; font-size:22px; transition:transform .18s; }
-.mihomoConnectionQuickDelete { display:flex; align-items:center; justify-content:center; gap:5px; min-height:29px; padding:5px 9px; border:1px solid rgba(230,91,106,.3); border-radius:7px; background:rgba(111,31,42,.18); color:#e58c98; font-size:9px; font-weight:700; cursor:pointer; }
+.mihomoConnectionQuickDelete { display:flex; align-items:center; justify-content:center; width:30px; height:30px; padding:0; border:1px solid rgba(230,91,106,.3); border-radius:7px; background:rgba(111,31,42,.18); color:#e58c98; cursor:pointer; }
 .mihomoConnectionQuickDelete > span { font-size:15px; line-height:1; }
 .mihomoConnectionQuickDelete:hover { border-color:rgba(230,91,106,.62); background:rgba(139,37,51,.3); color:#ffd7dc; }
 .mihomoConnectionCard[open] .mihomoConnectionChevron { transform:rotate(90deg); }
