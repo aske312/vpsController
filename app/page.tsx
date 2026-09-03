@@ -37,6 +37,7 @@ function publicError(message: string, status: number) {
 }
 const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-HISTORY_SAMPLES);
 type GeneratedProfile = { id: string; name: string; filename: string; config: string };
+type SshAccessState = { phase: "password" | "key-installed" | "awaiting-confirmation" | "hardened" | "rolled-back"; fingerprint: string; rollback_deadline?: string | null; message: string; key_login_observed?: boolean };
 export default function Home() {
   const [tab, setTab] = useState<Tab>("overview");
   const [selectedChannel, setSelectedChannel] = useState<Protocol>("awg");
@@ -87,6 +88,11 @@ export default function Home() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [passwordDialog, setPasswordDialog] = useState(false);
+  const [sshAdminDialog, setSshAdminDialog] = useState(false);
+  const [sshPublicKey, setSshPublicKey] = useState("");
+  const [sshAccessState, setSshAccessState] = useState<SshAccessState | null>(null);
+  const [sshKeyTested, setSshKeyTested] = useState(false);
+  const [sshCountdownClock, setSshCountdownClock] = useState(() => Date.now());
   const [clientDialog, setClientDialog] = useState(false);
   const [clientPage, setClientPage] = useState(1);
   const [currentAdminPassword, setCurrentAdminPassword] = useState("");
@@ -629,6 +635,64 @@ export default function Home() {
     await loadSecurity();
   }
 
+  const loadSshAccess = useCallback(async () => {
+    if (!token) return;
+    try { setSshAccessState(await request<SshAccessState>("/security/ssh-access")); setSshCountdownClock(Date.now()); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось получить состояние SSH-доступа"); }
+  }, [token, request]);
+
+  async function installSshKey() {
+    setBusy(true); setError("");
+    try {
+      const state = await request<SshAccessState>("/security/ssh-access/key", { method: "POST", body: JSON.stringify({ public_key: sshPublicKey.trim() }) });
+      setSshAccessState(state); setSshPublicKey(""); setSshKeyTested(false);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось установить публичный ключ"); }
+    finally { setBusy(false); }
+  }
+
+  async function resetSshKey() {
+    if (!await askConfirmation({ title: "Удалить установленный SSH-ключ?", message: "Будет удалён только публичный ключ, добавленный этим мастером. Парольный вход и остальные ключи не изменятся.", confirmLabel: "Удалить ключ", danger: true })) return;
+    setBusy(true); setError("");
+    try {
+      const state = await request<SshAccessState>("/security/ssh-access/key/reset", { method: "POST" });
+      setSshAccessState(state); setSshPublicKey(""); setSshKeyTested(false);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось удалить публичный ключ"); }
+    finally { setBusy(false); }
+  }
+
+  async function changeSshAccess(action: "begin" | "confirm" | "rollback") {
+    setBusy(true); setError("");
+    try {
+      const state = await request<SshAccessState>(`/security/ssh-access/${action}`, { method: "POST" });
+      setSshAccessState(state); setSshCountdownClock(Date.now());
+      if (action !== "rollback") setSshKeyTested(false);
+      await loadSecurity();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось изменить SSH-доступ"); }
+    finally { setBusy(false); }
+  }
+
+  function openSshAdminDialog() {
+    setSshAdminDialog(true);
+    setSshKeyTested(false);
+    void loadSshAccess();
+  }
+
+  useEffect(() => {
+    if (!sshAdminDialog || sshAccessState?.phase !== "awaiting-confirmation" || !sshAccessState.rollback_deadline) return;
+    const deadline = new Date(sshAccessState.rollback_deadline).getTime();
+    const interval = window.setInterval(() => {
+      const now = Date.now();
+      setSshCountdownClock(now);
+      if (now >= deadline) void loadSshAccess();
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [sshAdminDialog, sshAccessState?.phase, sshAccessState?.rollback_deadline, loadSshAccess]);
+
+  const sshRollbackSeconds = sshAccessState?.rollback_deadline
+    ? Math.max(0, Math.ceil((new Date(sshAccessState.rollback_deadline).getTime() - sshCountdownClock) / 1000))
+    : 0;
+  const sshRollbackCountdown = `${String(Math.floor(sshRollbackSeconds / 60)).padStart(2, "0")}:${String(sshRollbackSeconds % 60).padStart(2, "0")}`;
+
   function closePasswordDialog() {
     setPasswordDialog(false);
     setCurrentAdminPassword("");
@@ -705,9 +769,8 @@ export default function Home() {
     setBusy(true); setError("");
     try {
       await request("/services/panel-access", { method: "PUT", body: JSON.stringify({ mode }) });
-      setServices((current) => current ? {
-        ...current, panel_access: { ...current.panel_access, vpn_urls: current.panel_access?.vpn_urls || [], mode, public: mode === "external" },
-      } : current);
+      await Promise.all([loadServices(), loadSecurity()]);
+      setNotice(mode === "vpn" ? `Панель доступна только через ${protectedUrl}` : "Публичный доступ к панели открыт");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось изменить доступ к панели"); }
     finally { setBusy(false); }
   }
@@ -1208,7 +1271,14 @@ export default function Home() {
   const panelAccessHealthy = Boolean(panelSecurity?.consistent && (panelSecurity?.vpn_only || panelSecurity?.publicly_accessible));
   const sshProtected = Boolean(
     ssh?.active === false
-    || (ssh?.active && fail2ban?.active && fail2ban?.jail_active)
+    || (ssh?.active && !ssh?.publicly_allowed)
+    || (
+      ssh?.active
+      && fail2ban?.active
+      && fail2ban?.jail_active
+      && ssh?.password_authentication === "no"
+      && ssh?.permit_root_login !== "yes"
+    )
   );
   const securityChecks = [
     Boolean(firewall?.active),
@@ -1418,6 +1488,7 @@ export default function Home() {
         fixSecurity={fixSecurity}
         runApplicationAction={runApplicationAction}
         setPasswordDialog={setPasswordDialog}
+        openSshAdminDialog={openSshAdminDialog}
         setSecurityLogsOpen={setSecurityLogsOpen}
         setSecurityLogSource={setSecurityLogSource}
         setSecurityLogs={setSecurityLogs}
@@ -1539,10 +1610,10 @@ export default function Home() {
                 <section className="connectionQrPanel">
                   <header><span>QR CODE</span><strong>Сканирование на устройстве</strong></header>
                   {generatedQr ? <div className="connectionQrCanvas"><Image src={generatedQr} width={284} height={284} unoptimized alt={`QR-код конфигурации ${generatedName}`} /></div> : <div className="connectionQrCanvas pending"><span>{generatedQrError || "Создаём QR-код…"}</span></div>}
-                  <p>{selectedClientProtocol === "awg" ? "Откройте именно приложение AmneziaWG (не WireGuard) и отсканируйте код." : "Откройте клиент протокола на устройстве и отсканируйте код."}</p>
+                  <p>{generatedQrError ? "Эта конфигурация слишком велика для QR-кода. Скачайте файл и импортируйте его в клиент протокола." : selectedClientProtocol === "awg" ? "Откройте именно приложение AmneziaWG (не WireGuard) и отсканируйте код." : "Откройте клиент протокола на устройстве и отсканируйте код."}</p>
                 </section>
                 <section className="connectionTransfer">
-                  <div className="connectionTransferIntro"><span>TRANSFER</span><strong>Передача конфигурации</strong><p>Используйте один из вариантов ниже. Файл и QR содержат одинаковую конфигурацию подключения.</p></div>
+                  <div className="connectionTransferIntro"><span>TRANSFER</span><strong>Передача конфигурации</strong><p>{generatedQrError ? "Скачайте файл конфигурации и импортируйте его в клиент протокола." : "Используйте один из вариантов ниже. Файл и QR содержат одинаковую конфигурацию подключения."}</p></div>
                   {generatedProfiles.length > 1 && <div className="connectionProfileChoices" aria-label="Маршрут VLESS">{generatedProfiles.map((profile) => <button key={profile.id} type="button" className={profile.filename === generatedName ? "active" : ""} onClick={() => { setGenerated(profile.config); setGeneratedName(profile.filename); setGeneratedQr(""); setGeneratedQrError(""); }}>{profile.name}</button>)}</div>}
                   <button type="button" className="connectionDownloadPrimary" onClick={() => downloadConfig(generatedName, generated)}><span>Конфигурация</span><strong>Скачать файл</strong><small>{generatedName}</small></button>
                   {generatedQr && <a className="connectionDownloadSecondary" href={generatedQr} download={`${generatedName.replace(/\.conf$/i, "")}-qr.png`}><span>QR-код</span><strong>Скачать изображение</strong></a>}
@@ -1553,6 +1624,31 @@ export default function Home() {
             <div className="connectionDialogActions generatedActions"><button type="button" onClick={resetClientDialog}>Создать ещё</button><button type="button" className="primaryButton" onClick={closeClientDialog}>Готово</button></div>
           </>}
         </form>
+      </div>}
+      {sshAdminDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={() => setSshAdminDialog(false)}>
+        <section className="confirmDialog sshAdminDialog" role="dialog" aria-modal="true" aria-labelledby="ssh-admin-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
+          <header className="sshAdminHead">
+            <div className="sshAdminIcon" aria-hidden="true">SSH</div>
+            <div><p className="eyebrow">ADMINISTRATOR ACCESS</p><h2 id="ssh-admin-dialog-title">Безопасный доступ по SSH</h2><span>Переход с пароля на персональный ключ без риска потерять сервер.</span></div>
+            <button type="button" className="sshAdminClose" aria-label="Закрыть" onClick={() => setSshAdminDialog(false)}>×</button>
+          </header>
+          <div className="sshAdminBody">
+            <section className="sshAdminStatus">
+              <span className="sshAdminStatusMark">!</span>
+              <div><strong>{sshAccessState?.phase === "hardened" ? "Доступ по ключу подтверждён" : sshAccessState?.phase === "awaiting-confirmation" ? "Работает страховочный таймер" : sshAccessState?.phase === "key-installed" ? "Публичный ключ установлен" : "Парольный вход остаётся активным"}</strong><p>{sshAccessState?.message || "Панель ничего не закроет автоматически. Сначала создайте ключ и подтвердите вход в новой сессии."}</p></div>
+              <em>{sshAccessState?.phase === "hardened" ? "HARDENED" : sshAccessState?.phase === "awaiting-confirmation" ? "ROLLBACK ON" : "SAFE MODE"}</em>
+            </section>
+            <div className="sshAdminSectionTitle"><span>Порядок настройки</span><small>4 шага</small></div>
+            <ol className="sshAdminSteps">
+              <li><div className="sshAdminStepNumber">01</div><div className="sshAdminStepContent"><strong>Создайте ключ на компьютере администратора</strong><p>Команда создаст современную пару ED25519. Приватная часть остаётся только на вашем ПК.</p><code>ssh-keygen -t ed25519 -a 64</code></div></li>
+              <li className={sshAccessState?.fingerprint ? "sshAdminStepComplete" : ""}><div className="sshAdminStepNumber">02</div><div className="sshAdminStepContent"><strong>Добавьте публичную часть</strong><p>Вставьте одну строку из файла <b>.pub</b>. Приватный ключ сюда вводить нельзя.</p>{sshAccessState?.fingerprint ? <><div className="sshFingerprint"><span>Установлен</span><code>{sshAccessState.fingerprint}</code></div>{sshAccessState.phase !== "hardened" && sshAccessState.phase !== "awaiting-confirmation" && <button className="sshResetKeyButton" type="button" disabled={busy} onClick={() => void resetSshKey()}>Удалить ключ и начать заново</button>}</> : <><textarea className="sshPublicKeyInput" rows={3} value={sshPublicKey} onChange={(event) => setSshPublicKey(event.target.value)} placeholder="ssh-ed25519 AAAAC3... admin-pc" spellCheck={false} /><button className="sshStepButton" type="button" disabled={busy || sshPublicKey.trim().length < 80} onClick={() => void installSshKey()}>Проверить и установить ключ</button></>}</div></li>
+              <li className={sshKeyTested || sshAccessState?.key_login_observed ? "sshAdminStepComplete" : ""}><div className="sshAdminStepNumber">03</div><div className="sshAdminStepContent"><strong>Проверьте вход в отдельном окне</strong><p>Не закрывайте текущую сессию. Откройте новый терминал и подключитесь с созданным ключом.</p><code>ssh root@SERVER</code>{sshAccessState?.fingerprint && sshAccessState.phase !== "awaiting-confirmation" && sshAccessState.phase !== "hardened" && <label className="sshTestCheck"><input type="checkbox" checked={sshKeyTested} onChange={(event) => setSshKeyTested(event.target.checked)} /><span>Я успешно вошёл по ключу в новой SSH-сессии</span></label>}</div></li>
+              <li className={`sshAdminStepFinal ${sshAccessState?.phase === "hardened" ? "sshAdminStepComplete" : ""}`}><div className="sshAdminStepNumber">04</div><div className="sshAdminStepContent"><strong>Безопасно отключите парольный вход</strong><p>Сначала включится автоматический откат на 5 минут. Если подтверждения не будет, прежние настройки восстановятся сами.</p>{sshAccessState?.phase === "awaiting-confirmation" ? <div className="sshRollbackPanel"><div className="sshRollbackHead"><div><strong>Подтвердите повторный вход по ключу</strong><span>До автоматического восстановления настроек</span></div><time className={sshRollbackSeconds <= 60 ? "critical" : ""} dateTime={`PT${sshRollbackSeconds}S`}>{sshRollbackCountdown}</time></div><small>Откат запланирован на {new Date(sshAccessState.rollback_deadline || "").toLocaleTimeString("ru-RU")}</small><label className="sshTestCheck"><input type="checkbox" checked={sshKeyTested} onChange={(event) => setSshKeyTested(event.target.checked)} /><span>После отключения пароля я снова вошёл по ключу</span></label><div className="sshRollbackActions"><button type="button" disabled={busy} onClick={() => void changeSshAccess("rollback")}>Откатить сейчас</button><button className="sshStepButton" type="button" disabled={busy || !sshKeyTested} onClick={() => void changeSshAccess("confirm")}>Подтвердить доступ</button></div></div> : sshAccessState?.phase === "hardened" ? <div className="sshFingerprint"><span>Защищено</span><code>PasswordAuthentication no · Root только по ключу</code></div> : <button className="sshStepButton sshHardeningButton" type="button" disabled={busy || !sshAccessState?.fingerprint || !(sshKeyTested || sshAccessState?.key_login_observed)} onClick={() => void changeSshAccess("begin")}>Запустить безопасное применение</button>}</div></li>
+            </ol>
+            <div className="sshAdminNotice"><span>i</span><div><strong>Текущий режим тоже допустим</strong><p>Длинный уникальный пароль вместе с активным Fail2ban — предупреждение, а не неисправность приложения.</p></div></div>
+          </div>
+          <footer className="sshAdminActions"><span>{sshAccessState?.phase === "awaiting-confirmation" ? "Не закрывайте окно до проверки — активен автоматический откат" : "Все опасные изменения требуют отдельной проверки"}</span><button className="confirmPrimary" type="button" onClick={() => setSshAdminDialog(false)}>Закрыть</button></footer>
+        </section>
       </div>}
       {passwordDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closePasswordDialog}>
         <form className="confirmDialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()} onSubmit={changeAdminPassword}>

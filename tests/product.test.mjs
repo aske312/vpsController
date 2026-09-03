@@ -502,7 +502,7 @@ test("network diagnostics measure loss, jitter, MTU and server path health", asy
 });
 
 test("primary resource metrics use CPU percent and readable RAM and disk units", async () => {
-  const [api, page] = await Promise.all([read("api/main.py"), read("app/page.tsx")]);
+  const [api, page, overview] = await Promise.all([read("api/main.py"), read("app/page.tsx"), read("app/views/overview/overview-view.tsx")]);
   assert.match(api, /def cpu_usage_percent/);
   assert.match(api, /"cpu_percent": cpu_percent/);
   assert.match(page, /label="CPU"[\s\S]*cpu_percent/);
@@ -510,13 +510,27 @@ test("primary resource metrics use CPU percent and readable RAM and disk units",
   assert.match(page, /label="DISK USED"[\s\S]*bytes\(diskUsedBytes\)/);
   assert.match(page, /bytes\(memoryFree\)/);
   assert.match(page, /bytes\(diskFree\)/);
+  assert.match(overview, /Number\.isFinite\(value\) \|\| value <= 0/);
+  assert.match(overview, /Math\.max\(0, Math\.min\(Math\.floor\(Math\.log\(value\)/);
 });
 
 test("security distinguishes public SSH from public panel access", async () => {
-  const [api, page] = await Promise.all([read("api/main.py"), read("app/page.tsx")]);
+  const [api, page, section] = await Promise.all([read("api/main.py"), read("app/page.tsx"), read("app/views/security/security-view.tsx")]);
   assert.match(api, /"panel_access": \{/);
   assert.match(api, /"publicly_accessible": panel_publicly_accessible/);
   assert.match(api, /panel_access_consistent/);
+  assert.match(page, /ssh\?\.password_authentication === "no"/);
+  assert.match(page, /ssh\?\.permit_root_login !== "yes"/);
+  assert.match(page, /Безопасный доступ по SSH/);
+  assert.match(page, /Панель ничего не закроет автоматически/);
+  assert.match(page, /PasswordAuthentication no · Root только по ключу/);
+  assert.match(page, /\/security\/ssh-access\/key/);
+  assert.match(page, /\/security\/ssh-access\/\$\{action\}/);
+  assert.match(page, /автоматический откат на 5 минут/);
+  assert.match(page, /sshRollbackCountdown/);
+  assert.match(page, /До автоматического восстановления настроек/);
+  assert.match(page, /now >= deadline.*loadSshAccess/s);
+  assert.match(section, /title="SSH  административный доступ"[\s\S]*onAction=\{openSshAdminDialog\}[\s\S]*actionLabel="Настроить"/);
   assert.match(page, /title="Доступ к панели"/);
   assert.match(page, /SSH  административный доступ/);
   assert.match(page, /title="Дополнительные VPN-службы"/);
@@ -668,6 +682,29 @@ test("main preview is built off-VPS and interrupted updates cannot report succes
   assert.match(api, /int\(action\.get\("progress"/);
   assert.match(api, /awaiting_final_status[\s\S]*total_seconds\(\) < 30/);
   assert.match(manager, /write_action_status "succeeded" 100 "Тестовое обновление установлено и проверено"/);
+});
+
+test("SSH key hardening is transactional and automatically rolls back", async () => {
+  const [api, manager] = await Promise.all([read("api/main.py"), read("scripts/vps-control.sh")]);
+  assert.match(api, /class SshPublicKeyInstall/);
+  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/key"\)/);
+  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/key\/reset"\)/);
+  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/begin"\)/);
+  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/confirm"\)/);
+  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/rollback"\)/);
+  assert.match(api, /Accepted publickey for .*re\.escape\(fingerprint\)/);
+  assert.match(manager, /ssh-keygen -lf "\$\{temporary\}" -E sha256/);
+  assert.match(manager, /PasswordAuthentication no\\nKbdInteractiveAuthentication no\\nPermitRootLogin prohibit-password/);
+  assert.match(manager, /systemd-run --unit=vps-control-ssh-rollback --on-active=5m/);
+  assert.match(manager, /SSH_ACCESS_DROPIN="\/etc\/ssh\/sshd_config\.d\/00-vps-control-admin-access\.conf"/);
+  assert.match(manager, /mv "\$\{LEGACY_SSH_ACCESS_DROPIN\}" "\$\{SSH_ACCESS_DROPIN\}"/);
+  assert.match(manager, /ssh_access_write_state "awaiting-confirmation"/);
+  assert.match(manager, /ssh_access_write_state "hardened"/);
+  assert.match(manager, /ssh_access_write_state "rolled-back"/);
+  assert.match(manager, /ssh_access_reset_key\(\)/);
+  assert.match(manager, /fingerprint == expected/);
+  assert.match(manager, /остальные ключи не изменены/);
+  assert.match(manager, /\[\[ "\$\{phase\}" == "awaiting-confirmation" \]\]/);
 });
 
 test("live monitoring uses stable low-load cadence and detailed server metrics", async () => {
@@ -912,6 +949,10 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\].*includes\(tab\)/);
   assert.match(page, /CHANNEL CONFIGURATION/);
   assert.match(manager, /ReadWritePaths=-\/etc\/vps-control\.env -\/etc\/vps-control /);
+  assert.match(manager, /ENV_FILE="\$\{CONFIG_DIR\}\/environment"/);
+  assert.match(manager, /mv "\$\{LEGACY_ENV_FILE\}" "\$\{ENV_FILE\}"/);
+  assert.match(manager, /ln -sfn "\$\{ENV_FILE\}" "\$\{LEGACY_ENV_FILE\}"/);
+  assert.match(manager, /install -d -m 0750 -o root -g nogroup "\$\{CONFIG_DIR\}"/);
   assert.match(manager, /grep -Fxq "\$\{expected\}" "\$\{SERVICE_FILE\}"/);
   assert.match(manager, /start_services\(\) \{[\s\S]*?ensure_api_write_access[\s\S]*?systemctl start/);
   assert.match(manager, /restart_services\(\) \{[\s\S]*?ensure_api_write_access[\s\S]*?systemctl restart/);
@@ -952,6 +993,7 @@ test("protocol pages safely edit channel settings and VLESS links select HTTP2",
   assert.match(api, /"dns", "keepalive"/);
   assert.match(api, /"loglevel", "xpadding"/);
   assert.match(api, /protocol: Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"[^\]]*\]/);
+  assert.doesNotMatch(api, /hysteria[^\n]*"--test"/);
   assert.match(api, /@app\.post\("\/api\/protocols\/\{protocol\}\/resources\/check"\)/);
   assert.match(api, /allow_methods=\["GET", "POST", "PUT", "PATCH", "DELETE"\]/);
   assert.match(api, /"editable_settings": editable_settings/);
@@ -1378,8 +1420,25 @@ test("protected panel access uses one stable host through every configured chann
   assert.match(manager, /127\.0\.0\.1 %s # 312\.net internal panel/);
   assert.match(manager, /admin host via WG/);
   assert.match(manager, /admin host via OpenVPN/);
+  assert.match(manager, /http:\/\/localhost:\$\{HTTP_PORT\}/);
+  assert.match(manager, /handle \/api\/mihomo\/subscriptions\/\*/);
+  assert.match(manager, /No panel UI or/);
+  assert.doesNotMatch(manager, /set_config_value "\$\{INSTALL_DIR\}\/install\.conf" "ACCESS_MODE"/);
   assert.match(caddy, /http:\/\/{INTERNAL_PANEL_HOST} \{/);
   assert.match(caddy, /not remote_ip 127\.0\.0\.0\/8 10\.0\.0\.0\/8/);
+  assert.match(api, /"systemd-run", f"--unit=\{unit\}", "--wait", "--pipe", "--collect"/);
+  assert.match(api, /access_mode != "vpn" and ufw_enabled/);
+  assert.match(page, /Promise\.all\(\[loadServices\(\), loadSecurity\(\)\]\)/);
+});
+
+test("VPN-only mode publishes token subscriptions without exposing Mihomo administration", async () => {
+  const [manager, view, control] = await Promise.all([
+    read("protocol-images/mihomo/manager.py"), read("app/views/mihomo/mihomo-view.tsx"), read("scripts/vps-control.sh"),
+  ]);
+  assert.match(manager, /result\["url"\] = f"https:\/\/\{public_domain\}\{path\}"/);
+  assert.match(view, /result\.url \|\| new URL\(result\.path, window\.location\.origin\)/);
+  assert.match(control, /handle \/api\/mihomo\/subscriptions\/\*/);
+  assert.match(control, /respond 404/);
 });
 
 test("protected panel access follows every routable managed VPN", async () => {
@@ -1406,6 +1465,8 @@ test("application network check covers every installed protected protocol", asyn
     assert.match(manager, new RegExp(`vps-control-${protocol}`));
   }
   assert.match(manager, /for protocol in hysteria2 tuic trojan/);
+  assert.match(manager, /\/etc\/vps-control\/vless-reality-xhttp\/reality\.env/);
+  assert.doesNotMatch(manager, /\/etc\/vps-control\/xray\/reality\.env/);
   assert.match(manager, /check_protocol_port/);
   assert.match(manager, /все установленные защищённые протоколы/);
 });
@@ -1523,6 +1584,10 @@ test("Mihomo profiles have an explicit common configuration layer", async () => 
   const [manager, view] = await Promise.all([
     read("protocol-images/mihomo/manager.py"), read("app/views/mihomo/mihomo-view.tsx"),
   ]);
+  assert.match(view, /function clientUuid\(\): string/);
+  assert.match(view, /typeof crypto\.randomUUID === "function"/);
+  assert.match(view, /crypto\.getRandomValues\(bytes\)/);
+  assert.doesNotMatch(view, /useRef\(crypto\.randomUUID\(\)\)/);
   assert.match(manager, /result\["common_device_id"\] = common_device_id/);
   assert.match(manager, /"scope": "common" if/);
   assert.match(manager, /selected_device = device_id or str\(normalized\["common_device_id"\]\)/);

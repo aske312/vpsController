@@ -5,7 +5,11 @@ APP_NAME="vps-control"
 INSTALL_DIR="/opt/${APP_NAME}"
 DATA_DIR="/var/lib/${APP_NAME}"
 TEST_BACKUP_DIR="${DATA_DIR}/test-app-backup"
-ENV_FILE="/etc/${APP_NAME}.env"
+CONFIG_DIR="/etc/${APP_NAME}"
+LEGACY_ENV_FILE="/etc/${APP_NAME}.env"
+ENV_FILE="${CONFIG_DIR}/environment"
+SSH_ACCESS_DROPIN="/etc/ssh/sshd_config.d/00-vps-control-admin-access.conf"
+LEGACY_SSH_ACCESS_DROPIN="/etc/ssh/sshd_config.d/98-vps-control-admin-access.conf"
 MANAGER_CONFIG="/etc/${APP_NAME}-manager.conf"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}-api.service"
 WEB_SERVICE_FILE="/etc/systemd/system/${APP_NAME}-web.service"
@@ -549,11 +553,31 @@ PY
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
       -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
+  elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
+    # Keep TCP 80/443 available to protocol-specific Caddy hosts (for example
+    # VLESS CDN), but never attach the panel to a public catch-all listener.
+    sed -e "s|{\$SITE_ADDRESS}|http://localhost:${HTTP_PORT}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
+      -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
+      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" \
+      "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   else
     sed -e "s|{\$SITE_ADDRESS}|:${HTTP_PORT}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
       -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
+  fi
+  if [[ "${ACCESS_MODE}" == "vpn" && -n "${domain}" ]]; then
+    cat >>"${CADDY_CONFIG}" <<EOF
+
+# Public, token-protected Mihomo subscription refresh. No panel UI or
+# administrative API is exposed on this host while VPN-only mode is active.
+${domain} {
+    handle /api/mihomo/subscriptions/* {
+        reverse_proxy 127.0.0.1:8791
+    }
+    respond 404
+}
+EOF
   fi
 }
 
@@ -995,6 +1019,151 @@ EOF
   fail2ban-client -t >/dev/null
   systemctl enable fail2ban >/dev/null
   systemctl restart fail2ban
+}
+
+ssh_access_write_state() {
+  local phase="$1" fingerprint="${2:-}" deadline="${3:-}" message="${4:-}"
+  install -d -m 0750 "${DATA_DIR}"
+  python3 - "${DATA_DIR}/ssh-access.json" "${phase}" "${fingerprint}" "${deadline}" "${message}" <<'PY'
+import json, os, sys, tempfile
+path, phase, fingerprint, deadline, message = sys.argv[1:]
+payload = {"phase": phase, "fingerprint": fingerprint, "rollback_deadline": deadline or None, "message": message}
+fd, temporary = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".ssh-access-", text=True)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False)
+        handle.write("\n")
+    os.chmod(temporary, 0o640)
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary): os.unlink(temporary)
+PY
+}
+
+ssh_access_add_key() {
+  local public_key="${1:-}" ssh_dir="/root/.ssh" keys_file="/root/.ssh/authorized_keys" temporary fingerprint
+  [[ "${public_key}" != *$'\n'* && "${public_key}" != *$'\r'* ]] || die "публичный SSH-ключ должен занимать одну строку"
+  [[ "${public_key}" =~ ^(ssh-ed25519|sk-ssh-ed25519@openssh.com|ecdsa-sha2-nistp256)[[:space:]][A-Za-z0-9+/=]+([[:space:]].*)?$ ]] || die "поддерживается публичный ключ ED25519, FIDO2 ED25519 или ECDSA P-256"
+  temporary="$(mktemp)"
+  printf '%s\n' "${public_key}" >"${temporary}"
+  fingerprint="$(ssh-keygen -lf "${temporary}" -E sha256 2>/dev/null | awk '{print $2}')"
+  rm -f -- "${temporary}"
+  [[ "${fingerprint}" == SHA256:* ]] || die "OpenSSH отклонил публичный ключ"
+  install -d -m 0700 -o root -g root "${ssh_dir}"
+  touch "${keys_file}"
+  chown root:root "${keys_file}"
+  chmod 0600 "${keys_file}"
+  if ! ssh-keygen -lf "${keys_file}" -E sha256 2>/dev/null | awk '{print $2}' | grep -Fxq "${fingerprint}"; then
+    cp -a "${keys_file}" "${DATA_DIR}/authorized_keys.before-vps-control"
+    printf '%s\n' "${public_key}" >>"${keys_file}"
+  fi
+  sshd -t
+  ssh_access_write_state "key-installed" "${fingerprint}" "" "Публичный ключ установлен. Проверьте вход в новой SSH-сессии."
+  ok "публичный ключ ${fingerprint} установлен; парольный вход не изменён."
+}
+
+ssh_access_begin_hardening() {
+  local state_file="${DATA_DIR}/ssh-access.json" phase fingerprint deadline dropin="${SSH_ACCESS_DROPIN}"
+  [[ -s /root/.ssh/authorized_keys ]] || die "сначала установите публичный SSH-ключ"
+  read -r phase fingerprint <<<"$(python3 - "${state_file}" <<'PY'
+import json, sys
+try:
+    state=json.load(open(sys.argv[1], encoding="utf-8")); print(state.get("phase", ""), state.get("fingerprint", ""))
+except (OSError, ValueError): print("", "")
+PY
+)"
+  [[ "${phase}" == "key-installed" || "${phase}" == "rolled-back" ]] || die "безопасное применение уже запущено или ключ ещё не установлен"
+  [[ "${fingerprint}" == SHA256:* ]] || die "не найден подтверждённый ключ этого мастера"
+  install -d -m 0700 "${DATA_DIR}/ssh-access-backup"
+  if [[ -f "${dropin}" ]]; then cp -a "${dropin}" "${DATA_DIR}/ssh-access-backup/dropin"; else rm -f "${DATA_DIR}/ssh-access-backup/dropin"; fi
+  printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n' >"${dropin}"
+  chmod 0644 "${dropin}"
+  if ! sshd -t; then
+    rm -f "${dropin}"
+    [[ ! -f "${DATA_DIR}/ssh-access-backup/dropin" ]] || cp -a "${DATA_DIR}/ssh-access-backup/dropin" "${dropin}"
+    die "новая конфигурация SSH не прошла проверку"
+  fi
+  systemctl reload ssh.service
+  systemctl stop vps-control-ssh-rollback.timer vps-control-ssh-rollback.service >/dev/null 2>&1 || true
+  systemd-run --unit=vps-control-ssh-rollback --on-active=5m --timer-property=AccuracySec=1s "${COMMAND_PATH}" ssh-access-rollback >/dev/null
+  deadline="$(date -u -d '+5 minutes' +%Y-%m-%dT%H:%M:%SZ)"
+  ssh_access_write_state "awaiting-confirmation" "${fingerprint}" "${deadline}" "Парольный вход отключён временно. Подтвердите доступ по ключу до автоматического отката."
+  ok "парольный вход временно отключён; автоматический откат запланирован на ${deadline}."
+}
+
+ssh_access_reset_key() {
+  local state_file="${DATA_DIR}/ssh-access.json" phase fingerprint keys_file="/root/.ssh/authorized_keys" temporary
+  read -r phase fingerprint <<<"$(python3 - "${state_file}" <<'PY'
+import json, sys
+try:
+    state=json.load(open(sys.argv[1], encoding="utf-8")); print(state.get("phase", ""), state.get("fingerprint", ""))
+except (OSError, ValueError): print("", "")
+PY
+)"
+  [[ "${phase}" == "key-installed" || "${phase}" == "rolled-back" ]] || die "ключ можно сбросить только до безопасного применения"
+  [[ "${fingerprint}" == SHA256:* && -f "${keys_file}" ]] || die "не найден ключ, установленный этим мастером"
+  temporary="$(mktemp)"
+  python3 - "${keys_file}" "${temporary}" "${fingerprint}" <<'PY'
+import subprocess, sys, tempfile
+source, target, expected = sys.argv[1:]
+removed = False
+with open(source, encoding="utf-8") as handle, open(target, "w", encoding="utf-8") as output:
+    for line in handle:
+        value = line.strip()
+        if not value or value.startswith("#"):
+            output.write(line)
+            continue
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as key_file:
+            key_file.write(value + "\n"); key_file.flush()
+            result = subprocess.run(["ssh-keygen", "-lf", key_file.name, "-E", "sha256"], capture_output=True, text=True, check=False)
+        fingerprint = result.stdout.split()[1] if result.returncode == 0 and len(result.stdout.split()) > 1 else ""
+        if fingerprint == expected:
+            removed = True
+        else:
+            output.write(line)
+if not removed:
+    raise SystemExit("installed key fingerprint was not found")
+PY
+  install -m 0600 -o root -g root "${temporary}" "${keys_file}"
+  rm -f -- "${temporary}"
+  ssh_access_write_state "password" "" "" "Ключ мастера удалён. Можно установить новый публичный ключ."
+  ok "ключ ${fingerprint} удалён; остальные ключи не изменены."
+}
+
+ssh_access_confirm() {
+  local state_file="${DATA_DIR}/ssh-access.json" phase fingerprint
+  read -r phase fingerprint <<<"$(python3 - "${state_file}" <<'PY'
+import json, sys
+try:
+    state=json.load(open(sys.argv[1], encoding="utf-8")); print(state.get("phase", ""), state.get("fingerprint", ""))
+except (OSError, ValueError): print("", "")
+PY
+)"
+  [[ "${phase}" == "awaiting-confirmation" ]] || die "нет ожидающего подтверждения изменения SSH"
+  systemctl stop vps-control-ssh-rollback.timer vps-control-ssh-rollback.service >/dev/null 2>&1 || true
+  systemctl reset-failed vps-control-ssh-rollback.service >/dev/null 2>&1 || true
+  rm -rf -- "${DATA_DIR}/ssh-access-backup"
+  ssh_access_write_state "hardened" "${fingerprint}" "" "Доступ по ключу подтверждён; парольный вход отключён."
+  ok "доступ по ключу подтверждён; автоматический откат отменён."
+}
+
+ssh_access_rollback() {
+  local state_file="${DATA_DIR}/ssh-access.json" phase fingerprint dropin="${SSH_ACCESS_DROPIN}"
+  read -r phase fingerprint <<<"$(python3 - "${state_file}" <<'PY'
+import json, sys
+try:
+    state=json.load(open(sys.argv[1], encoding="utf-8")); print(state.get("phase", ""), state.get("fingerprint", ""))
+except (OSError, ValueError): print("", "")
+PY
+)"
+  [[ "${phase}" == "awaiting-confirmation" ]] || die "нет ожидающего отката изменения SSH"
+  if [[ -f "${DATA_DIR}/ssh-access-backup/dropin" ]]; then cp -a "${DATA_DIR}/ssh-access-backup/dropin" "${dropin}"; else rm -f "${dropin}"; fi
+  sshd -t
+  systemctl reload ssh.service
+  systemctl stop vps-control-ssh-rollback.timer >/dev/null 2>&1 || true
+  rm -rf -- "${DATA_DIR}/ssh-access-backup"
+  ssh_access_write_state "rolled-back" "${fingerprint}" "" "Предыдущие настройки SSH восстановлены."
+  ok "предыдущие настройки SSH восстановлены."
 }
 
 secure_server() {
@@ -1609,9 +1778,25 @@ write_integrity_manifest() {
 
 ensure_environment() {
   install -d -m 0750 "${DATA_DIR}" "${DATA_DIR}/tmp" "${DATA_DIR}/logs" /etc/wireguard /etc/amnezia
+  install -d -m 0750 -o root -g nogroup "${CONFIG_DIR}"
+  # ProtectSystem=strict cannot reliably make one file below /etc writable on
+  # every supported systemd version. Keep the public path compatible while the
+  # real file lives in the already allow-listed application directory.
+  if [[ ! -s "${ENV_FILE}" && -f "${LEGACY_ENV_FILE}" ]]; then
+    mv "${LEGACY_ENV_FILE}" "${ENV_FILE}"
+  fi
+  ln -sfn "${ENV_FILE}" "${LEGACY_ENV_FILE}"
+  # sshd keeps the first value it reads. Migrate the old late-sorting drop-in
+  # so cloud-init cannot keep PasswordAuthentication enabled ahead of it.
+  if [[ -f "${LEGACY_SSH_ACCESS_DROPIN}" ]] && grep -q '"phase"[[:space:]]*:[[:space:]]*"hardened"' "${DATA_DIR}/ssh-access.json" 2>/dev/null; then
+    mv "${LEGACY_SSH_ACCESS_DROPIN}" "${SSH_ACCESS_DROPIN}"
+    sshd -t
+    systemctl reload ssh.service 2>/dev/null || true
+  fi
   rm -f -- "${DATA_DIR}/personalization.json"
   if [[ ! -s "${ENV_FILE}" ]]; then
     install -m 0600 "${PROJECT_DIR}/.env.example" "${ENV_FILE}"
+    ln -sfn "${ENV_FILE}" "${LEGACY_ENV_FILE}"
     # Архив мог быть подготовлен на Windows. CR в EnvironmentFile становится
     # частью адресов и ломает Caddy/PANEL_URL, поэтому нормализуем шаблон.
     sed -i 's/\r$//' "${ENV_FILE}"
@@ -1716,6 +1901,15 @@ EOF
 
 ensure_api_write_access() {
   local expected="ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/swanctl -/etc/caddy/vps-control.d -/etc/wireguard -/etc/amnezia ${DATA_DIR}"
+  install -d -m 0750 -o root -g nogroup "${CONFIG_DIR}"
+  if [[ ! -s "${ENV_FILE}" && -f "${LEGACY_ENV_FILE}" ]]; then
+    mv "${LEGACY_ENV_FILE}" "${ENV_FILE}"
+  fi
+  ln -sfn "${ENV_FILE}" "${LEGACY_ENV_FILE}"
+  if ! grep -Fxq "EnvironmentFile=${ENV_FILE}" "${SERVICE_FILE}"; then
+    sed -i "s|^EnvironmentFile=.*|EnvironmentFile=${ENV_FILE}|" "${SERVICE_FILE}"
+    systemctl daemon-reload
+  fi
   if ! grep -Fxq "${expected}" "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
     systemctl daemon-reload
@@ -2282,7 +2476,6 @@ change_access_mode() {
   [[ "${requested}" == "external" || "${requested}" == "vpn" ]] || die "режим должен быть external или vpn."
   ACCESS_MODE="${requested}"
   set_config_value "${INSTALL_CONFIG}" "ACCESS_MODE" "${ACCESS_MODE}"
-  set_config_value "${INSTALL_DIR}/install.conf" "ACCESS_MODE" "${ACCESS_MODE}"
   configure_access
   configure_firewall "panel-only"
   write_caddy_config
@@ -2661,7 +2854,7 @@ PY
   unit="vps-control-vless-reality-xhttp.service"
   if systemctl is-enabled --quiet "${unit}" 2>/dev/null; then
     check_protocol_unit "VLESS" "${unit}"
-    port="$(sed -n 's/^PORT=//p' /etc/vps-control/xray/reality.env 2>/dev/null | tail -n 1)"
+    port="$(sed -n 's/^PORT=//p' /etc/vps-control/vless-reality-xhttp/reality.env 2>/dev/null | tail -n 1)"
     check_protocol_port "VLESS" tcp "${port:-443}"
   fi
 
@@ -2819,7 +3012,7 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
+    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update|ssh-key-add|ssh-key-reset|ssh-access-begin|ssh-access-confirm|ssh-access-rollback)
       case "${1}" in
         protocol-install|protocol-remove|protocol-update) begin_operation "${1}${2:+:${2}}" ;;
         *) begin_operation "${1}" ;;
@@ -2896,6 +3089,11 @@ main() {
     vpn-firewall) configure_vpn_firewall_policy ;;
     vless-cdn-firewall) configure_vless_cdn_firewall ;;
     optimize) optimize_resources ;;
+    ssh-key-add) shift; ssh_access_add_key "$@" ;;
+    ssh-key-reset) ssh_access_reset_key ;;
+    ssh-access-begin) ssh_access_begin_hardening ;;
+    ssh-access-confirm) ssh_access_confirm ;;
+    ssh-access-rollback) ssh_access_rollback ;;
     automation-apply) apply_automation ;;
     logging-config) configure_logging "$@" ;;
     logs-clear) clear_managed_logs ;;

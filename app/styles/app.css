@@ -1156,6 +1156,67 @@
   cursor: not-allowed;
 }
 
+.sshAdminDialog { width:min(720px,calc(100vw - 32px)); max-height:min(860px,calc(100vh - 32px)); padding:0; overflow:hidden; border-color:rgba(98,126,118,.36); background:linear-gradient(155deg,#111817 0%,#0d1211 55%,#101514 100%); box-shadow:0 28px 90px rgba(0,0,0,.58); }
+.sshAdminHead { display:grid; grid-template-columns:48px minmax(0,1fr) 32px; gap:14px; align-items:center; padding:20px 22px; border-bottom:1px solid var(--line); background:linear-gradient(90deg,rgba(75,139,119,.12),transparent 62%); }
+.sshAdminIcon { display:grid; place-items:center; width:48px; height:48px; border:1px solid rgba(83,177,145,.34); border-radius:12px; background:rgba(53,126,103,.14); color:var(--green); font:700 11px var(--font-mono); letter-spacing:.12em; }
+.sshAdminHead .eyebrow { margin:0 0 4px; }
+.sshAdminHead h2 { margin:0; font-size:21px; letter-spacing:-.025em; }
+.sshAdminHead span { display:block; margin-top:5px; color:var(--muted); font-size:11px; line-height:1.45; }
+.sshAdminClose { align-self:start; display:grid; place-items:center; width:32px; height:32px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--muted); font-size:22px; cursor:pointer; }
+.sshAdminClose:hover { border-color:var(--line); background:rgba(255,255,255,.04); color:var(--text); }
+.sshAdminBody { padding:18px 22px 20px; overflow-y:auto; }
+.sshAdminStatus { display:grid; grid-template-columns:34px minmax(0,1fr) auto; gap:12px; align-items:center; padding:13px 14px; border:1px solid rgba(224,171,75,.28); border-radius:11px; background:rgba(224,171,75,.065); }
+.sshAdminStatusMark { display:grid; place-items:center; width:32px; height:32px; border-radius:9px; background:rgba(224,171,75,.14); color:var(--warning); font:700 14px var(--font-mono); }
+.sshAdminStatus strong { display:block; color:#e8dfc9; font-size:12px; }
+.sshAdminStatus p { margin:3px 0 0; color:var(--muted); font-size:10px; line-height:1.5; }
+.sshAdminStatus em { padding:5px 7px; border:1px solid rgba(224,171,75,.24); border-radius:6px; color:var(--warning); font:700 8px var(--font-mono); letter-spacing:.12em; }
+.sshAdminSectionTitle { display:flex; justify-content:space-between; align-items:center; margin:20px 1px 10px; color:var(--text); font:700 10px var(--font-mono); letter-spacing:.08em; text-transform:uppercase; }
+.sshAdminSectionTitle small { color:var(--muted); font:9px var(--font-mono); }
+.sshAdminSteps { display:grid; gap:8px; margin:0; padding:0; list-style:none; counter-reset:none; }
+.sshAdminSteps li { position:relative; display:grid; grid-template-columns:42px minmax(0,1fr); gap:12px; padding:13px 14px 13px 10px; border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.018); }
+.sshAdminSteps li:not(:last-child)::after { content:""; position:absolute; left:30px; bottom:-9px; width:1px; height:9px; background:var(--line); }
+.sshAdminStepNumber { padding-top:2px; color:var(--green); font:700 10px var(--font-mono); letter-spacing:.08em; text-align:center; }
+.sshAdminStepContent strong { display:block; color:var(--text); font-size:12px; }
+.sshAdminStepContent p { margin:3px 0 9px; color:var(--muted); font-size:10px; line-height:1.45; }
+.sshAdminStepContent small { display:block; margin-top:7px; color:#87918e; font-size:9px; line-height:1.45; }
+.sshAdminStepContent code { display:block; padding:9px 11px; border:1px solid rgba(98,126,118,.28); border-radius:7px; background:#090d0c; color:#a9d7c7; font:10px/1.55 var(--font-mono); white-space:pre-wrap; user-select:all; }
+.sshAdminStepFinal { border-color:rgba(83,177,145,.25) !important; background:rgba(53,126,103,.055) !important; }
+.sshAdminStepComplete .sshAdminStepNumber { color:#83d8bb; }
+.sshAdminStepComplete { border-color:rgba(83,177,145,.28) !important; }
+.sshPublicKeyInput { width:100%; min-height:72px; resize:vertical; padding:10px 11px; border:1px solid rgba(98,126,118,.32); border-radius:7px; outline:none; background:#090d0c; color:#c6d6d1; font:10px/1.55 var(--font-mono); }
+.sshPublicKeyInput:focus { border-color:rgba(83,177,145,.62); box-shadow:0 0 0 3px rgba(83,177,145,.08); }
+.sshStepButton { margin-top:9px; min-height:34px; padding:0 13px; border:1px solid #31564b; border-radius:7px; background:var(--green-dim); color:var(--green); font:700 9px var(--font-mono); cursor:pointer; }
+.sshStepButton:disabled { opacity:.38; cursor:not-allowed; }
+.sshHardeningButton { border-color:rgba(224,171,75,.36); background:rgba(224,171,75,.09); color:var(--warning); }
+.sshFingerprint { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px; align-items:center; }
+.sshFingerprint > span { padding:6px 8px; border-radius:6px; background:rgba(83,177,145,.12); color:var(--green); font:700 8px var(--font-mono); text-transform:uppercase; }
+.sshFingerprint code { min-width:0; overflow-wrap:anywhere; }
+.sshResetKeyButton { margin-top:9px; padding:0; border:0; background:transparent; color:#d0948d; font:9px var(--font-mono); text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
+.sshResetKeyButton:hover { color:#ef8178; }
+.sshResetKeyButton:disabled { opacity:.4; cursor:not-allowed; }
+.sshTestCheck { display:flex; gap:9px; align-items:flex-start; margin-top:10px; color:#bdc8c4; font-size:10px; line-height:1.45; cursor:pointer; }
+.sshTestCheck input { flex:0 0 auto; width:15px; height:15px; margin:0; accent-color:var(--green); }
+.sshRollbackPanel { padding:11px; border:1px solid rgba(224,171,75,.3); border-radius:8px; background:rgba(224,171,75,.055); }
+.sshRollbackHead { display:flex; align-items:center; justify-content:space-between; gap:18px; }
+.sshRollbackHead strong,.sshRollbackHead span { display:block; }
+.sshRollbackHead strong { color:#eadcbf; font-size:10px; }
+.sshRollbackHead span { margin-top:3px; color:var(--muted); font-size:9px; }
+.sshRollbackHead time { min-width:76px; color:var(--warning); font:700 22px var(--font-mono); letter-spacing:.04em; text-align:right; font-variant-numeric:tabular-nums; }
+.sshRollbackHead time.critical { color:#ef8178; animation:sshCountdownPulse 1s ease-in-out infinite; }
+.sshRollbackPanel > small { display:block; margin-top:5px; color:#978b73; font:8px var(--font-mono); }
+.sshRollbackActions { display:flex; justify-content:flex-end; gap:8px; margin-top:10px; }
+.sshRollbackActions button { min-height:32px; padding:0 11px; border:1px solid var(--line); border-radius:7px; background:rgba(255,255,255,.025); color:var(--muted); font:9px var(--font-mono); cursor:pointer; }
+.sshRollbackActions .sshStepButton { margin:0; border-color:#31564b; background:var(--green-dim); color:var(--green); }
+@keyframes sshCountdownPulse { 50% { opacity:.58; } }
+.sshAdminNotice { display:grid; grid-template-columns:26px minmax(0,1fr); gap:10px; margin-top:12px; padding:11px 13px; border:1px solid rgba(91,121,177,.24); border-radius:9px; background:rgba(72,104,161,.065); }
+.sshAdminNotice > span { display:grid; place-items:center; width:24px; height:24px; border-radius:50%; background:rgba(91,121,177,.16); color:#9eb8e7; font:700 10px var(--font-mono); }
+.sshAdminNotice strong { display:block; color:#c7d2e6; font-size:10px; }
+.sshAdminNotice p { margin:3px 0 0; color:var(--muted); font-size:9px; line-height:1.5; }
+.sshAdminActions { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:13px 22px; border-top:1px solid var(--line); background:rgba(6,9,8,.46); }
+.sshAdminActions span { color:var(--muted); font:9px var(--font-mono); }
+.sshAdminActions button { min-width:112px; min-height:36px; border:1px solid #31564b; border-radius:8px; background:var(--green-dim); color:var(--green); cursor:pointer; }
+@media (max-width:640px) { .sshAdminDialog { max-height:calc(100vh - 16px); width:calc(100vw - 16px); } .sshAdminHead,.sshAdminBody,.sshAdminActions { padding-left:15px; padding-right:15px; } .sshAdminStatus { grid-template-columns:34px 1fr; } .sshAdminStatus em { display:none; } .sshAdminActions span { display:none; } .sshAdminActions button { width:100%; } }
+
 .shell .serviceRow small, .shell .automationIdentity small {
   font-size: 11px;
   line-height: 1.55;

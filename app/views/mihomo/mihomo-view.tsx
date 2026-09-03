@@ -11,6 +11,22 @@ import { createPortal } from "react-dom";
 type View = "overview" | "profiles" | "channels" | "dns" | "rules" | "routing";
 type ReadyDevice = ProfileDevice & { subscription: string; qr: string };
 
+function clientUuid(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const value = Array.from(bytes, (item) => item.toString(16).padStart(2, "0")).join("");
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
 type ConfirmOptions = {
   title: string;
   message: string;
@@ -470,7 +486,7 @@ export function MihomoPage({
   const [editing, setEditing] = useState<Module | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number | boolean>>({});
   const [profileDialog, setProfileDialog] = useState<Profile | "new" | null>(null);
-  const profileMutationId = useRef(crypto.randomUUID());
+  const profileMutationId = useRef(clientUuid());
   const [profileStep, setProfileStep] = useState(1);
   const profileCanvasRef = useRef<HTMLElement>(null);
   const [profileName, setProfileName] = useState("");
@@ -590,8 +606,8 @@ export function MihomoPage({
     if (!createdProfile) return;
     let cancelled = false;
     void (async () => {
-      const result = await request(`/mihomo/profiles/${createdProfile.id}/subscription`) as { path: string };
-      const subscription = new URL(result.path, window.location.origin).toString();
+      const result = await request(`/mihomo/profiles/${createdProfile.id}/subscription`) as { path: string; url?: string };
+      const subscription = result.url || new URL(result.path, window.location.origin).toString();
       const qr = await QRCode.toDataURL(subscription, { errorCorrectionLevel: "M", margin: 2, width: 360 });
       return [{ id: "profile", name: createdProfile.name, subscription, qr }];
     })().then((items) => { if (!cancelled) setReadyDevices(items); }).catch((cause) => {
@@ -887,7 +903,7 @@ export function MihomoPage({
   }
 
   function newProfile() {
-    profileMutationId.current = crypto.randomUUID();
+    profileMutationId.current = clientUuid();
     setProfileStep(1);
     setProfileStrategyTouched(false);
     setProfileDialog("new");
@@ -899,7 +915,7 @@ export function MihomoPage({
   }
 
   function editProfile(profile: Profile) {
-    profileMutationId.current = crypto.randomUUID();
+    profileMutationId.current = clientUuid();
     setProfileStep(1);
     setProfileStrategyTouched(true);
     setProfileDialog(profile);
@@ -925,7 +941,7 @@ export function MihomoPage({
       if (vlessRoute === "tls") settings.tls_domain = String(routingPolicy?.values.preset_tls_domain || "").trim();
     }
     setProfileConnections((current) => [...current, {
-      id: `connection-${crypto.randomUUID()}`,
+      id: `connection-${clientUuid()}`,
       component: module.id,
       name: module.id === "transport-reality" ? (vlessRoute === "cdn" ? "VLESS CDN" : vlessRoute === "tls" ? "VLESS TLS" : "VLESS REALITY") : module.name,
       device_id: activeDeviceId,
@@ -963,7 +979,7 @@ export function MihomoPage({
         settings.cdn_enabled = false;
         if (definition.transport) settings.transport = definition.transport;
       }
-      connections.push({ id: `connection-${crypto.randomUUID()}`, component: componentId, name: definition.label || `${componentModule.name}${definition.cdn ? " · CDN" : ""}`, device_id: activeDeviceId, settings });
+      connections.push({ id: `connection-${clientUuid()}`, component: componentId, name: definition.label || `${componentModule.name}${definition.cdn ? " · CDN" : ""}`, device_id: activeDeviceId, settings });
     }
     setProfileConnections((current) => [...current.filter((connection) => connection.device_id !== activeDeviceId), ...connections]);
     if (!profileStrategyTouched) setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: { ...(device.routing || profileRouting), strategy: preset.strategy } } : device));
@@ -1114,8 +1130,8 @@ export function MihomoPage({
     setBusy(`subscription:${profile.id}`);
     setError("");
     try {
-      const result = await request(`/mihomo/profiles/${profile.id}/subscription`) as { path: string };
-      await navigator.clipboard.writeText(new URL(result.path, window.location.origin).toString());
+      const result = await request(`/mihomo/profiles/${profile.id}/subscription`) as { path: string; url?: string };
+      await navigator.clipboard.writeText(result.url || new URL(result.path, window.location.origin).toString());
       setNotice(`Единая ссылка профиля «${profile.name}» скопирована. Клиент с HWID появится как отдельное устройство, без HWID получит общие правила.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось получить ссылку подписки");
@@ -1132,7 +1148,7 @@ export function MihomoPage({
 
   function addPresetDraft() {
     if (presetDraft.length >= 12) return;
-    const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID().slice(0, 8) : String(Date.now()).slice(-8);
+    const suffix = clientUuid().slice(0, 8);
     setPresetEditorIndex(presetDraft.length);
     setPresetDraft((current) => [...current, {
       id: `preset-${suffix}`,

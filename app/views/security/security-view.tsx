@@ -20,12 +20,12 @@ type SecurityViewProps = {
   legacy: Record<string, { active?: boolean; enabled?: string }>; applicationSecurity?: AppSecurity; panelSecurity?: PanelSecurity; panelAccessHealthy: boolean; sshProtected: boolean; failedSshRecords24h: string;
   autoRefresh: boolean; securityLogsOpen: boolean; securityLogSource: LogSource; securityLogs: string[]; securityLogsUpdatedAt: Date | null; securityNewLogCount: number;
   fixSecurity: (action: "secure" | "kernel-update" | "vpn-firewall") => Promise<void> | void; runApplicationAction: (action: ApplicationAction) => Promise<void> | void;
-  setPasswordDialog: Dispatch<SetStateAction<boolean>>; setSecurityLogsOpen: Dispatch<SetStateAction<boolean>>; setSecurityLogSource: Dispatch<SetStateAction<LogSource>>; setSecurityLogs: Dispatch<SetStateAction<string[]>>;
+  setPasswordDialog: Dispatch<SetStateAction<boolean>>; openSshAdminDialog: () => void; setSecurityLogsOpen: Dispatch<SetStateAction<boolean>>; setSecurityLogSource: Dispatch<SetStateAction<LogSource>>; setSecurityLogs: Dispatch<SetStateAction<string[]>>;
   loadSecurityLogs: () => Promise<void> | void; downloadLogs: (filename: string, lines: string[]) => void;
 };
 
 export function SecurityView(props: SecurityViewProps) {
-  const { securityLoading, securityScore, securityChecks, securityPerimeterChecks, securitySystemChecks, securityApplicationChecks, firewall, ssh, updates, applicationVersion, securitySystem, fail2ban, listeners, listenerSummary, legacy, applicationSecurity, panelSecurity, panelAccessHealthy, sshProtected, failedSshRecords24h, autoRefresh, securityLogsOpen, securityLogSource, securityLogs, securityLogsUpdatedAt, securityNewLogCount, fixSecurity, runApplicationAction, setPasswordDialog, setSecurityLogsOpen, setSecurityLogSource, setSecurityLogs, loadSecurityLogs, downloadLogs } = props;
+  const { securityLoading, securityScore, securityChecks, securityPerimeterChecks, securitySystemChecks, securityApplicationChecks, firewall, ssh, updates, applicationVersion, securitySystem, fail2ban, listeners, listenerSummary, legacy, applicationSecurity, panelSecurity, panelAccessHealthy, sshProtected, failedSshRecords24h, autoRefresh, securityLogsOpen, securityLogSource, securityLogs, securityLogsUpdatedAt, securityNewLogCount, fixSecurity, runApplicationAction, setPasswordDialog, openSshAdminDialog, setSecurityLogsOpen, setSecurityLogSource, setSecurityLogs, loadSecurityLogs, downloadLogs } = props;
   return <section className="securityWorkspace">
         <article className="securityOverview">
           <div className="securityOverviewLead">
@@ -82,7 +82,7 @@ export function SecurityView(props: SecurityViewProps) {
                 <SecurityActionRow ok={Boolean(firewall?.vpn_policy_healthy)} title="VPN firewall policy" text={`Forwarding ${firewall?.forwarding_enabled ? "ON" : "OFF"}  stateful ${firewall?.stateful_return ? "ON" : "OFF"}`} onAction={() => void fixSecurity("vpn-firewall")} />
                 <SecurityActionRow ok={panelAccessHealthy} title="Доступ к панели" text={panelSecurity?.publicly_accessible ? `Публичный TCP ${panelSecurity.port || 80} разрешён UFW` : `Из интернета закрыт · ${panelSecurity?.internal_url || "внутренний адрес"} через ${(panelSecurity?.allowed_channels || []).join(" / ") || "защищённое подключение"}`} onAction={() => void fixSecurity("secure")} />
                 <SecurityActionRow ok={Boolean(fail2ban?.active && fail2ban?.jail_active)} title="Fail2ban  SSH" text={`В бане ${fail2ban?.currently_banned || 0}  всего ${fail2ban?.total_banned || 0}`} onAction={() => void fixSecurity("secure")} />
-                <SecurityActionRow ok={sshProtected} title="SSH  административный доступ" text={ssh?.active === false ? "SSH остановлен" : `Internet ${ssh?.publicly_allowed ? "allowed" : "closed"}  Password ${String(ssh?.password_authentication || "unknown")}  Root ${String(ssh?.permit_root_login || "unknown")}`} onAction={() => void fixSecurity("secure")} />
+                <SecurityActionRow ok={sshProtected} title="SSH  административный доступ" text={ssh?.active === false ? "SSH остановлен" : `Internet ${ssh?.publicly_allowed ? "allowed" : "closed"}  Password ${String(ssh?.password_authentication || "unknown")}  Root ${String(ssh?.permit_root_login || "unknown")}`} onAction={openSshAdminDialog} actionLabel="Настроить" alwaysAction />
                 <SecurityActionRow ok={ssh?.active === false || ssh?.x11_forwarding === "no"} title="SSH-туннели" text={ssh?.active === false ? "SSH остановлен" : `X11 ${ssh?.x11_forwarding || "unknown"}  TCP ${ssh?.tcp_forwarding || "unknown"}  MaxAuthTries ${ssh?.max_auth_tries || "unknown"}`} onAction={() => void fixSecurity("secure")} />
               </div>
             </section>

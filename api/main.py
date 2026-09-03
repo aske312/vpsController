@@ -141,7 +141,7 @@ AWG_PROFILE = {
     "H3": os.getenv("AWG_H3", "1000000000"), "H4": os.getenv("AWG_H4", "1400000000"),
 }
 DATA_DIR = Path(os.getenv("DATA_DIR", "/var/lib/vps-control"))
-ENV_FILE = Path(os.getenv("ENV_FILE", "/etc/vps-control.env"))
+ENV_FILE = Path(os.getenv("ENV_FILE", "/etc/vps-control/environment"))
 CLIENTS_FILE = DATA_DIR / "clients.json"
 ACTION_FILE = DATA_DIR / "application-action.json"
 AUTOMATION_FILE = DATA_DIR / "automation.json"
@@ -152,6 +152,7 @@ APP_VERSION_FILE = DATA_DIR / "application-version.json"
 LOGGING_CONFIG_FILE = Path("/etc/vps-control-logging.conf")
 INSTALL_DIR = Path(os.getenv("INSTALL_DIR", "/opt/vps-control"))
 CONTROL_COMMAND = os.getenv("CONTROL_COMMAND", "/usr/local/sbin/vps-control")
+SSH_ACCESS_FILE = DATA_DIR / "ssh-access.json"
 PROTOCOL_IMAGES_DIR = INSTALL_DIR / "protocol-images"
 MONITOR_DIR = DATA_DIR / "monitor"
 DNS_SETTINGS_FILE = DATA_DIR / "dns-settings.json"
@@ -1107,6 +1108,10 @@ class AdminPasswordChange(BaseModel):
     confirm_password: str = Field(min_length=16, max_length=128)
 
 
+class SshPublicKeyInstall(BaseModel):
+    public_key: str = Field(min_length=80, max_length=2048)
+
+
 @app.get("/api/auth/status")
 def auth_status() -> dict:
     return {"configured": bool(ADMIN_USER and ADMIN_PASSWORD), "username": ADMIN_USER}
@@ -1156,6 +1161,74 @@ def change_admin_password(payload: AdminPasswordChange, _: None = Depends(requir
     ADMIN_PASSWORD = password
     os.environ["ADMIN_PASSWORD"] = password
     return {"changed": True, "reauthenticate": True}
+
+
+def ssh_access_state() -> dict:
+    state = {"phase": "password", "fingerprint": "", "rollback_deadline": None, "message": ""}
+    try:
+        loaded = json.loads(SSH_ACCESS_FILE.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            state.update({key: loaded.get(key, state[key]) for key in state})
+    except (OSError, json.JSONDecodeError):
+        pass
+    public_key_login = run(
+        "journalctl", "-u", "ssh.service", "--since", "-15 minutes", "--no-pager", "-o", "cat", timeout=5,
+    )
+    fingerprint = str(state.get("fingerprint") or "")
+    state["key_login_observed"] = bool(
+        fingerprint
+        and re.search(rf"Accepted publickey for .* {re.escape(fingerprint)}(?: |$)", public_key_login)
+    )
+    return state
+
+
+def run_ssh_access_action(action: str, *arguments: str) -> None:
+    unit = f"vps-control-ssh-access-{action}-{int(time.time() * 1000)}"
+    result = subprocess.run(
+        ["systemd-run", f"--unit={unit}", "--wait", "--collect", "--pipe", "--quiet", "--property=Type=oneshot", CONTROL_COMMAND, action, *arguments],
+        capture_output=True, text=True, timeout=45, check=False,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip().splitlines()
+        raise HTTPException(status_code=400, detail=detail[-1] if detail else "Не удалось изменить доступ SSH")
+
+
+@app.get("/api/security/ssh-access")
+def get_ssh_access(_: None = Depends(require_token)) -> dict:
+    return ssh_access_state()
+
+
+@app.post("/api/security/ssh-access/key")
+def install_ssh_public_key(payload: SshPublicKeyInstall, _: None = Depends(require_token)) -> dict:
+    public_key = payload.public_key.strip()
+    if "\n" in public_key or "\r" in public_key:
+        raise HTTPException(status_code=400, detail="Публичный ключ должен занимать одну строку")
+    run_ssh_access_action("ssh-key-add", public_key)
+    return ssh_access_state()
+
+
+@app.post("/api/security/ssh-access/key/reset")
+def reset_ssh_public_key(_: None = Depends(require_token)) -> dict:
+    run_ssh_access_action("ssh-key-reset")
+    return ssh_access_state()
+
+
+@app.post("/api/security/ssh-access/begin")
+def begin_ssh_hardening(_: None = Depends(require_token)) -> dict:
+    run_ssh_access_action("ssh-access-begin")
+    return ssh_access_state()
+
+
+@app.post("/api/security/ssh-access/confirm")
+def confirm_ssh_hardening(_: None = Depends(require_token)) -> dict:
+    run_ssh_access_action("ssh-access-confirm")
+    return ssh_access_state()
+
+
+@app.post("/api/security/ssh-access/rollback")
+def rollback_ssh_hardening(_: None = Depends(require_token)) -> dict:
+    run_ssh_access_action("ssh-access-rollback")
+    return ssh_access_state()
 
 
 @app.get("/api/overview")
@@ -1305,8 +1378,10 @@ def security(_: None = Depends(require_token)) -> dict:
             panel_allowed_channels.add("IKEv2")
         if parts[5] in ("0.0.0.0/0", "::/0") and not vpn_interfaces:
             panel_public_rule = True
+    # Public transport hosts may legitimately keep TCP 80/443 open while the
+    # panel itself is restricted by Caddy to managed connections.
     panel_publicly_accessible = (
-        ufw_enabled and panel_listening and panel_public_rule
+        access_mode != "vpn" and ufw_enabled and panel_listening and panel_public_rule
     )
     panel_access_consistent = (
         panel_publicly_accessible
@@ -1319,7 +1394,7 @@ def security(_: None = Depends(require_token)) -> dict:
         enabled = run("systemctl", "is-enabled", name)
         active = run("systemctl", "is-active", name)
         legacy_services[name] = {"enabled": enabled or "not-found", "active": active == "active"}
-    env_file = Path("/etc/vps-control.env")
+    env_file = ENV_FILE
     control_file = Path(CONTROL_COMMAND)
     env_mode = env_file.stat().st_mode & 0o777 if env_file.exists() else None
     control_mode = control_file.stat().st_mode & 0o777 if control_file.exists() else None
@@ -2472,15 +2547,16 @@ def update_panel_access(payload: PanelAccessSettings, _: None = Depends(require_
     unit = f"vps-control-access-{int(time.time())}"
     result = subprocess.run(
         [
-            "systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec",
+            "systemd-run", f"--unit={unit}", "--wait", "--pipe", "--collect",
+            "--property=Type=exec",
             CONTROL_COMMAND, "access-mode", payload.mode,
         ],
-        capture_output=True, text=True, timeout=10, check=False,
+        capture_output=True, text=True, timeout=90, check=False,
     )
     if result.returncode:
         raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to change panel access")
     return {
-        "mode": payload.mode, "state": "activating", "unit": f"{unit}.service",
+        "mode": payload.mode, "state": "active", "unit": f"{unit}.service",
         "internal_url": internal_panel_url(), "available_channels": configured_panel_channels(),
     }
 
@@ -3797,9 +3873,8 @@ def persist_env_values(values: dict[str, str | int | bool]) -> None:
             env_text = re.sub(rf"(?m)^{re.escape(key)}=.*$", lambda _: line, env_text)
         else:
             env_text = env_text.rstrip() + "\n" + line + "\n"
-    # ProtectSystem=strict exposes the exact /etc/vps-control.env file as
-    # writable, not arbitrary sibling paths in /etc. Writing a sibling temp
-    # file therefore fails with EROFS inside the API service sandbox.
+    # The environment file lives in the writable /etc/vps-control directory;
+    # /etc/vps-control.env is retained by the installer as a compatibility link.
     ENV_FILE.write_text(env_text, encoding="utf-8")
     os.chmod(ENV_FILE, 0o600)
 
@@ -3991,9 +4066,6 @@ def update_protocol_settings(
             config_text = f"listen: :{port}\n{tls}auth:\n  type: http\n  http:\n    url: http://127.0.0.1:18081/auth\ntrafficStats:\n  listen: 127.0.0.1:18082\n  secret: vps-control-local\n{obfs}masquerade:\n  type: string\n  string:\n    content: Not Found\n    statusCode: 404\n"
             temporary.write_text(config_text, encoding="utf-8")
             os.chmod(temporary, 0o600)
-            result = subprocess.run(["/usr/local/lib/vps-control-hysteria2/hysteria", "server", "-c", str(temporary), "--test"], capture_output=True, text=True, timeout=15, check=False)
-            if result.returncode:
-                raise RuntimeError(result.stderr.strip() or "Hysteria2 rejected configuration")
             old_port = int(json.loads(original_settings).get("port", 8443))
             temporary.replace(HYSTERIA2_CONFIG)
             atomic = HYSTERIA2_SETTINGS.with_suffix(".tmp")

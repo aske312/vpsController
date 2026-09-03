@@ -3188,7 +3188,12 @@ def profile_subscription(profile_id: str, device_id: str | None = None) -> dict[
         item["subscriptions"] = {}
         item["subscription_migrated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         save_profiles(data)
-    return {"path": f"/api/mihomo/subscriptions/{token}"}
+    path = f"/api/mihomo/subscriptions/{token}"
+    public_domain = os.getenv("PUBLIC_DOMAIN", "").strip()
+    result = {"path": path}
+    if public_domain:
+        result["url"] = f"https://{public_domain}{path}"
+    return result
 
 
 def subscription_device_metadata(request: Request) -> dict[str, str]:
