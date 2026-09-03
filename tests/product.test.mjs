@@ -345,8 +345,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.doesNotMatch(page, /<small>пинг<\/small>/);
   assert.doesNotMatch(page, /<small>PING<\/small>/);
   assert.doesNotMatch(page, /item\?\.latency_ms/);
-  assert.match(styles, /new-operator\/mihomo\.webp/);
-  assert.match(styles, /\.mihomoCommandHero \.mihomoHeroArt \{[^}]*background-size:contain/s);
+  assert.match(styles, /new-operator\/mihomo-control-v2\.png/);
+  assert.match(styles, /\.mihomoCommandHero \.mihomoHeroArt \{[^}]*position:absolute[^}]*background:url\("\/gate-art\/new-operator\/mihomo-control-v2\.png"\) center\/cover no-repeat/s);
   assert.match(page, /overviewIssueTargets/);
   assert.match(page, /overviewActiveConnections/);
   assert.match(page, /overviewIssues/);
