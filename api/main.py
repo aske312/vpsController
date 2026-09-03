@@ -1904,17 +1904,35 @@ def remove_protocol_image(image_id: str, _: None = Depends(require_token)) -> di
     if not image.get("removable"):
         raise HTTPException(status_code=409, detail="Protocol does not support removal")
     if os.getenv("ACCESS_MODE", "external") == "vpn" and image_id in ("wg", "awg"):
-        alternate_id = "awg" if image_id == "wg" else "wg"
-        alternate_interface = AWG_INTERFACE if alternate_id == "awg" else WG_INTERFACE
-        alternate_tool = "awg" if alternate_id == "awg" else "wg"
-        alternate_unit = f"{alternate_tool}-quick@{alternate_interface}.service"
-        if not (
-            Path(f"/sys/class/net/{alternate_interface}").exists()
-            and run("systemctl", "is-active", alternate_unit) == "active"
-        ):
+        removed_label = "WireGuard" if image_id == "wg" else "AmneziaWG"
+        fallback_channels = set(configured_panel_channels()) - {removed_label}
+        # A protected panel is routable through every managed VPN, not only
+        # through the other WireGuard-family interface.  The old two-item
+        # check incorrectly rejected WG removal even with OpenVPN/IKEv2 ready.
+        live_fallbacks = set()
+        if "WireGuard" in fallback_channels and run("systemctl", "is-active", f"wg-quick@{WG_INTERFACE}.service") == "active":
+            live_fallbacks.add("WireGuard")
+        if "AmneziaWG" in fallback_channels and run("systemctl", "is-active", f"awg-quick@{AWG_INTERFACE}.service") == "active":
+            live_fallbacks.add("AmneziaWG")
+        if "OpenVPN" in fallback_channels and run("systemctl", "is-active", "vps-control-openvpn.service") == "active":
+            live_fallbacks.add("OpenVPN")
+        if "IKEv2" in fallback_channels and run("systemctl", "is-active", "vps-control-ikev2.service") == "active":
+            live_fallbacks.add("IKEv2")
+        fallback_services = {
+            "VLESS": "vps-control-vless-reality-xhttp.service",
+            "transport-reality": "vps-control-mihomo-reality.service",
+            "Shadowsocks": "vps-control-shadowsocks.target",
+            "Hysteria2": "vps-control-hysteria2.service",
+            "TUIC v5": "vps-control-tuic.service",
+            "Trojan": "vps-control-trojan.service",
+        }
+        for channel, unit_name in fallback_services.items():
+            if channel in fallback_channels and run("systemctl", "is-active", unit_name) == "active":
+                live_fallbacks.add(channel)
+        if not live_fallbacks:
             raise HTTPException(
                 status_code=409,
-                detail="The last active VPN module cannot be removed while panel access is VPN-only",
+                detail="Нельзя удалить последний активный канал доступа к закрытой панели. Сначала включите другой VPN-протокол или публичный доступ.",
             )
     if ACTION_FILE.exists():
         try:
@@ -1933,7 +1951,7 @@ def remove_protocol_image(image_id: str, _: None = Depends(require_token)) -> di
     action = {
         "unit": f"{unit}.service", "action": f"protocol-remove:{image_id}",
         "started_at": datetime.now(timezone.utc).isoformat(), "state": "activating",
-        "progress": 3, "message": "Запуск удаления протокола",
+        "progress": 3, "message": f"Удаление {image.get('name', image_id)} запущено; дождитесь подтверждения сервера",
     }
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")

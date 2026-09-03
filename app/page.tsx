@@ -1080,6 +1080,7 @@ export default function Home() {
     setBusy(true); setError(""); setInstallingProtocol(`remove-${image.id}`);
     try {
       const started = await request(`/protocol-images/${image.id}`, { method: "DELETE" });
+      setNotice(`Удаление ${image.name} запущено. Не закрывайте страницу до подтверждения.`);
       setApplication((current) => ({
         api: current?.api || { active: true, enabled: true },
         containers: current?.containers || [],
@@ -1419,7 +1420,7 @@ export default function Home() {
     onLogout={() => { sessionStorage.removeItem("312-token"); setToken(""); }}
   >
       {tab !== "overview" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
-      {error && <div className="errorBox">{error}</div>}
+      {error && <div className="errorBox" role="alert"><span>!</span>{error}<button onClick={() => setError("")} aria-label="Закрыть сообщение об ошибке">×</button></div>}
       {notice && <div className="successNotice" role="status"><span>✓</span>{notice}<button onClick={() => setNotice("")} aria-label="Закрыть уведомление">×</button></div>}
       {tab === "overview" && (
         <OverviewDashboard

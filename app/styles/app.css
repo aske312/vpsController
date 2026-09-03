@@ -770,6 +770,14 @@
 }
 
 .errorBox {
+  position: fixed;
+  z-index: 10000;
+  top: 18px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: min(520px, calc(100vw - 36px));
   border: 1px solid #4b2a2a;
   background: #211517;
   color: #ef8b7e;
@@ -1154,6 +1162,18 @@
 .confirmActions button:disabled {
   opacity: .35;
   cursor: not-allowed;
+}
+
+.errorBox > span {
+  font-weight: 800;
+}
+
+.errorBox > button {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 17px;
 }
 
 .sshAdminDialog { width:min(720px,calc(100vw - 32px)); max-height:min(860px,calc(100vh - 32px)); padding:0; overflow:hidden; border-color:rgba(98,126,118,.36); background:linear-gradient(155deg,#111817 0%,#0d1211 55%,#101514 100%); box-shadow:0 28px 90px rgba(0,0,0,.58); }
