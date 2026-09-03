@@ -1226,7 +1226,7 @@ export function MihomoPage({
             <div className="mihomoHeroTitleLine">
               <h1>Центр управления</h1>
               <span className={status?.active ? "mihomoCoreState online" : "mihomoCoreState"}>
-                {status?.active ? "ЯДРО В СЕТИ" : "НУЖНА ПРОВЕРКА"}
+                {status?.active ? "В СЕТИ" : "НУЖНА ПРОВЕРКА"}
               </span>
             </div>
             <p className="mihomoHeroLead">
@@ -1255,7 +1255,7 @@ export function MihomoPage({
           </div>
           <div className="mihomoHeroEndpoint"><span>ENDPOINT</span><b>{status?.endpoint || "Не определён"}</b></div>
         </div>
-        <div className="mihomoHeroArt" aria-hidden="true"><span>MIHOMO</span></div>
+        <div className="mihomoHeroArt" aria-hidden="true" />
         <nav className="mihomoHost__tabs mihomoTabs mihomoHeroNavigation" aria-label="Разделы Mihomo">
           <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
           <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
@@ -1324,16 +1324,15 @@ export function MihomoPage({
                     const onlineCount = connectionStats.filter((item) => Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0))).length;
                     const deviceRx = connectionStats.reduce((sum, item) => sum + Number(item?.rx_bytes || 0), 0);
                     const deviceTx = connectionStats.reduce((sum, item) => sum + Number(item?.tx_bytes || 0), 0);
-                    const deviceLatency = profileStats[profile.id]?.devices?.[device.id]?.latency_ms;
                     const protocolListKey = `${profile.id}:${device.id}`;
                     const protocolsExpanded = expandedProtocolLists.has(protocolListKey);
                     const deleting = busy === `device:${profile.id}:${device.id}`;
                     return <section key={device.id} className="mihomoProfileDevice">
                       <header className="mihomoDeviceHeader">
-                        <button type="button" className="mihomoDeviceToggle" aria-expanded={protocolsExpanded} onClick={() => toggleCollapsed(setExpandedProtocolLists, protocolListKey)}><div className="mihomoDeviceIdentity"><span>{device.scope === "common" ? "ALL" : devicePlatformMeta(device).code}</span><p><b>{device.scope === "common" ? "Общие настройки профиля" : device.name}</b><small>{connections.length} каналов · {device.scope === "hwid" ? deviceSystemLabel(device) : device.scope === "common" ? "для клиентов без HWID и новых устройств" : "устаревшее устройство"}</small>{device.scope === "hwid" && <em>{device.last_seen_at ? `Последний запрос ${new Date(device.last_seen_at).toLocaleString("ru-RU")}` : "HWID зарегистрирован"}</em>}</p></div><div className="mihomoDeviceTotals"><span><small>КАНАЛЫ</small><b>{onlineCount}/{connections.length}</b></span><span><small>ПРАВИЛА</small><b>{ruleCount}</b></span><span><small>ТРАФИК</small><b>↓ {bytes(deviceRx)} · ↑ {bytes(deviceTx)}</b></span><span><small>PING</small><b>{deviceLatency != null ? `${Math.round(deviceLatency)} ms` : "—"}</b></span></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
+                        <button type="button" className="mihomoDeviceToggle" aria-expanded={protocolsExpanded} onClick={() => toggleCollapsed(setExpandedProtocolLists, protocolListKey)}><div className="mihomoDeviceIdentity"><span>{device.scope === "common" ? "ALL" : devicePlatformMeta(device).code}</span><p><b>{device.scope === "common" ? "Общие настройки профиля" : device.name}</b><small>{connections.length} каналов · {device.scope === "hwid" ? deviceSystemLabel(device) : device.scope === "common" ? "для клиентов без HWID и новых устройств" : "устаревшее устройство"}</small>{device.scope === "hwid" && <em>{device.last_seen_at ? `Последний запрос ${new Date(device.last_seen_at).toLocaleString("ru-RU")}` : "HWID зарегистрирован"}</em>}</p></div><div className="mihomoDeviceTotals"><span><small>КАНАЛЫ</small><b>{onlineCount}/{connections.length}</b></span><span><small>ПРАВИЛА</small><b>{ruleCount}</b></span><span><small>ТРАФИК</small><b>↓ {bytes(deviceRx)} · ↑ {bytes(deviceTx)}</b></span></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
                         <nav className="mihomoDeviceActions"><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>Скачать YAML</button><button onClick={() => void copyConfig(profile, device)} disabled={busy === `config:${profile.id}`}>Копировать YAML</button>{device.scope !== "common" && <button className="dangerButton" onClick={() => void removeProfileDevice(profile, device)} disabled={deleting} title="Удалить это устройство и его подключения">{deleting ? "Удаление…" : "Удалить устройство"}</button>}</nav>
                       </header>
-                    {protocolsExpanded && <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0)); return <div key={connection.id}><span className={`protocol-${connection.component}${online ? " online" : ""}`}>{channelShort[connection.component] || "CH"}<i /></span><p><b>{connection.name}</b><small>↓ {bytes(item?.rx_bytes || 0)} · ↑ {bytes(item?.tx_bytes || 0)}{item?.latency_ms != null ? ` · ${Math.round(item.latency_ms)} ms` : ""}</small>{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Для устройства пока нет подключений.</p>}</div>}
+                    {protocolsExpanded && <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0)); return <div key={connection.id}><span className={`protocol-${connection.component}${online ? " online" : ""}`}>{channelShort[connection.component] || "CH"}<i /></span><p><b>{connection.name}</b><small>↓ {bytes(item?.rx_bytes || 0)} · ↑ {bytes(item?.tx_bytes || 0)}</small>{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Для устройства пока нет подключений.</p>}</div>}
                     </section>;
                   })}
                   {!devices.length && <p className="mihomoConnectionEmpty">HWID-устройства пока не зарегистрированы. Клиенты без HWID используют общий пул и не отображаются как устройства.</p>}

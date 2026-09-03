@@ -395,7 +395,7 @@
 .mihomoDeviceIdentity b,.mihomoDeviceIdentity small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mihomoDeviceIdentity b { color:#dce8ef; font-size:11px; }
 .mihomoDeviceIdentity small { margin-top:3px; color:#657a89; font:8px var(--font-mono); }
-.mihomoDeviceTotals { display:grid; grid-template-columns:62px 62px minmax(118px,1fr) 58px; gap:7px; }
+.mihomoDeviceTotals { display:grid; grid-template-columns:62px 62px minmax(118px,1fr); gap:7px; }
 .mihomoDeviceTotals > span { min-width:0; padding:7px 9px; border-left:2px solid rgba(134,117,227,.35); background:rgba(10,20,29,.52); }
 .mihomoDeviceTotals small,.mihomoDeviceTotals b { display:block; }
 .mihomoDeviceTotals small { color:#607482; font:700 7px var(--font-mono); letter-spacing:.08em; }
@@ -1227,13 +1227,17 @@
 .mihomoCommandHero .mihomoHeroContent { gap:16px; padding:30px 32px; }
 .mihomoCommandHero .mihomoHeroFacts { grid-template-columns:repeat(4,minmax(0,1fr)); }
 .mihomoCommandHero .mihomoHeroFacts > div { min-height:68px; }
-.mihomoCommandHero { grid-template-rows:minmax(0,1fr) auto; }
+.mihomoCommandHero { grid-template-rows:minmax(0,1fr) auto; border-color:rgba(104,91,190,.24); background:linear-gradient(135deg,#07111d,#050b16); box-shadow:inset 0 1px rgba(255,255,255,.02),0 18px 42px rgba(0,0,0,.12); }
 .mihomoCommandHero .mihomoHeroContent,.mihomoCommandHero .mihomoHeroArt { grid-row:1; }
-.mihomoCommandHero .mihomoHeroArt { background-color:#050c18; background-size:contain; background-position:right center; background-repeat:no-repeat; }
-.mihomoCommandHero .mihomoHeroArt::before { background:linear-gradient(90deg,#050c18 0%,rgba(5,12,24,.94) 8%,rgba(5,12,24,.5) 22%,transparent 43%),linear-gradient(0deg,rgba(5,12,24,.3),transparent 36%); }
-.mihomoHeroNavigation { position:relative; z-index:3; grid-column:1/-1; grid-row:2; gap:1px; padding:0; border:0; border-top:1px solid rgba(103,89,215,.22); border-radius:0; background:rgba(5,12,24,.96); }
+.mihomoCommandHero .mihomoHeroContent { background:linear-gradient(90deg,#07111d 0%,rgba(7,17,29,.98) 78%,rgba(7,17,29,.68) 100%); }
+.mihomoCommandHero .mihomoHeroArt { background-color:#050b16; background-size:contain; background-position:right center; background-repeat:no-repeat; filter:saturate(.76) brightness(.72); }
+.mihomoCommandHero .mihomoHeroArt::before { z-index:1; background:linear-gradient(90deg,#07111d 0%,rgba(7,17,29,.92) 13%,rgba(7,17,29,.48) 31%,rgba(5,11,22,.14) 62%,rgba(5,11,22,.28) 100%),linear-gradient(0deg,rgba(5,11,22,.58),transparent 48%); }
+.mihomoCommandHero .mihomoHeroFacts { gap:0; border:0; border-radius:10px; background:rgba(91,113,138,.08); box-shadow:inset 0 0 0 1px rgba(91,113,138,.1); }
+.mihomoCommandHero .mihomoHeroFacts > div { border-right:1px solid rgba(91,113,138,.09); background:rgba(8,17,29,.42); }
+.mihomoCommandHero .mihomoHeroFacts > div:last-child { border-right:0; }
+.mihomoHeroNavigation { position:relative; z-index:3; grid-column:1/-1; grid-row:2; gap:0; padding:0 12px; border:0; border-radius:0; background:linear-gradient(90deg,rgba(7,17,29,.98),rgba(6,13,25,.94)); box-shadow:inset 0 1px rgba(91,113,138,.08); }
 .mihomoHeroNavigation button { flex:1; justify-content:center; min-height:48px; border-radius:0; }
-.mihomoHeroNavigation button.active { border-color:transparent; box-shadow:inset 0 -2px #8c76ef; background:linear-gradient(0deg,rgba(92,75,180,.2),transparent); }
+.mihomoHeroNavigation button.active { border-color:transparent; box-shadow:inset 0 -2px #8c76ef; background:linear-gradient(0deg,rgba(92,75,180,.14),transparent 76%); }
 .mihomoOverviewLiveRow { grid-template-columns:8px minmax(0,1fr) 70px 96px; }
 @media (max-width:1180px) {
   .mihomoCommandHero .mihomoHeroFacts { grid-template-columns:repeat(2,minmax(0,1fr)); }
