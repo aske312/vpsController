@@ -1204,8 +1204,6 @@ export function MihomoPage({
   const overviewRx = Object.values(profileStats).reduce((sum, item) => sum + Number(item.summary.rx_bytes || 0), 0);
   const overviewTx = Object.values(profileStats).reduce((sum, item) => sum + Number(item.summary.tx_bytes || 0), 0);
   const overviewActiveProfiles = profiles.filter((profile) => Number(profileStats[profile.id]?.summary.active || 0) > 0).length;
-  const overviewLatencies = Object.values(profileStats).map((item) => item.summary.latency_ms).filter((value): value is number => typeof value === "number");
-  const overviewLatency = overviewLatencies.length ? Math.min(...overviewLatencies) : null;
   const overviewIssues = [
     !status?.active ? { title: "Ядро Mihomo не отвечает", text: "Проверьте состояние сервиса перед выдачей профилей.", view: "channels" as View } : null,
     !installedChannels.length ? { title: "Нет компонентов подключения", text: "Установите хотя бы один транспорт.", view: "channels" as View } : null,
@@ -1221,15 +1219,6 @@ export function MihomoPage({
 
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
-      <nav className="mihomoHost__tabs mihomoTabs" aria-label="Разделы Mihomo">
-        <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
-        <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
-        <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Компоненты</Tab>
-        <Tab id="dns" current={view} onSelect={setView}>DNS</Tab>
-        <Tab id="rules" current={view} onSelect={setView}>Правила</Tab>
-        <Tab id="routing" current={view} onSelect={setView}>Настройки</Tab>
-      </nav>
-
       <article className="mihomoCommandHero">
         <div className="mihomoHeroContent">
           <div className="mihomoHeroIntro">
@@ -1267,6 +1256,14 @@ export function MihomoPage({
           <div className="mihomoHeroEndpoint"><span>ENDPOINT</span><b>{status?.endpoint || "Не определён"}</b></div>
         </div>
         <div className="mihomoHeroArt" aria-hidden="true"><span>MIHOMO</span></div>
+        <nav className="mihomoHost__tabs mihomoTabs mihomoHeroNavigation" aria-label="Разделы Mihomo">
+          <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
+          <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
+          <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Компоненты</Tab>
+          <Tab id="dns" current={view} onSelect={setView}>DNS</Tab>
+          <Tab id="rules" current={view} onSelect={setView}>Правила</Tab>
+          <Tab id="routing" current={view} onSelect={setView}>Настройки</Tab>
+        </nav>
       </article>
 
       {error && <div className="mihomoMessage is-error">{error}</div>}
@@ -1280,21 +1277,14 @@ export function MihomoPage({
               <article><small>ПРОФИЛИ В СЕТИ</small><strong>{overviewActiveProfiles}<i> / {profiles.length}</i></strong><span>с активными клиентами</span></article>
               <article><small>HWID-УСТРОЙСТВА</small><strong>{overviewDevices}</strong><span>зарегистрировано</span></article>
               <article><small>ВХОДЯЩИЙ ТРАФИК</small><strong>↓ {bytes(overviewRx)}</strong><span>↑ {bytes(overviewTx)} исходящего</span></article>
-              <article><small>ЛУЧШАЯ ЗАДЕРЖКА</small><strong>{overviewLatency != null ? `${Math.round(overviewLatency)} мс` : "—"}</strong><span>{overviewLatency != null ? "по активным маршрутам" : "нет измерений"}</span></article>
+              <article><small>НАСТРОЕННЫЕ КАНАЛЫ</small><strong>{overviewConnections}</strong><span>во всех профилях</span></article>
             </div>
           </section>
-
-          <nav className="mihomoOverviewShortcuts" aria-label="Быстрые действия Mihomo">
-            <button type="button" onClick={() => setView("profiles")}><i>01</i><span><b>Профили</b><small>Подписки и устройства</small></span><em>→</em></button>
-            <button type="button" onClick={() => setView("channels")}><i>02</i><span><b>Компоненты</b><small>{installedChannels.length} установлено</small></span><em>→</em></button>
-            <button type="button" onClick={() => setView("rules")}><i>03</i><span><b>Правила</b><small>Маршруты приложений</small></span><em>→</em></button>
-            <button type="button" onClick={() => setView("dns")}><i>04</i><span><b>DNS</b><small>{policiesReady ? "Политика готова" : "Требуется настройка"}</small></span><em>→</em></button>
-          </nav>
 
           <section className="mihomoOverviewDesk">
             <article className="mihomoOverviewLiveProfiles">
               <header><div><p className="eyebrow">ПРОФИЛИ</p><h3>Текущая активность</h3></div>{profiles.length > 0 && <button type="button" onClick={() => setView("profiles")}>Все профили</button>}</header>
-              <div>{profiles.slice(0, 8).map((profile) => { const item = profileStats[profile.id]?.summary; const devices = registeredProfileDevices(profile).length; return <div className="mihomoOverviewLiveRow" key={profile.id}><i className={item?.active ? "is-online" : ""} /><p><b>{profile.name}</b><small>{devices} устройств · {profile.connections.length} каналов</small></p><strong>{item ? `${item.active}/${item.configured}` : "—"}<small>активно</small></strong><span>{item?.latency_ms != null ? `${Math.round(item.latency_ms)} мс` : "—"}<small>пинг</small></span><em>↓ {bytes(item?.rx_bytes || 0)}<small>↑ {bytes(item?.tx_bytes || 0)}</small></em></div>; })}</div>
+              <div>{profiles.slice(0, 8).map((profile) => { const item = profileStats[profile.id]?.summary; const devices = registeredProfileDevices(profile).length; return <div className="mihomoOverviewLiveRow" key={profile.id}><i className={item?.active ? "is-online" : ""} /><p><b>{profile.name}</b><small>{devices} устройств · {profile.connections.length} каналов</small></p><strong>{item ? `${item.active}/${item.configured}` : "—"}<small>активно</small></strong><em>↓ {bytes(item?.rx_bytes || 0)}<small>↑ {bytes(item?.tx_bytes || 0)}</small></em></div>; })}</div>
               {!profiles.length && <div className="mihomoOverviewBlank"><b>Здесь появится активность профилей</b><span>{installedChannels.length ? "Создайте профиль и добавьте первое устройство." : "Сначала установите компонент подключения."}</span></div>}
             </article>
 
