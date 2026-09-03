@@ -1907,12 +1907,26 @@ def application_status(_: None = Depends(require_token)) -> dict:
             else:
                 active_state = run("systemctl", "is-active", unit) or "unknown"
                 result = run("systemctl", "show", unit, "--property=Result", "--value") or "unknown"
+                updated_at = action.get("updated_at", "")
+                try:
+                    updated_time = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                except (TypeError, ValueError):
+                    updated_time = None
+                awaiting_final_status = bool(
+                    updated_time
+                    and 0 <= (datetime.now(timezone.utc) - updated_time).total_seconds() < 30
+                    and result == "unknown"
+                    and active_state not in ("active", "activating", "failed")
+                )
                 if active_state in ("active", "activating"):
                     resolved_state = active_state
                 elif active_state == "failed" or result not in ("success", "unknown"):
                     resolved_state = "failed"
                 elif int(action.get("progress", 0) or 0) >= 100 and result == "success":
                     resolved_state = "succeeded"
+                elif awaiting_final_status:
+                    resolved_state = "activating"
+                    action["message"] = "Подтверждаем результат операции"
                 else:
                     resolved_state = "failed"
                     result = "interrupted"

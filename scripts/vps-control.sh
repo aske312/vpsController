@@ -2175,6 +2175,7 @@ update_prebuilt_branch() {
 
   install_prebuilt_release install-release "${archive}"
   ok "приложение обновлено до ${branch} ${release_commit}."
+  write_action_status "succeeded" 100 "Обновление установлено и проверено"
 }
 
 update_test_branch() {
@@ -2228,6 +2229,7 @@ update_test_branch() {
   fi
   rm -f "${DATA_DIR}/application-version.json"
   ok "подготовленная тестовая ветка main ${latest:0:7} установлена с автоматическим откатом при ошибке."
+  write_action_status "succeeded" 100 "Тестовое обновление установлено и проверено"
 }
 
 update_app() {

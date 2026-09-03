@@ -664,6 +664,8 @@ test("main preview is built off-VPS and interrupted updates cannot report succes
   assert.match(api, /--property=TimeoutStopSec=45s/);
   assert.match(api, /Операция прервана перезагрузкой/);
   assert.match(api, /int\(action\.get\("progress"/);
+  assert.match(api, /awaiting_final_status[\s\S]*total_seconds\(\) < 30/);
+  assert.match(manager, /write_action_status "succeeded" 100 "Тестовое обновление установлено и проверено"/);
 });
 
 test("live monitoring uses stable low-load cadence and detailed server metrics", async () => {
