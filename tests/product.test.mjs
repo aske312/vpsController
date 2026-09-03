@@ -339,6 +339,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /aria-label="Раздел настроек"/);
   assert.match(page, /mihomoOverviewV3/);
   assert.match(page, /mihomoOverviewPulse/);
+  assert.match(page, /mihomoOverviewShortcuts/);
+  assert.match(page, /mihomoHeroArt/);
+  assert.match(styles, /new-operator\/mihomo\.webp/);
   assert.match(page, /overviewIssueTargets/);
   assert.match(page, /overviewActiveConnections/);
   assert.match(page, /overviewIssues/);

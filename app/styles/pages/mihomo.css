@@ -1051,6 +1051,64 @@
   .mihomoProfileDialog .mihomoConnectionList { grid-template-columns:1fr; }
 }
 
+/* Mihomo overview: compact command deck with dedicated prepared artwork. */
+.mihomoCommandHero {
+  min-height:360px;
+  display:grid;
+  grid-template-columns:minmax(520px,.92fr) minmax(420px,1.08fr);
+  background:#050c18;
+  border-color:rgba(103,89,215,.34);
+  box-shadow:inset 0 1px rgba(255,255,255,.025),0 18px 44px rgba(0,0,0,.16);
+}
+.mihomoCommandHero::after { z-index:1; background:linear-gradient(90deg,transparent 45%,rgba(43,29,112,.09)); }
+.mihomoHeroContent { position:relative; z-index:2; width:auto; min-height:360px; gap:16px; padding:30px 32px; background:linear-gradient(90deg,rgba(5,12,24,1) 0%,rgba(5,12,24,.98) 82%,rgba(5,12,24,.72) 100%); }
+.mihomoHeroIntro .eyebrow { color:#9887f1; }
+.mihomoHeroTitleLine { align-items:flex-end; }
+.mihomoHeroTitleLine h1 { max-width:520px; font-size:clamp(34px,3.4vw,50px); }
+.mihomoHeroLead { max-width:520px; margin-top:12px; color:#91a4b7; }
+.mihomoHeroFacts { grid-template-columns:repeat(4,minmax(0,1fr)); border-radius:12px; background:rgba(116,94,223,.16); }
+.mihomoHeroFacts > div,.mihomoHeroFacts > div.wide { min-height:68px; padding:11px 12px; background:rgba(8,17,31,.9); }
+.mihomoHeroFacts strong { font-size:14px; }
+.mihomoHeroActions { flex-wrap:wrap; }
+.mihomoHeroActions .dangerButton { margin-left:auto; opacity:.72; }
+.mihomoHeroEndpoint { min-width:0; display:flex; align-items:center; gap:10px; padding-top:2px; color:#61778a; }
+.mihomoHeroEndpoint span { font:700 8px var(--font-mono); letter-spacing:.1em; }
+.mihomoHeroEndpoint b { overflow:hidden; color:#879cac; font:600 9px var(--font-mono); text-overflow:ellipsis; white-space:nowrap; }
+.mihomoHeroArt { position:relative; z-index:0; min-width:0; min-height:360px; overflow:hidden; background:url("/gate-art/new-operator/mihomo.webp") 68% center/cover no-repeat; }
+.mihomoHeroArt::before { content:""; position:absolute; inset:0; background:linear-gradient(90deg,rgba(5,12,24,.92),transparent 28%),linear-gradient(0deg,rgba(5,12,24,.42),transparent 44%); }
+.mihomoHeroArt > span { position:absolute; right:22px; bottom:18px; padding:7px 10px; border:1px solid rgba(121,102,238,.3); border-radius:8px; background:rgba(5,11,24,.58); color:#a999ff; font:800 9px var(--font-mono); letter-spacing:.14em; backdrop-filter:blur(8px); }
+.mihomoOverviewPulse > header { min-height:78px; }
+.mihomoOverviewPulse > header > div { display:grid; gap:3px; }
+.mihomoOverviewPulse > header > div > span { color:var(--muted); font-size:9px; }
+.mihomoOverviewPulse > header > i { width:11px; height:11px; border-radius:50%; background:#69747b; box-shadow:0 0 0 7px rgba(105,116,123,.08); }
+.mihomoOverviewPulse > header > i.is-online { background:#54d2a5; box-shadow:0 0 0 7px rgba(84,210,165,.08),0 0 15px rgba(84,210,165,.38); }
+.mihomoOverviewPulseGrid article { min-height:92px; justify-content:center; }
+.mihomoOverviewShortcuts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+.mihomoOverviewShortcuts button { min-width:0; display:grid; grid-template-columns:30px minmax(0,1fr) auto; align-items:center; gap:10px; padding:12px; border:1px solid rgba(91,113,138,.2); border-radius:12px; background:linear-gradient(145deg,rgba(10,20,30,.94),rgba(6,14,22,.92)); color:inherit; text-align:left; cursor:pointer; }
+.mihomoOverviewShortcuts button:hover { border-color:rgba(121,101,231,.46); background:linear-gradient(145deg,rgba(25,27,55,.94),rgba(7,15,24,.94)); }
+.mihomoOverviewShortcuts button > i { display:grid; place-items:center; width:30px; height:30px; border-radius:8px; background:rgba(92,75,180,.16); color:#b9adfb; font:800 8px var(--font-mono); }
+.mihomoOverviewShortcuts button > span { min-width:0; display:grid; gap:3px; }
+.mihomoOverviewShortcuts b { color:var(--text); font-size:10px; }
+.mihomoOverviewShortcuts small { overflow:hidden; color:var(--muted); font-size:8px; text-overflow:ellipsis; white-space:nowrap; }
+.mihomoOverviewShortcuts em { color:#8878dd; font-style:normal; }
+
+@media (max-width:1180px) {
+  .mihomoCommandHero { grid-template-columns:minmax(480px,1fr) minmax(320px,.75fr); }
+  .mihomoHeroFacts { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .mihomoOverviewShortcuts { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width:820px) {
+  .mihomoCommandHero { grid-template-columns:1fr; }
+  .mihomoHeroContent { min-height:0; padding:22px 18px; }
+  .mihomoHeroArt { min-height:240px; background-position:64% center; }
+  .mihomoHeroActions .dangerButton { margin-left:0; }
+}
+@media (max-width:560px) {
+  .mihomoHeroFacts,.mihomoOverviewPulseGrid,.mihomoOverviewShortcuts { grid-template-columns:1fr 1fr; }
+  .mihomoHeroTitleLine h1 { font-size:34px; }
+  .mihomoHeroArt { min-height:210px; }
+}
+
 @media (max-width:640px) {
   .mihomoProfileHeading label span,.mihomoProfileDialog > footer > span { display:none; }
   .mihomoProfileDialog > footer { grid-template-columns:auto 1fr; }
@@ -1163,4 +1221,15 @@
   .mihomoClientGuide ol,.mihomoClientApps,.mihomoDnsFields,.mihomoDnsSummary,.mihomoDnsMode > div,.mihomoDnsAdvanced > div,.mihomoDnsFakeIp { grid-template-columns:1fr; }
   .mihomoDnsProviders > div { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .mihomoDnsHeader,.mihomoDnsFooter { align-items:flex-start; flex-direction:column; }
+}
+
+/* Keep the overview command deck authoritative over legacy Mihomo sizing rules. */
+.mihomoCommandHero .mihomoHeroContent { gap:16px; padding:30px 32px; }
+.mihomoCommandHero .mihomoHeroFacts { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.mihomoCommandHero .mihomoHeroFacts > div { min-height:68px; }
+@media (max-width:1180px) {
+  .mihomoCommandHero .mihomoHeroFacts { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width:820px) {
+  .mihomoCommandHero .mihomoHeroContent { padding:22px 18px; }
 }

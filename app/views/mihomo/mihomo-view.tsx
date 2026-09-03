@@ -1235,28 +1235,26 @@ export function MihomoPage({
           <div className="mihomoHeroIntro">
             <p className="eyebrow">MIHOMO CONTROL</p>
             <div className="mihomoHeroTitleLine">
-              <h1>Mihomo</h1>
+              <h1>Центр управления</h1>
               <span className={status?.active ? "mihomoCoreState online" : "mihomoCoreState"}>
-                {status?.active ? "CORE ONLINE" : "CORE CHECK"}
+                {status?.active ? "ЯДРО В СЕТИ" : "НУЖНА ПРОВЕРКА"}
               </span>
             </div>
             <p className="mihomoHeroLead">
-              Контроль и управление профилями, компонентами подключений, DNS и политиками маршрутизации.
+              Профили, защищённые маршруты и правила доступа в одном контуре.
             </p>
           </div>
 
           <div className="mihomoHeroFacts">
-            <HeroFact label="CORE" value={status?.core_version || "—"} note={status?.active ? "runtime active" : "status unavailable"} />
-            <HeroFact label="PROFILES" value={String(status?.profiles ?? profiles.length)} note={`${status?.profiles_in_use || 0} in use`} />
-            <HeroFact label="CREDENTIALS" value={String(status?.credentials || 0)} note="internal only" />
-            <HeroFact label="COMPONENTS" value={`${status?.channels_installed ?? installedChannels.length}/${status?.modules_total ?? modules.length}`} note={`${status?.channels_in_use?.length || 0} in use`} />
-            <HeroFact label="ENDPOINT" value={status?.endpoint || "—"} note="Mihomo node" wide />
+            <HeroFact label="ЯДРО" value={status?.core_version || "—"} note={status?.active ? "работает штатно" : "статус недоступен"} />
+            <HeroFact label="ПРОФИЛИ" value={String(status?.profiles ?? profiles.length)} note={`${status?.profiles_in_use || 0} используются`} />
+            <HeroFact label="АКТИВНЫЕ КАНАЛЫ" value={String(overviewActiveConnections)} note={`${overviewConnections} настроено`} />
+            <HeroFact label="КОМПОНЕНТЫ" value={`${status?.channels_installed ?? installedChannels.length}/${status?.modules_total ?? modules.length}`} note={`${status?.channels_in_use?.length || 0} используются`} />
           </div>
 
           <div className="mihomoHeroActions">
-            <button className="ghostButton" type="button" onClick={() => void refresh()} disabled={Boolean(busy)}>
-              Обновить
-            </button>
+            <button className="primaryButton" type="button" onClick={() => setView("profiles")}>Управление профилями</button>
+            <button className="ghostButton" type="button" onClick={() => void refresh()} disabled={Boolean(busy)}>Обновить данные</button>
             <button
               className="dangerButton"
               type="button"
@@ -1266,7 +1264,9 @@ export function MihomoPage({
               {coreBusy ? "Удаляется…" : "Удалить Mihomo"}
             </button>
           </div>
+          <div className="mihomoHeroEndpoint"><span>ENDPOINT</span><b>{status?.endpoint || "Не определён"}</b></div>
         </div>
+        <div className="mihomoHeroArt" aria-hidden="true"><span>MIHOMO</span></div>
       </article>
 
       {error && <div className="mihomoMessage is-error">{error}</div>}
@@ -1275,14 +1275,21 @@ export function MihomoPage({
       {view === "overview" && (
         <div className="mihomoOverviewV3">
           <section className="mihomoOverviewPulse">
-            <header><div><p className="eyebrow">LIVE</p><h2>{overviewActiveConnections ? `${overviewActiveConnections} подключений активно` : "Активных подключений нет"}</h2></div><button type="button" className="ghostButton" onClick={() => void refresh()} disabled={Boolean(busy)}>Обновить</button></header>
+            <header><div><p className="eyebrow">СОСТОЯНИЕ СЕТИ</p><h2>{overviewActiveConnections ? `${overviewActiveConnections} подключений активно` : "Ожидание подключений"}</h2><span>{status?.active ? "Ядро Mihomo принимает конфигурации и обслуживает маршруты" : "Проверьте состояние ядра перед выдачей профилей"}</span></div><i className={status?.active ? "is-online" : ""} /></header>
             <div className="mihomoOverviewPulseGrid">
-              <article><small>ПРОФИЛИ</small><strong>{overviewActiveProfiles}<i> / {profiles.length}</i></strong><span>с активными клиентами</span></article>
-              <article><small>УСТРОЙСТВА</small><strong>{overviewDevices}</strong><span>{overviewConnections} каналов настроено</span></article>
-              <article><small>ТРАФИК</small><strong>↓ {bytes(overviewRx)}</strong><span>↑ {bytes(overviewTx)}</span></article>
-              <article><small>ЛУЧШИЙ ПИНГ</small><strong>{overviewLatency != null ? `${Math.round(overviewLatency)} мс` : "—"}</strong><span>{overviewLatency != null ? "по активным профилям" : "нет измерений"}</span></article>
+              <article><small>ПРОФИЛИ В СЕТИ</small><strong>{overviewActiveProfiles}<i> / {profiles.length}</i></strong><span>с активными клиентами</span></article>
+              <article><small>HWID-УСТРОЙСТВА</small><strong>{overviewDevices}</strong><span>зарегистрировано</span></article>
+              <article><small>ВХОДЯЩИЙ ТРАФИК</small><strong>↓ {bytes(overviewRx)}</strong><span>↑ {bytes(overviewTx)} исходящего</span></article>
+              <article><small>ЛУЧШАЯ ЗАДЕРЖКА</small><strong>{overviewLatency != null ? `${Math.round(overviewLatency)} мс` : "—"}</strong><span>{overviewLatency != null ? "по активным маршрутам" : "нет измерений"}</span></article>
             </div>
           </section>
+
+          <nav className="mihomoOverviewShortcuts" aria-label="Быстрые действия Mihomo">
+            <button type="button" onClick={() => setView("profiles")}><i>01</i><span><b>Профили</b><small>Подписки и устройства</small></span><em>→</em></button>
+            <button type="button" onClick={() => setView("channels")}><i>02</i><span><b>Компоненты</b><small>{installedChannels.length} установлено</small></span><em>→</em></button>
+            <button type="button" onClick={() => setView("rules")}><i>03</i><span><b>Правила</b><small>Маршруты приложений</small></span><em>→</em></button>
+            <button type="button" onClick={() => setView("dns")}><i>04</i><span><b>DNS</b><small>{policiesReady ? "Политика готова" : "Требуется настройка"}</small></span><em>→</em></button>
+          </nav>
 
           <section className="mihomoOverviewDesk">
             <article className="mihomoOverviewLiveProfiles">
