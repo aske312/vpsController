@@ -684,6 +684,11 @@ test("main preview is built off-VPS and interrupted updates cannot report succes
   assert.match(manager, /write_action_status "succeeded" 100 "Тестовое обновление установлено и проверено"/);
 });
 
+test("missing main preview is reported as not installed rather than a broken server update", async () => {
+  const manager = await read("scripts/vps-control.sh");
+  assert.match(manager, /Тестовая сборка main ещё не опубликована; установка не выполнялась, рабочая версия не изменена/);
+});
+
 test("SSH key hardening is transactional and automatically rolls back", async () => {
   const [api, manager] = await Promise.all([read("api/main.py"), read("scripts/vps-control.sh")]);
   assert.match(api, /class SshPublicKeyInstall/);

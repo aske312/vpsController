@@ -218,8 +218,10 @@ finish_operation() {
       *) write_action_status "succeeded" 100 "Операция завершена" ;;
     esac
   else
-    if [[ "${CURRENT_ACTION}" == "test-update" || "${CURRENT_ACTION}" == "update" ]]; then
-      write_action_status "failed" "${ACTION_PROGRESS}" "Обновление остановлено по ошибке или таймауту; рабочая версия восстановлена"
+    if [[ "${CURRENT_ACTION}" == "test-update" ]]; then
+      write_action_status "failed" "${ACTION_PROGRESS}" "Тестовая сборка main ещё не опубликована; установка не выполнялась, рабочая версия не изменена"
+    elif [[ "${CURRENT_ACTION}" == "update" ]]; then
+      write_action_status "failed" "${ACTION_PROGRESS}" "Обновление приложения остановлено по ошибке или таймауту; рабочая версия сохранена"
     elif [[ "${CURRENT_ACTION}" == "safe-update" ]]; then
       write_action_status "failed" "${ACTION_PROGRESS}" "Безопасное обновление завершилось с ошибкой; доступен отчёт"
     else
