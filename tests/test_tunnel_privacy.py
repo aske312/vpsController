@@ -17,18 +17,82 @@ from test_privacy import manager, ROOT
 
 
 class TunnelPrivacyTests(unittest.TestCase):
+    def test_global_toggle_preserves_channels_and_skips_other_protocols(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config_path = root / "reality/config.json"
+            config_path.parent.mkdir()
+            inbounds = [{"protocol": "vless", "port": 10443 + index, "settings": {"clients": [{"id": identity}], "decryption": "none"}} for index, identity in enumerate(("one", "two"))]
+            config_path.write_text(json.dumps({"inbounds": inbounds}))
+            connections = [{"component": "transport-reality", "device_id": identity, "settings": {"privacy_mode": "standard"}, "credential": {"uuid": identity, "cdn_path": "/keep-" + identity}} for identity in ("one", "two")]
+            untouched = {"component": "transport-wg", "device_id": "one", "credential": {"private_key": "unchanged"}}
+            connections.append(untouched)
+            items = [{"common_device_id": "one", "connections": connections}]
+            def apply(path, value):
+                path.write_text(json.dumps(value))
+            with patch.object(manager, "CONFIG_ROOT", root), patch.object(manager, "profiles", return_value=items), patch.object(manager, "vless_encryption_pair", return_value=("private", "public")) as pair, patch.object(manager, "apply_reality_config", side_effect=apply) as runtime, patch.object(manager, "render_profile", return_value="yaml") as render, patch.object(manager, "validate_rendered_profile"), patch.object(manager, "save_profiles"):
+                manager.apply_tunnel_privacy(True)
+                self.assertEqual(pair.call_count, 2)
+                self.assertEqual(render.call_count, 2)
+                self.assertEqual(runtime.call_count, 1)
+                for index, connection in enumerate(connections[:2]):
+                    self.assertEqual(connection["credential"]["encryption"], "public")
+                    self.assertEqual(connection["credential"]["cdn_path"], "/keep-" + connection["credential"]["uuid"])
+                    self.assertEqual(json.loads(config_path.read_text())["inbounds"][index]["port"], 10443 + index)
+                self.assertEqual(untouched["credential"], {"private_key": "unchanged"})
+                manager.apply_tunnel_privacy(True)
+                self.assertEqual(pair.call_count, 2)
+                self.assertEqual(runtime.call_count, 1)
+                pair.return_value = ("none", "")
+                manager.apply_tunnel_privacy(False)
+                self.assertTrue(all(entry["settings"]["decryption"] == "none" for entry in json.loads(config_path.read_text())["inbounds"]))
+
+    def test_failed_global_toggle_restores_setting_profiles_and_server_config(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = root / "config"
+            config.mkdir()
+            server = config / "config.json"
+            profile = root / "profiles.json"
+            routing = root / "settings/routing.json"
+            routing.parent.mkdir()
+            for path, content in ((server, "{}"), (profile, "[]"), (routing, '{"tunnel_privacy": false}')):
+                path.write_text(content)
+            def fail(_):
+                server.write_text("changed")
+                profile.write_text("changed")
+                raise RuntimeError("validation failed")
+            with patch.object(manager, "CONFIG_ROOT", config), patch.object(manager, "PROFILE_FILE", profile), patch.object(manager, "ROUTING_SETTINGS_FILE", routing), patch.object(manager, "routing_settings", return_value={"tunnel_privacy": False}), patch.object(manager, "validate_routing", return_value={"tunnel_privacy": True}), patch.object(manager, "systemctl_active", return_value=False), patch.object(manager, "apply_tunnel_privacy", side_effect=fail):
+                with self.assertRaisesRegex(RuntimeError, "validation failed"):
+                    manager.patch_routing_settings(manager.ModuleSettingsPatch(values={"tunnel_privacy": True}))
+            self.assertEqual(json.loads(routing.read_text()), {"tunnel_privacy": False})
+            self.assertEqual(profile.read_text(), "[]")
+            self.assertEqual(server.read_text(), "{}")
+
+    def test_ech_capability_is_optional_and_cached(self):
+        manager.ech_capability_cache.clear()
+        with patch.object(manager.urllib.request, "urlopen") as request:
+            request.return_value.__enter__.return_value.read.return_value = json.dumps({"Status": 0, "Answer": [{"type": 65, "data": '1 . alpn="h2" ech="ABC123=="'}]}).encode()
+            self.assertTrue(manager.cdn_supports_ech("supported.example"))
+            self.assertTrue(manager.cdn_supports_ech("supported.example"))
+            self.assertEqual(request.call_count, 1)
+            request.side_effect = OSError("unavailable")
+            self.assertFalse(manager.cdn_supports_ech("unsupported.example"))
+
     def test_ech_requires_encrypted_resolvers_and_preserves_direct_rules(self):
         profile = {"common_device_id": "common", "routing": {"direct_ru_sites": True}, "connections": [{"component": "transport-reality", "device_id": "common", "settings": {"route_mode": "cdn", "cdn_ech": True}, "credential": {"uuid": str(uuid.uuid4()), "cdn_enabled": True, "route_mode": "cdn", "cdn_domain": "example.com", "cdn_path": "/test"}}]}
         dns = {"enhanced_mode": "fake-ip", "nameserver": "https://cloudflare-dns.com/dns-query", "fallback": "https://dns.google/dns-query"}
         rules = ["DOMAIN-SUFFIX,example.ru,DIRECT"]
-        with patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=rules):
+        profile["connections"][0]["credential"]["encryption"] = "public-key"
+        profile["routing"]["tunnel_privacy"] = False  # Per-profile overrides cannot disable global protection.
+        with patch.object(manager, "routing_settings", return_value={"tunnel_privacy": True}), patch.object(manager, "cdn_supports_ech", return_value=True), patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=rules):
             config = yaml.safe_load(manager.render_profile(profile))
             self.assertEqual(config["dns"]["proxy-server-nameserver"], [dns["nameserver"], dns["fallback"]])
             self.assertEqual(config["rules"], [*rules, "MATCH,GATE.312"])
             self.assertEqual(config["proxies"][0]["ech-opts"], {"enable": True})
             dns["fallback"] = "8.8.8.8"
-            with self.assertRaises(manager.HTTPException):
-                manager.render_profile(profile)
+            config = yaml.safe_load(manager.render_profile(profile))
+            self.assertEqual(config["dns"]["fallback"], ["https://dns.google/dns-query"])
 
     def test_old_client_core_is_rejected_before_key_generation(self):
         with patch.object(manager.Path, "is_file", return_value=True), patch.object(manager, "run", return_value=subprocess.CompletedProcess([], 0, "Mihomo Meta v1.18.0", "")) as run:
@@ -103,10 +167,7 @@ class TunnelPrivacyTests(unittest.TestCase):
             self.assertNotIn("privacy_mode", legacy)
             self.assertNotIn("cdn_ech", legacy)
             self.assertEqual(legacy, manager.validate_connection("transport-reality", {**legacy, "privacy_mode": "standard", "cdn_ech": False}))
-            with self.assertRaises(manager.HTTPException):
-                manager.validate_connection("transport-reality", {**legacy, "privacy_mode": "unknown"})
-            with self.assertRaises(manager.HTTPException):
-                manager.validate_connection("transport-reality", {"cdn_ech": True})
+            self.assertEqual(legacy, manager.validate_connection("transport-reality", {**legacy, "privacy_mode": "encrypted", "cdn_ech": True}))
 
     def test_cdn_export_carries_encryption_and_optional_ech(self):
         credential = {"cdn_domain": "example.com", "cdn_path": "/test", "uuid": str(uuid.uuid4()), "encryption": "test-public-configuration"}
@@ -122,7 +183,7 @@ class TunnelPrivacyTests(unittest.TestCase):
 
     def test_missing_encryption_never_silently_downgrades(self):
         profile = {"common_device_id": "common", "connections": [{"component": "transport-reality", "device_id": "common", "settings": {"privacy_mode": "encrypted"}, "credential": {}}]}
-        with patch.object(manager, "normalize_profile", return_value=profile):
+        with patch.object(manager, "routing_settings", return_value={"tunnel_privacy": True}), patch.object(manager, "normalize_profile", return_value=profile):
             with self.assertRaises(manager.HTTPException):
                 manager.render_profile(profile)
 
@@ -156,7 +217,7 @@ class RealCorePrivacyTests(unittest.TestCase):
             for transport in ("websocket", "xhttp", "httpupgrade", "grpc"):
                 profile = {"common_device_id": "common", "connections": [{"component": "transport-reality", "device_id": "common", "settings": {"route_mode": "cdn", "cdn_ech": True, "privacy_mode": "encrypted"}, "credential": {"uuid": str(uuid.uuid4()), "encryption": encryption, "cdn_enabled": True, "route_mode": "cdn", "cdn_domain": "example.com", "cdn_path": "/test", "cdn_transport": transport}}]}
                 dns = {"enhanced_mode": "fake-ip", "nameserver": "https://cloudflare-dns.com/dns-query", "fallback": "https://dns.google/dns-query"}
-                with patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=[]):
+                with patch.object(manager, "routing_settings", return_value={"tunnel_privacy": True}), patch.object(manager, "cdn_supports_ech", return_value=True), patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=[]):
                     manager.validate_rendered_profile(manager.render_profile(profile))
 
     def test_encrypted_transports_hide_payload_from_relay(self):

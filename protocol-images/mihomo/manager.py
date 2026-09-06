@@ -18,6 +18,8 @@ import tempfile
 import threading
 import time
 import uuid
+import urllib.request
+import urllib.parse
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -91,6 +93,7 @@ def profile_runtime_transaction(modules: set[str]):
     backup_root = Path(tempfile.mkdtemp(prefix="mihomo-profile-transaction-"))
     config_backup = backup_root / "config"
     profile_backup = backup_root / "profiles.json"
+    routing_backup = backup_root / "routing.json"
     service_was_active = {
         module_id: systemctl_active(service)
         for module_id in modules
@@ -100,9 +103,16 @@ def profile_runtime_transaction(modules: set[str]):
         shutil.copytree(CONFIG_ROOT, config_backup)
     if PROFILE_FILE.exists():
         shutil.copy2(PROFILE_FILE, profile_backup)
+    if ROUTING_SETTINGS_FILE.exists():
+        shutil.copy2(ROUTING_SETTINGS_FILE, routing_backup)
     try:
         yield
     except Exception:
+        if routing_backup.exists():
+            ROUTING_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(routing_backup, ROUTING_SETTINGS_FILE)
+        elif ROUTING_SETTINGS_FILE.exists():
+            ROUTING_SETTINGS_FILE.unlink()
         if CONFIG_ROOT.exists():
             shutil.rmtree(CONFIG_ROOT)
         if config_backup.exists():
@@ -1293,9 +1303,16 @@ def patch_profile_presets(patch: PresetSettingsPatch) -> dict[str, Any]:
 
 @app.patch("/api/mihomo/routing/settings", dependencies=[Depends(auth_required)])
 def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
-    next_values = validate_routing(patch.values, current=routing_settings())
-    SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
-    atomic_json(ROUTING_SETTINGS_FILE, next_values)
+    with profile_mutation_lock:
+        current = routing_settings()
+        next_values = validate_routing(patch.values, current=current)
+        changed = bool(current.get("tunnel_privacy")) != bool(next_values.get("tunnel_privacy"))
+        if changed:
+            with profile_runtime_transaction({"transport-reality"}):
+                atomic_json(ROUTING_SETTINGS_FILE, next_values)
+                apply_tunnel_privacy(bool(next_values.get("tunnel_privacy")))
+        else:
+            atomic_json(ROUTING_SETTINGS_FILE, next_values)
     return {"schema": routing_schema(), "values": next_values, "rule_lists": routing_rule_lists(next_values)}
 
 
@@ -1989,12 +2006,9 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
     result = {**connection_defaults(component), **values}
     if component != "transport-reality":
         return result
-    privacy_mode = result.get("privacy_mode", "standard")
-    if privacy_mode not in {"standard", "encrypted"}:
-        raise HTTPException(status_code=422, detail="Unsupported tunnel privacy mode")
-    # Keep old settings identical so unchanged saves retain their credentials.
-    if privacy_mode == "standard":
-        result.pop("privacy_mode", None)
+    # Privacy is global; stale clients cannot override it per connection.
+    result.pop("privacy_mode", None)
+    result.pop("cdn_ech", None)
     try:
         port = int(result.get("port", 0))
     except (TypeError, ValueError) as exc:
@@ -2024,15 +2038,6 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
     route_mode = str(result.get("route_mode", "direct")) if "route_mode" in values else ("both" if bool(result.get("cdn_enabled", False)) else "direct")
     if route_mode not in {"direct", "tls", "cdn", "both"}:
         raise HTTPException(status_code=422, detail="Unsupported VLESS route mode")
-    cdn_ech = result.get("cdn_ech", False)
-    if not isinstance(cdn_ech, bool):
-        raise HTTPException(status_code=422, detail="ECH setting must be boolean")
-    if cdn_ech and route_mode not in {"cdn", "both"}:
-        raise HTTPException(status_code=422, detail="ECH доступен только для CDN-подключения.")
-    if cdn_ech:
-        ech_dns_resolvers(dns_settings())
-    if not cdn_ech:
-        result.pop("cdn_ech", None)
     cdn_enabled = route_mode in {"cdn", "both"}
     tls_enabled = route_mode == "tls"
     tls_domain = str(result.get("tls_domain", "")).strip().lower()
@@ -2188,6 +2193,67 @@ def vless_encryption_pair(settings: dict[str, Any]) -> tuple[str, str]:
     return ".".join(server_fields), ".".join(client_fields)
 
 
+ech_capability_cache: dict[str, tuple[float, bool]] = {}
+
+
+def cdn_supports_ech(domain: str) -> bool:
+    """Best effort capability check, never contact an arbitrary supplied URL."""
+    cached = ech_capability_cache.get(domain)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+    supported = False
+    if domain:
+        try:
+            url = "https://dns.google/resolve?" + urllib.parse.urlencode({"name": domain, "type": 65})
+            with urllib.request.urlopen(url, timeout=3) as response:
+                data = json.loads(response.read(65536))
+            supported = data.get("Status") == 0 and any(
+                answer.get("type") == 65 and re.search(r'(?:^|\s)ech="?[A-Za-z0-9+/]', str(answer.get("data", "")))
+                for answer in data.get("Answer", [])
+            )
+        except (OSError, ValueError):
+            pass
+    ech_capability_cache[domain] = (time.monotonic() + 300, bool(supported))
+    return bool(supported)
+
+
+def apply_tunnel_privacy(enabled: bool) -> None:
+    """Called under the mutation lock/rollback transaction; retain all identities."""
+    items = profiles()
+    config_path = CONFIG_ROOT / "reality" / "config.json"
+    config = load_json(config_path, {})
+    changed = False
+    for item in items:
+        for connection in item.get("connections", []):
+            if connection.get("component") != "transport-reality":
+                continue
+            credential = connection.get("credential", {})
+            identity = credential.get("uuid")
+            inbounds = [entry for entry in config.get("inbounds", []) if identity and entry.get("protocol") == "vless" and any(client.get("id") == identity for client in entry.get("settings", {}).get("clients", []))]
+            if not inbounds or any(len(entry["settings"]["clients"]) != 1 for entry in inbounds):
+                raise HTTPException(status_code=409, detail="Невозможно безопасно обновить шифрование существующего канала: проверьте конфигурацию сервера.")
+            encrypted = bool(credential.get("encryption"))
+            if enabled != encrypted:
+                decryption, encryption = vless_encryption_pair({"privacy_mode": "encrypted" if enabled else "standard"})
+                for entry in inbounds:
+                    entry["settings"]["decryption"] = decryption
+                credential["encryption"] = encryption
+                changed = True
+            elif enabled and any(entry["settings"].get("decryption", "none") == "none" for entry in inbounds):
+                raise HTTPException(status_code=409, detail="Параметры шифрования клиента и сервера не согласованы.")
+            connection.get("settings", {}).pop("privacy_mode", None)
+            connection.get("settings", {}).pop("cdn_ech", None)
+        sync_legacy_profile_fields(item)
+    # Validate every device, including HWID-bound and fallback connections.
+    for item in items:
+        for device_id in {str(connection.get("device_id", item["common_device_id"])) for connection in item.get("connections", [])}:
+            validate_rendered_profile(render_profile(item, device_id))
+    if changed:
+        apply_reality_config(config_path, config)
+    if items:
+        save_profiles(items)
+
+
 def add_reality_credential(profile_id: str, connection_id: str, connection_settings: dict[str, Any], restart_service: bool = True, reload_caddy: bool = True) -> dict[str, Any]:
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
@@ -2213,7 +2279,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     # Xray tags and Caddy descriptors are global, so scope them by profile too.
     route_id = f"{profile_id}-{connection_id}"
     direct_tag = f"mihomo-vless-{route_id}"
-    decryption, encryption = vless_encryption_pair(settings)
+    decryption, encryption = vless_encryption_pair({"privacy_mode": "encrypted" if routing_settings().get("tunnel_privacy") else "standard"})
     if direct_enabled:
         config["inbounds"].append({"tag": direct_tag, "listen": "::", "port": direct_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": vless_stream(settings, private_key, env.get("SHORT_ID", "")), "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}})
     cdn_path = "/" + secrets.token_hex(16)
@@ -2861,8 +2927,8 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         next_connections: list[dict[str, Any]] = []
         for definition in definitions:
             current_connection = current_connections.get(definition["id"])
-            current_server_settings = {key: value for key, value in (current_connection or {}).get("settings", {}).items() if key != "cdn_ech"}
-            next_server_settings = {key: value for key, value in definition.get("settings", {}).items() if key != "cdn_ech"}
+            current_server_settings = {key: value for key, value in (current_connection or {}).get("settings", {}).items() if key not in {"cdn_ech", "privacy_mode"}}
+            next_server_settings = {key: value for key, value in definition.get("settings", {}).items() if key not in {"cdn_ech", "privacy_mode"}}
             if current_connection and current_connection.get("component") == definition["component"] and current_server_settings == next_server_settings:
                 next_connections.append({**definition, "credential": current_connection.get("credential", {})})
             else:
@@ -3103,11 +3169,12 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
     if not connections:
         raise HTTPException(status_code=409, detail="У профиля нет подключений Mihomo")
+    privacy = bool(routing_settings().get("tunnel_privacy"))
     used_names: set[str] = set()
     rendered: list[tuple[dict[str, Any], str | None, str | None, str | None]] = []
     for index, connection in enumerate(connections):
         component = str(connection["component"])
-        if connection.get("settings", {}).get("privacy_mode") == "encrypted" and not connection.get("credential", {}).get("encryption"):
+        if privacy and component == "transport-reality" and not connection.get("credential", {}).get("encryption"):
             raise HTTPException(status_code=409, detail="Для защищённого подключения отсутствуют параметры шифрования. Пересоздайте подключение.")
         # Keep descriptive GUI labels out of client-visible aliases.
         base = f"Connection {index + 1}"
@@ -3142,7 +3209,11 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"):
         routing[key] = bool(profile_routing.get(key, False))
     mode = str(routing.get("mode", "rule"))
-    dns = dns_settings()
+    dns = dict(dns_settings())
+    if privacy:
+        for key, default in (("nameserver", "https://cloudflare-dns.com/dns-query"), ("fallback", "https://dns.google/dns-query")):
+            if not str(dns.get(key, "")).startswith(("https://", "tls://", "quic://")):
+                dns[key] = default
     lines = [
         "mixed-port: 7890",
         "allow-lan: false",
@@ -3174,7 +3245,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "  fallback:",
         f"    - {q(dns['fallback'])}",
     ]
-    if any(connection.get("settings", {}).get("cdn_ech") for connection in connections):
+    if privacy:
         resolvers = ech_dns_resolvers(dns)
         # ECH needs HTTPS DNS records. Resolve the proxy hostname explicitly
         # over the user's encrypted resolvers, never via an implicit OS DNS.
@@ -3190,7 +3261,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         if name:
             lines.extend(render_proxy(str(connection["component"]), connection.get("credential", {}), name))
         if cdn_name:
-            lines.extend(render_vless_cdn({**connection.get("credential", {}), "cdn_ech": bool(connection.get("settings", {}).get("cdn_ech", False))}, cdn_name))
+            credential = connection.get("credential", {})
+            lines.extend(render_vless_cdn({**credential, "cdn_ech": privacy and cdn_supports_ech(str(credential.get("cdn_domain", "")))}, cdn_name))
         if tls_name:
             lines.extend(render_vless_tls(connection.get("credential", {}), tls_name))
     group_type = str(routing.get("strategy", "fallback"))

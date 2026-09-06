@@ -1461,6 +1461,12 @@ export function MihomoPage({
                 <label><span>CDN-домен</span><input value={String(routingDraft.preset_cdn_domain || "")} placeholder="cdn.example.com" onChange={(event) => updateRoutingDraft("preset_cdn_domain", event.target.value)} /><small>{routingDraft.preset_cdn_domain ? "Готов для CDN-транспортов" : "Нужен для CDN-каналов"}</small></label>
                 <label><span>Прямой TLS-домен</span><input value={String(routingDraft.preset_tls_domain || "")} placeholder="tls.example.com" onChange={(event) => updateRoutingDraft("preset_tls_domain", event.target.value)} /><small>{routingDraft.preset_tls_domain ? "Готов для прямого TLS" : "Нужен для TLS-каналов"}</small></label>
               </div></article>
+              <article className="is-wide"><header><span>04</span><div><b>Защита соединений</b><small>Единая настройка всех каналов и устройств Mihomo</small></div></header><div className="mihomoDnsAdvanced">
+                <div><label className={routingDraft.tunnel_privacy ? "is-enabled" : ""}><span><b>Усиленная защита</b><small>Для всех профилей Mihomo</small></span><input type="checkbox" checked={Boolean(routingDraft.tunnel_privacy)} onChange={(event) => updateRoutingDraft("tunnel_privacy", event.target.checked)} /></label></div>
+                <p className="mihomoGamesHint">Дополнительное шифрование клиент—VPS для VLESS, зашифрованный DNS и ECH при обнаружении поддержки у CDN. Для остальных протоколов сохраняется штатное шифрование. Основные и резервные каналы защищаются одинаково; правила DIRECT не меняются.</p>
+                <p className="mihomoGamesHint">После переключения обновите YAML или подписку на всех устройствах. Для VLESS нужен Mihomo 1.19.30 или новее; старые параметры перестанут работать. Сервер проверит совместимость перед применением.</p>
+                <p className="mihomoGamesHint">IP сторон, время и объём трафика не скрываются от CDN. ECH применяется по возможности, без гарантии нераспознаваемости соединения. Получайте YAML через доверенный канал.</p>
+              </div></article>
             </div>
           </section>
 
@@ -1583,19 +1589,6 @@ export function MihomoPage({
                       <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}><span aria-hidden="true">×</span></button><span className="mihomoConnectionChevron">›</span>
                     </summary>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
-                    {connection.component === "transport-reality" && <fieldset className="mihomoTunnelPrivacy">
-                      <legend>Приватность туннеля</legend>
-                      <label><span>Защита содержимого</span><select value={String(connection.settings.privacy_mode || "standard")} onChange={(event) => updateConnectionSetting(connection.id, "privacy_mode", event.target.value)}>
-                        <option value="standard">Обычный TLS / REALITY</option>
-                        <option value="encrypted">Дополнительное шифрование клиент—VPS</option>
-                      </select></label>
-                      <p>Дополнительный слой шифрует содержимое туннеля до VPS и добавляет случайное заполнение начального обмена. Правила прямого выхода, включая российские сайты, сохраняются.</p>
-                      {["cdn", "both"].includes(vlessRoute) && <label className="is-toggle"><span>Скрывать домен TLS через ECH</span><input type="checkbox" checked={Boolean(connection.settings.cdn_ech)} onChange={(event) => updateConnectionSetting(connection.id, "cdn_ech", event.target.checked)} /></label>}
-                      {connection.settings.cdn_ech === true && <p>Требуется поддержка ECH на CDN и актуальный клиент. Выберите зашифрованные основной и резервный DNS в настройках Mihomo. При несовместимости соединение может не установиться; IP CDN и характеристики трафика остаются видимыми.</p>}
-                      {connection.settings.privacy_mode === "encrypted" && <p>Нужен клиент с ядром Mihomo 1.19.30 или новее. После смены режима обновите YAML или подписку: старые параметры этого подключения перестанут работать. Для защиты от подмены со стороны CDN получайте YAML через доверенный канал.</p>}
-                      <small>Провайдер видит соединение с CDN или сервером; домен без ECH, время и объём трафика могут быть видны. CDN знает IP сторон. Полная нераспознаваемость туннеля не гарантируется.</small>
-                      <small>Защита применяется к этой карточке. Резервные подключения настраиваются отдельно.</small>
-                    </fieldset>}
                     <div className="mihomoConnectionFields">
                       {schema.filter((field) => {
                         if (["route_mode", "cdn_enabled", "privacy_mode", "cdn_ech"].includes(field.key)) return false;
