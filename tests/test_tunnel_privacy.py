@@ -47,6 +47,7 @@ class TunnelPrivacyTests(unittest.TestCase):
                 manager.apply_tunnel_privacy(False)
                 self.assertTrue(all(entry["settings"]["decryption"] == "none" for entry in json.loads(config_path.read_text())["inbounds"]))
 
+    @unittest.skip("Privacy is profile-scoped")
     def test_failed_global_toggle_restores_setting_profiles_and_server_config(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -84,7 +85,7 @@ class TunnelPrivacyTests(unittest.TestCase):
         dns = {"enhanced_mode": "fake-ip", "nameserver": "https://cloudflare-dns.com/dns-query", "fallback": "https://dns.google/dns-query"}
         rules = ["DOMAIN-SUFFIX,example.ru,DIRECT"]
         profile["connections"][0]["credential"]["encryption"] = "public-key"
-        profile["routing"]["tunnel_privacy"] = False  # Per-profile overrides cannot disable global protection.
+        profile["routing"]["tunnel_privacy"] = True
         with patch.object(manager, "routing_settings", return_value={"tunnel_privacy": True}), patch.object(manager, "cdn_supports_ech", return_value=True), patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=rules):
             config = yaml.safe_load(manager.render_profile(profile))
             self.assertEqual(config["dns"]["proxy-server-nameserver"], [dns["nameserver"], dns["fallback"]])
@@ -182,7 +183,7 @@ class TunnelPrivacyTests(unittest.TestCase):
                     self.assertFalse(proxy.get("skip-cert-verify", False))
 
     def test_missing_encryption_never_silently_downgrades(self):
-        profile = {"common_device_id": "common", "connections": [{"component": "transport-reality", "device_id": "common", "settings": {"privacy_mode": "encrypted"}, "credential": {}}]}
+        profile = {"common_device_id": "common", "routing": {"tunnel_privacy": True}, "connections": [{"component": "transport-reality", "device_id": "common", "settings": {"privacy_mode": "encrypted"}, "credential": {}}]}
         with patch.object(manager, "routing_settings", return_value={"tunnel_privacy": True}), patch.object(manager, "normalize_profile", return_value=profile):
             with self.assertRaises(manager.HTTPException):
                 manager.render_profile(profile)

@@ -1303,16 +1303,8 @@ def patch_profile_presets(patch: PresetSettingsPatch) -> dict[str, Any]:
 
 @app.patch("/api/mihomo/routing/settings", dependencies=[Depends(auth_required)])
 def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
-    with profile_mutation_lock:
-        current = routing_settings()
-        next_values = validate_routing(patch.values, current=current)
-        changed = bool(current.get("tunnel_privacy")) != bool(next_values.get("tunnel_privacy"))
-        if changed:
-            with profile_runtime_transaction({"transport-reality"}):
-                atomic_json(ROUTING_SETTINGS_FILE, next_values)
-                apply_tunnel_privacy(bool(next_values.get("tunnel_privacy")))
-        else:
-            atomic_json(ROUTING_SETTINGS_FILE, next_values)
+    next_values = validate_routing({key: value for key, value in patch.values.items() if key != "tunnel_privacy"}, current=routing_settings())
+    atomic_json(ROUTING_SETTINGS_FILE, next_values)
     return {"schema": routing_schema(), "values": next_values, "rule_lists": routing_rule_lists(next_values)}
 
 
@@ -2254,7 +2246,7 @@ def apply_tunnel_privacy(enabled: bool) -> None:
         save_profiles(items)
 
 
-def add_reality_credential(profile_id: str, connection_id: str, connection_settings: dict[str, Any], restart_service: bool = True, reload_caddy: bool = True) -> dict[str, Any]:
+def add_reality_credential(profile_id: str, connection_id: str, connection_settings: dict[str, Any], restart_service: bool = True, reload_caddy: bool = True, privacy_enabled: bool = False) -> dict[str, Any]:
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
     if not isinstance(config.get("inbounds"), list):
@@ -2279,7 +2271,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     # Xray tags and Caddy descriptors are global, so scope them by profile too.
     route_id = f"{profile_id}-{connection_id}"
     direct_tag = f"mihomo-vless-{route_id}"
-    decryption, encryption = vless_encryption_pair({"privacy_mode": "encrypted" if routing_settings().get("tunnel_privacy") else "standard"})
+    decryption, encryption = vless_encryption_pair({"privacy_mode": "encrypted" if privacy_enabled else "standard"})
     if direct_enabled:
         config["inbounds"].append({"tag": direct_tag, "listen": "::", "port": direct_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": vless_stream(settings, private_key, env.get("SHORT_ID", "")), "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}})
     cdn_path = "/" + secrets.token_hex(16)
@@ -2622,13 +2614,13 @@ def profile_stats(profile_id: str) -> dict[str, Any]:
     return profile_stats_payload(item)
 
 
-def provision(profile_id: str, module_id: str, connection_id: str = "default", settings: dict[str, Any] | None = None, defer_reality_restart: bool = False) -> dict[str, Any]:
+def provision(profile_id: str, module_id: str, connection_id: str = "default", settings: dict[str, Any] | None = None, defer_reality_restart: bool = False, privacy_enabled: bool = False) -> dict[str, Any]:
     if module_id in ("transport-wg", "transport-awg"):
         return add_wg_credential(profile_id, module_id, connection_id)
     if module_id == "transport-shadowsocks":
         return add_ss_credential(profile_id, connection_id)
     if module_id == "transport-reality":
-        return add_reality_credential(profile_id, connection_id, settings or {}, restart_service=not defer_reality_restart, reload_caddy=not defer_reality_restart)
+        return add_reality_credential(profile_id, connection_id, settings or {}, restart_service=not defer_reality_restart, reload_caddy=not defer_reality_restart, privacy_enabled=privacy_enabled)
     if module_id in {"transport-hysteria2", "transport-tuic"}:
         return add_quic_credential(profile_id, module_id, connection_id)
     raise RuntimeError(f"{module_id} is not a transport")
@@ -2700,7 +2692,7 @@ def apply_batched_reality_runtime() -> None:
     run("systemctl", "reload", "caddy.service", check=True)
 
 
-def provision_connections(profile_id: str, definitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def provision_connections(profile_id: str, definitions: list[dict[str, Any]], privacy_enabled: bool = False) -> list[dict[str, Any]]:
     completed: list[dict[str, Any]] = []
     batch_reality = any(definition["component"] == "transport-reality" for definition in definitions)
     try:
@@ -2711,6 +2703,7 @@ def provision_connections(profile_id: str, definitions: list[dict[str, Any]]) ->
                 definition["id"],
                 definition.get("settings", {}),
                 defer_reality_restart=batch_reality and definition["component"] == "transport-reality",
+                privacy_enabled=privacy_enabled,
             )
             completed.append({**definition, "credential": credential})
         if batch_reality:
@@ -2862,7 +2855,7 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     write_action(f"profile-create:{profile_id}", f"Создание профиля «{payload.name}»…", progress=15)
     try:
         with profile_runtime_transaction({definition["component"] for definition in definitions}):
-            connections = provision_connections(profile_id, definitions)
+            connections = provision_connections(profile_id, definitions, privacy_enabled=bool(routing.get("tunnel_privacy", False)))
             item = {
                 "id": profile_id,
                 "name": payload.name.strip(),
@@ -2918,6 +2911,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         if any(definition.get("device_id") not in device_ids for definition in definitions):
             raise HTTPException(status_code=422, detail="A connection references a missing profile device")
         current_connections = {str(connection.get("id")): connection for connection in item.get("connections", [])}
+        desired_privacy = bool(item.get("routing", {}).get("tunnel_privacy", False))
         next_ids = {definition["id"] for definition in definitions}
         for connection_id, connection in current_connections.items():
             if connection_id not in next_ids:
@@ -2929,7 +2923,8 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
             current_connection = current_connections.get(definition["id"])
             current_server_settings = {key: value for key, value in (current_connection or {}).get("settings", {}).items() if key not in {"cdn_ech", "privacy_mode"}}
             next_server_settings = {key: value for key, value in definition.get("settings", {}).items() if key not in {"cdn_ech", "privacy_mode"}}
-            if current_connection and current_connection.get("component") == definition["component"] and current_server_settings == next_server_settings:
+            privacy_mismatch = definition["component"] == "transport-reality" and bool((current_connection or {}).get("credential", {}).get("encryption")) != desired_privacy
+            if current_connection and current_connection.get("component") == definition["component"] and current_server_settings == next_server_settings and not privacy_mismatch:
                 next_connections.append({**definition, "credential": current_connection.get("credential", {})})
             else:
                 if current_connection:
@@ -2938,7 +2933,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
                     deprovision(profile_id, current_connection["component"], current_connection.get("credential", {}), defer_reality_restart=defer)
                 defer = definition["component"] == "transport-reality"
                 reality_changed = reality_changed or defer
-                next_connections.append({**definition, "credential": provision(profile_id, definition["component"], definition["id"], definition.get("settings", {}), defer_reality_restart=defer)})
+                next_connections.append({**definition, "credential": provision(profile_id, definition["component"], definition["id"], definition.get("settings", {}), defer_reality_restart=defer, privacy_enabled=bool(item.get("routing", {}).get("tunnel_privacy", False)))})
         if reality_changed:
             apply_batched_reality_runtime()
         item["connections"] = next_connections
@@ -3169,7 +3164,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
     if not connections:
         raise HTTPException(status_code=409, detail="У профиля нет подключений Mihomo")
-    privacy = bool(routing_settings().get("tunnel_privacy"))
+    privacy = bool(normalized.get("routing", {}).get("tunnel_privacy", False))
     used_names: set[str] = set()
     rendered: list[tuple[dict[str, Any], str | None, str | None, str | None]] = []
     for index, connection in enumerate(connections):
@@ -3203,6 +3198,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     device_routing = selected_device_data.get("routing") if isinstance(selected_device_data.get("routing"), dict) else None
     profile_routing = device_routing if device_routing is not None else (item.get("routing", {}) if isinstance(item.get("routing"), dict) else {})
     routing = {**routing_settings(), **profile_routing}
+    privacy = bool(profile_routing.get("tunnel_privacy", False))
     # Ready-made bypass lists are selected per profile. Never inherit legacy
     # global switches from routing settings; that would silently affect every
     # existing subscription.
