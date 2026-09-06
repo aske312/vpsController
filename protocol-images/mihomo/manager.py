@@ -600,6 +600,11 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
     }
     result = dict(current) if current is not None else routing_defaults()
     for key, raw in values.items():
+        if key == "tunnel_privacy":
+            if not isinstance(raw, bool):
+                raise HTTPException(status_code=422, detail="tunnel_privacy must be boolean")
+            result[key] = raw
+            continue
         if key not in definition:
             raise HTTPException(status_code=422, detail=f"Unknown routing setting: {key}")
         item = definition[key]
@@ -3197,6 +3202,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     selected_device_data = next((device for device in normalized.get("devices", []) if str(device.get("id")) == selected_device), {})
     device_routing = selected_device_data.get("routing") if isinstance(selected_device_data.get("routing"), dict) else None
     profile_routing = device_routing if device_routing is not None else (item.get("routing", {}) if isinstance(item.get("routing"), dict) else {})
+    if isinstance(item.get("routing"), dict) and "tunnel_privacy" in item["routing"]:
+        profile_routing = {**profile_routing, "tunnel_privacy": bool(item["routing"]["tunnel_privacy"])}
     routing = {**routing_settings(), **profile_routing}
     privacy = bool(profile_routing.get("tunnel_privacy", False))
     # Ready-made bypass lists are selected per profile. Never inherit legacy

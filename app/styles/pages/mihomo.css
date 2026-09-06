@@ -621,6 +621,17 @@
 .mihomoProfileStageIntro b { color:var(--text); font-size:11px; }
 .mihomoProfileStageIntro small { color:var(--muted); font-size:9px; line-height:1.4; }
 .mihomoProfileStrategy { display:grid; gap:7px; margin-top:8px; padding:9px; border:1px solid var(--line); border-radius:11px; background:rgba(8,17,26,.72); }
+.mihomoProfileProtection { display:grid; gap:9px; margin-top:8px; padding:9px; border:1px solid var(--line); border-radius:11px; background:rgba(8,17,26,.72); }
+.mihomoProfileProtection > header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.mihomoProfileProtection > header > div { display:grid; gap:3px; }
+.mihomoProfileProtection > header b { color:var(--text); font-size:11px; }
+.mihomoProfileProtection > header small,.mihomoProfileProtection > header > span { color:var(--muted); font-size:9px; }
+.mihomoProfileProtection > label { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:10px; padding:10px; border:1px solid var(--line); border-radius:9px; background:rgba(5,13,21,.58); }
+.mihomoProfileProtection > label.is-enabled { border-color:rgba(89,199,146,.38); background:rgba(37,112,79,.11); }
+.mihomoProfileProtection > label > span { display:grid; gap:3px; }
+.mihomoProfileProtection label b { color:var(--text); font-size:10px; }
+.mihomoProfileProtection label small,.mihomoProfileProtection > p { color:var(--muted); font-size:9px; line-height:1.45; }
+.mihomoProfileProtection input[type=checkbox] { width:17px; min-height:17px; margin:0; accent-color:#59c792; }
 .mihomoProfileStrategy > header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .mihomoProfileStrategy > header > div { display:grid; gap:3px; }
 .mihomoProfileStrategy > header b { color:var(--text); font-size:11px; }
@@ -635,9 +646,9 @@
 .mihomoProfileStrategy button.is-selected { border-color:rgba(89,199,146,.38); background:rgba(37,112,79,.11); }
 .mihomoProfileStrategy button.is-selected > i { background:rgba(42,137,92,.24); color:#b9f3d8; }
 .mihomoStrategyBadge { align-self:center; padding:6px 8px; border:1px solid rgba(89,199,146,.24); border-radius:8px; color:#8ed7b8; font:800 8px var(--font-mono); white-space:nowrap; }
-.mihomoProfileDialog.is-step-1 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-1 .mihomoProfileRules,.mihomoProfileDialog.is-step-1 .mihomoPresetPicker,.mihomoProfileDialog.is-step-1 .mihomoConnectionBuilder,.mihomoProfileDialog.is-step-1 .mihomoProfileTechnicalNote { display:none; }
+.mihomoProfileDialog.is-step-1 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-1 .mihomoProfileProtection,.mihomoProfileDialog.is-step-1 .mihomoProfileRules,.mihomoProfileDialog.is-step-1 .mihomoPresetPicker,.mihomoProfileDialog.is-step-1 .mihomoConnectionBuilder,.mihomoProfileDialog.is-step-1 .mihomoProfileTechnicalNote { display:none; }
 .mihomoProfileDialog.is-step-2 .mihomoProfileName,.mihomoProfileDialog.is-step-2 .mihomoPresetPicker,.mihomoProfileDialog.is-step-2 .mihomoConnectionBuilder,.mihomoProfileDialog.is-step-2 .mihomoProfileTechnicalNote { display:none; }
-.mihomoProfileDialog.is-step-3 .mihomoProfileName,.mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-3 .mihomoProfileRules { display:none; }
+.mihomoProfileDialog.is-step-3 .mihomoProfileName,.mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-3 .mihomoProfileProtection,.mihomoProfileDialog.is-step-3 .mihomoProfileRules { display:none; }
 .mihomoProfileDialog.is-step-1 .mihomoProfileDraftSummary { display:none; }
 .mihomoProfileDialog.is-step-2 .mihomoDeviceBuilder,.mihomoProfileDialog.is-step-3 .mihomoDeviceBuilder { order:-2; margin:0; padding:0 0 10px; border:0; border-bottom:1px solid rgba(91,113,138,.14); border-radius:0; background:transparent; }
 .mihomoProfileDialog.is-step-2 .mihomoDeviceBuilder > header,.mihomoProfileDialog.is-step-3 .mihomoDeviceBuilder > header { display:none; }
@@ -980,9 +991,9 @@
 .mihomoProfileGeneral > label { display:grid; gap:6px; max-width:680px; }
 .mihomoProfileGeneral > label > span { color:#8297a6; font-size:10px; }
 .mihomoProfileGeneral input { min-height:42px; font-size:13px; }
-.mihomoProfileDialog.is-step-2 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-2 .mihomoProfileRules { display:grid; }
+.mihomoProfileDialog.is-step-2 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-2 .mihomoProfileProtection,.mihomoProfileDialog.is-step-2 .mihomoProfileRules { display:grid; }
 .mihomoProfileDialog.is-step-2 .mihomoPresetPicker,.mihomoProfileDialog.is-step-2 .mihomoConnectionBuilder { display:none; }
-.mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-3 .mihomoProfileRules { display:none; }
+.mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-3 .mihomoProfileProtection,.mihomoProfileDialog.is-step-3 .mihomoProfileRules { display:none; }
 .mihomoProfileDialog.is-step-3 .mihomoPresetPicker,.mihomoProfileDialog.is-step-3 .mihomoConnectionBuilder { display:grid; }
 .mihomoProfileDialog .mihomoProfileStrategy > div { grid-template-columns:repeat(4,minmax(180px,1fr)); }
 .mihomoProfileDialog .mihomoProfileStrategy > div { display:flex; flex-wrap:wrap; }
