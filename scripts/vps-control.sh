@@ -86,7 +86,11 @@ ACTION_STARTED_AT=""
 ACTION_PROGRESS=0
 REBOOT_AFTER_UPDATE="no"
 INSTALL_LOG="/var/log/vps-control-install.log"
-MAIN_RELEASE_WAIT_ATTEMPTS=18
+# GitHub's verified preview build installs dependencies twice and commonly
+# takes longer than three minutes. Keep production serving while waiting up
+# to fifteen minutes for the exact main commit instead of reporting a false
+# failure while the workflow is still healthy.
+MAIN_RELEASE_WAIT_ATTEMPTS=90
 STABL_RELEASE_WAIT_ATTEMPTS=30
 UPDATE_DOWNLOAD_TIMEOUT=300
 DEPENDENCY_INSTALL_TIMEOUT=300

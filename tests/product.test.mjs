@@ -620,7 +620,7 @@ test("service mode deploys main from an isolated preview while stabl remains the
   assert.doesNotMatch(manager, /curl[^\n]*--head/);
   assert.match(manager, /release_commit.*== "\$\{latest\}"/s);
   assert.match(manager, /STABL_RELEASE_WAIT_ATTEMPTS=30/);
-  assert.match(manager, /MAIN_RELEASE_WAIT_ATTEMPTS=18/);
+  assert.match(manager, /MAIN_RELEASE_WAIT_ATTEMPTS=90/);
   assert.match(manager, /for attempt in \$\(seq 1 "\$\{MAIN_RELEASE_WAIT_ATTEMPTS\}"\)/);
   assert.match(manager, /--max-time "\$\{UPDATE_DOWNLOAD_TIMEOUT\}"/);
   assert.match(manager, /подготовленный релиз не соответствует актуальной ревизии ветки \$\{branch\}/);
