@@ -1127,12 +1127,29 @@ export function MihomoPage({
     finally { setBusy(""); }
   }
 
+  async function copyText(value: string) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const copied = document.execCommand("copy");
+    area.remove();
+    if (!copied) throw new Error("Браузер не разрешил копирование. Скопируйте ссылку вручную.");
+  }
+
   async function copySubscription(profile: Profile) {
     setBusy(`subscription:${profile.id}`);
     setError("");
     try {
       const result = await request(`/mihomo/profiles/${profile.id}/subscription`) as { path: string; url?: string };
-      await navigator.clipboard.writeText(result.url || new URL(result.path, window.location.origin).toString());
+      await copyText(result.url || new URL(result.path, window.location.origin).toString());
       setNotice(`Единая ссылка профиля «${profile.name}» скопирована. Клиент с HWID появится как отдельное устройство, без HWID получит общие правила.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось получить ссылку подписки");
@@ -1545,7 +1562,7 @@ export function MihomoPage({
               </>}
             </section>
             <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа GATE.312 для YAML выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{profileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>
-            <section className="mihomoProfileProtection"><header><div><b>Защита соединений</b><small>Отдельные функции для всех каналов выбранного профиля.</small></div></header><div className="mihomoProfileProtectionOptions"><label className={activeProfileRouting.tunnel_privacy ? "is-enabled" : ""}><span><b>Шифрование до VPS</b><small>Дополнительный слой VLESS · клиент—VPS</small></span><input type="checkbox" checked={Boolean(activeProfileRouting.tunnel_privacy)} onChange={(event) => { const enabled = event.target.checked; setProfileRouting((current) => ({ ...current, tunnel_privacy: enabled })); setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: { ...(device.routing || {}), tunnel_privacy: enabled } } : device)); }} /></label><label className={activeProfileRouting.tunnel_ech ? "is-enabled" : ""}><span><b>Скрытие имени CDN</b><small>ECH только при поддержке домена и клиента</small></span><input type="checkbox" checked={Boolean(activeProfileRouting.tunnel_ech)} onChange={(event) => { const enabled = event.target.checked; setProfileRouting((current) => ({ ...current, tunnel_ech: enabled })); setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: { ...(device.routing || {}), tunnel_ech: enabled } } : device)); }} /></label></div><p>Другие протоколы сохраняют штатное шифрование, DIRECT-маршруты не меняются. Для дополнительного VLESS-слоя нужен Mihomo 1.19.30+. После сохранения обновите подписку.</p></section>
+            <section className="mihomoProfileRules"><header><div><b>Защита соединений</b><small>Отдельные функции для всех каналов выбранного профиля.</small></div><span>{[activeProfileRouting.tunnel_privacy, activeProfileRouting.tunnel_ech].filter(Boolean).length} из 2</span></header><div><button type="button" className={`mihomoProfileRuleButton${activeProfileRouting.tunnel_privacy ? " is-enabled" : ""}`} aria-pressed={Boolean(activeProfileRouting.tunnel_privacy)} onClick={() => { const enabled = !activeProfileRouting.tunnel_privacy; setProfileRouting((current) => ({ ...current, tunnel_privacy: enabled })); setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: { ...(device.routing || {}), tunnel_privacy: enabled } } : device)); }}><i>VPS</i><span><b>Шифрование до VPS</b><small>Дополнительный слой VLESS · клиент—VPS</small></span></button><button type="button" className={`mihomoProfileRuleButton${activeProfileRouting.tunnel_ech ? " is-enabled" : ""}`} aria-pressed={Boolean(activeProfileRouting.tunnel_ech)} onClick={() => { const enabled = !activeProfileRouting.tunnel_ech; setProfileRouting((current) => ({ ...current, tunnel_ech: enabled })); setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: { ...(device.routing || {}), tunnel_ech: enabled } } : device)); }}><i>ECH</i><span><b>Скрытие имени CDN</b><small>ECH только при поддержке домена и клиента</small></span></button></div></section>
             <section className="mihomoProfileRules"><header><div><b>Правила устройства</b><small>Применяются только к подписке и YAML выбранного устройства.</small></div><span>{profileDirectRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length} из {profileDirectRules.length}</span></header><div>{profileDirectRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div></section>
             <section className="mihomoPresetPicker">
               <header><div><b>Создать подключения из пресета</b><small>Готовый набор заменит подключения выбранной конфигурации.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настроить пресеты</button></header>
@@ -1616,7 +1633,7 @@ export function MihomoPage({
           </form>
         </div>
       )}
-      {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile"><header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль «{createdProfile.name}» готов</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header><div className="mihomoReadyDevices">{readyDevices.map((device) => <article key={device.id}><Image src={device.qr} alt={`QR подписки ${device.name}`} width={240} height={240} unoptimized /><div><b>Подписка Mihomo</b><small>Отсканируйте QR-код в приложении или скопируйте ссылку.</small><nav><button className="primaryButton" onClick={() => void navigator.clipboard.writeText(device.subscription)}>Скопировать ссылку</button></nav></div></article>)}{!readyDevices.length && <div className="mihomoHint">Подготавливаем QR-код подписки…</div>}</div><footer><button className="primaryButton" onClick={() => setCreatedProfile(null)}>Готово</button></footer></div></div>}
+      {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile"><header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль «{createdProfile.name}» готов</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header><div className="mihomoReadyDevices">{readyDevices.map((device) => <article key={device.id}><Image src={device.qr} alt={`QR подписки ${device.name}`} width={240} height={240} unoptimized /><div><b>Подписка Mihomo</b><small>Отсканируйте QR-код в приложении или скопируйте ссылку.</small><nav><button className="primaryButton" onClick={() => void copyText(device.subscription)}>Скопировать ссылку</button></nav></div></article>)}{!readyDevices.length && <div className="mihomoHint">Подготавливаем QR-код подписки…</div>}</div><footer><button className="primaryButton" onClick={() => setCreatedProfile(null)}>Готово</button></footer></div></div>}
       {presetDialog && <div className="mihomoDialogBackdrop mihomoPresetBackdrop">
         <form className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}>
           <header>
