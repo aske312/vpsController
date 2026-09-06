@@ -86,6 +86,7 @@ class TunnelPrivacyTests(unittest.TestCase):
         rules = ["DOMAIN-SUFFIX,example.ru,DIRECT"]
         profile["connections"][0]["credential"]["encryption"] = "public-key"
         profile["routing"]["tunnel_privacy"] = True
+        profile["routing"]["tunnel_ech"] = True
         with patch.object(manager, "routing_settings", return_value={"tunnel_privacy": True}), patch.object(manager, "cdn_supports_ech", return_value=True), patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=rules):
             config = yaml.safe_load(manager.render_profile(profile))
             self.assertEqual(config["dns"]["proxy-server-nameserver"], [dns["nameserver"], dns["fallback"]])
@@ -177,7 +178,7 @@ class TunnelPrivacyTests(unittest.TestCase):
                 for ech in (False, True):
                     config = yaml.safe_load("proxies:\n" + "\n".join(manager.render_vless_cdn({**credential, "cdn_transport": transport, "cdn_ech": ech}, "Connection 1")))
                     proxy = config["proxies"][0]
-                    self.assertEqual(proxy["encryption"], credential["encryption"])
+                    self.assertEqual(proxy.get("encryption"), credential["encryption"])
                     self.assertEqual(proxy.get("ech-opts"), {"enable": True} if ech else None)
                     self.assertTrue(proxy["tls"])
                     self.assertFalse(proxy.get("skip-cert-verify", False))

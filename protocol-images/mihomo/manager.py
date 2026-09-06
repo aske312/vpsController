@@ -600,7 +600,7 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
     }
     result = dict(current) if current is not None else routing_defaults()
     for key, raw in values.items():
-        if key == "tunnel_privacy":
+        if key in {"tunnel_privacy", "tunnel_ech"}:
             if not isinstance(raw, bool):
                 raise HTTPException(status_code=422, detail="tunnel_privacy must be boolean")
             result[key] = raw
@@ -3066,7 +3066,6 @@ def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) ->
             f"    server: {q(server)}",
             f"    port: {int(effective['port'])}",
             f"    uuid: {q(credential['uuid'])}",
-            f"    encryption: {q(credential.get('encryption', ''))}",
             "    udp: true",
             "    tls: true",
             f"    servername: {q(effective['servername'])}",
@@ -3087,6 +3086,8 @@ def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) ->
                 "    grpc-opts:",
                 f"      grpc-service-name: {q(str(effective.get('path', '/vless')).lstrip('/'))}",
             ]
+        if credential.get("encryption"):
+            lines.insert(6, f"    encryption: {q(credential['encryption'])}")
         return lines
     if module_id == "transport-hysteria2":
         lines = [
@@ -3131,13 +3132,14 @@ def render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
         f"    server: {q(credential['cdn_domain'])}",
         "    port: 443",
         f"    uuid: {q(credential['uuid'])}",
-        f"    encryption: {q(credential.get('encryption', ''))}",
         "    udp: true",
         "    tls: true",
         f"    servername: {q(credential['cdn_domain'])}",
         "    client-fingerprint: chrome",
         f"    network: {'ws' if transport in {'websocket', 'httpupgrade'} else transport}",
     ]
+    if credential.get("encryption"):
+        lines.insert(6, f"    encryption: {q(credential['encryption'])}")
     if credential.get("cdn_ech", False):
         lines += ["    ech-opts:", "      enable: true"]
     if transport == "xhttp":
@@ -3213,7 +3215,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         routing[key] = bool(profile_routing.get(key, False))
     mode = str(routing.get("mode", "rule"))
     dns = dict(dns_settings())
-    if privacy:
+    if privacy and bool(profile_routing.get("tunnel_ech", False)):
         for key, default in (("nameserver", "https://cloudflare-dns.com/dns-query"), ("fallback", "https://dns.google/dns-query")):
             if not str(dns.get(key, "")).startswith(("https://", "tls://", "quic://")):
                 dns[key] = default
@@ -3248,7 +3250,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "  fallback:",
         f"    - {q(dns['fallback'])}",
     ]
-    if privacy:
+    if privacy and bool(profile_routing.get("tunnel_ech", False)):
         resolvers = ech_dns_resolvers(dns)
         # ECH needs HTTPS DNS records. Resolve the proxy hostname explicitly
         # over the user's encrypted resolvers, never via an implicit OS DNS.
@@ -3265,7 +3267,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
             lines.extend(render_proxy(str(connection["component"]), connection.get("credential", {}), name))
         if cdn_name:
             credential = connection.get("credential", {})
-            lines.extend(render_vless_cdn({**credential, "cdn_ech": privacy and cdn_supports_ech(str(credential.get("cdn_domain", "")))}, cdn_name))
+            lines.extend(render_vless_cdn({**credential, "cdn_ech": privacy and bool(profile_routing.get("tunnel_ech", False)) and cdn_supports_ech(str(credential.get("cdn_domain", "")))}, cdn_name))
         if tls_name:
             lines.extend(render_vless_tls(connection.get("credential", {}), tls_name))
     group_type = str(routing.get("strategy", "fallback"))
