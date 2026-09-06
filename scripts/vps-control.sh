@@ -687,6 +687,13 @@ PY
 # Public, token-protected Mihomo subscription refresh. No panel UI or
 # administrative API is exposed on this host while VPN-only mode is active.
 ${domain} {
+    header {
+        -Server
+        -X-Powered-By
+    }
+    handle /s/* {
+        reverse_proxy 127.0.0.1:8791
+    }
     handle /api/mihomo/subscriptions/* {
         reverse_proxy 127.0.0.1:8791
     }
@@ -1996,7 +2003,7 @@ Wants=network-online.target
 Type=simple
 EnvironmentFile=${ENV_FILE}
 WorkingDirectory=${INSTALL_DIR}/api
-ExecStart=${INSTALL_DIR}/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+ExecStart=${INSTALL_DIR}/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --no-server-header
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=15

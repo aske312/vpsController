@@ -414,13 +414,14 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   }
 });
 
-test("интерфейс и метаданные относятся к продукту 312.net", async () => {
+test("интерфейс относится к 312.net, публичные метаданные нейтральны", async () => {
   const [layout, page, packageJson] = await Promise.all([
     read("app/layout.tsx"),
     read("app/page.tsx"),
     read("package.json"),
   ]);
-  assert.match(layout, /312\.net/);
+  assert.match(layout, /title: "Infrastructure Control"/);
+  assert.doesNotMatch(layout, /VPN|WireGuard|Amnezia|Mihomo|VLESS|Shadowsocks|Hysteria|TUIC|Trojan|IKEv2/i);
   assert.match(page, /Безопасность/);
   assert.equal(JSON.parse(packageJson).name, "312-net-control");
   assert.doesNotMatch(`${layout}\n${page}`, /ChatGPT|Starter Project|Codex/i);

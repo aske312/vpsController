@@ -33,8 +33,8 @@ printf '%s  %s\n' "${asset_digest}" "${artifact}" | sha256sum -c -
 install -m 0755 "${artifact}" "${BIN}.new"; "${BIN}.new" version >/dev/null; mv -f "${BIN}.new" "${BIN}"
 
 if [[ ! -s "${ROOT}/server.crt" || ! -s "${ROOT}/server.key" ]]; then
-  openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 3650 -subj '/CN=hysteria2.local' \
-    -addext 'subjectAltName=DNS:hysteria2.local' -keyout "${ROOT}/server.key" -out "${ROOT}/server.crt"
+  openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 3650 -subj '/CN=endpoint.internal' \
+    -addext 'subjectAltName=DNS:endpoint.internal' -keyout "${ROOT}/server.key" -out "${ROOT}/server.crt"
 fi
 chmod 0600 "${ROOT}/server.key" "${ROOT}/server.crt"
 [[ -s "${ROOT}/users.json" ]] || printf '{}\n' >"${ROOT}/users.json"

@@ -7,7 +7,7 @@ const mono = JetBrains_Mono({ variable: "--font-mono", subsets: ["latin", "cyril
 
 export const metadata: Metadata = {
   title: "Infrastructure Control",
-  description: "312.net: управление серверной инфраструктурой, WireGuard и AmneziaWG.",
+  description: "Управление серверной инфраструктурой.",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
   openGraph: {
     title: "Infrastructure Control",

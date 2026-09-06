@@ -1180,8 +1180,8 @@ export default function Home() {
       const preferred = profiles.find((profile) => profile.id === "cdn") || profiles[0];
       setGeneratedProfiles(profiles);
       setGenerated(preferred?.config || result.config);
-      setGeneratedName(preferred?.filename || result.filename || `${newClient.name}-${selectedClientProtocol}.conf`);
-      downloadConfig(preferred?.filename || result.filename || `${newClient.name}-${selectedClientProtocol}.conf`, preferred?.config || result.config);
+      setGeneratedName(preferred?.filename || result.filename || `${newClient.name}.conf`);
+      downloadConfig(preferred?.filename || result.filename || `${newClient.name}.conf`, preferred?.config || result.config);
       setNewClient({ ...newClient, name: "" });
       await loadClients();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось создать клиента"); }
@@ -1189,9 +1189,8 @@ export default function Home() {
   }
 
   function downloadConfig(filename: string, config: string) {
-    const isAmneziaWg = /-awg\.conf$/i.test(filename);
     const blob = new Blob([config], {
-      type: isAmneziaWg ? "application/octet-stream" : "application/x-wireguard-profile;charset=utf-8",
+      type: "application/octet-stream",
     });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");

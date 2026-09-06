@@ -9,7 +9,7 @@ PY
 ); fi
 apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openvpn easy-rsa iptables
 install -d -m 0700 "$ROOT/easy-rsa"; install -d -m 0755 /usr/local/lib/vps-control-openvpn; cp -a /usr/share/easy-rsa/. "$ROOT/easy-rsa/"; chmod -R go-rwx "$ROOT/easy-rsa"
-cd "$ROOT/easy-rsa"; export EASYRSA_BATCH=1 EASYRSA_PKI="$PKI" EASYRSA_REQ_CN='312.net OpenVPN CA'
+cd "$ROOT/easy-rsa"; export EASYRSA_BATCH=1 EASYRSA_PKI="$PKI" EASYRSA_REQ_CN='Private Root CA'
 [[ -s "$PKI/ca.crt" ]] || { ./easyrsa init-pki; ./easyrsa build-ca nopass; }
 [[ -s "$PKI/issued/server.crt" ]] || ./easyrsa build-server-full server nopass
 ./easyrsa gen-crl; install -m 0644 "$PKI/crl.pem" "$ROOT/crl.pem"

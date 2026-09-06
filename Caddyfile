@@ -6,6 +6,10 @@
 }
 
 {$SITE_ADDRESS} {
+    header -X-Powered-By
+    handle /s/* {
+        reverse_proxy 127.0.0.1:8791
+    }
     header {
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
@@ -28,6 +32,10 @@
 }
 
 http://{WG_PANEL_ADDRESS}, http://{AWG_PANEL_ADDRESS} {
+    header -X-Powered-By
+    handle /s/* {
+        reverse_proxy 127.0.0.1:8791
+    }
     header {
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
@@ -51,6 +59,10 @@ http://{WG_PANEL_ADDRESS}, http://{AWG_PANEL_ADDRESS} {
 
 # Stable panel address for full tunnels and HTTP/SOCKS proxy connections.
 http://{INTERNAL_PANEL_HOST} {
+    header -X-Powered-By
+    handle /s/* {
+        reverse_proxy 127.0.0.1:8791
+    }
     @outsideProtectedConnection not remote_ip 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
     respond @outsideProtectedConnection 403
     header {

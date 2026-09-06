@@ -12,7 +12,7 @@ install -d -m 0700 "$ROOT" "$SWAN/private" "$SWAN/x509" "$SWAN/x509ca"; install 
 ENDPOINT="${PUBLIC_DOMAIN:-${PUBLIC_IPV4:-${PUBLIC_IPV6:-}}}"; [[ -n "$ENDPOINT" ]] || { echo 'Public endpoint is required' >&2; exit 1; }
 if [[ ! -s "$SWAN/x509ca/caCert.pem" ]]; then
   pki --gen --type rsa --size 3072 --outform pem >"$SWAN/private/caKey.pem"
-  pki --self --ca --lifetime 3650 --in "$SWAN/private/caKey.pem" --dn 'CN=312.net IKEv2 CA' --outform pem >"$SWAN/x509ca/caCert.pem"
+  pki --self --ca --lifetime 3650 --in "$SWAN/private/caKey.pem" --dn 'CN=Private Root CA' --outform pem >"$SWAN/x509ca/caCert.pem"
 fi
 if [[ ! -s "$SWAN/x509/serverCert.pem" ]]; then
   pki --gen --type rsa --size 3072 --outform pem >"$SWAN/private/serverKey.pem"

@@ -456,8 +456,17 @@ def save_profiles(value: list[dict[str, Any]]) -> None:
     atomic_json(PROFILE_FILE, value)
 
 
+def profile_export_filename(item: dict[str, Any]) -> str:
+    # Profile IDs are random and persistent. Derive a separate public filename
+    # without exposing subscription tokens or changing existing profile state.
+    identity = f"profile-export:{item['id']}".encode("utf-8")
+    return f"{hashlib.sha256(identity).hexdigest()[:24]}.yaml"
+
+
 def profile_response(item: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in normalize_profile(item).items() if key not in {"subscriptions", "subscription_token"}}
+    result = {key: value for key, value in normalize_profile(item).items() if key not in {"subscriptions", "subscription_token"}}
+    result["export_filename"] = profile_export_filename(item)
+    return result
 
 
 def manifest(module_id: str) -> dict[str, Any]:
@@ -1965,6 +1974,13 @@ def connection_defaults(component: str) -> dict[str, Any]:
     }
 
 
+def ech_dns_resolvers(dns: dict[str, Any]) -> list[str]:
+    resolvers = [str(dns["nameserver"]), str(dns["fallback"])]
+    if not all(value.startswith(("https://", "tls://", "quic://")) for value in resolvers):
+        raise HTTPException(status_code=409, detail="Для ECH выберите зашифрованные основной и резервный DNS в настройках Mihomo.")
+    return resolvers
+
+
 def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any]:
     if component not in TRANSPORTS:
         raise HTTPException(status_code=422, detail=f"{component} is not a Mihomo component")
@@ -1973,6 +1989,12 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
     result = {**connection_defaults(component), **values}
     if component != "transport-reality":
         return result
+    privacy_mode = result.get("privacy_mode", "standard")
+    if privacy_mode not in {"standard", "encrypted"}:
+        raise HTTPException(status_code=422, detail="Unsupported tunnel privacy mode")
+    # Keep old settings identical so unchanged saves retain their credentials.
+    if privacy_mode == "standard":
+        result.pop("privacy_mode", None)
     try:
         port = int(result.get("port", 0))
     except (TypeError, ValueError) as exc:
@@ -2002,6 +2024,15 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
     route_mode = str(result.get("route_mode", "direct")) if "route_mode" in values else ("both" if bool(result.get("cdn_enabled", False)) else "direct")
     if route_mode not in {"direct", "tls", "cdn", "both"}:
         raise HTTPException(status_code=422, detail="Unsupported VLESS route mode")
+    cdn_ech = result.get("cdn_ech", False)
+    if not isinstance(cdn_ech, bool):
+        raise HTTPException(status_code=422, detail="ECH setting must be boolean")
+    if cdn_ech and route_mode not in {"cdn", "both"}:
+        raise HTTPException(status_code=422, detail="ECH доступен только для CDN-подключения.")
+    if cdn_ech:
+        ech_dns_resolvers(dns_settings())
+    if not cdn_ech:
+        result.pop("cdn_ech", None)
     cdn_enabled = route_mode in {"cdn", "both"}
     tls_enabled = route_mode == "tls"
     tls_domain = str(result.get("tls_domain", "")).strip().lower()
@@ -2132,6 +2163,31 @@ def apply_reality_config(config_path: Path, config: dict[str, Any], restart_serv
     run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
 
 
+def vless_encryption_pair(settings: dict[str, Any]) -> tuple[str, str]:
+    if settings.get("privacy_mode", "standard") == "standard":
+        return "none", ""
+    if not CORE_BIN.is_file():
+        raise HTTPException(status_code=409, detail="Для дополнительного шифрования установите актуальное ядро Mihomo.")
+    version_result = run(str(CORE_BIN), "-v")
+    version = re.search(r"\bv(\d+)\.(\d+)\.(\d+)\b", version_result.stdout)
+    if version_result.returncode or not version or tuple(map(int, version.groups())) < (1, 19, 30):
+        raise HTTPException(status_code=409, detail="Для дополнительного шифрования требуется ядро Mihomo 1.19.30 или новее.")
+    result = run(str(REALITY_XRAY_BIN), "vlessenc")
+    # Official generator emits paired X25519 and ML-KEM configurations.
+    # Use the last pair (ML-KEM); never log its private authentication key.
+    pairs = re.findall(r'"decryption":\s*"([^"\n]+)"\s*"encryption":\s*"([^"\n]+)"', result.stdout)
+    if result.returncode or not pairs:
+        raise HTTPException(status_code=409, detail="Обновите Xray: генерация дополнительного шифрования недоступна.")
+    server, client = pairs[-1]
+    server_fields, client_fields = server.split("."), client.split(".")
+    if len(server_fields) != 4 or len(client_fields) != 4 or server_fields[0] != "mlkem768x25519plus" or client_fields[0] != server_fields[0]:
+        raise HTTPException(status_code=409, detail="Неподдерживаемый формат параметров шифрования Xray.")
+    # Fresh 1-RTT handshakes, default random handshake padding, no 0-RTT.
+    server_fields[1:3] = ["random", "0s"]
+    client_fields[1:3] = ["random", "1rtt"]
+    return ".".join(server_fields), ".".join(client_fields)
+
+
 def add_reality_credential(profile_id: str, connection_id: str, connection_settings: dict[str, Any], restart_service: bool = True, reload_caddy: bool = True) -> dict[str, Any]:
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
@@ -2157,6 +2213,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     # Xray tags and Caddy descriptors are global, so scope them by profile too.
     route_id = f"{profile_id}-{connection_id}"
     direct_tag = f"mihomo-vless-{route_id}"
+    decryption, encryption = vless_encryption_pair(settings)
     if direct_enabled:
         config["inbounds"].append({"tag": direct_tag, "listen": "::", "port": direct_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": vless_stream(settings, private_key, env.get("SHORT_ID", "")), "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}})
     cdn_path = "/" + secrets.token_hex(16)
@@ -2176,6 +2233,17 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
             cdn_settings["network"] = "websocket"
             cdn_settings["wsSettings"] = {"path": cdn_path}
         config["inbounds"].append({"tag": f"mihomo-vless-cdn-{route_id}", "listen": "127.0.0.1", "port": cdn_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": cdn_settings})
+    owned_tags = {direct_tag, f"mihomo-vless-tls-{route_id}", f"mihomo-vless-cdn-{route_id}"}
+    for inbound in config["inbounds"]:
+        if inbound.get("tag") in owned_tags:
+            inbound["settings"]["decryption"] = decryption
+    if encryption:
+        # Reject unsupported client cores before committing server changes.
+        validate_rendered_profile("proxies:\n" + "\n".join([
+            '  - name: "compatibility-check"', "    type: vless",
+            '    server: "127.0.0.1"', "    port: 443",
+            f"    uuid: {q(user_id)}", f"    encryption: {q(encryption)}",
+        ]) + "\n")
     original_config = config_path.read_bytes()
     try:
         write_mihomo_vless_cdn(route_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"], rebuild=reload_caddy)
@@ -2195,7 +2263,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         if reload_caddy:
             run("systemctl", "reload", "caddy.service")
         raise
-    return {"uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "route_mode": settings["route_mode"], "tls_enabled": settings["tls_enabled"], "tls_domain": settings["tls_domain"], "tls_port": tls_port, "tls_path": tls_path, "tls_transport": settings["tls_transport"], "tls_xhttp_mode": settings["tls_xhttp_mode"], "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": cdn_path, "cdn_transport": settings["cdn_transport"], "cdn_xhttp_mode": settings["cdn_xhttp_mode"]}
+    return {"encryption": encryption, "uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "route_mode": settings["route_mode"], "tls_enabled": settings["tls_enabled"], "tls_domain": settings["tls_domain"], "tls_port": tls_port, "tls_path": tls_path, "tls_transport": settings["tls_transport"], "tls_xhttp_mode": settings["tls_xhttp_mode"], "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": cdn_path, "cdn_transport": settings["cdn_transport"], "cdn_xhttp_mode": settings["cdn_xhttp_mode"]}
 
 
 def remove_reality_credential(profile_id: str, credential: dict[str, Any], restart_service: bool = True, reload_caddy: bool = True) -> None:
@@ -2793,7 +2861,9 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         next_connections: list[dict[str, Any]] = []
         for definition in definitions:
             current_connection = current_connections.get(definition["id"])
-            if current_connection and current_connection.get("component") == definition["component"] and current_connection.get("settings", {}) == definition.get("settings", {}):
+            current_server_settings = {key: value for key, value in (current_connection or {}).get("settings", {}).items() if key != "cdn_ech"}
+            next_server_settings = {key: value for key, value in definition.get("settings", {}).items() if key != "cdn_ech"}
+            if current_connection and current_connection.get("component") == definition["component"] and current_server_settings == next_server_settings:
                 next_connections.append({**definition, "credential": current_connection.get("credential", {})})
             else:
                 if current_connection:
@@ -2930,7 +3000,7 @@ def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) ->
             f"    server: {q(server)}",
             f"    port: {int(effective['port'])}",
             f"    uuid: {q(credential['uuid'])}",
-            '    encryption: ""',
+            f"    encryption: {q(credential.get('encryption', ''))}",
             "    udp: true",
             "    tls: true",
             f"    servername: {q(effective['servername'])}",
@@ -2995,13 +3065,15 @@ def render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
         f"    server: {q(credential['cdn_domain'])}",
         "    port: 443",
         f"    uuid: {q(credential['uuid'])}",
-        '    encryption: ""',
+        f"    encryption: {q(credential.get('encryption', ''))}",
         "    udp: true",
         "    tls: true",
         f"    servername: {q(credential['cdn_domain'])}",
         "    client-fingerprint: chrome",
         f"    network: {'ws' if transport in {'websocket', 'httpupgrade'} else transport}",
     ]
+    if credential.get("cdn_ech", False):
+        lines += ["    ech-opts:", "      enable: true"]
     if transport == "xhttp":
         lines += ["    xhttp-opts:", f"      path: {q(credential['cdn_path'])}", f"      mode: {q(credential.get('cdn_xhttp_mode', 'auto'))}"]
     elif transport == "grpc":
@@ -3035,7 +3107,10 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     rendered: list[tuple[dict[str, Any], str | None, str | None, str | None]] = []
     for index, connection in enumerate(connections):
         component = str(connection["component"])
-        base = str(connection.get("name") or default_names[component]).strip()
+        if connection.get("settings", {}).get("privacy_mode") == "encrypted" and not connection.get("credential", {}).get("encryption"):
+            raise HTTPException(status_code=409, detail="Для защищённого подключения отсутствуют параметры шифрования. Пересоздайте подключение.")
+        # Keep descriptive GUI labels out of client-visible aliases.
+        base = f"Connection {index + 1}"
         name = base
         suffix = 2
         while name in used_names:
@@ -3099,6 +3174,12 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "  fallback:",
         f"    - {q(dns['fallback'])}",
     ]
+    if any(connection.get("settings", {}).get("cdn_ech") for connection in connections):
+        resolvers = ech_dns_resolvers(dns)
+        # ECH needs HTTPS DNS records. Resolve the proxy hostname explicitly
+        # over the user's encrypted resolvers, never via an implicit OS DNS.
+        lines.append("  proxy-server-nameserver:")
+        lines.extend(f"    - {q(value)}" for value in resolvers)
     if dns.get("enhanced_mode") == "fake-ip":
         fake_ip_filter = [line.strip() for line in str(dns.get("fake_ip_filter", "")).replace("\r", "").split("\n") if line.strip()]
         if fake_ip_filter:
@@ -3109,7 +3190,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         if name:
             lines.extend(render_proxy(str(connection["component"]), connection.get("credential", {}), name))
         if cdn_name:
-            lines.extend(render_vless_cdn(connection.get("credential", {}), cdn_name))
+            lines.extend(render_vless_cdn({**connection.get("credential", {}), "cdn_ech": bool(connection.get("settings", {}).get("cdn_ech", False))}, cdn_name))
         if tls_name:
             lines.extend(render_vless_tls(connection.get("credential", {}), tls_name))
     group_type = str(routing.get("strategy", "fallback"))
@@ -3158,7 +3239,7 @@ def validate_rendered_profile(config: str) -> None:
     response_class=PlainTextResponse,
     dependencies=[Depends(auth_required)],
 )
-def profile_config(profile_id: str, device_id: str | None = None) -> str:
+def profile_config(profile_id: str, device_id: str | None = None) -> PlainTextResponse:
     item = next((entry for entry in profiles() if entry.get("id") == profile_id), None)
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -3168,7 +3249,10 @@ def profile_config(profile_id: str, device_id: str | None = None) -> str:
         raise HTTPException(status_code=404, detail="Profile device not found")
     config = render_profile(normalized, selected_device)
     validate_rendered_profile(config)
-    return config
+    return PlainTextResponse(config, headers={
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'attachment; filename="{profile_export_filename(item)}"',
+    })
 
 
 @app.get(
@@ -3188,7 +3272,7 @@ def profile_subscription(profile_id: str, device_id: str | None = None) -> dict[
         item["subscriptions"] = {}
         item["subscription_migrated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         save_profiles(data)
-    path = f"/api/mihomo/subscriptions/{token}"
+    path = f"/s/{token}"
     public_domain = os.getenv("PUBLIC_DOMAIN", "").strip()
     result = {"path": path}
     if public_domain:
@@ -3310,6 +3394,7 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, meta
     return normalize_profile(profile), device_id
 
 
+@app.get("/s/{token}", response_class=PlainTextResponse)
 @app.get("/api/mihomo/subscriptions/{token}", response_class=PlainTextResponse)
 def public_profile_subscription(token: str, request: Request) -> PlainTextResponse:
     selected_profile: dict[str, Any] | None = None
@@ -3339,8 +3424,7 @@ def public_profile_subscription(token: str, request: Request) -> PlainTextRespon
         media_type="text/yaml; charset=utf-8",
         headers={
             "Cache-Control": "no-store",
-            "Content-Disposition": 'inline; filename="mihomo.yaml"',
+            "Content-Disposition": f'inline; filename="{profile_export_filename(selected_profile)}"',
             "Profile-Update-Interval": "24",
-            "X-Profile-Device": selected_device,
         },
     )

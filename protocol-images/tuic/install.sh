@@ -22,14 +22,14 @@ install -m 0755 "${tmp}/sing-box-${version}-linux-${arch}/sing-box" "${BIN}.new"
 [[ -s "${ROOT}/config.json" ]] && "${BIN}.new" check -c "${ROOT}/config.json"
 mv -f "${BIN}.new" "${BIN}"
 if [[ ! -s "${ROOT}/server.crt" || ! -s "${ROOT}/server.key" ]]; then
-  openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 3650 -subj '/CN=tuic.local' -addext 'subjectAltName=DNS:tuic.local' -keyout "${ROOT}/server.key" -out "${ROOT}/server.crt"
+  openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 3650 -subj '/CN=endpoint.internal' -addext 'subjectAltName=DNS:endpoint.internal' -keyout "${ROOT}/server.key" -out "${ROOT}/server.crt"
 fi
 chmod 0600 "${ROOT}/server.key" "${ROOT}/server.crt"
 [[ -s "${ROOT}/settings.json" ]] || printf '{"port":%s,"congestion_control":"bbr"}\n' "${PORT}" >"${ROOT}/settings.json"
 [[ -s "${ROOT}/config.json" ]] || python3 - "${ROOT}/config.json" "${ROOT}" "${PORT}" <<'PY'
 import json,os,sys
 path,root,port=sys.argv[1],sys.argv[2],int(sys.argv[3])
-config={'log':{'level':'warn'},'inbounds':[{'type':'tuic','tag':'tuic-in','listen':'::','listen_port':port,'users':[],'congestion_control':'bbr','auth_timeout':'3s','zero_rtt_handshake':False,'heartbeat':'10s','tls':{'enabled':True,'server_name':'tuic.local','certificate_path':f'{root}/server.crt','key_path':f'{root}/server.key'}}],'outbounds':[{'type':'direct','tag':'direct'}]}
+config={'log':{'level':'warn'},'inbounds':[{'type':'tuic','tag':'tuic-in','listen':'::','listen_port':port,'users':[],'congestion_control':'bbr','auth_timeout':'3s','zero_rtt_handshake':False,'heartbeat':'10s','tls':{'enabled':True,'server_name':'endpoint.internal','certificate_path':f'{root}/server.crt','key_path':f'{root}/server.key'}}],'outbounds':[{'type':'direct','tag':'direct'}]}
 open(path,'w',encoding='utf-8').write(json.dumps(config,indent=2)); os.chmod(path,0o600)
 PY
 chmod 0600 "${ROOT}/settings.json" "${ROOT}/config.json"

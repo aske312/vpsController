@@ -30,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="312.net Infrastructure API", version="0.2.0")
+app = FastAPI(title="Infrastructure API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None)
 logger = logging.getLogger("vps-control.api")
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
 app.add_middleware(
@@ -1095,7 +1095,7 @@ def update_status() -> dict:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "server": SERVER_NAME, "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"ok": True}
 
 
 class BootstrapRequest(BaseModel):
@@ -1114,7 +1114,7 @@ class SshPublicKeyInstall(BaseModel):
 
 @app.get("/api/auth/status")
 def auth_status() -> dict:
-    return {"configured": bool(ADMIN_USER and ADMIN_PASSWORD), "username": ADMIN_USER}
+    return {"configured": bool(ADMIN_USER and ADMIN_PASSWORD)}
 
 
 @app.put("/api/security/admin-password")
@@ -3277,6 +3277,15 @@ def append_peer(config: Path, client_id: str, public_key: str, psk: str, address
         handle.write(block)
 
 
+def certificate_server_name(path: Path) -> str:
+    """Use the installed certificate identity, including on legacy servers."""
+    extensions = run("openssl", "x509", "-in", str(path), "-noout", "-ext", "subjectAltName", check=True)
+    match = re.search(r"DNS:([A-Za-z0-9.-]+)", extensions)
+    if not match:
+        raise HTTPException(status_code=409, detail="Server certificate has no DNS identity")
+    return match.group(1)
+
+
 @app.post("/api/clients")
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
     client_id = secrets.token_hex(8)
@@ -3303,14 +3312,14 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 endpoint = str(settings.get("endpoint") or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
                 ca = (IKEV2_SWANCTL_DIR / "x509ca" / "caCert.pem").read_text(encoding="utf-8")
                 client_config = "\n".join([
-                    "IKEv2 connection", f"Server: {endpoint}", "Remote ID: " + endpoint,
+                    "Connection", f"Server: {endpoint}", "Remote ID: " + endpoint,
                     f"Username: {client_id}", f"Password: {password}", "Authentication: EAP-MSCHAPv2",
-                    "Install the CA certificate below as a trusted VPN root certificate:", "", ca.strip(), "",
+                    "Install the CA certificate below as a trusted root certificate:", "", ca.strip(), "",
                 ])
                 items = read_clients()
                 items.append({"id": client_id, "name": payload.name, "protocol": "ikev2", "public_key": client_id, "endpoint": endpoint, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
-                return {"id": client_id, "filename": f"{safe_name}-ikev2.txt", "config": client_config}
+                return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config}
             except Exception as exc:
                 if replaced:
                     try:
@@ -3352,7 +3361,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 items = read_clients()
                 items.append({"id": client_id, "name": payload.name, "protocol": "openvpn", "public_key": client_id, "port": port, "transport": transport, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
-                return {"id": client_id, "filename": f"{safe_name}-openvpn.ovpn", "config": client_config}
+                return {"id": client_id, "filename": f"{safe_name}.ovpn", "config": client_config}
             except Exception as exc:
                 if issued:
                     try:
@@ -3366,6 +3375,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         with client_mutation_lock:
             try:
                 settings = json.loads(HYSTERIA2_SETTINGS.read_text(encoding="utf-8"))
+                tls_identity = str(settings.get("domain", "")).strip() or certificate_server_name(HYSTERIA2_DIR / "server.crt")
                 users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8")) if HYSTERIA2_USERS.exists() else {}
                 password = secrets.token_urlsafe(32)
                 users[client_id] = password
@@ -3382,7 +3392,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     f"server: {endpoint}:{port}",
                     f"auth: {client_id}:{password}",
                     "tls:",
-                    f"  sni: {domain or 'hysteria2.local'}",
+                    f"  sni: {tls_identity}",
                     f"  insecure: {'false' if tls_mode == 'acme' else 'true'}",
                     *([f"  pinSHA256: {fingerprint}"] if tls_mode != "acme" and fingerprint else []),
                     "socks5:", "  listen: 127.0.0.1:1080", "  disableUDP: false",
@@ -3390,7 +3400,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 items = read_clients()
                 items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "domain": domain, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
-                return {"id": client_id, "filename": f"{safe_name}-hysteria2.yaml", "config": client_config}
+                return {"id": client_id, "filename": f"{safe_name}.yaml", "config": client_config}
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 raise HTTPException(status_code=500, detail="Unable to create Hysteria2 connection") from exc
     if payload.protocol == "tuic":
@@ -3417,11 +3427,11 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 client = {
                     "log": {"level": "warn"},
                     "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080}],
-                    "outbounds": [{"type": "tuic", "tag": "tuic-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "uuid": user_uuid, "password": password, "congestion_control": settings.get("congestion_control", "bbr"), "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": "10s", "tls": {"enabled": True, "server_name": "tuic.local", "certificate": certificate}}],
-                    "route": {"final": "tuic-out"},
+                    "outbounds": [{"type": "tuic", "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "uuid": user_uuid, "password": password, "congestion_control": settings.get("congestion_control", "bbr"), "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": "10s", "tls": {"enabled": True, "server_name": certificate_server_name(TUIC_DIR / "server.crt"), "certificate": certificate}}],
+                    "route": {"final": "connection-out"},
                 }
                 items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "port": int(settings.get("port", 8444)), "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
-                return {"id": client_id, "filename": f"{safe_name}-tuic.json", "config": json.dumps(client, ensure_ascii=False, indent=2)}
+                return {"id": client_id, "filename": f"{safe_name}.json", "config": json.dumps(client, ensure_ascii=False, indent=2)}
             except Exception as exc:
                 TUIC_CONFIG.write_bytes(original); os.chmod(TUIC_CONFIG, 0o600)
                 run("systemctl", "restart", "vps-control-tuic.service", timeout=20)
@@ -3439,9 +3449,9 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 if result.returncode: raise RuntimeError(result.stderr.strip())
                 temporary.replace(TROJAN_CONFIG); run("systemctl", "restart", "vps-control-trojan.service", timeout=20, check=True)
                 settings=json.loads(TROJAN_SETTINGS.read_text()); endpoint=PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT; certificate=(TROJAN_DIR/"server.crt").read_text()
-                client={"log":{"level":"warn"},"inbounds":[{"type":"mixed","tag":"mixed-in","listen":"127.0.0.1","listen_port":2080}],"outbounds":[{"type":"trojan","tag":"trojan-out","server":endpoint,"server_port":int(settings.get("port",8445)),"password":password,"tls":{"enabled":True,"server_name":"trojan.local","certificate":certificate}}],"route":{"final":"trojan-out"}}
+                client={"log":{"level":"warn"},"inbounds":[{"type":"mixed","tag":"mixed-in","listen":"127.0.0.1","listen_port":2080}],"outbounds":[{"type":"trojan","tag":"connection-out","server":endpoint,"server_port":int(settings.get("port",8445)),"password":password,"tls":{"enabled":True,"server_name":certificate_server_name(TROJAN_DIR / "server.crt"),"certificate":certificate}}],"route":{"final":"connection-out"}}
                 items=read_clients(); items.append({"id":client_id,"name":payload.name,"protocol":payload.protocol,"public_key":client_id,"port":int(settings.get("port",8445)),"settings":payload.settings.model_dump(exclude_none=True),"created_at":datetime.now(timezone.utc).isoformat()}); write_clients(items)
-                return {"id":client_id,"filename":f"{safe_name}-trojan.json","config":json.dumps(client,ensure_ascii=False,indent=2)}
+                return {"id":client_id,"filename":f"{safe_name}.json","config":json.dumps(client,ensure_ascii=False,indent=2)}
             except Exception as exc:
                 TROJAN_CONFIG.write_bytes(original); os.chmod(TROJAN_CONFIG,0o600); run("systemctl","restart","vps-control-trojan.service",timeout=20)
                 raise HTTPException(status_code=500,detail="Unable to create Trojan connection") from exc
@@ -3484,7 +3494,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         items = read_clients()
         items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
         write_clients(items)
-        return {"id": client_id, "filename": f"{safe_name}-shadowsocks.txt", "config": client_config}
+        return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config}
 
     if payload.protocol == "vless-reality-xhttp":
         with client_mutation_lock:
@@ -3535,23 +3545,23 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 direct_transport = str(vless_reality_inbound(config_data).get("streamSettings", {}).get("network", "xhttp")).upper()
                 profiles = []
                 if "direct" in requested_routes:
-                    profiles.append({"id": "direct", "name": f"Direct · REALITY/{direct_transport}", "filename": f"{safe_name}-vless-direct.txt", "config": direct_config})
+                    profiles.append({"id": "direct", "name": f"Direct · REALITY/{direct_transport}", "filename": f"{safe_name}-direct.txt", "config": direct_config})
                 tls_domain = reality.get("TLS_DOMAIN", "")
                 if "tls" in requested_routes and tls_domain:
                     tls_query = urllib.parse.urlencode(vless_tls_client_query(reality, payload.settings.fingerprint))
                     tls_config = f"vless://{client_uuid}@{tls_domain}:443?{tls_query}#{urllib.parse.quote(payload.name + ' TLS')}"
-                    profiles.append({"id": "tls", "name": f"TLS · {reality.get('TLS_TRANSPORT', 'xhttp').upper()}", "filename": f"{safe_name}-vless-tls.txt", "config": tls_config})
+                    profiles.append({"id": "tls", "name": f"TLS · {reality.get('TLS_TRANSPORT', 'xhttp').upper()}", "filename": f"{safe_name}-secure.txt", "config": tls_config})
                 cdn_domain = reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
                 if "cdn" in requested_routes and cdn_domain:
                     cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality, payload.settings.fingerprint))
                     cdn_config = f"vless://{client_uuid}@{cdn_domain}:443?{cdn_query}#{urllib.parse.quote(payload.name + ' CDN')}"
-                    profiles.append({"id": "cdn", "name": f"CDN · TLS/{reality.get('CDN_TRANSPORT', 'websocket').upper()}", "filename": f"{safe_name}-vless-cdn.txt", "config": cdn_config})
+                    profiles.append({"id": "cdn", "name": f"CDN · TLS/{reality.get('CDN_TRANSPORT', 'websocket').upper()}", "filename": f"{safe_name}-relay.txt", "config": cdn_config})
                 client_config = "\n".join(profile["config"] for profile in profiles)
                 stage = "сохранение подключения"
                 items = read_clients()
                 items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "vless_routes": requested_routes, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
-                return {"id": client_id, "filename": f"{safe_name}-vless.txt", "config": client_config, "profiles": profiles}
+                return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config, "profiles": profiles}
             except HTTPException:
                 if replaced:
                     try:
@@ -3632,7 +3642,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         }
     )
     write_clients(items)
-    return {"id": client_id, "filename": f"{safe_name}-{payload.protocol}.conf", "config": client_config}
+    return {"id": client_id, "filename": f"{safe_name}.conf", "config": client_config}
 
 
 @app.delete("/api/clients/{client_id}")

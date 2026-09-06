@@ -80,6 +80,7 @@ type Module = {
 
 type Profile = {
   id: string;
+  export_filename: string;
   name: string;
   channels: string[];
   connections: ProfileConnection[];
@@ -1119,7 +1120,7 @@ export function MihomoPage({
       const config = (await request(`/mihomo/profiles/${profile.id}/config${device ? `?device_id=${encodeURIComponent(device.id)}` : ""}`)) as string;
       const link = document.createElement("a");
       link.href = URL.createObjectURL(new Blob([config], { type: "application/yaml;charset=utf-8" }));
-      link.download = `${[profile.name, device?.name].filter(Boolean).join("-").trim().replace(/[^a-zA-Z0-9а-яА-Я._-]+/g, "-") || "mihomo"}.yaml`;
+      link.download = profile.export_filename;
       document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(link.href);
       setNotice(`Профиль «${profile.name}» скачан.`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось скачать профиль"); }
@@ -1582,9 +1583,22 @@ export function MihomoPage({
                       <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}><span aria-hidden="true">×</span></button><span className="mihomoConnectionChevron">›</span>
                     </summary>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
+                    {connection.component === "transport-reality" && <fieldset className="mihomoTunnelPrivacy">
+                      <legend>Приватность туннеля</legend>
+                      <label><span>Защита содержимого</span><select value={String(connection.settings.privacy_mode || "standard")} onChange={(event) => updateConnectionSetting(connection.id, "privacy_mode", event.target.value)}>
+                        <option value="standard">Обычный TLS / REALITY</option>
+                        <option value="encrypted">Дополнительное шифрование клиент—VPS</option>
+                      </select></label>
+                      <p>Дополнительный слой шифрует содержимое туннеля до VPS и добавляет случайное заполнение начального обмена. Правила прямого выхода, включая российские сайты, сохраняются.</p>
+                      {["cdn", "both"].includes(vlessRoute) && <label className="is-toggle"><span>Скрывать домен TLS через ECH</span><input type="checkbox" checked={Boolean(connection.settings.cdn_ech)} onChange={(event) => updateConnectionSetting(connection.id, "cdn_ech", event.target.checked)} /></label>}
+                      {connection.settings.cdn_ech === true && <p>Требуется поддержка ECH на CDN и актуальный клиент. Выберите зашифрованные основной и резервный DNS в настройках Mihomo. При несовместимости соединение может не установиться; IP CDN и характеристики трафика остаются видимыми.</p>}
+                      {connection.settings.privacy_mode === "encrypted" && <p>Нужен клиент с ядром Mihomo 1.19.30 или новее. После смены режима обновите YAML или подписку: старые параметры этого подключения перестанут работать. Для защиты от подмены со стороны CDN получайте YAML через доверенный канал.</p>}
+                      <small>Провайдер видит соединение с CDN или сервером; домен без ECH, время и объём трафика могут быть видны. CDN знает IP сторон. Полная нераспознаваемость туннеля не гарантируется.</small>
+                      <small>Защита применяется к этой карточке. Резервные подключения настраиваются отдельно.</small>
+                    </fieldset>}
                     <div className="mihomoConnectionFields">
                       {schema.filter((field) => {
-                        if (field.key === "route_mode" || field.key === "cdn_enabled") return false;
+                        if (["route_mode", "cdn_enabled", "privacy_mode", "cdn_ech"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute === "cdn" && ["port", "target", "transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute === "direct" && ["cdn_domain", "cdn_transport", "cdn_xhttp_mode"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute !== "tls" && ["tls_domain", "tls_transport", "tls_xhttp_mode"].includes(field.key)) return false;
