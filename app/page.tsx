@@ -1,5 +1,7 @@
 "use client";
 
+import { createApiClient } from "./lib/api-request";
+
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
@@ -86,6 +88,7 @@ export default function Home() {
   const [diagnosticsOpen, setDiagnosticsOpen] = useState<Partial<Record<Protocol, boolean>>>({});
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState("");
+  const [refreshErrors, setRefreshErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [passwordDialog, setPasswordDialog] = useState(false);
   const [sshAdminDialog, setSshAdminDialog] = useState(false);
@@ -138,19 +141,9 @@ export default function Home() {
     return () => document.removeEventListener("pointerdown", closeSettings);
   }, [moduleMenuOpen, settingsOpen]);
 
-  const request = useCallback(async (path: string, init?: RequestInit) => {
-    const response = await fetch(`/api${path}`, {
-      ...init,
-      headers: { "Content-Type": "application/json", Authorization: `Basic ${token}`, ...(init?.headers || {}) },
-    });
-    if (!response.ok) {
-      const raw = await response.text();
-      let detail = raw;
-      try { detail = (JSON.parse(raw) as { detail?: string }).detail || raw; } catch { /* Plain-text API error. */ }
-      throw new Error(response.status === 401 ? "Неверный токен администратора" : publicError(detail, response.status));
-    }
-    return response.json();
-  }, [token]);
+  const request = useMemo(() => createApiClient(token, {
+    formatHttpError: (detail, status) => status === 401 ? "Сессия панели завершена. Войдите заново." : publicError(detail, status),
+  }), [token]);
 
 
   function askConfirmation(options: Omit<ConfirmationRequest, "resolve">): Promise<boolean> {
@@ -179,7 +172,8 @@ export default function Home() {
         setInstallingProtocol("");
       }
       setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Ошибка соединения"); }
+      setRefreshErrors((current) => { const next = { ...current }; delete next.loadOverview; return next; });
+    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadOverview: cause instanceof Error ? cause.message : "Ошибка соединения" })); }
   }, [installingProtocol, request, token]);
 
   const loadClients = useCallback(async () => {
@@ -187,7 +181,8 @@ export default function Home() {
     try {
       const data = await request("/clients");
       setClients(data.items); setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить клиентов"); }
+      setRefreshErrors((current) => { const next = { ...current }; delete next.loadClients; return next; });
+    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadClients: cause instanceof Error ? cause.message : "Не удалось обновить клиентов" })); }
   }, [request, token]);
 
   const loadSecurity = useCallback(async () => {
@@ -195,7 +190,8 @@ export default function Home() {
     setSecurityLoading(true);
     try {
       setSecurity(await request("/security")); setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить состояние безопасности"); }
+      setRefreshErrors((current) => { const next = { ...current }; delete next.loadSecurity; return next; });
+    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadSecurity: cause instanceof Error ? cause.message : "Не удалось обновить состояние безопасности" })); }
     finally { setSecurityLoading(false); }
   }, [request, token]);
 
@@ -203,7 +199,8 @@ export default function Home() {
     if (!token) return;
     try {
       setApplication(await request("/application/status")); setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить приложение"); }
+      setRefreshErrors((current) => { const next = { ...current }; delete next.loadApplication; return next; });
+    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadApplication: cause instanceof Error ? cause.message : "Не удалось обновить приложение" })); }
   }, [request, token]);
 
   const loadServices = useCallback(async () => {
@@ -217,7 +214,8 @@ export default function Home() {
         retention_days: next.logging?.retention_days ?? 30,
       });
       setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить состояние служб"); }
+      setRefreshErrors((current) => { const next = { ...current }; delete next.loadServices; return next; });
+    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadServices: cause instanceof Error ? cause.message : "Не удалось обновить состояние служб" })); }
   }, [request, token]);
 
   const loadProtocolStatus = useCallback(async (protocol: Protocol) => {
@@ -287,7 +285,8 @@ export default function Home() {
         }));
       }
       setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить состояние протокола"); }
+      setRefreshErrors((current) => { const next = { ...current }; delete next.loadProtocolStatus; return next; });
+    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadProtocolStatus: cause instanceof Error ? cause.message : "Не удалось обновить состояние протокола" })); }
   }, [request, token]);
 
   const loadDns = useCallback(async () => {
@@ -295,7 +294,8 @@ export default function Home() {
     try {
       const next = await request("/dns") as DnsStatus;
       setDns(next); setDnsDraft((current) => current || next.settings); setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось загрузить DNS"); }
+      setRefreshErrors((current) => { const next = { ...current }; delete next.loadDns; return next; });
+    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadDns: cause instanceof Error ? cause.message : "Не удалось загрузить DNS" })); }
   }, [request, token]);
 
   async function saveDnsSettings() {
@@ -372,8 +372,7 @@ export default function Home() {
 
   const refreshCurrent = useCallback(async (showBusy = false) => {
     if (!token) return;
-    if (showBusy) setBusy(true);
-    setError("");
+    if (showBusy) { setBusy(true); setError(""); }
     try {
       if (tab === "overview") await Promise.all([loadOverview(), loadClients(), loadApplication(), loadServices()]);
       else if (tab === "security") await Promise.all([loadSecurity(), loadServices()]);
@@ -411,7 +410,7 @@ export default function Home() {
       : tab === "overview" ? 30000
         : ["channels", "wg", "awg", "shadowsocks", "vless-reality-xhttp", "clients"].includes(tab) ? 15000
           : 10000;
-    const timer = window.setInterval(() => void refreshCurrent(false), delay);
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void refreshCurrent(false); }, delay);
     return () => window.clearInterval(timer);
   }, [application?.action?.action, application?.action?.state, autoRefresh, refreshCurrent, tab, token]);
 
@@ -488,7 +487,6 @@ export default function Home() {
     liveRequestInFlight.current = true;
     try {
       const next = await request("/live-status") as LiveStatus;
-      setError("");
       const now = Date.now();
       const previous = networkSample.current;
       let nextRxRate = 0;
@@ -1430,6 +1428,7 @@ export default function Home() {
     onLogout={() => { sessionStorage.removeItem("312-token"); setToken(""); }}
   >
       {tab !== "overview" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
+      {Object.entries(refreshErrors).map(([source, message]) => <div className="errorBox" role="status" key={source}>{message} Отображаются последние полученные данные.</div>)}
       {error && <div className="errorBox" role="alert"><span>!</span>{error}<button onClick={() => setError("")} aria-label="Закрыть сообщение об ошибке">×</button></div>}
       {notice && <div className="successNotice" role="status"><span>✓</span>{notice}<button onClick={() => setNotice("")} aria-label="Закрыть уведомление">×</button></div>}
       {tab === "overview" && (

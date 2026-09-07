@@ -1266,7 +1266,7 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.doesNotMatch(manager.match(/install_prebuilt_release\(\) \{([\s\S]*?)\n\}/)?.[1] || "", /apt-get|npm |docker (build|compose)/);
   assert.doesNotMatch(api, /Application updates require a prepared release archive/);
   const releaseInstall = manager.match(/install_prebuilt_release\(\) \{([\s\S]*?)\n\}/)?.[1] || "";
-  assert.match(releaseInstall, /PROJECT_DIR="\$\{INSTALL_DIR\}"\s+write_caddy_config/);
+  assert.match(releaseInstall, /PROJECT_DIR="\$\{INSTALL_DIR\}"\s+if ! write_caddy_config/);
   assert.match(releaseInstall, /http:\/\/127\.0\.0\.1:3000\//);
   assert.match(page, /runApplicationAction\("update"\)/);
   assert.match(page, /стабильная версия stabl/);

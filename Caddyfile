@@ -7,7 +7,12 @@
 
 {$SITE_ADDRESS} {
     route {
-    {PANEL_ACCESS_GUARD}
+    # Also understood by older release installers: the protected site uses localhost.
+    @outsidePanel {
+        host localhost
+        not remote_ip 127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+    }
+    respond @outsidePanel 403
     header -X-Powered-By
     handle /s/* {
         reverse_proxy 127.0.0.1:8791

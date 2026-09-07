@@ -1,5 +1,7 @@
 "use client";
 
+import { createApiClient } from "../../lib/api-request";
+
 import { formatModuleVersion } from "../../lib/format-version";
 import { bytes, duration } from "../../lib/control-plane-ui";
 import QRCode from "qrcode";
@@ -483,6 +485,8 @@ export function MihomoPage({
   const routingAutosaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [refreshError, setRefreshError] = useState("");
+  const refreshInFlight = useRef<Promise<void> | null>(null);
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<Module | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number | boolean>>({});
@@ -510,63 +514,49 @@ export function MihomoPage({
     profileCanvasRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, [profileStep, profileDialog]);
 
-  const request = useCallback(async (path: string, init?: RequestInit) => {
-    if (!token) throw new Error("Сессия панели завершена. Войдите заново.");
-    const response = await fetch(`/api${path}`, {
-      ...init,
-      headers: {
-        Authorization: `Basic ${token}`,
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        ...(init?.headers || {}),
-      },
-    });
-    if (!response.ok) {
-      let message = `HTTP ${response.status}`;
-      try {
-        const body = await response.json();
-        message = body?.detail || body?.message || message;
-        if (body?.operation_id) message += ` · операция ${body.operation_id}`;
-      } catch {
-        // Preserve status text for non-JSON responses.
-      }
-      throw new Error(publicError(message, response.status));
-    }
-    if ((response.headers.get("content-type") || "").includes("text/plain")) {
-      return response.text();
-    }
-    return response.status === 204 ? null : response.json();
-  }, [token]);
+  const request = useMemo(() => createApiClient(token, {
+    formatHttpError: (detail, status) => status === 401 ? "Сессия панели завершена. Войдите заново." : publicError(detail, status),
+  }), [token]);
 
-  const refresh = useCallback(async () => {
-    setError("");
-    try {
-      const [nextStatus, nextModules, nextProfiles, nextDns, nextRouting] = await Promise.all([
-        request("/mihomo/status"),
-        request("/mihomo/modules"),
-        request("/mihomo/profiles"),
-        request("/mihomo/dns/settings"),
-        request("/mihomo/routing/schema"),
-      ]);
-      setStatus(nextStatus as Status);
-      setModules((nextModules as { items: Module[] }).items || []);
-      setProfiles((nextProfiles as { items: Profile[] }).items || []);
-      setDnsPolicy(nextDns as PolicySettings);
-      if (!dnsDirtyRef.current) setDnsDraft({ ...(nextDns as PolicySettings).values });
-      setRoutingPolicy(nextRouting as PolicySettings);
-      if (!routingDirtyRef.current) {
-        const values = { ...(nextRouting as PolicySettings).values };
-        routingDraftRef.current = values;
-        setRoutingDraft(values);
-      }
-      const profileItems = (nextProfiles as { items: Profile[] }).items || [];
-      const statsEntries = await Promise.all(profileItems.map(async (profile) => {
-        try { return [profile.id, await request(`/mihomo/profiles/${profile.id}/stats`)] as const; }
-        catch { return [profile.id, null] as const; }
-      }));
-      setProfileStats(Object.fromEntries(statsEntries.filter((entry) => entry[1])) as Record<string, ProfileStats>);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось загрузить Mihomo Manager");
+  const refresh = useCallback(async (afterAction = true): Promise<void> => {
+    if (refreshInFlight.current) {
+      if (!afterAction) return refreshInFlight.current;
+      await refreshInFlight.current;
+      if (refreshInFlight.current) return refreshInFlight.current;
     }
+    const job = (async () => {
+      try {
+        const [nextStatus, nextModules, nextProfiles, nextDns, nextRouting] = await Promise.all([
+          request("/mihomo/status"),
+          request("/mihomo/modules"),
+          request("/mihomo/profiles"),
+          request("/mihomo/dns/settings"),
+          request("/mihomo/routing/schema"),
+        ]);
+        setStatus(nextStatus as Status);
+        setModules((nextModules as { items: Module[] }).items || []);
+        setProfiles((nextProfiles as { items: Profile[] }).items || []);
+        setDnsPolicy(nextDns as PolicySettings);
+        if (!dnsDirtyRef.current) setDnsDraft({ ...(nextDns as PolicySettings).values });
+        setRoutingPolicy(nextRouting as PolicySettings);
+        if (!routingDirtyRef.current) {
+          const values = { ...(nextRouting as PolicySettings).values };
+          routingDraftRef.current = values;
+          setRoutingDraft(values);
+        }
+        const profileItems = (nextProfiles as { items: Profile[] }).items || [];
+        const statsEntries = await Promise.all(profileItems.map(async (profile) => {
+          try { return [profile.id, await request(`/mihomo/profiles/${profile.id}/stats`)] as const; }
+          catch { return [profile.id, null] as const; }
+        }));
+        setProfileStats(Object.fromEntries(statsEntries.filter((entry) => entry[1])) as Record<string, ProfileStats>);
+        setRefreshError("");
+      } catch (cause) {
+        setRefreshError(cause instanceof Error ? cause.message : "Не удалось обновить данные Mihomo");
+      }
+    })().finally(() => { refreshInFlight.current = null; });
+    refreshInFlight.current = job;
+    return job;
   }, [request]);
 
   function updateDnsDraft(key: string, value: string | number | boolean) {
@@ -598,8 +588,8 @@ export function MihomoPage({
   }
 
   useEffect(() => {
-    const initial = window.setTimeout(() => void refresh(), 0);
-    const timer = window.setInterval(() => void refresh(), 15000);
+    const initial = window.setTimeout(() => void refresh(false), 0);
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(false); }, 15000);
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [refresh]);
 
@@ -1300,7 +1290,8 @@ export function MihomoPage({
         </nav>
       </article>
 
-      {error && <div className="mihomoMessage is-error">{error}</div>}
+      {error && <div className="mihomoMessage is-error" role="alert">{error}</div>}
+      {refreshError && <div className="mihomoMessage is-error" role="status">{refreshError} Отображаются последние полученные данные.</div>}
       {notice && <div className="mihomoMessage is-ok">{notice}</div>}
 
       {view === "overview" && (

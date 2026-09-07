@@ -10,7 +10,7 @@
     "dev": "WRANGLER_LOG_PATH=.runtime/wrangler/wrangler.log vinext dev",
     "build": "vinext build",
     "start": "WRANGLER_LOG_PATH=.runtime/wrangler/wrangler.log vinext start",
-    "test": "npm run build && node --test tests/product.test.mjs",
+    "test": "npm run build && node --experimental-strip-types --test tests/product.test.mjs tests/api-request.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {

@@ -69,6 +69,7 @@ GEOLOCATION_SENARY_URL="https://ipinfo.io"
 PUBLIC_IP_DISCOVERY_URL="https://api64.ipify.org"
 UPDATE_TEMP_DIR=""
 UPDATE_ROLLBACK_DIR=""
+UPDATE_GATEWAY_BACKUP_DIR=""
 UPDATE_SWAP_ACTIVE="no"
 SSH_TEMP_STARTED="no"
 SSH_TEMP_RULE="no"
@@ -647,6 +648,13 @@ PY
 }
 
 write_caddy_config() {
+  # Resolve from the installed tree at call time. A running old shell must not
+  # interpret a newer release's template using stale rendering functions.
+  if [[ -f "${INSTALL_DIR}/api/gateway_config.py" ]]; then
+    python3 "${INSTALL_DIR}/api/gateway_config.py" write --mode "${ACCESS_MODE}" --port "${HTTP_PORT}" --output "${CADDY_CONFIG}" || return
+    python3 "${INSTALL_DIR}/api/cdn_security.py" rebuild || return
+    return
+  fi
   local domain internal_panel_host wg_panel_address awg_panel_address panel_guard=""
   if [[ "${ACCESS_MODE}" == "vpn" ]]; then
     panel_guard='@outsidePanel not remote_ip 127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; respond @outsidePanel 403'
@@ -708,7 +716,7 @@ ${domain} {
 }
 EOF
   fi
-  python3 "${INSTALL_DIR}/api/cdn_security.py" rebuild
+  [[ ! -f "${INSTALL_DIR}/api/cdn_security.py" ]] || python3 "${INSTALL_DIR}/api/cdn_security.py" rebuild
 }
 
 env_value() {
@@ -1449,6 +1457,17 @@ for package in data.get("preflight_packages", []):
 PY
 }
 
+restore_update_gateway() {
+  [[ -n "${UPDATE_GATEWAY_BACKUP_DIR}" && -f "${UPDATE_GATEWAY_BACKUP_DIR}/Caddyfile" ]] || return 1
+  cp -a -- "${UPDATE_GATEWAY_BACKUP_DIR}/Caddyfile" "${CADDY_CONFIG}" || return
+  [[ -n "${CADDY_SNIPPET_DIR}" && "${CADDY_SNIPPET_DIR}" != "/" ]] || return 1
+  install -d -m 0755 "${CADDY_SNIPPET_DIR}" || return
+  rm -f -- "${CADDY_SNIPPET_DIR}"/*.caddy || return
+  if [[ -d "${UPDATE_GATEWAY_BACKUP_DIR}/snippets" ]]; then
+    cp -a -- "${UPDATE_GATEWAY_BACKUP_DIR}/snippets/." "${CADDY_SNIPPET_DIR}/" || return
+  fi
+}
+
 rollback_interrupted_update() {
   [[ "${UPDATE_SWAP_ACTIVE}" == "yes" ]] || return 0
   local rollback target failed
@@ -1471,7 +1490,9 @@ rollback_interrupted_update() {
   [[ ! -e "${INSTALL_DIR}" ]] || mv -- "${INSTALL_DIR}" "${failed}"
   mv -- "${rollback}" "${INSTALL_DIR}"
   PROJECT_DIR="${INSTALL_DIR}"
-  systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
+  restore_update_gateway || return
+  systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" 2>/dev/null || true
+  systemctl reload-or-restart caddy.service 2>/dev/null || true
   restart_mihomo_manager_if_present || true
   if systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service; then
     [[ ! -d "${failed}" ]] || rm -rf -- "${failed}"
@@ -2122,9 +2143,9 @@ ReadWritePaths=${DATA_DIR}/web
 WantedBy=multi-user.target
 EOF
   install -d -m 0755 /etc/caddy
-  write_caddy_config
-  caddy validate --config "${CADDY_CONFIG}" >/dev/null
-  systemctl daemon-reload
+  write_caddy_config || return
+  caddy validate --config "${CADDY_CONFIG}" >/dev/null || return
+  systemctl daemon-reload || return
   systemctl enable "${APP_NAME}-web.service" caddy.service >>"${INSTALL_LOG}" 2>&1
 }
 
@@ -2362,6 +2383,18 @@ install_prebuilt_release() {
   PYTHONPATH="${payload}" "${candidate_python}" -c 'import api.main' >/dev/null \
     || { rm -rf -- "${stage_root}"; die "API нового релиза не проходит проверку импорта; обновление отменено до остановки служб."; }
 
+  local gateway_renderer="${payload}/api/gateway_config.py"
+  [[ -f "${gateway_renderer}" ]] || gateway_renderer="${INSTALL_DIR}/api/gateway_config.py"
+  python3 "${gateway_renderer}" check --root "${payload}" --mode "${ACCESS_MODE}" --port "${HTTP_PORT}" \
+    || { rm -rf -- "${stage_root}"; die "Конфигурация Caddy нового релиза не прошла проверку; рабочие службы не остановлены."; }
+
+  # Restore the exact active configuration on failure, including older releases
+  # which cannot render the current security policy.
+  install -d -m 0700 "${stage_root}/gateway-backup"
+  cp -a -- "${CADDY_CONFIG}" "${stage_root}/gateway-backup/Caddyfile"
+  [[ ! -d "${CADDY_SNIPPET_DIR}" ]] || cp -a -- "${CADDY_SNIPPET_DIR}" "${stage_root}/gateway-backup/snippets"
+  UPDATE_GATEWAY_BACKUP_DIR="${stage_root}/gateway-backup"
+
   if [[ "${requirements_changed}" == "yes" ]]; then
     while IFS= read -r -d '' venv_entry; do
       IFS= read -r first_line <"${venv_entry}" || true
@@ -2387,9 +2420,8 @@ install_prebuilt_release() {
   fi
   chmod 0755 "${INSTALL_DIR}" "${INSTALL_DIR}/scripts/vps-control.sh"
   PROJECT_DIR="${INSTALL_DIR}"
-  write_caddy_config
-
-  if ! install_api \
+  if ! write_caddy_config \
+    || ! install_api \
     || ! install_web \
     || ! ensure_api_write_access \
     || ! ensure_mihomo_profile_runtimes \
@@ -2397,7 +2429,8 @@ install_prebuilt_release() {
     || ! build_commit="$(awk -F= '$1 == "commit" {print $2}' "${INSTALL_DIR}/.prebuilt-release")" \
     || ! printf '%s\n' "${build_commit:-manual}" >"${INSTALL_DIR}/.build-commit" \
     || ! write_integrity_manifest \
-    || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
+    || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" \
+    || ! systemctl reload-or-restart caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! restart_mihomo_manager_if_present \
     || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
@@ -2412,13 +2445,14 @@ install_prebuilt_release() {
     rm -rf -- "${INSTALL_DIR}"
     mv -- "${rollback}" "${INSTALL_DIR}"
     PROJECT_DIR="${INSTALL_DIR}"
-    write_caddy_config
+    restore_update_gateway
     if [[ "${legacy_runtime}" == "yes" ]]; then
       systemctl stop "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
       start_legacy_containers
       systemctl restart "${APP_NAME}-api.service"
     else
-      systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
+      systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service"
+      systemctl reload-or-restart caddy.service
     fi
     restart_mihomo_manager_if_present
     rm -rf -- "${stage_root}"
@@ -2434,6 +2468,7 @@ install_prebuilt_release() {
   fi
   UPDATE_SWAP_ACTIVE="no"
   UPDATE_ROLLBACK_DIR=""
+  UPDATE_GATEWAY_BACKUP_DIR=""
   rm -rf -- "${stage_root}"
   cleanup_legacy_runtime
   install -m 0755 "${INSTALL_DIR}/scripts/vps-control.sh" "${COMMAND_PATH}"
