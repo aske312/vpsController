@@ -6,7 +6,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
 import yaml
 
 try:
@@ -57,6 +56,7 @@ class PrivacyTests(unittest.TestCase):
                 api.certificate_server_name(Path("server.crt"))
 
     def test_public_api_does_not_disclose_identity_or_schema(self):
+        from fastapi.testclient import TestClient
         client = TestClient(api.app)
         with patch.object(api, "ADMIN_USER", "private-admin"), patch.object(api, "ADMIN_PASSWORD", "secret"):
             self.assertEqual(client.get("/api/health").json(), {"ok": True})
@@ -80,6 +80,7 @@ class PrivacyTests(unittest.TestCase):
         self.assertEqual(config["proxies"][0]["private-key"], "test-private")
 
     def test_subscription_alias_preserves_token_checks_and_legacy_urls(self):
+        from fastapi.testclient import TestClient
         client = TestClient(manager.app)
         profile = {"id": "test", "subscription_token": "test-token", "common_device_id": "common"}
         with patch.object(manager, "profiles", return_value=[profile]), patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "record_common_subscription_access", return_value=profile), patch.object(manager, "render_profile", return_value="proxies: []\n"), patch.object(manager, "validate_rendered_profile"):

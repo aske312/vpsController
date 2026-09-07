@@ -30,6 +30,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cdn_security
+
 app = FastAPI(title="Infrastructure API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None)
 logger = logging.getLogger("vps-control.api")
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
@@ -2052,6 +2056,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
             "enabled": run("systemctl", "is-enabled", "vps-control-api.service") == "enabled",
         },
         "containers": containers,
+        "cdn_security": cdn_security.settings(),
         "action": action,
         "service_mode": {
             "active": SERVICE_MODE_FILE.exists(),
@@ -2568,6 +2573,22 @@ class PanelAccessSettings(BaseModel):
     mode: Literal["external", "vpn"]
 
 
+class CdnSecuritySettings(BaseModel):
+    authenticated_origin_pulls: bool
+
+
+@app.put("/api/application/cdn-security")
+def update_cdn_security(payload: CdnSecuritySettings, _: None = Depends(require_token)) -> dict:
+    result = subprocess.run(
+        ["systemd-run", f"--unit=vps-control-cdn-security-{uuid.uuid4().hex[:12]}", "--wait", "--pipe", "--collect", "--property=Type=exec",
+         CONTROL_COMMAND, "cdn-security", "enable" if payload.authenticated_origin_pulls else "disable"],
+        capture_output=True, text=True, timeout=300, check=False,
+    )
+    if result.returncode:
+        raise HTTPException(status_code=409, detail="Проверка CF не пройдена; настройка не применена. Проверьте Full (strict), Authenticated Origin Pulls и доступность CDN.")
+    return cdn_security.settings()
+
+
 @app.put("/api/services/panel-access")
 def update_panel_access(payload: PanelAccessSettings, _: None = Depends(require_token)) -> dict:
     if payload.mode == "vpn":
@@ -3052,12 +3073,13 @@ def write_vless_cdn_snippet(enabled: bool, domain: str, path: str, transport: st
         routes.append({"domain": domain, "path": path, "port": VLESS_CDN_PORT, "transport": transport})
     direct = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line) if VLESS_ENV.exists() else {}
     if direct.get("TLS_ENABLED") == "yes" and direct.get("TLS_DOMAIN") and direct.get("TLS_PATH"):
-        routes.append({"domain": direct["TLS_DOMAIN"], "path": direct["TLS_PATH"], "port": int(direct.get("TLS_PORT", VLESS_TLS_PORT)), "transport": direct.get("TLS_TRANSPORT", "xhttp")})
+        routes.append({"domain": direct["TLS_DOMAIN"], "path": direct["TLS_PATH"], "port": int(direct.get("TLS_PORT", VLESS_TLS_PORT)), "transport": direct.get("TLS_TRANSPORT", "xhttp"), "cloudflare": False})
     if MIHOMO_VLESS_CDN_ROUTES.exists():
         for descriptor in MIHOMO_VLESS_CDN_ROUTES.glob("*.json"):
             try:
                 value = json.loads(descriptor.read_text(encoding="utf-8"))
                 if value.get("domain") and value.get("path") and value.get("port"):
+                    value.setdefault("cloudflare", not descriptor.stem.startswith("tls-"))
                     routes.append(value)
             except (OSError, ValueError, TypeError):
                 continue
@@ -3070,14 +3092,7 @@ def write_vless_cdn_snippet(enabled: bool, domain: str, path: str, transport: st
         if not grouped:
             VLESS_CDN_SNIPPET.unlink(missing_ok=True)
             return
-        lines: list[str] = []
-        for route_domain, items in grouped.items():
-            lines.append(f"{route_domain} {{")
-            for item in items:
-                matcher = f"{item['path']}*" if item.get("transport") in {"xhttp", "grpc"} else str(item["path"])
-                upstream = f"h2c://127.0.0.1:{int(item['port'])}" if item.get("transport") == "grpc" else f"127.0.0.1:{int(item['port'])}"
-                lines.extend([f"    handle {matcher} {{", f"        reverse_proxy {upstream}", "    }"])
-            lines.extend(["    respond 404", "}"])
+        lines = cdn_security.render_routes(routes).splitlines()
         temporary = VLESS_CDN_SNIPPET.with_suffix(".tmp")
         temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
         os.chmod(temporary, 0o644)

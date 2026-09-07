@@ -598,6 +598,7 @@ export default function Home() {
         containers: current?.containers || [],
         action: started,
         service_mode: current?.service_mode,
+        cdn_security: current?.cdn_security,
         runtime: current?.runtime,
       }));
       if (action === "reboot" || action === "poweroff") return;
@@ -759,6 +760,16 @@ export default function Home() {
       await Promise.all([loadServices(), loadApplication()]);
       setNotice("Расписание обслуживания сохранено и применено");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось сохранить расписания"); }
+    finally { setBusy(false); }
+  }
+
+  async function changeCdnSecurity(enabled: boolean) {
+    setBusy(true); setError("");
+    try {
+      const security = await request("/application/cdn-security", { method: "PUT", body: JSON.stringify({ authenticated_origin_pulls: enabled }) });
+      setApplication((current) => current ? { ...current, cdn_security: security } : current);
+      setNotice(enabled ? "Проверка сертификата CF включена; запрос через CDN прошёл" : "Проверка сертификата CF выключена");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось применить проверку CF"); }
     finally { setBusy(false); }
   }
 
@@ -1518,6 +1529,7 @@ export default function Home() {
         runApplicationAction={runApplicationAction}
         changeServiceMode={changeServiceMode}
         changePanelAccess={changePanelAccess}
+        changeCdnSecurity={changeCdnSecurity}
         loadApplicationLogs={loadApplicationLogs}
         downloadLogs={downloadLogs}
         downloadUpdateReport={downloadUpdateReport}

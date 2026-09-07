@@ -28,6 +28,10 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
+import cdn_security
+
 APP_ROOT = Path("/opt/vps-control")
 MODULE_ROOT = APP_ROOT / "protocol-images" / "mihomo"
 SUBMODULE_ROOT = MODULE_ROOT / "modules"
@@ -133,6 +137,8 @@ def profile_runtime_transaction(modules: set[str]):
                 run("systemctl", "stop", service)
         if service_was_active.get("transport-reality", False):
             rebuild_vless_cdn_snippet()
+            if Path("/usr/local/sbin/vps-control").is_file():
+                run("/usr/local/sbin/vps-control", "vless-cdn-firewall")
             run("systemctl", "reload", "caddy.service")
         raise
     finally:
@@ -602,7 +608,7 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
     for key, raw in values.items():
         if key in {"tunnel_privacy", "tunnel_ech"}:
             if not isinstance(raw, bool):
-                raise HTTPException(status_code=422, detail="tunnel_privacy must be boolean")
+                raise HTTPException(status_code=422, detail=f"{key} must be boolean")
             result[key] = raw
             continue
         if key not in definition:
@@ -2115,9 +2121,12 @@ def rebuild_vless_cdn_snippet() -> None:
         pass
     if direct.get("CDN_ENABLED") == "yes" and direct.get("CDN_DOMAIN") and direct.get("WS_PATH"):
         routes.append({"domain": direct["CDN_DOMAIN"], "path": direct.get("CDN_PATH", direct["WS_PATH"]), "port": int(direct.get("CDN_PORT", "10087")), "transport": direct.get("CDN_TRANSPORT", "websocket")})
+    if direct.get("TLS_ENABLED") == "yes" and direct.get("TLS_DOMAIN") and direct.get("TLS_PATH"):
+        routes.append({"domain": direct["TLS_DOMAIN"], "path": direct["TLS_PATH"], "port": int(direct.get("TLS_PORT", "10088")), "transport": direct.get("TLS_TRANSPORT", "xhttp"), "cloudflare": False})
     for descriptor in VLESS_CDN_ROUTE_ROOT.glob("*.json") if VLESS_CDN_ROUTE_ROOT.exists() else []:
         value = load_json(descriptor, {})
         if value.get("domain") and value.get("path") and value.get("port"):
+            value.setdefault("cloudflare", not descriptor.stem.startswith("tls-"))
             routes.append(value)
     grouped: dict[str, list[dict[str, Any]]] = {}
     for route in routes:
@@ -2129,14 +2138,7 @@ def rebuild_vless_cdn_snippet() -> None:
         if not grouped:
             VLESS_CDN_SNIPPET.unlink(missing_ok=True)
         else:
-            lines: list[str] = []
-            for domain, items in grouped.items():
-                lines.append(f"{domain} {{")
-                for item in items:
-                    matcher = f"{item['path']}*" if item.get("transport") in {"xhttp", "grpc"} else str(item["path"])
-                    upstream = f"h2c://127.0.0.1:{int(item['port'])}" if item.get("transport") == "grpc" else f"127.0.0.1:{int(item['port'])}"
-                    lines.extend([f"    handle {matcher} {{", f"        reverse_proxy {upstream}", "    }"])
-                lines.extend(["    respond 404", "}"])
+            lines = cdn_security.render_routes(routes).splitlines()
             temporary = VLESS_CDN_SNIPPET.with_suffix(".tmp")
             temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
             os.chmod(temporary, 0o644)
@@ -2691,6 +2693,9 @@ def apply_batched_reality_runtime() -> None:
     firewall_helper = Path("/usr/local/sbin/vps-control-mihomo-vless-firewall")
     if firewall_helper.is_file():
         run(str(firewall_helper), "sync", check=True)
+    control = Path("/usr/local/sbin/vps-control")
+    if control.is_file():
+        run(str(control), "vless-cdn-firewall", check=True)
     run("systemctl", "reset-failed", "vps-control-mihomo-reality.service")
     run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
     if not service_stably_active("vps-control-mihomo-reality.service"):
@@ -2715,7 +2720,42 @@ def ensure_vless_panel_route(config: dict[str, Any]) -> None:
     # Repair existing installs too, keeping this exception ahead of LAN blocks.
     rules[:] = [rule, *(item for item in rules if not isinstance(item, dict) or item.get("outboundTag") != "panel-local")]
 
-def provision_connections(profile_id: str, definitions: list[dict[str, Any]], privacy_enabled: bool = False) -> list[dict[str, Any]]:
+def device_routing(profile: dict[str, Any], device_id: str) -> dict[str, Any]:
+    """An explicit device routing object takes precedence over legacy routing."""
+    device = next((entry for entry in profile.get("devices", []) if str(entry.get("id")) == device_id), {})
+    values = device.get("routing")
+    return values if isinstance(values, dict) else profile.get("routing", {})
+
+
+def reconcile_profile_encryption(profile: dict[str, Any]) -> None:
+    """Validate both cores before applying; the caller owns the rollback transaction."""
+    config_path = CONFIG_ROOT / "reality" / "config.json"
+    config = load_json(config_path, {})
+    changed = False
+    for connection in profile.get("connections", []):
+        if connection.get("component") != "transport-reality":
+            continue
+        enabled = bool(device_routing(profile, str(connection.get("device_id", "device-1"))).get("tunnel_privacy", False))
+        credential = connection.get("credential", {})
+        if enabled == bool(credential.get("encryption")):
+            continue
+        identity = credential.get("uuid")
+        inbounds = [entry for entry in config.get("inbounds", []) if identity and entry.get("protocol") == "vless" and any(client.get("id") == identity for client in entry.get("settings", {}).get("clients", []))]
+        if not inbounds or any(len(entry["settings"]["clients"]) != 1 for entry in inbounds):
+            raise HTTPException(status_code=409, detail="Невозможно безопасно обновить шифрование канала: проверьте конфигурацию сервера.")
+        decryption, encryption = vless_encryption_pair({"privacy_mode": "encrypted" if enabled else "standard"})
+        for entry in inbounds:
+            entry["settings"]["decryption"] = decryption
+        credential["encryption"] = encryption
+        changed = True
+    if changed:
+        for device_id in {str(entry.get("device_id", "device-1")) for entry in profile.get("connections", [])}:
+            validate_rendered_profile(render_profile(profile, device_id))
+        apply_reality_config(config_path, config)
+        sync_legacy_profile_fields(profile)
+
+
+def provision_connections(profile_id: str, definitions: list[dict[str, Any]], privacy_enabled: bool = False, profile: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     completed: list[dict[str, Any]] = []
     batch_reality = any(definition["component"] == "transport-reality" for definition in definitions)
     try:
@@ -2726,7 +2766,7 @@ def provision_connections(profile_id: str, definitions: list[dict[str, Any]], pr
                 definition["id"],
                 definition.get("settings", {}),
                 defer_reality_restart=batch_reality and definition["component"] == "transport-reality",
-                privacy_enabled=privacy_enabled,
+                privacy_enabled=bool(device_routing(profile, str(definition.get("device_id", "device-1"))).get("tunnel_privacy", False)) if profile is not None else privacy_enabled,
             )
             completed.append({**definition, "credential": credential})
         if batch_reality:
@@ -2878,7 +2918,7 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     write_action(f"profile-create:{profile_id}", f"Создание профиля «{payload.name}»…", progress=15)
     try:
         with profile_runtime_transaction({definition["component"] for definition in definitions}):
-            connections = provision_connections(profile_id, definitions, privacy_enabled=bool(routing.get("tunnel_privacy", False)))
+            connections = provision_connections(profile_id, definitions, profile={"devices": devices, "routing": routing})
             item = {
                 "id": profile_id,
                 "name": payload.name.strip(),
@@ -2934,7 +2974,6 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         if any(definition.get("device_id") not in device_ids for definition in definitions):
             raise HTTPException(status_code=422, detail="A connection references a missing profile device")
         current_connections = {str(connection.get("id")): connection for connection in item.get("connections", [])}
-        desired_privacy = bool(item.get("routing", {}).get("tunnel_privacy", False))
         next_ids = {definition["id"] for definition in definitions}
         for connection_id, connection in current_connections.items():
             if connection_id not in next_ids:
@@ -2946,8 +2985,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
             current_connection = current_connections.get(definition["id"])
             current_server_settings = {key: value for key, value in (current_connection or {}).get("settings", {}).items() if key not in {"cdn_ech", "privacy_mode"}}
             next_server_settings = {key: value for key, value in definition.get("settings", {}).items() if key not in {"cdn_ech", "privacy_mode"}}
-            privacy_mismatch = definition["component"] == "transport-reality" and bool((current_connection or {}).get("credential", {}).get("encryption")) != desired_privacy
-            if current_connection and current_connection.get("component") == definition["component"] and current_server_settings == next_server_settings and not privacy_mismatch:
+            if current_connection and current_connection.get("component") == definition["component"] and current_server_settings == next_server_settings:
                 next_connections.append({**definition, "credential": current_connection.get("credential", {})})
             else:
                 if current_connection:
@@ -2956,7 +2994,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
                     deprovision(profile_id, current_connection["component"], current_connection.get("credential", {}), defer_reality_restart=defer)
                 defer = definition["component"] == "transport-reality"
                 reality_changed = reality_changed or defer
-                next_connections.append({**definition, "credential": provision(profile_id, definition["component"], definition["id"], definition.get("settings", {}), defer_reality_restart=defer, privacy_enabled=bool(item.get("routing", {}).get("tunnel_privacy", False)))})
+                next_connections.append({**definition, "credential": provision(profile_id, definition["component"], definition["id"], definition.get("settings", {}), defer_reality_restart=defer, privacy_enabled=bool(device_routing(item, str(definition.get("device_id", "device-1"))).get("tunnel_privacy", False)))})
         if reality_changed:
             apply_batched_reality_runtime()
         item["connections"] = next_connections
@@ -2985,6 +3023,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         normalized = normalize_profile(item)
         item.clear()
         item.update(normalized)
+    reconcile_profile_encryption(item)
     item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     item["last_operation_id"] = payload.operation_id or ""
     save_profiles(data)
@@ -3189,7 +3228,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
     if not connections:
         raise HTTPException(status_code=409, detail="У профиля нет подключений Mihomo")
-    privacy = bool(normalized.get("routing", {}).get("tunnel_privacy", False))
+    profile_routing = device_routing(normalized, selected_device)
+    privacy = bool(profile_routing.get("tunnel_privacy", False))
     used_names: set[str] = set()
     rendered: list[tuple[dict[str, Any], str | None, str | None, str | None]] = []
     for index, connection in enumerate(connections):
@@ -3219,14 +3259,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         if component == "transport-reality" and str(connection.get("settings", {}).get("route_mode") or credential.get("route_mode")) == "tls":
             direct_name, cdn_name, tls_name = None, None, name
         rendered.append((connection, direct_name, cdn_name, tls_name))
-    selected_device_data = next((device for device in normalized.get("devices", []) if str(device.get("id")) == selected_device), {})
-    device_routing = selected_device_data.get("routing") if isinstance(selected_device_data.get("routing"), dict) else None
-    profile_routing = device_routing if device_routing is not None else (item.get("routing", {}) if isinstance(item.get("routing"), dict) else {})
-    if isinstance(item.get("routing"), dict) and "tunnel_privacy" in item["routing"]:
-        profile_routing = {**profile_routing, "tunnel_privacy": bool(item["routing"]["tunnel_privacy"])}
     routing = {**routing_settings(), **profile_routing}
-    privacy = bool(profile_routing.get("tunnel_privacy", False))
-    ech_requested = privacy and bool(profile_routing.get("tunnel_ech", False))
+    ech_requested = bool(profile_routing.get("tunnel_ech", False))
     ech_enabled = ech_requested and any(
         cdn_name and cdn_supports_ech(str(connection.get("credential", {}).get("cdn_domain", "")))
         for connection, _, cdn_name, _ in rendered
@@ -3479,10 +3513,11 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, meta
         raise HTTPException(status_code=409, detail="У профиля нет общего набора подключений")
     components = {str(definition["component"]) for definition in definitions}
     with profile_runtime_transaction(components):
-        provisioned = provision_connections(str(profile["id"]), definitions)
+        inherited_routing = dict(device_routing(normalized, template_id))
+        provisioned = provision_connections(str(profile["id"]), definitions, privacy_enabled=bool(inherited_routing.get("tunnel_privacy", False)))
         profile.setdefault("devices", []).append({
             "id": device_id, "name": metadata.get("device_name") or f"HWID {hwid_hash[:8].upper()}",
-            "hwid_hash": hwid_hash, "routing": dict(profile.get("routing", {})),
+            "hwid_hash": hwid_hash, "routing": inherited_routing,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "last_seen_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             **{key: value for key, value in metadata.items() if value and key != "device_name"},

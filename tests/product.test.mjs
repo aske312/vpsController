@@ -247,8 +247,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /routing = \{\*\*routing_settings\(\), \*\*profile_routing\}/);
   assert.match(manager, /routing: dict\[str, Any\] = Field\(default_factory=dict\)/);
   assert.match(manager, /device\.get\("routing"\).*dict\(legacy_routing\)/s);
-  assert.match(manager, /selected_device_data = next/);
-  assert.match(manager, /profile_routing = device_routing if device_routing is not None/);
+  assert.match(manager, /profile_routing = device_routing\(normalized, selected_device\)/);
+  assert.match(manager, /return values if isinstance\(values, dict\) else profile.get\("routing", \{\}\)/);
   assert.match(manager, /DIRECT_GAME_PROCESSES/);
   assert.match(manager, /TUNNEL_GAME_PROCESSES/);
   assert.match(manager, /DEFAULT_TUNNEL_GAMES = tuple\(TUNNEL_GAME_PROCESSES\)/);
@@ -1101,7 +1101,7 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   ]);
   assert.match(manager, /set_env_value "VLESS_CDN_DOMAIN"/);
   assert.match(manager, /VLESS_CDN_PORT/);
-  assert.match(manager, /VLESS CDN certificate/);
+  assert.match(manager, /python3 "\$\{policy\}" firewall/);
   assert.doesNotMatch(bootstrap, /--vless-cdn-domain/);
   assert.match(config, /VLESS_CDN_PORT="10087"/);
   assert.match(caddy, /import \/etc\/caddy\/vps-control\.d\/\*\.caddy/);
@@ -1111,13 +1111,13 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(install, /saved_cdn_domain/);
   assert.match(install, /CDN_ENABLED/);
   assert.match(install, /vless-cdn\.caddy/);
-  assert.match(install, /mihomo\/reality\/caddy-routes/);
+  assert.match(install, /cdn_security\.py rebuild/);
+  const cdnPolicy = await read("api/cdn_security.py");
+  assert.match(cdnPolicy, /mihomo\/reality\/caddy-routes/);
   assert.match(install, /Always rebuild it/);
-  assert.match(install, /fcntl\.LOCK_EX/);
+  assert.match(cdnPolicy, /fcntl\.LOCK_EX/);
   assert.match(install, /caddy validate/);
-  assert.match(uninstall, /vless-cdn\.caddy/);
-  assert.match(uninstall, /mihomo\/reality\/caddy-routes/);
-  assert.match(uninstall, /fcntl\.LOCK_EX/);
+  assert.match(uninstall, /cdn_security\.py rebuild/);
   assert.match(api, /def vless_reality_inbound/);
   assert.match(api, /def vless_cdn_client_query/);
   assert.match(api, /def vless_tls_client_query/);
@@ -1431,7 +1431,7 @@ test("protected panel access uses one stable host through every configured chann
   assert.match(manager, /No panel UI or/);
   assert.doesNotMatch(manager, /set_config_value "\$\{INSTALL_DIR\}\/install\.conf" "ACCESS_MODE"/);
   assert.match(caddy, /http:\/\/{INTERNAL_PANEL_HOST} \{/);
-  assert.match(caddy, /not remote_ip 127\.0\.0\.0\/8 10\.0\.0\.0\/8/);
+  assert.match(caddy, /not remote_ip 127\.0\.0\.0\/8 ::1\/128 10\.0\.0\.0\/8/);
   assert.match(api, /"systemd-run", f"--unit=\{unit\}", "--wait", "--pipe", "--collect"/);
   assert.match(api, /access_mode != "vpn" and ufw_enabled/);
   assert.match(page, /Promise\.all\(\[loadServices\(\), loadSecurity\(\)\]\)/);
@@ -1610,7 +1610,7 @@ test("Mihomo profiles expose one subscription and register optional HWID devices
   assert.match(manager, /request\.query_params\.get\("hwid"\)/);
   assert.match(manager, /hmac\.new\(token\.encode\(\), raw_hwid\.encode\(\), hashlib\.sha256\)/);
   assert.match(manager, /def subscription_device/);
-  assert.match(manager, /provision_connections\(str\(profile\["id"\]\), definitions\)/);
+  assert.match(manager, /provision_connections\(str\(profile\["id"\]\), definitions, privacy_enabled=bool\(inherited_routing/);
   assert.match(view, /подписка устарела, требуется новая установка/);
   assert.match(view, /Клиент с HWID появится как отдельное устройство/);
   assert.doesNotMatch(view, /subscription\?device_id=/);

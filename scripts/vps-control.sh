@@ -647,7 +647,10 @@ PY
 }
 
 write_caddy_config() {
-  local domain internal_panel_host wg_panel_address awg_panel_address
+  local domain internal_panel_host wg_panel_address awg_panel_address panel_guard=""
+  if [[ "${ACCESS_MODE}" == "vpn" ]]; then
+    panel_guard='@outsidePanel not remote_ip 127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; respond @outsidePanel 403'
+  fi
   domain="$(env_value PUBLIC_DOMAIN)"
   internal_panel_host="admin.312.net"
   wg_panel_address="$(python3 - "$(env_value WG_SUBNET)" <<'PY'
@@ -666,19 +669,19 @@ PY
   if [[ -n "${domain}" && "${ACCESS_MODE}" == "external" ]]; then
     sed -e "s|{\$SITE_ADDRESS}|${domain}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
-      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" \
+      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PANEL_ACCESS_GUARD}|${panel_guard/; /\\n}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
     # Keep TCP 80/443 available to protocol-specific Caddy hosts (for example
     # VLESS CDN), but never attach the panel to a public catch-all listener.
     sed -e "s|{\$SITE_ADDRESS}|http://localhost:${HTTP_PORT}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
-      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" \
+      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PANEL_ACCESS_GUARD}|${panel_guard/; /\\n}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   else
     sed -e "s|{\$SITE_ADDRESS}|:${HTTP_PORT}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
-      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" \
+      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PANEL_ACCESS_GUARD}|${panel_guard/; /\\n}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   fi
   if [[ "${ACCESS_MODE}" == "vpn" && -n "${domain}" ]]; then
@@ -687,6 +690,9 @@ PY
 # Public, token-protected Mihomo subscription refresh. No panel UI or
 # administrative API is exposed on this host while VPN-only mode is active.
 ${domain} {
+    route {
+    @outsideProtectedConnection not remote_ip 127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 $(python3 "${INSTALL_DIR}/api/cdn_security.py" networks)
+    respond @outsideProtectedConnection 403
     header {
         -Server
         -X-Powered-By
@@ -698,9 +704,11 @@ ${domain} {
         reverse_proxy 127.0.0.1:8791
     }
     respond 404
+    }
 }
 EOF
   fi
+  python3 "${INSTALL_DIR}/api/cdn_security.py" rebuild
 }
 
 env_value() {
@@ -1758,18 +1766,16 @@ configure_firewall() {
       ufw allow "${HTTP_PORT}/tcp"
     fi
   fi
-  if [[ -n "$(env_value VLESS_CDN_DOMAIN)" ]]; then
-    ufw allow 80/tcp comment '312.net VLESS CDN certificate'
-    ufw allow 443/tcp comment '312.net VLESS CDN HTTPS'
-  fi
+  configure_vless_cdn_firewall
   ufw --force enable
 }
 
 configure_vless_cdn_firewall() {
   command -v ufw >/dev/null 2>&1 || return 0
   [[ "${ENABLE_UFW}" == "yes" ]] || return 0
-  ufw allow 80/tcp comment '312.net VLESS CDN certificate'
-  ufw allow 443/tcp comment '312.net VLESS CDN HTTPS'
+  local policy="${INSTALL_DIR}/api/cdn_security.py"
+  [[ -f "${policy}" ]] || policy="${PROJECT_DIR}/api/cdn_security.py"
+  python3 "${policy}" firewall
 }
 
 configure_vpn_firewall_policy() {
@@ -3209,6 +3215,7 @@ main() {
     auto-safe-update) auto_safe_update_server ;;
     kernel-update) update_kernel ;;
     vpn-firewall) configure_vpn_firewall_policy ;;
+    cdn-security) python3 "${INSTALL_DIR}/api/cdn_security.py" aop "${2:-}" ;;
     vless-cdn-firewall) configure_vless_cdn_firewall ;;
     optimize) optimize_resources ;;
     ssh-key-add) shift; ssh_access_add_key "$@" ;;

@@ -17,6 +17,66 @@ from test_privacy import manager, ROOT
 
 
 class TunnelPrivacyTests(unittest.TestCase):
+    def test_device_only_update_rolls_back_profile_and_runtime_on_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config_root = root / "config"
+            config = config_root / "reality/config.json"
+            config.parent.mkdir(parents=True)
+            config.write_text(json.dumps({"inbounds": [{"protocol": "vless", "settings": {"clients": [{"id": "identity"}], "decryption": "none"}}]}))
+            profile_file = root / "profiles.json"
+            profile_file.write_text(json.dumps([{"id": "profile", "common_device_id": "one", "devices": [{"id": "one", "name": "Device", "routing": {}}], "connections": [{"id": "channel", "component": "transport-reality", "device_id": "one", "credential": {"uuid": "identity"}}]}]))
+            original_profile, original_config = profile_file.read_bytes(), config.read_bytes()
+            def fail(path, value):
+                path.write_text(json.dumps(value))
+                raise RuntimeError("injected runtime failure")
+            with patch.object(manager, "CONFIG_ROOT", config_root), patch.object(manager, "PROFILE_FILE", profile_file), patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"), patch.object(manager, "profiles", side_effect=lambda: json.loads(profile_file.read_text())), patch.object(manager, "systemctl_active", return_value=False), patch.object(manager, "validate_routing", side_effect=lambda values, **_: values), patch.object(manager, "write_action"), patch.object(manager, "vless_encryption_pair", return_value=("private", "public")), patch.object(manager, "render_profile", return_value="yaml"), patch.object(manager, "validate_rendered_profile"), patch.object(manager, "apply_reality_config", side_effect=fail), patch.object(manager, "provision") as provision:
+                payload = manager.ProfileUpdate(devices=[manager.ProfileDeviceInput(id="one", name="Device", routing={"tunnel_privacy": True})])
+                with self.assertRaisesRegex(RuntimeError, "injected"):
+                    manager.update_profile("profile", payload)
+                provision.assert_not_called()
+            self.assertEqual(profile_file.read_bytes(), original_profile)
+            self.assertEqual(config.read_bytes(), original_config)
+
+    def test_ech_and_encryption_are_independent_per_device(self):
+        dns = {"enhanced_mode": "fake-ip", "nameserver": "https://dns.google/dns-query", "fallback": "https://cloudflare-dns.com/dns-query"}
+        for encrypted in (False, True):
+            for ech in (False, True):
+                with self.subTest(encrypted=encrypted, ech=ech):
+                    profile = {"common_device_id": "device", "routing": {"tunnel_privacy": not encrypted, "tunnel_ech": not ech},
+                               "devices": [{"id": "device", "routing": {"tunnel_privacy": encrypted, "tunnel_ech": ech}}],
+                               "connections": [{"component": "transport-reality", "device_id": "device", "settings": {"route_mode": "cdn"}, "credential": {"uuid": str(uuid.uuid4()), "encryption": "public" if encrypted else "", "cdn_enabled": True, "route_mode": "cdn", "cdn_domain": "example.com", "cdn_path": "/test"}}]}
+                    with patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "routing_settings", return_value={}), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=[]), patch.object(manager, "cdn_supports_ech", return_value=True):
+                        proxy = yaml.safe_load(manager.render_profile(profile))["proxies"][0]
+                    self.assertEqual(bool(proxy.get("encryption")), encrypted)
+                    self.assertEqual(bool(proxy.get("ech-opts", {}).get("enable")), ech)
+
+    def test_device_change_preserves_credentials_and_other_device(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / "reality/config.json"
+            path.parent.mkdir()
+            original = {"inbounds": [{"protocol": "vless", "port": 11000 + i, "settings": {"clients": [{"id": identity}], "decryption": "none"}} for i, identity in enumerate(("one", "two"))]}
+            path.write_text(json.dumps(original))
+            profile = {"common_device_id": "one", "devices": [{"id": name, "routing": {"tunnel_privacy": name == "one"}} for name in ("one", "two")], "connections": [{"component": "transport-reality", "device_id": name, "credential": {"uuid": name, "cdn_path": "/keep"}} for name in ("one", "two")]}
+            with patch.object(manager, "CONFIG_ROOT", root), patch.object(manager, "vless_encryption_pair", return_value=("private", "public")), patch.object(manager, "render_profile", return_value="yaml"), patch.object(manager, "validate_rendered_profile"), patch.object(manager, "apply_reality_config") as apply:
+                manager.reconcile_profile_encryption(profile)
+                candidate = apply.call_args.args[1]
+                self.assertEqual(candidate["inbounds"][0]["settings"]["decryption"], "private")
+                self.assertEqual(candidate["inbounds"][1], original["inbounds"][1])
+                self.assertEqual(candidate["inbounds"][0]["port"], 11000)
+                self.assertEqual(profile["connections"][0]["credential"]["uuid"], "one")
+                self.assertEqual(profile["connections"][0]["credential"]["cdn_path"], "/keep")
+                manager.reconcile_profile_encryption(profile)
+                self.assertEqual(apply.call_count, 1)
+
+    def test_create_provisions_encryption_from_each_device(self):
+        profile = {"routing": {"tunnel_privacy": True}, "devices": [{"id": "a", "routing": {}}, {"id": "b", "routing": {"tunnel_privacy": True}}]}
+        definitions = [{"id": name, "device_id": name, "component": "transport-reality"} for name in ("a", "b")]
+        with patch.object(manager, "provision", return_value={}) as provision, patch.object(manager, "apply_batched_reality_runtime"):
+            manager.provision_connections("profile", definitions, profile=profile)
+        self.assertEqual([call.kwargs["privacy_enabled"] for call in provision.call_args_list], [False, True])
+
     def test_vless_panel_route_is_local_only(self):
         config = {"routing": {"rules": []}, "outbounds": [{"protocol": "freedom", "tag": "direct"}]}
         manager.ensure_vless_panel_route(config)
@@ -242,7 +302,12 @@ class RealCorePrivacyTests(unittest.TestCase):
                 profile = {"common_device_id": "common", "connections": [{"component": "transport-reality", "device_id": "common", "settings": {"route_mode": "cdn", "cdn_ech": True, "privacy_mode": "encrypted"}, "credential": {"uuid": str(uuid.uuid4()), "encryption": encryption, "cdn_enabled": True, "route_mode": "cdn", "cdn_domain": "example.com", "cdn_path": "/test", "cdn_transport": transport}}]}
                 dns = {"enhanced_mode": "fake-ip", "nameserver": "https://cloudflare-dns.com/dns-query", "fallback": "https://dns.google/dns-query"}
                 with patch.object(manager, "routing_settings", return_value={"tunnel_privacy": True}), patch.object(manager, "cdn_supports_ech", return_value=True), patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=[]):
-                    manager.validate_rendered_profile(manager.render_profile(profile))
+                    profile["routing"] = {"tunnel_privacy": True, "tunnel_ech": True}
+                    config = yaml.safe_load(manager.render_profile(profile))
+                    self.assertTrue(config["proxies"][0]["ech-opts"]["enable"])
+                    # This compatibility check must not depend on downloading GeoIP data.
+                    config["dns"]["fallback-filter"] = {"geoip": False}
+                    manager.validate_rendered_profile(yaml.safe_dump(config))
 
     def test_encrypted_transports_hide_payload_from_relay(self):
         xray = Path(os.environ["PRIVACY_XRAY_BIN"]).resolve()
