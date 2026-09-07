@@ -20,10 +20,24 @@ class TunnelPrivacyTests(unittest.TestCase):
     def test_vless_panel_route_is_local_only(self):
         config = {"routing": {"rules": []}, "outbounds": [{"protocol": "freedom", "tag": "direct"}]}
         manager.ensure_vless_panel_route(config)
-        self.assertEqual(next(item for item in config["outbounds"] if item["tag"] == "panel-local")["settings"]["redirect"], "127.0.0.1:8080")
+        self.assertEqual(next(item for item in config["outbounds"] if item["tag"] == "panel-local")["settings"]["redirect"], "127.0.0.1:80")
         self.assertEqual(config["routing"]["rules"][0]["domain"], ["full:admin.312.net"])
         manager.ensure_vless_panel_route(config)
         self.assertEqual(sum(item.get("tag") == "panel-local" for item in config["outbounds"]), 1)
+
+    def test_vless_panel_route_repairs_existing_redirect_before_private_network_block(self):
+        block = {"type": "field", "ip": ["127.0.0.0/8", "10.0.0.0/8"], "outboundTag": "blocked"}
+        direct = {"protocol": "freedom", "tag": "direct"}
+        config = {"routing": {"rules": [block, {"type": "field", "domain": ["full:admin.312.net"], "outboundTag": "panel-local"}]},
+                  "outbounds": [direct, {"tag": "panel-local", "protocol": "freedom", "settings": {"redirect": "127.0.0.1:8080"}}]}
+        manager.ensure_vless_panel_route(config)
+        self.assertEqual(config["outbounds"][1]["settings"]["redirect"], "127.0.0.1:80")
+        self.assertEqual(config["outbounds"][0], direct)
+        self.assertEqual(config["routing"]["rules"][0]["domain"], ["full:admin.312.net"])
+        self.assertEqual(config["routing"]["rules"][1], block)
+        repaired = json.dumps(config)
+        manager.ensure_vless_panel_route(config)
+        self.assertEqual(json.dumps(config), repaired)
 
     def test_global_toggle_preserves_channels_and_skips_other_protocols(self):
         with tempfile.TemporaryDirectory() as temp:

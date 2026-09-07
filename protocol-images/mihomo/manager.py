@@ -2701,13 +2701,20 @@ def apply_batched_reality_runtime() -> None:
 def ensure_vless_panel_route(config: dict[str, Any]) -> None:
     """Keep the VPN-only panel reachable through VLESS without public exposure."""
     outbounds = config.setdefault("outbounds", [])
-    if not any(item.get("tag") == "panel-local" for item in outbounds if isinstance(item, dict)):
-        outbounds.append({"tag": "panel-local", "protocol": "freedom", "settings": {"redirect": "127.0.0.1:8080"}})
+    # The admin.312.net virtual host listens on HTTP port 80. Port 8080
+    # matches localhost in VPN-only mode and cannot serve the original Host.
+    outbound = {"tag": "panel-local", "protocol": "freedom", "settings": {"redirect": "127.0.0.1:80"}}
+    existing = next((index for index, item in enumerate(outbounds) if isinstance(item, dict) and item.get("tag") == "panel-local"), None)
+    if existing is None:
+        outbounds.append(outbound)
+    else:
+        outbounds[existing] = outbound
     routing = config.setdefault("routing", {"domainStrategy": "IPIfNonMatch", "rules": []})
     rules = routing.setdefault("rules", [])
     rule = {"type": "field", "domain": ["full:admin.312.net"], "outboundTag": "panel-local"}
-    if not any(item.get("outboundTag") == "panel-local" for item in rules if isinstance(item, dict)):
-        rules.insert(0, rule)
+    # Repair existing installs too, keeping this exception ahead of LAN blocks.
+    rules[:] = [rule, *(item for item in rules if not isinstance(item, dict) or item.get("outboundTag") != "panel-local")]
+
 def provision_connections(profile_id: str, definitions: list[dict[str, Any]], privacy_enabled: bool = False) -> list[dict[str, Any]]:
     completed: list[dict[str, Any]] = []
     batch_reality = any(definition["component"] == "transport-reality" for definition in definitions)
