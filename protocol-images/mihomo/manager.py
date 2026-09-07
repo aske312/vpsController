@@ -3219,6 +3219,11 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         profile_routing = {**profile_routing, "tunnel_privacy": bool(item["routing"]["tunnel_privacy"])}
     routing = {**routing_settings(), **profile_routing}
     privacy = bool(profile_routing.get("tunnel_privacy", False))
+    ech_requested = privacy and bool(profile_routing.get("tunnel_ech", False))
+    ech_enabled = ech_requested and any(
+        cdn_name and cdn_supports_ech(str(connection.get("credential", {}).get("cdn_domain", "")))
+        for connection, _, cdn_name, _ in rendered
+    )
     # Ready-made bypass lists are selected per profile. Never inherit legacy
     # global switches from routing settings; that would silently affect every
     # existing subscription.
@@ -3226,7 +3231,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         routing[key] = bool(profile_routing.get(key, False))
     mode = str(routing.get("mode", "rule"))
     dns = dict(dns_settings())
-    if privacy and bool(profile_routing.get("tunnel_ech", False)):
+    if ech_enabled:
         for key, default in (("nameserver", "https://cloudflare-dns.com/dns-query"), ("fallback", "https://dns.google/dns-query")):
             if not str(dns.get(key, "")).startswith(("https://", "tls://", "quic://")):
                 dns[key] = default
@@ -3261,7 +3266,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "  fallback:",
         f"    - {q(dns['fallback'])}",
     ]
-    if privacy and bool(profile_routing.get("tunnel_ech", False)):
+    if ech_enabled:
         resolvers = ech_dns_resolvers(dns)
         # ECH needs HTTPS DNS records. Resolve the proxy hostname explicitly
         # over the user's encrypted resolvers, never via an implicit OS DNS.
@@ -3278,7 +3283,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
             lines.extend(render_proxy(str(connection["component"]), connection.get("credential", {}), name))
         if cdn_name:
             credential = connection.get("credential", {})
-            lines.extend(render_vless_cdn({**credential, "cdn_ech": privacy and bool(profile_routing.get("tunnel_ech", False)) and cdn_supports_ech(str(credential.get("cdn_domain", "")))}, cdn_name))
+            lines.extend(render_vless_cdn({**credential, "cdn_ech": ech_enabled and cdn_supports_ech(str(credential.get("cdn_domain", "")))}, cdn_name))
         if tls_name:
             lines.extend(render_vless_tls(connection.get("credential", {}), tls_name))
     group_type = str(routing.get("strategy", "fallback"))
