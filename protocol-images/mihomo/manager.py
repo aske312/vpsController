@@ -2146,6 +2146,7 @@ def rebuild_vless_cdn_snippet() -> None:
 
 
 def apply_reality_config(config_path: Path, config: dict[str, Any], restart_service: bool = True) -> None:
+    ensure_vless_panel_route(config)
     # Xray determines the config loader from the final extension. Keep .json
     # last; names such as config.json.candidate are rejected by newer Xray.
     candidate = config_path.with_name(f"{config_path.stem}.candidate.json")
@@ -2697,6 +2698,16 @@ def apply_batched_reality_runtime() -> None:
     run("systemctl", "reload", "caddy.service", check=True)
 
 
+def ensure_vless_panel_route(config: dict[str, Any]) -> None:
+    """Keep the VPN-only panel reachable through VLESS without public exposure."""
+    outbounds = config.setdefault("outbounds", [])
+    if not any(item.get("tag") == "panel-local" for item in outbounds if isinstance(item, dict)):
+        outbounds.append({"tag": "panel-local", "protocol": "freedom", "settings": {"redirect": "127.0.0.1:8080"}})
+    routing = config.setdefault("routing", {"domainStrategy": "IPIfNonMatch", "rules": []})
+    rules = routing.setdefault("rules", [])
+    rule = {"type": "field", "domain": ["full:admin.312.net"], "outboundTag": "panel-local"}
+    if not any(item.get("outboundTag") == "panel-local" for item in rules if isinstance(item, dict)):
+        rules.insert(0, rule)
 def provision_connections(profile_id: str, definitions: list[dict[str, Any]], privacy_enabled: bool = False) -> list[dict[str, Any]]:
     completed: list[dict[str, Any]] = []
     batch_reality = any(definition["component"] == "transport-reality" for definition in definitions)

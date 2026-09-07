@@ -17,6 +17,14 @@ from test_privacy import manager, ROOT
 
 
 class TunnelPrivacyTests(unittest.TestCase):
+    def test_vless_panel_route_is_local_only(self):
+        config = {"routing": {"rules": []}, "outbounds": [{"protocol": "freedom", "tag": "direct"}]}
+        manager.ensure_vless_panel_route(config)
+        self.assertEqual(next(item for item in config["outbounds"] if item["tag"] == "panel-local")["settings"]["redirect"], "127.0.0.1:8080")
+        self.assertEqual(config["routing"]["rules"][0]["domain"], ["full:admin.312.net"])
+        manager.ensure_vless_panel_route(config)
+        self.assertEqual(sum(item.get("tag") == "panel-local" for item in config["outbounds"]), 1)
+
     def test_global_toggle_preserves_channels_and_skips_other_protocols(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
