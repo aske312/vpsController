@@ -89,6 +89,7 @@ type Profile = {
   routing?: Record<string, string | number | boolean>;
   devices?: ProfileDevice[];
   common_device_id?: string;
+  protection_status?: Record<string, { vless_connections: number; encryption_pending: boolean }>;
   subscription_status?: "active" | "obsolete" | "missing";
   created_at: string;
   updated_at: string;
@@ -1531,6 +1532,7 @@ export function MihomoPage({
               <div className="mihomoProfileHeading"><div><p className="eyebrow">MIHOMO PROFILE</p><h2>{profileDialog === "new" ? "Новый профиль" : "Настройка профиля"}</h2></div></div>
               <button type="button" className="iconButton" onClick={() => setProfileDialog(null)}>x</button>
             </header>
+            {error && <div className="mihomoMessage is-error" role="alert">{error}</div>}
             <div className="mihomoProfileWorkspace">
               <aside className="mihomoProfileRail">
                 <header><small>КОНФИГУРАЦИЯ</small><b>Параметры профиля</b></header>
@@ -1553,7 +1555,24 @@ export function MihomoPage({
               </>}
             </section>
             <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа GATE.312 для YAML выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{profileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>
-            <section className="mihomoProfileRules"><header><div><b>Защита соединений</b><small>Независимые настройки выбранного устройства. После сохранения обновите подписку в клиенте.</small></div><span>{[activeProfileRouting.tunnel_privacy, activeProfileRouting.tunnel_ech].filter(Boolean).length} из 2</span></header><div><button type="button" className={`mihomoProfileRuleButton${activeProfileRouting.tunnel_privacy ? " is-enabled" : ""}`} aria-pressed={Boolean(activeProfileRouting.tunnel_privacy)} onClick={() => { const enabled = !activeProfileRouting.tunnel_privacy; setProfileRouting((current) => ({ ...current, tunnel_privacy: enabled })); setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: { ...(device.routing || {}), tunnel_privacy: enabled } } : device)); }}><i>VPS</i><span><b>Шифрование до VPS</b><small>VLESS · Mihomo ≥ 1.19.30; старый конфиг перестанет подключаться</small></span></button><button type="button" className={`mihomoProfileRuleButton${activeProfileRouting.tunnel_ech ? " is-enabled" : ""}`} aria-pressed={Boolean(activeProfileRouting.tunnel_ech)} onClick={() => { const enabled = !activeProfileRouting.tunnel_ech; setProfileRouting((current) => ({ ...current, tunnel_ech: enabled })); setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: { ...(device.routing || {}), tunnel_ech: enabled } } : device)); }}><i>ECH</i><span><b>Скрытие имени сервера (ECH)</b><small>Зависит от домена, клиента и сети; может замедлять подключение</small></span></button></div></section>
+            <section className="mihomoProfileProtection" aria-label="Защита соединений">
+              <header><div><b>Защита соединений</b><small>{profileDevices.find((device) => device.id === activeDeviceId)?.scope === "common"
+                ? "Параметры профиля: для общей подписки и новых устройств. Уже зарегистрированные HWID-устройства настраиваются отдельно."
+                : "Индивидуальные параметры выбранного HWID-устройства. Общие настройки профиля и другие устройства не изменяются."}</small></div></header>
+              <div className="mihomoProfileProtectionOptions">
+                <label className={activeProfileRouting.tunnel_privacy ? "is-enabled" : ""}>
+                  <span><b>Дополнительное шифрование клиент — VPS</b><small>Шифрует VLESS внутри соединения через CDN. Требуется Mihomo 1.19.30 или новее.</small></span>
+                  <input type="checkbox" checked={Boolean(activeProfileRouting.tunnel_privacy)} onChange={(event) => toggleProfileRule("tunnel_privacy", event.target.checked)} />
+                </label>
+                <label className={activeProfileRouting.tunnel_ech ? "is-enabled" : ""}>
+                  <span><b>Скрытие имени сервера (ECH)</b><small>Отдельная функция для CDN-домена с поддержкой ECH. Зависит от клиента, DNS и сети; может замедлять подключение.</small></span>
+                  <input type="checkbox" checked={Boolean(activeProfileRouting.tunnel_ech)} onChange={(event) => toggleProfileRule("tunnel_ech", event.target.checked)} />
+                </label>
+              </div>
+              {profileDialog !== "new" && profileDialog?.protection_status?.[activeDeviceId]?.encryption_pending && <p role="status">Сохранённая настройка шифрования ещё не применена к подключениям. Нажмите «Сохранить», затем обновите подписку в клиенте.</p>}
+              {!profileConnections.some((connection) => connection.device_id === activeDeviceId && connection.component === "transport-reality") && <p>У выбранной конфигурации пока нет VLESS-подключений. Шифрование начнёт действовать после их добавления и сохранения.</p>}
+              <p>Изменения применяются после сохранения профиля. При переключении дополнительного шифрования старый клиентский конфиг перестанет подключаться — обновите подписку в клиенте.</p>
+            </section>
             <section className="mihomoProfileRules"><header><div><b>Правила устройства</b><small>Применяются только к подписке и YAML выбранного устройства.</small></div><span>{profileDirectRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length} из {profileDirectRules.length}</span></header><div>{profileDirectRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div></section>
             <section className="mihomoPresetPicker">
               <header><div><b>Создать подключения из пресета</b><small>Готовый набор заменит подключения выбранной конфигурации.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настроить пресеты</button></header>

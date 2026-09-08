@@ -482,6 +482,15 @@ def profile_export_filename(item: dict[str, Any]) -> str:
 def profile_response(item: dict[str, Any]) -> dict[str, Any]:
     result = {key: value for key, value in normalize_profile(item).items() if key not in {"subscriptions", "subscription_token"}}
     result["export_filename"] = profile_export_filename(item)
+    result["protection_status"] = {}
+    for device in result["devices"]:
+        device_id = str(device["id"])
+        connections = [entry for entry in result.get("connections", []) if entry.get("device_id") == device_id and entry.get("component") == "transport-reality"]
+        requested = bool(device_routing(result, device_id).get("tunnel_privacy", False))
+        result["protection_status"][device_id] = {
+            "vless_connections": len(connections),
+            "encryption_pending": any(bool(entry.get("credential", {}).get("encryption")) != requested for entry in connections),
+        }
     return result
 
 
@@ -3235,7 +3244,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     for index, connection in enumerate(connections):
         component = str(connection["component"])
         if privacy and component == "transport-reality" and not connection.get("credential", {}).get("encryption"):
-            raise HTTPException(status_code=409, detail="Для защищённого подключения отсутствуют параметры шифрования. Пересоздайте подключение.")
+            raise HTTPException(status_code=409, detail="Шифрование отмечено в настройках, но ещё не применено к подключениям. Сохраните профиль в панели, затем обновите подписку в клиенте.")
         # Keep descriptive GUI labels out of client-visible aliases.
         base = f"Connection {index + 1}"
         name = base

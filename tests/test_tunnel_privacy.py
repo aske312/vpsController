@@ -17,6 +17,30 @@ from test_privacy import manager, ROOT
 
 
 class TunnelPrivacyTests(unittest.TestCase):
+    def test_saved_legacy_flag_is_reported_and_repaired_without_recreating_connections(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config_root = root / "config"
+            config = config_root / "reality/config.json"
+            config.parent.mkdir(parents=True)
+            config.write_text(json.dumps({"inbounds": [{"protocol": "vless", "port": 12345, "settings": {"clients": [{"id": "identity"}], "decryption": "none"}}]}))
+            profile_file = root / "profiles.json"
+            item = {"id": "profile", "common_device_id": "common", "devices": [{"id": "common", "name": "Profile", "routing": {}}, {"id": "device", "name": "Device", "routing": {"tunnel_privacy": True, "tunnel_ech": False}}], "connections": [{"id": "channel", "component": "transport-reality", "device_id": "device", "credential": {"uuid": "identity"}}]}
+            profile_file.write_text(json.dumps([item]))
+            status = manager.profile_response(item)["protection_status"]
+            self.assertTrue(status["device"]["encryption_pending"])
+            self.assertFalse(status["common"]["encryption_pending"])
+            with patch.object(manager, "CONFIG_ROOT", config_root), patch.object(manager, "PROFILE_FILE", profile_file), patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"), patch.object(manager, "profiles", side_effect=lambda: json.loads(profile_file.read_text())), patch.object(manager, "systemctl_active", return_value=False), patch.object(manager, "write_action"), patch.object(manager, "vless_encryption_pair", return_value=("private", "public")), patch.object(manager, "render_profile", return_value="yaml"), patch.object(manager, "validate_rendered_profile"), patch.object(manager, "apply_reality_config", side_effect=lambda path, value: path.write_text(json.dumps(value))), patch.object(manager, "provision") as provision:
+                updated = manager.update_profile("profile", manager.ProfileUpdate(name="Profile"))
+            provision.assert_not_called()
+            self.assertFalse(updated["protection_status"]["device"]["encryption_pending"])
+            self.assertEqual(updated["connections"][0]["credential"], {"uuid": "identity", "encryption": "public"})
+            inbound = json.loads(config.read_text())["inbounds"][0]
+            self.assertEqual(inbound["port"], 12345)
+            self.assertEqual(inbound["settings"]["decryption"], "private")
+            self.assertFalse(updated["devices"][0]["routing"].get("tunnel_privacy", False))
+            self.assertFalse(updated["devices"][1]["routing"]["tunnel_ech"])
+
     def test_device_only_update_rolls_back_profile_and_runtime_on_failure(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
