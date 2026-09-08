@@ -1,8 +1,21 @@
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
+import { X509Certificate } from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 const readFileText = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+test("release includes a tracked, valid public Cloudflare CA", async () => {
+  const path = "api/resources/cloudflare-origin-pull-ca.pem";
+  const tracked = execFileSync("git", ["ls-files", "--error-unmatch", path], { cwd: new URL("../", import.meta.url), encoding: "utf8" });
+  assert.equal(tracked.trim(), path);
+  const pem = await readFileText(path);
+  assert.doesNotMatch(pem, /PRIVATE KEY/);
+  const cert = new X509Certificate(pem);
+  assert.equal(cert.ca, true);
+  assert.match(cert.subject, /CloudFlare|Cloudflare/);
+  assert.ok(Date.parse(cert.validTo) > Date.now() + 30 * 86400000);
+});
 const readUiSources = async () => {
   const files = await readdir(new URL("../app", import.meta.url), { recursive: true });
   const sources = files

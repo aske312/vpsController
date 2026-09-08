@@ -20,6 +20,14 @@ security = api.cdn_security
 
 
 class CdnSecurityTests(unittest.TestCase):
+    def test_missing_packaged_ca_is_reported_before_starting_mutation(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(security, "RESOURCES", Path(temp)), patch.object(api.subprocess, "run") as run:
+            with self.assertRaises(api.HTTPException) as error:
+                api.update_cdn_security(api.CdnSecuritySettings(authenticated_origin_pulls=True))
+            self.assertEqual(error.exception.status_code, 409)
+            self.assertIn("отсутствует публичный сертификат", error.exception.detail)
+            run.assert_not_called()
+
     def test_cdn_is_restricted_but_direct_tls_is_preserved(self):
         routes = [{"domain": "cdn.example", "path": "/cdn", "port": 12345}, {"domain": "direct.example", "path": "/tls", "port": 12346, "cloudflare": False}]
         text = security.render_routes(routes, {"authenticated_origin_pulls": True}, protected=True)

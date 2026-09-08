@@ -45,6 +45,26 @@ class GatewayTests(unittest.TestCase):
 
 @unittest.skipIf(os.name == "nt", "Requires deployment Bash")
 class ShellGatewayTests(unittest.TestCase):
+    def test_release_build_rejects_missing_ca_before_dependency_downloads(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "scripts").mkdir()
+            script = root / "scripts/build-release.sh"
+            script.write_text((ROOT / "scripts/build-release.sh").read_text())
+            result = subprocess.run(["bash", str(script), str(root / "output/release.tar.gz")], capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Missing public Cloudflare origin-pull CA in release", result.stderr)
+            self.assertFalse((root / "output/release.tar.gz").exists())
+
+    @unittest.skipUnless(os.getenv("PRIVACY_CADDY_BIN"), "Requires Caddy")
+    def test_aop_candidate_loads_certificate_from_release(self):
+        routes = [{"domain": "cdn.example", "path": "/test", "port": 12345}]
+        with tempfile.TemporaryDirectory() as temp, patch.object(gateway.cdn_security, "SNIPPET", Path(temp) / "transports.caddy"), patch.object(gateway.cdn_security, "read_routes", return_value=routes), patch.object(gateway.cdn_security, "settings", return_value={"authenticated_origin_pulls": True}):
+            try:
+                gateway.validate_candidate(ROOT, "vpn", 18080, {}, os.environ["PRIVACY_CADDY_BIN"])
+            except subprocess.CalledProcessError as error:
+                self.fail(error.stderr.decode())
+
     def test_failed_renderer_propagates_even_in_conditional(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

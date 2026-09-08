@@ -2579,6 +2579,8 @@ class CdnSecuritySettings(BaseModel):
 
 @app.put("/api/application/cdn-security")
 def update_cdn_security(payload: CdnSecuritySettings, _: None = Depends(require_token)) -> dict:
+    if payload.authenticated_origin_pulls and not (cdn_security.RESOURCES / "cloudflare-origin-pull-ca.pem").is_file():
+        raise HTTPException(status_code=409, detail="В установленном релизе отсутствует публичный сертификат Cloudflare. Обновите приложение до исправленного релиза; настройки Cloudflare менять не требуется для устранения этой ошибки.")
     result = subprocess.run(
         ["systemd-run", f"--unit=vps-control-cdn-security-{uuid.uuid4().hex[:12]}", "--wait", "--pipe", "--collect", "--property=Type=exec",
          CONTROL_COMMAND, "cdn-security", "enable" if payload.authenticated_origin_pulls else "disable"],

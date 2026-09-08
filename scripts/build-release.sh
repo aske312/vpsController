@@ -7,7 +7,7 @@ WORK_DIR="$(mktemp -d)"
 STAGE="${WORK_DIR}/vps-control-release"
 trap 'rm -rf -- "${WORK_DIR}"' EXIT
 
-for command_name in curl gzip node npm rsync sha256sum tar; do
+for command_name in curl gzip node npm openssl rsync sha256sum tar; do
   command -v "${command_name}" >/dev/null 2>&1 || { echo "Missing command: ${command_name}" >&2; exit 1; }
 done
 [[ "$(uname -s)" == "Linux" ]] || { echo "Release must be built on Linux." >&2; exit 1; }
@@ -18,6 +18,12 @@ rsync -a --delete \
   --exclude '.wrangler/' --exclude 'node_modules/' --exclude 'dist/' --exclude 'outputs/' \
   --exclude '.env*' --exclude 'venv/' \
   "${ROOT_DIR}/" "${STAGE}/"
+
+# Check the staged release, not an ignored file left in a developer's workspace.
+cf_ca="${STAGE}/api/resources/cloudflare-origin-pull-ca.pem"
+[[ -s "${cf_ca}" ]] || { echo "Missing public Cloudflare origin-pull CA in release." >&2; exit 1; }
+openssl x509 -in "${cf_ca}" -noout -checkend 2592000 >/dev/null \
+  || { echo "Invalid or expiring public Cloudflare origin-pull CA." >&2; exit 1; }
 
 # A release manager with CRLF line endings cannot even enter its rollback path:
 # bash parses the carriage return as part of `pipefail`. Fail the build before
