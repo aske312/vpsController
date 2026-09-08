@@ -166,7 +166,10 @@ def configure_aop(enabled: bool) -> None:
                 if remaining <= 0:
                     raise TimeoutError("Cloudflare verification deadline exceeded")
                 # Random, uncached response proves this origin was reached using mTLS.
-                request = urllib.request.Request(f"https://{domain}/__cf_check_{probe}", headers={"Cache-Control": "no-cache"})
+                request = urllib.request.Request(
+                    f"https://{domain}/__cf_check_{probe}",
+                    headers={"Cache-Control": "no-cache", "User-Agent": "GATE.312 origin verification"},
+                )
                 with urllib.request.urlopen(request, timeout=min(12, remaining)) as response:
                     if response.read(256).decode() != probe:
                         raise ValueError("Cloudflare origin verification failed")

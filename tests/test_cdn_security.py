@@ -69,6 +69,18 @@ class CdnSecurityTests(unittest.TestCase):
             self.assertFalse(json.loads(state.read_text())["authenticated_origin_pulls"])
             self.assertEqual(reload.call_count, 2)
 
+    def test_cf_probe_uses_non_blocked_service_identity(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, _): return probe.encode()
+        probe = "known-probe"
+        with tempfile.TemporaryDirectory() as temp, patch.object(security, "SNIPPET", Path(temp) / "route.caddy"), patch.object(security, "STATE", Path(temp) / "state.json"), patch.object(security, "read_routes", return_value=[{"domain": "cdn.example", "path": "/transport", "port": 12345}]), patch.object(security.secrets, "token_hex", return_value=probe), patch.object(security, "reload_caddy"), patch.object(security.urllib.request, "urlopen", return_value=Response()) as urlopen:
+            security.configure_aop(True)
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.get_header("User-agent"), "GATE.312 origin verification")
+        self.assertEqual(request.get_header("Cache-control"), "no-cache")
+
     def test_protected_firewall_adds_cf_before_removing_blanket_rule(self):
         with patch.object(security, "read_env", return_value={"ACCESS_MODE": "vpn"}), patch.object(security, "read_routes", return_value=[{"cloudflare": True}]), patch.object(security.subprocess, "run") as run:
             security.configure_firewall()
