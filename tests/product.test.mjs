@@ -16,6 +16,17 @@ test("release includes a tracked, valid public Cloudflare CA", async () => {
   assert.match(cert.subject, /CloudFlare|Cloudflare/);
   assert.ok(Date.parse(cert.validTo) > Date.now() + 30 * 86400000);
 });
+
+test("successful release readiness retries do not print transient connection errors", async () => {
+  const installer = await readFileText("scripts/vps-control.sh");
+  const updatePaths = [
+    installer.slice(installer.indexOf("install_prebuilt_release()"), installer.indexOf("update_prebuilt_branch()")),
+    installer.slice(installer.indexOf("restore_test_app()"), installer.indexOf("change_access_mode()")),
+  ].join("\n");
+  const readiness = [...updatePaths.matchAll(/curl --fail --silent[^\n]+--retry 10[^\n]+/g)].map((match) => match[0]);
+  assert.ok(readiness.length >= 2);
+  for (const command of readiness) assert.doesNotMatch(command, /--show-error/);
+});
 const readUiSources = async () => {
   const files = await readdir(new URL("../app", import.meta.url), { recursive: true });
   const sources = files

@@ -2433,9 +2433,9 @@ install_prebuilt_release() {
     || ! systemctl reload-or-restart caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! restart_mihomo_manager_if_present \
-    || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
+    || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 \
       "http://127.0.0.1:8000/api/health" >/dev/null \
-    || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
+    || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 \
       "http://127.0.0.1:3000/" >/dev/null; then
     warn "новый релиз не прошёл проверку; выполняется откат."
     systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
@@ -2614,8 +2614,8 @@ restore_test_app() {
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! restart_mihomo_manager_if_present \
-    || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:8000/api/health" >/dev/null \
-    || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:3000/" >/dev/null; then
+    || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:8000/api/health" >/dev/null \
+    || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:3000/" >/dev/null; then
     warn "сохранённая версия не запустилась; тестовая версия восстанавливается."
     systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
     if [[ -d "${INSTALL_DIR}/venv" && ! -e "${failed_install}/venv" ]]; then
