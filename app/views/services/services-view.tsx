@@ -52,7 +52,7 @@ type Props = {
   onLoggingChange: (patch: Partial<LoggingSettings>) => void;
   onSaveLogging: () => void;
   onClearLogs: () => void;
-  onAutomationChange: (kind: "reboot" | "cleanup", patch: Partial<AutomationSchedule>) => void;
+  onAutomationChange: (kind: keyof ServicesStatus["automation"], patch: Partial<AutomationSchedule>) => void;
   onSaveAutomation: () => void;
 };
 

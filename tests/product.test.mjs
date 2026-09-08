@@ -681,7 +681,8 @@ test("service mode deploys main from an isolated preview while stabl remains the
   assert.match(stablWorkflow, /gh release create stabl-latest/);
   assert.match(stablWorkflow, /gh release create main-latest/);
   assert.match(stablWorkflow, /npm run lint/);
-  assert.match(stablWorkflow, /node --test tests\/product\.test\.mjs/);
+  assert.match(stablWorkflow, /npm run typecheck/);
+  assert.match(stablWorkflow, /node --experimental-strip-types --test tests\/\*\.test\.mjs/);
 });
 
 test("main preview is built off-VPS and interrupted updates cannot report success", async () => {
@@ -693,7 +694,8 @@ test("main preview is built off-VPS and interrupted updates cannot report succes
   const previewWorkflow = workflow.split("  preview:")[1] || "";
   assert.match(workflow, /Build main preview package/);
   assert.match(previewWorkflow, /npm run lint/);
-  assert.match(previewWorkflow, /node --test tests\/product\.test\.mjs/);
+  assert.match(previewWorkflow, /npm run typecheck/);
+  assert.match(previewWorkflow, /node --experimental-strip-types --test tests\/\*\.test\.mjs/);
   assert.match(workflow, /vps-control-main\.tar\.gz/);
   assert.match(workflow, /gh release create main-latest/);
   assert.doesNotMatch(manager, /BUILD_COMMIT="\$\{latest\}".*build-release/s);

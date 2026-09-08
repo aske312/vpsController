@@ -1,6 +1,7 @@
 "use client";
 
 import { createApiClient } from "./lib/api-request";
+import type { ApplicationMetadata } from "./types/control-plane";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
@@ -56,6 +57,7 @@ export default function Home() {
   const [securityLogsUpdatedAt, setSecurityLogsUpdatedAt] = useState<Date | null>(null);
   const [securityNewLogCount, setSecurityNewLogCount] = useState(0);
   const [application, setApplication] = useState<ApplicationStatus | null>(null);
+  const [applicationMetadata, setApplicationMetadata] = useState<ApplicationMetadata | null>(null);
   const [services, setServices] = useState<ServicesStatus | null>(null);
   const [dns, setDns] = useState<DnsStatus | null>(null);
   const [dnsDraft, setDnsDraft] = useState<DnsSettings | null>(null);
@@ -218,10 +220,22 @@ export default function Home() {
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadServices: cause instanceof Error ? cause.message : "Не удалось обновить состояние служб" })); }
   }, [request, token]);
 
+  const loadApplicationMetadata = useCallback(async () => {
+    if (!token) return;
+    try {
+      setApplicationMetadata(await request<ApplicationMetadata>("/application/metadata"));
+      setRefreshErrors((current) => { const next = { ...current }; delete next.loadApplicationMetadata; return next; });
+    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadApplicationMetadata: cause instanceof Error ? cause.message : "Не удалось обновить сведения о версии" })); }
+  }, [request, token]);
+
   const loadProtocolStatus = useCallback(async (protocol: Protocol) => {
     if (!token) return;
     try {
-      const raw = await request(`/protocols/${protocol}/status`) as ProtocolStatus;
+      const raw = await request(`/protocols/${protocol}/status`) as Omit<ProtocolStatus, "resources" | "history" | "diagnostics"> & {
+        resources?: Partial<ProtocolStatus["resources"]>;
+        history?: Partial<ProtocolStatus["history"]>;
+        diagnostics?: Partial<ProtocolStatus["diagnostics"]>;
+      };
       // WG/AWG already return full monitoring data. Stream protocols (VRX/SS)
       // may omit history/resources/diagnostics, so normalize the response before
       // rendering the shared Protocol Workspace. This keeps one UI contract for
@@ -376,12 +390,12 @@ export default function Home() {
     try {
       if (tab === "overview") await Promise.all([loadOverview(), loadClients(), loadApplication(), loadServices()]);
       else if (tab === "security") await Promise.all([loadSecurity(), loadServices()]);
-      else if (tab === "application") await loadApplication();
+      else if (tab === "application") await Promise.all([loadApplication(), loadApplicationMetadata(), loadServices()]);
       else if (tab === "services") await loadServices();
       else if (tab === "dns") await loadDns();
       else if (tab === "mihomo") await loadOverview();
       else if (tab === "channels") await Promise.all([loadClients(), loadProtocolStatus(selectedChannel)]);
-      else if (["wg", "awg", "shadowsocks", "vless-reality-xhttp"].includes(tab)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
+      else if (directProtocolOrder.includes(tab as Protocol)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
       else {
         await loadClients();
         if (tab === "clients") await measureDeviceRoute(showBusy);
@@ -389,7 +403,7 @@ export default function Home() {
     } finally {
       if (showBusy) setBusy(false);
     }
-  }, [loadApplication, loadClients, loadDns, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, selectedChannel, tab, token]);
+  }, [loadApplication, loadApplicationMetadata, loadClients, loadDns, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, selectedChannel, tab, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -592,6 +606,7 @@ export default function Home() {
     try {
       const started = await request("/application/action", { method: "POST", body: JSON.stringify({ action }) });
       setApplication((current) => ({
+        ...current,
         api: current?.api || { active: true, enabled: true },
         containers: current?.containers || [],
         action: started,
@@ -742,7 +757,7 @@ export default function Home() {
     finally { setBusy(false); }
   }
 
-  function updateAutomation(kind: "reboot" | "cleanup", patch: Partial<AutomationSchedule>) {
+  function updateAutomation(kind: keyof ServicesStatus["automation"], patch: Partial<AutomationSchedule>) {
     automationDirty.current = true;
     setAutomationDraft((current) => current ? {
       ...current, [kind]: { ...current[kind], ...patch },
@@ -1148,7 +1163,7 @@ export default function Home() {
   );
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
   const vlessRouteStatus = protocolStatuses["vless-reality-xhttp"]?.routes || {};
-  const connectionTypeOptions = installedProtocols.flatMap((protocol) => {
+  const connectionTypeOptions = installedProtocols.flatMap<{ id: string; protocol: Protocol; routeId?: "direct" | "tls" | "cdn"; name: string; badge: string; description: string }>((protocol) => {
     if (protocol !== "vless-reality-xhttp") return [{
       id: protocol, protocol, routeId: undefined, name: labels[protocol],
       badge: protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : protocol.toUpperCase(),
@@ -1183,7 +1198,8 @@ export default function Home() {
       setBusy(false); setError("Сначала установите выбранный протокол"); return;
     }
     try {
-      const payload = { ...newClient, protocol: selectedClientProtocol, settings: newClientSettings, ...(selectedClientProtocol === "vless-reality-xhttp" ? { vless_routes: newClientVlessRoutes } : {}) };
+      if (!selectedConnectionType) throw new Error("Нет доступного маршрута для подключения");
+      const payload = { ...newClient, protocol: selectedConnectionType.protocol, settings: newClientSettings, ...(selectedConnectionType.routeId ? { vless_routes: [selectedConnectionType.routeId] } : {}) };
       const result = await request("/clients", { method: "POST", body: JSON.stringify(payload) }) as { config: string; filename?: string; profiles?: GeneratedProfile[] };
       const profiles = result.profiles?.filter((profile) => profile.config && profile.filename) || [];
       const preferred = profiles.find((profile) => profile.id === "cdn") || profiles[0];
@@ -1276,8 +1292,8 @@ export default function Home() {
     protocol_policies?: Record<string, { installed?: boolean; route_allowed?: boolean; nat_enabled?: boolean; healthy?: boolean }>;
   } | undefined;
   const ssh = security?.ssh as { active?: boolean; password_authentication?: string; permit_root_login?: string; publicly_allowed?: boolean; active_connections?: number; max_auth_tries?: string; x11_forwarding?: string; tcp_forwarding?: string } | undefined;
-  const updates = security?.updates as { available?: number; security?: number; kernel_available?: boolean; reboot_required?: boolean; automatic?: boolean; source?: string; checked_at?: string; refreshing?: boolean } | undefined;
-  const applicationVersion = security?.application_version as { branch?: string; current_commit?: string; latest_commit?: string; outdated?: boolean | null; checked_at?: string; error?: string; refreshing?: boolean } | undefined;
+  const updates = (tab === "application" ? applicationMetadata?.updates : security?.updates) as ApplicationMetadata["updates"] | undefined;
+  const applicationVersion = (tab === "application" ? applicationMetadata?.application_version : security?.application_version) as ApplicationMetadata["application_version"] | undefined;
   const securitySystem = security?.system as { kernel?: string; ipv4_forwarding?: boolean; syn_cookies?: boolean; rp_filter?: boolean; rp_filter_mode?: number; rp_filter_valid?: boolean; redirects_disabled?: boolean; source_route_disabled?: boolean; dmesg_restricted?: boolean; auditd_active?: boolean; sudo_users?: string[]; login_users?: string[]; apparmor?: { active?: boolean; profiles?: number } } | undefined;
   const fail2ban = security?.fail2ban as { active?: boolean; jail_active?: boolean; currently_banned?: number; total_banned?: number } | undefined;
   const listeners = (security?.listeners as string[]) || [];

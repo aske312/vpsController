@@ -32,6 +32,12 @@ manager = load_module("privacy_manager", "protocol-images/mihomo/manager.py")
 
 
 class PrivacyTests(unittest.TestCase):
+    def test_application_metadata_does_not_depend_on_security_page(self):
+        version = {"branch": "main", "current_commit": "abc123", "outdated": False}
+        updates = {"available": 3, "security": 1}
+        with patch.object(api, "application_version_status", return_value=version), patch.object(api, "update_status", return_value=updates):
+            self.assertEqual(api.application_metadata(), {"application_version": version, "updates": updates})
+
     def test_export_filename_is_stable_per_profile_and_contains_no_secrets(self):
         profile = {"id": "random-profile-a", "name": "VLESS personal", "subscription_token": "secret-token"}
         filename = manager.profile_export_filename(profile)

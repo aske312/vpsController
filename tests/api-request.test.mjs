@@ -7,6 +7,23 @@ afterEach(() => { globalThis.fetch = originalFetch; });
 const client = (options = {}) => createApiClient("test-token", { retryDelaysMs: [0, 0], ...options });
 const ok = () => new Response('{"ok":true}', { headers: { "content-type": "application/json" } });
 
+test("validation details remain HTTP errors with a text formatter", async () => {
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return Response.json({ detail: [{ msg: "Field required", input: "private-value" }] }, { status: 422 });
+  };
+  await assert.rejects(client({ formatHttpError: (detail) => detail.trim() })("/settings"), {
+    kind: "http", status: 422, message: "Field required",
+  });
+  assert.equal(calls, 1);
+});
+
+test("HEAD succeeds without parsing an absent JSON body", async () => {
+  globalThis.fetch = async () => new Response(null, { status: 200 });
+  assert.equal(await client()("/health", { method: "HEAD" }), null);
+});
+
 test("read recovers from a dropped connection and a gateway failure", async () => {
   let calls = 0;
   globalThis.fetch = async () => {

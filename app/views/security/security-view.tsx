@@ -12,7 +12,7 @@ type SystemView = { kernel?: string; ipv4_forwarding?: boolean; syn_cookies?: bo
 type Fail2banView = { active?: boolean; jail_active?: boolean; currently_banned?: number; total_banned?: number };
 type ListenerSummary = { tcp?: number; udp?: number; local_only?: number };
 type AppSecurity = { admin_password_strong?: boolean; cors_restricted?: boolean; secrets_protected?: boolean; secrets_mode?: string; api_local_only?: boolean; control_command_protected?: boolean; control_command_mode?: string };
-type PanelSecurity = { port?: number; publicly_accessible?: boolean; allowed_interfaces?: string[] };
+type PanelSecurity = { port?: number; publicly_accessible?: boolean; allowed_interfaces?: string[]; internal_url?: string; allowed_channels?: string[] };
 
 type SecurityViewProps = {
   securityLoading: boolean; securityScore: number; securityChecks: boolean[]; securityPerimeterChecks: boolean[]; securitySystemChecks: boolean[]; securityApplicationChecks: boolean[];

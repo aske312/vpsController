@@ -987,7 +987,7 @@ export function MihomoPage({
   async function saveProfile(event: FormEvent) {
     event.preventDefault();
     const creating = profileDialog === "new";
-    const operationId = creating ? "profile:new" : `profile:${profileDialog && profileDialog !== "new" ? profileDialog.id : "edit"}`;
+    const operationId = creating ? "profile:new" : `profile:${profileDialog ? profileDialog.id : "edit"}`;
     const operationLabel = creating ? "Создание Mihomo-профиля" : `Сохранение профиля ${profileName}`;
     publishMihomoOperation(operationId, operationLabel, "running", "Обновляем профиль и credentials…");
     setBusy("profile");

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ApplicationAction, ApplicationStatus, ServicesStatus } from "../../types/control-plane";
-import { actionLabels } from "../../lib/control-plane-ui";
+import { actionLabels, applicationActionState } from "../../lib/control-plane-ui";
 
 type ApplicationVersion = { branch?: string; current_commit?: string; latest_commit?: string; outdated?: boolean | null; checked_at?: string; error?: string; refreshing?: boolean };
 type UpdateStatus = { available?: number; security?: number; kernel_available?: boolean; reboot_required?: boolean; automatic?: boolean; source?: string; checked_at?: string; refreshing?: boolean };
@@ -18,6 +18,7 @@ type ApplicationViewProps = {
 };
 
 export function ApplicationView({ application, services, applicationVersion, updates, serviceModeActive, busy, applicationLogs, runApplicationAction, changeServiceMode, changePanelAccess, changeCdnSecurity, loadApplicationLogs, downloadLogs, downloadUpdateReport }: ApplicationViewProps) {
+  const actionState = applicationActionState(application?.action);
   return <section className="applicationWorkspace">
         <article className="applicationSummary">
           <div className="applicationSummaryCopy">
@@ -59,10 +60,10 @@ export function ApplicationView({ application, services, applicationVersion, upd
                 <span><strong>{container.component_name || container.Service || `Компонент ${index + 1}`}</strong><small>{container.purpose || container.status_text || container.Status || container.State || "Компонент приложения"}</small></span>
                 <b>{container.healthy ? "RUNNING" : "STOPPED"}</b>
               </div>)}
-              {application?.action?.action && <div className={application.action.state !== "failed" && application.action.result !== "failed" ? "healthy" : "failed"}>
+              {application?.action?.action && <div className={actionState === "FAILED" ? "failed" : actionState === "DONE" ? "healthy" : "pending"}>
                 <i />
-                <span><strong>Последняя команда  {actionLabels[application.action.action.split(":")[0]] || application.action.action}</strong><small>{application.action.state === "running" ? "Команда выполняется системной службой" : application.action.result === "success" ? "Завершена без ошибок" : application.action.message || "Результат уточняется"}</small></span>
-                <b>{application.action.state === "running" ? "RUNNING" : application.action.result === "failed" ? "FAILED" : "DONE"}</b>
+                <span><strong>Последняя команда  {actionLabels[application.action.action.split(":")[0]] || application.action.action}</strong><small>{actionState === "RUNNING" ? "Команда выполняется системной службой" : actionState === "DONE" ? "Завершена без ошибок" : application.action.message || "Результат уточняется"}</small></span>
+                <b>{actionState}</b>
               </div>}
             </div>
 
@@ -109,7 +110,7 @@ export function ApplicationView({ application, services, applicationVersion, upd
           <section className="applicationLifecycle">
             <header><div><p className="eyebrow">SYSTEM LIFECYCLE</p><h2>VPS и системные пакеты</h2></div></header>
             <div className="applicationLifecycleActions">
-              <button onClick={() => void runApplicationAction("safe-update")} disabled={busy}><strong>Обновить сервер</strong><small>{updates?.total ? `${updates.total} доступных обновлений · полный Debian upgrade` : "Все пакеты Debian · точка восстановления · проверка"}</small></button>
+              <button onClick={() => void runApplicationAction("safe-update")} disabled={busy}><strong>Обновить сервер</strong><small>{updates?.available ? `${updates.available} доступных обновлений · полный Debian upgrade` : "Все пакеты Debian · точка восстановления · проверка"}</small></button>
               <button onClick={() => void runApplicationAction("reboot")} disabled={busy}><strong>Перезагрузить VPS</strong><small>Корректно завершить службы и reboot</small></button>
               <button className="danger" onClick={() => void runApplicationAction("poweroff")} disabled={busy}><strong>Выключить VPS</strong><small>Повторный запуск потребуется у провайдера</small></button>
             </div>

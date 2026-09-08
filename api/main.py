@@ -1963,6 +1963,11 @@ def remove_protocol_image(image_id: str, _: None = Depends(require_token)) -> di
     return action
 
 
+@app.get("/api/application/metadata")
+def application_metadata(_: None = Depends(require_token)) -> dict:
+    return {"application_version": application_version_status(), "updates": update_status()}
+
+
 @app.get("/api/application/status")
 def application_status(_: None = Depends(require_token)) -> dict:
     action = {}

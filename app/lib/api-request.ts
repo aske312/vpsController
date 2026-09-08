@@ -43,12 +43,16 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
           let detail = `HTTP ${response.status}`;
           try {
             const body = JSON.parse(raw);
-            detail = body?.detail || body?.message || detail;
+            const value = body?.detail || body?.message;
+            if (typeof value === "string") detail = value;
+            else if (Array.isArray(value)) {
+              detail = value.map((item) => typeof item?.msg === "string" ? item.msg : "").filter(Boolean).join("; ") || detail;
+            }
             if (body?.operation_id) detail += ` · операция ${body.operation_id}`;
           } catch { /* Do not display an HTML gateway page in the UI. */ }
           throw new ApiRequestError(options.formatHttpError?.(detail, response.status) || detail, "http", response.status);
         }
-        if (response.status === 204) return null;
+        if (response.status === 204 || method === "HEAD") return null;
         // Consume inside the retry boundary: a stream may break after headers arrive.
         const body = await response.text();
         if ((response.headers.get("content-type") || "").includes("text/plain")) return body;
