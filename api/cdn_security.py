@@ -89,10 +89,13 @@ def render_routes(routes: list[dict], policy: dict | None = None, protected: boo
             lines += ["    tls {", "        client_auth {", "            mode require_and_verify", f'            trusted_ca_cert_file {json.dumps(str(RESOURCES / "cloudflare-origin-pull-ca.pem"))}', "        }", "    }"]
         # A route preserves ordering: reject before any reverse_proxy handler.
         lines.append("    route {")
+        if probe and cf_only:
+            # The unguessable probe validates Cloudflare mTLS itself. Keep it
+            # ahead of source filtering so a stale range snapshot cannot make
+            # certificate verification report a misleading HTTP 403.
+            lines += [f"        handle /__cf_check_{probe} {{", f'            respond "{probe}" 200', "        }"]
         if cf_only and (protected or aop):
             lines += [f"        @outsideCF not remote_ip {ranges}", "        respond @outsideCF 403"]
-        if probe and cf_only:
-            lines += [f"        handle /__cf_check_{probe} {{", f'            respond "{probe}" 200', "        }"]
         for index, item in enumerate(items):
             path = str(item["path"])
             if not re.fullmatch(r"/[A-Za-z0-9_./-]*", path):

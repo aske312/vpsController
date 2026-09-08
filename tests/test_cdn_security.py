@@ -83,6 +83,14 @@ class CdnSecurityTests(unittest.TestCase):
         self.assertGreater(len(ranges), 15)
         self.assertTrue(any(":" in value for value in ranges))
 
+    def test_aop_probe_precedes_source_filter_but_transports_remain_protected(self):
+        text = security.render_routes(
+            [{"domain": "cdn.example", "path": "/transport", "port": 12345}],
+            {"authenticated_origin_pulls": True}, protected=True, probe="random-token",
+        )
+        self.assertLess(text.index("handle /__cf_check_random-token"), text.index("@outsideCF"))
+        self.assertLess(text.index("respond @outsideCF 403"), text.index("handle /transport"))
+
 
 @unittest.skipUnless(os.getenv("PRIVACY_CADDY_BIN"), "Set Caddy binary for real gateway checks")
 class RealCaddyTests(unittest.TestCase):
