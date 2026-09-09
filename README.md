@@ -75,10 +75,35 @@ sudo vps-control install-release /root/vps-control-release.tar.gz
 
 ## Разработка
 
+Карта каталогов и правила размещения кода: [структура проекта](docs/audit/PROJECT_STRUCTURE.md).
+
+Для повседневных изменений проверки запускаются без сборки:
+
 ```bash
-npm test
-npm run lint
+npm test           # JS/TS-тесты
+npm run check     # ESLint, TypeScript и JS/TS-тесты
+npm run check:full # те же проверки и production-сборка веб-приложения
 ```
+
+`npm run build` только собирает приложение. ESLint кеширует результаты по содержимому
+файлов в `.runtime/eslint-cache`, TypeScript использует инкрементальную проверку.
+При работе над одной функцией можно запускать соответствующий файл тестов:
+
+```bash
+node --experimental-strip-types --test tests/web/cdn-security-operation.test.mjs
+```
+
+Python-тесты API запускаются отдельно, в окружении с зависимостями API:
+
+```bash
+python -m unittest discover -s tests/api -t . -p "test_*.py"
+```
+
+В CI сохраняются ESLint, проверка типов, все JS/TS-тесты и сборка.
+После `npm ci` упаковщик получает `RELEASE_SKIP_INSTALL=1` и использует уже
+проверенные зависимости. При самостоятельном запуске `scripts/build-release.sh`
+установка из lockfile выполняется по умолчанию. Зависимости для запуска приложения
+внутри Linux-пакета устанавливаются отдельно.
 
 Ветка `main` используется для разработки, `stabl` — для стабильных установок и обновлений.
 

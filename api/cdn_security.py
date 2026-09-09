@@ -12,6 +12,7 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+from typing import Callable
 
 RESOURCES = Path(__file__).resolve().parent / "resources"
 STATE = Path("/etc/vps-control/cdn-security.json")
@@ -144,7 +145,7 @@ def configure_firewall() -> None:
         subprocess.run(["ufw", "allow", "80/tcp", "comment", "GATE.312 ACME HTTP"], check=True, capture_output=True)
 
 
-def configure_aop(enabled: bool) -> None:
+def configure_aop(enabled: bool, progress: Callable[[int, str], None] = lambda *_: None) -> None:
     """Rollback if validation, reload or end-to-end Cloudflare verification fails."""
     SNIPPET.parent.mkdir(parents=True, exist_ok=True)
     with SNIPPET.with_suffix(".lock").open("w") as lock:
@@ -158,8 +159,10 @@ def configure_aop(enabled: bool) -> None:
         policy = {"authenticated_origin_pulls": enabled}
         probe = secrets.token_hex(24) if enabled else ""
         try:
+            progress(20, "Применение конфигурации шлюза")
             write_snippet(render_routes(routes, policy, probe=probe))
             reload_caddy()
+            progress(45, "Проверка соединения через Cloudflare" if enabled else "Сохранение настройки")
             deadline = time.monotonic() + 60
             for domain in domains if enabled else []:
                 remaining = deadline - time.monotonic()
@@ -173,8 +176,10 @@ def configure_aop(enabled: bool) -> None:
                 with urllib.request.urlopen(request, timeout=min(12, remaining)) as response:
                     if response.read(256).decode() != probe:
                         raise ValueError("Cloudflare origin verification failed")
-            write_snippet(render_routes(routes, policy))
-            reload_caddy()
+            if enabled:
+                progress(80, "Завершение проверки CF")
+                write_snippet(render_routes(routes, policy))
+                reload_caddy()
             STATE.parent.mkdir(parents=True, exist_ok=True)
             candidate = STATE.with_suffix(".tmp")
             candidate.write_text(json.dumps(policy) + "\n", encoding="utf-8")

@@ -1,18 +1,18 @@
 @import "tailwindcss";
 
-@import "./styles/theme.css";
-@import "./styles/protocol-palette.css";
-@import "./styles/base.css";
-@import "./styles/app.css";
+@import "../src/shared/styles/theme.css";
+@import "../src/shared/styles/protocol-palette.css";
+@import "../src/shared/styles/base.css";
+@import "../src/shared/styles/app.css";
 
-@import "./styles/pages/auth.css";
-@import "./styles/pages/overview.css";
-@import "./styles/pages/dns.css";
-@import "./styles/pages/security.css";
-@import "./styles/pages/application.css";
-@import "./styles/pages/services.css";
-@import "./styles/pages/connections.css";
-@import "./styles/pages/protocols.css";
-@import "./styles/pages/mihomo.css";
-@import "./styles/polish.css";
-@import "./styles/control-center.css";
+@import "../src/features/auth/auth.css";
+@import "../src/features/overview/overview.css";
+@import "../src/features/dns/dns.css";
+@import "../src/features/security/security.css";
+@import "../src/features/application/application.css";
+@import "../src/features/services/services.css";
+@import "../src/features/connections/connections.css";
+@import "../src/features/protocols/protocols.css";
+@import "../src/features/mihomo/mihomo.css";
+@import "../src/shared/styles/polish.css";
+@import "../src/shared/styles/control-center.css";

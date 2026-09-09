@@ -43,11 +43,12 @@ jobs:
       - name: Build verified Linux release
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_SKIP_INSTALL: "1"
         run: |
           npm ci --include=dev --include=optional --ignore-scripts
           npm run lint
           npm run typecheck
-          node --experimental-strip-types --test tests/*.test.mjs
+          npm test
           bash scripts/build-release.sh outputs/vps-control-release.tar.gz
       - name: Replace stabl-latest release
         env:
@@ -78,11 +79,12 @@ jobs:
       - name: Build main preview package
         env:
           BUILD_COMMIT: ${{ github.sha }}
+          RELEASE_SKIP_INSTALL: "1"
         run: |
           npm ci --include=dev --include=optional --ignore-scripts
           npm run lint
           npm run typecheck
-          node --experimental-strip-types --test tests/*.test.mjs
+          npm test
           version="v$(node -p 'require("./package.json").version')"
           RELEASE_VERSION="$version" bash scripts/build-release.sh \
             "outputs/vps-control-main.tar.gz"

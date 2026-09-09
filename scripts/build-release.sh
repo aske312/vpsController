@@ -11,11 +11,16 @@ for command_name in curl gzip node npm openssl rsync sha256sum tar; do
   command -v "${command_name}" >/dev/null 2>&1 || { echo "Missing command: ${command_name}" >&2; exit 1; }
 done
 [[ "$(uname -s)" == "Linux" ]] || { echo "Release must be built on Linux." >&2; exit 1; }
+if [[ "${RELEASE_SKIP_INSTALL:-0}" == "1" && ! -d "${ROOT_DIR}/node_modules" ]]; then
+  echo "RELEASE_SKIP_INSTALL=1 requires dependencies installed with npm ci in the project directory." >&2
+  exit 1
+fi
 
 mkdir -p "${STAGE}" "$(dirname -- "${OUTPUT}")"
 rsync -a --delete \
   --exclude '.git/' --exclude '.idea/' --exclude '.runtime/' --exclude '.vinext/' \
   --exclude '.wrangler/' --exclude 'node_modules/' --exclude 'dist/' --exclude 'outputs/' \
+  --exclude '/docs/audit/' --exclude '/.servers/' --exclude 'AGENTS.md' \
   --exclude '.env*' --exclude 'venv/' \
   "${ROOT_DIR}/" "${STAGE}/"
 
@@ -86,7 +91,11 @@ app_version="${RELEASE_VERSION:-$(node -e 'const p=require(process.argv[1]); con
   cd "${ROOT_DIR}"
   export NEXT_PUBLIC_APP_VERSION="${app_version}"
   export NEXT_PUBLIC_BUILD_COMMIT="${commit}"
-  npm ci --include=dev --include=optional --ignore-scripts
+  # CI already installed and checked these dependencies in this same job.
+  # Standalone release builds still install from the lockfile by default.
+  if [[ "${RELEASE_SKIP_INSTALL:-0}" != "1" ]]; then
+    npm ci --include=dev --include=optional --ignore-scripts
+  fi
   npm run build
 )
 

@@ -10,9 +10,11 @@
     "dev": "WRANGLER_LOG_PATH=.runtime/wrangler/wrangler.log vinext dev",
     "build": "vinext build",
     "start": "WRANGLER_LOG_PATH=.runtime/wrangler/wrangler.log vinext start",
-    "test": "npm run build && node --experimental-strip-types --test tests/*.test.mjs",
+    "test": "node --experimental-strip-types --test tests/web/*.test.mjs tests/contracts/*.test.mjs",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "check:full": "npm run check && npm run build",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --cache --cache-strategy content --cache-location .runtime/eslint-cache"
   },
   "dependencies": {
     "next": "16.2.12",

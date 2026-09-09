@@ -28,11 +28,30 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cdn_security
+import cdn_operation
+from schemas import (
+    BootstrapRequest,
+    AdminPasswordChange,
+    SshPublicKeyInstall,
+    ApplicationAction,
+    ServiceAction,
+    PanelAccessSettings,
+    CdnSecuritySettings,
+    ServiceModeSettings,
+    LoggingSettings,
+    AutomationSchedule,
+    AutomationSettings,
+    DnsCustomResolver,
+    DnsSettingsUpdate,
+    DnsCheckRequest,
+    ClientConnectionSettings,
+    ClientCreate,
+    ProtocolSettingsUpdate,
+)
 
 app = FastAPI(title="Infrastructure API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None)
 logger = logging.getLogger("vps-control.api")
@@ -1102,20 +1121,6 @@ def health() -> dict:
     return {"ok": True}
 
 
-class BootstrapRequest(BaseModel):
-    password: str = Field(min_length=1, max_length=256)
-
-
-class AdminPasswordChange(BaseModel):
-    current_password: str = Field(min_length=1, max_length=256)
-    new_password: str = Field(min_length=16, max_length=128)
-    confirm_password: str = Field(min_length=16, max_length=128)
-
-
-class SshPublicKeyInstall(BaseModel):
-    public_key: str = Field(min_length=80, max_length=2048)
-
-
 @app.get("/api/auth/status")
 def auth_status() -> dict:
     return {"configured": bool(ADMIN_USER and ADMIN_PASSWORD)}
@@ -2061,7 +2066,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
             "enabled": run("systemctl", "is-enabled", "vps-control-api.service") == "enabled",
         },
         "containers": containers,
-        "cdn_security": cdn_security.settings(),
+        "cdn_security": {**cdn_security.settings(), "operation": cdn_operation.status()},
         "action": action,
         "service_mode": {
             "active": SERVICE_MODE_FILE.exists(),
@@ -2076,10 +2081,6 @@ def application_status(_: None = Depends(require_token)) -> dict:
             "migration_required": legacy_runtime,
         },
     }
-
-
-class ApplicationAction(BaseModel):
-    action: Literal["restart", "update", "test-update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "safe-update", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
 
 
 @app.post("/api/application/action")
@@ -2513,10 +2514,6 @@ def live_status(_: None = Depends(require_token)) -> dict:
     }
 
 
-class ServiceAction(BaseModel):
-    action: Literal["start", "stop", "restart"]
-
-
 def manage_ssh_units(action: Literal["start", "stop", "restart"]) -> None:
     """Control OpenSSH without starting its socket and service together."""
     if action == "stop":
@@ -2574,26 +2571,26 @@ def manage_service(service_id: str, payload: ServiceAction, _: None = Depends(re
     return service_details(service_id, definition)
 
 
-class PanelAccessSettings(BaseModel):
-    mode: Literal["external", "vpn"]
+@app.get("/api/application/cdn-security")
+def cdn_security_status(operation_id: str | None = None, _: None = Depends(require_token)) -> dict:
+    try:
+        operation = cdn_operation.status(operation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Некорректный идентификатор операции") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Операция пока не найдена") from exc
+    return {**cdn_security.settings(), "operation": operation}
 
 
-class CdnSecuritySettings(BaseModel):
-    authenticated_origin_pulls: bool
-
-
-@app.put("/api/application/cdn-security")
+@app.put("/api/application/cdn-security", status_code=202)
 def update_cdn_security(payload: CdnSecuritySettings, _: None = Depends(require_token)) -> dict:
     if payload.authenticated_origin_pulls and not (cdn_security.RESOURCES / "cloudflare-origin-pull-ca.pem").is_file():
         raise HTTPException(status_code=409, detail="В установленном релизе отсутствует публичный сертификат Cloudflare. Обновите приложение до исправленного релиза; настройки Cloudflare менять не требуется для устранения этой ошибки.")
-    result = subprocess.run(
-        ["systemd-run", f"--unit=vps-control-cdn-security-{uuid.uuid4().hex[:12]}", "--wait", "--pipe", "--collect", "--property=Type=exec",
-         CONTROL_COMMAND, "cdn-security", "enable" if payload.authenticated_origin_pulls else "disable"],
-        capture_output=True, text=True, timeout=300, check=False,
-    )
-    if result.returncode:
-        raise HTTPException(status_code=409, detail="Проверка CF не пройдена; настройка не применена. Проверьте Full (strict), Authenticated Origin Pulls и доступность CDN.")
-    return cdn_security.settings()
+    try:
+        operation = cdn_operation.start(payload.authenticated_origin_pulls, payload.operation_id, CONTROL_COMMAND)
+    except cdn_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {**cdn_security.settings(), "operation": operation}
 
 
 @app.put("/api/services/panel-access")
@@ -2619,10 +2616,6 @@ def update_panel_access(payload: PanelAccessSettings, _: None = Depends(require_
     }
 
 
-class ServiceModeSettings(BaseModel):
-    active: bool
-
-
 @app.put("/api/services/service-mode")
 def update_service_mode(payload: ServiceModeSettings, _: None = Depends(require_token)) -> dict:
     unit = f"vps-control-service-mode-{int(time.time())}"
@@ -2636,11 +2629,6 @@ def update_service_mode(payload: ServiceModeSettings, _: None = Depends(require_
     if result.returncode:
         raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to change service mode")
     return {"active": payload.active, "state": "activating", "unit": f"{unit}.service"}
-
-
-class LoggingSettings(BaseModel):
-    persistent: bool
-    retention_days: int = Field(ge=0, le=365)
 
 
 def start_control_task(name: str, *arguments: str) -> dict:
@@ -2678,20 +2666,6 @@ def clear_logs(_: None = Depends(require_token)) -> dict:
     return start_control_task("logs-clear", "logs-clear")
 
 
-class AutomationSchedule(BaseModel):
-    enabled: bool
-    cadence: Literal["daily", "weekly", "monthly"]
-    weekday: Literal["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] = "Sun"
-    hour: int = Field(ge=0, le=23)
-    minute: int = Field(ge=0, le=59)
-
-
-class AutomationSettings(BaseModel):
-    reboot: AutomationSchedule
-    cleanup: AutomationSchedule
-    update: AutomationSchedule
-
-
 @app.put("/api/services/automation")
 def update_automation(payload: AutomationSettings, _: None = Depends(require_token)) -> dict:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -2722,27 +2696,6 @@ def update_automation(payload: AutomationSettings, _: None = Depends(require_tok
             "update": timer_details("update"),
         },
     }
-
-
-class DnsCustomResolver(BaseModel):
-    name: str = Field(default="Собственный DNS", min_length=2, max_length=48)
-    addresses: list[str] = Field(min_length=1, max_length=4)
-    doh_url: str = Field(default="", max_length=256)
-
-
-class DnsSettingsUpdate(BaseModel):
-    selected_id: str = Field(min_length=2, max_length=64, pattern=r"^[a-z0-9-]+$")
-    apply_wg: bool = True
-    apply_awg: bool = True
-    apply_shadowsocks: bool = True
-    apply_vrx: bool = True
-    prefer_encrypted: bool = False
-    fallback_enabled: bool = True
-    custom: DnsCustomResolver | None = None
-
-
-class DnsCheckRequest(BaseModel):
-    provider_id: str | None = Field(default=None, max_length=64)
 
 
 @app.get("/api/clients")
@@ -2870,56 +2823,6 @@ def check_dns(payload: DnsCheckRequest, _: None = Depends(require_token)) -> dic
     with ThreadPoolExecutor(max_workers=min(8, max(1, len(providers)))) as pool:
         results = list(pool.map(check_dns_provider, providers))
     return {"checked_at": datetime.now(timezone.utc).isoformat(), "items": results}
-
-
-class ClientConnectionSettings(BaseModel):
-    dns: str | None = Field(default=None, min_length=3, max_length=512, pattern=r"^[A-Za-z0-9:., ]+$")
-    mtu: int | None = Field(default=None, ge=576, le=1500)
-    keepalive: int | None = Field(default=None, ge=0, le=300)
-    route_mode: Literal["all", "ipv4"] = "ipv4"
-    shadowsocks_mode: Literal["tcp_only", "tcp_and_udp"] = "tcp_and_udp"
-    timeout: int | None = Field(default=None, ge=30, le=3600)
-    no_delay: bool = True
-    fingerprint: Literal["chrome", "firefox", "safari"] = "chrome"
-
-
-class ClientCreate(BaseModel):
-    name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
-    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"]
-    vless_routes: list[Literal["direct", "tls", "cdn"]] | None = None
-    settings: ClientConnectionSettings = Field(default_factory=ClientConnectionSettings)
-
-
-class ProtocolSettingsUpdate(BaseModel):
-    mtu: int | None = Field(default=None, ge=1280, le=1420)
-    timeout: int | None = Field(default=None, ge=30, le=3600)
-    udp_mtu: int | None = Field(default=None, ge=576, le=1500)
-    mode: Literal["tcp_only", "tcp_and_udp"] | None = None
-    no_delay: bool | None = None
-    xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
-    transport: Literal["xhttp", "raw", "grpc"] | None = None
-    transport_path: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$")
-    dns: str | None = Field(default=None, min_length=3, max_length=512)
-    keepalive: int | None = Field(default=None, ge=0, le=300)
-    loglevel: Literal["debug", "info", "warning", "error", "none"] | None = None
-    xpadding: str | None = Field(default=None, min_length=1, max_length=32, pattern=r"^\d+(?:-\d+)?$")
-    sni: str | None = Field(default=None, min_length=4, max_length=253, pattern=r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
-    xmux_concurrency: int | None = Field(default=None, ge=1, le=64)
-    cdn_enabled: bool | None = None
-    cdn_domain: str | None = Field(default=None, max_length=253)
-    cdn_transport: Literal["websocket", "xhttp", "httpupgrade", "grpc"] | None = None
-    cdn_xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
-    tls_enabled: bool | None = None
-    tls_domain: str | None = Field(default=None, max_length=253)
-    tls_transport: Literal["websocket", "xhttp", "httpupgrade", "grpc"] | None = None
-    tls_xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
-    port: int | None = Field(default=None, ge=1024, le=65535)
-    tls_mode: Literal["pinned", "acme"] | None = None
-    domain: str | None = Field(default=None, max_length=253)
-    obfs_enabled: bool | None = None
-    obfs_password: str | None = Field(default=None, max_length=128)
-    congestion_control: Literal["bbr", "cubic", "new_reno"] | None = None
-    vpn_transport: Literal["udp", "tcp"] | None = None
 
 
 def configure_vless_transport(stream: dict, transport: str, path: str = "/") -> None:

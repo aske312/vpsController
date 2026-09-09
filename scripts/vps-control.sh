@@ -1887,6 +1887,9 @@ sync_release() {
     --exclude '.git/' \
     --exclude '.idea/' \
     --exclude '.openai/' \
+    --exclude '/docs/audit/' \
+    --exclude '/.servers/' \
+    --exclude 'AGENTS.md' \
     --include '.env.example' \
     --exclude '.env*' \
     --exclude 'node_modules/' \
@@ -3250,7 +3253,13 @@ main() {
     auto-safe-update) auto_safe_update_server ;;
     kernel-update) update_kernel ;;
     vpn-firewall) configure_vpn_firewall_policy ;;
-    cdn-security) python3 "${INSTALL_DIR}/api/cdn_security.py" aop "${2:-}" ;;
+    cdn-security)
+      if [[ -n "${3:-}" ]]; then
+        python3 "${INSTALL_DIR}/api/cdn_operation.py" "${3}"
+      else
+        python3 "${INSTALL_DIR}/api/cdn_security.py" aop "${2:-}"
+      fi
+      ;;
     vless-cdn-firewall) configure_vless_cdn_firewall ;;
     optimize) optimize_resources ;;
     ssh-key-add) shift; ssh_access_add_key "$@" ;;
