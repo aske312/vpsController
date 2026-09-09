@@ -1,6 +1,7 @@
 "use client";
 
 import { useNotifications, useNotifier, useNotificationList } from "../shared/notifications/notification-center";
+import { isPending } from "../shared/notifications/store";
 import { createApiClient } from "../shared/lib/api-request";
 import { useCdnSecurity } from "../features/application/use-cdn-security";
 import type { CdnSecurityStatus } from "../shared/lib/cdn-security-operation";
@@ -24,13 +25,13 @@ import { ProtocolView } from "../features/protocols/protocol-view";
 import { LoginView } from "../features/auth/login-view";
 import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, DnsCheck, DnsSettings, DnsStatus, LiveStatus, LoggingSettings, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
 import { actionLabels, bytes, CLIENTS_PER_PAGE, directProtocolOrder, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
-import { systemOperationNotification, type SystemAction } from "./system-operation";
+import { createSystemActionCompletionTracker, systemActionNeedsReload, systemOperationNotification, type SystemAction } from "./system-operation";
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
 
 function reloadWithoutCache(message: string) {
-  sessionStorage.setItem("312-notice", message);
+  if (message) sessionStorage.setItem("312-notice", message);
   const target = new URL(window.location.href);
   target.searchParams.set("_refresh", Date.now().toString());
   window.location.replace(target.toString());
@@ -99,6 +100,9 @@ export function ControlPanel() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [refreshErrors, setRefreshErrors] = useState<Record<string, RefreshFailure>>({});
   const [busy, setBusy] = useState(false);
+  const [reloadRequested, setReloadRequested] = useState(false);
+  const requestCommandReload = useCallback(() => setReloadRequested(true), []);
+  const [trackActionCompletion] = useState(createSystemActionCompletionTracker);
   const [passwordDialog, setPasswordDialog] = useState(false);
   const [sshAdminDialog, setSshAdminDialog] = useState(false);
   const [sshPublicKey, setSshPublicKey] = useState("");
@@ -127,13 +131,18 @@ export function ControlPanel() {
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
   const automationDirty = useRef(false);
   const loggingDirty = useRef(false);
-  const trackedActionUnit = useRef("");
   const liveRequestInFlight = useRef(false);
 
   useEffect(() => {
     // Restore browser-only credentials after hydration.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setToken(sessionStorage.getItem("312-token") || "");
+    const savedTab = sessionStorage.getItem("312-reload-tab");
+    if (savedTab && Object.hasOwn(navigationLabels, savedTab)) setTab(savedTab as Tab);
+    sessionStorage.removeItem("312-reload-tab");
+    const savedChannel = sessionStorage.getItem("312-reload-channel");
+    if (savedChannel && directProtocolOrder.includes(savedChannel as Protocol)) setSelectedChannel(savedChannel as Protocol);
+    sessionStorage.removeItem("312-reload-channel");
     const savedNotice = sessionStorage.getItem("312-notice");
     if (savedNotice) {
       notifySuccess(savedNotice);
@@ -447,28 +456,23 @@ export function ControlPanel() {
   }, [application?.action?.state, autoRefresh, loadApplication, token]);
 
   useEffect(() => {
-    const action = application?.action;
-    if (!action?.unit) return;
-    if (["queued", "active", "activating", "running", "rebooting", "powering-off"].includes(action.state || "")) {
-      trackedActionUnit.current = action.unit;
-      return;
-    }
-    if (trackedActionUnit.current !== action.unit || !["succeeded", "finished", "failed"].includes(action.state || "")) return;
-    trackedActionUnit.current = "";
-    const label = actionLabels[(action.action || "").split(":")[0]] || "Операция";
+    const completed = trackActionCompletion(application?.action);
+    if (!completed) return;
+    // React to a newly confirmed server result, never the historical status on mount.
+    if (systemActionNeedsReload(completed)) requestCommandReload();
+    else void refreshCurrent(false);
+  }, [application?.action, refreshCurrent, requestCommandReload, trackActionCompletion]);
+
+  const reloadBlocked = busy || Boolean(installingProtocol) || notificationItems.some((item) => isPending(item) || item.state === "error");
+  useEffect(() => {
+    if (!token || !reloadRequested || reloadBlocked) return;
     const timer = window.setTimeout(() => {
-      if (action.state === "failed" || action.result === "failed") {
-        return;
-      }
-      const message = `${label}: успешно завершено`;
-      if (["update", "test-update", "test-rollback", "safe-update", "kernel-update"].includes(action.action || "")) {
-        window.setTimeout(() => reloadWithoutCache(`${message}. Кэш интерфейса сброшен`), 600);
-        return;
-      }
-      void refreshCurrent(false);
-    }, 0);
+      sessionStorage.setItem("312-reload-tab", tab);
+      sessionStorage.setItem("312-reload-channel", selectedChannel);
+      reloadWithoutCache("");
+    }, 600);
     return () => window.clearTimeout(timer);
-  }, [application?.action, refreshCurrent]);
+  }, [reloadBlocked, reloadRequested, selectedChannel, tab, token]);
 
   useEffect(() => {
     if (!token || tab === "overview") return;
@@ -610,6 +614,7 @@ export function ControlPanel() {
     setBusy(true);
     try {
       const started = await request("/application/action", { method: "POST", body: JSON.stringify({ action }) });
+      trackActionCompletion(started);
       setApplication((current) => ({
         ...current,
         api: current?.api || { active: true, enabled: true },
@@ -647,6 +652,7 @@ export function ControlPanel() {
     try {
       await request(`/services/${serviceId}/action`, { method: "POST", body: JSON.stringify({ action }) });
       await Promise.all([loadServices(), loadSecurity()]);
+      requestCommandReload();
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось выполнить действие со службой"); }
     finally { setBusy(false); }
   }
@@ -840,7 +846,7 @@ export function ControlPanel() {
       }
       if (!confirmed) throw new Error("Сервер не подтвердил завершение переключения режима");
       setAutoRefresh(autoRefreshAfterChange);
-      reloadWithoutCache(`Сервисный режим ${active ? "включён" : "выключен"}. Кэш интерфейса сброшен`);
+      requestCommandReload();
     } catch (cause) {
       setAutoRefresh(autoRefreshAfterChange);
       notifyError(cause instanceof Error ? cause.message : "Не удалось изменить сервисный режим");
@@ -851,6 +857,7 @@ export function ControlPanel() {
     const title = actionLabels[(action.action || "").split(":")[0]] || "Операция";
     notifications.finishOperation({ ...systemOperationNotification(action, title, false),
       state: error !== undefined ? "error" : "success", message: error === undefined ? "" : error || "Команда завершилась с ошибкой.", progress: undefined });
+    if (error === undefined) requestCommandReload();
   }
 
   async function waitForProtocolState(image: ProtocolImage, installed: boolean) {
@@ -978,6 +985,7 @@ export function ControlPanel() {
     try {
       await request(`/protocols/${protocol}/restart`, { method: "POST" });
       await Promise.all([loadProtocolStatus(protocol), loadOverview()]);
+      requestCommandReload();
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось перезапустить протокол"); }
     finally { setBusy(false); }
   }
@@ -1259,6 +1267,7 @@ export function ControlPanel() {
           : `Не удалось проверить учётные данные (ошибка ${response.status})`);
       }
       notifications.reset();
+      setReloadRequested(false);
       setToken(candidateToken);
       setLoginPassword("");
       setLoginPasswordVisible(false);
@@ -1450,7 +1459,7 @@ export function ControlPanel() {
     lastUpdated={lastUpdated}
     onToggleAutoRefresh={() => setAutoRefresh((value) => !value)}
     onRefresh={() => void refreshCurrent(true)}
-    onLogout={() => { notifications.reset(); sessionStorage.removeItem("312-token"); setToken(""); }}
+    onLogout={() => { notifications.reset(); setReloadRequested(false); sessionStorage.removeItem("312-token"); setToken(""); }}
   >
       {tab !== "overview" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
       <RefreshNotices errors={refreshErrors} reconnecting={cdnCommand.pending} />
@@ -1478,6 +1487,7 @@ export function ControlPanel() {
           token={token}
           confirmAction={askConfirmation}
           coreBusy={installingProtocol === "remove-mihomo"}
+          onCommandComplete={requestCommandReload}
           onRemoveCore={async () => {
             const image = protocolImages.find((item) => item.id === "mihomo" && item.installed);
             if (image) await removeProtocol(image, true);

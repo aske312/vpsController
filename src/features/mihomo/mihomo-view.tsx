@@ -29,11 +29,13 @@ export function MihomoPage({
   confirmAction,
   coreBusy,
   onRemoveCore,
+  onCommandComplete,
 }: {
   token: string;
   confirmAction: (options: ConfirmOptions) => Promise<boolean>;
   coreBusy: boolean;
   onRemoveCore: () => Promise<void>;
+  onCommandComplete: () => void;
 }) {
   const [view, setView] = useState<View>("overview");
   const [status, setStatus] = useState<Status | null>(null);
@@ -384,6 +386,7 @@ export function MihomoPage({
       });
       await refresh();
       notifyOperation(operationId, operationLabel, "success", `${module.name}: ${install ? "установлен; DNS и маршрутизация Mihomo готовы" : "удалён из Mihomo"}.`);
+      onCommandComplete();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Операция Mihomo не выполнена";
       notifyOperation(operationId, operationLabel, "error", message);
@@ -413,6 +416,7 @@ export function MihomoPage({
       await request(`/mihomo/modules/${module.id}/update`, { method: "POST" });
       await refresh();
       notifyOperation(operationId, operationLabel, "success", `${module.name}: обновлён до ${module.available_version}.`);
+      onCommandComplete();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Обновление Mihomo-модуля не выполнено";
       notifyOperation(operationId, operationLabel, "error", message);

@@ -170,8 +170,6 @@ test("live monitoring uses stable low-load cadence and detailed server metrics",
   assert.match(page, /target\.searchParams\.set\("_refresh", Date\.now\(\)\.toString\(\)\)/);
   assert.match(page, /window\.location\.replace\(target\.toString\(\)\)/);
   assert.match(page, /\["update", "test-update", "test-rollback", "safe-update", "kernel-update"\]\.includes/);
-  assert.match(page, /Сервисный режим \$\{active \? "включён" : "выключен"\}\. Кэш интерфейса сброшен/);
-  assert.match(page, /успешно завершено/);
 });
 
 test("log management runs bundled control safely and permits disabled retention", async () => {
