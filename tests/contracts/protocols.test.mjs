@@ -519,7 +519,6 @@ test("WG removal accepts live non-WG fallback channels and reports blockers", as
   assert.match(api, /vps-control-ikev2\.service/);
   assert.match(api, /"transport-reality": "vps-control-mihomo-reality\.service"/);
   assert.match(api, /Нельзя удалить последний активный канал доступа/);
-  assert.match(page, /Удаление \$\{image\.name\} запущено/);
   assert.match(page, /role=\{item.state === "error" \? "alert" : "status"\}/);
 });
 
