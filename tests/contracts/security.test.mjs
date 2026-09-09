@@ -213,7 +213,7 @@ test("command UI exposes only final public outcomes while technical errors stay 
   const [api, mihomo, dock] = await Promise.all([
     readApiSources(),
     read("protocol-images/mihomo/manager.py"),
-    read("src/control-panel/components/operation-dock.tsx"),
+    read("src/control-panel/components/operation-notifications.tsx"),
   ]);
   for (const backend of [api, mihomo]) {
     assert.match(backend, /PUBLIC_COMMAND_ERROR/);

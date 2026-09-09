@@ -6,14 +6,14 @@ import { clientUuid, devicePlatformMeta, deviceSystemLabel, registeredProfileDev
 import { Tab, HeroFact, ModuleCatalog, Empty } from "./components";
 import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, submitProfileMutation, type ProfileMutation } from "./profile-operation";
 
+import { useNotifier, useFailureNotifications } from "../../shared/notifications/notification-center";
+import { notificationFailure as refreshFailure, type NotificationFailure } from "../../shared/notifications/store";
 import { createApiClient } from "../../shared/lib/api-request";
 import { bytes, duration } from "../../shared/lib/control-plane-ui";
 import QRCode from "qrcode";
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
-
-const MIHOMO_OPERATION_EVENT = "gate312:mihomo-operation";
 
 const TECHNICAL_ERROR = /(?:\n|traceback|systemctl|journalctl|apt(?:-get)?|dpkg|stderr|stdout|exit status|failed to start|reading package lists|building dependency tree)/i;
 
@@ -22,11 +22,6 @@ function publicError(message: string, status: number) {
   return status >= 500 || TECHNICAL_ERROR.test(value) || /^(?:bad gateway|internal server error)$/i.test(value)
     ? "Команда завершилась с ошибкой. Технические сведения сохранены в журнале."
     : value || "Команда не выполнена.";
-}
-
-function publishMihomoOperation(id: string, label: string, state: "running" | "success" | "error" | "unknown", message?: string, onRecheck?: () => void) {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(MIHOMO_OPERATION_EVENT, { detail: { id, label, state, message, onRecheck } }));
 }
 
 export function MihomoPage({
@@ -60,10 +55,10 @@ export function MihomoPage({
   const routingDraftRef = useRef<Record<string, string | number | boolean>>({});
   const routingAutosaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  const [refreshError, setRefreshError] = useState("");
+  const { error: notifyError, success: notifySuccess, operation: notifyOperation } = useNotifier("mihomo", "Mihomo");
+  const [refreshErrors, setRefreshErrors] = useState<Record<string, NotificationFailure>>({});
+  useFailureNotifications("mihomo", "Обновление Mihomo", refreshErrors);
   const refreshInFlight = useRef<Promise<void> | null>(null);
-  const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<Module | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number | boolean>>({});
   const [profileDialog, setProfileDialog] = useState<Profile | "new" | null>(null);
@@ -126,9 +121,9 @@ export function MihomoPage({
           catch { return [profile.id, null] as const; }
         }));
         setProfileStats(Object.fromEntries(statsEntries.filter((entry) => entry[1])) as Record<string, ProfileStats>);
-        setRefreshError("");
+        setRefreshErrors({});
       } catch (cause) {
-        setRefreshError(cause instanceof Error ? cause.message : "Не удалось обновить данные Mihomo");
+        setRefreshErrors({ overview: refreshFailure(cause, "Не удалось обновить данные Mihomo") });
       }
     })().finally(() => { refreshInFlight.current = null; });
     refreshInFlight.current = job;
@@ -144,20 +139,18 @@ export function MihomoPage({
   async function saveDnsWorkspace(event: FormEvent) {
     event.preventDefault();
     const operationId = "settings:dns-private";
-    publishMihomoOperation(operationId, "DNS Mihomo", "running", "Сохраняем DNS для профилей Mihomo…");
+    notifyOperation(operationId, "DNS Mihomo", "running", "Сохраняем DNS для профилей Mihomo…");
     setBusy(operationId);
-    setError("");
+
     try {
       await request("/mihomo/dns/settings", { method: "PATCH", body: JSON.stringify({ values: dnsDraft }) });
       dnsDirtyRef.current = false;
       setDnsDirty(false);
       await refresh();
-      setNotice("DNS для соединений Mihomo сохранён. Обновите подписку в клиенте.");
-      publishMihomoOperation(operationId, "DNS Mihomo", "success", "DNS-настройки сохранены");
+      notifyOperation(operationId, "DNS Mihomo", "success", "DNS-настройки сохранены. Обновите подписку в клиенте.");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "DNS-настройки не сохранены";
-      setError(message);
-      publishMihomoOperation(operationId, "DNS Mihomo", "error", message);
+      notifyOperation(operationId, "DNS Mihomo", "error", message);
     } finally {
       setBusy("");
     }
@@ -178,10 +171,10 @@ export function MihomoPage({
       const qr = await QRCode.toDataURL(subscription, { errorCorrectionLevel: "M", margin: 2, width: 360 });
       return [{ id: "profile", name: createdProfile.name, subscription, qr }];
     })().then((items) => { if (!cancelled) setReadyDevices(items); }).catch((cause) => {
-      if (!cancelled) setError(cause instanceof Error ? cause.message : "Не удалось подготовить QR-коды подписок");
+      if (!cancelled) notifyError(cause instanceof Error ? cause.message : "Не удалось подготовить QR-коды подписок");
     });
     return () => { cancelled = true; };
-  }, [createdProfile, request]);
+  }, [createdProfile, request, notifyError]);
 
   useEffect(() => () => {
     if (routingAutosaveRef.current) clearTimeout(routingAutosaveRef.current);
@@ -209,7 +202,7 @@ export function MihomoPage({
           }
           setRoutingPolicy(result as PolicySettings);
         })
-        .catch((cause) => setError(cause instanceof Error ? cause.message : "Не удалось сохранить выбор"))
+        .catch((cause) => notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить выбор"))
         .finally(() => setRoutingAutosaving(false));
     }, 350);
   }
@@ -310,33 +303,31 @@ export function MihomoPage({
       setRoutingAutosaving(false);
     }
     const operationId = "settings:routing-policy";
-    publishMihomoOperation(operationId, "Маршрутизация Mihomo", "running", "Сохраняем правила маршрутизации…");
+    notifyOperation(operationId, "Маршрутизация Mihomo", "running", "Сохраняем правила маршрутизации…");
     setBusy(operationId);
-    setError("");
+
     try {
       await request("/mihomo/routing/settings", { method: "PATCH", body: JSON.stringify({ values: routingDraft }) });
       routingDirtyRef.current = false;
       setRoutingDirty(false);
       await refresh();
-      setNotice("Маршрутизация Mihomo сохранена. Обновите подписку в клиенте.");
-      publishMihomoOperation(operationId, "Маршрутизация Mihomo", "success", "Правила сохранены");
+      notifyOperation(operationId, "Маршрутизация Mihomo", "success", "Правила сохранены. Обновите подписку в клиенте.");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Маршрутизация не сохранена";
-      setError(message);
-      publishMihomoOperation(operationId, "Маршрутизация Mihomo", "error", message);
+      notifyOperation(operationId, "Маршрутизация Mihomo", "error", message);
     } finally {
       setBusy("");
     }
   }
 
   async function requestCoreRemoval() {
-    setError("");
+
     let current: Status;
     try {
       current = (await request("/mihomo/status")) as Status;
       setStatus(current);
     } catch (cause) {
-      setError(
+      notifyError(
         cause instanceof Error
           ? `Не удалось проверить зависимости Mihomo перед удалением: ${cause.message}`
           : "Не удалось проверить зависимости Mihomo перед удалением",
@@ -380,21 +371,18 @@ export function MihomoPage({
     if (!confirmed) return;
     const operationId = `module:${module.id}`;
     const operationLabel = `${install ? "Установка" : "Удаление"} ${module.name}`;
-    publishMihomoOperation(operationId, operationLabel, "running", "Mihomo Manager применяет изменение…");
+    notifyOperation(operationId, operationLabel, "running", "Mihomo Manager применяет изменение…");
     setBusy(module.id);
-    setError("");
-    setNotice("");
+
     try {
       await request(`/mihomo/modules/${module.id}${install ? "/install" : ""}`, {
         method: install ? "POST" : "DELETE",
       });
       await refresh();
-      setNotice(`${module.name}: ${install ? "установлен; DNS и маршрутизация Mihomo готовы" : "удалён из Mihomo"}.`);
-      publishMihomoOperation(operationId, operationLabel, "success", "Изменение применено");
+      notifyOperation(operationId, operationLabel, "success", `${module.name}: ${install ? "установлен; DNS и маршрутизация Mihomo готовы" : "удалён из Mihomo"}.`);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Операция Mihomo не выполнена";
-      setError(message);
-      publishMihomoOperation(operationId, operationLabel, "error", message);
+      notifyOperation(operationId, operationLabel, "error", message);
     } finally {
       setBusy("");
     }
@@ -414,19 +402,16 @@ export function MihomoPage({
     if (!confirmed) return;
     const operationId = `module-update:${module.id}`;
     const operationLabel = `Обновление ${module.name}`;
-    publishMihomoOperation(operationId, operationLabel, "running", "Mihomo Manager применяет обновление…");
+    notifyOperation(operationId, operationLabel, "running", "Mihomo Manager применяет обновление…");
     setBusy(`update:${module.id}`);
-    setError("");
-    setNotice("");
+
     try {
       await request(`/mihomo/modules/${module.id}/update`, { method: "POST" });
       await refresh();
-      setNotice(`${module.name}: обновлён до ${module.available_version}.`);
-      publishMihomoOperation(operationId, operationLabel, "success", "Обновление применено");
+      notifyOperation(operationId, operationLabel, "success", `${module.name}: обновлён до ${module.available_version}.`);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Обновление Mihomo-модуля не выполнено";
-      setError(message);
-      publishMihomoOperation(operationId, operationLabel, "error", message);
+      notifyOperation(operationId, operationLabel, "error", message);
     } finally {
       setBusy("");
     }
@@ -442,9 +427,9 @@ export function MihomoPage({
     if (!editing) return;
     const operationId = `settings:${editing.id}`;
     const operationLabel = `Настройки ${editing.name}`;
-    publishMihomoOperation(operationId, operationLabel, "running", "Сохраняем настройки внутреннего модуля…");
+    notifyOperation(operationId, operationLabel, "running", "Сохраняем настройки внутреннего модуля…");
     setBusy(operationId);
-    setError("");
+
     try {
       const settingsPath = editing.category === "dns"
         ? "/mihomo/dns/settings"
@@ -455,15 +440,12 @@ export function MihomoPage({
         method: "PATCH",
         body: JSON.stringify({ values: settingsDraft }),
       });
-      const editedName = editing.name;
       setEditing(null);
       await refresh();
-      setNotice(`Настройки ${editedName} сохранены.`);
-      publishMihomoOperation(operationId, operationLabel, "success", "Настройки сохранены");
+      notifyOperation(operationId, operationLabel, "success", "Настройки сохранены");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Настройки не сохранены";
-      setError(message);
-      publishMihomoOperation(operationId, operationLabel, "error", message);
+      notifyOperation(operationId, operationLabel, "error", message);
     } finally {
       setBusy("");
     }
@@ -569,28 +551,26 @@ export function MihomoPage({
       profileId: profileDialog === "new" ? undefined : profileDialog.id,
       payload: { name: profileName, devices: profileDevices, connections: profileConnections, routing: profileDevices.find((device) => device.scope === "common")?.routing || profileRouting, operation_id: profileMutationId.current },
     };
-    const report = (message: string) => publishMihomoOperation(operationId, operationLabel, "running", message);
+    const report = (message: string) => notifyOperation(operationId, operationLabel, "running", message);
     const finish = async (profile: Profile) => {
       setReadyDevices([]);
       setCreatedProfile(profile);
       setProfileDialog(null);
       await refresh();
       const transition = profileTransitionMessage(profile);
-      setNotice(`Mihomo-профиль сохранён. ${transition || "Обновите подписку в VPN-клиенте."}`);
-      publishMihomoOperation(operationId, operationLabel, "success", transition || "Сохранение подтверждено. Обновите подписку в VPN-клиенте.");
+      notifyOperation(operationId, operationLabel, "success", transition || "Сохранение подтверждено. Обновите подписку в VPN-клиенте.");
     };
     const fail = (cause: unknown) => {
       const message = cause instanceof Error ? cause.message : "Профиль не сохранён";
-      setError(message);
-      publishMihomoOperation(operationId, operationLabel, cause instanceof ProfileResultUnknown ? "unknown" : "error", message, () => {
+      notifyOperation(operationId, operationLabel, cause instanceof ProfileResultUnknown ? "unknown" : "error", message, () => {
         setBusy("profile");
-        setError("");
+
         void checkProfileMutation(request, mutation, report).then(finish).catch(fail).finally(() => setBusy(""));
       });
     };
-    publishMihomoOperation(operationId, operationLabel, "running", "Обновляем профиль и credentials…");
+    notifyOperation(operationId, operationLabel, "running", "Обновляем профиль и credentials…");
     setBusy("profile");
-    setError("");
+
     try {
       await finish(await submitProfileMutation(request, mutation, report));
     } catch (cause) {
@@ -610,18 +590,16 @@ export function MihomoPage({
     if (!confirmed) return;
     const operationId = `profile:${profile.id}`;
     const operationLabel = `Удаление профиля ${profile.name}`;
-    publishMihomoOperation(operationId, operationLabel, "running", "Удаляем профиль и связанные credentials…");
+    notifyOperation(operationId, operationLabel, "running", "Удаляем профиль и связанные credentials…");
     setBusy(operationId);
-    setError("");
+
     try {
       await request(`/mihomo/profiles/${profile.id}`, { method: "DELETE" });
       await refresh();
-      setNotice(`Профиль «${profile.name}» удалён.`);
-      publishMihomoOperation(operationId, operationLabel, "success", "Профиль удалён");
+      notifyOperation(operationId, operationLabel, "success", "Профиль удалён");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Профиль не удалён";
-      setError(message);
-      publishMihomoOperation(operationId, operationLabel, "error", message);
+      notifyOperation(operationId, operationLabel, "error", message);
     } finally {
       setBusy("");
     }
@@ -629,13 +607,13 @@ export function MihomoPage({
 
   async function copyConfig(profile: Profile, device?: ProfileDevice) {
     setBusy(`config:${profile.id}`);
-    setError("");
+
     try {
       const config = (await request(`/mihomo/profiles/${profile.id}/config${device ? `?device_id=${encodeURIComponent(device.id)}` : ""}`)) as string;
       await navigator.clipboard.writeText(config);
-      setNotice(`config.yaml для «${device?.name || profile.name}» скопирован в буфер обмена.`);
+      notifySuccess(`config.yaml для «${device?.name || profile.name}» скопирован в буфер обмена.`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось получить config.yaml");
+      notifyError(cause instanceof Error ? cause.message : "Не удалось получить config.yaml");
     } finally {
       setBusy("");
     }
@@ -643,12 +621,12 @@ export function MihomoPage({
 
   async function removeProfileDevice(profile: Profile, device: ProfileDevice) {
     if (device.scope === "common" || device.id === profile.common_device_id) {
-      setError("Общие настройки профиля нельзя удалить");
+      notifyError("Общие настройки профиля нельзя удалить");
       return;
     }
     const devices = profile.devices?.length ? profile.devices : [{ id: "device-1", name: "Устройство" }];
     if (devices.length <= 1) {
-      setError("В профиле должно остаться хотя бы одно устройство. Удалите профиль целиком, если он больше не нужен.");
+      notifyError("В профиле должно остаться хотя бы одно устройство. Удалите профиль целиком, если он больше не нужен.");
       return;
     }
     const deviceConnections = profile.connections.filter((connection) => (connection.device_id || devices[0].id) === device.id);
@@ -660,9 +638,9 @@ export function MihomoPage({
     });
     if (!confirmed) return;
     const operationId = `device:${profile.id}:${device.id}`;
-    publishMihomoOperation(operationId, `Удаление устройства ${device.name}`, "running", "Удаляем устройство и его credentials…");
+    notifyOperation(operationId, `Удаление устройства ${device.name}`, "running", "Удаляем устройство и его credentials…");
     setBusy(operationId);
-    setError("");
+
     try {
       await request(`/mihomo/profiles/${profile.id}`, {
         method: "PATCH",
@@ -672,12 +650,10 @@ export function MihomoPage({
         }),
       });
       await refresh();
-      setNotice(`Устройство «${device.name}» удалено из профиля «${profile.name}».`);
-      publishMihomoOperation(operationId, `Удаление устройства ${device.name}`, "success", "Устройство удалено");
+      notifyOperation(operationId, `Удаление устройства ${device.name}`, "success", "Устройство удалено");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Устройство не удалено";
-      setError(message);
-      publishMihomoOperation(operationId, `Удаление устройства ${device.name}`, "error", message);
+      notifyOperation(operationId, `Удаление устройства ${device.name}`, "error", message);
     } finally {
       setBusy("");
     }
@@ -685,15 +661,15 @@ export function MihomoPage({
 
   async function downloadConfig(profile: Profile, device?: ProfileDevice) {
     setBusy(`download:${profile.id}`);
-    setError("");
+
     try {
       const config = (await request(`/mihomo/profiles/${profile.id}/config${device ? `?device_id=${encodeURIComponent(device.id)}` : ""}`)) as string;
       const link = document.createElement("a");
       link.href = URL.createObjectURL(new Blob([config], { type: "application/yaml;charset=utf-8" }));
       link.download = profile.export_filename;
       document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(link.href);
-      setNotice(`Профиль «${profile.name}» скачан.`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось скачать профиль"); }
+      notifySuccess(`Профиль «${profile.name}» скачан.`);
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось скачать профиль"); }
     finally { setBusy(""); }
   }
 
@@ -716,13 +692,13 @@ export function MihomoPage({
 
   async function copySubscription(profile: Profile) {
     setBusy(`subscription:${profile.id}`);
-    setError("");
+
     try {
       const result = await request(`/mihomo/profiles/${profile.id}/subscription`) as { path: string; url?: string };
       await copyText(result.url || new URL(result.path, window.location.origin).toString());
-      setNotice(`Единая ссылка профиля «${profile.name}» скопирована. Клиент с HWID появится как отдельное устройство, без HWID получит общие правила.`);
+      notifySuccess(`Единая ссылка профиля «${profile.name}» скопирована. Клиент с HWID появится как отдельное устройство, без HWID получит общие правила.`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось получить ссылку подписки");
+      notifyError(cause instanceof Error ? cause.message : "Не удалось получить ссылку подписки");
     } finally {
       setBusy("");
     }
@@ -765,12 +741,12 @@ export function MihomoPage({
   }
 
   async function savePresetSettings(event: FormEvent) {
-    event.preventDefault(); setBusy("presets"); setError("");
+    event.preventDefault(); setBusy("presets");
     try {
       const result = await request("/mihomo/routing/presets", { method: "PATCH", body: JSON.stringify({ presets: presetDraft }) }) as { presets: ProfilePreset[] };
       setRoutingPolicy((current) => current ? { ...current, presets: result.presets } : current);
-      setPresetDialog(false); setNotice("Настройки быстрых профилей сохранены.");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось сохранить пресеты"); }
+      setPresetDialog(false); notifySuccess("Настройки быстрых профилей сохранены.");
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить пресеты"); }
     finally { setBusy(""); }
   }
 
@@ -869,10 +845,6 @@ export function MihomoPage({
           <Tab id="routing" current={view} onSelect={setView}>Настройки</Tab>
         </nav>
       </article>
-
-      {error && <div className="mihomoMessage is-error" role="alert">{error}</div>}
-      {refreshError && <div className="mihomoMessage is-error" role="status">{refreshError} Отображаются последние полученные данные.</div>}
-      {notice && <div className="mihomoMessage is-ok">{notice}</div>}
 
       {view === "overview" && (
         <div className="mihomoOverviewV3">
@@ -1111,7 +1083,6 @@ export function MihomoPage({
               <div className="mihomoProfileHeading"><div><p className="eyebrow">MIHOMO PROFILE</p><h2>{profileDialog === "new" ? "Новый профиль" : "Настройка профиля"}</h2></div></div>
               <button type="button" className="iconButton" onClick={() => setProfileDialog(null)}>x</button>
             </header>
-            {error && <div className="mihomoMessage is-error" role="alert">{error}</div>}
             <div className="mihomoProfileWorkspace">
               <aside className="mihomoProfileRail">
                 <header><small>КОНФИГУРАЦИЯ</small><b>Параметры профиля</b></header>

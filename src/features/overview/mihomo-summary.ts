@@ -7,7 +7,7 @@ type SummaryData = {
   profileStats: Record<string, ProfileStats["summary"]> | null;
 };
 type Section = keyof SummaryData;
-export type MihomoSummary = SummaryData & { errors: Partial<Record<Section, string>> };
+export type MihomoSummary = SummaryData & { errors: Partial<Record<Section, string>>; networkErrors?: Partial<Record<Section, boolean>> };
 type ReadApi = <T>(path: string) => Promise<T>;
 
 export const EMPTY_MIHOMO_SUMMARY: MihomoSummary = {
@@ -40,11 +40,13 @@ export function createMihomoSummaryStore(request: ReadApi) {
     try {
       const data = await read();
       const errors = { ...snapshot.errors };
+      const networkErrors = { ...snapshot.networkErrors };
       delete errors[section];
-      publish({ ...snapshot, [section]: data, errors });
+      delete networkErrors[section];
+      publish({ ...snapshot, [section]: data, errors, networkErrors });
     } catch (cause) {
       const unauthorized = cause instanceof Error && "status" in cause && cause.status === 401;
-      publish({ ...snapshot, errors: {
+      publish({ ...snapshot, networkErrors: { ...snapshot.networkErrors, [section]: cause instanceof Error && "kind" in cause && (cause.kind === "network" || cause.kind === "response") }, errors: {
         ...snapshot.errors,
         [section]: unauthorized ? "Сессия панели завершена. Войдите заново." : sectionErrors[section],
       } });

@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { GateNavigation } from "./gate-navigation";
-import { OperationDock } from "./operation-dock";
+import { OperationNotifications } from "./operation-notifications";
 import type { CdnOperation } from "../../shared/lib/cdn-security-operation";
 
 type ProtocolImage = {
@@ -109,7 +109,7 @@ export function AppWorkspace({
         onNavigate={onNavigate}
       />
 
-      <OperationDock action={operationAction} label={operationLabel} active={operationActive} command={commandOperation} onRecheck={onRecheckCommand} onDismiss={onDismissCommand} />
+      <OperationNotifications action={operationAction} label={operationLabel} active={operationActive} command={commandOperation} onRecheck={onRecheckCommand} onDismiss={onDismissCommand} />
 
       <section className="content">
         <header className="gateMasthead" aria-label="Состояние сервера">

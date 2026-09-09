@@ -109,7 +109,7 @@
 
 .securityPostureRing {
   --score:#6fdfbd; width:94px; height:94px; flex:0 0 auto; display:grid; place-content:center; text-align:center;
-  border-radius:50%; position:relative; background:conic-gradient(var(--score) calc(var(--security-score, 95) * 1%),rgba(85,107,127,.22) 0);
+  border-radius:50%; position:relative; background:conic-gradient(var(--score) calc(var(--security-score, 0) * 1%),rgba(85,107,127,.22) 0);
 }
 
 .securityPostureRing::before { content:""; position:absolute; inset:7px; border-radius:50%; background:#08121b; border:1px solid rgba(100,126,149,.18); }

@@ -1,6 +1,6 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
+import type { CSSProperties, Dispatch, SetStateAction } from "react";
 import type { ApplicationAction } from "../../shared/types/control-plane";
 
 type LogSource = "ssh" | "firewall" | "system";
@@ -29,7 +29,7 @@ export function SecurityView(props: SecurityViewProps) {
   return <section className="securityWorkspace">
         <article className="securityOverview">
           <div className="securityOverviewLead">
-            <div className={`securityPostureRing ${securityScore >= 85 ? "ok" : securityScore >= 60 ? "warn" : "bad"}`}>
+            <div className={`securityPostureRing ${securityScore >= 85 ? "ok" : securityScore >= 60 ? "warn" : "bad"}`} style={{ "--security-score": securityScore } as CSSProperties}>
               <strong>{securityScore}%</strong>
               <small>POSTURE</small>
             </div>

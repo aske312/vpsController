@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createApiClient } from "../../shared/lib/api-request";
+import { useFailureNotifications } from "../../shared/notifications/notification-center";
 import { formatModuleVersion } from "../../shared/lib/format-version";
 import type { Module as MihomoModule } from "../mihomo/types";
 import { createMihomoSummaryStore, EMPTY_MIHOMO_SUMMARY } from "./mihomo-summary";
@@ -214,7 +215,9 @@ export function OverviewDashboard({
   const mihomoStatus = summary.status;
   const mihomoProfiles = summary.profiles;
   const mihomoProfileStats = summary.profileStats || {};
-  const mihomoSummaryError = [...new Set(Object.values(summary.errors))].join(". ");
+  const summaryFailures = useMemo(() => Object.fromEntries(Object.entries(summary.errors).map(([key, message]) => [key, { message: message!, network: summary.networkErrors?.[key as keyof typeof summary.errors] }])), [summary]);
+  const retrySummary = useMemo(() => ({ label: "Повторить проверку", run: () => summaryStore.refresh(true) }), [summaryStore]);
+  useFailureNotifications("overview-mihomo", "Mihomo на Обзоре", summaryFailures, false, retrySummary);
   const [directStatuses, setDirectStatuses] = useState<Partial<Record<ProtocolId, DirectProtocolStatus>>>({});
   const [directStatusFailures, setDirectStatusFailures] = useState<Partial<Record<ProtocolId, boolean>>>({});
   const [directRates, setDirectRates] = useState<Partial<Record<ProtocolId, { rx: number; tx: number }>>>({});
@@ -428,7 +431,6 @@ export function OverviewDashboard({
                   <span>{credentialsCount ?? "—"} credentials</span>
                   <span>{mihomoStatus?.endpoint || overview?.server.public_endpoint || overview?.server.public_ip || "—"}</span>
                 </footer>
-                {mihomoSummaryError && <div className="overviewInlineWarning" role="status">{mihomoSummaryError}. <button type="button" onClick={() => void summaryStore.refresh(true)}>Повторить проверку</button></div>}
               </section>
             )}
 

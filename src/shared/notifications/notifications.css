@@ -1,0 +1,70 @@
+.gateNotificationDock {
+  position:fixed;
+  z-index:11000;
+  top:90px;
+  right:max(18px, env(safe-area-inset-right));
+  width:min(410px, calc(100vw - 36px));
+  display:grid;
+  gap:7px;
+  pointer-events:none;
+  color:var(--text, #e0ebef);
+  font-family:var(--font-sans), sans-serif;
+}
+.gateNotificationHeader {
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:9px 12px; border:1px solid rgba(105,135,160,.25); border-radius:10px;
+  background:rgba(10,17,23,.97); pointer-events:auto;
+}
+.gateNotificationHeader strong { font-size:12px; }
+.gateNotificationHeader strong span { margin-left:5px; color:var(--muted); }
+.gateNotificationHeader strong small { display:block; margin-top:3px; color:var(--muted); font-size:9px; font-weight:500; }
+.gateNotificationHeader > div { display:flex; gap:12px; }
+.gateNotificationHeader button { padding:3px 0; border:0; background:none; color:var(--muted); font-size:10px; cursor:pointer; }
+.gateNotificationList {
+  display:flex; flex-direction:column; gap:8px;
+  max-height:min(60dvh, 560px); overflow-y:auto; overscroll-behavior:contain;
+  scrollbar-width:thin; scrollbar-color:#475b68 transparent;
+  pointer-events:auto; padding:2px;
+}
+.gateNotificationDock:not(.is-expanded) .gateOperationCard:nth-child(n+4) { display:none; }
+.gateOperationCard {
+  --notification-color:var(--amber, #e8b761);
+  flex:0 0 auto; min-width:0; overflow:hidden; pointer-events:auto;
+  border:1px solid color-mix(in srgb, var(--notification-color) 38%, transparent);
+  border-radius:12px; background:rgba(10,17,23,.97);
+  box-shadow:0 8px 24px rgba(0,0,0,.28); backdrop-filter:blur(18px);
+}
+.gateOperationCard.error { --notification-color:var(--red, #f07b7b); }
+.gateOperationCard.success { --notification-color:var(--green, #62d7b4); }
+.gateOperationCard.info { --notification-color:#97b9dc; }
+.gateOperationContent { display:grid; grid-template-columns:30px minmax(0,1fr) auto; align-items:start; gap:10px; padding:12px; }
+.gateOperationIcon {
+  width:29px; height:29px; display:grid; place-items:center; border-radius:9px;
+  color:var(--notification-color); background:color-mix(in srgb, var(--notification-color) 9%, transparent);
+  border:1px solid color-mix(in srgb, var(--notification-color) 24%, transparent);
+  font:800 14px/1 var(--font-mono), monospace;
+}
+.gateOperationText { min-width:0; display:grid; gap:5px; overflow-wrap:anywhere; }
+.gateOperationText > span { color:#8397a3; font:650 8px/1.3 var(--font-mono), monospace; letter-spacing:.05em; }
+.gateOperationText > strong { color:#e0ebef; font-size:12px; line-height:1.35; }
+.gateOperationText > small { color:#a6b6c0; font-size:11px; line-height:1.5; white-space:pre-wrap; }
+.gateNotificationClose { width:26px; height:26px; display:grid; place-items:center; border:0; border-radius:6px; background:rgba(255,255,255,.04); color:#b9c9d3; font-size:18px; cursor:pointer; }
+.gateNotificationClose:hover { background:rgba(255,255,255,.1); color:#fff; }
+.gateOperationPercent { padding-top:7px; color:#d9e6ec; font:700 11px/1 var(--font-mono), monospace; }
+.gateOperationTrack { height:3px; overflow:hidden; background:rgba(105,135,160,.1); }
+.gateOperationTrack > i { display:block; height:100%; background:var(--notification-color); transition:width .35s ease; }
+.gateOperationTrack.indeterminate > i { width:34% !important; animation:gateOperationSlide 1.15s ease-in-out infinite; }
+@keyframes gateOperationSlide { from { transform:translateX(-100%); } to { transform:translateX(300%); } }
+.gateOperationButton { margin:0 12px 12px 52px; padding:7px 10px; border:1px solid color-mix(in srgb, var(--notification-color) 35%, transparent); border-radius:6px; color:var(--notification-color); background:transparent; font:600 11px/1.3 var(--font-sans), sans-serif; cursor:pointer; }
+.gateOperationButton:disabled { opacity:.6; cursor:wait; }
+.gateNotificationDock :is(button, [tabindex]):focus-visible { outline:2px solid #97b9dc; outline-offset:2px; }
+@media (max-width:760px) {
+  .gateNotificationDock { top:auto; right:10px; left:10px; bottom:calc(76px + env(safe-area-inset-bottom)); width:auto; }
+  .gateNotificationList { max-height:45dvh; }
+  .gateNotificationDock:not(.is-expanded) .gateNotificationList { max-height:25dvh; }
+  .gateNotificationDock:not(.is-expanded) .gateOperationCard:nth-child(n+2) { display:none; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .gateOperationTrack.indeterminate > i { animation:none; }
+  .gateOperationTrack > i { transition:none; }
+}

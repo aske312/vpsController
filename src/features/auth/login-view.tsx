@@ -4,9 +4,9 @@ import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { BrandGlyph } from "../../shared/components/brand-glyph";
 import { LegalFooter } from "../../shared/components/legal-footer";
 
-type LoginViewProps = { loginUser: string; loginPassword: string; loginPasswordVisible: boolean; error: string; busy: boolean; version: string; commit: string; setLoginUser: Dispatch<SetStateAction<string>>; setLoginPassword: Dispatch<SetStateAction<string>>; setLoginPasswordVisible: Dispatch<SetStateAction<boolean>>; login: (event: FormEvent) => Promise<void> | void; };
+type LoginViewProps = { loginUser: string; loginPassword: string; loginPasswordVisible: boolean; busy: boolean; version: string; commit: string; setLoginUser: Dispatch<SetStateAction<string>>; setLoginPassword: Dispatch<SetStateAction<string>>; setLoginPasswordVisible: Dispatch<SetStateAction<boolean>>; login: (event: FormEvent) => Promise<void> | void; };
 
-export function LoginView({ loginUser, loginPassword, loginPasswordVisible, error, busy, version, commit, setLoginUser, setLoginPassword, setLoginPasswordVisible, login }: LoginViewProps) {
+export function LoginView({ loginUser, loginPassword, loginPasswordVisible, busy, version, commit, setLoginUser, setLoginPassword, setLoginPasswordVisible, login }: LoginViewProps) {
   return (
     <main className="loginPage visualLogin loginRedesign">
       <div className="loginBackdrop" aria-hidden="true" />
@@ -29,7 +29,6 @@ export function LoginView({ loginUser, loginPassword, loginPasswordVisible, erro
               <label className="loginField"><span>Логин</span><div className="loginInputWrap"><UserIcon /><input type="text" value={loginUser} onChange={(event) => setLoginUser(event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus required placeholder="admin" /></div></label>
               <label className="loginField"><span>Пароль</span><div className="loginInputWrap loginPasswordWrap"><KeyIcon /><input type={loginPasswordVisible ? "text" : "password"} value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} autoComplete="current-password" required placeholder="Введите пароль" /><button type="button" className="loginVisibility" onClick={() => setLoginPasswordVisible((value) => !value)} aria-label={loginPasswordVisible ? "Скрыть пароль" : "Показать пароль"} aria-pressed={loginPasswordVisible}>{loginPasswordVisible ? <EyeOffIcon /> : <EyeIcon />}</button></div></label>
             </div>
-            {error && <div className="errorBox loginError" role="alert">{error}</div>}
             <button className="loginSubmit" type="submit" disabled={busy}><span>{busy ? "Проверяем доступ…" : "Войти в панель"}</span>{busy ? <i className="loginSpinner" /> : <ArrowIcon />}</button>
             <footer className="loginPanelFooter"><ShieldIcon /><span>Соединение с панелью защищено</span></footer>
           </form>

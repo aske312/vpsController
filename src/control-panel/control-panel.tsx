@@ -1,5 +1,6 @@
 "use client";
 
+import { useNotifications, useNotifier, useNotificationList } from "../shared/notifications/notification-center";
 import { createApiClient } from "../shared/lib/api-request";
 import { useCdnSecurity } from "../features/application/use-cdn-security";
 import type { CdnSecurityStatus } from "../shared/lib/cdn-security-operation";
@@ -75,7 +76,9 @@ export function ControlPanel() {
   const [clientStateFilter, setClientStateFilter] = useState<"all" | "online" | "attention" | "offline">("all");
   const [automationDraft, setAutomationDraft] = useState<ServicesStatus["automation"] | null>(null);
   const [loggingDraft, setLoggingDraft] = useState<LoggingSettings | null>(null);
-  const [notice, setNotice] = useState("");
+  const notifications = useNotifications();
+  const notificationItems = useNotificationList();
+  const { error: notifyError, success: notifySuccess } = useNotifier("panel", "Панель");
   const [applicationLogs, setApplicationLogs] = useState<string[]>([]);
   const [securityLogsOpen, setSecurityLogsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -93,7 +96,6 @@ export function ControlPanel() {
   const [resourcesOpen, setResourcesOpen] = useState<Partial<Record<Protocol, boolean>>>({});
   const [diagnosticsOpen, setDiagnosticsOpen] = useState<Partial<Record<Protocol, boolean>>>({});
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [error, setError] = useState("");
   const [refreshErrors, setRefreshErrors] = useState<Record<string, RefreshFailure>>({});
   const [busy, setBusy] = useState(false);
   const [passwordDialog, setPasswordDialog] = useState(false);
@@ -133,10 +135,10 @@ export function ControlPanel() {
     setToken(sessionStorage.getItem("312-token") || "");
     const savedNotice = sessionStorage.getItem("312-notice");
     if (savedNotice) {
-      setNotice(savedNotice);
+      notifySuccess(savedNotice);
       sessionStorage.removeItem("312-notice");
     }
-  }, []);
+  }, [notifySuccess]);
 
   useEffect(() => {
     function closeSettings(event: PointerEvent) {
@@ -150,7 +152,6 @@ export function ControlPanel() {
   const request = useMemo(() => createApiClient(token, {
     formatHttpError: (detail, status) => status === 401 ? "Сессия панели завершена. Войдите заново." : publicError(detail, status),
   }), [token]);
-
 
   function askConfirmation(options: Omit<ConfirmationRequest, "resolve">): Promise<boolean> {
     setConfirmationInput("");
@@ -323,11 +324,11 @@ export function ControlPanel() {
 
   async function saveDnsSettings() {
     if (!dnsDraft) return;
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       const next = await request("/dns/settings", { method: "PUT", body: JSON.stringify(dnsDraft) }) as DnsStatus;
-      setDns(next); setDnsDraft(next.settings); setNotice("DNS-профиль сохранён и применён к выбранным протоколам");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось сохранить DNS"); }
+      setDns(next); setDnsDraft(next.settings); notifySuccess("DNS-профиль сохранён и применён к выбранным протоколам");
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить DNS"); }
     finally { setBusy(false); }
   }
 
@@ -366,11 +367,11 @@ export function ControlPanel() {
   }, []);
 
   async function checkDnsProviders(providerId?: string) {
-    setCheckingDns(true); setError("");
+    setCheckingDns(true);
     try {
       const result = await request("/dns/check", { method: "POST", body: JSON.stringify({ provider_id: providerId || null }) }) as { items: DnsCheck[] };
       setDnsChecks((current) => ({ ...current, ...Object.fromEntries(result.items.map((item) => [item.id, item])) }));
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Проверка DNS не выполнена"); }
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Проверка DNS не выполнена"); }
     finally { setCheckingDns(false); }
   }
 
@@ -383,19 +384,19 @@ export function ControlPanel() {
     const fields = protocolStatuses[protocol]?.editable_settings || [];
     const draft = protocolSettingsDraft[protocol] || {};
     const body = Object.fromEntries(fields.map((field) => [field.key, draft[field.key] ?? field.value]));
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       await request(`/protocols/${protocol}/settings`, { method: "PATCH", body: JSON.stringify(body) });
       protocolSettingsDirty.current[protocol] = false;
       await loadProtocolStatus(protocol);
-      setNotice(`Настройки ${labels[protocol]} применены`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось применить настройки протокола"); }
+      notifySuccess(`Настройки ${labels[protocol]} применены`);
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось применить настройки протокола"); }
     finally { setBusy(false); }
   }
 
   const refreshCurrent = useCallback(async (showBusy = false) => {
     if (!token) return;
-    if (showBusy) { setBusy(true); setError(""); }
+    if (showBusy) { setBusy(true); }
     try {
       if (tab === "overview") await Promise.all([loadOverview(), loadClients(), loadApplication(), loadServices()]);
       else if (tab === "security") await Promise.all([loadSecurity(), loadServices()]);
@@ -456,7 +457,6 @@ export function ControlPanel() {
     const label = actionLabels[(action.action || "").split(":")[0]] || "Операция";
     const timer = window.setTimeout(() => {
       if (action.state === "failed" || action.result === "failed") {
-        setError(`${label}: выполнение завершилось с ошибкой`);
         return;
       }
       const message = `${label}: успешно завершено`;
@@ -464,17 +464,10 @@ export function ControlPanel() {
         window.setTimeout(() => reloadWithoutCache(`${message}. Кэш интерфейса сброшен`), 600);
         return;
       }
-      setNotice(message);
       void refreshCurrent(false);
     }, 0);
     return () => window.clearTimeout(timer);
   }, [application?.action, refreshCurrent]);
-
-  useEffect(() => {
-    if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(""), 8000);
-    return () => window.clearTimeout(timer);
-  }, [notice]);
 
   useEffect(() => {
     if (!token || tab === "overview") return;
@@ -613,7 +606,7 @@ export function ControlPanel() {
         : `Будет выполнена команда «vps-control ${action}». Во время операции возможен кратковременный перерыв в работе.`,
       confirmLabel: action === "safe-update" ? "Создать точку и обновить" : "Выполнить", danger: action === "reboot",
     })) return;
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       const started = await request("/application/action", { method: "POST", body: JSON.stringify({ action }) });
       setApplication((current) => ({
@@ -627,7 +620,7 @@ export function ControlPanel() {
       }));
       if (action === "reboot" || action === "poweroff") return;
       await loadApplication(); await loadApplicationLogs();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Команда не запущена"); }
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Команда не запущена"); }
     finally { setBusy(false); }
   }
 
@@ -649,11 +642,11 @@ export function ControlPanel() {
       message: "Во время перезапуска возможен кратковременный перерыв в работе.",
       confirmLabel: "Перезапустить",
     })) return;
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       await request(`/services/${serviceId}/action`, { method: "POST", body: JSON.stringify({ action }) });
       await Promise.all([loadServices(), loadSecurity()]);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось выполнить действие со службой"); }
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось выполнить действие со службой"); }
     finally { setBusy(false); }
   }
 
@@ -663,47 +656,47 @@ export function ControlPanel() {
   }
 
   async function downloadUpdateReport() {
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       const report = await request("/application/update-report") as { filename: string; lines: string[] };
       downloadLogs(report.filename, report.lines);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось получить отчёт обновления"); }
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось получить отчёт обновления"); }
     finally { setBusy(false); }
   }
 
   const loadSshAccess = useCallback(async () => {
     if (!token) return;
     try { setSshAccessState(await request<SshAccessState>("/security/ssh-access")); setSshCountdownClock(Date.now()); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось получить состояние SSH-доступа"); }
-  }, [token, request]);
+    catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось получить состояние SSH-доступа"); }
+  }, [token, request, notifyError]);
 
   async function installSshKey() {
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       const state = await request<SshAccessState>("/security/ssh-access/key", { method: "POST", body: JSON.stringify({ public_key: sshPublicKey.trim() }) });
       setSshAccessState(state); setSshPublicKey(""); setSshKeyTested(false);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось установить публичный ключ"); }
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось установить публичный ключ"); }
     finally { setBusy(false); }
   }
 
   async function resetSshKey() {
     if (!await askConfirmation({ title: "Удалить установленный SSH-ключ?", message: "Будет удалён только публичный ключ, добавленный этим мастером. Парольный вход и остальные ключи не изменятся.", confirmLabel: "Удалить ключ", danger: true })) return;
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       const state = await request<SshAccessState>("/security/ssh-access/key/reset", { method: "POST" });
       setSshAccessState(state); setSshPublicKey(""); setSshKeyTested(false);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось удалить публичный ключ"); }
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось удалить публичный ключ"); }
     finally { setBusy(false); }
   }
 
   async function changeSshAccess(action: "begin" | "confirm" | "rollback") {
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       const state = await request<SshAccessState>(`/security/ssh-access/${action}`, { method: "POST" });
       setSshAccessState(state); setSshCountdownClock(Date.now());
       if (action !== "rollback") setSshKeyTested(false);
       await loadSecurity();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось изменить SSH-доступ"); }
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось изменить SSH-доступ"); }
     finally { setBusy(false); }
   }
 
@@ -737,7 +730,7 @@ export function ControlPanel() {
   }
 
   function openClientDialog() {
-    setGenerated(""); setGeneratedProfiles([]); setGeneratedQr(""); setGeneratedQrError(""); setError(""); setClientDialog(true);
+    setGenerated(""); setGeneratedProfiles([]); setGeneratedQr(""); setGeneratedQrError(""); setClientDialog(true);
   }
 
   function closeClientDialog() {
@@ -746,25 +739,25 @@ export function ControlPanel() {
   }
 
   function resetClientDialog() {
-    setGenerated(""); setGeneratedProfiles([]); setGeneratedQr(""); setGeneratedQrError(""); setError("");
+    setGenerated(""); setGeneratedProfiles([]); setGeneratedQr(""); setGeneratedQrError("");
   }
 
   async function changeAdminPassword(event: FormEvent) {
     event.preventDefault();
-    if (!currentAdminPassword) { setError("Введите текущий пароль"); return; }
-    if (newAdminPassword.length < 16 || newAdminPassword.length > 128) { setError("Новый пароль должен содержать от 16 до 128 символов"); return; }
-    if (!/^[!-~]+$/.test(newAdminPassword)) { setError("Используйте печатные латинские символы без пробелов"); return; }
+    if (!currentAdminPassword) { notifyError("Введите текущий пароль"); return; }
+    if (newAdminPassword.length < 16 || newAdminPassword.length > 128) { notifyError("Новый пароль должен содержать от 16 до 128 символов"); return; }
+    if (!/^[!-~]+$/.test(newAdminPassword)) { notifyError("Используйте печатные латинские символы без пробелов"); return; }
     const passwordCategories = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((pattern) => pattern.test(newAdminPassword)).length;
-    if (passwordCategories < 3) { setError("Добавьте минимум три группы: строчные, заглавные, цифры и спецсимволы"); return; }
-    if (newAdminPassword === currentAdminPassword) { setError("Новый пароль должен отличаться от текущего"); return; }
-    if (newAdminPassword !== confirmAdminPassword) { setError("Новые пароли не совпадают"); return; }
-    setBusy(true); setError("");
+    if (passwordCategories < 3) { notifyError("Добавьте минимум три группы: строчные, заглавные, цифры и спецсимволы"); return; }
+    if (newAdminPassword === currentAdminPassword) { notifyError("Новый пароль должен отличаться от текущего"); return; }
+    if (newAdminPassword !== confirmAdminPassword) { notifyError("Новые пароли не совпадают"); return; }
+    setBusy(true);
     try {
       await request("/security/admin-password", { method: "PUT", body: JSON.stringify({ current_password: currentAdminPassword, new_password: newAdminPassword, confirm_password: confirmAdminPassword }) });
       sessionStorage.removeItem("312-token");
       closePasswordDialog(); setToken(""); setLoginPassword("");
-      setNotice("Пароль изменён. Войдите заново с новым паролем.");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось изменить пароль"); }
+      notifySuccess("Пароль изменён. Войдите заново с новым паролем.");
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось изменить пароль"); }
     finally { setBusy(false); }
   }
 
@@ -777,13 +770,13 @@ export function ControlPanel() {
 
   async function saveAutomation() {
     if (!automationDraft) return;
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       await request("/services/automation", { method: "PUT", body: JSON.stringify(automationDraft) });
       automationDirty.current = false;
       await Promise.all([loadServices(), loadApplication()]);
-      setNotice("Расписание обслуживания сохранено и применено");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось сохранить расписания"); }
+      notifySuccess("Расписание обслуживания сохранено и применено");
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить расписания"); }
     finally { setBusy(false); }
   }
 
@@ -791,7 +784,7 @@ export function ControlPanel() {
     const protectedUrl = services?.panel_access?.internal_url || "http://admin.312.net";
     const channels = services?.panel_access?.available_channels || [];
     if (mode === "vpn" && !channels.length) {
-      setError("Сначала настройте хотя бы одно защищённое подключение");
+      notifyError("Сначала настройте хотя бы одно защищённое подключение");
       return;
     }
     const message = mode === "vpn"
@@ -802,12 +795,12 @@ export function ControlPanel() {
       message, confirmLabel: mode === "vpn" ? "Оставить защищённый доступ" : "Открыть доступ",
       danger: mode === "external",
     })) return;
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       await request("/services/panel-access", { method: "PUT", body: JSON.stringify({ mode }) });
       await Promise.all([loadServices(), loadSecurity()]);
-      setNotice(mode === "vpn" ? `Панель доступна только через ${protectedUrl}` : "Публичный доступ к панели открыт");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось изменить доступ к панели"); }
+      notifySuccess(mode === "vpn" ? `Панель доступна только через ${protectedUrl}` : "Публичный доступ к панели открыт");
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось изменить доступ к панели"); }
     finally { setBusy(false); }
   }
 
@@ -821,7 +814,7 @@ export function ControlPanel() {
       danger: active,
     })) return;
     const autoRefreshAfterChange = autoRefresh;
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       setAutoRefresh(false);
       await request("/services/service-mode", { method: "PUT", body: JSON.stringify({ active }) });
@@ -849,7 +842,7 @@ export function ControlPanel() {
       reloadWithoutCache(`Сервисный режим ${active ? "включён" : "выключен"}. Кэш интерфейса сброшен`);
     } catch (cause) {
       setAutoRefresh(autoRefreshAfterChange);
-      setError(cause instanceof Error ? cause.message : "Не удалось изменить сервисный режим");
+      notifyError(cause instanceof Error ? cause.message : "Не удалось изменить сервисный режим");
     } finally { setBusy(false); }
   }
 
@@ -885,7 +878,7 @@ export function ControlPanel() {
       message: `На сервер будет установлена последняя доступная версия модуля ${image.name}.`,
       confirmLabel: "Установить",
     })) return;
-    setBusy(true); setError(""); setInstallingProtocol(image.id);
+    setBusy(true); setInstallingProtocol(image.id);
     try {
       const started = await request(`/protocol-images/${image.id}/install`, { method: "POST" });
       setApplication((current) => ({
@@ -904,10 +897,10 @@ export function ControlPanel() {
           loadProtocolStatus(image.id as Protocol),
         ]);
       }
-      setNotice(`${image.name} установлен и готов к работе`);
+      notifySuccess(`${image.name} установлен и готов к работе`);
     } catch (cause) {
       setInstallingProtocol("");
-      setError(cause instanceof Error ? cause.message : "Не удалось запустить установку протокола");
+      notifyError(cause instanceof Error ? cause.message : "Не удалось запустить установку протокола");
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
 
@@ -948,7 +941,7 @@ export function ControlPanel() {
       confirmLabel: "Обновить",
       danger: image.update_breaking,
     })) return;
-    setBusy(true); setError(""); setInstallingProtocol(`update-${image.id}`);
+    setBusy(true); setInstallingProtocol(`update-${image.id}`);
     try {
       const started = await request(`/protocol-images/${image.id}/update`, { method: "POST" });
       setApplication((current) => ({
@@ -958,9 +951,9 @@ export function ControlPanel() {
       }));
       await waitForProtocolUpdate(image);
       await Promise.all([loadOverview(), loadProtocolStatus(image.id as Protocol)]);
-      setNotice(`${image.name} обновлён до ${image.available_version}`);
+      notifySuccess(`${image.name} обновлён до ${image.available_version}`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось запустить обновление протокола");
+      notifyError(cause instanceof Error ? cause.message : "Не удалось запустить обновление протокола");
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
 
@@ -970,16 +963,16 @@ export function ControlPanel() {
       message: `${labels[protocol]} будет перезапущен. Активные соединения могут кратковременно прерваться.`,
       confirmLabel: "Перезапустить",
     })) return;
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       await request(`/protocols/${protocol}/restart`, { method: "POST" });
       await Promise.all([loadProtocolStatus(protocol), loadOverview()]);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось перезапустить протокол"); }
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось перезапустить протокол"); }
     finally { setBusy(false); }
   }
 
   async function checkProtocolResources(protocol: Protocol) {
-    setCheckingResources(protocol); setError("");
+    setCheckingResources(protocol);
     try {
       const resources = await request(`/protocols/${protocol}/resources/check`, { method: "POST" });
       setProtocolStatuses((statuses) => {
@@ -987,7 +980,7 @@ export function ControlPanel() {
         return current ? { ...statuses, [protocol]: { ...current, resources } } : statuses;
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось проверить доступность ресурсов");
+      notifyError(cause instanceof Error ? cause.message : "Не удалось проверить доступность ресурсов");
     } finally {
       setCheckingResources(null);
     }
@@ -1005,7 +998,7 @@ export function ControlPanel() {
       message: "Новые системные журналы будут храниться только в оперативной памяти и исчезнут после перезагрузки. Диагностика прошлых событий станет ограниченной.",
       confirmLabel: "Отключить запись", danger: true,
     })) return;
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       await request("/services/logging", {
         method: "PUT",
@@ -1013,8 +1006,8 @@ export function ControlPanel() {
       });
       loggingDirty.current = false;
       await loadServices();
-      setNotice("Настройки записи и хранения журналов сохранены");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось сохранить настройки журналов"); }
+      notifySuccess("Настройки записи и хранения журналов сохранены");
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить настройки журналов"); }
     finally { setBusy(false); }
   }
 
@@ -1024,18 +1017,18 @@ export function ControlPanel() {
       message: "Будут удалены системные журналы, логи контейнеров и история мониторинга WG/AWG. Действие нельзя отменить.",
       confirmLabel: "Очистить журналы", phrase: "ОЧИСТИТЬ ЛОГИ", danger: true,
     })) return;
-    setBusy(true); setError("");
+    setBusy(true);
     try {
       await request("/services/logging/clear", { method: "POST" });
       setSecurityLogs([]); setApplicationLogs([]);
       await loadServices();
-      setNotice("Управляемые журналы очищены");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось очистить журналы"); }
+      notifySuccess("Управляемые журналы очищены");
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось очистить журналы"); }
     finally { setBusy(false); }
   }
 
   async function checkNetworkDiagnostics(protocol: Protocol) {
-    setCheckingDiagnostics(protocol); setError("");
+    setCheckingDiagnostics(protocol);
     try {
       const diagnostics = await request(`/protocols/${protocol}/diagnostics/check`, { method: "POST" });
       setProtocolStatuses((statuses) => {
@@ -1043,7 +1036,7 @@ export function ControlPanel() {
         return current ? { ...statuses, [protocol]: { ...current, diagnostics } } : statuses;
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось выполнить полную диагностику сети");
+      notifyError(cause instanceof Error ? cause.message : "Не удалось выполнить полную диагностику сети");
     } finally {
       setCheckingDiagnostics(null);
     }
@@ -1102,10 +1095,10 @@ export function ControlPanel() {
     const nextProtocol = image.id === "mihomo"
       ? undefined
       : directProtocolOrder.find((protocol) => protocol !== image.id && protocolImages.some((candidate) => candidate.id === protocol && candidate.installed));
-    setBusy(true); setError(""); setInstallingProtocol(`remove-${image.id}`);
+    setBusy(true); setInstallingProtocol(`remove-${image.id}`);
     try {
       const started = await request(`/protocol-images/${image.id}`, { method: "DELETE" });
-      setNotice(`Удаление ${image.name} запущено. Не закрывайте страницу до подтверждения.`);
+      notifySuccess(`Удаление ${image.name} запущено. Не закрывайте страницу до подтверждения.`);
       setApplication((current) => ({
         api: current?.api || { active: true, enabled: true },
         containers: current?.containers || [],
@@ -1129,10 +1122,10 @@ export function ControlPanel() {
       } else {
         setTab("overview");
       }
-      setNotice(`${image.name} удалён`);
+      notifySuccess(`${image.name} удалён`);
     } catch (cause) {
       setInstallingProtocol("");
-      setError(cause instanceof Error ? cause.message : "Не удалось запустить удаление протокола");
+      notifyError(cause instanceof Error ? cause.message : "Не удалось запустить удаление протокола");
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
 
@@ -1189,14 +1182,14 @@ export function ControlPanel() {
     if (!generated) return () => { cancelled = true; };
     void QRCode.toDataURL(generated, { errorCorrectionLevel: "L", margin: 4, width: 768 })
       .then((dataUrl) => { if (!cancelled) setGeneratedQr(dataUrl); })
-      .catch(() => { if (!cancelled) setGeneratedQrError("Не удалось создать QR-код для этой конфигурации"); });
+      .catch(() => { if (!cancelled) { setGeneratedQrError("Не удалось создать QR-код для этой конфигурации"); notifyError("Не удалось создать QR-код. Скачайте файл конфигурации и импортируйте его в клиент."); } });
     return () => { cancelled = true; };
-  }, [generated]);
+  }, [generated, notifyError]);
 
   async function addClient(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setGenerated(""); setGeneratedQr(""); setGeneratedQrError(""); setError("");
+    event.preventDefault(); setBusy(true); setGenerated(""); setGeneratedQr(""); setGeneratedQrError("");
     if (!installedProtocols.includes(selectedClientProtocol)) {
-      setBusy(false); setError("Сначала установите выбранный протокол"); return;
+      setBusy(false); notifyError("Сначала установите выбранный протокол"); return;
     }
     try {
       if (!selectedConnectionType) throw new Error("Нет доступного маршрута для подключения");
@@ -1210,7 +1203,7 @@ export function ControlPanel() {
       downloadConfig(preferred?.filename || result.filename || `${newClient.name}.conf`, preferred?.config || result.config);
       setNewClient({ ...newClient, name: "" });
       await loadClients();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось создать клиента"); }
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось создать клиента"); }
     finally { setBusy(false); }
   }
 
@@ -1236,13 +1229,13 @@ export function ControlPanel() {
     })) return;
     setBusy(true);
     try { await request(`/clients/${id}`, { method: "DELETE" }); await loadClients(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось удалить клиента"); }
+    catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось удалить клиента"); }
     finally { setBusy(false); }
   }
 
   async function login(event: FormEvent) {
     event.preventDefault();
-    setBusy(true); setError("");
+    setBusy(true);
     const candidateToken = btoa(`${loginUser}:${loginPassword}`);
     try {
       const response = await fetch("/api/overview", {
@@ -1253,11 +1246,12 @@ export function ControlPanel() {
           ? "Неверный логин или пароль"
           : `Не удалось проверить учётные данные (ошибка ${response.status})`);
       }
+      notifications.reset();
       setToken(candidateToken);
       setLoginPassword("");
       setLoginPasswordVisible(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось войти в панель");
+      notifyError(cause instanceof Error ? cause.message : "Не удалось войти в панель");
     } finally {
       setBusy(false);
     }
@@ -1268,7 +1262,6 @@ export function ControlPanel() {
       loginUser={loginUser}
       loginPassword={loginPassword}
       loginPasswordVisible={loginPasswordVisible}
-      error={error}
       busy={busy}
       version={appVersion}
       commit={buildCommit}
@@ -1385,7 +1378,7 @@ export function ControlPanel() {
   const operationActive = ["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(application?.action?.state || "");
   const operationName = application?.action?.action || "";
   const operationLabel = actionLabels[operationName.split(":")[0]] || operationName;
-  const nodeHasError = Boolean(error) || application?.api.active === false || application?.action?.state === "failed" || application?.action?.result === "failed";
+  const nodeHasError = notificationItems.some((item) => item.state === "error") || application?.api.active === false || application?.action?.state === "failed" || application?.action?.result === "failed";
   const nodeDegraded = Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
   const serviceModeActive = Boolean(services?.service_mode?.active || application?.service_mode?.active);
   const nodeState = !application ? "gray" : nodeHasError ? "red" : serviceModeActive ? "blue" : operationActive || nodeDegraded ? "yellow" : "green";
@@ -1445,12 +1438,10 @@ export function ControlPanel() {
     lastUpdated={lastUpdated}
     onToggleAutoRefresh={() => setAutoRefresh((value) => !value)}
     onRefresh={() => void refreshCurrent(true)}
-    onLogout={() => { sessionStorage.removeItem("312-token"); setToken(""); }}
+    onLogout={() => { notifications.reset(); sessionStorage.removeItem("312-token"); setToken(""); }}
   >
       {tab !== "overview" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
       <RefreshNotices errors={refreshErrors} reconnecting={cdnCommand.pending} />
-      {error && <div className="errorBox" role="alert"><span>!</span>{error}<button onClick={() => setError("")} aria-label="Закрыть сообщение об ошибке">×</button></div>}
-      {notice && <div className="successNotice" role="status"><span>✓</span>{notice}<button onClick={() => setNotice("")} aria-label="Закрыть уведомление">×</button></div>}
       {tab === "overview" && (
         <OverviewDashboard
           token={token}
@@ -1469,7 +1460,6 @@ export function ControlPanel() {
           onUpdateProtocol={(image) => void updateProtocol(image)}
         />
       )}
-
 
       {tab === "mihomo" && (
         <MihomoPage

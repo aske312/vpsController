@@ -56,6 +56,6 @@ export function useCdnSecurity(request: ReturnType<typeof createApiClient>, toke
     operation, pending,
     change: (enabled: boolean) => pending ? Promise.resolve() : execute(newCdnOperation(enabled)),
     recheck: () => { if (operation) void execute(operation, true); },
-    dismiss: () => { if (!pending) setOperation(null); },
+    dismiss: () => { if (!pending) setOperation((current) => current?.id === operation?.id ? null : current); },
   };
 }

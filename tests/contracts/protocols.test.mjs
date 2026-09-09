@@ -520,7 +520,7 @@ test("WG removal accepts live non-WG fallback channels and reports blockers", as
   assert.match(api, /"transport-reality": "vps-control-mihomo-reality\.service"/);
   assert.match(api, /Нельзя удалить последний активный канал доступа/);
   assert.match(page, /Удаление \$\{image\.name\} запущено/);
-  assert.match(page, /className="errorBox" role="alert"/);
+  assert.match(page, /role=\{item.state === "error" \? "alert" : "status"\}/);
 });
 
 test("application network check covers every installed protected protocol", async () => {

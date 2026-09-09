@@ -36,6 +36,7 @@ const STYLE_FILES = [
   "src/features/protocols/protocols.css",
   "src/features/mihomo/mihomo.css",
   "src/shared/styles/polish.css",
-  "src/shared/styles/control-center.css"
+  "src/shared/styles/control-center.css",
+  "src/shared/notifications/notifications.css"
 ];
 export const readStyles = async () => (await Promise.all(STYLE_FILES.map(read))).join("\n");
