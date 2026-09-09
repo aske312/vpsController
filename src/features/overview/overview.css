@@ -459,6 +459,7 @@
 .overviewExit small { font-size: 9px; }
 
 .overviewInlineWarning { font-size: 9.5px; line-height: 1.4; }
+.overviewInlineWarning button { margin-left:6px; padding:2px 5px; border:1px solid currentColor; border-radius:4px; background:transparent; color:inherit; font:inherit; cursor:pointer; }
 
 .overviewTelemetry > header > small { font-size: 9.5px; line-height: 1.3; }
 

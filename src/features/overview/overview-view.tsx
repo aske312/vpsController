@@ -1,7 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createApiClient } from "../../shared/lib/api-request";
 import { formatModuleVersion } from "../../shared/lib/format-version";
+import type { Module as MihomoModule } from "../mihomo/types";
+import { createMihomoSummaryStore, EMPTY_MIHOMO_SUMMARY } from "./mihomo-summary";
 
 type ProtocolId = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2" | "tuic" | "trojan" | "openvpn" | "ikev2";
 type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
@@ -66,56 +69,12 @@ type Client = {
   active_connections?: number;
 };
 
-type MihomoStatus = {
-  active: boolean;
-  core_version: string;
-  profiles: number;
-  profiles_in_use: number;
-  credentials: number;
-  channels_in_use: string[];
-  channels_installed: number;
-  modules_installed: number;
-  modules_total: number;
-  endpoint: string;
-};
-
-type MihomoModule = {
-  id: string;
-  name: string;
-  description: string;
-  category: "transport" | "dns" | "routing";
-  category_name: string;
-  installed: boolean;
-  active: boolean;
-};
-
-type MihomoProfile = {
-  id: string;
-  name: string;
-  channels: string[];
-  connections?: Array<{ id: string; component: string; name: string }>;
-  created_at: string;
-  updated_at: string;
-};
-
-type MihomoProfileStats = {
-  id: string;
-  summary: { rx_bytes: number; tx_bytes: number };
-};
-
-type MihomoSummarySnapshot = {
-  status: MihomoStatus;
-  modules: MihomoModule[];
-  profiles: MihomoProfile[];
-  profileStats: Record<string, MihomoProfileStats["summary"]>;
-};
-
-const MIHOMO_SUMMARY_CACHE_TTL_MS = 15_000;
-let mihomoSummaryCache: { token: string; cachedAt: number; data: MihomoSummarySnapshot } | null = null;
-let mihomoSummaryRequest: { token: string; promise: Promise<MihomoSummarySnapshot> } | null = null;
-
-function cachedMihomoSummary(token: string) {
-  return token && mihomoSummaryCache?.token === token ? mihomoSummaryCache : null;
+let mihomoSummaryCache: { token: string; store: ReturnType<typeof createMihomoSummaryStore> } | null = null;
+function mihomoSummaryStore(token: string) {
+  if (mihomoSummaryCache?.token !== token) {
+    mihomoSummaryCache = { token, store: createMihomoSummaryStore(createApiClient(token)) };
+  }
+  return mihomoSummaryCache.store;
 }
 
 type DirectProtocolStatus = {
@@ -250,12 +209,12 @@ export function OverviewDashboard({
 }: Props) {
   const mihomoImage = protocolImages.find((item) => item.id === "mihomo");
   const mihomoInstalled = Boolean(mihomoImage?.installed);
-  const initialMihomoSummary = useMemo(() => cachedMihomoSummary(token)?.data, [token]);
-  const [mihomoStatus, setMihomoStatus] = useState<MihomoStatus | null>(() => initialMihomoSummary?.status || null);
-  const [mihomoModules, setMihomoModules] = useState<MihomoModule[]>(() => initialMihomoSummary?.modules || []);
-  const [mihomoProfiles, setMihomoProfiles] = useState<MihomoProfile[]>(() => initialMihomoSummary?.profiles || []);
-  const [mihomoProfileStats, setMihomoProfileStats] = useState<Record<string, MihomoProfileStats["summary"]>>(() => initialMihomoSummary?.profileStats || {});
-  const [mihomoSummaryError, setMihomoSummaryError] = useState("");
+  const summaryStore = useMemo(() => mihomoSummaryStore(mihomoInstalled ? token : ""), [mihomoInstalled, token]);
+  const summary = useSyncExternalStore(summaryStore.subscribe, summaryStore.getSnapshot, () => EMPTY_MIHOMO_SUMMARY);
+  const mihomoStatus = summary.status;
+  const mihomoProfiles = summary.profiles;
+  const mihomoProfileStats = summary.profileStats || {};
+  const mihomoSummaryError = [...new Set(Object.values(summary.errors))].join(". ");
   const [directStatuses, setDirectStatuses] = useState<Partial<Record<ProtocolId, DirectProtocolStatus>>>({});
   const [directStatusFailures, setDirectStatusFailures] = useState<Partial<Record<ProtocolId, boolean>>>({});
   const [directRates, setDirectRates] = useState<Partial<Record<ProtocolId, { rx: number; tx: number }>>>({});
@@ -269,58 +228,6 @@ export function OverviewDashboard({
     ),
     [protocolImages],
   );
-  const loadMihomoSummary = useCallback(async (force = false) => {
-    if (!token || !mihomoInstalled) {
-      if (!token || mihomoSummaryCache?.token === token) mihomoSummaryCache = null;
-      setMihomoStatus(null);
-      setMihomoModules([]);
-      setMihomoProfiles([]);
-      setMihomoProfileStats({});
-      setMihomoSummaryError("");
-      return;
-    }
-    const cached = cachedMihomoSummary(token);
-    if (cached) {
-      setMihomoStatus(cached.data.status);
-      setMihomoModules(cached.data.modules);
-      setMihomoProfiles(cached.data.profiles);
-      setMihomoProfileStats(cached.data.profileStats);
-      setMihomoSummaryError("");
-      if (!force && Date.now() - cached.cachedAt < MIHOMO_SUMMARY_CACHE_TTL_MS) return;
-    }
-    try {
-      let request = mihomoSummaryRequest?.token === token ? mihomoSummaryRequest.promise : null;
-      if (!request) {
-        request = (async () => {
-          const headers = { Authorization: `Basic ${token}` };
-          const [statusResponse, modulesResponse, profilesResponse, statsResponse] = await Promise.all([
-            fetch("/api/mihomo/status", { headers }), fetch("/api/mihomo/modules", { headers }),
-            fetch("/api/mihomo/profiles", { headers }), fetch("/api/mihomo/stats", { headers }),
-          ]);
-          if (!statusResponse.ok || !modulesResponse.ok || !profilesResponse.ok) throw new Error("summary unavailable");
-          const [status, modules, profiles, stats] = await Promise.all([
-            statusResponse.json() as Promise<MihomoStatus>, modulesResponse.json() as Promise<{ items: MihomoModule[] }>,
-            profilesResponse.json() as Promise<{ items: MihomoProfile[] }>,
-            statsResponse.ok ? statsResponse.json() as Promise<{ items: MihomoProfileStats[] }> : Promise.resolve({ items: [] }),
-          ]);
-          return { status, modules: modules.items || [], profiles: profiles.items || [], profileStats: Object.fromEntries((stats.items || []).map((item) => [item.id, item.summary])) };
-        })();
-        mihomoSummaryRequest = { token, promise: request };
-      }
-      const snapshot = await request;
-      mihomoSummaryCache = { token, cachedAt: Date.now(), data: snapshot };
-      if (mihomoSummaryRequest?.promise === request) mihomoSummaryRequest = null;
-      setMihomoStatus(snapshot.status);
-      setMihomoModules(snapshot.modules);
-      setMihomoProfiles(snapshot.profiles);
-      setMihomoProfileStats(snapshot.profileStats);
-      setMihomoSummaryError("");
-    } catch {
-      mihomoSummaryRequest = null;
-      if (!cached) setMihomoSummaryError("Сводка Mihomo временно недоступна");
-    }
-  }, [mihomoInstalled, token]);
-
   const loadDirectStatuses = useCallback(async () => {
     if (!token || !directChannels.length) {
       setDirectStatuses({});
@@ -367,11 +274,11 @@ export function OverviewDashboard({
   }, [directChannels, token]);
 
   useEffect(() => {
-    const initial = window.setTimeout(() => void loadMihomoSummary(false), 0);
-    if (!mihomoInstalled) return () => window.clearTimeout(initial);
-    const timer = window.setInterval(() => void loadMihomoSummary(true), 12000);
+    if (!token || !mihomoInstalled) return;
+    const initial = window.setTimeout(() => void summaryStore.refresh(), 0);
+    const timer = window.setInterval(() => void summaryStore.refresh(true), 12000);
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
-  }, [loadMihomoSummary, mihomoInstalled]);
+  }, [summaryStore, mihomoInstalled, token]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void loadDirectStatuses(), 0);
@@ -381,8 +288,8 @@ export function OverviewDashboard({
   }, [directChannels, loadDirectStatuses]);
 
   const installedMihomoChannels = useMemo(
-    () => mihomoModules.filter((item) => item.category === "transport" && item.installed),
-    [mihomoModules],
+    () => (summary.modules || []).filter((item) => item.category === "transport" && item.installed),
+    [summary.modules],
   );
 
   const installedServerModules = useMemo(() => protocolImages.filter((item) => item.installed), [protocolImages]);
@@ -395,8 +302,9 @@ export function OverviewDashboard({
   const attentionDirectClients = clients.filter((client) => client.quality === "warning" || client.quality === "error").length;
   const offlineDirectClients = clients.filter((client) => client.quality === "offline").length;
 
-  const profileCount = mihomoProfiles.length || mihomoStatus?.profiles || 0;
-  const totalAccessObjects = (mihomoStatus?.credentials || 0) + clients.length;
+  const profileCount = mihomoProfiles?.length ?? mihomoStatus?.profiles ?? (mihomoInstalled ? "—" : 0);
+  const credentialsCount = mihomoProfiles?.reduce((count, profile) => count + profile.connections.length, 0) ?? mihomoStatus?.credentials;
+  const totalAccessObjects = mihomoInstalled && credentialsCount === undefined ? null : (credentialsCount || 0) + clients.length;
   const memoryTotal = overview?.resources.memory_total || 0;
   const diskTotal = overview?.resources.disk_total || 0;
   const memoryFree = overview?.resources.memory_available || 0;
@@ -404,12 +312,14 @@ export function OverviewDashboard({
   const networkTotal = (overview?.resources.network_rx || 0) + (overview?.resources.network_tx || 0);
 
   const mihomoChannelStates = useMemo(() => installedMihomoChannels.map((module) => {
-    const profileRefs = mihomoProfiles.filter((profile) => profile.channels.some((channel) => valueMatchesChannel(channel, module))).length;
+    const profileRefs = (mihomoProfiles || []).filter((profile) => profile.channels.some((channel) => valueMatchesChannel(channel, module))).length;
     const inUse = (mihomoStatus?.channels_in_use || []).some((channel) => valueMatchesChannel(channel, module));
     return { module, profileRefs, inUse, runtimeReady: module.active };
   }), [installedMihomoChannels, mihomoProfiles, mihomoStatus?.channels_in_use]);
 
-  const mihomoInUseCount = mihomoChannelStates.filter((item) => item.inUse).length;
+  const mihomoInUseCount = mihomoProfiles
+    ? new Set(mihomoProfiles.flatMap((profile) => profile.connections.map((connection) => connection.component))).size
+    : mihomoStatus?.channels_in_use.length ?? 0;
   const mihomoReadyCount = mihomoChannelStates.filter((item) => item.runtimeReady && !item.inUse).length;
 
   const directChannelStates = useMemo(() => directChannels.map((image) => {
@@ -440,6 +350,9 @@ export function OverviewDashboard({
   const directStoppedCount = directChannelStates.filter((item) => item.serviceActive === false).length;
   const routesInUse = mihomoInUseCount + directInUseCount;
   const routesReady = mihomoReadyCount + directReadyCount;
+  const mihomoUsageKnown = !mihomoInstalled || mihomoProfiles !== null || mihomoStatus !== null;
+  const routesInUseLabel = mihomoUsageKnown ? routesInUse : "—";
+  const routesReadyLabel = mihomoUsageKnown && (!mihomoInstalled || summary.modules !== null) ? routesReady : "—";
 
   return (
     <section className="overview" aria-label="Обзор инфраструктуры">
@@ -450,10 +363,10 @@ export function OverviewDashboard({
             <h1>Доступ и маршруты</h1>
           </div>
           <div className="overviewTopologyStats">
-            <span><small>ACCESS OBJECTS</small><strong>{totalAccessObjects}</strong></span>
+            <span><small>ACCESS OBJECTS</small><strong>{totalAccessObjects ?? "—"}</strong></span>
             {mihomoInstalled && <span className="violet"><small>PROFILES</small><strong>{profileCount}</strong></span>}
-            {mihomoInstalled && <span className="violet"><small>CHANNELS</small><strong>{installedMihomoChannels.length}</strong></span>}
-            <span className={routesInUse ? "cyan" : ""}><small>ROUTES IN USE</small><strong>{routesInUse}</strong></span>
+            {mihomoInstalled && <span className="violet"><small>CHANNELS</small><strong>{summary.modules ? installedMihomoChannels.length : mihomoStatus?.channels_installed ?? "—"}</strong></span>}
+            <span className={routesInUse ? "cyan" : ""}><small>ROUTES IN USE</small><strong>{routesInUseLabel}</strong></span>
           </div>
         </header>
 
@@ -462,12 +375,12 @@ export function OverviewDashboard({
             <p className="eyebrow">CLIENT ACCESS</p>
             <div className="overviewAccessGlyph"><SourceGlyph /></div>
             <strong>Клиенты</strong>
-            <small>{totalAccessObjects ? `${totalAccessObjects} настроенных объектов доступа` : "Объекты доступа ещё не созданы"}</small>
+            <small>{totalAccessObjects === null ? "Загружаются данные доступа…" : totalAccessObjects ? `${totalAccessObjects} настроенных объектов доступа` : "Объекты доступа ещё не созданы"}</small>
             <dl>
-              <div><dt>Mihomo credentials</dt><dd>{mihomoStatus?.credentials || 0}</dd></div>
+              <div><dt>Mihomo credentials</dt><dd>{credentialsCount ?? (mihomoInstalled ? "—" : 0)}</dd></div>
               <div><dt>Direct clients</dt><dd>{clients.length}</dd></div>
-              <div><dt>Routes in use</dt><dd className={routesInUse ? "ok" : ""}>{routesInUse}</dd></div>
-              <div><dt>Ready / idle</dt><dd>{routesReady}</dd></div>
+              <div><dt>Routes in use</dt><dd className={routesInUse ? "ok" : ""}>{routesInUseLabel}</dd></div>
+              <div><dt>Ready / idle</dt><dd>{routesReadyLabel}</dd></div>
             </dl>
           </aside>
 
@@ -484,7 +397,7 @@ export function OverviewDashboard({
                     </div>
                   </div>
                   <span className={`overviewState ${mihomoStatus?.active ? "online" : "idle"}`}>
-                    {mihomoStatus?.active ? (mihomoInUseCount ? "CORE ONLINE  IN USE" : "CORE ONLINE  IDLE") : "CORE STOPPED"}
+                    {!mihomoStatus ? (summary.errors.status ? "СТАТУС НЕДОСТУПЕН" : "ПРОВЕРКА СОСТОЯНИЯ") : mihomoStatus.active ? (mihomoInUseCount ? "CORE ONLINE  IN USE" : "CORE ONLINE  IDLE") : "CORE STOPPED"}
                   </span>
                 </header>
 
@@ -492,7 +405,7 @@ export function OverviewDashboard({
                   <section className="overviewManagedProfiles">
                     <div className="overviewManagedHead"><div className="overviewSectionLabel"><b>Профили</b><span>{profileCount}</span></div></div>
                     <div className="overviewManagedProfileList">
-                      {mihomoProfiles.map((profile) => {
+                      {(mihomoProfiles || []).map((profile) => {
                         const assignedComponents = [...new Set(profile.connections?.length ? profile.connections.map((connection) => connection.component) : profile.channels)];
                         const traffic = mihomoProfileStats[profile.id];
                         return <div className="overviewManagedProfileRow" key={profile.id}>
@@ -505,16 +418,17 @@ export function OverviewDashboard({
                           <span className="overviewManagedTraffic"><b>↓ {traffic ? bytes(traffic.rx_bytes) : "—"}</b><small>↑ {traffic ? bytes(traffic.tx_bytes) : "—"}</small></span>
                         </div>;
                       })}
-                      {!mihomoProfiles.length && <p className="overviewEmpty">Профили ещё не созданы.</p>}
+                      {mihomoProfiles === null && <p className="overviewEmpty" role="status">{summary.errors.profiles ? "Список профилей временно недоступен." : "Загрузка профилей…"}</p>}
+                      {mihomoProfiles?.length === 0 && <p className="overviewEmpty">Профили ещё не созданы.</p>}
                     </div>
                   </section>
                 </div>
 
                 <footer>
-                  <span>{mihomoStatus?.credentials || 0} credentials</span>
+                  <span>{credentialsCount ?? "—"} credentials</span>
                   <span>{mihomoStatus?.endpoint || overview?.server.public_endpoint || overview?.server.public_ip || "—"}</span>
                 </footer>
-                {mihomoSummaryError && <div className="overviewInlineWarning">{mihomoSummaryError}</div>}
+                {mihomoSummaryError && <div className="overviewInlineWarning" role="status">{mihomoSummaryError}. <button type="button" onClick={() => void summaryStore.refresh(true)}>Повторить проверку</button></div>}
               </section>
             )}
 
@@ -557,7 +471,7 @@ export function OverviewDashboard({
           </div>
 
           <aside className="overviewExit">
-            {mihomoInstalled && <div className="violet"><ExitGlyph /><strong>Internet</strong><small>{mihomoInUseCount ? "Mihomo route active" : "Mihomo ready / idle"}</small></div>}
+            {mihomoInstalled && <div className="violet"><ExitGlyph /><strong>Internet</strong><small>{!mihomoUsageKnown ? "Ожидание данных Mihomo" : mihomoInUseCount ? "Mihomo route active" : "Mihomo ready / idle"}</small></div>}
             {directChannels.length > 0 && <div className="cyan"><ExitGlyph /><strong>Internet</strong><small>{directInUseCount ? "direct traffic active" : "direct routes idle"}</small></div>}
           </aside>
         </div>
@@ -608,8 +522,8 @@ export function OverviewDashboard({
           <FactCard label="LOAD 1M" value={overview?.resources.load1?.toFixed(2) || "—"} detail={`${overview?.resources.cpu_count || 0} CPU cores`} />
           <FactCard label="TRAFFIC TOTAL" value={bytes(networkTotal)} detail={`↓ ${bytes(overview?.resources.network_rx || 0)}  ↑ ${bytes(overview?.resources.network_tx || 0)}`} />
           <FactCard label="DIRECT CLIENTS" value={`${clients.length}`} detail={`${stableDirectClients} stable  ${attentionDirectClients} attention  ${offlineDirectClients} offline`} />
-          <FactCard label="MIHOMO CREDENTIALS" value={`${mihomoStatus?.credentials || 0}`} detail={`${profileCount} profiles  ${mihomoStatus?.profiles_in_use || 0} in use`} />
-          <FactCard label="ROUTES IN USE" value={`${routesInUse}`} detail={`${routesReady} ready / idle`} />
+          <FactCard label="MIHOMO CREDENTIALS" value={`${credentialsCount ?? (mihomoInstalled ? "—" : 0)}`} detail={`${profileCount} profiles  ${mihomoProfiles?.filter((profile) => profile.connections.length > 0).length ?? mihomoStatus?.profiles_in_use ?? (mihomoInstalled ? "—" : 0)} in use`} />
+          <FactCard label="ROUTES IN USE" value={`${routesInUseLabel}`} detail={`${routesReadyLabel} ready / idle`} />
           <FactCard label="FREE MEMORY" value={bytes(memoryFree)} detail={`${memUsed.toFixed(0)}% currently used`} />
         </div>
       </section>
@@ -634,7 +548,7 @@ export function OverviewDashboard({
               const directStatus = isDirect ? directStatuses[protocol] : undefined;
               const statusFailed = isDirect && Boolean(directStatusFailures[protocol]);
               const statusKnown = image.id === "mihomo"
-                ? Boolean(mihomoStatus) || Boolean(mihomoSummaryError)
+                ? Boolean(mihomoStatus) || Boolean(summary.errors.status)
                 : isDirect
                   ? Boolean(directStatus) || statusFailed
                   : typeof image.active === "boolean";
@@ -660,7 +574,7 @@ export function OverviewDashboard({
                 ? { className: "available", label: "ДОСТУПЕН" }
                 : !statusKnown
                   ? { className: "checking", label: "ПРОВЕРКА" }
-                  : statusFailed || (image.id === "mihomo" && Boolean(mihomoSummaryError))
+                  : statusFailed || (image.id === "mihomo" && Boolean(summary.errors.status) && !mihomoStatus)
                     ? { className: "unavailable", label: "НЕТ ДАННЫХ" }
                     : running
                       ? { className: "online", label: "РАБОТАЕТ" }

@@ -410,7 +410,6 @@ test("overview aggregates network usage for Mihomo profiles and direct protocols
   ]);
   assert.match(manager, /@app\.get\("\/api\/mihomo\/stats"/);
   assert.match(manager, /profile_stats_payload\(item\)/);
-  assert.match(overview, /fetch\("\/api\/mihomo\/stats"/);
   assert.match(overview, /mihomoProfileStats\[profile\.id\]/);
   assert.match(overview, /protocolClients\.reduce\(\(sum, client\) => sum \+ \(client\.rx_bps \|\| 0\)/);
   assert.match(overview, /hasClientRates \? clientRx : rate\.rx/);
