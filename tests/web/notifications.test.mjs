@@ -1,8 +1,42 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createNotificationStore } from "../../src/shared/notifications/store.ts";
+import { systemOperationNotification } from "../../src/control-panel/system-operation.ts";
 
 const operation = (id, state = "running", message = id) => ({ id, state, message, source: "test", title: id, kind: "operation" });
+
+test("API acknowledgement, shell progress and confirmed result share one card", () => {
+  for (const state of ["success", "error"]) {
+    const store = createNotificationStore();
+    const action = { unit: "install-123.service", action: "protocol-install:mihomo", started_at: "2026-09-10T01:00:00.123Z", progress: 3 };
+    const initial = systemOperationNotification(action, "Install", true);
+    store.upsert(initial);
+    const progress = systemOperationNotification({ ...action, started_at: "2026-09-10T04:00:01+03:00", progress: 80 }, "Install", true);
+    store.upsert(progress);
+    assert.equal(store.getSnapshot().length, 1);
+    assert.equal(store.getSnapshot()[0].progress, 80);
+    store.finishOperation({ ...progress, state, message: "Result details", progress: undefined });
+    store.upsert(initial);
+    assert.equal(store.getSnapshot().length, 1);
+    assert.equal(store.getSnapshot()[0].state, state);
+    store.dismiss(initial.id);
+    store.upsert(progress);
+    assert.equal(store.getSnapshot().length, 0);
+    store.upsert(systemOperationNotification({ ...action, unit: "install-456.service" }, "Install", true));
+    assert.equal(store.getSnapshot().length, 1, "a separate command must remain visible");
+  }
+});
+
+test("operation details are shown only on failure", () => {
+  const store = createNotificationStore();
+  for (const state of ["running", "unknown", "success"]) {
+    store.upsert(operation("one", state, "Verbose execution details"));
+    assert.doesNotMatch(store.getSnapshot()[0].message, /Verbose/);
+  }
+  const failed = systemOperationNotification({ unit: "one", state: "failed", message: "Actual error details" }, "Command", false);
+  store.upsert(failed);
+  assert.equal(store.getSnapshot().find((item) => item.id === failed.id).message, "Actual error details");
+});
 
 test("parallel commands and form errors retain independent cards", () => {
   const store = createNotificationStore();

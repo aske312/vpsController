@@ -209,11 +209,10 @@ test("SSH management does not start socket activation and the daemon together", 
   assert.match(manager, /start_preferred_ssh/);
 });
 
-test("command UI exposes only final public outcomes while technical errors stay in journals", async () => {
-  const [api, mihomo, dock] = await Promise.all([
+test("backend keeps sensitive technical command errors in journals", async () => {
+  const [api, mihomo] = await Promise.all([
     readApiSources(),
     read("protocol-images/mihomo/manager.py"),
-    read("src/control-panel/components/operation-notifications.tsx"),
   ]);
   for (const backend of [api, mihomo]) {
     assert.match(backend, /PUBLIC_COMMAND_ERROR/);
@@ -221,8 +220,6 @@ test("command UI exposes only final public outcomes while technical errors stay 
     assert.match(backend, /Suppressed technical/);
   }
   assert.match(mihomo, /if state == "failed":[\s\S]*message = PUBLIC_COMMAND_ERROR/);
-  assert.match(dock, /Команда выполняется\. Итог появится после завершения\./);
-  assert.doesNotMatch(dock, /action\?\.message \|\| action\?\.unit/);
 });
 
 test("channel DNS follows installed protected channels and security lives under system", async () => {

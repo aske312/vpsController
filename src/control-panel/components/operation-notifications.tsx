@@ -3,8 +3,8 @@
 import { useEffect, useRef } from "react";
 import type { CdnOperation } from "../../shared/lib/cdn-security-operation";
 import { useNotifications } from "../../shared/notifications/notification-center";
+import { systemOperationId, systemOperationNotification, type SystemAction } from "../system-operation";
 
-type SystemAction = { unit?: string; action?: string; state?: string; result?: string; started_at?: string; progress?: number; message?: string };
 type Props = { action?: SystemAction | null; label?: string; active: boolean; command?: CdnOperation | null; onRecheck?: () => void; onDismiss?: () => void };
 
 /** Adapt polled server state to the shared center; this component has no UI. */
@@ -13,15 +13,11 @@ export function OperationNotifications({ action, label, active, command, onReche
   const tracked = useRef(new Set<string>());
   useEffect(() => {
     if (!action) return;
-    const id = `operation:system:${action.unit || action.action}:${action.started_at || ""}`;
+    const id = systemOperationId(action);
     if (active) tracked.current.add(id);
     if (!tracked.current.has(id)) return;
-    const failed = action.state === "failed" || action.result === "failed";
-    const done = ["succeeded", "finished"].includes(action.state || "");
-    const state = failed ? "error" : done ? "success" : active ? "running" : "unknown";
     const title = label || action.action || "Системная операция";
-    store.upsert({ id, source: "system", title, state, kind: "operation", progress: active ? action.progress : undefined,
-      message: failed ? `${title}: выполнение завершилось с ошибкой` : done ? `${title}: успешно завершено` : active ? "Команда выполняется. Итог появится после завершения." : "Результат команды пока не подтверждён." });
+    store.upsert(systemOperationNotification(action, title, active));
   }, [store, action, label, active]);
   useEffect(() => {
     if (!command) return;

@@ -29,6 +29,7 @@ export function createNotificationStore(now = Date.now) {
   let networkSince: number | undefined;
   const listeners = new Set<() => void>();
   const dismissed = new Map<string, string>();
+  const finishedOperations = new Set<string>();
   const failures = new Map<string, { title: string; values: Record<string, NotificationFailure>; reconnecting: boolean; action?: NotificationAction }>();
   const emit = () => listeners.forEach((listener) => listener());
 
@@ -40,6 +41,11 @@ export function createNotificationStore(now = Date.now) {
   }
 
   function upsert(input: NotificationInput) {
+    if (finishedOperations.has(input.id)) return input.id;
+    if (input.kind === "operation" && input.state !== "error") {
+      const summaries = { running: "Выполняется…", unknown: "Ожидаем подтверждения результата.", success: "Готово.", info: "Ожидает выполнения." };
+      input = { ...input, message: summaries[input.state] };
+    }
     const previous = items.find((item) => item.id === input.id);
     const signature = fingerprint(input);
     if (dismissed.get(input.id) === signature) return input.id;
@@ -106,8 +112,15 @@ export function createNotificationStore(now = Date.now) {
     getSnapshot: () => items,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     upsert, notify, resolve, dismiss,
+    finishOperation: (input: NotificationInput) => {
+      upsert(input);
+      // A confirmed result must not be replaced by a late progress poll,
+      // including after the completed card has been dismissed.
+      finishedOperations.add(input.id);
+      if (finishedOperations.size > 200) finishedOperations.delete(finishedOperations.values().next().value!);
+    },
     clearCompleted: () => [...items].filter((item) => !isPending(item)).forEach((item) => dismiss(item.id)),
-    reset: () => { items = []; failures.clear(); dismissed.clear(); networkSince = undefined; pausedAt = undefined; emit(); },
+    reset: () => { items = []; failures.clear(); dismissed.clear(); finishedOperations.clear(); networkSince = undefined; pausedAt = undefined; emit(); },
     setFailures: (source: string, title: string, values: Record<string, NotificationFailure>, reconnecting = false, action?: NotificationAction) => {
       failures.set(source, { title, values, reconnecting, action });
       syncFailures();

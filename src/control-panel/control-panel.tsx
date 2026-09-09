@@ -24,6 +24,7 @@ import { ProtocolView } from "../features/protocols/protocol-view";
 import { LoginView } from "../features/auth/login-view";
 import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, DnsCheck, DnsSettings, DnsStatus, LiveStatus, LoggingSettings, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
 import { actionLabels, bytes, CLIENTS_PER_PAGE, directProtocolOrder, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
+import { systemOperationNotification, type SystemAction } from "./system-operation";
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
@@ -846,6 +847,12 @@ export function ControlPanel() {
     } finally { setBusy(false); }
   }
 
+  function finishSystemCommand(action: SystemAction, error?: string) {
+    const title = actionLabels[(action.action || "").split(":")[0]] || "Операция";
+    notifications.finishOperation({ ...systemOperationNotification(action, title, false),
+      state: error !== undefined ? "error" : "success", message: error === undefined ? "" : error || "Команда завершилась с ошибкой.", progress: undefined });
+  }
+
   async function waitForProtocolState(image: ProtocolImage, installed: boolean) {
     for (let attempt = 0; attempt < 120; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 5000));
@@ -879,12 +886,13 @@ export function ControlPanel() {
       confirmLabel: "Установить",
     })) return;
     setBusy(true); setInstallingProtocol(image.id);
+    let started: SystemAction | undefined;
     try {
-      const started = await request(`/protocol-images/${image.id}/install`, { method: "POST" });
+      started = await request(`/protocol-images/${image.id}/install`, { method: "POST" });
       setApplication((current) => ({
         api: current?.api || { active: true, enabled: true },
         containers: current?.containers || [],
-        action: started,
+        action: started!,
       }));
       await waitForProtocolState(image, true);
       if (image.id === "mihomo") {
@@ -897,10 +905,11 @@ export function ControlPanel() {
           loadProtocolStatus(image.id as Protocol),
         ]);
       }
-      notifySuccess(`${image.name} установлен и готов к работе`);
+      finishSystemCommand(started!);
     } catch (cause) {
       setInstallingProtocol("");
-      notifyError(cause instanceof Error ? cause.message : "Не удалось запустить установку протокола");
+      const message = cause instanceof Error ? cause.message : "Не удалось запустить установку протокола";
+      if (started) finishSystemCommand(started, message); else notifyError(message);
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
 
@@ -942,18 +951,20 @@ export function ControlPanel() {
       danger: image.update_breaking,
     })) return;
     setBusy(true); setInstallingProtocol(`update-${image.id}`);
+    let started: SystemAction | undefined;
     try {
-      const started = await request(`/protocol-images/${image.id}/update`, { method: "POST" });
+      started = await request(`/protocol-images/${image.id}/update`, { method: "POST" });
       setApplication((current) => ({
         api: current?.api || { active: true, enabled: true },
         containers: current?.containers || [],
-        action: started,
+        action: started!,
       }));
       await waitForProtocolUpdate(image);
       await Promise.all([loadOverview(), loadProtocolStatus(image.id as Protocol)]);
-      notifySuccess(`${image.name} обновлён до ${image.available_version}`);
+      finishSystemCommand(started!);
     } catch (cause) {
-      notifyError(cause instanceof Error ? cause.message : "Не удалось запустить обновление протокола");
+      const message = cause instanceof Error ? cause.message : "Не удалось запустить обновление протокола";
+      if (started) finishSystemCommand(started, message); else notifyError(message);
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
 
@@ -1096,13 +1107,13 @@ export function ControlPanel() {
       ? undefined
       : directProtocolOrder.find((protocol) => protocol !== image.id && protocolImages.some((candidate) => candidate.id === protocol && candidate.installed));
     setBusy(true); setInstallingProtocol(`remove-${image.id}`);
+    let started: SystemAction | undefined;
     try {
-      const started = await request(`/protocol-images/${image.id}`, { method: "DELETE" });
-      notifySuccess(`Удаление ${image.name} запущено. Не закрывайте страницу до подтверждения.`);
+      started = await request(`/protocol-images/${image.id}`, { method: "DELETE" });
       setApplication((current) => ({
         api: current?.api || { active: true, enabled: true },
         containers: current?.containers || [],
-        action: started,
+        action: started!,
       }));
       await waitForProtocolState(image, false);
       setProtocolStatuses((current) => {
@@ -1122,10 +1133,11 @@ export function ControlPanel() {
       } else {
         setTab("overview");
       }
-      notifySuccess(`${image.name} удалён`);
+      finishSystemCommand(started!);
     } catch (cause) {
       setInstallingProtocol("");
-      notifyError(cause instanceof Error ? cause.message : "Не удалось запустить удаление протокола");
+      const message = cause instanceof Error ? cause.message : "Не удалось запустить удаление протокола";
+      if (started) finishSystemCommand(started, message); else notifyError(message);
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
 
