@@ -1,9 +1,39 @@
 """Prepare parallel VLESS listeners without invalidating the previous YAML."""
 from copy import deepcopy
+import hashlib
+import json
 import secrets
 import uuid
 
 GRACE_SECONDS = 15 * 60
+DELIVERY_SETTLE_SECONDS = 30
+
+
+def transition_delivery_revision(profile, device_id):
+    """Bind a subscription response to this device and this transition only."""
+    device = next((item for item in profile.get("devices", []) if item.get("id") == device_id), {})
+    value = {
+        "name": profile.get("name"),
+        "routing": device.get("routing", profile.get("routing", {})),
+        "connections": [item for item in profile.get("connections", []) if item.get("device_id") == device_id],
+        "retiring": [{"id": item.get("id"), "credential": item.get("credential"),
+                      "deadline": item.get("transition_deadline", item.get("expires_at"))}
+                     for item in profile.get("retiring_connections", []) if item.get("device_id") == device_id],
+    }
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def mark_transition_delivered(profile, device_id, revision, served_at):
+    if transition_delivery_revision(profile, device_id) != revision:
+        return False
+    changed = False
+    for entry in profile.get("retiring_connections", []):
+        if entry.get("device_id") == device_id and entry.get("yaml_served_revision") != revision:
+            entry.setdefault("transition_deadline", entry["expires_at"])
+            entry.update(yaml_served_revision=revision, yaml_served_at=served_at,
+                         expires_at=min(entry["expires_at"], served_at + DELIVERY_SETTLE_SECONDS))
+            changed = True
+    return changed
 
 
 def stage_vless_transition(config, connection, decryption, encryption):

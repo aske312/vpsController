@@ -11,11 +11,14 @@ type Options = { timeoutMs?: number; pollDelayMs?: number };
 
 export function profileTransitionMessage(profile: Profile, deviceId?: string): string {
   const statuses = deviceId ? [profile.protection_status?.[deviceId]] : Object.values(profile.protection_status ?? {});
-  const deadlines = statuses.flatMap((status) => status?.previous_valid_until ? [status.previous_valid_until * 1000] : []);
-  if (!deadlines.length) return "";
+  const transitions = statuses.filter((status) => status?.previous_valid_until);
+  if (!transitions.length) return "";
+  const waiting = transitions.filter((status) => status?.yaml_served_at == null);
+  if (!waiting.length) return "Новая конфигурация выдана клиенту. Ожидание обновления завершено; прежние подключения отключаются.";
+  const deadlines = waiting.map((status) => status!.previous_valid_until! * 1000);
   const deadline = Math.min(...deadlines);
   return deadline > Date.now()
-    ? `Старая конфигурация доступна до ${new Date(deadline).toLocaleTimeString("ru-RU")}. Обновите подписку в VPN-клиенте; до перехода действует прежняя защита.`
+    ? `Старая конфигурация доступна до ${new Date(deadline).toLocaleTimeString("ru-RU")} или до обновления подписки клиентом. Обновите подписку в VPN-клиенте; до перехода действует прежняя защита.`
     : "Старая конфигурация ожидает отключения. Обновите подписку в VPN-клиенте.";
 }
 

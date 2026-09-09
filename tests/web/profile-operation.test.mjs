@@ -1,11 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkProfileMutation, ProfileResultUnknown, submitProfileMutation } from "../../src/features/mihomo/profile-operation.ts";
+import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, submitProfileMutation } from "../../src/features/mihomo/profile-operation.ts";
 
 const mutation = { profileId: "profile-1", payload: { operation_id: "operation-1", name: "Test" } };
 const confirmed = { id: "profile-1", last_operation_id: "operation-1" };
 const interrupted = () => Object.assign(new Error("connection lost"), { kind: "network" });
 const options = { timeoutMs: 150, pollDelayMs: 0 };
+
+test("YAML delivery ends that device's waiting message without hiding other pending devices", () => {
+  const previous_valid_until = Date.now() / 1000 + 900;
+  const profile = { protection_status: {
+    common: { previous_valid_until },
+    device: { previous_valid_until, yaml_served_at: Date.now() / 1000 },
+  } };
+  assert.match(profileTransitionMessage(profile, "device"), /Ожидание обновления завершено/);
+  assert.doesNotMatch(profileTransitionMessage(profile, "device"), /доступна до/);
+  assert.match(profileTransitionMessage(profile, "common"), /доступна до/);
+  assert.match(profileTransitionMessage(profile), /доступна до/);
+  assert.equal(profileTransitionMessage({ protection_status: { device: {} } }, "device"), "");
+});
 
 test("successful profile save needs no recovery requests", async () => {
   let calls = 0;

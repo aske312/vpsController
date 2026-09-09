@@ -2,6 +2,8 @@
 from contextlib import ExitStack
 from copy import deepcopy
 import asyncio
+import hashlib
+import hmac
 import json
 from pathlib import Path
 import tempfile
@@ -10,6 +12,8 @@ import unittest
 from unittest.mock import patch
 
 from tests.api.support import manager
+
+render_profile = manager.render_profile
 
 
 class ProfileTransitionTests(unittest.TestCase):
@@ -24,6 +28,7 @@ class ProfileTransitionTests(unittest.TestCase):
         self.profile_file = self.root / "profiles.json"
         self.clock = 1000.0
         credential = {"uuid": "old-id", "encryption": "", "direct_tag": "mihomo-vless-original", "port": 13000,
+                      "transport": "raw", "servername": "example.com", "public_key": "test-key", "short_id": "abcd",
                       "cdn_enabled": True, "cdn_domain": "example.com", "cdn_port": 13001, "cdn_path": "/old", "cdn_transport": "websocket",
                       "tls_enabled": True, "tls_domain": "example.com", "tls_port": 13002, "tls_path": "/old-tls", "tls_transport": "grpc"}
         self.profile = {"id": "profile", "name": "Profile", "last_operation_id": "saved-id", "common_device_id": "common",
@@ -141,6 +146,91 @@ class ProfileTransitionTests(unittest.TestCase):
             manager.update_profile("profile", manager.ProfileUpdate(name="Profile"))
         self.assertEqual((self.profile_file.read_bytes(), self.config.read_bytes()), before)
         self.assertEqual({p.stem for p in self.routes.glob("*.json")}, {"original", "tls-original"})
+
+    def subscription_response(self, hwid=None):
+        request = manager.Request({"type": "http", "method": "GET", "path": "/s/test-token", "query_string": b"",
+                                   "headers": [(b"x-device-id", hwid.encode())] if hwid else []})
+        return manager.public_profile_subscription("test-token", request)
+
+    def test_new_yaml_delivery_finishes_waiting_after_send_and_shortens_cleanup(self):
+        self.profile["subscription_token"] = "test-token"
+        self.transition()
+        new_uuid = self.profile["connections"][0]["credential"]["uuid"]
+        dns = {"enhanced_mode": "fake-ip", "nameserver": "https://dns.google/dns-query", "fallback": "https://cloudflare-dns.com/dns-query"}
+        with patch.object(manager, "render_profile", side_effect=render_profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "routing_settings", return_value={}), patch.object(manager, "public_endpoint", return_value="example.com"):
+            response = self.subscription_response()
+        self.assertIn(new_uuid, response.body.decode())
+        self.assertIn('encryption: "public"', response.body.decode())
+        self.assertNotIn("old-id", response.body.decode())
+        self.assertEqual(response.headers["cache-control"], "no-store")
+
+        async def receive():
+            return {"type": "http.request", "body": b""}
+
+        async def failed_send(_):
+            raise OSError("connection lost")
+
+        with self.assertRaises(OSError):
+            asyncio.run(response({"type": "http"}, receive, failed_send))
+        self.assertEqual(manager.profiles()[0]["retiring_connections"][0]["expires_at"], 1900)
+
+        async def send(_):
+            self.assertNotIn("yaml_served_at", manager.profile_response(manager.profiles()[0])["protection_status"]["common"])
+
+        asyncio.run(response({"type": "http"}, receive, send))
+        stored = manager.profiles()[0]
+        self.assertEqual(stored["retiring_connections"][0]["expires_at"], 1030)
+        self.assertEqual(manager.profile_response(stored)["protection_status"]["common"]["yaml_served_at"], 1000)
+        self.clock = 1020
+        asyncio.run(self.subscription_response().background())
+        self.assertEqual(manager.profiles()[0]["retiring_connections"][0]["expires_at"], 1030)
+        manager.cleanup_profile_transitions()
+        self.assertEqual(len(json.loads(self.config.read_text())["inbounds"]), 6)
+        self.clock = 1030
+        manager.cleanup_profile_transitions()
+        self.assertEqual(manager.profiles()[0]["retiring_connections"], [])
+        self.assertEqual(len(json.loads(self.config.read_text())["inbounds"]), 3)
+
+    def test_hwid_delivery_does_not_finish_another_device_or_common_pool(self):
+        self.profile["subscription_token"] = "test-token"
+        self.transition()
+        device = {"id": "hwid-device", "name": "Device", "routing": {"tunnel_privacy": True},
+                  "hwid_hash": hmac.new(b"test-token", b"device", hashlib.sha256).hexdigest()}
+        self.profile["devices"].append(device)
+        for key in ("connections", "retiring_connections"):
+            copied = deepcopy(self.profile[key][0])
+            copied.update(id="device-channel", device_id=device["id"])
+            self.profile[key].append(copied)
+        manager.save_profiles([self.profile])
+        asyncio.run(self.subscription_response("device").background())
+        status = manager.profile_response(manager.profiles()[0])["protection_status"]
+        self.assertNotIn("yaml_served_at", status["common"])
+        self.assertEqual(status["common"]["previous_valid_until"], 1900)
+        self.assertEqual(status["hwid-device"]["previous_valid_until"], 1030)
+        self.assertEqual(status["hwid-device"]["yaml_served_at"], 1000)
+
+    def test_old_response_and_admin_download_cannot_finish_a_new_transition(self):
+        self.profile["subscription_token"] = "test-token"
+        self.transition()
+        response = self.subscription_response()
+        self.clock = 1010
+        self.profile["devices"][0]["routing"]["tunnel_privacy"] = False
+        self.transition()
+        asyncio.run(response.background())
+        self.assertEqual(manager.profiles()[0]["retiring_connections"][0]["expires_at"], 1910)
+        self.assertIsNone(manager.profile_config("profile").background)
+        with patch.object(manager, "validate_rendered_profile", side_effect=ValueError("invalid yaml")):
+            with self.assertRaises(ValueError):
+                self.subscription_response()
+        self.assertNotIn("yaml_served_at", manager.profile_response(manager.profiles()[0])["protection_status"]["common"])
+
+    def test_delivery_recording_failure_keeps_original_grace_period(self):
+        self.profile["subscription_token"] = "test-token"
+        self.transition()
+        response = self.subscription_response()
+        with patch.object(manager, "save_profiles", side_effect=OSError("disk unavailable")), self.assertLogs(manager.logger, level="ERROR"):
+            asyncio.run(response.background())
+        self.assertEqual(manager.profiles()[0]["retiring_connections"][0]["expires_at"], 1900)
 
     def test_manager_startup_resumes_cleanup_without_a_browser_request(self):
         called = threading.Event()

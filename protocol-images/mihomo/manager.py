@@ -28,11 +28,12 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from profile_transition import GRACE_SECONDS, stage_vless_transition
+from profile_transition import GRACE_SECONDS, stage_vless_transition, transition_delivery_revision, mark_transition_delivered
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
 
@@ -523,6 +524,9 @@ def profile_response(item: dict[str, Any]) -> dict[str, Any]:
         if retiring:
             result["protection_status"][device_id]["previous_connections"] = len(retiring)
             result["protection_status"][device_id]["previous_valid_until"] = min(entry["expires_at"] for entry in retiring)
+            revision = transition_delivery_revision(item, device_id)
+            if all(entry.get("yaml_served_revision") == revision and entry.get("yaml_served_at") is not None for entry in retiring):
+                result["protection_status"][device_id]["yaml_served_at"] = max(entry["yaml_served_at"] for entry in retiring)
     return result
 
 
@@ -3543,7 +3547,8 @@ def subscription_device_metadata(request: Request) -> dict[str, str]:
             "macos": r"Mac OS X[ /]([0-9]+(?:[_\.]\d+){0,3})",
             "windows": r"Windows NT[ /]([0-9]+(?:\.\d+){0,3})",
         }
-        version_match = re.search(version_patterns.get(device_os, r"$^"), user_agent, re.IGNORECASE)
+        version_pattern = version_patterns.get(device_os)
+        version_match = re.search(version_pattern, user_agent, re.IGNORECASE) if version_pattern else None
         if version_match:
             os_version = version_match.group(1).replace("_", ".")
     client_name = clean(request.headers.get("x-client-name"), 80)
@@ -3624,6 +3629,21 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, meta
     return normalize_profile(profile), device_id
 
 
+@serialized_profile_mutation
+def record_transition_delivery(profile_id: str, device_id: str, revision: str) -> None:
+    # Runs after ASGI sends the YAML body. A short settling period lets the
+    # client apply it before the existing worker removes the old listeners.
+    try:
+        data = profiles()
+        item = next((entry for entry in data if entry.get("id") == profile_id), None)
+        if item and mark_transition_delivered(item, device_id, revision, time.time()):
+            save_profiles(data)
+    except Exception:
+        # The response was already sent. Preserve the original grace period
+        # if recording delivery fails; another subscription refresh can retry.
+        logger.error("Could not record updated subscription delivery")
+
+
 @app.get("/s/{token}", response_class=PlainTextResponse)
 @app.get("/api/mihomo/subscriptions/{token}", response_class=PlainTextResponse)
 def public_profile_subscription(token: str, request: Request) -> PlainTextResponse:
@@ -3649,9 +3669,14 @@ def public_profile_subscription(token: str, request: Request) -> PlainTextRespon
             selected_profile = record_common_subscription_access(latest, subscription_device_metadata(request))
     config = render_profile(selected_profile, selected_device)
     validate_rendered_profile(config)
+    delivery = None
+    if any(entry.get("device_id") == selected_device for entry in selected_profile.get("retiring_connections", [])):
+        delivery = BackgroundTask(record_transition_delivery, selected_profile["id"], selected_device,
+                                  transition_delivery_revision(selected_profile, selected_device))
     return PlainTextResponse(
         config,
         media_type="text/yaml; charset=utf-8",
+        background=delivery,
         headers={
             "Cache-Control": "no-store",
             "Content-Disposition": f'inline; filename="{profile_export_filename(selected_profile)}"',

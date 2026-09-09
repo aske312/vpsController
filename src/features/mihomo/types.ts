@@ -64,7 +64,7 @@ export type Profile = {
   routing?: Record<string, string | number | boolean>;
   devices?: ProfileDevice[];
   common_device_id?: string;
-  protection_status?: Record<string, { vless_connections: number; encryption_pending: boolean; previous_connections?: number; previous_valid_until?: number }>;
+  protection_status?: Record<string, { vless_connections: number; encryption_pending: boolean; previous_connections?: number; previous_valid_until?: number; yaml_served_at?: number }>;
   subscription_status?: "active" | "obsolete" | "missing";
   created_at: string;
   updated_at: string;
