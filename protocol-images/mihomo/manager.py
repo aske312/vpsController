@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import asyncio
+from copy import deepcopy
 import functools
 import fcntl
 import hashlib
@@ -20,7 +22,7 @@ import time
 import uuid
 import urllib.request
 import urllib.parse
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +31,8 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from profile_transition import GRACE_SECONDS, stage_vless_transition
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
 
@@ -83,6 +87,7 @@ def transactional_profile_mutation(function):
             current = next((item for item in profiles() if str(item.get("id")) == profile_id), None)
             if current:
                 modules.update(str(connection.get("component")) for connection in current.get("connections", []))
+                modules.update(str(connection.get("component")) for connection in current.get("retiring_connections", []))
             payload = kwargs.get("payload") or (args[1] if len(args) > 1 else None)
             if payload is not None and getattr(payload, "connections", None) is not None:
                 modules.update(str(connection.component) for connection in payload.connections)
@@ -197,12 +202,35 @@ for _module_id in TRANSPORTS:
     if isinstance(_manifest_value, dict) and _manifest_value.get("service"):
         SERVICE_BY_MODULE[_module_id] = str(_manifest_value["service"])
 
+def transition_worker(stopped: threading.Event) -> None:
+    while not stopped.is_set():
+        try:
+            cleanup_profile_transitions()
+        except Exception:
+            # Rollback retains the previous listeners; retry without exposing keys.
+            logger.error("Profile transition cleanup failed; retrying in 60 seconds")
+        stopped.wait(60)
+
+
+@asynccontextmanager
+async def manager_lifespan(_app):
+    stopped = threading.Event()
+    worker = threading.Thread(target=transition_worker, args=(stopped,), daemon=True)
+    worker.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        await asyncio.to_thread(worker.join, 10)
+
+
 app = FastAPI(
     title="GATE.312 Mihomo Manager",
     version="1.0.0",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
+    lifespan=manager_lifespan,
 )
 logger = logging.getLogger("vps-control.mihomo")
 PUBLIC_COMMAND_ERROR = "Команда завершилась с ошибкой. Технические сведения сохранены в журнале."
@@ -480,7 +508,7 @@ def profile_export_filename(item: dict[str, Any]) -> str:
 
 
 def profile_response(item: dict[str, Any]) -> dict[str, Any]:
-    result = {key: value for key, value in normalize_profile(item).items() if key not in {"subscriptions", "subscription_token"}}
+    result = {key: value for key, value in normalize_profile(item).items() if key not in {"subscriptions", "subscription_token", "retiring_connections"}}
     result["export_filename"] = profile_export_filename(item)
     result["protection_status"] = {}
     for device in result["devices"]:
@@ -491,6 +519,10 @@ def profile_response(item: dict[str, Any]) -> dict[str, Any]:
             "vless_connections": len(connections),
             "encryption_pending": any(bool(entry.get("credential", {}).get("encryption")) != requested for entry in connections),
         }
+        retiring = [entry for entry in item.get("retiring_connections", []) if entry.get("device_id") == device_id]
+        if retiring:
+            result["protection_status"][device_id]["previous_connections"] = len(retiring)
+            result["protection_status"][device_id]["previous_valid_until"] = min(entry["expires_at"] for entry in retiring)
     return result
 
 
@@ -2690,7 +2722,7 @@ def legacy_connection_inputs(channels: list[str]) -> list[dict[str, Any]]:
     return [{"id": f"connection-{index + 1}-{uuid.uuid4().hex[:6]}", "component": component, "name": manifest(component).get("name", component), "settings": connection_defaults(component)} for index, component in enumerate(validate_channels(channels))]
 
 
-def apply_batched_reality_runtime() -> None:
+def apply_batched_reality_runtime(restart_service: bool = True) -> None:
     """Validate both consumers before one short Xray restart and one Caddy reload."""
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
@@ -2705,10 +2737,11 @@ def apply_batched_reality_runtime() -> None:
     control = Path("/usr/local/sbin/vps-control")
     if control.is_file():
         run(str(control), "vless-cdn-firewall", check=True)
-    run("systemctl", "reset-failed", "vps-control-mihomo-reality.service")
-    run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
-    if not service_stably_active("vps-control-mihomo-reality.service"):
-        raise RuntimeError("Mihomo VLESS service did not remain active after applying the profile")
+    if restart_service:
+        run("systemctl", "reset-failed", "vps-control-mihomo-reality.service")
+        run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)
+        if not service_stably_active("vps-control-mihomo-reality.service"):
+            raise RuntimeError("Mihomo VLESS service did not remain active after applying the profile")
     run("systemctl", "reload", "caddy.service", check=True)
 
 
@@ -2737,10 +2770,12 @@ def device_routing(profile: dict[str, Any], device_id: str) -> dict[str, Any]:
 
 
 def reconcile_profile_encryption(profile: dict[str, Any]) -> None:
-    """Validate both cores before applying; the caller owns the rollback transaction."""
+    """Publish new credentials while keeping the old listeners for client refresh."""
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
     changed = False
+    runtime_changed = False
+    expires_at = time.time() + GRACE_SECONDS
     for connection in profile.get("connections", []):
         if connection.get("component") != "transport-reality":
             continue
@@ -2748,20 +2783,66 @@ def reconcile_profile_encryption(profile: dict[str, Any]) -> None:
         credential = connection.get("credential", {})
         if enabled == bool(credential.get("encryption")):
             continue
-        identity = credential.get("uuid")
-        inbounds = [entry for entry in config.get("inbounds", []) if identity and entry.get("protocol") == "vless" and any(client.get("id") == identity for client in entry.get("settings", {}).get("clients", []))]
-        if not inbounds or any(len(entry["settings"]["clients"]) != 1 for entry in inbounds):
-            raise HTTPException(status_code=409, detail="Невозможно безопасно обновить шифрование канала: проверьте конфигурацию сервера.")
-        decryption, encryption = vless_encryption_pair({"privacy_mode": "encrypted" if enabled else "standard"})
-        for entry in inbounds:
-            entry["settings"]["decryption"] = decryption
-        credential["encryption"] = encryption
+        retiring = profile.setdefault("retiring_connections", [])
+        previous = next((entry for entry in retiring if entry["id"] == connection["id"]), None)
+        old_connection = deepcopy(connection)
+        if previous:
+            # Toggling back reuses the retained generation: at most two per channel.
+            if bool(previous["credential"].get("encryption")) != enabled:
+                raise HTTPException(status_code=409, detail="Дождитесь завершения предыдущего перехода подключения.")
+            connection["credential"] = previous["credential"]
+            retiring.remove(previous)
+        else:
+            decryption, encryption = vless_encryption_pair({"privacy_mode": "encrypted" if enabled else "standard"})
+            try:
+                connection["credential"] = stage_vless_transition(config, connection, decryption, encryption)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            runtime_changed = True
+        retiring.append({**old_connection, "expires_at": expires_at})
+        credential = connection["credential"]
+        if connection.get("settings", {}).get("port"):
+            connection["settings"]["port"] = credential["port"]
+        if not previous:
+            route_id = credential["direct_tag"].removeprefix("mihomo-vless-")
+            for kind in ("cdn", "tls"):
+                if credential.get(f"{kind}_enabled"):
+                    write_mihomo_vless_cdn(("tls-" if kind == "tls" else "") + route_id, True,
+                                          credential[f"{kind}_domain"], credential[f"{kind}_path"],
+                                          credential[f"{kind}_port"], credential[f"{kind}_transport"], rebuild=False)
         changed = True
     if changed:
         for device_id in {str(entry.get("device_id", "device-1")) for entry in profile.get("connections", [])}:
             validate_rendered_profile(render_profile(profile, device_id))
-        apply_reality_config(config_path, config)
+        if runtime_changed:
+            apply_reality_config(config_path, config, restart_service=False)
+            apply_batched_reality_runtime()
         sync_legacy_profile_fields(profile)
+
+
+def remove_retiring_connections(profile: dict[str, Any], connection_id: str) -> None:
+    remaining = []
+    for entry in profile.get("retiring_connections", []):
+        if entry["id"] == connection_id:
+            deprovision(profile["id"], entry["component"], entry["credential"], defer_reality_restart=True)
+        else:
+            remaining.append(entry)
+    profile["retiring_connections"] = remaining
+
+
+@serialized_profile_mutation
+def cleanup_profile_transitions() -> None:
+    data = profiles()
+    now = time.time()
+    due = [(profile, entry) for profile in data for entry in profile.get("retiring_connections", []) if entry["expires_at"] <= now]
+    if not due:
+        return
+    with profile_runtime_transaction({"transport-reality"}):
+        for profile, entry in due:
+            deprovision(profile["id"], entry["component"], entry["credential"], defer_reality_restart=True)
+            profile["retiring_connections"].remove(entry)
+        apply_batched_reality_runtime(restart_service=systemctl_active("vps-control-mihomo-reality.service"))
+        save_profiles(data)
 
 
 def provision_connections(profile_id: str, definitions: list[dict[str, Any]], privacy_enabled: bool = False, profile: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -2823,7 +2904,7 @@ def reconciliation_report(repair: bool = False) -> dict[str, Any]:
     expected_route_ids: set[str] = set()
     expected_quic: dict[str, set[str]] = {"transport-hysteria2": set(), "transport-tuic": set()}
     for profile in saved_profiles:
-        for connection in profile.get("connections", []):
+        for connection in [*profile.get("connections", []), *profile.get("retiring_connections", [])]:
             component = str(connection.get("component", ""))
             credential = connection.get("credential", {})
             if component == "transport-reality":
@@ -2988,6 +3069,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
             if connection_id not in next_ids:
                 defer = connection["component"] == "transport-reality"
                 reality_changed = reality_changed or defer
+                remove_retiring_connections(item, connection_id)
                 deprovision(profile_id, connection["component"], connection.get("credential", {}), defer_reality_restart=defer)
         next_connections: list[dict[str, Any]] = []
         for definition in definitions:
@@ -3000,6 +3082,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
                 if current_connection:
                     defer = current_connection["component"] == "transport-reality"
                     reality_changed = reality_changed or defer
+                    remove_retiring_connections(item, definition["id"])
                     deprovision(profile_id, current_connection["component"], current_connection.get("credential", {}), defer_reality_restart=defer)
                 defer = definition["component"] == "transport-reality"
                 reality_changed = reality_changed or defer
@@ -3017,6 +3100,9 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         credentials = dict(item.get("credentials", {}))
         for module_id in current:
             if module_id not in next_channels:
+                for connection in item.get("connections", []):
+                    if connection.get("component") == module_id:
+                        remove_retiring_connections(item, connection["id"])
                 deprovision(profile_id, module_id, credentials.get(module_id, {}))
                 credentials.pop(module_id, None)
         try:
@@ -3051,7 +3137,7 @@ def delete_profile(profile_id: str) -> dict[str, Any]:
     write_action(f"profile-delete:{profile_id}", f"Удаление профиля «{item.get('name', '')}»…", progress=20)
     errors: list[str] = []
     reality_changed = False
-    for connection in item.get("connections", []):
+    for connection in [*item.get("connections", []), *item.get("retiring_connections", [])]:
         try:
             defer = connection.get("component") == "transport-reality"
             reality_changed = reality_changed or defer

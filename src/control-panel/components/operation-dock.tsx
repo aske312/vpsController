@@ -18,7 +18,8 @@ type MihomoOperation = {
   id: string;
   label: string;
   message?: string;
-  state: "running" | "success" | "error";
+  state: "running" | "success" | "error" | "unknown";
+  onRecheck?: () => void;
 };
 
 type Props = {
@@ -42,7 +43,7 @@ export function OperationDock({ action, label, active, command, onRecheck, onDis
       if (!detail?.id) return;
       if (clearTimer.current) window.clearTimeout(clearTimer.current);
       setMihomo(detail);
-      if (detail.state !== "running") {
+      if (detail.state === "success" || detail.state === "error") {
         clearTimer.current = window.setTimeout(() => setMihomo(null), detail.state === "error" ? 5500 : 2600);
       }
     };
@@ -93,11 +94,12 @@ export function OperationDock({ action, label, active, command, onRecheck, onDis
             <div className="gateOperationText">
               <span>MIHOMO OPERATION</span>
               <strong>{mihomo.label}</strong>
-              <small>{mihomo.message || (mihomo.state === "running" ? "Mihomo Manager выполняет команду…" : mihomo.state === "success" ? "Операция завершена" : "Операция завершилась ошибкой")}</small>
+              <small>{mihomo.message || (mihomo.state === "running" ? "Mihomo Manager выполняет команду…" : mihomo.state === "success" ? "Операция завершена" : mihomo.state === "unknown" ? "Результат операции пока не подтверждён" : "Операция завершилась ошибкой")}</small>
             </div>
-            <b className="gateOperationPercent">{mihomo.state === "running" ? "…" : mihomo.state === "success" ? "100%" : "ERR"}</b>
+            <b className="gateOperationPercent">{mihomo.state === "running" || mihomo.state === "unknown" ? "…" : mihomo.state === "success" ? "100%" : "ERR"}</b>
           </div>
-          <div className={`gateOperationTrack ${mihomo.state === "running" ? "indeterminate" : ""}`}><i style={{ width: mihomo.state === "running" ? "34%" : "100%" }} /></div>
+          <div className={`gateOperationTrack ${mihomo.state === "running" || mihomo.state === "unknown" ? "indeterminate" : ""}`}><i style={{ width: mihomo.state === "running" || mihomo.state === "unknown" ? "34%" : "100%" }} /></div>
+          {mihomo.state === "unknown" && mihomo.onRecheck && <button type="button" className="gateOperationButton" onClick={mihomo.onRecheck}>Проверить результат</button>}
         </section>
       )}
     </aside>

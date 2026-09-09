@@ -150,7 +150,6 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /if \(!profileStrategyTouched\) setProfileDevices/);
   assert.match(page, /activeProfileRouting/);
   assert.match(page, /Правила устройства/);
-  assert.match(page, /Профиль готов/);
   assert.match(page, /Скопировать ссылку/);
   assert.match(page, /title: "UDP"/);
   assert.match(page, /udpExclusionCatalog/);

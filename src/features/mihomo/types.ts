@@ -55,6 +55,8 @@ export type Module = {
 
 export type Profile = {
   id: string;
+  create_operation_id?: string;
+  last_operation_id?: string;
   export_filename: string;
   name: string;
   channels: string[];
@@ -62,7 +64,7 @@ export type Profile = {
   routing?: Record<string, string | number | boolean>;
   devices?: ProfileDevice[];
   common_device_id?: string;
-  protection_status?: Record<string, { vless_connections: number; encryption_pending: boolean }>;
+  protection_status?: Record<string, { vless_connections: number; encryption_pending: boolean; previous_connections?: number; previous_valid_until?: number }>;
   subscription_status?: "active" | "obsolete" | "missing";
   created_at: string;
   updated_at: string;

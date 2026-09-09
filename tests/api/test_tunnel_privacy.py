@@ -17,7 +17,7 @@ from tests.api.support import manager, ROOT, free_port, wait_port
 
 
 class TunnelPrivacyTests(unittest.TestCase):
-    def test_saved_legacy_flag_is_reported_and_repaired_without_recreating_connections(self):
+    def test_saved_legacy_flag_is_repaired_while_previous_yaml_remains_valid(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             config_root = root / "config"
@@ -30,14 +30,18 @@ class TunnelPrivacyTests(unittest.TestCase):
             status = manager.profile_response(item)["protection_status"]
             self.assertTrue(status["device"]["encryption_pending"])
             self.assertFalse(status["common"]["encryption_pending"])
-            with patch.object(manager, "CONFIG_ROOT", config_root), patch.object(manager, "PROFILE_FILE", profile_file), patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"), patch.object(manager, "profiles", side_effect=lambda: json.loads(profile_file.read_text())), patch.object(manager, "systemctl_active", return_value=False), patch.object(manager, "write_action"), patch.object(manager, "vless_encryption_pair", return_value=("private", "public")), patch.object(manager, "render_profile", return_value="yaml"), patch.object(manager, "validate_rendered_profile"), patch.object(manager, "apply_reality_config", side_effect=lambda path, value: path.write_text(json.dumps(value))), patch.object(manager, "provision") as provision:
+            with patch.object(manager, "CONFIG_ROOT", config_root), patch.object(manager, "PROFILE_FILE", profile_file), patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"), patch.object(manager, "profiles", side_effect=lambda: json.loads(profile_file.read_text())), patch.object(manager, "systemctl_active", return_value=False), patch.object(manager, "write_action"), patch.object(manager, "vless_encryption_pair", return_value=("private", "public")), patch.object(manager, "render_profile", return_value="yaml"), patch.object(manager, "validate_rendered_profile"), patch.object(manager, "apply_batched_reality_runtime"), patch.object(manager, "apply_reality_config", side_effect=lambda path, value, **_: path.write_text(json.dumps(value))), patch.object(manager, "provision") as provision:
                 updated = manager.update_profile("profile", manager.ProfileUpdate(name="Profile"))
             provision.assert_not_called()
             self.assertFalse(updated["protection_status"]["device"]["encryption_pending"])
-            self.assertEqual(updated["connections"][0]["credential"], {"uuid": "identity", "encryption": "public"})
+            self.assertNotEqual(updated["connections"][0]["credential"]["uuid"], "identity")
+            self.assertEqual(updated["connections"][0]["credential"]["encryption"], "public")
+            self.assertNotIn("retiring_connections", updated)
+            self.assertEqual(updated["protection_status"]["device"]["previous_connections"], 1)
             inbound = json.loads(config.read_text())["inbounds"][0]
             self.assertEqual(inbound["port"], 12345)
-            self.assertEqual(inbound["settings"]["decryption"], "private")
+            self.assertEqual(inbound["settings"]["decryption"], "none")
+            self.assertEqual(json.loads(config.read_text())["inbounds"][1]["settings"]["decryption"], "private")
             self.assertFalse(updated["devices"][0]["routing"].get("tunnel_privacy", False))
             self.assertFalse(updated["devices"][1]["routing"]["tunnel_ech"])
 
@@ -51,7 +55,7 @@ class TunnelPrivacyTests(unittest.TestCase):
             profile_file = root / "profiles.json"
             profile_file.write_text(json.dumps([{"id": "profile", "common_device_id": "one", "devices": [{"id": "one", "name": "Device", "routing": {}}], "connections": [{"id": "channel", "component": "transport-reality", "device_id": "one", "credential": {"uuid": "identity"}}]}]))
             original_profile, original_config = profile_file.read_bytes(), config.read_bytes()
-            def fail(path, value):
+            def fail(path, value, **_):
                 path.write_text(json.dumps(value))
                 raise RuntimeError("injected runtime failure")
             with patch.object(manager, "CONFIG_ROOT", config_root), patch.object(manager, "PROFILE_FILE", profile_file), patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"), patch.object(manager, "profiles", side_effect=lambda: json.loads(profile_file.read_text())), patch.object(manager, "systemctl_active", return_value=False), patch.object(manager, "validate_routing", side_effect=lambda values, **_: values), patch.object(manager, "write_action"), patch.object(manager, "vless_encryption_pair", return_value=("private", "public")), patch.object(manager, "render_profile", return_value="yaml"), patch.object(manager, "validate_rendered_profile"), patch.object(manager, "apply_reality_config", side_effect=fail), patch.object(manager, "provision") as provision:
@@ -75,21 +79,23 @@ class TunnelPrivacyTests(unittest.TestCase):
                     self.assertEqual(bool(proxy.get("encryption")), encrypted)
                     self.assertEqual(bool(proxy.get("ech-opts", {}).get("enable")), ech)
 
-    def test_device_change_preserves_credentials_and_other_device(self):
+    def test_device_change_preserves_previous_listener_and_other_device(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             path = root / "reality/config.json"
             path.parent.mkdir()
             original = {"inbounds": [{"protocol": "vless", "port": 11000 + i, "settings": {"clients": [{"id": identity}], "decryption": "none"}} for i, identity in enumerate(("one", "two"))]}
             path.write_text(json.dumps(original))
-            profile = {"common_device_id": "one", "devices": [{"id": name, "routing": {"tunnel_privacy": name == "one"}} for name in ("one", "two")], "connections": [{"component": "transport-reality", "device_id": name, "credential": {"uuid": name, "cdn_path": "/keep"}} for name in ("one", "two")]}
-            with patch.object(manager, "CONFIG_ROOT", root), patch.object(manager, "vless_encryption_pair", return_value=("private", "public")), patch.object(manager, "render_profile", return_value="yaml"), patch.object(manager, "validate_rendered_profile"), patch.object(manager, "apply_reality_config") as apply:
+            profile = {"common_device_id": "one", "devices": [{"id": name, "routing": {"tunnel_privacy": name == "one"}} for name in ("one", "two")], "connections": [{"id": name, "component": "transport-reality", "device_id": name, "credential": {"uuid": name, "cdn_path": "/keep"}} for name in ("one", "two")]}
+            with patch.object(manager, "CONFIG_ROOT", root), patch.object(manager, "vless_encryption_pair", return_value=("private", "public")), patch.object(manager, "render_profile", return_value="yaml"), patch.object(manager, "validate_rendered_profile"), patch.object(manager, "apply_batched_reality_runtime"), patch.object(manager, "apply_reality_config") as apply:
                 manager.reconcile_profile_encryption(profile)
                 candidate = apply.call_args.args[1]
-                self.assertEqual(candidate["inbounds"][0]["settings"]["decryption"], "private")
+                self.assertEqual(candidate["inbounds"][0], original["inbounds"][0])
+                self.assertEqual(candidate["inbounds"][2]["settings"]["decryption"], "private")
                 self.assertEqual(candidate["inbounds"][1], original["inbounds"][1])
                 self.assertEqual(candidate["inbounds"][0]["port"], 11000)
-                self.assertEqual(profile["connections"][0]["credential"]["uuid"], "one")
+                self.assertEqual(profile["retiring_connections"][0]["credential"]["uuid"], "one")
+                self.assertNotEqual(profile["connections"][0]["credential"]["uuid"], "one")
                 self.assertEqual(profile["connections"][0]["credential"]["cdn_path"], "/keep")
                 manager.reconcile_profile_encryption(profile)
                 self.assertEqual(apply.call_count, 1)
