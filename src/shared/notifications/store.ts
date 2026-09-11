@@ -9,6 +9,7 @@ export type NotificationInput = {
   kind?: "message" | "operation";
   progress?: number;
   action?: NotificationAction;
+  onCancel?: () => void | Promise<void>;
   onDismiss?: () => void;
 };
 export type Notification = NotificationInput & { count: number; createdAt: number; expiresAt?: number };
@@ -19,7 +20,7 @@ export function notificationFailure(cause: unknown, fallback: string) {
 }
 
 export const isPending = (item: Pick<Notification, "state">) => item.state === "running" || item.state === "unknown";
-const fingerprint = (item: NotificationInput) => JSON.stringify([item.state, item.title, item.message, item.progress, item.action?.label]);
+const fingerprint = (item: NotificationInput) => JSON.stringify([item.state, item.title, item.message, item.progress, item.action?.label, Boolean(item.onCancel)]);
 
 /** One store per mounted application. Nothing is shared between SSR requests. */
 export function createNotificationStore(now = Date.now) {
@@ -52,6 +53,7 @@ export function createNotificationStore(now = Date.now) {
     if (previous && fingerprint(previous) === signature) {
       // Callbacks may change while the visible message remains the same.
       previous.action = input.action;
+      previous.onCancel = input.onCancel;
       previous.onDismiss = input.onDismiss;
       return input.id;
     }

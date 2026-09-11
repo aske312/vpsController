@@ -45,6 +45,7 @@ type AppWorkspaceProps = {
   commandOperation?: CdnOperation | null;
   onRecheckCommand?: () => void;
   onDismissCommand?: () => void;
+  onCancelOperation?: () => void | Promise<void>;
   applicationStateTitle: string;
   uptimeLabel: string;
   loadLabel: string;
@@ -75,6 +76,7 @@ export function AppWorkspace({
   commandOperation,
   onRecheckCommand,
   onDismissCommand,
+  onCancelOperation,
   applicationStateTitle,
   uptimeLabel,
   loadLabel,
@@ -109,7 +111,7 @@ export function AppWorkspace({
         onNavigate={onNavigate}
       />
 
-      <OperationNotifications action={operationAction} label={operationLabel} active={operationActive} command={commandOperation} onRecheck={onRecheckCommand} onDismiss={onDismissCommand} />
+      <OperationNotifications action={operationAction} label={operationLabel} active={operationActive} command={commandOperation} onRecheck={onRecheckCommand} onDismiss={onDismissCommand} onCancel={onCancelOperation} />
 
       <section className="content">
         <header className="gateMasthead" aria-label="Состояние сервера">

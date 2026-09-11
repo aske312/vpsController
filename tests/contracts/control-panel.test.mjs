@@ -149,6 +149,19 @@ test("service settings are staged, saved explicitly and survive background refre
   assert.match(manager, /install -m 0755 "\$\{PROJECT_DIR\}\/scripts\/vps-control\.sh" "\$\{COMMAND_PATH\}"/);
 });
 
+test("long application actions can be stopped and rolled back", async () => {
+  const [api, notification, systemOperation] = await Promise.all([
+    readApiSources(),
+    read("src/shared/notifications/notification-center.tsx"),
+    read("src/control-panel/system-operation.ts"),
+  ]);
+  assert.match(api, /@app\.delete\("\/api\/application\/action"\)/);
+  assert.match(api, /systemctl", "stop", "--no-block", unit/);
+  assert.match(notification, /gateNotificationCancel/);
+  assert.match(notification, /Остановить и откатить/);
+  assert.match(systemOperation, /rollbackableActions/);
+});
+
 test("live monitoring uses stable low-load cadence and detailed server metrics", async () => {
   const [api, page] = await Promise.all([readApiSources(), readUiSources()]);
   assert.match(api, /@app\.get\("\/api\/live-status"\)/);

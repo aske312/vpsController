@@ -27,6 +27,14 @@ test("API acknowledgement, shell progress and confirmed result share one card", 
   }
 });
 
+test("rollback control is attached only to cancellable long actions", () => {
+  const cancel = () => {};
+  const update = systemOperationNotification({ unit: "vps-control-action-1.service", action: "update", state: "running" }, "Update", true, cancel);
+  const reboot = systemOperationNotification({ unit: "vps-control-action-2.service", action: "reboot", state: "running" }, "Reboot", true, cancel);
+  assert.equal(update.onCancel, cancel);
+  assert.equal(reboot.onCancel, undefined);
+});
+
 test("operation details are shown only on failure", () => {
   const store = createNotificationStore();
   for (const state of ["running", "unknown", "success"]) {

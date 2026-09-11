@@ -666,6 +666,12 @@ export function ControlPanel() {
     finally { setBusy(false); }
   }
 
+  async function cancelApplicationAction() {
+    await request("/application/action", { method: "DELETE" });
+    await loadApplication();
+    await loadApplicationLogs();
+  }
+
   async function runServiceAction(serviceId: string, serviceName: string, action: "start" | "stop" | "restart") {
     if (action === "stop" && serviceId === "ssh") {
       if (!await askConfirmation({
@@ -1495,6 +1501,7 @@ export function ControlPanel() {
     commandOperation={cdnCommand.operation}
     onRecheckCommand={cdnCommand.recheck}
     onDismissCommand={cdnCommand.dismiss}
+    onCancelOperation={cancelApplicationAction}
     operationAction={application?.action}
     operationLabel={operationLabel}
     operationActive={operationActive}

@@ -73,6 +73,7 @@ function NotificationViewport({ items }: { items: Notification[] }) {
 function NotificationCard({ item }: { item: Notification }) {
   const store = useNotifications();
   const [checking, setChecking] = useState(false);
+  const [canceling, setCanceling] = useState(false);
   const pending = isPending(item);
   const progress = Number.isFinite(item.progress) ? Math.max(0, Math.min(100, item.progress!)) : undefined;
   async function runAction() {
@@ -82,8 +83,16 @@ function NotificationCard({ item }: { item: Notification }) {
     catch (cause) { store.upsert({ ...item, state: "error", message: cause instanceof Error ? cause.message : "Не удалось выполнить действие" }); }
     finally { setChecking(false); }
   }
+  async function cancelOperation() {
+    if (canceling || !item.onCancel) return;
+    setCanceling(true);
+    try { await item.onCancel(); }
+    catch (cause) { store.upsert({ ...item, state: "error", message: cause instanceof Error ? cause.message : "Не удалось остановить команду" }); }
+    finally { setCanceling(false); }
+  }
   return <section className={`gateOperationCard ${item.state}`} role={item.state === "error" ? "alert" : "status"} aria-atomic="true" aria-label={item.title}>
     <div className="gateOperationContent">
+      {pending && item.onCancel && <button type="button" className="gateNotificationCancel" onClick={() => void cancelOperation()} disabled={canceling} aria-label={`Остановить и откатить: ${item.title}`}>{canceling ? "…" : "×"}</button>}
       <span className="gateOperationIcon" aria-hidden="true">{item.state === "error" ? "!" : item.state === "success" ? "✓" : pending ? "…" : "i"}</span>
       <div className="gateOperationText"><span>{item.kind === "operation" ? "ВЫПОЛНЕНИЕ КОМАНДЫ" : "УВЕДОМЛЕНИЕ"}{item.count > 1 ? ` · ×${item.count}` : ""}</span><strong>{item.title}</strong><small>{item.message}</small></div>
       {!pending && <button type="button" className="gateNotificationClose" onClick={() => store.dismiss(item.id)} aria-label={`Закрыть: ${item.title}`}>×</button>}

@@ -37,7 +37,7 @@
 .gateOperationCard.error { --notification-color:var(--red, #f07b7b); }
 .gateOperationCard.success { --notification-color:var(--green, #62d7b4); }
 .gateOperationCard.info { --notification-color:#97b9dc; }
-.gateOperationContent { display:grid; grid-template-columns:30px minmax(0,1fr) auto; align-items:start; gap:10px; padding:12px; }
+.gateOperationContent { display:grid; grid-template-columns:30px minmax(0,1fr) auto auto; align-items:start; gap:10px; padding:12px; }
 .gateOperationIcon {
   width:29px; height:29px; display:grid; place-items:center; border-radius:9px;
   color:var(--notification-color); background:color-mix(in srgb, var(--notification-color) 9%, transparent);
@@ -50,6 +50,9 @@
 .gateOperationText > small { color:#a6b6c0; font-size:11px; line-height:1.5; white-space:pre-wrap; }
 .gateNotificationClose { width:26px; height:26px; display:grid; place-items:center; border:0; border-radius:6px; background:rgba(255,255,255,.04); color:#b9c9d3; font-size:18px; cursor:pointer; }
 .gateNotificationClose:hover { background:rgba(255,255,255,.1); color:#fff; }
+.gateNotificationCancel { width:26px; height:26px; display:grid; place-items:center; border:1px solid color-mix(in srgb, var(--notification-color) 35%, transparent); border-radius:6px; background:transparent; color:var(--notification-color); font-size:18px; line-height:1; cursor:pointer; }
+.gateNotificationCancel:hover { background:color-mix(in srgb, var(--notification-color) 12%, transparent); }
+.gateNotificationCancel:disabled { opacity:.6; cursor:wait; }
 .gateOperationPercent { padding-top:7px; color:#d9e6ec; font:700 11px/1 var(--font-mono), monospace; }
 .gateOperationTrack { height:3px; overflow:hidden; background:rgba(105,135,160,.1); }
 .gateOperationTrack > i { display:block; height:100%; background:var(--notification-color); transition:width .35s ease; }

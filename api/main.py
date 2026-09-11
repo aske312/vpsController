@@ -2223,6 +2223,29 @@ def application_action(payload: ApplicationAction, _: None = Depends(require_tok
     return action
 
 
+@app.delete("/api/application/action")
+def cancel_application_action(_: None = Depends(require_token)) -> dict:
+    if not ACTION_FILE.exists():
+        raise HTTPException(status_code=404, detail="No application action is running")
+    try:
+        action = json.loads(ACTION_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=409, detail="Application action state is unavailable") from exc
+    unit = str(action.get("unit", ""))
+    state = str(action.get("state", ""))
+    if not re.fullmatch(r"vps-control-action-[0-9]+\.service", unit):
+        raise HTTPException(status_code=409, detail="This operation cannot be rolled back from the panel")
+    if state not in {"queued", "active", "activating", "running"}:
+        raise HTTPException(status_code=409, detail="No active application action is available to roll back")
+    result = subprocess.run(
+        ["systemctl", "stop", "--no-block", unit],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    if result.returncode:
+        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to stop application action")
+    return {"unit": unit, "action": action.get("action"), "state": "stopping", "message": "Остановка команды и откат изменений запущены"}
+
+
 @app.get("/api/application/logs")
 def application_logs(lines: int = 160, _: None = Depends(require_token)) -> dict:
     lines = max(20, min(lines, 400))
