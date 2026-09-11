@@ -1,12 +1,15 @@
 "use client";
 
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import type { DnsCheck, DnsSettings, DnsStatus, MihomoDnsStatus, NetworkStatus } from "../../shared/types/control-plane";
+import { useNotifier } from "../../shared/notifications/notification-center";
+import { probeNetworkDns, readNetworkControl, saveNetworkDns, saveNetworkMihomoDns, type NetworkRequest } from "./network-api";
 import { SystemDnsControl } from "./system-dns-control";
 // DNS самого VPS управляется отдельным блоком сети через apply_system.
 
 type Tone = "good" | "attention" | "critical";
-type Props = { status: NetworkStatus | null; loading: boolean; onRefresh: () => void; dns: DnsStatus | null; dnsDraft: DnsSettings | null; dnsChecks: Record<string, DnsCheck>; checkingDns: boolean; busy: boolean; setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>>; checkDnsProviders: (providerId?: string) => Promise<void> | void; saveDnsSettings: () => Promise<void> | void; mihomoDns: MihomoDnsStatus | null; mihomoDnsDraft: Record<string, string | number | boolean>; mihomoDnsBusy: boolean; setMihomoDnsDraft: Dispatch<SetStateAction<Record<string, string | number | boolean>>>; saveMihomoDns: () => Promise<void> | void };
+type Props = { request: NetworkRequest; refreshKey?: number };
+type WorkspaceProps = { status: NetworkStatus | null; loading: boolean; onRefresh: () => void; dns: DnsStatus | null; dnsDraft: DnsSettings | null; dnsChecks: Record<string, DnsCheck>; checkingDns: boolean; busy: boolean; setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>>; checkDnsProviders: (providerId?: string) => Promise<void> | void; saveDnsSettings: () => Promise<void> | void; mihomoDns: MihomoDnsStatus | null; mihomoDnsDraft: Record<string, string | number | boolean>; mihomoDnsBusy: boolean; setMihomoDnsDraft: Dispatch<SetStateAction<Record<string, string | number | boolean>>>; saveMihomoDns: () => Promise<void> | void };
 const scope = [["apply_wg", "WG", "WireGuard"], ["apply_awg", "AWG", "AmneziaWG"], ["apply_shadowsocks", "SS", "Shadowsocks"], ["apply_vrx", "VLESS", "Прямой VLESS"]] as const;
 const scopeProtocol = { apply_wg: "wg", apply_awg: "awg", apply_shadowsocks: "shadowsocks", apply_vrx: "vless-reality-xhttp" } as const;
 // Контракт применения: «Изменения применяются только к отмеченным каналам». Для VLESS Xray получит выбранные resolver-ы и перезапустится; для SS серверный трафик не изменяется.
@@ -17,7 +20,84 @@ const domainTone = (route: string): Tone => route === "direct" ? "good" : route 
 function Signal({ tone }: { tone: Tone }) { return <i className={`networkSignal ${tone}`} aria-hidden="true" />; }
 function Caption({ children }: { children: string }) { return <span className="networkCaption">{children}</span>; }
 
-export function NetworkView({ status, loading, onRefresh, dns, dnsDraft, dnsChecks, checkingDns, busy, setDnsDraft, checkDnsProviders, saveDnsSettings, mihomoDns, mihomoDnsDraft, mihomoDnsBusy, setMihomoDnsDraft, saveMihomoDns }: Props) {
+export function NetworkView({ request, refreshKey = 0 }: Props) {
+  const { error: notifyError, success: notifySuccess } = useNotifier("network", "Сеть");
+  const [status, setStatus] = useState<NetworkStatus | null>(null);
+  const [dns, setDns] = useState<DnsStatus | null>(null);
+  const [dnsDraft, setDnsDraft] = useState<DnsSettings | null>(null);
+  const [dnsChecks, setDnsChecks] = useState<Record<string, DnsCheck>>({});
+  const [mihomoDns, setMihomoDns] = useState<MihomoDnsStatus | null>(null);
+  const [mihomoDnsDraft, setMihomoDnsDraft] = useState<Record<string, string | number | boolean>>({});
+  const [loading, setLoading] = useState(true);
+  const [checkingDns, setCheckingDns] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [mihomoDnsBusy, setMihomoDnsBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const next = await readNetworkControl(request);
+      setStatus(next.network);
+      setDns(next.dns);
+      setDnsDraft((current) => current ?? next.dns.settings);
+      setMihomoDns(next.mihomoDns);
+      if (next.mihomoDns) setMihomoDnsDraft((current) => Object.keys(current).length ? current : next.mihomoDns!.values);
+    } catch (cause) {
+      notifyError(cause instanceof Error ? cause.message : "Не удалось определить сетевую конфигурацию");
+    } finally {
+      setLoading(false);
+    }
+  }, [notifyError, request]);
+
+  // Network status is synchronized with the selected VPS and refresh key.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void load(); }, [load, refreshKey]);
+
+  const checkDnsProviders = useCallback(async (providerId?: string) => {
+    setCheckingDns(true);
+    try {
+      const items = await probeNetworkDns(request, providerId);
+      setDnsChecks((current) => ({ ...current, ...Object.fromEntries(items.map((item) => [item.id, item])) }));
+    } catch (cause) {
+      notifyError(cause instanceof Error ? cause.message : "Проверка DNS не выполнена");
+    } finally {
+      setCheckingDns(false);
+    }
+  }, [notifyError, request]);
+
+  const saveDnsSettings = useCallback(async () => {
+    if (!dnsDraft) return;
+    setBusy(true);
+    try {
+      const next = await saveNetworkDns(request, dnsDraft);
+      setDns(next);
+      setDnsDraft(next.settings);
+      notifySuccess("DNS-политика сохранена и применена");
+    } catch (cause) {
+      notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить DNS");
+    } finally {
+      setBusy(false);
+    }
+  }, [dnsDraft, notifyError, notifySuccess, request]);
+
+  const saveMihomoDns = useCallback(async () => {
+    setMihomoDnsBusy(true);
+    try {
+      const next = await saveNetworkMihomoDns(request, mihomoDnsDraft);
+      setMihomoDns(next);
+      setMihomoDnsDraft(next.values);
+      notifySuccess("DNS Mihomo сохранён");
+    } catch (cause) {
+      notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить DNS Mihomo");
+    } finally {
+      setMihomoDnsBusy(false);
+    }
+  }, [mihomoDnsDraft, notifyError, notifySuccess, request]);
+
+  return <div data-network-page="true"><NetworkWorkspace status={status} loading={loading} onRefresh={() => void load()} dns={dns} dnsDraft={dnsDraft} dnsChecks={dnsChecks} checkingDns={checkingDns} busy={busy} setDnsDraft={setDnsDraft} checkDnsProviders={checkDnsProviders} saveDnsSettings={saveDnsSettings} mihomoDns={mihomoDns} mihomoDnsDraft={mihomoDnsDraft} mihomoDnsBusy={mihomoDnsBusy} setMihomoDnsDraft={setMihomoDnsDraft} saveMihomoDns={saveMihomoDns} /></div>;
+}
+
+function NetworkWorkspace({ status, loading, onRefresh, dns, dnsDraft, dnsChecks, checkingDns, busy, setDnsDraft, checkDnsProviders, saveDnsSettings, mihomoDns, mihomoDnsDraft, mihomoDnsBusy, setMihomoDnsDraft, saveMihomoDns }: WorkspaceProps) {
   const [mihomoSelected, setMihomoSelected] = useState(true);
   const tone = routeTone(status);
   if (!status) return <main className="networkBoard"><NetworkHeader status={status} loading={loading} onRefresh={onRefresh} tone={tone} /><div className="networkWaiting"><Signal tone="attention" /><strong>Сетевая конфигурация загружается</strong><span>Получаем домены, маршруты и точки доступа VPS.</span></div></main>;
@@ -41,7 +121,7 @@ export function NetworkView({ status, loading, onRefresh, dns, dnsDraft, dnsChec
 function NetworkHeader({ status, loading, onRefresh, tone }: { status: NetworkStatus | null; loading: boolean; onRefresh: () => void; tone: Tone }) { return <header className="networkHeader"><div className="networkHeaderTitle"><span className="networkLogo">↗</span><div><Caption>NETWORK / VPS</Caption><h1>Сеть</h1></div></div><div className={`networkCurrentRoute ${tone}`}><Signal tone={tone} /><div><Caption>ACTIVE ROUTE</Caption><strong>{status?.route.label || "Определяем…"}</strong></div></div><button type="button" className="networkReload" onClick={onRefresh} disabled={loading}>{loading ? "Проверяем…" : "Обновить"}</button></header>; }
 
 export function DnsView({ dns, dnsDraft, dnsChecks, checkingDns, busy, setDnsDraft, checkDnsProviders, saveDnsSettings, mihomoAvailable = false, mihomoSelected = false, onMihomoSelected }: { dns: DnsStatus | null; dnsDraft: DnsSettings | null; dnsChecks: Record<string, DnsCheck>; checkingDns: boolean; busy: boolean; setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>>; checkDnsProviders: (providerId?: string) => Promise<void> | void; saveDnsSettings: () => Promise<void> | void; mihomoAvailable?: boolean; mihomoSelected?: boolean; onMihomoSelected?: (value: boolean) => void }) {
-  const [activeScope, setActiveScope] = useState("system");
+  const activeScope = "system";
   const selected = dns?.providers.find((item) => item.id === dnsDraft?.selected_id);
   const activeProfileId = dnsDraft?.profiles?.[activeScope] || dnsDraft?.selected_id;
   const activeSelected = dns?.providers.find((item) => item.id === activeProfileId);

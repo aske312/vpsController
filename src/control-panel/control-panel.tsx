@@ -18,13 +18,12 @@ import { OverviewDashboard } from "../features/overview/overview-view";
 import { AppWorkspace } from "./components/app-workspace";
 import { ServicesDashboard } from "../features/services/services-view";
 import { NetworkView } from "../features/network/network-view";
-import { probeNetworkDns, readNetworkControl, saveNetworkDns, saveNetworkMihomoDns } from "../features/network/network-api";
 import { SecurityView } from "../features/security/security-view";
 import { ApplicationView } from "../features/application/application-view";
 import { ConnectionsView } from "../features/connections/connections-view";
 import { ProtocolView } from "../features/protocols/protocol-view";
 import { LoginView } from "../features/auth/login-view";
-import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, DnsCheck, DnsSettings, DnsStatus, LiveStatus, LoggingSettings, MihomoDnsStatus, NetworkStatus, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
+import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, LiveStatus, LoggingSettings, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
 import { actionLabels, bytes, CLIENTS_PER_PAGE, directProtocolOrder, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
 import { createSystemActionCompletionTracker, systemActionNeedsReload, systemOperationNotification, type SystemAction } from "./system-operation";
 
@@ -51,6 +50,7 @@ type GeneratedProfile = { id: string; name: string; filename: string; config: st
 type SshAccessState = { phase: "password" | "key-installed" | "awaiting-confirmation" | "hardened" | "rolled-back"; fingerprint: string; rollback_deadline?: string | null; message: string; key_login_observed?: boolean };
 export function ControlPanel() {
   const [tab, setTab] = useState<Tab>("overview");
+  const [networkRefreshKey, setNetworkRefreshKey] = useState(0);
   const [selectedChannel, setSelectedChannel] = useState<Protocol>("awg");
   const [token, setToken] = useState("");
   const [loginUser, setLoginUser] = useState("admin");
@@ -67,18 +67,9 @@ export function ControlPanel() {
   const [application, setApplication] = useState<ApplicationStatus | null>(null);
   const [applicationMetadata, setApplicationMetadata] = useState<ApplicationMetadata | null>(null);
   const [services, setServices] = useState<ServicesStatus | null>(null);
-  const [dns, setDns] = useState<DnsStatus | null>(null);
-  const [network, setNetwork] = useState<NetworkStatus | null>(null);
-  const [networkLoading, setNetworkLoading] = useState(false);
-  const [mihomoDns, setMihomoDns] = useState<MihomoDnsStatus | null>(null);
-  const [mihomoDnsDraft, setMihomoDnsDraft] = useState<Record<string, string | number | boolean>>({});
-  const [mihomoDnsBusy, setMihomoDnsBusy] = useState(false);
-  const [dnsDraft, setDnsDraft] = useState<DnsSettings | null>(null);
-  const [dnsChecks, setDnsChecks] = useState<Record<string, DnsCheck>>({});
   const [deviceProbe, setDeviceProbe] = useState<DeviceProbe | null>(null);
   const [probingDevice, setProbingDevice] = useState(false);
   const deviceProbeAt = useRef(0);
-  const [checkingDns, setCheckingDns] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
   const [clientProtocolFilter, setClientProtocolFilter] = useState<"all" | Protocol>("all");
   const [clientStateFilter, setClientStateFilter] = useState<"all" | "online" | "attention" | "offline">("all");
@@ -254,31 +245,6 @@ export function ControlPanel() {
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadApplicationMetadata: refreshFailure(cause, "Не удалось обновить сведения о версии") })); }
   }, [request, token]);
 
-  const loadNetwork = useCallback(async () => {
-    if (!token) return;
-    setNetworkLoading(true);
-    try {
-      const next = await readNetworkControl(request);
-      setNetwork(next.network);
-      setDns(next.dns);
-      if (!dnsDraft) setDnsDraft(next.dns.settings);
-      setMihomoDns(next.mihomoDns);
-      if (next.mihomoDns) setMihomoDnsDraft((current) => Object.keys(current).length ? current : next.mihomoDns!.values);
-      setLastUpdated(new Date());
-      setRefreshErrors((current) => { const next = { ...current }; delete next.loadNetwork; return next; });
-    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadNetwork: refreshFailure(cause, "Не удалось определить сетевую конфигурацию") })); }
-    finally { setNetworkLoading(false); }
-  }, [dnsDraft, request, token]);
-
-  const saveMihomoDns = useCallback(async () => {
-    setMihomoDnsBusy(true);
-    try {
-      const next = await saveNetworkMihomoDns(request, mihomoDnsDraft);
-      setMihomoDns(next); setMihomoDnsDraft(next.values); notifySuccess("DNS Mihomo сохранён и включён в общую сетевую политику");
-    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить DNS Mihomo"); }
-    finally { setMihomoDnsBusy(false); }
-  }, [mihomoDnsDraft, notifyError, notifySuccess, request]);
-
   const loadProtocolStatus = useCallback(async (protocol: Protocol) => {
     if (!token) return;
     try {
@@ -354,25 +320,6 @@ export function ControlPanel() {
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadProtocolStatus: refreshFailure(cause, "Не удалось обновить состояние протокола") })); }
   }, [request, token]);
 
-  const loadDns = useCallback(async () => {
-    if (!token) return;
-    try {
-      const next = await request("/dns") as DnsStatus;
-      setDns(next); setDnsDraft((current) => current || next.settings); setLastUpdated(new Date());
-      setRefreshErrors((current) => { const next = { ...current }; delete next.loadDns; return next; });
-    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadDns: refreshFailure(cause, "Не удалось загрузить DNS") })); }
-  }, [request, token]);
-
-  async function saveDnsSettings() {
-    if (!dnsDraft) return;
-    setBusy(true);
-    try {
-      const next = await saveNetworkDns(request, dnsDraft);
-      setDns(next); setDnsDraft(next.settings); notifySuccess("DNS-профиль сохранён и применён к выбранным протоколам");
-    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить DNS"); }
-    finally { setBusy(false); }
-  }
-
   const measureDeviceRoute = useCallback(async (force = false) => {
     if (!force && Date.now() - deviceProbeAt.current < 30000) return;
     setProbingDevice(true);
@@ -407,15 +354,6 @@ export function ControlPanel() {
     setProbingDevice(false);
   }, []);
 
-  async function checkDnsProviders(providerId?: string) {
-    setCheckingDns(true);
-    try {
-      const items = await probeNetworkDns(request, providerId);
-      setDnsChecks((current) => ({ ...current, ...Object.fromEntries(items.map((item) => [item.id, item])) }));
-    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Проверка DNS не выполнена"); }
-    finally { setCheckingDns(false); }
-  }
-
   function changeProtocolSetting(protocol: Protocol, key: string, value: string | number | boolean) {
     protocolSettingsDirty.current[protocol] = true;
     setProtocolSettingsDraft((drafts) => ({ ...drafts, [protocol]: { ...(drafts[protocol] || {}), [key]: value } }));
@@ -443,8 +381,8 @@ export function ControlPanel() {
       else if (tab === "security") await Promise.all([loadSecurity(), loadServices()]);
       else if (tab === "application") await Promise.all([loadApplication(), loadApplicationMetadata(), loadServices()]);
       else if (tab === "services") await loadServices();
-      else if (tab === "dns") { setTab("network"); await loadNetwork(); }
-      else if (tab === "network") await loadNetwork();
+      else if (tab === "dns") { setTab("network"); setNetworkRefreshKey((value) => value + 1); }
+      else if (tab === "network") setNetworkRefreshKey((value) => value + 1);
       else if (tab === "mihomo") await loadOverview();
       else if (tab === "channels") await Promise.all([loadClients(), loadProtocolStatus(selectedChannel)]);
       else if (directProtocolOrder.includes(tab as Protocol)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
@@ -455,7 +393,7 @@ export function ControlPanel() {
     } finally {
       if (showBusy) setBusy(false);
     }
-  }, [loadApplication, loadApplicationMetadata, loadClients, loadDns, loadNetwork, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, selectedChannel, tab, token]);
+  }, [loadApplication, loadApplicationMetadata, loadClients, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, selectedChannel, tab, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -1553,24 +1491,7 @@ export function ControlPanel() {
         {installedProtocols.map((protocol) => <button type="button" key={protocol} className={`protocol-${protocol}${tab === "channels" && selectedChannel === protocol ? " active" : ""}`} onClick={() => { setSelectedChannel(protocol); setTab("channels"); void loadProtocolStatus(protocol); }}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : "VLESS"}</button>)}
       </nav>}
 
-      {tab === "network" && <NetworkView
-        status={network}
-        loading={networkLoading}
-        onRefresh={() => void loadNetwork()}
-        dns={dns}
-        dnsDraft={dnsDraft}
-        dnsChecks={dnsChecks}
-        checkingDns={checkingDns}
-        busy={busy}
-        setDnsDraft={setDnsDraft}
-        checkDnsProviders={checkDnsProviders}
-        saveDnsSettings={saveDnsSettings}
-        mihomoDns={mihomoDns}
-        mihomoDnsDraft={mihomoDnsDraft}
-        mihomoDnsBusy={mihomoDnsBusy}
-        setMihomoDnsDraft={setMihomoDnsDraft}
-        saveMihomoDns={() => void saveMihomoDns()}
-      />}
+      {tab === "network" && <NetworkView request={request} refreshKey={networkRefreshKey} />}
 
       {tab === "security" && <SecurityView
         securityLoading={securityLoading}
