@@ -76,6 +76,7 @@ export function GateNavigation({
         )}
 
         <NavGroup label="SYSTEM">
+          <NavButton active={activeTab === "network"} icon="network" label="Сеть" onClick={() => onNavigate("network")} />
           <NavButton active={activeTab === "security"} icon="security" label="Безопасность" onClick={() => onNavigate("security")} />
           <NavButton active={activeTab === "application"} icon="application" label="Приложение" onClick={() => onNavigate("application")} />
           <NavButton active={activeTab === "services"} icon="services" label="Службы" onClick={() => onNavigate("services")} />

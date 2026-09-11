@@ -1,7 +1,7 @@
 import type { CdnSecurityStatus } from "../lib/cdn-security-operation";
 
 export type Protocol = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2" | "tuic" | "trojan" | "openvpn" | "ikev2";
-export type Tab = "overview" | "channels" | "dns" | "security" | "application" | "services" | "clients" | "mihomo" | Protocol;
+export type Tab = "overview" | "channels" | "dns" | "network" | "security" | "application" | "services" | "clients" | "mihomo" | Protocol;
 export type TunnelProtocol = "wg" | "awg";
 export type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
 export type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" | "network-check" | "integrity-check" | "identity" | "secure" | "safe-update" | "kernel-update" | "vpn-firewall" | "optimize" | "reboot" | "poweroff";
@@ -22,6 +22,17 @@ export type DnsSettings = { selected_id: string; apply_wg: boolean; apply_awg: b
 export type DnsEffect = { installed: boolean; value: string; scope: "new_profiles" | "client_recommendation" | "server_xray"; changes_existing: boolean; matches_selected: boolean };
 export type DnsStatus = { settings: DnsSettings; providers: DnsProvider[]; protocol_effect: Record<string, string>; protocol_effect_details?: Record<string, DnsEffect> };
 export type DnsCheck = { id: string; available: boolean; udp_ok: boolean; udp_ms?: number; tcp_ok: boolean; tcp_ms?: number; doh_ok: boolean; doh_ms?: number; latency_ms?: number };
+export type NetworkStatus = {
+  detected_at: string;
+  server: { name: string; public_ip: string; public_ipv4?: string; public_ipv6?: string };
+  domains: Array<{ value: string; role: string; source: string; resolved: string[]; matches_origin: boolean; route: "direct" | "proxy_or_cdn" | "unresolved" }>;
+  route: { mode: "direct" | "proxy_or_cdn" | "none"; label: string; evidence: string[] };
+  tls: { mode: string; certificate_source: string; https_expected: boolean };
+  edge: { provider: string; mode: string; evidence: string[] };
+  access: { mode: string; panel_url: string; direct_url: string; protected_url: string };
+  listeners: Array<{ port: number; protocol: string; process: string }>;
+  resolvers: string[];
+};
 export type ConfirmationRequest = { title: string; message: string; confirmLabel: string; phrase?: string; danger?: boolean; resolve: (confirmed: boolean) => void; };
 export type EditableProtocolSetting = { key: string; label: string; type: "number" | "select" | "boolean" | "text"; value: string | number | boolean; min?: number; max?: number; help?: string; options?: Array<{ value: string; label: string }>; };
 export type ProtocolStatus = { protocol: Protocol; interface: string; active: boolean; service_active: boolean; service_enabled: boolean; active_since: string; address: string; listen_port: number; mtu: number; peers: number; online_peers: number; endpoints: number; last_handshake_age_s?: number; peer_rx_bytes: number; peer_tx_bytes: number; interface_rx_bytes: number; interface_tx_bytes: number; rx_errors: number; tx_errors: number; rx_dropped: number; tx_dropped: number; unit?: string; transport?: string; security?: string; target?: string; settings?: Record<string, string | number | boolean>; editable_settings?: EditableProtocolSetting[]; routes?: Partial<Record<"direct" | "tls" | "cdn", { enabled: boolean; security?: string; transport?: string; endpoint?: string; server_name?: string; path?: string }>>; resources: { checked_at?: string; items: Array<{ name: string; available: boolean; status_code?: number; latency_ms: number }>; }; history: { period_hours: number; samples: number; availability_percent?: number; monitoring_gaps: number; service_interruptions: number; inactive_connection_periods: number; external_loss_percent?: number; latency_avg_ms?: number; latency_max_ms?: number; jitter_avg_ms?: number; interface_errors: number; interface_dropped: number; uplink_errors: number; uplink_dropped: number; conntrack_peak_percent?: number; received_bytes: number; transmitted_bytes: number; average_rx_bps: number; average_tx_bps: number; peak_rx_bps: number; peak_tx_bps: number; events: Array<{ at?: string; type: "monitor_gap" | "service_down" | "peers_offline"; seconds?: number }>; }; diagnostics: { checked_at?: string; status: "healthy" | "warning" | "critical" | "pending"; score?: number; live?: { loss_percent?: number; latency_ms?: number; jitter_ms?: number; dns_ms?: number; https_connect_ms?: number; https_total_ms?: number }; network?: { uplink?: string; gateway?: string; uplink_mtu?: number; tunnel_mtu?: number; conntrack_count?: number; conntrack_max?: number; conntrack_percent?: number }; checks: Array<{ id: string; name: string; ok: boolean; value: string }>; findings: Array<{ severity: "warning" | "critical"; code: string; title: string; detail: string; action: string }>; }; };

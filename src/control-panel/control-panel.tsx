@@ -18,12 +18,13 @@ import { OverviewDashboard } from "../features/overview/overview-view";
 import { AppWorkspace } from "./components/app-workspace";
 import { ServicesDashboard } from "../features/services/services-view";
 import { DnsView } from "../features/dns/dns-view";
+import { NetworkView } from "../features/network/network-view";
 import { SecurityView } from "../features/security/security-view";
 import { ApplicationView } from "../features/application/application-view";
 import { ConnectionsView } from "../features/connections/connections-view";
 import { ProtocolView } from "../features/protocols/protocol-view";
 import { LoginView } from "../features/auth/login-view";
-import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, DnsCheck, DnsSettings, DnsStatus, LiveStatus, LoggingSettings, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
+import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, DnsCheck, DnsSettings, DnsStatus, LiveStatus, LoggingSettings, NetworkStatus, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
 import { actionLabels, bytes, CLIENTS_PER_PAGE, directProtocolOrder, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
 import { createSystemActionCompletionTracker, systemActionNeedsReload, systemOperationNotification, type SystemAction } from "./system-operation";
 
@@ -67,6 +68,8 @@ export function ControlPanel() {
   const [applicationMetadata, setApplicationMetadata] = useState<ApplicationMetadata | null>(null);
   const [services, setServices] = useState<ServicesStatus | null>(null);
   const [dns, setDns] = useState<DnsStatus | null>(null);
+  const [network, setNetwork] = useState<NetworkStatus | null>(null);
+  const [networkLoading, setNetworkLoading] = useState(false);
   const [dnsDraft, setDnsDraft] = useState<DnsSettings | null>(null);
   const [dnsChecks, setDnsChecks] = useState<Record<string, DnsCheck>>({});
   const [deviceProbe, setDeviceProbe] = useState<DeviceProbe | null>(null);
@@ -138,7 +141,7 @@ export function ControlPanel() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setToken(sessionStorage.getItem("312-token") || "");
     const savedTab = sessionStorage.getItem("312-reload-tab");
-    if (savedTab && Object.hasOwn(navigationLabels, savedTab)) setTab(savedTab as Tab);
+    if (savedTab && Object.hasOwn(navigationLabels, savedTab)) setTab((savedTab === "dns" ? "network" : savedTab) as Tab);
     sessionStorage.removeItem("312-reload-tab");
     const savedChannel = sessionStorage.getItem("312-reload-channel");
     if (savedChannel && directProtocolOrder.includes(savedChannel as Protocol)) setSelectedChannel(savedChannel as Protocol);
@@ -247,6 +250,23 @@ export function ControlPanel() {
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadApplicationMetadata; return next; });
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadApplicationMetadata: refreshFailure(cause, "Не удалось обновить сведения о версии") })); }
   }, [request, token]);
+
+  const loadNetwork = useCallback(async () => {
+    if (!token) return;
+    setNetworkLoading(true);
+    try {
+      const [networkStatus, dnsStatus] = await Promise.all([
+        request("/network") as Promise<NetworkStatus>,
+        request("/dns") as Promise<DnsStatus>,
+      ]);
+      setNetwork(networkStatus);
+      setDns(dnsStatus);
+      if (!dnsDraft) setDnsDraft(dnsStatus.settings);
+      setLastUpdated(new Date());
+      setRefreshErrors((current) => { const next = { ...current }; delete next.loadNetwork; return next; });
+    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadNetwork: refreshFailure(cause, "Не удалось определить сетевую конфигурацию") })); }
+    finally { setNetworkLoading(false); }
+  }, [dnsDraft, request, token]);
 
   const loadProtocolStatus = useCallback(async (protocol: Protocol) => {
     if (!token) return;
@@ -413,6 +433,7 @@ export function ControlPanel() {
       else if (tab === "application") await Promise.all([loadApplication(), loadApplicationMetadata(), loadServices()]);
       else if (tab === "services") await loadServices();
       else if (tab === "dns") await loadDns();
+      else if (tab === "network") await loadNetwork();
       else if (tab === "mihomo") await loadOverview();
       else if (tab === "channels") await Promise.all([loadClients(), loadProtocolStatus(selectedChannel)]);
       else if (directProtocolOrder.includes(tab as Protocol)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
@@ -423,7 +444,7 @@ export function ControlPanel() {
     } finally {
       if (showBusy) setBusy(false);
     }
-  }, [loadApplication, loadApplicationMetadata, loadClients, loadDns, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, selectedChannel, tab, token]);
+  }, [loadApplication, loadApplicationMetadata, loadClients, loadDns, loadNetwork, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, selectedChannel, tab, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -1511,10 +1532,24 @@ export function ControlPanel() {
 
       {(tab === "channels" || tab === "dns") && <nav className="protocolSwitcher channelPageSwitcher" aria-label="Защищённые каналы">
         {installedProtocols.map((protocol) => <button type="button" key={protocol} className={`protocol-${protocol}${tab === "channels" && selectedChannel === protocol ? " active" : ""}`} onClick={() => { setSelectedChannel(protocol); setTab("channels"); void loadProtocolStatus(protocol); }}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : "VLESS"}</button>)}
-        <button type="button" className={tab === "dns" ? "active" : ""} onClick={() => setTab("dns")}>DNS</button>
+        <button type="button" className={tab === "dns" ? "active" : ""} onClick={() => setTab("network")}>DNS</button>
       </nav>}
 
       {tab === "dns" && <DnsView
+        dns={dns}
+        dnsDraft={dnsDraft}
+        dnsChecks={dnsChecks}
+        checkingDns={checkingDns}
+        busy={busy}
+        setDnsDraft={setDnsDraft}
+        checkDnsProviders={checkDnsProviders}
+        saveDnsSettings={saveDnsSettings}
+      />}
+
+      {tab === "network" && <NetworkView
+        status={network}
+        loading={networkLoading}
+        onRefresh={() => void loadNetwork()}
         dns={dns}
         dnsDraft={dnsDraft}
         dnsChecks={dnsChecks}

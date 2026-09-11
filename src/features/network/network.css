@@ -1,0 +1,28 @@
+.networkWorkspace { display:grid; gap:14px; padding-bottom:80px; }
+.networkPageHead { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; }
+.networkRefreshButton { min-height:40px; padding:0 15px; border:1px solid #355e75; border-radius:7px; background:#142a36; color:#b5e8ff; font-size:9px; font-weight:700; }
+.networkRefreshButton:disabled { opacity:.55; cursor:wait; }
+.networkSignalGrid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+.networkSignalCard, .networkPanel { border:1px solid #26363f; border-radius:9px; background:#11191d; box-shadow:0 8px 24px #0002; }
+.networkSignalCard { display:grid; gap:7px; min-height:105px; padding:15px; }
+.networkSignalCard span, .networkPanel .eyebrow { color:#6e9aab; font:7px var(--font-mono); letter-spacing:.12em; }
+.networkSignalCard strong { font-size:16px; color:#d9f2fa; }
+.networkSignalCard small, .networkPanel header > span, .networkRow small { color:var(--muted); font-size:10px; }
+.networkGrid { display:grid; grid-template-columns:1.15fr .85fr; gap:14px; }
+.networkPanel { overflow:hidden; }
+.networkPanel > header { display:flex; align-items:center; justify-content:space-between; gap:15px; padding:18px 18px 13px; border-bottom:1px solid #243139; }
+.networkPanel h2 { margin-top:5px; font-size:16px; }
+.networkRows { display:grid; }
+.networkRow { display:grid; grid-template-columns:1fr auto; gap:8px 14px; align-items:center; padding:14px 18px; border-bottom:1px solid #202c31; }
+.networkRow:last-child { border-bottom:0; }
+.networkRow div { display:grid; gap:4px; min-width:0; }
+.networkRow strong { overflow:hidden; color:#d6e9ed; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+.networkRow code, .networkEndpointList code { color:#a8d6df; font:10px var(--font-mono); overflow-wrap:anywhere; }
+.networkRow > code { grid-column:1 / -1; color:#81939a; }
+.networkRow b { padding:5px 7px; border-radius:4px; font:7px var(--font-mono); }
+.networkRow b.ok { background:#12342b; color:#85e5be; }.networkRow b.warn { background:#3a2e17; color:#f4c976; }.networkRow b.bad { background:#391d25; color:#f49aac; }
+.networkEndpointList { display:grid; gap:0; padding:4px 18px 10px; }
+.networkEndpointList label { display:grid; gap:6px; padding:13px 0; border-bottom:1px solid #202c31; }.networkEndpointList label:last-child { border-bottom:0; }.networkEndpointList span { color:var(--muted); font-size:10px; }
+.networkEvidence { display:grid; gap:10px; margin:0; padding:18px 35px 20px; color:#b4c6cb; font-size:11px; }.networkEvidence li::marker { color:#65bdd2; }.networkMuted, .networkEmpty { margin:0; padding:22px 18px; color:var(--muted); font-size:11px; }
+@media (max-width: 900px) { .networkSignalGrid, .networkGrid { grid-template-columns:1fr 1fr; } }
+@media (max-width: 620px) { .networkPageHead { align-items:flex-start; flex-direction:column; }.networkSignalGrid, .networkGrid { grid-template-columns:1fr; } }

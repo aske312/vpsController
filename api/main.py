@@ -1291,6 +1291,97 @@ def overview(_: None = Depends(require_token)) -> dict:
     }
 
 
+def network_domain_probe(domain: str, role: str) -> dict:
+    resolved: list[str] = []
+    try:
+        for item in socket.getaddrinfo(domain, None, type=socket.SOCK_STREAM):
+            address = str(item[4][0]).split("%", 1)[0]
+            if address not in resolved:
+                resolved.append(address)
+    except (OSError, UnicodeError):
+        pass
+    origin = {value for value in (PUBLIC_IPV4, PUBLIC_IPV6, PUBLIC_IP) if value}
+    matches = bool(resolved and origin.intersection(resolved))
+    route = "direct" if matches else "proxy_or_cdn" if resolved else "unresolved"
+    return {"value": domain, "role": role, "source": "environment", "resolved": resolved, "matches_origin": matches, "route": route}
+
+
+def network_status() -> dict:
+    domain_items: list[dict] = []
+    for domain, role in ((PUBLIC_DOMAIN, "panel"), (VLESS_CDN_DOMAIN, "VLESS CDN")):
+        if domain and not any(item["value"] == domain for item in domain_items):
+            domain_items.append(network_domain_probe(domain, role))
+    direct_domains = [item for item in domain_items if item["route"] == "direct"]
+    proxy_domains = [item for item in domain_items if item["route"] == "proxy_or_cdn"]
+    if direct_domains and not proxy_domains:
+        route_mode, route_label = "direct", "Прямой доступ к origin"
+    elif proxy_domains:
+        route_mode, route_label = "proxy_or_cdn", "Внешний proxy или CDN"
+    else:
+        route_mode, route_label = "none", "Публичный домен не определён"
+    evidence = []
+    if domain_items:
+        evidence.append("DNS домена проверен самим VPS")
+        if direct_domains:
+            evidence.append("Найден IP, совпадающий с origin VPS")
+        if proxy_domains:
+            evidence.append("IP домена не совпадает с origin VPS")
+    else:
+        evidence.append("PUBLIC_DOMAIN не задан")
+
+    cloudflare_ranges: set[str] = set()
+    for filename in ("cloudflare-ips-v4.txt", "cloudflare-ips-v6.txt"):
+        try:
+            cloudflare_ranges.update(line.strip() for line in (Path(__file__).parent / "resources" / filename).read_text().splitlines() if line.strip() and not line.startswith("#"))
+        except OSError:
+            pass
+    edge_provider = "Не определён"
+    edge_evidence = ["Определяется по DNS-ответам и конфигурации, API DNS-провайдера не используется"]
+    if any(any(ipaddress.ip_address(ip) in ipaddress.ip_network(cidr) for cidr in cloudflare_ranges) for item in proxy_domains for ip in item["resolved"]):
+        edge_provider = "Cloudflare"
+        edge_evidence = ["DNS-ответ содержит адрес из диапазонов Cloudflare"]
+    elif proxy_domains:
+        edge_provider = "Внешний proxy/CDN"
+    elif domain_items:
+        edge_provider = "Нет внешнего proxy"
+
+    listeners: list[dict] = []
+    for line in run("ss", "-H", "-lnt", timeout=4).splitlines():
+        columns = line.split()
+        if len(columns) < 4:
+            continue
+        endpoint = columns[3].rsplit(":", 1)[-1]
+        if endpoint.isdigit():
+            listeners.append({"port": int(endpoint), "protocol": "TCP", "process": "system listener"})
+    resolvers: list[str] = []
+    try:
+        for line in Path("/etc/resolv.conf").read_text().splitlines():
+            if line.strip().startswith("nameserver "):
+                address = line.split()[1]
+                if address not in resolvers:
+                    resolvers.append(address)
+    except OSError:
+        pass
+    panel_url = f"https://{PUBLIC_DOMAIN}" if PUBLIC_DOMAIN else f"http://{PUBLIC_IP_ENDPOINT}:{os.getenv('HTTP_PORT', '80')}"
+    direct_url = f"http://{PUBLIC_IP_ENDPOINT}:{os.getenv('HTTP_PORT', '80')}"
+    return {
+        "detected_at": datetime.now(timezone.utc).isoformat(),
+        "server": {"name": SERVER_NAME, "public_ip": PUBLIC_IP, "public_ipv4": PUBLIC_IPV4, "public_ipv6": PUBLIC_IPV6},
+        "domains": domain_items,
+        "route": {"mode": route_mode, "label": route_label, "evidence": evidence},
+        "tls": {"mode": "Caddy ACME" if PUBLIC_DOMAIN else "Не используется", "certificate_source": "Автоматический сертификат Caddy" if PUBLIC_DOMAIN else "—", "https_expected": bool(PUBLIC_DOMAIN)},
+        "edge": {"provider": edge_provider, "mode": "proxy/CDN" if proxy_domains else "direct", "evidence": edge_evidence},
+        "access": {"mode": "external" if PUBLIC_DOMAIN else "direct", "panel_url": panel_url, "direct_url": direct_url, "protected_url": f"https://{INTERNAL_PANEL_HOST}"},
+        "listeners": listeners,
+        "resolvers": resolvers,
+    }
+
+
+@app.get("/api/network")
+def get_network(_: None = Depends(require_token)) -> dict:
+    return network_status()
+
+
 @app.get("/api/security")
 def security(_: None = Depends(require_token)) -> dict:
     failed = run(

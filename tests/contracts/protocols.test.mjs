@@ -266,7 +266,8 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(page, /onNavigate\("channels"\)/);
   assert.match(page, /onNavigate\("overview"\)/);
   assert.match(page, /onNavigate\("clients"\)/);
-  assert.match(page, /setTab\("dns"\)/);
+  assert.match(page, /setTab\("network"\)/);
+  assert.match(page, /<NetworkView/);
   assert.match(page, /onNavigate\("security"\)/);
   assert.match(page, /onNavigate\("application"\)/);
   assert.match(page, /onNavigate\("services"\)/);
@@ -277,6 +278,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.ok((api.match(/"country": "RU"/g) || []).length >= 5);
   assert.ok((api.match(/"id": "[a-z0-9-]+", "name":/g) || []).length >= 10);
   assert.match(api, /@app\.get\("\/api\/dns"\)/);
+  assert.match(api, /@app\.get\("\/api\/network"\)/);
   assert.match(api, /@app\.put\("\/api\/dns\/settings"\)/);
   assert.match(api, /@app\.post\("\/api\/dns\/check"\)/);
   assert.match(api, /def dns_wire_query/);
