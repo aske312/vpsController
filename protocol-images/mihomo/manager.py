@@ -2233,6 +2233,11 @@ def apply_reality_config(config_path: Path, config: dict[str, Any], restart_serv
         candidate.unlink(missing_ok=True)
         raise RuntimeError((result.stderr or result.stdout).strip() or "Xray rejected VLESS configuration")
     os.replace(candidate, config_path)
+    # The Xray unit runs as nobody:nogroup. Keep the generated file readable
+    # after every atomic replace, even when the destination already had an
+    # unexpected owner or mode from a previous manual/runtime write.
+    os.chmod(config_path, 0o640)
+    shutil.chown(config_path, user="root", group="nogroup")
     if not restart_service:
         return
     # Profile mutations can legitimately restart Xray several times in a
