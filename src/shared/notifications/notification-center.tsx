@@ -92,11 +92,13 @@ function NotificationCard({ item }: { item: Notification }) {
   }
   return <section className={`gateOperationCard ${item.state}`} role={item.state === "error" ? "alert" : "status"} aria-atomic="true" aria-label={item.title}>
     <div className="gateOperationContent">
-      {pending && item.onCancel && <button type="button" className="gateNotificationCancel" onClick={() => void cancelOperation()} disabled={canceling} aria-label={`Остановить и откатить: ${item.title}`}>{canceling ? "…" : "×"}</button>}
       <span className="gateOperationIcon" aria-hidden="true">{item.state === "error" ? "!" : item.state === "success" ? "✓" : pending ? "…" : "i"}</span>
       <div className="gateOperationText"><span>{item.kind === "operation" ? "ВЫПОЛНЕНИЕ КОМАНДЫ" : "УВЕДОМЛЕНИЕ"}{item.count > 1 ? ` · ×${item.count}` : ""}</span><strong>{item.title}</strong><small>{item.message}</small></div>
-      {!pending && <button type="button" className="gateNotificationClose" onClick={() => store.dismiss(item.id)} aria-label={`Закрыть: ${item.title}`}>×</button>}
-      {pending && <b className="gateOperationPercent">{progress === undefined || item.state === "unknown" ? "…" : `${progress}%`}</b>}
+      <div className="gateOperationActions">
+        {pending && <b className="gateOperationPercent">{progress === undefined || item.state === "unknown" ? "…" : `${progress}%`}</b>}
+        {pending && item.onCancel && <button type="button" className="gateNotificationCancel" onClick={() => void cancelOperation()} disabled={canceling} aria-label={`Остановить и откатить: ${item.title}`}>{canceling ? "…" : "×"}</button>}
+        {!pending && <button type="button" className="gateNotificationClose" onClick={() => store.dismiss(item.id)} aria-label={`Закрыть: ${item.title}`}>×</button>}
+      </div>
     </div>
     {item.kind === "operation" && <div className={`gateOperationTrack ${pending && (progress === undefined || item.state === "unknown") ? "indeterminate" : ""}`} aria-hidden="true"><i style={{ width: `${pending ? progress ?? 34 : 100}%` }} /></div>}
     {item.action && <button type="button" className="gateOperationButton" disabled={checking || item.state === "running"} onClick={() => void runAction()}>{checking ? "Проверяем…" : item.action.label}</button>}
