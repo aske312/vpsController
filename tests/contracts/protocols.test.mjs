@@ -271,7 +271,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(page, /onNavigate\("security"\)/);
   assert.match(page, /onNavigate\("application"\)/);
   assert.match(page, /onNavigate\("services"\)/);
-  assert.match(page, /DNS POLICY/);
+  assert.match(page, /DNS CONTROL/);
   assert.match(page, /Проверить все/);
   assert.match(page, /Сторонний DNS/);
   assert.match(api, /DNS_PROVIDERS = \(/);
@@ -288,7 +288,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /env_updates\["VRX_DNS"\]/);
   assert.match(api, /vrx_servers\.insert\(0, vrx_provider\["doh_url"\]\)/);
   assert.match(page, /DoH для VLESS/);
-  assert.match(page, /SECURE CHANNELS · DNS/);
+  assert.match(page, /DNS control/);
   assert.match(api, /apply_system|def apply_system_dns/);
   assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
   assert.match(api, /def apply_vrx_dns/);

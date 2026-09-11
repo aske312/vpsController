@@ -2909,17 +2909,19 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
         env_updates["SHADOWSOCKS_DNS"] = ", ".join(ss_addresses)
     if data["apply_vrx"]:
         env_updates["VRX_DNS"] = vrx_addresses
-    if data["apply_system"]:
-        apply_system_dns(system_addresses)
-    elif SYSTEM_RESOLVED_DROPIN.exists():
-        SYSTEM_RESOLVED_DROPIN.unlink()
-        if run("systemctl", "is-active", "systemd-resolved.service") == "active":
-            run("systemctl", "restart", "systemd-resolved", check=True)
     env_original = ENV_FILE.read_bytes() if ENV_FILE.exists() else None
     vrx_original = VLESS_CONFIG.read_bytes() if data["apply_vrx"] and VLESS_CONFIG.exists() else None
     settings_original = DNS_SETTINGS_FILE.read_bytes() if DNS_SETTINGS_FILE.exists() else None
+    system_dropin_original = SYSTEM_RESOLVED_DROPIN.read_bytes() if SYSTEM_RESOLVED_DROPIN.exists() else None
+    resolv_original = SYSTEM_RESOLV_CONF.read_bytes() if SYSTEM_RESOLV_CONF.exists() and not SYSTEM_RESOLV_CONF.is_symlink() else None
     temporary = DNS_SETTINGS_FILE.with_suffix(".tmp")
     try:
+        if data["apply_system"]:
+            apply_system_dns(system_addresses)
+        elif SYSTEM_RESOLVED_DROPIN.exists():
+            SYSTEM_RESOLVED_DROPIN.unlink()
+            if run("systemctl", "is-active", "systemd-resolved.service") == "active":
+                run("systemctl", "restart", "systemd-resolved", check=True)
         if env_updates:
             persist_env_values(env_updates)
         if vrx_original is not None:
@@ -2949,6 +2951,19 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
                 restart_vless_service()
             except Exception:
                 logger.exception("VRX restart failed during DNS rollback")
+        if system_dropin_original is None:
+            SYSTEM_RESOLVED_DROPIN.unlink(missing_ok=True)
+        else:
+            SYSTEM_RESOLVED_DROPIN.parent.mkdir(parents=True, exist_ok=True)
+            SYSTEM_RESOLVED_DROPIN.write_bytes(system_dropin_original)
+            os.chmod(SYSTEM_RESOLVED_DROPIN, 0o644)
+        if resolv_original is not None:
+            SYSTEM_RESOLV_CONF.write_bytes(resolv_original)
+        try:
+            if run("systemctl", "is-active", "systemd-resolved.service") == "active":
+                run("systemctl", "restart", "systemd-resolved", check=True)
+        except Exception:
+            logger.exception("System DNS restart failed during DNS rollback")
         detail = exc.detail if isinstance(exc, HTTPException) else "Не удалось сохранить DNS; предыдущие настройки восстановлены"
         status_code = exc.status_code if isinstance(exc, HTTPException) else 500
         raise HTTPException(status_code=status_code, detail=detail) from exc
