@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from profile_transition import GRACE_SECONDS, stage_vless_transition, transition_delivery_revision, mark_transition_delivered
+from client_singbox import build_singbox_config, UnsupportedClientConfig
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
 
@@ -92,6 +93,8 @@ def transactional_profile_mutation(function):
             payload = kwargs.get("payload") or (args[1] if len(args) > 1 else None)
             if payload is not None and getattr(payload, "connections", None) is not None:
                 modules.update(str(connection.component) for connection in payload.connections)
+            if current and function.__name__ == "update_profile":
+                preflight_client_export_update(current, payload)
         with profile_runtime_transaction(modules):
             return function(*args, **kwargs)
     return wrapped
@@ -643,6 +646,24 @@ def routing_defaults() -> dict[str, Any]:
     return values
 
 
+TLS_FRAGMENT_RANGES = {
+    "tunnel_fragment_size": (1, 16384, "100-200"),
+    "tunnel_fragment_interval": (0, 1000, "10-20"),
+}
+
+
+def validate_fragment_range(key: str, raw: Any) -> str:
+    minimum, maximum, _ = TLS_FRAGMENT_RANGES[key]
+    match = re.fullmatch(r"([0-9]{1,5})(?:\s*-\s*([0-9]{1,5}))?", raw.strip()) if isinstance(raw, str) else None
+    if not match:
+        raise HTTPException(status_code=422, detail=f"{key}: укажите число или диапазон минимум-максимум")
+    start = int(match[1])
+    end = int(match[2]) if match[2] is not None else start
+    if not minimum <= start <= end <= maximum:
+        raise HTTPException(status_code=422, detail=f"{key}: допустимый диапазон {minimum}–{maximum}, минимум не больше максимума")
+    return f"{start}-{end}"
+
+
 def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = None) -> dict[str, Any]:
     definition = {
         str(item["key"]): item
@@ -651,10 +672,18 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
     }
     result = dict(current) if current is not None else routing_defaults()
     for key, raw in values.items():
-        if key in {"tunnel_privacy", "tunnel_ech"}:
+        if key == "client_config_format":
+            if raw not in ("mihomo", "singbox"):
+                raise HTTPException(status_code=422, detail="Формат клиента должен быть mihomo или singbox")
+            result[key] = raw
+            continue
+        if key in {"tunnel_privacy", "tunnel_ech", "tunnel_fragment"}:
             if not isinstance(raw, bool):
                 raise HTTPException(status_code=422, detail=f"{key} must be boolean")
             result[key] = raw
+            continue
+        if key in TLS_FRAGMENT_RANGES:
+            result[key] = validate_fragment_range(key, raw)
             continue
         if key not in definition:
             raise HTTPException(status_code=422, detail=f"Unknown routing setting: {key}")
@@ -3027,11 +3056,16 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
                 "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
             sync_legacy_profile_fields(item)
+            for device in devices:
+                if device.get("routing", {}).get("client_config_format") == "singbox":
+                    render_client_profile(item, str(device["id"]))
             data = profiles()
             data.append(item)
             save_profiles(data)
     except Exception as exc:
         write_action(f"profile-create:{profile_id}", str(exc), state="failed", progress=100)
+        if isinstance(exc, HTTPException):
+            raise
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     write_action(f"profile-create:{profile_id}", f"Профиль «{item['name']}» создан", state="done", progress=100)
     return profile_response(item)
@@ -3123,6 +3157,9 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         item.clear()
         item.update(normalized)
     reconcile_profile_encryption(item)
+    for device in item.get("devices", []):
+        if device.get("routing", {}).get("client_config_format") == "singbox":
+            render_client_profile(item, str(device["id"]))
     item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     item["last_operation_id"] = payload.operation_id or ""
     save_profiles(data)
@@ -3360,10 +3397,9 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         rendered.append((connection, direct_name, cdn_name, tls_name))
     routing = {**routing_settings(), **profile_routing}
     ech_requested = bool(profile_routing.get("tunnel_ech", False))
-    ech_enabled = ech_requested and any(
-        cdn_name and cdn_supports_ech(str(connection.get("credential", {}).get("cdn_domain", "")))
-        for connection, _, cdn_name, _ in rendered
-    )
+    # The client resolves current ECH parameters through encrypted DNS. A
+    # server-side DNS outage must not silently disable the requested protection.
+    ech_enabled = ech_requested and any(cdn_name for _, _, cdn_name, _ in rendered)
     # Ready-made bypass lists are selected per profile. Never inherit legacy
     # global switches from routing settings; that would silently affect every
     # existing subscription.
@@ -3423,7 +3459,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
             lines.extend(render_proxy(str(connection["component"]), connection.get("credential", {}), name))
         if cdn_name:
             credential = connection.get("credential", {})
-            lines.extend(render_vless_cdn({**credential, "cdn_ech": ech_enabled and cdn_supports_ech(str(credential.get("cdn_domain", "")))}, cdn_name))
+            lines.extend(render_vless_cdn({**credential, "cdn_ech": ech_enabled}, cdn_name))
         if tls_name:
             lines.extend(render_vless_tls(connection.get("credential", {}), tls_name))
     group_type = str(routing.get("strategy", "fallback"))
@@ -3452,6 +3488,71 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def preflight_client_export_update(current: dict[str, Any], payload: ProfileUpdate) -> None:
+    """Reject incompatible client-only edits before entering the runtime transaction."""
+    candidate = deepcopy(current)
+    if payload.devices is not None:
+        candidate["devices"] = [device.model_dump() for device in payload.devices]
+    if payload.routing is not None:
+        candidate["routing"] = {**candidate.get("routing", {}), **payload.routing}
+    if payload.connections is not None:
+        existing = {entry["id"]: entry for entry in candidate.get("connections", [])}
+        candidate["connections"] = [
+            {**connection.model_dump(), "credential": existing.get(connection.id, {}).get("credential", {})}
+            for connection in payload.connections
+        ]
+    for device in candidate.get("devices", []):
+        if device.get("routing", {}).get("client_config_format") != "singbox":
+            continue
+        selected = [entry for entry in candidate.get("connections", []) if entry.get("device_id") == device["id"]]
+        unsupported = [entry["component"] for entry in selected if entry["component"] not in {"transport-reality", "transport-wg", "transport-shadowsocks", "transport-hysteria2", "transport-tuic"}]
+        if unsupported:
+            raise HTTPException(status_code=422, detail=f"Экспорт sing-box не поддерживает {', '.join(dict.fromkeys(unsupported))}. Оставьте формат Mihomo для этой связки.")
+        # New/replaced transports are fully validated after provisioning. For
+        # client settings on existing transports no runtime changes are needed.
+        old = {entry["id"]: entry for entry in current.get("connections", [])}
+        if all(entry.get("credential") and entry["id"] in old and entry.get("settings", {}) == old[entry["id"]].get("settings", {})
+               and entry["component"] == old[entry["id"]]["component"]
+               and (entry["component"] != "transport-reality" or bool(device.get("routing", {}).get("tunnel_privacy", False)) == bool(entry["credential"].get("encryption")))
+               for entry in selected):
+            render_client_profile(candidate, str(device["id"]))
+
+
+def render_client_profile(item: dict[str, Any], device_id: str, requested_format: str | None = None) -> tuple[str, str]:
+    profile = normalize_profile(item)
+    device_values = device_routing(profile, device_id)
+    export_format = requested_format or str(device_values.get("client_config_format", "mihomo"))
+    if export_format == "mihomo":
+        config = render_profile(profile, device_id)
+        validate_rendered_profile(config)
+        return config, "yaml"
+    if export_format != "singbox":
+        raise HTTPException(status_code=422, detail="Неизвестный формат профиля")
+    connections = [entry for entry in profile.get("connections", []) if entry.get("device_id") == device_id]
+    for connection in connections:
+        if not module_is_installed(str(connection["component"])):
+            raise HTTPException(status_code=409, detail=f"Модуль {connection['component']} выбранного устройства не установлен")
+    # Match the existing device-scoped preset inheritance used by the YAML exporter.
+    routing = {**routing_settings(), **device_values}
+    for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"):
+        routing[key] = bool(device_values.get(key, False))
+    fragment = None
+    if device_values.get("tunnel_fragment", False):
+        fragment = {
+            "packets": "tlshello",
+            "length": validate_fragment_range("tunnel_fragment_size", device_values.get("tunnel_fragment_size", "100-200")),
+            "interval": validate_fragment_range("tunnel_fragment_interval", device_values.get("tunnel_fragment_interval", "10-20")),
+        }
+    # Protection flags never inherit from global routing settings.
+    for key in ("tunnel_ech", "tunnel_privacy"):
+        routing[key] = bool(device_values.get(key, False))
+    try:
+        config = build_singbox_config(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings, fragment)
+    except UnsupportedClientConfig as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return json.dumps(config, ensure_ascii=False, indent=2) + "\n", "json"
+
+
 def validate_rendered_profile(config: str) -> None:
     if not CORE_BIN.is_file():
         return
@@ -3472,7 +3573,7 @@ def validate_rendered_profile(config: str) -> None:
     response_class=PlainTextResponse,
     dependencies=[Depends(auth_required)],
 )
-def profile_config(profile_id: str, device_id: str | None = None) -> PlainTextResponse:
+def profile_config(profile_id: str, device_id: str | None = None, format: str | None = None) -> PlainTextResponse:
     item = next((entry for entry in profiles() if entry.get("id") == profile_id), None)
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -3480,11 +3581,10 @@ def profile_config(profile_id: str, device_id: str | None = None) -> PlainTextRe
     selected_device = device_id or str(normalized["common_device_id"])
     if selected_device not in {str(device.get("id")) for device in normalized.get("devices", [])}:
         raise HTTPException(status_code=404, detail="Profile device not found")
-    config = render_profile(normalized, selected_device)
-    validate_rendered_profile(config)
+    config, extension = render_client_profile(normalized, selected_device, format)
     return PlainTextResponse(config, headers={
         "Cache-Control": "no-store",
-        "Content-Disposition": f'attachment; filename="{profile_export_filename(item)}"',
+        "Content-Disposition": f'attachment; filename="{Path(profile_export_filename(item)).stem}.{extension}"',
     })
 
 
@@ -3667,19 +3767,18 @@ def public_profile_subscription(token: str, request: Request) -> PlainTextRespon
         with profile_mutation_lock:
             latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
             selected_profile = record_common_subscription_access(latest, subscription_device_metadata(request))
-    config = render_profile(selected_profile, selected_device)
-    validate_rendered_profile(config)
+    config, extension = render_client_profile(selected_profile, selected_device, request.query_params.get("format"))
     delivery = None
     if any(entry.get("device_id") == selected_device for entry in selected_profile.get("retiring_connections", [])):
         delivery = BackgroundTask(record_transition_delivery, selected_profile["id"], selected_device,
                                   transition_delivery_revision(selected_profile, selected_device))
     return PlainTextResponse(
         config,
-        media_type="text/yaml; charset=utf-8",
+        media_type="application/json" if extension == "json" else "text/yaml; charset=utf-8",
         background=delivery,
         headers={
             "Cache-Control": "no-store",
-            "Content-Disposition": f'inline; filename="{profile_export_filename(selected_profile)}"',
+            "Content-Disposition": f'inline; filename="{Path(profile_export_filename(selected_profile)).stem}.{extension}"',
             "Profile-Update-Interval": "24",
         },
     )

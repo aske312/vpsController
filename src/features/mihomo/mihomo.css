@@ -1031,6 +1031,10 @@
 .mihomoProfileRuleButton.is-enabled { border-color:rgba(89,199,146,.38); background:rgba(37,112,79,.11); }
 .mihomoProfileRuleButton.is-enabled > i { background:rgba(42,137,92,.24); color:#b9f3d8; }
 .mihomoProfileRuleButton.is-enabled b { color:#d9f5e8; }
+.mihomoFragmentStatus { margin:0; color:var(--muted); font-size:11px; line-height:1.5; }
+.mihomoFragmentFields > label { display:grid; align-content:start; gap:5px; min-width:0; color:var(--text); font-size:11px; }
+.mihomoFragmentFields input { box-sizing:border-box; width:100%; }
+.mihomoFragmentFields small { color:var(--muted); font-size:10px; line-height:1.5; }
 
 .mihomoProfileDialog .mihomoPresetPicker > div > button { grid-template-columns:28px minmax(0,1fr); align-items:center; gap:8px; border-style:dashed; }
 .mihomoProfileDialog .mihomoPresetPicker > div > button > i { display:grid; place-items:center; width:28px; height:28px; border-radius:8px; background:rgba(92,75,180,.18); color:#c7bcff; font:normal 18px/1 sans-serif; }

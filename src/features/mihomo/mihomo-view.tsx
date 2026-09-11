@@ -4,6 +4,7 @@ import type { View, ReadyDevice, ConfirmOptions, Status, Module, Profile, Profil
 import { presetConnectionOptions, presetOptionGroups, channelShort, dnsProviderMeta, gameRoutingCatalog, defaultTunnelGameIds, defaultDirectGameIds, udpExclusionCatalog, p2pClientCatalog, profileDirectRules, ruleIconGroups, profileStrategies } from "./catalog";
 import { clientUuid, devicePlatformMeta, deviceSystemLabel, registeredProfileDevices, selectedGameIds } from "./profile-utils";
 import { Tab, HeroFact, ModuleCatalog, Empty } from "./components";
+import { ProfileFormatSelect, ProfileProtection } from "./profile-protection";
 import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, submitProfileMutation, type ProfileMutation } from "./profile-operation";
 
 import { useNotifier, useFailureNotifications } from "../../shared/notifications/notification-center";
@@ -277,10 +278,14 @@ export function MihomoPage({
     updateRoutingDraft("direct_p2p_clients", [...selected].join(","), true);
   }
 
-  function toggleProfileRule(key: string, checked: boolean) {
+  function setProfileRoutingValue(key: string, value: string | boolean) {
     setProfileDevices((current) => current.map((device) => device.id === activeDeviceId
-      ? { ...device, routing: { ...(device.routing || profileRouting), [key]: checked } }
+      ? { ...device, routing: { ...(device.routing || profileRouting), [key]: value } }
       : device));
+  }
+
+  function toggleProfileRule(key: string, checked: boolean) {
+    setProfileRoutingValue(key, checked);
   }
 
   function toggleCollapsed(setter: Dispatch<SetStateAction<Set<string>>>, key: string) {
@@ -619,7 +624,7 @@ export function MihomoPage({
     try {
       const config = (await request(`/mihomo/profiles/${profile.id}/config${device ? `?device_id=${encodeURIComponent(device.id)}` : ""}`)) as string;
       await navigator.clipboard.writeText(config);
-      notifySuccess(`config.yaml для «${device?.name || profile.name}» скопирован в буфер обмена.`);
+      notifySuccess(`Конфигурация для «${device?.name || profile.name}» скопирована в буфер обмена.`);
     } catch (cause) {
       notifyError(cause instanceof Error ? cause.message : "Не удалось получить config.yaml");
     } finally {
@@ -673,8 +678,10 @@ export function MihomoPage({
     try {
       const config = (await request(`/mihomo/profiles/${profile.id}/config${device ? `?device_id=${encodeURIComponent(device.id)}` : ""}`)) as string;
       const link = document.createElement("a");
-      link.href = URL.createObjectURL(new Blob([config], { type: "application/yaml;charset=utf-8" }));
-      link.download = profile.export_filename;
+      const selectedDevice = device || profile.devices?.find((item) => item.id === profile.common_device_id);
+      const singbox = selectedDevice?.routing?.client_config_format === "singbox";
+      link.href = URL.createObjectURL(new Blob([config], { type: singbox ? "application/json;charset=utf-8" : "application/yaml;charset=utf-8" }));
+      link.download = singbox ? profile.export_filename.replace(/\.yaml$/, ".json") : profile.export_filename;
       document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(link.href);
       notifySuccess(`Профиль «${profile.name}» скачан.`);
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось скачать профиль"); }
@@ -1113,7 +1120,8 @@ export function MihomoPage({
               </>}
             </section>
             <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа GATE.312 для YAML выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{profileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>
-            <section className="mihomoProfileRules"><header><div><b>Защита соединений</b><small>Независимые настройки выбранного устройства. После сохранения обновите подписку в клиенте.</small></div><span>{[activeProfileRouting.tunnel_privacy, activeProfileRouting.tunnel_ech].filter(Boolean).length} из 2</span></header><div><button type="button" className={`mihomoProfileRuleButton${activeProfileRouting.tunnel_privacy ? " is-enabled" : ""}`} aria-pressed={Boolean(activeProfileRouting.tunnel_privacy)} onClick={() => toggleProfileRule("tunnel_privacy", !activeProfileRouting.tunnel_privacy)}><i>VPS</i><span><b>Шифрование до VPS</b><small>VLESS · Mihomo ≥ 1.19.30; старый конфиг доступен до обновления подписки, максимум 15 минут</small></span></button><button type="button" className={`mihomoProfileRuleButton${activeProfileRouting.tunnel_ech ? " is-enabled" : ""}`} aria-pressed={Boolean(activeProfileRouting.tunnel_ech)} onClick={() => toggleProfileRule("tunnel_ech", !activeProfileRouting.tunnel_ech)}><i>ECH</i><span><b>Скрытие имени сервера (ECH)</b><small>Зависит от домена, клиента и сети; может замедлять подключение</small></span></button></div></section>
+            <section className="mihomoProfileName mihomoProfileGeneral"><header><div><b>Файл для клиента</b><small>Выберите формат подписки для этого общего или HWID-устройства.</small></div></header><ProfileFormatSelect routing={activeProfileRouting} onChange={setProfileRoutingValue} /></section>
+            <ProfileProtection routing={activeProfileRouting} connections={profileConnections.filter((connection) => connection.device_id === activeDeviceId)} modules={modules} onChange={setProfileRoutingValue} />
             {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <p className="mihomoMessage is-error" role="status">Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте.</p>}
             {transitionMessage && <p className="mihomoMessage" role="status">{transitionMessage}{activeDeviceId === liveDialogProfile?.common_device_id && " Для клиентов без HWID переход общий: обновление подписки завершает ожидание для всего общего пула."}</p>}
             <section className="mihomoProfileRules"><header><div><b>Правила устройства</b><small>Применяются только к подписке и YAML выбранного устройства.</small></div><span>{profileDirectRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length} из {profileDirectRules.length}</span></header><div>{profileDirectRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div></section>

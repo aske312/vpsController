@@ -17,6 +17,37 @@ from tests.api.support import manager, ROOT, free_port, wait_port
 
 
 class TunnelPrivacyTests(unittest.TestCase):
+    def test_ech_export_survives_server_dns_outage_and_stays_device_scoped(self):
+        profile = {
+            "common_device_id": "phone",
+            "devices": [
+                {"id": "phone", "routing": {"tunnel_ech": True}},
+                {"id": "pc", "routing": {"tunnel_ech": False}},
+            ],
+            "connections": [
+                {"component": "transport-reality", "device_id": device,
+                 "credential": {"uuid": "test", "cdn_enabled": True,
+                                "route_mode": "cdn", "cdn_domain": "example.com",
+                                "cdn_path": "/test"}}
+                for device in ("phone", "pc")
+            ],
+        }
+        dns = {"enhanced_mode": "fake-ip", "nameserver": "1.1.1.1", "fallback": "8.8.8.8"}
+        with patch.object(manager, "normalize_profile", return_value=profile), \
+                patch.object(manager, "routing_settings", return_value={}), \
+                patch.object(manager, "dns_settings", return_value=dns), \
+                patch.object(manager, "profile_rules", return_value=[]), \
+                patch.object(manager.urllib.request, "urlopen", side_effect=OSError("DNS unavailable")) as request:
+            phone = yaml.safe_load(manager.render_profile(profile, "phone"))
+            pc = yaml.safe_load(manager.render_profile(profile, "pc"))
+        request.assert_not_called()
+        self.assertEqual(phone["proxies"][0]["ech-opts"], {"enable": True})
+        self.assertEqual(phone["dns"]["proxy-server-nameserver"],
+                         ["https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"])
+        self.assertNotIn("ech-opts", pc["proxies"][0])
+        self.assertNotIn("proxy-server-nameserver", pc["dns"])
+        self.assertEqual(dns["nameserver"], "1.1.1.1")
+
     def test_saved_legacy_flag_is_repaired_while_previous_yaml_remains_valid(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
