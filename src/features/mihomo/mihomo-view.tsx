@@ -1,7 +1,7 @@
 "use client";
 
 import type { View, ReadyDevice, ConfirmOptions, Status, Module, Profile, ProfileConnection, ProfileDevice, PolicySettings, ProfilePreset, ProfileStats, RuleIconGroup } from "./types";
-import { presetConnectionOptions, presetOptionGroups, channelShort, dnsProviderMeta, gameRoutingCatalog, defaultTunnelGameIds, defaultDirectGameIds, udpExclusionCatalog, p2pClientCatalog, profileDirectRules, ruleIconGroups, profileStrategies } from "./catalog";
+import { presetConnectionOptions, presetOptionGroups, channelShort, gameRoutingCatalog, defaultTunnelGameIds, defaultDirectGameIds, udpExclusionCatalog, p2pClientCatalog, profileDirectRules, ruleIconGroups, profileStrategies } from "./catalog";
 import { clientUuid, devicePlatformMeta, deviceSystemLabel, registeredProfileDevices, selectedGameIds } from "./profile-utils";
 import { Tab, HeroFact, ModuleCatalog, Empty } from "./components";
 import { ProfileFormatSelect, ProfileProtection } from "./profile-protection";
@@ -43,9 +43,6 @@ export function MihomoPage({
   const [modules, setModules] = useState<Module[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [dnsPolicy, setDnsPolicy] = useState<PolicySettings | null>(null);
-  const [dnsDraft, setDnsDraft] = useState<Record<string, string | number | boolean>>({});
-  const [dnsDirty, setDnsDirty] = useState(false);
-  const dnsDirtyRef = useRef(false);
   const [routingPolicy, setRoutingPolicy] = useState<PolicySettings | null>(null);
   const [routingDraft, setRoutingDraft] = useState<Record<string, string | number | boolean>>({});
   const [routingDirty, setRoutingDirty] = useState(false);
@@ -115,7 +112,6 @@ export function MihomoPage({
         setModules((nextModules as { items: Module[] }).items || []);
         setProfiles((nextProfiles as { items: Profile[] }).items || []);
         setDnsPolicy(nextDns as PolicySettings);
-        if (!dnsDirtyRef.current) setDnsDraft({ ...(nextDns as PolicySettings).values });
         setRoutingPolicy(nextRouting as PolicySettings);
         if (!routingDirtyRef.current) {
           const values = { ...(nextRouting as PolicySettings).values };
@@ -136,32 +132,6 @@ export function MihomoPage({
     refreshInFlight.current = job;
     return job;
   }, [request]);
-
-  function updateDnsDraft(key: string, value: string | number | boolean) {
-    setDnsDraft((current) => ({ ...current, [key]: value }));
-    dnsDirtyRef.current = true;
-    setDnsDirty(true);
-  }
-
-  async function saveDnsWorkspace(event: FormEvent) {
-    event.preventDefault();
-    const operationId = "settings:dns-private";
-    notifyOperation(operationId, "DNS Mihomo", "running", "Сохраняем DNS для профилей Mihomo…");
-    setBusy(operationId);
-
-    try {
-      await request("/mihomo/dns/settings", { method: "PATCH", body: JSON.stringify({ values: dnsDraft }) });
-      dnsDirtyRef.current = false;
-      setDnsDirty(false);
-      await refresh();
-      notifyOperation(operationId, "DNS Mihomo", "success", "DNS-настройки сохранены. Обновите подписку в клиенте.");
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "DNS-настройки не сохранены";
-      notifyOperation(operationId, "DNS Mihomo", "error", message);
-    } finally {
-      setBusy("");
-    }
-  }
 
   useEffect(() => {
     const initial = window.setTimeout(() => void refresh(false), 0);
@@ -807,10 +777,6 @@ export function MihomoPage({
     profiles.length > 0 && overviewActiveConnections === 0 ? { title: "Нет активных подключений", text: "Профили созданы, но клиенты сейчас не подключены.", view: "profiles" as View } : null,
   ].filter(Boolean) as Array<{ title: string; text: string; view: View }>;
   const overviewIssueTargets = overviewIssues.filter((issue, index, items) => items.findIndex((item) => item.view === issue.view) === index);
-  const dnsModeField = dnsPolicy?.schema.find((field) => field.key === "enhanced_mode");
-  const dnsPrimaryField = dnsPolicy?.schema.find((field) => field.key === "nameserver");
-  const dnsFallbackField = dnsPolicy?.schema.find((field) => field.key === "fallback");
-  const dnsOptions = (dnsPrimaryField?.options || []).map((option) => typeof option === "string" ? { value: option, label: option } : option);
 
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
@@ -855,7 +821,6 @@ export function MihomoPage({
           <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
           <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
           <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Компоненты</Tab>
-          <Tab id="dns" current={view} onSelect={setView}>DNS</Tab>
           <Tab id="rules" current={view} onSelect={setView}>Правила</Tab>
           <Tab id="routing" current={view} onSelect={setView}>Настройки</Tab>
         </nav>
@@ -956,18 +921,6 @@ export function MihomoPage({
           onUpdate={updateModule}
           onSettings={openSettings}
         />
-      )}
-
-      {view === "dns" && (
-        <form className="mihomoDnsWorkspace mihomoDnsV2" onSubmit={saveDnsWorkspace}>
-          <header className="mihomoDnsHeader"><div><p className="eyebrow">DNS ПРОФИЛЕЙ</p><h2>Разрешение доменов</h2><p>Выберите режим и два независимых резолвера для подписок Mihomo.</p></div><span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "ГОТОВ" : "ОЖИДАНИЕ"}</span></header>
-          <section className="mihomoDnsSummary"><div><small>РЕЖИМ</small><b>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" ? "Fake IP" : "Redir host"}</b><span>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" ? "Быстрее и точнее для правил" : "Максимальная совместимость"}</span></div><div><small>ОСНОВНОЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.nameserver || ""))?.label || "Не выбран"}</b><span>{dnsProviderMeta[String(dnsDraft.nameserver || "")]?.note || "DNS профиля"}</span></div><div><small>РЕЗЕРВНЫЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.fallback || ""))?.label || "Не выбран"}</b><span>{dnsProviderMeta[String(dnsDraft.fallback || "")]?.note || "Используется при сбое"}</span></div></section>
-          <section className="mihomoDnsMode"><header><div><b>Режим обработки</b><small>Как Mihomo сопоставляет домены с правилами маршрутизации.</small></div></header><div>{(dnsModeField?.options || ["fake-ip", "redir-host"]).map((option) => { const value = typeof option === "string" ? option : option.value; const selected = String(dnsDraft.enhanced_mode || dnsModeField?.default || "fake-ip") === value; return <button type="button" key={value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft("enhanced_mode", value)}><span>{value === "fake-ip" ? "FAST" : "COMPAT"}</span><p><b>{value === "fake-ip" ? "Fake IP" : "Redir host"}</b><small>{value === "fake-ip" ? "Рекомендуется для TUN и правил по доменам" : "Для приложений, несовместимых с Fake IP"}</small></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>
-          <section className="mihomoDnsAdvanced"><header><div><b>Дополнительная обработка</b><small>Параметры попадут непосредственно в DNS-секцию профилей.</small></div></header><div><label className={Boolean(dnsDraft.ipv6) ? "is-enabled" : ""}><span><b>IPv6</b><small>Возвращать записи AAAA</small></span><input type="checkbox" checked={Boolean(dnsDraft.ipv6)} onChange={(event) => updateDnsDraft("ipv6", event.target.checked)} /></label><label className={Boolean(dnsDraft.prefer_h3) ? "is-enabled" : ""}><span><b>HTTP/3</b><small>Для совместимых DoH-серверов</small></span><input type="checkbox" checked={Boolean(dnsDraft.prefer_h3)} onChange={(event) => updateDnsDraft("prefer_h3", event.target.checked)} /></label><label><span><b>Кэш DNS</b><small>Алгоритм вытеснения записей</small></span><select value={String(dnsDraft.cache_algorithm || "lru")} onChange={(event) => updateDnsDraft("cache_algorithm", event.target.value)}><option value="lru">LRU · совместимый</option><option value="arc">ARC · адаптивный</option></select></label></div>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" && <label className="mihomoDnsFakeIp"><span><b>Исключения Fake IP</b><small>По одному домену или маске на строку. Для них клиент получит реальный IP.</small></span><textarea rows={4} value={String(dnsDraft.fake_ip_filter || "")} spellCheck={false} placeholder={"*.lan\n*.local"} onChange={(event) => updateDnsDraft("fake_ip_filter", event.target.value)} /></label>}</section>
-          {([['nameserver', 'Основной DNS', 'Используется для обычных запросов.'], ['fallback', 'Резервный DNS', 'Подхватывает запросы при недоступности основного.']] as const).map(([key, title, note]) => <section className="mihomoDnsProviders" key={key}><header><div><b>{title}</b><small>{note}</small></div></header><div>{dnsOptions.map((option) => { const selected = String(dnsDraft[key] || (key === 'nameserver' ? dnsPrimaryField?.default : dnsFallbackField?.default) || "") === option.value; const meta = dnsProviderMeta[option.value] || { code: "DNS", note: "Пользовательский резолвер" }; return <button type="button" key={option.value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft(key, option.value)}><span>{meta.code}</span><p><b>{option.label}</b><small>{meta.note}</small></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>)}
-          <aside className="mihomoDnsNote"><b>Применение настроек</b><span>Основной и резервный DNS должны отличаться. После сохранения обновите подписку в клиенте, чтобы устройство получило новую конфигурацию.</span></aside>
-          <footer className="mihomoDnsFooter"><span>{dnsDirty ? "Есть несохранённые изменения" : "Настройки синхронизированы"}</span><button className="primaryButton" type="submit" disabled={!dnsDirty || busy === "settings:dns-private" || dnsDraft.nameserver === dnsDraft.fallback}>{busy === "settings:dns-private" ? "Сохранение…" : dnsDraft.nameserver === dnsDraft.fallback ? "Выберите разные DNS" : "Сохранить DNS"}</button></footer>
-        </form>
       )}
 
       {(view === "routing" || view === "rules") && (

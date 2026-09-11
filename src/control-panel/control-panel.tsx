@@ -24,7 +24,7 @@ import { ApplicationView } from "../features/application/application-view";
 import { ConnectionsView } from "../features/connections/connections-view";
 import { ProtocolView } from "../features/protocols/protocol-view";
 import { LoginView } from "../features/auth/login-view";
-import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, DnsCheck, DnsSettings, DnsStatus, LiveStatus, LoggingSettings, NetworkStatus, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
+import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, DnsCheck, DnsSettings, DnsStatus, LiveStatus, LoggingSettings, MihomoDnsStatus, NetworkStatus, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
 import { actionLabels, bytes, CLIENTS_PER_PAGE, directProtocolOrder, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
 import { createSystemActionCompletionTracker, systemActionNeedsReload, systemOperationNotification, type SystemAction } from "./system-operation";
 
@@ -70,6 +70,9 @@ export function ControlPanel() {
   const [dns, setDns] = useState<DnsStatus | null>(null);
   const [network, setNetwork] = useState<NetworkStatus | null>(null);
   const [networkLoading, setNetworkLoading] = useState(false);
+  const [mihomoDns, setMihomoDns] = useState<MihomoDnsStatus | null>(null);
+  const [mihomoDnsDraft, setMihomoDnsDraft] = useState<Record<string, string | number | boolean>>({});
+  const [mihomoDnsBusy, setMihomoDnsBusy] = useState(false);
   const [dnsDraft, setDnsDraft] = useState<DnsSettings | null>(null);
   const [dnsChecks, setDnsChecks] = useState<Record<string, DnsCheck>>({});
   const [deviceProbe, setDeviceProbe] = useState<DeviceProbe | null>(null);
@@ -255,18 +258,30 @@ export function ControlPanel() {
     if (!token) return;
     setNetworkLoading(true);
     try {
-      const [networkStatus, dnsStatus] = await Promise.all([
+      const [networkStatus, dnsStatus, mihomoDnsStatus] = await Promise.all([
         request("/network") as Promise<NetworkStatus>,
         request("/dns") as Promise<DnsStatus>,
+        request("/mihomo/dns/settings").catch(() => null) as Promise<MihomoDnsStatus | null>,
       ]);
       setNetwork(networkStatus);
       setDns(dnsStatus);
       if (!dnsDraft) setDnsDraft(dnsStatus.settings);
+      setMihomoDns(mihomoDnsStatus);
+      if (mihomoDnsStatus) setMihomoDnsDraft((current) => Object.keys(current).length ? current : mihomoDnsStatus.values);
       setLastUpdated(new Date());
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadNetwork; return next; });
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadNetwork: refreshFailure(cause, "Не удалось определить сетевую конфигурацию") })); }
     finally { setNetworkLoading(false); }
   }, [dnsDraft, request, token]);
+
+  const saveMihomoDns = useCallback(async () => {
+    setMihomoDnsBusy(true);
+    try {
+      const next = await request("/mihomo/dns/settings", { method: "PATCH", body: JSON.stringify({ values: mihomoDnsDraft }) }) as MihomoDnsStatus;
+      setMihomoDns(next); setMihomoDnsDraft(next.values); notifySuccess("DNS Mihomo сохранён и включён в общую сетевую политику");
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить DNS Mihomo"); }
+    finally { setMihomoDnsBusy(false); }
+  }, [mihomoDnsDraft, notifyError, notifySuccess, request]);
 
   const loadProtocolStatus = useCallback(async (protocol: Protocol) => {
     if (!token) return;
@@ -1558,6 +1573,11 @@ export function ControlPanel() {
         setDnsDraft={setDnsDraft}
         checkDnsProviders={checkDnsProviders}
         saveDnsSettings={saveDnsSettings}
+        mihomoDns={mihomoDns}
+        mihomoDnsDraft={mihomoDnsDraft}
+        mihomoDnsBusy={mihomoDnsBusy}
+        setMihomoDnsDraft={setMihomoDnsDraft}
+        saveMihomoDns={() => void saveMihomoDns()}
       />}
 
       {tab === "security" && <SecurityView
