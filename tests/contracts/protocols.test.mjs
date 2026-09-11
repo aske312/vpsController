@@ -289,7 +289,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /vrx_servers\.insert\(0, selected\["doh_url"\]\)/);
   assert.match(page, /DoH для VLESS/);
   assert.match(page, /SECURE CHANNELS · DNS/);
-  assert.doesNotMatch(api, /apply_system|system_resolver|def apply_system_dns/);
+  assert.match(api, /apply_system|def apply_system_dns/);
   assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
   assert.match(api, /def apply_vrx_dns/);
   assert.match(api, /content-type: application\/dns-message/);

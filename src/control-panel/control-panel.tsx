@@ -18,6 +18,7 @@ import { OverviewDashboard } from "../features/overview/overview-view";
 import { AppWorkspace } from "./components/app-workspace";
 import { ServicesDashboard } from "../features/services/services-view";
 import { NetworkView } from "../features/network/network-view";
+import { probeNetworkDns, readNetworkControl, saveNetworkDns, saveNetworkMihomoDns } from "../features/network/network-api";
 import { SecurityView } from "../features/security/security-view";
 import { ApplicationView } from "../features/application/application-view";
 import { ConnectionsView } from "../features/connections/connections-view";
@@ -257,16 +258,12 @@ export function ControlPanel() {
     if (!token) return;
     setNetworkLoading(true);
     try {
-      const [networkStatus, dnsStatus, mihomoDnsStatus] = await Promise.all([
-        request("/network") as Promise<NetworkStatus>,
-        request("/dns") as Promise<DnsStatus>,
-        request("/mihomo/dns/settings").catch(() => null) as Promise<MihomoDnsStatus | null>,
-      ]);
-      setNetwork(networkStatus);
-      setDns(dnsStatus);
-      if (!dnsDraft) setDnsDraft(dnsStatus.settings);
-      setMihomoDns(mihomoDnsStatus);
-      if (mihomoDnsStatus) setMihomoDnsDraft((current) => Object.keys(current).length ? current : mihomoDnsStatus.values);
+      const next = await readNetworkControl(request);
+      setNetwork(next.network);
+      setDns(next.dns);
+      if (!dnsDraft) setDnsDraft(next.dns.settings);
+      setMihomoDns(next.mihomoDns);
+      if (next.mihomoDns) setMihomoDnsDraft((current) => Object.keys(current).length ? current : next.mihomoDns!.values);
       setLastUpdated(new Date());
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadNetwork; return next; });
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadNetwork: refreshFailure(cause, "Не удалось определить сетевую конфигурацию") })); }
@@ -276,7 +273,7 @@ export function ControlPanel() {
   const saveMihomoDns = useCallback(async () => {
     setMihomoDnsBusy(true);
     try {
-      const next = await request("/mihomo/dns/settings", { method: "PATCH", body: JSON.stringify({ values: mihomoDnsDraft }) }) as MihomoDnsStatus;
+      const next = await saveNetworkMihomoDns(request, mihomoDnsDraft);
       setMihomoDns(next); setMihomoDnsDraft(next.values); notifySuccess("DNS Mihomo сохранён и включён в общую сетевую политику");
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить DNS Mihomo"); }
     finally { setMihomoDnsBusy(false); }
@@ -370,7 +367,7 @@ export function ControlPanel() {
     if (!dnsDraft) return;
     setBusy(true);
     try {
-      const next = await request("/dns/settings", { method: "PUT", body: JSON.stringify(dnsDraft) }) as DnsStatus;
+      const next = await saveNetworkDns(request, dnsDraft);
       setDns(next); setDnsDraft(next.settings); notifySuccess("DNS-профиль сохранён и применён к выбранным протоколам");
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить DNS"); }
     finally { setBusy(false); }
@@ -413,8 +410,8 @@ export function ControlPanel() {
   async function checkDnsProviders(providerId?: string) {
     setCheckingDns(true);
     try {
-      const result = await request("/dns/check", { method: "POST", body: JSON.stringify({ provider_id: providerId || null }) }) as { items: DnsCheck[] };
-      setDnsChecks((current) => ({ ...current, ...Object.fromEntries(result.items.map((item) => [item.id, item])) }));
+      const items = await probeNetworkDns(request, providerId);
+      setDnsChecks((current) => ({ ...current, ...Object.fromEntries(items.map((item) => [item.id, item])) }));
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Проверка DNS не выполнена"); }
     finally { setCheckingDns(false); }
   }
@@ -1544,6 +1541,7 @@ export function ControlPanel() {
           confirmAction={askConfirmation}
           coreBusy={installingProtocol === "remove-mihomo"}
           onCommandComplete={requestCommandReload}
+          onOpenNetwork={() => setTab("network")}
           onRemoveCore={async () => {
             const image = protocolImages.find((item) => item.id === "mihomo" && item.installed);
             if (image) await removeProtocol(image, true);

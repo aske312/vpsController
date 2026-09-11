@@ -75,6 +75,7 @@ class DnsSettingsUpdate(BaseModel):
     apply_vrx: bool = True
     prefer_encrypted: bool = False
     fallback_enabled: bool = True
+    apply_system: bool = False
     custom: DnsCustomResolver | None = None
 
 

@@ -179,6 +179,8 @@ SSH_ACCESS_FILE = DATA_DIR / "ssh-access.json"
 PROTOCOL_IMAGES_DIR = INSTALL_DIR / "protocol-images"
 MONITOR_DIR = DATA_DIR / "monitor"
 DNS_SETTINGS_FILE = DATA_DIR / "dns-settings.json"
+SYSTEM_RESOLVED_DROPIN = Path("/etc/systemd/resolved.conf.d/312-net.conf")
+SYSTEM_RESOLV_CONF = Path("/etc/resolv.conf")
 updates_refresh_lock = threading.Lock()
 app_version_refresh_lock = threading.Lock()
 resource_check_lock = threading.Lock()
@@ -2861,6 +2863,7 @@ def dns_status(_: None = Depends(require_token)) -> dict:
             "shadowsocks": {"installed": installed["shadowsocks"], "value": effects["shadowsocks"], "scope": "client_recommendation", "changes_existing": False, "matches_selected": effects["shadowsocks"] == expected},
             "vless-reality-xhttp": {"installed": installed["vless-reality-xhttp"], "value": effects["vless-reality-xhttp"], "scope": "server_xray", "changes_existing": True, "matches_selected": effects["vless-reality-xhttp"] == ", ".join(expected_vrx)},
         },
+        "system": system_dns_state(),
     }
 
 
@@ -2895,6 +2898,12 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
         env_updates["SHADOWSOCKS_DNS"] = addresses
     if data["apply_vrx"]:
         env_updates["VRX_DNS"] = vrx_addresses
+    if data["apply_system"]:
+        apply_system_dns(selected_addresses)
+    elif SYSTEM_RESOLVED_DROPIN.exists():
+        SYSTEM_RESOLVED_DROPIN.unlink()
+        if run("systemctl", "is-active", "systemd-resolved.service") == "active":
+            run("systemctl", "restart", "systemd-resolved", check=True)
     env_original = ENV_FILE.read_bytes() if ENV_FILE.exists() else None
     vrx_original = VLESS_CONFIG.read_bytes() if data["apply_vrx"] and VLESS_CONFIG.exists() else None
     settings_original = DNS_SETTINGS_FILE.read_bytes() if DNS_SETTINGS_FILE.exists() else None
@@ -3176,13 +3185,36 @@ def configured_int(values: dict[str, str], name: str, fallback: int) -> int:
 
 
 def read_dns_settings() -> dict:
-    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "prefer_encrypted": False, "fallback_enabled": True, "custom": None}
+    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "prefer_encrypted": False, "fallback_enabled": True, "apply_system": False, "custom": None}
     try:
         saved = json.loads(DNS_SETTINGS_FILE.read_text(encoding="utf-8"))
         # Keep only supported channel keys when reading older settings files.
         return {key: value for key, value in {**defaults, **saved}.items() if key in defaults}
     except (OSError, json.JSONDecodeError, TypeError):
         return defaults
+
+
+def system_dns_state() -> dict:
+    try:
+        addresses = [line.split()[1] for line in SYSTEM_RESOLV_CONF.read_text(encoding="utf-8").splitlines() if line.startswith("nameserver ") and len(line.split()) > 1]
+    except OSError:
+        addresses = []
+    source = "systemd-resolved" if SYSTEM_RESOLV_CONF.is_symlink() and "systemd" in str(SYSTEM_RESOLV_CONF.resolve()) else "resolv.conf"
+    return {"addresses": addresses[:4], "source": source, "managed": SYSTEM_RESOLVED_DROPIN.exists()}
+
+
+def apply_system_dns(addresses: list[str]) -> None:
+    if not addresses:
+        raise HTTPException(status_code=422, detail="Укажите хотя бы один DNS-резолвер для VPS")
+    if run("systemctl", "is-active", "systemd-resolved.service") == "active":
+        SYSTEM_RESOLVED_DROPIN.parent.mkdir(parents=True, exist_ok=True)
+        SYSTEM_RESOLVED_DROPIN.write_text("[Resolve]\nDNS=" + " ".join(addresses) + "\nFallbackDNS=\n", encoding="utf-8")
+        os.chmod(SYSTEM_RESOLVED_DROPIN, 0o644)
+        run("systemctl", "restart", "systemd-resolved", check=True)
+        return
+    if SYSTEM_RESOLV_CONF.is_symlink():
+        raise HTTPException(status_code=409, detail="На VPS не найден активный systemd-resolved для управления DNS")
+    SYSTEM_RESOLV_CONF.write_text("# Managed by 312.net\n" + "\n".join(f"nameserver {address}" for address in addresses) + "\n", encoding="utf-8")
 
 
 def dns_provider_list(settings: dict | None = None) -> list[dict]:

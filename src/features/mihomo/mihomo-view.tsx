@@ -31,12 +31,14 @@ export function MihomoPage({
   coreBusy,
   onRemoveCore,
   onCommandComplete,
+  onOpenNetwork,
 }: {
   token: string;
   confirmAction: (options: ConfirmOptions) => Promise<boolean>;
   coreBusy: boolean;
   onRemoveCore: () => Promise<void>;
   onCommandComplete: () => void;
+  onOpenNetwork?: () => void;
 }) {
   const [view, setView] = useState<View>("overview");
   const [status, setStatus] = useState<Status | null>(null);
@@ -398,6 +400,10 @@ export function MihomoPage({
   }
 
   function openSettings(module: Module) {
+    if (module.category === "dns") {
+      onOpenNetwork?.();
+      return;
+    }
     setEditing(module);
     setSettingsDraft({ ...module.settings_values });
   }

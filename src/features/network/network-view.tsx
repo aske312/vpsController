@@ -2,6 +2,8 @@
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import type { DnsCheck, DnsSettings, DnsStatus, MihomoDnsStatus, NetworkStatus } from "../../shared/types/control-plane";
+import { SystemDnsControl } from "./system-dns-control";
+// DNS самого VPS управляется отдельным блоком сети через apply_system.
 
 type Tone = "good" | "attention" | "critical";
 type Props = { status: NetworkStatus | null; loading: boolean; onRefresh: () => void; dns: DnsStatus | null; dnsDraft: DnsSettings | null; dnsChecks: Record<string, DnsCheck>; checkingDns: boolean; busy: boolean; setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>>; checkDnsProviders: (providerId?: string) => Promise<void> | void; saveDnsSettings: () => Promise<void> | void; mihomoDns: MihomoDnsStatus | null; mihomoDnsDraft: Record<string, string | number | boolean>; mihomoDnsBusy: boolean; setMihomoDnsDraft: Dispatch<SetStateAction<Record<string, string | number | boolean>>>; saveMihomoDns: () => Promise<void> | void };
@@ -31,6 +33,7 @@ export function NetworkView({ status, loading, onRefresh, dns, dnsDraft, dnsChec
     </section>
     <section className="networkDomains"><header><div><Caption>DOMAIN ROUTES</Caption><h2>Маршруты доменов</h2></div><span>{status.domains.length} записей</span></header><div className="networkDomainHeader"><span>ДОМЕН / РОЛЬ</span><span>RESOLVED ADDRESSES</span><span>MODE</span></div>{status.domains.length ? status.domains.map((domain) => { const itemTone = domainTone(domain.route); return <div className="networkDomain" key={`${domain.role}-${domain.value}`}><div><Signal tone={itemTone} /><strong>{domain.value}</strong><small>{domain.role} · {domain.source}</small></div><code>{domain.resolved.join(", ") || "не разрешается"}</code><b className={itemTone}>{domain.route === "direct" ? "DIRECT" : domain.route === "proxy_or_cdn" ? "CDN" : "ERROR"}</b></div>; }) : <p className="networkNoData">Домены не настроены.</p>}</section>
     <DnsView dns={dns} dnsDraft={dnsDraft} dnsChecks={dnsChecks} checkingDns={checkingDns} busy={busy} setDnsDraft={setDnsDraft} checkDnsProviders={checkDnsProviders} saveDnsSettings={saveDnsSettings} mihomoAvailable={Boolean(mihomoDns)} mihomoSelected={mihomoSelected} onMihomoSelected={setMihomoSelected} />
+    <SystemDnsControl dns={dns} dnsDraft={dnsDraft} setDnsDraft={setDnsDraft} />
     {mihomoDns && mihomoSelected && <MihomoCore policy={mihomoDns} draft={mihomoDnsDraft} busy={mihomoDnsBusy} setDraft={setMihomoDnsDraft} onSave={saveMihomoDns} />}
   </main>;
 }

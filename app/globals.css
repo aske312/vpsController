@@ -8,6 +8,7 @@
 @import "../src/features/auth/auth.css";
 @import "../src/features/overview/overview.css";
 @import "../src/features/network/network.css";
+@import "../src/features/network/system-dns-control.css";
 @import "../src/features/security/security.css";
 @import "../src/features/application/application.css";
 @import "../src/features/services/services.css";
