@@ -2883,23 +2883,34 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
     selected = next((item for item in providers if item["id"] == data["selected_id"]), None)
     if not selected:
         raise HTTPException(status_code=422, detail="Выбранный DNS-профиль не найден")
-    selected_addresses = selected["addresses"] if data["fallback_enabled"] else selected["addresses"][:1]
-    addresses = ", ".join(selected_addresses)
-    vrx_servers = list(selected_addresses)
-    if data["prefer_encrypted"] and selected.get("doh_url"):
-        vrx_servers.insert(0, selected["doh_url"])
-    vrx_addresses = ", ".join(vrx_servers)
+    profiles = data.get("profiles") or {}
+    for profile_id in profiles.values():
+        if not next((item for item in providers if item["id"] == profile_id), None):
+            raise HTTPException(status_code=422, detail="Один из DNS-профилей не найден")
+    def resolver_for(scope: str) -> tuple[list[str], dict]:
+        item = next((item for item in providers if item["id"] == profiles.get(scope, data["selected_id"])), selected)
+        values = item["addresses"] if data["fallback_enabled"] else item["addresses"][:1]
+        return list(values), item
+    system_addresses, _ = resolver_for("system")
+    wg_addresses, _ = resolver_for("wg")
+    awg_addresses, _ = resolver_for("awg")
+    ss_addresses, _ = resolver_for("shadowsocks")
+    vrx_addresses, vrx_provider = resolver_for("vless-reality-xhttp")
+    vrx_servers = list(vrx_addresses)
+    if data["prefer_encrypted"] and vrx_provider.get("doh_url"):
+        vrx_servers.insert(0, vrx_provider["doh_url"])
+    addresses = ", ".join(wg_addresses)
     env_updates = {}
     if data["apply_wg"]:
         env_updates["WG_DNS"] = addresses
     if data["apply_awg"]:
-        env_updates["AWG_DNS"] = addresses
+        env_updates["AWG_DNS"] = ", ".join(awg_addresses)
     if data["apply_shadowsocks"]:
-        env_updates["SHADOWSOCKS_DNS"] = addresses
+        env_updates["SHADOWSOCKS_DNS"] = ", ".join(ss_addresses)
     if data["apply_vrx"]:
         env_updates["VRX_DNS"] = vrx_addresses
     if data["apply_system"]:
-        apply_system_dns(selected_addresses)
+        apply_system_dns(system_addresses)
     elif SYSTEM_RESOLVED_DROPIN.exists():
         SYSTEM_RESOLVED_DROPIN.unlink()
         if run("systemctl", "is-active", "systemd-resolved.service") == "active":
@@ -3185,7 +3196,7 @@ def configured_int(values: dict[str, str], name: str, fallback: int) -> int:
 
 
 def read_dns_settings() -> dict:
-    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "prefer_encrypted": False, "fallback_enabled": True, "apply_system": False, "custom": None}
+    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "prefer_encrypted": False, "fallback_enabled": True, "apply_system": False, "profiles": {}, "custom": None}
     try:
         saved = json.loads(DNS_SETTINGS_FILE.read_text(encoding="utf-8"))
         # Keep only supported channel keys when reading older settings files.

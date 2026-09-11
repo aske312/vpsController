@@ -76,6 +76,7 @@ class DnsSettingsUpdate(BaseModel):
     prefer_encrypted: bool = False
     fallback_enabled: bool = True
     apply_system: bool = False
+    profiles: dict[str, str] = Field(default_factory=dict)
     custom: DnsCustomResolver | None = None
 
 

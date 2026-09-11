@@ -286,7 +286,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /env_updates\["AWG_DNS"\]/);
   assert.match(api, /env_updates\["SHADOWSOCKS_DNS"\]/);
   assert.match(api, /env_updates\["VRX_DNS"\]/);
-  assert.match(api, /vrx_servers\.insert\(0, selected\["doh_url"\]\)/);
+  assert.match(api, /vrx_servers\.insert\(0, vrx_provider\["doh_url"\]\)/);
   assert.match(page, /DoH для VLESS/);
   assert.match(page, /SECURE CHANNELS · DNS/);
   assert.match(api, /apply_system|def apply_system_dns/);
