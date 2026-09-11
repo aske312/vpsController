@@ -3505,7 +3505,7 @@ def preflight_client_export_update(current: dict[str, Any], payload: ProfileUpda
         if device.get("routing", {}).get("client_config_format") != "singbox":
             continue
         selected = [entry for entry in candidate.get("connections", []) if entry.get("device_id") == device["id"]]
-        unsupported = [entry["component"] for entry in selected if entry["component"] not in {"transport-reality", "transport-wg", "transport-shadowsocks", "transport-hysteria2", "transport-tuic"}]
+        unsupported = [entry["component"] for entry in selected if entry["component"] not in {"transport-reality", "transport-wg", "transport-awg", "transport-shadowsocks", "transport-hysteria2", "transport-tuic"}]
         if unsupported:
             raise HTTPException(status_code=422, detail=f"Экспорт sing-box не поддерживает {', '.join(dict.fromkeys(unsupported))}. Оставьте формат Mihomo для этой связки.")
         # New/replaced transports are fully validated after provisioning. For

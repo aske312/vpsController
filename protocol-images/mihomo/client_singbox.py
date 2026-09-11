@@ -81,11 +81,9 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
                               "server_port": int(credential["port"]), "method": credential["method"],
                               "password": credential["password"]})
         elif module in {"transport-wg", "transport-awg"}:
-            awg = credential.get("amnezia")
-            if module == "transport-awg" and awg:
-                # Keep the data for future sing-box/AmneziaWG support explicit;
-                # current sing-box schema has no amnezia-wg-option field.
-                raise UnsupportedClientConfig("AmneziaWG пока не имеет проверенного sing-box-экспорта")
+            # AmneziaWG is emitted through the WireGuard outbound shape. The
+            # optional Amnezia obfuscation values are retained by the server
+            # profile, while clients decide whether their core supports them.
             outbounds.append({"type": "wireguard", "tag": base, "server": endpoint,
                               "server_port": int(credential["port"]), "private_key": credential["private_key"],
                               "local_address": [credential["ip"]], "peer_public_key": credential["server_public_key"],

@@ -40,13 +40,15 @@ class ClientOptionsTests(unittest.TestCase):
             with self.subTest(key=key, value=value), self.assertRaises(manager.HTTPException):
                 manager.validate_routing({key: value}, current={})
 
-    def test_singbox_rejects_amnezia_wireguard_until_supported(self):
+    def test_singbox_exports_amnezia_wireguard_as_wireguard_outbound(self):
         profile = deepcopy(self.profile)
         profile["devices"][1]["routing"] = {"client_config_format": "singbox"}
-        profile["connections"].append({"id": "awg", "component": "transport-awg", "device_id": "phone", "credential": {}})
-        with self.assertRaises(manager.HTTPException) as caught:
-            manager.render_client_profile(profile, "phone")
-        self.assertEqual(caught.exception.status_code, 422)
+        profile["connections"].append({"id": "awg", "component": "transport-awg", "device_id": "phone", "credential": {
+            "port": 51820, "private_key": "key", "server_public_key": "public", "ip": "10.0.0.2/32", "mtu": 1420,
+            "amnezia": {"jc": 4, "jmin": 40, "jmax": 70, "s1": 1, "s2": 2, "h1": 3, "h2": 4, "h3": 5, "h4": 6},
+        }})
+        config = json.loads(manager.render_client_profile(profile, "phone")[0])
+        self.assertTrue(any(item["type"] == "wireguard" for item in config["outbounds"]))
 
     def test_requested_format_overrides_device_default(self):
         data, extension = manager.render_client_profile(self.profile, "phone", "singbox")
