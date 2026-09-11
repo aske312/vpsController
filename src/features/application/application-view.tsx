@@ -93,7 +93,7 @@ export function ApplicationView({ application, services, applicationVersion, upd
               </label>
               <label>
                 <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? `Выключен · адрес после включения ${services?.panel_access?.internal_url || "http://admin.312.net"}` : `Доступ через ${services?.panel_access?.internal_url || (services?.panel_access?.vpn_urls || []).join("  ") || "защищённое подключение"}`}</small></span>
-                <span className="applicationSwitch"><input type="checkbox" checked={!services?.panel_access?.public} onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")} disabled={busy || !services || serviceModeActive || (services.panel_access?.public !== false && services.panel_access?.can_enable === false)} /><i /></span>
+                <span className="applicationSwitch"><input type="checkbox" checked={!services?.panel_access?.public} onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")} disabled={busy || !services || (services.panel_access?.public !== false && services.panel_access?.can_enable === false)} /><i /></span>
               </label>
               <label>
                 <span><strong>Проверка сертификата Cloudflare</strong><small>Только CDN-каналы. Сначала включите Full (strict) и Authenticated Origin Pulls в CF. При ошибке проверки настройка откатится; возможен краткий разрыв CDN.</small><small>Подтверждает сеть CF, а не принадлежность вашему аккаунту.</small></span>

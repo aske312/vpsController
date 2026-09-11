@@ -375,6 +375,12 @@ def internal_panel_url() -> str:
     return f"http://{INTERNAL_PANEL_HOST}"
 
 
+def external_panel_url() -> str:
+    if PUBLIC_DOMAIN:
+        return f"https://{PUBLIC_DOMAIN}"
+    return f"http://{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{os.getenv('HTTP_PORT', '80')}"
+
+
 def write_clients(items: list[dict]) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp = CLIENTS_FILE.with_suffix(".tmp")
@@ -2438,6 +2444,7 @@ def services_status(_: None = Depends(require_token)) -> dict:
             "public": os.getenv("ACCESS_MODE", "external") != "vpn",
             "vpn_urls": vpn_urls,
             "internal_url": internal_panel_url(),
+            "external_url": external_panel_url(),
             "available_channels": panel_channels,
             "can_enable": bool(panel_channels),
         },
@@ -2593,7 +2600,7 @@ def update_cdn_security(payload: CdnSecuritySettings, _: None = Depends(require_
     return {**cdn_security.settings(), "operation": operation}
 
 
-@app.put("/api/services/panel-access")
+@app.put("/api/services/panel-access", status_code=202)
 def update_panel_access(payload: PanelAccessSettings, _: None = Depends(require_token)) -> dict:
     if payload.mode == "vpn":
         channels = configured_panel_channels()
@@ -2602,17 +2609,20 @@ def update_panel_access(payload: PanelAccessSettings, _: None = Depends(require_
     unit = f"vps-control-access-{int(time.time())}"
     result = subprocess.run(
         [
-            "systemd-run", f"--unit={unit}", "--wait", "--pipe", "--collect",
+            # access-mode restarts the API service after changing the gateway.
+            # Waiting here can terminate this request before acknowledgement.
+            "systemd-run", f"--unit={unit}", "--collect",
             "--property=Type=exec",
             CONTROL_COMMAND, "access-mode", payload.mode,
         ],
-        capture_output=True, text=True, timeout=90, check=False,
+        capture_output=True, text=True, timeout=10, check=False,
     )
     if result.returncode:
         raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to change panel access")
     return {
-        "mode": payload.mode, "state": "active", "unit": f"{unit}.service",
-        "internal_url": internal_panel_url(), "available_channels": configured_panel_channels(),
+        "action": "access-mode", "mode": payload.mode, "state": "activating", "unit": f"{unit}.service",
+        "internal_url": internal_panel_url(), "external_url": external_panel_url(),
+        "available_channels": configured_panel_channels(),
     }
 
 
@@ -2628,7 +2638,7 @@ def update_service_mode(payload: ServiceModeSettings, _: None = Depends(require_
     )
     if result.returncode:
         raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to change service mode")
-    return {"active": payload.active, "state": "activating", "unit": f"{unit}.service"}
+    return {"action": "service-mode", "active": payload.active, "state": "activating", "unit": f"{unit}.service"}
 
 
 def start_control_task(name: str, *arguments: str) -> dict:

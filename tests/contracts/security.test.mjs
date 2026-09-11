@@ -157,6 +157,8 @@ test("protected panel access uses one stable host through every configured chann
   ]);
   assert.match(api, /INTERNAL_PANEL_HOST = "admin\.312\.net"/);
   assert.match(api, /return f"http:\/\/\{INTERNAL_PANEL_HOST\}"/);
+  assert.match(api, /def external_panel_url\(\)/);
+  assert.match(api, /"external_url": external_panel_url\(\)/);
   assert.match(api, /"can_enable": bool\(panel_channels\)/);
   assert.match(page, /Панель будет доступна по адресу/);
   assert.match(view, /panel_access\?\.can_enable === false/);
@@ -174,7 +176,15 @@ test("protected panel access uses one stable host through every configured chann
   assert.doesNotMatch(manager, /set_config_value "\$\{INSTALL_DIR\}\/install\.conf" "ACCESS_MODE"/);
   assert.match(caddy, /http:\/\/{INTERNAL_PANEL_HOST}, http:\/\/{PUBLIC_PANEL_ADDRESS} \{/);
   assert.match(caddy, /not remote_ip 127\.0\.0\.0\/8 ::1\/128 10\.0\.0\.0\/8/);
-  assert.match(api, /"systemd-run", f"--unit=\{unit\}", "--wait", "--pipe", "--collect"/);
+  assert.match(api, /@app\.put\("\/api\/services\/panel-access", status_code=202\)/);
+  assert.match(api, /"systemd-run", f"--unit=\{unit\}", "--collect"/);
+  assert.match(api, /access-mode restarts the API service/);
+  assert.match(api, /"action": "access-mode"/);
+  assert.match(api, /"action": "service-mode"/);
+  assert.match(page, /systemOperationNotification\(operation, actionLabels\["access-mode"\], true\)/);
+  assert.match(page, /systemOperationNotification\(operation, actionLabels\["service-mode"\], true\)/);
+  assert.match(page, /window\.location\.assign\(targetUrl\)/);
+  assert.doesNotMatch(view, /serviceModeActive \|\|/);
   assert.match(api, /access_mode != "vpn" and ufw_enabled/);
   assert.match(page, /Promise\.all\(\[loadServices\(\), loadSecurity\(\)\]\)/);
 });

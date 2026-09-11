@@ -789,6 +789,8 @@ export function ControlPanel() {
 
   async function changePanelAccess(mode: "external" | "vpn") {
     const protectedUrl = services?.panel_access?.internal_url || "http://admin.312.net";
+    const externalUrl = services?.panel_access?.external_url
+      || (overview?.server.public_domain ? `https://${overview.server.public_domain}` : `http://${overview?.server.public_ip || ""}`);
     const channels = services?.panel_access?.available_channels || [];
     if (mode === "vpn" && !channels.length) {
       notifyError("Сначала настройте хотя бы одно защищённое подключение");
@@ -804,9 +806,17 @@ export function ControlPanel() {
     })) return;
     setBusy(true);
     try {
-      await request("/services/panel-access", { method: "PUT", body: JSON.stringify({ mode }) });
-      await Promise.all([loadServices(), loadSecurity()]);
-      notifySuccess(mode === "vpn" ? `Панель доступна только через ${protectedUrl}` : "Публичный доступ к панели открыт");
+      const started = await request("/services/panel-access", { method: "PUT", body: JSON.stringify({ mode }) }) as SystemAction;
+      const operation = { ...started, action: "access-mode" };
+      notifications.upsert(systemOperationNotification(operation, actionLabels["access-mode"], true));
+      setApplication((current) => current ? { ...current, action: { ...current.action, ...operation } } : current);
+      setServices((current) => current ? { ...current, panel_access: { ...(current.panel_access || { vpn_urls: [] }), mode, public: mode !== "vpn" } } : current);
+      // The command restarts the API. Reading immediately here can return the
+      // old EnvironmentFile value and overwrite the optimistic switch state.
+      window.setTimeout(() => { void loadServices(); void loadSecurity(); }, 5000);
+      const targetUrl = mode === "vpn" ? protectedUrl : externalUrl;
+      window.setTimeout(() => window.location.assign(targetUrl), 1800);
+      // The operation card remains the source of truth until the target page loads.
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось изменить доступ к панели"); }
     finally { setBusy(false); }
   }
@@ -824,7 +834,10 @@ export function ControlPanel() {
     setBusy(true);
     try {
       setAutoRefresh(false);
-      await request("/services/service-mode", { method: "PUT", body: JSON.stringify({ active }) });
+      const started = await request("/services/service-mode", { method: "PUT", body: JSON.stringify({ active }) }) as SystemAction;
+      const operation = { ...started, action: "service-mode" };
+      notifications.upsert(systemOperationNotification(operation, actionLabels["service-mode"], true));
+      setApplication((current) => current ? { ...current, action: { ...current.action, ...operation } } : current);
       let confirmed = false;
       for (let attempt = 0; attempt < 36; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 5000));
@@ -836,7 +849,8 @@ export function ControlPanel() {
           setApplication(nextApplication);
           const modeActionFinished = nextApplication?.action?.action === "service-mode"
             && ["succeeded", "finished"].includes(nextApplication?.action?.state || "");
-          if (Boolean(nextServices?.service_mode?.active) === active && modeActionFinished) {
+          if (Boolean(nextServices?.service_mode?.active) === active
+            && (modeActionFinished || nextApplication?.service_mode?.active === active)) {
             confirmed = true;
             break;
           }
