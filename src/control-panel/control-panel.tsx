@@ -17,7 +17,7 @@ import { MihomoPage } from "../features/mihomo/mihomo-view";
 import { OverviewDashboard } from "../features/overview/overview-view";
 import { AppWorkspace } from "./components/app-workspace";
 import { ServicesDashboard } from "../features/services/services-view";
-import { DnsView } from "../features/dns/dns-view";
+import { DnsView } from "../features/network/dns-policy-view";
 import { NetworkView } from "../features/network/network-view";
 import { SecurityView } from "../features/security/security-view";
 import { ApplicationView } from "../features/application/application-view";

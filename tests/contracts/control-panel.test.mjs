@@ -207,7 +207,7 @@ test("the interface uses one fixed visual design without personalization", async
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
-  const [page, dnsView, api, css] = await Promise.all([readUiSources(), read("src/features/dns/dns-view.tsx"), readApiSources(), readStyles()]);
+  const [page, dnsView, api, css] = await Promise.all([readUiSources(), read("src/features/network/dns-policy-view.tsx"), readApiSources(), readStyles()]);
   assert.match(dnsView, /Изменения применяются только к отмеченным каналам/);
   assert.doesNotMatch(page, /DNS самого VPS|system_resolver|apply_system/);
   assert.match(dnsView, /Только новые конфиги клиентов/);

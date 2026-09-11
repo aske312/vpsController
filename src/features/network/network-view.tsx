@@ -2,7 +2,7 @@
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import type { DnsCheck, DnsSettings, DnsStatus, MihomoDnsStatus, NetworkStatus } from "../../shared/types/control-plane";
-import { DnsView } from "../dns/dns-view";
+import { DnsView } from "./dns-policy-view";
 
 type Props = { status: NetworkStatus | null; loading: boolean; onRefresh: () => void; dns: DnsStatus | null; dnsDraft: DnsSettings | null; dnsChecks: Record<string, DnsCheck>; checkingDns: boolean; busy: boolean; setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>>; checkDnsProviders: (providerId?: string) => Promise<void> | void; saveDnsSettings: () => Promise<void> | void; mihomoDns: MihomoDnsStatus | null; mihomoDnsDraft: Record<string, string | number | boolean>; mihomoDnsBusy: boolean; setMihomoDnsDraft: Dispatch<SetStateAction<Record<string, string | number | boolean>>>; saveMihomoDns: () => Promise<void> | void };
 type Tone = "ok" | "warn" | "bad";
