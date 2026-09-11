@@ -165,10 +165,14 @@ test("protected panel access uses one stable host through every configured chann
   assert.match(manager, /admin host via WG/);
   assert.match(manager, /admin host via OpenVPN/);
   assert.match(manager, /http:\/\/localhost:\$\{HTTP_PORT\}/);
+  assert.match(manager, /PUBLIC_PANEL_ADDRESS/);
+  assert.match(manager, /vpn_public_ip/);
+  assert.match(manager, /env_value PUBLIC_IP_ENDPOINT/);
+  assert.match(manager, /vpn_origin%:\$\{HTTP_PORT\}/);
   assert.match(manager, /handle \/api\/mihomo\/subscriptions\/\*/);
   assert.match(manager, /No panel UI or/);
   assert.doesNotMatch(manager, /set_config_value "\$\{INSTALL_DIR\}\/install\.conf" "ACCESS_MODE"/);
-  assert.match(caddy, /http:\/\/{INTERNAL_PANEL_HOST} \{/);
+  assert.match(caddy, /http:\/\/{INTERNAL_PANEL_HOST}, http:\/\/{PUBLIC_PANEL_ADDRESS} \{/);
   assert.match(caddy, /not remote_ip 127\.0\.0\.0\/8 ::1\/128 10\.0\.0\.0\/8/);
   assert.match(api, /"systemd-run", f"--unit=\{unit\}", "--wait", "--pipe", "--collect"/);
   assert.match(api, /access_mode != "vpn" and ufw_enabled/);

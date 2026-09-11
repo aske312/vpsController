@@ -25,6 +25,7 @@ def render(template: str, mode: str, port: int, values: dict[str, str]) -> str:
     substitutions = {
         "{$SITE_ADDRESS}": site, "{$HTTP_PORT}": str(port),
         "{INTERNAL_PANEL_HOST}": "admin.312.net",
+        "{PUBLIC_PANEL_ADDRESS}": values.get("PUBLIC_IP_ENDPOINT") or values.get("PUBLIC_IPV4") or values.get("PUBLIC_IP") or "127.0.0.1",
         "{WG_PANEL_ADDRESS}": str(next(ipaddress.ip_network(values.get("WG_SUBNET") or "10.72.0.0/24").hosts())),
         "{AWG_PANEL_ADDRESS}": str(next(ipaddress.ip_network(values.get("AWG_SUBNET") or "10.73.0.0/24").hosts())),
         "{PANEL_ACCESS_GUARD}": f"@outsidePanel not remote_ip {PRIVATE_SOURCES}\n    respond @outsidePanel 403" if mode == "vpn" else "",

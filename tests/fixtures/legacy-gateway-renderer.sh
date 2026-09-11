@@ -19,19 +19,19 @@ PY
   if [[ -n "${domain}" && "${ACCESS_MODE}" == "external" ]]; then
     sed -e "s|{\$SITE_ADDRESS}|${domain}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
-      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" \
+      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PUBLIC_PANEL_ADDRESS}|$(env_value PUBLIC_IP_ENDPOINT)|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
     # Keep TCP 80/443 available to protocol-specific Caddy hosts (for example
     # VLESS CDN), but never attach the panel to a public catch-all listener.
     sed -e "s|{\$SITE_ADDRESS}|http://localhost:${HTTP_PORT}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
-      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" \
+      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PUBLIC_PANEL_ADDRESS}|$(env_value PUBLIC_IP_ENDPOINT)|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   else
     sed -e "s|{\$SITE_ADDRESS}|:${HTTP_PORT}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
-      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" \
+      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PUBLIC_PANEL_ADDRESS}|$(env_value PUBLIC_IP_ENDPOINT)|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   fi
   if [[ "${ACCESS_MODE}" == "vpn" && -n "${domain}" ]]; then

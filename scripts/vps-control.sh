@@ -526,10 +526,18 @@ configure_access() {
     openvpn_address="$({ [[ -z "${openvpn_interface}" ]] || ip -o -4 addr show dev "${openvpn_interface}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
     ike_pool="$(python3 -c 'import json; print(json.load(open("/etc/vps-control/ikev2/settings.json")).get("pool",""))' 2>/dev/null || true)"
     [[ "$(configured_panel_channel_count)" -gt 0 ]] || die "Сначала настройте хотя бы одно защищённое подключение."
-    local vpn_origins="http://${INTERNAL_PANEL_HOST}"
+    # Caddy exposes the protected panel on TCP/80.  The API listens on
+    # HTTP_PORT behind Caddy, so browser origins must use the public panel
+    # addresses and port 80 rather than the internal API port.
+    local vpn_public_ip vpn_origins="http://${INTERNAL_PANEL_HOST}"
+    vpn_public_ip="$(env_value PUBLIC_IP_ENDPOINT)"
+    if [[ -n "${vpn_public_ip}" ]]; then
+      [[ -z "${vpn_origins}" ]] || vpn_origins+=","
+      vpn_origins+="http://${vpn_public_ip}"
+    fi
     for vpn_origin in ${wg_address:+http://${wg_address}:${HTTP_PORT}} ${awg_address:+http://${awg_address}:${HTTP_PORT}} ${openvpn_address:+http://${openvpn_address}:${HTTP_PORT}}; do
       [[ -z "${vpn_origins}" ]] || vpn_origins+=","
-      vpn_origins+="${vpn_origin}"
+      vpn_origins+="${vpn_origin%:${HTTP_PORT}}"
     done
     if [[ -n "${ike_pool}" ]]; then
       [[ -z "${vpn_origins}" ]] || vpn_origins+=","
@@ -655,12 +663,16 @@ write_caddy_config() {
     python3 "${INSTALL_DIR}/api/cdn_security.py" rebuild || return
     return
   fi
-  local domain internal_panel_host wg_panel_address awg_panel_address panel_guard=""
+  local domain internal_panel_host public_panel_address wg_panel_address awg_panel_address panel_guard=""
   if [[ "${ACCESS_MODE}" == "vpn" ]]; then
     panel_guard='@outsidePanel not remote_ip 127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; respond @outsidePanel 403'
   fi
   domain="$(env_value PUBLIC_DOMAIN)"
   internal_panel_host="admin.312.net"
+  public_panel_address="$(env_value PUBLIC_IP_ENDPOINT)"
+  [[ -n "${public_panel_address}" ]] || public_panel_address="$(env_value PUBLIC_IPV4)"
+  [[ -n "${public_panel_address}" ]] || public_panel_address="$(env_value PUBLIC_IP)"
+  [[ -n "${public_panel_address}" ]] || public_panel_address="127.0.0.1"
   wg_panel_address="$(python3 - "$(env_value WG_SUBNET)" <<'PY'
 import ipaddress
 import sys
@@ -677,19 +689,19 @@ PY
   if [[ -n "${domain}" && "${ACCESS_MODE}" == "external" ]]; then
     sed -e "s|{\$SITE_ADDRESS}|${domain}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
-      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PANEL_ACCESS_GUARD}|${panel_guard/; /\\n}|g" \
+      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PUBLIC_PANEL_ADDRESS}|${public_panel_address}|g" -e "s|{PANEL_ACCESS_GUARD}|${panel_guard/; /\\n}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
     # Keep TCP 80/443 available to protocol-specific Caddy hosts (for example
     # VLESS CDN), but never attach the panel to a public catch-all listener.
     sed -e "s|{\$SITE_ADDRESS}|http://localhost:${HTTP_PORT}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
-      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PANEL_ACCESS_GUARD}|${panel_guard/; /\\n}|g" \
+      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PUBLIC_PANEL_ADDRESS}|${public_panel_address}|g" -e "s|{PANEL_ACCESS_GUARD}|${panel_guard/; /\\n}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   else
     sed -e "s|{\$SITE_ADDRESS}|:${HTTP_PORT}|g" -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
       -e "s|{WG_PANEL_ADDRESS}|${wg_panel_address}|g" -e "s|{AWG_PANEL_ADDRESS}|${awg_panel_address}|g" \
-      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PANEL_ACCESS_GUARD}|${panel_guard/; /\\n}|g" \
+      -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PUBLIC_PANEL_ADDRESS}|${public_panel_address}|g" -e "s|{PANEL_ACCESS_GUARD}|${panel_guard/; /\\n}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   fi
   if [[ "${ACCESS_MODE}" == "vpn" && -n "${domain}" ]]; then

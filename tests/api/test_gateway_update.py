@@ -24,11 +24,13 @@ class GatewayTests(unittest.TestCase):
     def test_modes_render_without_unknown_placeholders(self):
         template = (ROOT / "Caddyfile").read_text(encoding="utf-8")
         for mode, site in [("vpn", "http://localhost:8080"), ("external", "panel.example")]:
-            text = gateway.render(template, mode, 8080, {"PUBLIC_DOMAIN": "panel.example"})
+            text = gateway.render(template, mode, 8080, {"PUBLIC_DOMAIN": "panel.example", "PUBLIC_IP_ENDPOINT": "203.0.113.10"})
             self.assertIn(site + " {", text)
             self.assertNotIn("{PANEL_ACCESS_GUARD}", text)
             self.assertNotIn("{$SITE_ADDRESS}", text)
             self.assertNotIn("{WG_PANEL_ADDRESS}", text)
+            self.assertNotIn("{PUBLIC_PANEL_ADDRESS}", text)
+            self.assertIn("http://203.0.113.10", text)
             self.assertIn("respond @outsidePanel 403", text)
 
     def test_invalid_candidate_fails_without_modifying_active_config(self):
