@@ -42,7 +42,6 @@ export function MihomoPage({
   const [status, setStatus] = useState<Status | null>(null);
   const [modules, setModules] = useState<Module[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [dnsPolicy, setDnsPolicy] = useState<PolicySettings | null>(null);
   const [routingPolicy, setRoutingPolicy] = useState<PolicySettings | null>(null);
   const [routingDraft, setRoutingDraft] = useState<Record<string, string | number | boolean>>({});
   const [routingDirty, setRoutingDirty] = useState(false);
@@ -101,17 +100,15 @@ export function MihomoPage({
     }
     const job = (async () => {
       try {
-        const [nextStatus, nextModules, nextProfiles, nextDns, nextRouting] = await Promise.all([
+        const [nextStatus, nextModules, nextProfiles, nextRouting] = await Promise.all([
           request("/mihomo/status"),
           request("/mihomo/modules"),
           request("/mihomo/profiles"),
-          request("/mihomo/dns/settings"),
           request("/mihomo/routing/schema"),
         ]);
         setStatus(nextStatus as Status);
         setModules((nextModules as { items: Module[] }).items || []);
         setProfiles((nextProfiles as { items: Profile[] }).items || []);
-        setDnsPolicy(nextDns as PolicySettings);
         setRoutingPolicy(nextRouting as PolicySettings);
         if (!routingDirtyRef.current) {
           const values = { ...(nextRouting as PolicySettings).values };
@@ -741,7 +738,7 @@ export function MihomoPage({
   );
   const installedChannels = transportModules.filter((item) => item.installed);
   const profilePresets = routingPolicy?.presets || [];
-  const policiesReady = installedChannels.length > 0 && Boolean(dnsPolicy && routingPolicy);
+  const policiesReady = installedChannels.length > 0 && Boolean(routingPolicy);
   const editableRuleLists = routingPolicy?.rule_lists || [];
   const selectedRuleList = editableRuleLists.find((item) => item.id === activeRuleList) || editableRuleLists[0];
   const selectedRuleValue = selectedRuleList ? String(routingDraft[selectedRuleList.key] ?? "@default") : "";
@@ -772,7 +769,7 @@ export function MihomoPage({
   const overviewIssues = [
     !status?.active ? { title: "Ядро Mihomo не отвечает", text: "Проверьте состояние сервиса перед выдачей профилей.", view: "channels" as View } : null,
     !installedChannels.length ? { title: "Нет компонентов подключения", text: "Установите хотя бы один транспорт.", view: "channels" as View } : null,
-    installedChannels.length > 0 && !policiesReady ? { title: "Политики ещё не готовы", text: "Проверьте DNS и настройки маршрутизации.", view: "dns" as View } : null,
+    installedChannels.length > 0 && !policiesReady ? { title: "Политики ещё не готовы", text: "Проверьте настройки маршрутизации на странице «Сеть».", view: "routing" as View } : null,
     installedChannels.length > 0 && !profiles.length ? { title: "Нет профилей", text: "Создайте профиль и добавьте устройство.", view: "profiles" as View } : null,
     profiles.length > 0 && overviewActiveConnections === 0 ? { title: "Нет активных подключений", text: "Профили созданы, но клиенты сейчас не подключены.", view: "profiles" as View } : null,
   ].filter(Boolean) as Array<{ title: string; text: string; view: View }>;
