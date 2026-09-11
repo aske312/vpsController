@@ -125,7 +125,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /overviewIssueTargets/);
   assert.match(page, /overviewActiveConnections/);
   assert.match(page, /overviewIssues/);
-  assert.match(network, /MihomoDnsPanel/);
+  assert.match(network, /MihomoCore/);
   assert.match(network, /Режим обработки/);
   assert.match(network, /Дополнительная обработка/);
   assert.match(manager, /cache-algorithm:/);

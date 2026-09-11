@@ -17,7 +17,6 @@ import { MihomoPage } from "../features/mihomo/mihomo-view";
 import { OverviewDashboard } from "../features/overview/overview-view";
 import { AppWorkspace } from "./components/app-workspace";
 import { ServicesDashboard } from "../features/services/services-view";
-import { DnsView } from "../features/network/dns-policy-view";
 import { NetworkView } from "../features/network/network-view";
 import { SecurityView } from "../features/security/security-view";
 import { ApplicationView } from "../features/application/application-view";
@@ -447,7 +446,7 @@ export function ControlPanel() {
       else if (tab === "security") await Promise.all([loadSecurity(), loadServices()]);
       else if (tab === "application") await Promise.all([loadApplication(), loadApplicationMetadata(), loadServices()]);
       else if (tab === "services") await loadServices();
-      else if (tab === "dns") await loadDns();
+      else if (tab === "dns") { setTab("network"); await loadNetwork(); }
       else if (tab === "network") await loadNetwork();
       else if (tab === "mihomo") await loadOverview();
       else if (tab === "channels") await Promise.all([loadClients(), loadProtocolStatus(selectedChannel)]);
@@ -1552,21 +1551,9 @@ export function ControlPanel() {
         />
       )}
 
-      {(tab === "channels" || tab === "dns") && <nav className="protocolSwitcher channelPageSwitcher" aria-label="Защищённые каналы">
+      {tab === "channels" && <nav className="protocolSwitcher channelPageSwitcher" aria-label="Защищённые каналы">
         {installedProtocols.map((protocol) => <button type="button" key={protocol} className={`protocol-${protocol}${tab === "channels" && selectedChannel === protocol ? " active" : ""}`} onClick={() => { setSelectedChannel(protocol); setTab("channels"); void loadProtocolStatus(protocol); }}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : "VLESS"}</button>)}
-        <button type="button" className={tab === "dns" ? "active" : ""} onClick={() => setTab("network")}>DNS</button>
       </nav>}
-
-      {tab === "dns" && <DnsView
-        dns={dns}
-        dnsDraft={dnsDraft}
-        dnsChecks={dnsChecks}
-        checkingDns={checkingDns}
-        busy={busy}
-        setDnsDraft={setDnsDraft}
-        checkDnsProviders={checkDnsProviders}
-        saveDnsSettings={saveDnsSettings}
-      />}
 
       {tab === "network" && <NetworkView
         status={network}

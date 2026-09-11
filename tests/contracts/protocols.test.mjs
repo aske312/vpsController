@@ -266,7 +266,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(page, /onNavigate\("channels"\)/);
   assert.match(page, /onNavigate\("overview"\)/);
   assert.match(page, /onNavigate\("clients"\)/);
-  assert.match(page, /setTab\("network"\)/);
+  assert.match(page, /tab === "network"/);
   assert.match(page, /<NetworkView/);
   assert.match(page, /onNavigate\("security"\)/);
   assert.match(page, /onNavigate\("application"\)/);

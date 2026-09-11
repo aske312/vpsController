@@ -64,7 +64,7 @@ export function GateNavigation({
             {transports.length > 0 && (
               <>
                 <NavButton
-                  active={activeTab === "channels" || activeTab === "dns" || transports.some((item) => activeTab === item.id)}
+                  active={activeTab === "channels" || transports.some((item) => activeTab === item.id)}
                   icon="transport"
                   label="Защищённые каналы"
                   tone="cyan"

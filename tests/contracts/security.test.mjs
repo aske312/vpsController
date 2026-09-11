@@ -241,7 +241,7 @@ test("channel DNS follows installed protected channels and security lives under 
   assert.match(navigation, /import \{ directProtocolOrder \} from "\.\.\/\.\.\/shared\/lib\/control-plane-ui"/);
   assert.match(navigation, /const transports = directProtocolOrder/);
   assert.doesNotMatch(navigation, /const protocolOrder =/);
-  assert.match(navigation, /activeTab === "channels" \|\| activeTab === "dns"/);
+  assert.match(navigation, /activeTab === "channels" \|\| transports\.some/);
   assert.doesNotMatch(navigation, /label="DNS"/);
   assert.match(navigation, /<NavGroup label="SYSTEM">[\s\S]*label="Безопасность"[\s\S]*label="Приложение"/);
   assert.doesNotMatch(navigation, /<NavGroup label="INFRASTRUCTURE">/);
