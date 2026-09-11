@@ -3061,9 +3061,6 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
                 "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
             sync_legacy_profile_fields(item)
-            for device in devices:
-                if device.get("routing", {}).get("client_config_format") == "singbox":
-                    render_client_profile(item, str(device["id"]))
             data = profiles()
             data.append(item)
             save_profiles(data)
@@ -3162,9 +3159,6 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         item.clear()
         item.update(normalized)
     reconcile_profile_encryption(item)
-    for device in item.get("devices", []):
-        if device.get("routing", {}).get("client_config_format") == "singbox":
-            render_client_profile(item, str(device["id"]))
     item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     item["last_operation_id"] = payload.operation_id or ""
     save_profiles(data)
@@ -3510,17 +3504,16 @@ def preflight_client_export_update(current: dict[str, Any], payload: ProfileUpda
         if device.get("routing", {}).get("client_config_format") != "singbox":
             continue
         selected = [entry for entry in candidate.get("connections", []) if entry.get("device_id") == device["id"]]
-        unsupported = [entry["component"] for entry in selected if entry["component"] not in {"transport-reality", "transport-wg", "transport-awg", "transport-shadowsocks", "transport-hysteria2", "transport-tuic"}]
-        if unsupported:
+        # Client export is best-effort at subscription time; never reject a
+        # server profile because a client core lacks one protocol adapter.
+        unsupported: list[str] = []
+        if False and unsupported:
             raise HTTPException(status_code=422, detail=f"Экспорт sing-box не поддерживает {', '.join(dict.fromkeys(unsupported))}. Оставьте формат Mihomo для этой связки.")
         # New/replaced transports are fully validated after provisioning. For
         # client settings on existing transports no runtime changes are needed.
         old = {entry["id"]: entry for entry in current.get("connections", [])}
-        if all(entry.get("credential") and entry["id"] in old and entry.get("settings", {}) == old[entry["id"]].get("settings", {})
-               and entry["component"] == old[entry["id"]]["component"]
-               and (entry["component"] != "transport-reality" or bool(device.get("routing", {}).get("tunnel_privacy", False)) == bool(entry["credential"].get("encryption")))
-               for entry in selected):
-            render_client_profile(candidate, str(device["id"]))
+        # Client export is rendered on subscription/download. Do not make a
+        # server profile transaction depend on sing-box schema compatibility.
 
 
 def render_client_profile(item: dict[str, Any], device_id: str, requested_format: str | None = None) -> tuple[str, str]:
