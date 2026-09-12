@@ -3,10 +3,9 @@ import test from "node:test";
 import { read, readMihomoSources, readApiSources, readStyles } from "./support.mjs";
 
 test("Mihomo transports automatically provision DNS and routing policies", async () => {
-  const [manager, page, network, styles, polish, dnsManifest, routingManifest] = await Promise.all([
+  const [manager, page, styles, polish, dnsManifest, routingManifest] = await Promise.all([
     read("protocol-images/mihomo/manager.py"),
     readMihomoSources(),
-    read("src/features/network/network-view.tsx"),
     read("src/features/mihomo/mihomo.css"),
     read("src/shared/styles/polish.css"),
     read("protocol-images/mihomo/modules/dns-private/manifest.json").then(JSON.parse),

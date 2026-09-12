@@ -271,8 +271,8 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(page, /onNavigate\("security"\)/);
   assert.match(page, /onNavigate\("application"\)/);
   assert.match(page, /onNavigate\("services"\)/);
-  assert.match(page, /DNS CONTROL/);
-  assert.match(page, /Проверить все/);
+  assert.match(page, /Выберите DNS-провайдера/);
+  assert.match(page, /Проверить с VPS/);
   assert.match(page, /Сторонний DNS/);
   assert.match(api, /DNS_PROVIDERS = \(/);
   assert.ok((api.match(/"country": "RU"/g) || []).length >= 5);
@@ -287,8 +287,8 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /env_updates\["SHADOWSOCKS_DNS"\]/);
   assert.match(api, /env_updates\["VRX_DNS"\]/);
   assert.match(api, /vrx_servers\.insert\(0, vrx_provider\["doh_url"\]\)/);
-  assert.match(page, /DoH для VLESS/);
-  assert.match(page, /DNS control/);
+  assert.match(page, /Зашифрованный DNS для VLESS/);
+  assert.match(page, /DNS для каждого компонента/);
   assert.match(api, /apply_system|def apply_system_dns/);
   assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
   assert.match(api, /def apply_vrx_dns/);
@@ -305,8 +305,8 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.doesNotMatch(api, /urllib\.parse\.urlencode\(\{"dns": ss_dns\}\)/);
   assert.match(page, /apply_shadowsocks/);
   assert.match(page, /apply_vrx/);
-  assert.match(css, /\.dnsWorkspace/);
-  assert.match(css, /\.dnsApplyDock/);
+  assert.match(css, /\[data-network-page\] \.networkDnsForm/);
+  assert.match(css, /\[data-network-page\] \.networkSaveBar/);
 });
 
 test("VLESS image supports independent REALITY, TLS and CDN profiles", async () => {

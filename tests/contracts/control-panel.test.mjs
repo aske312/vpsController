@@ -207,20 +207,25 @@ test("the interface uses one fixed visual design without personalization", async
 });
 
 test("DNS and connection screens describe real effects and provide safe filtering", async () => {
-  const [page, dnsView, api, css] = await Promise.all([readUiSources(), read("src/features/network/network-view.tsx"), readApiSources(), readStyles()]);
-  assert.match(dnsView, /Изменения применяются только к отмеченным каналам/);
-  assert.match(dnsView, /DNS самого VPS|apply_system/);
-  assert.match(dnsView, /Только новые конфиги клиентов/);
-  assert.match(dnsView, /Xray получит выбранные resolver-ы и перезапустится/);
-  assert.match(dnsView, /серверный трафик не изменяется/);
+  const [page, dnsView, dnsComponents, api, css] = await Promise.all([
+    readUiSources(), read("src/features/network/network-dns.tsx"),
+    read("src/features/network/system-dns-control.tsx"), readApiSources(), readStyles(),
+  ]);
+  assert.match(dnsView, /Изменения применяются только к отмеченным компонентам/);
+  assert.match(dnsComponents, /id: "system", key: "apply_system"/);
+  assert.match(dnsComponents, /DNS в новых конфигурациях клиентов/);
+  assert.match(dnsView, /VLESS перезапустит Xray/);
+  assert.match(dnsComponents, /без изменения серверного трафика/);
   assert.match(page, /clientProtocolFilter/);
   assert.match(page, /clientStateFilter/);
   assert.match(page, /clientSearch/);
   assert.match(page, /НЕСТАБИЛЬНО/);
   assert.match(api, /protocol_effect_details/);
   assert.match(api, /"installed": installed\["wg"\]/);
-  assert.match(dnsView, /filter\(\(\[, item\]\) => item\.installed\)/);
-  assert.match(dnsView, /Нет установленных протоколов/);
+  assert.match(dnsComponents, /const available = component\.id === "system" \|\| Boolean\(effect\?\.installed\)/);
+  assert.match(dnsComponents, /disabled=\{!available\}/);
+  assert.match(dnsComponents, /checked=\{available && Boolean\(dnsDraft\[component\.key\]\)\}/);
+  assert.match(dnsComponents, /Протокол не установлен/);
   assert.match(api, /matches_selected/);
   assert.match(css, /\.connectionsWorkspace/);
   assert.match(css, /\.connectionsFilters/);
