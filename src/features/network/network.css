@@ -1,5 +1,5 @@
 ﻿[data-network-page] { width: 100%; min-width: 0; }
-[data-network-page] .networkBoard { display: grid; gap: 22px; width: 100%; max-width: none; margin: 0; padding: 0 0 24px; color: var(--text); font-family: var(--ui-font); }
+[data-network-page] .networkBoard { display: grid; gap: 14px; width: 100%; max-width: none; margin: 0; padding: 0 0 24px; color: var(--text); font-family: var(--ui-font); }
 [data-network-page] * { box-sizing: border-box; }
 [data-network-page] [hidden] { display: none !important; }
 [data-network-page] h2, [data-network-page] p { margin: 0; }
@@ -7,11 +7,11 @@
 [data-network-page] p, [data-network-page] small { color: var(--muted); font-size: 12px; line-height: 1.6; }
 [data-network-page] code { font-family: var(--technical-font); font-size: 12px; overflow-wrap: anywhere; }
 [data-network-page] button, [data-network-page] input, [data-network-page] select { font: inherit; }
-[data-network-page] button { min-height: 39px; padding: 9px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-raised); color: var(--text); font-size: 12px; font-weight: 550; cursor: pointer; }
+[data-network-page] button { min-height: 34px; padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-raised); color: var(--text); font-size: 12px; font-weight: 550; cursor: pointer; }
 [data-network-page] button:hover:not(:disabled) { border-color: var(--cyan); background: var(--panel-soft); }
 [data-network-page] button:disabled { opacity: .45; cursor: not-allowed; }
 [data-network-page] :is(button, input, select, summary):focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
-[data-network-page] input:not([type="checkbox"]), [data-network-page] select { display: block; width: 100%; min-width: 0; min-height: 42px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-inset); color: var(--text); font-size: 13px; }
+[data-network-page] input:not([type="checkbox"]), [data-network-page] select { display: block; width: 100%; min-width: 0; min-height: 34px; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-inset); color: var(--text); font-size: 13px; }
 [data-network-page] input[type="checkbox"] { appearance: auto; width: 18px; height: 18px; margin: 0; accent-color: var(--green); flex-shrink: 0; }
 [data-network-page] .networkToolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; border-bottom: 1px solid var(--line); }
 [data-network-page] .networkTabs { display: flex; gap: 28px; align-self: stretch; }
@@ -22,36 +22,29 @@
 [data-network-page] .networkUnsavedDot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
 [data-network-page] .networkRefresh { display: flex; align-items: center; gap: 14px; padding-bottom: 9px; }
 [data-network-page] .networkRefresh > span { color: var(--dim); font-family: var(--technical-font); font-size: 10px; }
-[data-network-page] .networkDnsForm, [data-network-page] .networkDnsFields, [data-network-page] .networkDiagnostics { display: grid; gap: 20px; min-width: 0; }
+[data-network-page] .networkDnsForm, [data-network-page] .networkDnsFields, [data-network-page] .networkDiagnostics { display: grid; gap: 12px; min-width: 0; }
 [data-network-page] .networkDnsFields { border: 0; padding: 0; margin: 0; }
 [data-network-page] .networkPanel { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel); }
-[data-network-page] .networkSectionHeading { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 20px 24px; }
+[data-network-page] .networkSectionHeading { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 16px; }
 [data-network-page] .networkSectionHeading > div { display: grid; gap: 6px; }
-[data-network-page] .networkDnsSetup { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(220px, .8fr); gap: 0; overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: linear-gradient(120deg, var(--green-dim), transparent 65%), var(--panel); }
-[data-network-page] .networkDnsSetup > label, [data-network-page] .networkDnsSetup > div { display: grid; align-content: start; grid-template-columns: 24px minmax(0, 1fr); gap: 12px 8px; min-width: 0; padding: 24px; }
-[data-network-page] .networkDnsSetup > :not(:first-child) { border-left: 1px solid var(--line); }
-[data-network-page] .networkFieldNumber { color: var(--green); font-family: var(--technical-font); font-size: 10px; padding-top: 2px; }
-[data-network-page] .networkFieldTitle { font-size: 14px; font-weight: 600; }
-[data-network-page] .networkDnsSetup select, [data-network-page] .networkDnsSetup small, [data-network-page] .networkSwitch { grid-column: 1 / -1; }
-[data-network-page] .networkDnsSetup small { font-size: 11px; }
 [data-network-page] .networkSwitch { display: flex; align-items: center; gap: 10px; min-height: 42px; font-size: 13px; }
 [data-network-page] .networkTableWrap { overflow-x: auto; }
 [data-network-page] table { width: 100%; border-collapse: collapse; table-layout: auto; text-align: left; }
-[data-network-page] th { padding: 12px 24px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel-inset); color: var(--dim); font-size: 11px; font-weight: 500; }
-[data-network-page] td { padding: 16px 24px; border-bottom: 1px solid var(--line); font-size: 12px; }
+[data-network-page] th { padding: 9px 16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel-inset); color: var(--dim); font-size: 11px; font-weight: 500; }
+[data-network-page] td { padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12px; }
 [data-network-page] tr:last-child td { border-bottom: 0; }
 [data-network-page] td strong { display: block; font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
 [data-network-page] td small { display: block; margin-top: 4px; font-size: 10px; }
-[data-network-page] .networkCustomFields { display: grid; grid-template-columns: .8fr 1fr 1.2fr; gap: 16px; padding: 0 24px 24px; }
+[data-network-page] .networkCustomFields { display: grid; grid-template-columns: .8fr 1fr 1.2fr; gap: 12px; padding: 0 16px 14px; }
 [data-network-page] .networkCustomFields label { display: grid; gap: 9px; color: var(--muted); font-size: 12px; }
-[data-network-page] .networkValidation { padding: 0 24px 20px; color: var(--amber); }
+[data-network-page] .networkValidation { padding: 0 16px 12px; color: var(--amber); }
 [data-network-page] .networkCatalog { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; }
-[data-network-page] .networkCatalog > summary { padding: 17px 24px; cursor: pointer; color: var(--muted); font-size: 13px; }
+[data-network-page] .networkCatalog > summary { padding: 11px 16px; cursor: pointer; color: var(--muted); font-size: 13px; }
 [data-network-page] .networkCatalog > summary span { margin-right: 16px; color: var(--text); }
 [data-network-page] .networkCatalog > summary small { font-size: 11px; }
 [data-network-page] .networkCatalogToolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px 20px; }
 [data-network-page] .networkImpact { max-width: 1050px; color: var(--muted); font-size: 11px; line-height: 1.7; }
-[data-network-page] .networkSaveBar { position: sticky; bottom: 12px; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 24px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--panel-raised); box-shadow: 0 10px 30px #0004; }
+[data-network-page] .networkSaveBar { position: sticky; bottom: 12px; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--panel-raised); box-shadow: 0 10px 30px #0004; }
 [data-network-page] .networkSaveBar.dirty { border-color: var(--amber); }
 [data-network-page] .networkSaveBar > div:first-child { display: grid; gap: 5px; }
 [data-network-page] .networkSaveBar strong { font-size: 13px; font-weight: 550; }
@@ -60,18 +53,18 @@
 [data-network-page] .networkPrimaryButton { background: var(--green); border-color: var(--green); color: var(--bg-deep); }
 [data-network-page] .networkPrimaryButton:hover:not(:disabled) { background: var(--cyan); color: var(--bg-deep); }
 [data-network-page] .networkFacts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel); }
-[data-network-page] .networkFacts > div { display: grid; align-content: start; gap: 10px; padding: 22px 24px; min-width: 0; }
+[data-network-page] .networkFacts > div { display: grid; align-content: start; gap: 6px; padding: 14px 16px; min-width: 0; }
 [data-network-page] .networkFacts > div + div { border-left: 1px solid var(--line); }
 [data-network-page] .networkFacts strong { font-size: 16px; overflow-wrap: anywhere; }
 [data-network-page] .networkFacts span { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
-[data-network-page] .networkAccess { display: flex; flex-wrap: wrap; gap: 20px 36px; }
+[data-network-page] .networkAccess { display: flex; flex-wrap: wrap; gap: 12px 24px; }
 [data-network-page] .networkAccess > div { display: grid; gap: 7px; padding-left: 14px; border-left: 2px solid var(--line-strong); }
 [data-network-page] .networkSearch { width: 240px; }
 [data-network-page] .networkBadge { display: inline-flex; padding: 5px 9px; border: 1px solid var(--line); border-radius: 5px; font-size: 10px; color: var(--muted); }
 [data-network-page] .networkBadge.direct { color: var(--green); background: var(--green-dim); }
 [data-network-page] .networkBadge.proxy_or_cdn { color: var(--amber); }
 [data-network-page] .networkBadge.unresolved { color: var(--red); }
-[data-network-page] .networkEvidence { padding: 15px 24px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+[data-network-page] .networkEvidence { padding: 11px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 [data-network-page] .networkEvidence summary { cursor: pointer; }
 [data-network-page] .networkEvidence ul { padding-left: 18px; line-height: 1.8; overflow-wrap: anywhere; }
 [data-network-page] .networkEmpty { display: grid; justify-items: center; gap: 12px; padding: 40px 24px; color: var(--muted); text-align: center; }
@@ -79,10 +72,6 @@
 [data-network-page] .networkNotice { padding: 12px 16px; border-left: 2px solid var(--amber); color: var(--amber); }
 [data-network-page] .networkSrOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 1100px) {
-  [data-network-page] .networkDnsSetup { grid-template-columns: 1fr 1fr; }
-  [data-network-page] .networkDnsSetup > .networkDnsPolicy { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); grid-template-columns: 24px 1fr 1fr; align-items: center; padding: 16px 24px; }
-  [data-network-page] .networkDnsPolicy .networkSwitch { grid-column: 3; grid-row: 1; }
-  [data-network-page] .networkDnsPolicy small { grid-column: 2 / -1; }
   [data-network-page] .networkFacts { grid-template-columns: 1fr 1fr; }
   [data-network-page] .networkFacts > div:nth-child(3) { border-left: 0; }
   [data-network-page] .networkFacts > div:nth-child(n+3) { border-top: 1px solid var(--line); }
@@ -91,16 +80,26 @@
   [data-network-page] .networkToolbar { flex-wrap: wrap; gap: 10px; }
   [data-network-page] .networkTabs { gap: 20px; }
   [data-network-page] .networkRefresh { width: 100%; justify-content: space-between; }
-  [data-network-page] .networkDnsSetup, [data-network-page] .networkCustomFields { grid-template-columns: 1fr; }
-  [data-network-page] .networkDnsSetup > :not(:first-child) { border-left: 0; border-top: 1px solid var(--line); }
-  [data-network-page] .networkDnsSetup > label, [data-network-page] .networkDnsSetup > .networkDnsPolicy { padding: 18px; grid-template-columns: 24px 1fr; }
-  [data-network-page] .networkDnsPolicy .networkSwitch, [data-network-page] .networkDnsPolicy small { grid-column: 1 / -1; grid-row: auto; }
-  [data-network-page] .networkSectionHeading { padding: 18px; flex-wrap: wrap; }
+  [data-network-page] .networkSectionHeading { padding: 12px; flex-wrap: wrap; }
   [data-network-page] .networkSaveBar { padding: 16px; flex-direction: column; align-items: stretch; gap: 14px; }
   [data-network-page] .networkSaveActions button { flex: 1; }
   [data-network-page] .networkTableWrap table { min-width: 650px; }
-  [data-network-page] th, [data-network-page] td { padding: 13px 16px; }
+  [data-network-page] th, [data-network-page] td { padding: 10px 12px; }
   [data-network-page] .networkCatalog > summary small { display: block; margin-top: 5px; }
   [data-network-page] .networkSearch { width: 100%; }
-  [data-network-page] .networkFacts > div { padding: 17px; }
+  [data-network-page] .networkFacts > div { padding: 12px; }
+}
+
+[data-network-page] .networkDnsEditor { overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--panel); }
+[data-network-page] .networkDnsSetup { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(0, 1fr) minmax(0, 1.1fr); gap: 14px; padding: 0 16px 12px; }
+[data-network-page] .networkDnsSetup > label { display: grid; align-content: start; gap: 6px; min-width: 0; color: var(--muted); font-size: 11px; }
+[data-network-page] .networkEditorOptions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 24px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--panel-inset); }
+[data-network-page] .networkEditorOptions .networkSwitch { min-height: 24px; font-size: 12px; }
+[data-network-page] .networkEditorOptions small { flex-basis: 100%; font-size: 10px; }
+[data-network-page] .networkSectionHeading > div { min-width: 0; }
+[data-network-page] .networkSearch { flex-shrink: 0; }
+@media (max-width: 700px) {
+  [data-network-page] .networkDnsSetup { grid-template-columns: 1fr; gap: 10px; padding: 0 12px 12px; }
+  [data-network-page] .networkEditorOptions { padding: 10px 12px; }
+  [data-network-page] .networkCustomFields { grid-template-columns: 1fr; }
 }

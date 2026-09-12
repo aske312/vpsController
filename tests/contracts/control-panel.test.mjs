@@ -223,8 +223,11 @@ test("DNS and connection screens describe real effects and provide safe filterin
   assert.match(api, /protocol_effect_details/);
   assert.match(api, /"installed": installed\["wg"\]/);
   assert.match(dnsComponents, /const available = component\.id === "system" \|\| Boolean\(effect\?\.installed\)/);
-  assert.match(dnsComponents, /disabled=\{!available\}/);
-  assert.match(dnsComponents, /checked=\{available && Boolean\(dnsDraft\[component\.key\]\)\}/);
+  assert.doesNotMatch(dnsComponents, /<(?:input|select|button)\b/);
+  assert.match(dnsView, /disabled=\{!available\}/);
+  assert.match(dnsView, /checked=\{available && Boolean\(dnsDraft\[component\.key\]\)\}/);
+  assert.match(dnsComponents, /dns\.settings\.profiles/);
+  assert.match(dnsView, /\[component\.id\]: id/);
   assert.match(dnsComponents, /Протокол не установлен/);
   assert.match(api, /matches_selected/);
   assert.match(css, /\.connectionsWorkspace/);

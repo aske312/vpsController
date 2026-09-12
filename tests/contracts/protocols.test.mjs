@@ -288,7 +288,7 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /env_updates\["VRX_DNS"\]/);
   assert.match(api, /vrx_servers\.insert\(0, vrx_provider\["doh_url"\]\)/);
   assert.match(page, /Зашифрованный DNS для VLESS/);
-  assert.match(page, /Куда применять/);
+  assert.match(page, /Состояние DNS компонентов/);
   assert.match(api, /apply_system|def apply_system_dns/);
   assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
   assert.match(api, /def apply_vrx_dns/);
