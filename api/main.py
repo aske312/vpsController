@@ -2833,12 +2833,8 @@ def clients(_: None = Depends(require_token)) -> dict:
 def dns_status(_: None = Depends(require_token)) -> dict:
     settings = read_dns_settings()
     providers = dns_provider_list(settings)
-    selected = next((item for item in providers if item["id"] == settings["selected_id"]), None)
-    selected_addresses = list(selected["addresses"] if selected else [])
-    if not settings["fallback_enabled"]:
-        selected_addresses = selected_addresses[:1]
-    expected = ", ".join(selected_addresses)
-    expected_vrx = list(selected_addresses)
+    expected = {scope: ", ".join(dns_resolvers_for(settings, providers, scope)[0]) for scope in ("wg", "awg", "shadowsocks")}
+    expected_vrx, selected = dns_resolvers_for(settings, providers, "vless-reality-xhttp")
     if settings["prefer_encrypted"] and selected and selected.get("doh_url"):
         expected_vrx.insert(0, selected["doh_url"])
     effects = {
@@ -2858,9 +2854,9 @@ def dns_status(_: None = Depends(require_token)) -> dict:
         "providers": providers,
         "protocol_effect": effects,
         "protocol_effect_details": {
-            "wg": {"installed": installed["wg"], "value": effects["wg"], "scope": "new_profiles", "changes_existing": False, "matches_selected": effects["wg"] == expected},
-            "awg": {"installed": installed["awg"], "value": effects["awg"], "scope": "new_profiles", "changes_existing": False, "matches_selected": effects["awg"] == expected},
-            "shadowsocks": {"installed": installed["shadowsocks"], "value": effects["shadowsocks"], "scope": "client_recommendation", "changes_existing": False, "matches_selected": effects["shadowsocks"] == expected},
+            "wg": {"installed": installed["wg"], "value": effects["wg"], "scope": "new_profiles", "changes_existing": False, "matches_selected": effects["wg"] == expected["wg"]},
+            "awg": {"installed": installed["awg"], "value": effects["awg"], "scope": "new_profiles", "changes_existing": False, "matches_selected": effects["awg"] == expected["awg"]},
+            "shadowsocks": {"installed": installed["shadowsocks"], "value": effects["shadowsocks"], "scope": "client_recommendation", "changes_existing": False, "matches_selected": effects["shadowsocks"] == expected["shadowsocks"]},
             "vless-reality-xhttp": {"installed": installed["vless-reality-xhttp"], "value": effects["vless-reality-xhttp"], "scope": "server_xray", "changes_existing": True, "matches_selected": effects["vless-reality-xhttp"] == ", ".join(expected_vrx)},
         },
         "system": system_dns_state(),
@@ -2887,10 +2883,10 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
     for profile_id in profiles.values():
         if not next((item for item in providers if item["id"] == profile_id), None):
             raise HTTPException(status_code=422, detail="Один из DNS-профилей не найден")
+    if data.get("fallback_id") and not any(item["id"] == data["fallback_id"] for item in providers):
+        raise HTTPException(status_code=422, detail="Резервный DNS-профиль не найден")
     def resolver_for(scope: str) -> tuple[list[str], dict]:
-        item = next((item for item in providers if item["id"] == profiles.get(scope, data["selected_id"])), selected)
-        values = item["addresses"] if data["fallback_enabled"] else item["addresses"][:1]
-        return list(values), item
+        return dns_resolvers_for(data, providers, scope)
     system_addresses, _ = resolver_for("system")
     wg_addresses, _ = resolver_for("wg")
     awg_addresses, _ = resolver_for("awg")
@@ -3211,13 +3207,30 @@ def configured_int(values: dict[str, str], name: str, fallback: int) -> int:
 
 
 def read_dns_settings() -> dict:
-    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "prefer_encrypted": False, "fallback_enabled": True, "apply_system": False, "profiles": {}, "custom": None}
+    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "prefer_encrypted": False, "fallback_enabled": True, "fallback_id": None, "apply_system": False, "profiles": {}, "custom": None}
     try:
         saved = json.loads(DNS_SETTINGS_FILE.read_text(encoding="utf-8"))
         # Keep only supported channel keys when reading older settings files.
         return {key: value for key, value in {**defaults, **saved}.items() if key in defaults}
     except (OSError, json.JSONDecodeError, TypeError):
         return defaults
+
+
+def dns_resolvers_for(settings: dict, providers: list[dict], scope: str) -> tuple[list[str], dict]:
+    """Resolve component primary and optional backup without changing provider data."""
+    primary_id = (settings.get("profiles") or {}).get(scope) or settings["selected_id"]
+    primary = next((item for item in providers if item["id"] == primary_id), None)
+    if primary is None:
+        raise HTTPException(status_code=422, detail="Основной DNS-профиль не найден")
+    addresses = list(primary["addresses"])
+    if not settings.get("fallback_enabled", True):
+        addresses = addresses[:1]
+    elif settings.get("fallback_id"):
+        backup = next((item for item in providers if item["id"] == settings["fallback_id"]), None)
+        if backup is None:
+            raise HTTPException(status_code=422, detail="Резервный DNS-профиль не найден")
+        addresses = addresses[:1] + list(backup["addresses"][:1])
+    return list(dict.fromkeys(addresses)), primary
 
 
 def system_dns_state() -> dict:

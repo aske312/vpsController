@@ -1,10 +1,5 @@
-﻿[data-network-page] .networkDnsMatrix { display: grid; }
-[data-network-page] .networkMatrixRow { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(160px, 1fr) 115px; align-items: center; gap: 12px 20px; padding: 17px 20px; border-top: 1px solid var(--line); }
-[data-network-page] .networkMatrixRow.unavailable { opacity: .45; }
-[data-network-page] .networkProfileSelect { min-width: 0; }
-@media (max-width: 760px) {
-  [data-network-page] .networkMatrixRow { grid-template-columns: minmax(0, 1fr) auto; padding: 16px; gap: 12px; }
-  [data-network-page] .networkProfileSelect { grid-column: 1 / -1; grid-row: 2; }
-  [data-network-page] .networkApplyToggle { grid-column: 2; grid-row: 1; }
-  [data-network-page] .networkMatrixCurrent { padding-left: 0; }
-}
+﻿[data-network-page] .networkDnsMatrix th:first-child { width: 32%; }
+[data-network-page] .networkDnsMatrix th:nth-child(2) { width: 28%; }
+[data-network-page] .networkDnsMatrix th:last-child, [data-network-page] .networkDnsMatrix td:last-child { width: 110px; text-align: center; }
+[data-network-page] .networkDnsMatrix select { max-width: 440px; }
+[data-network-page] .networkDnsMatrix .unavailable { opacity: .45; }

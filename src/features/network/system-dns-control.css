@@ -1,16 +1,4 @@
-﻿[data-network-page] .networkSystemControl {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-}
-[data-network-page] .networkComponent { display: flex; align-items: center; gap: 12px; min-width: 0; }
-[data-network-page] .networkComponent > span { display: grid; place-items: center; width: 48px; height: 38px; flex-shrink: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-inset); color: var(--cyan); font-family: var(--technical-font); font-size: 10px; }
-[data-network-page] .networkComponent > div { display: grid; gap: 4px; }
-[data-network-page] .networkComponent strong { font-size: 12px; }
-[data-network-page] .networkComponent small { font-size: 10px; }
-[data-network-page] .networkApplyToggle { display: flex; align-items: center; justify-content: end; gap: 8px; font-size: 11px; cursor: pointer; }
-[data-network-page] .networkMatrixCurrent { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 14px; grid-column: 1 / -1; padding-left: 60px; font-size: 10px; color: var(--dim); }
-[data-network-page] .networkMatrixCurrent code { color: var(--muted); font-size: 11px; }
-[data-network-page] .networkMatrixCurrent small { font-size: 10px; }
+﻿[data-network-page] .networkSystemControl { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--panel); }
+[data-network-page] .networkComponent { display: flex; align-items: center; gap: 13px; }
+[data-network-page] .networkComponent > span { display: grid; place-items: center; min-width: 44px; height: 34px; padding: 0 5px; border: 1px solid var(--line); border-radius: 6px; color: var(--green); font-family: var(--technical-font); font-size: 10px; background: var(--panel-inset); }
+[data-network-page] .networkComponent small { max-width: 310px; }
