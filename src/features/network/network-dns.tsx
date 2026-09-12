@@ -31,17 +31,27 @@ export function DnsView({ dns, dnsDraft, dnsChecks, checkingDns, busy, loading, 
   return <form className="networkDnsForm" onSubmit={(event) => { event.preventDefault(); if (dirty && canSave) void saveDnsSettings(); }}>
     <fieldset disabled={busy} className="networkDnsFields">
       <section className="networkDnsEditor" aria-label="Общий профиль DNS">
-        <header className="networkSectionHeading"><div><h2>Общий профиль DNS</h2><p>Один основной DNS и резерв для VPS и прямых протоколов. Индивидуальные настройки задаются ниже как исключения.</p></div></header>
-        <div className="networkDnsSetup networkDnsCommon">
-          <label>Основной DNS<select value={dnsDraft.selected_id} onChange={(event) => update({ selected_id: event.target.value })}>{options}</select></label>
-          <label>Резервный DNS<select value={reserve} onChange={(event) => update({ fallback_enabled: event.target.value !== "off", fallback_id: ["off", "auto"].includes(event.target.value) ? null : event.target.value })}><option value="off">Без резерва</option><option value="auto">Второй адрес основного провайдера</option>{options}</select></label>
+        <header className="networkSectionHeading"><div><h2>Общий профиль DNS</h2><p>Для системы и прямых протоколов. Выберите провайдеров; индивидуальные профили доступны в исключениях.</p></div></header>
+        <div className="networkResolverWorkspace">
+          {(["primary", "fallback"] as const).map((role) => {
+            const selectedId = role === "primary" ? dnsDraft.selected_id : reserve;
+            const choices = [
+              ...(role === "fallback" ? [{ id: "off", name: "Без резерва", note: "Только основной DNS", code: "OFF" }, { id: "auto", name: "Тот же провайдер", note: "Второй IP, не отдельный DoH", code: "AUTO" }] : []),
+              ...providers.map((provider) => ({ id: provider.id, name: provider.name, note: provider.filter, code: provider.country })),
+              { id: "custom", name: dnsDraft.custom?.name || "Сторонний DNS", note: "Свои адреса и HTTPS URL", code: "DNS" },
+            ];
+            return <section className="networkResolverColumn" key={role}>
+              <header><div><small>{role === "primary" ? "ОСНОВНОЙ" : "РЕЗЕРВНЫЙ"}</small><strong>{choices.find((item) => item.id === selectedId)?.name || "Не выбран"}</strong></div><span className="networkResolverMark">{role === "primary" ? "01" : "02"}</span></header>
+              <div className="networkProviderGrid">{choices.map((provider) => <button type="button" key={provider.id} className={selectedId === provider.id ? "networkProvider is-selected" : "networkProvider"} aria-pressed={selectedId === provider.id} onClick={() => role === "primary" ? update({ selected_id: provider.id }) : update({ fallback_enabled: provider.id !== "off", fallback_id: ["off", "auto"].includes(provider.id) ? null : provider.id })}><span className="networkProviderCode">{provider.code}</span><span className="networkProviderText"><strong>{provider.name}</strong><small>{provider.note}</small></span><span className="networkProviderIndicator" aria-hidden="true" /></button>)}</div>
+            </section>;
+          })}
         </div>
-        <div className="networkEditorOptions">
+        <div className="networkEditorOptions"><span className="networkApplyLabel">Применять к</span>
           {dnsComponents.map((component) => {
             const available = component.id === "system" || Boolean(dns.protocol_effect_details?.[component.id]?.installed);
             return <label className="networkSwitch" key={component.id} title={available ? component.hint : "Протокол не установлен"}><input type="checkbox" disabled={!available} checked={available && Boolean(dnsDraft[component.key])} onChange={(event) => update({ [component.key]: event.target.checked })} /><span>{component.title}</span></label>;
           })}
-          <small>Управление применением только здесь. Hysteria2, TUIC и Trojan используют DNS самого VPS. Shadowsocks: сервер использует DNS VPS, отдельное значение является рекомендацией клиенту.</small>
+          <small>Управление применением только здесь. Hysteria2, TUIC и Trojan используют DNS системы. Shadowsocks: сервер использует DNS системы, отдельное значение является рекомендацией клиенту.</small>
         </div>
       </section>
       <details className="networkCatalog networkExceptions">
@@ -52,12 +62,12 @@ export function DnsView({ dns, dnsDraft, dnsChecks, checkingDns, busy, loading, 
         })}</div>
         <p className="networkPolicyNote">Исключение заменяет только основной DNS компонента. Резерв остаётся общим; автоматический резерв берётся у выбранного для компонента провайдера.</p>
       </details>
-      <section className="networkDnsProtection" aria-label="Защита DNS">
+      <details className="networkDnsProtection"><summary>Защита DNS и ограничения</summary>
         <label className="networkSwitch"><input type="checkbox" checked={dnsDraft.prefer_encrypted} onChange={(event) => update({ prefer_encrypted: event.target.checked })} /><span>Зашифрованный DNS для VLESS: только DoH, включая резерв</span></label>
         <p>При отказе DoH обычный DNS для запрашиваемых сайтов не подставляется. Имя самого DoH-сервера первоначально разрешается системным DNS. Для независимого DoH-резерва выберите другого провайдера: второй IP того же провайдера не создаёт второй DoH-адрес.</p>
         {!encryptionValid && <p className="networkValidation" role="alert">У основного или резервного DNS VLESS нет HTTPS-адреса. Выберите провайдера с DoH либо укажите HTTPS URL стороннего DNS.</p>}
         <small>Это не глобальное шифрование DNS: VPS использует системный резолвер. WG/AWG, OpenVPN и IKEv2 передают DNS через VPN при соблюдении маршрутов клиентом; участок VPS → DNS не шифруется этой настройкой. Защита от утечек при отключении VPN требует настроек клиента.</small>
-      </section>
+      </details>
       {customUsed && <section className="networkPanel networkCustom"><header className="networkSectionHeading"><div><h2>Сторонний DNS</h2><p>Один пользовательский профиль для основного или резервного DNS.</p></div></header><div className="networkCustomFields"><label>Название<input value={dnsDraft.custom?.name || ""} placeholder="Мой DNS" onChange={(event) => updateCustom({ name: event.target.value })} /></label><label>IP-адреса через запятую<input required value={dnsDraft.custom?.addresses.join(",") || ""} placeholder="1.1.1.1,1.0.0.1" onChange={(event) => updateCustom({ addresses: event.target.value.split(",") })} /></label><label>DoH URL, необязательно<input type="url" value={dnsDraft.custom?.doh_url || ""} placeholder="https://dns.example/dns-query" onChange={(event) => updateCustom({ doh_url: event.target.value })} /></label></div>{!customValid && <p className="networkValidation">Укажите IP-адреса без пустых значений.</p>}</section>}
       <SystemDnsControl dns={dns} />
       <details className="networkCatalog"><summary><span>Доступные DNS</span><small>{providers.length} провайдеров · адреса и проверка доступности</small></summary><div className="networkCatalogToolbar"><p>Проверка выполняется с VPS.</p><button type="button" disabled={checkingDns || loading} onClick={() => void checkDnsProviders()}>{checkingDns ? "Проверяем…" : "Проверить все"}</button></div><div className="networkTableWrap"><table><thead><tr><th>Провайдер</th><th>Адреса</th><th>Фильтрация</th><th>UDP</th><th>DoH</th></tr></thead><tbody>{providers.map((provider) => <tr key={provider.id}><td><strong>{provider.name}</strong><small>{provider.country}</small></td><td><code>{provider.addresses.join(", ")}</code></td><td>{provider.filter}</td><td>{probeLabel(dnsChecks[provider.id], "udp")}</td><td>{provider.doh_url ? probeLabel(dnsChecks[provider.id], "doh") : "Нет"}</td></tr>)}</tbody></table></div></details>

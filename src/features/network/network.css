@@ -114,3 +114,76 @@
   [data-network-page] .networkEditorOptions { padding: 10px 12px; }
   [data-network-page] .networkCustomFields { grid-template-columns: 1fr; }
 }
+
+/* Network workspace: compact resolver choices and grouped system telemetry. */
+[data-network-page] .networkDnsFields { gap: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel); }
+[data-network-page] .networkDnsFields > :is(section, details) { border: 0; border-radius: 0; border-bottom: 1px solid var(--line); }
+[data-network-page] .networkDnsFields > :last-child { border-bottom: 0; }
+[data-network-page] .networkDnsEditor { background: transparent; }
+[data-network-page] .networkDnsEditor > .networkSectionHeading { padding: 16px 20px; }
+[data-network-page] .networkResolverWorkspace { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+[data-network-page] .networkResolverColumn { min-width: 0; padding: 14px 16px 16px; }
+[data-network-page] .networkResolverColumn + .networkResolverColumn { border-left: 1px solid var(--line); }
+[data-network-page] .networkResolverColumn > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+[data-network-page] .networkResolverColumn > header > div { display: grid; gap: 3px; }
+[data-network-page] .networkResolverColumn > header small, [data-network-page] .networkKicker { font: 600 10px var(--technical-font); letter-spacing: .1em; color: var(--muted); }
+[data-network-page] .networkResolverColumn > header strong { font-size: 14px; font-weight: 550; }
+[data-network-page] .networkResolverMark { font: 500 22px var(--technical-font); color: var(--line-strong); }
+[data-network-page] .networkProviderGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+[data-network-page] button.networkProvider { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 55px; padding: 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-inset); text-align: left; }
+[data-network-page] button.networkProvider.is-selected { border-color: var(--green); background: var(--green-dim); }
+[data-network-page] .networkProviderCode { display: grid; place-items: center; flex: 0 0 30px; height: 30px; border-radius: 6px; background: var(--panel-soft); color: var(--cyan); font: 600 9px var(--technical-font); }
+[data-network-page] .networkProviderText { flex: 1; min-width: 0; }
+[data-network-page] .networkProviderText strong { display: block; font-size: 11px; font-weight: 550; line-height: 1.35; overflow-wrap: anywhere; }
+[data-network-page] .networkProviderText small { display: block; margin-top: 3px; font-size: 10px; line-height: 1.35; }
+[data-network-page] .networkProviderIndicator { flex: 0 0 6px; height: 6px; border: 1px solid var(--line-strong); border-radius: 50%; }
+[data-network-page] .is-selected .networkProviderIndicator { border-color: var(--green); background: var(--green); }
+[data-network-page] .networkApplyLabel { width: 100%; color: var(--muted); font-size: 11px; }
+[data-network-page] .networkEditorOptions { padding: 12px 16px; gap: 8px 18px; background: transparent; }
+[data-network-page] .networkEditorOptions .networkSwitch { gap: 7px; font-size: 11px; }
+[data-network-page] .networkEditorOptions input[type="checkbox"] { width: 15px; height: 15px; }
+[data-network-page] details.networkDnsProtection { display: block; padding: 12px 16px; background: var(--panel-inset); }
+[data-network-page] .networkDnsProtection > summary { font-size: 13px; cursor: pointer; }
+[data-network-page] .networkDnsProtection > .networkSwitch { margin-top: 10px; }
+[data-network-page] .networkDnsProtection > small { display: block; margin-top: 8px; }
+[data-network-page] .networkSystemControl .networkSectionHeading { padding: 13px 16px; }
+[data-network-page] .networkSystemControl h2 { font-size: 14px; }
+[data-network-page] .networkDnsMatrix td { padding-top: 8px; padding-bottom: 8px; }
+[data-network-page] .networkSaveBar { box-shadow: none; }
+[data-network-page] .networkStateOverview { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.5fr); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--panel); }
+[data-network-page] .networkRouteOverview { display: flex; flex-direction: column; justify-content: center; gap: 8px; min-width: 0; padding: 22px; background: radial-gradient(ellipse at top left, var(--green-dim), transparent 80%); }
+[data-network-page] .networkRouteOverview > strong { font-size: 22px; font-weight: 550; letter-spacing: -.03em; overflow-wrap: anywhere; }
+[data-network-page] .networkRoutePath { display: flex; align-items: center; gap: 9px; margin-top: 12px; font: 10px var(--technical-font); color: var(--muted); }
+[data-network-page] .networkRoutePath > span { overflow-wrap: anywhere; }
+[data-network-page] .networkRoutePath > i { flex: 1; min-width: 12px; height: 1px; background: var(--line-strong); }
+[data-network-page] .networkSystemFacts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border-left: 1px solid var(--line); }
+[data-network-page] .networkSystemFacts > div { display: grid; align-content: start; gap: 7px; padding: 16px; min-width: 0; }
+[data-network-page] .networkSystemFacts > div:nth-child(even) { border-left: 1px solid var(--line); }
+[data-network-page] .networkSystemFacts > div:nth-child(n+3) { border-top: 1px solid var(--line); }
+[data-network-page] .networkSystemFacts dt { font-size: 11px; color: var(--muted); }
+[data-network-page] .networkSystemFacts dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+[data-network-page] .networkSystemFacts dd small { display: block; margin-top: 4px; font-size: 10px; }
+[data-network-page] .networkAccessBoard { display: grid; grid-template-columns: minmax(150px, .45fr) minmax(0, 1.55fr); gap: 20px; padding: 16px; border-bottom: 1px solid var(--line); }
+[data-network-page] .networkAccessBoard h2 { font-size: 14px; }
+[data-network-page] .networkAccessBoard header p { margin-top: 4px; font-size: 11px; }
+[data-network-page] .networkAccessEntry { display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 12px; padding: 7px 0; }
+[data-network-page] .networkAccessEntry + .networkAccessEntry { border-top: 1px solid var(--line); }
+[data-network-page] .networkAccessEntry > span { font-size: 11px; color: var(--muted); }
+@media (max-width: 1100px) {
+  [data-network-page] .networkResolverWorkspace { grid-template-columns: 1fr; }
+  [data-network-page] .networkResolverColumn + .networkResolverColumn { border-left: 0; border-top: 1px solid var(--line); }
+  [data-network-page] .networkProviderGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  [data-network-page] .networkProviderGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-network-page] .networkResolverColumn { padding: 12px; }
+  [data-network-page] .networkProviderCode { flex-basis: 24px; height: 26px; font-size: 8px; }
+  [data-network-page] .networkStateOverview, [data-network-page] .networkAccessBoard { grid-template-columns: 1fr; }
+  [data-network-page] .networkSystemFacts { border-left: 0; border-top: 1px solid var(--line); }
+  [data-network-page] .networkRouteOverview { padding: 16px; }
+  [data-network-page] .networkAccessBoard { gap: 10px; padding: 12px; }
+  [data-network-page] .networkAccessEntry { grid-template-columns: 1fr; gap: 3px; }
+}
+@media (max-width: 380px) {
+  [data-network-page] .networkProviderGrid { grid-template-columns: 1fr; }
+}

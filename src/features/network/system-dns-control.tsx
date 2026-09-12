@@ -1,7 +1,7 @@
 ﻿import type { DnsStatus } from "../../shared/types/control-plane";
 
 export const dnsComponents = [
-  { id: "system", key: "apply_system", code: "VPS", title: "Сам сервер", hint: "Системное разрешение имён" },
+  { id: "system", key: "apply_system", code: "SYS", title: "Система", hint: "Системное разрешение имён" },
   { id: "wg", key: "apply_wg", code: "WG", title: "WireGuard", hint: "DNS в новых конфигурациях клиентов" },
   { id: "awg", key: "apply_awg", code: "AWG", title: "AmneziaWG", hint: "DNS в новых конфигурациях клиентов" },
   { id: "shadowsocks", key: "apply_shadowsocks", code: "SS", title: "Shadowsocks", hint: "Рекомендация, без изменения серверного трафика" },
@@ -13,7 +13,7 @@ export const dnsComponents = [
 export function SystemDnsControl({ dns }: { dns: DnsStatus }) {
   const name = (id: string) => dns.providers.find((provider) => provider.id === id)?.name || (id === "custom" ? dns.settings.custom?.name || "Сторонний DNS" : id);
   const backup = !dns.settings.fallback_enabled ? "Без резерва" : dns.settings.fallback_id ? name(dns.settings.fallback_id) : "Резерв основного провайдера";
-  return <section className="networkSystemControl"><header className="networkSectionHeading"><div><h2>Состояние DNS компонентов</h2><p>Сохранённые настройки и фактические адреса. Общий резерв: {backup}.</p></div></header><div className="networkTableWrap"><table className="networkDnsMatrix"><thead><tr><th>Компонент</th><th>Сохранённый профиль</th><th>DNS сейчас</th><th>Состояние</th></tr></thead><tbody>{dnsComponents.map((component) => {
+  return <section className="networkSystemControl"><header className="networkSectionHeading"><div><h2>Применение DNS</h2><p>Сохранённые настройки и фактические адреса. Общий резерв: {backup}.</p></div></header><div className="networkTableWrap"><table className="networkDnsMatrix"><thead><tr><th>Компонент</th><th>Сохранённый профиль</th><th>Текущее значение</th><th>Состояние</th></tr></thead><tbody>{dnsComponents.map((component) => {
     const effect = dns.protocol_effect_details?.[component.id];
     const available = component.id === "system" || Boolean(effect?.installed);
     const profile = dns.settings.profiles?.[component.id] || dns.settings.selected_id;
@@ -22,6 +22,6 @@ export function SystemDnsControl({ dns }: { dns: DnsStatus }) {
   })}{["hysteria2", "tuic", "trojan"].map((id) => {
     const effect = dns.protocol_effect_details?.[id];
     if (!effect?.installed) return null;
-    return <tr key={id}><td><strong>{id === "hysteria2" ? "Hysteria2" : id === "tuic" ? "TUIC" : "Trojan"}</strong><small>Системное разрешение имён на сервере</small></td><td><strong>{dns.settings.apply_system ? name(dns.settings.profiles?.system || dns.settings.selected_id) : "Настройки ОС"}</strong><small>Наследует DNS VPS, без отдельного исключения</small></td><td><code>{effect.value || "Нет данных"}</code></td><td><span className="networkBadge">Через DNS VPS</span></td></tr>;
+    return <tr key={id}><td><strong>{id === "hysteria2" ? "Hysteria2" : id === "tuic" ? "TUIC" : "Trojan"}</strong><small>Системное разрешение имён на сервере</small></td><td><strong>{dns.settings.apply_system ? name(dns.settings.profiles?.system || dns.settings.selected_id) : "Настройки ОС"}</strong><small>Наследует DNS системы, без отдельного исключения</small></td><td><code>{effect.value || "Нет данных"}</code></td><td><span className="networkBadge">Через систему</span></td></tr>;
   })}</tbody></table></div></section>;
 }
