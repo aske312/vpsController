@@ -80,10 +80,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /find-process-mode: strict/);
   assert.match(manager, /def endpoint_latency_ms/);
   assert.match(manager, /"latency_ms": min\(latencies\) if latencies else None/);
-  assert.doesNotMatch(page, /request\("\/mihomo\/dns\/settings"\)/);
+  assert.match(page, /request\("\/mihomo\/dns\/settings"\)/);
   assert.match(page, /request\("\/mihomo\/routing\/schema"\)/);
-  assert.doesNotMatch(page, /className="mihomoDnsWorkspace mihomoDnsV2"/);
-  assert.doesNotMatch(page, /<Tab id="dns"[^>]*>DNS<\/Tab>/);
+  assert.match(page, /className="mihomoDnsWorkspace mihomoDnsV2"/);
+  assert.match(page, /<Tab id="dns"[^>]*>DNS<\/Tab>/);
   assert.doesNotMatch(page, />DNS Mihomo<\/Tab>/);
   assert.match(page, /Clash Verge Rev/);
   assert.match(page, /apps\.apple\.com\/us\/app\/clash-mi\/id6744321968/);
@@ -125,9 +125,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /overviewIssueTargets/);
   assert.match(page, /overviewActiveConnections/);
   assert.match(page, /overviewIssues/);
-  assert.match(network, /MihomoCore/);
-  assert.match(network, /Режим обработки/);
-  assert.match(network, /Дополнительная обработка/);
+  assert.match(page, /mihomoDnsWorkspace/);
+  assert.match(page, /Режим обработки/);
+  assert.match(page, /Дополнительная обработка/);
   assert.match(manager, /cache-algorithm:/);
   assert.match(manager, /fake-ip-filter:/);
   assert.match(dnsManifest.settings.map((item) => item.key).join(","), /ipv6,prefer_h3,cache_algorithm,fake_ip_filter/);
