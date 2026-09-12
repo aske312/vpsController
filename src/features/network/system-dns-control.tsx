@@ -10,7 +10,7 @@ const components = [
 ] as const;
 
 export function SystemDnsControl({ dns, dnsDraft, setDnsDraft }: { dns: DnsStatus; dnsDraft: DnsSettings; setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>> }) {
-  return <section className="networkSystemControl"><div className="networkSectionHeading"><div><span className="networkCaption">02 / Назначение профилей</span><h2>DNS для каждого компонента</h2><p>Выберите профиль и отметьте компоненты, к которым нужно применить изменения.</p></div></div><div className="networkDnsMatrix">{components.map((component) => {
+  return <section className="networkSystemControl"><div className="networkSectionHeading"><div><span className="networkCaption">Применение DNS</span><h2>Куда применять</h2><p>Отметьте компоненты и выберите для них профиль.</p></div></div><div className="networkDnsMatrix">{components.map((component) => {
     const effect = dns.protocol_effect_details?.[component.id];
     const available = component.id === "system" || Boolean(effect?.installed);
     const selected = dnsDraft.profiles?.[component.id] || dnsDraft.selected_id;
