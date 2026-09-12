@@ -91,6 +91,16 @@
 }
 
 [data-network-page] .networkDnsEditor { overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--panel); }
+[data-network-page] .networkDnsSetup.networkDnsCommon { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+[data-network-page] .networkExceptionList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; padding: 0 16px; }
+[data-network-page] .networkExceptionRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 1fr); align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+[data-network-page] .networkExceptionRow strong { font-size: 12px; font-weight: 550; }
+[data-network-page] .networkExceptionRow small { display: block; font-size: 10px; }
+[data-network-page] .networkPolicyNote { padding: 10px 16px; }
+[data-network-page] .networkDnsProtection { display: grid; gap: 4px; padding: 10px 16px; border-left: 2px solid var(--cyan); background: var(--panel-inset); }
+[data-network-page] .networkDnsProtection .networkSwitch { min-height: 28px; }
+[data-network-page] .networkDnsProtection small { font-size: 11px; }
+[data-network-page] .networkDnsProtection .networkValidation { padding: 6px 0; }
 [data-network-page] .networkDnsSetup { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(0, 1fr) minmax(0, 1.1fr); gap: 14px; padding: 0 16px 12px; }
 [data-network-page] .networkDnsSetup > label { display: grid; align-content: start; gap: 6px; min-width: 0; color: var(--muted); font-size: 11px; }
 [data-network-page] .networkEditorOptions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 24px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--panel-inset); }
@@ -99,6 +109,7 @@
 [data-network-page] .networkSectionHeading > div { min-width: 0; }
 [data-network-page] .networkSearch { flex-shrink: 0; }
 @media (max-width: 700px) {
+  [data-network-page] .networkDnsSetup.networkDnsCommon, [data-network-page] .networkExceptionList { grid-template-columns: 1fr; }
   [data-network-page] .networkDnsSetup { grid-template-columns: 1fr; gap: 10px; padding: 0 12px 12px; }
   [data-network-page] .networkEditorOptions { padding: 10px 12px; }
   [data-network-page] .networkCustomFields { grid-template-columns: 1fr; }

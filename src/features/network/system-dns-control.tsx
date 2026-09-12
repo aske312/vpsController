@@ -6,6 +6,8 @@ export const dnsComponents = [
   { id: "awg", key: "apply_awg", code: "AWG", title: "AmneziaWG", hint: "DNS в новых конфигурациях клиентов" },
   { id: "shadowsocks", key: "apply_shadowsocks", code: "SS", title: "Shadowsocks", hint: "Рекомендация, без изменения серверного трафика" },
   { id: "vless-reality-xhttp", key: "apply_vrx", code: "VLESS", title: "Прямой VLESS", hint: "Сразу, с перезапуском Xray" },
+  { id: "openvpn", key: "apply_openvpn", code: "OVPN", title: "OpenVPN", hint: "С перезапуском службы и переподключением клиентов" },
+  { id: "ikev2", key: "apply_ikev2", code: "IKE", title: "IKEv2", hint: "DNS при следующем подключении клиентов" },
 ] as const;
 
 export function SystemDnsControl({ dns }: { dns: DnsStatus }) {
@@ -16,6 +18,10 @@ export function SystemDnsControl({ dns }: { dns: DnsStatus }) {
     const available = component.id === "system" || Boolean(effect?.installed);
     const profile = dns.settings.profiles?.[component.id] || dns.settings.selected_id;
     const enabled = available && Boolean(dns.settings[component.key]);
-    return <tr className={available ? "" : "unavailable"} key={component.id}><td><div className="networkComponent"><span>{component.code}</span><div><strong>{component.title}</strong><small>{available ? component.hint : "Протокол не установлен"}</small></div></div></td><td>{available ? <><strong>{name(profile)}</strong></> : <span>Не настроен</span>}</td><td><code>{available ? component.id === "system" ? dns.system?.addresses.join(", ") || "Нет данных" : effect?.value || "Нет данных" : "—"}</code></td><td><span className={`networkBadge ${enabled ? "direct" : ""}`}>{!available ? "Не установлен" : enabled ? "Применение включено" : "Не применяется"}</span>{available && component.id !== "system" && enabled && !effect?.matches_selected && <small>Фактический DNS отличается</small>}</td></tr>;
+    return <tr className={available ? "" : "unavailable"} key={component.id}><td><div className="networkComponent"><span>{component.code}</span><div><strong>{component.title}</strong><small>{available ? component.hint : "Протокол не установлен"}</small></div></div></td><td>{available ? <><strong>{name(profile)}</strong><small>{dns.settings.profiles?.[component.id] ? "Исключение" : "Общий профиль"}{component.id === "vless-reality-xhttp" && dns.settings.prefer_encrypted ? " · Только DoH" : ""}</small></> : <span>Не настроен</span>}</td><td><code>{available ? component.id === "system" ? dns.system?.addresses.join(", ") || "Нет данных" : effect?.value || "Нет данных" : "—"}</code></td><td><span className={`networkBadge ${enabled ? "direct" : ""}`}>{!available ? "Не установлен" : enabled ? "Применение включено" : "Не применяется"}</span>{available && component.id !== "system" && enabled && !effect?.matches_selected && <small>Фактический DNS отличается</small>}</td></tr>;
+  })}{["hysteria2", "tuic", "trojan"].map((id) => {
+    const effect = dns.protocol_effect_details?.[id];
+    if (!effect?.installed) return null;
+    return <tr key={id}><td><strong>{id === "hysteria2" ? "Hysteria2" : id === "tuic" ? "TUIC" : "Trojan"}</strong><small>Системное разрешение имён на сервере</small></td><td><strong>{dns.settings.apply_system ? name(dns.settings.profiles?.system || dns.settings.selected_id) : "Настройки ОС"}</strong><small>Наследует DNS VPS, без отдельного исключения</small></td><td><code>{effect.value || "Нет данных"}</code></td><td><span className="networkBadge">Через DNS VPS</span></td></tr>;
   })}</tbody></table></div></section>;
 }

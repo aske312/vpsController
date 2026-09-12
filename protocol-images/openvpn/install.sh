@@ -39,7 +39,7 @@ status /run/vps-control-openvpn/status 5
 status-version 3
 tmp-dir /run/vps-control-openvpn
 push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS $DNS"
+$(printf '%s\n' "$DNS" | tr -d ' ' | tr ',' '\n' | while IFS= read -r resolver; do printf 'push "dhcp-option DNS %s"\n' "$resolver"; done)
 verb 3
 EOF
 chmod 0600 "$ROOT"/*.key "$ROOT/settings.json" "$ROOT/server.conf"

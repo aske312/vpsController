@@ -2835,13 +2835,15 @@ def dns_status(_: None = Depends(require_token)) -> dict:
     providers = dns_provider_list(settings)
     expected = {scope: ", ".join(dns_resolvers_for(settings, providers, scope)[0]) for scope in ("wg", "awg", "shadowsocks")}
     expected_vrx, selected = dns_resolvers_for(settings, providers, "vless-reality-xhttp")
-    if settings["prefer_encrypted"] and selected and selected.get("doh_url"):
-        expected_vrx.insert(0, selected["doh_url"])
+    try:
+        expected_vrx = dns_vrx_servers(settings, providers)
+    except HTTPException:
+        expected_vrx = []  # Older mixed DoH/plain policies need an explicit correction.
     effects = {
         "wg": current_env_value("WG_DNS", WG_DNS),
         "awg": current_env_value("AWG_DNS", AWG_DNS),
         "shadowsocks": current_env_value("SHADOWSOCKS_DNS", "не настроен"),
-        "vless-reality-xhttp": current_env_value("VRX_DNS", "не настроен"),
+        "vless-reality-xhttp": actual_vrx_dns(),
     }
     installed = {
         "wg": WG_CONFIG.exists() and run("systemctl", "is-enabled", f"wg-quick@{WG_INTERFACE}.service") == "enabled",
@@ -2854,6 +2856,7 @@ def dns_status(_: None = Depends(require_token)) -> dict:
         "providers": providers,
         "protocol_effect": effects,
         "protocol_effect_details": {
+            **direct_dns_effects(settings, providers),
             "wg": {"installed": installed["wg"], "value": effects["wg"], "scope": "new_profiles", "changes_existing": False, "matches_selected": effects["wg"] == expected["wg"]},
             "awg": {"installed": installed["awg"], "value": effects["awg"], "scope": "new_profiles", "changes_existing": False, "matches_selected": effects["awg"] == expected["awg"]},
             "shadowsocks": {"installed": installed["shadowsocks"], "value": effects["shadowsocks"], "scope": "client_recommendation", "changes_existing": False, "matches_selected": effects["shadowsocks"] == expected["shadowsocks"]},
@@ -2880,6 +2883,9 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
     if not selected:
         raise HTTPException(status_code=422, detail="Выбранный DNS-профиль не найден")
     profiles = data.get("profiles") or {}
+    allowed_scopes = {"system", "wg", "awg", "shadowsocks", "vless-reality-xhttp", "openvpn", "ikev2"}
+    if set(profiles) - allowed_scopes:
+        raise HTTPException(status_code=422, detail="DNS этого компонента не управляется страницей Сеть. Mihomo настраивается отдельно")
     for profile_id in profiles.values():
         if not next((item for item in providers if item["id"] == profile_id), None):
             raise HTTPException(status_code=422, detail="Один из DNS-профилей не найден")
@@ -2892,9 +2898,14 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
     awg_addresses, _ = resolver_for("awg")
     ss_addresses, _ = resolver_for("shadowsocks")
     vrx_addresses, vrx_provider = resolver_for("vless-reality-xhttp")
-    vrx_servers = list(vrx_addresses)
-    if data["prefer_encrypted"] and vrx_provider.get("doh_url"):
-        vrx_servers.insert(0, vrx_provider["doh_url"])
+    vrx_servers = dns_vrx_servers(data, providers) if data["apply_vrx"] else vrx_addresses
+    tunnel_updates = []
+    for scope, config, settings_file in (("openvpn", OPENVPN_CONFIG, OPENVPN_SETTINGS), ("ikev2", IKEV2_CONFIG, IKEV2_SETTINGS)):
+        if data[f"apply_{scope}"] and config.exists():
+            tunnel_updates.append((scope, config, settings_file, resolver_for(scope)[0]))
+    for scope in ("wg", "awg", "openvpn", "ikev2"):
+        if data[f"apply_{scope}"] and any(ipaddress.ip_address(address).version != 4 for address in resolver_for(scope)[0]):
+            raise HTTPException(status_code=422, detail=f"{scope}: основной и резервный DNS должны быть IPv4, чтобы не выходить за IPv4-маршрут туннеля")
     addresses = ", ".join(wg_addresses)
     env_updates = {}
     if data["apply_wg"]:
@@ -2904,7 +2915,8 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
     if data["apply_shadowsocks"]:
         env_updates["SHADOWSOCKS_DNS"] = ", ".join(ss_addresses)
     if data["apply_vrx"]:
-        env_updates["VRX_DNS"] = vrx_addresses
+        env_updates["VRX_DNS"] = ", ".join(vrx_servers)
+    tunnel_originals = {path: path.read_bytes() for _, config, settings_file, _ in tunnel_updates for path in (config, settings_file)}
     env_original = ENV_FILE.read_bytes() if ENV_FILE.exists() else None
     vrx_original = VLESS_CONFIG.read_bytes() if data["apply_vrx"] and VLESS_CONFIG.exists() else None
     settings_original = DNS_SETTINGS_FILE.read_bytes() if DNS_SETTINGS_FILE.exists() else None
@@ -2922,12 +2934,21 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
             persist_env_values(env_updates)
         if vrx_original is not None:
             apply_vrx_dns(vrx_servers)
+        for scope, config, settings_file, resolvers in tunnel_updates:
+            apply_tunnel_dns(scope, config, settings_file, resolvers)
         DNS_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
         temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         os.chmod(temporary, 0o600)
         temporary.replace(DNS_SETTINGS_FILE)
     except Exception as exc:
         logger.exception("DNS settings transaction failed; restoring previous state")
+        for path, original in tunnel_originals.items():
+            path.write_bytes(original)
+        for scope, _, _, _ in tunnel_updates:
+            try:
+                restart_dns_tunnel(scope)
+            except Exception:
+                logger.exception("Tunnel restart failed during DNS rollback: %s", scope)
         if env_original is None:
             ENV_FILE.unlink(missing_ok=True)
         else:
@@ -3207,7 +3228,7 @@ def configured_int(values: dict[str, str], name: str, fallback: int) -> int:
 
 
 def read_dns_settings() -> dict:
-    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "prefer_encrypted": False, "fallback_enabled": True, "fallback_id": None, "apply_system": False, "profiles": {}, "custom": None}
+    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "apply_openvpn": False, "apply_ikev2": False, "prefer_encrypted": False, "fallback_enabled": True, "fallback_id": None, "apply_system": False, "profiles": {}, "custom": None}
     try:
         saved = json.loads(DNS_SETTINGS_FILE.read_text(encoding="utf-8"))
         # Keep only supported channel keys when reading older settings files.
@@ -3231,6 +3252,71 @@ def dns_resolvers_for(settings: dict, providers: list[dict], scope: str) -> tupl
             raise HTTPException(status_code=422, detail="Резервный DNS-профиль не найден")
         addresses = addresses[:1] + list(backup["addresses"][:1])
     return list(dict.fromkeys(addresses)), primary
+
+
+def dns_vrx_servers(settings: dict, providers: list[dict]) -> list[str]:
+    addresses, primary = dns_resolvers_for(settings, providers, "vless-reality-xhttp")
+    if not settings.get("prefer_encrypted"):
+        return addresses
+    selected = [primary]
+    if settings.get("fallback_enabled", True) and settings.get("fallback_id"):
+        selected.append(next(item for item in providers if item["id"] == settings["fallback_id"]))
+    if any(not item.get("doh_url", "").startswith("https://") for item in selected):
+        raise HTTPException(status_code=422, detail="Защищённый DNS VLESS требует HTTPS у основного и резервного провайдеров. Обычный DNS не будет добавлен вместо DoH")
+    # Local DoH avoids recursively resolving the resolver through the same outbound.
+    # Only resolver hostnames use OS bootstrap; target queries remain in HTTPS.
+    return list(dict.fromkeys(item["doh_url"].replace("https://", "https+local://", 1) for item in selected))
+
+
+def actual_vrx_dns() -> str:
+    try:
+        config = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
+        return ", ".join(str(item.get("address", "")) if isinstance(item, dict) else str(item) for item in config.get("dns", {}).get("servers", [])) or "Системный DNS"
+    except (OSError, ValueError, TypeError):
+        return "Нет данных"
+
+
+def direct_dns_effects(settings: dict, providers: list[dict]) -> dict:
+    effects = {}
+    for scope, config, settings_file in (("openvpn", OPENVPN_CONFIG, OPENVPN_SETTINGS), ("ikev2", IKEV2_CONFIG, IKEV2_SETTINGS)):
+        addresses = []
+        try:
+            contents = config.read_text(encoding="utf-8")
+            if scope == "openvpn":
+                addresses = re.findall(r'(?m)^\s*push "dhcp-option DNS ([^"\s]+)"\s*$', contents)
+            else:
+                match = re.search(r"(?m)^\s*dns\s*=\s*([^\n]+)", contents)
+                addresses = [item.strip() for item in match[1].split(",")] if match else []
+        except OSError:
+            pass
+        effects[scope] = {"installed": config.exists() and settings_file.exists(), "value": ", ".join(addresses), "scope": "reconnect", "changes_existing": True, "matches_selected": addresses == dns_resolvers_for(settings, providers, scope)[0]}
+    state = system_dns_state()
+    for scope, config in (("hysteria2", HYSTERIA2_CONFIG), ("tuic", TUIC_CONFIG), ("trojan", TROJAN_CONFIG)):
+        effects[scope] = {"installed": config.exists(), "value": ", ".join(state["addresses"]), "scope": "server_system", "changes_existing": True, "matches_selected": False}
+    return effects
+
+
+def restart_dns_tunnel(scope: str) -> None:
+    if scope == "ikev2":
+        reload_ikev2()
+    else:
+        run("systemctl", "restart", "vps-control-openvpn.service", timeout=30, check=True)
+
+
+def apply_tunnel_dns(scope: str, config: Path, settings_file: Path, addresses: list[str]) -> None:
+    contents = config.read_text(encoding="utf-8")
+    settings = json.loads(settings_file.read_text(encoding="utf-8"))
+    settings["dns"] = ",".join(addresses)
+    if scope == "openvpn":
+        contents = re.sub(r'(?m)^\s*push "dhcp-option DNS [^"]+"\s*$', "", contents)
+        contents = contents.rstrip() + "\n" + "\n".join(f'push "dhcp-option DNS {address}"' for address in addresses) + "\n"
+    else:
+        contents, count = re.subn(r"(?m)^(\s*dns\s*=\s*).+$", lambda match: match[1] + settings["dns"], contents)
+        if count != 1:
+            raise HTTPException(status_code=409, detail="Не удалось однозначно определить DNS-пул IKEv2")
+    config.write_text(contents, encoding="utf-8")
+    settings_file.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+    restart_dns_tunnel(scope)
 
 
 def system_dns_state() -> dict:
@@ -3272,6 +3358,13 @@ def apply_vrx_dns(addresses: list[str]) -> None:
         config = json.loads(original.decode("utf-8"))
         config["dns"] = {"servers": addresses, "queryStrategy": "UseIP"}
         config.setdefault("routing", {})["domainStrategy"] = "IPIfNonMatch"
+        direct_outbounds = [item for item in config.get("outbounds", []) if item.get("protocol") == "freedom"]
+        if not direct_outbounds:
+            raise RuntimeError("Direct Xray outbound is missing; cannot enforce DNS policy")
+        for outbound in direct_outbounds:
+            # ForceIP fails closed, whereas UseIP can fall back to the OS resolver.
+            outbound.setdefault("settings", {})["domainStrategy"] = "ForceIP"
+            outbound.setdefault("streamSettings", {}).setdefault("sockopt", {})["domainStrategy"] = "ForceIP"
         temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
         os.chmod(temporary, 0o640)
         os.chown(temporary, 0, 65534)
@@ -4149,7 +4242,8 @@ def update_protocol_settings(
             config_text = original_config.decode("utf-8")
             config_text = re.sub(r"(?m)^port\s+\d+$", f"port {int(settings.get('port', 1194))}", config_text)
             config_text = re.sub(r"(?m)^proto\s+\S+$", f"proto {'tcp-server' if settings.get('protocol') == 'tcp' else 'udp'}", config_text)
-            config_text = re.sub(r'(?m)^push "dhcp-option DNS [^"]+"$', f'push "dhcp-option DNS {settings.get("dns", "1.1.1.1")}"', config_text)
+            config_text = re.sub(r'(?m)^push "dhcp-option DNS [^"]+"$', "", config_text)
+            config_text = config_text.rstrip() + "\n" + "\n".join(f'push "dhcp-option DNS {address.strip()}"' for address in settings.get("dns", "1.1.1.1").split(",") if address.strip()) + "\n"
             temporary_config.write_text(config_text, encoding="utf-8")
             temporary_settings.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
             os.chmod(temporary_config, 0o600); os.chmod(temporary_settings, 0o600)

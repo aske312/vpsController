@@ -73,6 +73,8 @@ class DnsSettingsUpdate(BaseModel):
     apply_awg: bool = True
     apply_shadowsocks: bool = True
     apply_vrx: bool = True
+    apply_openvpn: bool = False
+    apply_ikev2: bool = False
     prefer_encrypted: bool = False
     fallback_enabled: bool = True
     fallback_id: str | None = Field(default=None, min_length=2, max_length=64, pattern=r"^[a-z0-9-]+$")
