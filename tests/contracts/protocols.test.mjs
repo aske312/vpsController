@@ -286,7 +286,15 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(api, /env_updates\["AWG_DNS"\]/);
   assert.match(api, /env_updates\["SHADOWSOCKS_DNS"\]/);
   assert.match(api, /env_updates\["VRX_DNS"\]/);
-  assert.match(api, /vrx_servers\.insert\(0, vrx_provider\["doh_url"\]\)/);
+  assert.match(api, /vrx_servers = dns_vrx_servers\(data, providers\)/);
+  const encryptedDns = api.match(/def dns_vrx_servers\([\s\S]*?(?=\ndef )/)?.[0] || "";
+  assert.match(encryptedDns, /if not settings\.get\("prefer_encrypted"\):\s+return addresses/);
+  assert.match(encryptedDns, /selected\.append\(/);
+  assert.match(encryptedDns, /if any\(not item\.get\("doh_url", ""\)\.startswith\("https:\/\/"\)/);
+  assert.match(encryptedDns, /raise HTTPException\(status_code=422/);
+  assert.match(encryptedDns, /return list\(dict\.fromkeys\(item\["doh_url"\]\.replace/);
+  assert.doesNotMatch(encryptedDns, /\.insert\(|\.extend\(addresses\)/);
+  assert.match(api, /setdefault\("sockopt", \{\}\)\["domainStrategy"\] = "ForceIP"/);
   assert.match(page, /Зашифрованный DNS для VLESS/);
   assert.match(page, /Состояние DNS компонентов/);
   assert.match(api, /apply_system|def apply_system_dns/);

@@ -227,7 +227,13 @@ test("DNS and connection screens describe real effects and provide safe filterin
   assert.match(dnsView, /disabled=\{!available\}/);
   assert.match(dnsView, /checked=\{available && Boolean\(dnsDraft\[component\.key\]\)\}/);
   assert.match(dnsComponents, /dns\.settings\.profiles/);
-  assert.match(dnsView, /\[component\.id\]: id/);
+  assert.match(dnsView, /value=\{dnsDraft\.selected_id\}/);
+  assert.match(dnsView, /update\(\{ selected_id: event\.target\.value \}\)/);
+  assert.match(dnsView, /chooseException\(component\.id, event\.target\.value\)/);
+  assert.match(dnsView, /if \(id\) profiles\[scope\] = id/);
+  assert.match(dnsView, /else delete profiles\[scope\]/);
+  assert.match(dnsView, /<option value="">Общий профиль<\/option>/);
+  assert.match(dnsView, /const canSave = customValid && encryptionValid/);
   assert.match(dnsComponents, /Протокол не установлен/);
   assert.match(api, /matches_selected/);
   assert.match(css, /\.connectionsWorkspace/);
