@@ -1479,7 +1479,6 @@ export function ControlPanel() {
           confirmAction={askConfirmation}
           coreBusy={installingProtocol === "remove-mihomo"}
           onCommandComplete={requestCommandReload}
-          onOpenNetwork={() => setTab("network")}
           onRemoveCore={async () => {
             const image = protocolImages.find((item) => item.id === "mihomo" && item.installed);
             if (image) await removeProtocol(image, true);
