@@ -1,1 +1,16 @@
-[data-network-page] .networkSystemControl{display:grid;gap:14px;padding:16px;border:1px solid var(--n-line,#19313e);border-radius:16px;background:linear-gradient(135deg,#0d202a,#08141b)}[data-network-page] .networkSystemControl header{display:flex;justify-content:space-between;align-items:start;gap:18px}[data-network-page] .networkSystemControl header>div{display:grid;gap:5px}[data-network-page] .networkSystemControl h3{margin:0;font-size:15px}[data-network-page] .networkSystemControl p{margin:0;color:var(--n-muted,#87a2ad);font-size:12px}[data-network-page] .networkSystemControl header>label{display:flex;align-items:center;gap:8px;color:var(--n-accent,#63d7c6);font-size:11px;white-space:nowrap}[data-network-page] .networkSystemControl input{accent-color:var(--n-accent,#63d7c6)}[data-network-page] .networkSystemControl>div{display:flex;align-items:center;gap:12px;padding-top:12px;border-top:1px solid var(--n-line,#19313e)}[data-network-page] .networkSystemControl>div strong{font-family:var(--font-mono,monospace);font-size:12px}[data-network-page] .networkSystemControl>div small{color:var(--n-muted,#87a2ad);font-size:10px}@media(max-width:640px){[data-network-page] .networkSystemControl header{display:grid}[data-network-page] .networkSystemControl header>label{white-space:normal}[data-network-page] .networkSystemControl>div{align-items:start;flex-direction:column;gap:4px}}
+﻿[data-network-page] .networkSystemControl {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+[data-network-page] .networkComponent { display: flex; align-items: center; gap: 12px; min-width: 0; }
+[data-network-page] .networkComponent > span { display: grid; place-items: center; width: 48px; height: 38px; flex-shrink: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-inset); color: var(--cyan); font-family: var(--technical-font); font-size: 10px; }
+[data-network-page] .networkComponent > div { display: grid; gap: 4px; }
+[data-network-page] .networkComponent strong { font-size: 12px; }
+[data-network-page] .networkComponent small { font-size: 10px; }
+[data-network-page] .networkApplyToggle { display: flex; align-items: center; justify-content: end; gap: 8px; font-size: 11px; cursor: pointer; }
+[data-network-page] .networkMatrixCurrent { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 14px; grid-column: 1 / -1; padding-left: 60px; font-size: 10px; color: var(--dim); }
+[data-network-page] .networkMatrixCurrent code { color: var(--muted); font-size: 11px; }
+[data-network-page] .networkMatrixCurrent small { font-size: 10px; }

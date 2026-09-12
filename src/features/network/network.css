@@ -1,42 +1,182 @@
-/* РЎС‚РёР»Рё СЃС‚СЂР°РЅРёС†С‹ РЎРµС‚СЊ. DNS Рё Mihomo РЅР°С…РѕРґСЏС‚СЃСЏ Р·РґРµСЃСЊ Р¶Рµ, С‡С‚РѕР±С‹ СЃС‚СЂР°РЅРёС†Р° СЃРѕР±РёСЂР°Р»Р°СЃСЊ РѕРґРЅРёРј РІРёР·СѓР°Р»СЊРЅС‹Рј РєРѕРЅС‚СѓСЂРѕРј. */
-[data-network-page] .networkBoard{--n-bg:#061018;--n-panel:#0b1822;--n-panel2:#0e202b;--n-line:#19313e;--n-strong:#2a5263;--n-text:#e4f0f3;--n-muted:#87a2ad;--n-accent:#63d7c6;--n-warn:#f0b86a;display:grid;gap:18px;width:100%;padding:2px 0 32px;color:var(--n-text)}
-[data-network-page] .networkBoard button,[data-network-page] .networkBoard input,[data-network-page] .networkBoard select,[data-network-page] .networkBoard textarea{font:inherit}[data-network-page] .networkBoard button{color:inherit;cursor:pointer}[data-network-page] .networkBoard button:disabled{cursor:not-allowed;opacity:.55}[data-network-page] .networkBoard h2,[data-network-page] .networkBoard h3,[data-network-page] .networkBoard p{margin:0}[data-network-page] .networkBoard h2{font-size:23px;letter-spacing:-.03em}[data-network-page] .networkBoard h3{font-size:15px}[data-network-page] .networkBoard p,[data-network-page] .networkBoard small{color:var(--n-muted);font-size:12px;line-height:1.45}[data-network-page] .networkCaption{display:block;color:var(--n-accent);font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}[data-network-page] .networkHeader{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:14px;padding:16px 18px;border:1px solid var(--n-line);border-radius:18px;background:linear-gradient(135deg,#10242e,#08131c);box-shadow:0 18px 50px #0003}[data-network-page] .networkLogo{display:grid;place-items:center;width:42px;height:42px;border:1px solid #4a9e9b;border-radius:13px;color:var(--n-accent);background:#102f35}[data-network-page] .networkHeaderTitle,[data-network-page] .networkIntro>div,[data-network-page] .networkRailTitle,[data-network-page] .networkInfoRail>div:not(.networkRailTitle),[data-network-page] .networkAccessRail>div:not(.networkRailTitle),[data-network-page] .networkDnsExtras article>header>div,[data-network-page] .networkApply>div{display:grid;gap:4px}[data-network-page] .networkCurrentRoute{display:flex;align-items:center;gap:8px;color:var(--n-muted);font-family:var(--font-mono,monospace);font-size:11px}[data-network-page] .networkCurrentRoute code{color:var(--n-text)}[data-network-page] .networkSignal{width:8px;height:8px;border-radius:50%;background:var(--n-accent);box-shadow:0 0 14px var(--n-accent)}[data-network-page] .networkSignal.attention{background:var(--n-warn);box-shadow:0 0 14px var(--n-warn)}[data-network-page] .networkSignal.critical{background:#f27d7d;box-shadow:0 0 14px #f27d7d}[data-network-page] .networkReload,[data-network-page] .networkResolverCatalog>header button,[data-network-page] .networkDnsExtras button,[data-network-page] .networkCore>header button{border:1px solid var(--n-strong);border-radius:9px;padding:8px 11px;background:#10242d;font-size:11px}[data-network-page] .networkIntro{display:flex;justify-content:space-between;align-items:end;gap:20px}[data-network-page] .networkCounters{display:flex;gap:8px}[data-network-page] .networkCounters span,[data-network-page] .networkRouteValue{display:grid;gap:2px;padding:9px 12px;border:1px solid var(--n-line);border-radius:10px;background:#0a161e}[data-network-page] .networkCounters b{font-size:16px}[data-network-page] .networkCounters small{font-size:10px}[data-network-page] .networkBoardGrid{display:grid;grid-template-columns:190px minmax(0,1fr) 190px;min-height:230px;border:1px solid var(--n-line);border-radius:16px;overflow:hidden;background:var(--n-bg)}[data-network-page] .networkInfoRail,[data-network-page] .networkAccessRail{display:grid;align-content:start;gap:12px;padding:16px;border-right:1px solid var(--n-line)}[data-network-page] .networkAccessRail{border:0;border-left:1px solid var(--n-line)}[data-network-page] .networkInfoRail>div:not(.networkRailTitle),[data-network-page] .networkAccessRail>div:not(.networkRailTitle){padding-top:10px;border-top:1px solid var(--n-line)}[data-network-page] .networkInfoRail b,[data-network-page] .networkAccessRail b{font-size:12px}[data-network-page] .networkRouteCanvas{display:grid;place-items:center;gap:16px;padding:28px;background:radial-gradient(circle at center,#123541 0,#08151e 55%,#061018 100%)}[data-network-page] .networkPath{display:flex;align-items:center;gap:12px;width:min(100%,420px)}[data-network-page] .networkPath:before,[data-network-page] .networkPath:after{height:1px;flex:1;background:linear-gradient(90deg,transparent,var(--n-accent));content:""}[data-network-page] .networkPath:after{background:linear-gradient(90deg,var(--n-accent),transparent)}[data-network-page] .networkPathNode{display:grid;place-items:center;width:52px;height:52px;border:1px solid var(--n-accent);border-radius:50%;background:#102d35;color:var(--n-accent);font-size:11px}[data-network-page] .networkRouteValue{min-width:140px;text-align:center}[data-network-page] .networkDomains,[data-network-page] .networkDnsBoard,[data-network-page] .networkCore{display:grid;gap:0;border:1px solid var(--n-line);border-radius:16px;overflow:hidden;background:linear-gradient(180deg,#0d1c26,#09131a)}[data-network-page] .networkDomains>header,[data-network-page] .networkDnsTitle,[data-network-page] .networkCore>header{display:flex;justify-content:space-between;align-items:start;gap:14px;padding:17px 18px;border-bottom:1px solid var(--n-line)}[data-network-page] .networkDomains>header>div,[data-network-page] .networkDnsTitle>div,[data-network-page] .networkCore>header>div{display:grid;gap:5px}[data-network-page] .networkDomainHeader,[data-network-page] .networkDomain{display:grid;grid-template-columns:minmax(0,1fr) 130px 120px;gap:14px;align-items:center;padding:11px 18px}[data-network-page] .networkDomainHeader{color:var(--n-muted);font-size:10px;text-transform:uppercase;letter-spacing:.12em}[data-network-page] .networkDomain{border-top:1px solid var(--n-line)}[data-network-page] .networkDomain code,[data-network-page] .networkEffectiveRows code{font-family:var(--font-mono,monospace);font-size:11px}[data-network-page] .networkDomain>div{display:grid;gap:3px}[data-network-page] .networkDomain .good{color:var(--n-accent)}[data-network-page] .networkDomain .attention{color:var(--n-warn)}[data-network-page] .networkDnsTitle{align-items:center}[data-network-page] .networkDnsSelected{display:grid;gap:3px;text-align:right}[data-network-page] .networkDnsSelected strong{font-size:13px}[data-network-page] .networkDnsMain{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(260px,.65fr);border-bottom:1px solid var(--n-line)}[data-network-page] .networkResolverCatalog{border-right:1px solid var(--n-line)}[data-network-page] .networkResolverCatalog>header,[data-network-page] .networkScope>header,[data-network-page] .networkDnsExtras article>header{display:flex;justify-content:space-between;align-items:start;gap:10px;padding:14px 16px}[data-network-page] .networkResolver{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;padding:11px 16px;border:0;border-top:1px solid var(--n-line);background:transparent;text-align:left}[data-network-page] .networkResolver:hover,[data-network-page] .networkResolver.active{background:#12313a}[data-network-page] .networkResolver>span{font-size:17px}[data-network-page] .networkResolver>div,[data-network-page] .networkResolver aside{display:grid;gap:3px}[data-network-page] .networkResolver aside{display:flex;gap:7px}[data-network-page] .networkResolver aside b{color:#6b8089;font-size:10px}[data-network-page] .networkResolver aside .ok{color:var(--n-accent)}[data-network-page] .networkResolver code{color:var(--n-muted);font-family:var(--font-mono,monospace);font-size:10px}[data-network-page] .networkResolver em{color:var(--n-accent);font-size:9px;font-style:normal;font-weight:800}[data-network-page] .networkSystemScope{display:grid!important;grid-template-columns:28px minmax(0,1fr)!important;align-items:center;gap:10px;padding:13px 16px!important;border:0!important;background:#0c2028}[data-network-page] .networkSystemScope.active{box-shadow:inset 3px 0 var(--n-accent)}[data-network-page] .networkSystemScope span{display:grid;gap:3px}[data-network-page] .networkSystemScope strong{font-size:11px}[data-network-page] .networkSystemScope input{accent-color:var(--n-accent)}[data-network-page] .networkScope{display:grid;align-content:start}[data-network-page] .networkScope>div{display:grid}[data-network-page] .networkScope label,[data-network-page] .networkDnsOptions label{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;gap:9px;padding:11px 16px;border-top:1px solid var(--n-line);cursor:pointer}[data-network-page] .networkScope label.active{background:#102b31}[data-network-page] .networkScope label.disabled,[data-network-page] .networkDnsOptions label.disabled{opacity:.45;cursor:not-allowed}[data-network-page] .networkScope input,[data-network-page] .networkDnsOptions input,[data-network-page] .networkCoreOptions input{accent-color:var(--n-accent)}[data-network-page] .networkScope label>b{color:var(--n-accent);font-family:var(--font-mono,monospace);font-size:10px}[data-network-page] .networkScope label span,[data-network-page] .networkDnsOptions span{display:grid;gap:2px}[data-network-page] .networkScope label strong,[data-network-page] .networkDnsOptions strong{font-size:11px}[data-network-page] .networkDnsOptions{border-top:1px solid var(--n-line)}[data-network-page] .networkDnsOptions label{grid-template-columns:minmax(0,1fr) auto}[data-network-page] .networkDnsExtras{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--n-line)}[data-network-page] .networkDnsExtras article{background:#0b1822}[data-network-page] .networkDnsExtras article>header>span{color:var(--n-accent);font-size:11px}[data-network-page] .networkCustomFields{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0 16px 16px}[data-network-page] .networkCustomFields label{display:grid;gap:5px;color:var(--n-muted);font-size:10px}[data-network-page] .networkCustomFields input,[data-network-page] .networkCore select,[data-network-page] .networkFakeIp textarea{width:100%;border:1px solid var(--n-strong);border-radius:8px;padding:8px;background:#061018;color:var(--n-text);font-size:11px}[data-network-page] .networkEffectiveRows{display:grid;gap:7px;padding:0 16px 16px}[data-network-page] .networkEffectiveRows>div{display:grid;grid-template-columns:70px minmax(0,1fr) auto;align-items:center;gap:8px;padding:8px;border:1px solid var(--n-line);border-radius:8px}[data-network-page] .networkEffectiveRows .same b{color:var(--n-accent)}[data-network-page] .networkEffectiveRows .different b{color:var(--n-warn)}[data-network-page] .networkEffectiveRows small{font-size:9px}[data-network-page] .networkDnsImpact{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px;border-bottom:1px solid var(--n-line);background:#0a2028}[data-network-page] .networkDnsImpact strong{color:var(--n-accent);font-size:11px}[data-network-page] .networkDnsImpact span{color:var(--n-muted);font-size:11px}[data-network-page] .networkDnsImpact b{color:var(--n-text)}[data-network-page] .networkApply{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 16px;background:#08131a}[data-network-page] .networkApply button{border:1px solid var(--n-accent);border-radius:9px;padding:10px 14px;background:var(--n-accent);color:#06201f;font-size:12px;font-weight:800}[data-network-page] .networkCore{background:#09161d}[data-network-page] .networkCore>header button{color:var(--n-accent)}[data-network-page] .networkCoreSummary{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--n-line)}[data-network-page] .networkCoreSummary span{display:grid;gap:4px;padding:13px 16px;background:#0d2029}[data-network-page] .networkCoreSummary strong{font-size:12px}[data-network-page] .networkCoreGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--n-line)}[data-network-page] .networkCoreGrid article{background:#0b1822}[data-network-page] .networkCoreGrid article>header{display:grid;gap:3px;padding:14px 16px;border-bottom:1px solid var(--n-line)}[data-network-page] .networkModeButtons{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 16px}[data-network-page] .networkModeButtons button{display:grid;gap:4px;padding:11px;border:1px solid var(--n-strong);border-radius:9px;background:#08141c;text-align:left}[data-network-page] .networkModeButtons button.active{border-color:var(--n-accent);background:#103039}[data-network-page] .networkModeButtons strong{font-size:12px}[data-network-page] .networkModeButtons small{font-size:10px}[data-network-page] .networkCoreOptions{display:grid;gap:1px;padding:10px 16px}[data-network-page] .networkCoreOptions label{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;padding:7px 0;color:var(--n-muted);font-size:11px}[data-network-page] .networkCoreOptions select{width:90px;padding:5px}[data-network-page] .networkCoreResolver{grid-column:1/-1;background:#0b1822}[data-network-page] .networkCoreResolver>div{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 16px}[data-network-page] .networkCoreResolver label{display:grid;grid-template-columns:110px minmax(0,1fr);align-items:center;gap:8px;color:var(--n-muted);font-size:11px}[data-network-page] .networkFakeIp{display:grid;grid-template-columns:180px minmax(0,1fr);gap:14px;align-items:center;padding:14px 16px;border-top:1px solid var(--n-line)}[data-network-page] .networkFakeIp span{display:grid;gap:3px;font-size:11px}[data-network-page] .networkFakeIp textarea{resize:vertical}[data-network-page] .networkWaiting,[data-network-page] .networkNoData{display:grid;place-items:center;gap:8px;min-height:180px;padding:24px;border:1px dashed var(--n-strong);border-radius:16px;color:var(--n-muted);text-align:center}
-@media(max-width:1000px){[data-network-page] .networkHeader{grid-template-columns:1fr auto}[data-network-page] .networkCurrentRoute{grid-column:1}[data-network-page] .networkReload{grid-column:2;grid-row:1}[data-network-page] .networkBoardGrid{grid-template-columns:220px 1fr}[data-network-page] .networkAccessRail{grid-column:1/-1;display:grid;grid-template-columns:140px repeat(3,1fr);gap:12px;border:0;border-top:1px solid var(--n-line)}[data-network-page] .networkAccessRail .networkRailTitle{border:0}[data-network-page] .networkAccessRail>div:not(.networkRailTitle){padding:5px 0;border:0}[data-network-page] .networkDnsMain,[data-network-page] .networkDnsExtras{grid-template-columns:1fr}}
-@media(max-width:640px){[data-network-page] .networkHeader{grid-template-columns:1fr;padding:13px}[data-network-page] .networkCurrentRoute,[data-network-page] .networkReload{grid-column:auto;grid-row:auto;width:100%}[data-network-page] .networkIntro{align-items:flex-start;flex-direction:column}[data-network-page] .networkCounters{flex-wrap:wrap}[data-network-page] .networkBoardGrid{display:block}[data-network-page] .networkInfoRail{border:0;border-bottom:1px solid var(--n-line)}[data-network-page] .networkRouteCanvas{padding:18px 16px}[data-network-page] .networkAccessRail{display:grid;grid-template-columns:1fr 1fr}[data-network-page] .networkAccessRail .networkRailTitle{grid-column:1/-1}[data-network-page] .networkDomainHeader{display:none}[data-network-page] .networkDomain{grid-template-columns:1fr auto;gap:7px}[data-network-page] .networkDomain>div{grid-column:1/-1}[data-network-page] .networkDomain code{padding-left:16px}[data-network-page] .networkDnsTitle{align-items:flex-start;flex-direction:column}[data-network-page] .networkDnsSelected{width:100%;text-align:left}[data-network-page] .networkResolver{grid-template-columns:30px minmax(0,1fr) auto}[data-network-page] .networkResolver aside{grid-column:2}[data-network-page] .networkResolver em{grid-column:3;grid-row:1}[data-network-page] .networkDnsExtras{padding:0 8px 8px}[data-network-page] .networkCustomFields,[data-network-page] .networkEffectiveRows,[data-network-page] .networkDnsImpact{grid-template-columns:1fr}[data-network-page] .networkCoreGrid{grid-template-columns:1fr}[data-network-page] .networkCoreResolver{grid-column:auto}[data-network-page] .networkCoreResolver>div,[data-network-page] .networkCoreResolver label{grid-template-columns:1fr}[data-network-page] .networkCoreResolver select{width:100%}[data-network-page] .networkFakeIp{grid-template-columns:1fr}[data-network-page] .networkApply{align-items:stretch;flex-direction:column}[data-network-page] .networkApply button{width:100%}}
-/* Network control surface */
-[data-network-page] .networkBoard{gap:12px;max-width:1180px;margin:0 auto;padding:4px 0 36px}
-[data-network-page] .networkHeader{grid-template-columns:minmax(0,1fr) auto auto;min-height:68px;padding:12px 14px;border-radius:14px;background:#09151d;box-shadow:none}
-[data-network-page] .networkHeaderTitle{gap:10px}
-[data-network-page] .networkLogo{width:36px;height:36px;border-radius:10px;background:#102d35;border-color:#2c6871}
-[data-network-page] .networkHeaderTitle h1{font-size:18px}
-[data-network-page] .networkCurrentRoute{min-width:190px;padding:8px 11px;border:1px solid var(--n-line);border-radius:9px;background:#071119}
-[data-network-page] .networkReload{min-height:36px;padding:0 13px;border-radius:9px;background:#10252d}
-[data-network-page] .networkControlLead{display:flex;justify-content:space-between;gap:24px;align-items:end;padding:16px 2px 4px}
-[data-network-page] .networkControlLead>div:first-child,[data-network-page] .networkControlMeta span{display:grid;gap:5px}
-[data-network-page] .networkControlLead h2{margin:0;font-size:21px;letter-spacing:-.03em}
-[data-network-page] .networkControlLead p{max-width:650px;margin:0;color:var(--n-muted);font-size:12px}
-[data-network-page] .networkControlMeta{display:flex;gap:8px}
-[data-network-page] .networkControlMeta span{min-width:112px;padding:9px 11px;border:1px solid var(--n-line);border-radius:9px;background:#09151d}
-[data-network-page] .networkControlMeta strong{overflow:hidden;color:var(--n-text);font-family:var(--font-mono,monospace);font-size:11px;text-overflow:ellipsis;white-space:nowrap}
-[data-network-page] .networkSystemControl,[data-network-page] .networkDnsBoard,[data-network-page] .networkCore,[data-network-page] .networkDiagnostics{border:1px solid var(--n-line);border-radius:13px;background:#09151d;overflow:hidden}
-[data-network-page] .networkSystemControl{gap:0;padding:0}
-[data-network-page] .networkSystemControl>header{padding:15px 16px;background:#0d2029}
-[data-network-page] .networkSystemControl>div{padding:12px 16px}
-[data-network-page] .networkDnsTitle,[data-network-page] .networkCore>header{padding:15px 16px;background:#0d2029}
-[data-network-page] .networkDnsTitle h2,[data-network-page] .networkCore h2{font-size:17px}
-[data-network-page] .networkDnsMain{grid-template-columns:minmax(0,1.5fr) minmax(260px,.7fr)}
-[data-network-page] .networkResolverCatalog,[data-network-page] .networkScope{background:#09151d}
-[data-network-page] .networkResolver{min-height:60px;padding:10px 14px}
-[data-network-page] .networkResolver:hover,[data-network-page] .networkResolver.active{background:#102d35}
-[data-network-page] .networkResolver.active{box-shadow:inset 3px 0 var(--n-accent)}
-[data-network-page] .networkApply{padding:13px 16px;background:#0d2029}
-[data-network-page] .networkApply button{border-radius:8px;background:var(--n-accent);color:#06201f}
-[data-network-page] .networkCoreSummary span,[data-network-page] .networkCoreGrid article,[data-network-page] .networkCoreResolver{background:#0b1b24}
-[data-network-page] .networkDiagnostics{display:grid;gap:0;border-color:#142a36;background:#071119}
-[data-network-page] .networkDiagnostics>.networkIntro{padding:14px 16px;border-bottom:1px solid var(--n-line);background:#09151d}
-[data-network-page] .networkDiagnostics .networkIntro h2{font-size:16px}
-[data-network-page] .networkDiagnostics .networkIntro p{font-size:11px}
-[data-network-page] .networkDiagnostics .networkBoardGrid{margin:0;border:0;border-radius:0}
-[data-network-page] .networkDiagnostics .networkDomains{border:0;border-top:1px solid var(--n-line);border-radius:0}
-@media(max-width:760px){[data-network-page] .networkControlLead{align-items:stretch;flex-direction:column;gap:12px}[data-network-page] .networkControlMeta{display:grid;grid-template-columns:1fr 1fr}[data-network-page] .networkControlMeta span{min-width:0}}
-@media(max-width:640px){[data-network-page] .networkHeader{grid-template-columns:1fr}[data-network-page] .networkCurrentRoute,[data-network-page] .networkReload{grid-column:auto;grid-row:auto;width:100%}[data-network-page] .networkControlLead{padding-top:10px}}
+﻿[data-network-page] .networkBoard {
+  display: grid;
+  gap: 24px;
+  width: 100%;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 8px 0 36px;
+  color: var(--text);
+  font-family: var(--ui-font);
+}
+[data-network-page] * { box-sizing: border-box; }
+[data-network-page] [hidden] { display: none !important; }
+[data-network-page] h1, [data-network-page] h2, [data-network-page] h3, [data-network-page] p { margin: 0; }
+[data-network-page] h1 { font-family: var(--display-font); font-size: 34px; font-weight: 650; letter-spacing: -.045em; line-height: 1.2; }
+[data-network-page] h2 { font-size: 17px; font-weight: 600; letter-spacing: -.02em; }
+[data-network-page] h3 { font-size: 14px; font-weight: 600; }
+[data-network-page] p, [data-network-page] small { color: var(--muted); font-size: 12px; line-height: 1.65; }
+[data-network-page] code, [data-network-page] .networkMono { font-family: var(--technical-font); overflow-wrap: anywhere; }
+[data-network-page] button, [data-network-page] input, [data-network-page] select { font: inherit; }
+[data-network-page] button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 39px; padding: 9px 13px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-raised); color: var(--text); font-size: 12px; font-weight: 550; cursor: pointer; transition: background .16s, border-color .16s; }
+[data-network-page] button:hover:not(:disabled) { background: var(--panel-soft); border-color: var(--cyan); }
+[data-network-page] button:disabled { opacity: .45; cursor: not-allowed; }
+[data-network-page] :is(button, input, select, summary):focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+[data-network-page] input:not([type="checkbox"]), [data-network-page] select { width: 100%; min-width: 0; min-height: 40px; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-inset); color: var(--text); font-size: 12px; }
+[data-network-page] input::placeholder { color: var(--dim); }
+[data-network-page] input[type="checkbox"] { width: 17px; height: 17px; margin: 0; accent-color: var(--cyan); flex-shrink: 0; }
+[data-network-page] .networkCaption { color: var(--muted); font-family: var(--technical-font); font-size: 10px; font-weight: 500; letter-spacing: .07em; line-height: 1.5; text-transform: uppercase; }
+[data-network-page] .networkHeader, [data-network-page] .networkHeading { display: flex; align-items: center; gap: 18px; }
+[data-network-page] .networkHeader { justify-content: space-between; padding: 4px 0 2px; }
+[data-network-page] .networkHeading > div { display: grid; gap: 6px; }
+[data-network-page] .networkLogo { display: grid; place-items: center; width: 62px; height: 70px; border: 1px solid var(--line-strong); border-radius: 16px; background: linear-gradient(145deg, var(--panel-raised), var(--panel-inset)); color: var(--cyan); flex-shrink: 0; }
+[data-network-page] .networkLogo svg, [data-network-page] .networkEmpty svg { width: 32px; height: 32px; stroke: currentColor; stroke-width: 1.5; }
+[data-network-page] .networkRefresh { display: grid; justify-items: end; gap: 9px; }
+[data-network-page] .networkRefresh > span { font-family: var(--technical-font); font-size: 10px; color: var(--muted); }
+[data-network-page] .networkSummary { display: grid; grid-template-columns: 1.2fr 1.15fr 1fr 1fr; border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--panel); }
+[data-network-page] .networkSummary article { display: flex; flex-direction: column; gap: 12px; padding: 23px 20px; min-width: 0; border-left: 1px solid var(--line); }
+[data-network-page] .networkSummary article:first-child { border-left: 0; background: linear-gradient(130deg, var(--green-dim), transparent); }
+[data-network-page] .networkSummary strong { display: flex; align-items: center; gap: 9px; font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
+[data-network-page] .networkSummary small { margin-top: auto; font-size: 11px; overflow-wrap: anywhere; }
+[data-network-page] .networkDot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
+[data-network-page] .networkDot.direct { background: var(--green); box-shadow: 0 0 0 4px var(--green-dim); }
+[data-network-page] .networkDot.proxy_or_cdn { background: var(--amber); }
+[data-network-page] .networkDot.unresolved { background: var(--red); }
+[data-network-page] .networkAccess { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: -8px; }
+[data-network-page] .networkAccess > div { display: grid; align-content: start; gap: 8px; padding-left: 13px; border-left: 2px solid var(--line-strong); }
+[data-network-page] .networkAccess > .primary { border-color: var(--cyan); }
+[data-network-page] .networkAccess code { font-size: 11px; line-height: 1.65; }
+[data-network-page] .networkTabs { display: flex; align-items: center; gap: 24px; border-bottom: 1px solid var(--line); }
+[data-network-page] .networkTabs button { position: relative; min-height: 48px; padding: 12px 0 16px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font-size: 13px; }
+[data-network-page] .networkTabs button:hover:not(:disabled) { background: transparent; color: var(--text); }
+[data-network-page] .networkTabs button.active { color: var(--cyan); }
+[data-network-page] .networkTabs button.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--cyan); content: ""; }
+[data-network-page] .networkTabs > span { margin-left: auto; color: var(--dim); font-size: 11px; }
+[data-network-page] .networkUnsavedDot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
+[data-network-page] .networkDiagnostics, [data-network-page] .networkDnsForm, [data-network-page] .networkDnsFields { display: grid; gap: 20px; min-width: 0; }
+[data-network-page] .networkPanel, [data-network-page] .networkRoutePanel { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel); overflow: hidden; }
+[data-network-page] .networkSectionHeading { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px; }
+[data-network-page] .networkSectionHeading > div { display: grid; gap: 6px; min-width: 0; }
+[data-network-page] .networkSectionHeading > button { flex-shrink: 0; }
+[data-network-page] .networkBadge { display: inline-flex; align-items: center; width: fit-content; padding: 4px 8px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+[data-network-page] .networkBadge.direct { color: var(--green); background: var(--green-dim); }
+[data-network-page] .networkBadge.proxy_or_cdn { color: var(--amber); }
+[data-network-page] .networkBadge.unresolved { color: var(--red); }
+[data-network-page] .networkRoutePanel { background: radial-gradient(ellipse at 50% 100%, var(--panel-raised), transparent 70%), var(--panel); }
+[data-network-page] .networkTopology { display: grid; grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1fr) 42px minmax(0, 1fr); align-items: center; padding: 10px 24px 26px; }
+[data-network-page] .networkTopology article { display: flex; align-items: flex-start; gap: 13px; min-width: 0; padding: 18px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--panel-inset); }
+[data-network-page] .networkTopology article > div { display: grid; gap: 7px; min-width: 0; }
+[data-network-page] .networkTopology strong { font-size: 14px; overflow-wrap: anywhere; }
+[data-network-page] .networkTopology small { font-size: 10px; }
+[data-network-page] .networkTopology .networkTopologyEdge { border-color: var(--cyan); }
+[data-network-page] .networkStep { color: var(--cyan); font-family: var(--technical-font); font-size: 10px; padding-top: 3px; }
+[data-network-page] .networkConnector { text-align: center; color: var(--cyan); font-size: 24px; }
+[data-network-page] .networkEvidence { padding: 13px 20px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+[data-network-page] .networkEvidence summary { width: fit-content; cursor: pointer; }
+[data-network-page] .networkEvidence ul { margin: 12px 0 0; padding-left: 18px; line-height: 1.8; overflow-wrap: anywhere; }
+[data-network-page] .networkEvidence p { margin-top: 12px; }
+[data-network-page] .networkDiagnosticColumns { display: grid; grid-template-columns: minmax(0, 2.4fr) minmax(230px, 1fr); align-items: start; gap: 20px; }
+[data-network-page] .networkCount { margin-left: 5px; color: var(--dim); font-family: var(--technical-font); font-size: 12px; font-weight: 400; }
+[data-network-page] .networkSearch { width: 190px; flex-shrink: 0; }
+[data-network-page] .networkTableWrap { overflow-x: auto; }
+[data-network-page] table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+[data-network-page] th { padding: 11px 20px; background: var(--panel-inset); color: var(--dim); font-size: 10px; font-weight: 500; }
+[data-network-page] td { padding: 15px 20px; border-top: 1px solid var(--line); vertical-align: middle; }
+[data-network-page] td:first-child { max-width: 310px; overflow-wrap: anywhere; }
+[data-network-page] td strong, [data-network-page] td small { display: block; }
+[data-network-page] td small { margin-top: 4px; font-size: 10px; }
+[data-network-page] td code { font-size: 11px; }
+[data-network-page] .networkResolverAddresses { display: grid; gap: 10px; padding: 0 20px 16px; }
+[data-network-page] .networkResolverAddresses > div { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-inset); }
+[data-network-page] .networkResolverAddresses span { color: var(--dim); font-size: 10px; font-family: var(--technical-font); }
+[data-network-page] .networkResolverAddresses code { font-size: 12px; }
+[data-network-page] .networkPanelNote { padding: 0 20px 20px; font-size: 11px; }
+[data-network-page] .networkListeners { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; padding: 0 20px 20px; }
+[data-network-page] .networkListeners article { display: grid; gap: 10px; padding: 15px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-inset); }
+[data-network-page] .networkListeners strong { display: flex; justify-content: space-between; align-items: center; font-family: var(--technical-font); font-size: 18px; font-weight: 500; }
+[data-network-page] .networkListeners strong span { font-size: 10px; color: var(--cyan); text-transform: uppercase; }
+[data-network-page] .networkListeners code { color: var(--muted); font-size: 11px; }
+[data-network-page] .networkDnsFields { margin: 0; padding: 0; border: 0; }
+[data-network-page] .networkProviderGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 0 20px 20px; }
+[data-network-page] .networkProvider { display: grid; align-content: start; justify-content: stretch; gap: 13px; min-width: 0; padding: 17px; text-align: left; background: var(--panel-inset); border-color: var(--line); }
+[data-network-page] .networkProvider.selected { border-color: var(--cyan); background: linear-gradient(145deg, var(--green-dim), var(--panel-inset)); }
+[data-network-page] .networkProviderHeading { display: flex; align-items: center; gap: 10px; }
+[data-network-page] .networkProviderHeading strong { font-size: 14px; }
+[data-network-page] .networkProviderCountry { color: var(--muted); font-size: 11px; }
+[data-network-page] .networkRadio { width: 14px; height: 14px; margin-left: auto; border: 1px solid var(--line-strong); border-radius: 50%; flex-shrink: 0; }
+[data-network-page] .selected .networkRadio { border: 4px solid var(--cyan); }
+[data-network-page] .networkProviderFilter { color: var(--muted); font-size: 11px; font-weight: 400; }
+[data-network-page] .networkProvider > code { font-size: 11px; font-weight: 400; }
+[data-network-page] .networkProbeResults { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; border-top: 1px solid var(--line); padding-top: 11px; }
+[data-network-page] .networkProbeResults > span { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px; color: var(--dim); font-size: 9px; }
+[data-network-page] .networkProbeResults b { font-weight: 500; }
+[data-network-page] .networkProbeResults .networkProbeOk b { color: var(--green); }
+[data-network-page] .networkProbeResults .networkProbeFail b { color: var(--red); }
+[data-network-page] .networkCustom { padding: 20px; border-top: 1px solid var(--line); }
+[data-network-page] .networkCustomHeading { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 16px; }
+[data-network-page] .networkCustomHeading p { margin-top: 5px; }
+[data-network-page] .networkCustomHeading button { flex-shrink: 0; }
+[data-network-page] .networkCustomFields { display: grid; grid-template-columns: .8fr 1fr 1.2fr; gap: 14px; }
+[data-network-page] .networkCustomFields label { display: flex; flex-wrap: wrap; align-content: start; gap: 8px; color: var(--muted); font-size: 11px; }
+[data-network-page] .networkCustomFields label > span { color: var(--dim); }
+[data-network-page] .networkValidation { margin-top: 12px; color: var(--amber); }
+[data-network-page] .networkDnsOptions { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
+[data-network-page] .networkDnsOptions label { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 20px; }
+[data-network-page] .networkDnsOptions label + label { border-left: 1px solid var(--line); }
+[data-network-page] .networkDnsOptions label > span { display: grid; gap: 5px; }
+[data-network-page] .networkDnsOptions strong { font-size: 12px; }
+[data-network-page] .networkDnsOptions small { font-size: 11px; }
+[data-network-page] .networkImpact { display: grid; gap: 7px; padding: 3px 0 3px 15px; border-left: 2px solid var(--amber); }
+[data-network-page] .networkImpact strong { font-size: 12px; font-weight: 500; }
+[data-network-page] .networkSaveBar { position: sticky; bottom: 14px; z-index: 5; display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 17px 20px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--panel-raised); box-shadow: 0 10px 35px #0005; }
+[data-network-page] .networkSaveBar.dirty { border-color: var(--amber); }
+[data-network-page] .networkSaveBar > div:first-child { display: flex; align-items: center; gap: 12px; }
+[data-network-page] .networkSaveBar span { display: grid; gap: 5px; }
+[data-network-page] .networkSaveBar strong { font-size: 12px; }
+[data-network-page] .networkSaveBar small { font-size: 10px; }
+[data-network-page] .networkSaveActions { display: flex; gap: 9px; flex-shrink: 0; }
+[data-network-page] .networkPrimaryButton { background: var(--cyan); border-color: var(--cyan); color: var(--bg-deep); }
+[data-network-page] .networkPrimaryButton:hover:not(:disabled) { background: var(--blue); color: var(--bg-deep); }
+[data-network-page] .networkEmpty { display: grid; justify-items: center; gap: 12px; padding: 70px 24px; border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); color: var(--muted); text-align: center; }
+[data-network-page] .networkEmpty.compact { padding: 28px 20px; border: 0; font-size: 13px; }
+[data-network-page] .networkNotice { padding: 12px 16px; border-left: 2px solid var(--amber); background: var(--panel); color: var(--amber); }
+[data-network-page] .networkSrOnly { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  [data-network-page] .networkDiagnostics, [data-network-page] .networkDnsForm { animation: networkReveal .25s ease-out both; }
+  @keyframes networkReveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+}
+@media (max-width: 1150px) {
+  [data-network-page] .networkSummary { grid-template-columns: 1fr 1fr; }
+  [data-network-page] .networkSummary article:nth-child(3) { border-left: 0; }
+  [data-network-page] .networkSummary article:nth-child(n+3) { border-top: 1px solid var(--line); }
+  [data-network-page] .networkDiagnosticColumns { grid-template-columns: 1fr; }
+  [data-network-page] .networkProviderGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-network-page] .networkResolverAddresses { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  [data-network-page] .networkBoard { gap: 20px; }
+  [data-network-page] .networkHeader { align-items: flex-start; flex-direction: column; gap: 16px; }
+  [data-network-page] .networkRefresh { width: 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+  [data-network-page] .networkLogo { width: 48px; height: 58px; }
+  [data-network-page] h1 { font-size: 29px; }
+  [data-network-page] .networkAccess { grid-template-columns: 1fr; gap: 15px; }
+  [data-network-page] .networkTabs > span { display: none; }
+  [data-network-page] .networkTopology { grid-template-columns: 1fr; gap: 8px; padding: 0 16px 20px; }
+  [data-network-page] .networkConnector { transform: rotate(90deg); line-height: 1; }
+  [data-network-page] .networkSectionHeading { flex-wrap: wrap; padding: 16px; }
+  [data-network-page] .networkCustomFields, [data-network-page] .networkDnsOptions { grid-template-columns: 1fr; }
+  [data-network-page] .networkDnsOptions label + label { border-left: 0; border-top: 1px solid var(--line); }
+  [data-network-page] .networkSaveBar { align-items: stretch; flex-direction: column; gap: 14px; bottom: 8px; padding: 15px; }
+  [data-network-page] .networkSaveActions button { flex: 1; }
+  [data-network-page] .networkSearch { width: 100%; }
+  [data-network-page] th, [data-network-page] td { padding: 12px; }
+}
+@media (max-width: 480px) {
+  [data-network-page] .networkSummary article { padding: 16px 12px; }
+  [data-network-page] .networkSummary strong { font-size: 14px; }
+  [data-network-page] .networkProviderGrid, [data-network-page] .networkResolverAddresses { grid-template-columns: 1fr; }
+  [data-network-page] .networkProviderGrid { padding: 0 14px 14px; }
+  [data-network-page] .networkCustom { padding: 16px; }
+  [data-network-page] .networkCustomHeading { align-items: flex-start; flex-direction: column; }
+  [data-network-page] .networkTabs { gap: 22px; }
+  [data-network-page] .networkDomains table { min-width: 460px; }
+}

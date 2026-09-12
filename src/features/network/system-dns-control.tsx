@@ -1,9 +1,27 @@
-import type { Dispatch, SetStateAction } from "react";
+﻿import type { Dispatch, SetStateAction } from "react";
 import type { DnsSettings, DnsStatus } from "../../shared/types/control-plane";
 
-export function SystemDnsControl({ dns, dnsDraft, setDnsDraft }: { dns: DnsStatus | null; dnsDraft: DnsSettings | null; setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>> }) {
-  const scopes = [["system", "VPS", "DNS самого сервера"], ["wg", "WG", "WireGuard"], ["awg", "AWG", "AmneziaWG"], ["shadowsocks", "SS", "Shadowsocks"], ["vless-reality-xhttp", "VLESS", "Xray VLESS"]] as const;
-  const value = (scope: string) => dnsDraft?.profiles?.[scope] || dnsDraft?.selected_id || "";
-  const update = (scope: string, selected_id: string) => setDnsDraft((current) => current ? { ...current, profiles: { ...(current.profiles || {}), [scope]: selected_id } } : current);
-  return <section className="networkSystemControl"><header><div><span className="networkCaption">DNS CONTROL MATRIX</span><h3>DNS для каждого компонента</h3><p>Каждая строка имеет собственный профиль. Сохранение применяет выбранные resolver’ы к соответствующим компонентам.</p></div></header><div className="networkDnsMatrix">{scopes.map(([scope, code, title]) => <label key={scope}><span><b>{code}</b><small>{title}{scope === "system" ? ` · ${dns?.system?.source || "системный resolver"}` : ""}</small></span><select value={value(scope)} onChange={(event) => update(scope, event.target.value)}>{(dns?.providers || []).map((provider) => <option value={provider.id} key={provider.id}>{provider.name}</option>)}</select>{scope === "system" && <input type="checkbox" checked={dnsDraft?.apply_system ?? false} onChange={(event) => setDnsDraft((current) => current ? { ...current, apply_system: event.target.checked } : current)} />}</label>)}</div></section>;
+const components = [
+  { id: "system", key: "apply_system", code: "VPS", title: "Сам сервер", hint: "Системное разрешение имён" },
+  { id: "wg", key: "apply_wg", code: "WG", title: "WireGuard", hint: "DNS в новых конфигурациях клиентов" },
+  { id: "awg", key: "apply_awg", code: "AWG", title: "AmneziaWG", hint: "DNS в новых конфигурациях клиентов" },
+  { id: "shadowsocks", key: "apply_shadowsocks", code: "SS", title: "Shadowsocks", hint: "Рекомендация клиентам, без изменения серверного трафика" },
+  { id: "vless-reality-xhttp", key: "apply_vrx", code: "VLESS", title: "Прямой VLESS", hint: "Применение сразу с перезапуском Xray" },
+] as const;
+
+export function SystemDnsControl({ dns, dnsDraft, setDnsDraft }: { dns: DnsStatus; dnsDraft: DnsSettings; setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>> }) {
+  return <section className="networkSystemControl"><div className="networkSectionHeading"><div><span className="networkCaption">02 / Назначение профилей</span><h2>DNS для каждого компонента</h2><p>Выберите профиль и отметьте компоненты, к которым нужно применить изменения.</p></div></div><div className="networkDnsMatrix">{components.map((component) => {
+    const effect = dns.protocol_effect_details?.[component.id];
+    const available = component.id === "system" || Boolean(effect?.installed);
+    const selected = dnsDraft.profiles?.[component.id] || dnsDraft.selected_id;
+    return <div className={`networkMatrixRow ${available ? "" : "unavailable"}`} key={component.id}>
+      <div className="networkComponent"><span>{component.code}</span><div><strong>{component.title}</strong><small>{available ? component.hint : "Протокол не установлен"}</small></div></div>
+      <label className="networkProfileSelect"><span className="networkSrOnly">Профиль DNS: {component.title}</span><select disabled={!available} value={selected} onChange={(event) => { const id = event.target.value; setDnsDraft((current) => current ? { ...current, ...(component.id === "system" ? { selected_id: id } : {}), profiles: { ...(current.profiles || {}), [component.id]: id } } : current); }}>
+        {!dns.providers.some((provider) => provider.id === selected) && selected !== "custom" && <option value={selected}>{selected || "Выберите профиль"}</option>}
+        {dns.providers.filter((provider) => provider.id !== "custom").map((provider) => <option value={provider.id} key={provider.id}>{provider.name}</option>)}<option value="custom">{dnsDraft.custom?.name || "Сторонний DNS"}</option>
+      </select></label>
+      <label className="networkApplyToggle"><input type="checkbox" disabled={!available} checked={available && Boolean(dnsDraft[component.key])} onChange={(event) => { const checked = event.target.checked; setDnsDraft((current) => current ? { ...current, [component.key]: checked } : current); }} /><span>Применять<span className="networkSrOnly">: {component.title}</span></span></label>
+      {available && <div className="networkMatrixCurrent"><span>Сейчас</span><code>{component.id === "system" ? dns.system?.addresses.join(", ") || "Нет данных" : effect?.value || "Нет данных"}</code><small>{component.id === "system" ? dns.system?.source : effect?.matches_selected ? "Соответствует сохранённому профилю" : "Отличается от сохранённого профиля"}</small></div>}
+    </div>;
+  })}</div></section>;
 }
