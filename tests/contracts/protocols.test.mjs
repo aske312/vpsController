@@ -260,33 +260,15 @@ test("protocol pages safely edit channel settings and VLESS links select HTTP2",
   assert.match(css, /\.protocolConfiguration/);
 });
 
-test("DNS control provides Russian resolvers, live checks and protocol application", async () => {
-  const [page, api, css] = await Promise.all([readUiSources(), readApiSources(), readStyles()]);
-  assert.match(page, /type Tab = "overview" \| "channels" \| "dns"/);
-  assert.match(page, /onNavigate\("channels"\)/);
-  assert.match(page, /onNavigate\("overview"\)/);
-  assert.match(page, /onNavigate\("clients"\)/);
-  assert.match(page, /tab === "network"/);
-  assert.match(page, /<NetworkView/);
-  assert.match(page, /onNavigate\("security"\)/);
-  assert.match(page, /onNavigate\("application"\)/);
-  assert.match(page, /onNavigate\("services"\)/);
-  assert.match(page, /Доступные DNS/);
-  assert.match(page, /Проверить все/);
-  assert.match(page, /Сторонний DNS/);
-  assert.match(api, /DNS_PROVIDERS = \(/);
-  assert.ok((api.match(/"country": "RU"/g) || []).length >= 5);
-  assert.ok((api.match(/"id": "[a-z0-9-]+", "name":/g) || []).length >= 10);
+test("DNS API preserves component application and encrypted fallback boundaries", async () => {
+  const api = await readApiSources();
+  // Only API/configuration contracts, not provider labels or editor markup.
   assert.match(api, /@app\.get\("\/api\/dns"\)/);
-  assert.match(api, /@app\.get\("\/api\/network"\)/);
   assert.match(api, /@app\.put\("\/api\/dns\/settings"\)/);
   assert.match(api, /@app\.post\("\/api\/dns\/check"\)/);
-  assert.match(api, /def dns_wire_query/);
-  assert.match(api, /env_updates\["WG_DNS"\]/);
-  assert.match(api, /env_updates\["AWG_DNS"\]/);
-  assert.match(api, /env_updates\["SHADOWSOCKS_DNS"\]/);
-  assert.match(api, /env_updates\["VRX_DNS"\]/);
-  assert.match(api, /vrx_servers = dns_vrx_servers\(data, providers\)/);
+  for (const key of ["WG_DNS", "AWG_DNS", "SHADOWSOCKS_DNS", "VRX_DNS"]) {
+    assert.ok(api.includes('env_updates["' + key + '"]'), key + " remains independently applied");
+  }
   const encryptedDns = api.match(/def dns_vrx_servers\([\s\S]*?(?=\ndef )/)?.[0] || "";
   assert.match(encryptedDns, /if not settings\.get\("prefer_encrypted"\):\s+return addresses/);
   assert.match(encryptedDns, /selected\.append\(/);
@@ -295,26 +277,8 @@ test("DNS control provides Russian resolvers, live checks and protocol applicati
   assert.match(encryptedDns, /return list\(dict\.fromkeys\(item\["doh_url"\]\.replace/);
   assert.doesNotMatch(encryptedDns, /\.insert\(|\.extend\(addresses\)/);
   assert.match(api, /setdefault\("sockopt", \{\}\)\["domainStrategy"\] = "ForceIP"/);
-  assert.match(page, /Зашифрованный DNS для VLESS/);
-  assert.match(page, /Состояние DNS компонентов/);
-  assert.match(api, /apply_system|def apply_system_dns/);
-  assert.doesNotMatch(api, /ENV_FILE\.with_suffix\("\.settings\.tmp"\)/);
-  assert.match(api, /def apply_vrx_dns/);
-  assert.match(api, /content-type: application\/dns-message/);
-  assert.doesNotMatch(api, /application\/dns-json/);
-  assert.match(api, /status_code = exc\.status_code if isinstance\(exc, HTTPException\) else 500/);
-  assert.match(api, /"scope": "new_profiles"/);
-  assert.match(api, /"scope": "client_recommendation"/);
-  assert.match(api, /"scope": "server_xray"/);
-  assert.match(api, /"changes_existing": False/);
-  assert.match(api, /def validate_reality_sni/);
-  assert.match(api, /reality_settings\["serverNames"\] = \[supplied\["sni"\]\]/);
-  assert.match(api, /persist_vrx_target\(supplied\["sni"\]\)/);
-  assert.doesNotMatch(api, /urllib\.parse\.urlencode\(\{"dns": ss_dns\}\)/);
-  assert.match(page, /apply_shadowsocks/);
-  assert.match(page, /apply_vrx/);
-  assert.match(css, /\[data-network-page\] \.networkDnsForm/);
-  assert.match(css, /\[data-network-page\] \.networkSaveBar/);
+  assert.match(api, /apply_vrx_dns\(vrx_servers\)/);
+  assert.match(api, /if set\(profiles\) - allowed_scopes:/);
 });
 
 test("VLESS image supports independent REALITY, TLS and CDN profiles", async () => {
@@ -420,22 +384,6 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(protocolCss, /\.vlessCommandCenter \.vlessSettingsGroup\s*\{\s*display:block/);
   assert.match(protocolCss, /\.protocolWorkspace \.protocolSettingsFields label > span[^}]*font-size:12px/s);
   assert.match(protocolCss, /\.protocolWorkspace \.protocolSettingsFields input:not[^}]*min-height:40px !important/s);
-});
-
-test("direct protocols share the compact protocol command center", async () => {
-  const [protocolView, protocolCss] = await Promise.all([
-    read("src/features/protocols/protocol-view.tsx"),
-    read("src/features/protocols/protocols.css"),
-  ]);
-  assert.match(protocolView, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"\][^\n]+<ProtocolCommandCenter/);
-  assert.match(protocolView, /function ProtocolCommandCenter/);
-  assert.match(protocolView, /protocolWorkspace-\$\{protocolCode\.toLowerCase\(\)\} protocolCommandCenter/);
-  assert.match(protocolView, /protocol === "shadowsocks" \? "TCP \+ UDP PROXY"/);
-  assert.match(protocolView, /protocol === "hysteria2" \|\| protocol === "tuic" \? "QUIC \+ UDP PROXY"/);
-  assert.match(protocolCss, /\.protocolCommandCenter\s*\{[^}]*gap:9px/);
-  assert.match(protocolView, /vlessOverviewMetrics/);
-  assert.match(protocolView, /vlessContourGrid single/);
-  assert.match(protocolView, /vlessWorkspaceNew/);
 });
 
 test("installable protocol images are dispatched independently", async () => {

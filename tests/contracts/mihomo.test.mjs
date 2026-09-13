@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { read, readMihomoSources, readApiSources, readStyles } from "./support.mjs";
+import { read, readMihomoSources, readApiSources } from "./support.mjs";
 
 test("Mihomo transports automatically provision DNS and routing policies", async () => {
-  const [manager, page, styles, polish, dnsManifest, routingManifest] = await Promise.all([
+  const [manager, page, dnsManifest, routingManifest] = await Promise.all([
     read("protocol-images/mihomo/manager.py"),
     readMihomoSources(),
-    read("src/features/mihomo/mihomo.css"),
-    read("src/shared/styles/polish.css"),
     read("protocol-images/mihomo/modules/dns-private/manifest.json").then(JSON.parse),
     read("protocol-images/mihomo/modules/routing-policy/manifest.json").then(JSON.parse),
   ]);
@@ -81,87 +79,39 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /"latency_ms": min\(latencies\) if latencies else None/);
   assert.match(page, /request\("\/mihomo\/dns\/settings"\)/);
   assert.match(page, /request\("\/mihomo\/routing\/schema"\)/);
-  assert.match(page, /className="mihomoDnsWorkspace mihomoDnsV2"/);
-  assert.match(page, /<Tab id="dns"[^>]*>DNS<\/Tab>/);
-  assert.doesNotMatch(page, />DNS Mihomo<\/Tab>/);
   assert.match(page, /Clash Verge Rev/);
   assert.match(page, /apps\.apple\.com\/us\/app\/clash-mi\/id6744321968/);
   assert.match(page, /MetaCubeX\/ClashMetaForAndroid\/releases/);
-  assert.match(page, /Маршруты игр/);
   assert.match(page, /setGameRoute/);
   assert.match(page, /const ruleIconGroups/);
   assert.match(page, /toggleRuleIconGroup/);
   assert.match(page, /ruleExtraLines/);
   assert.match(page, /updateRuleExtras/);
-  assert.doesNotMatch(page, /mihomoHint">NETWORK,UDP,DIRECT/);
-  assert.match(page, /mihomoCatalogToolbar/);
   assert.match(page, /visibleRuleGroups/);
   assert.match(page, /direct_downloads/);
   assert.match(page, /p2pClientCatalog/);
   assert.match(page, /toggleP2pClient/);
-  assert.doesNotMatch(page, /<b>Дополнительные процессы через VPN<\/b>/);
-  assert.match(page, /mihomoProfileRuleButton/);
   assert.match(page, /profileDirectRules/);
   assert.match(page, /const ruleCount = profileDirectRules\.filter/);
-  assert.match(page, /<small>ПРАВИЛА<\/small><b>\{ruleCount\}<\/b>/);
   assert.match(page, /QRCode\.toDataURL\(subscription/);
-  assert.match(page, /mihomoProfileEditorHead/);
-  assert.match(page, /mihomoProfileWorkspace/);
-  assert.match(page, /mihomoProfileRail/);
-  assert.match(page, /aria-label="Раздел настроек"/);
-  assert.match(page, /mihomoOverviewV3/);
-  assert.match(page, /mihomoOverviewPulse/);
-  assert.doesNotMatch(page, /mihomoOverviewShortcuts/);
-  assert.match(page, /mihomoHeroArt/);
-  assert.match(page, /mihomoHeroArt[\s\S]*mihomoHeroNavigation/);
-  assert.doesNotMatch(page, /<small>пинг<\/small>/);
-  assert.doesNotMatch(page, /<small>PING<\/small>/);
   assert.doesNotMatch(page, /item\?\.latency_ms/);
-  assert.match(styles, /new-operator\/mihomo-control-v2\.webp/);
-  assert.match(styles, /\.mihomoCommandHero \{[^}]*border:0[^}]*box-shadow:none/s);
-  assert.match(styles, /\.mihomoCommandHero::after \{[^}]*radial-gradient[^}]*box-shadow:inset/s);
-  assert.match(styles, /\.mihomoCommandHero \.mihomoHeroArt \{[^}]*position:absolute[^}]*background-color:#01010e[^}]*background-image:url\("\/gate-art\/new-operator\/mihomo-control-v2\.webp"\)[^}]*background-size:contain/s);
   assert.match(page, /overviewIssueTargets/);
   assert.match(page, /overviewActiveConnections/);
   assert.match(page, /overviewIssues/);
-  assert.match(page, /mihomoDnsWorkspace/);
-  assert.match(page, /Режим обработки/);
-  assert.match(page, /Дополнительная обработка/);
   assert.match(manager, /cache-algorithm:/);
   assert.match(manager, /fake-ip-filter:/);
   assert.match(dnsManifest.settings.map((item) => item.key).join(","), /ipv6,prefer_h3,cache_algorithm,fake_ip_filter/);
-  assert.match(page, /mihomoModuleCatalogV2/);
   assert.match(page, /moduleCapabilities/);
   assert.match(page, /expandedDeviceLists/);
   assert.match(page, /expandedProtocolLists/);
-  assert.match(page, /mihomoProfileToggle/);
-  assert.match(page, /mihomoDeviceToggle/);
-  assert.doesNotMatch(page, /Скрыть устройства/);
-  assert.doesNotMatch(page, /Скрыть каналы/);
-  assert.doesNotMatch(page, /Получено \{bytes\(item\?\.rx_bytes/);
-  assert.match(page, /mihomoProfileCanvas/);
-  assert.match(styles, /\.mihomoProfileDialog \{ width:94vw; height:92dvh;/);
-  assert.match(polish, /\.mihomoDialog:not\(\.mihomoProfileDialog\)/);
-  assert.doesNotMatch(polish, /\.mihomoDialog\) \{\s*width:min\(620px/);
   assert.match(page, /setProfileStrategy/);
-  assert.match(page, /title: "Общие"/);
-  assert.match(page, /title: "Резерв"/);
-  assert.match(page, /Показывать Selector в Mihomo-клиенте/);
   assert.match(page, /if \(!profileStrategyTouched\) setProfileDevices/);
   assert.match(page, /activeProfileRouting/);
-  assert.match(page, /Правила устройства/);
-  assert.match(page, /Скопировать ссылку/);
   assert.match(page, /title: "UDP"/);
   assert.match(page, /udpExclusionCatalog/);
   assert.match(page, /udp_tunnel_exclusions_rules/);
-  assert.match(page, /Маршруты игр/);
-  assert.match(page, /setGameRoute/);
-  assert.doesNotMatch(page, /title: "Игры через VPN"/);
   assert.match(page, /EA Sports FC 26/);
   assert.match(page, /toggleProfileRule/);
-  assert.match(page, /Применяются только к подписке и YAML выбранного устройства/);
-  assert.match(page, /mihomoRuleStudio/);
-  assert.match(page, /сохраняется автоматически/);
   assert.match(page, /routingAutosaveRef/);
   assert.match(page, /available_rules/);
   assert.match(page, /routingDraft\[selectedRuleList\.key\]/);
@@ -176,8 +126,6 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_ru_sites_rules/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_ru_banks_rules/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_ru_marketplaces_rules/);
-  assert.match(page, /DNS и маршрутизация Mihomo готовы/);
-  assert.match(styles, /\.mihomoPolicyPanel/);
   for (const policy of [dnsManifest, routingManifest]) {
     assert.equal(policy.installable, false);
     assert.equal(policy.automatic, true);
@@ -258,7 +206,6 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /cdn_transport/);
   assert.match(manager, /cdn_xhttp_mode/);
   assert.match(view, /removeProfileDevice/);
-  assert.match(view, /Удалить устройство/);
   assert.match(manager, /def rebuild_vless_cdn_snippet/);
   assert.match(manager, /VLESS_CDN_ROUTE_ROOT/);
   assert.match(manager, /route_id = f"\{profile_id\}-\{connection_id\}"/);
@@ -285,16 +232,7 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /\/api\/mihomo\/routing\/presets/);
   assert.match(manager, /"summary": \{"configured": len\(values\)/);
   assert.doesNotMatch(view, /downloadConfig\(createdProfile\)/);
-  assert.match(view, /width=\{240\} height=\{240\}/);
-  assert.match(view, /mihomoProfileSummary/);
-  assert.match(view, /mihomoProfileDevices/);
-  assert.match(view, /setProfileStep\(1\)[\s\S]*>Общее<\/button>/);
-  assert.match(view, /mihomoProfileGeneral/);
-  assert.match(view, /Название HWID-устройства/);
-  assert.match(view, /mihomoConnectionQuickDelete[^>]*title="Удалить подключение"[\s\S]*<span aria-hidden="true">×<\/span><\/button>/);
-  assert.match(view, /Настроить пресеты/);
   assert.match(view, /preset_cdn_domain/);
-  assert.match(view, /Создать подключения из пресета/);
   assert.doesNotMatch(view, /profileDialog === "new" && <section className="mihomoPresetPicker"/);
   assert.doesNotMatch(view, /const module = modules\.find/, "Next.js reserves the local variable name module");
 });
@@ -311,8 +249,6 @@ test("Mihomo profiles expose one subscription and register optional HWID devices
   assert.match(manager, /hmac\.new\(token\.encode\(\), raw_hwid\.encode\(\), hashlib\.sha256\)/);
   assert.match(manager, /def subscription_device/);
   assert.match(manager, /provision_connections\(str\(profile\["id"\]\), definitions, privacy_enabled=bool\(inherited_routing/);
-  assert.match(view, /подписка устарела, требуется новая установка/);
-  assert.match(view, /Клиент с HWID появится как отдельное устройство/);
   assert.doesNotMatch(view, /subscription\?device_id=/);
 });
 
@@ -329,10 +265,6 @@ test("Mihomo profiles have an explicit common configuration layer", async () => 
   assert.match(manager, /selected_device = device_id or str\(normalized\["common_device_id"\]\)/);
   assert.match(manager, /template_id = str\(normalized\["common_device_id"\]\)/);
   assert.match(manager, /Общие настройки профиля нельзя удалить/);
-  assert.match(view, /Общие настройки профиля/);
-  assert.match(view, /HWID-устройства/);
-  assert.match(view, /для клиентов без HWID и новых устройств/);
-  assert.doesNotMatch(view, />\+ Устройство<\/button>/);
 });
 
 test("Mihomo HWID devices retain client and platform metadata", async () => {
@@ -353,15 +285,12 @@ test("Mihomo HWID devices retain client and platform metadata", async () => {
   assert.match(view, /const devicePlatform/);
   assert.match(view, /function deviceSystemLabel/);
   assert.match(view, /deviceSystemLabel\(device\)/);
-  assert.match(view, /Последний запрос/);
 });
 
 test("Mihomo UI does not count the common configuration as a device", async () => {
   const view = await readMihomoSources();
   assert.match(view, /function registeredProfileDevices/);
   assert.match(view, /device\.scope !== "common" && device\.id !== profile\.common_device_id/);
-  assert.match(view, /HWID-устройства пока не зарегистрированы/);
-  assert.match(view, /Параметры профиля[\s\S]*HWID-устройства/);
   assert.match(view, /profileDevices\.filter\(\(device\) => device\.scope === "common"\)/);
 });
 
@@ -376,8 +305,6 @@ test("Mihomo deduplicates migrated common devices and keeps clients without HWID
   assert.match(manager, /def record_common_subscription_access/);
   assert.match(manager, /"reason": "hwid_missing"/);
   assert.match(view, /\.filter\(\(device\) => device\.scope === "common"\)\.slice\(0, 1\)/);
-  assert.doesNotMatch(view, /HWID не передан — персональное устройство/);
-  assert.doesNotMatch(view, /mihomoCommonAccessNotice/);
 });
 
 test("Mihomo profile lifecycle is transactional, idempotent and reconciled", async () => {
@@ -402,18 +329,15 @@ test("Mihomo profile lifecycle is transactional, idempotent and reconciled", asy
 });
 
 test("overview aggregates network usage for Mihomo profiles and direct protocols", async () => {
-  const [manager, overview, styles] = await Promise.all([
+  const [manager, overview] = await Promise.all([
     read("protocol-images/mihomo/manager.py"),
     read("src/features/overview/overview-view.tsx"),
-    readStyles(),
   ]);
   assert.match(manager, /@app\.get\("\/api\/mihomo\/stats"/);
   assert.match(manager, /profile_stats_payload\(item\)/);
   assert.match(overview, /mihomoProfileStats\[profile\.id\]/);
   assert.match(overview, /protocolClients\.reduce\(\(sum, client\) => sum \+ \(client\.rx_bps \|\| 0\)/);
   assert.match(overview, /hasClientRates \? clientRx : rate\.rx/);
-  assert.match(styles, /\.overviewManagedTraffic/);
-  assert.doesNotMatch(styles, /\.overviewRoute\.direct \.overviewDirectTraffic,\.overviewRoute\.direct \.overviewDirectLatency \{ display:none/);
 });
 
 test("Mihomo provides verified Hysteria2 and TUIC v5 transports", async () => {

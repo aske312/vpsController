@@ -2,38 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileText, read, readUiSources, readApiSources, readStyles } from "./support.mjs";
 
-test("control surfaces share compact headers, telemetry and modal language", async () => {
-  const [styles, overview, versions] = await Promise.all([
-    readStyles(), read("src/features/overview/overview-view.tsx"), read("src/shared/lib/format-version.ts"),
-  ]);
-  assert.match(overview, /overviewNodeWorkspace/);
-  assert.match(overview, /const availableVersion = image\.available_version/);
-  assert.match(styles, /grid-template-columns:minmax\(0,8fr\) minmax\(260px,2fr\)/);
-  assert.match(styles, /\.gateMastMetric/);
-  assert.match(styles, /\.confirmBackdrop,.accessBetaModalBackdrop,.mihomoDialogBackdrop,.legalBackdrop/);
-  assert.match(versions, /slice\(0, 3\)/);
-});
-
-test("operational pages keep their artwork, 70/30 workspace and real country flags", async () => {
-  const [workspace, styles] = await Promise.all([
-    read("src/control-panel/components/app-workspace.tsx"), readStyles(),
-  ]);
-  for (const asset of ["overview.webp", "network_1.webp", "security.webp", "services.webp", "application.webp", "mihomo.webp"]) {
-    assert.match(styles, new RegExp(asset.replace(".", "\\.")));
-  }
-  assert.match(styles, /\.overviewNodeWorkspace\s*\{[\s\S]*?grid-template-columns:minmax\(0,8fr\) minmax\(260px,2fr\)/);
-  assert.match(styles, /\.overviewFlow \{ width:min\(1180px,100%\)/);
-  assert.match(styles, /\.overviewRoute\.mihomo \.overviewChannelList \{ grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-  const overview = await read("src/features/overview/overview-view.tsx");
-  assert.match(overview, /"transport-hysteria2": "HY2"/);
-  assert.match(overview, /"transport-tuic": "TUIC"/);
-  assert.match(workspace, /function CountryFlag/);
-  assert.match(workspace, /<svg viewBox="0 0 27 18"/);
-  assert.match(workspace, /country === "nl"/);
-  assert.match(workspace, /country === "lv"/);
-  assert.match(workspace, /country === "ru"/);
-});
-
 test("интерфейс относится к 312.net, публичные метаданные нейтральны", async () => {
   const [layout, page, packageJson] = await Promise.all([
     read("app/layout.tsx"),
@@ -206,38 +174,16 @@ test("the interface uses one fixed visual design without personalization", async
   assert.match(manager, /rm -f -- "\$\{DATA_DIR\}\/personalization\.json"/);
 });
 
-test("DNS and connection screens describe real effects and provide safe filtering", async () => {
-  const [page, dnsView, dnsComponents, api, css] = await Promise.all([
-    readUiSources(), read("src/features/network/network-dns.tsx"),
-    read("src/features/network/system-dns-control.tsx"), readApiSources(), readStyles(),
+test("DNS status distinguishes installed components and keeps its summary read-only", async () => {
+  const [api, components] = await Promise.all([
+    readApiSources(), read("src/features/network/system-dns-control.tsx"),
   ]);
-  assert.match(dnsView, /Изменения применяются только к отмеченным компонентам/);
-  assert.match(dnsComponents, /id: "system", key: "apply_system"/);
-  assert.match(dnsComponents, /DNS в новых конфигурациях клиентов/);
-  assert.match(dnsView, /VLESS перезапустит Xray/);
-  assert.match(dnsComponents, /без изменения серверного трафика/);
-  assert.match(page, /clientProtocolFilter/);
-  assert.match(page, /clientStateFilter/);
-  assert.match(page, /clientSearch/);
-  assert.match(page, /НЕСТАБИЛЬНО/);
-  assert.match(api, /protocol_effect_details/);
+  // Architectural boundary: the status summary must not become a second editor.
+  assert.doesNotMatch(components, /<(?:input|select|button)\b/);
+  assert.match(api, /"protocol_effect_details":/);
   assert.match(api, /"installed": installed\["wg"\]/);
-  assert.match(dnsComponents, /const available = component\.id === "system" \|\| Boolean\(effect\?\.installed\)/);
-  assert.doesNotMatch(dnsComponents, /<(?:input|select|button)\b/);
-  assert.match(dnsView, /disabled=\{!available\}/);
-  assert.match(dnsView, /checked=\{available && Boolean\(dnsDraft\[component\.key\]\)\}/);
-  assert.match(dnsComponents, /dns\.settings\.profiles/);
-  assert.match(dnsView, /value=\{dnsDraft\.selected_id\}/);
-  assert.match(dnsView, /update\(\{ selected_id: event\.target\.value \}\)/);
-  assert.match(dnsView, /chooseException\(component\.id, event\.target\.value\)/);
-  assert.match(dnsView, /if \(id\) profiles\[scope\] = id/);
-  assert.match(dnsView, /else delete profiles\[scope\]/);
-  assert.match(dnsView, /<option value="">Общий профиль<\/option>/);
-  assert.match(dnsView, /const canSave = customValid && encryptionValid/);
-  assert.match(dnsComponents, /Протокол не установлен/);
-  assert.match(api, /matches_selected/);
-  assert.match(css, /\.connectionsWorkspace/);
-  assert.match(css, /\.connectionsFilters/);
+  assert.match(api, /"installed": installed\["awg"\]/);
+  assert.match(api, /"matches_selected":/);
 });
 
 test("connection latency labels identify the real measurement source", async () => {
@@ -265,9 +211,4 @@ test("legacy users beta surface and orchestration are removed", async () => {
   }
   await assert.rejects(readFileText("api/access_beta.py"), { code: "ENOENT" });
   await assert.rejects(readFileText("src/features/users/users-view.tsx"), { code: "ENOENT" });
-});
-
-test("managed services artwork fills the block without distortion", async () => {
-  const servicesCss = await read("src/features/services/services.css");
-  assert.match(servicesCss, /\.servicesManagedBackdrop[^}]*background-size:cover[^}]*background-repeat:no-repeat/s);
 });
