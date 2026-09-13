@@ -93,7 +93,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /toggleP2pClient/);
   assert.match(page, /profileDirectRules/);
   assert.match(page, /const ruleCount = profileDirectRules\.filter/);
-  assert.match(page, /QRCode\.toDataURL\(subscription/);
+  assert.match(page, /const importUrl = clientImportUrl\(subscription,/);
+  assert.match(page, /QRCode\.toDataURL\(importUrl,/);
   assert.doesNotMatch(page, /item\?\.latency_ms/);
   assert.match(page, /overviewIssueTargets/);
   assert.match(page, /overviewActiveConnections/);
