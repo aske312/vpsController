@@ -135,9 +135,10 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
     route_rules, rule_sets = singbox_rules(rules, proxy_tag)
     config = {"log": {"level": "warn"},
               "dns": {"servers": [{"type": "local", "tag": "bootstrap"}, dns_server(dns["nameserver"], "remote"), dns_server(dns["fallback"], "fallback")], "final": "remote"},
-              "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 7890}],
+              "inbounds": [{"type": "tun", "tag": "tun-in", "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"], "auto_route": True},
+                           {"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 7890}],
               "outbounds": outbounds,
-              "route": {"auto_detect_interface": True, "default_domain_resolver": "bootstrap", "rules": [{"action": "sniff"}, *route_rules], "final": proxy_tag}}
+              "route": {"auto_detect_interface": True, "default_domain_resolver": "bootstrap", "rules": [{"action": "sniff"}, {"protocol": "dns", "action": "hijack-dns"}, *route_rules], "final": proxy_tag}}
     if endpoints:
         config["endpoints"] = endpoints
     if rule_sets:

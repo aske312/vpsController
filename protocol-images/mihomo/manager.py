@@ -3037,6 +3037,7 @@ def list_profiles() -> dict[str, Any]:
 # "like ClashMeta v2ray sing-box" in its User-Agent. See docs/client-compatibility.md.
 CLIENT_SIGNATURES = (
     (r"\bhapp\b", "Happ", ("xray",)),
+    (r"\bv2rayn\b", "v2rayN", ("xray",)),
     (r"\bkaring\b", "Karing", ("mihomo", "singbox")),
     (r"\bhiddify(?:nextx?|app)?\b", "Hiddify", ("mihomo", "singbox")),
     (r"\bflclash[- ]?x\b", "FlClashX", ("mihomo",)),

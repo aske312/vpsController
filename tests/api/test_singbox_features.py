@@ -38,6 +38,10 @@ class SingboxFeaturesTests(unittest.TestCase):
 
     def test_standard_wireguard_ech_and_selector(self):
         result = self.config()
+        tun = next(entry for entry in result["inbounds"] if entry["type"] == "tun")
+        self.assertTrue(tun["auto_route"])
+        self.assertTrue(tun["address"])
+        self.assertIn({"protocol": "dns", "action": "hijack-dns"}, result["route"]["rules"])
         self.assertEqual(result["endpoints"][0]["peers"][0]["allowed_ips"], ["0.0.0.0/0", "::/0"])
         self.assertEqual(result["outbounds"][-1]["type"], "selector")
         self.assertIn(result["endpoints"][0]["tag"], result["outbounds"][-1]["outbounds"])

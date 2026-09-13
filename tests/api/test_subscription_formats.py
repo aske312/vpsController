@@ -152,7 +152,7 @@ class SubscriptionFormatTests(unittest.TestCase):
         for agent, name, formats in cases:
             with self.subTest(agent=agent):
                 self.assertEqual(manager.client_identity({"user_agent": agent, "client_name": "Karing"}), (name, formats))
-        for agent in ("Unknown/1.0", "v2rayN/7.0", "Throne/1.0"):
+        for agent in ("Unknown/1.0", "Throne/1.0"):
             self.assertEqual(manager.client_formats({"user_agent": agent}), ())
 
     def test_desktop_headers_register_and_reuse_device(self):
@@ -218,6 +218,13 @@ class SubscriptionFormatTests(unittest.TestCase):
         result = self.fetch("Happ/3.13.0", hwid=None)
         self.assertIsInstance(json.loads(result.body), list)
         self.assertEqual(len(self.store[0]["devices"]), 1)
+        self.provision.assert_not_called()
+
+    def test_v2rayn_receives_xray_json_from_universal_subscription(self):
+        result = self.fetch("v2rayN/7.0", hwid=None)
+        self.assertIsInstance(json.loads(result.body), list)
+        self.assertEqual(json.loads(result.body)[0]["outbounds"][0]["protocol"], "shadowsocks")
+        self.assertEqual(manager.client_identity({"user_agent": "v2rayN/7.0"}), ("v2rayN", ("xray",)))
         self.provision.assert_not_called()
 
     def test_launcher_registration_keeps_supported_extensions(self):
