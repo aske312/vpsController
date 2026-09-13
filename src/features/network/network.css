@@ -217,7 +217,9 @@
 [data-network-page] .networkAdditionalBody > section { padding: 12px 0; border-top: 1px solid var(--line); }
 [data-network-page] .networkAdditionalBody h3 { margin: 0 0 5px; font-size: 13px; font-weight: 550; }
 [data-network-page] .networkAdditionalBody .networkExceptionList { padding: 0; }
-[data-network-page] .networkUtilityOptions { display: flex; gap: 10px 24px; flex-wrap: wrap; }
+[data-network-page] .networkUtilityOptions { display: flex; gap: 10px; flex-wrap: wrap; }
+[data-network-page] .networkUtilityOptions > button.networkProvider { flex: 1 1 220px; }
+[data-network-page] .networkAdditionalBody > section > button.networkProvider { width: 100%; max-width: 440px; }
 [data-network-page] .networkAdditionalHeading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
 [data-network-page] .networkAdditionalHeading button { flex-shrink: 0; }
 [data-network-page] .networkEvidence a { color: var(--cyan); }

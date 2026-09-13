@@ -3,7 +3,7 @@
 The server remains Xray/Caddy/Mihomo; this module only serializes client-side
 outbounds. Unknown or unsupported connection types fail the export explicitly.
 """
-from copy import deepcopy
+from urllib.parse import urlsplit
 
 
 class UnsupportedClientConfig(ValueError):
@@ -29,20 +29,19 @@ def _transport(kind, path, mode="auto", host=None):
     if kind in {"raw", "tcp"}:
         return None
     if kind == "xhttp":
-        # XHTTP is represented by sing-box's HTTP V2Ray transport. The server
-        # path and mode are retained; clients that do not support XHTTP reject
-        # validation instead of silently connecting incorrectly.
-        return {"type": "http", "path": path}
+        raise UnsupportedClientConfig("XHTTP не поддерживается стандартным экспортом sing-box")
     if kind == "websocket":
         return {"type": "ws", "path": path, "headers": {"Host": host} if host else {}}
     if kind == "httpupgrade":
-        return {"type": "httpupgrade", "path": path, "host": [host] if host else []}
+        return {"type": "httpupgrade", "path": path, "host": host or ""}
     if kind == "grpc":
         return {"type": "grpc", "service_name": str(path).lstrip("/")}
     raise UnsupportedClientConfig(f"Транспорт {kind} не поддерживается sing-box")
 
 
 def _vless(tag, credential, endpoint, variant, routing, fragment):
+    if credential.get("encryption"):
+        raise UnsupportedClientConfig("VLESS Encryption не поддерживается экспортом sing-box. Сохраните устройство с выключенным шифрованием до VPS и обновите подписку.")
     if variant == "direct":
         effective = dict(credential)
         if not credential.get("direct_tag"):
@@ -57,7 +56,7 @@ def _vless(tag, credential, endpoint, variant, routing, fragment):
         path = credential.get(f"{variant}_path", "/")
         tls = _tls(server, None, bool(routing.get("tunnel_ech")) and variant == "cdn", fragment)
     value = {"type": "vless", "tag": tag, "server": server, "server_port": port,
-             "uuid": credential["uuid"], "network": "tcp", "tls": tls}
+             "uuid": credential["uuid"], "tls": tls}
     transport_value = _transport(transport, path, credential.get(f"{variant}_xhttp_mode", "auto"), server)
     if transport_value:
         value["transport"] = transport_value
@@ -80,19 +79,13 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
             outbounds.append({"type": "shadowsocks", "tag": base, "server": endpoint,
                               "server_port": int(credential["port"]), "method": credential["method"],
                               "password": credential["password"]})
-        elif module in {"transport-wg", "transport-awg"}:
-            # AmneziaWG is emitted through the WireGuard outbound shape. The
-            # optional Amnezia obfuscation values are retained by the server
-            # profile, while clients decide whether their core supports them.
-            outbounds.append({"type": "wireguard", "tag": base, "server": endpoint,
-                              "server_port": int(credential["port"]), "private_key": credential["private_key"],
-                              "local_address": [credential["ip"]], "peer_public_key": credential["server_public_key"],
-                              "mtu": int(credential["mtu"])})
         elif module == "transport-hysteria2":
             outbounds.append({"type": "hysteria2", "tag": base, "server": endpoint,
                               "server_port": int(credential["port"]), "password": credential["password"],
                               "up_mbps": int(credential["up_mbps"]), "down_mbps": int(credential["down_mbps"]),
                               "tls": {"enabled": True, "server_name": credential.get("sni", "gate.312"), "insecure": True}})
+            if credential.get("obfs"):
+                outbounds[-1]["obfs"] = {"type": "salamander", "password": credential["obfs_password"]}
         elif module == "transport-tuic":
             outbounds.append({"type": "tuic", "tag": base, "server": endpoint,
                               "server_port": int(credential["port"]), "uuid": credential["uuid"],
@@ -121,9 +114,9 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
         kind, value, target = parts
         item = {"outbound": proxy_tag if target == "GATE.312" else ("direct" if target == "DIRECT" else "block")}
         if kind in {"DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD"}:
-            item["domain"] = ({"DOMAIN": [value], "DOMAIN-SUFFIX": [value], "DOMAIN-KEYWORD": [value]}[kind])
-        elif kind in {"IP-CIDR", "IP-CIDR6", "GEOIP"}:
-            item["ip_cidr"] = [value if kind != "GEOIP" else f"geoip:{value}"]
+            item[{"DOMAIN": "domain", "DOMAIN-SUFFIX": "domain_suffix", "DOMAIN-KEYWORD": "domain_keyword"}[kind]] = [value]
+        elif kind in {"IP-CIDR", "IP-CIDR6"}:
+            item["ip_cidr"] = [value]
         elif kind == "NETWORK":
             item["network"] = [value.lower()]
         else:
@@ -132,7 +125,19 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
     route_rules.append({"action": "sniff"})
     route_rules.append({"inbound": ["mixed-in"], "outbound": proxy_tag})
     return {"log": {"level": "warn"},
-            "dns": {"servers": [{"tag": "remote", "address": dns["nameserver"]}, {"tag": "fallback", "address": dns["fallback"]}], "final": "remote"},
+            "dns": {"servers": [{"type": "local", "tag": "bootstrap"}, dns_server(dns["nameserver"], "remote"), dns_server(dns["fallback"], "fallback")], "final": "remote"},
             "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 7890}],
             "outbounds": outbounds,
-            "route": {"auto_detect_interface": True, "rules": route_rules, "final": proxy_tag}}
+            "route": {"auto_detect_interface": True, "default_domain_resolver": "bootstrap", "rules": route_rules, "final": proxy_tag}}
+
+
+def dns_server(address, tag):
+    parsed = urlsplit(address if "://" in address else "udp://" + address)
+    if parsed.scheme not in {"udp", "tcp", "tls", "https", "quic"} or not parsed.hostname:
+        raise UnsupportedClientConfig(f"DNS {address} не поддерживается sing-box")
+    result = {"type": parsed.scheme, "tag": tag, "server": parsed.hostname, "domain_resolver": "bootstrap"}
+    if parsed.port:
+        result["server_port"] = parsed.port
+    if parsed.scheme == "https":
+        result["path"] = parsed.path or "/dns-query"
+    return result

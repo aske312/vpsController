@@ -1,0 +1,26 @@
+{
+  "mihomo": {
+    "label": "Mihomo YAML",
+    "components": ["transport-reality", "transport-shadowsocks", "transport-wg", "transport-awg", "transport-hysteria2", "transport-tuic"],
+    "transports": ["raw", "tcp", "xhttp", "grpc", "websocket", "httpupgrade"],
+    "features": ["tunnel_privacy", "tunnel_ech"],
+    "strategies": ["", "fallback", "url-test", "select"],
+    "rules": ["block_ads", "block_privacy", "direct_ru_sites", "direct_ru_banks", "direct_ru_marketplaces", "direct_downloads", "direct_local_network", "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"]
+  },
+  "singbox": {
+    "label": "sing-box JSON",
+    "components": ["transport-reality", "transport-shadowsocks", "transport-hysteria2", "transport-tuic"],
+    "transports": ["raw", "tcp", "grpc", "websocket", "httpupgrade"],
+    "features": ["tunnel_fragment"],
+    "strategies": ["url-test"],
+    "rules": ["block_privacy", "direct_ru_banks", "direct_ru_marketplaces", "direct_downloads", "direct_local_network"]
+  },
+  "xray": {
+    "label": "Happ · Xray JSON",
+    "components": ["transport-reality", "transport-shadowsocks"],
+    "transports": ["raw", "tcp", "xhttp", "grpc", "websocket", "httpupgrade"],
+    "features": ["tunnel_privacy"],
+    "strategies": [],
+    "rules": ["block_privacy", "direct_ru_banks", "direct_ru_marketplaces", "direct_downloads", "direct_local_network"]
+  }
+}

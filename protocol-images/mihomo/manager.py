@@ -35,6 +35,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from profile_transition import GRACE_SECONDS, stage_vless_transition, transition_delivery_revision, mark_transition_delivered
 from client_singbox import build_singbox_config, UnsupportedClientConfig
+from client_xray import build_xray_configs, xray_rules
+from client_capabilities import CAPABILITIES, FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
 
@@ -277,6 +279,7 @@ class ProfileDeviceInput(BaseModel):
     id: str = Field(max_length=48, pattern=r"^[a-zA-Z0-9_-]+$")
     name: str = Field(min_length=1, max_length=80)
     routing: dict[str, Any] = Field(default_factory=dict)
+    manual: bool = False
     hwid_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     created_at: str | None = Field(default=None, max_length=32)
     os: str | None = Field(default=None, max_length=16)
@@ -464,7 +467,7 @@ def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
         {
             **device,
             "name": "Общие настройки профиля" if str(device.get("id")) == common_device_id else device.get("name", "Устройство"),
-            "scope": "common" if str(device.get("id")) == common_device_id else ("hwid" if device.get("hwid_hash") else "legacy"),
+            "scope": "common" if str(device.get("id")) == common_device_id else ("hwid" if device.get("hwid_hash") else "manual" if device.get("manual") else "legacy"),
         }
         for device in unique_devices
     ]
@@ -516,6 +519,7 @@ def profile_response(item: dict[str, Any]) -> dict[str, Any]:
     result["export_filename"] = profile_export_filename(item)
     result["protection_status"] = {}
     for device in result["devices"]:
+        device["supported_formats"] = list(client_formats(device))
         device_id = str(device["id"])
         connections = [entry for entry in result.get("connections", []) if entry.get("device_id") == device_id and entry.get("component") == "transport-reality"]
         requested = bool(device_routing(result, device_id).get("tunnel_privacy", False))
@@ -673,8 +677,8 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
     result = dict(current) if current is not None else routing_defaults()
     for key, raw in values.items():
         if key == "client_config_format":
-            if raw not in ("mihomo", "singbox"):
-                raise HTTPException(status_code=422, detail="Формат клиента должен быть mihomo или singbox")
+            if raw not in CAPABILITIES:
+                raise HTTPException(status_code=422, detail="Неизвестный формат клиента")
             result[key] = raw
             continue
         if key in {"tunnel_privacy", "tunnel_ech", "tunnel_fragment"}:
@@ -3029,6 +3033,78 @@ def list_profiles() -> dict[str, Any]:
     return {"items": [profile_response(item) for item in profiles()]}
 
 
+# Application signatures precede generic core names: Hiddify advertises
+# "like ClashMeta v2ray sing-box" in its User-Agent. See docs/client-compatibility.md.
+CLIENT_SIGNATURES = (
+    (r"\bhapp\b", "Happ", ("xray",)),
+    (r"\bkaring\b", "Karing", ("mihomo", "singbox")),
+    (r"\bhiddify(?:nextx?|app)?\b", "Hiddify", ("mihomo", "singbox")),
+    (r"\bflclash[- ]?x\b", "FlClashX", ("mihomo",)),
+    (r"\bflclash\b", "FlClash", ("mihomo",)),
+    (r"\bprizrak[- ]?box\b", "Prizrak-Box", ("mihomo",)),
+    (r"\b(?:clash[- ]?)?nyanpasu\b", "Clash Nyanpasu", ("mihomo",)),
+    (r"\bkoala[- ]?clash\b", "Koala Clash", ("mihomo",)),
+    (r"\bsparkle\b", "Sparkle", ("mihomo",)),
+    (r"\b(?:clash|mihomo)[- ]?party\b", "Clash Party", ("mihomo",)),
+    (r"\bclash[- ]?verge(?:[- ]?rev)?\b", "Clash Verge Rev", ("mihomo",)),
+    (r"\bclash[- ]?mi\b", "Clash Mi", ("mihomo",)),
+    (r"\b(?:clashmetaforandroid|clash[- ]meta[- ]for[- ]android|cfa|cmfa)\b", "Clash Meta for Android", ("mihomo",)),
+    (r"\bsing[- ]?box[- ]launcher\b", "Sing-Box Launcher", ("singbox",)),
+    (r"\bsing[- ]?box[- ]?mt\b", "sing-box MT", ("singbox",)),
+    (r"\bsfa\b", "sing-box for Android", ("singbox",)),
+    (r"\bsf[imt]\b", "sing-box for Apple", ("singbox",)),
+    (r"\bsf[wd]\b", "sing-box for Desktop", ("singbox",)),
+)
+
+
+def client_identity(metadata: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
+    identities = [str(metadata.get(key) or "").lower() for key in ("user_agent", "client_name")]
+    for identity in identities:
+        for pattern, name, formats in CLIENT_SIGNATURES:
+            if re.search(pattern, identity):
+                return name, formats
+    for identity in identities:
+        if re.search(r"\b(?:clash(?:meta)?|mihomo)\b", identity):
+            return "Mihomo / Clash", ("mihomo",)
+        if re.search(r"\bsing[- ]?box\b", identity):
+            return "sing-box", ("singbox",)
+    return "", ()
+
+
+def client_formats(metadata: dict[str, Any]) -> tuple[str, ...]:
+    return client_identity(metadata)[1]
+
+
+def device_client_format(device: dict[str, Any], metadata: dict[str, Any]) -> str:
+    supported = client_formats(metadata) or client_formats(device)
+    saved = str(device.get("routing", {}).get("client_config_format", "mihomo"))
+    return saved if not supported or saved in supported else supported[0]
+
+
+def validate_profile_devices(devices: list[dict[str, Any]], common_id: str, existing: list[dict[str, Any]] | None = None) -> None:
+    known = {str(device["id"]) for device in (existing or [])}
+    shared = [device for device in devices if device.get("manual")]
+    if len(shared) > 1:
+        raise HTTPException(status_code=422, detail="В профиле можно создать только одно общее устройство sing-box")
+    for device in devices:
+        device_id = str(device["id"])
+        format = device.get("routing", {}).get("client_config_format", "mihomo")
+        if device.get("manual"):
+            if device_id == common_id or format != "singbox":
+                raise HTTPException(status_code=422, detail="Вручную можно создать только общее устройство sing-box JSON")
+            device["hwid_hash"] = None
+        else:
+            saved = next((entry for entry in (existing or []) if str(entry["id"]) == device_id), {})
+            supported = client_formats(saved)
+            previous = saved.get("routing", {}).get("client_config_format", "mihomo")
+            if device_id == common_id and format != "mihomo":
+                raise HTTPException(status_code=422, detail="Общий шаблон профиля использует Mihomo YAML")
+            if device_id != common_id and format != previous and (len(supported) < 2 or format not in supported):
+                raise HTTPException(status_code=422, detail="Смена формата доступна только устройствам с поддержкой YAML и JSON")
+            if device_id != common_id and device_id not in known:
+                raise HTTPException(status_code=422, detail="Индивидуальные устройства регистрируются автоматически по HWID")
+
+
 @app.post("/api/mihomo/profiles", dependencies=[Depends(auth_required)])
 @serialized_profile_mutation
 def create_profile(payload: ProfileCreate) -> dict[str, Any]:
@@ -3038,6 +3114,8 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
             return profile_response(existing)
     definitions = validate_connection_inputs(payload.connections) if payload.connections is not None else legacy_connection_inputs(payload.channels)
     devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
+    validate_profile_devices(devices, str(devices[0]["id"]))
+    validate_client_capabilities({"devices": devices, "connections": definitions, "common_device_id": devices[0]["id"]})
     device_ids = {device["id"] for device in devices}
     if len(device_ids) != len(devices) or any(definition.get("device_id", "device-1") not in device_ids for definition in definitions):
         raise HTTPException(status_code=422, detail="Profile devices are invalid or a connection references a missing device")
@@ -3090,11 +3168,20 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         item["routing"] = validate_routing(payload.routing, current=item.get("routing", {}))
     if payload.devices is not None:
         devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
+        saved_devices = {str(device["id"]): device for device in item.get("devices", [])}
+        for device in devices:
+            saved = saved_devices.get(str(device["id"]), {})
+            if saved.get("hwid_hash"):
+                device["hwid_hash"] = saved["hwid_hash"]
+                device["last_seen_at"] = saved.get("last_seen_at")
+                for key in ("user_agent", "client_name", "client_version"):
+                    device[key] = saved.get(key)
         if len({device["id"] for device in devices}) != len(devices):
             raise HTTPException(status_code=422, detail="Duplicate profile device id")
         common_device_id = str(item.get("common_device_id") or item.get("devices", [{}])[0].get("id", ""))
         if common_device_id not in {device["id"] for device in devices}:
             raise HTTPException(status_code=422, detail="Общие настройки профиля нельзя удалить")
+        validate_profile_devices(devices, common_device_id, item.get("devices", []))
         item["devices"] = devices
         item["subscriptions"] = {}
     if payload.connections is not None:
@@ -3500,20 +3587,41 @@ def preflight_client_export_update(current: dict[str, Any], payload: ProfileUpda
             {**connection.model_dump(), "credential": existing.get(connection.id, {}).get("credential", {})}
             for connection in payload.connections
         ]
+    # Metadata comes from the saved request, never from editable API fields.
+    saved = {entry["id"]: entry for entry in current.get("devices", [])}
     for device in candidate.get("devices", []):
-        if device.get("routing", {}).get("client_config_format") != "singbox":
+        if device["id"] in saved:
+            for key in ("client_name", "user_agent"):
+                device[key] = saved[device["id"]].get(key)
+    validate_client_capabilities(candidate)
+
+
+def validate_client_capabilities(profile):
+    common_id = profile.get("common_device_id") or profile.get("devices", [{}])[0].get("id")
+    for device in profile.get("devices", []):
+        if device["id"] == common_id:
             continue
-        selected = [entry for entry in candidate.get("connections", []) if entry.get("device_id") == device["id"]]
-        # Client export is best-effort at subscription time; never reject a
-        # server profile because a client core lacks one protocol adapter.
-        unsupported: list[str] = []
-        if False and unsupported:
-            raise HTTPException(status_code=422, detail=f"Экспорт sing-box не поддерживает {', '.join(dict.fromkeys(unsupported))}. Оставьте формат Mihomo для этой связки.")
-        # New/replaced transports are fully validated after provisioning. For
-        # client settings on existing transports no runtime changes are needed.
-        old = {entry["id"]: entry for entry in current.get("connections", [])}
-        # Client export is rendered on subscription/download. Do not make a
-        # server profile transaction depend on sing-box schema compatibility.
+        routing = device.get("routing", {})
+        format = routing.get("client_config_format", "mihomo")
+        if format not in CAPABILITIES:
+            raise HTTPException(status_code=422, detail="Неизвестный формат клиента")
+        supported = client_formats(device)
+        if supported and format not in supported:
+            raise HTTPException(status_code=422, detail="Приложение устройства не поддерживает выбранный формат")
+        caps = device_capabilities(format, device.get("os", "unknown"))
+        for key in FEATURES | RULES:
+            if routing.get(key) and key not in caps["features"] + caps["rules"]:
+                raise HTTPException(status_code=422, detail=f"{caps['label']}: функция {key} недоступна")
+        if routing.get("strategy") and routing["strategy"] not in caps["strategies"]:
+            raise HTTPException(status_code=422, detail=f"{caps['label']}: стратегия недоступна")
+        if format != "mihomo":
+            try:
+                xray_rules(profile_rules(routing))
+            except UnsupportedClientConfig as exc:
+                raise HTTPException(status_code=422, detail=f"{caps['label']}: неподдерживаемые правила: {exc}") from exc
+        for connection in profile.get("connections", []):
+            if connection.get("device_id") == device["id"] and not connection_supported(connection, format):
+                raise HTTPException(status_code=422, detail=f"{caps['label']}: несовместимое подключение {connection.get('name') or connection.get('component')}")
 
 
 def render_client_profile(item: dict[str, Any], device_id: str, requested_format: str | None = None) -> tuple[str, str]:
@@ -3524,9 +3632,10 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
         config = render_profile(profile, device_id)
         validate_rendered_profile(config)
         return config, "yaml"
-    if export_format != "singbox":
+    if export_format not in {"singbox", "xray"}:
         raise HTTPException(status_code=422, detail="Неизвестный формат профиля")
-    connections = [entry for entry in profile.get("connections", []) if entry.get("device_id") == device_id]
+    connections = [entry for entry in profile.get("connections", []) if entry.get("device_id") == device_id and connection_supported(entry, export_format, reality_connection_settings)]
+    device_values = compatible_routing(device_values, export_format)
     for connection in connections:
         if not module_is_installed(str(connection["component"])):
             raise HTTPException(status_code=409, detail=f"Модуль {connection['component']} выбранного устройства не установлен")
@@ -3545,7 +3654,10 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
     for key in ("tunnel_ech", "tunnel_privacy"):
         routing[key] = bool(device_values.get(key, False))
     try:
-        config = build_singbox_config(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings, fragment)
+        if export_format == "xray":
+            config = build_xray_configs(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings)
+        else:
+            config = build_singbox_config(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings, fragment)
     except UnsupportedClientConfig as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return json.dumps(config, ensure_ascii=False, indent=2) + "\n", "json"
@@ -3596,6 +3708,8 @@ def profile_subscription(profile_id: str, device_id: str | None = None) -> dict[
     item = next((entry for entry in data if entry.get("id") == profile_id), None)
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
+    if device_id is not None and device_id not in {str(device["id"]) for device in normalize_profile(item)["devices"]}:
+        raise HTTPException(status_code=404, detail="Profile device not found")
     token = str(item.get("subscription_token", ""))
     if not token:
         token = secrets.token_urlsafe(32)
@@ -3603,12 +3717,16 @@ def profile_subscription(profile_id: str, device_id: str | None = None) -> dict[
         item["subscriptions"] = {}
         item["subscription_migrated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         save_profiles(data)
-    path = f"/s/{token}"
+    path = f"/s/{device_subscription_token(token, device_id) if device_id is not None else token}"
     public_domain = os.getenv("PUBLIC_DOMAIN", "").strip()
     result = {"path": path}
     if public_domain:
         result["url"] = f"https://{public_domain}{path}"
     return result
+
+
+def device_subscription_token(token: str, device_id: str) -> str:
+    return hmac.new(token.encode(), f"device-config:{device_id}".encode(), hashlib.sha256).hexdigest()
 
 
 def subscription_device_metadata(request: Request) -> dict[str, str]:
@@ -3637,7 +3755,7 @@ def subscription_device_metadata(request: Request) -> dict[str, str]:
             device_os = "linux"
         else:
             device_os = "unknown"
-    os_version = clean(request.headers.get("x-os-version"), 40)
+    os_version = clean(request.headers.get("x-os-version") or request.headers.get("x-ver-os"), 40)
     if not os_version:
         version_patterns = {
             "ios": r"(?:CPU (?:iPhone )?OS|iPhone OS|iOS)[ /]([0-9]+(?:[_\.][0-9]+){0,3})",
@@ -3650,14 +3768,12 @@ def subscription_device_metadata(request: Request) -> dict[str, str]:
         if version_match:
             os_version = version_match.group(1).replace("_", ".")
     client_name = clean(request.headers.get("x-client-name"), 80)
-    if not client_name and "clash-verge" in user_agent.lower():
-        client_name = "Clash Verge"
-    if not client_name and ("clashmi" in user_agent.lower() or "clash mi" in user_agent.lower()):
-        client_name = "Clash Mi"
+    if not client_name:
+        client_name = client_identity({"user_agent": user_agent})[0]
     return {
         "os": device_os,
         "os_version": os_version,
-        "device_name": clean(request.headers.get("x-device-name"), 80),
+        "device_name": clean(request.headers.get("x-device-name") or request.headers.get("x-device-model"), 80),
         "client_name": client_name,
         "client_version": clean(request.headers.get("x-client-version"), 40),
         "user_agent": user_agent,
@@ -3689,18 +3805,23 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, meta
     normalized = normalize_profile(profile)
     existing = next((device for device in normalized["devices"] if hmac.compare_digest(str(device.get("hwid_hash", "")), hwid_hash)), None)
     if existing:
+        selected_format = device_client_format(existing, metadata)
+        existing["routing"] = compatible_routing(device_routing(normalized, str(existing["id"])), selected_format, metadata.get("os", "unknown"))
         existing.update({key: value for key, value in metadata.items() if value and key != "device_name"})
-        if metadata.get("device_name"):
+        if metadata.get("device_name") and not existing.get("manual"):
             existing["name"] = metadata["device_name"]
         existing["last_seen_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         save_subscription_profile(normalized)
         return normalized, str(existing["id"])
     template_id = str(normalized["common_device_id"])
-    template_device = next(device for device in normalized["devices"] if str(device.get("id")) == template_id)
+    supported = client_formats(metadata)
+    selected_format = supported[0] if supported else "mihomo"
     device_id = f"hwid-{hwid_hash[:16]}"
     definitions = []
     for connection in normalized["connections"]:
         if str(connection.get("device_id", template_id)) != template_id:
+            continue
+        if not connection_supported(connection, selected_format, reality_connection_settings):
             continue
         definitions.append({
             "id": f"hwid-{hwid_hash[:10]}-{uuid.uuid4().hex[:8]}",
@@ -3708,10 +3829,10 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, meta
             "device_id": device_id, "settings": dict(connection.get("settings", {})),
         })
     if not definitions:
-        raise HTTPException(status_code=409, detail="У профиля нет общего набора подключений")
+        raise HTTPException(status_code=409, detail="В общем профиле нет совместимых подключений для этого клиента")
     components = {str(definition["component"]) for definition in definitions}
     with profile_runtime_transaction(components):
-        inherited_routing = dict(device_routing(normalized, template_id))
+        inherited_routing = compatible_routing(device_routing(normalized, template_id), selected_format, metadata.get("os", "unknown"))
         provisioned = provision_connections(str(profile["id"]), definitions, privacy_enabled=bool(inherited_routing.get("tunnel_privacy", False)))
         profile.setdefault("devices", []).append({
             "id": device_id, "name": metadata.get("device_name") or f"HWID {hwid_hash[:8].upper()}",
@@ -3746,18 +3867,50 @@ def record_transition_delivery(profile_id: str, device_id: str, revision: str) -
 @app.get("/api/mihomo/subscriptions/{token}", response_class=PlainTextResponse)
 def public_profile_subscription(token: str, request: Request) -> PlainTextResponse:
     selected_profile: dict[str, Any] | None = None
+    bound_device: str | None = None
     for item in profiles():
         saved_token = item.get("subscription_token")
         if isinstance(saved_token, str) and hmac.compare_digest(saved_token, token):
             selected_profile = item
             break
+        if isinstance(saved_token, str) and saved_token:
+            bound_device = next((str(device["id"]) for device in normalize_profile(item)["devices"]
+                                 if hmac.compare_digest(device_subscription_token(saved_token, str(device["id"])), token)), None)
+            if bound_device is not None:
+                selected_profile = item
+                break
     if not selected_profile:
         raise HTTPException(status_code=404, detail="Subscription not found")
     raw_hwid = (request.headers.get("x-device-id") or request.headers.get("x-hwid") or request.query_params.get("hwid") or "").strip()
-    selected_device = str(normalize_profile(selected_profile)["common_device_id"])
-    if raw_hwid:
-        if len(raw_hwid) > 256:
-            raise HTTPException(status_code=422, detail="HWID is too long")
+    if len(raw_hwid) > 256:
+        raise HTTPException(status_code=422, detail="HWID is too long")
+    selected_device = bound_device or str(normalize_profile(selected_profile)["common_device_id"])
+    if bound_device is not None:
+        with profile_mutation_lock:
+            latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), None)
+            if latest is None or bound_device not in {str(device["id"]) for device in normalize_profile(latest)["devices"]}:
+                raise HTTPException(status_code=404, detail="Profile device not found")
+            selected_profile = normalize_profile(latest)
+            if not hmac.compare_digest(device_subscription_token(str(latest.get("subscription_token", "")), bound_device), token):
+                raise HTTPException(status_code=404, detail="Subscription not found")
+            for device in selected_profile["devices"]:
+                if str(device["id"]) == bound_device:
+                    if bound_device != str(selected_profile["common_device_id"]) and not device.get("manual"):
+                        saved_hash = device.get("hwid_hash")
+                        hwid_hash = hmac.new(str(latest["subscription_token"]).encode(), raw_hwid.encode(), hashlib.sha256).hexdigest() if raw_hwid else None
+                        if saved_hash and (not hwid_hash or not hmac.compare_digest(str(saved_hash), hwid_hash)):
+                            raise HTTPException(status_code=403, detail="Ссылка привязана к другому HWID или клиент не передал HWID")
+                        if hwid_hash and not saved_hash:
+                            if any(other.get("hwid_hash") == hwid_hash and str(other["id"]) != bound_device for other in selected_profile["devices"]):
+                                raise HTTPException(status_code=409, detail="Этот HWID уже привязан к другому устройству профиля")
+                            device["hwid_hash"] = hwid_hash
+                            device["scope"] = "hwid"
+                        metadata = subscription_device_metadata(request)
+                        device["routing"] = {**device_routing(selected_profile, bound_device), "client_config_format": device_client_format(device, metadata)}
+                        device.update({key: value for key, value in metadata.items() if value and value != "unknown" and key != "device_name"})
+                    device["last_seen_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            save_subscription_profile(selected_profile)
+    elif raw_hwid:
         with profile_mutation_lock:
             latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
             selected_profile, selected_device = subscription_device(latest, raw_hwid, token, subscription_device_metadata(request))
@@ -3765,7 +3918,18 @@ def public_profile_subscription(token: str, request: Request) -> PlainTextRespon
         with profile_mutation_lock:
             latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
             selected_profile = record_common_subscription_access(latest, subscription_device_metadata(request))
-    config, extension = render_client_profile(selected_profile, selected_device, request.query_params.get("format"))
+    selected = next(device for device in normalize_profile(selected_profile)["devices"] if str(device["id"]) == selected_device)
+    requested_format = None
+    if not raw_hwid and bound_device is None:
+        supported = client_formats(subscription_device_metadata(request))
+        requested_format = supported[0] if supported else None
+        if requested_format == "singbox":
+            shared = next((device for device in selected_profile["devices"] if device.get("manual")), None)
+            if shared:
+                selected_device = str(shared["id"])
+    elif not selected.get("manual"):
+        requested_format = device_client_format(selected, subscription_device_metadata(request))
+    config, extension = render_client_profile(selected_profile, selected_device, requested_format)
     delivery = None
     if any(entry.get("device_id") == selected_device for entry in selected_profile.get("retiring_connections", [])):
         delivery = BackgroundTask(record_transition_delivery, selected_profile["id"], selected_device,

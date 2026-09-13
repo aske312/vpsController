@@ -394,6 +394,7 @@
 .mihomoDeviceIdentity p { min-width:0; margin:0; }
 .mihomoDeviceIdentity b,.mihomoDeviceIdentity small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mihomoDeviceIdentity b { color:#dce8ef; font-size:11px; }
+.mihomoDeviceClientBadge { display:inline-block; margin-right:6px; padding:2px 5px; border:1px solid rgba(134,117,227,.25); border-radius:5px; background:rgba(92,75,180,.12); color:#b8adf4; font:700 9px var(--font-mono); vertical-align:middle; white-space:nowrap; }
 .mihomoDeviceIdentity small { margin-top:3px; color:#657a89; font:8px var(--font-mono); }
 .mihomoDeviceTotals { display:grid; grid-template-columns:62px 62px minmax(118px,1fr); gap:7px; }
 .mihomoDeviceTotals > span { min-width:0; padding:7px 9px; border-left:2px solid rgba(134,117,227,.35); background:rgba(10,20,29,.52); }
@@ -974,7 +975,7 @@
 .mihomoProfileRail > header small { color:#6e8392; font:700 8px var(--font-mono); letter-spacing:.09em; }
 .mihomoProfileRail > header b { color:var(--text); font-size:11px; }
 .mihomoProfileRail .mihomoDeviceBuilder { display:grid !important; order:initial !important; gap:9px; margin:0 !important; padding:0 !important; border:0 !important; border-radius:0 !important; background:transparent !important; }
-.mihomoProfileRail .mihomoDeviceBuilder > header { display:flex !important; margin-top:6px; padding:8px 3px 0; border-top:1px solid var(--line); }
+.mihomoProfileRail .mihomoDeviceBuilder > header { display:flex !important; flex-wrap:wrap; margin-top:6px; padding:8px 3px 0; border-top:1px solid var(--line); }
 .mihomoProfileRail .mihomoDeviceBuilder > header b { color:#8da0ad; font-size:9px; }
 .mihomoProfileRail .mihomoDeviceBuilder > div { display:grid; grid-template-columns:1fr !important; gap:6px; }
 .mihomoProfileRail .mihomoDeviceBuilder > div > button { width:100%; padding:9px; }
@@ -1061,7 +1062,8 @@
   .mihomoProfileHeading label { grid-column:1/-1; min-width:0; max-width:none; }
   .mihomoProfileWorkspace { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); }
   .mihomoProfileRail { overflow-x:auto; padding:9px 12px; }
-  .mihomoProfileRail > header,.mihomoProfileRail .mihomoDeviceBuilder > header,.mihomoProfileRail .mihomoConnectionEmpty { display:none !important; }
+  .mihomoProfileRail > header,.mihomoProfileRail .mihomoDeviceBuilder > header > div,.mihomoProfileRail .mihomoConnectionEmpty { display:none !important; }
+  .mihomoProfileRail .mihomoDeviceBuilder > header { flex-shrink:0; margin:0; padding:0; border:0; }
   .mihomoProfileRail .mihomoDeviceBuilder { display:flex !important; }
   .mihomoProfileRail .mihomoDeviceBuilder > div { display:flex; grid-template-columns:none !important; gap:6px; }
   .mihomoProfileRail .mihomoDeviceBuilder > div > button { min-width:190px; }
