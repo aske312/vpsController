@@ -9,11 +9,11 @@
   },
   "singbox": {
     "label": "sing-box JSON",
-    "components": ["transport-reality", "transport-shadowsocks", "transport-hysteria2", "transport-tuic"],
+    "components": ["transport-reality", "transport-shadowsocks", "transport-wg", "transport-hysteria2", "transport-tuic"],
     "transports": ["raw", "tcp", "grpc", "websocket", "httpupgrade"],
-    "features": ["tunnel_fragment"],
-    "strategies": ["url-test"],
-    "rules": ["block_privacy", "direct_ru_banks", "direct_ru_marketplaces", "direct_downloads", "direct_local_network"]
+    "features": ["tunnel_fragment", "tunnel_ech"],
+    "strategies": ["url-test", "select"],
+    "rules": ["block_ads", "block_privacy", "direct_ru_sites", "direct_ru_banks", "direct_ru_marketplaces", "direct_downloads", "direct_local_network", "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"]
   },
   "xray": {
     "label": "Happ · Xray JSON",

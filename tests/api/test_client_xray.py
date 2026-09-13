@@ -41,8 +41,8 @@ class XrayExportTests(unittest.TestCase):
         connections = [{"component": "transport-hysteria2", "credential": {"port": 443, "password": "test", "up_mbps": 50, "down_mbps": 100, "obfs": True, "obfs_password": "test-obfs"}}]
         result = build_singbox_config(connections, {}, {"nameserver": "https://dns.google/dns-query", "fallback": "1.1.1.1"}, ["DOMAIN-SUFFIX,example.com,DIRECT", "DOMAIN-KEYWORD,example,REJECT"], "192.0.2.1", lambda: {}, None)
         self.assertEqual(result["outbounds"][0]["obfs"], {"type": "salamander", "password": "test-obfs"})
-        self.assertEqual(result["route"]["rules"][0]["domain_suffix"], ["example.com"])
-        self.assertEqual(result["route"]["rules"][1]["domain_keyword"], ["example"])
+        self.assertEqual(result["route"]["rules"][1]["domain_suffix"], ["example.com"])
+        self.assertEqual(result["route"]["rules"][2]["domain_keyword"], ["example"])
         self.assertEqual(result["dns"]["servers"][1]["type"], "https")
 
     def test_singbox_export_passes_current_core_parser(self):

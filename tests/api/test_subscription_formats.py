@@ -10,6 +10,41 @@ from tests.api.support import manager
 
 
 class SubscriptionFormatTests(unittest.TestCase):
+    def test_same_hwid_in_different_apps_registers_separate_devices(self):
+        self.fetch("koala-clash/1.0")
+        first = deepcopy(self.store[0]["devices"][1])
+        self.fetch("Happ/3.0")
+        second = deepcopy(self.store[0]["devices"][2])
+        self.assertEqual(first["hwid_hash"], second["hwid_hash"])
+        self.assertNotEqual(first["id"], second["id"])
+        self.fetch("koala-clash/2.0")
+        self.fetch("Happ/4.0")
+        self.assertEqual(len(self.store[0]["devices"]), 3)
+        self.assertEqual(self.provision.call_count, 2)
+        self.assertEqual(self.store[0]["devices"][1]["id"], first["id"])
+
+    def test_legacy_device_is_migrated_without_reprovisioning(self):
+        self.fetch("Karing/1.0")
+        device = self.store[0]["devices"][1]
+        device.pop("client_identity_key")
+        previous = deepcopy(self.store[0]["connections"])
+        self.fetch("Karing/2.0")
+        self.assertEqual(len(self.store[0]["devices"]), 2)
+        self.assertEqual(self.provision.call_count, 1)
+        self.assertEqual(self.store[0]["connections"], previous)
+        self.assertEqual(self.store[0]["devices"][1]["client_identity_key"], "karing")
+
+    def test_common_singbox_excludes_encrypted_credentials_without_changing_profile(self):
+        encrypted = {"id": "encrypted", "device_id": "common", "component": "transport-reality",
+                     "settings": {"transport": "tcp"}, "credential": {"encryption": "test-encryption"}}
+        self.store[0]["connections"].append(encrypted)
+        response = self.fetch("sing-box MT/1.0", hwid=None)
+        config = json.loads(response.body)
+        self.assertEqual(config["outbounds"][0]["password"], "test-only")
+        self.assertFalse(any(entry["type"] == "vless" for entry in config["outbounds"]))
+        self.assertEqual(self.store[0]["connections"][1], encrypted)
+        self.provision.assert_not_called()
+
     def setUp(self):
         self.initial = {"id": "profile", "name": "Test", "common_device_id": "common", "subscription_token": "test-token",
                         "devices": [{"id": "common", "name": "Common", "routing": {}}],
@@ -146,6 +181,24 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.assertEqual(len(self.store[0]["devices"]), 1)
         self.provision.assert_not_called()
 
+    def test_launcher_registration_keeps_supported_extensions(self):
+        self.store[0]["devices"][0]["routing"] = {"tunnel_privacy": True, "tunnel_ech": True}
+        self.store[0]["connections"].append({"id": "awg", "device_id": "common", "component": "transport-awg", "settings": {}})
+        awg = {"port": 51820, "private_key": "A" * 43 + "=", "server_public_key": "A" * 43 + "=", "ip": "10.0.0.2/32", "mtu": 1420, "amnezia": {"jc": 4}}
+        self.provision.side_effect = lambda pid, definitions, **kw: [
+            {**entry, "credential": awg if entry["component"] == "transport-awg" else {"port": 12001, "method": "aes-128-gcm", "password": entry["device_id"]}}
+            for entry in definitions]
+        response = self.fetch("singbox-launcher/1.0", "desktop")
+        config = json.loads(response.body)
+        self.assertEqual(config["endpoints"][0]["jc"], 4)
+        device = self.store[0]["devices"][1]
+        self.assertEqual(device["client_name"], "Sing-Box Launcher")
+        self.assertTrue(device["routing"]["tunnel_privacy"])
+        self.assertTrue(device["routing"]["tunnel_ech"])
+        self.assertEqual(len(self.provision.call_args.args[1]), 2)
+        manager.validate_client_capabilities(self.store[0])
+        self.assertEqual(self.fetch("singbox-launcher/1.0", "desktop").body, response.body)
+
     def test_incompatible_template_does_not_create_empty_happ_device(self):
         self.store[0]["connections"][0]["component"] = "transport-awg"
         with self.assertRaises(manager.HTTPException) as error:
@@ -200,14 +253,14 @@ class SubscriptionFormatTests(unittest.TestCase):
                     manager.update_profile("profile", manager.ProfileUpdate(devices=[manager.ProfileDeviceInput(**item) for item in devices]))
                 self.assertEqual(error.exception.status_code, 422)
 
-    def test_without_hwid_selects_shared_json_without_registering_device(self):
+    def test_without_hwid_uses_common_json_even_when_legacy_shared_exists(self):
         self.store[0]["devices"].append({"id": "shared", "name": "Shared", "manual": True, "routing": {"client_config_format": "singbox"}})
         connection = deepcopy(self.initial["connections"][0])
         connection.update(id="shared-ss", device_id="shared")
         connection["credential"]["password"] = "shared-password"
         self.store[0]["connections"].append(connection)
         response = self.fetch("sing-box MT/1.14", hwid=None)
-        self.assertEqual(json.loads(response.body)["outbounds"][0]["password"], "shared-password")
+        self.assertEqual(json.loads(response.body)["outbounds"][0]["password"], "test-only")
         yaml = self.fetch("ClashMi/1.0", hwid=None)
         self.assertIn('.yaml', yaml.headers["content-disposition"])
         self.assertEqual(len(self.store[0]["devices"]), 2)

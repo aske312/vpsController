@@ -3,9 +3,9 @@ import type { Module, ProfileConnection } from "./types";
 
 type Routing = Record<string, string | number | boolean>;
 
-export function ProfileProtection({ routing, connections, modules, common = false, onChange }: { routing: Routing; connections: ProfileConnection[]; modules: Module[]; common?: boolean; onChange: (key: string, value: string | boolean) => void }) {
+export function ProfileProtection({ routing, connections, modules, common = false, client, onChange }: { routing: Routing; connections: ProfileConnection[]; modules: Module[]; common?: boolean; client?: string; onChange: (key: string, value: string | boolean) => void }) {
   const fragment = Boolean(routing.tunnel_fragment);
-  const caps = clientCapabilities(routing.client_config_format);
+  const caps = clientCapabilities(routing.client_config_format, undefined, client);
   const showFragment = common || caps.features.includes("tunnel_fragment");
   const compatible = connections.some((connection) => connection.component === "transport-reality" && modules.some((module) => module.id === connection.component && module.installed));
   return <section className="mihomoProfileRules">

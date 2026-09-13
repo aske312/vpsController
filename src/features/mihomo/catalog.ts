@@ -310,5 +310,5 @@ export const profileStrategies = [
   { value: "", code: "AUTO", title: "Общие", text: "Наследовать стратегию маршрутизации." },
   { value: "fallback", code: "SAFE", title: "Резерв", text: "Переключаться при недоступности канала." },
   { value: "url-test", code: "FAST", title: "Автовыбор", text: "Автоматически выбирать самый быстрый канал." },
-  { value: "select", code: "MAN", title: "Вручную", text: "Показывать Selector в Mihomo-клиенте." },
+  { value: "select", code: "MAN", title: "Вручную", text: "Выбирать канал в приложении." },
 ];

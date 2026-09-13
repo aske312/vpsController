@@ -370,7 +370,7 @@
 
 .mihomoProfileIdentity small { margin-top: 3px; color: #738999; font: 9px var(--font-mono); }
 .mihomoProfileIdentity em { display:block; margin-top:6px; color:#566c7c; font:normal 8px var(--font-mono); }
-.mihomoProfileSummary { display:grid; grid-template-columns:repeat(3,minmax(105px,1fr)); gap:8px; }
+.mihomoProfileSummary { display:grid; grid-template-columns:repeat(2,minmax(105px,1fr)); gap:8px; }
 .mihomoProfileSummary > div { display:grid; gap:3px; min-width:0; padding:9px 11px; border:1px solid rgba(91,113,138,.15); border-radius:9px; background:rgba(5,13,21,.58); }
 .mihomoProfileSummary small { color:#667c8c; font-size:8px; text-transform:uppercase; letter-spacing:.08em; }
 .mihomoProfileSummary strong { display:flex; align-items:center; gap:6px; color:#dce8ef; font:700 11px var(--font-mono); }
@@ -564,7 +564,7 @@
 .mihomoProfileToggle > .mihomoCollapseChevron { grid-column:2; grid-row:1; }
 .mihomoProfileHeader > .mihomoRowActions { grid-column:auto; justify-content:flex-start; }
 .mihomoProfileSummary { grid-template-columns:1fr 1fr; }
-.mihomoProfileSummary > div:last-child { grid-column:1/-1; }
+
 .mihomoDeviceHeader { grid-template-columns:1fr; align-items:stretch; }
 .mihomoDeviceToggle { grid-template-columns:1fr 18px; }
 .mihomoDeviceToggle .mihomoDeviceTotals { grid-column:1/-1; }

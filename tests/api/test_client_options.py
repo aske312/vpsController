@@ -66,11 +66,12 @@ class ClientOptionsTests(unittest.TestCase):
         self.assertEqual(manager.device_routing(normalized, "phone")["client_config_format"], "singbox")
         self.assertEqual(normalized["common_device_id"], "common")
 
-    def test_only_one_shared_singbox_can_be_created_manually(self):
+    def test_shared_singbox_creation_is_disabled_but_existing_remain_editable(self):
         common = {"id": "common", "routing": {}}
         shared = {"id": "shared", "manual": True, "routing": {"client_config_format": "singbox"}}
-        manager.validate_profile_devices([common, shared], "common")
+        manager.validate_profile_devices([common, shared], "common", [common, shared])
         cases = [
+            [common, shared],
             [common, shared, {**shared, "id": "second"}],
             [common, {**shared, "routing": {"client_config_format": "mihomo"}}],
             [common, {"id": "new-yaml", "routing": {}}],
@@ -82,7 +83,7 @@ class ClientOptionsTests(unittest.TestCase):
             self.assertEqual(error.exception.status_code, 422)
         # Existing automatically registered YAML devices remain editable.
         hwid = {"id": "hwid-phone", "hwid_hash": "a" * 64, "routing": {}}
-        manager.validate_profile_devices([common, shared, hwid], "common", [common, hwid])
+        manager.validate_profile_devices([common, shared, hwid], "common", [common, shared, hwid])
 
     def test_shared_singbox_is_not_bound_to_hwid_and_serves_multiple_clients(self):
         self.profile["subscription_token"] = "test-profile-token"

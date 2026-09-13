@@ -23,7 +23,7 @@ export function devicePlatformMeta(device: ProfileDevice) {
 
 export function deviceClientShortName(device: Pick<ProfileDevice, "client_name">) {
   const name = device.client_name?.trim();
-  if (!name) return "Клиент ?";
+  if (!name) return "Undefined";
   const shortNames: Record<string, string> = {
     "Koala Clash": "Koala", "Clash Verge Rev": "Verge", "Clash Nyanpasu": "Nyanpasu",
     "Clash Party": "Party", "Clash Meta for Android": "CMFA", "Prizrak-Box": "Prizrak",

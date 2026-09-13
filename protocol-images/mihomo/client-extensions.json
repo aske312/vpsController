@@ -1,0 +1,9 @@
+{
+  "Sing-Box Launcher": {
+    "format": "singbox",
+    "core": "sing-box-lx",
+    "components": ["transport-awg"],
+    "transports": ["xhttp"],
+    "features": ["tunnel_privacy"]
+  }
+}
