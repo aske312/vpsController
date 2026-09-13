@@ -274,10 +274,10 @@ test("DNS API preserves component application and encrypted fallback boundaries"
   assert.match(encryptedDns, /selected\.append\(/);
   assert.match(encryptedDns, /if any\(not item\.get\("doh_url", ""\)\.startswith\("https:\/\/"\)/);
   assert.match(encryptedDns, /raise HTTPException\(status_code=422/);
-  assert.match(encryptedDns, /return list\(dict\.fromkeys\(item\["doh_url"\]\.replace/);
+  assert.match(encryptedDns, /return list\(dict\.fromkeys\(item\["doh_url"\]/);
   assert.doesNotMatch(encryptedDns, /\.insert\(|\.extend\(addresses\)/);
   assert.match(api, /setdefault\("sockopt", \{\}\)\["domainStrategy"\] = "ForceIP"/);
-  assert.match(api, /apply_vrx_dns\(vrx_servers\)/);
+  assert.match(api, /apply_vrx_dns\(vrx_servers[,)]/);
   assert.match(api, /if set\(profiles\) - allowed_scopes:/);
 });
 

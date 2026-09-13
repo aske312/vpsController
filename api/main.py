@@ -32,6 +32,7 @@ from fastapi.responses import JSONResponse
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cdn_security
+from dns_policy import build_xray_dns, probe_xray_dns, successful_dns_response
 import cdn_operation
 from schemas import (
     BootstrapRequest,
@@ -216,6 +217,17 @@ RESOURCE_TARGETS = (
 )
 
 DNS_PROVIDERS = (
+    {"id": "dns-sb", "name": "DNS.SB", "country": "GLOBAL", "addresses": ["185.222.222.222", "45.11.45.11"], "doh_url": "https://doh.dns.sb/dns-query", "filter": "Без контент-фильтрации"},
+    {"id": "adguard-unfiltered", "name": "AdGuard Unfiltered", "country": "GLOBAL", "addresses": ["94.140.14.140", "94.140.14.141"], "doh_url": "https://unfiltered.adguard-dns.com/dns-query", "filter": "Без фильтрации"},
+    {"id": "adguard-family", "name": "AdGuard Family", "country": "GLOBAL", "addresses": ["94.140.14.15", "94.140.15.16"], "doh_url": "https://family.adguard-dns.com/dns-query", "filter": "Семейный, без рекламы и трекеров"},
+    {"id": "controld-unfiltered", "name": "Control D", "country": "GLOBAL", "addresses": ["76.76.2.0", "76.76.10.0"], "doh_url": "https://freedns.controld.com/p0", "filter": "Без фильтрации"},
+    {"id": "controld-malware", "name": "Control D Malware", "country": "GLOBAL", "addresses": ["76.76.2.1", "76.76.10.1"], "doh_url": "https://freedns.controld.com/p1", "filter": "Вредоносные сайты"},
+    {"id": "controld-ads", "name": "Control D Ads", "country": "GLOBAL", "addresses": ["76.76.2.2", "76.76.10.2"], "doh_url": "https://freedns.controld.com/p2", "filter": "Реклама и трекеры"},
+    {"id": "controld-family", "name": "Control D Family", "country": "GLOBAL", "addresses": ["76.76.2.4", "76.76.10.4"], "doh_url": "https://freedns.controld.com/family", "filter": "Семейный"},
+    {"id": "dns4eu-unfiltered", "name": "DNS4EU", "country": "EU", "addresses": ["86.54.11.100", "86.54.11.200"], "doh_url": "https://unfiltered.joindns4.eu/dns-query", "filter": "Без контент-фильтра; правовые ограничения ЕС"},
+    {"id": "dns4eu-protective", "name": "DNS4EU Protective", "country": "EU", "addresses": ["86.54.11.1", "86.54.11.201"], "doh_url": "https://protective.joindns4.eu/dns-query", "filter": "Вредоносные сайты и фишинг"},
+    {"id": "dns4eu-noads", "name": "DNS4EU No Ads", "country": "EU", "addresses": ["86.54.11.13", "86.54.11.213"], "doh_url": "https://noads.joindns4.eu/dns-query", "filter": "Вредоносные сайты, реклама и трекеры"},
+    {"id": "dns4eu-family", "name": "DNS4EU Family", "country": "EU", "addresses": ["86.54.11.11", "86.54.11.211"], "doh_url": "https://child-noads.joindns4.eu/dns-query", "filter": "Семейный, без рекламы"},
     {"id": "yandex-basic", "name": "Яндекс DNS — базовый", "country": "RU", "addresses": ["77.88.8.8", "77.88.8.1"], "doh_url": "https://common.dot.dns.yandex.net/dns-query", "filter": "Без фильтрации"},
     {"id": "yandex-safe", "name": "Яндекс DNS — безопасный", "country": "RU", "addresses": ["77.88.8.88", "77.88.8.2"], "filter": "Вредоносные сайты"},
     {"id": "yandex-family", "name": "Яндекс DNS — семейный", "country": "RU", "addresses": ["77.88.8.7", "77.88.8.3"], "filter": "Вредоносные и взрослые сайты"},
@@ -2917,6 +2929,21 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
     if data["apply_vrx"]:
         env_updates["VRX_DNS"] = ", ".join(vrx_servers)
     tunnel_originals = {path: path.read_bytes() for _, config, settings_file, _ in tunnel_updates for path in (config, settings_file)}
+    # Preflight is deliberately before snapshots and mutations: failure leaves live state untouched.
+    plain_addresses = set()
+    for scope, enabled in (("system", data["apply_system"]), ("wg", data["apply_wg"]), ("awg", data["apply_awg"]), ("shadowsocks", data["apply_shadowsocks"]), ("openvpn", data["apply_openvpn"]), ("ikev2", data["apply_ikev2"])):
+        if enabled:
+            plain_addresses.update(resolver_for(scope)[0])
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        reachable = list(pool.map(lambda address: dns_wire_query(address)[0], sorted(plain_addresses)))
+    if not all(reachable):
+        raise HTTPException(status_code=422, detail="Один из выбранных DNS не ответил на проверку. Рабочие настройки не изменены")
+    if data["apply_vrx"] and VLESS_CONFIG.exists():
+        try:
+            for server in vrx_servers:
+                probe_xray_dns(build_xray_dns([server], data["bootstrap_id"]), XRAY_BIN)
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            raise HTTPException(status_code=422, detail="Проверка DNS через Xray не прошла. Проверьте основной DNS, резерв и bootstrap. Рабочие настройки не изменены") from exc
     env_original = ENV_FILE.read_bytes() if ENV_FILE.exists() else None
     vrx_original = VLESS_CONFIG.read_bytes() if data["apply_vrx"] and VLESS_CONFIG.exists() else None
     settings_original = DNS_SETTINGS_FILE.read_bytes() if DNS_SETTINGS_FILE.exists() else None
@@ -2933,7 +2960,7 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
         if env_updates:
             persist_env_values(env_updates)
         if vrx_original is not None:
-            apply_vrx_dns(vrx_servers)
+            apply_vrx_dns(vrx_servers, bootstrap_id=data["bootstrap_id"])
         for scope, config, settings_file, resolvers in tunnel_updates:
             apply_tunnel_dns(scope, config, settings_file, resolvers)
         DNS_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -3228,7 +3255,7 @@ def configured_int(values: dict[str, str], name: str, fallback: int) -> int:
 
 
 def read_dns_settings() -> dict:
-    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "apply_openvpn": False, "apply_ikev2": False, "prefer_encrypted": False, "fallback_enabled": True, "fallback_id": None, "apply_system": False, "profiles": {}, "custom": None}
+    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "apply_openvpn": False, "apply_ikev2": False, "prefer_encrypted": False, "bootstrap_id": "cloudflare", "fallback_enabled": True, "fallback_id": None, "apply_system": False, "profiles": {}, "custom": None}
     try:
         saved = json.loads(DNS_SETTINGS_FILE.read_text(encoding="utf-8"))
         # Keep only supported channel keys when reading older settings files.
@@ -3263,15 +3290,13 @@ def dns_vrx_servers(settings: dict, providers: list[dict]) -> list[str]:
         selected.append(next(item for item in providers if item["id"] == settings["fallback_id"]))
     if any(not item.get("doh_url", "").startswith("https://") for item in selected):
         raise HTTPException(status_code=422, detail="Защищённый DNS VLESS требует HTTPS у основного и резервного провайдеров. Обычный DNS не будет добавлен вместо DoH")
-    # Local DoH avoids recursively resolving the resolver through the same outbound.
-    # Only resolver hostnames use OS bootstrap; target queries remain in HTTPS.
-    return list(dict.fromkeys(item["doh_url"].replace("https://", "https+local://", 1) for item in selected))
+    return list(dict.fromkeys(item["doh_url"] for item in selected))
 
 
 def actual_vrx_dns() -> str:
     try:
         config = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
-        return ", ".join(str(item.get("address", "")) if isinstance(item, dict) else str(item) for item in config.get("dns", {}).get("servers", [])) or "Системный DNS"
+        return ", ".join(str(item.get("address", "")) if isinstance(item, dict) else str(item) for item in config.get("dns", {}).get("servers", []) if not isinstance(item, dict) or not item.get("skipFallback")) or "Системный DNS"
     except (OSError, ValueError, TypeError):
         return "Нет данных"
 
@@ -3350,13 +3375,13 @@ def dns_provider_list(settings: dict | None = None) -> list[dict]:
     return providers
 
 
-def apply_vrx_dns(addresses: list[str]) -> None:
+def apply_vrx_dns(addresses: list[str], *, bootstrap_id: str = "cloudflare") -> None:
     """Apply server-side Xray resolution without replacing a working config on validation failure."""
     original = VLESS_CONFIG.read_bytes()
     temporary = VLESS_CONFIG.with_suffix(".dns.tmp.json")
     try:
         config = json.loads(original.decode("utf-8"))
-        config["dns"] = {"servers": addresses, "queryStrategy": "UseIP"}
+        config["dns"] = build_xray_dns(addresses, bootstrap_id)
         config.setdefault("routing", {})["domainStrategy"] = "IPIfNonMatch"
         direct_outbounds = [item for item in config.get("outbounds", []) if item.get("protocol") == "freedom"]
         if not direct_outbounds:
@@ -3401,7 +3426,7 @@ def dns_wire_query(address: str, tcp: bool = False, timeout: float = 2.0) -> tup
             else:
                 sock.send(packet)
                 response = sock.recv(4096)
-        valid = len(response) >= 12 and struct.unpack("!H", response[:2])[0] == transaction and bool(response[2] & 0x80)
+        valid = successful_dns_response(response, packet)
         return valid, round((time.monotonic() - started) * 1000, 1) if valid else None
     except (OSError, socket.timeout):
         return False, None
@@ -3423,7 +3448,7 @@ def check_dns_provider(provider: dict) -> dict:
                 ["curl", "-fsS", "--max-time", "4", "-X", "POST", "-H", "content-type: application/dns-message", "-H", "accept: application/dns-message", "--data-binary", "@-", doh_url],
                 input=doh_packet, capture_output=True, timeout=5, check=False,
             )
-            doh_ok = result.returncode == 0 and len(result.stdout) >= 12 and struct.unpack("!H", result.stdout[:2])[0] == transaction and bool(result.stdout[2] & 0x80)
+            doh_ok = result.returncode == 0 and successful_dns_response(result.stdout, doh_packet)
             doh_ms = round((time.monotonic() - started) * 1000, 1) if doh_ok else None
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass

@@ -187,3 +187,61 @@
 @media (max-width: 380px) {
   [data-network-page] .networkProviderGrid { grid-template-columns: 1fr; }
 }
+
+[data-network-page] .networkPageHeader { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: end; gap: 24px; padding: 10px 0 16px; background: none; border: 0; box-shadow: none; }
+[data-network-page] .networkPageIdentity { display: grid; gap: 5px; }
+[data-network-page] .networkPageIdentity .eyebrow { font: 600 10px var(--technical-font); letter-spacing: .12em; }
+[data-network-page] .networkPageIdentity h1 { margin: 0; font: 550 28px var(--ui-font); letter-spacing: -.04em; }
+[data-network-page] .networkPageHeader .networkToolbar { border: 0; align-items: end; }
+[data-network-page] .networkPageHeader .networkTabs { gap: 20px; }
+[data-network-page] .networkPageHeader .networkTabs button { padding: 10px 0; }
+[data-network-page] .networkPageHeader .networkRefresh { padding: 0; align-items: center; }
+[data-network-page] .networkProviderTools { display: flex; align-items: center; gap: 12px; padding: 0 16px 14px; }
+[data-network-page] .networkProviderSearch { flex: 1; max-width: 410px; }
+[data-network-page] .networkProviderTools > span { color: var(--muted); font-size: 11px; }
+[data-network-page] .networkProviderTools > button { margin-left: auto; }
+[data-network-page] .networkResolverColumn .networkProviderGrid { max-height: 410px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; align-content: start; padding: 1px 4px 1px 1px; }
+[data-network-page] .networkProviderCode { font-size: 8px; }
+[data-network-page] .networkProviderText .networkResolverAddresses { font: 9px var(--technical-font); overflow-wrap: anywhere; }
+[data-network-page] .networkApplySection h2 { font-size: 14px; }
+[data-network-page] .networkApplyGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 0 16px 14px; }
+[data-network-page] .networkBatchActions { display: flex; flex-wrap: wrap; gap: 8px; }
+[data-network-page] .networkBatchActions button { min-height: 30px; padding: 5px 9px; font-size: 11px; }
+[data-network-page] .networkApplyGrid button.networkProvider { align-items: flex-start; }
+[data-network-page] .networkApplyGrid .networkProviderIndicator { margin-top: 12px; }
+[data-network-page] .networkAdditional > summary { display: flex; align-items: center; gap: 14px; padding: 13px 16px; cursor: pointer; font-size: 13px; }
+[data-network-page] .networkAdditional > summary::before { content: '+'; color: var(--cyan); font: 16px var(--technical-font); }
+[data-network-page] .networkAdditional[open] > summary::before { content: '-'; }
+[data-network-page] .networkAdditional > summary small { font-size: 11px; }
+[data-network-page] .networkAdditionalBody { padding: 0 16px 10px; }
+[data-network-page] .networkAdditionalBody > section { padding: 12px 0; border-top: 1px solid var(--line); }
+[data-network-page] .networkAdditionalBody h3 { margin: 0 0 5px; font-size: 13px; font-weight: 550; }
+[data-network-page] .networkAdditionalBody .networkExceptionList { padding: 0; }
+[data-network-page] .networkUtilityOptions { display: flex; gap: 10px 24px; flex-wrap: wrap; }
+[data-network-page] .networkAdditionalHeading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+[data-network-page] .networkAdditionalHeading button { flex-shrink: 0; }
+[data-network-page] .networkEvidence a { color: var(--cyan); }
+@media (max-width: 1100px) {
+  [data-network-page] .networkApplyGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  [data-network-page] .networkPageHeader { grid-template-columns: 1fr; gap: 10px; }
+}
+@media (max-width: 700px) {
+  [data-network-page] .networkPageHeader .networkToolbar { align-items: start; }
+  [data-network-page] .networkPageHeader .networkRefresh { width: 100%; }
+  [data-network-page] .networkProviderTools { flex-wrap: wrap; padding: 0 12px 12px; }
+  [data-network-page] .networkProviderSearch { flex-basis: 100%; max-width: none; }
+  [data-network-page] .networkApplyGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0 12px 12px; }
+  [data-network-page] .networkAdditionalHeading { flex-wrap: wrap; }
+  [data-network-page] .networkAdditional > summary { flex-wrap: wrap; gap: 8px; }
+}
+@media (max-width: 380px) {
+  [data-network-page] .networkApplyGrid { grid-template-columns: 1fr; }
+}
+
+[data-network-page] .networkDnsSuggestion { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 0 16px 14px; padding: 12px; border: 1px solid var(--green); border-radius: var(--radius-sm); background: var(--green-dim); }
+[data-network-page] .networkDnsSuggestion strong { font-size: 12px; }
+[data-network-page] .networkDnsSuggestion button { flex-shrink: 0; }
+[data-network-page] .networkBootstrapField { display: grid; gap: 6px; max-width: 440px; margin-top: 12px; font-size: 12px; }
+@media (max-width: 700px) {
+  [data-network-page] .networkDnsSuggestion { flex-direction: column; align-items: stretch; margin: 0 12px 12px; }
+}
