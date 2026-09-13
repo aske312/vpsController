@@ -648,20 +648,6 @@ export function MihomoPage({
     }
   }
 
-  async function copyConfig(profile: Profile, device?: ProfileDevice) {
-    setBusy(`config:${profile.id}`);
-
-    try {
-      const config = (await request(`/mihomo/profiles/${profile.id}/config${device ? `?device_id=${encodeURIComponent(device.id)}` : ""}`)) as string;
-      await navigator.clipboard.writeText(config);
-      notifySuccess(`Конфигурация для «${device?.name || profile.name}» скопирована в буфер обмена.`);
-    } catch (cause) {
-      notifyError(cause instanceof Error ? cause.message : "Не удалось получить config.yaml");
-    } finally {
-      setBusy("");
-    }
-  }
-
   async function removeProfileDevice(profile: Profile, device: ProfileDevice) {
     if (device.scope === "common" || device.id === profile.common_device_id) {
       notifyError("Общие настройки профиля нельзя удалить");
@@ -685,13 +671,7 @@ export function MihomoPage({
     setBusy(operationId);
 
     try {
-      await request(`/mihomo/profiles/${profile.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          devices: devices.filter((item) => item.id !== device.id),
-          connections: profile.connections.filter((connection) => (connection.device_id || devices[0].id) !== device.id),
-        }),
-      });
+      await request(`/mihomo/profiles/${profile.id}/devices/${encodeURIComponent(device.id)}`, { method: "DELETE" });
       await refresh();
       notifyOperation(operationId, `Удаление устройства ${device.name}`, "success", "Устройство удалено");
     } catch (cause) {
@@ -951,7 +931,7 @@ export function MihomoPage({
                     return <section key={device.id} className="mihomoProfileDevice">
                       <header className="mihomoDeviceHeader">
                         <button type="button" className="mihomoDeviceToggle" aria-expanded={protocolsExpanded} onClick={() => toggleCollapsed(setExpandedProtocolLists, protocolListKey)}><div className="mihomoDeviceIdentity"><span>{device.scope === "common" ? "ALL" : devicePlatformMeta(device).code}</span><p><b><DeviceClientBadge device={device} />{device.scope === "common" ? "Общие настройки профиля" : device.name}</b><small>{connections.length} каналов · {device.scope === "hwid" ? deviceSystemLabel(device) : device.scope === "common" ? "для клиентов без HWID и новых устройств" : device.scope === "manual" ? "Общий sing-box для всех клиентов" : "устаревшее устройство"}</small>{device.scope === "hwid" && <em>{device.last_seen_at ? `Последний запрос ${new Date(device.last_seen_at).toLocaleString("ru-RU")}` : "HWID зарегистрирован"}</em>}</p></div><div className="mihomoDeviceTotals"><span><small>КАНАЛЫ</small><b>{onlineCount}/{connections.length}</b></span><span><small>ПРАВИЛА</small><b>{ruleCount}</b></span><span><small>ТРАФИК</small><b>↓ {bytes(deviceRx)} · ↑ {bytes(deviceTx)}</b></span></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
-                        <nav className="mihomoDeviceActions"><button onClick={() => { setReadyDevices([]); setCreatedProfile(profile); }}>QR и подключение</button><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>{clientConfigFormat(profile, device) !== "mihomo" ? "Скачать JSON" : "Скачать YAML"}</button><button onClick={() => void copyConfig(profile, device)} disabled={busy === `config:${profile.id}`}>{clientConfigFormat(profile, device) !== "mihomo" ? "Копировать JSON" : "Копировать YAML"}</button>{device.scope !== "common" && <button className="dangerButton" onClick={() => void removeProfileDevice(profile, device)} disabled={deleting} title="Удалить это устройство и его подключения">{deleting ? "Удаление…" : "Удалить устройство"}</button>}</nav>
+                        <nav className="mihomoDeviceActions"><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>{clientConfigFormat(profile, device) !== "mihomo" ? "Скачать JSON" : "Скачать YAML"}</button>{device.scope !== "common" && <button className="dangerButton" onClick={() => void removeProfileDevice(profile, device)} disabled={deleting} title="Удалить это устройство и его подключения">{deleting ? "Удаление…" : "Удалить устройство"}</button>}</nav>
                       </header>
                     {protocolsExpanded && <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0)); return <div key={connection.id}><span className={`protocol-${connection.component}${online ? " online" : ""}`}>{channelShort[connection.component] || "CH"}<i /></span><p><b>{connection.name}</b><small>↓ {bytes(item?.rx_bytes || 0)} · ↑ {bytes(item?.tx_bytes || 0)}</small>{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Для устройства пока нет подключений.</p>}</div>}
                     </section>;
@@ -965,7 +945,7 @@ export function MihomoPage({
           <section className="mihomoClientGuide">
             <header><p className="eyebrow">CLIENT SETUP</p><h3>Настройка и подключение</h3><p>Одна подписка поддерживает несколько устройств. Каждое приложение с включённой отправкой HWID регистрирует отдельное устройство; без HWID используется общий набор. Формат определяется автоматически, а для Karing и Hiddify доступен выбор YAML/JSON в настройках зарегистрированного устройства.</p></header>
             <ol><li><b>1</b><span>Нажмите «Скопировать подписку» у нужного профиля.</span></li><li><b>2</b><span>В клиенте добавьте удалённый профиль по URL.</span></li><li><b>3</b><span>После изменений обновите профиль в клиенте.</span></li></ol>
-            <div className="mihomoClientApps">
+            <details className="mihomoClientAppsDetails"><summary>Приложения для подключения</summary><div className="mihomoClientApps">
               <a href="https://github.com/clash-verge-rev/clash-verge-rev/releases" target="_blank" rel="noreferrer"><small>PC · WINDOWS / LINUX</small><strong>Clash Verge Rev</strong><span>Официальные релизы ↗</span></a>
               <a href="https://apps.apple.com/us/app/clash-mi/id6744321968" target="_blank" rel="noreferrer"><small>IPHONE / IPAD</small><strong>Clash Mi</strong><span>Скачать в App Store ↗</span></a>
               <a href="https://github.com/MetaCubeX/ClashMetaForAndroid/releases" target="_blank" rel="noreferrer"><small>ANDROID</small><strong>Clash Meta for Android</strong><span>Официальные APK-релизы ↗</span></a>
@@ -984,7 +964,7 @@ export function MihomoPage({
               <a href="https://github.com/xishang0128/sparkle/releases" target="_blank" rel="noreferrer"><small>ПК · YAML</small><strong>Sparkle</strong><span>Официальные релизы ↗</span></a>
               <a href="https://happ.info/" target="_blank" rel="noreferrer"><small>МОБИЛЬНЫЕ / ПК · XRAY JSON · HWID</small><strong>Happ</strong><span>VLESS и Shadowsocks ↗</span></a>
               <a href="https://github.com/Leadaxe/singbox-launcher" target="_blank" rel="noreferrer"><small>ПК · JSON</small><strong>Sing-Box Launcher</strong><span>Отправка HWID настраивается в клиенте ↗</span></a>
-            </div>
+            </div></details>
           </section>
         </article>
       )}
@@ -1006,7 +986,10 @@ export function MihomoPage({
           <header className="mihomoDnsHeader"><div><p className="eyebrow">DNS ПРОФИЛЕЙ</p><h2>Разрешение доменов</h2><p>Выберите режим и два независимых резолвера для подписок Mihomo.</p></div><span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "ГОТОВ" : "ОЖИДАНИЕ"}</span></header>
           <section className="mihomoDnsSummary"><div><small>РЕЖИМ</small><b>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" ? "Fake IP" : "Redir host"}</b><span>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" ? "Быстрее и точнее для правил" : "Максимальная совместимость"}</span></div><div><small>ОСНОВНОЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.nameserver || ""))?.label || "Не выбран"}</b><span>{dnsProviderMeta[String(dnsDraft.nameserver || "")]?.note || "DNS профиля"}</span></div><div><small>РЕЗЕРВНЫЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.fallback || ""))?.label || "Не выбран"}</b><span>{dnsProviderMeta[String(dnsDraft.fallback || "")]?.note || "Используется при сбое"}</span></div></section>
           <section className="mihomoDnsMode"><header><div><b>Режим обработки</b><small>Как Mihomo сопоставляет домены с правилами маршрутизации.</small></div></header><div>{(dnsModeField?.options || ["fake-ip", "redir-host"]).map((option) => { const value = typeof option === "string" ? option : option.value; const selected = String(dnsDraft.enhanced_mode || dnsModeField?.default || "fake-ip") === value; return <button type="button" key={value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft("enhanced_mode", value)}><span>{value === "fake-ip" ? "FAST" : "COMPAT"}</span><p><b>{value === "fake-ip" ? "Fake IP" : "Redir host"}</b><small>{value === "fake-ip" ? "Рекомендуется для TUN и правил по доменам" : "Для приложений, несовместимых с Fake IP"}</small></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>
-          <section className="mihomoDnsAdvanced"><header><div><b>Дополнительная обработка</b><small>Параметры попадут непосредственно в DNS-секцию профилей.</small></div></header><div><label className={Boolean(dnsDraft.ipv6) ? "is-enabled" : ""}><span><b>IPv6</b><small>Возвращать записи AAAA</small></span><input type="checkbox" checked={Boolean(dnsDraft.ipv6)} onChange={(event) => updateDnsDraft("ipv6", event.target.checked)} /></label><label className={Boolean(dnsDraft.prefer_h3) ? "is-enabled" : ""}><span><b>HTTP/3</b><small>Для совместимых DoH-серверов</small></span><input type="checkbox" checked={Boolean(dnsDraft.prefer_h3)} onChange={(event) => updateDnsDraft("prefer_h3", event.target.checked)} /></label><label><span><b>Кэш DNS</b><small>Алгоритм вытеснения записей</small></span><select value={String(dnsDraft.cache_algorithm || "lru")} onChange={(event) => updateDnsDraft("cache_algorithm", event.target.value)}><option value="lru">LRU · совместимый</option><option value="arc">ARC · адаптивный</option></select></label></div>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" && <label className="mihomoDnsFakeIp"><span><b>Исключения Fake IP</b><small>По одному домену или маске на строку. Для них клиент получит реальный IP.</small></span><textarea rows={4} value={String(dnsDraft.fake_ip_filter || "")} spellCheck={false} placeholder={"*.lan\n*.local"} onChange={(event) => updateDnsDraft("fake_ip_filter", event.target.value)} /></label>}</section>
+          <section className="mihomoDnsAdvanced"><header><div><b>Дополнительная обработка</b><small>Параметры попадут непосредственно в DNS-секцию профилей.</small></div></header><div>{([{ key: "ipv6", code: "IPv6", title: "IPv6", hint: "Возвращать записи AAAA" }, { key: "prefer_h3", code: "H3", title: "HTTP/3", hint: "Для совместимых DoH-серверов" }] as const).map((feature) => {
+            const enabled = Boolean(dnsDraft[feature.key]);
+            return <button type="button" key={feature.key} aria-pressed={enabled} className={enabled ? "is-selected" : ""} onClick={() => updateDnsDraft(feature.key, !enabled)}><span>{feature.code}</span><p><b>{feature.title}</b><small>{feature.hint}</small></p><i>{enabled ? "Включено" : "Выключено"}</i></button>;
+          })}<label><span><b>Кэш DNS</b><small>Алгоритм вытеснения записей</small></span><select value={String(dnsDraft.cache_algorithm || "lru")} onChange={(event) => updateDnsDraft("cache_algorithm", event.target.value)}><option value="lru">LRU · совместимый</option><option value="arc">ARC · адаптивный</option></select></label></div>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" && <label className="mihomoDnsFakeIp"><span><b>Исключения Fake IP</b><small>По одному домену или маске на строку. Для них клиент получит реальный IP.</small></span><textarea rows={4} value={String(dnsDraft.fake_ip_filter || "")} spellCheck={false} placeholder={"*.lan\n*.local"} onChange={(event) => updateDnsDraft("fake_ip_filter", event.target.value)} /></label>}</section>
           {([['nameserver', 'Основной DNS', 'Используется для обычных запросов.'], ['fallback', 'Резервный DNS', 'Подхватывает запросы при недоступности основного.']] as const).map(([key, title, note]) => <section className="mihomoDnsProviders" key={key}><header><div><b>{title}</b><small>{note}</small></div></header><div>{dnsOptions.map((option) => { const selected = String(dnsDraft[key] || (key === 'nameserver' ? dnsPrimaryField?.default : dnsFallbackField?.default) || "") === option.value; const meta = dnsProviderMeta[option.value] || { code: "DNS", note: "Пользовательский резолвер" }; return <button type="button" key={option.value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft(key, option.value)}><span>{meta.code}</span><p><b>{option.label}</b><small>{meta.note}</small></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>)}
           <aside className="mihomoDnsNote"><b>Применение настроек</b><span>Основной и резервный DNS должны отличаться. После сохранения обновите подписку в клиенте, чтобы устройство получило новую конфигурацию.</span></aside>
           <footer className="mihomoDnsFooter"><span>{dnsDirty ? "Есть несохранённые изменения" : "Настройки синхронизированы"}</span><button className="primaryButton" type="submit" disabled={!dnsDirty || busy === "settings:dns-private" || dnsDraft.nameserver === dnsDraft.fallback}>{busy === "settings:dns-private" ? "Сохранение…" : dnsDraft.nameserver === dnsDraft.fallback ? "Выберите разные DNS" : "Сохранить DNS"}</button></footer>

@@ -3269,6 +3269,43 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     return profile_response(item)
 
 
+@app.delete("/api/mihomo/profiles/{profile_id}/devices/{device_id}", dependencies=[Depends(auth_required)])
+@serialized_profile_mutation
+@transactional_profile_mutation
+def delete_profile_device(profile_id: str, device_id: str) -> dict[str, Any]:
+    data = profiles()
+    index = next((index for index, entry in enumerate(data) if entry.get("id") == profile_id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    item = normalize_profile(data[index])
+    if device_id == item["common_device_id"]:
+        raise HTTPException(status_code=422, detail="Общие настройки профиля нельзя удалить")
+    if not any(device["id"] == device_id for device in item["devices"]):
+        return {"removed": device_id, "already_removed": True}
+    operation = f"device-delete:{profile_id}:{device_id}"
+    write_action(operation, "Удаление устройства и его подключений…", progress=20)
+    reality_changed = False
+    for connection in [*item["connections"], *item.get("retiring_connections", [])]:
+        if connection.get("device_id") != device_id:
+            continue
+        defer = connection["component"] == "transport-reality"
+        reality_changed = reality_changed or defer
+        deprovision(profile_id, connection["component"], connection.get("credential", {}), defer_reality_restart=defer)
+    if reality_changed:
+        apply_batched_reality_runtime()
+    item["devices"] = [device for device in item["devices"] if device["id"] != device_id]
+    item["connections"] = [entry for entry in item["connections"] if entry.get("device_id") != device_id]
+    if "retiring_connections" in item:
+        item["retiring_connections"] = [entry for entry in item["retiring_connections"] if entry.get("device_id") != device_id]
+    item["subscriptions"] = {}
+    item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    sync_legacy_profile_fields(item)
+    data[index] = item
+    save_profiles(data)
+    write_action(operation, "Устройство удалено", state="done", progress=100)
+    return {"removed": device_id}
+
+
 @app.delete("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(auth_required)])
 @serialized_profile_mutation
 @transactional_profile_mutation

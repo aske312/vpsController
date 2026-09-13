@@ -10,6 +10,45 @@ from tests.api.support import manager
 
 
 class SubscriptionFormatTests(unittest.TestCase):
+    def test_remove_registered_device_preserves_other_devices(self):
+        self.fetch("koala-clash/1.0", "first")
+        self.fetch("Happ/3.0", "second")
+        profile = manager.profile_response(self.store[0])
+        removed = profile["devices"][1]["id"]
+        retained = [entry for entry in profile["connections"] if entry["device_id"] != removed]
+        # Deletion must not validate/reprovision retained connections or require
+        # their modules to be available. Only the target credentials are revoked.
+        with patch.object(manager, "deprovision") as deprovision, patch.object(manager, "validate_connection_inputs", side_effect=AssertionError("unrelated settings validated")):
+            manager.delete_profile_device("profile", removed)
+        self.assertEqual(len(self.store[0]["devices"]), 2)
+        self.assertEqual([entry["credential"] for entry in self.store[0]["connections"]], [entry["credential"] for entry in retained])
+        deprovision.assert_called_once()
+        with patch.object(manager, "deprovision") as deprovision:
+            self.assertTrue(manager.delete_profile_device("profile", removed)["already_removed"])
+            deprovision.assert_not_called()
+
+    def test_device_delete_protects_common_and_preserves_state_on_failure(self):
+        self.fetch("Happ/3.0")
+        before = deepcopy(self.store)
+        with self.assertRaises(manager.HTTPException) as error:
+            manager.delete_profile_device("profile", "common")
+        self.assertEqual(error.exception.status_code, 422)
+        with patch.object(manager, "deprovision", side_effect=RuntimeError("revoke failed")), self.assertRaisesRegex(RuntimeError, "revoke failed"):
+            manager.delete_profile_device("profile", before[0]["devices"][1]["id"])
+        self.assertEqual(self.store, before)
+
+    def test_device_delete_revokes_retiring_connections_and_batches_reality(self):
+        self.fetch("Happ/3.0")
+        device_id = self.store[0]["devices"][1]["id"]
+        self.store[0]["connections"][1]["component"] = "transport-reality"
+        self.store[0]["retiring_connections"] = [{"id": "old", "device_id": device_id, "component": "transport-reality", "credential": {"id": "old-credential"}}]
+        with patch.object(manager, "deprovision") as revoke, patch.object(manager, "apply_batched_reality_runtime") as apply:
+            manager.delete_profile_device("profile", device_id)
+        self.assertEqual(revoke.call_count, 2)
+        self.assertTrue(all(call.kwargs["defer_reality_restart"] for call in revoke.call_args_list))
+        apply.assert_called_once()
+        self.assertEqual(self.store[0]["retiring_connections"], [])
+
     def test_same_hwid_in_different_apps_registers_separate_devices(self):
         self.fetch("koala-clash/1.0")
         first = deepcopy(self.store[0]["devices"][1])

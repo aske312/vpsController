@@ -1207,7 +1207,6 @@
 .mihomoDnsAdvanced label > span { min-width:0; display:grid; gap:3px; }
 .mihomoDnsAdvanced label b { color:var(--text); font-size:9px; }
 .mihomoDnsAdvanced label small { color:var(--muted); font-size:8px; }
-.mihomoDnsAdvanced input[type=checkbox] { width:17px; min-height:17px; margin:0; accent-color:#59c792; }
 .mihomoDnsAdvanced select { min-width:150px; min-height:36px; padding:0 9px; border:1px solid var(--line); border-radius:8px; background:#07111a; color:var(--text); font-size:9px; }
 .mihomoDnsFakeIp { display:grid; grid-template-columns:minmax(180px,.45fr) minmax(0,1.55fr); align-items:start; gap:14px; padding:11px; border:1px solid var(--line); border-radius:11px; background:rgba(5,13,21,.48); }
 .mihomoDnsFakeIp textarea { width:100%; min-height:82px; padding:9px 10px; border:1px solid var(--line); border-radius:9px; outline:none; resize:vertical; background:#050d15; color:var(--text); font:9px/1.5 var(--font-mono); }
@@ -1217,15 +1216,15 @@
 .mihomoDnsMode > header small,.mihomoDnsProviders > header small { color:var(--muted); font-size:9px; }
 .mihomoDnsMode > div { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
 .mihomoDnsProviders > div { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
-.mihomoDnsMode button,.mihomoDnsProviders button { min-width:0; display:grid; grid-template-columns:42px minmax(0,1fr) auto; align-items:center; gap:10px; padding:11px; border:1px solid var(--line); border-radius:11px; background:rgba(5,13,21,.62); color:inherit; text-align:left; cursor:pointer; }
-.mihomoDnsMode button:hover,.mihomoDnsProviders button:hover { border-color:rgba(116,94,223,.35); }
-.mihomoDnsMode button.is-selected,.mihomoDnsProviders button.is-selected { border-color:rgba(89,199,146,.45); background:rgba(37,112,79,.12); }
-.mihomoDnsMode button > span,.mihomoDnsProviders button > span { width:42px; min-height:36px; display:grid; place-items:center; border-radius:9px; background:rgba(92,75,180,.14); color:#bdb1ff; font:800 8px var(--font-mono); }
-.mihomoDnsMode button p,.mihomoDnsProviders button p { min-width:0; margin:0; }
-.mihomoDnsMode button b,.mihomoDnsMode button small,.mihomoDnsProviders button b,.mihomoDnsProviders button small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mihomoDnsMode button b,.mihomoDnsProviders button b { color:var(--text); font-size:9px; }
-.mihomoDnsMode button small,.mihomoDnsProviders button small { margin-top:3px; color:var(--muted); font-size:7px; }
-.mihomoDnsMode button > i,.mihomoDnsProviders button > i { color:#75c9a4; font-size:7px; font-style:normal; }
+.mihomoDnsMode button,.mihomoDnsProviders button,.mihomoDnsAdvanced button { min-width:0; display:grid; grid-template-columns:42px minmax(0,1fr) auto; align-items:center; gap:10px; padding:11px; border:1px solid var(--line); border-radius:11px; background:rgba(5,13,21,.62); color:inherit; text-align:left; cursor:pointer; }
+.mihomoDnsMode button:hover,.mihomoDnsProviders button:hover,.mihomoDnsAdvanced button:hover { border-color:rgba(116,94,223,.35); }
+.mihomoDnsMode button.is-selected,.mihomoDnsProviders button.is-selected,.mihomoDnsAdvanced button.is-selected { border-color:rgba(89,199,146,.45); background:rgba(37,112,79,.12); }
+.mihomoDnsMode button > span,.mihomoDnsProviders button > span,.mihomoDnsAdvanced button > span { width:42px; min-height:36px; display:grid; place-items:center; border-radius:9px; background:rgba(92,75,180,.14); color:#bdb1ff; font:800 8px var(--font-mono); }
+.mihomoDnsMode button p,.mihomoDnsProviders button p,.mihomoDnsAdvanced button p { min-width:0; margin:0; }
+.mihomoDnsMode button b,.mihomoDnsMode button small,.mihomoDnsProviders button b,.mihomoDnsProviders button small,.mihomoDnsAdvanced button b,.mihomoDnsAdvanced button small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mihomoDnsMode button b,.mihomoDnsProviders button b,.mihomoDnsAdvanced button b { color:var(--text); font-size:9px; }
+.mihomoDnsMode button small,.mihomoDnsProviders button small,.mihomoDnsAdvanced button small { margin-top:3px; color:var(--muted); font-size:7px; }
+.mihomoDnsMode button > i,.mihomoDnsProviders button > i,.mihomoDnsAdvanced button > i { color:#75c9a4; font-size:7px; font-style:normal; }
 .mihomoDnsFooter { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:15px 22px; border-top:1px solid var(--line); }
 .mihomoDnsFooter > span { color:var(--muted); font-size:9px; }
 
@@ -1271,3 +1270,5 @@
   .mihomoHeroNavigation { grid-row:2; }
   .mihomoHeroNavigation button { flex:0 0 auto; min-width:110px; }
 }
+.mihomoClientAppsDetails > summary { padding:10px 0; cursor:pointer; color:var(--text); font-size:12px; }
+.mihomoClientAppsDetails[open] > summary { margin-bottom:8px; }
