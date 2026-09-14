@@ -382,6 +382,12 @@
 [data-network-page] .networkPageHeader { min-height:0; padding:10px 0 14px; border:0; border-radius:0; background:none; box-shadow:none; }
 [data-network-page] .networkPageHeader::after { display:none; }
 [data-network-page] .networkPageIdentity h1 { color:var(--text); font-size:28px; }
+[data-network-page] { --network-accent:var(--green); --network-accent-bright:var(--cyan); --network-surface:var(--panel); --network-surface-soft:var(--panel-inset); --network-border:var(--line); }
+[data-network-page] .networkV2Hero { min-height:0; display:block; padding:8px 0 18px; border:0; border-bottom:1px solid var(--line); border-radius:0; background:transparent; box-shadow:none; }
+[data-network-page] .networkV2Hero::after, [data-network-page] .networkV2Hero img { display:none; }
+[data-network-page] .networkV2HeroCopy { max-width:680px; }
+[data-network-page] .networkV2HeroCopy h2 { margin:4px 0; color:var(--text); font-size:24px; }
+[data-network-page] .networkV2HeroStats strong { color:var(--green); }
 
 /* Final Network v2 visual layer. */
 [data-network-page] .networkPageHeader { position:relative; min-height:220px; align-items:end; padding:28px 30px 20px; overflow:hidden; border:1px solid var(--network-border); border-radius:22px; background:linear-gradient(90deg,rgba(6,10,27,.98) 0%,rgba(6,10,27,.88) 43%,rgba(6,10,27,.28) 100%),url('/gate-art/new-operator/network_1.webp') center/cover; box-shadow:0 18px 60px rgba(15,18,80,.22); }
