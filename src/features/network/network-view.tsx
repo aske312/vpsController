@@ -17,6 +17,16 @@ function NetworkIcon() {
   return <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="11" y="3" width="10" height="8" rx="2" /><path d="M16 11v7M6 23v-5h20v5" /><rect x="2" y="23" width="8" height="6" rx="1.5" /><rect x="22" y="23" width="8" height="6" rx="1.5" /></svg>;
 }
 
+function validAccessPoints(status: NetworkStatus) {
+  const candidates = [["Панель", status.access.panel_url], ["Прямой доступ", status.access.direct_url], ["Защищённый доступ", status.access.protected_url]] as const;
+  const seen = new Set<string>();
+  return candidates.filter(([, value]) => {
+    if (!value || seen.has(value)) return false;
+    try { const url = new URL(value); if (!["http:", "https:"].includes(url.protocol) || !url.hostname) return false; } catch { return false; }
+    seen.add(value); return true;
+  });
+}
+
 export function NetworkView({ request, refreshKey = 0 }: Props) {
   const { error: notifyError, success: notifySuccess } = useNotifier("network", "Сеть");
   const [status, setStatus] = useState<NetworkStatus | null>(null);
@@ -143,8 +153,9 @@ function Diagnostics({ status, request, endpointDraft, endpointDirty, busy, setE
       <dl className="networkSystemFacts"><div><dt>IPv4 сервера</dt><dd><code>{status.server.public_ipv4 || (!status.server.public_ip.includes(":") ? status.server.public_ip : "Не назначен")}</code></dd></div><div><dt>IPv6 сервера</dt><dd><code>{status.server.public_ipv6 || (status.server.public_ip.includes(":") ? status.server.public_ip : "Не назначен")}</code></dd></div><div><dt>TLS</dt><dd>{status.tls.mode}<small>{status.tls.certificate_source}</small></dd></div><div><dt>Текущий DNS панели</dt><dd><code>{status.resolvers.join(", ") || "Нет данных"}</code></dd></div></dl>
     </section>
     {endpointDraft && <NetworkEndpoints request={request} draft={endpointDraft} busy={busy} dirty={endpointDirty} onChange={(key, value) => setEndpointDraft({ ...endpointDraft, [key]: value })} onSave={saveEndpoints} />}
-    <section className="networkAccessBoard" aria-label="Точки доступа"><header><h2>Точки доступа</h2><p>Адреса подключения к панели</p></header><div>{[["Панель", status.access.panel_url], ["Прямой доступ", status.access.direct_url], ["Защищённый доступ", status.access.protected_url]].filter(([, value], index, items) => value && items.findIndex(([, address]) => address === value) === index).map(([label, value]) => <div className="networkAccessEntry" key={value}><span>{label}</span><code>{value}</code></div>)}</div></section>
+    <section className="networkAccessBoard" aria-label="Точки доступа"><header><h2>Точки доступа</h2><p>Адреса подключения к панели</p></header><div>{validAccessPoints(status).map(([label, value]) => <div className="networkAccessEntry" key={value}><span>{label}</span><code>{value}</code></div>)}{!validAccessPoints(status).length && <p className="networkEmpty">Нет корректных точек доступа.</p>}</div></section>
     <section className="networkPanel networkRoutesPanel"><header className="networkSectionHeading"><div><span className="networkKicker">ИСТОЧНИКИ МАРШРУТА</span><h2>Домены и IP серверов</h2><p>Все адреса, которые панель использует для доступа и защищённых каналов.</p></div><label className="networkSearch"><span className="networkSrOnly">Поиск домена или IP</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти домен или IP" /></label></header><div className="networkTableWrap"><table><thead><tr><th>Адрес</th><th>Роль</th><th>DNS-ответ</th><th>Маршрут</th></tr></thead><tbody>{domains.map((domain) => <tr key={`${domain.role}-${domain.value}`}><td><strong>{domain.value}</strong>{domain.role.includes("CDN") && <NetworkEch domain={domain.value} route={domain.route} request={request} />}</td><td><span>{domain.role}</span><small>{domain.source}</small></td><td><code>{domain.resolved.join(", ") || "Нет DNS-ответа"}</code></td><td><span className={`networkBadge ${domain.route}`}>{routeLabels[domain.route]}</span></td></tr>)}</tbody></table></div>{!domains.length && <p className="networkEmpty">{query ? "Совпадений нет." : "Домены не настроены."}</p>}<details className="networkEvidence"><summary>Пояснения проверки</summary>{evidence.length ? <ul>{evidence.map((item) => <li key={item}>{item}</li>)}</ul> : <p>Сервер не вернул пояснений.</p>}</details></section>
     </section>
+    {status.capabilities && <section className="networkCapabilities" aria-label="Сетевые возможности сервера"><header><div><span className="networkKicker">УСИЛЕНИЕ РЕСУРСА</span><h2>Сетевые возможности сервера</h2><p>Проверки помогают выбрать транспорт и найти ограничения до публикации маршрута.</p></div>{status.capabilities.uplink && <code>{status.capabilities.uplink}</code>}</header><div className="networkCapabilityGrid">{status.capabilities.checks.map((check) => <article className={`networkCapabilityCard ${check.status}`} key={check.id}><span>{check.label}</span><strong>{check.value}</strong><small>{check.detail}</small></article>)}</div></section>}
   </div>;
 }

@@ -1405,6 +1405,38 @@ def network_domain_probe(domain: str, role: str) -> dict:
     return {"value": domain, "role": role, "source": "environment", "resolved": resolved, "matches_origin": matches, "route": route}
 
 
+def network_capabilities() -> dict:
+    """Read-only checks that help choose a stable transport configuration."""
+    default_route = run("ip", "route", "show", "default", timeout=3)
+    uplink = ""
+    for token_index, token in enumerate(default_route.split()):
+        if token == "dev" and token_index + 1 < len(default_route.split()):
+            uplink = default_route.split()[token_index + 1]
+            break
+    mtu_text = run("ip", "link", "show", "dev", uplink, timeout=3) if uplink else ""
+    mtu_match = re.search(r"mtu (\d+)", mtu_text)
+    mtu = int(mtu_match.group(1)) if mtu_match else None
+    try:
+        congestion = Path("/proc/sys/net/ipv4/tcp_congestion_control").read_text().strip()
+    except OSError:
+        congestion = ""
+    try:
+        fast_open = int(Path("/proc/sys/net/ipv4/tcp_fastopen").read_text().strip())
+    except (OSError, ValueError):
+        fast_open = 0
+    qdisc = run("tc", "qdisc", "show", "dev", uplink, timeout=3) if uplink else ""
+    ipv6_address = PUBLIC_IPV6 or (PUBLIC_IP if ":" in PUBLIC_IP else "")
+    ipv6_ready = bool(ipv6_address)
+    checks = [
+        {"id": "ipv6", "label": "IPv6", "status": "ready" if ipv6_ready else "warning", "value": ipv6_address or "не назначен", "detail": "Публичный IPv6 доступен серверу" if ipv6_ready else "Публичный IPv6 не обнаружен"},
+        {"id": "congestion", "label": "TCP congestion control", "status": "ready" if congestion else "unsupported", "value": congestion or "неизвестно", "detail": "Алгоритм ядра активен" if congestion else "Параметр ядра недоступен"},
+        {"id": "mtu", "label": "MTU uplink", "status": "ready" if mtu and 1280 <= mtu <= 9000 else "warning", "value": str(mtu) if mtu else "неизвестно", "detail": "MTU в допустимом диапазоне" if mtu and 1280 <= mtu <= 9000 else "Проверьте MTU перед настройкой туннелей"},
+        {"id": "qdisc", "label": "Очередь пакетов", "status": "ready" if any(name in qdisc for name in ("fq", "cake", "fq_codel")) else "warning", "value": (qdisc.split()[1] if len(qdisc.split()) > 1 else "неизвестно"), "detail": "Очередь подходит для низкой задержки" if any(name in qdisc for name in ("fq", "cake", "fq_codel")) else "Активная очередь не подтверждена"},
+        {"id": "fast_open", "label": "TCP Fast Open", "status": "ready" if fast_open else "warning", "value": str(fast_open), "detail": "Включён в ядре" if fast_open else "Выключен или недоступен"},
+    ]
+    return {"uplink": uplink, "checks": checks}
+
+
 def network_status() -> dict:
     domain_items: list[dict] = []
     endpoint_settings = read_network_endpoint_settings()
@@ -1490,6 +1522,7 @@ def network_status() -> dict:
         "listeners": listeners,
         "resolvers": resolvers,
         "transport_endpoints": endpoint_settings,
+        "capabilities": network_capabilities(),
     }
 
 
