@@ -349,6 +349,39 @@
 [data-network-page] .networkEch dd { margin: 4px 0 0; display: flex; align-items: flex-start; gap: 8px; }
 [data-network-page] .networkEch dd code { white-space: normal; overflow-wrap: anywhere; min-width: 0; flex: 1; }
 [data-network-page] .networkEch dd button { flex-shrink: 0; }
+[data-network-page] .networkV2 { display:grid; gap:14px; }
+[data-network-page] .networkV2Hero { position:relative; min-height:300px; display:flex; align-items:flex-end; overflow:hidden; padding:28px; border:1px solid var(--line); border-radius:var(--radius-lg); background:var(--panel); }
+[data-network-page] .networkV2Hero img { position:absolute; inset:0 0 0 auto; width:58%; height:100%; object-fit:contain; object-position:right center; opacity:.8; }
+[data-network-page] .networkV2Hero::after { position:absolute; inset:0; background:linear-gradient(90deg,var(--bg-deep) 0%,color-mix(in srgb,var(--bg-deep) 86%,transparent) 38%,transparent 76%); content:""; }
+[data-network-page] .networkV2HeroCopy { position:relative; z-index:1; max-width:520px; }
+[data-network-page] .networkV2HeroCopy h2 { margin:8px 0; font-size:30px; }
+[data-network-page] .networkV2HeroStats { display:flex; flex-wrap:wrap; gap:18px; margin-top:22px; color:var(--muted); font-size:11px; }
+[data-network-page] .networkV2HeroStats strong { display:block; color:var(--green); font:600 20px var(--technical-font); }
+[data-network-page] .networkV2BlockHead { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:18px 20px; }
+[data-network-page] .networkV2BlockHead > div:first-child { display:grid; gap:6px; }
+[data-network-page] .networkV2Actions { display:flex; align-items:center; gap:10px; }
+[data-network-page] .networkV2Actions .networkRoutesLauncher { border:0; overflow:visible; background:transparent; }
+[data-network-page] .networkV2Actions .networkRoutesLauncher > .networkSectionHeading { display:none; }
+[data-network-page] .networkV2Actions .networkRoutesLauncherBody { padding:0; }
+[data-network-page] .networkV2Actions .networkRoutesLauncherBody > span { display:none; }
+[data-network-page] .networkV2Columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+[data-network-page] .networkV2Card { min-width:0; padding:18px; }
+[data-network-page] .networkV2Card > header { display:grid; gap:6px; margin-bottom:18px; }
+[data-network-page] .networkV2RouteLine { display:flex; align-items:center; gap:10px; color:var(--muted); font:11px var(--technical-font); }
+[data-network-page] .networkV2RouteLine i { flex:1; height:1px; background:var(--line-strong); }
+[data-network-page] .networkV2Facts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); margin:18px 0 0; border-top:1px solid var(--line); }
+[data-network-page] .networkV2Facts div { display:grid; gap:5px; padding:10px 0; min-width:0; }
+[data-network-page] .networkV2Facts div:nth-child(even) { padding-left:12px; border-left:1px solid var(--line); }
+[data-network-page] .networkV2Facts dt { color:var(--muted); font-size:10px; }
+[data-network-page] .networkV2Facts dd { margin:0; overflow-wrap:anywhere; font-size:12px; }
+[data-network-page] .networkV2AccessList { display:grid; gap:0; }
+[data-network-page] .networkV2AccessList > div { display:grid; grid-template-columns:130px minmax(0,1fr); gap:12px; padding:10px 0; border-top:1px solid var(--line); }
+[data-network-page] .networkV2AccessList span { color:var(--muted); font-size:11px; }
+[data-network-page] .networkV2Capabilities { padding-bottom:18px; }
+@media (max-width:700px) { [data-network-page] .networkV2Hero { min-height:360px; padding:18px; } [data-network-page] .networkV2Hero img { width:100%; opacity:.5; } [data-network-page] .networkV2Columns { grid-template-columns:1fr; } [data-network-page] .networkV2BlockHead { align-items:stretch; flex-direction:column; } [data-network-page] .networkV2Actions { align-items:stretch; flex-direction:column; } [data-network-page] .networkV2Actions .networkRoutesLauncherBody { justify-content:flex-start; } }
+[data-network-page] .networkPageHeader { min-height:0; padding:10px 0 14px; border:0; border-radius:0; background:none; box-shadow:none; }
+[data-network-page] .networkPageHeader::after { display:none; }
+[data-network-page] .networkPageIdentity h1 { color:var(--text); font-size:28px; }
 
 /* Final Network v2 visual layer. */
 [data-network-page] .networkPageHeader { position:relative; min-height:220px; align-items:end; padding:28px 30px 20px; overflow:hidden; border:1px solid var(--network-border); border-radius:22px; background:linear-gradient(90deg,rgba(6,10,27,.98) 0%,rgba(6,10,27,.88) 43%,rgba(6,10,27,.28) 100%),url('/gate-art/new-operator/network_1.webp') center/cover; box-shadow:0 18px 60px rgba(15,18,80,.22); }
