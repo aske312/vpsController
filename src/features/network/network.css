@@ -1,4 +1,4 @@
-[data-network-page] { width: 100%; min-width: 0; }
+[data-network-page] { width: 100%; min-width: 0; --network-accent:#8b7cff; --network-accent-bright:#31c8ff; --network-surface:#0b1022; --network-surface-soft:#101735; --network-border:rgba(124,139,255,.22); }
 [data-network-page] .networkBoard { display: grid; gap: 14px; width: 100%; max-width: none; margin: 0; padding: 0 0 24px; color: var(--text); font-family: var(--ui-font); }
 [data-network-page] * { box-sizing: border-box; }
 [data-network-page] [hidden] { display: none !important; }
@@ -254,6 +254,28 @@
   [data-network-page] .networkProviderGrid { grid-template-columns: 1fr; }
 }
 
+/* Network v2: an independent operations workspace. */
+[data-network-page] .networkBoard { gap:20px; }
+[data-network-page] .networkPageHeader { position:relative; min-height:220px; align-items:end; padding:28px 30px 20px; overflow:hidden; border:1px solid var(--network-border); border-radius:22px; background:linear-gradient(90deg,rgba(6,10,27,.98) 0%,rgba(6,10,27,.88) 43%,rgba(6,10,27,.28) 100%),url('/gate-art/new-operator/network_1.webp') center/cover; box-shadow:0 18px 60px rgba(15,18,80,.22); }
+[data-network-page] .networkPageHeader::after { position:absolute; inset:auto 0 0; height:1px; background:linear-gradient(90deg,var(--network-accent),transparent); content:""; }
+[data-network-page] .networkPageIdentity, [data-network-page] .networkPageHeader .networkToolbar { position:relative; z-index:1; }
+[data-network-page] .networkPageIdentity h1 { color:#fff; font-size:38px; letter-spacing:-.05em; }
+[data-network-page] .networkPageIdentity .eyebrow { color:var(--network-accent-bright); font:600 11px var(--technical-font); letter-spacing:.2em; text-transform:uppercase; }
+[data-network-page] .networkPageHeader .networkToolbar { align-items:end; }
+[data-network-page] .networkPageHeader .networkTabs button { color:rgba(230,235,255,.66); }
+[data-network-page] .networkPageHeader .networkTabs button.active { color:#fff; }
+[data-network-page] .networkPageHeader .networkTabs button.active::after { background:var(--network-accent-bright); box-shadow:0 0 12px var(--network-accent-bright); }
+[data-network-page] .networkWorkspace, [data-network-page] .networkCapabilities, [data-network-page] .networkPanel { border-color:var(--network-border); background:var(--network-surface); }
+[data-network-page] .networkStateOverview { border-color:var(--network-border); background:var(--network-surface); }
+[data-network-page] .networkRouteOverview { background:radial-gradient(ellipse at top left,rgba(139,124,255,.2),transparent 75%); }
+[data-network-page] th { background:var(--network-surface-soft); color:rgba(210,220,255,.62); }
+[data-network-page] td, [data-network-page] th { border-color:var(--network-border); }
+[data-network-page] .networkPrimaryButton { background:var(--network-accent); border-color:var(--network-accent); color:#fff; box-shadow:0 5px 18px rgba(139,124,255,.22); }
+[data-network-page] .networkPrimaryButton:hover:not(:disabled) { background:var(--network-accent-bright); border-color:var(--network-accent-bright); color:#05101c; }
+[data-network-page] .networkKicker { color:var(--network-accent-bright); }
+[data-network-page] .networkBadge.direct { color:#70e5bd; background:rgba(55,204,158,.12); }
+[data-network-page] .networkCapabilityCard { border-color:var(--network-border); background:var(--network-surface-soft); }
+
 [data-network-page] .networkPageHeader { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: end; gap: 24px; padding: 10px 0 16px; background: none; border: 0; box-shadow: none; }
 [data-network-page] .networkPageIdentity { display: grid; gap: 5px; }
 [data-network-page] .networkPageIdentity .eyebrow { font: 600 10px var(--technical-font); letter-spacing: .12em; }
@@ -327,3 +349,27 @@
 [data-network-page] .networkEch dd { margin: 4px 0 0; display: flex; align-items: flex-start; gap: 8px; }
 [data-network-page] .networkEch dd code { white-space: normal; overflow-wrap: anywhere; min-width: 0; flex: 1; }
 [data-network-page] .networkEch dd button { flex-shrink: 0; }
+
+/* Final Network v2 visual layer. */
+[data-network-page] .networkPageHeader { position:relative; min-height:220px; align-items:end; padding:28px 30px 20px; overflow:hidden; border:1px solid var(--network-border); border-radius:22px; background:linear-gradient(90deg,rgba(6,10,27,.98) 0%,rgba(6,10,27,.88) 43%,rgba(6,10,27,.28) 100%),url('/gate-art/new-operator/network_1.webp') center/cover; box-shadow:0 18px 60px rgba(15,18,80,.22); }
+[data-network-page] .networkPageHeader::after { position:absolute; right:0; bottom:0; left:0; height:1px; background:linear-gradient(90deg,var(--network-accent),transparent); content:""; }
+[data-network-page] .networkPageIdentity, [data-network-page] .networkPageHeader .networkToolbar { position:relative; z-index:1; }
+[data-network-page] .networkPageIdentity h1 { color:#fff; font-size:38px; letter-spacing:-.05em; }
+[data-network-page] .networkPageIdentity .eyebrow { color:var(--network-accent-bright); font:600 11px var(--technical-font); letter-spacing:.2em; text-transform:uppercase; }
+[data-network-page] .networkPageHeader .networkToolbar { align-items:end; }
+[data-network-page] .networkPageHeader .networkTabs button { color:rgba(230,235,255,.66); }
+[data-network-page] .networkPageHeader .networkTabs button.active { color:#fff; }
+[data-network-page] .networkPageHeader .networkTabs button.active::after { background:var(--network-accent-bright); box-shadow:0 0 12px var(--network-accent-bright); }
+[data-network-page] .networkWorkspace, [data-network-page] .networkCapabilities, [data-network-page] .networkPanel { border-color:var(--network-border); background:var(--network-surface); }
+[data-network-page] .networkStateOverview { border-color:var(--network-border); background:var(--network-surface); }
+[data-network-page] .networkRouteOverview { background:radial-gradient(ellipse at top left,rgba(139,124,255,.2),transparent 75%); }
+[data-network-page] th { background:var(--network-surface-soft); color:rgba(210,220,255,.62); }
+[data-network-page] td, [data-network-page] th { border-color:var(--network-border); }
+[data-network-page] .networkPrimaryButton { background:var(--network-accent); border-color:var(--network-accent); color:#fff; box-shadow:0 5px 18px rgba(139,124,255,.22); }
+[data-network-page] .networkPrimaryButton:hover:not(:disabled) { background:var(--network-accent-bright); border-color:var(--network-accent-bright); color:#05101c; }
+[data-network-page] .networkKicker { color:var(--network-accent-bright); }
+[data-network-page] .networkCapabilityCard { border-color:var(--network-border); background:var(--network-surface-soft); }
+@media (max-width:700px) {
+  [data-network-page] .networkPageHeader { min-height:260px; padding:20px 16px 14px; background-position:62% center; }
+  [data-network-page] .networkPageIdentity h1 { font-size:32px; }
+}
