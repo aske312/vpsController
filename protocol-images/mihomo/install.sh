@@ -20,8 +20,47 @@ tmp_dir="$(mktemp -d)"
 candidate="${CORE_DIR}/.mihomo.$$.tmp"
 trap 'rm -rf -- "${tmp_dir}"; rm -f -- "${candidate}"' EXIT
 release_json="${tmp_dir}/release.json"
-curl --fail --location --silent --show-error --retry 3 \
-  https://api.github.com/repos/MetaCubeX/mihomo/releases/latest -o "${release_json}"
+if ! curl --fail --location --silent --retry 3 \
+  --user-agent "vps-control-mihomo/1" --header 'Accept: application/vnd.github+json' \
+  https://api.github.com/repos/MetaCubeX/mihomo/releases/latest -o "${release_json}"; then
+  # GitHub can return 403 when the VPS shares an exhausted unauthenticated API
+  # bucket. The expanded release page contains the same asset digest and does
+  # not use that API quota.
+  latest_url="$(curl --fail --location --silent --show-error --retry 3 \
+    --user-agent "vps-control-mihomo/1" -o /dev/null -w '%{url_effective}' \
+    https://github.com/MetaCubeX/mihomo/releases/latest)"
+  release_tag="${latest_url##*/}"
+  release_tag="${release_tag%%\?*}"
+  [[ "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "Не удалось определить стабильный релиз Mihomo" >&2
+    exit 1
+  }
+  expanded_assets="${tmp_dir}/expanded-assets.html"
+  curl --fail --location --silent --show-error --retry 3 \
+    --user-agent "vps-control-mihomo/1" \
+    "https://github.com/MetaCubeX/mihomo/releases/expanded_assets/${release_tag}" -o "${expanded_assets}"
+  python3 - "${expanded_assets}" "${release_tag}" "$(uname -m)" >"${release_json}" <<'PY'
+import html, json, re, sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+version = sys.argv[2].removeprefix("v")
+architecture = sys.argv[3]
+suffix = "amd64-compatible" if architecture == "x86_64" else "arm64" if architecture in {"aarch64", "arm64"} else ""
+if not suffix:
+    raise SystemExit("Архитектура Mihomo не поддерживается")
+name = f"mihomo-linux-{suffix}-v{version}.gz"
+match = re.search(r'href="([^" ]+/' + re.escape(name) + r')"', text)
+if not match:
+    raise SystemExit(f"Asset {name} не найден")
+href = html.unescape(match.group(1))
+url = href if href.startswith("http") else "https://github.com" + href
+window = text[max(0, match.start() - 500):match.end() + 1800]
+digest = re.search(r"sha256:([0-9a-fA-F]{64})", window)
+if not digest:
+    raise SystemExit(f"Официальный SHA-256 для {name} отсутствует")
+print(json.dumps({"tag_name": "v" + version, "assets": [{"name": name, "browser_download_url": url, "digest": "sha256:" + digest.group(1)}]}))
+PY
+fi
 read -r core_version asset_url core_digest < <(python3 - "${release_json}" "$(uname -m)" <<'PY'
 import json, re, sys
 release = json.load(open(sys.argv[1], encoding="utf-8"))

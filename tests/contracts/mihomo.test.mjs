@@ -53,6 +53,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /"qbittorrent": \["qbittorrent\.exe", "qbittorrent"\]/);
   assert.match(manager, /direct_p2p_rules\(routing\)/);
   assert.match(manager, /windows_geolocation/);
+  assert.match(manager, /DIRECT_RULE_META[\s\S]+windows_geolocation/);
   assert.match(manager, /inference\.location\.live\.net,DIRECT/);
   assert.match(manager, /DOMAIN,settings-win\.data\.microsoft\.com,REJECT/);
   assert.match(manager, /DOMAIN,incoming\.telemetry\.mozilla\.org,REJECT/);
@@ -159,6 +160,9 @@ test("Mihomo installs and updates the latest verified stable core independently"
   assert.match(installer, /asset\.get\("digest", ""\)/);
   assert.match(installer, /sha256:\[0-9a-fA-F\]\{64\}/);
   assert.match(installer, /sha256sum -c -/);
+  assert.match(installer, /expanded_assets/);
+  assert.match(installer, /user-agent.*vps-control-mihomo/);
+  assert.match(installer, /same asset digest/);
   assert.match(installer, /candidate="\$\{CORE_DIR\}\/\.mihomo\.\$\$\.tmp"/);
   assert.match(installer, /mv -f -- "\$\{candidate\}" "\$\{CORE\}"/);
   assert.match(installer, /MIHOMO_UPDATE_ONLY/);
