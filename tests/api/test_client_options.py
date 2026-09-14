@@ -1,6 +1,9 @@
 """Client format selection and sing-box TLS fragmentation."""
 from copy import deepcopy
 import json
+import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -33,6 +36,13 @@ class ClientOptionsTests(unittest.TestCase):
         self.assertTrue(tls["fragment"])
         self.assertTrue(tls["record_fragment"])
         self.assertEqual(manager.render_client_profile(self.profile, "common")[1], "yaml")
+
+    @unittest.skipUnless(os.getenv("PRIVACY_MIHOMO_BIN"), "Set Mihomo binary for offline configuration validation")
+    def test_basic_profile_validates_without_downloading_geographic_databases(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(manager, "CORE_BIN", Path(os.environ["PRIVACY_MIHOMO_BIN"])), patch.object(manager, "CORE_HOME", Path(folder)):
+            config = manager.render_profile(self.profile, "common")
+            manager.validate_rendered_profile(config)
+            self.assertFalse(any(path.suffix in {".dat", ".mmdb", ".metadb"} for path in Path(folder).rglob("*")))
 
     def test_validation_rejects_unknown_format_and_invalid_fragment_ranges(self):
         for key, value in (("client_config_format", "unknown"),

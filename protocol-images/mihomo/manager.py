@@ -3824,6 +3824,9 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         f"    - {q(dns['nameserver'])}",
         "  fallback:",
         f"    - {q(dns['fallback'])}",
+        # Avoid Mihomo's implicit CN filter and GeoIP download for DNS alone.
+        "  fallback-filter:",
+        "    geoip: false",
     ]
     if ech_enabled:
         resolvers = ech_dns_resolvers(dns)

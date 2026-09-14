@@ -30,7 +30,7 @@ export function LoginView({ loginUser, loginPassword, loginPasswordVisible, busy
               <label className="loginField"><span>Пароль</span><div className="loginInputWrap loginPasswordWrap"><KeyIcon /><input type={loginPasswordVisible ? "text" : "password"} value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} autoComplete="current-password" required placeholder="Введите пароль" /><button type="button" className="loginVisibility" onClick={() => setLoginPasswordVisible((value) => !value)} aria-label={loginPasswordVisible ? "Скрыть пароль" : "Показать пароль"} aria-pressed={loginPasswordVisible}>{loginPasswordVisible ? <EyeOffIcon /> : <EyeIcon />}</button></div></label>
             </div>
             <button className="loginSubmit" type="submit" disabled={busy}><span>{busy ? "Проверяем доступ…" : "Войти в панель"}</span>{busy ? <i className="loginSpinner" /> : <ArrowIcon />}</button>
-            <footer className="loginPanelFooter"><ShieldIcon /><span>Соединение с панелью защищено</span></footer>
+            <footer className="loginPanelFooter"><ShieldIcon /><span>Доступ только для администратора</span></footer>
           </form>
         </div>
       </section>
