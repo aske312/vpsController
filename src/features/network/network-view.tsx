@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DnsCheck, DnsSettings, DnsStatus, NetworkStatus } from "../../shared/types/control-plane";
+import type { DnsCheck, DnsSettings, DnsStatus, NetworkEndpointSettings, NetworkStatus } from "../../shared/types/control-plane";
 import { useNotifier } from "../../shared/notifications/notification-center";
-import { probeNetworkDns, readNetworkControl, saveNetworkDns, type NetworkRequest } from "./network-api";
+import { probeNetworkDns, readNetworkControl, saveNetworkDns, saveNetworkEndpoints, type NetworkRequest } from "./network-api";
 import { DnsView } from "./network-dns";
 import { NetworkEch } from "./network-ech";
+import { NetworkEndpoints } from "./network-endpoints";
 import { dnsComponents } from "./system-dns-control";
 
 type Props = { request: NetworkRequest; refreshKey?: number };
@@ -21,6 +22,7 @@ export function NetworkView({ request, refreshKey = 0 }: Props) {
   const [status, setStatus] = useState<NetworkStatus | null>(null);
   const [dns, setDns] = useState<DnsStatus | null>(null);
   const [dnsDraft, setDnsDraft] = useState<DnsSettings | null>(null);
+  const [endpointDraft, setEndpointDraft] = useState<NetworkEndpointSettings | null>(null);
   const [dnsChecks, setDnsChecks] = useState<Record<string, DnsCheck>>({});
   const [loading, setLoading] = useState(true);
   const [checkingDns, setCheckingDns] = useState(false);
@@ -31,7 +33,9 @@ export function NetworkView({ request, refreshKey = 0 }: Props) {
   const savingRef = useRef(false);
   const checkingRef = useRef(false);
   const savedRef = useRef<DnsSettings | null>(null);
+  const savedEndpointRef = useRef<NetworkEndpointSettings | null>(null);
   const dirty = Boolean(dns && dnsDraft && JSON.stringify(dns.settings) !== JSON.stringify(dnsDraft));
+  const endpointDirty = Boolean(status && endpointDraft && JSON.stringify(status.transport_endpoints) !== JSON.stringify(endpointDraft));
 
   const load = useCallback(async () => {
     if (loadingRef.current || savingRef.current) return;
@@ -41,8 +45,10 @@ export function NetworkView({ request, refreshKey = 0 }: Props) {
       const next = await readNetworkControl(request);
       const previous = savedRef.current;
       setStatus(next.network);
+      setEndpointDraft((current) => !current || JSON.stringify(current) === JSON.stringify(savedEndpointRef.current) ? next.network.transport_endpoints : current);
       setDnsDraft((current) => !current || JSON.stringify(current) === JSON.stringify(previous) ? next.dns.settings : current);
       savedRef.current = next.dns.settings;
+      savedEndpointRef.current = next.network.transport_endpoints;
       setDns(next.dns);
       setLoadFailed(false);
     } catch (cause) {
@@ -95,12 +101,28 @@ export function NetworkView({ request, refreshKey = 0 }: Props) {
     }
   }, [dns, dnsDraft, notifyError, notifySuccess, request]);
 
+  const saveEndpoints = useCallback(async () => {
+    if (!endpointDraft || savingRef.current || loadingRef.current) return;
+    savingRef.current = true;
+    setBusy(true);
+    try {
+      const settings = Object.fromEntries(Object.entries(endpointDraft).map(([key, value]) => [key, value.trim()])) as NetworkEndpointSettings;
+      const next = await saveNetworkEndpoints(request, settings);
+      setStatus(next);
+      setEndpointDraft(next.transport_endpoints);
+      savedEndpointRef.current = next.transport_endpoints;
+      notifySuccess("Домены защищённых каналов сохранены");
+    } catch (cause) {
+      notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить домены защищённых каналов");
+    } finally { savingRef.current = false; setBusy(false); }
+  }, [endpointDraft, notifyError, notifySuccess, request]);
+
   return <div data-network-page="true"><main className="networkBoard">
     <header className="networkPageHeader"><div className="networkPageIdentity"><p className="eyebrow">312.NET / Сеть</p><h1>Сеть</h1></div><div className="networkToolbar"><nav className="networkTabs" aria-label="Разделы сети">{([["diagnostics", "Состояние сети"], ["dns", "Настройки DNS"]] as const).map(([id, label]) => <button type="button" key={id} className={section === id ? "active" : ""} aria-pressed={section === id} onClick={() => setSection(id)}>{label}{id === "dns" && dirty && <span className="networkUnsavedDot" aria-label="Несохранённые изменения" />}</button>)}</nav><div className="networkRefresh"><span>{loading ? "Обновляем…" : loadFailed ? "Ошибка обновления" : status ? formatTime(status.detected_at) : "Нет данных"}</span><button type="button" onClick={() => void load()} disabled={loading || busy}>Обновить</button></div></div></header>
     {!status ? <section className="networkEmpty" role="status"><NetworkIcon /><h2>{loading ? "Загружаем настройки сети" : "Не удалось получить данные"}</h2><p>{loading ? "Получаем состояние сервера и DNS." : "Повторите загрузку кнопкой «Обновить»."}</p></section> : <>
       {loadFailed && <p className="networkNotice" role="status">Обновление не удалось. Показаны последние полученные данные.</p>}
       <div hidden={section !== "dns"}><DnsView dns={dns} dnsDraft={dnsDraft} dnsChecks={dnsChecks} checkingDns={checkingDns} busy={busy} loading={loading} dirty={dirty} setDnsDraft={setDnsDraft} checkDnsProviders={checkDnsProviders} saveDnsSettings={saveDnsSettings} /></div>
-      <div hidden={section !== "diagnostics"}><Diagnostics status={status} request={request} /></div>
+      <div hidden={section !== "diagnostics"}><Diagnostics status={status} request={request} endpointDraft={endpointDraft} endpointDirty={endpointDirty} busy={busy} setEndpointDraft={setEndpointDraft} saveEndpoints={saveEndpoints} /></div>
     </>}
   </main></div>;
 }
@@ -110,11 +132,12 @@ function formatTime(value: string) {
   return Number.isNaN(date.getTime()) ? "Время неизвестно" : date.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-function Diagnostics({ status, request }: { status: NetworkStatus; request: NetworkRequest }) {
+function Diagnostics({ status, request, endpointDraft, endpointDirty, busy, setEndpointDraft, saveEndpoints }: { status: NetworkStatus; request: NetworkRequest; endpointDraft: NetworkEndpointSettings | null; endpointDirty: boolean; busy: boolean; setEndpointDraft: (value: NetworkEndpointSettings) => void; saveEndpoints: () => void }) {
   const [query, setQuery] = useState("");
   const domains = status.domains.filter((domain) => `${domain.value} ${domain.role} ${domain.resolved.join(" ")}`.toLowerCase().includes(query.toLowerCase().trim()));
   const evidence = [...new Set([...status.route.evidence, ...status.edge.evidence])];
   return <div className="networkDiagnostics">
+    {endpointDraft && <NetworkEndpoints draft={endpointDraft} busy={busy} dirty={endpointDirty} onChange={(key, value) => setEndpointDraft({ ...endpointDraft, [key]: value })} onSave={saveEndpoints} />}
     <section className="networkStateOverview" aria-label="Состояние системы">
       <div className="networkRouteOverview"><small className="networkKicker">МАРШРУТ ПОДКЛЮЧЕНИЯ</small><strong>{status.route.label}</strong><p>{status.edge.provider} · {status.edge.mode}</p><div className="networkRoutePath"><span>Клиент</span><i aria-hidden="true" /><span>{status.edge.mode || "Внешняя сеть"}</span><i aria-hidden="true" /><span>Система</span></div></div>
       <dl className="networkSystemFacts"><div><dt>IPv4 системы</dt><dd><code>{status.server.public_ipv4 || (!status.server.public_ip.includes(":") ? status.server.public_ip : "Не назначен")}</code></dd></div><div><dt>IPv6 системы</dt><dd><code>{status.server.public_ipv6 || (status.server.public_ip.includes(":") ? status.server.public_ip : "Не назначен")}</code></dd></div><div><dt>TLS</dt><dd>{status.tls.mode}<small>{status.tls.certificate_source}</small></dd></div><div><dt>DNS системы</dt><dd><code>{status.resolvers.join(", ") || "Нет данных"}</code></dd></div></dl>

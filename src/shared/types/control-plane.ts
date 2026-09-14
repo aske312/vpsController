@@ -22,6 +22,7 @@ export type DnsSettings = { selected_id: string; apply_wg: boolean; apply_awg: b
 export type DnsEffect = { installed: boolean; value: string; scope: "new_profiles" | "client_recommendation" | "server_xray" | "server_system" | "reconnect"; changes_existing: boolean; matches_selected: boolean };
 export type DnsStatus = { settings: DnsSettings; providers: DnsProvider[]; protocol_effect: Record<string, string>; protocol_effect_details?: Record<string, DnsEffect>; system?: { addresses: string[]; source: string; managed: boolean } };
 export type DnsCheck = { id: string; available: boolean; udp_ok: boolean; udp_ms?: number; tcp_ok: boolean; tcp_ms?: number; doh_ok: boolean; doh_ms?: number; latency_ms?: number };
+export type NetworkEndpointSettings = { cdn_domain: string; tls_relay_domain: string; udp_relay_domain: string };
 export type NetworkStatus = {
   detected_at: string;
   server: { name: string; public_ip: string; public_ipv4?: string; public_ipv6?: string };
@@ -32,6 +33,7 @@ export type NetworkStatus = {
   access: { mode: string; panel_url: string; direct_url: string; protected_url: string };
   listeners: Array<{ port: number; protocol: string; process: string }>;
   resolvers: string[];
+  transport_endpoints: NetworkEndpointSettings;
 };
 export type MihomoDnsField = { key: string; label: string; type: "select" | "boolean" | "textarea" | "text"; default: string | number | boolean; options?: Array<string | { value: string; label: string }>; help?: string };
 export type MihomoDnsStatus = { schema: MihomoDnsField[]; values: Record<string, string | number | boolean> };

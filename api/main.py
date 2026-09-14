@@ -51,6 +51,7 @@ from schemas import (
     DnsCustomResolver,
     DnsSettingsUpdate,
     DnsCheckRequest,
+    NetworkEndpointSettings,
     ClientConnectionSettings,
     ClientCreate,
     ProtocolSettingsUpdate,
@@ -182,6 +183,8 @@ SSH_ACCESS_FILE = DATA_DIR / "ssh-access.json"
 PROTOCOL_IMAGES_DIR = INSTALL_DIR / "protocol-images"
 MONITOR_DIR = DATA_DIR / "monitor"
 DNS_SETTINGS_FILE = DATA_DIR / "dns-settings.json"
+NETWORK_ENDPOINTS_FILE = DATA_DIR / "network-endpoints.json"
+PROTECTED_CHANNELS_FILE = DATA_DIR / "protected-channels.json"
 SYSTEM_RESOLVED_DROPIN = Path("/etc/systemd/resolved.conf.d/312-net.conf")
 SYSTEM_RESOLV_CONF = Path("/etc/resolv.conf")
 updates_refresh_lock = threading.Lock()
@@ -356,6 +359,82 @@ def read_clients() -> list[dict]:
         return json.loads(CLIENTS_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return []
+
+
+CHANNEL_MODE_PROTOCOLS = {"wg", "awg", "shadowsocks", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"}
+CHANNEL_MODE_LABELS = {"direct": "Прямой маршрут", "tls_relay": "TLS relay", "udp_relay": "UDP relay"}
+
+
+def read_network_endpoint_settings() -> dict[str, str]:
+    defaults = {"cdn_domain": VLESS_CDN_DOMAIN.strip().lower(), "tls_relay_domain": "", "udp_relay_domain": ""}
+    try:
+        stored = json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        stored = {}
+    if not isinstance(stored, dict):
+        stored = {}
+    return {key: str(stored.get(key, default) or "").strip().lower() for key, default in defaults.items()}
+
+
+def write_network_endpoint_settings(settings: dict[str, str]) -> dict[str, str]:
+    normalized = {key: str(settings.get(key, "") or "").strip().lower() for key in ("cdn_domain", "tls_relay_domain", "udp_relay_domain")}
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = NETWORK_ENDPOINTS_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(NETWORK_ENDPOINTS_FILE)
+    return normalized
+
+
+def read_protected_channel_modes() -> dict[str, str]:
+    try:
+        stored = json.loads(PROTECTED_CHANNELS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        stored = {}
+    if not isinstance(stored, dict):
+        return {}
+    return {str(protocol): str(mode) for protocol, mode in stored.items() if protocol in CHANNEL_MODE_PROTOCOLS and mode in CHANNEL_MODE_LABELS}
+
+
+def channel_mode_for(protocol: str) -> str:
+    return read_protected_channel_modes().get(protocol, "direct")
+
+
+def supported_channel_modes(protocol: str) -> set[str]:
+    modes = {"direct"}
+    if protocol in {"shadowsocks", "trojan", "openvpn"}:
+        modes.add("tls_relay")
+    if protocol in {"wg", "awg", "shadowsocks", "hysteria2", "tuic", "openvpn", "ikev2"}:
+        modes.add("udp_relay")
+    return modes
+
+
+def channel_mode_endpoint(protocol: str, fallback: str) -> tuple[str, str]:
+    mode = channel_mode_for(protocol)
+    if mode == "direct":
+        return fallback, mode
+    domain = read_network_endpoint_settings()["tls_relay_domain" if mode == "tls_relay" else "udp_relay_domain"]
+    if not domain:
+        raise HTTPException(status_code=409, detail=f"Для режима {CHANNEL_MODE_LABELS[mode]} сначала настройте соответствующий домен на странице «Сеть»")
+    return domain, mode
+
+
+def save_channel_mode(protocol: str, mode: str) -> None:
+    if protocol not in CHANNEL_MODE_PROTOCOLS:
+        raise HTTPException(status_code=422, detail="Защищённый маршрут недоступен для этого протокола")
+    if mode not in supported_channel_modes(protocol):
+        raise HTTPException(status_code=422, detail="Неизвестный режим защищённого канала")
+    if mode != "direct":
+        endpoint_key = "tls_relay_domain" if mode == "tls_relay" else "udp_relay_domain"
+        if not read_network_endpoint_settings().get(endpoint_key):
+            raise HTTPException(status_code=409, detail="Сначала настройте домен relay на странице «Сеть»")
+    modes = read_protected_channel_modes()
+    modes[protocol] = mode
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = PROTECTED_CHANNELS_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(modes, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(PROTECTED_CHANNELS_FILE)
 
 
 PANEL_PROTOCOL_LABELS = {
@@ -1324,7 +1403,14 @@ def network_domain_probe(domain: str, role: str) -> dict:
 
 def network_status() -> dict:
     domain_items: list[dict] = []
-    candidates = [(PUBLIC_DOMAIN, "panel", "environment"), (VLESS_CDN_DOMAIN, "VLESS CDN", "environment")]
+    endpoint_settings = read_network_endpoint_settings()
+    candidates = [
+        (PUBLIC_DOMAIN, "panel", "environment"),
+        (VLESS_CDN_DOMAIN, "VLESS CDN", "environment"),
+        (endpoint_settings["cdn_domain"], "CDN endpoint", "settings"),
+        (endpoint_settings["tls_relay_domain"], "TLS relay", "settings"),
+        (endpoint_settings["udp_relay_domain"], "UDP relay", "settings"),
+    ]
     for route in cdn_security.read_routes():
         candidates.append((route.get("domain", ""), "VLESS CDN" if route.get("cloudflare", True) else "VLESS TLS", "gateway"))
     for domain, role, source in candidates:
@@ -1399,11 +1485,22 @@ def network_status() -> dict:
         "access": {"mode": "external" if PUBLIC_DOMAIN else "direct", "panel_url": panel_url, "direct_url": direct_url, "protected_url": f"https://{INTERNAL_PANEL_HOST}"},
         "listeners": listeners,
         "resolvers": resolvers,
+        "transport_endpoints": endpoint_settings,
     }
 
 
 @app.get("/api/network")
 def get_network(_: None = Depends(require_token)) -> dict:
+    return network_status()
+
+
+@app.put("/api/network/endpoints")
+def update_network_endpoints(payload: NetworkEndpointSettings, _: None = Depends(require_token)) -> dict:
+    settings = {key: str(value or "").strip().lower() for key, value in payload.model_dump().items()}
+    for label, value in (("CDN", settings["cdn_domain"]), ("TLS relay", settings["tls_relay_domain"]), ("UDP relay", settings["udp_relay_domain"])):
+        if value and not valid_hostname(value):
+            raise HTTPException(status_code=422, detail=f"Укажите корректный домен для {label}")
+    write_network_endpoint_settings(settings)
     return network_status()
 
 
@@ -3583,16 +3680,19 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 reload_ikev2()
                 settings = json.loads(IKEV2_SETTINGS.read_text(encoding="utf-8"))
                 endpoint = str(settings.get("endpoint") or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
+                endpoint, channel_mode = channel_mode_endpoint("ikev2", endpoint)
                 ca = (IKEV2_SWANCTL_DIR / "x509ca" / "caCert.pem").read_text(encoding="utf-8")
                 client_config = "\n".join([
-                    "Connection", f"Server: {endpoint}", "Remote ID: " + endpoint,
+                    "Connection", f"Server: {endpoint}", "Remote ID: " + str(settings.get("endpoint") or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT),
                     f"Username: {client_id}", f"Password: {password}", "Authentication: EAP-MSCHAPv2",
                     "Install the CA certificate below as a trusted root certificate:", "", ca.strip(), "",
                 ])
                 items = read_clients()
-                items.append({"id": client_id, "name": payload.name, "protocol": "ikev2", "public_key": client_id, "endpoint": endpoint, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+                items.append({"id": client_id, "name": payload.name, "protocol": "ikev2", "public_key": client_id, "endpoint": endpoint, "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config}
+            except HTTPException:
+                raise
             except Exception as exc:
                 if replaced:
                     try:
@@ -3620,7 +3720,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 certificate = (OPENVPN_PKI / "issued" / f"{client_id}.crt").read_text(encoding="utf-8")
                 private_key = (OPENVPN_PKI / "private" / f"{client_id}.key").read_text(encoding="utf-8")
                 tls_crypt = (OPENVPN_DIR / "tls-crypt.key").read_text(encoding="utf-8")
-                endpoint = PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT
+                endpoint, channel_mode = channel_mode_endpoint("openvpn", PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
                 port = int(settings.get("port", 1194))
                 transport = str(settings.get("protocol", "udp"))
                 client_config = "\n".join([
@@ -3632,9 +3732,11 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     "<key>", private_key.strip(), "</key>", "<tls-crypt>", tls_crypt.strip(), "</tls-crypt>", "",
                 ])
                 items = read_clients()
-                items.append({"id": client_id, "name": payload.name, "protocol": "openvpn", "public_key": client_id, "port": port, "transport": transport, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+                items.append({"id": client_id, "name": payload.name, "protocol": "openvpn", "public_key": client_id, "port": port, "transport": transport, "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}.ovpn", "config": client_config}
+            except HTTPException:
+                raise
             except Exception as exc:
                 if issued:
                     try:
@@ -3658,7 +3760,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 temporary.replace(HYSTERIA2_USERS)
                 port = int(settings.get("port", 8443))
                 domain = str(settings.get("domain", "")).strip()
-                endpoint = domain or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT
+                endpoint, channel_mode = channel_mode_endpoint("hysteria2", domain or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
                 tls_mode = str(settings.get("tls_mode", "pinned"))
                 fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt")).partition("=")[2].strip()
                 client_config = "\n".join([
@@ -3671,7 +3773,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     "socks5:", "  listen: 127.0.0.1:1080", "  disableUDP: false",
                 ]) + "\n"
                 items = read_clients()
-                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "domain": domain, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "domain": domain, "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}.yaml", "config": client_config}
             except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -3695,7 +3797,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 temporary.replace(TUIC_CONFIG)
                 run("systemctl", "restart", "vps-control-tuic.service", timeout=20, check=True)
                 settings = json.loads(TUIC_SETTINGS.read_text(encoding="utf-8"))
-                endpoint = PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT
+                endpoint, channel_mode = channel_mode_endpoint("tuic", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
                 certificate = (TUIC_DIR / "server.crt").read_text(encoding="utf-8")
                 client = {
                     "log": {"level": "warn"},
@@ -3703,8 +3805,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     "outbounds": [{"type": "tuic", "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "uuid": user_uuid, "password": password, "congestion_control": settings.get("congestion_control", "bbr"), "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": "10s", "tls": {"enabled": True, "server_name": certificate_server_name(TUIC_DIR / "server.crt"), "certificate": certificate}}],
                     "route": {"final": "connection-out"},
                 }
-                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "port": int(settings.get("port", 8444)), "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
+                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "port": int(settings.get("port", 8444)), "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}.json", "config": json.dumps(client, ensure_ascii=False, indent=2)}
+            except HTTPException:
+                raise
             except Exception as exc:
                 TUIC_CONFIG.write_bytes(original); os.chmod(TUIC_CONFIG, 0o600)
                 run("systemctl", "restart", "vps-control-tuic.service", timeout=20)
@@ -3721,10 +3825,12 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 result = subprocess.run(["/usr/local/lib/vps-control-trojan/sing-box", "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
                 if result.returncode: raise RuntimeError(result.stderr.strip())
                 temporary.replace(TROJAN_CONFIG); run("systemctl", "restart", "vps-control-trojan.service", timeout=20, check=True)
-                settings=json.loads(TROJAN_SETTINGS.read_text()); endpoint=PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT; certificate=(TROJAN_DIR/"server.crt").read_text()
+                settings=json.loads(TROJAN_SETTINGS.read_text()); endpoint, channel_mode=channel_mode_endpoint("trojan", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT); certificate=(TROJAN_DIR/"server.crt").read_text()
                 client={"log":{"level":"warn"},"inbounds":[{"type":"mixed","tag":"mixed-in","listen":"127.0.0.1","listen_port":2080}],"outbounds":[{"type":"trojan","tag":"connection-out","server":endpoint,"server_port":int(settings.get("port",8445)),"password":password,"tls":{"enabled":True,"server_name":certificate_server_name(TROJAN_DIR / "server.crt"),"certificate":certificate}}],"route":{"final":"connection-out"}}
-                items=read_clients(); items.append({"id":client_id,"name":payload.name,"protocol":payload.protocol,"public_key":client_id,"port":int(settings.get("port",8445)),"settings":payload.settings.model_dump(exclude_none=True),"created_at":datetime.now(timezone.utc).isoformat()}); write_clients(items)
+                items=read_clients(); items.append({"id":client_id,"name":payload.name,"protocol":payload.protocol,"public_key":client_id,"port":int(settings.get("port",8445)),"channel_mode":channel_mode,"settings":payload.settings.model_dump(exclude_none=True),"created_at":datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 return {"id":client_id,"filename":f"{safe_name}.json","config":json.dumps(client,ensure_ascii=False,indent=2)}
+            except HTTPException:
+                raise
             except Exception as exc:
                 TROJAN_CONFIG.write_bytes(original); os.chmod(TROJAN_CONFIG,0o600); run("systemctl","restart","vps-control-trojan.service",timeout=20)
                 raise HTTPException(status_code=500,detail="Unable to create Trojan connection") from exc
@@ -3763,9 +3869,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             config_path.unlink(missing_ok=True)
             raise HTTPException(status_code=500, detail="Unable to start Shadowsocks client service")
         userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
-        client_config = f"ss://{userinfo}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}#{urllib.parse.quote(payload.name)}"
+        endpoint, channel_mode = channel_mode_endpoint("shadowsocks", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
+        client_config = f"ss://{userinfo}@{endpoint}:{port}#{urllib.parse.quote(payload.name)}"
         items = read_clients()
-        items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+        items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
         write_clients(items)
         return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config}
 
@@ -3896,6 +4003,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     client_listen_port = AWG_CLIENT_PORT if payload.protocol == "awg" else None
     client_listen_line = f"ListenPort = {client_listen_port}\n" if client_listen_port is not None else ""
     endpoint_host = PUBLIC_IP_ENDPOINT or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_ENDPOINT
+    endpoint_host, channel_mode = channel_mode_endpoint(payload.protocol, endpoint_host)
     client_config = (
         f"[Interface]\nAddress = {address}/32\nDNS = {payload.settings.dns or (current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS))}\n"
         f"PrivateKey = {private_key}\n{client_listen_line}MTU = {mtu}\n{extra}\n[Peer]\n"
@@ -3911,6 +4019,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             "public_key": public_key,
             "address": f"{address}/32",
             "settings": payload.settings.model_dump(exclude_none=True),
+            "channel_mode": channel_mode,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
     )
@@ -4035,7 +4144,7 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     return {"deleted": client_id}
 
 
-def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
+def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
     if protocol in ("wg", "awg"):
         prefix = "WG" if protocol == "wg" else "AWG"
         return [{
@@ -4151,6 +4260,22 @@ def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
     }]
 
 
+def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
+    fields = _editable_protocol_settings(protocol, values)
+    if protocol not in CHANNEL_MODE_PROTOCOLS:
+        return fields
+    relay_options = [{"value": "direct", "label": "Прямой маршрут"}]
+    if "tls_relay" in supported_channel_modes(protocol):
+        relay_options.append({"value": "tls_relay", "label": "TLS relay · домен"})
+    if "udp_relay" in supported_channel_modes(protocol):
+        relay_options.append({"value": "udp_relay", "label": "UDP relay · домен"})
+    return [{
+        "key": "channel_mode", "label": "Защищённый маршрут", "type": "select",
+        "value": channel_mode_for(protocol), "options": relay_options,
+        "help": "Меняет только endpoint новых конфигураций. Сам relay должен быть настроен отдельно и принимать трафик на порту протокола.",
+    }, *fields]
+
+
 def persist_tunnel_mtu(protocol: Literal["wg", "awg"], mtu: int) -> None:
     config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
@@ -4230,6 +4355,7 @@ def update_protocol_settings(
     _: None = Depends(require_token),
 ) -> dict:
     supplied = payload.model_dump(exclude_none=True)
+    channel_mode = supplied.pop("channel_mode", None)
     allowed = {
         "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
         "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
@@ -4240,8 +4366,12 @@ def update_protocol_settings(
         "ikev2": {"dns"},
         "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni", "tls_enabled", "tls_domain", "tls_transport", "tls_xhttp_mode", "cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"},
     }[protocol]
-    if not supplied or not set(supplied).issubset(allowed):
+    if (not supplied and channel_mode is None) or not set(supplied).issubset(allowed):
         raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
+    if channel_mode is not None:
+        save_channel_mode(protocol, channel_mode)
+    if not supplied:
+        return protocol_status(protocol)
     if "dns" in supplied:
         resolver_values = [value.strip() for value in supplied["dns"].split(",") if value.strip()]
         if not resolver_values:

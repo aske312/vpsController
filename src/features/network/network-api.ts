@@ -1,4 +1,4 @@
-import type { DnsCheck, DnsSettings, DnsStatus, NetworkStatus } from "../../shared/types/control-plane";
+import type { DnsCheck, DnsSettings, DnsStatus, NetworkEndpointSettings, NetworkStatus } from "../../shared/types/control-plane";
 
 export type NetworkRequest = <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -13,6 +13,10 @@ export async function readNetworkControl(request: NetworkRequest) {
 
 export function saveNetworkDns(request: NetworkRequest, settings: DnsSettings) {
   return request<DnsStatus>("/dns/settings", { method: "PUT", body: JSON.stringify(settings) });
+}
+
+export function saveNetworkEndpoints(request: NetworkRequest, settings: NetworkEndpointSettings) {
+  return request<NetworkStatus>("/network/endpoints", { method: "PUT", body: JSON.stringify(settings) });
 }
 
 export async function probeNetworkDns(request: NetworkRequest, providerId?: string) {

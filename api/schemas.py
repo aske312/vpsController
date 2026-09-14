@@ -93,6 +93,12 @@ class DnsCheckRequest(BaseModel):
     provider_id: str | None = Field(default=None, max_length=64)
 
 
+class NetworkEndpointSettings(BaseModel):
+    cdn_domain: str = Field(default="", max_length=253)
+    tls_relay_domain: str = Field(default="", max_length=253)
+    udp_relay_domain: str = Field(default="", max_length=253)
+
+
 class ClientConnectionSettings(BaseModel):
     dns: str | None = Field(default=None, min_length=3, max_length=512, pattern=r"^[A-Za-z0-9:., ]+$")
     mtu: int | None = Field(default=None, ge=576, le=1500)
@@ -112,6 +118,7 @@ class ClientCreate(BaseModel):
 
 
 class ProtocolSettingsUpdate(BaseModel):
+    channel_mode: Literal["direct", "tls_relay", "udp_relay"] | None = None
     mtu: int | None = Field(default=None, ge=1280, le=1420)
     timeout: int | None = Field(default=None, ge=30, le=3600)
     udp_mtu: int | None = Field(default=None, ge=576, le=1500)
