@@ -66,6 +66,15 @@ class NetworkDomainsTests(unittest.TestCase):
             result = api.check_network_endpoint(api.NetworkEndpointCheck(kind="udp_relay", domain="missing.example.com"), None)
         self.assertEqual(result["status"], "unresolved")
 
+    def test_relay_endpoint_accepts_ip_without_relaxing_cdn_domain(self):
+        with tempfile.TemporaryDirectory() as root:
+            data_dir = Path(root)
+            with patch.object(api, "DATA_DIR", data_dir), patch.object(api, "NETWORK_ENDPOINTS_FILE", data_dir / "network-endpoints.json"), patch.object(api, "network_status", return_value={"transport_endpoints": {}}):
+                response = api.update_network_endpoints(api.NetworkEndpointSettings(cdn_domain="", tls_relay_domain="198.51.100.20", udp_relay_domain=""), None)
+            self.assertEqual(json.loads((data_dir / "network-endpoints.json").read_text())["tls_relay_domain"], "198.51.100.20")
+            with self.assertRaises(api.HTTPException):
+                api.update_network_endpoints(api.NetworkEndpointSettings(cdn_domain="198.51.100.20"), None)
+
     def test_cdn_endpoint_connects_existing_panel_vless_origin(self):
         with tempfile.TemporaryDirectory() as root:
             data_dir = Path(root)

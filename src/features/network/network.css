@@ -170,7 +170,21 @@
 [data-network-page] .networkAccessEntry + .networkAccessEntry { border-top: 1px solid var(--line); }
 [data-network-page] .networkAccessEntry > span { font-size: 11px; color: var(--muted); }
 [data-network-page] .networkEndpointPanel { overflow: hidden; }
+[data-network-page] .networkEndpointPanel > .networkSectionHeading { align-items: flex-start; }
+[data-network-page] .networkEndpointPanel .networkKicker { display: block; margin-bottom: 5px; }
+[data-network-page] .networkEndpointCard { display: grid; gap: 8px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-inset); }
+[data-network-page] .networkEndpointCard.ready { border-color: color-mix(in srgb, var(--green) 55%, var(--line)); }
+[data-network-page] .networkEndpointCard.warning { border-color: color-mix(in srgb, var(--amber) 55%, var(--line)); }
+[data-network-page] .networkEndpointCard.unresolved { border-color: color-mix(in srgb, var(--red) 55%, var(--line)); }
+[data-network-page] .networkEndpointCardHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+[data-network-page] .networkEndpointCardHead h3 { margin: 0; font-size: 13px; font-weight: 600; }
+[data-network-page] .networkEndpointCardHead span { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+[data-network-page] .networkEndpointState { flex-shrink: 0; color: var(--muted); font: 10px var(--technical-font); }
+[data-network-page] .networkEndpointCard.ready .networkEndpointState { color: var(--green); }
+[data-network-page] .networkEndpointCard.warning .networkEndpointState { color: var(--amber); }
+[data-network-page] .networkEndpointCard.unresolved .networkEndpointState { color: var(--red); }
 [data-network-page] .networkEndpointStatus { color: var(--dim); font: 10px var(--technical-font); }
+[data-network-page] .networkEndpointStatus.is-dirty { color: var(--amber); }
 [data-network-page] .networkEndpointGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 0 16px 14px; }
 [data-network-page] .networkEndpointGrid label { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: 11px; }
 [data-network-page] .networkEndpointGrid label > span { color: var(--text); font-size: 12px; }

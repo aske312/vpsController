@@ -1502,8 +1502,9 @@ def get_network(_: None = Depends(require_token)) -> dict:
 def update_network_endpoints(payload: NetworkEndpointSettings, _: None = Depends(require_token)) -> dict:
     settings = {key: str(value or "").strip().lower() for key, value in payload.model_dump().items()}
     for label, value in (("CDN", settings["cdn_domain"]), ("TLS relay", settings["tls_relay_domain"]), ("UDP relay", settings["udp_relay_domain"])):
-        if value and not valid_hostname(value):
-            raise HTTPException(status_code=422, detail=f"Укажите корректный домен для {label}")
+        valid = valid_hostname(value) if label == "CDN" else valid_network_endpoint(value)
+        if value and not valid:
+            raise HTTPException(status_code=422, detail=f"Укажите корректный домен или IP для {label}")
     # A configured CDN endpoint is also the VLESS origin route on this VPS.
     # Relay endpoints only need to be consumed during client export; their
     # remote edge host is intentionally outside this node's control plane.
@@ -1523,8 +1524,9 @@ def update_network_endpoints(payload: NetworkEndpointSettings, _: None = Depends
 @app.post("/api/network/endpoints/check")
 def check_network_endpoint(payload: NetworkEndpointCheck, _: None = Depends(require_token)) -> dict:
     domain = payload.domain.strip().lower()
-    if not valid_hostname(domain):
-        raise HTTPException(status_code=422, detail="Укажите корректный домен без схемы https:// и порта")
+    valid = valid_hostname(domain) if payload.kind == "cdn" else valid_network_endpoint(domain)
+    if not valid:
+        raise HTTPException(status_code=422, detail="Укажите корректный домен или IP без схемы https:// и порта")
     probe = network_domain_probe(domain, {"cdn": "CDN / ECH", "tls_relay": "TLS relay", "udp_relay": "UDP relay"}[payload.kind])
     if not probe["resolved"]:
         return {**probe, "kind": payload.kind, "status": "unresolved", "ready": False, "message": "Домен не разрешается через DNS с VPS панели"}
@@ -3264,6 +3266,15 @@ def vless_tls_client_query(reality: dict, fingerprint: str = "chrome") -> dict[s
 
 def valid_hostname(value: str) -> bool:
     return bool(re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", value))
+
+
+def valid_network_endpoint(value: str) -> bool:
+    """External relay endpoints may be published as a hostname or an IP."""
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return valid_hostname(value)
 
 
 def direct_tls_domain_ready(domain: str) -> bool:
