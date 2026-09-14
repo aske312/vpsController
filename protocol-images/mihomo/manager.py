@@ -24,7 +24,7 @@ import urllib.request
 import urllib.parse
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
@@ -269,6 +269,15 @@ class PresetSettingsPatch(BaseModel):
     presets: list[dict[str, Any]] = Field(default_factory=list, min_length=1, max_length=12)
 
 
+class PersonalRuleInput(BaseModel):
+    code: str = Field(min_length=1, max_length=8, pattern=r"^[A-Za-z0-9_-]+$")
+    title: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=160)
+    kind: Literal["domain", "process"] = "domain"
+    entries: list[str] = Field(min_length=1, max_length=200)
+    target: Literal["GATE.312", "DIRECT", "REJECT"] = "GATE.312"
+
+
 class ProfileConnectionInput(BaseModel):
     id: str | None = Field(default=None, max_length=48, pattern=r"^[a-zA-Z0-9_-]+$")
     component: str = Field(min_length=1, max_length=64)
@@ -290,6 +299,7 @@ class ProfileDeviceInput(BaseModel):
     os_version: str | None = Field(default=None, max_length=40)
     user_agent: str | None = Field(default=None, max_length=256)
     last_seen_at: str | None = Field(default=None, max_length=32)
+    personal_rule_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
 class ProfileCreate(BaseModel):
@@ -1196,6 +1206,13 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
     # router, NAS or smart-home device never disappears behind the profile.
     if routing.get("direct_local_network", False):
         rules.extend(configured_preset_rules(routing, "direct_local_network"))
+    # Device-specific rules must be evaluated before the shared library. This
+    # lets a personal exception win over a broader global rule.
+    rules.extend(
+        str(rule).strip()
+        for rule in routing.get("_personal_rule_lines", [])
+        if str(rule).strip()
+    )
     for setting in DIRECT_RULE_PRESETS:
         if setting == "direct_local_network":
             continue
@@ -1214,6 +1231,7 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
 DNS_SETTINGS_FILE = SETTINGS_ROOT / f"{DNS_MODULE_ID}.json"
 ROUTING_SETTINGS_FILE = SETTINGS_ROOT / f"{ROUTING_MODULE_ID}.json"
 PRESET_SETTINGS_FILE = SETTINGS_ROOT / "profile-presets.json"
+PERSONAL_RULES_FILE = SETTINGS_ROOT / "personal-rules.json"
 
 
 def default_profile_presets() -> list[dict[str, Any]]:
@@ -1326,6 +1344,105 @@ def ensure_policy_settings() -> None:
         atomic_json(ROUTING_SETTINGS_FILE, routing_defaults())
     if not PRESET_SETTINGS_FILE.exists():
         atomic_json(PRESET_SETTINGS_FILE, default_profile_presets())
+    if not PERSONAL_RULES_FILE.exists():
+        atomic_json(PERSONAL_RULES_FILE, [])
+
+
+def normalize_personal_rule(value: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    rule_id = str(value.get("id", ""))
+    if not re.fullmatch(r"personal-[a-f0-9]{12}", rule_id):
+        return None
+    kind = str(value.get("kind", "domain"))
+    if kind not in {"domain", "process"}:
+        return None
+    entries = [str(entry).strip() for entry in value.get("entries", []) if str(entry).strip()]
+    return {
+        "id": rule_id,
+        "code": str(value.get("code", "PERS"))[:8],
+        "title": str(value.get("title", "Персональное правило"))[:80],
+        "description": str(value.get("description", ""))[:160],
+        "kind": kind,
+        "entries": entries[:200],
+        "target": str(value.get("target", "GATE.312")) if value.get("target") in {"GATE.312", "DIRECT", "REJECT"} else "GATE.312",
+    }
+
+
+def personal_rules() -> list[dict[str, Any]]:
+    value = load_json(PERSONAL_RULES_FILE, [])
+    if not isinstance(value, list):
+        return []
+    return [rule for entry in value if isinstance(entry, dict) and (rule := normalize_personal_rule(entry))]
+
+
+def save_personal_rules(value: list[dict[str, Any]]) -> None:
+    atomic_json(PERSONAL_RULES_FILE, value)
+
+
+def validate_personal_rule(payload: PersonalRuleInput, rule_id: str | None = None) -> dict[str, Any]:
+    code = payload.code.strip().upper()
+    title = payload.title.strip()
+    description = payload.description.strip()
+    if not code or not re.fullmatch(r"[A-Z0-9_-]{1,8}", code):
+        raise HTTPException(status_code=422, detail="Код персонального правила должен содержать 1–8 латинских символов")
+    if not title:
+        raise HTTPException(status_code=422, detail="Название персонального правила не может быть пустым")
+    entries: list[str] = []
+    for raw in payload.entries:
+        entry = str(raw).strip()
+        if not entry or entry in entries:
+            continue
+        if len(entry) > 160 or any(char in entry for char in "\r\n,"):
+            raise HTTPException(status_code=422, detail="Значения правила должны быть указаны по одному в строке")
+        if payload.kind == "domain":
+            entry = entry.removeprefix("*.").lower()
+            if not re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}", entry):
+                raise HTTPException(status_code=422, detail=f"Некорректный домен: {entry}")
+        elif not re.fullmatch(r"[A-Za-z0-9._*? +()\-]+", entry):
+            raise HTTPException(status_code=422, detail=f"Некорректное имя процесса: {entry}")
+        if entry in entries:
+            continue
+        entries.append(entry)
+    if not entries:
+        raise HTTPException(status_code=422, detail="Добавьте хотя бы один домен или процесс")
+    return {
+        "id": rule_id or f"personal-{uuid.uuid4().hex[:12]}",
+        "code": code,
+        "title": title,
+        "description": description,
+        "kind": payload.kind,
+        "entries": entries,
+        "target": payload.target,
+    }
+
+
+def personal_rules_for_device(profile: dict[str, Any], device_id: str) -> list[dict[str, Any]]:
+    device = next((entry for entry in profile.get("devices", []) if str(entry.get("id")) == device_id), {})
+    selected = {str(rule_id) for rule_id in device.get("personal_rule_ids", []) if str(rule_id)}
+    return [rule for rule in personal_rules() if rule["id"] in selected]
+
+
+def personal_rule_lines(rule: dict[str, Any]) -> list[str]:
+    kind = str(rule.get("kind", "domain"))
+    target = str(rule.get("target", "GATE.312"))
+    if kind == "process":
+        return [f"{'PROCESS-NAME-WILDCARD' if any(char in entry for char in '*?') else 'PROCESS-NAME'},{entry},{target}" for entry in rule.get("entries", [])]
+    return [f"DOMAIN-SUFFIX,{entry},{target}" for entry in rule.get("entries", [])]
+
+
+def personal_rule_lines_for_device(profile: dict[str, Any], device_id: str) -> list[str]:
+    return [line for rule in personal_rules_for_device(profile, device_id) for line in personal_rule_lines(rule)]
+
+
+def validate_personal_rule_ids(devices: list[dict[str, Any]]) -> None:
+    known = {rule["id"] for rule in personal_rules()}
+    for device in devices:
+        selected = device.get("personal_rule_ids", [])
+        if not isinstance(selected, list):
+            raise HTTPException(status_code=422, detail="Список персональных правил устройства некорректен")
+        if len(selected) != len(set(str(rule_id) for rule_id in selected)) or any(str(rule_id) not in known for rule_id in selected):
+            raise HTTPException(status_code=422, detail="Одно из персональных правил устройства не найдено")
 
 
 def validate_dns(values: dict[str, Any]) -> dict[str, Any]:
@@ -1382,7 +1499,50 @@ def get_action() -> dict[str, Any]:
 @app.get("/api/mihomo/routing/schema", dependencies=[Depends(auth_required)])
 def get_routing_schema() -> dict[str, Any]:
     values = routing_settings()
-    return {"schema": routing_schema(), "values": values, "presets": profile_presets(), "rule_lists": routing_rule_lists(values)}
+    return {"schema": routing_schema(), "values": values, "presets": profile_presets(), "rule_lists": routing_rule_lists(values), "personal_rules": personal_rules()}
+
+
+@app.post("/api/mihomo/routing/personal-rules", dependencies=[Depends(auth_required)])
+@serialized_profile_mutation
+def create_personal_rule(payload: PersonalRuleInput) -> dict[str, Any]:
+    rules = personal_rules()
+    rule = validate_personal_rule(payload)
+    rules.append(rule)
+    save_personal_rules(rules)
+    return rule
+
+
+@app.patch("/api/mihomo/routing/personal-rules/{rule_id}", dependencies=[Depends(auth_required)])
+@serialized_profile_mutation
+def update_personal_rule(rule_id: str, payload: PersonalRuleInput) -> dict[str, Any]:
+    rules = personal_rules()
+    index = next((index for index, rule in enumerate(rules) if rule["id"] == rule_id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Персональное правило не найдено")
+    rule = validate_personal_rule(payload, rule_id)
+    rules[index] = rule
+    save_personal_rules(rules)
+    return rule
+
+
+@app.delete("/api/mihomo/routing/personal-rules/{rule_id}", dependencies=[Depends(auth_required)])
+@serialized_profile_mutation
+def delete_personal_rule(rule_id: str) -> dict[str, Any]:
+    rules = personal_rules()
+    if not any(rule["id"] == rule_id for rule in rules):
+        return {"removed": rule_id, "already_removed": True}
+    save_personal_rules([rule for rule in rules if rule["id"] != rule_id])
+    data = profiles()
+    changed = False
+    for profile in data:
+        for device in profile.get("devices", []):
+            selected = device.get("personal_rule_ids", [])
+            if rule_id in selected:
+                device["personal_rule_ids"] = [value for value in selected if value != rule_id]
+                changed = True
+    if changed:
+        save_profiles(data)
+    return {"removed": rule_id}
 
 
 @app.patch("/api/mihomo/routing/presets", dependencies=[Depends(auth_required)])
@@ -1396,7 +1556,7 @@ def patch_profile_presets(patch: PresetSettingsPatch) -> dict[str, Any]:
 def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
     next_values = validate_routing({key: value for key, value in patch.values.items() if key != "tunnel_privacy"}, current=routing_settings())
     atomic_json(ROUTING_SETTINGS_FILE, next_values)
-    return {"schema": routing_schema(), "values": next_values, "rule_lists": routing_rule_lists(next_values)}
+    return {"schema": routing_schema(), "values": next_values, "rule_lists": routing_rule_lists(next_values), "personal_rules": personal_rules()}
 
 
 @app.get("/api/mihomo/dns/settings", dependencies=[Depends(auth_required)])
@@ -3140,6 +3300,7 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     definitions = validate_connection_inputs(payload.connections) if payload.connections is not None else legacy_connection_inputs(payload.channels)
     devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
     validate_profile_devices(devices, str(devices[0]["id"]))
+    validate_personal_rule_ids(devices)
     validate_client_capabilities({"devices": devices, "connections": definitions, "common_device_id": devices[0]["id"]})
     device_ids = {device["id"] for device in devices}
     if len(device_ids) != len(devices) or any(definition.get("device_id", "device-1") not in device_ids for definition in definitions):
@@ -3207,6 +3368,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         if common_device_id not in {device["id"] for device in devices}:
             raise HTTPException(status_code=422, detail="Общие настройки профиля нельзя удалить")
         validate_profile_devices(devices, common_device_id, item.get("devices", []))
+        validate_personal_rule_ids(devices)
         item["devices"] = devices
         item["subscriptions"] = {}
     if payload.connections is not None:
@@ -3544,6 +3706,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
             direct_name, cdn_name, tls_name = None, None, connection_label(connection, index + 1, "tls")
         rendered.append((connection, direct_name, cdn_name, tls_name))
     routing = {**routing_settings(), **profile_routing}
+    routing["_personal_rule_lines"] = personal_rule_lines_for_device(normalized, selected_device)
     ech_requested = bool(profile_routing.get("tunnel_ech", False))
     # The client resolves current ECH parameters through encrypted DNS. A
     # server-side DNS outage must not silently disable the requested protection.
@@ -3576,7 +3739,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "  dns-hijack:",
         '    - "any:53"',
     ]
-    if routing.get("direct_games_enabled", False):
+    if routing.get("direct_games_enabled", False) or any(str(rule).startswith("PROCESS-NAME") for rule in routing.get("_personal_rule_lines", [])):
         lines.insert(4, "find-process-mode: strict")
     lines += [
         "dns:",
@@ -3672,6 +3835,11 @@ def validate_client_capabilities(profile):
             raise HTTPException(status_code=422, detail="Приложение устройства не поддерживает выбранный формат")
         client = None if device.get("manual") else device.get("client_name")
         caps = device_capabilities(format, device.get("os", "unknown"), client)
+        selected_personal_rules = personal_rules_for_device(profile, str(device["id"]))
+        if selected_personal_rules and format == "uri":
+            raise HTTPException(status_code=422, detail=f"{caps['label']}: персональные правила нельзя экспортировать в URI-подписку")
+        if any(rule["kind"] == "process" for rule in selected_personal_rules) and format == "xray":
+            raise HTTPException(status_code=422, detail=f"{caps['label']}: правила приложений поддерживаются только Mihomo и sing-box")
         for key in FEATURES | RULES:
             if routing.get(key) and key not in caps["features"] + caps["rules"]:
                 raise HTTPException(status_code=422, detail=f"{caps['label']}: функция {key} недоступна")
@@ -3699,6 +3867,11 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
         return config, "yaml"
     if export_format not in {"singbox", "xray", "uri"}:
         raise HTTPException(status_code=422, detail="Неизвестный формат профиля")
+    selected_personal_rules = personal_rules_for_device(profile, device_id)
+    if selected_personal_rules and export_format == "uri":
+        raise HTTPException(status_code=422, detail="Персональные правила нельзя экспортировать в URI-подписку")
+    if any(rule["kind"] == "process" for rule in selected_personal_rules) and export_format == "xray":
+        raise HTTPException(status_code=422, detail="Правила приложений поддерживаются только Mihomo и sing-box")
     connections = [entry for entry in profile.get("connections", []) if entry.get("device_id") == device_id and connection_supported(entry, export_format, reality_connection_settings, client_name)]
     if device_id == str(profile["common_device_id"]) and "tunnel_privacy" not in device_capabilities(export_format, client=client_name)["features"]:
         # Encrypted credentials cannot be downgraded in an exported file.
@@ -3711,6 +3884,7 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
             raise HTTPException(status_code=409, detail=f"Модуль {connection['component']} выбранного устройства не установлен")
     # Match the existing device-scoped preset inheritance used by the YAML exporter.
     routing = {**routing_settings(), **device_values}
+    routing["_personal_rule_lines"] = personal_rule_lines_for_device(profile, device_id)
     for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"):
         routing[key] = bool(device_values.get(key, False))
     fragment = None
@@ -3915,7 +4089,7 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, meta
         provisioned = provision_connections(str(profile["id"]), definitions, privacy_enabled=bool(inherited_routing.get("tunnel_privacy", False)))
         profile.setdefault("devices", []).append({
             "id": device_id, "name": metadata.get("device_name") or f"HWID {hwid_hash[:8].upper()}",
-            "hwid_hash": hwid_hash, "client_identity_key": client_identity_key(metadata), "routing": inherited_routing,
+            "hwid_hash": hwid_hash, "scope": "hwid", "client_identity_key": client_identity_key(metadata), "routing": inherited_routing,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "last_seen_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             **{key: value for key, value in metadata.items() if value and key != "device_name"},

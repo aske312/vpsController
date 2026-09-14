@@ -73,6 +73,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /profile_routing\.get\(key, False\)/);
   assert.match(manager, /def configured_preset_rules/);
   assert.match(manager, /"rule_lists": routing_rule_lists\(values\)/);
+  assert.match(manager, /class PersonalRuleInput/);
+  assert.match(manager, /@app\.post\("\/api\/mihomo\/routing\/personal-rules"/);
+  assert.match(manager, /personal_rule_ids/);
+  assert.match(manager, /personal_rule_lines_for_device/);
   assert.match(manager, /PROCESS-NAME-WILDCARD/);
   assert.match(manager, /find-process-mode: strict/);
   assert.match(manager, /def endpoint_latency_ms/);
@@ -88,6 +92,9 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /ruleExtraLines/);
   assert.match(page, /updateRuleExtras/);
   assert.match(page, /visibleRuleGroups/);
+  assert.match(page, /visiblePersonalRules/);
+  assert.match(page, /openPersonalRuleEditor/);
+  assert.match(page, /togglePersonalRule/);
   assert.match(page, /direct_downloads/);
   assert.match(page, /p2pClientCatalog/);
   assert.match(page, /toggleP2pClient/);

@@ -1,6 +1,6 @@
 "use client";
 
-import type { View, ReadyDevice, ConfirmOptions, Status, Module, Profile, ProfileConnection, ProfileDevice, PolicySettings, ProfilePreset, ProfileStats, RuleIconGroup } from "./types";
+import type { View, ReadyDevice, ConfirmOptions, Status, Module, Profile, ProfileConnection, ProfileDevice, PolicySettings, ProfilePreset, ProfileStats, RuleIconGroup, PersonalRule } from "./types";
 import { presetConnectionOptions, presetOptionGroups, channelShort, dnsProviderMeta, gameRoutingCatalog, defaultTunnelGameIds, defaultDirectGameIds, udpExclusionCatalog, p2pClientCatalog, profileDirectRules, ruleIconGroups, profileStrategies } from "./catalog";
 import { clientUuid, deviceClientShortName, clientConfigFormat, clientImportUrl, devicePlatformMeta, deviceSystemLabel, registeredProfileDevices, selectedGameIds } from "./profile-utils";
 import { Tab, HeroFact, ModuleCatalog, Empty } from "./components";
@@ -99,6 +99,8 @@ export function MihomoPage({
   const [presetDialog, setPresetDialog] = useState(false);
   const [presetDraft, setPresetDraft] = useState<ProfilePreset[]>([]);
   const [presetEditorIndex, setPresetEditorIndex] = useState(0);
+  const [personalRuleDialog, setPersonalRuleDialog] = useState<PersonalRule | "new" | null>(null);
+  const [personalRuleDraft, setPersonalRuleDraft] = useState({ code: "PERS", title: "", description: "", kind: "domain" as PersonalRule["kind"], entries: "", target: "GATE.312" as PersonalRule["target"] });
 
   useEffect(() => {
     profileCanvasRef.current?.scrollTo({ top: 0, behavior: "auto" });
@@ -311,6 +313,15 @@ export function MihomoPage({
 
   function toggleProfileRule(key: string, checked: boolean) {
     setProfileRoutingValue(key, checked);
+  }
+
+  function togglePersonalRule(ruleId: string) {
+    setProfileDevices((current) => current.map((device) => {
+      if (device.id !== activeDeviceId) return device;
+      const selected = new Set(device.personal_rule_ids || []);
+      if (selected.has(ruleId)) selected.delete(ruleId); else selected.add(ruleId);
+      return { ...device, personal_rule_ids: [...selected] };
+    }));
   }
 
   function toggleCollapsed(setter: Dispatch<SetStateAction<Set<string>>>, key: string) {
@@ -773,6 +784,43 @@ export function MihomoPage({
     finally { setBusy(""); }
   }
 
+  function openPersonalRuleEditor(rule?: PersonalRule) {
+    setPersonalRuleDraft(rule ? { code: rule.code, title: rule.title, description: rule.description, kind: rule.kind, entries: rule.entries.join("\n"), target: rule.target } : { code: "PERS", title: "", description: "", kind: "domain", entries: "", target: "GATE.312" });
+    setPersonalRuleDialog(rule || "new");
+  }
+
+  async function savePersonalRule(event: FormEvent) {
+    event.preventDefault();
+    setBusy("personal-rule");
+    try {
+      const payload = { ...personalRuleDraft, entries: personalRuleDraft.entries.replace(/\r/g, "").split("\n").map((entry) => entry.trim()).filter(Boolean) };
+      const ruleId = personalRuleDialog && personalRuleDialog !== "new" ? `/${encodeURIComponent(personalRuleDialog.id)}` : "";
+      await request(`/mihomo/routing/personal-rules${ruleId}`, { method: ruleId ? "PATCH" : "POST", body: JSON.stringify(payload) });
+      setPersonalRuleDialog(null);
+      await refresh();
+      notifySuccess(ruleId ? "Персональное правило обновлено" : "Персональное правило создано");
+    } catch (cause) {
+      notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить персональное правило");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function removePersonalRule(rule: PersonalRule) {
+    if (!await confirmAction({ title: `Удалить правило «${rule.title}»?`, message: "Правило будет убрано из всех устройств, где оно включено.", confirmLabel: "Удалить правило", danger: true })) return;
+    setBusy(`personal-rule:${rule.id}`);
+    try {
+      await request(`/mihomo/routing/personal-rules/${encodeURIComponent(rule.id)}`, { method: "DELETE" });
+      if (activeRuleList === `personal:${rule.id}`) setActiveRuleList("direct_ru_sites");
+      await refresh();
+      notifySuccess("Персональное правило удалено");
+    } catch (cause) {
+      notifyError(cause instanceof Error ? cause.message : "Не удалось удалить персональное правило");
+    } finally {
+      setBusy("");
+    }
+  }
+
   const transportModules = useMemo(
     () => modules.filter((item) => item.category === "transport"),
     [modules],
@@ -781,7 +829,9 @@ export function MihomoPage({
   const profilePresets = routingPolicy?.presets || [];
   const policiesReady = installedChannels.length > 0 && Boolean(dnsPolicy && routingPolicy);
   const editableRuleLists = routingPolicy?.rule_lists || [];
+  const personalRules = routingPolicy?.personal_rules || [];
   const selectedRuleList = editableRuleLists.find((item) => item.id === activeRuleList) || editableRuleLists[0];
+  const selectedPersonalRule = personalRules.find((rule) => activeRuleList === `personal:${rule.id}`);
   const selectedRuleValue = selectedRuleList ? String(routingDraft[selectedRuleList.key] ?? "@default") : "";
   const selectedRuleText = selectedRuleList ? (selectedRuleValue === "@default" ? selectedRuleList.default_rules : selectedRuleValue) : "";
   const selectedUdpExclusions = new Set(String(routingDraft.udp_tunnel_exclusions || "").split(",").filter(Boolean));
@@ -801,6 +851,7 @@ export function MihomoPage({
     group,
     rules: profileDirectRules.filter((rule) => rule.group === group && (!normalizedRuleSearch || `${rule.title} ${rule.text} ${rule.code}`.toLocaleLowerCase("ru").includes(normalizedRuleSearch))),
   })).filter((section) => section.rules.length);
+  const visiblePersonalRules = personalRules.filter((rule) => !normalizedRuleSearch || `${rule.title} ${rule.description} ${rule.code} ${rule.entries.join(" ")}`.toLocaleLowerCase("ru").includes(normalizedRuleSearch));
   const overviewDevices = profiles.reduce((sum, profile) => sum + registeredProfileDevices(profile).length, 0);
   const overviewConnections = profiles.reduce((sum, profile) => sum + profile.connections.length, 0);
   const overviewActiveConnections = Object.values(profileStats).reduce((sum, item) => sum + Number(item.summary.active || 0), 0);
@@ -1005,9 +1056,14 @@ export function MihomoPage({
 
           {view === "rules" && <>
           <section className="mihomoRuleStudio">
-            <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small><input aria-label="Поиск правил" value={ruleSearch} placeholder="Найти правило…" onChange={(event) => setRuleSearch(event.target.value)} /></header><div className="mihomoRuleLibrary">{visibleRuleGroups.map((section) => <section key={section.group}><h4>{section.group}</h4>{section.rules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</section>)}</div></aside>
+            <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small><input aria-label="Поиск правил" value={ruleSearch} placeholder="Найти правило…" onChange={(event) => setRuleSearch(event.target.value)} /></header><div className="mihomoRuleLibrary">{visibleRuleGroups.map((section) => <section key={section.group}><h4>{section.group}</h4>{section.rules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</section>)}{(visiblePersonalRules.length > 0 || !normalizedRuleSearch) && <section className="mihomoPersonalRuleLibrary"><h4>Персональные</h4>{visiblePersonalRules.map((rule) => { const profileCount = profiles.reduce((count, profile) => count + (profile.devices || []).filter((device) => (device.personal_rule_ids || []).includes(rule.id)).length, 0); return <button type="button" key={rule.id} className={activeRuleList === `personal:${rule.id}` ? "is-active" : ""} onClick={() => setActiveRuleList(`personal:${rule.id}`)}><span>{rule.code}</span><p><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></p><i>{profileCount} устр.</i></button>; })}<button type="button" className="mihomoRuleLibraryAdd" onClick={() => openPersonalRuleEditor()}>+ Создать персональное правило</button></section>}</div></aside>
             <article>
-              {activeRuleList === "direct_games_udp_enabled" ? <>
+              {selectedPersonalRule ? <>
+                <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PERSONAL RULE</p><h3>{selectedPersonalRule.title}</h3><p>{selectedPersonalRule.description || (selectedPersonalRule.kind === "process" ? "Приложения, перечисленные ниже, будут направлены через выбранный маршрут в TUN." : "Домены, перечисленные ниже, будут направлены через выбранный маршрут.")}</p></div><span>{selectedPersonalRule.entries.length} знач.</span></header>
+                <div className="mihomoPersonalRuleMeta"><span>{selectedPersonalRule.kind === "process" ? "Приложения в TUN" : "Сайты"}</span><span>{selectedPersonalRule.target}</span></div>
+                <div className="mihomoPersonalRuleEntries">{selectedPersonalRule.entries.map((entry) => <code key={entry}>{entry}</code>)}</div>
+                <footer className="mihomoRuleEditorActions"><span>Правило доступно для включения в настройках каждого устройства.</span><nav><button type="button" className="ghostButton" onClick={() => openPersonalRuleEditor(selectedPersonalRule)}>Изменить</button><button type="button" className="dangerButton" disabled={busy === `personal-rule:${selectedPersonalRule.id}`} onClick={() => void removePersonalRule(selectedPersonalRule)}>Удалить</button></nav></footer>
+              </> : activeRuleList === "direct_games_udp_enabled" ? <>
                 <header className="mihomoRuleEditorHead"><div><p className="eyebrow">NETWORK RULE</p><h3>UDP напрямую</h3><p>Выбранные исключения остаются в GATE.312, остальной UDP идёт напрямую.</p></div><span>{selectedUdpExclusions.size} искл.</span></header>
                 <div className="mihomoGameCatalog">
                   {udpExclusionCatalog.map((resource) => { const selected = selectedUdpExclusions.has(resource.id); return <button type="button" key={resource.id} className={selected ? "is-selected" : ""} aria-pressed={selected} onClick={() => toggleUdpExclusion(resource.id)}><span>{resource.code}</span><b>{resource.name}</b><i>{selected ? "Через VPN" : "Напрямую"}</i></button>; })}
@@ -1038,7 +1094,7 @@ export function MihomoPage({
             </article>
           </section>
 
-          <details className="mihomoAdvancedRules"><summary><span><b>Дополнительные правила</b><small>Для опытных пользователей</small></span><i>Открыть редактор</i></summary><label><span>По одному правилу Mihomo на строку</span><textarea rows={7} value={String(routingDraft.rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nDOMAIN,api.example.com,DIRECT"} onChange={(event) => updateRoutingDraft("rules", event.target.value)} /></label></details>
+          <details className="mihomoAdvancedRules"><summary><span><b>Глобальные дополнительные правила</b><small>Для всех конфигураций Mihomo</small></span><i>Открыть редактор</i></summary><label><span>По одному правилу Mihomo на строку</span><small>Эти правила применяются ко всем профилям. Для выборочного включения создайте правило в категории «Персональные».</small><textarea rows={7} value={String(routingDraft.rules || "")} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nDOMAIN,api.example.com,DIRECT"} onChange={(event) => updateRoutingDraft("rules", event.target.value)} /></label></details>
           </>}
 
           {view === "routing" && <>
@@ -1153,7 +1209,7 @@ export function MihomoPage({
             <ProfileProtection client={activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name} routing={activeProfileRouting} connections={profileConnections.filter((connection) => connection.device_id === activeDeviceId)} modules={modules} common={activeProfileDevice?.scope === "common"} onChange={setProfileRoutingValue} />
             {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <p className="mihomoMessage is-error" role="status">Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте.</p>}
             {transitionMessage && <p className="mihomoMessage" role="status">{transitionMessage}{activeDeviceId === liveDialogProfile?.common_device_id && " Для клиентов без HWID переход общий: обновление подписки завершает ожидание для всего общего пула."}</p>}
-            <section className="mihomoProfileRules"><header><div><b>Правила устройства</b><small>Применяются только к конфигурации выбранного устройства.</small></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length} из {visibleProfileRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div></section>
+            <section className="mihomoProfileRules"><header><div><b>Правила устройства</b><small>Включаются только в конфигурации выбранного устройства.</small></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + (activeProfileDevice?.personal_rule_ids || []).length} из {visibleProfileRules.length + personalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div>{personalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{personalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></span></button>; })}</div>}</section>
             <section className="mihomoPresetPicker">
               <header><div><b>Создать подключения из пресета</b><small>Готовый набор заменит подключения выбранной конфигурации.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настроить пресеты</button></header>
               <div>{profilePresets.filter((preset) => commonDevice || preset.components.every((item) => {
@@ -1254,6 +1310,19 @@ export function MihomoPage({
         })}{!readyDevices.length && <div className="mihomoHint">{readyFailed ? <><span>Не удалось подготовить ссылки устройств.</span><button onClick={() => setCreatedProfile({ ...createdProfile })}>Повторить</button></> : "Подготавливаем QR-коды устройств…"}</div>}</div>
         <footer><button className="primaryButton" onClick={() => setCreatedProfile(null)}>Готово</button></footer>
       </div></div>}
+      {personalRuleDialog && <div className="mihomoDialogBackdrop mihomoPersonalRuleBackdrop">
+        <form className="mihomoDialog mihomoPersonalRuleDialog" onSubmit={savePersonalRule}>
+          <header><div><p className="eyebrow">PERSONAL RULE</p><h2>{personalRuleDialog === "new" ? "Новое персональное правило" : "Изменить персональное правило"}</h2><small>Правило появится отдельной иконкой в категории «Персональные» и будет доступно всем устройствам.</small></div><button type="button" className="iconButton" aria-label="Закрыть" onClick={() => setPersonalRuleDialog(null)}>×</button></header>
+          <div className="mihomoPersonalRuleForm">
+            <label><span>Код и название</span><div className="mihomoPersonalRuleFormRow"><input value={personalRuleDraft.code} maxLength={8} placeholder="GAME" onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, code: event.target.value }))} required /><input value={personalRuleDraft.title} maxLength={80} placeholder="Например, Игровой трафик" onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, title: event.target.value }))} required /></div></label>
+            <label><span>Тип правила</span><select value={personalRuleDraft.kind} onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, kind: event.target.value as PersonalRule["kind"] }))}><option value="domain">Сайты / домены</option><option value="process">Приложения в TUN</option></select></label>
+            <label><span>Маршрут</span><select value={personalRuleDraft.target} onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, target: event.target.value as PersonalRule["target"] }))}><option value="GATE.312">Через VPN (GATE.312)</option><option value="DIRECT">Напрямую</option><option value="REJECT">Заблокировать</option></select></label>
+            <label><span>Значения — по одному в строке</span><textarea rows={8} value={personalRuleDraft.entries} placeholder={personalRuleDraft.kind === "process" ? "game.exe\ncom.example.game" : "example.com\napi.example.com"} onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, entries: event.target.value }))} required /></label>
+            <label><span>Описание <small>необязательно</small></span><input value={personalRuleDraft.description} maxLength={160} placeholder="Когда применять это правило" onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, description: event.target.value }))} /></label>
+          </div>
+          <footer><button type="button" className="ghostButton" onClick={() => setPersonalRuleDialog(null)}>Отмена</button><span>После сохранения правило включается отдельно для каждого устройства.</span><button type="submit" className="primaryButton" disabled={busy === "personal-rule"}>Сохранить правило</button></footer>
+        </form>
+      </div>}
       {presetDialog && <div className="mihomoDialogBackdrop mihomoPresetBackdrop">
         <form className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}>
           <header>

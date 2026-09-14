@@ -230,6 +230,35 @@ class SubscriptionFormatTests(unittest.TestCase):
                 self.assertEqual(len(self.store[0]["devices"]), 1)
         self.provision.assert_not_called()
 
+    def test_hwid_enabled_later_on_common_link_registers_device_on_refresh(self):
+        common_response = self.fetch("FlClashX/0.2.0", hwid=None)
+        self.assertEqual(len(self.store[0]["devices"]), 1)
+        self.assertIn(b'password: "test-only"', common_response.body)
+
+        refreshed_response = self.fetch(
+            "FlClashX/0.2.0",
+            hwid="phone-hwid",
+            extra_headers=[
+                (b"x-device-os", b"Android"),
+                (b"x-ver-os", b"15"),
+                (b"x-device-model", b"Pixel"),
+            ],
+        )
+
+        self.assertEqual(len(self.store[0]["devices"]), 2)
+        device = self.store[0]["devices"][1]
+        self.assertEqual(device["scope"], "hwid")
+        self.assertEqual(device["client_name"], "FlClashX")
+        self.assertEqual(device["os"], "android")
+        self.assertEqual(device["os_version"], "15")
+        self.assertNotEqual(refreshed_response.body, common_response.body)
+        self.assertIn(f'password: "{device["id"]}"'.encode(), refreshed_response.body)
+        self.assertEqual(
+            [entry["device_id"] for entry in self.store[0]["connections"]],
+            ["common", device["id"]],
+        )
+        self.assertEqual(self.provision.call_count, 1)
+
     def test_multiple_hwid_clients_receive_independent_profiles(self):
         first = self.fetch("HiddifyNext/2.5 (ios) like ClashMeta v2ray sing-box", "hiddify-phone")
         second = self.fetch("SFA/1.0", "android-phone")
