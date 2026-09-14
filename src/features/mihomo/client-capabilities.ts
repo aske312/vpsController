@@ -12,6 +12,7 @@ export function clientCapabilities(format: unknown, os?: string, client?: string
 export function compatibleClientRouting(routing: Record<string, string | number | boolean>, format: string, os?: string, client?: string) {
   const caps = clientCapabilities(format, os, client);
   const result: Record<string, string | number | boolean> = { ...routing, client_config_format: format };
+  if (format === "uri") result.rules = "";
   for (const key of [...catalog.mihomo.rules, "tunnel_privacy", "tunnel_ech", "tunnel_fragment"]) {
     if (key in result && ![...caps.features, ...caps.rules].includes(key)) result[key] = false;
   }

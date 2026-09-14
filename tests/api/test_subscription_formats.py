@@ -10,6 +10,37 @@ from tests.api.support import manager
 
 
 class SubscriptionFormatTests(unittest.TestCase):
+    def test_browser_qr_opens_import_page_without_registering_device(self):
+        before = deepcopy(self.store)
+        result = self.fetch("Mozilla/5.0", hwid=None, extra_headers=[(b"accept", b"text/html"), (b"host", b"example.com")])
+        body = result.body.decode()
+        self.assertIn("happ://add/", body)
+        self.assertIn("sing-box://import-remote-profile", body)
+        self.assertIn("client=v2rage", body)
+        self.assertEqual(self.store, before)
+        self.provision.assert_not_called()
+
+    def test_happ_import_handoff_works_with_generic_user_agent(self):
+        result = self.fetch("CFNetwork/3860 Darwin/25", hwid=None, query=b"client=happ")
+        self.assertIsInstance(json.loads(result.body), list)
+        self.assertEqual(self.store[0]["common_access"]["user_agent"], "CFNetwork/3860 Darwin/25")
+        self.assertEqual(self.store[0]["common_access"]["client_name"], "Happ")
+
+    def test_rocketvpn_and_v2rage_get_vless_links_instead_of_yaml(self):
+        from urllib.parse import urlsplit, parse_qs
+        self.store[0]["connections"] = [{"id": "ws", "device_id": "common", "component": "transport-reality",
+            "settings": {"route_mode": "cdn"}, "credential": {"uuid": "00000000-0000-4000-8000-000000000001",
+            "cdn_enabled": True, "cdn_domain": "example.com", "cdn_transport": "websocket", "cdn_path": "/vpn?a=1&b=2"}}]
+        for agent in ("RocketVPN/582994 CFNetwork/3860 Darwin/25", "v2RAGE/1.9"):
+            response = self.fetch(agent, hwid=None)
+            self.assertIn("text/plain", response.headers["content-type"])
+            link = urlsplit(response.body.decode().strip())
+            self.assertEqual(link.scheme, "vless")
+            self.assertEqual(link.hostname, "example.com")
+            self.assertEqual(parse_qs(link.query)["path"], ["/vpn?a=1&b=2"])
+            self.assertEqual(parse_qs(link.query)["type"], ["ws"])
+        self.provision.assert_not_called()
+
     def test_remove_registered_device_preserves_other_devices(self):
         self.fetch("koala-clash/1.0", "first")
         self.fetch("Happ/3.0", "second")

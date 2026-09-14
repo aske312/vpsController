@@ -15,6 +15,14 @@
     "strategies": ["url-test", "select"],
     "rules": ["block_ads", "block_privacy", "direct_ru_sites", "direct_ru_banks", "direct_ru_marketplaces", "direct_downloads", "direct_local_network", "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"]
   },
+  "uri": {
+    "label": "VLESS-подписка (TXT)",
+    "components": ["transport-reality"],
+    "transports": ["raw", "tcp", "grpc", "websocket", "httpupgrade"],
+    "features": [],
+    "strategies": [],
+    "rules": []
+  },
   "xray": {
     "label": "Happ · Xray JSON",
     "components": ["transport-reality", "transport-shadowsocks"],

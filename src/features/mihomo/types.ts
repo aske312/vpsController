@@ -78,7 +78,7 @@ export type ProfileConnection = {
   settings: Record<string, string | number | boolean>;
 };
 
-export type ProfileDevice = { id: string; name: string; scope?: "common" | "hwid" | "manual" | "legacy"; manual?: boolean; supported_formats?: ("mihomo" | "singbox" | "xray")[]; hwid_hash?: string; created_at?: string; last_seen_at?: string; os?: string; os_version?: string; client_name?: string; client_version?: string; user_agent?: string; routing?: Record<string, string | number | boolean> };
+export type ProfileDevice = { id: string; name: string; scope?: "common" | "hwid" | "manual" | "legacy"; manual?: boolean; supported_formats?: ("mihomo" | "singbox" | "xray" | "uri")[]; hwid_hash?: string; created_at?: string; last_seen_at?: string; os?: string; os_version?: string; client_name?: string; client_version?: string; user_agent?: string; routing?: Record<string, string | number | boolean> };
 
 export type PolicySettings = {
   schema: SettingField[];

@@ -596,8 +596,6 @@ export function MihomoPage({
     };
     const report = (message: string) => notifyOperation(operationId, operationLabel, "running", message);
     const finish = async (profile: Profile) => {
-      setReadyDevices([]);
-      setCreatedProfile(profile);
       setProfileDialog(null);
       await refresh();
       const transition = profileTransitionMessage(profile);
@@ -688,9 +686,10 @@ export function MihomoPage({
     try {
       const config = (await request(`/mihomo/profiles/${profile.id}/config${device ? `?device_id=${encodeURIComponent(device.id)}` : ""}`)) as string;
       const link = document.createElement("a");
-      const singbox = clientConfigFormat(profile, device) !== "mihomo";
-      link.href = URL.createObjectURL(new Blob([config], { type: singbox ? "application/json;charset=utf-8" : "application/yaml;charset=utf-8" }));
-      link.download = singbox ? profile.export_filename.replace(/\.yaml$/, ".json") : profile.export_filename;
+      const format = clientConfigFormat(profile, device);
+      const singbox = format === "singbox" || format === "xray";
+      link.href = URL.createObjectURL(new Blob([config], { type: format === "uri" ? "text/plain;charset=utf-8" : singbox ? "application/json;charset=utf-8" : "application/yaml;charset=utf-8" }));
+      link.download = format === "uri" ? profile.export_filename.replace(/\.yaml$/, ".txt") : singbox ? profile.export_filename.replace(/\.yaml$/, ".json") : profile.export_filename;
       document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(link.href);
       notifySuccess(`Профиль «${profile.name}» скачан.`);
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось скачать профиль"); }
@@ -931,7 +930,7 @@ export function MihomoPage({
                     return <section key={device.id} className="mihomoProfileDevice">
                       <header className="mihomoDeviceHeader">
                         <button type="button" className="mihomoDeviceToggle" aria-expanded={protocolsExpanded} onClick={() => toggleCollapsed(setExpandedProtocolLists, protocolListKey)}><div className="mihomoDeviceIdentity"><span>{device.scope === "common" ? "ALL" : devicePlatformMeta(device).code}</span><p><b><DeviceClientBadge device={device} />{device.scope === "common" ? "Общие настройки профиля" : device.name}</b><small>{connections.length} каналов · {device.scope === "hwid" ? deviceSystemLabel(device) : device.scope === "common" ? "для клиентов без HWID и новых устройств" : device.scope === "manual" ? "Общий sing-box для всех клиентов" : "устаревшее устройство"}</small>{device.scope === "hwid" && <em>{device.last_seen_at ? `Последний запрос ${new Date(device.last_seen_at).toLocaleString("ru-RU")}` : "HWID зарегистрирован"}</em>}</p></div><div className="mihomoDeviceTotals"><span><small>КАНАЛЫ</small><b>{onlineCount}/{connections.length}</b></span><span><small>ПРАВИЛА</small><b>{ruleCount}</b></span><span><small>ТРАФИК</small><b>↓ {bytes(deviceRx)} · ↑ {bytes(deviceTx)}</b></span></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
-                        <nav className="mihomoDeviceActions"><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>{clientConfigFormat(profile, device) !== "mihomo" ? "Скачать JSON" : "Скачать YAML"}</button>{device.scope !== "common" && <button className="dangerButton" onClick={() => void removeProfileDevice(profile, device)} disabled={deleting} title="Удалить это устройство и его подключения">{deleting ? "Удаление…" : "Удалить устройство"}</button>}</nav>
+                        <nav className="mihomoDeviceActions"><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>{clientConfigFormat(profile, device) === "uri" ? "Скачать TXT" : clientConfigFormat(profile, device) !== "mihomo" ? "Скачать JSON" : "Скачать YAML"}</button>{device.scope !== "common" && <button className="dangerButton" onClick={() => void removeProfileDevice(profile, device)} disabled={deleting} title="Удалить это устройство и его подключения">{deleting ? "Удаление…" : "Удалить устройство"}</button>}</nav>
                       </header>
                     {protocolsExpanded && <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0)); return <div key={connection.id}><span className={`protocol-${connection.component}${online ? " online" : ""}`}>{channelShort[connection.component] || "CH"}<i /></span><p><b>{connection.name}</b><small>↓ {bytes(item?.rx_bytes || 0)} · ↑ {bytes(item?.tx_bytes || 0)}</small>{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Для устройства пока нет подключений.</p>}</div>}
                     </section>;
@@ -1247,7 +1246,7 @@ export function MihomoPage({
               {device.scope !== "common" && <small>{device.manual ? "Общий JSON для всех устройств профиля, без привязки к HWID." : "Устройство привязано к HWID."}</small>}
               <small>{device.scope === "common" ? "Сканируйте QR в клиенте: новые устройства зарегистрируются, существующие сохранят свои настройки. Формат файла определяется по приложению." : happ ? "Добавьте ссылку подписки в Happ или скачайте Xray JSON." : singbox ? "Отсканируйте QR камерой iPhone или откройте в sing-box. Для импорта из файла скачайте JSON." : "Отсканируйте QR-код в приложении Mihomo или скачайте YAML."}</small>
               <nav>{(singbox || karing || hiddify) && <a className="primaryButton" href={clientImportUrl(device.subscription, `${createdProfile.name} · ${device.name}`, singbox ? "singbox" : "mihomo", karing ? "Karing" : hiddify ? "Hiddify" : "")}>{karing ? "Открыть в Karing" : hiddify ? "Открыть в Hiddify" : "Открыть в sing-box"}</a>}
-                <button className="primaryButton" disabled={busy === `download:${createdProfile.id}`} onClick={() => void downloadConfig(createdProfile, device)}>{singbox || happ ? "Скачать JSON" : "Скачать YAML"}</button>
+                <button className="primaryButton" disabled={busy === `download:${createdProfile.id}`} onClick={() => void downloadConfig(createdProfile, device)}>{format === "uri" ? "Скачать TXT" : singbox || happ ? "Скачать JSON" : "Скачать YAML"}</button>
                 <button onClick={() => void copyText(device.subscription)}>Скопировать ссылку на файл</button>
               </nav>
             </div>

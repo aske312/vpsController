@@ -46,7 +46,7 @@ export function registeredProfileDevices(profile: Profile) {
 export function clientConfigFormat(profile: Profile, device?: ProfileDevice) {
   const selected = device || profile.devices?.find((item) => item.id === profile.common_device_id || item.scope === "common");
   const format = (selected?.routing || profile.routing)?.client_config_format;
-  return format === "xray" || format === "singbox" ? format : "mihomo";
+  return format === "uri" || format === "xray" || format === "singbox" ? format : "mihomo";
 }
 
 export function clientImportUrl(url: string, name: string, format: string, client = "") {

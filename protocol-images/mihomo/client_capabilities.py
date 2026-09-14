@@ -21,6 +21,8 @@ def device_capabilities(format, os=None, client=None):
 
 def compatible_routing(routing, format, os=None, client=None):
     result = dict(routing)
+    if format == "uri":
+        result["rules"] = ""
     caps = device_capabilities(format, os, client)
     for key in FEATURES | RULES:
         if key in result and key not in caps["features"] + caps["rules"]:

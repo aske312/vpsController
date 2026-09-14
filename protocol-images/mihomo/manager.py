@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from profile_transition import GRACE_SECONDS, stage_vless_transition, transition_delivery_revision, mark_transition_delivered
 from client_singbox import build_singbox_config, singbox_rules, UnsupportedClientConfig
 from client_xray import build_xray_configs, xray_rules
+from client_subscription import CLIENT_HINTS, import_page, vless_subscription
 from client_capabilities import CAPABILITIES, FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
@@ -3036,6 +3037,8 @@ def list_profiles() -> dict[str, Any]:
 # Application signatures precede generic core names: Hiddify advertises
 # "like ClashMeta v2ray sing-box" in its User-Agent. See docs/client-compatibility.md.
 CLIENT_SIGNATURES = (
+    (r"\bv2rage\b", "v2RAGE", ("uri",)),
+    (r"\brocketvpn\b", "RocketVPN", ("uri",)),
     (r"\bhapp\b", "Happ", ("xray",)),
     (r"\bv2rayn\b", "v2rayN", ("xray",)),
     (r"\bkaring\b", "Karing", ("mihomo", "singbox")),
@@ -3689,13 +3692,15 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
         config = render_profile(profile, device_id)
         validate_rendered_profile(config)
         return config, "yaml"
-    if export_format not in {"singbox", "xray"}:
+    if export_format not in {"singbox", "xray", "uri"}:
         raise HTTPException(status_code=422, detail="Неизвестный формат профиля")
     connections = [entry for entry in profile.get("connections", []) if entry.get("device_id") == device_id and connection_supported(entry, export_format, reality_connection_settings, client_name)]
     if device_id == str(profile["common_device_id"]) and "tunnel_privacy" not in device_capabilities(export_format, client=client_name)["features"]:
         # Encrypted credentials cannot be downgraded in an exported file.
         connections = [entry for entry in connections if not entry.get("credential", {}).get("encryption")]
     device_values = compatible_routing(device_values, export_format, client=client_name)
+    if export_format == "uri":
+        device_values["rules"] = ""
     for connection in connections:
         if not module_is_installed(str(connection["component"])):
             raise HTTPException(status_code=409, detail=f"Модуль {connection['component']} выбранного устройства не установлен")
@@ -3714,8 +3719,10 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
     for key in ("tunnel_ech", "tunnel_privacy"):
         routing[key] = bool(device_values.get(key, False))
     try:
-        if export_format == "xray":
+        if export_format in {"xray", "uri"}:
             config = build_xray_configs(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings)
+            if export_format == "uri":
+                return vless_subscription(config), "txt"
         else:
             config = build_singbox_config(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings, fragment, device_capabilities(export_format, client=client_name))
     except UnsupportedClientConfig as exc:
@@ -3828,6 +3835,10 @@ def subscription_device_metadata(request: Request) -> dict[str, str]:
         if version_match:
             os_version = version_match.group(1).replace("_", ".")
     client_name = clean(request.headers.get("x-client-name"), 80)
+    hint = CLIENT_HINTS.get(request.query_params.get("client", ""))
+    if hint:
+        # Explicit import handoff also works when an app uses a generic HTTP UA.
+        client_name = hint
     if not client_name:
         client_name = client_identity({"user_agent": user_agent})[0]
     return {
@@ -3943,6 +3954,12 @@ def public_profile_subscription(token: str, request: Request) -> PlainTextRespon
                 break
     if not selected_profile:
         raise HTTPException(status_code=404, detail="Subscription not found")
+    if "text/html" in request.headers.get("accept", "").lower() and not request.query_params.get("client") and not client_formats(subscription_device_metadata(request)):
+        return HTMLResponse(import_page(str(request.url).split("?", 1)[0]), headers={
+            "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+            "X-Robots-Tag": "noindex, nofollow", "Vary": "Accept, User-Agent",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+        })
     raw_hwid = (request.headers.get("x-device-id") or request.headers.get("x-hwid") or request.query_params.get("hwid") or "").strip()
     if len(raw_hwid) > 256:
         raise HTTPException(status_code=422, detail="HWID is too long")
@@ -3998,7 +4015,7 @@ def public_profile_subscription(token: str, request: Request) -> PlainTextRespon
                                   transition_delivery_revision(selected_profile, selected_device))
     return PlainTextResponse(
         config,
-        media_type="application/json" if extension == "json" else "text/yaml; charset=utf-8",
+        media_type="application/json" if extension == "json" else "text/plain" if extension == "txt" else "text/yaml; charset=utf-8",
         background=delivery,
         headers={
             "Cache-Control": "no-store",
