@@ -11,14 +11,16 @@ setting() {
   printf '%s' "${value:-${fallback}}"
 }
 
-PORT="$(setting VLESS_REALITY_PORT 443)"
+PORT="${VLESS_REALITY_PORT:-$(setting VLESS_REALITY_PORT 8443)}"
+API_PORT="${VLESS_API_PORT:-$(setting VLESS_API_PORT 10085)}"
+export VLESS_API_PORT="${API_PORT}"
 TARGET="$(setting VLESS_REALITY_TARGET www.intel.com:443)"
 CDN_DOMAIN="$(setting VLESS_CDN_DOMAIN '')"
-CDN_PORT="$(setting VLESS_CDN_PORT 10087)"
+CDN_PORT="${VLESS_CDN_PORT:-$(setting VLESS_CDN_PORT 10087)}"
 CDN_TRANSPORT="$(setting VLESS_CDN_TRANSPORT xhttp)"
 CDN_XHTTP_MODE="$(setting VLESS_CDN_XHTTP_MODE auto)"
 TLS_DOMAIN="$(setting VLESS_TLS_DOMAIN '')"
-TLS_PORT="$(setting VLESS_TLS_PORT 10088)"
+TLS_PORT="${VLESS_TLS_PORT:-$(setting VLESS_TLS_PORT 10088)}"
 TLS_TRANSPORT="$(setting VLESS_TLS_TRANSPORT xhttp)"
 TLS_XHTTP_MODE="$(setting VLESS_TLS_XHTTP_MODE auto)"
 TLS_ENABLED="no"
@@ -212,7 +214,7 @@ if ! grep -q '^XHTTP_PATH=' "${CONFIG_DIR}/reality.env"; then
   sed -i "s|^PATH=.*|XHTTP_PATH=${XHTTP_PATH}|" "${CONFIG_DIR}/reality.env"
 fi
 python3 - "${CONFIG_DIR}/config.json" "${PORT}" "${TARGET}" "${TARGET_HOST}" "${PRIVATE_KEY}" "${SHORT_ID}" "${XHTTP_PATH}" "${CDN_DOMAIN}" "${CDN_PORT}" "${CDN_PATH}" "${CDN_ENABLED}" "${CDN_TRANSPORT}" "${CDN_XHTTP_MODE}" "${TLS_DOMAIN}" "${TLS_PORT}" "${CDN_PATH}-tls" "${TLS_ENABLED}" "${TLS_TRANSPORT}" "${TLS_XHTTP_MODE}" <<'PY'
-import json, sys
+import json, os, sys
 output, port, target, host, private_key, short_id, path, cdn_domain, cdn_port, cdn_path, cdn_enabled, cdn_transport, cdn_xhttp_mode, tls_domain, tls_port, tls_path, tls_enabled, tls_transport, tls_xhttp_mode = sys.argv[1:]
 existing_clients_by_id = {}
 try:
@@ -269,7 +271,7 @@ if tls_enabled == "yes" and tls_domain:
 config = {
   "log": {"loglevel": "warning"},
   "stats": {},
-  "api": {"tag": "api", "listen": "127.0.0.1:10085", "services": ["StatsService"]},
+  "api": {"tag": "api", "listen": "127.0.0.1:" + os.environ.get("VLESS_API_PORT", "10085"), "services": ["StatsService"]},
   "policy": {"levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}}},
   "inbounds": inbounds,
   "outbounds": [{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "blocked"}],

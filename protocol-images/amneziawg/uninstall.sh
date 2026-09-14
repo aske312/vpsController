@@ -17,6 +17,8 @@ CONFIGURED_AWG_CONFIG="$(env_value AWG_CONFIG)"
 CONFIGURED_AWG_CONFIG="${CONFIGURED_AWG_CONFIG:-/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf}"
 PACKAGE_CONFIG="/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf"
 QUICK_CONFIG="/etc/amnezia/${AWG_INTERFACE}.conf"
+saved_port="$(sed -n 's/^ListenPort[[:space:]]*=[[:space:]]*//p' "${CONFIGURED_AWG_CONFIG}" 2>/dev/null | head -n1 || true)"
+AWG_PORT="${saved_port:-${AWG_PORT}}"
 
 systemctl disable --now "awg-quick@${AWG_INTERFACE}.service" 2>/dev/null || true
 if command -v ufw >/dev/null 2>&1; then

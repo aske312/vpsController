@@ -32,6 +32,7 @@ from fastapi.responses import JSONResponse
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cdn_security
+import port_allocation
 from dns_policy import build_xray_dns, probe_xray_dns, successful_dns_response
 import cdn_operation
 import ech_settings
@@ -570,7 +571,8 @@ def stream_sample(key: str, rx: int, tx: int, fallback_age: int | None = None) -
 
 
 def xray_user_stats(email: str, journal_age: int | None = None) -> tuple[int, int, int | None, float, float]:
-    output = run(XRAY_BIN, "api", "statsquery", "-server=127.0.0.1:10085", "-pattern", f"user>>>{email}>>>traffic>>>", timeout=3)
+    server = port_allocation.read_json(VLESS_CONFIG).get("api", {}).get("listen", "127.0.0.1:10085")
+    output = run(XRAY_BIN, "api", "statsquery", f"-server={server}", "-pattern", f"user>>>{email}>>>traffic>>>", timeout=3)
     uplink = downlink = 0
     try:
         payload = json.loads(output)
@@ -624,7 +626,8 @@ def shadowsocks_connections(port: int) -> int:
 def hysteria2_stats() -> tuple[dict[str, dict], dict[str, int]]:
     def request(path: str) -> dict:
         try:
-            call = urllib.request.Request(f"http://127.0.0.1:18082{path}", headers={"Authorization": "vps-control-local"})
+            port = int(port_allocation.read_json(HYSTERIA2_SETTINGS).get("stats_port", 18082))
+            call = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers={"Authorization": "vps-control-local"})
             with urllib.request.urlopen(call, timeout=2) as response:
                 value = json.loads(response.read(1024 * 1024))
                 return value if isinstance(value, dict) else {}
@@ -3694,6 +3697,55 @@ def certificate_server_name(path: Path) -> str:
     return match.group(1)
 
 
+@port_allocation.release_on_error(lambda payload, client_id, safe_name: f"panel:ss:{client_id}")
+def create_shadowsocks_client(payload: ClientCreate, client_id: str, safe_name: str) -> dict:
+    if run("systemctl", "show", "vps-control-shadowsocks.target", "--property=LoadState", "--value") != "loaded":
+        raise HTTPException(status_code=409, detail="shadowsocks protocol is not installed")
+    used_ports = {int(item["port"]) for item in read_clients() if item.get("protocol") == "shadowsocks" and item.get("port")}
+    try:
+        port = port_allocation.allocate(f"panel:ss:{client_id}", SHADOWSOCKS_PORT_START, {"tcp", "udp"}, used=used_ports, count=10000)
+    except port_allocation.PortConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    password = secrets.token_urlsafe(32)
+    method = "chacha20-ietf-poly1305"
+    config_path = SHADOWSOCKS_CONFIG_DIR / f"{client_id}.json"
+    temporary_config = config_path.with_suffix(".tmp")
+    try:
+        SHADOWSOCKS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        temporary_config.write_text(json.dumps({
+            "server": "::", "server_port": port, "password": password, "method": method,
+            "timeout": payload.settings.timeout or 300, "mode": payload.settings.shadowsocks_mode, "fast_open": False,
+            "no_delay": payload.settings.no_delay, "mtu": payload.settings.mtu or 1200,
+        }, indent=2), encoding="utf-8")
+        os.chmod(temporary_config, 0o600)
+        temporary_config.replace(config_path)
+        port_allocation.release(f"panel:ss:{client_id}")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="Unable to save Shadowsocks client configuration") from exc
+    finally:
+        temporary_config.unlink(missing_ok=True)
+    try:
+        shadowsocks_firewall("add", port)
+        run("systemctl", "enable", "--now", f"vps-control-shadowsocks@{client_id}.service", timeout=20, check=True)
+        if run("systemctl", "is-active", f"vps-control-shadowsocks@{client_id}.service") != "active":
+            raise RuntimeError("Shadowsocks client service did not become active")
+    except Exception:
+        run("systemctl", "disable", "--now", f"vps-control-shadowsocks@{client_id}.service")
+        try:
+            shadowsocks_firewall("delete", port)
+        except Exception:
+            pass
+        config_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="Unable to start Shadowsocks client service")
+    userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
+    endpoint, channel_mode = channel_mode_endpoint("shadowsocks", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
+    client_config = f"ss://{userinfo}@{endpoint}:{port}#{urllib.parse.quote(payload.name)}"
+    items = read_clients()
+    items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+    write_clients(items)
+    return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config}
+
+
 @app.post("/api/clients")
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
     client_id = secrets.token_hex(8)
@@ -3874,45 +3926,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 raise HTTPException(status_code=500,detail="Unable to create Trojan connection") from exc
             finally: temporary.unlink(missing_ok=True)
     if payload.protocol == "shadowsocks":
-        if run("systemctl", "show", "vps-control-shadowsocks.target", "--property=LoadState", "--value") != "loaded":
-            raise HTTPException(status_code=409, detail="shadowsocks protocol is not installed")
-        used_ports = {int(item["port"]) for item in read_clients() if item.get("protocol") == "shadowsocks" and item.get("port")}
-        port = next((candidate for candidate in range(SHADOWSOCKS_PORT_START, min(65536, SHADOWSOCKS_PORT_START + 10000)) if candidate not in used_ports), None)
-        if port is None:
-            raise HTTPException(status_code=409, detail="No free Shadowsocks ports")
-        password = secrets.token_urlsafe(32)
-        method = "chacha20-ietf-poly1305"
-        config_path = SHADOWSOCKS_CONFIG_DIR / f"{client_id}.json"
-        try:
-            SHADOWSOCKS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            config_path.write_text(json.dumps({
-                "server": "::", "server_port": port, "password": password, "method": method,
-                "timeout": payload.settings.timeout or 300, "mode": payload.settings.shadowsocks_mode, "fast_open": False,
-                "no_delay": payload.settings.no_delay, "mtu": payload.settings.mtu or 1200,
-            }, indent=2), encoding="utf-8")
-            os.chmod(config_path, 0o600)
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail="Unable to save Shadowsocks client configuration") from exc
-        try:
-            shadowsocks_firewall("add", port)
-            run("systemctl", "enable", "--now", f"vps-control-shadowsocks@{client_id}.service", timeout=20, check=True)
-            if run("systemctl", "is-active", f"vps-control-shadowsocks@{client_id}.service") != "active":
-                raise RuntimeError("Shadowsocks client service did not become active")
-        except Exception:
-            run("systemctl", "disable", "--now", f"vps-control-shadowsocks@{client_id}.service")
-            try:
-                shadowsocks_firewall("delete", port)
-            except Exception:
-                pass
-            config_path.unlink(missing_ok=True)
-            raise HTTPException(status_code=500, detail="Unable to start Shadowsocks client service")
-        userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
-        endpoint, channel_mode = channel_mode_endpoint("shadowsocks", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
-        client_config = f"ss://{userinfo}@{endpoint}:{port}#{urllib.parse.quote(payload.name)}"
-        items = read_clients()
-        items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
-        write_clients(items)
-        return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config}
+        with client_mutation_lock:
+            return create_shadowsocks_client(payload, client_id, safe_name)
 
     if payload.protocol == "vless-reality-xhttp":
         with client_mutation_lock:
@@ -4108,6 +4123,7 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
         port = int(item.get("port", 0))
         run("systemctl", "disable", "--now", f"vps-control-shadowsocks@{client_id}.service", timeout=20)
         (SHADOWSOCKS_CONFIG_DIR / f"{client_id}.json").unlink(missing_ok=True)
+        port_allocation.release(f"panel:ss:{client_id}")
         if port:
             try:
                 shadowsocks_firewall("delete", port)
@@ -4545,7 +4561,9 @@ def update_protocol_settings(
             tls = (f"acme:\n  domains:\n    - {json.dumps(domain)}\n" if tls_mode == "acme" else
                    f"tls:\n  cert: {HYSTERIA2_DIR}/server.crt\n  key: {HYSTERIA2_DIR}/server.key\n  sniGuard: disable\n")
             obfs = (f"obfs:\n  type: salamander\n  salamander:\n    password: {json.dumps(str(settings.get('obfs_password', '')))}\n" if settings.get("obfs_enabled") else "")
-            config_text = f"listen: :{port}\n{tls}auth:\n  type: http\n  http:\n    url: http://127.0.0.1:18081/auth\ntrafficStats:\n  listen: 127.0.0.1:18082\n  secret: vps-control-local\n{obfs}masquerade:\n  type: string\n  string:\n    content: Not Found\n    statusCode: 404\n"
+            auth_port = int(settings.get("auth_port", 18081))
+            stats_port = int(settings.get("stats_port", 18082))
+            config_text = f"listen: :{port}\n{tls}auth:\n  type: http\n  http:\n    url: http://127.0.0.1:{auth_port}/auth\ntrafficStats:\n  listen: 127.0.0.1:{stats_port}\n  secret: vps-control-local\n{obfs}masquerade:\n  type: string\n  string:\n    content: Not Found\n    statusCode: 404\n"
             temporary.write_text(config_text, encoding="utf-8")
             os.chmod(temporary, 0o600)
             old_port = int(json.loads(original_settings).get("port", 8443))

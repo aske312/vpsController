@@ -55,14 +55,16 @@ EOF
 chmod 0755 /usr/local/sbin/vps-control-shadowsocks-firewall
 # Keep UDP datagrams below the conservative tunnel MTU. This avoids EMSGSIZE
 # drops on mobile and tunneled client paths while preserving TCP + UDP mode.
-python3 - "${PORT_START}" <<'PY'
+python3 - "${PORT_START}" "$(dirname "$0")/../../api" <<'PY'
 import glob, json, os
 import sys
+sys.path.insert(0, sys.argv[2])
+import port_allocation
 
 port_start = int(sys.argv[1])
-next_port = port_start
 used_ports = set()
 for path in sorted(glob.glob("/etc/vps-control/shadowsocks/clients/*.json")):
+    owner = 'panel:ss:' + os.path.basename(path).removesuffix('.json')
     try:
         with open(path, encoding="utf-8") as source:
             config = json.load(source)
@@ -73,13 +75,8 @@ for path in sorted(glob.glob("/etc/vps-control/shadowsocks/clients/*.json")):
         except (TypeError, ValueError):
             port = 0
         if not 1024 <= port <= 65535 or port in used_ports:
-            while next_port <= 65535 and next_port in used_ports:
-                next_port += 1
-            if next_port > 65535:
-                raise ValueError("no free Shadowsocks port during migration")
-            config["server_port"] = next_port
-            port = next_port
-            next_port += 1
+            port = port_allocation.allocate(owner, port_start, {'tcp', 'udp'}, used=used_ports, count=10000)
+            config["server_port"] = port
         used_ports.add(port)
         if config.get("method") == "chacha20-ietf-poly13005":
             config["method"] = "chacha20-ietf-poly1305"
@@ -94,6 +91,8 @@ for path in sorted(glob.glob("/etc/vps-control/shadowsocks/clients/*.json")):
         os.replace(temporary, path)
     except (OSError, ValueError):
         continue
+    finally:
+        port_allocation.release(owner)
 PY
 cat >/etc/systemd/system/vps-control-shadowsocks.target <<'EOF'
 [Unit]

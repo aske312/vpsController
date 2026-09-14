@@ -11,8 +11,10 @@ PY
 MODULE_DIR=/usr/local/lib/vps-control-mihomo-reality
 CONFIG_DIR=/etc/vps-control/mihomo/reality
 PORT_START="$(setting port_start 9443)"; CDN_PORT_START="$(setting cdn_port_start 10443)"
+API_PORT="$(setting api_port 10086)"
 XRAY_DNS="$(setting dns '1.1.1.1, 1.0.0.1')"; LOGLEVEL="$(setting loglevel warning)"
 [[ "${PORT_START}" =~ ^[0-9]+$ && "${PORT_START}" -ge 1024 && "${PORT_START}" -le 65535 ]] || exit 1
+[[ "${API_PORT}" =~ ^[0-9]+$ && "${API_PORT}" -ge 1024 && "${API_PORT}" -le 65535 ]] || exit 1
 [[ "${CDN_PORT_START}" =~ ^[0-9]+$ && "${CDN_PORT_START}" -ge 1024 && "${CDN_PORT_START}" -le 65535 && "${CDN_PORT_START}" != "${PORT_START}" ]] || exit 1
 [[ "${LOGLEVEL}" =~ ^(debug|info|warning|error|none)$ ]] || exit 1
 export DEBIAN_FRONTEND=noninteractive
@@ -35,13 +37,13 @@ if [[ ! -s "${CONFIG_DIR}/reality.env" ]]; then
  printf 'PRIVATE_KEY=%s\nPUBLIC_KEY=%s\nSHORT_ID=%s\n' "${private}" "${public}" "$(openssl rand -hex 8)" >"${CONFIG_DIR}/reality.env"
 fi
 chmod 0600 "${CONFIG_DIR}/reality.env"; candidate="${CONFIG_DIR}/config.candidate.json"
-python3 - "${CONFIG_DIR}/config.json" "${candidate}" "${XRAY_DNS}" "${LOGLEVEL}" <<'PY'
+python3 - "${CONFIG_DIR}/config.json" "${candidate}" "${XRAY_DNS}" "${LOGLEVEL}" "${API_PORT}" <<'PY'
 import json,os,sys
 try:
  with open(sys.argv[1],encoding="utf-8") as h:old=json.load(h)
 except (OSError,ValueError):old={}
 ins=[x for x in old.get('inbounds',[]) if str(x.get('tag','')).startswith('mihomo-vless-')]
-ins.append({'tag':'api','listen':'127.0.0.1','port':10086,'protocol':'dokodemo-door','settings':{'address':'127.0.0.1'}})
+ins.append({'tag':'api','listen':'127.0.0.1','port':int(sys.argv[5]),'protocol':'dokodemo-door','settings':{'address':'127.0.0.1'}})
 private_networks=['10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','127.0.0.0/8','169.254.0.0/16','::1/128','fc00::/7','fe80::/10']
 c={'log':{'loglevel':sys.argv[4]},'api':{'tag':'api','services':['StatsService']},'stats':{},'policy':{'levels':{'0':{'statsUserUplink':True,'statsUserDownlink':True}}},'inbounds':ins,'dns':{'servers':[x.strip() for x in sys.argv[3].split(',') if x.strip()],'queryStrategy':'UseIP'},'routing':{'domainStrategy':'IPIfNonMatch','rules':[{'type':'field','domain':['full:admin.312.net'],'outboundTag':'panel-local'},{'type':'field','inboundTag':['api'],'outboundTag':'api'},{'type':'field','ip':private_networks,'outboundTag':'blocked'}]},'outbounds':[{'protocol':'freedom','tag':'direct'},{'protocol':'freedom','tag':'panel-local','settings':{'redirect':'127.0.0.1:80'}},{'protocol':'blackhole','tag':'blocked'}]}
 with open(sys.argv[2],'w',encoding='utf-8') as h:json.dump(c,h,ensure_ascii=False,indent=2)

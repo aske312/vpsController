@@ -41,6 +41,7 @@ from client_subscription import CLIENT_HINTS, import_page, vless_subscription
 from client_capabilities import CAPABILITIES, FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
+import port_allocation
 
 APP_ROOT = Path("/opt/vps-control")
 MODULE_ROOT = APP_ROOT / "protocol-images" / "mihomo"
@@ -1778,6 +1779,105 @@ class ModulePortConflict(RuntimeError):
     """A safe, actionable conflict message without command output or credentials."""
 
 
+FIXED_UDP_MODULES = ("transport-wg", "transport-awg", "transport-hysteria2", "transport-tuic")
+MODULE_LISTENERS = {**{module: ("port", {"udp"}) for module in FIXED_UDP_MODULES},
+                    "transport-reality": ("api_port", {"tcp"})}
+
+
+def reserved_module_ports(protocols: set[str], exclude: str | None = None) -> set[int]:
+    """Persisted listeners remain reserved even while their services are stopped."""
+    return port_allocation.reserved_ports(protocols, f"mihomo:{exclude}" if exclude else None)
+
+
+def unavailable_module_ports(protocols: set[str], exclude: str | None = None) -> set[int]:
+    listeners = run("ss", "-Hanut")
+    if listeners.returncode:
+        raise RuntimeError("Не удалось проверить занятые TCP/UDP-порты сервера")
+    ports = reserved_module_ports(protocols, exclude)
+    for line in listeners.stdout.splitlines():
+        fields = line.split()
+        if len(fields) < 5 or fields[0] not in {"tcp", "udp"}:
+            raise RuntimeError("Не удалось прочитать список TCP/UDP-портов сервера")
+        if fields[0] in protocols:
+            try:
+                ports.add(int(fields[4].rsplit(":", 1)[1]))
+            except ValueError as exc:
+                raise RuntimeError("Не удалось прочитать список TCP/UDP-портов сервера") from exc
+    return ports
+
+
+def free_module_port(start: int, protocols: set[str], exclude: str | None = None,
+                     used: set[int] | None = None, count: int = 4000, wrap: bool = False,
+                     owner: str | None = None) -> int:
+    if owner:
+        return port_allocation.allocate(owner, start, protocols, used=used, count=count,
+                                        snapshot=lambda: unavailable_module_ports(protocols, exclude))
+    occupied = unavailable_module_ports(protocols, exclude) | (used or set())
+    ranges = [(start, min(start + count, 65536))]
+    if wrap:
+        ranges.append((1024, start))
+    for lower, upper in ranges:
+        for port in range(lower, upper):
+            if port not in occupied:
+                return port
+    raise ModulePortConflict("Нет свободных портов в выбранном диапазоне. Измените начальный порт в настройках модуля.")
+
+
+def check_module_port(module_id: str, port: int) -> None:
+    if module_id not in MODULE_LISTENERS:
+        return
+    _, protocols = MODULE_LISTENERS[module_id]
+    protocol = "/".join(sorted(protocols)).upper()
+    if port in reserved_module_ports(protocols, exclude=module_id):
+        raise ModulePortConflict(f"{protocol}-порт {port} зарезервирован другим компонентом Mihomo.")
+    if module_id in {"transport-hysteria2", "transport-tuic"}:
+        check_quic_port(module_id, port)
+        return
+    if module_id == "transport-reality":
+        config = load_json(CONFIG_ROOT / "reality" / "config.json", {})
+        if systemctl_active(SERVICE_BY_MODULE[module_id]) and any(
+            item.get("tag") == "api" and item.get("port") == port for item in config.get("inbounds", [])
+        ):
+            return
+        if port in unavailable_module_ports(protocols, exclude=module_id):
+            raise ModulePortConflict(f"TCP-порт {port} уже занят. Выберите свободный служебный порт VLESS.")
+        return
+    # WireGuard listeners live in the kernel, not in the service's process tree.
+    tool, interface = ("wg", "mh-wg0") if module_id == "transport-wg" else ("awg", "mh-awg0")
+    if systemctl_active(SERVICE_BY_MODULE[module_id]):
+        current = run(tool, "show", interface, "listen-port")
+        if current.returncode == 0 and current.stdout.strip() == str(port):
+            return
+    if port in unavailable_module_ports({"udp"}, exclude=module_id):
+        raise ModulePortConflict(f"UDP-порт {port} уже занят. Выберите свободный порт в настройках модуля Mihomo.")
+
+
+def prepare_module_port(module_id: str) -> None:
+    if module_id not in MODULE_LISTENERS:
+        return
+    key, protocols = MODULE_LISTENERS[module_id]
+    values = module_settings(module_id)
+    conflict = False
+    try:
+        check_module_port(module_id, int(values[key]))
+    except ModulePortConflict:
+        # Never invalidate credentials already delivered to clients, including
+        # the old generation retained during a profile transition.
+        if module_id in FIXED_UDP_MODULES and any(connection.get("component") == module_id
+               for profile in profiles()
+               for connection in [*profile.get("connections", []), *profile.get("retiring_connections", [])]):
+            raise
+        conflict = True
+    try:
+        values[key] = port_allocation.allocate(f"mihomo:{module_id}", int(values[key]), protocols,
+            fixed=not conflict, allow_live=not conflict and systemctl_active(SERVICE_BY_MODULE[module_id]),
+            snapshot=lambda: unavailable_module_ports(protocols, exclude=module_id))
+    except port_allocation.PortConflict as exc:
+        raise ModulePortConflict(str(exc)) from exc
+    atomic_json(SETTINGS_ROOT / f"{module_id}.json", values)
+    port_allocation.release(f"mihomo:{module_id}")
+
+
 def check_quic_port(module_id: str, port: int) -> None:
     if module_id not in {"transport-hysteria2", "transport-tuic"}:
         return
@@ -1787,7 +1887,7 @@ def check_quic_port(module_id: str, port: int) -> None:
         for inbound in config.get("inbounds", [])
     ):
         return  # The running module already owns its configured port.
-    listeners = run("ss", "-Hlun", "sport", "=", f":{port}")
+    listeners = run("ss", "-Huan", "sport", "=", f":{port}")
     if listeners.returncode:
         raise RuntimeError("Unable to check UDP listeners before installing the module")
     if listeners.stdout.strip():
@@ -1798,8 +1898,7 @@ def check_quic_port(module_id: str, port: int) -> None:
 
 def preflight_module(info: dict[str, Any]) -> None:
     module_id = info["id"]
-    if module_id in {"transport-hysteria2", "transport-tuic"}:
-        check_quic_port(module_id, int(module_settings(module_id)["port"]))
+    prepare_module_port(module_id)
     os_release: dict[str, str] = {}
     try:
         for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
@@ -1953,9 +2052,10 @@ def get_module_settings(module_id: str) -> dict[str, Any]:
 def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[str, Any]:
     previous_values = module_settings(module_id)
     next_values = validate_settings(module_id, patch.values)
-    if module_id in {"transport-hysteria2", "transport-tuic"} and next_values["port"] != previous_values["port"]:
+    port_key = MODULE_LISTENERS.get(module_id, (None, set()))[0]
+    if port_key and next_values[port_key] != previous_values[port_key]:
         try:
-            check_quic_port(module_id, int(next_values["port"]))
+            check_module_port(module_id, int(next_values[port_key]))
         except ModulePortConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
@@ -2191,7 +2291,7 @@ def remove_wg_credential(profile_id: str, module_id: str, credential: dict[str, 
 def used_ss_ports() -> set[int]:
     result: set[int] = set()
     for profile in profiles():
-        for connection in profile.get("connections", []):
+        for connection in [*profile.get("connections", []), *profile.get("retiring_connections", [])]:
             if connection.get("component") == "transport-shadowsocks":
                 try:
                     result.add(int(connection.get("credential", {}).get("port", 0)))
@@ -2200,13 +2300,12 @@ def used_ss_ports() -> set[int]:
     return result
 
 
+@port_allocation.release_on_error(lambda profile_id, connection_id="default": f"mihomo:ss:{profile_id}-{connection_id}")
 def add_ss_credential(profile_id: str, connection_id: str = "default") -> dict[str, Any]:
     settings = module_settings("transport-shadowsocks")
     start = int(settings["port_start"])
     used = used_ss_ports()
-    port = next((candidate for candidate in range(start, min(start + 2000, 65536)) if candidate not in used), None)
-    if port is None:
-        raise RuntimeError("No free Mihomo Shadowsocks ports")
+    port = free_module_port(start, {"tcp", "udp"}, used=used, count=2000, owner=f"mihomo:ss:{profile_id}-{connection_id}")
     password = secrets.token_urlsafe(24)
     config_dir = CONFIG_ROOT / "shadowsocks"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -2222,6 +2321,7 @@ def add_ss_credential(profile_id: str, connection_id: str = "default") -> dict[s
     }
     instance_id = f"{profile_id}-{connection_id}"
     atomic_json(config_dir / f"{instance_id}.json", config)
+    port_allocation.release(f"mihomo:ss:{instance_id}")
     run("systemctl", "enable", "--now", f"vps-control-mihomo-ss@{instance_id}.service", check=True)
     if shutil.which("ufw") and run("ufw", "status").stdout.startswith("Status: active"):
         run("ufw", "allow", f"{port}/tcp")
@@ -2234,10 +2334,20 @@ def remove_ss_credential(profile_id: str, credential: dict[str, Any]) -> None:
     run("systemctl", "disable", "--now", f"vps-control-mihomo-ss@{instance_id}.service")
     path = CONFIG_ROOT / "shadowsocks" / f"{instance_id}.json"
     path.unlink(missing_ok=True)
+    port_allocation.release(f"mihomo:ss:{instance_id}")
     port = credential.get("port")
     if port and shutil.which("ufw"):
         run("ufw", "delete", "allow", f"{port}/tcp")
         run("ufw", "delete", "allow", f"{port}/udp")
+
+
+def reality_api_server() -> str:
+    # Read the applied config, so changing a draft setting cannot redirect stats.
+    config = load_json(CONFIG_ROOT / "reality" / "config.json", {})
+    for inbound in config.get("inbounds", []):
+        if inbound.get("tag") == "api" and inbound.get("port"):
+            return f"127.0.0.1:{int(inbound['port'])}"
+    return REALITY_API_SERVER
 
 
 def reality_env() -> dict[str, str]:
@@ -2379,12 +2489,8 @@ def used_vless_ports(config: dict[str, Any]) -> set[int]:
     return {int(item.get("port", 0)) for item in config.get("inbounds", []) if isinstance(item, dict) and int(item.get("port", 0) or 0) > 0}
 
 
-def next_vless_port(config: dict[str, Any], start: int) -> int:
-    used = used_vless_ports(config)
-    for port in range(start, min(start + 4000, 65536)):
-        if port not in used:
-            return port
-    raise RuntimeError("No free VLESS ports in the configured range")
+def next_vless_port(config: dict[str, Any], start: int, owner: str | None = None) -> int:
+    return free_module_port(start, {"tcp"}, used=used_vless_ports(config), owner=owner)
 
 
 def vless_stream(settings: dict[str, Any], private_key: str, short_id: str) -> dict[str, Any]:
@@ -2569,6 +2675,7 @@ def apply_tunnel_privacy(enabled: bool) -> None:
         save_profiles(items)
 
 
+@port_allocation.release_on_error(lambda profile_id, connection_id, *args, **kwargs: f"mihomo:vless:{profile_id}-{connection_id}:")
 def add_reality_credential(profile_id: str, connection_id: str, connection_settings: dict[str, Any], restart_service: bool = True, reload_caddy: bool = True, privacy_enabled: bool = False) -> dict[str, Any]:
     config_path = CONFIG_ROOT / "reality" / "config.json"
     config = load_json(config_path, {})
@@ -2577,12 +2684,16 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     settings = validate_connection("transport-reality", connection_settings)
     core = module_settings("transport-reality")
     direct_enabled = settings["route_mode"] in {"direct", "both"}
-    direct_port = (int(settings["port"]) or next_vless_port(config, int(core["port_start"]))) if direct_enabled else 0
-    if direct_enabled and direct_port in used_vless_ports(config):
+    allocation_owner = f"mihomo:vless:{profile_id}-{connection_id}"
+    direct_port = (int(settings["port"]) or next_vless_port(config, int(core["port_start"]), allocation_owner + ":direct")) if direct_enabled else 0
+    if direct_enabled and int(settings["port"]) and direct_port in (used_vless_ports(config) | unavailable_module_ports({"tcp"})):
         raise RuntimeError(f"VLESS port {direct_port} is already used")
+    if direct_enabled and int(settings["port"]):
+        port_allocation.allocate(allocation_owner + ":direct", direct_port, {"tcp"}, fixed=True,
+                                 snapshot=lambda: unavailable_module_ports({"tcp"}))
     port_allocation_config = {**config, "inbounds": [*config.get("inbounds", []), *([{"port": direct_port}] if direct_enabled else [])]}
-    cdn_port = next_vless_port(port_allocation_config, int(core["cdn_port_start"])) if settings["cdn_enabled"] else 0
-    tls_port = next_vless_port(port_allocation_config, int(core.get("tls_port_start", 11443))) if settings["tls_enabled"] else 0
+    cdn_port = next_vless_port(port_allocation_config, int(core["cdn_port_start"]), allocation_owner + ":cdn") if settings["cdn_enabled"] else 0
+    tls_port = next_vless_port(port_allocation_config, int(core.get("tls_port_start", 11443)), allocation_owner + ":tls") if settings["tls_enabled"] else 0
     env = reality_env()
     private_key, public_key = env.get("PRIVATE_KEY", ""), env.get("PUBLIC_KEY", "")
     if not private_key or not public_key:
@@ -2630,6 +2741,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         write_mihomo_vless_cdn(route_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"], rebuild=reload_caddy)
         write_mihomo_vless_cdn(f"tls-{route_id}", settings["tls_enabled"], settings["tls_domain"], tls_path, tls_port, settings["tls_transport"], rebuild=reload_caddy)
         apply_reality_config(config_path, config, restart_service=restart_service)
+        port_allocation.release_prefix(allocation_owner + ":")
         if reload_caddy and (settings["cdn_enabled"] or settings["tls_enabled"]):
             run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
             run("systemctl", "reload", "caddy.service", check=True)
@@ -2862,7 +2974,7 @@ def reality_profile_stats(profile_id: str, connection_id: str | None = None) -> 
     email = f"mihomo-{profile_id}" + (f"-{connection_id}" if connection_id else "")
     output = run(
         str(REALITY_XRAY_BIN), "api", "statsquery",
-        f"-server={REALITY_API_SERVER}", "-pattern", f"user>>>{email}>>>traffic>>>",
+        f"-server={reality_api_server()}", "-pattern", f"user>>>{email}>>>traffic>>>",
     ).stdout
     uplink = downlink = 0
     try:

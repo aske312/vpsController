@@ -5,9 +5,8 @@ STATE=/var/lib/vps-control/hysteria2
 BIN=/usr/local/lib/vps-control-hysteria2/hysteria
 CONFIG="${ROOT}/config.yaml"
 PORT="${HYSTERIA2_PORT:-8443}"
-if [[ ! -s "${ROOT}/settings.json" ]]; then
-  while ss -H -lun "sport = :${PORT}" | grep -q .; do PORT=$((PORT + 1)); [[ ${PORT} -le 65535 ]] || { echo 'No free UDP port for Hysteria2' >&2; exit 1; }; done
-fi
+AUTH_PORT="${HYSTERIA2_AUTH_PORT:-18081}"
+STATS_PORT="${HYSTERIA2_STATS_PORT:-18082}"
 
 case "$(dpkg --print-architecture)" in amd64) asset_arch=amd64;; arm64) asset_arch=arm64;; *) echo 'Unsupported architecture' >&2; exit 2;; esac
 apt-get update
@@ -40,6 +39,13 @@ chmod 0600 "${ROOT}/server.key" "${ROOT}/server.crt"
 [[ -s "${ROOT}/users.json" ]] || printf '{}\n' >"${ROOT}/users.json"
 [[ -s "${ROOT}/settings.json" ]] || printf '{"port":%s,"tls_mode":"pinned","domain":"","obfs_enabled":false,"obfs_password":""}\n' "${PORT}" >"${ROOT}/settings.json"
 chmod 0600 "${ROOT}/users.json" "${ROOT}/settings.json"
+python3 - "${ROOT}/settings.json" "${PORT}" "${AUTH_PORT}" "${STATS_PORT}" <<'PY'
+import json,sys
+path=sys.argv[1]
+with open(path,encoding='utf-8') as source: values=json.load(source)
+values.update(zip(('port','auth_port','stats_port'),map(int,sys.argv[2:])))
+with open(path,'w',encoding='utf-8') as target: json.dump(values,target)
+PY
 cat >"${CONFIG}" <<EOF
 listen: :${PORT}
 tls:
@@ -49,9 +55,9 @@ tls:
 auth:
   type: http
   http:
-    url: http://127.0.0.1:18081/auth
+    url: http://127.0.0.1:${AUTH_PORT}/auth
 trafficStats:
-  listen: 127.0.0.1:18082
+  listen: 127.0.0.1:${STATS_PORT}
   secret: vps-control-local
 masquerade:
   type: string

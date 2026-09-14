@@ -15,6 +15,8 @@ WG_SUBNET="${WG_SUBNET:-10.72.0.0/24}"
 UPLINK_INTERFACE="$(ip -o -4 route show default | awk '{print $5; exit}')"
 WG_CONFIG="$(env_value WG_CONFIG)"
 WG_CONFIG="${WG_CONFIG:-/etc/wireguard/${WG_INTERFACE}.conf}"
+saved_port="$(sed -n 's/^ListenPort[[:space:]]*=[[:space:]]*//p' "${WG_CONFIG}" 2>/dev/null | head -n1 || true)"
+WG_PORT="${saved_port:-${WG_PORT}}"
 
 systemctl disable --now "wg-quick@${WG_INTERFACE}.service" 2>/dev/null || true
 if command -v ufw >/dev/null 2>&1; then

@@ -29,4 +29,5 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         return
 
-ThreadingHTTPServer(("127.0.0.1", 18081), Handler).serve_forever()
+settings = json.loads(USERS.with_name("settings.json").read_text(encoding="utf-8"))
+ThreadingHTTPServer(("127.0.0.1", int(settings.get("auth_port", 18081))), Handler).serve_forever()

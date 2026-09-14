@@ -101,6 +101,8 @@ class ModuleInstallationTests(unittest.TestCase):
                 with (
                     patch.object(manager, 'ACTION_FILE', action),
                     patch.object(manager, 'module_is_installed', return_value=False),
+                    patch.object(manager, 'profiles', return_value=[{'connections': [{'component': module}]}]),
+                    patch.object(manager, 'reserved_module_ports', return_value=set()),
                     patch.object(manager, 'module_settings', return_value={'port': 8443}),
                     patch.object(manager, 'systemctl_active', return_value=False),
                     patch.object(manager, 'load_json', return_value={}),
@@ -113,7 +115,7 @@ class ModuleInstallationTests(unittest.TestCase):
                 self.assertEqual(raised.exception.status_code, 409)
                 self.assertIn('8443', raised.exception.detail)
                 install.assert_not_called()
-                run.assert_called_once_with('ss', '-Hlun', 'sport', '=', ':8443')
+                run.assert_called_once_with('ss', '-Huan', 'sport', '=', ':8443')
                 self.assertEqual(json.loads(action.read_text(encoding='utf-8'))['message'], raised.exception.detail)
 
     def test_free_port_and_own_running_listener_are_allowed_but_probe_failure_is_not(self):

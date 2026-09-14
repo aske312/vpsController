@@ -1531,16 +1531,18 @@ verify_protocol_image_ready() {
   local image_id="$1" port
   case "${image_id}" in
     wg)
+      port="$(wg show "${WG_INTERFACE}" listen-port)" || return 1
       systemctl is-active --quiet "wg-quick@${WG_INTERFACE}.service" \
         && ip link show "${WG_INTERFACE}" >/dev/null 2>&1 \
         && wg show "${WG_INTERFACE}" >/dev/null 2>&1 \
-        && ss -Hlun | grep -Eq "[:.]${WG_PORT}[[:space:]]"
+        && ss -Hlun | grep -Eq "[:.]${port}[[:space:]]"
       ;;
     awg)
+      port="$(awg show "${AWG_INTERFACE}" listen-port)" || return 1
       systemctl is-active --quiet "awg-quick@${AWG_INTERFACE}.service" \
         && ip link show "${AWG_INTERFACE}" >/dev/null 2>&1 \
         && awg show "${AWG_INTERFACE}" >/dev/null 2>&1 \
-        && ss -Hlun | grep -Eq "[:.]${AWG_PORT}[[:space:]]"
+        && ss -Hlun | grep -Eq "[:.]${port}[[:space:]]"
       ;;
     shadowsocks)
       systemctl is-active --quiet vps-control-shadowsocks.target \
@@ -1570,6 +1572,19 @@ wait_protocol_image_ready() {
     sleep 0.5
   done
   verify_protocol_image_ready "${image_id}"
+}
+
+prepare_protocol_ports() {
+  local image_id="$1" selected key value
+  selected="$(ENV_FILE="${ENV_FILE}" python3 "${INSTALL_DIR}/api/port_allocation.py" "${image_id}")" \
+    || die "не удалось выделить порты ${image_id}; установка не запускалась."
+  while IFS='=' read -r key value; do
+    [[ -n "${key}" ]] || continue
+    [[ "${key}" =~ ^[A-Z0-9_]+_PORT$ && "${value}" =~ ^[0-9]+$ ]] || die "некорректный результат выбора портов."
+    printf -v "${key}" '%s' "${value}"
+    export "${key}"
+    set_env_value "${key}" "${value}"
+  done <<<"${selected}"
 }
 
 install_protocol_image() {
@@ -1603,6 +1618,7 @@ PY
   [[ "${installer}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${installer}" ]] \
     || die "образ ${image_id} содержит некорректный installer."
   info "Установка образа ${image_id}"
+  prepare_protocol_ports "${image_id}"
   prepare_package_manager
   preflight_protocol_image "${manifest}" \
     || die "preflight модуля ${image_id} не пройден; установка не запускалась."
@@ -1649,6 +1665,7 @@ PY
   # the API code or environment and does not require an API restart.
   sync_protocol_monitor
   ok "Образ ${image_id} установлен."
+  python3 "${INSTALL_DIR}/api/port_allocation.py" "${image_id}" --release
 }
 
 remove_protocol_image() {
@@ -1839,9 +1856,9 @@ configure_vpn_firewall_policy() {
       subnet="$(ip -4 route show dev "${interface}" proto kernel scope link | awk 'NR == 1 {print $1}')"
       [[ -n "${subnet}" ]] || continue
       if [[ "${interface}" == "${WG_INTERFACE}" ]]; then
-        port="${WG_PORT}"
+        port="$(wg show "${interface}" listen-port)"
       else
-        port="${AWG_PORT}"
+        port="$(awg show "${interface}" listen-port)"
       fi
       installed=$((installed + 1))
       printf 'iptables -C INPUT -p udp --dport %q -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p udp --dport %q -j ACCEPT\n' "${port}" "${port}"

@@ -247,6 +247,8 @@ class TunnelPrivacyTests(unittest.TestCase):
             self.assertEqual(run.call_count, 1)
 
     def test_encryption_is_applied_only_to_owned_inbounds(self):
+        self.enterContext(patch.object(manager, "unavailable_module_ports", return_value=set()))
+        self.enterContext(patch.object(manager.port_allocation, "DATA_ROOT", Path(self.enterContext(tempfile.TemporaryDirectory()))))
         manifest = json.loads((ROOT / "protocol-images/mihomo/modules/transport-reality/manifest.json").read_text())
         defaults = {field["key"]: field.get("default") for field in manifest["connection_settings"]}
         settings = {**defaults, "privacy_mode": "encrypted", "route_mode": "both", "cdn_enabled": True, "tls_enabled": False, "cdn_domain": "example.com"}
@@ -265,6 +267,8 @@ class TunnelPrivacyTests(unittest.TestCase):
                 client_validation.assert_called_once()
 
     def test_client_validation_failure_leaves_server_untouched(self):
+        self.enterContext(patch.object(manager, "unavailable_module_ports", return_value=set()))
+        self.enterContext(patch.object(manager.port_allocation, "DATA_ROOT", Path(self.enterContext(tempfile.TemporaryDirectory()))))
         manifest = json.loads((ROOT / "protocol-images/mihomo/modules/transport-reality/manifest.json").read_text())
         settings = {field["key"]: field.get("default") for field in manifest["connection_settings"]}
         settings.update({"privacy_mode": "encrypted", "route_mode": "cdn", "cdn_enabled": True, "tls_enabled": False, "cdn_domain": "example.com"})
