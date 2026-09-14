@@ -1,4 +1,4 @@
-﻿[data-network-page] { width: 100%; min-width: 0; }
+[data-network-page] { width: 100%; min-width: 0; }
 [data-network-page] .networkBoard { display: grid; gap: 14px; width: 100%; max-width: none; margin: 0; padding: 0 0 24px; color: var(--text); font-family: var(--ui-font); }
 [data-network-page] * { box-sizing: border-box; }
 [data-network-page] [hidden] { display: none !important; }
@@ -247,3 +247,10 @@
 @media (max-width: 700px) {
   [data-network-page] .networkDnsSuggestion { flex-direction: column; align-items: stretch; margin: 0 12px 12px; }
 }
+[data-network-page] .networkEch { margin-top: 10px; white-space: normal; }
+[data-network-page] .networkEch section { min-width: 280px; max-width: 620px; padding: 16px; margin-top: 12px; border: 1px solid var(--line, #334155); border-radius: 12px; }
+[data-network-page] .networkEch p { line-height: 1.5; margin: 12px 0; }
+[data-network-page] .networkEch dl > div { margin: 12px 0; }
+[data-network-page] .networkEch dd { margin: 4px 0 0; display: flex; align-items: flex-start; gap: 8px; }
+[data-network-page] .networkEch dd code { white-space: normal; overflow-wrap: anywhere; min-width: 0; flex: 1; }
+[data-network-page] .networkEch dd button { flex-shrink: 0; }

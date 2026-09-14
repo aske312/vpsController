@@ -5,6 +5,7 @@ import type { DnsCheck, DnsSettings, DnsStatus, NetworkStatus } from "../../shar
 import { useNotifier } from "../../shared/notifications/notification-center";
 import { probeNetworkDns, readNetworkControl, saveNetworkDns, type NetworkRequest } from "./network-api";
 import { DnsView } from "./network-dns";
+import { NetworkEch } from "./network-ech";
 import { dnsComponents } from "./system-dns-control";
 
 type Props = { request: NetworkRequest; refreshKey?: number };
@@ -99,7 +100,7 @@ export function NetworkView({ request, refreshKey = 0 }: Props) {
     {!status ? <section className="networkEmpty" role="status"><NetworkIcon /><h2>{loading ? "Загружаем настройки сети" : "Не удалось получить данные"}</h2><p>{loading ? "Получаем состояние сервера и DNS." : "Повторите загрузку кнопкой «Обновить»."}</p></section> : <>
       {loadFailed && <p className="networkNotice" role="status">Обновление не удалось. Показаны последние полученные данные.</p>}
       <div hidden={section !== "dns"}><DnsView dns={dns} dnsDraft={dnsDraft} dnsChecks={dnsChecks} checkingDns={checkingDns} busy={busy} loading={loading} dirty={dirty} setDnsDraft={setDnsDraft} checkDnsProviders={checkDnsProviders} saveDnsSettings={saveDnsSettings} /></div>
-      <div hidden={section !== "diagnostics"}><Diagnostics status={status} /></div>
+      <div hidden={section !== "diagnostics"}><Diagnostics status={status} request={request} /></div>
     </>}
   </main></div>;
 }
@@ -109,7 +110,7 @@ function formatTime(value: string) {
   return Number.isNaN(date.getTime()) ? "Время неизвестно" : date.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-function Diagnostics({ status }: { status: NetworkStatus }) {
+function Diagnostics({ status, request }: { status: NetworkStatus; request: NetworkRequest }) {
   const [query, setQuery] = useState("");
   const domains = status.domains.filter((domain) => `${domain.value} ${domain.role} ${domain.resolved.join(" ")}`.toLowerCase().includes(query.toLowerCase().trim()));
   const evidence = [...new Set([...status.route.evidence, ...status.edge.evidence])];
@@ -119,6 +120,6 @@ function Diagnostics({ status }: { status: NetworkStatus }) {
       <dl className="networkSystemFacts"><div><dt>IPv4 системы</dt><dd><code>{status.server.public_ipv4 || (!status.server.public_ip.includes(":") ? status.server.public_ip : "Не назначен")}</code></dd></div><div><dt>IPv6 системы</dt><dd><code>{status.server.public_ipv6 || (status.server.public_ip.includes(":") ? status.server.public_ip : "Не назначен")}</code></dd></div><div><dt>TLS</dt><dd>{status.tls.mode}<small>{status.tls.certificate_source}</small></dd></div><div><dt>DNS системы</dt><dd><code>{status.resolvers.join(", ") || "Нет данных"}</code></dd></div></dl>
     </section>
     <section className="networkAccessBoard" aria-label="Точки доступа"><header><h2>Точки доступа</h2><p>Адреса подключения к панели</p></header><div>{[["Панель", status.access.panel_url], ["Прямой доступ", status.access.direct_url], ["Защищённый доступ", status.access.protected_url]].filter(([, value], index, items) => value && items.findIndex(([, address]) => address === value) === index).map(([label, value]) => <div className="networkAccessEntry" key={value}><span>{label}</span><code>{value}</code></div>)}</div></section>
-    <section className="networkPanel"><header className="networkSectionHeading"><div><h2>Домены и маршруты</h2></div><label className="networkSearch"><span className="networkSrOnly">Поиск домена или IP</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти домен или IP" /></label></header><div className="networkTableWrap"><table><thead><tr><th>Домен</th><th>Назначение</th><th>Разрешённые адреса</th><th>Маршрут</th></tr></thead><tbody>{domains.map((domain) => <tr key={`${domain.role}-${domain.value}`}><td><strong>{domain.value}</strong></td><td><span>{domain.role}</span><small>{domain.source}</small></td><td><code>{domain.resolved.join(", ") || "Нет DNS-ответа"}</code></td><td><span className={`networkBadge ${domain.route}`}>{routeLabels[domain.route]}</span></td></tr>)}</tbody></table></div>{!domains.length && <p className="networkEmpty">{query ? "Совпадений нет." : "Домены не настроены."}</p>}<details className="networkEvidence"><summary>Сведения о маршруте</summary>{evidence.length ? <ul>{evidence.map((item) => <li key={item}>{item}</li>)}</ul> : <p>Сервер не вернул пояснений.</p>}</details></section>
+    <section className="networkPanel"><header className="networkSectionHeading"><div><h2>Домены и маршруты</h2></div><label className="networkSearch"><span className="networkSrOnly">Поиск домена или IP</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти домен или IP" /></label></header><div className="networkTableWrap"><table><thead><tr><th>Домен</th><th>Назначение</th><th>Разрешённые адреса</th><th>Маршрут</th></tr></thead><tbody>{domains.map((domain) => <tr key={`${domain.role}-${domain.value}`}><td><strong>{domain.value}</strong>{domain.role.includes("CDN") && <NetworkEch domain={domain.value} route={domain.route} request={request} />}</td><td><span>{domain.role}</span><small>{domain.source}</small></td><td><code>{domain.resolved.join(", ") || "Нет DNS-ответа"}</code></td><td><span className={`networkBadge ${domain.route}`}>{routeLabels[domain.route]}</span></td></tr>)}</tbody></table></div>{!domains.length && <p className="networkEmpty">{query ? "Совпадений нет." : "Домены не настроены."}</p>}<details className="networkEvidence"><summary>Сведения о маршруте</summary>{evidence.length ? <ul>{evidence.map((item) => <li key={item}>{item}</li>)}</ul> : <p>Сервер не вернул пояснений.</p>}</details></section>
   </div>;
 }

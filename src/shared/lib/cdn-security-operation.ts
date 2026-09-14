@@ -6,7 +6,11 @@ export type CdnOperation = {
   state: "queued" | "running" | "succeeded" | "failed" | "unknown";
   progress: number;
   message: string;
+  kind?: "ech";
+  domain?: string;
+  result?: EchRecord;
 };
+export type EchRecord = { domain: string; public_name: string; type: string; priority: number; target: string; ttl: number; parameters: string; content: string };
 export type CdnSecurityStatus = { authenticated_origin_pulls: boolean; operation?: CdnOperation | null };
 type Request = ReturnType<typeof createApiClient>;
 type Report = (operation: CdnOperation) => void;
@@ -60,8 +64,8 @@ export async function submitCdnSecurity(request: Request, operation: CdnOperatio
   report(operation);
   let tracked = operation;
   try {
-    const status = await request<CdnSecurityStatus>("/application/cdn-security", {
-      method: "PUT", body: JSON.stringify({ authenticated_origin_pulls: operation.enabled, operation_id: operation.id }), signal: options.signal,
+    const status = await request<CdnSecurityStatus>(operation.kind === "ech" ? "/application/ech" : "/application/cdn-security", {
+      method: "PUT", body: JSON.stringify(operation.kind === "ech" ? { domain: operation.domain, operation_id: operation.id } : { authenticated_origin_pulls: operation.enabled, operation_id: operation.id }), signal: options.signal,
     });
     options.signal?.throwIfAborted();
     if (status.operation?.id !== operation.id) throw new CdnResultUnknown();

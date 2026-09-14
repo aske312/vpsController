@@ -38,6 +38,11 @@ class CdnSecuritySettings(BaseModel):
     operation_id: str = Field(default_factory=lambda: uuid.uuid4().hex, pattern=r"^[0-9a-f]{32}$")
 
 
+class EchSettings(BaseModel):
+    domain: str = Field(min_length=1, max_length=253)
+    operation_id: str = Field(default_factory=lambda: uuid.uuid4().hex, pattern=r"^[0-9a-f]{32}$")
+
+
 class ServiceModeSettings(BaseModel):
     active: bool
 

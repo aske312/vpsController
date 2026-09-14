@@ -49,6 +49,24 @@ test("resuming an operation only reads its result", async () => {
   assert.equal((await followCdnSecurity(request(), initial, () => {})).operation.state, "succeeded");
 });
 
+test("ECH preparation uses its endpoint and recovers a lost acknowledgement without replay", async () => {
+  const ech = { ...initial, kind: "ech", domain: "cdn.example.com" };
+  let writes = 0;
+  globalThis.fetch = async (path, init) => {
+    if (init.method === "PUT") {
+      writes++;
+      assert.equal(path, "/api/application/ech");
+      assert.deepEqual(JSON.parse(init.body), { domain: ech.domain, operation_id: ech.id });
+      throw new TypeError("connection lost");
+    }
+    assert.match(path, /cdn-security\?operation_id=/);
+    return Response.json({ authenticated_origin_pulls: false, operation: { ...ech, state: "succeeded", result: { domain: ech.domain } } });
+  };
+  const final = await submitCdnSecurity(request(), ech, () => {}, { pollDelayMs: 0 });
+  assert.equal(writes, 1);
+  assert.equal(final.operation.result.domain, ech.domain);
+});
+
 test("another operation cannot accidentally confirm this command", async () => {
   globalThis.fetch = async () => Response.json({ ...result("succeeded"), operation: { ...initial, id: "b".repeat(32), state: "succeeded" } });
   await assert.rejects(followCdnSecurity(request(), initial, () => {}), CdnResultUnknown);

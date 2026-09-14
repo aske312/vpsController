@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cdn_security
 from dns_policy import build_xray_dns, probe_xray_dns, successful_dns_response
 import cdn_operation
+import ech_settings
 from schemas import (
     BootstrapRequest,
     AdminPasswordChange,
@@ -42,6 +43,7 @@ from schemas import (
     ServiceAction,
     PanelAccessSettings,
     CdnSecuritySettings,
+    EchSettings,
     ServiceModeSettings,
     LoggingSettings,
     AutomationSchedule,
@@ -1326,7 +1328,11 @@ def network_status() -> dict:
     for route in cdn_security.read_routes():
         candidates.append((route.get("domain", ""), "VLESS CDN" if route.get("cloudflare", True) else "VLESS TLS", "gateway"))
     for domain, role, source in candidates:
-        if domain and not any(item["value"] == domain for item in domain_items):
+        existing = next((item for item in domain_items if item['value'] == domain), None)
+        if existing is not None:
+            if role not in existing['role'].split(', '):
+                existing['role'] += ', ' + role
+        elif domain:
             item = network_domain_probe(domain, role)
             item["source"] = source
             domain_items.append(item)
@@ -2731,6 +2737,29 @@ def update_cdn_security(payload: CdnSecuritySettings, _: None = Depends(require_
     except cdn_operation.OperationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {**cdn_security.settings(), "operation": operation}
+
+
+@app.get('/api/application/ech')
+def ech_status(domain: str, _: None = Depends(require_token)) -> dict:
+    try:
+        domain = ech_settings.hostname(domain)
+        result = ech_settings.record(domain)
+        operation = cdn_operation.status()
+        if operation and (operation.get('kind') != 'ech' or operation.get('domain') != domain):
+            operation = None
+        return {'record': result, 'operation': operation}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.put('/api/application/ech', status_code=202)
+def prepare_ech(payload: EchSettings, _: None = Depends(require_token)) -> dict:
+    try:
+        domain = ech_settings.check_domain(payload.domain)
+        operation = cdn_operation.start(True, payload.operation_id, CONTROL_COMMAND, domain=domain)
+    except (ValueError, cdn_operation.OperationConflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {**cdn_security.settings(), 'operation': operation}
 
 
 @app.put("/api/services/panel-access", status_code=202)

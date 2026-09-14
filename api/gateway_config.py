@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 import cdn_security
+import ech_settings
 
 
 PRIVATE_SOURCES = "127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
@@ -53,7 +54,7 @@ def render(template: str, mode: str, port: int, values: dict[str, str]) -> str:
     }}
 }}
 """
-    return template
+    return ech_settings.inject(template)
 
 
 def validate_candidate(template_root: Path, mode: str, port: int, values: dict[str, str], caddy: str = "caddy") -> None:

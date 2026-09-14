@@ -81,6 +81,18 @@ class CdnOperationTests(unittest.TestCase):
         self.assertEqual(operations.status(ID)["state"], "succeeded")
         self.assertEqual(operations.status(ID)["progress"], 100)
 
+    def test_ech_worker_persists_public_record_and_rejects_reusing_id_for_cf(self):
+        with patch.object(operations.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')):
+            operations.start(True, ID, '/control', domain='cdn.example.com')
+            with self.assertRaises(operations.OperationConflict):
+                operations.start(True, ID, '/control')
+        record = {'domain': 'cdn.example.com', 'parameters': 'ech="public"'}
+        with patch.object(operations.ech_settings, 'prepare', return_value=record), patch.object(operations.cdn_security, 'configure_aop') as cf:
+            operations.run(ID)
+            cf.assert_not_called()
+        self.assertEqual(operations.status(ID)['result'], record)
+        self.assertEqual(operations.status(ID)['state'], 'succeeded')
+
     def test_worker_failure_is_saved_without_exposing_traceback(self):
         self.start()
         with patch.object(operations.cdn_security, "configure_aop", side_effect=RuntimeError("private technical detail")), patch.object(operations.traceback, "print_exc") as log:

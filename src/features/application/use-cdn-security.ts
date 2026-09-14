@@ -55,6 +55,7 @@ export function useCdnSecurity(request: ReturnType<typeof createApiClient>, toke
   return {
     operation, pending,
     change: (enabled: boolean) => pending ? Promise.resolve() : execute(newCdnOperation(enabled)),
+    prepareEch: (domain: string) => pending ? Promise.resolve() : execute({ ...newCdnOperation(true), kind: "ech", domain, message: "Подготовка ECH…" }),
     recheck: () => { if (operation) void execute(operation, true); },
     dismiss: () => { if (!pending) setOperation((current) => current?.id === operation?.id ? null : current); },
   };

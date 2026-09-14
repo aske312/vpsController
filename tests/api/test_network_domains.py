@@ -5,6 +5,12 @@ from tests.api.support import api
 
 
 class NetworkDomainsTests(unittest.TestCase):
+    def test_shared_panel_and_cdn_domain_retains_both_roles(self):
+        with patch.object(api, 'PUBLIC_DOMAIN', 'shared.example.com'), patch.object(api, 'VLESS_CDN_DOMAIN', ''), patch.object(api.cdn_security, 'read_routes', return_value=[{'domain': 'shared.example.com'}]), patch.object(api.socket, 'getaddrinfo', return_value=[]), patch.object(api, 'run', return_value=''):
+            domains = api.network_status()['domains']
+        self.assertEqual(len(domains), 1)
+        self.assertEqual(domains[0]['role'], 'panel, VLESS CDN')
+
     def test_gateway_domains_are_visible_without_global_cdn_setting(self):
         routes = [
             {"domain": "cdn.example.com", "cloudflare": True},

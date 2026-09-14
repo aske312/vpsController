@@ -21,7 +21,7 @@ export function OperationNotifications({ action, label, active, command, onReche
   }, [store, action, label, active, onCancel]);
   useEffect(() => {
     if (!command) return;
-    store.upsert({ id: `operation:cdn:${command.id}`, source: "cdn", title: "Проверка сертификата Cloudflare", message: command.message,
+    store.upsert({ id: `operation:cdn:${command.id}`, source: "cdn", title: command.kind === "ech" ? "Настройка ECH" : "Проверка сертификата Cloudflare", message: command.message,
       state: command.state === "succeeded" ? "success" : command.state === "failed" ? "error" : command.state === "unknown" ? "unknown" : "running",
       kind: "operation", progress: command.state === "queued" ? undefined : command.progress,
       action: command.state === "unknown" && onRecheck ? { label: "Проверить результат", run: onRecheck } : undefined, onDismiss });

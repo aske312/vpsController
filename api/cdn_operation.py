@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 
 import cdn_security
+import ech_settings
 
 DIRECTORY = Path("/var/lib/vps-control/cdn-operations")
 ACTIVE = {"queued", "running"}
@@ -65,23 +66,25 @@ def status(operation_id: str | None = None) -> dict | None:
     return operation
 
 
-def start(enabled: bool, operation_id: str, control_command: str) -> dict:
+def start(enabled: bool, operation_id: str, control_command: str, *, domain: str | None = None) -> dict:
     path = operation_path(operation_id)
     DIRECTORY.mkdir(parents=True, exist_ok=True)
     with (DIRECTORY / "start.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if path.exists():
             existing = status(operation_id)
-            if existing["enabled"] != enabled:
+            if existing["enabled"] != enabled or existing.get('domain') != domain:
                 raise OperationConflict("Эта команда уже отправлена с другой настройкой")
             return existing
         current = status()
         if current and current["state"] in ACTIVE:
-            raise OperationConflict("Проверка CF уже выполняется. Дождитесь результата.")
+            raise OperationConflict("Операция настройки шлюза уже выполняется. Дождитесь результата.")
         operation = {
             "id": operation_id, "enabled": enabled, "state": "queued", "progress": 0,
             "message": "Команда принята", "created_at": time.time(),
         }
+        if domain is not None:
+            operation.update(kind='ech', domain=domain)
         # Persist before launch: a fast worker must not have its result overwritten.
         write(operation)
         pointer = DIRECTORY / "current.tmp"
@@ -118,14 +121,22 @@ def run(operation_id: str) -> None:
         write(operation)
 
     try:
-        progress(5, "Подготовка проверки CF")
-        cdn_security.configure_aop(operation["enabled"], progress=progress)
-    except Exception:
+        if operation.get('kind') == 'ech':
+            progress(5, 'Подготовка ECH')
+            operation['result'] = ech_settings.prepare(operation['domain'], progress=progress)
+        else:
+            progress(5, "Подготовка проверки CF")
+            cdn_security.configure_aop(operation["enabled"], progress=progress)
+    except Exception as exc:
         traceback.print_exc()
         operation.update(state="failed", message="Проверка CF не завершена. Проверьте настройки Cloudflare и журнал команды.")
+        if operation.get('kind') == 'ech':
+            operation['message'] = str(exc) if isinstance(exc, ValueError) else 'Не удалось настроить ECH. Подробности сохранены в журнале команды.'
         write(operation)
         raise
     operation.update(state="succeeded", progress=100, message="Проверка сертификата CF включена" if operation["enabled"] else "Проверка сертификата CF выключена")
+    if operation.get('kind') == 'ech':
+        operation['message'] = 'ECH настроен на сервере. Добавьте выданную HTTPS-запись в DNS.'
     write(operation)
 
 
