@@ -52,6 +52,7 @@ from schemas import (
     DnsSettingsUpdate,
     DnsCheckRequest,
     NetworkEndpointSettings,
+    NetworkEndpointCheck,
     ClientConnectionSettings,
     ClientCreate,
     ProtocolSettingsUpdate,
@@ -1500,8 +1501,33 @@ def update_network_endpoints(payload: NetworkEndpointSettings, _: None = Depends
     for label, value in (("CDN", settings["cdn_domain"]), ("TLS relay", settings["tls_relay_domain"]), ("UDP relay", settings["udp_relay_domain"])):
         if value and not valid_hostname(value):
             raise HTTPException(status_code=422, detail=f"Укажите корректный домен для {label}")
+    # A configured CDN endpoint is also the VLESS origin route on this VPS.
+    # Relay endpoints only need to be consumed during client export; their
+    # remote edge host is intentionally outside this node's control plane.
+    cdn_domain = settings["cdn_domain"]
+    if cdn_domain and VLESS_CONFIG.exists() and VLESS_ENV.exists():
+        reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+        if reality.get("CDN_DOMAIN", "").strip().lower() != cdn_domain or reality.get("CDN_ENABLED") != "yes":
+            update_protocol_settings(
+                "vless-reality-xhttp",
+                ProtocolSettingsUpdate(cdn_enabled=True, cdn_domain=cdn_domain),
+                None,
+            )
     write_network_endpoint_settings(settings)
     return network_status()
+
+
+@app.post("/api/network/endpoints/check")
+def check_network_endpoint(payload: NetworkEndpointCheck, _: None = Depends(require_token)) -> dict:
+    domain = payload.domain.strip().lower()
+    if not valid_hostname(domain):
+        raise HTTPException(status_code=422, detail="Укажите корректный домен без схемы https:// и порта")
+    probe = network_domain_probe(domain, {"cdn": "CDN / ECH", "tls_relay": "TLS relay", "udp_relay": "UDP relay"}[payload.kind])
+    if not probe["resolved"]:
+        return {**probe, "kind": payload.kind, "status": "unresolved", "ready": False, "message": "Домен не разрешается через DNS с VPS панели"}
+    if probe["matches_origin"]:
+        return {**probe, "kind": payload.kind, "status": "warning", "ready": True, "message": "Домен уже указывает на VPS панели; соединение возможно, но отдельный edge/relay не скрывает origin"}
+    return {**probe, "kind": payload.kind, "status": "ready", "ready": True, "message": "DNS отвечает, домен не указывает на VPS панели"}
 
 
 @app.get("/api/security")

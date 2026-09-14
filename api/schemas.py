@@ -99,6 +99,11 @@ class NetworkEndpointSettings(BaseModel):
     udp_relay_domain: str = Field(default="", max_length=253)
 
 
+class NetworkEndpointCheck(BaseModel):
+    kind: Literal["cdn", "tls_relay", "udp_relay"]
+    domain: str = Field(min_length=1, max_length=253)
+
+
 class ClientConnectionSettings(BaseModel):
     dns: str | None = Field(default=None, min_length=3, max_length=512, pattern=r"^[A-Za-z0-9:., ]+$")
     mtu: int | None = Field(default=None, ge=576, le=1500)

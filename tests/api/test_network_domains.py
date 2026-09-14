@@ -56,3 +56,25 @@ class NetworkDomainsTests(unittest.TestCase):
                 self.assertEqual(api.editable_protocol_settings("wg", {})[0]["key"], "channel_mode")
                 with self.assertRaises(api.HTTPException):
                     api.save_channel_mode("trojan", "udp_relay")
+
+    def test_endpoint_check_reports_dns_and_origin_warning(self):
+        with patch.object(api, "PUBLIC_IPV4", "198.51.100.1"), patch.object(api, "PUBLIC_IPV6", ""), patch.object(api, "PUBLIC_IP", "198.51.100.1"), patch.object(api.socket, "getaddrinfo", return_value=[(0, 0, 0, "", ("198.51.100.2", 0))]):
+            result = api.check_network_endpoint(api.NetworkEndpointCheck(kind="tls_relay", domain="relay.example.com"), None)
+        self.assertEqual(result["status"], "ready")
+        self.assertTrue(result["ready"])
+        with patch.object(api.socket, "getaddrinfo", return_value=[]):
+            result = api.check_network_endpoint(api.NetworkEndpointCheck(kind="udp_relay", domain="missing.example.com"), None)
+        self.assertEqual(result["status"], "unresolved")
+
+    def test_cdn_endpoint_connects_existing_panel_vless_origin(self):
+        with tempfile.TemporaryDirectory() as root:
+            data_dir = Path(root)
+            config = data_dir / "vless.json"
+            env = data_dir / "reality.env"
+            config.write_text("{}")
+            env.write_text("CDN_DOMAIN=old.example.com\nCDN_ENABLED=yes\n")
+            with patch.object(api, "DATA_DIR", data_dir), patch.object(api, "NETWORK_ENDPOINTS_FILE", data_dir / "network-endpoints.json"), patch.object(api, "VLESS_CONFIG", config), patch.object(api, "VLESS_ENV", env), patch.object(api, "update_protocol_settings") as update, patch.object(api, "network_status", return_value={"transport_endpoints": {}}):
+                api.update_network_endpoints(api.NetworkEndpointSettings(cdn_domain="new.example.com"), None)
+            update.assert_called_once()
+            self.assertEqual(update.call_args.args[0], "vless-reality-xhttp")
+            self.assertEqual(update.call_args.args[1].cdn_domain, "new.example.com")
