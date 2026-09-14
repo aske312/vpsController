@@ -5,6 +5,7 @@ outbounds. Unknown or unsupported connection types fail the export explicitly.
 """
 from urllib.parse import urlsplit
 import re
+from client_labels import connection_label
 
 
 class UnsupportedClientConfig(ValueError):
@@ -75,16 +76,18 @@ def _vless(tag, credential, endpoint, variant, routing, fragment, capabilities=N
 def build_singbox_config(connections, routing, dns, rules, endpoint, direct_settings, fragment, capabilities=None):
     outbounds = []
     endpoints = []
+    tags = []
     for index, connection in enumerate(connections, 1):
+        previous_outbounds, previous_endpoints = len(outbounds), len(endpoints)
         module, credential = connection["component"], connection.get("credential", {})
-        base = f"connection-{index}"
+        base = connection_label(connection, index) if module != "transport-reality" else ""
         if module == "transport-reality":
             mode = str(connection.get("settings", {}).get("route_mode") or credential.get("route_mode") or "both")
             variants = ["tls"] if mode == "tls" else ["direct"]
             if credential.get("cdn_enabled") and mode in {"cdn", "both"}:
                 variants = ["cdn"] if mode == "cdn" else ["direct", "cdn"]
             for variant in variants:
-                outbounds.append(_vless(f"{base}-{variant}", credential, (endpoint, direct_settings), variant, routing, fragment, capabilities))
+                outbounds.append(_vless(connection_label(connection, index, variant, direct_settings), credential, (endpoint, direct_settings), variant, routing, fragment, capabilities))
         elif module in {"transport-wg", "transport-awg"}:
             if module == "transport-awg" and not (capabilities and module in capabilities["components"]):
                 raise UnsupportedClientConfig("AmneziaWG требует клиент с ядром sing-box-lx")
@@ -115,9 +118,9 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
                               "tls": {"enabled": True, "server_name": credential.get("sni", "gate.312"), "insecure": True}})
         else:
             raise UnsupportedClientConfig(f"Модуль {module} не поддерживается sing-box")
+        tags.extend(item["tag"] for item in outbounds[previous_outbounds:] + endpoints[previous_endpoints:])
     if not outbounds and not endpoints:
         raise UnsupportedClientConfig("У устройства нет подключений для экспорта")
-    tags = sorted((item["tag"] for item in outbounds + endpoints), key=lambda tag: int(tag.split("-")[1]))
     outbounds += [{"type": "direct", "tag": "direct"}, {"type": "block", "tag": "block"}]
     if len(tags) == 1:
         proxy_tag = tags[0]

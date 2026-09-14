@@ -47,7 +47,7 @@ class PrivacyTests(unittest.TestCase):
             self.assertEqual(client.get(path).status_code, 404)
         self.assertEqual(client.get("/api/clients").status_code, 401)
 
-    def test_export_aliases_are_neutral_and_references_resolve(self):
+    def test_export_names_describe_protocols_and_references_resolve(self):
         credential = {"port": 51820, "ip": "10.0.0.2/32", "private_key": "test-private", "server_public_key": "test-public", "mtu": 1280}
         profile = {"common_device_id": "common", "connections": [
             {"component": "transport-wg", "device_id": "common", "name": name, "credential": credential}
@@ -56,8 +56,10 @@ class PrivacyTests(unittest.TestCase):
         dns = {"enhanced_mode": "fake-ip", "nameserver": "1.1.1.1", "fallback": "1.0.0.1"}
         with patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "public_endpoint", return_value="example.invalid"), patch.object(manager, "profile_rules", return_value=[]), patch.object(manager, "dns_settings", return_value=dns):
             config = yaml.safe_load(manager.render_profile(profile))
-        self.assertEqual([proxy["name"] for proxy in config["proxies"]], ["Connection 1", "Connection 2"])
-        self.assertEqual(config["proxy-groups"][0]["proxies"], ["Connection 1", "Connection 2"])
+        names = [proxy["name"] for proxy in config["proxies"]]
+        self.assertTrue(all("WireGuard" in name and "UDP" in name for name in names))
+        self.assertEqual(len(set(names)), 2)
+        self.assertEqual(config["proxy-groups"][0]["proxies"], names)
         self.assertEqual(config["proxies"][0]["type"], "wireguard")
         self.assertEqual(config["proxies"][0]["private-key"], "test-private")
 

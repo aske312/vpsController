@@ -51,6 +51,8 @@ class SubscriptionFormatTests(unittest.TestCase):
             self.assertEqual(link.hostname, "example.com")
             self.assertEqual(parse_qs(link.query)["path"], ["/vpn?a=1&b=2"])
             self.assertEqual(parse_qs(link.query)["type"], ["ws"])
+            from urllib.parse import unquote
+            self.assertIn("VLESS · WebSocket · TLS · CDN", unquote(link.fragment))
         self.provision.assert_not_called()
 
     def test_remove_registered_device_preserves_other_devices(self):

@@ -38,6 +38,8 @@ class SingboxFeaturesTests(unittest.TestCase):
 
     def test_standard_wireguard_ech_and_selector(self):
         result = self.config()
+        self.assertIn("WireGuard", result["endpoints"][0]["tag"])
+        self.assertIn("VLESS · WebSocket · TLS · CDN", result["outbounds"][0]["tag"])
         tun = next(entry for entry in result["inbounds"] if entry["type"] == "tun")
         self.assertTrue(tun["auto_route"])
         self.assertTrue(tun["address"])

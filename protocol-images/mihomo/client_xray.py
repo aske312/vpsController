@@ -1,6 +1,7 @@
 """Happ accepts an array of complete Xray configurations, one per selectable node."""
 from copy import deepcopy
 from client_singbox import UnsupportedClientConfig
+from client_labels import connection_label
 
 
 def xray_rules(rules):
@@ -29,9 +30,11 @@ def xray_rules(rules):
 
 def build_xray_configs(connections, routing, dns, rules, endpoint, direct_settings):
     nodes = []
-    for connection in connections:
+    names = []
+    for index, connection in enumerate(connections, 1):
         credential = connection.get("credential", {})
         if connection["component"] == "transport-shadowsocks":
+            names.append(connection_label(connection, index))
             nodes.append({"protocol": "shadowsocks", "settings": {"servers": [{"address": endpoint, "port": int(credential["port"]), "method": credential["method"], "password": credential["password"]}]}})
             continue
         if connection["component"] != "transport-reality":
@@ -41,6 +44,7 @@ def build_xray_configs(connections, routing, dns, rules, endpoint, direct_settin
         if credential.get("cdn_enabled") and mode in {"cdn", "both"}:
             variants = ["cdn"] if mode == "cdn" else ["direct", "cdn"]
         for variant in variants:
+            names.append(connection_label(connection, index, variant, direct_settings))
             if variant == "direct":
                 effective = dict(credential)
                 if not credential.get("direct_tag"):
@@ -71,7 +75,7 @@ def build_xray_configs(connections, routing, dns, rules, endpoint, direct_settin
     configs = []
     for index, node in enumerate(nodes, 1):
         node["tag"] = "proxy"
-        configs.append({"remarks": f"Connection {index}", "log": {"loglevel": "warning"},
+        configs.append({"remarks": names[index - 1], "log": {"loglevel": "warning"},
                         "dns": {"servers": [dns["nameserver"], dns["fallback"]]},
                         "inbounds": [{"tag": "socks", "listen": "127.0.0.1", "port": 10808, "protocol": "socks", "settings": {"auth": "noauth", "udp": True}, "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}}],
                         "outbounds": [node, {"tag": "direct", "protocol": "freedom"}, {"tag": "block", "protocol": "blackhole"}],

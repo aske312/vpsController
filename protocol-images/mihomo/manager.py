@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from profile_transition import GRACE_SECONDS, stage_vless_transition, transition_delivery_revision, mark_transition_delivered
 from client_singbox import build_singbox_config, singbox_rules, UnsupportedClientConfig
 from client_xray import build_xray_configs, xray_rules
+from client_labels import connection_label
 from client_subscription import CLIENT_HINTS, import_page, vless_subscription
 from client_capabilities import CAPABILITIES, FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
@@ -3519,8 +3520,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         component = str(connection["component"])
         if privacy and component == "transport-reality" and not connection.get("credential", {}).get("encryption"):
             raise HTTPException(status_code=409, detail="Шифрование отмечено в настройках, но ещё не применено к подключениям. Сохраните профиль в панели, затем обновите подписку в клиенте.")
-        # Keep descriptive GUI labels out of client-visible aliases.
-        base = f"Connection {index + 1}"
+        mode = connection.get("settings", {}).get("route_mode") or connection.get("credential", {}).get("route_mode")
+        base = connection_label(connection, index + 1, mode if mode in {"cdn", "tls"} else "direct", reality_connection_settings)
         name = base
         suffix = 2
         while name in used_names:
@@ -3535,12 +3536,12 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
             route_mode = str(connection.get("settings", {}).get("route_mode") or credential.get("route_mode") or "both")
             if route_mode == "cdn":
                 direct_name = None
-                cdn_name = name
+                cdn_name = connection_label(connection, index + 1, "cdn")
             elif route_mode == "both":
-                cdn_name = f"{name} · CDN"
+                cdn_name = connection_label(connection, index + 1, "cdn")
                 used_names.add(cdn_name)
         if component == "transport-reality" and str(connection.get("settings", {}).get("route_mode") or credential.get("route_mode")) == "tls":
-            direct_name, cdn_name, tls_name = None, None, name
+            direct_name, cdn_name, tls_name = None, None, connection_label(connection, index + 1, "tls")
         rendered.append((connection, direct_name, cdn_name, tls_name))
     routing = {**routing_settings(), **profile_routing}
     ech_requested = bool(profile_routing.get("tunnel_ech", False))
