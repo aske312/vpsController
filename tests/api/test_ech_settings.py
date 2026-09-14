@@ -23,6 +23,15 @@ def public_config(name):
 
 
 class EchTests(unittest.TestCase):
+    def test_old_caddy_is_rejected_before_any_configuration_changes(self):
+        for version, supported in [('2.6.2', False), ('v2.10.0 h1:test', True), ('v2.11.4', True), ('unknown', False)]:
+            with self.subTest(version=version), patch.object(ech.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, version, '')):
+                self.assertEqual(ech.capability()['supported'], supported)
+        with patch.object(ech.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '2.6.2', '')), patch.object(ech, 'check_domain') as check:
+            with self.assertRaisesRegex(ValueError, 'Caddy 2.6.2'):
+                ech.prepare('cdn.example.com')
+            check.assert_not_called()
+
     def test_hostname_rejects_configuration_injection_and_ips(self):
         for name in ['evil.test\n}', 'https://a.test', 'a.test:443', '127.0.0.1', '*.test', '-a.test']:
             with self.subTest(name=name), self.assertRaises(ValueError):
@@ -71,7 +80,7 @@ class EchTests(unittest.TestCase):
                 calls.append(args)
                 if len(calls) == 2:
                     raise subprocess.CalledProcessError(1, args)
-            with patch.object(ech, 'STATE', root / 'ech.json'), patch.object(ech.cdn_security, 'CADDY', caddy), patch.object(ech.cdn_security, 'SNIPPET', root / 'routes.caddy'), patch.object(ech, 'check_domain', return_value='cdn.example.com'), patch.object(ech.cdn_security, 'read_env', return_value={'PUBLIC_DOMAIN': 'panel.example.com'}), patch.object(ech, 'record', return_value={'domain': 'cdn.example.com'}), patch.object(ech.subprocess, 'run', side_effect=run):
+            with patch.object(ech, 'require_support'), patch.object(ech, 'STATE', root / 'ech.json'), patch.object(ech.cdn_security, 'CADDY', caddy), patch.object(ech.cdn_security, 'SNIPPET', root / 'routes.caddy'), patch.object(ech, 'check_domain', return_value='cdn.example.com'), patch.object(ech.cdn_security, 'read_env', return_value={'PUBLIC_DOMAIN': 'panel.example.com'}), patch.object(ech, 'record', return_value={'domain': 'cdn.example.com'}), patch.object(ech.subprocess, 'run', side_effect=run):
                 with self.assertRaises(subprocess.CalledProcessError):
                     ech.prepare('cdn.example.com')
                 self.assertEqual(caddy.read_text(), '{\n}\n')

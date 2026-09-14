@@ -19,6 +19,25 @@ BEGIN = '# BEGIN GATE.312 ECH'
 END = '# END GATE.312 ECH'
 
 
+def capability() -> dict:
+    try:
+        result = subprocess.run(['caddy', 'version'], capture_output=True, text=True, check=True, timeout=5)
+        match = re.match(r'v?(\d+)\.(\d+)\.(\d+)', result.stdout.strip())
+        if match:
+            version = '.'.join(match.groups())
+            supported = tuple(map(int, match.groups())) >= (2, 10, 0)
+            return {'supported': supported, 'version': version, 'message': '' if supported else f'Установлен Caddy {version}. Для ECH требуется Caddy 2.10.0 или новее. Сначала обновите Caddy на сервере.'}
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {'supported': False, 'version': None, 'message': 'Не удалось определить версию Caddy. Подготовка ECH недоступна.'}
+
+
+def require_support() -> None:
+    result = capability()
+    if not result['supported']:
+        raise ValueError(result['message'])
+
+
 def hostname(value: str) -> str:
     value = value.strip().lower().rstrip('.')
     if len(value) > 253 or '.' not in value or any(not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', label) for label in value.split('.')):
@@ -101,6 +120,7 @@ def check_domain(domain: str) -> str:
 
 
 def prepare(domain: str, progress=lambda *_: None) -> dict:
+    require_support()
     domain = check_domain(domain)
     STATE.parent.mkdir(parents=True, exist_ok=True)
     # Serialize against CF policy changes using the existing gateway lock.

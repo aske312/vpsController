@@ -13,6 +13,7 @@ export function NetworkEch({ domain, route, request }: { domain: string; route: 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState("");
+  const [capability, setCapability] = useState<{ supported: boolean; message: string } | null>(null);
   const apply = useCallback((status: CdnSecurityStatus) => {
     if (status.operation?.result) setRecord(status.operation.result);
   }, []);
@@ -22,9 +23,10 @@ export function NetworkEch({ domain, route, request }: { domain: string; route: 
     setLoading(true);
     setError("");
     try {
-      const status = await request<{ record: EchRecord | null; operation: CdnOperation | null }>(`/application/ech?domain=${encodeURIComponent(domain)}`);
+      const status = await request<{ record: EchRecord | null; operation: CdnOperation | null; capability: { supported: boolean; message: string } }>(`/application/ech?domain=${encodeURIComponent(domain)}`);
       setRecord(status.record);
       setServerOperation(status.operation);
+      setCapability(status.capability);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось прочитать настройку ECH");
     } finally { setLoading(false); }
@@ -40,7 +42,8 @@ export function NetworkEch({ domain, route, request }: { domain: string; route: 
     {open && <section aria-label={`ECH для ${domain}`}>
       <strong>ECH для {domain}</strong>
       <p>Создаёт ключи ECH на сервере и готовую HTTPS-запись для вашего DNS-провайдера. Обычный TLS-сертификат выпускается отдельно и автоматически.</p>
-      {route === "proxy_or_cdn" ? <p>Домен направлен через внешний прокси/CDN. Включите ECH у этого провайдера: ключи нашего VPS не подходят для его TLS-соединения.</p> : <button type="button" className="primaryButton" disabled={loading || command.pending || route === "unresolved"} onClick={() => void command.prepareEch(domain)}>{command.pending ? "Подготовка ECH…" : record ? "Проверить настройку сервера" : "Подготовить ECH"}</button>}
+      {route === "proxy_or_cdn" ? <p>Домен направлен через внешний прокси/CDN. Включите ECH у этого провайдера: ключи нашего VPS не подходят для его TLS-соединения.</p> : <button type="button" className="primaryButton" disabled={loading || command.pending || route === "unresolved" || !capability?.supported} onClick={() => void command.prepareEch(domain)}>{command.pending ? "Подготовка ECH…" : record ? "Проверить настройку сервера" : "Подготовить ECH"}</button>}
+      {capability?.message && <p role="status">{capability.message}</p>}
       <button type="button" className="ghostButton" disabled={loading || command.pending} onClick={() => void load()}>Обновить данные</button>
       {loading && <p role="status">Загрузка…</p>}
       {error && <p role="alert">{error}</p>}

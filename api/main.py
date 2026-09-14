@@ -2747,7 +2747,7 @@ def ech_status(domain: str, _: None = Depends(require_token)) -> dict:
         operation = cdn_operation.status()
         if operation and (operation.get('kind') != 'ech' or operation.get('domain') != domain):
             operation = None
-        return {'record': result, 'operation': operation}
+        return {'record': result, 'operation': operation, 'capability': ech_settings.capability()}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -2755,6 +2755,7 @@ def ech_status(domain: str, _: None = Depends(require_token)) -> dict:
 @app.put('/api/application/ech', status_code=202)
 def prepare_ech(payload: EchSettings, _: None = Depends(require_token)) -> dict:
     try:
+        ech_settings.require_support()
         domain = ech_settings.check_domain(payload.domain)
         operation = cdn_operation.start(True, payload.operation_id, CONTROL_COMMAND, domain=domain)
     except (ValueError, cdn_operation.OperationConflict) as exc:

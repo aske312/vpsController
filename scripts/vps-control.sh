@@ -2403,6 +2403,11 @@ install_prebuilt_release() {
   python3 "${gateway_renderer}" check --root "${payload}" --mode "${ACCESS_MODE}" --port "${HTTP_PORT}" \
     || { rm -rf -- "${stage_root}"; die "Конфигурация Caddy нового релиза не прошла проверку; рабочие службы не остановлены."; }
 
+  if [[ -f "${payload}/api/runtime_dependencies.py" ]]; then
+    python3 "${payload}/api/runtime_dependencies.py" install \
+      || { rm -rf -- "${stage_root}"; die "Не удалось обновить зависимости релиза; работающая версия приложения сохранена."; }
+  fi
+
   # Restore the exact active configuration on failure, including older releases
   # which cannot render the current security policy.
   install -d -m 0700 "${stage_root}/gateway-backup"
@@ -2487,7 +2492,7 @@ install_prebuilt_release() {
   rm -rf -- "${stage_root}"
   cleanup_legacy_runtime
   install -m 0755 "${INSTALL_DIR}/scripts/vps-control.sh" "${COMMAND_PATH}"
-  ok "подготовленный релиз установлен; WG/AWG и системные пакеты не изменялись."
+  ok "подготовленный релиз и необходимые зависимости установлены; WG/AWG и ядро ОС не изменялись."
 }
 
 update_prebuilt_branch() {
@@ -2735,20 +2740,26 @@ PY
 }
 
 update_kernel() {
-  info "Проверка обновления ядра Ubuntu"
+  info "Проверка обновления ядра Debian/Ubuntu"
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  local packages=()
-  for package in linux-virtual linux-generic linux-image-virtual linux-headers-virtual linux-image-generic linux-headers-generic; do
-    if dpkg-query -W -f='${db:Status-Abbrev}' "${package}" 2>/dev/null | grep -q '^ii'; then
-      packages+=("${package}")
-    fi
-  done
-  ((${#packages[@]})) || die "не найден поддерживаемый метапакет ядра Ubuntu."
-  if apt-get -s install --only-upgrade "${packages[@]}" 2>/dev/null | grep -q '^Inst '; then
+  local package status simulation
+  local -a packages=()
+  while read -r package status; do
+    [[ "${status}" == ii* ]] || continue
+    package="${package%%:*}"
+    case "${package}" in
+      linux-image-[0-9]*|linux-headers-[0-9]*|*-dbg) continue ;;
+      linux-image-*|linux-headers-*|linux-generic*|linux-virtual*|linux-aws*|linux-azure*|linux-gcp*|linux-oracle*|linux-lowlatency*) packages+=("${package}") ;;
+    esac
+  done < <(dpkg-query -W -f='${binary:Package} ${db:Status-Abbrev}\n' 'linux-*' 2>/dev/null || true)
+  ((${#packages[@]})) || die "не найден установленный метапакет ядра Debian/Ubuntu; автоматическая смена семейства ядра запрещена."
+  apt-get -o DPkg::Lock::Timeout=300 update
+  simulation="$(apt-get -s install --only-upgrade --no-remove "${packages[@]}")" \
+    || die "Не удалось проверить обновление пакетов ядра; установка отменена."
+  if grep -q '^Inst ' <<<"${simulation}"; then
     REBOOT_AFTER_UPDATE="yes"
   fi
-  apt-get install -y --only-upgrade "${packages[@]}"
+  apt-get -o DPkg::Lock::Timeout=300 install -y --only-upgrade --no-remove "${packages[@]}"
   ok "Пакеты ядра проверены и обновлены; при наличии нового ядра выполните reboot."
   if [[ "${REBOOT_AFTER_UPDATE}" == "yes" && -z "${CURRENT_ACTION}" ]]; then
     systemctl --no-block --no-wall reboot
@@ -3155,7 +3166,7 @@ usage() {
   integrity-check  проверить файлы, права, конфигурацию и компоненты приложения
   identity         повторно определить IP и геолокацию сервера
   secure           установить и включить базовую защиту Ubuntu
-  kernel-update    обновить ядро Ubuntu
+  kernel-update    обновить установленное ядро Debian/Ubuntu
   vpn-firewall     восстановить маршрутизацию и NAT установленных WG/AWG
   optimize         очистить безопасные кэши и старые журналы
   automation-apply применить сохранённые расписания обслуживания

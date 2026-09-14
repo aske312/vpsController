@@ -111,11 +111,17 @@ restore_update_gateway
                 self.assertEqual((snippets / "original.caddy").exists(), had_snippets)
 
     def test_preflight_failure_never_stops_services_or_swaps_release(self):
+        self.failed_release_update('gateway_config.py')
+
+    def test_dependency_failure_never_stops_services_or_swaps_release(self):
+        self.failed_release_update('runtime_dependencies.py')
+
+    def failed_release_update(self, failing_script):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             payload = root / "vps-control-release"
             installed = root / "installed"
-            for name in ["node_modules/.bin/vinext", "dist/server/index.js", "api/main.py", "api/requirements.txt", "api/gateway_config.py", ".prebuilt-release"]:
+            for name in ["node_modules/.bin/vinext", "dist/server/index.js", "api/main.py", "api/requirements.txt", "api/gateway_config.py", "api/runtime_dependencies.py", ".prebuilt-release"]:
                 path = payload / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("")
@@ -133,7 +139,7 @@ INSTALL_DIR={shlex.quote(str(installed))}
 ACCESS_MODE=vpn
 HTTP_PORT=8080
 mktemp() {{ command mktemp -d {shlex.quote(temp)}/stage.XXXXXX; }}
-python3() {{ return 17; }}
+python3() {{ case "$1" in *{failing_script}) return 17;; *) return 0;; esac; }}
 systemctl() {{ touch {shlex.quote(temp)}/services-touched; return 91; }}
 die() {{ exit 43; }}
 {function('install_prebuilt_release')}

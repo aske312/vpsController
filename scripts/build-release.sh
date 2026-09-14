@@ -68,6 +68,7 @@ curl -fL --retry 4 --retry-all-errors \
 printf '%s  %s\n' "${mihomo_sha256}" "${mihomo_archive}" | sha256sum -c -
 
 mkdir -p "${STAGE}/api/bin"
+python3 "${STAGE}/api/runtime_dependencies.py" download --directory "${STAGE}/api/packages"
 gzip -dc "${mihomo_archive}" >"${STAGE}/api/bin/mihomo"
 chmod 0755 "${STAGE}/api/bin/mihomo"
 "${STAGE}/api/bin/mihomo" -v | grep -F "Mihomo Meta v${MIHOMO_VERSION} " >/dev/null

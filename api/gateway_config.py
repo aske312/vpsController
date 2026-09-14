@@ -11,6 +11,7 @@ from pathlib import Path
 
 import cdn_security
 import ech_settings
+import runtime_dependencies
 
 
 PRIVATE_SOURCES = "127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
@@ -85,8 +86,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     values = cdn_security.read_env(cdn_security.ENV)
     if args.action == "check":
-        validate_candidate(args.root, args.mode, args.port, values)
+        with runtime_dependencies.candidate_caddy() as caddy:
+            validate_candidate(args.root, args.mode, args.port, values, caddy)
     else:
+        # Legacy installers already invoke the target release's gateway writer.
+        runtime_dependencies.install()
         text = render((args.root / "Caddyfile").read_text(encoding="utf-8"), args.mode, args.port, values)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         candidate = args.output.with_suffix(".candidate")

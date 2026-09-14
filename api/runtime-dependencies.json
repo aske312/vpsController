@@ -1,0 +1,9 @@
+{
+  "caddy": {
+    "version": "2.11.4",
+    "assets": {
+      "amd64": "c41708ffb4af9bc6d19f7d22a7a034804352a21ecc62e1d3dfe3d58e30b38a3e",
+      "arm64": "aeab2e38bf77a0162611a1703a5e16c09475b000d41f7edaa9337734d16642fd"
+    }
+  }
+}
