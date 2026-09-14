@@ -94,7 +94,6 @@ export function MihomoPage({
   const [expandedDeviceLists, setExpandedDeviceLists] = useState<Set<string>>(() => new Set());
   const [expandedProtocolLists, setExpandedProtocolLists] = useState<Set<string>>(() => new Set());
   const [createdProfile, setCreatedProfile] = useState<Profile | null>(null);
-  const [singboxQr, setSingboxQr] = useState(false);
   const [readyDevices, setReadyDevices] = useState<ReadyDevice[]>([]);
   const [readyFailed, setReadyFailed] = useState(false);
   const [presetDialog, setPresetDialog] = useState(false);
@@ -195,7 +194,7 @@ export function MihomoPage({
         const url = new URL(result.url || result.path, window.location.origin);
         const format = clientConfigFormat(createdProfile, device);
         const subscription = url.toString();
-        const importUrl = clientImportUrl(subscription, `${createdProfile.name} · ${device.name}`, device.scope === "common" ? (singboxQr ? "singbox" : "mihomo") : format, device.scope === "common" ? "" : `${device.client_name || ""} ${device.user_agent || ""}`);
+        const importUrl = clientImportUrl(subscription, `${createdProfile.name} · ${device.name}`, device.scope === "common" ? "mihomo" : format, device.scope === "common" ? "" : `${device.client_name || ""} ${device.user_agent || ""}`);
         const qr = await QRCode.toDataURL(importUrl, { errorCorrectionLevel: "M", margin: 2, width: 360 });
         items.push({ ...device, subscription, qr });
       }
@@ -207,7 +206,7 @@ export function MihomoPage({
       }
     });
     return () => { cancelled = true; };
-  }, [createdProfile, singboxQr, request, notifyError]);
+  }, [createdProfile, request, notifyError]);
 
   useEffect(() => () => {
     if (routingAutosaveRef.current) clearTimeout(routingAutosaveRef.current);
@@ -1236,7 +1235,6 @@ export function MihomoPage({
       )}
       {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile">
         <header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль «{createdProfile.name}» готов</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header>
-        <label>Способ импорта QR <select value={singboxQr ? "singbox" : "universal"} onChange={(event) => { setReadyDevices([]); setSingboxQr(event.target.value === "singbox"); }}><option value="universal">Ссылка подписки — сканировать в клиенте</option><option value="singbox">sing-box MT — сканировать камерой iPhone</option></select></label>
         <div className="mihomoReadyDevices">{readyDevices.map((device) => {
           const format = clientConfigFormat(createdProfile, device);
           const singbox = format === "singbox";
