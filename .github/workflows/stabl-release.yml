@@ -13,7 +13,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  api-tests:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+      - run: pip install -r tests/requirements.txt
+      - name: Check API before packaging or publishing
+        run: python -m unittest discover -s tests/api -t . -p 'test_*.py'
+
   release:
+    needs: api-tests
     if: github.ref_name == 'stabl'
     runs-on: ubuntu-24.04
     steps:
@@ -66,6 +82,7 @@ jobs:
           fi
 
   preview:
+    needs: api-tests
     if: github.ref_name == 'main'
     runs-on: ubuntu-24.04
     steps:

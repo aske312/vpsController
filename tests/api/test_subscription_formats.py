@@ -26,6 +26,18 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.assertEqual(self.store[0]["common_access"]["user_agent"], "CFNetwork/3860 Darwin/25")
         self.assertEqual(self.store[0]["common_access"]["client_name"], "Happ")
 
+    def test_explicit_import_client_wins_over_user_agent_and_survives_save(self):
+        response = self.fetch("RocketVPN/582994", query=b"client=happ")
+        self.assertIsInstance(json.loads(response.body), list)
+        device = self.store[0]["devices"][1]
+        self.assertEqual(device["routing"]["client_config_format"], "xray")
+        self.assertEqual(manager.client_formats(device), ("xray",))
+        self.assertEqual(device["user_agent"], "RocketVPN/582994")
+        manager.update_profile("profile", manager.ProfileUpdate(devices=[manager.ProfileDeviceInput(**entry) for entry in self.store[0]["devices"]]))
+        self.assertEqual(manager.client_formats(self.store[0]["devices"][1]), ("xray",))
+        self.assertIsInstance(json.loads(self.fetch("RocketVPN/582995", query=b"client=happ").body), list)
+        self.assertEqual(len(self.store[0]["devices"]), 2)
+
     def test_rocketvpn_and_v2rage_get_vless_links_instead_of_yaml(self):
         from urllib.parse import urlsplit, parse_qs
         self.store[0]["connections"] = [{"id": "ws", "device_id": "common", "component": "transport-reality",

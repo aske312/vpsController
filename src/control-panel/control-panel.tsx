@@ -132,7 +132,6 @@ export function ControlPanel() {
 
   useEffect(() => {
     // Restore browser-only credentials after hydration.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setToken(sessionStorage.getItem("312-token") || "");
     const savedTab = sessionStorage.getItem("312-reload-tab");
     if (savedTab && Object.hasOwn(navigationLabels, savedTab)) setTab((savedTab === "dns" ? "network" : savedTab) as Tab);
@@ -399,7 +398,6 @@ export function ControlPanel() {
     if (!token) return;
     sessionStorage.setItem("312-token", token);
     // Load the minimum shared data required to construct the first screen and navigation.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void Promise.all([loadOverview(), loadClients(), loadApplication(), loadServices()]);
   }, [loadApplication, loadClients, loadOverview, loadServices, token]);
 
@@ -447,7 +445,6 @@ export function ControlPanel() {
   useEffect(() => {
     if (!token || tab === "overview") return;
     // Synchronize only the newly opened module.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshCurrent(false);
   }, [refreshCurrent, tab, token]);
 

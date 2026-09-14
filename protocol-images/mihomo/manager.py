@@ -3062,6 +3062,10 @@ CLIENT_SIGNATURES = (
 
 
 def client_identity(metadata: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
+    import_client = metadata.get("import_client")
+    if import_client in CLIENT_HINTS:
+        format = {"happ": "xray", "singbox": "singbox", "v2rage": "uri"}[import_client]
+        return CLIENT_HINTS[import_client], (format,)
     identities = [str(metadata.get(key) or "").lower() for key in ("user_agent", "client_name")]
     for identity in identities:
         for pattern, name, formats in CLIENT_SIGNATURES:
@@ -3194,7 +3198,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
             if saved.get("hwid_hash"):
                 device["hwid_hash"] = saved["hwid_hash"]
                 device["last_seen_at"] = saved.get("last_seen_at")
-                for key in ("user_agent", "client_name", "client_version", "client_identity_key", "os", "os_version"):
+                for key in ("user_agent", "client_name", "client_version", "client_identity_key", "import_client", "os", "os_version"):
                     device[key] = saved.get(key)
         if len({device["id"] for device in devices}) != len(devices):
             raise HTTPException(status_code=422, detail="Duplicate profile device id")
@@ -3648,7 +3652,7 @@ def preflight_client_export_update(current: dict[str, Any], payload: ProfileUpda
     saved = {entry["id"]: entry for entry in current.get("devices", [])}
     for device in candidate.get("devices", []):
         if device["id"] in saved:
-            for key in ("client_name", "user_agent"):
+            for key in ("client_name", "user_agent", "import_client"):
                 device[key] = saved[device["id"]].get(key)
     validate_client_capabilities(candidate)
 
@@ -3846,6 +3850,7 @@ def subscription_device_metadata(request: Request) -> dict[str, str]:
         "os_version": os_version,
         "device_name": clean(request.headers.get("x-device-name") or request.headers.get("x-device-model"), 80),
         "client_name": client_name,
+        "import_client": request.query_params.get("client", "") if hint else "",
         "client_version": clean(request.headers.get("x-client-version"), 40),
         "user_agent": user_agent,
     }

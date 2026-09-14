@@ -65,7 +65,7 @@ class PrivacyTests(unittest.TestCase):
         from fastapi.testclient import TestClient
         client = TestClient(manager.app)
         profile = {"id": "test", "subscription_token": "test-token", "common_device_id": "common"}
-        with patch.object(manager, "profiles", return_value=[profile]), patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "record_common_subscription_access", return_value=profile), patch.object(manager, "render_profile", return_value="proxies: []\n"), patch.object(manager, "validate_rendered_profile"):
+        with patch.object(manager, "profiles", return_value=[profile]), patch.object(manager, "save_profiles"), patch.object(manager, "render_profile", return_value="proxies: []\n"), patch.object(manager, "validate_rendered_profile"):
             for path in ("/s/test-token", "/api/mihomo/subscriptions/test-token"):
                 response = client.get(path)
                 self.assertEqual(response.status_code, 200)
