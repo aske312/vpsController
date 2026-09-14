@@ -24,9 +24,9 @@ export function ModuleCatalog({ title, description, modules, busy, onToggle, onU
           <article key={module.id} className={module.installed ? "is-installed" : ""}>
             <header><span className={`mihomoModuleCode protocol-${module.id}`}>{channelShort[module.id] || (module.category === "dns" ? "DNS" : "RT")}</span><div><b>{module.name}</b><small>{module.description}</small></div><i className={module.active ? "is-online" : module.installed ? "is-ready" : ""} /></header>
             <div className="mihomoModuleCapabilities">{(moduleCapabilities[module.id] || []).map((capability) => <span key={capability}>{capability}</span>)}</div>
-            <dl><div><dt>Состояние</dt><dd>{module.active ? "Работает" : module.installed ? "Готов" : "Не установлен"}</dd></div><div><dt>Версия</dt><dd>{module.installed_version ? formatModuleVersion(module.installed_version) : "—"}</dd></div><div><dt>Сервис</dt><dd>{module.service || "Внутренний"}</dd></div></dl>
+            <dl><div><dt>Состояние</dt><dd>{module.active ? "Работает" : module.installed ? "Остановлен" : "Не установлен"}</dd></div><div><dt>Версия</dt><dd>{module.installed_version ? formatModuleVersion(module.installed_version) : "—"}</dd></div><div><dt>Сервис</dt><dd>{module.service || "Внутренний"}</dd></div></dl>
             <footer className="mihomoModuleActions">
-              <button className="ghostButton" onClick={() => onSettings(module)}>Настройки</button>
+              <button className="ghostButton" disabled={Boolean(busy)} onClick={() => onSettings(module)}>Настройки</button>
               {module.installed && module.update_available && (
                 <button className={`ghostButton${module.update_breaking ? " breaking" : ""}`} disabled={Boolean(busy)} onClick={() => void onUpdate(module)}>{busy === `update:${module.id}` ? "Обновление…" : "Обновить"}</button>
               )}

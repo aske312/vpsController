@@ -307,7 +307,7 @@ class TunnelPrivacyTests(unittest.TestCase):
 
     def test_default_fields_do_not_change_legacy_settings(self):
         manifest = json.loads((ROOT / "protocol-images/mihomo/modules/transport-reality/manifest.json").read_text())
-        with patch.object(manager, "manifest", return_value=manifest), patch.object(manager, "module_is_installed", return_value=True):
+        with patch.object(manager, "manifest", return_value=manifest), patch.object(manager, "module_is_installed", return_value=True), patch.object(manager, "module_is_ready", return_value=True):
             legacy = manager.validate_connection("transport-reality", {"route_mode": "cdn", "cdn_domain": "example.com"})
             self.assertNotIn("privacy_mode", legacy)
             self.assertNotIn("cdn_ech", legacy)

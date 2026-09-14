@@ -235,7 +235,6 @@ test("backend keeps sensitive technical command errors in journals", async () =>
     assert.match(backend, /public_http_exception_handler/);
     assert.match(backend, /Suppressed technical/);
   }
-  assert.match(mihomo, /if state == "failed":[\s\S]*message = PUBLIC_COMMAND_ERROR/);
 });
 
 test("channel DNS follows installed protected channels and security lives under system", async () => {

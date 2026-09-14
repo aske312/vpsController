@@ -84,8 +84,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /find-process-mode: strict/);
   assert.match(manager, /def endpoint_latency_ms/);
   assert.match(manager, /"latency_ms": min\(latencies\) if latencies else None/);
-  assert.match(page, /request\("\/mihomo\/dns\/settings"\)/);
-  assert.match(page, /request\("\/mihomo\/routing\/schema"\)/);
+  // Independent reads and preservation on failure are tested in settings-save.test.mjs.
   assert.match(page, /Clash Verge Rev/);
   assert.match(page, /apps\.apple\.com\/us\/app\/clash-mi\/id6744321968/);
   assert.match(page, /MetaCubeX\/ClashMetaForAndroid\/releases/);

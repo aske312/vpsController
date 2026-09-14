@@ -10,7 +10,9 @@ import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, s
 
 import { useNotifier, useFailureNotifications } from "../../shared/notifications/notification-center";
 import { notificationFailure as refreshFailure, type NotificationFailure } from "../../shared/notifications/store";
-import { createApiClient } from "../../shared/lib/api-request";
+import { createApiClient, mutationFailureState } from "../../shared/lib/api-request";
+import { createSettingsSaveQueue } from "./settings-save";
+import { refreshWorkspaceSections } from "./workspace-refresh";
 import { bytes, duration } from "../../shared/lib/control-plane-ui";
 import QRCode from "qrcode";
 import Image from "next/image";
@@ -52,10 +54,12 @@ export function MihomoPage({
   const [dnsDraft, setDnsDraft] = useState<Record<string, string | number | boolean>>({});
   const [dnsDirty, setDnsDirty] = useState(false);
   const dnsDirtyRef = useRef(false);
+  const dnsDraftRef = useRef<Record<string, string | number | boolean>>({});
   const [routingPolicy, setRoutingPolicy] = useState<PolicySettings | null>(null);
   const [routingDraft, setRoutingDraft] = useState<Record<string, string | number | boolean>>({});
   const [routingDirty, setRoutingDirty] = useState(false);
   const [routingAutosaving, setRoutingAutosaving] = useState(false);
+  const routingPendingRef = useRef(0);
   const [activeRuleList, setActiveRuleList] = useState("direct_ru_sites");
   const [ruleSearch, setRuleSearch] = useState("");
   const [gameSearch, setGameSearch] = useState("");
@@ -109,6 +113,8 @@ export function MihomoPage({
   const request = useMemo(() => createApiClient(token, {
     formatHttpError: (detail, status) => status === 401 ? "Сессия панели завершена. Войдите заново." : publicError(detail, status),
   }), [token]);
+  const saveRouting = useMemo(() => createSettingsSaveQueue((values: Record<string, string | number | boolean>) =>
+    request<PolicySettings>("/mihomo/routing/settings", { method: "PATCH", body: JSON.stringify({ values }) })), [request]);
 
   const refresh = useCallback(async (afterAction = true): Promise<void> => {
     if (refreshInFlight.current) {
@@ -118,31 +124,37 @@ export function MihomoPage({
     }
     const job = (async () => {
       try {
-        const [nextStatus, nextModules, nextProfiles, nextDns, nextRouting] = await Promise.all([
-          request("/mihomo/status"),
-          request("/mihomo/modules"),
-          request("/mihomo/profiles"),
-          request("/mihomo/dns/settings"),
-          request("/mihomo/routing/schema"),
-        ]);
-        setStatus(nextStatus as Status);
-        setModules((nextModules as { items: Module[] }).items || []);
-        setProfiles((nextProfiles as { items: Profile[] }).items || []);
-        setDnsPolicy(nextDns as PolicySettings);
-        if (!dnsDirtyRef.current) setDnsDraft({ ...(nextDns as PolicySettings).values });
-        setRoutingPolicy(nextRouting as PolicySettings);
-        if (!routingDirtyRef.current) {
-          const values = { ...(nextRouting as PolicySettings).values };
-          routingDraftRef.current = values;
-          setRoutingDraft(values);
-        }
-        const profileItems = (nextProfiles as { items: Profile[] }).items || [];
-        const statsEntries = await Promise.all(profileItems.map(async (profile) => {
+        let profileItems: Profile[] | undefined;
+        const failures = await refreshWorkspaceSections(request, {
+          status: { path: "/mihomo/status", accept: (value) => setStatus(value as Status) },
+          modules: { path: "/mihomo/modules", accept: (value) => setModules((value as { items: Module[] }).items || []) },
+          profiles: { path: "/mihomo/profiles", accept: (value) => {
+            profileItems = (value as { items: Profile[] }).items || [];
+            setProfiles(profileItems);
+          } },
+          dns: { path: "/mihomo/dns/settings", accept: (value) => {
+            setDnsPolicy(value as PolicySettings);
+            if (!dnsDirtyRef.current) {
+              dnsDraftRef.current = { ...(value as PolicySettings).values };
+              setDnsDraft(dnsDraftRef.current);
+            }
+          } },
+          routing: { path: "/mihomo/routing/schema", accept: (value) => {
+            setRoutingPolicy(value as PolicySettings);
+            if (!routingDirtyRef.current) {
+              routingDraftRef.current = { ...(value as PolicySettings).values };
+              setRoutingDraft(routingDraftRef.current);
+            }
+          } },
+        });
+        const statsEntries = await Promise.all((profileItems || []).map(async (profile) => {
           try { return [profile.id, await request(`/mihomo/profiles/${profile.id}/stats`)] as const; }
-          catch { return [profile.id, null] as const; }
+          catch (cause) { failures.stats = cause; return [profile.id, null] as const; }
         }));
-        setProfileStats(Object.fromEntries(statsEntries.filter((entry) => entry[1])) as Record<string, ProfileStats>);
-        setRefreshErrors({});
+        if (profileItems) setProfileStats((previous) => Object.fromEntries(statsEntries
+          .map(([id, value]) => [id, value || previous[id]])
+          .filter(([, value]) => value)) as Record<string, ProfileStats>);
+        setRefreshErrors(Object.fromEntries(Object.entries(failures).map(([key, cause]) => [key, refreshFailure(cause, "Не удалось обновить данные Mihomo")])));
       } catch (cause) {
         setRefreshErrors({ overview: refreshFailure(cause, "Не удалось обновить данные Mihomo") });
       }
@@ -151,8 +163,15 @@ export function MihomoPage({
     return job;
   }, [request]);
 
+  function reportMutationFailure(id: string, label: string, cause: unknown, fallback: string) {
+    const state = mutationFailureState(cause);
+    notifyOperation(id, label, state, cause instanceof Error ? cause.message : fallback,
+      state === "unknown" ? () => refresh() : undefined);
+  }
+
   function updateDnsDraft(key: string, value: string | number | boolean) {
-    setDnsDraft((current) => ({ ...current, [key]: value }));
+    dnsDraftRef.current = { ...dnsDraftRef.current, [key]: value };
+    setDnsDraft(dnsDraftRef.current);
     dnsDirtyRef.current = true;
     setDnsDirty(true);
   }
@@ -163,16 +182,17 @@ export function MihomoPage({
     notifyOperation(operationId, "DNS Mihomo", "running", "Сохраняем DNS для профилей Mihomo…");
     setBusy(operationId);
     try {
-      await request("/mihomo/dns/settings", { method: "PATCH", body: JSON.stringify({ values: dnsDraft }) });
-      dnsDirtyRef.current = false;
-      setDnsDirty(false);
+      const submitted = dnsDraftRef.current;
+      await request("/mihomo/dns/settings", { method: "PATCH", body: JSON.stringify({ values: submitted }) });
+      if (dnsDraftRef.current === submitted) {
+        dnsDirtyRef.current = false;
+        setDnsDirty(false);
+      }
       await refresh();
-      notifySuccess("DNS для соединений Mihomo сохранён");
       notifyOperation(operationId, "DNS Mihomo", "success", "DNS-настройки сохранены");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "DNS-настройки не сохранены";
-      notifyOperation(operationId, "DNS Mihomo", "error", message);
-      notifyError(message);
+      reportMutationFailure(operationId, "DNS Mihomo", cause, message);
     } finally {
       setBusy("");
     }
@@ -214,6 +234,17 @@ export function MihomoPage({
     if (routingAutosaveRef.current) clearTimeout(routingAutosaveRef.current);
   }, []);
 
+  async function persistRouting(values: Record<string, string | number | boolean>) {
+    routingPendingRef.current++;
+    setRoutingAutosaving(true);
+    try {
+      return await saveRouting(values);
+    } finally {
+      routingPendingRef.current--;
+      setRoutingAutosaving(Boolean(routingPendingRef.current || routingAutosaveRef.current));
+    }
+  }
+
   function updateRoutingDraft(key: string, value: string | number | boolean, autosave = false) {
     const next = { ...routingDraftRef.current, [key]: value };
     routingDraftRef.current = next;
@@ -225,7 +256,8 @@ export function MihomoPage({
     setRoutingAutosaving(true);
     routingAutosaveRef.current = setTimeout(() => {
       routingAutosaveRef.current = null;
-      void request("/mihomo/routing/settings", { method: "PATCH", body: JSON.stringify({ values: next }) })
+      notifyOperation("settings:routing-policy", "Маршрутизация Mihomo", "running", "Сохраняем выбор…");
+      void persistRouting(next)
         .then((result) => {
           const saved = { ...((result as PolicySettings).values || next) };
           if (routingDraftRef.current === next) {
@@ -233,11 +265,11 @@ export function MihomoPage({
             setRoutingDraft(saved);
             routingDirtyRef.current = false;
             setRoutingDirty(false);
+            notifyOperation("settings:routing-policy", "Маршрутизация Mihomo", "success", "Выбор сохранён. Обновите подписку в клиенте.");
           }
           setRoutingPolicy(result as PolicySettings);
         })
-        .catch((cause) => notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить выбор"))
-        .finally(() => setRoutingAutosaving(false));
+        .catch((cause) => reportMutationFailure("settings:routing-policy", "Маршрутизация Mihomo", cause, "Не удалось сохранить выбор"));
     }, 350);
   }
 
@@ -354,14 +386,17 @@ export function MihomoPage({
     setBusy(operationId);
 
     try {
-      await request("/mihomo/routing/settings", { method: "PATCH", body: JSON.stringify({ values: routingDraft }) });
-      routingDirtyRef.current = false;
-      setRoutingDirty(false);
+      const submitted = routingDraftRef.current;
+      await persistRouting(submitted);
+      if (routingDraftRef.current === submitted) {
+        routingDirtyRef.current = false;
+        setRoutingDirty(false);
+      }
       await refresh();
       notifyOperation(operationId, "Маршрутизация Mihomo", "success", "Правила сохранены. Обновите подписку в клиенте.");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Маршрутизация не сохранена";
-      notifyOperation(operationId, "Маршрутизация Mihomo", "error", message);
+      reportMutationFailure(operationId, "Маршрутизация Mihomo", cause, message);
     } finally {
       setBusy("");
     }
@@ -430,7 +465,7 @@ export function MihomoPage({
       onCommandComplete();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Операция Mihomo не выполнена";
-      notifyOperation(operationId, operationLabel, "error", message);
+      reportMutationFailure(operationId, operationLabel, cause, message);
     } finally {
       setBusy("");
     }
@@ -460,7 +495,7 @@ export function MihomoPage({
       onCommandComplete();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Обновление Mihomo-модуля не выполнено";
-      notifyOperation(operationId, operationLabel, "error", message);
+      reportMutationFailure(operationId, operationLabel, cause, message);
     } finally {
       setBusy("");
     }
@@ -494,7 +529,7 @@ export function MihomoPage({
       notifyOperation(operationId, operationLabel, "success", "Настройки сохранены");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Настройки не сохранены";
-      notifyOperation(operationId, operationLabel, "error", message);
+      reportMutationFailure(operationId, operationLabel, cause, message);
     } finally {
       setBusy("");
     }
@@ -651,7 +686,7 @@ export function MihomoPage({
       notifyOperation(operationId, operationLabel, "success", "Профиль удалён");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Профиль не удалён";
-      notifyOperation(operationId, operationLabel, "error", message);
+      reportMutationFailure(operationId, operationLabel, cause, message);
     } finally {
       setBusy("");
     }
@@ -685,7 +720,7 @@ export function MihomoPage({
       notifyOperation(operationId, `Удаление устройства ${device.name}`, "success", "Устройство удалено");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Устройство не удалено";
-      notifyOperation(operationId, `Удаление устройства ${device.name}`, "error", message);
+      reportMutationFailure(operationId, `Удаление устройства ${device.name}`, cause, message);
     } finally {
       setBusy("");
     }
@@ -1089,7 +1124,7 @@ export function MihomoPage({
               </> : selectedRuleList ? <>
                 <header className="mihomoRuleEditorHead"><div><p className="eyebrow">DOMAIN / IP RULES</p><h3>{selectedRuleList.title}</h3><p>{selectedRuleList.description} Выберите нужные группы.</p></div><span>{selectedRuleText.split("\n").filter(Boolean).length} правил</span></header>
                 {ruleIconGroups[selectedRuleList.id] && <div className={`mihomoGameCatalog${ruleIconGroups[selectedRuleList.id].length > 12 ? " mihomoLargeCatalog" : ""}`}>{ruleIconGroups[selectedRuleList.id].map((group) => { const lines = ruleGroupLines(selectedRuleList, group); const current = new Set(selectedRuleText.split("\n").map((line) => line.trim()).filter(Boolean)); const enabled = lines.length > 0 && lines.every((line) => current.has(line)); return <button type="button" key={group.id} className={enabled ? "is-selected" : ""} aria-pressed={enabled} onClick={() => toggleRuleIconGroup(selectedRuleList, group)}><span>{group.code}</span><b>{group.name}</b><i>{enabled ? "Включено" : "Выключено"}</i></button>; })}</div>}
-                <footer className="mihomoRuleEditorActions"><span>{routingAutosaving ? "Сохраняем выбор…" : selectedRuleValue === "@default" ? "Стандартный набор · сохраняется автоматически" : "Выбор сохранён автоматически"}</span><nav><button type="button" className="ghostButton" disabled={selectedRuleValue === "@default"} onClick={() => updateRoutingDraft(selectedRuleList.key, "@default", true)}>По умолчанию</button></nav></footer>
+                <footer className="mihomoRuleEditorActions"><span>{routingAutosaving ? "Сохраняем выбор…" : routingDirty ? "Есть несохранённые изменения" : selectedRuleValue === "@default" ? "Стандартный набор · сохраняется автоматически" : "Выбор сохранён автоматически"}</span><nav><button type="button" className="ghostButton" disabled={selectedRuleValue === "@default"} onClick={() => updateRoutingDraft(selectedRuleList.key, "@default", true)}>По умолчанию</button></nav></footer>
                 <label className="mihomoCustomGames"><span><b>Дополнительные исключения</b><small>Собственные правила Mihomo, по одному на строку. Они дополняют выбранные выше группы.</small></span><textarea rows={5} value={ruleExtraLines(selectedRuleList).join("\n")} spellCheck={false} placeholder={"DOMAIN-SUFFIX,example.com,DIRECT\nIP-CIDR,203.0.113.0/24,DIRECT,no-resolve"} onChange={(event) => updateRuleExtras(selectedRuleList, event.target.value)} /></label>
               </> : <div className="mihomoHint">Списки правил загружаются…</div>}
             </article>

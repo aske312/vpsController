@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 MODULE="${QUIC_MODULE:-hysteria2}"
 SERVICE="vps-control-mihomo-${MODULE}"
-DEFAULT_PORT="${QUIC_DEFAULT_PORT:-8443}"
+DEFAULT_PORT="${QUIC_DEFAULT_PORT:-18443}"
 PORT="$(python3 - "${MIHOMO_SETTINGS_FILE:-}" "$DEFAULT_PORT" <<'PY'
 import json,sys
 try: d=json.load(open(sys.argv[1],encoding='utf-8'))
@@ -61,6 +61,26 @@ if module == "tuic": inbound.update({"congestion_control":"bbr","auth_timeout":"
 json.dump({"log":{"level":"warn"},"inbounds":[inbound],"outbounds":[{"type":"direct"}]},open(path,"w",encoding="utf-8"),indent=2)
 PY
 fi
+# A failed first installation may have left a config with the old port.
+# Preserve users, TLS and other settings when retrying with a corrected port.
+python3 - "$root/$MODULE/config.json" "$PORT" "$MODULE" <<'PY'
+import json, os, sys, tempfile
+path, port, module = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    config = json.load(handle)
+for inbound in config.get("inbounds", []):
+    if inbound.get("type") == module:
+        inbound["listen_port"] = int(port)
+fd, temporary = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".config.")
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(config, handle, indent=2)
+        handle.write("\n")
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PY
 /usr/local/bin/sing-box check -c "$root/$MODULE/config.json"
 cat >"/etc/systemd/system/$SERVICE.service" <<EOF
 [Unit]
@@ -69,10 +89,12 @@ After=network-online.target
 [Service]
 ExecStart=/usr/local/bin/sing-box run -c $root/$MODULE/config.json
 Restart=on-failure
+RestartSec=3
 User=root
 [Install]
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
+systemctl reset-failed "$SERVICE.service" || true
 systemctl enable --now "$SERVICE.service"
 if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then ufw allow "$PORT/udp" comment "GATE.312 Mihomo $MODULE" >/dev/null || true; fi

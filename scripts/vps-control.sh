@@ -1608,6 +1608,7 @@ PY
     || die "preflight модуля ${image_id} не пройден; установка не запускалась."
   apt-get -o DPkg::Lock::Timeout=300 check \
     || die "пакетный менеджер не готов к установке ${image_id}; выполните apt-get check."
+  refresh_protocol_api_access
   module_log="/var/log/${APP_NAME}-protocol-${image_id}.log"
   install -m 0600 /dev/null "${module_log}"
   set +e
@@ -1644,11 +1645,8 @@ PY
   if [[ "${image_id}" == "wg" || "${image_id}" == "awg" ]]; then
     configure_vpn_firewall_policy
   fi
-  # Protocol clients persist configs below /etc/vps-control.  Keep the API
-  # sandbox in sync even when a module is installed on an older deployment
-  # whose service unit predates the writable path.
-  ensure_api_write_access
-  systemctl restart "${APP_NAME}-api.service"
+  # Protocol status/configuration is read live; installation does not change
+  # the API code or environment and does not require an API restart.
   sync_protocol_monitor
   ok "Образ ${image_id} установлен."
 }
@@ -1667,13 +1665,12 @@ remove_protocol_image() {
   [[ "${uninstaller}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${uninstaller}" ]] \
     || die "образ ${image_id} не поддерживает удаление."
   info "Удаление установленного протокола ${image_id}"
+  refresh_protocol_api_access
   ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
     PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${uninstaller}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
-  ensure_api_write_access
-  systemctl restart "${APP_NAME}-api.service"
   sync_protocol_monitor
   ok "Протокол ${image_id} удалён; образ сохранён."
 }
@@ -1695,6 +1692,7 @@ update_protocol_image() {
   package="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("package",""))' "${manifest}")"
   installer="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("installer",""))' "${manifest}")"
   info "Обновление образа ${image_id}"
+  refresh_protocol_api_access
   module_log="/var/log/${APP_NAME}-protocol-${image_id}.log"
   install -m 0600 /dev/null "${module_log}"
   if [[ -n "${package}" ]]; then
@@ -1738,8 +1736,6 @@ update_protocol_image() {
   if [[ "${image_id}" == "mihomo" ]]; then
     systemctl restart vps-control-mihomo-manager.service
   fi
-  ensure_api_write_access
-  systemctl restart "${APP_NAME}-api.service"
   sync_protocol_monitor
   ok "Образ ${image_id} обновлён."
 }
@@ -1874,7 +1870,6 @@ EOF
   systemctl daemon-reload
   systemctl enable "$(basename "${policy_service}")" >/dev/null
   "${policy_script}"
-  systemctl restart "${APP_NAME}-api.service"
   ok "маршрутизация, stateful return и NAT для WG/AWG восстановлены."
 }
 
@@ -2078,6 +2073,16 @@ EOF
 
 ensure_api_write_access() {
   local expected="ReadWritePaths=-/etc/vps-control.env -/etc/vps-control -/etc/swanctl -/etc/caddy/vps-control.d -/etc/wireguard -/etc/amnezia ${DATA_DIR}"
+  API_WRITE_ACCESS_CHANGED=no
+  # Optional ReadWritePaths missing at process startup are not mounted writable
+  # when an installer creates them later. Prepare them before installing modules.
+  local directory
+  for directory in /etc/wireguard /etc/amnezia /etc/swanctl; do
+    if [[ ! -d "${directory}" ]]; then
+      install -d -m 0700 "${directory}"
+      API_WRITE_ACCESS_CHANGED=yes
+    fi
+  done
   install -d -m 0750 -o root -g nogroup "${CONFIG_DIR}"
   if [[ ! -s "${ENV_FILE}" && -f "${LEGACY_ENV_FILE}" ]]; then
     mv "${LEGACY_ENV_FILE}" "${ENV_FILE}"
@@ -2085,11 +2090,21 @@ ensure_api_write_access() {
   ln -sfn "${ENV_FILE}" "${LEGACY_ENV_FILE}"
   if ! grep -Fxq "EnvironmentFile=${ENV_FILE}" "${SERVICE_FILE}"; then
     sed -i "s|^EnvironmentFile=.*|EnvironmentFile=${ENV_FILE}|" "${SERVICE_FILE}"
-    systemctl daemon-reload
+    API_WRITE_ACCESS_CHANGED=yes
   fi
   if ! grep -Fxq "${expected}" "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
+    API_WRITE_ACCESS_CHANGED=yes
+  fi
+  if [[ "${API_WRITE_ACCESS_CHANGED}" == yes ]]; then
     systemctl daemon-reload
+  fi
+}
+
+refresh_protocol_api_access() {
+  ensure_api_write_access
+  if [[ "${API_WRITE_ACCESS_CHANGED}" == yes ]]; then
+    systemctl restart "${APP_NAME}-api.service"
   fi
 }
 

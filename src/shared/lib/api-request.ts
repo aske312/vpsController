@@ -17,6 +17,11 @@ export class ApiRequestError extends Error {
   }
 }
 
+export function mutationFailureState(cause: unknown): "unknown" | "error" {
+  return cause instanceof Error && "kind" in cause && (cause.kind === "network" || cause.kind === "response")
+    ? "unknown" : "error";
+}
+
 // One client per authenticated UI. Concurrent reads share a request, not a cache.
 export function createApiClient(token: string, options: RequestOptions = {}) {
   const pending = new Map<string, Promise<ApiResult>>();

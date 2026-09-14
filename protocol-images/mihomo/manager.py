@@ -82,6 +82,22 @@ def serialized_profile_mutation(function):
     return wrapped
 
 
+def module_mutation(action: str):
+    def decorate(function):
+        @functools.wraps(function)
+        def wrapped(module_id: str, *args, **kwargs):
+            with profile_mutation_lock:
+                try:
+                    return function(module_id, *args, **kwargs)
+                except subprocess.TimeoutExpired as exc:
+                    message = "Время ожидания команды истекло. Результат пока неизвестен; проверьте состояние модуля перед повторным действием."
+                    logger.error("Mihomo module action %s:%s timed out", action, module_id)
+                    write_action(f"{action}:{module_id}", message, state="unknown", progress=100)
+                    raise HTTPException(status_code=504, detail=message) from exc
+        return wrapped
+    return decorate
+
+
 def transactional_profile_mutation(function):
     @functools.wraps(function)
     def wrapped(*args, **kwargs):
@@ -371,13 +387,13 @@ def atomic_json(path: Path, value: Any, mode: int = 0o600) -> None:
             os.unlink(temporary)
 
 
-def write_action(action: str, message: str, state: str = "running", progress: int = 10) -> None:
+def write_action(action: str, message: str, state: str = "running", progress: int = 10, *, public_message: str | None = None) -> None:
     # FastAPI dispatches these sync endpoints to a threadpool, so a client can
     # poll get_action() from a separate request while a long install/profile
     # operation is still running on another worker thread.
     if state == "failed":
         logger.error("Mihomo action %s failed: %s", action, message)
-        message = PUBLIC_COMMAND_ERROR
+        message = public_message or PUBLIC_COMMAND_ERROR
     atomic_json(ACTION_FILE, {
         "action": action,
         "message": message,
@@ -1554,6 +1570,7 @@ def delete_personal_rule(rule_id: str) -> dict[str, Any]:
 
 
 @app.patch("/api/mihomo/routing/presets", dependencies=[Depends(auth_required)])
+@serialized_profile_mutation
 def patch_profile_presets(patch: PresetSettingsPatch) -> dict[str, Any]:
     next_presets = validate_profile_presets(patch.presets)
     atomic_json(PRESET_SETTINGS_FILE, next_presets)
@@ -1561,6 +1578,7 @@ def patch_profile_presets(patch: PresetSettingsPatch) -> dict[str, Any]:
 
 
 @app.patch("/api/mihomo/routing/settings", dependencies=[Depends(auth_required)])
+@serialized_profile_mutation
 def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
     next_values = validate_routing({key: value for key, value in patch.values.items() if key != "tunnel_privacy"}, current=routing_settings())
     atomic_json(ROUTING_SETTINGS_FILE, next_values)
@@ -1573,6 +1591,7 @@ def get_dns_settings() -> dict[str, Any]:
 
 
 @app.patch("/api/mihomo/dns/settings", dependencies=[Depends(auth_required)])
+@serialized_profile_mutation
 def patch_dns_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
     next_values = validate_dns(patch.values)
     SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
@@ -1605,7 +1624,11 @@ def direct_tls_domain_ready(domain: str) -> bool:
 
 
 def module_is_installed(module_id: str) -> bool:
-    enabled = bool(state()["modules"].get(module_id))
+    return bool(state()["modules"].get(module_id))
+
+
+def module_is_ready(module_id: str) -> bool:
+    enabled = module_is_installed(module_id)
     service = SERVICE_BY_MODULE.get(module_id)
     if service:
         return enabled and systemctl_active(service)
@@ -1751,7 +1774,32 @@ def module_payload(module_id: str) -> dict[str, Any]:
     }
 
 
+class ModulePortConflict(RuntimeError):
+    """A safe, actionable conflict message without command output or credentials."""
+
+
+def check_quic_port(module_id: str, port: int) -> None:
+    if module_id not in {"transport-hysteria2", "transport-tuic"}:
+        return
+    config = load_json(quic_root(module_id) / "config.json", {})
+    if systemctl_active(SERVICE_BY_MODULE[module_id]) and any(
+        inbound.get("type") == quic_module_name(module_id) and inbound.get("listen_port") == port
+        for inbound in config.get("inbounds", [])
+    ):
+        return  # The running module already owns its configured port.
+    listeners = run("ss", "-Hlun", "sport", "=", f":{port}")
+    if listeners.returncode:
+        raise RuntimeError("Unable to check UDP listeners before installing the module")
+    if listeners.stdout.strip():
+        raise ModulePortConflict(
+            f"UDP-порт {port} уже занят. Выберите свободный порт в настройках модуля Mihomo и повторите установку."
+        )
+
+
 def preflight_module(info: dict[str, Any]) -> None:
+    module_id = info["id"]
+    if module_id in {"transport-hysteria2", "transport-tuic"}:
+        check_quic_port(module_id, int(module_settings(module_id)["port"]))
     os_release: dict[str, str] = {}
     try:
         for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
@@ -1901,19 +1949,25 @@ def get_module_settings(module_id: str) -> dict[str, Any]:
 
 
 @app.patch("/api/mihomo/modules/{module_id}/settings", dependencies=[Depends(auth_required)])
+@module_mutation("module-settings")
 def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[str, Any]:
     previous_values = module_settings(module_id)
     next_values = validate_settings(module_id, patch.values)
+    if module_id in {"transport-hysteria2", "transport-tuic"} and next_values["port"] != previous_values["port"]:
+        try:
+            check_quic_port(module_id, int(next_values["port"]))
+        except ModulePortConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
     atomic_json(SETTINGS_ROOT / f"{module_id}.json", next_values)
-    if module_is_installed(module_id) and module_id in TRANSPORTS:
+    if module_is_ready(module_id) and module_id in TRANSPORTS:
         write_action(f"module-settings:{module_id}", f"Применение настроек {manifest(module_id)['name']}…")
         try:
             if module_id in {"transport-hysteria2", "transport-tuic"}:
                 write_quic_runtime(module_id)
             else:
                 call_module_script(module_id, "install")
-        except RuntimeError as exc:
+        except (RuntimeError, subprocess.TimeoutExpired) as exc:
             # Keep persisted settings and the generated runtime configuration
             # in sync. Re-applying the previous validated settings also rolls
             # back a candidate that passed static validation but failed its
@@ -1924,8 +1978,10 @@ def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[st
                     write_quic_runtime(module_id)
                 else:
                     call_module_script(module_id, "install")
-            except RuntimeError as rollback_exc:
+            except (RuntimeError, subprocess.TimeoutExpired) as rollback_exc:
                 exc = RuntimeError(f"{exc}; rollback failed: {rollback_exc}")
+            if isinstance(exc, subprocess.TimeoutExpired):
+                raise exc
             write_action(f"module-settings:{module_id}", str(exc), state="failed", progress=100)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         write_action(f"module-settings:{module_id}", f"Настройки {manifest(module_id)['name']} применены", state="done", progress=100)
@@ -1933,16 +1989,18 @@ def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[st
 
 
 @app.post("/api/mihomo/modules/{module_id}/install", dependencies=[Depends(auth_required)])
+@module_mutation("module-install")
 def install_module(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
     if info.get("installable", True) is not True:
         raise HTTPException(status_code=409, detail="Module is not available for installation")
-    if module_is_installed(module_id):
+    if module_is_ready(module_id):
         return module_payload(module_id)
     try:
         preflight_module(info)
     except RuntimeError as exc:
-        write_action(f"module-install:{module_id}", str(exc), state="failed", progress=100)
+        write_action(f"module-install:{module_id}", str(exc), state="failed", progress=100,
+                     public_message=str(exc) if isinstance(exc, ModulePortConflict) else None)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     write_action(f"module-install:{module_id}", f"Установка {info['name']}…", progress=10)
     # Create defaults before the installer so the first install is deterministic.
@@ -1973,12 +2031,13 @@ def install_module(module_id: str) -> dict[str, Any]:
 
 
 @app.delete("/api/mihomo/modules/{module_id}", dependencies=[Depends(auth_required)])
+@module_mutation("module-remove")
 def remove_module(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
     in_use = [
         profile["name"]
         for profile in profiles()
-        if any(connection.get("component") == module_id for connection in profile.get("connections", []))
+        if any(connection.get("component") == module_id for connection in [*profile.get("connections", []), *profile.get("retiring_connections", [])])
     ]
     if in_use:
         raise HTTPException(
@@ -2000,6 +2059,7 @@ def remove_module(module_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/mihomo/modules/{module_id}/update", dependencies=[Depends(auth_required)])
+@module_mutation("module-update")
 def update_module(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
     if not module_is_installed(module_id):
@@ -2254,6 +2314,8 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
         raise HTTPException(status_code=422, detail=f"{component} is not a Mihomo component")
     if not module_is_installed(component):
         raise HTTPException(status_code=409, detail=f"Сначала установите компонент {manifest(component)['name']}")
+    if not module_is_ready(component):
+        raise HTTPException(status_code=409, detail=f"Компонент {manifest(component)['name']} установлен, но его служба не работает. Сначала восстановите службу.")
     result = {**connection_defaults(component), **values}
     if component != "transport-reality":
         return result
@@ -2905,6 +2967,8 @@ def validate_channels(channels: list[str]) -> list[str]:
             raise HTTPException(status_code=422, detail=f"{module_id} is not a Mihomo transport")
         if not module_is_installed(module_id):
             raise HTTPException(status_code=409, detail=f"Сначала установите {manifest(module_id)['name']} внутри Mihomo")
+        if not module_is_ready(module_id):
+            raise HTTPException(status_code=409, detail=f"Служба {manifest(module_id)['name']} не работает. Сначала восстановите службу.")
         if module_id not in result:
             result.append(module_id)
     return result
