@@ -658,9 +658,17 @@ PY
 write_caddy_config() {
   # Resolve from the installed tree at call time. A running old shell must not
   # interpret a newer release's template using stale rendering functions.
+  local cdn_policy="${INSTALL_DIR}/api/cdn_security.py"
   if [[ -f "${INSTALL_DIR}/api/gateway_config.py" ]]; then
     python3 "${INSTALL_DIR}/api/gateway_config.py" write --mode "${ACCESS_MODE}" --port "${HTTP_PORT}" --output "${CADDY_CONFIG}" || return
-    python3 "${INSTALL_DIR}/api/cdn_security.py" rebuild || return
+    if [[ -f "${cdn_policy}" ]]; then
+      python3 "${cdn_policy}" rebuild || return
+    else
+      # A stable release may predate the CDN security module while an older
+      # Caddy snippet still imports it. Remove that stale optional snippet so
+      # the panel can be restored and the next release can recreate it.
+      rm -f -- "${CADDY_SNIPPET_DIR}/vless-cdn.caddy"
+    fi
     return
   fi
   local domain internal_panel_host public_panel_address wg_panel_address awg_panel_address panel_guard=""
@@ -704,14 +712,14 @@ PY
       -e "s|{INTERNAL_PANEL_HOST}|${internal_panel_host}|g" -e "s|{PUBLIC_PANEL_ADDRESS}|${public_panel_address}|g" -e "s|{PANEL_ACCESS_GUARD}|${panel_guard/; /\\n}|g" \
       "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
   fi
-  if [[ "${ACCESS_MODE}" == "vpn" && -n "${domain}" ]]; then
+  if [[ "${ACCESS_MODE}" == "vpn" && -n "${domain}" && -f "${cdn_policy}" ]]; then
     cat >>"${CADDY_CONFIG}" <<EOF
 
 # Public, token-protected Mihomo subscription refresh. No panel UI or
 # administrative API is exposed on this host while VPN-only mode is active.
 ${domain} {
     route {
-    @outsideProtectedConnection not remote_ip 127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 $(python3 "${INSTALL_DIR}/api/cdn_security.py" networks)
+    @outsideProtectedConnection not remote_ip 127.0.0.0/8 ::1/128 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 $(python3 "${cdn_policy}" networks)
     respond @outsideProtectedConnection 403
     header {
         -Server
@@ -728,7 +736,11 @@ ${domain} {
 }
 EOF
   fi
-  [[ ! -f "${INSTALL_DIR}/api/cdn_security.py" ]] || python3 "${INSTALL_DIR}/api/cdn_security.py" rebuild
+  if [[ -f "${cdn_policy}" ]]; then
+    python3 "${cdn_policy}" rebuild
+  else
+    rm -f -- "${CADDY_SNIPPET_DIR}/vless-cdn.caddy"
+  fi
 }
 
 env_value() {
@@ -1808,6 +1820,7 @@ configure_vless_cdn_firewall() {
   [[ "${ENABLE_UFW}" == "yes" ]] || return 0
   local policy="${INSTALL_DIR}/api/cdn_security.py"
   [[ -f "${policy}" ]] || policy="${PROJECT_DIR}/api/cdn_security.py"
+  [[ -f "${policy}" ]] || return 0
   python3 "${policy}" firewall
 }
 
@@ -2630,7 +2643,17 @@ restore_test_app() {
     mv -- "${failed_install}/venv" "${INSTALL_DIR}/venv"
   fi
   PROJECT_DIR="${INSTALL_DIR}"
+  # Shared Caddy configuration can outlive the application release. Preserve
+  # the public Cloudflare CA when rolling back to a release that predates the
+  # CDN module; otherwise caddy validation makes the rollback impossible.
+  if [[ ! -s "${INSTALL_DIR}/api/resources/cloudflare-origin-pull-ca.pem" \
+    && -s "${failed_install}/api/resources/cloudflare-origin-pull-ca.pem" ]]; then
+    install -d -m 0755 "${INSTALL_DIR}/api/resources"
+    install -m 0644 "${failed_install}/api/resources/cloudflare-origin-pull-ca.pem" \
+      "${INSTALL_DIR}/api/resources/cloudflare-origin-pull-ca.pem"
+  fi
   if ! install_api || ! install_web || ! ensure_api_write_access || ! ensure_mihomo_profile_runtimes \
+    || ! systemctl daemon-reload \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! restart_mihomo_manager_if_present \
@@ -2643,6 +2666,7 @@ restore_test_app() {
     fi
     mv -- "${INSTALL_DIR}" "${TEST_BACKUP_DIR}"
     mv -- "${failed_install}" "${INSTALL_DIR}"
+    systemctl daemon-reload
     systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
     restart_mihomo_manager_if_present
     die "возврат отклонён; тестовая версия продолжает работать."
@@ -2729,9 +2753,11 @@ PY
     ssh_public="${saved[3]:-yes}"
     IFS=',' read -ra timers <<<"${saved[4]:-}"
     for timer in "${timers[@]}"; do [[ -z "${timer}" ]] || systemctl start "${timer}" || true; done
-    rm -f "${SERVICE_MODE_FILE}"
     rm -f "${DATA_DIR}/application-version.json"
     change_access_mode "$1" "${previous_access}"
+    # Keep the marker until the final access configuration succeeds. A failed
+    # Caddy/firewall restore must remain retryable and visible as service mode.
+    rm -f "${SERVICE_MODE_FILE}"
     [[ "${ssh_public}" == "yes" ]] || ufw delete allow OpenSSH >/dev/null 2>&1 || true
     [[ "${ssh_service_active}" == "yes" ]] || systemctl stop ssh.service
     [[ "${ssh_socket_active}" == "yes" ]] || systemctl stop ssh.socket

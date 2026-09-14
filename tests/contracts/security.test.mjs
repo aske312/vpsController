@@ -181,6 +181,8 @@ test("protected panel access uses one stable host through every configured chann
   assert.match(api, /access-mode restarts the API service/);
   assert.match(api, /"action": "access-mode"/);
   assert.match(api, /"action": "service-mode"/);
+  assert.match(api, /ACTION_FILE\.write_text\(json\.dumps\(action/);
+  assert.match(api, /"progress": 3/);
   assert.match(page, /systemOperationNotification\(operation, actionLabels\["access-mode"\], true\)/);
   assert.match(page, /systemOperationNotification\(operation, actionLabels\["service-mode"\], true\)/);
   assert.match(page, /window\.location\.assign\(targetUrl\)/);

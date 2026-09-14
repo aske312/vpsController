@@ -163,6 +163,9 @@ test("service mode deploys main from an isolated preview while stabl remains the
   assert.match(page, /Rollback/);
   assert.match(manager, /TEST_BACKUP_DIR="\$\{DATA_DIR\}\/test-app-backup"/);
   assert.match(manager, /restore_test_app\(\)/);
+  assert.match(manager, /cloudflare-origin-pull-ca\.pem/);
+  assert.match(manager, /systemctl daemon-reload/);
+  assert.match(manager, /Keep the marker until the final access configuration succeeds/);
   assert.match(manager, /if \[\[ -d "\$\{TEST_BACKUP_DIR\}" \]\]; then\s+info "возврат к сохранённой стабильной версии перед выключением сервисного режима"\s+restore_test_app/s);
   assert.match(page, /Будет восстановлена стабильная версия stabl/);
   assert.match(stablWorkflow, /branches: \[stabl, main\]/);

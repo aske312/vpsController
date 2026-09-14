@@ -2924,7 +2924,19 @@ def update_service_mode(payload: ServiceModeSettings, _: None = Depends(require_
     )
     if result.returncode:
         raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to change service mode")
-    return {"action": "service-mode", "active": payload.active, "state": "activating", "unit": f"{unit}.service"}
+    action = {
+        "unit": f"{unit}.service",
+        "action": "service-mode",
+        "active": payload.active,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "state": "activating",
+        "progress": 3,
+        "message": "Команда передана серверу",
+    }
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
+    os.chmod(ACTION_FILE, 0o600)
+    return action
 
 
 def start_control_task(name: str, *arguments: str) -> dict:
