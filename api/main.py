@@ -1322,9 +1322,14 @@ def network_domain_probe(domain: str, role: str) -> dict:
 
 def network_status() -> dict:
     domain_items: list[dict] = []
-    for domain, role in ((PUBLIC_DOMAIN, "panel"), (VLESS_CDN_DOMAIN, "VLESS CDN")):
+    candidates = [(PUBLIC_DOMAIN, "panel", "environment"), (VLESS_CDN_DOMAIN, "VLESS CDN", "environment")]
+    for route in cdn_security.read_routes():
+        candidates.append((route.get("domain", ""), "VLESS CDN" if route.get("cloudflare", True) else "VLESS TLS", "gateway"))
+    for domain, role, source in candidates:
         if domain and not any(item["value"] == domain for item in domain_items):
-            domain_items.append(network_domain_probe(domain, role))
+            item = network_domain_probe(domain, role)
+            item["source"] = source
+            domain_items.append(item)
     direct_domains = [item for item in domain_items if item["route"] == "direct"]
     proxy_domains = [item for item in domain_items if item["route"] == "proxy_or_cdn"]
     if direct_domains and not proxy_domains:
