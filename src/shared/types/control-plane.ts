@@ -24,6 +24,7 @@ export type DnsStatus = { settings: DnsSettings; providers: DnsProvider[]; proto
 export type DnsCheck = { id: string; available: boolean; udp_ok: boolean; udp_ms?: number; tcp_ok: boolean; tcp_ms?: number; doh_ok: boolean; doh_ms?: number; latency_ms?: number };
 export type NetworkEndpointSettings = { cdn_domain: string; tls_relay_domain: string; udp_relay_domain: string };
 export type NetworkEndpointCheck = { kind: "cdn" | "tls_relay" | "udp_relay"; domain: string; resolved: string[]; matches_origin: boolean; route: "direct" | "proxy_or_cdn" | "unresolved"; status: "ready" | "warning" | "unresolved"; ready: boolean; message: string };
+export type NetworkCapabilityCheck = { id: string; label: string; status: "ready" | "warning" | "unsupported"; value: string; detail: string };
 export type NetworkStatus = {
   detected_at: string;
   server: { name: string; public_ip: string; public_ipv4?: string; public_ipv6?: string };
@@ -35,6 +36,7 @@ export type NetworkStatus = {
   listeners: Array<{ port: number; protocol: string; process: string }>;
   resolvers: string[];
   transport_endpoints: NetworkEndpointSettings;
+  capabilities?: { uplink?: string; checks: NetworkCapabilityCheck[] };
 };
 export type MihomoDnsField = { key: string; label: string; type: "select" | "boolean" | "textarea" | "text"; default: string | number | boolean; options?: Array<string | { value: string; label: string }>; help?: string };
 export type MihomoDnsStatus = { schema: MihomoDnsField[]; values: Record<string, string | number | boolean> };
