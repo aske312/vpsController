@@ -52,6 +52,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /DIRECT_P2P_PROCESSES/);
   assert.match(manager, /"qbittorrent": \["qbittorrent\.exe", "qbittorrent"\]/);
   assert.match(manager, /direct_p2p_rules\(routing\)/);
+  assert.match(manager, /windows_geolocation/);
+  assert.match(manager, /inference\.location\.live\.net,DIRECT/);
   assert.match(manager, /DOMAIN,settings-win\.data\.microsoft\.com,REJECT/);
   assert.match(manager, /DOMAIN,incoming\.telemetry\.mozilla\.org,REJECT/);
   const privacyDefaults = manager.slice(manager.indexOf('"block_privacy": ['), manager.indexOf('"direct_ru_sites": ['));
@@ -98,6 +100,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /direct_downloads/);
   assert.match(page, /p2pClientCatalog/);
   assert.match(page, /toggleP2pClient/);
+  assert.match(page, /windows_geolocation/);
   assert.match(page, /profileDirectRules/);
   assert.match(page, /const ruleCount = profileDirectRules\.filter/);
   assert.match(page, /const importUrl = clientImportUrl\(subscription,/);
@@ -120,6 +123,8 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /udp_tunnel_exclusions_rules/);
   assert.match(page, /EA Sports FC 26/);
   assert.match(page, /toggleProfileRule/);
+  assert.match(page, /device\.routing\?\.\[rule\.key\]/);
+  assert.match(page, /new Set\(device\.personal_rule_ids \|\| \[\]\)\.size/);
   assert.match(page, /routingAutosaveRef/);
   assert.match(page, /available_rules/);
   assert.match(page, /routingDraft\[selectedRuleList\.key\]/);
@@ -131,6 +136,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.doesNotMatch(routingManifest.settings.map((item) => item.key).join(","), /tunnel_restricted_games_enabled/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /tunnel_games/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_game_processes/);
+  assert.match(routingManifest.settings.map((item) => item.key).join(","), /windows_geolocation/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_ru_sites_rules/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_ru_banks_rules/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_ru_marketplaces_rules/);

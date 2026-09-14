@@ -921,6 +921,13 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "IP-CIDR6,fe80::/10,DIRECT,no-resolve",
         "IP-CIDR6,ff00::/8,DIRECT,no-resolve",
     ],
+    # Windows Location Services use these endpoints to obtain location data.
+    # Keep the exception opt-in: it only changes the source IP for these
+    # requests and does not bypass the rest of the Windows device traffic.
+    "windows_geolocation": [
+        "DOMAIN,inference.location.live.net,DIRECT",
+        "DOMAIN,location-inference-westus.cloudapp.net,DIRECT",
+    ],
     "direct_downloads": [
         # Operating-system and driver payloads. Authentication/API traffic is
         # deliberately not included, only well-known delivery hosts.
@@ -3835,6 +3842,8 @@ def validate_client_capabilities(profile):
             raise HTTPException(status_code=422, detail="Приложение устройства не поддерживает выбранный формат")
         client = None if device.get("manual") else device.get("client_name")
         caps = device_capabilities(format, device.get("os", "unknown"), client)
+        if routing.get("windows_geolocation") and device.get("os") != "windows":
+            raise HTTPException(status_code=422, detail=f"{caps['label']}: правило геолокации доступно только для Windows")
         selected_personal_rules = personal_rules_for_device(profile, str(device["id"]))
         if selected_personal_rules and format == "uri":
             raise HTTPException(status_code=422, detail=f"{caps['label']}: персональные правила нельзя экспортировать в URI-подписку")

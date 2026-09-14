@@ -188,6 +188,7 @@ export const profileDirectRules = [
   { key: "direct_ru_banks", code: "BANK", title: "Банки", text: "Банки и платёжные сервисы.", group: "Напрямую" },
   { key: "direct_ru_marketplaces", code: "SHOP", title: "Магазины", text: "Магазины и маркетплейсы.", group: "Напрямую" },
   { key: "direct_downloads", code: "DL", title: "Загрузки", text: "Крупные файлы без VPN.", group: "Напрямую" },
+  { key: "windows_geolocation", code: "GEO", title: "Геолокация Windows", text: "Службы геолокации через провайдера.", group: "Windows" },
   { key: "direct_local_network", code: "LAN", title: "Локальная сеть", text: "Домашние устройства напрямую.", group: "Сеть" },
   { key: "direct_games_enabled", code: "GAME", title: "Игры", text: "Выбранные игры без VPN.", group: "Сеть" },
   { key: "direct_games_udp_enabled", code: "UDP", title: "UDP", text: "Весь UDP без VPN.", group: "Сеть" },

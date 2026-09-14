@@ -120,6 +120,13 @@
       "help": "Сохраняет прямой доступ к роутерам, NAS, принтерам, умному дому и приватным IPv4/IPv6-адресам."
     },
     {
+      "key": "windows_geolocation",
+      "label": "Геолокация Windows — напрямую",
+      "type": "boolean",
+      "default": false,
+      "help": "Направляет через провайдера только запросы Windows Location Services. По умолчанию выключено; остальной трафик остаётся в туннеле."
+    },
+    {
       "key": "direct_downloads",
       "label": "Загрузки напрямую",
       "type": "boolean",
