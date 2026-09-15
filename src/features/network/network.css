@@ -386,6 +386,7 @@
   background: transparent;
   color: var(--network-text);
   text-align: left;
+  min-height: 34px;
 }
 
 [data-network-page] .networkRouteExpand:hover { color: var(--network-cyan); }
@@ -442,22 +443,66 @@
 [data-network-page] .networkRouteCascade {
   display: grid;
   gap: 0;
-  padding: 0 16px 14px 45px;
+  padding: 0 18px 17px 50px;
   background: var(--network-panel-soft);
 }
 
 [data-network-page] .networkRouteCascadeHeader {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 11px 0 9px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 0 10px;
   border-bottom: 1px solid var(--network-line);
+}
+
+[data-network-page] .networkRouteCascadeHeader > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+[data-network-page] .networkRouteCascadeHeader .networkRouteTags {
+  flex: 0 0 auto;
+  justify-content: flex-end;
 }
 
 [data-network-page] .networkRouteCascadeHeader strong {
   overflow: hidden;
   color: var(--network-text);
   font: 700 11px/1.2 var(--font-mono), monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-network-page] .networkRouteCascadeMeta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  padding: 10px 0 0;
+}
+
+[data-network-page] .networkRouteCascadeMeta > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--network-line);
+  border-radius: 8px;
+  background: rgba(5, 13, 20, .42);
+}
+
+[data-network-page] .networkRouteCascadeMeta small {
+  color: var(--network-dim);
+  font-size: 8px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+[data-network-page] .networkRouteCascadeMeta strong {
+  overflow: hidden;
+  color: var(--network-text);
+  font: 700 10px/1.25 var(--font-mono), monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -561,26 +606,6 @@
 [data-network-page] .networkRouteTag.direct { color: var(--network-muted); }
 [data-network-page] .networkRouteTag.unknown { color: var(--network-amber); }
 
-[data-network-page] .networkEvidence {
-  margin: 0 16px;
-  border-top: 1px solid var(--network-line);
-}
-
-[data-network-page] .networkEvidence summary {
-  padding: 10px 0;
-  color: var(--network-muted);
-  cursor: pointer;
-  font-size: 10px;
-}
-
-[data-network-page] .networkEvidence ul {
-  margin: 0;
-  padding: 0 0 11px 17px;
-  color: var(--network-muted);
-  font-size: 10px;
-  line-height: 1.45;
-}
-
 /* CAPABILITIES. */
 
 [data-network-page] .networkV2Capabilities { padding-bottom: 12px; }
@@ -590,6 +615,30 @@
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 7px;
   padding: 0 14px;
+}
+
+[data-network-page] .networkCapabilityActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+[data-network-page] .networkCapabilityActions button,
+[data-network-page] .networkCapabilityAction button {
+  min-height: 29px;
+  padding: 0 9px;
+  border: 1px solid var(--network-line-strong);
+  border-radius: 7px;
+  background: rgba(5, 13, 20, .72);
+  color: var(--network-muted);
+  font-size: 9px;
+}
+
+[data-network-page] .networkCapabilityActions button:hover:not(:disabled),
+[data-network-page] .networkCapabilityAction button:hover:not(:disabled) {
+  border-color: rgba(98, 200, 255, .42);
+  color: var(--network-cyan);
 }
 
 [data-network-page] .networkCapabilityCard {
@@ -602,7 +651,13 @@
   background: rgba(5, 13, 20, .48);
 }
 
-[data-network-page] .networkCapabilityCard > span {
+[data-network-page] .networkCapabilityCardHead {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+[data-network-page] .networkCapabilityCardHead > span {
   overflow: hidden;
   color: var(--network-muted);
   font-size: 9px;
@@ -610,7 +665,7 @@
   white-space: nowrap;
 }
 
-[data-network-page] .networkCapabilityCard > strong {
+[data-network-page] .networkCapabilityCardHead > strong {
   overflow: hidden;
   color: var(--network-text);
   font: 700 11px/1.2 var(--font-mono), monospace;
@@ -624,9 +679,26 @@
   line-height: 1.35;
 }
 
-[data-network-page] .networkCapabilityCard.ready > strong { color: var(--network-green); }
-[data-network-page] .networkCapabilityCard.warning > strong { color: var(--network-amber); }
-[data-network-page] .networkCapabilityCard.unsupported > strong { color: var(--network-red); }
+[data-network-page] .networkCapabilityAction {
+  display: grid;
+  gap: 7px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--network-line);
+}
+
+[data-network-page] .networkCapabilityAction p {
+  margin: 0;
+  color: var(--network-muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+[data-network-page] .networkCapabilityAction button { justify-self: start; }
+
+[data-network-page] .networkCapabilityCard.ready .networkCapabilityCardHead > strong { color: var(--network-green); }
+[data-network-page] .networkCapabilityCard.warning .networkCapabilityCardHead > strong { color: var(--network-amber); }
+[data-network-page] .networkCapabilityCard.unsupported .networkCapabilityCardHead > strong { color: var(--network-red); }
 
 /* DNS settings tab. */
 
@@ -843,15 +915,6 @@
 [data-network-page] .networkApplyGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 12px 16px; }
 
 [data-network-page] .networkApplySection .networkSectionHeading { border-bottom: 0; padding-bottom: 7px; }
-
-[data-network-page] .networkPolicyNote,
-[data-network-page] .networkImpact {
-  margin: 0;
-  padding: 0 16px 13px;
-  color: var(--network-dim);
-  font-size: 10px;
-  line-height: 1.4;
-}
 
 [data-network-page] .networkCustomFields {
   display: grid;
@@ -1221,6 +1284,8 @@
   [data-network-page] .networkApplyGrid,
   [data-network-page] .networkCustomFields,
   [data-network-page] .networkEndpointGrid { grid-template-columns: 1fr; }
+  [data-network-page] .networkRouteCascadeMeta { grid-template-columns: 1fr; }
+  [data-network-page] .networkCapabilityActions { align-items: stretch; flex-direction: column; }
   [data-network-page] .networkResolverWorkspace { grid-template-columns: 1fr; padding: 10px; }
   [data-network-page] .networkDnsSuggestion,
   [data-network-page] .networkProviderTools { align-items: stretch; flex-direction: column; }

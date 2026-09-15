@@ -66,7 +66,7 @@ export function GateNavigation({
                 <NavButton
                   active={activeTab === "channels" || transports.some((item) => activeTab === item.id)}
                   icon="transport"
-                  label="Защищённые каналы"
+                  label="Tunnels"
                   tone="cyan"
                   onClick={() => onNavigate("channels")}
                 />

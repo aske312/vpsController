@@ -39,12 +39,14 @@ export function MihomoPage({
   coreBusy,
   onRemoveCore,
   onCommandComplete,
+  onLoadingChange,
 }: {
   token: string;
   confirmAction: (options: ConfirmOptions) => Promise<boolean>;
   coreBusy: boolean;
   onRemoveCore: () => Promise<void>;
   onCommandComplete: () => void;
+  onLoadingChange?: (loading: boolean, run?: number) => void;
 }) {
   const [view, setView] = useState<View>("overview");
   const [status, setStatus] = useState<Status | null>(null);
@@ -72,6 +74,7 @@ export function MihomoPage({
   const [refreshErrors, setRefreshErrors] = useState<Record<string, NotificationFailure>>({});
   useFailureNotifications("mihomo", "Обновление Mihomo", refreshErrors);
   const refreshInFlight = useRef<Promise<void> | null>(null);
+  const refreshRun = useRef(0);
   const [editing, setEditing] = useState<Module | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number | boolean>>({});
   const [profileDialog, setProfileDialog] = useState<Profile | "new" | null>(null);
@@ -122,6 +125,8 @@ export function MihomoPage({
       await refreshInFlight.current;
       if (refreshInFlight.current) return refreshInFlight.current;
     }
+    const run = ++refreshRun.current;
+    onLoadingChange?.(true, run);
     const job = (async () => {
       try {
         let profileItems: Profile[] | undefined;
@@ -158,10 +163,13 @@ export function MihomoPage({
       } catch (cause) {
         setRefreshErrors({ overview: refreshFailure(cause, "Не удалось обновить данные Mihomo") });
       }
-    })().finally(() => { refreshInFlight.current = null; });
+    })().finally(() => {
+      refreshInFlight.current = null;
+      onLoadingChange?.(false, run);
+    });
     refreshInFlight.current = job;
     return job;
-  }, [request]);
+  }, [onLoadingChange, request]);
 
   function reportMutationFailure(id: string, label: string, cause: unknown, fallback: string) {
     const state = mutationFailureState(cause);

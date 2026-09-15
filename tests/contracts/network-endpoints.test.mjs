@@ -30,6 +30,10 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(page, /SERVER IPv4/);
   assert.match(page, /SERVER IPv6/);
   assert.match(page, /serverRoutes/);
+  assert.match(page, /NetworkCapabilityCard/);
+  assert.match(page, /Обновить проверки/);
+  assert.match(page, /Скопировать IPv6/);
+  assert.doesNotMatch(page, /networkEvidence/);
   assert.ok(page.indexOf("networkStateStrip") < page.indexOf("networkV2RouteBlock"));
   assert.match(networkApi, /saveNetworkEndpoints/);
   assert.match(types, /transport_endpoints/);
@@ -43,6 +47,8 @@ test("network DNS selection is limited to installed independently configurable p
   ]);
   assert.match(dns, /installedDnsComponents/);
   assert.match(dns, /item\.key !== "apply_system"/);
+  assert.match(dns, /DNS:.*undefined/);
+  assert.doesNotMatch(dns, /Безопасное применение|Границы применения|networkImpact|networkPolicyNote/);
   assert.doesNotMatch(dns, /Исключения по компонентам/);
   assert.match(css, /networkResolverColumn \.networkProviderGrid[\s\S]+max-height: 300px/);
   assert.match(css, /networkSaveBar[\s\S]+position: sticky/);

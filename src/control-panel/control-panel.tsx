@@ -50,6 +50,8 @@ type GeneratedProfile = { id: string; name: string; filename: string; config: st
 type SshAccessState = { phase: "password" | "key-installed" | "awaiting-confirmation" | "hardened" | "rolled-back"; fingerprint: string; rollback_deadline?: string | null; message: string; key_login_observed?: boolean };
 export function ControlPanel() {
   const [tab, setTab] = useState<Tab>("overview");
+  const activeTabRef = useRef<Tab>(tab);
+  activeTabRef.current = tab;
   const [networkRefreshKey, setNetworkRefreshKey] = useState(0);
   const [selectedChannel, setSelectedChannel] = useState<Protocol>("awg");
   const [token, setToken] = useState("");
@@ -83,6 +85,11 @@ export function ControlPanel() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moduleMenuOpen, setModuleMenuOpen] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [viewLoading, setViewLoading] = useState(false);
+  const viewLoadingTimer = useRef<number | null>(null);
+  const viewLoadingRun = useRef(0);
+  const networkLoadingRun = useRef(0);
+  const mihomoLoadingRun = useRef(0);
   const [networkRate, setNetworkRate] = useState({ rx: 0, tx: 0 });
   const [resourceHistory, setResourceHistory] = useState<ResourceHistory>({ load: [], memory: [], disk: [], rx: [], tx: [] });
   const [protocolImages, setProtocolImages] = useState<ProtocolImage[]>([]);
@@ -378,8 +385,56 @@ export function ControlPanel() {
     finally { setBusy(false); }
   }
 
-  const refreshCurrent = useCallback(async (showBusy = false) => {
+  const beginViewLoading = useCallback(() => {
+    const run = ++viewLoadingRun.current;
+    if (viewLoadingTimer.current !== null) {
+      window.clearTimeout(viewLoadingTimer.current);
+    }
+    viewLoadingTimer.current = window.setTimeout(() => {
+      if (run === viewLoadingRun.current) setViewLoading(true);
+    }, 220);
+    return run;
+  }, []);
+
+  const endViewLoading = useCallback((run?: number) => {
+    if (run !== undefined && run !== viewLoadingRun.current) return;
+    viewLoadingRun.current += 1;
+    if (viewLoadingTimer.current !== null) {
+      window.clearTimeout(viewLoadingTimer.current);
+      viewLoadingTimer.current = null;
+    }
+    setViewLoading(false);
+  }, []);
+
+  const handleNetworkLoadingChange = useCallback((loading: boolean, run = 0) => {
+    if (loading) {
+      networkLoadingRun.current = run;
+      beginViewLoading();
+    } else if (activeTabRef.current === "network" && (!run || run === networkLoadingRun.current)) {
+      endViewLoading();
+    }
+  }, [beginViewLoading, endViewLoading]);
+
+  const handleMihomoLoadingChange = useCallback((loading: boolean, run = 0) => {
+    if (loading) {
+      mihomoLoadingRun.current = run;
+      beginViewLoading();
+    } else if (activeTabRef.current === "mihomo" && (!run || run === mihomoLoadingRun.current)) {
+      endViewLoading();
+    }
+  }, [beginViewLoading, endViewLoading]);
+
+  useEffect(() => () => {
+    if (viewLoadingTimer.current !== null) window.clearTimeout(viewLoadingTimer.current);
+  }, []);
+
+  useEffect(() => {
+    if (!token) endViewLoading();
+  }, [endViewLoading, token]);
+
+  const refreshCurrent = useCallback(async (showBusy = false, showTransition = false) => {
     if (!token) return;
+    const transitionRun = showTransition ? beginViewLoading() : undefined;
     if (showBusy) { setBusy(true); }
     try {
       if (tab === "overview") await Promise.all([loadOverview(showBusy), loadClients(showBusy), loadApplication(showBusy), loadServices(showBusy)]);
@@ -396,16 +451,15 @@ export function ControlPanel() {
         if (tab === "clients") await measureDeviceRoute(showBusy);
       }
     } finally {
+      if (showTransition && tab !== "network" && tab !== "mihomo") endViewLoading(transitionRun);
       if (showBusy) setBusy(false);
     }
-  }, [loadApplication, loadApplicationMetadata, loadClients, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, selectedChannel, tab, token]);
+  }, [beginViewLoading, endViewLoading, loadApplication, loadApplicationMetadata, loadClients, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, selectedChannel, tab, token]);
 
   useEffect(() => {
     if (!token) return;
     sessionStorage.setItem("312-token", token);
-    // Load the minimum shared data required to construct the first screen and navigation.
-    void Promise.all([loadOverview(), loadClients(), loadApplication(), loadServices()]);
-  }, [loadApplication, loadClients, loadOverview, loadServices, token]);
+  }, [token]);
 
   useEffect(() => {
     if (!token || !autoRefresh) return;
@@ -449,9 +503,9 @@ export function ControlPanel() {
   }, [reloadBlocked, reloadRequested, selectedChannel, tab, token]);
 
   useEffect(() => {
-    if (!token || tab === "overview") return;
-    // Synchronize only the newly opened module.
-    void refreshCurrent(false);
+    if (!token) return;
+    // Keep the previous screen in place and only show the shared veil for a slow read.
+    void refreshCurrent(false, true);
   }, [refreshCurrent, tab, token]);
 
   const loadSecurityLogs = useCallback(async () => {
@@ -1452,7 +1506,8 @@ export function ControlPanel() {
     busy={busy}
     lastUpdated={lastUpdated}
     onToggleAutoRefresh={() => setAutoRefresh((value) => !value)}
-    onRefresh={() => void refreshCurrent(true)}
+    viewLoading={viewLoading}
+    onRefresh={() => void refreshCurrent(true, true)}
     onLogout={() => { notifications.reset(); setReloadRequested(false); sessionStorage.removeItem("312-token"); setToken(""); }}
   >
       {tab !== "overview" && tab !== "network" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
@@ -1482,6 +1537,7 @@ export function ControlPanel() {
           confirmAction={askConfirmation}
           coreBusy={installingProtocol === "remove-mihomo"}
           onCommandComplete={requestCommandReload}
+          onLoadingChange={handleMihomoLoadingChange}
           onRemoveCore={async () => {
             const image = protocolImages.find((item) => item.id === "mihomo" && item.installed);
             if (image) await removeProtocol(image, true);
@@ -1489,11 +1545,11 @@ export function ControlPanel() {
         />
       )}
 
-      {tab === "channels" && <nav className="protocolSwitcher channelPageSwitcher" aria-label="Защищённые каналы">
+      {tab === "channels" && <nav className="protocolSwitcher channelPageSwitcher" aria-label="Tunnels">
         {installedProtocols.map((protocol) => <button type="button" key={protocol} className={`protocol-${protocol}${tab === "channels" && selectedChannel === protocol ? " active" : ""}`} onClick={() => { setSelectedChannel(protocol); setTab("channels"); void loadProtocolStatus(protocol); }}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : "VLESS"}</button>)}
       </nav>}
 
-      {tab === "network" && <NetworkView request={request} refreshKey={networkRefreshKey} />}
+      {tab === "network" && <NetworkView request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} />}
 
       {tab === "security" && <SecurityView
         securityLoading={securityLoading}

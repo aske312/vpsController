@@ -274,11 +274,15 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /image\.description \|\| image\.category_name/);
   assert.match(page, /activeProtocolImage/);
   assert.match(page, /setTab\(protocol\)/);
-  assert.match(page, /const channelProfiles: Record<Protocol/);
-  assert.match(page, /family: "KERNEL TUNNEL"/);
-  assert.match(page, /family: "STEALTH TUNNEL"/);
+  assert.match(page, /const profiles: Record<Protocol, TunnelProfile>/);
+  assert.match(page, /family: "KERNEL VPN"/);
+  assert.match(page, /family: "STEALTH VPN"/);
   assert.match(page, /family: "ENCRYPTED PROXY"/);
-  assert.match(page, /family: "MODULAR TRANSPORT"/);
+  assert.match(page, /family: "XRAY TRANSPORT"/);
+  assert.match(page, /tunnelsWorkspace/);
+  assert.match(page, /data-asset="operator_prt_1\.webp"/);
+  assert.match(page, /NOT CONNECTED/);
+  assert.doesNotMatch(page, /ProtocolCommandCenter|VlessControlCenter/);
   assert.match(page, /client\.protocol === "tuic" \? "TUIC" : client\.protocol === "trojan" \? "TRJ" : client\.protocol === "openvpn" \? "OVPN" : client\.protocol === "ikev2" \? "IKE" : "VLESS"/);
   assert.match(page, /if \(Boolean\(current\?\.installed\) === installed\) return;/);
   for (const operation of ["install", "remove", "update"]) {
@@ -292,7 +296,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(vlessInstall, /systemctl restart vps-control-vless-reality-xhttp\.service/);
   assert.match(vlessInstall, /восстановлена предыдущая/);
   assert.match(page, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\].*includes\(tab\)/);
-  assert.match(page, /CHANNEL CONFIGURATION/);
+  assert.match(page, /CONFIGURATION/);
   assert.match(manager, /ReadWritePaths=-\/etc\/vps-control\.env -\/etc\/vps-control /);
   assert.match(manager, /ENV_FILE="\$\{CONFIG_DIR\}\/environment"/);
   assert.match(manager, /mv "\$\{LEGACY_ENV_FILE\}" "\$\{ENV_FILE\}"/);
@@ -301,8 +305,9 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(manager, /grep -Fxq "\$\{expected\}" "\$\{SERVICE_FILE\}"/);
   assert.match(manager, /start_services\(\) \{[\s\S]*?ensure_api_write_access[\s\S]*?systemctl start/);
   assert.match(manager, /restart_services\(\) \{[\s\S]*?ensure_api_write_access[\s\S]*?systemctl restart/);
-  assert.match(css, /\.protocol\.shadowsocks/);
-  assert.match(css, /\.protocol\.vless-reality-xhttp/);
+  assert.match(css, /\.tunnelsWorkspace/);
+  assert.match(css, /\.tunnelModuleRail/);
+  assert.match(css, /\.tunnelDashboardGrid/);
 });
 
 test("protocol pages safely edit channel settings and VLESS links select HTTP2", async () => {
@@ -329,12 +334,11 @@ test("protocol pages safely edit channel settings and VLESS links select HTTP2",
   assert.match(api, /allow_methods=\["GET", "POST", "PUT", "PATCH", "DELETE"\]/);
   assert.match(api, /"editable_settings": editable_settings/);
   assert.match(page, /function ProtocolSettingsEditor/);
-  assert.match(page, /function ProtocolSettingsPanel/);
   assert.match(page, /saveProtocolSettings/);
   assert.match(page, /method: "PATCH"/);
-  assert.match(page, /CHANNEL CONFIGURATION/);
-  assert.match(css, /\.protocolSettingsEditor/);
-  assert.match(css, /\.protocolConfiguration/);
+  assert.match(page, /CONFIGURATION/);
+  assert.match(css, /\.tunnelSettingsEditor/);
+  assert.match(css, /\.tunnelSettingsFields/);
 });
 
 test("DNS API preserves component application and encrypted fallback boundaries", async () => {
@@ -411,23 +415,17 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(page, /profile\.id === "cdn"/);
   assert.match(page, /VLESS REALITY/);
   assert.match(page, /Тип подключения/);
-  assert.match(page, /Настройки подключения/);
+  assert.match(page, /tunnelsWorkspace/);
   assert.match(manager, /configure_vless_cdn_firewall/);
   assert.match(api, /Транспорт прямого VLESS/);
   assert.match(api, /Только Direct\. После смены импортируйте Direct-профили заново/);
   assert.doesNotMatch(api, /Literal\["xhttp", "raw", "grpc", "websocket"\]/);
-  assert.match(protocolView, /Подключение по REALITY/);
-  assert.match(protocolView, /Подключение через TLS-домен/);
-  assert.match(protocolView, /Подключение через CDN-домен/);
-  assert.doesNotMatch(protocolView, /Основной маршрут/);
-  assert.doesNotMatch(protocolView, /Маршрут через CDN/);
-  assert.match(protocolView, /Домены и транспорт каждого контура настраиваются ниже/);
-  assert.match(protocolView, /Маскировка соединения/);
-  assert.match(protocolView, /Прямой TLS-домен/);
-  assert.match(protocolView, /Домен через CDN/);
-  assert.doesNotMatch(protocolView, /ОСНОВНОЙ · VLESS/);
-  assert.doesNotMatch(protocolView, /ДОПОЛНИТЕЛЬНЫЙ · TLS/);
-  assert.doesNotMatch(protocolView, /ДОПОЛНИТЕЛЬНЫЙ · CDN/);
+  assert.match(protocolView, /const profiles: Record<Protocol, TunnelProfile>/);
+  assert.match(protocolView, /name: "REALITY"/);
+  assert.match(protocolView, /name: "TLS route"/);
+  assert.match(protocolView, /name: "CDN route"/);
+  assert.match(protocolView, /function ProtocolSettingsEditor/);
+  assert.doesNotMatch(protocolView, /ProtocolCommandCenter|VlessControlCenter/);
   assert.match(page, /await loadProtocolStatus\(protocol\)/);
   assert.match(api, /"routes": routes/);
   assert.match(api, /Direct · REALITY\/\{direct_transport\}/);
@@ -436,31 +434,25 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(mihomoManager, /Profile-Update-Interval/);
   assert.match(mihomoManager, /secrets\.token_urlsafe\(32\)/);
   assert.match(install, /DynamicUser=yes/);
-  assert.match(protocolView, /function ProtocolCommandCenter/);
-  assert.match(protocolView, /className="vlessOverviewHead"/);
-  assert.match(protocolView, /className="vlessContourSection protocolContourSection"/);
-  assert.match(protocolView, /Рабочие параметры канала и его публичная точка подключения/);
-  assert.match(protocolView, /vlessOperations/);
-  assert.match(protocolCss, /\.vlessSettingsGroup\.cdn/);
-  assert.match(protocolCss, /\.vlessCommandHero/);
-  assert.match(protocolCss, /\.vlessRouteBoard/);
-  assert.match(protocolCss, /\.vlessCommandArt/);
+  assert.match(protocolView, /className=\{`protocolWorkspace tunnelsWorkspace/);
+  assert.match(protocolView, /className="tunnelDashboardGrid"/);
+  assert.match(protocolView, /className="tunnelDiagnosticsGrid"/);
+  assert.match(protocolCss, /\.tunnelSettingsFields/);
+  assert.match(protocolCss, /\.tunnelHero/);
+  assert.match(protocolCss, /\.tunnelOperatorPlaceholder/);
   assert.doesNotMatch(protocolView, /VlessConnectionTransportSettings/);
   assert.doesNotMatch(protocolView, /vlessScope="connections"/);
   assert.doesNotMatch(protocolView, /vlessScope=\{isVless \? "server" : "all"\}/);
-  assert.match(protocolView, /function VlessControlCenter/);
-  assert.match(protocolView, /Контуры подключения/);
-  assert.match(protocolCss, /\.vlessWorkspaceNew/);
-  assert.match(protocolCss, /\.vlessContourGrid/);
+  assert.match(protocolView, /BETA/);
+  assert.match(protocolCss, /\.tunnelsWorkspace/);
+  assert.match(protocolCss, /\.tunnelDiagnosticsGrid/);
   const controlCenterCss = await read("src/shared/styles/control-center.css");
   assert.match(controlCenterCss, /\.shell small[^}]*font-size:11px !important[^}]*line-height:1\.5 !important/s);
   assert.match(controlCenterCss, /label small[^}]*font-size:12px !important[^}]*line-height:1\.5 !important/s);
-  assert.match(protocolView, /className="protocolFieldHelp"/);
-  assert.match(protocolCss, /\.protocolFieldHelp\s*\{[^}]*font-size:9px[^}]*line-height:1\.3/s);
-  assert.match(protocolCss, /label\.protocolBooleanField[^}]*min-height:42px !important/s);
-  assert.match(protocolCss, /\.vlessCommandCenter \.vlessSettingsGroup\s*\{\s*display:block/);
-  assert.match(protocolCss, /\.protocolWorkspace \.protocolSettingsFields label > span[^}]*font-size:12px/s);
-  assert.match(protocolCss, /\.protocolWorkspace \.protocolSettingsFields input:not[^}]*min-height:40px !important/s);
+  assert.match(protocolView, /className=\{field.type === "boolean"/);
+  assert.match(protocolCss, /\.tunnelSettingsFields label/);
+  assert.match(protocolCss, /\.tunnelSettingsFields input\[type="checkbox"\]/);
+  assert.match(protocolCss, /\.tunnelSettingsActions/);
 });
 
 test("installable protocol images are dispatched independently", async () => {
@@ -627,7 +619,7 @@ test("direct TUIC v5 is installable and keeps clients isolated", async () => {
 test("direct Trojan is installable and manages isolated TLS users", async () => {
   const [manifestText, install, api, view] = await Promise.all([read("protocol-images/trojan/manifest.json"),read("protocol-images/trojan/install.sh"),readApiSources(),read("src/features/protocols/protocol-view.tsx")]);
   const manifest=JSON.parse(manifestText); assert.equal(manifest.id,"trojan"); assert.equal(manifest.installable,true);
-  assert.match(install,/sha256sum -c -/); assert.match(install,/'type':'trojan'/); assert.match(api,/payload\.protocol == "trojan"/); assert.match(api,/"type":"trojan"/); assert.match(view,/title:"Trojan"/);
+  assert.match(install,/sha256sum -c -/); assert.match(install,/'type':'trojan'/); assert.match(api,/payload\.protocol == "trojan"/); assert.match(api,/"type":"trojan"/); assert.match(view,/title: "Trojan"/);
 });
 
 test("direct OpenVPN is installable and uses per-client PKI with CRL revocation", async () => {
@@ -641,7 +633,7 @@ test("direct OpenVPN is installable and uses per-client PKI with CRL revocation"
   assert.match(install, /build-server-full server nopass/); assert.match(install, /tls-crypt/); assert.match(install, /crl-verify/);
   assert.match(firewall, /MASQUERADE/); assert.match(uninstall, /protocol.*openvpn/);
   assert.match(api, /build-client-full", client_id, "nopass"/); assert.match(api, /revoke_openvpn_certificate/); assert.match(api, /openvpn_stats/);
-  assert.match(view, /title:"OpenVPN"/);
+  assert.match(view, /title: "OpenVPN"/);
 });
 
 test("direct IKEv2 is installable and reloads isolated EAP users", async () => {
@@ -654,7 +646,7 @@ test("direct IKEv2 is installable and reloads isolated EAP users", async () => {
   assert.match(install, /Another strongSwan runtime is active/); assert.match(install, /EAP|eap-dynamic/);
   assert.match(install, /libstrongswan-standard-plugins/); assert.match(install, /SWAN=\/etc\/swanctl/); assert.match(firewall, /--dport 500/); assert.match(firewall, /--dport 4500/);
   assert.match(api, /render_ikev2_users/); assert.match(api, /reload_ikev2/); assert.match(api, /payload\.protocol == "ikev2"/);
-  assert.match(view, /title:"IKEv2"/);
+  assert.match(view, /title: "IKEv2"/);
 });
 
 test("direct protocol updates preserve client state and activate the new runtime", async () => {

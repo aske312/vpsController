@@ -54,6 +54,7 @@ type AppWorkspaceProps = {
   networkLabel: string;
   autoRefresh: boolean;
   busy: boolean;
+  viewLoading: boolean;
   lastUpdated?: Date | null;
   onToggleAutoRefresh: () => void;
   onRefresh: () => void;
@@ -85,6 +86,7 @@ export function AppWorkspace({
   networkLabel,
   autoRefresh,
   busy,
+  viewLoading,
   lastUpdated,
   onToggleAutoRefresh,
   onRefresh,
@@ -144,6 +146,11 @@ export function AppWorkspace({
         </header>
 
         {children}
+        {viewLoading && (
+          <div className="contentLoadingVeil" aria-busy="true" aria-live="polite">
+            <span className="contentLoadingIndicator"><i aria-hidden="true" />Обновляем раздел</span>
+          </div>
+        )}
       </section>
     </main>
   );
