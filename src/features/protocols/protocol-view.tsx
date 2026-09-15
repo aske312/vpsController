@@ -200,9 +200,10 @@ export function ProtocolView(props: ProtocolViewProps) {
                 key={protocol}
                 type="button"
                 className={protocol === protocolTab ? "active" : ""}
+                aria-label={item.title}
                 onClick={() => onSelectProtocol ? onSelectProtocol(protocol) : setTab(protocol)}
               >
-                <b>{item.short}</b><span>{item.title}</span>
+                <b>{item.short}</b>
               </button>
             );
           })}
