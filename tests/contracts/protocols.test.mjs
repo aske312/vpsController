@@ -296,7 +296,6 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(vlessInstall, /systemctl restart vps-control-vless-reality-xhttp\.service/);
   assert.match(vlessInstall, /восстановлена предыдущая/);
   assert.match(page, /\["wg", "awg", "shadowsocks", "vless-reality-xhttp"\].*includes\(tab\)/);
-  assert.match(page, /CONFIGURATION/);
   assert.match(manager, /ReadWritePaths=-\/etc\/vps-control\.env -\/etc\/vps-control /);
   assert.match(manager, /ENV_FILE="\$\{CONFIG_DIR\}\/environment"/);
   assert.match(manager, /mv "\$\{LEGACY_ENV_FILE\}" "\$\{ENV_FILE\}"/);
@@ -311,7 +310,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
 });
 
 test("protocol pages safely edit channel settings and VLESS links select HTTP2", async () => {
-  const [page, api, css] = await Promise.all([
+  const [page, api] = await Promise.all([
     readUiSources(), readApiSources(), readStyles(),
   ]);
   assert.match(api, /@app\.patch\("\/api\/protocols\/\{protocol\}\/settings"\)/);
@@ -333,12 +332,8 @@ test("protocol pages safely edit channel settings and VLESS links select HTTP2",
   assert.match(api, /@app\.post\("\/api\/protocols\/\{protocol\}\/resources\/check"\)/);
   assert.match(api, /allow_methods=\["GET", "POST", "PUT", "PATCH", "DELETE"\]/);
   assert.match(api, /"editable_settings": editable_settings/);
-  assert.match(page, /function ProtocolSettingsEditor/);
-  assert.match(page, /saveProtocolSettings/);
-  assert.match(page, /method: "PATCH"/);
-  assert.match(page, /CONFIGURATION/);
-  assert.match(css, /\.tunnelSettingsEditor/);
-  assert.match(css, /\.tunnelSettingsFields/);
+  assert.doesNotMatch(page, /function ProtocolSettingsEditor/);
+  assert.match(page, /Проверить сеть/);
 });
 
 test("DNS API preserves component application and encrypted fallback boundaries", async () => {
@@ -424,7 +419,7 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(protocolView, /name: "REALITY"/);
   assert.match(protocolView, /name: "TLS route"/);
   assert.match(protocolView, /name: "CDN route"/);
-  assert.match(protocolView, /function ProtocolSettingsEditor/);
+  assert.doesNotMatch(protocolView, /function ProtocolSettingsEditor/);
   assert.doesNotMatch(protocolView, /ProtocolCommandCenter|VlessControlCenter/);
   assert.match(page, /await loadProtocolStatus\(protocol\)/);
   assert.match(api, /"routes": routes/);
@@ -449,10 +444,8 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   const controlCenterCss = await read("src/shared/styles/control-center.css");
   assert.match(controlCenterCss, /\.shell small[^}]*font-size:11px !important[^}]*line-height:1\.5 !important/s);
   assert.match(controlCenterCss, /label small[^}]*font-size:12px !important[^}]*line-height:1\.5 !important/s);
-  assert.match(protocolView, /className=\{field.type === "boolean"/);
-  assert.match(protocolCss, /\.tunnelSettingsFields label/);
-  assert.match(protocolCss, /\.tunnelSettingsFields input\[type="checkbox"\]/);
-  assert.match(protocolCss, /\.tunnelSettingsActions/);
+  assert.match(page, /connectionTypeSettings/);
+  assert.match(page, /newClientSettings\.mtu/);
 });
 
 test("installable protocol images are dispatched independently", async () => {

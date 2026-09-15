@@ -4,7 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { formatModuleVersion } from "../../shared/lib/format-version";
 import { bytes, duration, safeDateTime } from "../../shared/lib/control-plane-ui";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
-import type { EditableProtocolSetting, Protocol, ProtocolImage, ProtocolStatus, Tab } from "../../shared/types/control-plane";
+import type { Protocol, ProtocolImage, ProtocolStatus, Tab } from "../../shared/types/control-plane";
 
 type ProtocolViewProps = {
   protocolTab: Protocol;
@@ -148,13 +148,12 @@ export function ProtocolView(props: ProtocolViewProps) {
     protocolTab, activeProtocol, activeProtocolRate, activeProtocolImage,
     protocolIsTunnel, protocolOperational, protocolAvailability, protocolDiagnosticsLabel,
     protocolResourceAvailable, protocolResourceTotal, installedProtocols, setTab, onSelectProtocol,
-    protocolSettingsDraft, diagnosticsOpen, resourcesOpen, checkingDiagnostics, checkingResources,
-    installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol, changeProtocolSetting,
-    saveProtocolSettings, toggleNetworkDiagnostics, checkNetworkDiagnostics,
+    diagnosticsOpen, resourcesOpen, checkingDiagnostics, checkingResources,
+    installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol,
+    toggleNetworkDiagnostics, checkNetworkDiagnostics,
     toggleProtocolResources, checkProtocolResources,
   } = props;
   const profile = profiles[protocolTab];
-  const draft = protocolSettingsDraft[protocolTab] || {};
   const fields = activeProtocol.editable_settings || [];
   const routeReady = {
     tls: fields.some((field) => field.key === "tls_enabled"),
@@ -164,7 +163,10 @@ export function ProtocolView(props: ProtocolViewProps) {
   const availability = Number.isFinite(Number(protocolAvailability)) ? Math.max(0, Math.min(100, Number(protocolAvailability))) : 0;
   const version = formatModuleVersion(activeProtocolImage?.installed_version, "version n/a");
   const endpoint = activeProtocol.listen_port ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port}` : activeProtocol.address || "—";
-  const health = activeProtocol.diagnostics?.status || "pending";
+  const health = protocolOperational ? (activeProtocol.diagnostics?.status || "healthy") : "critical";
+  const diagnosticSummary = activeProtocol.diagnostics?.score != null
+    ? `${activeProtocol.diagnostics.score}/100`
+    : "не проверено";
   const updateBusy = activeProtocolImage ? installingProtocol === `update-${activeProtocolImage.id}` : false;
 
   return (
@@ -202,6 +204,7 @@ export function ProtocolView(props: ProtocolViewProps) {
             <span>{activeProtocol.service_enabled ? "AUTOSTART" : "MANUAL START"}</span>
             <span>{protocolIsTunnel ? "L3 TUNNEL" : activeProtocol.transport || profile.family}</span>
             {activeProtocolImage?.update_available && <span className="warning">UPDATE AVAILABLE</span>}
+            <span className={`tunnelDiagnosticSummary ${health}`}>DIAGNOSTICS · {diagnosticSummary}</span>
           </div>
         </div>
         <div className="tunnelOperatorPlaceholder" data-asset="operator_prt_1.webp" aria-label="Заглушка изображения operator_prt_1.webp">
@@ -212,10 +215,11 @@ export function ProtocolView(props: ProtocolViewProps) {
       <div className="tunnelCommandBar">
         <div>
           <span className={`healthDot ${health}`} />
-          <p><small>RUNTIME</small><strong>{activeProtocol.unit || activeProtocol.interface || profile.title}</strong></p>
+          <p><small>RUNTIME</small><strong>{protocolOperational ? "ACTIVE" : "STOPPED"}</strong><span>{activeProtocol.unit || activeProtocol.interface || profile.title}</span></p>
         </div>
         <div className="tunnelCommandActions">
           <button type="button" onClick={() => void restartProtocol(protocolTab)} disabled={busy}>Перезапустить</button>
+          <button type="button" onClick={() => toggleNetworkDiagnostics(protocolTab)} disabled={busy || checkingDiagnostics === protocolTab}>{checkingDiagnostics === protocolTab ? "Проверяем…" : "Проверить сеть"}</button>
           {activeProtocolImage?.update_available && <button type="button" className="accent" onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy}>{updateBusy ? "Обновляем…" : "Обновить"}</button>}
           {activeProtocolImage?.removable && <button type="button" className="danger" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить модуль</button>}
         </div>
@@ -252,18 +256,6 @@ export function ProtocolView(props: ProtocolViewProps) {
           </div>
         </article>
       </div>
-
-      <article className="tunnelPanel settingsPanel">
-        <PanelTitle eyebrow="CONFIGURATION" title="Настройки модуля" note="Сохраняется существующая backend-логика применения и отката" />
-        <ProtocolSettingsEditor
-          protocol={protocolTab}
-          fields={fields}
-          draft={draft}
-          busy={busy}
-          onChange={(key, value) => changeProtocolSetting(protocolTab, key, value)}
-          onSave={() => void saveProtocolSettings(protocolTab)}
-        />
-      </article>
 
       <div className="tunnelDiagnosticsGrid">
         <article className={`tunnelPanel diagnosticPanel ${health}`}>
@@ -313,46 +305,4 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
 
 function CapabilityRow({ item }: { item: Capability }) {
   return <div className={item.beta ? "beta" : "ready"}><i /><span><strong>{item.name}{item.beta && <em>BETA</em>}</strong><small>{item.detail}</small></span>{item.beta ? <b>NOT CONNECTED</b> : <b>READY</b>}</div>;
-}
-
-function ProtocolSettingsEditor({
-  protocol, fields, draft, busy, onChange, onSave,
-}: {
-  protocol: Protocol;
-  fields: EditableProtocolSetting[];
-  draft: Record<string, string | number | boolean>;
-  busy: boolean;
-  onChange: (key: string, value: string | number | boolean) => void;
-  onSave: () => void;
-}) {
-  if (!fields.length) return <p className="emptyState settingsEmpty">Для этого модуля backend пока не предоставляет изменяемые параметры.</p>;
-
-  const valueOf = (key: string) => draft[key] ?? fields.find((field) => field.key === key)?.value;
-  const transport = String(valueOf("transport") || "xhttp");
-  const cdnEnabled = Boolean(valueOf("cdn_enabled"));
-  const tlsEnabled = Boolean(valueOf("tls_enabled"));
-  const tlsTransport = String(valueOf("tls_transport") || "xhttp");
-  const cdnTransport = String(valueOf("cdn_transport") || "websocket");
-
-  let visible = fields;
-  if (protocol === "vless-reality-xhttp") {
-    visible = visible.filter((field) => transport === "xhttp" || !["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key));
-    visible = visible.filter((field) => cdnEnabled || !field.key.startsWith("cdn_") || field.key === "cdn_enabled");
-    visible = visible.filter((field) => tlsEnabled || !field.key.startsWith("tls_") || field.key === "tls_enabled");
-    visible = visible.filter((field) => field.key !== "cdn_xhttp_mode" || (cdnEnabled && cdnTransport === "xhttp"));
-    visible = visible.filter((field) => field.key !== "tls_xhttp_mode" || (tlsEnabled && tlsTransport === "xhttp"));
-  }
-
-  return <div className="tunnelSettingsEditor">
-    <div className="tunnelSettingsFields">
-      {visible.map((field) => <label key={field.key} className={field.type === "boolean" ? "booleanField" : ""}>
-        <span><strong>{field.label}</strong>{field.help && <small>{field.help}</small>}</span>
-        {field.type === "boolean" ? <input type="checkbox" checked={Boolean(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.checked)} />
-          : field.type === "select" ? <select value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)}>{(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
-            : field.type === "number" ? <input type="number" min={field.min} max={field.max} value={Number(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, Number(event.target.value))} />
-              : <input type="text" value={String(draft[field.key] ?? field.value)} onChange={(event) => onChange(field.key, event.target.value)} />}
-      </label>)}
-    </div>
-    <div className="tunnelSettingsActions"><span>Изменяются только параметры, которые уже предоставляет backend этого модуля.</span><button type="button" onClick={onSave} disabled={busy}>{busy ? "Применяем…" : "Применить настройки"}</button></div>
-  </div>;
 }

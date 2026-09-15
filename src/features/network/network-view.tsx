@@ -14,6 +14,7 @@ import { useNotifier } from "../../shared/notifications/notification-center";
 import {
   probeNetworkDns,
   readNetworkControl,
+  deleteNetworkEndpoint,
   saveNetworkDns,
   saveNetworkEndpoints,
   type NetworkRequest,
@@ -205,6 +206,24 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
     }
   }, [endpointDraft, notifyError, notifySuccess, request]);
 
+  const removeEndpoint = useCallback(async (kind: NetworkEndpointCheck["kind"], domain: string) => {
+    if (savingRef.current || loadingRef.current) return;
+    savingRef.current = true;
+    setBusy(true);
+    try {
+      const next = await deleteNetworkEndpoint(request, kind, domain);
+      setStatus(next);
+      setEndpointDraft(next.transport_endpoints);
+      savedEndpointRef.current = next.transport_endpoints;
+      notifySuccess(`Адрес ${domain} отключён от сервера и удалён из настроек`);
+    } catch (cause) {
+      notifyError(cause instanceof Error ? cause.message : "Не удалось отключить адрес");
+    } finally {
+      savingRef.current = false;
+      setBusy(false);
+    }
+  }, [loadingRef, notifyError, notifySuccess, request]);
+
   return (
     <div data-network-page="true">
       <main className="networkBoard">
@@ -298,6 +317,7 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
                 endpointDraft={endpointDraft}
                 endpointDirty={endpointDirty}
                 busy={busy}
+                onRemoveRoute={removeEndpoint}
                 onRefresh={() => void load()}
                 setEndpointDraft={setEndpointDraft}
                 saveEndpoints={saveEndpoints}
@@ -368,18 +388,20 @@ function NetworkRouteTags({
 }
 
 function routeStatusFor(domain: NetworkStatus["domains"][number]): NetworkEndpointCheck["status"] | null {
+  if (domain.status === "stale") return "stale";
   const role = domain.role.toLowerCase();
   const isCdn = role.includes("cdn");
   const isTls = role.includes("tls");
-  if (!isCdn && !isTls) return null;
+  const isUdp = role.includes("udp");
+  if (!isCdn && !isTls && !isUdp) return null;
   if (!domain.resolved.length || domain.route === "unresolved") return "unresolved";
   if (isCdn) return domain.route === "proxy_or_cdn" ? "ready" : "warning";
-  return domain.route === "direct" ? "ready" : "warning";
+  return domain.route === "direct" ? "warning" : "ready";
 }
 
 function NetworkRouteStatus({ status }: { status: NetworkEndpointCheck["status"] | null }) {
   if (!status) return null;
-  return <span className={`networkRouteStatus ${status}`}>{status === "ready" ? "READY" : status === "warning" ? "WARN" : "ERROR"}</span>;
+  return <span className={`networkRouteStatus ${status}`}>{status === "ready" ? "READY" : status === "warning" ? "WARN" : status === "stale" ? "OBSOLETE" : "ERROR"}</span>;
 }
 
 function NetworkIdentityDetails({
@@ -487,6 +509,7 @@ function DiagnosticsV2({
   endpointDraft,
   endpointDirty,
   busy,
+  onRemoveRoute,
   setEndpointDraft,
   saveEndpoints,
   onRefresh,
@@ -496,6 +519,7 @@ function DiagnosticsV2({
   endpointDraft: NetworkEndpointSettings | null;
   endpointDirty: boolean;
   busy: boolean;
+  onRemoveRoute: (kind: NetworkEndpointCheck["kind"], domain: string) => void;
   setEndpointDraft: (value: NetworkEndpointSettings) => void;
   saveEndpoints: () => void;
   onRefresh: () => void;
@@ -530,7 +554,7 @@ function DiagnosticsV2({
       .includes(query.trim().toLowerCase()),
   );
   const endpointCheckFor = (value: string) =>
-    status.transport_endpoint_checks_by_domain?.[value] ||
+    Object.entries(status.transport_endpoint_checks_by_domain || {}).find(([, check]) => check?.domain?.toLowerCase() === value.toLowerCase())?.[1] ||
     Object.values(status.transport_endpoint_checks || {}).find(
       (check) => (check?.domain || (check as NetworkEndpointCheck & { value?: string }).value)?.toLowerCase() === value.toLowerCase(),
     );
@@ -608,6 +632,7 @@ function DiagnosticsV2({
                 } : undefined}
                 busy={busy}
                 dirty={endpointDirty}
+                onRemoveRoute={onRemoveRoute}
                 onChange={(key, value) => {
                   const primaryKey = key as "cdn_domain" | "tls_relay_domain" | "udp_relay_domain";
                   const listKey = ({ cdn_domain: "cdn_domains", tls_relay_domain: "tls_relay_domains", udp_relay_domain: "udp_relay_domains" } as const)[primaryKey];
@@ -631,6 +656,7 @@ function DiagnosticsV2({
                 <th>Домен / IP</th>
                 <th>Роль</th>
                 <th>Маршрут</th>
+                <th>Статус</th>
               </tr>
             </thead>
             <tbody>
@@ -677,12 +703,14 @@ function DiagnosticsV2({
                       </td>
                       <td>
                         <NetworkRouteTags domain={domain} />
+                      </td>
+                      <td>
                         <NetworkRouteStatus status={routeStatus} />
                       </td>
                     </tr>
                     {expanded && (
                       <tr className="networkRouteDetailRow">
-                        <td colSpan={3}>
+                        <td colSpan={4}>
                           <div className="networkRouteCascade">
                             <div className="networkRouteCascadeHeader">
                               <div>
@@ -706,6 +734,12 @@ function DiagnosticsV2({
                               </div>
                             </div>
                             <NetworkIdentityDetails domain={domain} />
+                            {domain.status === "stale" && domain.stale_usages?.length ? (
+                              <div className="networkRouteStaleNotice">
+                                <strong>Домен сохранён в подключениях:</strong>
+                                <span>{domain.stale_usages.join(" · ")}</span>
+                              </div>
+                            ) : null}
                             {domain.role.includes("CDN") && (
                               <NetworkEch
                                 domain={domain.value}

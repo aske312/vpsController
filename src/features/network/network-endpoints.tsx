@@ -16,6 +16,7 @@ export function NetworkEndpoints({
   dirty,
   onChange,
   onRouteListChange,
+  onRemoveRoute,
   onSave,
 }: {
   request: NetworkRequest;
@@ -26,6 +27,7 @@ export function NetworkEndpoints({
   dirty: boolean;
   onChange: (key: keyof NetworkEndpointSettings, value: string) => void;
   onRouteListChange: (key: keyof NetworkEndpointSettings, values: string[]) => void;
+  onRemoveRoute: (kind: NetworkEndpointCheck["kind"], domain: string) => void;
   onSave: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -187,6 +189,7 @@ export function NetworkEndpoints({
                       >
                         {checking === field.key ? "Проверяем…" : "Проверить"}
                       </button>
+                      {value && <button type="button" className="networkEndpointDelete" onClick={() => onRemoveRoute(field.kind, value)} disabled={busy}>Удалить</button>}
                     </div>
                     <small>{field.help}</small>
                     <small className="networkEndpointDnsHint">DNS: {field.kind === "cdn" ? "A/AAAA на origin VPS; для CDN включите proxy у DNS-провайдера." : field.kind === "tls_relay" ? "A/AAAA на внешний TLS relay; порт протокола должен быть проброшен на relay." : "A/AAAA на внешний UDP relay; нужный UDP-порт должен быть проброшен на relay."}</small>
@@ -200,7 +203,7 @@ export function NetworkEndpoints({
                     )}
                     <div className="networkEndpointRouteList">
                       <span>Адреса этого типа</span>
-                      {values.slice(1).map((route) => <div key={route}><code>{route}</code><button type="button" onClick={() => onRouteListChange(field.key, values.filter((item) => item !== route))}>Удалить</button></div>)}
+                      {values.slice(1).map((route) => <div key={route}><code>{route}</code><button type="button" onClick={() => onRemoveRoute(field.kind, route)} disabled={busy}>Отключить и удалить</button></div>)}
                       <button type="button" onClick={() => { const route = window.prompt("Введите домен или IP relay"); if (route?.trim() && !values.includes(route.trim())) onRouteListChange(field.key, [...values, route.trim()]); }}>Добавить адрес</button>
                     </div>
                   </article>

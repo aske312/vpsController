@@ -187,6 +187,7 @@ PROTOCOL_IMAGES_DIR = INSTALL_DIR / "protocol-images"
 MONITOR_DIR = DATA_DIR / "monitor"
 DNS_SETTINGS_FILE = DATA_DIR / "dns-settings.json"
 NETWORK_ENDPOINTS_FILE = DATA_DIR / "network-endpoints.json"
+NETWORK_ENDPOINT_RETIREMENTS_FILE = DATA_DIR / "network-endpoint-retirements.json"
 PROTECTED_CHANNELS_FILE = DATA_DIR / "protected-channels.json"
 SYSTEM_RESOLVED_DROPIN = Path("/etc/systemd/resolved.conf.d/312-net.conf")
 SYSTEM_RESOLV_CONF = Path("/etc/resolv.conf")
@@ -404,6 +405,72 @@ def write_network_endpoint_settings(settings: dict[str, object]) -> dict[str, ob
     os.chmod(temporary, 0o600)
     temporary.replace(NETWORK_ENDPOINTS_FILE)
     return normalized
+
+
+def read_network_endpoint_retirements() -> list[dict[str, object]]:
+    try:
+        value = json.loads(NETWORK_ENDPOINT_RETIREMENTS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        value = []
+    return [item for item in value if isinstance(item, dict) and item.get("kind") and item.get("domain")] if isinstance(value, list) else []
+
+
+def save_network_endpoint_retirements(value: list[dict[str, object]]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = NETWORK_ENDPOINT_RETIREMENTS_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value[-64:], ensure_ascii=False, indent=2), encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(NETWORK_ENDPOINT_RETIREMENTS_FILE)
+
+
+def endpoint_connection_usages(kind: str, domain: str) -> list[str]:
+    usages: list[str] = []
+    domain = domain.strip().lower()
+    reality: dict[str, str] = {}
+    if VLESS_ENV.exists():
+        try:
+            reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+        except OSError:
+            pass
+    for item in read_clients():
+        name = str(item.get("name") or item.get("id") or "Прямое подключение")
+        protocol = str(item.get("protocol", ""))
+        used = False
+        if protocol == "vless-reality-xhttp":
+            route_domain = {"cdn": reality.get("CDN_DOMAIN", ""), "tls_relay": reality.get("TLS_DOMAIN", "")}.get(kind, "")
+            used = ((kind == "cdn" and "cdn" in item.get("vless_routes", [])) or (kind == "tls_relay" and "tls" in item.get("vless_routes", []))) and route_domain.strip().lower() == domain
+        elif kind in {"tls_relay", "udp_relay"}:
+            used = item.get("channel_mode") == kind
+        if used:
+            usages.append(f"Прямое подключение «{name}»")
+    try:
+        profiles = json.loads((DATA_DIR / "mihomo" / "profiles.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        profiles = []
+    if isinstance(profiles, list):
+        for profile in profiles:
+            if not isinstance(profile, dict):
+                continue
+            profile_name = str(profile.get("name") or profile.get("id") or "Mihomo")
+            for connection in [*profile.get("connections", []), *profile.get("retiring_connections", [])]:
+                if not isinstance(connection, dict) or connection.get("component") != "transport-reality":
+                    continue
+                settings = connection.get("settings") if isinstance(connection.get("settings"), dict) else {}
+                credential = connection.get("credential") if isinstance(connection.get("credential"), dict) else {}
+                route_domain = {"cdn": settings.get("cdn_domain", credential.get("cdn_domain", "")), "tls_relay": settings.get("tls_domain", credential.get("tls_domain", ""))}.get(kind, "")
+                if route_domain and str(route_domain).strip().lower() == domain:
+                    connection_name = str(connection.get("id") or connection.get("device_id") or "соединение")
+                    usages.append(f"Mihomo «{profile_name}» / {connection_name}")
+    return list(dict.fromkeys(usages))
+
+
+def remember_network_endpoint_retirement(kind: str, domain: str) -> None:
+    usages = endpoint_connection_usages(kind, domain)
+    if not usages:
+        return
+    items = [item for item in read_network_endpoint_retirements() if not (item.get("kind") == kind and str(item.get("domain", "")).lower() == domain)]
+    items.append({"kind": kind, "domain": domain, "usages": usages, "retired_at": datetime.now(timezone.utc).isoformat()})
+    save_network_endpoint_retirements(items)
 
 
 def read_protected_channel_modes() -> dict[str, str]:
@@ -1763,15 +1830,30 @@ def network_status() -> dict:
             check = network_endpoint_check(kind, str(value))
             endpoint_checks_by_domain[f"{kind}:{value}"] = check
             endpoint_checks.setdefault(kind, check)
+    direct_cdn_domain = VLESS_CDN_DOMAIN
+    if VLESS_ENV.exists():
+        try:
+            direct_reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+            if direct_reality.get("CDN_ENABLED") != "yes":
+                direct_cdn_domain = ""
+        except OSError:
+            pass
     candidates = [
         (PUBLIC_DOMAIN, "panel", "environment"),
-        (VLESS_CDN_DOMAIN, "VLESS CDN", "environment"),
+        (direct_cdn_domain, "VLESS CDN", "environment"),
         *((value, "CDN endpoint", "settings") for value in endpoint_settings["cdn_domains"]),
         *((value, "TLS relay", "settings") for value in endpoint_settings["tls_relay_domains"]),
         *((value, "UDP relay", "settings") for value in endpoint_settings["udp_relay_domains"]),
     ]
     for route in cdn_security.read_routes():
         candidates.append((route.get("domain", ""), "VLESS CDN" if route.get("cloudflare", True) else "VLESS TLS", "gateway"))
+    active_endpoint_values = {str(value).strip().lower() for value in (*endpoint_settings["cdn_domains"], *endpoint_settings["tls_relay_domains"], *endpoint_settings["udp_relay_domains"], direct_cdn_domain) if value}
+    retirements = read_network_endpoint_retirements()
+    for retired in retirements:
+        retired_domain = str(retired.get("domain", "")).strip().lower()
+        if retired_domain and retired_domain not in active_endpoint_values:
+            label = {"cdn": "CDN", "tls_relay": "TLS", "udp_relay": "UDP"}.get(str(retired.get("kind")), "Маршрут")
+            candidates.append((retired_domain, f"{label} · УСТАРЕЛ", "connection"))
     for domain, role, source in candidates:
         existing = next((item for item in domain_items if item['value'] == domain), None)
         if existing is not None:
@@ -1780,6 +1862,10 @@ def network_status() -> dict:
         elif domain:
             item = network_domain_probe(domain, role)
             item["source"] = source
+            retirement = next((entry for entry in retirements if str(entry.get("domain", "")).strip().lower() == str(domain).strip().lower()), None)
+            if retirement and source == "connection":
+                item["status"] = "stale"
+                item["stale_usages"] = retirement.get("usages", [])
             domain_items.append(item)
     direct_domains = [item for item in domain_items if item["route"] == "direct"]
     proxy_domains = [item for item in domain_items if item["route"] == "proxy_or_cdn"]
@@ -1915,6 +2001,43 @@ def check_network_endpoint(payload: NetworkEndpointCheck, _: None = Depends(requ
     if not valid:
         raise HTTPException(status_code=422, detail="Укажите корректный домен или IP без схемы https:// и порта")
     return network_endpoint_check(payload.kind, domain)
+
+
+@app.delete("/api/network/endpoints/{kind}/{domain}")
+def delete_network_endpoint(kind: Literal["cdn", "tls_relay", "udp_relay"], domain: str, _: None = Depends(require_token)) -> dict:
+    domain = domain.strip().lower()
+    key_by_kind = {"cdn": "cdn_domain", "tls_relay": "tls_relay_domain", "udp_relay": "udp_relay_domain"}
+    list_key = f"{key_by_kind[kind]}s" if kind != "tls_relay" else "tls_relay_domains"
+    settings = read_network_endpoint_settings()
+    remember_network_endpoint_retirement(kind, domain)
+    values = [str(value) for value in (settings.get(list_key) or []) if str(value).strip().lower() != domain]
+    settings[list_key] = values
+    settings[key_by_kind[kind]] = values[0] if values else ""
+    if kind in {"cdn", "tls_relay"} and VLESS_ENV.exists() and VLESS_CONFIG.exists():
+        try:
+            reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+        except OSError:
+            reality = {}
+        if kind == "cdn" and reality.get("CDN_DOMAIN", "").strip().lower() == domain and reality.get("CDN_ENABLED") == "yes":
+            update_protocol_settings("vless-reality-xhttp", ProtocolSettingsUpdate(cdn_enabled=False, cdn_domain=""), None)
+        if kind == "tls_relay" and reality.get("TLS_DOMAIN", "").strip().lower() == domain and reality.get("TLS_ENABLED") == "yes":
+            update_protocol_settings("vless-reality-xhttp", ProtocolSettingsUpdate(tls_enabled=False, tls_domain=""), None)
+    if kind in {"cdn", "tls_relay"} and MIHOMO_VLESS_CDN_ROUTES.exists():
+        for descriptor in MIHOMO_VLESS_CDN_ROUTES.glob("*.json"):
+            try:
+                value = json.loads(descriptor.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                continue
+            if isinstance(value, dict) and str(value.get("domain", "")).strip().lower() == domain:
+                descriptor.unlink(missing_ok=True)
+        routes = cdn_security.read_routes()
+        if routes:
+            cdn_security.write_snippet(cdn_security.render_routes(routes))
+        else:
+            cdn_security.SNIPPET.unlink(missing_ok=True)
+        cdn_security.reload_caddy()
+    write_network_endpoint_settings(settings)
+    return network_status()
 
 
 @app.get("/api/security")
@@ -4496,7 +4619,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     endpoint_host = PUBLIC_IP_ENDPOINT or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_ENDPOINT
     endpoint_host, channel_mode = channel_mode_endpoint(payload.protocol, endpoint_host)
     client_config = (
-        f"[Interface]\nAddress = {address}/32\nDNS = {payload.settings.dns or (current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS))}\n"
+        f"[Interface]\nAddress = {address}/32\nDNS = {(current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS))}\n"
         f"PrivateKey = {private_key}\n{client_listen_line}MTU = {mtu}\n{extra}\n[Peer]\n"
         f"PublicKey = {server_public}\nPresharedKey = {psk}\nAllowedIPs = {'0.0.0.0/0, ::/0' if payload.settings.route_mode == 'all' else '0.0.0.0/0'}\n"
         f"Endpoint = {endpoint_host}:{port}\nPersistentKeepalive = {payload.settings.keepalive if payload.settings.keepalive is not None else (current_env_value('AWG_KEEPALIVE', str(AWG_KEEPALIVE)) if payload.protocol == 'awg' else current_env_value('WG_KEEPALIVE', str(WG_KEEPALIVE)))}\n"

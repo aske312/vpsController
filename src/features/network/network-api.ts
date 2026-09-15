@@ -24,6 +24,10 @@ export function checkNetworkEndpoint(request: NetworkRequest, kind: NetworkEndpo
   return request<NetworkEndpointCheck>("/network/endpoints/check", { method: "POST", body: JSON.stringify({ kind, domain }) });
 }
 
+export function deleteNetworkEndpoint(request: NetworkRequest, kind: NetworkEndpointCheck["kind"], domain: string) {
+  return request<NetworkStatus>(`/network/endpoints/${kind}/${encodeURIComponent(domain)}`, { method: "DELETE" });
+}
+
 export async function probeNetworkDns(request: NetworkRequest, providerId?: string) {
   const result = await request<{ items: DnsCheck[] }>("/dns/check", {
     method: "POST",

@@ -93,6 +93,8 @@
 .tunnelHeroMeta { display:flex; flex-wrap:wrap; gap:7px; margin-top:20px; }
 .tunnelHeroMeta span { padding:5px 8px; border:1px solid rgba(136,169,188,.16); border-radius:6px; color:#7f97a5; background:rgba(0,0,0,.12); font:750 8px var(--font-mono); letter-spacing:.06em; }
 .tunnelHeroMeta span.warning { color:var(--t-warning); border-color:rgba(232,201,109,.26); background:rgba(232,201,109,.06); }
+.tunnelHeroMeta span.tunnelDiagnosticSummary.healthy { color:#77d6b2; border-color:rgba(119,214,178,.24); }
+.tunnelHeroMeta span.tunnelDiagnosticSummary.critical { color:#ef969c; border-color:rgba(239,150,156,.24); }
 
 .tunnelOperatorPlaceholder {
   position:relative;
@@ -131,6 +133,7 @@
 .tunnelCommandBar p { margin:0; min-width:0; }
 .tunnelCommandBar p small { display:block; color:#607786; font:750 7px var(--font-mono); letter-spacing:.12em; }
 .tunnelCommandBar p strong { display:block; overflow:hidden; margin-top:2px; color:#cddbe2; font:700 10px var(--font-mono); text-overflow:ellipsis; white-space:nowrap; }
+.tunnelCommandBar p > span { display:block; overflow:hidden; margin-top:3px; color:#607987; font:700 8px var(--font-mono); text-overflow:ellipsis; white-space:nowrap; }
 .tunnelCommandActions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:7px; }
 .tunnelCommandActions button,.diagnosticActionRow button,.tunnelSettingsActions button {
   min-height:31px;
