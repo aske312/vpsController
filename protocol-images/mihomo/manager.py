@@ -58,6 +58,8 @@ CORE_BIN = RUNTIME_CORE_BIN if RUNTIME_CORE_BIN.is_file() else BUNDLED_CORE_BIN
 # The manager service runs with ProtectHome=true, so /root is masked and
 # that mkdir fails. Point it at a writable directory explicitly instead.
 CORE_HOME = DATA_ROOT / "core-home"
+MIHOMO_PROXY_GROUP = "312.net"
+SERVER_CITY = os.getenv("SERVER_CITY", "Unknown")
 ACTION_FILE = DATA_ROOT / "action.json"
 REALITY_XRAY_BIN = Path("/usr/local/lib/vps-control-mihomo-reality/xray")
 REALITY_API_SERVER = "127.0.0.1:10086"
@@ -537,10 +539,9 @@ def save_profiles(value: list[dict[str, Any]]) -> None:
 
 
 def profile_export_filename(item: dict[str, Any]) -> str:
-    # Profile IDs are random and persistent. Derive a separate public filename
-    # without exposing subscription tokens or changing existing profile state.
-    identity = f"profile-export:{item['id']}".encode("utf-8")
-    return f"{hashlib.sha256(identity).hexdigest()[:24]}.yaml"
+    del item
+    city = re.sub(r"[^A-Za-zА-Яа-яЁё0-9._-]+", "-", SERVER_CITY.strip()).strip(".-")
+    return f"{city or 'vps'}.yaml"
 
 
 def profile_response(item: dict[str, Any]) -> dict[str, Any]:
@@ -3902,6 +3903,12 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         routing[key] = bool(profile_routing.get(key, False))
     mode = str(routing.get("mode", "rule"))
     dns = dict(dns_settings())
+    dns["enhanced_mode"] = "fake-ip" if bool(profile_routing.get("dns_fake_ip", dns.get("enhanced_mode") == "fake-ip")) else "redir-host"
+    dns["ipv6"] = bool(profile_routing.get("dns_ipv6", dns.get("ipv6", False)))
+    dns["prefer_h3"] = bool(profile_routing.get("dns_prefer_h3", dns.get("prefer_h3", False)))
+    if bool(profile_routing.get("dns_secure", False)):
+        dns["nameserver"] = "https://cloudflare-dns.com/dns-query"
+        dns["fallback"] = "https://dns.google/dns-query"
     if ech_enabled:
         for key, default in (("nameserver", "https://cloudflare-dns.com/dns-query"), ("fallback", "https://dns.google/dns-query")):
             if not str(dns.get(key, "")).startswith(("https://", "tls://", "quic://")):
@@ -3912,17 +3919,25 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         f"mode: {mode}",
         "log-level: warning",
         f"ipv6: {str(bool(dns.get('ipv6', False))).lower()}",
+        f"tcp-concurrent: {str(bool(routing.get('tcp_concurrent', True))).lower()}",
+        "sniffer:",
+        f"  enable: {str(bool(routing.get('sniffer', True))).lower()}",
+        "  sniff:",
+        "    TLS:",
+        "      ports: [443, 8443]",
+        "    HTTP:",
+        "      ports: [80, 8080, 8880]",
         "tun:",
         # A portable profile must start without a privileged TUN driver.
         # Desktop clients can enable TUN explicitly after import; mixed-port
         # remains immediately usable on every supported platform.
-        "  enable: false",
+        f"  enable: {str(bool(routing.get('tun_enabled', False) or routing.get('tun_force', False))).lower()}",
         "  stack: mixed",
         "  auto-route: true",
-        "  strict-route: true",
-        "  dns-hijack:",
-        '    - "any:53"',
+        f"  strict-route: {str(bool(routing.get('tun_strict_route', True))).lower()}",
     ]
+    if bool(routing.get("dns_hijack_force", True)):
+        lines += ["  dns-hijack:", '    - "any:53"']
     if routing.get("direct_games_enabled", False) or any(str(rule).startswith("PROCESS-NAME") for rule in routing.get("_personal_rule_lines", [])):
         lines.insert(4, "find-process-mode: strict")
     lines += [
@@ -3963,7 +3978,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     group_type = str(routing.get("strategy", "fallback"))
     lines += [
         "proxy-groups:",
-        '  - name: "GATE.312"',
+        f"  - name: {q(MIHOMO_PROXY_GROUP)}",
         f"    type: {group_type}",
         "    proxies:",
     ]
@@ -3981,8 +3996,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         ]
     lines.append("rules:")
     for rule in profile_rules(routing):
-        lines.append(f"  - {q(rule)}")
-    lines.append('  - "MATCH,GATE.312"')
+        lines.append(f"  - {q(rule.replace(',GATE.312', ',' + MIHOMO_PROXY_GROUP))}")
+    lines.append(f"  - {q(f'MATCH,{MIHOMO_PROXY_GROUP}')}")
     return "\n".join(lines) + "\n"
 
 

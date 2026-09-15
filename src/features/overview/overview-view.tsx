@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { createApiClient } from "../../shared/lib/api-request";
 import { useFailureNotifications } from "../../shared/notifications/notification-center";
 import { formatModuleVersion } from "../../shared/lib/format-version";
+import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import type { Module as MihomoModule } from "../mihomo/types";
 import { createMihomoSummaryStore, EMPTY_MIHOMO_SUMMARY } from "./mihomo-summary";
 
@@ -111,15 +112,6 @@ type Props = {
   busy: boolean;
   onInstallProtocol: (image: ProtocolImage) => void;
   onUpdateProtocol: (image: ProtocolImage) => void;
-};
-
-const channelShort: Record<string, string> = {
-  "transport-awg": "AWG",
-  "transport-wg": "WG",
-  "transport-reality": "VL",
-  "transport-shadowsocks": "SS",
-  "transport-hysteria2": "HY2",
-  "transport-tuic": "TUIC",
 };
 
 const directShort: Record<ProtocolId, string> = {
@@ -415,7 +407,7 @@ export function OverviewDashboard({
                           <span className="profileDot" />
                           <p><b>{profile.name}</b><small>{profile.connections?.length || profile.channels.length} подключений</small></p>
                           <div className="overviewManagedProtocolSet">
-                            {assignedComponents.map((component) => <span key={component} title={component.replace("transport-", "")}>{component === "transport-reality" ? "VLESS" : channelShort[component] || component.replace("transport-", "").toUpperCase()}</span>)}
+                            {assignedComponents.map((component) => <span key={component} title={component.replace("transport-", "")}><ProtocolIcon protocol={component} /></span>)}
                             {!assignedComponents.length && <em>—</em>}
                           </div>
                           <span className="overviewManagedTraffic"><b>↓ {traffic ? bytes(traffic.rx_bytes) : "—"}</b><small>↑ {traffic ? bytes(traffic.tx_bytes) : "—"}</small></span>
@@ -452,7 +444,7 @@ export function OverviewDashboard({
                     const stateLabel = statusFailed ? "NO STATUS" : inUse ? "IN USE" : serviceActive === true ? "READY" : serviceActive === false ? "STOPPED" : "CHECKING";
                     return (
                       <div key={image.id}>
-                        <span className={`overviewProtocolMark protocol-${protocol}`}>{directShort[protocol]}</span>
+                        <span className={`overviewProtocolMark protocol-${protocol}`} title={directShort[protocol]}><ProtocolIcon protocol={protocol} /></span>
                         <p>
                           <b>{directName[protocol]}</b>
                           <small>{statusFailed ? "runtime status недоступен" : configured === null ? "проверяем конфигурацию" : configured ? `${protocolClients.length} clients  ${sessions} sessions` : "установлен, конфигурация не обнаружена"}</small>
@@ -585,7 +577,7 @@ export function OverviewDashboard({
               return (
                 <div className="overviewComponentRow" key={image.id}>
                   <div className="overviewComponentIdentity">
-                    <span className={`overviewProtocolMark protocol-${image.id}`}>{protocolMark(image.id)}</span>
+                    <span className={`overviewProtocolMark protocol-${image.id}`} title={protocolMark(image.id)}><ProtocolIcon protocol={image.id} /></span>
                     <p><b>{image.name}</b><small>{image.description || image.category_name}</small></p>
                   </div>
                   <div className="overviewComponentVersion">

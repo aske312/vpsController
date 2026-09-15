@@ -1546,12 +1546,12 @@
 }
 
 .visualShell {
-  --gate-art-overview: url("/gate-art/new-operator/auth.webp");
-  --gate-art-mihomo: url("/gate-art/new-operator/mihomo.webp");
-  --gate-art-direct: url("/gate-art/new-operator/connections.webp");
-  --gate-art-modules: url("/gate-art/new-operator/application.webp");
-  --gate-art-network: url("/gate-art/new-operator/network_1.webp");
-  --gate-art-security: url("/gate-art/new-operator/security.webp");
+  --gate-art-overview: url("/gate-art/auth.webp");
+  --gate-art-mihomo: url("/gate-art/mihomo.webp");
+  --gate-art-direct: url("/gate-art/connections.webp");
+  --gate-art-modules: url("/gate-art/application.webp");
+  --gate-art-network: url("/gate-art/network_1.webp");
+  --gate-art-security: url("/gate-art/security.webp");
   --gate-art: var(--gate-art-overview);
   --gate-art-x: 96%;
   --gate-art-y: 46%;
@@ -1637,7 +1637,7 @@
   position: absolute;
   z-index: -3;
   inset: 0;
-  background-image: url("/gate-art/new-operator/auth-v3.webp");
+  background-image: url("/gate-art/auth-v3.webp");
   background-repeat: no-repeat;
   background-position: 77% 42%;
   background-size: cover;

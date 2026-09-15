@@ -60,7 +60,7 @@
       rgba(5,13,21,.10) 54%,
       rgba(5,13,21,.62) 100%
     ),
-    url("/gate-art/new-operator/overview.webp");
+    url("/gate-art/overview.webp");
   background-repeat:no-repeat;
   background-position:center, center, right center;
   background-size:100% 100%, 100% 100%, contain;

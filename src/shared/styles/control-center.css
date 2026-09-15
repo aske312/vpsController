@@ -166,7 +166,7 @@
   border-color:var(--cc-line) !important; border-radius:15px !important; background:var(--cc-surface) !important; box-shadow:0 12px 36px rgba(0,0,0,.16);
 }
 .dnsResolverBrowser { min-height:0; }
-.dnsResolverArt { opacity:1 !important; background:linear-gradient(90deg,rgba(4,12,19,.99) 0%,rgba(4,12,19,.91) 48%,rgba(4,12,19,.16) 78%),url('/gate-art/new-operator/network_1.webp') right center/cover no-repeat !important; }
+.dnsResolverArt { opacity:1 !important; background:linear-gradient(90deg,rgba(4,12,19,.99) 0%,rgba(4,12,19,.91) 48%,rgba(4,12,19,.16) 78%),url('/gate-art/network_1.webp') right center/cover no-repeat !important; }
 .dnsResolverList { position:relative; z-index:1; width:64%; min-width:450px; }
 .dnsResolverCard { background:rgba(4,12,19,.72) !important; backdrop-filter:blur(7px); }
 .dnsPolicyConsole { background:linear-gradient(180deg,rgba(12,27,38,.96),rgba(5,13,20,.98)) !important; }
@@ -233,7 +233,7 @@
   border-radius:18px !important;
   background:
     linear-gradient(90deg,rgba(6,14,22,.98) 0%,rgba(6,14,22,.96) 60%,rgba(6,14,22,.70) 72%,rgba(6,14,22,.18) 100%),
-    url("/gate-art/new-operator/mihomo.webp") right center / auto 112% no-repeat,
+    url("/gate-art/mihomo.webp") right center / auto 112% no-repeat,
     #071019 !important;
   box-shadow:var(--cc-shadow) !important;
 }
@@ -293,7 +293,7 @@
   background-image:
     linear-gradient(90deg,rgba(4,11,18,.99) 0%,rgba(5,13,21,.96) 48%,rgba(5,13,21,.76) 70%,rgba(5,13,21,.32) 100%),
     linear-gradient(180deg,rgba(5,13,21,.12),rgba(5,13,21,.72)),
-    url("/gate-art/new-operator/overview.webp") !important;
+    url("/gate-art/overview.webp") !important;
   background-position:center,center,right center !important;
   background-size:100% 100%,100% 100%,auto 108% !important;
 }

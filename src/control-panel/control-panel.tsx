@@ -13,6 +13,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import Image from "next/image";
 import QRCode from "qrcode";
 import { LegalFooter } from "../shared/components/legal-footer";
+import { ProtocolIcon } from "../shared/components/protocol-icon";
 import { MihomoPage } from "../features/mihomo/mihomo-view";
 import { OverviewDashboard } from "../features/overview/overview-view";
 import { AppWorkspace } from "./components/app-workspace";
@@ -50,8 +51,6 @@ type GeneratedProfile = { id: string; name: string; filename: string; config: st
 type SshAccessState = { phase: "password" | "key-installed" | "awaiting-confirmation" | "hardened" | "rolled-back"; fingerprint: string; rollback_deadline?: string | null; message: string; key_login_observed?: boolean };
 export function ControlPanel() {
   const [tab, setTab] = useState<Tab>("overview");
-  const activeTabRef = useRef<Tab>(tab);
-  activeTabRef.current = tab;
   const [networkRefreshKey, setNetworkRefreshKey] = useState(0);
   const [selectedChannel, setSelectedChannel] = useState<Protocol>("awg");
   const [token, setToken] = useState("");
@@ -88,8 +87,6 @@ export function ControlPanel() {
   const [viewLoading, setViewLoading] = useState(false);
   const viewLoadingTimer = useRef<number | null>(null);
   const viewLoadingRun = useRef(0);
-  const networkLoadingRun = useRef(0);
-  const mihomoLoadingRun = useRef(0);
   const [networkRate, setNetworkRate] = useState({ rx: 0, tx: 0 });
   const [resourceHistory, setResourceHistory] = useState<ResourceHistory>({ load: [], memory: [], disk: [], rx: [], tx: [] });
   const [protocolImages, setProtocolImages] = useState<ProtocolImage[]>([]);
@@ -406,23 +403,8 @@ export function ControlPanel() {
     setViewLoading(false);
   }, []);
 
-  const handleNetworkLoadingChange = useCallback((loading: boolean, run = 0) => {
-    if (loading) {
-      networkLoadingRun.current = run;
-      beginViewLoading();
-    } else if (activeTabRef.current === "network" && (!run || run === networkLoadingRun.current)) {
-      endViewLoading();
-    }
-  }, [beginViewLoading, endViewLoading]);
-
-  const handleMihomoLoadingChange = useCallback((loading: boolean, run = 0) => {
-    if (loading) {
-      mihomoLoadingRun.current = run;
-      beginViewLoading();
-    } else if (activeTabRef.current === "mihomo" && (!run || run === mihomoLoadingRun.current)) {
-      endViewLoading();
-    }
-  }, [beginViewLoading, endViewLoading]);
+  const handleNetworkLoadingChange = useCallback(() => undefined, []);
+  const handleMihomoLoadingChange = useCallback(() => undefined, []);
 
   useEffect(() => () => {
     if (viewLoadingTimer.current !== null) window.clearTimeout(viewLoadingTimer.current);
@@ -451,7 +433,7 @@ export function ControlPanel() {
         await loadClients(showBusy);
       }
     } finally {
-      if (showTransition && tab !== "network" && tab !== "mihomo") endViewLoading(transitionRun);
+      if (showTransition) endViewLoading(transitionRun);
       if (showBusy) setBusy(false);
     }
   }, [beginViewLoading, endViewLoading, loadApplication, loadApplicationMetadata, loadClients, loadOverview, loadProtocolStatus, loadSecurity, loadServices, measureDeviceRoute, selectedChannel, tab, token]);
@@ -504,8 +486,8 @@ export function ControlPanel() {
 
   useEffect(() => {
     if (!token) return;
-    // Keep the previous screen in place and only show the shared veil for a slow read.
-    void refreshCurrent(false, true);
+    // Load tab data in the background; each screen owns its local loading state.
+    void refreshCurrent(false, false);
   }, [refreshCurrent, tab, token]);
 
   const loadSecurityLogs = useCallback(async () => {
@@ -565,30 +547,36 @@ export function ControlPanel() {
           awg: { ...current.protocols.awg, active: next.protocols.awg.active },
         },
       } : current);
-      setClients((current) => next.clients.map((client) => ({
-        ...current.find((existing) => existing.id === client.id && existing.protocol === client.protocol),
-        ...client,
-      })));
-      setProtocolStatuses((current) => {
-        const updated = { ...current };
-        (["wg", "awg"] as TunnelProtocol[]).forEach((protocol) => {
-          if (updated[protocol]) updated[protocol] = { ...updated[protocol]!, ...next.protocols[protocol] };
+      if (tab === "overview" || tab === "clients") {
+        setClients((current) => next.clients.map((client) => ({
+          ...current.find((existing) => existing.id === client.id && existing.protocol === client.protocol),
+          ...client,
+        })));
+      }
+      if (tab === "wg" || tab === "awg") {
+        setProtocolStatuses((current) => {
+          const updated = { ...current };
+          (["wg", "awg"] as TunnelProtocol[]).forEach((protocol) => {
+            if (updated[protocol]) updated[protocol] = { ...updated[protocol]!, ...next.protocols[protocol] };
+          });
+          return updated;
         });
-        return updated;
-      });
-      setSecurity((current) => current ? {
-        ...current,
-        firewall: { ...((current.firewall as Record<string, unknown> | undefined) || {}), active: next.security.firewall_active },
-        fail2ban: { ...((current.fail2ban as Record<string, unknown> | undefined) || {}), active: next.security.fail2ban_active },
-        ssh: { ...((current.ssh as Record<string, unknown> | undefined) || {}), active: next.security.ssh_listening },
-      } : current);
+      }
+      if (tab === "security") {
+        setSecurity((current) => current ? {
+          ...current,
+          firewall: { ...((current.firewall as Record<string, unknown> | undefined) || {}), active: next.security.firewall_active },
+          fail2ban: { ...((current.fail2ban as Record<string, unknown> | undefined) || {}), active: next.security.fail2ban_active },
+          ssh: { ...((current.ssh as Record<string, unknown> | undefined) || {}), active: next.security.ssh_listening },
+        } : current);
+      }
       setLastUpdated(new Date());
     } catch {
       // Full module refresh reports persistent errors; live telemetry stays silent.
     } finally {
       liveRequestInFlight.current = false;
     }
-  }, [request, token]);
+  }, [request, tab, token]);
 
   useEffect(() => {
     if (!token || !autoRefresh || !["overview", "clients", "wg", "awg", "security"].includes(tab)) return;
@@ -1686,7 +1674,7 @@ export function ControlPanel() {
               <div className="connectionForm">
                 <label>Название устройства<input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов</small></label>
               </div>
-              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); }}><b>{option.badge}</b><span><strong>{option.name}</strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
+              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name}</strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
               {selectedConnectionType && <fieldset className="connectionTypeSettings"><legend>Настройки подключения</legend><header><span>{selectedConnectionType.badge}</span><div><strong>{selectedConnectionType.name}</strong><small>{selectedConnectionType.protocol === "vless-reality-xhttp" ? "Транспорт задаётся безопасным серверным профилем" : "Индивидуальные параметры клиентского профиля"}</small></div></header><div className="connectionSettingsFields">{selectedConnectionType.protocol === "vless-reality-xhttp" ? <><label><span>Транспорт</span><select value={selectedVlessRoute?.transport || "xhttp"} disabled><option value={selectedVlessRoute?.transport || "xhttp"}>{(selectedVlessRoute?.transport || "xhttp").toUpperCase()}</option></select><small>Общий проверенный профиль; изменение не затронет других клиентов</small></label><label><span>Отпечаток TLS</span><select value={newClientSettings.fingerprint} onChange={(event) => setNewClientSettings((current) => ({ ...current, fingerprint: event.target.value as "chrome" | "firefox" | "safari" }))}><option value="chrome">Chrome — рекомендуется</option><option value="firefox">Firefox</option><option value="safari">Safari</option></select><small>Выбирайте вариант, соответствующий клиентскому устройству</small></label></> : selectedConnectionType.protocol === "shadowsocks" ? <><label><span>Режим трафика</span><select value={newClientSettings.shadowsocks_mode} onChange={(event) => setNewClientSettings((current) => ({ ...current, shadowsocks_mode: event.target.value as "tcp_only" | "tcp_and_udp" }))}><option value="tcp_and_udp">TCP + UDP — рекомендуется</option><option value="tcp_only">Только TCP</option></select></label><label><span>MTU</span><input type="number" min={576} max={1500} value={newClientSettings.mtu} onChange={(event) => setNewClientSettings((current) => ({ ...current, mtu: Number(event.target.value) }))} /></label><label><span>Timeout, сек.</span><input type="number" min={30} max={3600} value={newClientSettings.timeout} onChange={(event) => setNewClientSettings((current) => ({ ...current, timeout: Number(event.target.value) }))} /></label><label className="connectionCheckbox"><span><strong>TCP No Delay</strong><small>Снижает задержку коротких запросов</small></span><input type="checkbox" checked={newClientSettings.no_delay} onChange={(event) => setNewClientSettings((current) => ({ ...current, no_delay: event.target.checked }))} /></label></> : <><label><span>DNS</span><input value={newClientSettings.dns} onChange={(event) => setNewClientSettings((current) => ({ ...current, dns: event.target.value }))} /></label><label><span>MTU</span><input type="number" min={1280} max={1420} value={newClientSettings.mtu} onChange={(event) => setNewClientSettings((current) => ({ ...current, mtu: Number(event.target.value) }))} /></label><label><span>Keepalive, сек.</span><input type="number" min={0} max={300} value={newClientSettings.keepalive} onChange={(event) => setNewClientSettings((current) => ({ ...current, keepalive: Number(event.target.value) }))} /></label><label><span>Маршрутизация</span><select value={newClientSettings.route_mode} onChange={(event) => setNewClientSettings((current) => ({ ...current, route_mode: event.target.value as "all" | "ipv4" }))}><option value="all">Весь трафик IPv4 + IPv6</option><option value="ipv4">Только IPv4</option></select></label></>}</div></fieldset>}
             </div>
             <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy || !selectedConnectionType}>{busy ? "Создаём…" : "Создать подключение"}</button></div>

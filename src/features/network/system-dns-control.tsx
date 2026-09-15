@@ -1,4 +1,5 @@
-﻿import type { DnsStatus } from "../../shared/types/control-plane";
+import type { DnsStatus } from "../../shared/types/control-plane";
+import { ProtocolIcon } from "../../shared/components/protocol-icon";
 
 export const dnsComponents = [
   {
@@ -113,7 +114,7 @@ export function SystemDnsControl({ dns }: { dns: DnsStatus }) {
                 <tr key={component.id}>
                   <td>
                     <div className="networkComponent">
-                      <span>{component.code}</span>
+                      <span title={component.title}><ProtocolIcon protocol={component.id} /></span>
                       <div>
                         <strong>{component.title}</strong>
                       </div>

@@ -3,6 +3,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { formatModuleVersion } from "../../shared/lib/format-version";
 import { bytes, duration, safeDateTime } from "../../shared/lib/control-plane-ui";
+import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import type { EditableProtocolSetting, Protocol, ProtocolImage, ProtocolStatus, Tab } from "../../shared/types/control-plane";
 
 type ProtocolViewProps = {
@@ -203,7 +204,7 @@ export function ProtocolView(props: ProtocolViewProps) {
                 aria-label={item.title}
                 onClick={() => onSelectProtocol ? onSelectProtocol(protocol) : setTab(protocol)}
               >
-                <b>{item.short}</b>
+                <b><ProtocolIcon protocol={protocol} /></b>
               </button>
             );
           })}
@@ -214,7 +215,7 @@ export function ProtocolView(props: ProtocolViewProps) {
         <div className="tunnelHeroCopy">
           <p className="eyebrow">TUNNELS / {profile.family}</p>
           <div className="tunnelTitleRow">
-            <h1>{profile.title}</h1>
+            <span className="tunnelHeroIcon"><ProtocolIcon protocol={protocolTab} /></span><h1>{profile.title}</h1>
             <span className={protocolOperational ? "tunnelState online" : "tunnelState offline"}>{protocolOperational ? "ACTIVE" : "STOPPED"}</span>
           </div>
           <p className="tunnelLead">{profile.description}</p>

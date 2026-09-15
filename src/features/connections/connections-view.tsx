@@ -4,6 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { ConnectionGuide } from "./connection-guide";
 import { bytes, CLIENTS_PER_PAGE, duration, labels } from "../../shared/lib/control-plane-ui";
 import type { Client, DeviceProbe, Protocol } from "../../shared/types/control-plane";
+import { ProtocolIcon } from "../../shared/components/protocol-icon";
 
 type ClientStateFilter = "all" | "online" | "attention" | "offline";
 type ConnectionsViewProps = {
@@ -66,7 +67,7 @@ export function ConnectionsView({ installedProtocols, clientStateFilter, setClie
               const clientStateLabel = client.quality === "stable" ? "ОНЛАЙН" : client.quality === "offline" ? "ОФЛАЙН" : "НЕСТАБИЛЬНО";
               const protocolLabel = client.protocol === "wg" ? "WG" : client.protocol === "awg" ? "AWG" : client.protocol === "shadowsocks" ? "SS" : client.protocol === "hysteria2" ? "HY2" : client.protocol === "tuic" ? "TUIC" : client.protocol === "trojan" ? "TRJ" : client.protocol === "openvpn" ? "OVPN" : client.protocol === "ikev2" ? "IKE" : "VLESS";
               return <div className={`connectionRow quality-${client.quality || "offline"}`} key={client.id}>
-                <div className="connectionIdentity"><span className={`protocol protocol-${client.protocol}`}>{protocolLabel}</span><div><strong>{client.name}</strong><small>{client.address}{client.active_sources?.length ? `  ${client.active_sources.join(", ")}` : ""}</small></div></div>
+                <div className="connectionIdentity"><span className={`protocol protocol-${client.protocol}`} title={protocolLabel}><ProtocolIcon protocol={client.protocol} /></span><div><strong>{client.name}</strong><small>{client.address}{client.active_sources?.length ? `  ${client.active_sources.join(", ")}` : ""}</small></div></div>
                 <div className="connectionState"><span className={`connectionStateBadge ${client.quality || "offline"}`}>{clientStateLabel}</span><small>{client.quality_reason || "состояние уточняется"}</small></div>
                 <div className="connectionActivity"><small>{client.protocol === "wg" || client.protocol === "awg" ? "HANDSHAKE" : "АКТИВНОСТЬ"}</small><strong>{duration(client.handshake_age_s)}</strong><span>{client.active_connections ? `${client.active_connections} активн.` : "нет активных"}</span></div>
                 <div className="connectionTraffic"><span><small>RX</small><strong>{bytes(client.rx_bytes)}</strong><em>{bytes(client.rx_bps)}/с</em></span><span><small>TX</small><strong>{bytes(client.tx_bytes)}</strong><em>{bytes(client.tx_bps)}/с</em></span><span><small>RTT</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} мс` : "—"}</strong><em>{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? `${client.packet_loss_percent}% loss` : client.latency_source === "server_icmp_tunnel_ip" ? "VPS → device" : "недоступен"}</em></span></div>

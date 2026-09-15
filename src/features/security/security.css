@@ -309,7 +309,7 @@
   inset: -10px;
   z-index: -5;
   pointer-events: none;
-  background: url("/gate-art/new-operator/security.webp") center / cover no-repeat;
+  background: url("/gate-art/security.webp") center / cover no-repeat;
   opacity: .72;
   
   transform: scale(1.02);

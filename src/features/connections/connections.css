@@ -105,7 +105,7 @@
   /*border-radius: 20px;*/
   background:
     linear-gradient(90deg, rgba(6, 14, 22, .98) 0%, rgba(6, 14, 22, .94) 46%, rgba(6, 14, 22, .48) 67%, rgba(6, 14, 22, .12) 100%),
-    url("/gate-art/new-operator/connections.webp") right center / auto 112% no-repeat,
+    url("/gate-art/connections.webp") right center / auto 112% no-repeat,
     #071019;
 }
 
@@ -326,7 +326,7 @@
 }
 
 @media (max-width: 920px) {
-.connectionsHero { background-image: linear-gradient(90deg, rgba(6,14,22,.98), rgba(6,14,22,.84)), url("/gate-art/new-operator/connections.webp"); }
+.connectionsHero { background-image: linear-gradient(90deg, rgba(6,14,22,.98), rgba(6,14,22,.84)), url("/gate-art/connections.webp"); }
 .connectionsInventoryHead { align-items: flex-start; flex-direction: column; }
 .connectionsFilters { grid-template-columns: 1fr; }
 .connectionRow { grid-template-columns: 1fr auto; gap: 10px; }
@@ -373,7 +373,7 @@
   right: 0;
   bottom: 0;
   width: 53%;
-  background: url("/gate-art/new-operator/connections.webp") center right / cover no-repeat;
+  background: url("/gate-art/connections.webp") center right / cover no-repeat;
   -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.14) 9%, rgba(0,0,0,.62) 26%, #000 47%, #000 100%);
   mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.14) 9%, rgba(0,0,0,.62) 26%, #000 47%, #000 100%);
   pointer-events: none;
@@ -812,7 +812,7 @@
       rgba(5, 12, 21, .08) 38%,
       rgba(5, 12, 21, .015) 62%,
       rgba(5, 12, 21, 0) 100%),
-    url("/gate-art/new-operator/connections.webp") right center / auto 100% no-repeat,
+    url("/gate-art/connections.webp") right center / auto 100% no-repeat,
     radial-gradient(circle at 58% 52%, rgba(78, 54, 216, .20), transparent 45%),
     #050c16;
   -webkit-mask-image: none;
@@ -868,7 +868,7 @@
     width: 42%;
     background:
       linear-gradient(90deg, rgba(5,12,21,.62), rgba(5,12,21,.10) 48%, transparent 100%),
-      url("/gate-art/new-operator/connections.webp") right center / auto 100% no-repeat,
+      url("/gate-art/connections.webp") right center / auto 100% no-repeat,
       #050c16;
   }
 }
@@ -895,7 +895,7 @@
     border-radius: 20px;
     background:
       linear-gradient(90deg, rgba(5,12,21,.30), rgba(5,12,21,.04) 52%, transparent 100%),
-      url("/gate-art/new-operator/connections.webp") right center / auto 100% no-repeat,
+      url("/gate-art/connections.webp") right center / auto 100% no-repeat,
       #050c16;
   }
 .connectionsHeroArt::after { width: 84px; }
@@ -948,7 +948,7 @@
   border-radius: 0;
   box-shadow: none;
   opacity: .96;
-  background-image: url("/gate-art/new-operator/connections.webp");
+  background-image: url("/gate-art/connections.webp");
   background-repeat: no-repeat;
   background-position: right center;
   background-size: auto 100%;
@@ -1102,7 +1102,7 @@
     saturate(.95)
     brightness(.90);
 
-  background-image: url("/gate-art/new-operator/connections.webp");
+  background-image: url("/gate-art/connections.webp");
   background-repeat: no-repeat;
   background-position: center;
   background-size: contain;

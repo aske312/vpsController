@@ -12,6 +12,76 @@
   "scope": "mihomo",
   "settings": [
     {
+      "key": "sniffer",
+      "label": "Sniffer доменов",
+      "type": "boolean",
+      "default": true,
+      "help": "Определяет домен внутри TLS/HTTP-трафика для корректной маршрутизации по доменам."
+    },
+    {
+      "key": "tcp_concurrent",
+      "label": "TCP Concurrent",
+      "type": "boolean",
+      "default": true,
+      "help": "Пробует несколько адресов домена параллельно и выбирает более быстрый TCP-маршрут."
+    },
+    {
+      "key": "tun_enabled",
+      "label": "TUN режим",
+      "type": "boolean",
+      "default": false,
+      "help": "Перехватывает системный трафик устройства. Требует разрешения TUN в клиенте Mihomo."
+    },
+    {
+      "key": "tun_force",
+      "label": "TUN · принудительно",
+      "type": "boolean",
+      "default": false,
+      "help": "Принудительно включает TUN в этом профиле или на выбранном устройстве."
+    },
+    {
+      "key": "dns_hijack_force",
+      "label": "DNS Hijack · принудительно",
+      "type": "boolean",
+      "default": true,
+      "help": "Перехватывает DNS-запросы на порту 53 через DNS Mihomo."
+    },
+    {
+      "key": "dns_fake_ip",
+      "label": "Fake-IP DNS",
+      "type": "boolean",
+      "default": true,
+      "help": "Использует Fake-IP для точного определения доменов и правил маршрутизации."
+    },
+    {
+      "key": "dns_secure",
+      "label": "Защищённый DNS",
+      "type": "boolean",
+      "default": false,
+      "help": "Принудительно использует DoH-серверы в этом профиле."
+    },
+    {
+      "key": "dns_ipv6",
+      "label": "IPv6 в DNS",
+      "type": "boolean",
+      "default": false,
+      "help": "Разрешает ответы AAAA для этого профиля."
+    },
+    {
+      "key": "dns_prefer_h3",
+      "label": "HTTP/3 для DNS",
+      "type": "boolean",
+      "default": false,
+      "help": "Предпочитает HTTP/3 для совместимых DoH-серверов."
+    },
+    {
+      "key": "tun_strict_route",
+      "label": "TUN Strict Route",
+      "type": "boolean",
+      "default": true,
+      "help": "Не допускает обход маршрутизации мимо TUN."
+    },
+    {
       "key": "mode",
       "label": "Режим",
       "type": "select",

@@ -152,4 +152,16 @@ class ProtocolSettingsUpdate(BaseModel):
     obfs_enabled: bool | None = None
     obfs_password: str | None = Field(default=None, max_length=128)
     congestion_control: Literal["bbr", "cubic", "new_reno"] | None = None
+    heartbeat: Literal["5s", "10s", "15s", "30s"] | None = None
+    up_mbps: int | None = Field(default=None, ge=1, le=10000)
+    down_mbps: int | None = Field(default=None, ge=1, le=10000)
+    jc: int | None = Field(default=None, ge=0, le=128)
+    jmin: int | None = Field(default=None, ge=0, le=128)
+    jmax: int | None = Field(default=None, ge=0, le=128)
+    s1: int | None = Field(default=None, ge=0, le=128)
+    s2: int | None = Field(default=None, ge=0, le=128)
+    h1: int | None = Field(default=None, ge=0, le=4294967295)
+    h2: int | None = Field(default=None, ge=0, le=4294967295)
+    h3: int | None = Field(default=None, ge=0, le=4294967295)
+    h4: int | None = Field(default=None, ge=0, le=4294967295)
     vpn_transport: Literal["udp", "tcp"] | None = None

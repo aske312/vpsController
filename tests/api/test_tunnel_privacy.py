@@ -233,7 +233,7 @@ class TunnelPrivacyTests(unittest.TestCase):
         with patch.object(manager, "routing_settings", return_value={"tunnel_privacy": True}), patch.object(manager, "cdn_supports_ech", return_value=True), patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "dns_settings", return_value=dns), patch.object(manager, "profile_rules", return_value=rules):
             config = yaml.safe_load(manager.render_profile(profile))
             self.assertEqual(config["dns"]["proxy-server-nameserver"], [dns["nameserver"], dns["fallback"]])
-            self.assertEqual(config["rules"], [*rules, "MATCH,GATE.312"])
+            self.assertEqual(config["rules"], [*rules, "MATCH,312.net"])
             self.assertEqual(config["proxies"][0]["ech-opts"], {"enable": True})
             dns["fallback"] = "8.8.8.8"
             config = yaml.safe_load(manager.render_profile(profile))

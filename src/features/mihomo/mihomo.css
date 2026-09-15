@@ -25,7 +25,7 @@
   border-radius: 20px;
   background:
     linear-gradient(90deg, rgba(7,16,26,.98) 0%, rgba(7,16,26,.96) 60%, rgba(7,16,26,.70) 72%, rgba(7,16,26,.18) 100%),
-    url("/gate-art/new-operator/mihomo.webp") right center / auto 112% no-repeat,
+    url("/gate-art/mihomo.webp") right center / auto 112% no-repeat,
     #07101a;
   isolation: isolate;
 }
@@ -1117,7 +1117,7 @@
 .mihomoHeroEndpoint { min-width:0; display:flex; align-items:center; gap:10px; padding-top:2px; color:#61778a; }
 .mihomoHeroEndpoint span { font:700 8px var(--font-mono); letter-spacing:.1em; }
 .mihomoHeroEndpoint b { overflow:hidden; color:#879cac; font:600 9px var(--font-mono); text-overflow:ellipsis; white-space:nowrap; }
-.mihomoHeroArt { position:relative; z-index:0; min-width:0; min-height:360px; overflow:hidden; background:url("/gate-art/new-operator/mihomo.webp") 68% center/cover no-repeat; }
+.mihomoHeroArt { position:relative; z-index:0; min-width:0; min-height:360px; overflow:hidden; background:url("/gate-art/mihomo.webp") 68% center/cover no-repeat; }
 .mihomoHeroArt::before { content:""; position:absolute; inset:0; background:linear-gradient(90deg,rgba(5,12,24,.92),transparent 28%),linear-gradient(0deg,rgba(5,12,24,.42),transparent 44%); }
 .mihomoHeroArt > span { position:absolute; right:22px; bottom:18px; padding:7px 10px; border:1px solid rgba(121,102,238,.3); border-radius:8px; background:rgba(5,11,24,.58); color:#a999ff; font:800 9px var(--font-mono); letter-spacing:.14em; backdrop-filter:blur(8px); }
 .mihomoOverviewPulse > header { min-height:78px; }
@@ -1272,7 +1272,7 @@
 .mihomoCommandHero::after { z-index:1; background:radial-gradient(ellipse at 63% 42%,transparent 34%,rgba(1,1,14,.18) 72%,rgba(1,1,14,.52) 100%),linear-gradient(90deg,rgba(1,1,14,.28),transparent 13%,transparent 88%,rgba(1,1,14,.24)); box-shadow:inset 0 30px 40px -36px rgba(0,0,0,.92),inset 0 -38px 48px -36px rgba(0,0,0,.96); }
 .mihomoCommandHero .mihomoHeroContent,.mihomoCommandHero .mihomoHeroArt { grid-row:1; }
 .mihomoCommandHero .mihomoHeroContent { grid-column:1; background:transparent; }
-.mihomoCommandHero .mihomoHeroArt { position:absolute; inset:0 0 48px; z-index:0; min-height:0; background-color:#01010e; background-image:url("/gate-art/new-operator/mihomo-control-v2.webp"); background-position:right center; background-size:contain; background-repeat:no-repeat; filter:none; }
+.mihomoCommandHero .mihomoHeroArt { position:absolute; inset:0 0 48px; z-index:0; min-height:0; background-color:#01010e; background-image:url("/gate-art/mihomo-control-v2.webp"); background-position:right center; background-size:contain; background-repeat:no-repeat; filter:none; }
 .mihomoCommandHero .mihomoHeroArt::before { z-index:1; background:linear-gradient(90deg,rgba(1,1,14,.99) 0%,rgba(1,1,14,.96) 38%,rgba(1,1,14,.82) 57%,rgba(1,1,14,.42) 74%,rgba(1,1,14,.16) 100%),linear-gradient(180deg,rgba(1,1,14,.05) 0%,rgba(1,1,14,.1) 54%,rgba(1,1,14,.62) 100%); }
 .mihomoCommandHero .mihomoHeroFacts { gap:0; border:0; border-radius:10px; background:rgba(4,10,21,.36); box-shadow:none; backdrop-filter:blur(7px); }
 .mihomoCommandHero .mihomoHeroFacts > div { border-right:1px solid rgba(112,126,160,.1); background:rgba(5,12,24,.38); }

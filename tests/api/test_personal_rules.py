@@ -61,7 +61,7 @@ class PersonalRuleTests(unittest.TestCase):
         with patch.object(manager, "personal_rules", return_value=[rule]), patch.object(manager, "routing_settings", return_value={"mode": "rule", "strategy": "select"}), patch.object(manager, "dns_settings", return_value={"ipv6": False, "enhanced_mode": "redir-host", "prefer_h3": False, "cache_algorithm": "lru", "nameserver": "https://dns.example", "fallback": "https://fallback.example"}):
             config = manager.render_profile(profile, "common")
         self.assertIn('find-process-mode: strict', config)
-        self.assertIn('PROCESS-NAME,game.exe,GATE.312', config)
+        self.assertIn('PROCESS-NAME,game.exe,312.net', config)
 
 
 if __name__ == "__main__":

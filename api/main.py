@@ -4245,13 +4245,16 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 endpoint, channel_mode = channel_mode_endpoint("hysteria2", domain or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
                 tls_mode = str(settings.get("tls_mode", "pinned"))
                 fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt")).partition("=")[2].strip()
+                obfs_lines = (["obfs:", "  type: salamander", "  salamander:", f"    password: {json.dumps(str(settings.get('obfs_password', '')))}"] if settings.get("obfs_enabled") else [])
                 client_config = "\n".join([
                     f"server: {endpoint}:{port}",
                     f"auth: {client_id}:{password}",
+                    f"bandwidth:", "  up: %s mbps" % int(settings.get("up_mbps", 100)), "  down: %s mbps" % int(settings.get("down_mbps", 100)),
                     "tls:",
                     f"  sni: {tls_identity}",
                     f"  insecure: {'false' if tls_mode == 'acme' else 'true'}",
                     *([f"  pinSHA256: {fingerprint}"] if tls_mode != "acme" and fingerprint else []),
+                    *obfs_lines,
                     "socks5:", "  listen: 127.0.0.1:1080", "  disableUDP: false",
                 ]) + "\n"
                 items = read_clients()
@@ -4284,7 +4287,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 client = {
                     "log": {"level": "warn"},
                     "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080}],
-                    "outbounds": [{"type": "tuic", "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "uuid": user_uuid, "password": password, "congestion_control": settings.get("congestion_control", "bbr"), "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": "10s", "tls": {"enabled": True, "server_name": certificate_server_name(TUIC_DIR / "server.crt"), "certificate": certificate}}],
+                    "outbounds": [{"type": "tuic", "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "uuid": user_uuid, "password": password, "congestion_control": settings.get("congestion_control", "bbr"), "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": settings.get("heartbeat", "10s"), "tls": {"enabled": True, "server_name": certificate_server_name(TUIC_DIR / "server.crt"), "certificate": certificate}}],
                     "route": {"final": "connection-out"},
                 }
                 items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "port": int(settings.get("port", 8444)), "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
@@ -4593,7 +4596,7 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
 def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
     if protocol in ("wg", "awg"):
         prefix = "WG" if protocol == "wg" else "AWG"
-        return [{
+        fields = [{
             "key": "mtu", "label": "MTU туннеля", "type": "number",
             "value": int(values.get("mtu", 1280)), "min": 1280, "max": 1420,
             "help": "Применяется к серверному интерфейсу и новым клиентским конфигурациям.",
@@ -4606,6 +4609,10 @@ def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             "value": int(values.get("keepalive", current_env_value(f"{prefix}_KEEPALIVE", "25"))), "min": 0, "max": 300,
             "help": "0 отключает keepalive; 25 секунд подходит для NAT и мобильных сетей.",
         }]
+        if protocol == "awg":
+            for key, label, default in (("jc", "Jc · junk-пакеты", 6), ("jmin", "Jmin · минимум junk", 8), ("jmax", "Jmax · максимум junk", 80), ("s1", "S1 · padding", 64), ("s2", "S2 · padding", 112), ("h1", "H1 · заголовок", 150000000), ("h2", "H2 · заголовок", 600000000), ("h3", "H3 · заголовок", 1000000000), ("h4", "H4 · заголовок", 1400000000)):
+                fields.append({"key": key, "label": label, "type": "number", "value": int(values.get(key, AWG_PROFILE.get(key.title(), default))), "min": 0, "max": 4294967295 if key.startswith("h") else 128})
+        return fields
     if protocol == "hysteria2":
         return [
             {"key": "port", "label": "UDP-порт", "type": "number", "value": int(values.get("port", 8443)), "min": 1024, "max": 65535},
@@ -4615,6 +4622,8 @@ def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             {"key": "domain", "label": "Домен Hysteria2", "type": "text", "value": str(values.get("domain", "")), "help": "Нужен только для ACME. A/AAAA-запись должна указывать прямо на этот VPS."},
             {"key": "obfs_enabled", "label": "Salamander obfuscation", "type": "boolean", "value": bool(values.get("obfs_enabled", False))},
             {"key": "obfs_password", "label": "Пароль obfuscation", "type": "text", "value": str(values.get("obfs_password", "")), "help": "Изменение требует повторного импорта существующих подключений."},
+            {"key": "up_mbps", "label": "Лимит upload, Мбит/с", "type": "number", "value": int(values.get("up_mbps", 100)), "min": 1, "max": 10000},
+            {"key": "down_mbps", "label": "Лимит download, Мбит/с", "type": "number", "value": int(values.get("down_mbps", 100)), "min": 1, "max": 10000},
         ]
     if protocol == "ikev2":
         return [{"key": "dns", "label": "Client DNS", "type": "text", "value": str(values.get("dns", "1.1.1.1")), "help": "Applied to new and reconnecting IKEv2 sessions."}]
@@ -4630,6 +4639,7 @@ def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
         return [
             {"key": "port", "label": "UDP-порт", "type": "number", "value": int(values.get("port", 8444)), "min": 1024, "max": 65535},
             {"key": "congestion_control", "label": "Управление перегрузкой", "type": "select", "value": str(values.get("congestion_control", "bbr")), "options": [{"value": "bbr", "label": "BBR"}, {"value": "cubic", "label": "CUBIC"}, {"value": "new_reno", "label": "New Reno"}]},
+            {"key": "heartbeat", "label": "Heartbeat QUIC", "type": "select", "value": str(values.get("heartbeat", "10s")), "options": [{"value": value, "label": value} for value in ("5s", "10s", "15s", "30s")], "help": "Поддерживает NAT-сессию на мобильных и нестабильных сетях."},
         ]
     if protocol == "shadowsocks":
         return [
@@ -4803,10 +4813,10 @@ def update_protocol_settings(
     supplied = payload.model_dump(exclude_none=True)
     channel_mode = supplied.pop("channel_mode", None)
     allowed = {
-        "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive"},
+        "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive", "jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"},
         "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
-        "hysteria2": {"port", "tls_mode", "domain", "obfs_enabled", "obfs_password"},
-        "tuic": {"port", "congestion_control"},
+        "hysteria2": {"port", "tls_mode", "domain", "obfs_enabled", "obfs_password", "up_mbps", "down_mbps"},
+        "tuic": {"port", "congestion_control", "heartbeat"},
         "trojan": {"port"},
         "openvpn": {"port", "vpn_transport", "dns"},
         "ikev2": {"dns"},
@@ -4840,7 +4850,31 @@ def update_protocol_settings(
         persist_env_values({
             **({f"{prefix}_DNS": supplied["dns"]} if "dns" in supplied else {}),
             **({f"{prefix}_KEEPALIVE": supplied["keepalive"]} if "keepalive" in supplied else {}),
+            **({f"AWG_{key.upper()}": supplied[key] for key in ("jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4") if key in supplied} if protocol == "awg" else {}),
         })
+        if protocol == "awg" and any(key in supplied for key in ("jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4")):
+            original = config.read_bytes()
+            temporary = config.with_suffix(".settings.tmp")
+            try:
+                text = original.decode("utf-8")
+                for key in ("jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"):
+                    if key not in supplied:
+                        continue
+                    name = key.title()
+                    replacement = f"{name} = {int(supplied[key])}"
+                    text, count = re.subn(rf"(?m)^{re.escape(name)}\s*=.*$", replacement, text, count=1)
+                    if count == 0:
+                        text = text.rstrip() + f"\n{replacement}\n"
+                temporary.write_text(text, encoding="utf-8")
+                os.chmod(temporary, 0o600)
+                temporary.replace(config)
+                run("systemctl", "restart", f"awg-quick@{AWG_INTERFACE}.service", timeout=20, check=True)
+            except Exception as exc:
+                config.write_bytes(original)
+                run("systemctl", "restart", f"awg-quick@{AWG_INTERFACE}.service", timeout=20)
+                raise HTTPException(status_code=500, detail="Не удалось применить параметры маскировки AmneziaWG") from exc
+            finally:
+                temporary.unlink(missing_ok=True)
     elif protocol == "ikev2":
         if not IKEV2_CONFIG.exists() or not IKEV2_SETTINGS.exists():
             raise HTTPException(status_code=409, detail="IKEv2 is not installed")
@@ -4918,7 +4952,7 @@ def update_protocol_settings(
         try:
             settings = json.loads(original_settings); settings.update(supplied)
             config = json.loads(original_config); inbound = next(row for row in config.get("inbounds", []) if row.get("type") == "tuic")
-            old_port = int(inbound.get("listen_port", 8444)); inbound["listen_port"] = int(settings.get("port", old_port)); inbound["congestion_control"] = settings.get("congestion_control", "bbr")
+            old_port = int(inbound.get("listen_port", 8444)); inbound["listen_port"] = int(settings.get("port", old_port)); inbound["congestion_control"] = settings.get("congestion_control", "bbr"); inbound["heartbeat"] = settings.get("heartbeat", "10s")
             temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(temporary, 0o600)
             result = subprocess.run(["/usr/local/lib/vps-control-tuic/sing-box", "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
             if result.returncode: raise RuntimeError(result.stderr.strip())
@@ -4955,7 +4989,8 @@ def update_protocol_settings(
             obfs = (f"obfs:\n  type: salamander\n  salamander:\n    password: {json.dumps(str(settings.get('obfs_password', '')))}\n" if settings.get("obfs_enabled") else "")
             auth_port = int(settings.get("auth_port", 18081))
             stats_port = int(settings.get("stats_port", 18082))
-            config_text = f"listen: :{port}\n{tls}auth:\n  type: http\n  http:\n    url: http://127.0.0.1:{auth_port}/auth\ntrafficStats:\n  listen: 127.0.0.1:{stats_port}\n  secret: vps-control-local\n{obfs}masquerade:\n  type: string\n  string:\n    content: Not Found\n    statusCode: 404\n"
+            bandwidth = f"bandwidth:\n  up: {int(settings.get('up_mbps', 100))} mbps\n  down: {int(settings.get('down_mbps', 100))} mbps\n"
+            config_text = f"listen: :{port}\n{tls}{bandwidth}auth:\n  type: http\n  http:\n    url: http://127.0.0.1:{auth_port}/auth\ntrafficStats:\n  listen: 127.0.0.1:{stats_port}\n  secret: vps-control-local\n{obfs}masquerade:\n  type: string\n  string:\n    content: Not Found\n    statusCode: 404\n"
             temporary.write_text(config_text, encoding="utf-8")
             os.chmod(temporary, 0o600)
             old_port = int(json.loads(original_settings).get("port", 8443))
@@ -5369,6 +5404,10 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
 
     listen_port = int(rows[0].split("\t")[2]) if rows and len(rows[0].split("\t")) >= 3 else 0
     history = protocol_history(protocol)
+    interface_values = tunnel_interface_settings(WG_CONFIG if protocol == "wg" else AWG_CONFIG)
+    settings_summary = {"MTU": mtu}
+    if protocol == "awg":
+        settings_summary.update({key: interface_values.get(key, str(AWG_PROFILE[key])) for key in AWG_PROFILE})
     return {
         "protocol": protocol,
         "interface": interface,
@@ -5379,8 +5418,8 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
         "address": address,
         "listen_port": listen_port,
         "mtu": mtu,
-        "settings": {"MTU": mtu},
-        "editable_settings": editable_protocol_settings(protocol, {"mtu": mtu}),
+        "settings": settings_summary,
+        "editable_settings": editable_protocol_settings(protocol, {"mtu": mtu, **interface_values}),
         "peers": len(rows) - 1 if rows else 0,
         "online_peers": sum(1 for age in handshakes if age < 180),
         "endpoints": endpoints,

@@ -15,12 +15,12 @@ class PrivacyTests(unittest.TestCase):
         with patch.object(api, "application_version_status", return_value=version), patch.object(api, "update_status", return_value=updates), patch.object(api, "application_dependency_versions", return_value=dependencies):
             self.assertEqual(api.application_metadata(), {"application_version": version, "updates": updates, "dependencies": dependencies})
 
-    def test_export_filename_is_stable_per_profile_and_contains_no_secrets(self):
+    def test_export_filename_uses_server_city_and_contains_no_secrets(self):
         profile = {"id": "random-profile-a", "name": "VLESS personal", "subscription_token": "secret-token"}
-        filename = manager.profile_export_filename(profile)
-        self.assertRegex(filename, r"^[0-9a-f]{24}\.yaml$")
-        self.assertEqual(filename, manager.profile_export_filename({**profile, "name": "renamed", "subscription_token": "rotated-token"}))
-        self.assertNotEqual(filename, manager.profile_export_filename({"id": "random-profile-b"}))
+        with patch.object(manager, "SERVER_CITY", "Amsterdam"):
+            filename = manager.profile_export_filename(profile)
+            self.assertEqual(filename, "Amsterdam.yaml")
+            self.assertEqual(filename, manager.profile_export_filename({**profile, "name": "renamed", "subscription_token": "rotated-token"}))
 
     def test_download_and_profile_metadata_use_same_filename(self):
         profile = {"id": "test", "common_device_id": "common", "devices": [{"id": "common"}]}

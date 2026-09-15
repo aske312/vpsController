@@ -328,7 +328,7 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
 .dnsPageFacts strong { max-width:170px; overflow:hidden; color:var(--text); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
 .dnsWorkbench { display:grid; grid-template-columns:minmax(0,7fr) minmax(285px,3fr); gap:10px; }
 .dnsResolverBrowser,.dnsPolicyConsole,.dnsCustomPanel,.dnsEffectivePanel { position:relative; overflow:hidden; border:1px solid var(--line); border-radius:14px; background:rgba(7,16,24,.90); }
-.dnsResolverArt { position:absolute; z-index:0; inset:0; background:linear-gradient(90deg,rgba(5,13,20,.99) 0%,rgba(5,13,20,.95) 60%,rgba(5,13,20,.28)),url('/gate-art/new-operator/network_1.webp') right center/auto 100% no-repeat; opacity:.78; pointer-events:none; }
+.dnsResolverArt { position:absolute; z-index:0; inset:0; background:linear-gradient(90deg,rgba(5,13,20,.99) 0%,rgba(5,13,20,.95) 60%,rgba(5,13,20,.28)),url('/gate-art/network_1.webp') right center/auto 100% no-repeat; opacity:.78; pointer-events:none; }
 .dnsResolverBrowser > header,.dnsPolicyConsole > header,.dnsCustomPanel > header,.dnsEffectivePanel > header { position:relative; z-index:1; display:flex; align-items:flex-end; justify-content:space-between; gap:12px; padding:12px 13px; border-bottom:1px solid var(--line); }
 .dnsResolverBrowser h2,.dnsPolicyConsole h2,.dnsCustomPanel h3,.dnsEffectivePanel h3 { margin:2px 0 0; font-size:16px; }
 .dnsResolverBrowser header span,.dnsPolicyConsole header span { color:var(--muted); font-size:10px; }
