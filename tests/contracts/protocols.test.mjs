@@ -125,6 +125,26 @@ test("WG and AWG modules install and uninstall independently", async () => {
   }
 });
 
+test("direct tunnel lifecycle cannot target Mihomo-reserved identities", async () => {
+  const [wgInstall, wgRemove, awgInstall, awgRemove, mihomoWgRemove, mihomoAwgRemove] = await Promise.all([
+    read("protocol-images/wireguard/install.sh"),
+    read("protocol-images/wireguard/uninstall.sh"),
+    read("protocol-images/amneziawg/install.sh"),
+    read("protocol-images/amneziawg/uninstall.sh"),
+    read("protocol-images/mihomo/modules/transport-wg/uninstall.sh"),
+    read("protocol-images/mihomo/modules/transport-awg/uninstall.sh"),
+  ]);
+  const directGuard = /\$\{(?:WG|AWG)_INTERFACE\}" != mh-\*.*basename --.*mh-\*\.conf/s;
+  for (const script of [wgInstall, wgRemove, awgInstall, awgRemove]) {
+    assert.match(script, directGuard, "direct WireGuard-family scripts must reject Mihomo identities");
+  }
+  assert.match(mihomoWgRemove, /INTERFACE="mh-wg0"/);
+  assert.match(mihomoWgRemove, /CONFIG="\/etc\/wireguard\/\$\{INTERFACE\}\.conf"/);
+  assert.match(mihomoAwgRemove, /INTERFACE="mh-awg0"/);
+  assert.match(mihomoAwgRemove, /CONFIG="\/etc\/amnezia\/amneziawg\/\$\{INTERFACE\}\.conf"/);
+  assert.doesNotMatch(wgRemove + awgRemove, /rm -rf[^\n]*\/etc\/vps-control\/mihomo/);
+});
+
 test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", async () => {
   const [api, manager, page, css, ssManifest, ssInstall, ssRemove, vlessManifest, vlessInstall, vlessRemove] = await Promise.all([
     readApiSources(), read("scripts/vps-control.sh"), readUiSources(), readStyles(),

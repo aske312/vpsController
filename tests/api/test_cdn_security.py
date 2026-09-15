@@ -61,6 +61,20 @@ class CdnSecurityTests(unittest.TestCase):
                 routes = security.read_routes()
             self.assertEqual([item["cloudflare"] for item in routes], [True, False])
 
+    def test_direct_route_read_keeps_mihomo_route_descriptors(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            direct_env = root / "reality.env"
+            direct_env.write_text("CDN_ENABLED=yes\nCDN_DOMAIN=direct.example\nCDN_PATH=/direct\nCDN_PORT=12345\n")
+            routes = root / "routes"
+            routes.mkdir()
+            descriptor = routes / "mihomo-connection.json"
+            descriptor.write_text(json.dumps({"domain": "mihomo.example", "path": "/mihomo", "port": 12346}))
+            with patch.object(security, "DIRECT_ENV", direct_env), patch.object(security, "ROUTES", routes):
+                values = security.read_routes()
+            self.assertEqual({item["domain"] for item in values}, {"direct.example", "mihomo.example"})
+            self.assertEqual({item["port"] for item in values}, {12345, 12346})
+
     def test_failed_cf_probe_restores_files_and_reloads_previous_config(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

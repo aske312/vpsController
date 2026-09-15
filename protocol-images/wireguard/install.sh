@@ -21,6 +21,7 @@ WG_CONFIG="${WG_CONFIG:-/etc/wireguard/${WG_INTERFACE}.conf}"
 UPLINK_INTERFACE="$(ip -o -4 route show default | awk '{print $5; exit}')"
 
 [[ "${WG_INTERFACE}" =~ ^[a-zA-Z0-9_.-]{1,15}$ ]] || { echo "Некорректное имя интерфейса" >&2; exit 1; }
+[[ "${WG_INTERFACE}" != mh-* && "$(basename -- "${WG_CONFIG}")" != mh-*.conf ]] || { echo "Отказ: mh-* зарезервировано для Mihomo" >&2; exit 1; }
 [[ "${WG_PORT}" =~ ^[0-9]+$ ]] || { echo "Некорректный порт" >&2; exit 1; }
 [[ -n "${UPLINK_INTERFACE}" ]] || { echo "Не найден внешний сетевой интерфейс" >&2; exit 1; }
 

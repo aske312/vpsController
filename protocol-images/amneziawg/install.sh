@@ -39,6 +39,7 @@ WAS_ACTIVE=0
 systemctl is-active --quiet "awg-quick@${AWG_INTERFACE}.service" 2>/dev/null && WAS_ACTIVE=1
 
 [[ "${AWG_INTERFACE}" =~ ^[a-zA-Z0-9_.-]{1,15}$ ]] || { echo "Некорректное имя интерфейса" >&2; exit 1; }
+[[ "${AWG_INTERFACE}" != mh-* && "$(basename -- "${CONFIGURED_AWG_CONFIG}")" != mh-*.conf ]] || { echo "Отказ: mh-* зарезервировано для Mihomo" >&2; exit 1; }
 [[ "${AWG_PORT}" =~ ^[0-9]+$ && "${AWG_PORT}" -ge 1 && "${AWG_PORT}" -le 65535 ]] || { echo "Некорректный UDP-порт" >&2; exit 1; }
 [[ "${AWG_MTU}" =~ ^[0-9]+$ && "${AWG_MTU}" -ge 1280 && "${AWG_MTU}" -le 1420 ]] || { echo "AWG_MTU должен быть от 1280 до 1420" >&2; exit 1; }
 [[ -n "${UPLINK_INTERFACE}" ]] || { echo "Не найден внешний сетевой интерфейс" >&2; exit 1; }
