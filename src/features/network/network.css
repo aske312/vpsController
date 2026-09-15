@@ -398,6 +398,17 @@
 [data-network-page] .networkRouteTag.udp, [data-network-page] .networkRouteTag.relay { color:var(--amber); border-color:color-mix(in srgb,var(--amber) 45%,var(--line)); background:color-mix(in srgb,var(--amber) 10%,transparent); }
 [data-network-page] .networkRouteTag.direct { color:var(--muted); }
 [data-network-page] .networkRouteTag.unknown { color:var(--amber); }
+[data-network-page] .networkRouteExpand { display:flex; align-items:center; gap:8px; width:100%; padding:0; border:0; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
+[data-network-page] .networkRouteExpand:hover { color:var(--cyan); }
+[data-network-page] .networkRouteExpand > span:last-child { display:grid; gap:3px; min-width:0; }
+[data-network-page] .networkRouteExpand small { color:var(--muted); font-size:10px; font-weight:400; }
+[data-network-page] .networkRouteExpandMark { display:grid; place-items:center; flex:0 0 22px; height:22px; border:1px solid var(--line-strong); border-radius:6px; color:var(--cyan); font:14px var(--technical-font); }
+[data-network-page] .networkRouteRow.is-expanded > td { border-bottom-color:transparent; }
+[data-network-page] .networkRouteDetailRow > td { padding:0; border-top:0; }
+[data-network-page] .networkRouteCascade { display:grid; gap:8px; padding:0 20px 16px 50px; background:var(--panel-inset); border-bottom:1px solid var(--line); }
+[data-network-page] .networkRouteCascadeHeader { display:flex; align-items:baseline; gap:10px; padding-top:12px; }
+[data-network-page] .networkRouteCascadeHeader strong { font-size:11px; }
+[data-network-page] .networkRouteCascade .networkIdentityBody { margin-top:0; border:0; border-radius:0; background:transparent; padding:0; }
 @media (max-width:700px) { [data-network-page] .networkV2Hero { min-height:360px; padding:18px; } [data-network-page] .networkV2Hero img { width:100%; opacity:.5; } [data-network-page] .networkV2Columns { grid-template-columns:1fr; } [data-network-page] .networkV2BlockHead { align-items:stretch; flex-direction:column; } [data-network-page] .networkV2Actions { align-items:stretch; flex-direction:column; } [data-network-page] .networkV2Actions .networkRoutesLauncherBody { justify-content:flex-start; } }
 [data-network-page] .networkPageHeader { min-height:0; padding:10px 0 14px; border:0; border-radius:0; background:none; box-shadow:none; }
 [data-network-page] .networkPageHeader::after { display:none; }
