@@ -131,6 +131,12 @@ export function ControlPanel() {
   const liveRequestInFlight = useRef(false);
 
   useEffect(() => {
+    const target = new URL(window.location.href);
+    if (target.searchParams.has("_refresh")) {
+      target.searchParams.delete("_refresh");
+      window.history.replaceState(window.history.state, "", `${target.pathname}${target.search}${target.hash}`);
+    }
+
     // Restore browser-only credentials after hydration.
     setToken(sessionStorage.getItem("312-token") || "");
     const savedTab = sessionStorage.getItem("312-reload-tab");

@@ -150,6 +150,8 @@ test("live monitoring uses stable low-load cadence and detailed server metrics",
   assert.match(page, /function reloadWithoutCache\(message: string\)/);
   assert.match(page, /target\.searchParams\.set\("_refresh", Date\.now\(\)\.toString\(\)\)/);
   assert.match(page, /window\.location\.replace\(target\.toString\(\)\)/);
+  assert.match(page, /target\.searchParams\.delete\("_refresh"\)/);
+  assert.match(page, /window\.history\.replaceState\(window\.history\.state/);
   assert.match(page, /\["update", "test-update", "test-rollback", "safe-update", "kernel-update"\]\.includes/);
 });
 
