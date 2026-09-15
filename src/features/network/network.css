@@ -390,6 +390,14 @@
 [data-network-page] .networkIdentityIp code { font-size:10px; }
 [data-network-page] .networkIdentityIp > span { overflow-wrap:anywhere; }
 [data-network-page] .networkIdentityIp > small { grid-column:2; }
+[data-network-page] .networkRouteTags { display:flex; flex-wrap:wrap; gap:4px; min-width:115px; }
+[data-network-page] .networkRouteTag { display:inline-flex; align-items:center; min-height:20px; padding:2px 6px; border:1px solid var(--line-strong); border-radius:999px; color:var(--muted); font:600 9px var(--technical-font); letter-spacing:.04em; }
+[data-network-page] .networkRouteTag.ui { color:var(--cyan); border-color:color-mix(in srgb,var(--cyan) 45%,var(--line)); background:color-mix(in srgb,var(--cyan) 10%,transparent); }
+[data-network-page] .networkRouteTag.cdn, [data-network-page] .networkRouteTag.proxy { color:var(--green); border-color:color-mix(in srgb,var(--green) 45%,var(--line)); background:color-mix(in srgb,var(--green) 10%,transparent); }
+[data-network-page] .networkRouteTag.tcp, [data-network-page] .networkRouteTag.tls { color:var(--violet, #a78bfa); border-color:color-mix(in srgb,var(--violet, #a78bfa) 45%,var(--line)); background:color-mix(in srgb,var(--violet, #a78bfa) 10%,transparent); }
+[data-network-page] .networkRouteTag.udp, [data-network-page] .networkRouteTag.relay { color:var(--amber); border-color:color-mix(in srgb,var(--amber) 45%,var(--line)); background:color-mix(in srgb,var(--amber) 10%,transparent); }
+[data-network-page] .networkRouteTag.direct { color:var(--muted); }
+[data-network-page] .networkRouteTag.unknown { color:var(--amber); }
 @media (max-width:700px) { [data-network-page] .networkV2Hero { min-height:360px; padding:18px; } [data-network-page] .networkV2Hero img { width:100%; opacity:.5; } [data-network-page] .networkV2Columns { grid-template-columns:1fr; } [data-network-page] .networkV2BlockHead { align-items:stretch; flex-direction:column; } [data-network-page] .networkV2Actions { align-items:stretch; flex-direction:column; } [data-network-page] .networkV2Actions .networkRoutesLauncherBody { justify-content:flex-start; } }
 [data-network-page] .networkPageHeader { min-height:0; padding:10px 0 14px; border:0; border-radius:0; background:none; box-shadow:none; }
 [data-network-page] .networkPageHeader::after { display:none; }
