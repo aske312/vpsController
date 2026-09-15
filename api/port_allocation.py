@@ -226,6 +226,12 @@ def release_prefix(prefix: str) -> None:
             write_claims(updated)
 
 
+def release_module(module: str) -> None:
+    """Release installer reservations, including per-client Shadowsocks ports."""
+    prefix = "panel:ss:" if module == "shadowsocks" else f"panel:{module}:"
+    release_prefix(prefix)
+
+
 def release_on_error(prefix):
     def decorate(function):
         @wraps(function)
@@ -296,7 +302,7 @@ if __name__ == "__main__":
     import sys
     try:
         if len(sys.argv) > 2 and sys.argv[2] == "--release":
-            release_prefix(f"panel:{sys.argv[1]}:")
+            release_module(sys.argv[1])
         else:
             for key, port in prepare(sys.argv[1]).items():
                 print(f"{key}={port}")

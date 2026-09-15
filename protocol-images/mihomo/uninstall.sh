@@ -7,6 +7,10 @@ DATA_DIR="/var/lib/vps-control/mihomo"
 CONFIG_DIR="/etc/vps-control/mihomo"
 PROFILE_FILE="${DATA_DIR}/profiles.json"
 MANAGER_SERVICE="vps-control-mihomo-manager.service"
+CAPABILITIES_SERVICE="vps-control-mihomo-capabilities.service"
+CAPABILITIES_TIMER="vps-control-mihomo-capabilities.timer"
+CAPABILITIES_HELPER_DIR="/usr/local/lib/vps-control-mihomo"
+CAPABILITIES_DATA="/var/lib/vps-control/mihomo-capabilities.json"
 
 usage_summary="$(python3 - "${PROFILE_FILE}" <<'PY'
 import json, sys
@@ -49,8 +53,12 @@ for module_dir in "${MODULE_DIR}"/modules/transport-*; do
   fi
 done
 
+# The capability probe is part of the Mihomo runtime, but is not a transport
+# module, so stop it explicitly before checking for residual Mihomo services.
+systemctl disable --now "${CAPABILITIES_TIMER}" "${CAPABILITIES_SERVICE}" >/dev/null 2>&1 || true
+
 # Verify that no Mihomo-owned runtime survived the dependency cascade.
-for unit in   wg-quick@mh-wg0.service   awg-quick@mh-awg0.service   vps-control-mihomo-reality.service   vps-control-mihomo-ss.target   vps-control-mihomo-hysteria2.service   vps-control-mihomo-tuic.service; do
+for unit in   wg-quick@mh-wg0.service   awg-quick@mh-awg0.service   vps-control-mihomo-reality.service   vps-control-mihomo-ss.target   vps-control-mihomo-hysteria2.service   vps-control-mihomo-tuic.service   "${CAPABILITIES_SERVICE}"; do
   if systemctl is-active --quiet "${unit}" 2>/dev/null; then
     failures+=("active:${unit}")
   fi
@@ -79,7 +87,12 @@ if ((${#failures[@]})); then
 fi
 
 systemctl disable --now "${MANAGER_SERVICE}" >/dev/null 2>&1 || true
-rm -f /etc/systemd/system/vps-control-mihomo-manager.service
+systemctl disable --now "${CAPABILITIES_TIMER}" "${CAPABILITIES_SERVICE}" >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/vps-control-mihomo-manager.service \
+  /etc/systemd/system/"${CAPABILITIES_SERVICE}" \
+  /etc/systemd/system/"${CAPABILITIES_TIMER}"
+rm -rf -- "${CAPABILITIES_HELPER_DIR}"
+rm -f -- "${CAPABILITIES_DATA}"
 systemctl daemon-reload
 
 # Profiles, generated credentials, sub-module settings and all Mihomo-only configs.

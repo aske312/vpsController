@@ -48,6 +48,20 @@ class ModulePortsTests(unittest.TestCase):
         self.assertEqual(manager.module_settings("transport-tuic")["port"], 20002)
         self.assertIn(20001, manager.reserved_module_ports({"udp"}))
 
+    def test_direct_module_release_clears_all_installer_reservations(self):
+        claims = {
+            "panel:hysteria2:HYSTERIA2_PORT": {"port": 8443, "protocols": ["udp"]},
+            "panel:ss:client-one": {"port": 30000, "protocols": ["tcp", "udp"]},
+            "panel:ss:client-two": {"port": 30001, "protocols": ["tcp", "udp"]},
+            "mihomo:transport-reality": {"port": 10086, "protocols": ["tcp"]},
+        }
+        manager.port_allocation.DATA_ROOT.mkdir(parents=True)
+        manager.port_allocation.write_claims(claims)
+        manager.port_allocation.release_module("shadowsocks")
+        manager.port_allocation.release_module("hysteria2")
+        remaining = manager.port_allocation.read_json(manager.port_allocation.DATA_ROOT / "port-reservations.json")
+        self.assertEqual(set(remaining), {"mihomo:transport-reality"})
+
     def test_defaults_are_reserved_and_settings_conflict_is_rejected(self):
         port = manager.default_settings("transport-awg")["port"]
         with self.listeners(), patch.object(manager, "atomic_json") as save:

@@ -3,7 +3,12 @@ set -Eeuo pipefail
 systemctl disable --now vps-control-ikev2.service 2>/dev/null || true
 /usr/local/lib/vps-control-ikev2/firewall.sh delete 2>/dev/null || true
 rm -f /etc/systemd/system/vps-control-ikev2.service /etc/sysctl.d/90-vps-control-ikev2.conf
-rm -rf /etc/vps-control/ikev2 /etc/swanctl /usr/local/lib/vps-control-ikev2
+rm -rf /etc/vps-control/ikev2 /usr/local/lib/vps-control-ikev2
+# /etc/swanctl is system-wide; remove only files owned by this module.
+rm -f /etc/swanctl/swanctl.conf /etc/swanctl/users.conf \
+  /etc/swanctl/private/caKey.pem /etc/swanctl/private/serverKey.pem \
+  /etc/swanctl/x509ca/caCert.pem /etc/swanctl/x509/serverCert.pem
+rmdir /etc/swanctl/private /etc/swanctl/x509ca /etc/swanctl/x509 /etc/swanctl 2>/dev/null || true
 python3 - <<'PY'
 import json
 from pathlib import Path

@@ -145,6 +145,60 @@ test("direct tunnel lifecycle cannot target Mihomo-reserved identities", async (
   assert.doesNotMatch(wgRemove + awgRemove, /rm -rf[^\n]*\/etc\/vps-control\/mihomo/);
 });
 
+test("direct protocol lifecycle releases module and client port reservations", async () => {
+  const [manager, allocator, ikev2Remove] = await Promise.all([
+    read("scripts/vps-control.sh"),
+    read("api/port_allocation.py"),
+    read("protocol-images/ikev2/uninstall.sh"),
+  ]);
+  assert.match(manager, /remove_protocol_image\(\)[\s\S]*?release_protocol_ports "\$\{image_id\}"/);
+  assert.match(manager, /RESERVED_PROTOCOL_IMAGE="\$\{image_id\}"/);
+  assert.match(manager, /release_protocol_ports "\$\{RESERVED_PROTOCOL_IMAGE\}"/);
+  assert.match(allocator, /def release_module\(module: str\)/);
+  assert.match(allocator, /"panel:ss:" if module == "shadowsocks"/);
+  assert.doesNotMatch(ikev2Remove, /rm -rf \/etc\/swanctl(?:\s|\/)/);
+  assert.match(ikev2Remove, /swanctl\/swanctl\.conf/);
+});
+
+test("the complete protocol matrix has isolated direct and Mihomo ownership", async () => {
+  const direct = {
+    wg: ["wireguard", "/etc/wireguard/", "wg-quick@"],
+    awg: ["amneziawg", "/etc/amnezia/amneziawg/", "awg-quick@"],
+    shadowsocks: ["shadowsocks", "/etc/vps-control/shadowsocks", "vps-control-shadowsocks"],
+    "vless-reality-xhttp": ["vless-reality-xhttp", "/etc/vps-control/vless-reality-xhttp", "vps-control-vless-reality-xhttp"],
+    hysteria2: ["hysteria2", "/etc/vps-control/hysteria2", "vps-control-hysteria2"],
+    tuic: ["tuic", "/etc/vps-control/tuic", "vps-control-tuic"],
+    trojan: ["trojan", "/etc/vps-control/trojan", "vps-control-trojan"],
+    openvpn: ["openvpn", "/etc/vps-control/openvpn", "vps-control-openvpn"],
+    ikev2: ["ikev2", "/etc/vps-control/ikev2", "vps-control-ikev2"],
+  };
+  const mihomo = {
+    "transport-wg": ["transport-wg", "/etc/wireguard/", 'INTERFACE="mh-wg0"'],
+    "transport-awg": ["transport-awg", "/etc/amnezia/amneziawg/", 'INTERFACE="mh-awg0"'],
+    "transport-shadowsocks": ["transport-shadowsocks", "/etc/vps-control/mihomo/shadowsocks", "vps-control-mihomo-ss"],
+    "transport-reality": ["transport-reality", "/etc/vps-control/mihomo/reality", "vps-control-mihomo-reality"],
+    "transport-hysteria2": ["transport-hysteria2", "/etc/vps-control/mihomo/quic/hysteria2", "vps-control-mihomo-hysteria2"],
+    "transport-tuic": ["transport-tuic", "/etc/vps-control/mihomo/quic/tuic", "vps-control-mihomo-tuic"],
+  };
+  const directSources = await Promise.all(Object.values(direct).map(async ([directory]) => read(`protocol-images/${directory}/uninstall.sh`)));
+  const mihomoSources = await Promise.all(Object.values(mihomo).map(async ([directory]) => read(`protocol-images/mihomo/modules/${directory}/uninstall.sh`)));
+  for (const [index, [, pathMarker, unitMarker]] of Object.values(direct).entries()) {
+    assert.match(directSources[index], new RegExp(pathMarker.replaceAll("/", "\\/")));
+    assert.match(directSources[index], new RegExp(unitMarker));
+  }
+  for (const [index, [, pathMarker, unitMarker]] of Object.values(mihomo).entries()) {
+    assert.match(mihomoSources[index], new RegExp(pathMarker.replaceAll("/", "\\/")));
+    assert.match(mihomoSources[index], new RegExp(unitMarker));
+  }
+  const mihomoRemove = await read("protocol-images/mihomo/uninstall.sh");
+  for (const marker of [
+    "vps-control-mihomo-capabilities.service",
+    "vps-control-mihomo-capabilities.timer",
+    "/usr/local/lib/vps-control-mihomo",
+    "/var/lib/vps-control/mihomo-capabilities.json",
+  ]) assert.match(mihomoRemove, new RegExp(marker.replaceAll("/", "\\/")));
+});
+
 test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", async () => {
   const [api, manager, page, css, ssManifest, ssInstall, ssRemove, vlessManifest, vlessInstall, vlessRemove] = await Promise.all([
     readApiSources(), read("scripts/vps-control.sh"), readUiSources(), readStyles(),

@@ -83,6 +83,7 @@ SAFE_UPDATE_REPORT="${RECOVERY_DIR}/safe-update-report.txt"
 AUTOMATION_FILE="${DATA_DIR}/automation.json"
 SERVICE_MODE_FILE="${DATA_DIR}/service-mode.json"
 CURRENT_ACTION=""
+RESERVED_PROTOCOL_IMAGE=""
 ACTION_STARTED_AT=""
 ACTION_PROGRESS=0
 REBOOT_AFTER_UPDATE="no"
@@ -341,6 +342,10 @@ safe_update_server() {
 
 handle_exit() {
   local exit_code="$?"
+  if [[ -n "${RESERVED_PROTOCOL_IMAGE}" ]]; then
+    release_protocol_ports "${RESERVED_PROTOCOL_IMAGE}"
+    RESERVED_PROTOCOL_IMAGE=""
+  fi
   rollback_interrupted_update || warn "Emergency rollback encountered an additional error."
   cleanup_update_dir
   restore_update_ssh
@@ -1587,6 +1592,10 @@ prepare_protocol_ports() {
   done <<<"${selected}"
 }
 
+release_protocol_ports() {
+  python3 "${INSTALL_DIR}/api/port_allocation.py" "$1" --release >/dev/null 2>&1 || true
+}
+
 install_protocol_image() {
   local image_id="${2:-}"
   [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
@@ -1619,6 +1628,7 @@ PY
     || die "образ ${image_id} содержит некорректный installer."
   info "Установка образа ${image_id}"
   prepare_protocol_ports "${image_id}"
+  RESERVED_PROTOCOL_IMAGE="${image_id}"
   prepare_package_manager
   preflight_protocol_image "${manifest}" \
     || die "preflight модуля ${image_id} не пройден; установка не запускалась."
@@ -1665,7 +1675,8 @@ PY
   # the API code or environment and does not require an API restart.
   sync_protocol_monitor
   ok "Образ ${image_id} установлен."
-  python3 "${INSTALL_DIR}/api/port_allocation.py" "${image_id}" --release
+  release_protocol_ports "${image_id}"
+  RESERVED_PROTOCOL_IMAGE=""
 }
 
 remove_protocol_image() {
@@ -1687,6 +1698,7 @@ remove_protocol_image() {
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
     PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${uninstaller}"
+  release_protocol_ports "${image_id}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
   ok "Протокол ${image_id} удалён; образ сохранён."
