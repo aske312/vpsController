@@ -1,6 +1,6 @@
 "use client";
 
-import type { ApplicationAction, ApplicationStatus, ServicesStatus } from "../../shared/types/control-plane";
+import type { ApplicationAction, ApplicationDependency, ApplicationStatus, ServicesStatus } from "../../shared/types/control-plane";
 import { actionLabels, applicationActionState } from "../../shared/lib/control-plane-ui";
 
 type ApplicationVersion = { branch?: string; current_commit?: string; latest_commit?: string; outdated?: boolean | null; checked_at?: string; error?: string; refreshing?: boolean };
@@ -8,6 +8,7 @@ type UpdateStatus = { available?: number; security?: number; kernel_available?: 
 
 type ApplicationViewProps = {
   application: ApplicationStatus | null; services: ServicesStatus | null; applicationVersion?: ApplicationVersion; updates?: UpdateStatus;
+  applicationDependencies?: ApplicationDependency[];
   serviceModeActive: boolean; busy: boolean; applicationLogs: string[];
   runApplicationAction: (action: ApplicationAction) => Promise<void> | void;
   changeServiceMode: (enabled: boolean) => Promise<void> | void;
@@ -17,7 +18,7 @@ type ApplicationViewProps = {
   downloadUpdateReport: () => Promise<void> | void;
 };
 
-export function ApplicationView({ application, services, applicationVersion, updates, serviceModeActive, busy, applicationLogs, runApplicationAction, changeServiceMode, changePanelAccess, changeCdnSecurity, loadApplicationLogs, downloadLogs, downloadUpdateReport }: ApplicationViewProps) {
+export function ApplicationView({ application, services, applicationVersion, applicationDependencies, updates, serviceModeActive, busy, applicationLogs, runApplicationAction, changeServiceMode, changePanelAccess, changeCdnSecurity, loadApplicationLogs, downloadLogs, downloadUpdateReport }: ApplicationViewProps) {
   const actionState = applicationActionState(application?.action);
   return <section className="applicationWorkspace">
         <article className="applicationSummary">
@@ -104,6 +105,14 @@ export function ApplicationView({ application, services, applicationVersion, upd
               <span><small>CURRENT</small><strong>{applicationVersion?.current_commit?.slice(0, 12) || "unknown"}</strong></span>
               <span><small>LATEST</small><strong>{applicationVersion?.latest_commit?.slice(0, 12) || "unknown"}</strong></span>
               <span className={applicationVersion?.outdated ? "bad" : "ok"}><small>STATUS</small><strong>{applicationVersion?.refreshing ? "CHECKING" : applicationVersion?.outdated ? "UPDATE" : "CURRENT"}</strong></span>
+            </div>
+          </section>
+
+          <section className="applicationDependencies">
+            <header><div><p className="eyebrow">INSTALLED RUNTIME</p><h2>Зависимости приложения</h2><span>Фактически установленные версии на этом VPS</span></div><span>LOCAL CHECK</span></header>
+            <div className="applicationDependencyGrid">
+              {(applicationDependencies || []).map((dependency) => <div key={dependency.id}><span>{dependency.name}</span><strong>{dependency.version || "—"}</strong></div>)}
+              {!applicationDependencies?.length && <small>Версии пока не получены</small>}
             </div>
           </section>
 

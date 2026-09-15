@@ -1537,6 +1537,7 @@ export function ControlPanel() {
         application={application}
         services={services}
         applicationVersion={applicationVersion}
+        applicationDependencies={applicationMetadata?.dependencies}
         updates={updates}
         serviceModeActive={serviceModeActive}
         busy={busy || cdnCommand.pending}

@@ -153,6 +153,10 @@ test("live monitoring uses stable low-load cadence and detailed server metrics",
   assert.match(page, /target\.searchParams\.delete\("_refresh"\)/);
   assert.match(page, /window\.history\.replaceState\(window\.history\.state/);
   assert.match(page, /\["update", "test-update", "test-rollback", "safe-update", "kernel-update"\]\.includes/);
+  assert.match(api, /def application_dependency_versions\(\)/);
+  assert.match(api, /"dependencies": application_dependency_versions\(\)/);
+  assert.match(page, /className="applicationDependencies"/);
+  assert.match(page, /Фактически установленные версии на этом VPS/);
 });
 
 test("log management runs bundled control safely and permits disabled retention", async () => {

@@ -166,11 +166,11 @@
 
 .applicationManagement { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr); gap:12px; min-width:0; }
 
-.applicationEnvironment, .applicationLifecycle, .applicationJournal { min-width:0; overflow:hidden; border:1px solid rgba(91,116,141,.22); border-radius:18px; background:linear-gradient(180deg,rgba(8,16,24,.96),rgba(7,15,23,.93)); }
+.applicationEnvironment, .applicationLifecycle, .applicationDependencies, .applicationJournal { min-width:0; overflow:hidden; border:1px solid rgba(91,116,141,.22); border-radius:18px; background:linear-gradient(180deg,rgba(8,16,24,.96),rgba(7,15,23,.93)); }
 
-.applicationEnvironment > header, .applicationLifecycle > header, .applicationJournal > header { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; padding:13px 15px; border-bottom:1px solid rgba(91,116,141,.12); }
+.applicationEnvironment > header, .applicationLifecycle > header, .applicationDependencies > header, .applicationJournal > header { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; padding:13px 15px; border-bottom:1px solid rgba(91,116,141,.12); }
 
-.applicationEnvironment h2, .applicationLifecycle h2, .applicationJournal h2 { margin:0; font-size:18px; }
+.applicationEnvironment h2, .applicationLifecycle h2, .applicationDependencies h2, .applicationJournal h2 { margin:0; font-size:18px; }
 
 .applicationEnvironment > header > span { color:#7991a1; font:10px var(--font-mono),monospace; }
 
@@ -205,6 +205,15 @@
 .applicationRelease .ok strong { color:#69dcb9; }
 
 .applicationRelease .bad strong { color:#ef8989; }
+
+.applicationDependencies { grid-column:1 / -1; }
+.applicationDependencies > header > div > span { display:block; margin-top:4px; color:#7c92a1; font-size:10px; }
+.applicationDependencies > header > span { color:#7991a1; font:10px var(--font-mono),monospace; }
+.applicationDependencyGrid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; padding:12px 14px 14px; }
+.applicationDependencyGrid > div { display:grid; gap:5px; min-width:0; padding:9px 10px; border:1px solid rgba(91,116,141,.12); border-radius:11px; background:rgba(6,14,21,.35); }
+.applicationDependencyGrid > div > span { overflow:hidden; color:#91a6b5; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.applicationDependencyGrid strong { overflow:hidden; color:#dce9ef; font:700 11px var(--font-mono),monospace; text-overflow:ellipsis; white-space:nowrap; }
+.applicationDependencyGrid > small { grid-column:1 / -1; color:#7c91a0; font-size:10px; }
 
 .applicationLifecycleActions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding:12px 14px 14px; }
 
@@ -255,9 +264,10 @@
 @media (max-width: 680px) {
 .applicationSummary, .applicationControlContent { padding-left:14px; padding-right:14px; }
 .applicationPrimaryActions { grid-template-columns:1fr; }
-.applicationControlHead, .applicationEnvironment > header, .applicationLifecycle > header, .applicationJournal > header { flex-direction:column; align-items:flex-start; }
+.applicationControlHead, .applicationEnvironment > header, .applicationLifecycle > header, .applicationDependencies > header, .applicationJournal > header { flex-direction:column; align-items:flex-start; }
 .applicationControlBadges { justify-content:flex-start; }
 .applicationRelease { grid-template-columns:1fr; }
+.applicationDependencyGrid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .applicationJournal > header > div:last-child { width:100%; }
 .applicationJournal > header button { flex:1; }
 }

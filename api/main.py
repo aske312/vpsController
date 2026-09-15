@@ -19,6 +19,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import platform
+from importlib.metadata import PackageNotFoundError, version as installed_python_package_version
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2253,7 +2254,11 @@ def remove_protocol_image(image_id: str, _: None = Depends(require_token)) -> di
 
 @app.get("/api/application/metadata")
 def application_metadata(_: None = Depends(require_token)) -> dict:
-    return {"application_version": application_version_status(), "updates": update_status()}
+    return {
+        "application_version": application_version_status(),
+        "updates": update_status(),
+        "dependencies": application_dependency_versions(),
+    }
 
 
 @app.get("/api/application/status")
@@ -2611,6 +2616,44 @@ def application_version_status() -> dict:
         "branch": expected_branch, "current_commit": installed_commit, "latest_commit": "",
         "outdated": None, "checked_at": None, "error": "", "refreshing": True,
     }
+
+
+def installed_executable_version(command: str, *arguments: str) -> str:
+    output = run(command, *arguments, timeout=5)
+    match = re.search(r"\bv?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b", output)
+    return match.group(1) if match else ""
+
+
+def installed_python_package_version_or_empty(package: str) -> str:
+    try:
+        return installed_python_package_version(package)
+    except PackageNotFoundError:
+        return ""
+
+
+def installed_node_package_version(package: str) -> str:
+    try:
+        package_file = INSTALL_DIR / "node_modules" / package / "package.json"
+        data = json.loads(package_file.read_text(encoding="utf-8"))
+        return str(data.get("version", ""))
+    except (OSError, TypeError, ValueError):
+        return ""
+
+
+def application_dependency_versions() -> list[dict[str, str]]:
+    """Return versions actually installed in the application runtime."""
+    return [
+        {"id": "caddy", "name": "Caddy", "version": installed_executable_version("caddy", "version")},
+        {"id": "node", "name": "Node.js", "version": installed_executable_version("node", "--version")},
+        {"id": "python", "name": "Python", "version": platform.python_version()},
+        {"id": "fastapi", "name": "FastAPI", "version": installed_python_package_version_or_empty("fastapi")},
+        {"id": "uvicorn", "name": "Uvicorn", "version": installed_python_package_version_or_empty("uvicorn")},
+        {"id": "pydantic-settings", "name": "Pydantic Settings", "version": installed_python_package_version_or_empty("pydantic-settings")},
+        {"id": "vinext", "name": "Vinext", "version": installed_node_package_version("vinext")},
+        {"id": "next", "name": "Next.js", "version": installed_node_package_version("next")},
+        {"id": "react", "name": "React", "version": installed_node_package_version("react")},
+        {"id": "react-dom", "name": "React DOM", "version": installed_node_package_version("react-dom")},
+    ]
 
 
 def service_details(service_id: str, definition: dict) -> dict:
