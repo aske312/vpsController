@@ -19,10 +19,11 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(page, /networkRouteDetailRow/);
   assert.match(page, /networkRouteCascade/);
   assert.match(page, /NetworkRouteTags/);
-  assert.match(page, /networkServerIpGrid/);
-  assert.match(page, /PUBLIC IPv4/);
-  assert.match(page, /PUBLIC IPv6/);
-  assert.ok(page.indexOf("networkV2State") < page.indexOf("networkV2RouteBlock"));
+  assert.match(page, /networkStateStrip/);
+  assert.match(page, /SERVER IPv4/);
+  assert.match(page, /SERVER IPv6/);
+  assert.match(page, /serverRoutes/);
+  assert.ok(page.indexOf("networkStateStrip") < page.indexOf("networkV2RouteBlock"));
   assert.match(networkApi, /saveNetworkEndpoints/);
   assert.match(types, /transport_endpoints/);
   assert.match(types, /NetworkEndpointSettings/);
