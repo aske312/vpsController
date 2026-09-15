@@ -196,6 +196,7 @@ resource_check_lock = threading.Lock()
 network_diagnostic_lock = threading.Lock()
 resource_check_cache: dict[str, dict] = {}
 network_diagnostic_cache: dict[str, dict] = {}
+network_identity_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
 stream_stats_cache: dict[str, dict] = {}
 XRAY_BIN = "/usr/local/lib/vps-control-vless-reality-xhttp/xray"
@@ -1406,6 +1407,192 @@ def network_domain_probe(domain: str, role: str) -> dict:
     return {"value": domain, "role": role, "source": "environment", "resolved": resolved, "matches_origin": matches, "route": route}
 
 
+def network_resolver_addresses() -> list[str]:
+    addresses: list[str] = []
+    try:
+        lines = SYSTEM_RESOLV_CONF.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 2 or parts[0] != "nameserver":
+            continue
+        address = parts[1].strip("[]").split("%", 1)[0]
+        try:
+            ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        if address not in addresses:
+            addresses.append(address)
+    return addresses
+
+
+def _dns_wire_name(data: bytes, offset: int) -> tuple[str, int]:
+    labels: list[str] = []
+    cursor = offset
+    end = offset
+    visited: set[int] = set()
+    while cursor < len(data):
+        if cursor in visited:
+            raise ValueError("DNS compression loop")
+        visited.add(cursor)
+        length = data[cursor]
+        if length == 0:
+            end = max(end, cursor + 1)
+            break
+        if length & 0xC0 == 0xC0:
+            if cursor + 1 >= len(data):
+                raise ValueError("Invalid DNS pointer")
+            pointer = ((length & 0x3F) << 8) | data[cursor + 1]
+            if end == offset:
+                end = cursor + 2
+            cursor = pointer
+            continue
+        if length > 63 or cursor + 1 + length > len(data):
+            raise ValueError("Invalid DNS label")
+        labels.append(data[cursor + 1:cursor + 1 + length].decode("idna"))
+        cursor += 1 + length
+    if not end:
+        raise ValueError("Truncated DNS name")
+    return ".".join(labels).rstrip("."), end
+
+
+def network_dns_records(domain: str, record_type: int = 2) -> list[str]:
+    """Read a small DNS record set without adding a runtime dependency."""
+    normalized = domain.strip().rstrip(".").lower()
+    labels = normalized.encode("idna").split(b".")
+    if not normalized or any(not label or len(label) > 63 for label in labels):
+        return []
+    query = struct.pack("!6H", secrets.randbelow(65536), 0x0100, 1, 0, 0, 0)
+    query += b"".join(bytes([len(label)]) + label for label in labels) + b"\x00"
+    query += struct.pack("!HH", record_type, 1)
+    query_id = struct.unpack("!H", query[:2])[0]
+    for resolver in network_resolver_addresses():
+        try:
+            resolver_ip = ipaddress.ip_address(resolver)
+            family = socket.AF_INET6 if resolver_ip.version == 6 else socket.AF_INET
+            target = (resolver, 53, 0, 0) if family == socket.AF_INET6 else (resolver, 53)
+            with socket.socket(family, socket.SOCK_DGRAM) as sock:
+                sock.settimeout(2)
+                sock.sendto(query, target)
+                response, _ = sock.recvfrom(4096)
+            if len(response) < 12:
+                continue
+            response_id, flags, questions, answers, _, _ = struct.unpack("!6H", response[:12])
+            if response_id != query_id or not flags & 0x8000 or flags & 0x000F or questions != 1:
+                continue
+            offset = 12
+            _, offset = _dns_wire_name(response, offset)
+            offset += 4
+            values: list[str] = []
+            for _ in range(answers):
+                _, offset = _dns_wire_name(response, offset)
+                if offset + 10 > len(response):
+                    break
+                answer_type, answer_class, _, length = struct.unpack("!HHIH", response[offset:offset + 10])
+                offset += 10
+                if offset + length > len(response):
+                    break
+                if answer_class == 1 and answer_type == record_type:
+                    value, _ = _dns_wire_name(response, offset)
+                    if value and value not in values:
+                        values.append(value.lower())
+                offset += length
+            return values
+        except (OSError, UnicodeError, ValueError, struct.error):
+            continue
+    return []
+
+
+def network_dns_provider(nameservers: list[str]) -> str:
+    normalized = [value.rstrip(".").lower() for value in nameservers]
+    signatures = (
+        ("Cloudflare", ("cloudflare.com",)),
+        ("Amazon Route 53", ("awsdns", "amazonaws.com")),
+        ("Google Cloud DNS", ("googledomains.com", "google.com")),
+        ("DigitalOcean DNS", ("digitalocean.com",)),
+        ("Hetzner DNS", ("hetzner.com",)),
+        ("Namecheap DNS", ("registrar-servers.com",)),
+        ("GoDaddy DNS", ("domaincontrol.com",)),
+        ("DNS Made Easy", ("dnsmadeeasy.com",)),
+    )
+    for provider, markers in signatures:
+        if any(any(marker in nameserver for marker in markers) for nameserver in normalized):
+            return provider
+    return "Не определён" if not normalized else "Другой DNS-провайдер"
+
+
+def network_rdap_identity(address: str, known_provider: str = "") -> dict:
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError:
+        return {"address": address, "ptr": "", "provider": known_provider, "asn": "", "network": "", "source": ""}
+    cache_key = f"ip:{parsed.compressed}"
+    cached = network_identity_cache.get(cache_key)
+    if cached and time.time() - cached["_cached_at"] < 900:
+        return {key: value for key, value in cached.items() if key != "_cached_at"}
+    ptr = ""
+    try:
+        ptr = socket.gethostbyaddr(str(parsed))[0].rstrip(".")
+    except (OSError, UnicodeError, socket.herror):
+        pass
+    result = {"address": str(parsed), "ptr": ptr, "provider": known_provider, "asn": "", "network": "", "source": ""}
+    if parsed.is_global and not known_provider:
+        try:
+            request = urllib.request.Request(
+                f"https://rdap.org/ip/{urllib.parse.quote(str(parsed), safe=':')}",
+                headers={"Accept": "application/rdap+json, application/json", "User-Agent": "312-net-control/1"},
+            )
+            with urllib.request.urlopen(request, timeout=3) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            result["network"] = str(payload.get("name") or payload.get("handle") or "")
+            entities = payload.get("entities") if isinstance(payload.get("entities"), list) else []
+            entity_names: list[str] = []
+            for entity in entities:
+                if not isinstance(entity, dict):
+                    continue
+                handle = str(entity.get("handle") or "")
+                if re.fullmatch(r"AS\d+", handle, flags=re.IGNORECASE):
+                    result["asn"] = handle.upper()
+                vcard = entity.get("vcardArray")
+                if isinstance(vcard, list) and len(vcard) > 1 and isinstance(vcard[1], list):
+                    for field in vcard[1]:
+                        if isinstance(field, list) and len(field) > 3 and field[0] == "fn" and field[3]:
+                            entity_names.append(str(field[3]))
+                            break
+            result["provider"] = result["provider"] or (entity_names[0] if entity_names else str(payload.get("name") or ""))
+            result["source"] = "RDAP"
+        except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
+            result["source"] = ""
+    elif known_provider:
+        result["source"] = "Диапазон адресов Cloudflare"
+    network_identity_cache[cache_key] = {**result, "_cached_at": time.time()}
+    return result
+
+
+def network_domain_identity(domain: str, resolved: list[str], cloudflare_ranges: set[str]) -> tuple[dict, list[dict]]:
+    cache_key = f"domain:{domain.lower().rstrip('.')}"
+    cached = network_identity_cache.get(cache_key)
+    if cached and time.time() - cached["_cached_at"] < 300:
+        return cached["dns"], cached["ip_info"]
+    try:
+        ipaddress.ip_address(domain)
+        nameservers = []
+        dns = {"provider": "DNS не используется", "nameservers": nameservers, "source": "Адрес указан напрямую"}
+    except ValueError:
+        nameservers = network_dns_records(domain, 2)
+        dns = {"provider": network_dns_provider(nameservers), "nameservers": nameservers, "source": "Авторитетные NS через DNS VPS"}
+    ip_info: list[dict] = []
+    for address in resolved:
+        try:
+            in_cloudflare = any(ipaddress.ip_address(address) in ipaddress.ip_network(cidr) for cidr in cloudflare_ranges)
+        except ValueError:
+            in_cloudflare = False
+        ip_info.append(network_rdap_identity(address, "Cloudflare" if in_cloudflare else ""))
+    network_identity_cache[cache_key] = {"dns": dns, "ip_info": ip_info, "_cached_at": time.time()}
+    return dns, ip_info
+
+
 def network_ipv6_state() -> dict[str, bool | str]:
     local_address = ""
     output = run("ip", "-6", "-o", "addr", "show", "scope", "global", timeout=3)
@@ -1527,6 +1714,19 @@ def network_status() -> dict:
     elif domain_items:
         edge_provider = "Нет внешнего proxy"
 
+    if domain_items:
+        def enrich_domain(item: dict) -> tuple[dict, list[dict]]:
+            return network_domain_identity(item["value"], item["resolved"], cloudflare_ranges)
+
+        with ThreadPoolExecutor(max_workers=min(8, len(domain_items))) as pool:
+            identities = list(pool.map(enrich_domain, domain_items))
+        for item, (dns, ip_info) in zip(domain_items, identities):
+            item["dns"] = dns
+            item["ip_info"] = ip_info
+
+    origin_addresses = list(dict.fromkeys(value for value in (PUBLIC_IPV4, str(ipv6["address"]), PUBLIC_IP) if value))
+    origin_ip_info = [network_rdap_identity(address) for address in origin_addresses]
+
     listeners: list[dict] = []
     for line in run("ss", "-H", "-lnt", timeout=4).splitlines():
         columns = line.split()
@@ -1548,7 +1748,7 @@ def network_status() -> dict:
     direct_url = f"http://{PUBLIC_IP_ENDPOINT}:{os.getenv('HTTP_PORT', '80')}"
     return {
         "detected_at": datetime.now(timezone.utc).isoformat(),
-        "server": {"name": SERVER_NAME, "public_ip": PUBLIC_IP, "public_ipv4": PUBLIC_IPV4, "public_ipv6": str(ipv6["address"])},
+        "server": {"name": SERVER_NAME, "public_ip": PUBLIC_IP, "public_ipv4": PUBLIC_IPV4, "public_ipv6": str(ipv6["address"]), "ip_info": origin_ip_info},
         "domains": domain_items,
         "route": {"mode": route_mode, "label": route_label, "evidence": evidence},
         "tls": {"mode": "Caddy ACME" if PUBLIC_DOMAIN else "Не используется", "certificate_source": "Автоматический сертификат Caddy" if PUBLIC_DOMAIN else "—", "https_expected": bool(PUBLIC_DOMAIN)},

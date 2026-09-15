@@ -83,6 +83,20 @@ class NetworkDomainsTests(unittest.TestCase):
             result = api.check_network_endpoint(api.NetworkEndpointCheck(kind="udp_relay", domain="missing.example.com"), None)
         self.assertEqual(result["status"], "unresolved")
 
+    def test_domain_identity_reports_dns_provider_and_ip_owner(self):
+        with patch.object(api, "network_dns_records", return_value=["ns1.cloudflare.com", "ns2.cloudflare.com"]), patch.object(api, "network_rdap_identity", return_value={"address": "203.0.113.10", "ptr": "edge.example.net", "provider": "Example Networks", "asn": "AS64500", "network": "EXAMPLE-NET", "source": "RDAP"}):
+            dns, ips = api.network_domain_identity("cdn.example.com", ["203.0.113.10"], set())
+        self.assertEqual(dns["provider"], "Cloudflare")
+        self.assertEqual(dns["nameservers"], ["ns1.cloudflare.com", "ns2.cloudflare.com"])
+        self.assertEqual(ips[0]["asn"], "AS64500")
+        self.assertEqual(ips[0]["ptr"], "edge.example.net")
+
+    def test_direct_ip_identity_does_not_claim_a_dns_provider(self):
+        with patch.object(api, "network_dns_records") as records, patch.object(api, "network_rdap_identity", return_value={"address": "203.0.113.10"}):
+            dns, _ = api.network_domain_identity("203.0.113.10", ["203.0.113.10"], set())
+        records.assert_not_called()
+        self.assertEqual(dns["provider"], "DNS не используется")
+
     def test_relay_endpoint_accepts_ip_without_relaxing_cdn_domain(self):
         with tempfile.TemporaryDirectory() as root:
             data_dir = Path(root)
