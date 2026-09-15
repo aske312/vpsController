@@ -135,6 +135,15 @@
       "help": "После этого числа последовательных ошибок Mihomo принудительно запускает проверку группы."
     },
     {
+      "key": "vless_max_connections_per_device",
+      "label": "Максимум VLESS-подключений на устройство",
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 5,
+      "help": "Ограничивает суммарное число VLESS REALITY, VLESS TLS и VLESS CDN для одного устройства."
+    },
+    {
       "key": "tolerance",
       "label": "Допуск смены, мс",
       "type": "number",

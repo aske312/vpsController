@@ -557,8 +557,16 @@ export function MihomoPage({
     setProfileDialog("new");
     setProfileName("");
     setProfileConnections([]);
-    setProfileRouting({});
-    setProfileDevices([{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: {} }]);
+    const protectionDefaults = {
+      sniffer: true,
+      tcp_concurrent: true,
+      tun_enabled: true,
+      dns_hijack_force: true,
+      dns_fake_ip: true,
+      tun_strict_route: true,
+    };
+    setProfileRouting(protectionDefaults);
+    setProfileDevices([{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: protectionDefaults }]);
     setActiveDeviceId("profile-common");
   }
 
@@ -1190,6 +1198,7 @@ export function MihomoPage({
                 <label><span>Таймаут, мс</span><input type="number" min={1000} max={10000} value={Number(routingDraft.health_timeout || 3000)} onChange={(event) => updateRoutingDraft("health_timeout", Number(event.target.value))} /></label>
                 <label><span>Ошибок до переключения</span><input type="number" min={1} max={10} value={Number(routingDraft.max_failed_times || 2)} onChange={(event) => updateRoutingDraft("max_failed_times", Number(event.target.value))} /></label>
                 <label><span>Допуск смены, мс</span><input type="number" min={0} max={1000} value={Number(routingDraft.tolerance || 50)} onChange={(event) => updateRoutingDraft("tolerance", Number(event.target.value))} /></label>
+                <label><span>VLESS на устройство</span><input type="number" min={1} max={5} value={Number(routingDraft.vless_max_connections_per_device || 5)} onChange={(event) => updateRoutingDraft("vless_max_connections_per_device", Number(event.target.value))} /></label>
               </div></article>
             </div>
           </section>
@@ -1264,7 +1273,7 @@ export function MihomoPage({
                 </section>
               </aside>
               <main ref={profileCanvasRef} className="mihomoProfileCanvas">
-            <section className="mihomoProfileEditorHead"><div><small>ВЫБРАННАЯ КОНФИГУРАЦИЯ</small><b>{profileDevices.find((device) => device.id === activeDeviceId)?.scope === "common" ? "Параметры профиля" : profileDevices.find((device) => device.id === activeDeviceId)?.name}</b></div><nav aria-label="Раздел настроек"><button type="button" className={profileStep === 1 ? "is-active" : ""} onClick={() => setProfileStep(1)}>Общее</button><button type="button" className={profileStep === 2 ? "is-active" : ""} onClick={() => setProfileStep(2)}>Маршрутизация</button><button type="button" className={profileStep === 3 ? "is-active" : ""} onClick={() => setProfileStep(3)}>Подключения <i>{profileConnections.filter((connection) => connection.device_id === activeDeviceId).length}</i></button><button type="button" className={profileStep === 4 ? "is-active" : ""} onClick={() => setProfileStep(4)}>Защита</button></nav></section>
+            <section className="mihomoProfileEditorHead"><div><small>ВЫБРАННАЯ КОНФИГУРАЦИЯ</small><b>{profileDevices.find((device) => device.id === activeDeviceId)?.scope === "common" ? "Параметры профиля" : profileDevices.find((device) => device.id === activeDeviceId)?.name}</b></div><nav aria-label="Раздел настроек"><button type="button" className={profileStep === 1 ? "is-active" : ""} onClick={() => setProfileStep(1)}>Общее</button><button type="button" className={profileStep === 2 ? "is-active" : ""} onClick={() => setProfileStep(2)}>Защита</button><button type="button" className={profileStep === 3 ? "is-active" : ""} onClick={() => setProfileStep(3)}>Маршрутизация</button><button type="button" className={profileStep === 4 ? "is-active" : ""} onClick={() => setProfileStep(4)}>Подключения <i>{profileConnections.filter((connection) => connection.device_id === activeDeviceId).length}</i></button></nav></section>
             <section className="mihomoProfileName mihomoProfileGeneral">
               {profileDevices.find((device) => device.id === activeDeviceId)?.scope === "common" ? <>
                 <header><div><b>Название профиля</b><small>Отображается в панели и помогает отличать подписки.</small></div></header>
@@ -1307,9 +1316,9 @@ export function MihomoPage({
               <div className="mihomoConnectionAdd">
                 {installedChannels.filter((module) => commonDevice || activeCapabilities.components.includes(module.id)).flatMap((module) => {
                   if (module.id === "transport-reality") return [
-                    <button key="vless-direct" type="button" onClick={() => addProfileConnection(module, "direct")}>+ VLESS</button>,
-                    <button key="vless-tls" type="button" disabled={!confirmedNetworkRoute("tls")} title={!confirmedNetworkRoute("tls") ? "Сначала подтвердите прямой TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
-                    <button key="vless-cdn" type="button" disabled={!confirmedNetworkRoute("cdn")} title={!confirmedNetworkRoute("cdn") ? "Сначала подтвердите CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
+                    <button key="vless-direct" type="button" disabled={profileConnections.filter((connection) => connection.device_id === activeDeviceId && connection.component === "transport-reality").length >= Number(routingPolicy?.values.vless_max_connections_per_device || 5)} onClick={() => addProfileConnection(module, "direct")}>+ VLESS</button>,
+                    <button key="vless-tls" type="button" disabled={!confirmedNetworkRoute("tls") || profileConnections.filter((connection) => connection.device_id === activeDeviceId && connection.component === "transport-reality").length >= Number(routingPolicy?.values.vless_max_connections_per_device || 5)} title={!confirmedNetworkRoute("tls") ? "Сначала подтвердите прямой TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
+                    <button key="vless-cdn" type="button" disabled={!confirmedNetworkRoute("cdn") || profileConnections.filter((connection) => connection.device_id === activeDeviceId && connection.component === "transport-reality").length >= Number(routingPolicy?.values.vless_max_connections_per_device || 5)} title={!confirmedNetworkRoute("cdn") ? "Сначала подтвердите CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
                   ];
                   const singletonUsed = profileConnections.some((item) => item.device_id === activeDeviceId && item.component === module.id);
                   return [<button key={module.id} type="button" disabled={singletonUsed} onClick={() => addProfileConnection(module)}>+ {module.name}</button>];
@@ -1342,7 +1351,7 @@ export function MihomoPage({
                         return true;
                       }).map((field) => <label key={field.key} className={field.type === "boolean" ? "is-toggle" : ""}>
                         <span>{field.label}</span>
-                        {((field.key === "cdn_domain" && vlessRoute === "cdn") || (field.key === "tls_domain" && vlessRoute === "tls")) && confirmedNetworkRoutes(field.key === "cdn_domain" ? "cdn" : "tls").length > 0 ? <select value={String(connection.settings[field.key] ?? confirmedNetworkRoutes(field.key === "cdn_domain" ? "cdn" : "tls")[0])} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>{confirmedNetworkRoutes(field.key === "cdn_domain" ? "cdn" : "tls").map((domain) => <option key={domain} value={domain}>{domain}</option>)}</select> : field.type === "select" ? <select value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>
+                        {((field.key === "cdn_domain" && vlessRoute === "cdn") || (field.key === "tls_domain" && vlessRoute === "tls")) ? (() => { const kind = field.key === "cdn_domain" ? "cdn" : "tls"; const routes = confirmedNetworkRoutes(kind); return routes.length > 0 ? <select value={routes.includes(String(connection.settings[field.key] || "")) ? String(connection.settings[field.key]) : routes[0]} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>{routes.map((domain) => <option key={domain} value={domain}>{domain}</option>)}</select> : <span className="mihomoUnavailableField">Нет подтвержденных доменов на странице «Сеть»</span>; })() : field.type === "select" ? <select value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>
                           {(field.options || []).filter((option) => commonDevice || !["transport", "cdn_transport", "tls_transport"].includes(field.key) || activeCapabilities.transports.includes(typeof option === "string" ? option : option.value)).map((option) => { const value = typeof option === "string" ? option : option.value; const label = typeof option === "string" ? option : option.label; return <option key={value} value={value}>{label}</option>; })}
                         </select> : field.type === "boolean" ? <input type="checkbox" checked={Boolean(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.checked)} />
                           : <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, field.type === "number" ? Number(event.target.value) : event.target.value)} />}

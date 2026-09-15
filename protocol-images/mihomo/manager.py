@@ -3146,6 +3146,25 @@ def validate_channels(channels: list[str]) -> list[str]:
     return result
 
 
+def max_vless_connections_per_device() -> int:
+    try:
+        return max(1, min(5, int(routing_settings().get("vless_max_connections_per_device", 5))))
+    except (TypeError, ValueError):
+        return 5
+
+
+def validate_vless_connection_limit(values: list[dict[str, Any]]) -> None:
+    limit = max_vless_connections_per_device()
+    counts: dict[str, int] = {}
+    for value in values:
+        if value.get("component") != "transport-reality":
+            continue
+        device_id = str(value.get("device_id", "profile-common"))
+        counts[device_id] = counts.get(device_id, 0) + 1
+        if counts[device_id] > limit:
+            raise HTTPException(status_code=422, detail=f"Для одного устройства можно добавить не более {limit} VLESS-подключений")
+
+
 def validate_connection_inputs(values: list[ProfileConnectionInput]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     used_ids: set[str] = set()
@@ -3543,6 +3562,7 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
         if existing:
             return profile_response(existing)
     definitions = validate_connection_inputs(payload.connections) if payload.connections is not None else legacy_connection_inputs(payload.channels)
+    validate_vless_connection_limit(definitions)
     devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
     validate_profile_devices(devices, str(devices[0]["id"]))
     validate_personal_rule_ids(devices)
@@ -3619,6 +3639,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     if payload.connections is not None:
         reality_changed = False
         definitions = validate_connection_inputs(payload.connections)
+        validate_vless_connection_limit(definitions)
         device_ids = {str(device.get("id")) for device in item.get("devices", [])}
         if any(definition.get("device_id") not in device_ids for definition in definitions):
             raise HTTPException(status_code=422, detail="A connection references a missing profile device")

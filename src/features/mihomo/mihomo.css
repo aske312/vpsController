@@ -979,8 +979,6 @@
 @media (max-width: 860px) { .mihomoProfileBackdrop { padding:0; } .mihomoProfileDialog { width:100%; height:100dvh; border:0; border-radius:0; } .mihomoProfileDialog > header { min-height:58px; padding:11px 14px; } .mihomoProfileWorkspace { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); } .mihomoProfileRail { display:block; padding:9px 12px; border-right:0; border-bottom:1px solid var(--line); } .mihomoProfileSteps { grid-template-columns:repeat(3,1fr); } .mihomoProfileSteps button { grid-template-columns:24px minmax(0,1fr); padding:7px; } .mihomoProfileSteps button i { width:23px; height:23px; } .mihomoProfileSteps button small,.mihomoProfileDraftSummary,.mihomoProfileRailHint { display:none; } .mihomoProfileCanvas { padding:16px 16px 24px; scrollbar-gutter:auto; } .mihomoProfileDialog > footer { padding:10px 14px; } }
 @media (max-width: 640px) { .mihomoProfileStrategy > div { grid-template-columns:1fr; } .mihomoReadyDevices > article { grid-template-columns:1fr; } .mihomoReadyDevices img { width:132px; height:132px; justify-self:center; } .mihomoCreatedProfile .mihomoReadySummary,.mihomoProfileStrategy > header { align-items:flex-start; flex-direction:column; } }
 
-
-
 /* Profile editor: persistent level rail with routing/connection tabs. */
 .mihomoProfileDialog { width:calc(100vw - 32px); height:calc(100dvh - 32px); max-width:none; max-height:none; }
 .mihomoProfileDialog > header { gap:18px; }
@@ -1295,3 +1293,33 @@
 }
 .mihomoClientAppsDetails > summary { padding:10px 0; cursor:pointer; color:var(--text); font-size:12px; }
 .mihomoClientAppsDetails[open] > summary { margin-bottom:8px; }
+
+/* Final profile editor section order: general, protection, routing, connections. */
+.mihomoProfileDialog.is-step-1 .mihomoProfileStrategy,
+.mihomoProfileDialog.is-step-1 .mihomoProfileProtection,
+.mihomoProfileDialog.is-step-1 .mihomoProfileRules,
+.mihomoProfileDialog.is-step-1 .mihomoPresetPicker,
+.mihomoProfileDialog.is-step-1 .mihomoConnectionBuilder,
+.mihomoProfileDialog.is-step-1 .mihomoProfileTechnicalNote,
+.mihomoProfileDialog.is-step-2 .mihomoProfileName,
+.mihomoProfileDialog.is-step-2 .mihomoProfileStrategy,
+.mihomoProfileDialog.is-step-2 .mihomoProfileRules,
+.mihomoProfileDialog.is-step-2 .mihomoPresetPicker,
+.mihomoProfileDialog.is-step-2 .mihomoConnectionBuilder,
+.mihomoProfileDialog.is-step-2 .mihomoProfileTechnicalNote,
+.mihomoProfileDialog.is-step-3 .mihomoProfileName,
+.mihomoProfileDialog.is-step-3 .mihomoProfileProtection,
+.mihomoProfileDialog.is-step-3 .mihomoPresetPicker,
+.mihomoProfileDialog.is-step-3 .mihomoConnectionBuilder,
+.mihomoProfileDialog.is-step-3 .mihomoProfileTechnicalNote,
+.mihomoProfileDialog.is-step-4 .mihomoProfileName,
+.mihomoProfileDialog.is-step-4 .mihomoProfileStrategy,
+.mihomoProfileDialog.is-step-4 .mihomoProfileProtection,
+.mihomoProfileDialog.is-step-4 .mihomoProfileRules,
+.mihomoProfileDialog.is-step-4 .mihomoProfileTechnicalNote { display:none; }
+.mihomoProfileDialog.is-step-2 .mihomoProfileProtection,
+.mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,
+.mihomoProfileDialog.is-step-3 .mihomoProfileRules,
+.mihomoProfileDialog.is-step-4 .mihomoPresetPicker,
+.mihomoProfileDialog.is-step-4 .mihomoConnectionBuilder { display:grid; }
+.mihomoUnavailableField { color:var(--muted); font-size:10px; line-height:1.4; }
