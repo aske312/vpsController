@@ -263,3 +263,59 @@
   .runtimeFacts > div:nth-last-child(-n+2) { border-bottom:1px solid rgba(133,166,185,.08); }
   .runtimeFacts > div:last-child { border-bottom:0; }
 }
+
+/* Keep Tunnels in the shared control-center visual language. */
+.tunnelsWorkspace {
+  --t-accent: var(--cyan);
+  --t-accent-rgb: 97,207,216;
+  --t-line: var(--line);
+  --t-line-strong: var(--line-strong);
+  --t-text: var(--text);
+  --t-muted: var(--muted);
+  --t-soft: var(--dim);
+  gap: 10px;
+  padding-bottom: 20px;
+}
+
+.tunnelModuleRail,
+.tunnelCommandBar,
+.tunnelPanel {
+  border-color: var(--line);
+  border-radius: var(--radius-lg);
+}
+
+.tunnelModuleRail,
+.tunnelCommandBar { background: var(--panel); }
+.tunnelModuleRail button.active { background: color-mix(in srgb, var(--cyan) 10%, transparent); }
+.tunnelHero {
+  min-height: 206px;
+  border-color: var(--line-strong);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 78% 20%, color-mix(in srgb, var(--cyan) 10%, transparent), transparent 28%),
+    linear-gradient(180deg, var(--panel), var(--bg));
+  box-shadow: inset 0 1px rgba(255,255,255,.025);
+}
+
+.tunnelHeroCopy { padding: 22px 24px; }
+.tunnelTitleRow h1 { font-size: clamp(27px, 3vw, 38px); }
+.tunnelLead { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.tunnelHeroMeta { margin-top: 14px; }
+.tunnelOperatorPlaceholder { min-height: 178px; margin: 12px; padding: 14px; border-color: var(--line-strong); background: var(--panel-inset); }
+.tunnelDashboardGrid,
+.tunnelDiagnosticsGrid { gap: 10px; }
+.tunnelPanel { background: linear-gradient(180deg, var(--panel), var(--bg)); box-shadow: inset 0 1px rgba(255,255,255,.02); }
+.tunnelPanelTitle { padding: 12px 14px 10px; border-color: var(--line); }
+.tunnelPanelTitle h2 { font-size: 13px; }
+.runtimeFacts > div,
+.telemetryGrid > div { padding: 11px 13px; border-color: var(--line); }
+.capabilityList > div { padding: 9px 12px; border-color: var(--line); }
+.tunnelSettingsEditor { padding: 12px 13px 13px; }
+.tunnelSettingsFields label { min-height: 76px; padding: 9px; border-color: var(--line); background: var(--panel-inset); }
+.diagnosticHeader { padding: 12px 14px; }
+.diagnosticBody { padding: 0 13px 13px; border-color: var(--line); }
+
+@media (max-width: 560px) {
+  .tunnelHeroCopy { padding: 20px 17px; }
+  .tunnelOperatorPlaceholder { min-height: 130px; margin: 0 12px 12px; }
+}

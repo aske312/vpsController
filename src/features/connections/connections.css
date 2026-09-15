@@ -1695,3 +1695,70 @@
   .connectionTypeSettings dl { grid-template-columns: 1fr; }
   .connectionSettingsFields { grid-template-columns: 1fr; }
 }
+
+/* Shared control-center geometry and palette. */
+.connectionsWorkspace {
+  gap: 10px;
+}
+
+.connectionsHero {
+  min-height: 238px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 72% 48%, color-mix(in srgb, var(--blue) 8%, transparent), transparent 30%),
+    linear-gradient(180deg, var(--panel), var(--bg));
+  box-shadow: inset 0 1px rgba(255,255,255,.025);
+}
+
+.connectionsHeroContent {
+  width: min(760px, 64%);
+  min-height: 238px;
+  padding: 18px 0 18px 20px;
+}
+
+.connectionsHeroCopy h1 { font-size: clamp(28px, 2.7vw, 36px); }
+.connectionsHeroCopy > p:last-child { color: var(--muted); font-size: 12px; }
+.connectionsHeroStats { margin-top: 12px; border-color: var(--line); background: color-mix(in srgb, var(--panel-inset) 86%, transparent); }
+.connectionsHeroStats button { min-height: 46px; padding: 8px 10px; color: var(--muted); }
+.connectionsHeroStats button:hover,
+.connectionsHeroStats button.active { background: color-mix(in srgb, var(--cyan) 10%, transparent); }
+.connectionsHeroStats strong { color: var(--text); font-size: 16px; }
+.connectionsProbeStrip { margin-top: 8px; padding: 7px 9px; border-color: var(--line); background: color-mix(in srgb, var(--panel-inset) 88%, transparent); }
+.connectionsHeroActions { margin-top: 8px; }
+.connectionsHeroActions a,
+.connectionsHeroActions button { min-height: 34px; border-radius: var(--radius-md); font-size: 10px; }
+
+.connectionsInventory,
+.connectionGuide {
+  border-color: var(--line);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, var(--panel), var(--bg));
+  box-shadow: inset 0 1px rgba(255,255,255,.02);
+}
+
+.connectionsInventoryHead { padding: 12px 14px 10px; border-color: var(--line); }
+.connectionsInventoryHead h2 { font-size: 17px; }
+.connectionsInventoryHead span { color: var(--muted); font-size: 10px; }
+.connectionsFilters { padding: 9px 14px; border-color: var(--line); }
+.connectionsFilters label > span { color: var(--dim); }
+.connectionsFilters input,
+.connectionsFilters select { min-height: 34px; border-color: var(--line); border-radius: var(--radius-md); background: var(--panel-inset); color: var(--text); }
+.connectionsPagination { padding: 7px 14px; border-color: var(--line); color: var(--muted); }
+.connectionsPagination button { min-height: 27px; border-color: var(--line); background: var(--panel-soft); }
+.connectionRow { gap: 10px; padding: 9px 14px; border-color: var(--line); }
+.connectionIdentity strong { font-size: 12px; }
+.connectionIdentity small { color: var(--muted); font-size: 9px; }
+.connectionState small,
+.connectionActivity span,
+.connectionTraffic em { color: var(--dim); }
+.connectionTraffic { gap: 7px; }
+.connectionGuide > header { padding: 11px 14px 9px; border-color: var(--line); }
+.connectionGuide h2 { font-size: 16px; }
+.connectionGuideSteps section { min-height: 82px; padding: 11px 14px; border-color: var(--line); }
+.connectionGuideSteps p { color: var(--muted); font-size: 10px; }
+.connectionGuide > footer { padding: 8px 14px; border-color: var(--line); color: var(--muted); }
+
+@media (max-width: 920px) {
+  .connectionsHeroContent { width: 100%; min-height: auto; }
+}

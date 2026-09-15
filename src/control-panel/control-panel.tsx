@@ -335,9 +335,7 @@ export function ControlPanel() {
   const measureDeviceRoute = useCallback(async (force = false) => {
     if (!force && Date.now() - deviceProbeAt.current < 30000) return;
     setProbingDevice(true);
-    const samples: number[] = [];
-    let failed = 0;
-    for (let index = 0; index < 5; index += 1) {
+    const results = await Promise.all(Array.from({ length: 5 }, async (_, index) => {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 4000);
       const started = performance.now();
@@ -345,13 +343,15 @@ export function ControlPanel() {
         const response = await fetch(`/api/health?_probe=${Date.now()}-${index}`, { cache: "no-store", signal: controller.signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         await response.json();
-        samples.push(performance.now() - started);
+        return { elapsed: performance.now() - started, ok: true };
       } catch {
-        failed += 1;
+        return { elapsed: 0, ok: false };
       } finally {
         window.clearTimeout(timeout);
       }
-    }
+    }));
+    const samples = results.filter((result) => result.ok).map((result) => result.elapsed);
+    const failed = results.length - samples.length;
     const host = window.location.hostname;
     const route = host === "10.72.0.1" ? "WireGuard" : host === "10.73.0.1" ? "AmneziaWG" : "текущий маршрут браузера";
     const average = samples.length ? samples.reduce((sum, value) => sum + value, 0) / samples.length : null;
@@ -447,8 +447,8 @@ export function ControlPanel() {
       else if (tab === "channels") await Promise.all([loadClients(showBusy), loadProtocolStatus(selectedChannel, showBusy)]);
       else if (directProtocolOrder.includes(tab as Protocol)) await Promise.all([loadClients(showBusy), loadProtocolStatus(tab as Protocol, showBusy)]);
       else {
+        if (tab === "clients") void measureDeviceRoute(showBusy);
         await loadClients(showBusy);
-        if (tab === "clients") await measureDeviceRoute(showBusy);
       }
     } finally {
       if (showTransition && tab !== "network" && tab !== "mihomo") endViewLoading(transitionRun);
@@ -1485,7 +1485,6 @@ export function ControlPanel() {
       if (id === "channels" && installedProtocols[0]) {
         const channel = installedProtocols.includes(selectedChannel) ? selectedChannel : installedProtocols[0];
         setSelectedChannel(channel);
-        void loadProtocolStatus(channel);
       }
       setTab(id as Tab);
     }}
@@ -1633,7 +1632,7 @@ export function ControlPanel() {
         protocolResourceTotal={protocolResourceTotal}
         installedProtocols={installedProtocols}
         setTab={setTab}
-        onSelectProtocol={(protocol) => { setSelectedChannel(protocol); void loadProtocolStatus(protocol); }}
+        onSelectProtocol={(protocol) => setSelectedChannel(protocol)}
         protocolSettingsDraft={protocolSettingsDraft}
         diagnosticsOpen={diagnosticsOpen}
         resourcesOpen={resourcesOpen}
