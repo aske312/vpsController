@@ -15,6 +15,10 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(api, /tls_relay_domain/);
   assert.match(api, /udp_relay_domain/);
   assert.match(page, /NetworkEndpoints/);
+  assert.match(page, /expandedDomains/);
+  assert.match(page, /networkRouteDetailRow/);
+  assert.match(page, /networkRouteCascade/);
+  assert.match(page, /NetworkRouteTags/);
   assert.match(networkApi, /saveNetworkEndpoints/);
   assert.match(types, /transport_endpoints/);
   assert.match(types, /NetworkEndpointSettings/);
