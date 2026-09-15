@@ -17,6 +17,36 @@ from tests.api.support import manager, ROOT, free_port, wait_port
 
 
 class TunnelPrivacyTests(unittest.TestCase):
+    def test_profile_yaml_applies_selected_protection_flags(self):
+        profile = {
+            "common_device_id": "phone",
+            "devices": [{"id": "phone", "routing": {
+                "tun_enabled": True, "tun_force": False, "tun_strict_route": True,
+                "dns_hijack_force": True, "dns_fake_ip": True, "dns_ipv6": True,
+                "sniffer": True, "tcp_concurrent": True,
+            }}],
+            "connections": [{"component": "transport-reality", "device_id": "phone", "settings": {"route_mode": "direct"}, "credential": {"uuid": "test"}}],
+        }
+        with patch.object(manager, "normalize_profile", return_value=profile), \
+                patch.object(manager, "routing_settings", return_value={}), \
+                patch.object(manager, "dns_settings", return_value={"enhanced_mode": "redir-host", "nameserver": "1.1.1.1", "fallback": "8.8.8.8"}), \
+                patch.object(manager, "reality_connection_settings", return_value={"port": 9443, "target": "ya.ru:443", "transport": "xhttp", "transport_path": "/vless", "xhttp_mode": "auto", "xpadding": "100-200", "xmux_concurrency": 12, "servername": "ya.ru", "public_key": "public", "short_id": "short"}), \
+                patch.object(manager, "profile_rules", return_value=[]):
+            config = yaml.safe_load(manager.render_profile(profile, "phone"))
+            profile["devices"][0]["routing"].update({"tun_enabled": False, "tun_force": False})
+            ordinary_tun = yaml.safe_load(manager.render_profile(profile, "phone"))
+            profile["devices"][0]["routing"]["tun_force"] = True
+            forced_tun = yaml.safe_load(manager.render_profile(profile, "phone"))
+        self.assertFalse(ordinary_tun["tun"]["enable"])
+        self.assertTrue(forced_tun["tun"]["enable"])
+        self.assertTrue(config["tun"]["enable"])
+        self.assertTrue(config["tun"]["strict-route"])
+        self.assertEqual(config["tun"]["dns-hijack"], ["any:53"])
+        self.assertEqual(config["dns"]["enhanced-mode"], "fake-ip")
+        self.assertTrue(config["dns"]["ipv6"])
+        self.assertTrue(config["sniffer"]["enable"])
+        self.assertTrue(config["tcp-concurrent"])
+
     def test_ech_export_survives_server_dns_outage_and_stays_device_scoped(self):
         profile = {
             "common_device_id": "phone",

@@ -429,6 +429,11 @@ function NetworkIdentityDetails({
               ? dns.nameservers.join(", ")
               : "NS не получены"}
           </small>
+          {dns.records && (
+            <small>
+              A: {dns.records.a.length ? dns.records.a.join(", ") : "нет"} · AAAA: {dns.records.aaaa.length ? dns.records.aaaa.join(", ") : "нет"}
+            </small>
+          )}
         </div>
       )}
       {domain.edge && (

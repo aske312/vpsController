@@ -14,7 +14,7 @@ setting() {
 PORT="${VLESS_REALITY_PORT:-$(setting VLESS_REALITY_PORT 8443)}"
 API_PORT="${VLESS_API_PORT:-$(setting VLESS_API_PORT 10085)}"
 export VLESS_API_PORT="${API_PORT}"
-TARGET="$(setting VLESS_REALITY_TARGET www.intel.com:443)"
+TARGET="$(setting VLESS_REALITY_TARGET ya.ru:443)"
 CDN_DOMAIN="$(setting VLESS_CDN_DOMAIN '')"
 CDN_PORT="${VLESS_CDN_PORT:-$(setting VLESS_CDN_PORT 10087)}"
 CDN_TRANSPORT="$(setting VLESS_CDN_TRANSPORT xhttp)"
@@ -45,7 +45,7 @@ if [[ -s "${CONFIG_DIR}/reality.env" ]]; then
   [[ -z "${saved_tls_enabled}" ]] || TLS_ENABLED="${saved_tls_enabled}"
   [[ -z "${saved_tls_transport}" ]] || TLS_TRANSPORT="${saved_tls_transport}"
 fi
-[[ "${TARGET}" != "www.microsoft.com:443" && "${TARGET}" != "www.apple.com:443" ]] || TARGET="www.intel.com:443"
+[[ "${TARGET}" != "www.microsoft.com:443" && "${TARGET}" != "www.apple.com:443" ]] || TARGET="ya.ru:443"
 [[ "${PORT}" =~ ^[0-9]+$ && "${PORT}" -ge 1 && "${PORT}" -le 65535 ]] || { echo "Некорректный VLESS_REALITY_PORT" >&2; exit 1; }
 [[ "${TARGET}" =~ ^[A-Za-z0-9.-]+:[0-9]+$ ]] || { echo "Некорректный VLESS_REALITY_TARGET" >&2; exit 1; }
 [[ "${CDN_PORT}" =~ ^[0-9]+$ && "${CDN_PORT}" -ge 1024 && "${CDN_PORT}" -le 65535 ]] || { echo "Некорректный VLESS_CDN_PORT" >&2; exit 1; }
@@ -236,7 +236,8 @@ inbounds = [{
       "xPaddingBytes": "100-1000", "xmux": {"maxConcurrency": "8-16", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000"}
     }},
     "realitySettings": {
-      "show": False, "target": target, "xver": 0, "serverNames": [host],
+      "show": False, "target": target, "xver": 0,
+      "serverNames": ["ya.ru", "yandex.ru", "vk.com", "mail.ru", "rutube.ru", "ozon.ru"],
       "privateKey": private_key, "shortIds": [short_id],
       "limitFallbackUpload": {"afterBytes": 1048576, "bytesPerSec": 262144, "burstBytesPerSec": 524288},
       "limitFallbackDownload": {"afterBytes": 1048576, "bytesPerSec": 262144, "burstBytesPerSec": 524288}

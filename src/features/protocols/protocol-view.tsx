@@ -4,7 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { formatModuleVersion } from "../../shared/lib/format-version";
 import { bytes, duration, safeDateTime } from "../../shared/lib/control-plane-ui";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
-import type { Protocol, ProtocolImage, ProtocolStatus, Tab } from "../../shared/types/control-plane";
+import type { EditableProtocolSetting, Protocol, ProtocolImage, ProtocolStatus, Tab } from "../../shared/types/control-plane";
 
 type ProtocolViewProps = {
   protocolTab: Protocol;
@@ -149,7 +149,8 @@ export function ProtocolView(props: ProtocolViewProps) {
     protocolIsTunnel, protocolOperational, protocolAvailability, protocolDiagnosticsLabel,
     protocolResourceAvailable, protocolResourceTotal, installedProtocols, setTab, onSelectProtocol,
     diagnosticsOpen, resourcesOpen, checkingDiagnostics, checkingResources,
-    installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol,
+    installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol, protocolSettingsDraft,
+    changeProtocolSetting, saveProtocolSettings,
     toggleNetworkDiagnostics, checkNetworkDiagnostics,
     toggleProtocolResources, checkProtocolResources,
   } = props;
@@ -168,6 +169,7 @@ export function ProtocolView(props: ProtocolViewProps) {
     ? `${activeProtocol.diagnostics.score}/100`
     : "не проверено";
   const updateBusy = activeProtocolImage ? installingProtocol === `update-${activeProtocolImage.id}` : false;
+  const settingsDraft = protocolSettingsDraft[protocolTab] || {};
 
   return (
     <section className={`protocolWorkspace tunnelsWorkspace tunnelAccent-${profile.accent} protocol-${protocolTab}`}>
@@ -225,6 +227,21 @@ export function ProtocolView(props: ProtocolViewProps) {
         </div>
       </div>
 
+      {fields.length > 0 && <article className="tunnelPanel settingsPanel">
+        <header className="tunnelPanelTitle"><div><small>SETTINGS</small><h2>Настройки {profile.title}</h2></div><span>Только поддерживаемые параметры</span></header>
+        <div className="tunnelSettingsEditor">
+          <div className="tunnelSettingsFields">
+            {fields.map((field: EditableProtocolSetting) => <label className={field.type === "boolean" ? "booleanField" : ""} key={field.key}>
+              <span><strong>{field.label}</strong>{field.help && <small>{field.help}</small>}</span>
+              {field.type === "boolean" ? <input type="checkbox" checked={Boolean(settingsDraft[field.key] ?? field.value)} onChange={(event) => changeProtocolSetting(protocolTab, field.key, event.target.checked)} />
+                : field.type === "select" ? <select value={String(settingsDraft[field.key] ?? field.value)} onChange={(event) => changeProtocolSetting(protocolTab, field.key, event.target.value)}>{(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+                  : <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(settingsDraft[field.key] ?? field.value)} onChange={(event) => changeProtocolSetting(protocolTab, field.key, field.type === "number" ? Number(event.target.value) : event.target.value)} />}
+            </label>)}
+          </div>
+          <div className="tunnelSettingsActions"><span>Сохранение перезапустит только этот протокол.</span><button type="button" onClick={() => void saveProtocolSettings(protocolTab)} disabled={busy}>Сохранить настройки</button></div>
+        </div>
+      </article>}
+
       <div className="tunnelDashboardGrid">
         <article className="tunnelPanel runtimePanel">
           <PanelTitle eyebrow="RUNTIME" title="Состояние канала" note="Фактические данные backend" />
@@ -264,7 +281,7 @@ export function ProtocolView(props: ProtocolViewProps) {
             <b>{diagnosticsOpen[protocolTab] ? "Скрыть" : "Открыть"}</b>
           </button>
           {diagnosticsOpen[protocolTab] && <div className="diagnosticBody">
-            <div className="diagnosticActionRow"><span>{activeProtocol.diagnostics?.checked_at ? `Проверено ${safeDateTime(activeProtocol.diagnostics.checked_at)}` : "Ожидание проверки"}</span>{protocolIsTunnel && <button type="button" onClick={() => void checkNetworkDiagnostics(protocolTab)} disabled={checkingDiagnostics === protocolTab}>{checkingDiagnostics === protocolTab ? "Проверяем…" : "Проверить сеть"}</button>}</div>
+            <div className="diagnosticActionRow"><span>{activeProtocol.diagnostics?.checked_at ? `Проверено ${safeDateTime(activeProtocol.diagnostics.checked_at)}` : "Ожидание проверки"}</span><button type="button" onClick={() => void checkNetworkDiagnostics(protocolTab)} disabled={checkingDiagnostics === protocolTab}>{checkingDiagnostics === protocolTab ? "Проверяем…" : "Проверить сеть"}</button></div>
             <div className="diagnosticRows">{(activeProtocol.diagnostics?.checks || []).map((check) => <div className={check.ok ? "ok" : "failed"} key={check.id}><i /><span><strong>{check.name}</strong><small>{check.value}</small></span></div>)}{!activeProtocol.diagnostics?.checks?.length && <p className="emptyState">Нет результатов диагностики.</p>}</div>
             {(activeProtocol.diagnostics?.findings || []).map((finding) => <div className={`finding ${finding.severity}`} key={finding.code}><b>{finding.title}</b><span>{finding.detail}</span><small>{finding.action}</small></div>)}
           </div>}

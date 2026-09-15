@@ -9,7 +9,7 @@ import { RefreshNotices, refreshFailure } from "./components/refresh-notices";
 import type { RefreshFailure } from "./components/refresh-notices";
 import type { ApplicationMetadata } from "../shared/types/control-plane";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
 import { LegalFooter } from "../shared/components/legal-footer";
@@ -30,6 +30,49 @@ import { createSystemActionCompletionTracker, systemActionNeedsReload, systemOpe
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
+
+type NewClientSettings = {
+  mtu: number;
+  keepalive: number;
+  route_mode: "all" | "ipv4";
+  shadowsocks_mode: "tcp_only" | "tcp_and_udp";
+  timeout: number;
+  no_delay: boolean;
+  fingerprint: "chrome" | "firefox" | "safari";
+  cdn_domain: string;
+};
+
+type ClientConnectionType = { protocol: Protocol; routeId?: "direct" | "tls" | "cdn"; name: string; badge: string; description: string };
+
+function ClientConnectionSettings({
+  selectedConnectionType,
+  selectedVlessRoute,
+  newClientSettings,
+  setNewClientSettings,
+}: {
+  selectedConnectionType: ClientConnectionType;
+  selectedVlessRoute?: { transport?: string; confirmed_domains?: string[] };
+  newClientSettings: NewClientSettings;
+  setNewClientSettings: Dispatch<SetStateAction<NewClientSettings>>;
+}) {
+  const update = (value: Partial<NewClientSettings>) => setNewClientSettings((current) => ({ ...current, ...value }));
+  return <fieldset className="connectionTypeSettings"><legend>Настройки подключения</legend><header><span>{selectedConnectionType.badge}</span><div><strong>{selectedConnectionType.name}</strong><small>{selectedConnectionType.protocol === "vless-reality-xhttp" ? "Транспорт задаётся безопасным серверным профилем" : "Индивидуальные параметры клиентского профиля"}</small></div></header><div className="connectionSettingsFields">
+    {selectedConnectionType.protocol === "vless-reality-xhttp" ? <>
+      <label><span>Транспорт</span><select value={selectedVlessRoute?.transport || "xhttp"} disabled><option value={selectedVlessRoute?.transport || "xhttp"}>{(selectedVlessRoute?.transport || "xhttp").toUpperCase()}</option></select><small>Общий проверенный профиль; изменение не затронет других клиентов</small></label>
+      {selectedConnectionType.routeId === "cdn" && <label><span>Подтверждённый CDN-домен</span><select value={newClientSettings.cdn_domain || selectedVlessRoute?.confirmed_domains?.[0] || ""} onChange={(event) => update({ cdn_domain: event.target.value })}>{(selectedVlessRoute?.confirmed_domains || []).map((domain) => <option value={domain} key={domain}>{domain}</option>)}</select><small>Домен проверен через DNS с VPS и используется только этим подключением</small></label>}
+      <label><span>Отпечаток TLS</span><select value={newClientSettings.fingerprint} onChange={(event) => update({ fingerprint: event.target.value as NewClientSettings["fingerprint"] })}><option value="chrome">Chrome — рекомендуется</option><option value="firefox">Firefox</option><option value="safari">Safari</option></select><small>Выбирайте вариант, соответствующий клиентскому устройству</small></label>
+    </> : selectedConnectionType.protocol === "shadowsocks" ? <>
+      <label><span>Режим трафика</span><select value={newClientSettings.shadowsocks_mode} onChange={(event) => update({ shadowsocks_mode: event.target.value as NewClientSettings["shadowsocks_mode"] })}><option value="tcp_and_udp">TCP + UDP — рекомендуется</option><option value="tcp_only">Только TCP</option></select></label>
+      <label><span>MTU</span><input type="number" min={576} max={1500} value={newClientSettings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label>
+      <label><span>Timeout, сек.</span><input type="number" min={30} max={3600} value={newClientSettings.timeout} onChange={(event) => update({ timeout: Number(event.target.value) })} /></label>
+      <label className="connectionCheckbox"><span><strong>TCP No Delay</strong><small>Снижает задержку коротких запросов</small></span><input type="checkbox" checked={newClientSettings.no_delay} onChange={(event) => update({ no_delay: event.target.checked })} /></label>
+    </> : selectedConnectionType.protocol === "wg" || selectedConnectionType.protocol === "awg" ? <>
+      <label><span>MTU</span><input type="number" min={1280} max={1420} value={newClientSettings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label>
+      <label><span>Keepalive, сек.</span><input type="number" min={0} max={300} value={newClientSettings.keepalive} onChange={(event) => update({ keepalive: Number(event.target.value) })} /></label>
+      <label><span>Маршрутизация</span><select value={newClientSettings.route_mode} onChange={(event) => update({ route_mode: event.target.value as NewClientSettings["route_mode"] })}><option value="all">Весь трафик IPv4 + IPv6</option><option value="ipv4">Только IPv4</option></select></label>
+    </> : <p className="connectionSettingsHint">Дополнительные параметры задаются в настройках самого протокола; для этого подключения нет отдельных параметров.</p>}
+  </div></fieldset>;
+}
 
 function reloadWithoutCache(message: string) {
   if (message) sessionStorage.setItem("312-notice", message);
@@ -119,7 +162,7 @@ export function ControlPanel() {
   const [confirmationInput, setConfirmationInput] = useState("");
   const [newClient, setNewClient] = useState({ name: "", protocol: "wg" as Protocol });
   const [newClientVlessRoutes, setNewClientVlessRoutes] = useState<Array<"direct" | "tls" | "cdn">>(["direct"]);
-  const [newClientSettings, setNewClientSettings] = useState({ mtu: 1280, keepalive: 25, route_mode: "ipv4" as "all" | "ipv4", shadowsocks_mode: "tcp_and_udp" as "tcp_only" | "tcp_and_udp", timeout: 300, no_delay: true, fingerprint: "chrome" as "chrome" | "firefox" | "safari" });
+  const [newClientSettings, setNewClientSettings] = useState({ mtu: 1280, keepalive: 25, route_mode: "ipv4" as "all" | "ipv4", shadowsocks_mode: "tcp_and_udp" as "tcp_only" | "tcp_and_udp", timeout: 300, no_delay: true, fingerprint: "chrome" as "chrome" | "firefox" | "safari", cdn_domain: "" });
   const [generated, setGenerated] = useState("");
   const [generatedName, setGeneratedName] = useState("client.conf");
   const [generatedProfiles, setGeneratedProfiles] = useState<GeneratedProfile[]>([]);
@@ -362,25 +405,6 @@ export function ControlPanel() {
     deviceProbeAt.current = Date.now();
     setProbingDevice(false);
   }, []);
-
-  function changeProtocolSetting(protocol: Protocol, key: string, value: string | number | boolean) {
-    protocolSettingsDirty.current[protocol] = true;
-    setProtocolSettingsDraft((drafts) => ({ ...drafts, [protocol]: { ...(drafts[protocol] || {}), [key]: value } }));
-  }
-
-  async function saveProtocolSettings(protocol: Protocol) {
-    const fields = protocolStatuses[protocol]?.editable_settings || [];
-    const draft = protocolSettingsDraft[protocol] || {};
-    const body = Object.fromEntries(fields.map((field) => [field.key, draft[field.key] ?? field.value]));
-    setBusy(true);
-    try {
-      await request(`/protocols/${protocol}/settings`, { method: "PATCH", body: JSON.stringify(body) });
-      protocolSettingsDirty.current[protocol] = false;
-      await loadProtocolStatus(protocol);
-      notifySuccess(`Настройки ${labels[protocol]} применены`);
-    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось применить настройки протокола"); }
-    finally { setBusy(false); }
-  }
 
   const beginViewLoading = useCallback(() => {
     const run = ++viewLoadingRun.current;
@@ -1100,36 +1124,26 @@ export function ControlPanel() {
     const opening = !diagnosticsOpen[protocol];
     setDiagnosticsOpen((values) => ({ ...values, [protocol]: opening }));
     if (!opening) return;
-    if (protocol === "wg" || protocol === "awg") {
-      void checkNetworkDiagnostics(protocol);
-      return;
-    }
-    // VRX/SS have no tunnel-specific /diagnostics/check endpoint. Build a
-    // runtime diagnostic snapshot locally so the shared protocol page stays
-    // functional instead of sending an unsupported request.
-    setProtocolStatuses((statuses) => {
-      const current = statuses[protocol];
-      if (!current) return statuses;
-      const serviceOk = Boolean(current.service_active);
-      const checks = [
-        { id: "service", name: "Служба протокола", ok: serviceOk, value: serviceOk ? "active" : "не запущена" },
-        { id: "autostart", name: "Автозапуск", ok: Boolean(current.service_enabled), value: current.service_enabled ? "включён" : "выключен" },
-        { id: "listener", name: "Порт протокола", ok: Boolean(current.listen_port), value: current.listen_port ? String(current.listen_port) : "не определён" },
-      ];
-      return {
-        ...statuses,
-        [protocol]: {
-          ...current,
-          diagnostics: {
-            checked_at: new Date().toISOString(),
-            status: serviceOk ? "healthy" : "critical",
-            score: serviceOk ? 100 : 40,
-            checks,
-            findings: serviceOk ? [] : [{ severity: "critical", code: "service", title: "Служба протокола остановлена", detail: "Runtime протокола не активен.", action: "Перезапустить протокол и проверить systemd journal." }],
-          },
-        },
-      };
-    });
+    void checkNetworkDiagnostics(protocol);
+  }
+
+  function changeProtocolSetting(protocol: Protocol, key: string, value: string | number | boolean) {
+    protocolSettingsDirty.current[protocol] = true;
+    setProtocolSettingsDraft((drafts) => ({ ...drafts, [protocol]: { ...(drafts[protocol] || {}), [key]: value } }));
+  }
+
+  async function saveProtocolSettings(protocol: Protocol) {
+    const fields = protocolStatuses[protocol]?.editable_settings || [];
+    const draft = protocolSettingsDraft[protocol] || {};
+    const body = Object.fromEntries(fields.map((field) => [field.key, draft[field.key] ?? field.value]));
+    setBusy(true);
+    try {
+      await request(`/protocols/${protocol}/settings`, { method: "PATCH", body: JSON.stringify(body) });
+      protocolSettingsDirty.current[protocol] = false;
+      await loadProtocolStatus(protocol);
+      notifySuccess(`Настройки ${labels[protocol]} применены`);
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось применить настройки протокола"); }
+    finally { setBusy(false); }
   }
 
   function toggleProtocolResources(protocol: Protocol) {
@@ -1248,7 +1262,11 @@ export function ControlPanel() {
     }
     try {
       if (!selectedConnectionType) throw new Error("Нет доступного маршрута для подключения");
-      const payload = { ...newClient, protocol: selectedConnectionType.protocol, settings: newClientSettings, ...(selectedConnectionType.routeId ? { vless_routes: [selectedConnectionType.routeId] } : {}) };
+      const { cdn_domain: selectedCdnDomain, ...commonSettings } = newClientSettings;
+      const settings = selectedConnectionType.routeId === "cdn"
+        ? { ...commonSettings, cdn_domain: selectedCdnDomain || selectedVlessRoute?.confirmed_domains?.[0] || "" }
+        : commonSettings;
+      const payload = { ...newClient, protocol: selectedConnectionType.protocol, settings, ...(selectedConnectionType.routeId ? { vless_routes: [selectedConnectionType.routeId] } : {}) };
       const result = await request("/clients", { method: "POST", body: JSON.stringify(payload) }) as { config: string; filename?: string; profiles?: GeneratedProfile[] };
       const profiles = result.profiles?.filter((profile) => profile.config && profile.filename) || [];
       const preferred = profiles.find((profile) => profile.id === "cdn") || profiles[0];
@@ -1674,8 +1692,8 @@ export function ControlPanel() {
               <div className="connectionForm">
                 <label>Название устройства<input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов</small></label>
               </div>
-              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name}</strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
-              {selectedConnectionType && <fieldset className="connectionTypeSettings"><legend>Настройки подключения</legend><header><span>{selectedConnectionType.badge}</span><div><strong>{selectedConnectionType.name}</strong><small>{selectedConnectionType.protocol === "vless-reality-xhttp" ? "Транспорт задаётся безопасным серверным профилем" : "Индивидуальные параметры клиентского профиля"}</small></div></header><div className="connectionSettingsFields">{selectedConnectionType.protocol === "vless-reality-xhttp" ? <><label><span>Транспорт</span><select value={selectedVlessRoute?.transport || "xhttp"} disabled><option value={selectedVlessRoute?.transport || "xhttp"}>{(selectedVlessRoute?.transport || "xhttp").toUpperCase()}</option></select><small>Общий проверенный профиль; изменение не затронет других клиентов</small></label><label><span>Отпечаток TLS</span><select value={newClientSettings.fingerprint} onChange={(event) => setNewClientSettings((current) => ({ ...current, fingerprint: event.target.value as "chrome" | "firefox" | "safari" }))}><option value="chrome">Chrome — рекомендуется</option><option value="firefox">Firefox</option><option value="safari">Safari</option></select><small>Выбирайте вариант, соответствующий клиентскому устройству</small></label></> : selectedConnectionType.protocol === "shadowsocks" ? <><label><span>Режим трафика</span><select value={newClientSettings.shadowsocks_mode} onChange={(event) => setNewClientSettings((current) => ({ ...current, shadowsocks_mode: event.target.value as "tcp_only" | "tcp_and_udp" }))}><option value="tcp_and_udp">TCP + UDP — рекомендуется</option><option value="tcp_only">Только TCP</option></select></label><label><span>MTU</span><input type="number" min={576} max={1500} value={newClientSettings.mtu} onChange={(event) => setNewClientSettings((current) => ({ ...current, mtu: Number(event.target.value) }))} /></label><label><span>Timeout, сек.</span><input type="number" min={30} max={3600} value={newClientSettings.timeout} onChange={(event) => setNewClientSettings((current) => ({ ...current, timeout: Number(event.target.value) }))} /></label><label className="connectionCheckbox"><span><strong>TCP No Delay</strong><small>Снижает задержку коротких запросов</small></span><input type="checkbox" checked={newClientSettings.no_delay} onChange={(event) => setNewClientSettings((current) => ({ ...current, no_delay: event.target.checked }))} /></label></> : <><label><span>MTU</span><input type="number" min={1280} max={1420} value={newClientSettings.mtu} onChange={(event) => setNewClientSettings((current) => ({ ...current, mtu: Number(event.target.value) }))} /></label><label><span>Keepalive, сек.</span><input type="number" min={0} max={300} value={newClientSettings.keepalive} onChange={(event) => setNewClientSettings((current) => ({ ...current, keepalive: Number(event.target.value) }))} /></label><label><span>Маршрутизация</span><select value={newClientSettings.route_mode} onChange={(event) => setNewClientSettings((current) => ({ ...current, route_mode: event.target.value as "all" | "ipv4" }))}><option value="all">Весь трафик IPv4 + IPv6</option><option value="ipv4">Только IPv4</option></select></label></>}</div></fieldset>}
+              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name}</strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
+              {selectedConnectionType && <ClientConnectionSettings selectedConnectionType={selectedConnectionType} selectedVlessRoute={selectedVlessRoute} newClientSettings={newClientSettings} setNewClientSettings={setNewClientSettings} />}
             </div>
             <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy || !selectedConnectionType}>{busy ? "Создаём…" : "Создать подключение"}</button></div>
           </> : <>

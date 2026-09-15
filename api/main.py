@@ -11,6 +11,7 @@ import os
 import re
 import secrets
 import socket
+import ssl
 import struct
 import subprocess
 import threading
@@ -197,6 +198,7 @@ resource_check_lock = threading.Lock()
 network_diagnostic_lock = threading.Lock()
 resource_check_cache: dict[str, dict] = {}
 network_diagnostic_cache: dict[str, dict] = {}
+direct_diagnostic_cache: dict[str, dict] = {}
 network_identity_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
 stream_stats_cache: dict[str, dict] = {}
@@ -500,7 +502,13 @@ def channel_mode_endpoint(protocol: str, fallback: str) -> tuple[str, str]:
     mode = channel_mode_for(protocol)
     if mode == "direct":
         return fallback, mode
-    domain = read_network_endpoint_settings()["tls_relay_domain" if mode == "tls_relay" else "udp_relay_domain"]
+    settings = read_network_endpoint_settings()
+    key = "tls_relay" if mode == "tls_relay" else "udp_relay"
+    primary = str(settings.get(f"{key}_domain", "") or "")
+    values = settings.get(f"{key}_domains", [])
+    domains = list(dict.fromkeys([primary, *(values if isinstance(values, list) else [])]))
+    kind = "tls_relay" if key == "tls_relay" else "udp_relay"
+    domain = next((value for value in domains if value and network_endpoint_check(kind, str(value))["ready"]), "")
     if not domain:
         raise HTTPException(status_code=409, detail=f"Для режима {CHANNEL_MODE_LABELS[mode]} сначала настройте соответствующий домен на странице «Сеть»")
     return domain, mode
@@ -513,7 +521,12 @@ def save_channel_mode(protocol: str, mode: str) -> None:
         raise HTTPException(status_code=422, detail="Неизвестный режим защищённого канала")
     if mode != "direct":
         endpoint_key = "tls_relay_domain" if mode == "tls_relay" else "udp_relay_domain"
-        if not read_network_endpoint_settings().get(endpoint_key):
+        settings = read_network_endpoint_settings()
+        primary = str(settings.get(endpoint_key, "") or "")
+        values = settings.get(endpoint_key.replace("_domain", "_domains"), [])
+        domains = [primary, *(values if isinstance(values, list) else [])]
+        kind = "tls_relay" if mode == "tls_relay" else "udp_relay"
+        if not any(value and network_endpoint_check(kind, str(value))["ready"] for value in domains):
             raise HTTPException(status_code=409, detail="Сначала настройте домен relay на странице «Сеть»")
     modes = read_protected_channel_modes()
     modes[protocol] = mode
@@ -1207,6 +1220,141 @@ def cached_network_diagnostics(protocol: Literal["wg", "awg"]) -> dict:
     }
 
 
+DIRECT_DIAGNOSTIC_PROTOCOLS = frozenset({
+    "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2",
+})
+
+
+def _diagnostic_host(value: str) -> str:
+    value = str(value or "").strip()
+    return value[1:-1] if value.startswith("[") and "]" in value else value
+
+
+def _diagnostic_resolve(host: str) -> list[str]:
+    try:
+        return list(dict.fromkeys(item[4][0] for item in socket.getaddrinfo(_diagnostic_host(host), None, type=socket.SOCK_STREAM)))
+    except (OSError, ValueError):
+        return []
+
+
+def _diagnostic_port(value: object, fallback: int) -> int:
+    try:
+        port = int(str(value).strip())
+    except (TypeError, ValueError):
+        return fallback
+    return port if 1 <= port <= 65535 else fallback
+
+
+def _diagnostic_tcp_probe(host: str, port: int, tls: bool = False) -> tuple[bool, str]:
+    try:
+        with socket.create_connection((_diagnostic_host(host), port), timeout=4) as raw:
+            if tls:
+                context = ssl._create_unverified_context()
+                with context.wrap_socket(raw, server_hostname=_diagnostic_host(host)):
+                    return True, "TLS handshake завершён"
+        return True, "TCP соединение установлено"
+    except (OSError, ssl.SSLError) as exc:
+        return False, str(exc)[:160] or "соединение не установлено"
+
+
+def _diagnostic_listener(ports: list[int], udp: bool) -> tuple[bool, str]:
+    output = run("ss", "-H", "-lun" if udp else "-ltn")
+    found = [port for port in ports if re.search(rf"(?:^|\s)\S*:{port}(?:\s|$)", output, re.MULTILINE)]
+    return bool(found), ", ".join(str(port) for port in found) if found else "порт не прослушивается"
+
+
+def _direct_diagnostic_target(protocol: str) -> tuple[str, list[int], bool, bool, str]:
+    """Return endpoint, local ports, UDP flag, TLS flag and a human label."""
+    if protocol == "ikev2":
+        return PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, [500, 4500], True, False, "IKEv2 UDP"
+    if protocol == "shadowsocks":
+        ports: list[int] = []
+        for path in sorted(SHADOWSOCKS_CONFIG_DIR.glob("*.json")):
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+                port = _diagnostic_port(value.get("server_port", value.get("port", 0)), 0)
+                if port:
+                    ports.append(port)
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+        return PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, list(dict.fromkeys(ports)), True, False, "Shadowsocks TCP/UDP"
+    if protocol == "vless-reality-xhttp":
+        try:
+            reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+        except (OSError, ValueError):
+            reality = {}
+        ports = [_diagnostic_port(reality.get("PORT"), 8443)]
+        if reality.get("CDN_ENABLED") == "yes":
+            ports.append(_diagnostic_port(reality.get("CDN_PORT"), VLESS_CDN_PORT))
+        if reality.get("TLS_ENABLED") == "yes":
+            ports.append(_diagnostic_port(reality.get("TLS_PORT"), VLESS_TLS_PORT))
+        return PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, list(dict.fromkeys(ports)), False, False, f"REALITY target {reality.get('TARGET', 'ya.ru:443')}"
+    settings_file = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "trojan": TROJAN_SETTINGS, "openvpn": OPENVPN_SETTINGS}.get(protocol)
+    try:
+        values = json.loads(settings_file.read_text(encoding="utf-8")) if settings_file else {}
+    except (OSError, ValueError, json.JSONDecodeError):
+        values = {}
+    udp = protocol in {"hysteria2", "tuic"} or (protocol == "openvpn" and values.get("protocol", "udp") == "udp")
+    host = str(values.get("domain", "")) if protocol == "hysteria2" else (PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
+    default_port = 8444 if protocol == "tuic" else 8445 if protocol == "trojan" else 1194
+    return host or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, [_diagnostic_port(values.get("port"), default_port)], udp, not udp, protocol.upper()
+
+
+def direct_protocol_diagnostics(protocol: str, force: bool = False) -> dict:
+    if protocol not in DIRECT_DIAGNOSTIC_PROTOCOLS:
+        raise HTTPException(status_code=422, detail="Для этого протокола используется диагностика туннеля")
+    cached = direct_diagnostic_cache.get(protocol)
+    if cached and not force and time.time() - cached["_cached_at"] < 45:
+        return {key: value for key, value in cached.items() if key != "_cached_at"}
+    if not network_diagnostic_lock.acquire(blocking=False):
+        fallback = cached or {"checked_at": None, "status": "pending", "score": None, "checks": [], "findings": []}
+        return {key: value for key, value in fallback.items() if key != "_cached_at"}
+    try:
+        unit = {
+            "shadowsocks": "vps-control-shadowsocks.target", "vless-reality-xhttp": "vps-control-vless-reality-xhttp.service",
+            "hysteria2": "vps-control-hysteria2.service", "tuic": "vps-control-tuic.service", "trojan": "vps-control-trojan.service",
+            "openvpn": "vps-control-openvpn.service", "ikev2": "vps-control-ikev2.service",
+        }[protocol]
+        endpoint, ports, udp, tls, label = _direct_diagnostic_target(protocol)
+        service_ok = run("systemctl", "is-active", unit) == "active"
+        listener_ok, listener_value = _diagnostic_listener(ports, udp)
+        addresses = _diagnostic_resolve(endpoint)
+        if not endpoint:
+            endpoint_ok, endpoint_value = False, "endpoint не задан"
+        elif udp:
+            endpoint_ok, endpoint_value = bool(addresses), f"адресов: {len(addresses)}"
+        else:
+            endpoint_ok, endpoint_value = _diagnostic_tcp_probe(endpoint, ports[0], tls=tls)
+        checks = [
+            {"id": "service", "name": "Служба протокола", "ok": service_ok, "value": "active" if service_ok else "не запущена"},
+            {"id": "listener", "name": "Реальный порт", "ok": listener_ok, "value": listener_value},
+            {"id": "endpoint_dns", "name": "DNS endpoint", "ok": bool(addresses), "value": ", ".join(addresses[:4]) if addresses else "имя не разрешается"},
+            {"id": "endpoint", "name": "Доступность endpoint", "ok": endpoint_ok, "value": endpoint_value},
+        ]
+        if protocol == "vless-reality-xhttp":
+            try:
+                reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+            except (OSError, ValueError):
+                reality = {}
+            target = reality.get("TARGET", "ya.ru:443")
+            target_probe = run(XRAY_BIN, "tls", "ping", target, timeout=10)
+            target_ok = "Handshake succeeded" in target_probe
+            checks.append({"id": "reality_target", "name": "REALITY target TLS", "ok": target_ok, "value": "handshake завершён" if target_ok else "TLS handshake не прошёл"})
+        elif udp:
+            checks.append({"id": "quic_udp", "name": "QUIC/UDP listener", "ok": listener_ok, "value": "UDP-порт прослушивается" if listener_ok else "UDP-порт не найден"})
+        failed = [item for item in checks if not item["ok"]]
+        result = {
+            "checked_at": datetime.now(timezone.utc).isoformat(), "status": "critical" if failed else "healthy", "score": max(0, 100 - len(failed) * 25),
+            "live": {"endpoint": endpoint, "resolved": addresses, "ports": ports, "transport": label}, "checks": checks,
+            "findings": [{"severity": "critical", "code": item["id"], "title": item["name"], "detail": item["value"], "action": "Проверить службу, firewall, DNS-запись и соответствие порта настройкам протокола."} for item in failed],
+            "_cached_at": time.time(),
+        }
+        direct_diagnostic_cache[protocol] = result
+        return {key: value for key, value in result.items() if key != "_cached_at"}
+    finally:
+        network_diagnostic_lock.release()
+
+
 def memory_info() -> tuple[int, int]:
     values: dict[str, int] = {}
     for line in Path("/proc/meminfo").read_text().splitlines():
@@ -1577,9 +1725,16 @@ def network_dns_records(domain: str, record_type: int = 2) -> list[str]:
                 if offset + length > len(response):
                     break
                 if answer_class == 1 and answer_type == record_type:
-                    value, _ = _dns_wire_name(response, offset)
+                    if record_type == 1 and length == 4:
+                        value = socket.inet_ntop(socket.AF_INET, response[offset:offset + length])
+                    elif record_type == 28 and length == 16:
+                        value = socket.inet_ntop(socket.AF_INET6, response[offset:offset + length])
+                    elif record_type in (2, 5):
+                        value, _ = _dns_wire_name(response, offset)
+                    else:
+                        value = ""
                     if value and value not in values:
-                        values.append(value.lower())
+                        values.append(value.lower() if record_type in (2, 5) else value)
                 offset += length
             return values
         except (OSError, UnicodeError, ValueError, struct.error):
@@ -1726,8 +1881,17 @@ def network_domain_identity(domain: str, resolved: list[str], cloudflare_ranges:
         dns = {"provider": "DNS не используется", "nameservers": nameservers, "source": "Адрес указан напрямую"}
     except ValueError:
         nameservers = network_dns_records(domain, 2)
-        dns = {"provider": network_dns_provider(nameservers), "nameservers": nameservers, "source": "Авторитетные NS через DNS VPS"}
-    cnames = network_dns_records(domain, 5) if dns["provider"] != "DNS не используется" else []
+        dns = {
+            "provider": network_dns_provider(nameservers),
+            "nameservers": nameservers,
+            "records": {
+                "a": network_dns_records(domain, 1),
+                "aaaa": network_dns_records(domain, 28),
+                "cname": network_dns_records(domain, 5),
+            },
+            "source": "Авторитетные NS через DNS VPS",
+        }
+    cnames = dns.get("records", {}).get("cname", []) if dns["provider"] != "DNS не используется" else []
     ip_info: list[dict] = []
     for address in resolved:
         try:
@@ -3775,7 +3939,7 @@ def vless_reality_inbound(config: dict) -> dict:
 def vless_client_query(config: dict, reality: dict, fingerprint: str = "chrome") -> dict[str, str]:
     stream = vless_reality_inbound(config)["streamSettings"]
     transport = str(stream.get("network", "xhttp"))
-    target_host = reality.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0]
+    target_host = reality.get("TARGET", "ya.ru:443").rsplit(":", 1)[0]
     values = {"encryption": "none", "security": "reality", "sni": target_host, "fp": fingerprint, "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", "")}
     if transport == "xhttp":
         settings = stream.get("xhttpSettings", {})
@@ -3787,12 +3951,13 @@ def vless_client_query(config: dict, reality: dict, fingerprint: str = "chrome")
     return values
 
 
-def vless_cdn_client_query(reality: dict, fingerprint: str = "chrome") -> dict[str, str]:
+def vless_cdn_client_query(reality: dict, fingerprint: str = "chrome", domain: str | None = None) -> dict[str, str]:
     transport = reality.get("CDN_TRANSPORT", "websocket")
     path = reality.get("CDN_PATH", reality.get("WS_PATH", "/"))
+    endpoint_domain = domain or reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
     values = {
-        "encryption": "none", "security": "tls", "sni": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN),
-        "fp": fingerprint, "host": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN),
+        "encryption": "none", "security": "tls", "sni": endpoint_domain,
+        "fp": fingerprint, "host": endpoint_domain,
     }
     if transport == "xhttp":
         values.update({"type": "xhttp", "path": path, "mode": reality.get("CDN_XHTTP_MODE", "auto"), "alpn": "h2"})
@@ -3914,7 +4079,11 @@ def configure_vless_tls(config: dict, reality: dict, enabled: bool, domain: str,
 def write_vless_cdn_snippet(enabled: bool, domain: str, path: str, transport: str = "websocket") -> None:
     routes: list[dict] = []
     if enabled:
-        routes.append({"domain": domain, "path": path, "port": VLESS_CDN_PORT, "transport": transport})
+        configured = read_network_endpoint_settings().get("cdn_domains", [])
+        domains = list(dict.fromkeys([domain, *(configured if isinstance(configured, list) else [])]))
+        confirmed = [value for value in domains if value and network_endpoint_check("cdn", str(value))["ready"]]
+        for value in confirmed or [domain]:
+            routes.append({"domain": value, "path": path, "port": VLESS_CDN_PORT, "transport": transport})
     direct = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line) if VLESS_ENV.exists() else {}
     if direct.get("TLS_ENABLED") == "yes" and direct.get("TLS_DOMAIN") and direct.get("TLS_PATH"):
         routes.append({"domain": direct["TLS_DOMAIN"], "path": direct["TLS_PATH"], "port": int(direct.get("TLS_PORT", VLESS_TLS_PORT)), "transport": direct.get("TLS_TRANSPORT", "xhttp"), "cloudflare": False})
@@ -3986,7 +4155,7 @@ def configured_int(values: dict[str, str], name: str, fallback: int) -> int:
 
 
 def read_dns_settings() -> dict:
-    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "apply_openvpn": False, "apply_ikev2": False, "prefer_encrypted": False, "bootstrap_id": "cloudflare", "fallback_enabled": True, "fallback_id": None, "apply_system": False, "profiles": {}, "custom": None}
+    defaults = {"selected_id": "yandex-basic", "apply_wg": True, "apply_awg": True, "apply_shadowsocks": True, "apply_vrx": True, "apply_openvpn": True, "apply_ikev2": True, "prefer_encrypted": False, "bootstrap_id": "cloudflare", "fallback_enabled": True, "fallback_id": None, "apply_system": False, "profiles": {}, "custom": None}
     try:
         saved = json.loads(DNS_SETTINGS_FILE.read_text(encoding="utf-8"))
         # Keep only supported channel keys when reading older settings files.
@@ -4517,6 +4686,14 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 unavailable = [route for route in requested_routes if not route_inbounds[route]]
                 if unavailable:
                     raise HTTPException(status_code=409, detail=f"Маршрут VLESS не настроен: {', '.join(unavailable)}")
+                selected_cdn_domain = str(payload.settings.cdn_domain or reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)).strip().lower()
+                if "cdn" in requested_routes:
+                    configured = read_network_endpoint_settings().get("cdn_domains", [])
+                    allowed_cdn_domains = {str(value).strip().lower() for value in configured if isinstance(configured, list) and str(value).strip()}
+                    if reality.get("CDN_DOMAIN"):
+                        allowed_cdn_domains.add(str(reality["CDN_DOMAIN"]).strip().lower())
+                    if selected_cdn_domain not in allowed_cdn_domains or not network_endpoint_check("cdn", selected_cdn_domain)["ready"]:
+                        raise HTTPException(status_code=409, detail="Выбранный CDN-домен не подтверждён на странице «Сеть»")
                 selected_inbounds = [inbound for route in requested_routes for inbound in route_inbounds[route]]
                 for inbound in selected_inbounds:
                     inbound.setdefault("settings", {}).setdefault("clients", []).append({"id": client_uuid, "email": f"{client_id}@312.net"})
@@ -4545,9 +4722,9 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     tls_query = urllib.parse.urlencode(vless_tls_client_query(reality, payload.settings.fingerprint))
                     tls_config = f"vless://{client_uuid}@{tls_domain}:443?{tls_query}#{urllib.parse.quote(payload.name + ' TLS')}"
                     profiles.append({"id": "tls", "name": f"TLS · {reality.get('TLS_TRANSPORT', 'xhttp').upper()}", "filename": f"{safe_name}-secure.txt", "config": tls_config})
-                cdn_domain = reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
+                cdn_domain = selected_cdn_domain
                 if "cdn" in requested_routes and cdn_domain:
-                    cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality, payload.settings.fingerprint))
+                    cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality, payload.settings.fingerprint, cdn_domain))
                     cdn_config = f"vless://{client_uuid}@{cdn_domain}:443?{cdn_query}#{urllib.parse.quote(payload.name + ' CDN')}"
                     profiles.append({"id": "cdn", "name": f"CDN · TLS/{reality.get('CDN_TRANSPORT', 'websocket').upper()}", "filename": f"{safe_name}-relay.txt", "config": cdn_config})
                 client_config = "\n".join(profile["config"] for profile in profiles)
@@ -4768,17 +4945,23 @@ def protocol_route_ready(kind: str) -> bool:
         return bool(probe["resolved"] and probe["matches_origin"])
     endpoints = read_network_endpoint_settings()
     key = {"cdn": "cdn_domain", "udp": "udp_relay_domain"}.get(kind)
-    if not key or not endpoints.get(key):
+    if not key:
         return False
-    return bool(network_endpoint_check("cdn" if kind == "cdn" else "udp_relay", endpoints[key])["ready"])
+    list_key = key.replace("_domain", "_domains")
+    values = [endpoints.get(key, ""), *(endpoints.get(list_key, []) if isinstance(endpoints.get(list_key), list) else [])]
+    endpoint_kind = "cdn" if kind == "cdn" else "udp_relay"
+    return any(value and network_endpoint_check(endpoint_kind, str(value))["ready"] for value in values)
 
 
 def relay_route_ready(kind: str) -> bool:
     endpoints = read_network_endpoint_settings()
     key = {"tls": "tls_relay_domain", "udp": "udp_relay_domain"}.get(kind)
-    if not key or not endpoints.get(key):
+    if not key:
         return False
-    return bool(network_endpoint_check("tls_relay" if kind == "tls" else "udp_relay", endpoints[key])["ready"])
+    list_key = key.replace("_domain", "_domains")
+    values = [endpoints.get(key, ""), *(endpoints.get(list_key, []) if isinstance(endpoints.get(list_key), list) else [])]
+    endpoint_kind = "tls_relay" if kind == "tls" else "udp_relay"
+    return any(value and network_endpoint_check(endpoint_kind, str(value))["ready"] for value in values)
 
 
 def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
@@ -4788,10 +4971,6 @@ def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             "key": "mtu", "label": "MTU туннеля", "type": "number",
             "value": int(values.get("mtu", 1280)), "min": 1280, "max": 1420,
             "help": "Применяется к серверному интерфейсу и новым клиентским конфигурациям.",
-        }, {
-            "key": "dns", "label": "DNS новых профилей", "type": "text",
-            "value": str(values.get("dns", current_env_value(f"{prefix}_DNS", "1.1.1.1, 1.0.0.1"))),
-            "help": "Список DNS через запятую. Применяется к новым конфигурациям.",
         }, {
             "key": "keepalive", "label": "Keepalive новых профилей, с", "type": "number",
             "value": int(values.get("keepalive", current_env_value(f"{prefix}_KEEPALIVE", "25"))), "min": 0, "max": 300,
@@ -4814,12 +4993,11 @@ def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
             {"key": "down_mbps", "label": "Лимит download, Мбит/с", "type": "number", "value": int(values.get("down_mbps", 100)), "min": 1, "max": 10000},
         ]
     if protocol == "ikev2":
-        return [{"key": "dns", "label": "Client DNS", "type": "text", "value": str(values.get("dns", "1.1.1.1")), "help": "Applied to new and reconnecting IKEv2 sessions."}]
+        return []
     if protocol == "openvpn":
         return [
             {"key": "port", "label": "OpenVPN port", "type": "number", "value": int(values.get("port", 1194)), "min": 1024, "max": 65535},
             {"key": "vpn_transport", "label": "Transport", "type": "select", "value": str(values.get("protocol", "udp")), "options": [{"value": "udp", "label": "UDP · recommended"}, {"value": "tcp", "label": "TCP"}]},
-            {"key": "dns", "label": "Client DNS", "type": "text", "value": str(values.get("dns", "1.1.1.1"))},
         ]
     if protocol == "trojan":
         return [{"key":"port","label":"TCP-порт","type":"number","value":int(values.get("port",8445)),"min":1024,"max":65535}]
@@ -4837,7 +5015,6 @@ def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
                 {"value": "tcp_and_udp", "label": "TCP + UDP"}, {"value": "tcp_only", "label": "Только TCP"},
             ]},
             {"key": "no_delay", "label": "TCP no-delay", "type": "boolean", "value": bool(values.get("no_delay", True))},
-            {"key": "dns", "label": "Рекомендуемый DNS клиента", "type": "text", "value": current_env_value("SHADOWSOCKS_DNS", "1.1.1.1, 1.0.0.1"), "help": "Сохраняется как политика администратора. SS-сервер не может принудительно изменить DNS устройства; настройте его в клиентском приложении."},
         ]
     return [{
         "key": "transport", "label": "Транспорт прямого VLESS", "type": "select", "value": str(values.get("transport", "xhttp")),
@@ -4852,7 +5029,7 @@ def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
         "help": "Путь для XHTTP или service name для gRPC. В режиме RAW поле не используется.",
     }, {
         "key": "sni", "label": "SNI маскировки", "type": "text",
-        "value": str(values.get("sni", "www.intel.com")),
+        "value": str(values.get("sni", "ya.ru")),
         "help": "Публичный HTTPS-домен без https:// и порта. Изменение требует заново импортировать существующие VRX-профили.",
     }, {
         "key": "xhttp_mode", "label": "Режим XHTTP", "type": "select",
@@ -4898,9 +5075,6 @@ def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
     }, {
         "key": "cdn_xhttp_mode", "label": "Режим CDN XHTTP", "type": "select", "value": str(values.get("cdnXhttpMode", "auto")),
         "options": [{"value": value, "label": value} for value in ("auto", "stream-one", "stream-up", "packet-up")],
-    }, {
-        "key": "dns", "label": "DNS VRX", "type": "text", "value": current_env_value("VRX_DNS", "1.1.1.1, 1.0.0.1"),
-        "help": "Применяется к серверному резолверу Xray. DNS самого устройства задаётся в клиентском приложении.",
     }]
 
 
@@ -5015,14 +5189,14 @@ def update_protocol_settings(
     supplied = payload.model_dump(exclude_none=True)
     channel_mode = supplied.pop("channel_mode", None)
     allowed = {
-        "wg": {"mtu", "dns", "keepalive"}, "awg": {"mtu", "dns", "keepalive", "jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"},
-        "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay", "dns"},
+        "wg": {"mtu", "keepalive"}, "awg": {"mtu", "keepalive", "jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"},
+        "shadowsocks": {"timeout", "udp_mtu", "mode", "no_delay"},
         "hysteria2": {"port", "tls_mode", "domain", "obfs_enabled", "obfs_password", "up_mbps", "down_mbps"},
         "tuic": {"port", "congestion_control", "heartbeat"},
         "trojan": {"port"},
-        "openvpn": {"port", "vpn_transport", "dns"},
-        "ikev2": {"dns"},
-        "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "dns", "sni", "tls_enabled", "tls_domain", "tls_transport", "tls_xhttp_mode", "cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"},
+        "openvpn": {"port", "vpn_transport"},
+        "ikev2": set(),
+        "vless-reality-xhttp": {"transport", "transport_path", "xhttp_mode", "loglevel", "xpadding", "xmux_concurrency", "sni", "tls_enabled", "tls_domain", "tls_transport", "tls_xhttp_mode", "cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"},
     }[protocol]
     if (not supplied and channel_mode is None) or not set(supplied).issubset(allowed):
         raise HTTPException(status_code=422, detail="Настройки не соответствуют выбранному протоколу")
@@ -5030,18 +5204,6 @@ def update_protocol_settings(
         save_channel_mode(protocol, channel_mode)
     if not supplied:
         return protocol_status(protocol)
-    if "dns" in supplied:
-        resolver_values = [value.strip() for value in supplied["dns"].split(",") if value.strip()]
-        if not resolver_values:
-            raise HTTPException(status_code=422, detail="Укажите хотя бы один DNS-резолвер")
-        for resolver in resolver_values:
-            if protocol == "vless-reality-xhttp" and re.fullmatch(r"https://[^\s]+", resolver):
-                continue
-            try:
-                ipaddress.ip_address(resolver)
-            except ValueError as exc:
-                raise HTTPException(status_code=422, detail=f"Некорректный DNS для {protocol}: {resolver}") from exc
-
     if protocol in ("wg", "awg"):
         config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
         if not config.exists():
@@ -5050,7 +5212,6 @@ def update_protocol_settings(
             persist_tunnel_mtu(protocol, int(supplied["mtu"]))
         prefix = "WG" if protocol == "wg" else "AWG"
         persist_env_values({
-            **({f"{prefix}_DNS": supplied["dns"]} if "dns" in supplied else {}),
             **({f"{prefix}_KEEPALIVE": supplied["keepalive"]} if "keepalive" in supplied else {}),
             **({f"AWG_{key.upper()}": supplied[key] for key in ("jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4") if key in supplied} if protocol == "awg" else {}),
         })
@@ -5215,8 +5376,6 @@ def update_protocol_settings(
         finally:
             temporary.unlink(missing_ok=True)
     elif protocol == "shadowsocks":
-        if "dns" in supplied:
-            persist_env_values({"SHADOWSOCKS_DNS": supplied["dns"]})
         paths = sorted(SHADOWSOCKS_CONFIG_DIR.glob("*.json"))
         if not paths:
             raise HTTPException(status_code=409, detail="Нет настроенных каналов Shadowsocks")
@@ -5275,10 +5434,6 @@ def update_protocol_settings(
                     extra["xmux"] = {"maxConcurrency": str(supplied["xmux_concurrency"]), "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000"}
             if "loglevel" in supplied:
                 config.setdefault("log", {})["loglevel"] = supplied["loglevel"]
-            if "dns" in supplied:
-                dns_addresses = [value.strip() for value in supplied["dns"].split(",") if value.strip()]
-                config["dns"] = {"servers": dns_addresses, "queryStrategy": "UseIP"}
-                config.setdefault("routing", {})["domainStrategy"] = "IPIfNonMatch"
             cdn_changed = bool({"cdn_enabled", "cdn_domain", "cdn_transport", "cdn_xhttp_mode"} & supplied.keys())
             tls_changed = bool({"tls_enabled", "tls_domain", "tls_transport", "tls_xhttp_mode"} & supplied.keys())
             current_cdn_enabled = reality.get("CDN_ENABLED", "yes" if reality.get("CDN_DOMAIN") else "no") == "yes"
@@ -5311,8 +5466,6 @@ def update_protocol_settings(
             temporary.replace(VLESS_CONFIG)
             if "sni" in supplied:
                 persist_vrx_target(supplied["sni"])
-            if "dns" in supplied:
-                persist_env_values({"VRX_DNS": supplied["dns"]})
             if cdn_changed:
                 update_key_value_file(VLESS_ENV, {
                     "WS_PATH": reality.get("WS_PATH", ""),
@@ -5463,7 +5616,6 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 "MTU UDP": int(config_values.get("mtu", 1200) or 1200),
                 "Таймаут": f"{int(config_values.get('timeout', 300) or 300)} с",
                 "TCP no-delay": bool(config_values.get("no_delay", True)),
-                "DNS новых профилей": current_env_value("SHADOWSOCKS_DNS", "не настроен"),
             }
             editable_settings = editable_protocol_settings(protocol, config_values)
             for item in protocol_clients:
@@ -5492,7 +5644,6 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                     "CDN transport": f"TLS/{reality.get('CDN_TRANSPORT', 'websocket').upper()}" if reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN) else "отключён",
                     "TLS hostname": reality.get("TLS_DOMAIN", "") or "не настроен",
                     "TLS transport": reality.get("TLS_TRANSPORT", "xhttp").upper() if reality.get("TLS_ENABLED") == "yes" else "отключён",
-                    "DNS": current_env_value("VRX_DNS", "не настроен"),
                 }
                 config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
                 stream_values = vless_reality_inbound(config_data)["streamSettings"]
@@ -5524,6 +5675,15 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                     else "—"
                 )
                 cdn_enabled = cdn_inbound is not None and reality.get("CDN_ENABLED", "yes") == "yes"
+                configured_cdn_domains = read_network_endpoint_settings().get("cdn_domains", [])
+                cdn_domain_candidates = list(dict.fromkeys([
+                    reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN),
+                    *(configured_cdn_domains if isinstance(configured_cdn_domains, list) else []),
+                ]))
+                confirmed_cdn_domains = [
+                    str(value).strip().lower() for value in cdn_domain_candidates
+                    if value and network_endpoint_check("cdn", str(value))["ready"]
+                ] if cdn_enabled else []
                 routes = {
                     "direct": {
                         "enabled": True, "security": "REALITY", "transport": transport,
@@ -5538,6 +5698,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                         "endpoint": f"{reality.get('CDN_DOMAIN', VLESS_CDN_DOMAIN)}:443" if cdn_enabled else "",
                         "server_name": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN) if cdn_enabled else "",
                         "path": reality.get("CDN_PATH", reality.get("WS_PATH", "/")) if cdn_enabled else "",
+                        "confirmed_domains": confirmed_cdn_domains,
                     },
                 }
             except (OSError, ValueError, json.JSONDecodeError, KeyError, IndexError):
@@ -5649,8 +5810,13 @@ def check_protocol_resources(
 
 
 @app.post("/api/protocols/{protocol}/diagnostics/check")
-def check_network_diagnostics(protocol: Literal["wg", "awg"], _: None = Depends(require_token)) -> dict:
-    return network_diagnostics(protocol, protocol_history(protocol), force=True)
+def check_network_diagnostics(
+    protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"],
+    _: None = Depends(require_token),
+) -> dict:
+    if protocol in ("wg", "awg"):
+        return network_diagnostics(protocol, protocol_history(protocol), force=True)
+    return direct_protocol_diagnostics(protocol, force=True)
 
 
 @app.post("/api/protocols/{protocol}/restart")

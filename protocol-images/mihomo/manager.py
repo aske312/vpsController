@@ -565,8 +565,14 @@ def profile_response(item: dict[str, Any]) -> dict[str, Any]:
         device_id = str(device["id"])
         connections = [entry for entry in result.get("connections", []) if entry.get("device_id") == device_id and entry.get("component") == "transport-reality"]
         requested = bool(device_routing(result, device_id).get("tunnel_privacy", False))
+        route_counts = {"reality": 0, "cdn": 0, "tls": 0}
+        for connection in connections:
+            route_mode = str(connection.get("settings", {}).get("route_mode") or connection.get("credential", {}).get("route_mode") or "direct")
+            for route in ("reality", "cdn") if route_mode == "both" else ((route_mode,) if route_mode in {"reality", "cdn", "tls"} else ("reality",)):
+                route_counts[route] += 1
         result["protection_status"][device_id] = {
             "vless_connections": len(connections),
+            "vless_connections_by_route": route_counts,
             "encryption_pending": any(bool(entry.get("credential", {}).get("encryption")) != requested for entry in connections),
         }
         retiring = [entry for entry in item.get("retiring_connections", []) if entry.get("device_id") == device_id]
@@ -2440,7 +2446,11 @@ def reality_connection_settings() -> dict[str, Any]:
     available_names = [name for name in MIHOMO_REALITY_SNI_POOL if name in configured_names]
     # Do not emit a random SNI until the live Xray config advertises the pool;
     # this keeps existing subscriptions valid during a staged update.
-    selected_servername = secrets.choice(available_names) if len(available_names) >= 5 else env.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0]
+    selected_servername = (
+        secrets.choice(available_names)
+        if len(available_names) >= 5
+        else (available_names[0] if available_names else (configured_names[0] if configured_names else MIHOMO_REALITY_SNI_POOL[0]))
+    )
     result: dict[str, Any] = {
         "port": int(env.get("PORT", module_settings("transport-reality")["port"])),
         "public_key": env.get("PUBLIC_KEY", ""),
@@ -3155,14 +3165,20 @@ def max_vless_connections_per_device() -> int:
 
 def validate_vless_connection_limit(values: list[dict[str, Any]]) -> None:
     limit = max_vless_connections_per_device()
-    counts: dict[str, int] = {}
+    counts: dict[tuple[str, str], int] = {}
+    route_labels = {"reality": "REALITY", "cdn": "CDN", "tls": "TLS"}
     for value in values:
         if value.get("component") != "transport-reality":
             continue
         device_id = str(value.get("device_id", "profile-common"))
-        counts[device_id] = counts.get(device_id, 0) + 1
-        if counts[device_id] > limit:
-            raise HTTPException(status_code=422, detail=f"Для одного устройства можно добавить не более {limit} VLESS-подключений")
+        settings = value.get("settings") if isinstance(value.get("settings"), dict) else {}
+        route_mode = str(settings.get("route_mode", "direct"))
+        routes = ("reality", "cdn") if route_mode == "both" else ((route_mode,) if route_mode in route_labels else ("reality",))
+        for route in routes:
+            key = (device_id, route)
+            counts[key] = counts.get(key, 0) + 1
+            if counts[key] > limit:
+                raise HTTPException(status_code=422, detail=f"Для одного устройства можно добавить не более {limit} VLESS-подключений в режиме {route_labels[route]}")
 
 
 def validate_connection_inputs(values: list[ProfileConnectionInput]) -> list[dict[str, Any]]:

@@ -242,9 +242,10 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(ssInstall, /IPAccounting=true/);
   assert.match(vlessInstall, /xray" tls ping "\$\{TARGET\}"/);
   assert.match(vlessInstall, /certificate_length.*-le 3500/s);
-  assert.match(vlessInstall, /TARGET.*www\.microsoft\.com:443.*www\.apple\.com:443.*TARGET="www\.intel\.com:443"/);
+  assert.match(vlessInstall, /TARGET=.*ya\.ru:443/);
+  assert.match(vlessInstall, /serverNames.*ya\.ru.*yandex\.ru.*vk\.com.*mail\.ru.*rutube\.ru.*ozon\.ru/);
   assert.match(vlessInstall, /sed -i "s\|\^TARGET=\.\*\|TARGET=\$\{TARGET\}\|"/);
-  assert.match(manager, /VLESS_REALITY_TARGET="www\.intel\.com:443"/);
+  assert.match(manager, /VLESS_REALITY_TARGET="ya\.ru:443"/);
   assert.doesNotMatch(vlessInstall + vlessRemove, /wg-quick|awg-quick|shadowsocks/);
   assert.match(api, /Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"[^\]]*\]/);
   assert.match(api, /vless:\/\//);
@@ -325,7 +326,9 @@ test("protocol pages safely edit channel settings and VLESS links select HTTP2",
   assert.match(api, /values\["type"\] = "tcp"/);
   assert.match(api, /"maxConcurrency": "8-16"/);
   assert.match(api, /"xmux_concurrency"/);
-  assert.match(api, /"dns", "keepalive"/);
+  assert.match(api, /"keepalive"/);
+  assert.match(api, /extra = "forbid"/);
+  assert.doesNotMatch(api, /"key": "dns"/);
   assert.match(api, /"loglevel", "xpadding"/);
   assert.match(api, /protocol: Literal\["wg", "awg", "shadowsocks", "vless-reality-xhttp"[^\]]*\]/);
   assert.doesNotMatch(api, /hysteria[^\n]*"--test"/);
@@ -334,6 +337,8 @@ test("protocol pages safely edit channel settings and VLESS links select HTTP2",
   assert.match(api, /"editable_settings": editable_settings/);
   assert.doesNotMatch(page, /function ProtocolSettingsEditor/);
   assert.match(page, /Проверить сеть/);
+  assert.match(api, /DIRECT_DIAGNOSTIC_PROTOCOLS/);
+  assert.match(api, /REALITY target TLS/);
 });
 
 test("DNS API preserves component application and encrypted fallback boundaries", async () => {
@@ -421,7 +426,6 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(protocolView, /name: "CDN route"/);
   assert.doesNotMatch(protocolView, /function ProtocolSettingsEditor/);
   assert.doesNotMatch(protocolView, /ProtocolCommandCenter|VlessControlCenter/);
-  assert.match(page, /await loadProtocolStatus\(protocol\)/);
   assert.match(api, /"routes": routes/);
   assert.match(api, /Direct · REALITY\/\{direct_transport\}/);
   assert.match(mihomoManager, /systemctl", "reset-failed", "vps-control-mihomo-reality\.service/);

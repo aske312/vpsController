@@ -26,6 +26,19 @@ function DeviceClientBadge({ device }: { device: ProfileDevice }) {
   return <span className="mihomoDeviceClientBadge" title={device.client_name ? `Определено приложение: ${device.client_name}` : "Приложение пока не определено"}>{deviceClientShortName(device)}</span>;
 }
 
+function vlessRouteBuckets(connection: ProfileConnection): Array<"reality" | "cdn" | "tls"> {
+  if (connection.component !== "transport-reality") return [];
+  const mode = String(connection.settings.route_mode || (connection.settings.cdn_enabled ? "both" : "direct"));
+  if (mode === "both") return ["reality", "cdn"];
+  if (mode === "cdn") return ["cdn"];
+  if (mode === "tls") return ["tls"];
+  return ["reality"];
+}
+
+function vlessRouteCount(connections: ProfileConnection[], route: "reality" | "cdn" | "tls") {
+  return connections.reduce((count, connection) => count + (vlessRouteBuckets(connection).includes(route) ? 1 : 0), 0);
+}
+
 const TECHNICAL_ERROR = /(?:\n|traceback|systemctl|journalctl|apt(?:-get)?|dpkg|stderr|stdout|exit status|failed to start|reading package lists|building dependency tree)/i;
 
 function publicError(message: string, status: number) {
@@ -1315,11 +1328,15 @@ export function MihomoPage({
               <header><div><b>Подключения устройства</b><small>Каналы попадут только в подписку выбранного устройства.</small></div><span className="mihomoStrategyBadge">{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.code} · {profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header>
               <div className="mihomoConnectionAdd">
                 {installedChannels.filter((module) => commonDevice || activeCapabilities.components.includes(module.id)).flatMap((module) => {
-                  if (module.id === "transport-reality") return [
-                    <button key="vless-direct" type="button" disabled={profileConnections.filter((connection) => connection.device_id === activeDeviceId && connection.component === "transport-reality").length >= Number(routingPolicy?.values.vless_max_connections_per_device || 5)} onClick={() => addProfileConnection(module, "direct")}>+ VLESS</button>,
-                    <button key="vless-tls" type="button" disabled={!confirmedNetworkRoute("tls") || profileConnections.filter((connection) => connection.device_id === activeDeviceId && connection.component === "transport-reality").length >= Number(routingPolicy?.values.vless_max_connections_per_device || 5)} title={!confirmedNetworkRoute("tls") ? "Сначала подтвердите прямой TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
-                    <button key="vless-cdn" type="button" disabled={!confirmedNetworkRoute("cdn") || profileConnections.filter((connection) => connection.device_id === activeDeviceId && connection.component === "transport-reality").length >= Number(routingPolicy?.values.vless_max_connections_per_device || 5)} title={!confirmedNetworkRoute("cdn") ? "Сначала подтвердите CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
-                  ];
+                  if (module.id === "transport-reality") {
+                    const deviceVless = profileConnections.filter((connection) => connection.device_id === activeDeviceId && connection.component === "transport-reality");
+                    const limit = Number(routingPolicy?.values.vless_max_connections_per_device || 5);
+                    return [
+                      <button key="vless-direct" type="button" disabled={vlessRouteCount(deviceVless, "reality") >= limit} onClick={() => addProfileConnection(module, "direct")}>+ VLESS</button>,
+                      <button key="vless-tls" type="button" disabled={!confirmedNetworkRoute("tls") || vlessRouteCount(deviceVless, "tls") >= limit} title={!confirmedNetworkRoute("tls") ? "Сначала подтвердите прямой TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
+                      <button key="vless-cdn" type="button" disabled={!confirmedNetworkRoute("cdn") || vlessRouteCount(deviceVless, "cdn") >= limit} title={!confirmedNetworkRoute("cdn") ? "Сначала подтвердите CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
+                    ];
+                  }
                   const singletonUsed = profileConnections.some((item) => item.device_id === activeDeviceId && item.component === module.id);
                   return [<button key={module.id} type="button" disabled={singletonUsed} onClick={() => addProfileConnection(module)}>+ {module.name}</button>];
                 })}

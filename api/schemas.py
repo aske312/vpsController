@@ -78,8 +78,8 @@ class DnsSettingsUpdate(BaseModel):
     apply_awg: bool = True
     apply_shadowsocks: bool = True
     apply_vrx: bool = True
-    apply_openvpn: bool = False
-    apply_ikev2: bool = False
+    apply_openvpn: bool = True
+    apply_ikev2: bool = True
     prefer_encrypted: bool = False
     bootstrap_id: Literal["cloudflare", "google", "dns-sb"] = "cloudflare"
     fallback_enabled: bool = True
@@ -108,7 +108,9 @@ class NetworkEndpointCheck(BaseModel):
 
 
 class ClientConnectionSettings(BaseModel):
-    dns: str | None = Field(default=None, min_length=3, max_length=512, pattern=r"^[A-Za-z0-9:., ]+$")
+    class Config:
+        extra = "forbid"
+
     mtu: int | None = Field(default=None, ge=576, le=1500)
     keepalive: int | None = Field(default=None, ge=0, le=300)
     route_mode: Literal["all", "ipv4"] = "ipv4"
@@ -116,6 +118,7 @@ class ClientConnectionSettings(BaseModel):
     timeout: int | None = Field(default=None, ge=30, le=3600)
     no_delay: bool = True
     fingerprint: Literal["chrome", "firefox", "safari"] = "chrome"
+    cdn_domain: str | None = Field(default=None, max_length=253, pattern=r"^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 
 
 class ClientCreate(BaseModel):
@@ -126,6 +129,11 @@ class ClientCreate(BaseModel):
 
 
 class ProtocolSettingsUpdate(BaseModel):
+    class Config:
+        # DNS is deliberately not accepted here.  It belongs to /api/dns/settings
+        # so a legacy or hand-written PATCH cannot silently change one protocol.
+        extra = "forbid"
+
     channel_mode: Literal["direct", "tls_relay", "udp_relay"] | None = None
     mtu: int | None = Field(default=None, ge=1280, le=1420)
     timeout: int | None = Field(default=None, ge=30, le=3600)
@@ -135,7 +143,6 @@ class ProtocolSettingsUpdate(BaseModel):
     xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] | None = None
     transport: Literal["xhttp", "raw", "grpc"] | None = None
     transport_path: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$")
-    dns: str | None = Field(default=None, min_length=3, max_length=512)
     keepalive: int | None = Field(default=None, ge=0, le=300)
     loglevel: Literal["debug", "info", "warning", "error", "none"] | None = None
     xpadding: str | None = Field(default=None, min_length=1, max_length=32, pattern=r"^\d+(?:-\d+)?$")

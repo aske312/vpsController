@@ -10,6 +10,19 @@ manager = load_module("mihomo_manager_under_test", "protocol-images/mihomo/manag
 
 
 class MihomoTransactionTests(unittest.TestCase):
+    def test_vless_limit_is_applied_separately_per_route(self):
+        def connections(route, count, device="phone"):
+            return [{"component": "transport-reality", "device_id": device, "settings": {"route_mode": route}} for _ in range(count)]
+
+        with patch.object(manager, "max_vless_connections_per_device", return_value=5):
+            manager.validate_vless_connection_limit(connections("direct", 5) + connections("cdn", 5) + connections("tls", 5))
+            with self.assertRaisesRegex(manager.HTTPException, "режиме REALITY"):
+                manager.validate_vless_connection_limit(connections("direct", 6))
+            with self.assertRaisesRegex(manager.HTTPException, "режиме CDN"):
+                manager.validate_vless_connection_limit(connections("cdn", 6))
+            with self.assertRaisesRegex(manager.HTTPException, "режиме TLS"):
+                manager.validate_vless_connection_limit(connections("tls", 6))
+
     def test_fault_during_mutation_restores_profile_and_adapter_files(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)
