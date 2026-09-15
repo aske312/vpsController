@@ -1545,10 +1545,6 @@ export function ControlPanel() {
         />
       )}
 
-      {tab === "channels" && <nav className="protocolSwitcher channelPageSwitcher" aria-label="Tunnels">
-        {installedProtocols.map((protocol) => <button type="button" key={protocol} className={`protocol-${protocol}${tab === "channels" && selectedChannel === protocol ? " active" : ""}`} onClick={() => { setSelectedChannel(protocol); setTab("channels"); void loadProtocolStatus(protocol); }}>{protocol === "wg" ? "WG" : protocol === "awg" ? "AWG" : protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : "VLESS"}</button>)}
-      </nav>}
-
       {tab === "network" && <NetworkView request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} />}
 
       {tab === "security" && <SecurityView
@@ -1635,7 +1631,7 @@ export function ControlPanel() {
         protocolDiagnosticsLabel={protocolDiagnosticsLabel}
         protocolResourceAvailable={protocolResourceAvailable}
         protocolResourceTotal={protocolResourceTotal}
-        installedProtocols={tab === "channels" ? [] : installedProtocols}
+        installedProtocols={installedProtocols}
         setTab={setTab}
         onSelectProtocol={(protocol) => { setSelectedChannel(protocol); void loadProtocolStatus(protocol); }}
         protocolSettingsDraft={protocolSettingsDraft}
