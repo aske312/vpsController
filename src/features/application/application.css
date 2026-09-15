@@ -206,11 +206,12 @@
 
 .applicationRelease .bad strong { color:#ef8989; }
 
-.applicationDependencies { grid-column:1 / -1; }
-.applicationDependencies > header > div > span { display:block; margin-top:4px; color:#7c92a1; font-size:10px; }
+.applicationDependencies > header { align-items:center; padding:9px 13px; }
+.applicationDependencies > header > div { display:flex; align-items:baseline; gap:10px; min-width:0; flex-wrap:wrap; }
+.applicationDependencies > header > div > span { display:inline; margin-top:0; color:#7c92a1; font-size:10px; }
 .applicationDependencies > header > span { color:#7991a1; font:10px var(--font-mono),monospace; }
-.applicationDependencyGrid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; padding:12px 14px 14px; }
-.applicationDependencyGrid > div { display:grid; gap:5px; min-width:0; padding:9px 10px; border:1px solid rgba(91,116,141,.12); border-radius:11px; background:rgba(6,14,21,.35); }
+.applicationDependencyGrid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:6px; padding:8px 10px 10px; }
+.applicationDependencyGrid > div { display:grid; gap:3px; min-width:0; padding:7px 8px; border:1px solid rgba(91,116,141,.12); border-radius:9px; background:rgba(6,14,21,.35); }
 .applicationDependencyGrid > div > span { overflow:hidden; color:#91a6b5; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
 .applicationDependencyGrid strong { overflow:hidden; color:#dce9ef; font:700 11px var(--font-mono),monospace; text-overflow:ellipsis; white-space:nowrap; }
 .applicationDependencyGrid > small { grid-column:1 / -1; color:#7c91a0; font-size:10px; }

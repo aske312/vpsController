@@ -84,6 +84,14 @@ export function ApplicationView({ application, services, applicationVersion, app
           </div>
         </article>
 
+        <section className="applicationDependencies">
+          <header><div><p className="eyebrow">INSTALLED RUNTIME</p><h2>Зависимости приложения</h2><span>Фактически установленные версии на этом VPS</span></div><span>LOCAL CHECK</span></header>
+          <div className="applicationDependencyGrid">
+            {(applicationDependencies || []).map((dependency) => <div key={dependency.id}><span>{dependency.name}</span><strong>{dependency.version || "—"}</strong></div>)}
+            {!applicationDependencies?.length && <small>Версии пока не получены</small>}
+          </div>
+        </section>
+
         <article className="applicationManagement">
           <section className="applicationEnvironment">
             <header><div><p className="eyebrow">DEPLOYMENT & ACCESS</p><h2>Режим и публикация</h2></div><span>{applicationVersion?.branch || "main"}  {applicationVersion?.current_commit?.slice(0, 12) || "unknown"}</span></header>
@@ -105,14 +113,6 @@ export function ApplicationView({ application, services, applicationVersion, app
               <span><small>CURRENT</small><strong>{applicationVersion?.current_commit?.slice(0, 12) || "unknown"}</strong></span>
               <span><small>LATEST</small><strong>{applicationVersion?.latest_commit?.slice(0, 12) || "unknown"}</strong></span>
               <span className={applicationVersion?.outdated ? "bad" : "ok"}><small>STATUS</small><strong>{applicationVersion?.refreshing ? "CHECKING" : applicationVersion?.outdated ? "UPDATE" : "CURRENT"}</strong></span>
-            </div>
-          </section>
-
-          <section className="applicationDependencies">
-            <header><div><p className="eyebrow">INSTALLED RUNTIME</p><h2>Зависимости приложения</h2><span>Фактически установленные версии на этом VPS</span></div><span>LOCAL CHECK</span></header>
-            <div className="applicationDependencyGrid">
-              {(applicationDependencies || []).map((dependency) => <div key={dependency.id}><span>{dependency.name}</span><strong>{dependency.version || "—"}</strong></div>)}
-              {!applicationDependencies?.length && <small>Версии пока не получены</small>}
             </div>
           </section>
 
