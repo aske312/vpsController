@@ -8,6 +8,23 @@ from tests.api.support import api
 
 
 class NetworkDomainsTests(unittest.TestCase):
+    def test_ipv6_origin_is_ready_before_dns_record_is_added(self):
+        def fake_run(*args, **kwargs):
+            outputs = {
+                ("ip", "-6", "-o", "addr", "show", "scope", "global"): "2: eth0    inet6 2a01:db8::10/64 scope global",
+                ("ip", "-6", "route", "show", "default"): "default via 2a01:db8::1 dev eth0",
+                ("ss", "-H", "-lnt6"): "LISTEN 0 4096 [::]:443 [::]:* users:(\"caddy\")",
+            }
+            return outputs.get(args, "")
+
+        with patch.object(api, "PUBLIC_IPV6", ""), patch.object(api, "run", side_effect=fake_run):
+            state = api.network_ipv6_state()
+            check = next(item for item in api.network_capabilities(state)["checks"] if item["id"] == "ipv6")
+        self.assertEqual(state["address"], "2a01:db8::10")
+        self.assertTrue(state["ready"])
+        self.assertEqual(check["status"], "ready")
+        self.assertIn("AAAA", check["detail"])
+
     def test_shared_panel_and_cdn_domain_retains_both_roles(self):
         with patch.object(api, 'PUBLIC_DOMAIN', 'shared.example.com'), patch.object(api, 'VLESS_CDN_DOMAIN', ''), patch.object(api.cdn_security, 'read_routes', return_value=[{'domain': 'shared.example.com'}]), patch.object(api.socket, 'getaddrinfo', return_value=[]), patch.object(api, 'run', return_value=''):
             domains = api.network_status()['domains']

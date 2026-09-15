@@ -1406,7 +1406,31 @@ def network_domain_probe(domain: str, role: str) -> dict:
     return {"value": domain, "role": role, "source": "environment", "resolved": resolved, "matches_origin": matches, "route": route}
 
 
-def network_capabilities() -> dict:
+def network_ipv6_state() -> dict[str, bool | str]:
+    local_address = ""
+    output = run("ip", "-6", "-o", "addr", "show", "scope", "global", timeout=3)
+    for line in output.splitlines():
+        columns = line.split()
+        try:
+            address = next(columns[index + 1].split("/", 1)[0] for index, value in enumerate(columns) if value == "inet6")
+            parsed = ipaddress.ip_address(address)
+        except (StopIteration, ValueError):
+            continue
+        if parsed.version == 6 and parsed.is_global:
+            local_address = address
+            break
+    address = local_address or PUBLIC_IPV6
+    default_route = bool(run("ip", "-6", "route", "show", "default", timeout=3).strip())
+    web_listener = False
+    for line in run("ss", "-H", "-lnt6", timeout=4).splitlines():
+        columns = line.split()
+        if len(columns) >= 4 and columns[3].rsplit(":", 1)[-1] in {"80", "443"}:
+            web_listener = True
+            break
+    return {"address": address, "default_route": default_route, "web_listener": web_listener, "ready": bool(address and default_route and web_listener)}
+
+
+def network_capabilities(ipv6: dict[str, bool | str] | None = None) -> dict:
     """Read-only checks that help choose a stable transport configuration."""
     default_route = run("ip", "route", "show", "default", timeout=3)
     uplink = ""
@@ -1426,10 +1450,19 @@ def network_capabilities() -> dict:
     except (OSError, ValueError):
         fast_open = 0
     qdisc = run("tc", "qdisc", "show", "dev", uplink, timeout=3) if uplink else ""
-    ipv6_address = PUBLIC_IPV6 or (PUBLIC_IP if ":" in PUBLIC_IP else "")
-    ipv6_ready = bool(ipv6_address)
+    ipv6 = ipv6 or network_ipv6_state()
+    ipv6_address = str(ipv6["address"] or (PUBLIC_IP if ":" in PUBLIC_IP else ""))
+    ipv6_ready = bool(ipv6["ready"])
+    if ipv6_ready:
+        ipv6_detail = "IPv6 origin готов; добавьте AAAA-запись в DNS"
+    elif ipv6_address and bool(ipv6["default_route"]):
+        ipv6_detail = "IPv6-адрес и маршрут есть, но веб-порт по IPv6 не подтверждён"
+    elif ipv6_address:
+        ipv6_detail = "IPv6-адрес назначен, но маршрут IPv6 не подтверждён"
+    else:
+        ipv6_detail = "Публичный IPv6 не обнаружен"
     checks = [
-        {"id": "ipv6", "label": "IPv6", "status": "ready" if ipv6_ready else "warning", "value": ipv6_address or "не назначен", "detail": "Публичный IPv6 доступен серверу" if ipv6_ready else "Публичный IPv6 не обнаружен"},
+        {"id": "ipv6", "label": "IPv6", "status": "ready" if ipv6_ready else "warning", "value": ipv6_address or "не назначен", "detail": ipv6_detail},
         {"id": "congestion", "label": "TCP congestion control", "status": "ready" if congestion else "unsupported", "value": congestion or "неизвестно", "detail": "Алгоритм ядра активен" if congestion else "Параметр ядра недоступен"},
         {"id": "mtu", "label": "MTU uplink", "status": "ready" if mtu and 1280 <= mtu <= 9000 else "warning", "value": str(mtu) if mtu else "неизвестно", "detail": "MTU в допустимом диапазоне" if mtu and 1280 <= mtu <= 9000 else "Проверьте MTU перед настройкой туннелей"},
         {"id": "qdisc", "label": "Очередь пакетов", "status": "ready" if any(name in qdisc for name in ("fq", "cake", "fq_codel")) else "warning", "value": (qdisc.split()[1] if len(qdisc.split()) > 1 else "неизвестно"), "detail": "Очередь подходит для низкой задержки" if any(name in qdisc for name in ("fq", "cake", "fq_codel")) else "Активная очередь не подтверждена"},
@@ -1439,6 +1472,7 @@ def network_capabilities() -> dict:
 
 
 def network_status() -> dict:
+    ipv6 = network_ipv6_state()
     domain_items: list[dict] = []
     endpoint_settings = read_network_endpoint_settings()
     candidates = [
@@ -1514,7 +1548,7 @@ def network_status() -> dict:
     direct_url = f"http://{PUBLIC_IP_ENDPOINT}:{os.getenv('HTTP_PORT', '80')}"
     return {
         "detected_at": datetime.now(timezone.utc).isoformat(),
-        "server": {"name": SERVER_NAME, "public_ip": PUBLIC_IP, "public_ipv4": PUBLIC_IPV4, "public_ipv6": PUBLIC_IPV6},
+        "server": {"name": SERVER_NAME, "public_ip": PUBLIC_IP, "public_ipv4": PUBLIC_IPV4, "public_ipv6": str(ipv6["address"])},
         "domains": domain_items,
         "route": {"mode": route_mode, "label": route_label, "evidence": evidence},
         "tls": {"mode": "Caddy ACME" if PUBLIC_DOMAIN else "Не используется", "certificate_source": "Автоматический сертификат Caddy" if PUBLIC_DOMAIN else "—", "https_expected": bool(PUBLIC_DOMAIN)},
@@ -1523,7 +1557,7 @@ def network_status() -> dict:
         "listeners": listeners,
         "resolvers": resolvers,
         "transport_endpoints": endpoint_settings,
-        "capabilities": network_capabilities(),
+        "capabilities": network_capabilities(ipv6),
     }
 
 
