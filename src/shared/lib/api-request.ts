@@ -5,6 +5,82 @@ type RequestOptions = {
   retryDelaysMs?: number[];
 };
 type ApiResult = Awaited<ReturnType<Response["json"]>>;
+type CachedResponse = { value: ApiResult; cachedAt: number };
+type CachePolicy = { ttlMs: number; staleMs: number; persist: boolean };
+
+const CACHE_POLICIES: Array<{ match: RegExp; policy: CachePolicy }> = [
+  { match: /^\/overview$/, policy: { ttlMs: 5_000, staleMs: 60_000, persist: true } },
+  { match: /^\/protocol-images$/, policy: { ttlMs: 30_000, staleMs: 300_000, persist: true } },
+  { match: /^\/clients$/, policy: { ttlMs: 8_000, staleMs: 60_000, persist: true } },
+  { match: /^\/services$/, policy: { ttlMs: 10_000, staleMs: 60_000, persist: true } },
+  { match: /^\/security$/, policy: { ttlMs: 15_000, staleMs: 60_000, persist: false } },
+  { match: /^\/application\/metadata$/, policy: { ttlMs: 30_000, staleMs: 300_000, persist: true } },
+  { match: /^\/application\/status$/, policy: { ttlMs: 1_500, staleMs: 10_000, persist: false } },
+  { match: /^\/network$/, policy: { ttlMs: 15_000, staleMs: 120_000, persist: true } },
+  { match: /^\/dns$/, policy: { ttlMs: 15_000, staleMs: 120_000, persist: true } },
+  { match: /^\/protocols\/[^/]+\/status$/, policy: { ttlMs: 5_000, staleMs: 30_000, persist: false } },
+  { match: /^\/mihomo\/(?:status|modules|profiles|stats)$/, policy: { ttlMs: 15_000, staleMs: 60_000, persist: false } },
+];
+
+const CACHE_STORAGE_PREFIX = "312-api-cache:";
+
+function cachePolicy(path: string): CachePolicy | null {
+  const endpoint = path.split("?", 1)[0];
+  return CACHE_POLICIES.find((item) => item.match.test(endpoint))?.policy || null;
+}
+
+function tokenFingerprint(token: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < token.length; index += 1) {
+    hash ^= token.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function storageKey(token: string, path: string): string {
+  return `${CACHE_STORAGE_PREFIX}${tokenFingerprint(token)}:${encodeURIComponent(path)}`;
+}
+
+function readPersistedCache(token: string, cache: Map<string, CachedResponse>) {
+  if (typeof window === "undefined") return;
+  try {
+    const prefix = `${CACHE_STORAGE_PREFIX}${tokenFingerprint(token)}:`;
+    for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = sessionStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const path = decodeURIComponent(key.slice(prefix.length));
+      const policy = cachePolicy(path);
+      if (!policy?.persist) continue;
+      const raw = sessionStorage.getItem(key);
+      if (!raw) continue;
+      const entry = JSON.parse(raw) as CachedResponse;
+      if (!entry || typeof entry.cachedAt !== "number" || Date.now() - entry.cachedAt > policy.staleMs) {
+        sessionStorage.removeItem(key);
+        continue;
+      }
+      cache.set(path, entry);
+    }
+  } catch {
+    // Private browsing and quota-restricted contexts may reject sessionStorage.
+  }
+}
+
+function persistCache(token: string, path: string, entry: CachedResponse, policy: CachePolicy | null) {
+  if (!policy?.persist || typeof window === "undefined") return;
+  try { sessionStorage.setItem(storageKey(token, path), JSON.stringify(entry)); } catch { /* best effort */ }
+}
+
+function clearPersistedCache(token: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const prefix = `${CACHE_STORAGE_PREFIX}${tokenFingerprint(token)}:`;
+    for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = sessionStorage.key(index);
+      if (key?.startsWith(prefix)) sessionStorage.removeItem(key);
+    }
+  } catch { /* best effort */ }
+}
 
 export class ApiRequestError extends Error {
   kind: "network" | "http" | "response";
@@ -22,9 +98,13 @@ export function mutationFailureState(cause: unknown): "unknown" | "error" {
     ? "unknown" : "error";
 }
 
-// One client per authenticated UI. Concurrent reads share a request, not a cache.
+// One client per authenticated UI. Reads share in-flight requests and a short
+// stale-while-revalidate cache so switching tabs and reopening the panel feels
+// immediate without making live telemetry or logs stale.
 export function createApiClient(token: string, options: RequestOptions = {}) {
   const pending = new Map<string, Promise<ApiResult>>();
+  const cache = new Map<string, CachedResponse>();
+  readPersistedCache(token, cache);
   const request = async (path: string, init: RequestInit = {}): Promise<ApiResult> => {
     if (!token) throw new ApiRequestError("Сессия панели завершена. Войдите заново.", "http", 401);
     const method = (init.method || "GET").toUpperCase();
@@ -61,8 +141,16 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
         // Consume inside the retry boundary: a stream may break after headers arrive.
         const body = await response.text();
         if ((response.headers.get("content-type") || "").includes("text/plain")) return body;
-        try { return JSON.parse(body); }
+        let value: ApiResult;
+        try { value = JSON.parse(body); }
         catch { throw new ApiRequestError(`Панель получила неполный или некорректный ответ (${operation}). Обновите данные.`, "response"); }
+        const policy = read ? cachePolicy(path) : null;
+        if (policy) {
+          const entry = { value, cachedAt: Date.now() };
+          cache.set(path, entry);
+          persistCache(token, path, entry, policy);
+        }
+        return value;
       } catch (cause) {
         if (init.signal?.aborted) throw init.signal.reason || cause;
         const transient = !(cause instanceof ApiRequestError) || cause.kind === "response" || [502, 503, 504].includes(cause.status || 0);
@@ -81,15 +169,37 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
     }
   };
   return <T = ApiResult>(path: string, init: RequestInit = {}): Promise<T> => {
-    if (init.method && !["GET", "HEAD"].includes(init.method.toUpperCase())) {
+    const method = (init.method || "GET").toUpperCase();
+    const read = method === "GET" && init.body == null;
+    const share = read && !init.headers && !init.signal;
+    const policy = share ? cachePolicy(path) : null;
+    const bypassCache = init.cache === "no-store" || init.cache === "reload";
+    if (read && share && policy && !bypassCache) {
+      const entry = cache.get(path);
+      if (entry) {
+        const age = Date.now() - entry.cachedAt;
+        if (age <= policy.ttlMs) return Promise.resolve(entry.value) as Promise<T>;
+        if (age <= policy.staleMs) {
+          if (!pending.has(path)) {
+            const revalidation = request(path, init).finally(() => {
+              if (pending.get(path) === revalidation) pending.delete(path);
+            });
+            pending.set(path, revalidation);
+          }
+          return Promise.resolve(entry.value) as Promise<T>;
+        }
+      }
+    }
+    if (init.method && !["GET", "HEAD"].includes(method)) {
       // A refresh after a command must not join a read started before that command.
       pending.clear();
+      cache.clear();
+      clearPersistedCache(token);
       return request(path, init).finally(() => pending.clear()) as Promise<T>;
     }
     // Custom headers/signals may represent independent callers and must not merge.
-    const share = (!init.method || init.method.toUpperCase() === "GET") && !init.body && !init.headers && !init.signal;
     if (!share) return request(path, init) as Promise<T>;
-    const existing = pending.get(path);
+    const existing = bypassCache ? undefined : pending.get(path);
     if (existing) return existing as Promise<T>;
     const result = request(path, init).finally(() => {
       if (pending.get(path) === result) pending.delete(path);

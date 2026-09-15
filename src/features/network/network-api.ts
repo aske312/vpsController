@@ -3,10 +3,11 @@ import type { DnsCheck, DnsSettings, DnsStatus, NetworkEndpointCheck, NetworkEnd
 export type NetworkRequest = <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
 
 /** Все сетевые чтения и изменения страницы «Сеть» проходят через один feature API. */
-export async function readNetworkControl(request: NetworkRequest) {
+export async function readNetworkControl(request: NetworkRequest, force = false) {
+  const init = force ? { cache: "no-store" as const } : undefined;
   const [network, dns] = await Promise.all([
-    request<NetworkStatus>("/network"),
-    request<DnsStatus>("/dns"),
+    request<NetworkStatus>("/network", init),
+    request<DnsStatus>("/dns", init),
   ]);
   return { network, dns };
 }

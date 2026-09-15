@@ -8,7 +8,7 @@ type SummaryData = {
 };
 type Section = keyof SummaryData;
 export type MihomoSummary = SummaryData & { errors: Partial<Record<Section, string>>; networkErrors?: Partial<Record<Section, boolean>> };
-type ReadApi = <T>(path: string) => Promise<T>;
+type ReadApi = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 export const EMPTY_MIHOMO_SUMMARY: MihomoSummary = {
   status: null, modules: null, profiles: null, profileStats: null, errors: {},
@@ -62,11 +62,11 @@ export function createMihomoSummaryStore(request: ReadApi) {
       if (pending) return pending;
       if (!force && cachedAt && Date.now() - cachedAt < CACHE_TTL_MS) return Promise.resolve();
       pending = Promise.all([
-        load("status", () => request<Status>("/mihomo/status")),
-        load("modules", async () => items(await request<{ items: Module[] }>("/mihomo/modules"))),
-        load("profiles", async () => items(await request<{ items: Profile[] }>("/mihomo/profiles"))),
+        load("status", () => request<Status>("/mihomo/status", force ? { cache: "no-store" } : undefined)),
+        load("modules", async () => items(await request<{ items: Module[] }>("/mihomo/modules", force ? { cache: "no-store" } : undefined))),
+        load("profiles", async () => items(await request<{ items: Profile[] }>("/mihomo/profiles", force ? { cache: "no-store" } : undefined))),
         load("profileStats", async () => {
-          const stats = items(await request<{ items: Array<ProfileStats & { id: string }> }>("/mihomo/stats"));
+          const stats = items(await request<{ items: Array<ProfileStats & { id: string }> }>("/mihomo/stats", force ? { cache: "no-store" } : undefined));
           return Object.fromEntries(stats.map((item) => [item.id, item.summary]));
         }),
       ]).then(() => { cachedAt = Date.now(); }).finally(() => { pending = null; });

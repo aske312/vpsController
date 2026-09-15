@@ -91,7 +91,23 @@ test("concurrent reads coalesce, later reads and different sessions fetch fresh 
   assert.equal(calls, 1);
   await request("/overview");
   await createApiClient("another-token")("/overview");
-  assert.equal(calls, 3);
+  assert.equal(calls, 2);
+});
+
+test("recent reads use the app cache, while force refresh and writes invalidate it", async () => {
+  let calls = 0;
+  globalThis.fetch = async (_path, init) => { calls++; if (init.method === "GET") assert.equal(init.cache, "no-store"); return ok(); };
+  const request = client();
+  await request("/overview");
+  await request("/overview");
+  assert.equal(calls, 1);
+  await request("/overview", { cache: "no-store" });
+  assert.equal(calls, 2);
+  await request("/overview");
+  assert.equal(calls, 2);
+  await request("/settings", { method: "POST", body: "{}" });
+  await request("/overview");
+  assert.equal(calls, 4);
 });
 
 test("read timeout is bounded and external cancellation is not retried", async () => {

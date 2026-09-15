@@ -177,12 +177,12 @@ export function ControlPanel() {
   }, []);
   const cdnCommand = useCdnSecurity(request, token, application?.cdn_security?.operation, applyCdnSecurity);
 
-  const loadOverview = useCallback(async () => {
+  const loadOverview = useCallback(async (force = false) => {
     if (!token) return;
     try {
       const [next, imageData] = await Promise.all([
-        request("/overview") as Promise<Overview>,
-        request("/protocol-images") as Promise<{ items: ProtocolImage[] }>,
+        request("/overview", force ? { cache: "no-store" } : undefined) as Promise<Overview>,
+        request("/protocol-images", force ? { cache: "no-store" } : undefined) as Promise<{ items: ProtocolImage[] }>,
       ]);
       setOverview(next);
       setProtocolImages(imageData.items || []);
@@ -194,37 +194,37 @@ export function ControlPanel() {
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadOverview: refreshFailure(cause, "Ошибка соединения") })); }
   }, [installingProtocol, request, token]);
 
-  const loadClients = useCallback(async () => {
+  const loadClients = useCallback(async (force = false) => {
     if (!token) return;
     try {
-      const data = await request("/clients");
+      const data = await request("/clients", force ? { cache: "no-store" } : undefined);
       setClients(data.items); setLastUpdated(new Date());
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadClients; return next; });
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadClients: refreshFailure(cause, "Не удалось обновить клиентов") })); }
   }, [request, token]);
 
-  const loadSecurity = useCallback(async () => {
+  const loadSecurity = useCallback(async (force = false) => {
     if (!token) return;
     setSecurityLoading(true);
     try {
-      setSecurity(await request("/security")); setLastUpdated(new Date());
+      setSecurity(await request("/security", force ? { cache: "no-store" } : undefined)); setLastUpdated(new Date());
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadSecurity; return next; });
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadSecurity: refreshFailure(cause, "Не удалось обновить состояние безопасности") })); }
     finally { setSecurityLoading(false); }
   }, [request, token]);
 
-  const loadApplication = useCallback(async () => {
+  const loadApplication = useCallback(async (force = false) => {
     if (!token) return;
     try {
-      setApplication(await request("/application/status")); setLastUpdated(new Date());
+      setApplication(await request("/application/status", force ? { cache: "no-store" } : undefined)); setLastUpdated(new Date());
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadApplication; return next; });
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadApplication: refreshFailure(cause, "Не удалось обновить приложение") })); }
   }, [request, token]);
 
-  const loadServices = useCallback(async () => {
+  const loadServices = useCallback(async (force = false) => {
     if (!token) return;
     try {
-      const next = await request("/services") as ServicesStatus;
+      const next = await request("/services", force ? { cache: "no-store" } : undefined) as ServicesStatus;
       setServices(next);
       if (!automationDirty.current) setAutomationDraft(next.automation);
       if (!loggingDirty.current) setLoggingDraft({
@@ -236,18 +236,18 @@ export function ControlPanel() {
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadServices: refreshFailure(cause, "Не удалось обновить состояние служб") })); }
   }, [request, token]);
 
-  const loadApplicationMetadata = useCallback(async () => {
+  const loadApplicationMetadata = useCallback(async (force = false) => {
     if (!token) return;
     try {
-      setApplicationMetadata(await request<ApplicationMetadata>("/application/metadata"));
+      setApplicationMetadata(await request<ApplicationMetadata>("/application/metadata", force ? { cache: "no-store" } : undefined));
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadApplicationMetadata; return next; });
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadApplicationMetadata: refreshFailure(cause, "Не удалось обновить сведения о версии") })); }
   }, [request, token]);
 
-  const loadProtocolStatus = useCallback(async (protocol: Protocol) => {
+  const loadProtocolStatus = useCallback(async (protocol: Protocol, force = false) => {
     if (!token) return;
     try {
-      const raw = await request(`/protocols/${protocol}/status`) as Omit<ProtocolStatus, "resources" | "history" | "diagnostics"> & {
+      const raw = await request(`/protocols/${protocol}/status`, force ? { cache: "no-store" } : undefined) as Omit<ProtocolStatus, "resources" | "history" | "diagnostics"> & {
         resources?: Partial<ProtocolStatus["resources"]>;
         history?: Partial<ProtocolStatus["history"]>;
         diagnostics?: Partial<ProtocolStatus["diagnostics"]>;
@@ -376,17 +376,17 @@ export function ControlPanel() {
     if (!token) return;
     if (showBusy) { setBusy(true); }
     try {
-      if (tab === "overview") await Promise.all([loadOverview(), loadClients(), loadApplication(), loadServices()]);
-      else if (tab === "security") await Promise.all([loadSecurity(), loadServices()]);
-      else if (tab === "application") await Promise.all([loadApplication(), loadApplicationMetadata(), loadServices()]);
-      else if (tab === "services") await loadServices();
+      if (tab === "overview") await Promise.all([loadOverview(showBusy), loadClients(showBusy), loadApplication(showBusy), loadServices(showBusy)]);
+      else if (tab === "security") await Promise.all([loadSecurity(showBusy), loadServices(showBusy)]);
+      else if (tab === "application") await Promise.all([loadApplication(showBusy), loadApplicationMetadata(showBusy), loadServices(showBusy)]);
+      else if (tab === "services") await loadServices(showBusy);
       else if (tab === "dns") { setTab("network"); setNetworkRefreshKey((value) => value + 1); }
       else if (tab === "network") setNetworkRefreshKey((value) => value + 1);
       else if (tab === "mihomo") await loadOverview();
-      else if (tab === "channels") await Promise.all([loadClients(), loadProtocolStatus(selectedChannel)]);
-      else if (directProtocolOrder.includes(tab as Protocol)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
+      else if (tab === "channels") await Promise.all([loadClients(showBusy), loadProtocolStatus(selectedChannel, showBusy)]);
+      else if (directProtocolOrder.includes(tab as Protocol)) await Promise.all([loadClients(showBusy), loadProtocolStatus(tab as Protocol, showBusy)]);
       else {
-        await loadClients();
+        await loadClients(showBusy);
         if (tab === "clients") await measureDeviceRoute(showBusy);
       }
     } finally {

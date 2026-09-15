@@ -52,7 +52,7 @@ export function NetworkView({ request, refreshKey = 0 }: Props) {
     loadingRef.current = true;
     setLoading(true);
     try {
-      const next = await readNetworkControl(request);
+      const next = await readNetworkControl(request, refreshKey > 0);
       const previous = savedRef.current;
       setStatus(next.network);
       setEndpointDraft((current) => !current || JSON.stringify(current) === JSON.stringify(savedEndpointRef.current) ? next.network.transport_endpoints : current);
@@ -68,7 +68,7 @@ export function NetworkView({ request, refreshKey = 0 }: Props) {
       loadingRef.current = false;
       setLoading(false);
     }
-  }, [notifyError, request]);
+  }, [notifyError, refreshKey, request]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(); }, [load, refreshKey]);
