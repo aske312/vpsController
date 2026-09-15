@@ -39,7 +39,7 @@ type ProtocolViewProps = {
   checkProtocolResources: (protocol: Protocol) => Promise<void> | void;
 };
 
-type Capability = { name: string; detail: string; beta?: boolean };
+type Capability = { name: string; detail: string; beta?: boolean; route?: "cdn" | "tls" | "udp" };
 type TunnelProfile = {
   short: string;
   family: string;
@@ -59,10 +59,7 @@ const profiles: Record<Protocol, TunnelProfile> = {
       { name: "Peer keys", detail: "Отдельные ключи клиентов" },
       { name: "UDP transport", detail: "Минимальные накладные расходы" },
     ],
-    planned: [
-      { name: "Adaptive MTU", detail: "Автоподбор MTU по Path MTU", beta: true },
-      { name: "Relay route", detail: "Переключаемый внешний UDP relay", beta: true },
-    ],
+    planned: [],
   },
   awg: {
     short: "AWG", family: "STEALTH VPN", title: "AmneziaWG", accent: "mint",
@@ -72,10 +69,7 @@ const profiles: Record<Protocol, TunnelProfile> = {
       { name: "Independent keys", detail: "Собственный набор peer-ключей" },
       { name: "UDP tunnel", detail: "Отдельный сетевой интерфейс" },
     ],
-    planned: [
-      { name: "Obfuscation presets", detail: "Профили под разные сети", beta: true },
-      { name: "Fallback endpoint", detail: "Резервный endpoint/relay", beta: true },
-    ],
+    planned: [],
   },
   shadowsocks: {
     short: "SS", family: "ENCRYPTED PROXY", title: "Shadowsocks", accent: "blue",
@@ -85,23 +79,17 @@ const profiles: Record<Protocol, TunnelProfile> = {
       { name: "TCP + UDP", detail: "Два класса трафика" },
       { name: "Client ports", detail: "Изолированные точки доступа" },
     ],
-    planned: [
-      { name: "Port rotation", detail: "Управляемая смена внешнего порта", beta: true },
-      { name: "Relay chain", detail: "Промежуточный TCP/UDP relay", beta: true },
-    ],
+    planned: [],
   },
   "vless-reality-xhttp": {
     short: "VLESS", family: "XRAY TRANSPORT", title: "VLESS", accent: "violet",
     description: "Модуль Xray с независимыми входами REALITY, прямым TLS и CDN-маршрутом.",
     capabilities: [
       { name: "REALITY", detail: "Прямой маскируемый вход" },
-      { name: "TLS route", detail: "Независимый TLS-домен" },
-      { name: "CDN route", detail: "XHTTP / WS / gRPC через CDN" },
+      { name: "TLS route", detail: "Независимый TLS-домен", route: "tls" },
+      { name: "CDN route", detail: "XHTTP / WS / gRPC через CDN", route: "cdn" },
     ],
-    planned: [
-      { name: "ECH profile", detail: "Подготовка ECH/CDN-профиля", beta: true },
-      { name: "Route failover", detail: "Автовыбор живого входа", beta: true },
-    ],
+    planned: [],
   },
   hysteria2: {
     short: "HY2", family: "QUIC PROXY", title: "Hysteria2", accent: "amber",
@@ -111,10 +99,7 @@ const profiles: Record<Protocol, TunnelProfile> = {
       { name: "TLS 1.3", detail: "Защищённая точка входа" },
       { name: "Per-client auth", detail: "Раздельная аутентификация" },
     ],
-    planned: [
-      { name: "Bandwidth profiles", detail: "Пресеты uplink/downlink", beta: true },
-      { name: "UDP relay", detail: "Внешняя relay-точка", beta: true },
-    ],
+    planned: [],
   },
   tuic: {
     short: "TUIC", family: "QUIC PROXY", title: "TUIC v5", accent: "amber",
@@ -124,10 +109,7 @@ const profiles: Record<Protocol, TunnelProfile> = {
       { name: "UUID auth", detail: "Изолированные учётные данные" },
       { name: "UDP relay", detail: "Нативный UDP-трафик" },
     ],
-    planned: [
-      { name: "Congestion preset", detail: "Управление алгоритмом congestion", beta: true },
-      { name: "Fallback port", detail: "Резервная точка входа", beta: true },
-    ],
+    planned: [],
   },
   trojan: {
     short: "TRJ", family: "TLS PROXY", title: "Trojan", accent: "rose",
@@ -137,10 +119,7 @@ const profiles: Record<Protocol, TunnelProfile> = {
       { name: "Client password", detail: "Раздельная аутентификация" },
       { name: "Certificate", detail: "Контролируемое доверие" },
     ],
-    planned: [
-      { name: "SNI rotation", detail: "Управляемая смена домена", beta: true },
-      { name: "TLS relay", detail: "Внешняя промежуточная точка", beta: true },
-    ],
+    planned: [],
   },
   openvpn: {
     short: "OVPN", family: "CERTIFICATE VPN", title: "OpenVPN", accent: "green",
@@ -150,10 +129,7 @@ const profiles: Record<Protocol, TunnelProfile> = {
       { name: "tls-crypt", detail: "Защита control channel" },
       { name: "CRL", detail: "Отзыв клиентского доступа" },
     ],
-    planned: [
-      { name: "TCP fallback", detail: "Резервный TCP-listener", beta: true },
-      { name: "Profile policy", detail: "Раздельные route-профили", beta: true },
-    ],
+    planned: [],
   },
   ikev2: {
     short: "IKE", family: "SYSTEM VPN", title: "IKEv2", accent: "green",
@@ -163,10 +139,7 @@ const profiles: Record<Protocol, TunnelProfile> = {
       { name: "IPsec", detail: "IKEv2 + ESP/NAT-T" },
       { name: "EAP auth", detail: "Учётная запись на устройство" },
     ],
-    planned: [
-      { name: "Split policy", detail: "Профили split-routing", beta: true },
-      { name: "Certificate rotation", detail: "Контролируемая ротация X.509", beta: true },
-    ],
+    planned: [],
   },
 };
 
@@ -183,6 +156,11 @@ export function ProtocolView(props: ProtocolViewProps) {
   const profile = profiles[protocolTab];
   const draft = protocolSettingsDraft[protocolTab] || {};
   const fields = activeProtocol.editable_settings || [];
+  const routeReady = {
+    tls: fields.some((field) => field.key === "tls_enabled"),
+    cdn: fields.some((field) => field.key === "cdn_enabled"),
+    udp: fields.some((field) => field.key === "channel_mode" && (field.options || []).some((option) => option.value === "udp_relay")),
+  };
   const availability = Number.isFinite(Number(protocolAvailability)) ? Math.max(0, Math.min(100, Number(protocolAvailability))) : 0;
   const version = formatModuleVersion(activeProtocolImage?.installed_version, "version n/a");
   const endpoint = activeProtocol.listen_port ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port}` : activeProtocol.address || "—";
@@ -268,10 +246,9 @@ export function ProtocolView(props: ProtocolViewProps) {
         </article>
 
         <article className="tunnelPanel capabilitiesPanel">
-          <PanelTitle eyebrow="CAPABILITIES" title="Возможности модуля" note="Реализованные и запланированные функции разделены" />
+          <PanelTitle eyebrow="CAPABILITIES" title="Возможности модуля" note="Доступные функции текущей конфигурации" />
           <div className="capabilityList">
-            {profile.capabilities.map((item) => <CapabilityRow key={item.name} item={item} />)}
-            {profile.planned.map((item) => <CapabilityRow key={item.name} item={item} />)}
+            {profile.capabilities.filter((item) => !item.route || routeReady[item.route]).map((item) => <CapabilityRow key={item.name} item={item} />)}
           </div>
         </article>
       </div>
@@ -318,10 +295,6 @@ export function ProtocolView(props: ProtocolViewProps) {
         </article>
       </div>
 
-      <aside className="betaNotice">
-        <span>BETA</span>
-        <p><strong>Экспериментальные функции</strong><small>Жёлтые элементы — проектируемые возможности. Пока backend не подключён, они не являются рабочими настройками и не меняют конфигурацию сервера.</small></p>
-      </aside>
     </section>
   );
 }

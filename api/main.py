@@ -1728,10 +1728,8 @@ def network_endpoint_check(kind: str, domain: str) -> dict:
     probe = network_domain_probe(domain, f"{label} route")
     if not probe["resolved"]:
         status, ready, message = "unresolved", False, "Адрес не разрешается через DNS с VPS"
-    elif probe["matches_origin"] and kind in {"cdn", "udp_relay"}:
+    elif probe["matches_origin"] and kind in {"cdn", "tls_relay", "udp_relay"}:
         status, ready, message = "warning", False, "Адрес указывает на origin VPS, внешний маршрут не подтверждён"
-    elif kind == "tls_relay" and not probe["matches_origin"]:
-        status, ready, message = "warning", False, "TLS-адрес не указывает на origin VPS"
     else:
         status, ready, message = "ready", True, "Адрес подтверждён для этого маршрута"
     return {**probe, "kind": kind, "status": status, "ready": ready, "message": message}
@@ -4613,6 +4611,28 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     return {"deleted": client_id}
 
 
+def protocol_route_ready(kind: str) -> bool:
+    """Return whether a route required by a direct channel is confirmed."""
+    if kind == "tls":
+        if not PUBLIC_DOMAIN:
+            return False
+        probe = network_domain_probe(PUBLIC_DOMAIN, "TLS")
+        return bool(probe["resolved"] and probe["matches_origin"])
+    endpoints = read_network_endpoint_settings()
+    key = {"cdn": "cdn_domain", "udp": "udp_relay_domain"}.get(kind)
+    if not key or not endpoints.get(key):
+        return False
+    return bool(network_endpoint_check("cdn" if kind == "cdn" else "udp_relay", endpoints[key])["ready"])
+
+
+def relay_route_ready(kind: str) -> bool:
+    endpoints = read_network_endpoint_settings()
+    key = {"tls": "tls_relay_domain", "udp": "udp_relay_domain"}.get(kind)
+    if not key or not endpoints.get(key):
+        return False
+    return bool(network_endpoint_check("tls_relay" if kind == "tls" else "udp_relay", endpoints[key])["ready"])
+
+
 def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
     if protocol in ("wg", "awg"):
         prefix = "WG" if protocol == "wg" else "AWG"
@@ -4738,16 +4758,30 @@ def _editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
 
 def editable_protocol_settings(protocol: str, values: dict) -> list[dict]:
     fields = _editable_protocol_settings(protocol, values)
+    cdn_ready = protocol_route_ready("cdn")
+    tls_ready = protocol_route_ready("tls")
+    udp_ready = protocol_route_ready("udp")
+    # Domain values are owned by Network → ROUTES. Protocol pages expose only
+    # the switch or transport choice after the corresponding route is READY.
+    hidden_domain_keys = {"domain", "cdn_domain", "tls_domain", "sni"}
+    fields = [field for field in fields if field.get("key") not in hidden_domain_keys]
+    if protocol == "vless-reality-xhttp":
+        fields = [field for field in fields if (
+            (cdn_ready or not (str(field.get("key", "")).startswith("cdn_") or field.get("key") == "cdn_enabled"))
+            and (tls_ready or not (str(field.get("key", "")).startswith("tls_") or field.get("key") == "tls_enabled"))
+        )]
     if protocol not in CHANNEL_MODE_PROTOCOLS:
         return fields
     relay_options = [{"value": "direct", "label": "Прямой маршрут"}]
-    if "tls_relay" in supported_channel_modes(protocol):
+    if relay_route_ready("tls") and "tls_relay" in supported_channel_modes(protocol):
         relay_options.append({"value": "tls_relay", "label": "TLS relay · домен"})
-    if "udp_relay" in supported_channel_modes(protocol):
+    if udp_ready and "udp_relay" in supported_channel_modes(protocol):
         relay_options.append({"value": "udp_relay", "label": "UDP relay · домен"})
+    current_mode = channel_mode_for(protocol)
+    available_modes = {str(option["value"]) for option in relay_options}
     return [{
         "key": "channel_mode", "label": "Защищённый маршрут", "type": "select",
-        "value": channel_mode_for(protocol), "options": relay_options,
+        "value": current_mode if current_mode in available_modes else "direct", "options": relay_options,
         "help": "Меняет только endpoint новых конфигураций. Сам relay должен быть настроен отдельно и принимать трафик на порту протокола.",
     }, *fields]
 

@@ -132,7 +132,7 @@ class TunnelPrivacyTests(unittest.TestCase):
                 self.assertEqual(apply.call_count, 1)
 
     def test_create_provisions_encryption_from_each_device(self):
-        profile = {"routing": {"tunnel_privacy": True}, "devices": [{"id": "a", "routing": {}}, {"id": "b", "routing": {"tunnel_privacy": True}}]}
+        profile = {"routing": {"tunnel_privacy": False}, "devices": [{"id": "a", "routing": {}}, {"id": "b", "routing": {"tunnel_privacy": True}}]}
         definitions = [{"id": name, "device_id": name, "component": "transport-reality"} for name in ("a", "b")]
         with patch.object(manager, "provision", return_value={}) as provision, patch.object(manager, "apply_batched_reality_runtime"):
             manager.provision_connections("profile", definitions, profile=profile)
@@ -311,7 +311,7 @@ class TunnelPrivacyTests(unittest.TestCase):
 
     def test_default_fields_do_not_change_legacy_settings(self):
         manifest = json.loads((ROOT / "protocol-images/mihomo/modules/transport-reality/manifest.json").read_text())
-        with patch.object(manager, "manifest", return_value=manifest), patch.object(manager, "module_is_installed", return_value=True), patch.object(manager, "module_is_ready", return_value=True):
+        with patch.object(manager, "manifest", return_value=manifest), patch.object(manager, "module_is_installed", return_value=True), patch.object(manager, "module_is_ready", return_value=True), patch.object(manager, "mihomo_route_endpoint_ready", return_value=True):
             legacy = manager.validate_connection("transport-reality", {"route_mode": "cdn", "cdn_domain": "example.com"})
             self.assertNotIn("privacy_mode", legacy)
             self.assertNotIn("cdn_ech", legacy)
