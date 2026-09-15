@@ -1508,35 +1508,94 @@ def network_dns_provider(nameservers: list[str]) -> str:
     normalized = [value.rstrip(".").lower() for value in nameservers]
     signatures = (
         ("Cloudflare", ("cloudflare.com",)),
+        ("deSEC", ("desec.io", "desec.org", "desec.ch", "desec.cz", "desec.li", "dedyn.io")),
         ("Amazon Route 53", ("awsdns", "amazonaws.com")),
         ("Google Cloud DNS", ("googledomains.com", "google.com")),
+        ("Azure DNS", ("azure-dns.com", "azure-dns.net", "azure-dns.org", "azure-dns.info")),
         ("DigitalOcean DNS", ("digitalocean.com",)),
         ("Hetzner DNS", ("hetzner.com",)),
         ("Namecheap DNS", ("registrar-servers.com",)),
         ("GoDaddy DNS", ("domaincontrol.com",)),
+        ("Porkbun DNS", ("porkbun.com",)),
+        ("Gandi LiveDNS", ("gandi.net",)),
+        ("DNSimple", ("dnsimple.com",)),
+        ("ClouDNS", ("cloudns.net",)),
+        ("NS1", ("nsone.net",)),
+        ("Vercel DNS", ("vercel-dns.com",)),
         ("DNS Made Easy", ("dnsmadeeasy.com",)),
     )
     for provider, markers in signatures:
         if any(any(marker in nameserver for marker in markers) for nameserver in normalized):
             return provider
-    return "Не определён" if not normalized else "Другой DNS-провайдер"
+    return "Unknown" if not normalized else "Unknown"
+
+
+def network_edge_from_signals(cnames: list[str], ip_info: list[dict], cloudflare_ranges: set[str]) -> dict:
+    normalized_cnames = [value.rstrip(".").lower() for value in cnames]
+    cname_signatures = (
+        ("Cloudflare", ("cloudflare.com", "cdn.cloudflare.net", "cf-ipfs.com")),
+        ("Fastly", ("fastly.net",)),
+        ("Amazon CloudFront", ("cloudfront.net",)),
+        ("Akamai", ("akamaihd.net", "akamaiedge.net", "edgekey.net", "edgesuite.net", "akamaized.net")),
+        ("Azure Front Door / CDN", ("azurefd.net", "azureedge.net")),
+        ("Bunny CDN", ("b-cdn.net", "bunnycdn.com")),
+        ("CDN77", ("cdn77.org",)),
+        ("KeyCDN", ("kxcdn.com",)),
+        ("Gcore CDN", ("gcore.com", "gcorelabs.net")),
+        ("StackPath", ("stackpathcdn.com",)),
+        ("QUIC.cloud", ("quic.cloud",)),
+        ("Vercel Edge", ("vercel.app", "vercel-dns.com")),
+        ("Netlify Edge", ("netlify.app", "netlify.com")),
+    )
+    for provider, markers in cname_signatures:
+        if any(any(marker in cname for marker in markers) for cname in normalized_cnames):
+            return {"provider": provider, "confidence": "high", "cnames": cnames, "source": "CNAME"}
+    try:
+        if any(any(ipaddress.ip_address(item["address"]) in ipaddress.ip_network(cidr) for cidr in cloudflare_ranges) for item in ip_info):
+            return {"provider": "Cloudflare", "confidence": "high", "cnames": cnames, "source": "Диапазон IP Cloudflare"}
+    except (KeyError, ValueError):
+        pass
+    return {"provider": "Unknown", "confidence": "unknown", "cnames": cnames, "source": ""}
+
+
+def network_known_hoster(*values: str) -> str:
+    text = " ".join(value.strip().lower() for value in values if value)
+    signatures = (
+        ("Beget", ("beget", "as198610")),
+        ("Sweb / SpaceWeb", ("spaceweb", "sweb-as", "sweb.ru", "as44112")),
+        ("Veesp", ("veesp", "as42532")),
+        ("NIC.ru / RU-CENTER", ("ru-center", "ru-center-network", "nic.ru", "runic", "as48287", "as5537")),
+        ("REG.RU", ("reg.ru", "regru", "hosting.reg.ru", "as197695")),
+        ("Selectel", ("selectel", "as49505")),
+        ("Timeweb", ("timeweb", "as9123")),
+        ("RUVDS", ("ruvds", "rucloud")),
+        ("DDoS-Guard", ("ddos-guard", "ddosguard")),
+        ("Hostland", ("hostland",)),
+        ("Sprinthost", ("sprinthost",)),
+        ("NetAngels", ("netangels",)),
+        ("FirstVDS", ("firstvds",)),
+    )
+    for provider, markers in signatures:
+        if any(marker in text for marker in markers):
+            return provider
+    return "Unknown"
 
 
 def network_rdap_identity(address: str, known_provider: str = "") -> dict:
     try:
         parsed = ipaddress.ip_address(address)
     except ValueError:
-        return {"address": address, "ptr": "", "provider": known_provider, "asn": "", "network": "", "source": ""}
+        return {"address": address, "ptr": "", "provider": known_provider, "hoster": known_provider or "Unknown", "asn": "", "network": "", "source": ""}
     cache_key = f"ip:{parsed.compressed}"
     cached = network_identity_cache.get(cache_key)
-    if cached and time.time() - cached["_cached_at"] < 900:
+    if cached and "hoster" in cached and time.time() - cached["_cached_at"] < 900:
         return {key: value for key, value in cached.items() if key != "_cached_at"}
     ptr = ""
     try:
         ptr = socket.gethostbyaddr(str(parsed))[0].rstrip(".")
     except (OSError, UnicodeError, socket.herror):
         pass
-    result = {"address": str(parsed), "ptr": ptr, "provider": known_provider, "asn": "", "network": "", "source": ""}
+    result = {"address": str(parsed), "ptr": ptr, "provider": known_provider, "hoster": known_provider or "Unknown", "asn": "", "network": "", "source": ""}
     if parsed.is_global and not known_provider:
         try:
             request = urllib.request.Request(
@@ -1561,20 +1620,23 @@ def network_rdap_identity(address: str, known_provider: str = "") -> dict:
                             entity_names.append(str(field[3]))
                             break
             result["provider"] = result["provider"] or (entity_names[0] if entity_names else str(payload.get("name") or ""))
+            result["hoster"] = network_known_hoster(result["provider"], result["network"], result["asn"])
             result["source"] = "RDAP"
         except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
             result["source"] = ""
     elif known_provider:
         result["source"] = "Диапазон адресов Cloudflare"
     network_identity_cache[cache_key] = {**result, "_cached_at": time.time()}
+    if known_provider:
+        result["hoster"] = known_provider
     return result
 
 
-def network_domain_identity(domain: str, resolved: list[str], cloudflare_ranges: set[str]) -> tuple[dict, list[dict]]:
+def network_domain_identity(domain: str, resolved: list[str], cloudflare_ranges: set[str]) -> tuple[dict, dict, list[dict]]:
     cache_key = f"domain:{domain.lower().rstrip('.')}"
     cached = network_identity_cache.get(cache_key)
-    if cached and time.time() - cached["_cached_at"] < 300:
-        return cached["dns"], cached["ip_info"]
+    if cached and "edge" in cached and time.time() - cached["_cached_at"] < 300:
+        return cached["dns"], cached["edge"], cached["ip_info"]
     try:
         ipaddress.ip_address(domain)
         nameservers = []
@@ -1582,6 +1644,7 @@ def network_domain_identity(domain: str, resolved: list[str], cloudflare_ranges:
     except ValueError:
         nameservers = network_dns_records(domain, 2)
         dns = {"provider": network_dns_provider(nameservers), "nameservers": nameservers, "source": "Авторитетные NS через DNS VPS"}
+    cnames = network_dns_records(domain, 5) if dns["provider"] != "DNS не используется" else []
     ip_info: list[dict] = []
     for address in resolved:
         try:
@@ -1589,8 +1652,9 @@ def network_domain_identity(domain: str, resolved: list[str], cloudflare_ranges:
         except ValueError:
             in_cloudflare = False
         ip_info.append(network_rdap_identity(address, "Cloudflare" if in_cloudflare else ""))
-    network_identity_cache[cache_key] = {"dns": dns, "ip_info": ip_info, "_cached_at": time.time()}
-    return dns, ip_info
+    edge = network_edge_from_signals(cnames, ip_info, cloudflare_ranges)
+    network_identity_cache[cache_key] = {"dns": dns, "edge": edge, "ip_info": ip_info, "_cached_at": time.time()}
+    return dns, edge, ip_info
 
 
 def network_ipv6_state() -> dict[str, bool | str]:
@@ -1704,7 +1768,7 @@ def network_status() -> dict:
             cloudflare_ranges.update(line.strip() for line in (Path(__file__).parent / "resources" / filename).read_text().splitlines() if line.strip() and not line.startswith("#"))
         except OSError:
             pass
-    edge_provider = "Не определён"
+    edge_provider = "Unknown"
     edge_evidence = ["Определяется по DNS-ответам и конфигурации, API DNS-провайдера не используется"]
     if any(any(ipaddress.ip_address(ip) in ipaddress.ip_network(cidr) for cidr in cloudflare_ranges) for item in proxy_domains for ip in item["resolved"]):
         edge_provider = "Cloudflare"
@@ -1715,17 +1779,24 @@ def network_status() -> dict:
         edge_provider = "Нет внешнего proxy"
 
     if domain_items:
-        def enrich_domain(item: dict) -> tuple[dict, list[dict]]:
+        def enrich_domain(item: dict) -> tuple[dict, dict, list[dict]]:
             return network_domain_identity(item["value"], item["resolved"], cloudflare_ranges)
 
         with ThreadPoolExecutor(max_workers=min(8, len(domain_items))) as pool:
             identities = list(pool.map(enrich_domain, domain_items))
-        for item, (dns, ip_info) in zip(domain_items, identities):
+        for item, (dns, edge, ip_info) in zip(domain_items, identities):
             item["dns"] = dns
+            item["edge"] = edge
             item["ip_info"] = ip_info
+
+        detected_edges = list(dict.fromkeys(item["edge"]["provider"] for item in domain_items if item.get("edge", {}).get("provider") != "Unknown"))
+        if detected_edges:
+            edge_provider = ", ".join(detected_edges)
+            edge_evidence = [f"Сервис определён по DNS/IP-сигнатурам: {edge_provider}"]
 
     origin_addresses = list(dict.fromkeys(value for value in (PUBLIC_IPV4, str(ipv6["address"]), PUBLIC_IP) if value))
     origin_ip_info = [network_rdap_identity(address) for address in origin_addresses]
+    edge_mode = "proxy/CDN" if proxy_domains or any(item.get("edge", {}).get("provider") != "Unknown" for item in domain_items) else "direct"
 
     listeners: list[dict] = []
     for line in run("ss", "-H", "-lnt", timeout=4).splitlines():
@@ -1752,7 +1823,7 @@ def network_status() -> dict:
         "domains": domain_items,
         "route": {"mode": route_mode, "label": route_label, "evidence": evidence},
         "tls": {"mode": "Caddy ACME" if PUBLIC_DOMAIN else "Не используется", "certificate_source": "Автоматический сертификат Caddy" if PUBLIC_DOMAIN else "—", "https_expected": bool(PUBLIC_DOMAIN)},
-        "edge": {"provider": edge_provider, "mode": "proxy/CDN" if proxy_domains else "direct", "evidence": edge_evidence},
+        "edge": {"provider": edge_provider, "mode": edge_mode, "evidence": edge_evidence},
         "access": {"mode": "external" if PUBLIC_DOMAIN else "direct", "panel_url": panel_url, "direct_url": direct_url, "protected_url": f"https://{INTERNAL_PANEL_HOST}"},
         "listeners": listeners,
         "resolvers": resolvers,

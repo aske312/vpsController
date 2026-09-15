@@ -27,11 +27,12 @@ export type NetworkEndpointSettings = { cdn_domain: string; tls_relay_domain: st
 export type NetworkEndpointCheck = { kind: "cdn" | "tls_relay" | "udp_relay"; domain: string; resolved: string[]; matches_origin: boolean; route: "direct" | "proxy_or_cdn" | "unresolved"; status: "ready" | "warning" | "unresolved"; ready: boolean; message: string };
 export type NetworkCapabilityCheck = { id: string; label: string; status: "ready" | "warning" | "unsupported"; value: string; detail: string };
 export type NetworkDnsIdentity = { provider: string; nameservers: string[]; source: string };
-export type NetworkIpIdentity = { address: string; ptr: string; provider: string; asn: string; network: string; source: string };
+export type NetworkEdgeIdentity = { provider: string; confidence: "high" | "unknown"; cnames: string[]; source: string };
+export type NetworkIpIdentity = { address: string; ptr: string; provider: string; hoster: string; asn: string; network: string; source: string };
 export type NetworkStatus = {
   detected_at: string;
   server: { name: string; public_ip: string; public_ipv4?: string; public_ipv6?: string; ip_info?: NetworkIpIdentity[] };
-  domains: Array<{ value: string; role: string; source: string; resolved: string[]; matches_origin: boolean; route: "direct" | "proxy_or_cdn" | "unresolved"; dns?: NetworkDnsIdentity; ip_info?: NetworkIpIdentity[] }>;
+  domains: Array<{ value: string; role: string; source: string; resolved: string[]; matches_origin: boolean; route: "direct" | "proxy_or_cdn" | "unresolved"; dns?: NetworkDnsIdentity; edge?: NetworkEdgeIdentity; ip_info?: NetworkIpIdentity[] }>;
   route: { mode: "direct" | "proxy_or_cdn" | "none"; label: string; evidence: string[] };
   tls: { mode: string; certificate_source: string; https_expected: boolean };
   edge: { provider: string; mode: string; evidence: string[] };

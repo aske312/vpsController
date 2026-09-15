@@ -144,17 +144,18 @@ function formatTime(value: string) {
 
 function ipOwnerLabel(items: NetworkIpIdentity[] | undefined) {
   const item = items?.find((candidate) => candidate.provider || candidate.asn || candidate.network);
-  if (!item) return "Не определён";
-  return [item.provider, item.asn].filter(Boolean).join(" · ") || item.network || "Не определён";
+  if (!item) return "Unknown";
+  return [item.hoster, item.asn].filter(Boolean).join(" · ") || "Unknown";
 }
 
 function NetworkIdentityDetails({ domain }: { domain: NetworkStatus["domains"][number] }) {
   const dns = domain.dns;
   const ipInfo = domain.ip_info || [];
   if (!dns && !ipInfo.length) return null;
-  return <details className="networkIdentityDetails"><summary>DNS и сведения об IP</summary><div className="networkIdentityBody">
+  return <details className="networkIdentityDetails"><summary>DNS, CDN и сведения об IP</summary><div className="networkIdentityBody">
     {dns && <div className="networkIdentityDns"><span>Авторитетный DNS</span><strong>{dns.provider}</strong><small>{dns.nameservers.length ? dns.nameservers.join(", ") : "NS не получены"}</small></div>}
-    {ipInfo.length > 0 && <div className="networkIdentityIps">{ipInfo.map((item) => <div className="networkIdentityIp" key={item.address}><code>{item.address}</code><span>{[item.provider, item.asn].filter(Boolean).join(" · ") || item.network || "Владелец не определён"}</span>{item.ptr && <small>PTR: {item.ptr}</small>}</div>)}</div>}
+    {domain.edge && domain.edge.provider !== "Unknown" && <div className="networkIdentityDns"><span>CDN / edge</span><strong>{domain.edge.provider}</strong><small>{domain.edge.source}{domain.edge.cnames.length ? ` · ${domain.edge.cnames.join(", ")}` : ""}</small></div>}
+    {ipInfo.length > 0 && <div className="networkIdentityIps">{ipInfo.map((item) => <div className="networkIdentityIp" key={item.address}><code>{item.address}</code><span>{[item.hoster, item.asn].filter(Boolean).join(" · ") || "Unknown"}</span>{item.provider && item.provider !== item.hoster && <small>RDAP: {item.provider}</small>}{item.ptr && <small>PTR: {item.ptr}</small>}</div>)}</div>}
   </div></details>;
 }
 

@@ -84,18 +84,24 @@ class NetworkDomainsTests(unittest.TestCase):
         self.assertEqual(result["status"], "unresolved")
 
     def test_domain_identity_reports_dns_provider_and_ip_owner(self):
-        with patch.object(api, "network_dns_records", return_value=["ns1.cloudflare.com", "ns2.cloudflare.com"]), patch.object(api, "network_rdap_identity", return_value={"address": "203.0.113.10", "ptr": "edge.example.net", "provider": "Example Networks", "asn": "AS64500", "network": "EXAMPLE-NET", "source": "RDAP"}):
-            dns, ips = api.network_domain_identity("cdn.example.com", ["203.0.113.10"], set())
+        self.assertEqual(api.network_dns_provider(["ns1.desec.io", "ns2.desec.org"]), "deSEC")
+        self.assertEqual(api.network_known_hoster("Beget LLC", "BEGET-AS"), "Beget")
+        self.assertEqual(api.network_known_hoster("SpaceWeb Ltd", "SWEB-AS"), "Sweb / SpaceWeb")
+        self.assertEqual(api.network_known_hoster("SIA VEESP", "VEESP-LV-AS"), "Veesp")
+        with patch.object(api, "network_dns_records", side_effect=lambda _, record_type: ["ns1.cloudflare.com", "ns2.cloudflare.com"] if record_type == 2 else ["edge.fastly.net"]), patch.object(api, "network_rdap_identity", return_value={"address": "203.0.113.10", "ptr": "edge.example.net", "provider": "Example Networks", "hoster": "Unknown", "asn": "AS64500", "network": "EXAMPLE-NET", "source": "RDAP"}):
+            dns, edge, ips = api.network_domain_identity("cdn.example.com", ["203.0.113.10"], set())
         self.assertEqual(dns["provider"], "Cloudflare")
         self.assertEqual(dns["nameservers"], ["ns1.cloudflare.com", "ns2.cloudflare.com"])
+        self.assertEqual(edge["provider"], "Fastly")
         self.assertEqual(ips[0]["asn"], "AS64500")
         self.assertEqual(ips[0]["ptr"], "edge.example.net")
 
     def test_direct_ip_identity_does_not_claim_a_dns_provider(self):
-        with patch.object(api, "network_dns_records") as records, patch.object(api, "network_rdap_identity", return_value={"address": "203.0.113.10"}):
-            dns, _ = api.network_domain_identity("203.0.113.10", ["203.0.113.10"], set())
+        with patch.object(api, "network_dns_records") as records, patch.object(api, "network_rdap_identity", return_value={"address": "203.0.113.10", "hoster": "Unknown"}):
+            dns, edge, _ = api.network_domain_identity("203.0.113.10", ["203.0.113.10"], set())
         records.assert_not_called()
         self.assertEqual(dns["provider"], "DNS не используется")
+        self.assertEqual(edge["provider"], "Unknown")
 
     def test_relay_endpoint_accepts_ip_without_relaxing_cdn_domain(self):
         with tempfile.TemporaryDirectory() as root:
