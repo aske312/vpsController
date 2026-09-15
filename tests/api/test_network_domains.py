@@ -115,7 +115,7 @@ class NetworkDomainsTests(unittest.TestCase):
     def test_protected_channel_mode_requires_matching_endpoint_and_is_exposed_to_channel_settings(self):
         with tempfile.TemporaryDirectory() as root:
             data_dir = Path(root)
-            with patch.object(api, "DATA_DIR", data_dir), patch.object(api, "NETWORK_ENDPOINTS_FILE", data_dir / "network-endpoints.json"), patch.object(api, "PROTECTED_CHANNELS_FILE", data_dir / "protected-channels.json"):
+            with patch.object(api, "DATA_DIR", data_dir), patch.object(api, "NETWORK_ENDPOINTS_FILE", data_dir / "network-endpoints.json"), patch.object(api, "PROTECTED_CHANNELS_FILE", data_dir / "protected-channels.json"), patch.object(api, "network_endpoint_check", return_value={"ready": True}):
                 api.write_network_endpoint_settings({"cdn_domain": "", "tls_relay_domain": "", "udp_relay_domain": "udp.example.com"})
                 api.save_channel_mode("wg", "udp_relay")
                 self.assertEqual(api.channel_mode_for("wg"), "udp_relay")
