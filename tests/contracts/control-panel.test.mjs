@@ -17,7 +17,7 @@ test("интерфейс относится к 312.net, публичные ме�
   assert.match(JSON.parse(packageJson).version, /^\d+\.\d+\.\d+$/);
 });
 
-test("MIT license, privacy notice and connection guide are included and exposed in RU and EN", async () => {
+test("MIT license, privacy notice and connection guide are included in Russian", async () => {
   const [privacy, terms, legalUi, guide, guideUi, page] = await Promise.all([
     read("docs/PRIVACY_POLICY.md"),
     read("docs/TERMS_OF_USE.md"),
@@ -49,9 +49,10 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(guide, /## OpenVPN \(OVPN\)/);
   assert.match(guide, /## IKEv2 \(IKE\)/);
   assert.match(guide, /wireguard\.com\/install/);
-  assert.match(guideUi, /Connect with the selected protocol/);
+  assert.match(guideUi, /Подключение по выбранному протоколу/);
+  assert.doesNotMatch(guideUi, /guideLanguage|setLanguage|Connect with the selected protocol/);
   assert.match(page, /Одно подключение соответствует одному устройству и отдельному ключу/);
-  assert.match(guideUi, /Compatible apps/);
+  assert.match(guideUi, /Подходящие приложения/);
   assert.match(guideUi, /installedProtocols/);
   assert.doesNotMatch(guideUi, /PROTOCOL INSTRUCTIONS/);
   assert.match(guideUi, /amnezia\.org\/downloads/);

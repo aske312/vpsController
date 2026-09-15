@@ -22,10 +22,13 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(endpoint, />ROUTES<\/span>/);
   assert.doesNotMatch(endpoint, /networkRoutesLauncher/);
   assert.match(css, /networkAddRouteButton/);
+  assert.match(css, /networkRouteStatus\.ready/);
   assert.match(page, /expandedDomains/);
   assert.match(page, /networkRouteDetailRow/);
   assert.match(page, /networkRouteCascade/);
   assert.match(page, /NetworkRouteTags/);
+  assert.match(page, /NetworkRouteStatus/);
+  assert.match(page, /routeStatusFor/);
   assert.match(page, /networkStateStrip/);
   assert.match(page, /SERVER IPv4/);
   assert.match(page, /SERVER IPv6/);

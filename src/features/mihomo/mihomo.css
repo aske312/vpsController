@@ -1022,6 +1022,8 @@
 .mihomoProfileDialog.is-step-2 .mihomoPresetPicker,.mihomoProfileDialog.is-step-2 .mihomoConnectionBuilder { display:none; }
 .mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-3 .mihomoProfileProtection,.mihomoProfileDialog.is-step-3 .mihomoProfileRules { display:none; }
 .mihomoProfileDialog.is-step-3 .mihomoPresetPicker,.mihomoProfileDialog.is-step-3 .mihomoConnectionBuilder { display:grid; }
+.mihomoProfileDialog.is-step-4 .mihomoProfileName,.mihomoProfileDialog.is-step-4 .mihomoProfileStrategy,.mihomoProfileDialog.is-step-4 .mihomoProfileRules:not(.mihomoProfileProtection),.mihomoProfileDialog.is-step-4 .mihomoPresetPicker,.mihomoProfileDialog.is-step-4 .mihomoConnectionBuilder,.mihomoProfileDialog.is-step-4 .mihomoProfileTechnicalNote { display:none; }
+.mihomoProfileDialog.is-step-4 .mihomoProfileProtection { display:grid; }
 .mihomoProfileDialog .mihomoProfileStrategy > div { grid-template-columns:repeat(4,minmax(180px,1fr)); }
 .mihomoProfileDialog .mihomoProfileStrategy > div { display:flex; flex-wrap:wrap; }
 .mihomoProfileDialog .mihomoProfileStrategy button { width:190px; flex:0 1 190px; }

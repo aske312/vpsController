@@ -605,6 +605,21 @@
 [data-network-page] .networkRouteTag.relay { color: var(--network-amber); border-color: rgba(239, 182, 95, .34); background: rgba(239, 182, 95, .08); }
 [data-network-page] .networkRouteTag.direct { color: var(--network-muted); }
 [data-network-page] .networkRouteTag.unknown { color: var(--network-amber); }
+[data-network-page] .networkRouteStatus {
+  display: inline-flex;
+  align-items: center;
+  margin: 5px 0 0;
+  padding: 3px 7px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  line-height: 1;
+}
+[data-network-page] .networkRouteStatus.ready { color: var(--network-green); background: rgba(67, 171, 139, .1); }
+[data-network-page] .networkRouteStatus.warning { color: var(--network-amber); background: rgba(239, 182, 95, .1); }
+[data-network-page] .networkRouteStatus.unresolved { color: var(--network-red, #f17878); background: rgba(241, 120, 120, .1); }
 
 /* CAPABILITIES. */
 
@@ -1103,6 +1118,11 @@
   color: var(--network-muted);
   font: 700 8px var(--font-mono), monospace;
 }
+[data-network-page] .networkKnownRoutes { display:grid; gap:6px; margin-top:10px; padding:9px 10px; border:1px solid var(--network-line); border-radius:9px; background:rgba(4,11,18,.45); }
+[data-network-page] .networkKnownRoutes > span { color:var(--network-muted); font:700 9px/1.2 var(--font-mono),monospace; letter-spacing:.08em; text-transform:uppercase; }
+[data-network-page] .networkKnownRoutes > div { display:flex; flex-wrap:wrap; gap:5px; }
+[data-network-page] .networkKnownRoutes code { padding:4px 6px; border:1px solid rgba(106,221,186,.24); border-radius:6px; color:var(--network-green); font-size:10px; }
+[data-network-page] .networkKnownRoutes small { color:var(--network-dim); font-size:9px; }
 
 [data-network-page] .networkEndpointCard.ready .networkEndpointState { color: var(--network-green); background: rgba(67, 171, 139, .1); }
 

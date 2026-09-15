@@ -11,6 +11,7 @@ export function NetworkEndpoints({
   request,
   draft,
   initialChecks,
+  knownCdnDomains = [],
   busy,
   dirty,
   onChange,
@@ -19,6 +20,7 @@ export function NetworkEndpoints({
   request: NetworkRequest;
   draft: NetworkEndpointSettings;
   initialChecks?: Partial<Record<keyof NetworkEndpointSettings, NetworkEndpointCheck>>;
+  knownCdnDomains?: string[];
   busy: boolean;
   dirty: boolean;
   onChange: (key: keyof NetworkEndpointSettings, value: string) => void;
@@ -117,6 +119,7 @@ export function NetworkEndpoints({
                 <p>
                   Адреса попадут в новые конфигурации клиентов после сохранения.
                 </p>
+                {knownCdnDomains.length > 0 && <div className="networkKnownRoutes"><span>Обнаруженные CDN адреса</span><div>{knownCdnDomains.map((domain) => <code key={domain}>{domain}</code>)}</div><small>Активным общим адресом для новых конфигураций остаётся значение в поле CDN / ECH.</small></div>}
               </div>
               <button
                 type="button"

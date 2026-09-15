@@ -307,11 +307,6 @@
 
 .connectionGuide > footer a { color: #66dfba; text-decoration: none; font-weight: 700; }
 
-.connectionGuide .guideLanguage { display: flex; gap: 6px; }
-
-.connectionGuide .guideLanguage button { min-width: 34px; height: 28px; border: 1px solid rgba(90,116,143,.20); border-radius: 8px; background: rgba(7,15,23,.7); color:#8ea3b1; font:700 9px var(--font-mono), monospace; }
-
-.connectionGuide .guideLanguage button.active { border-color: rgba(81,200,162,.28); background: rgba(24,87,70,.22); color:#6ee0bc; }
 
 .connectionDialog.addClient { width: min(720px, calc(100vw - 32px)); border-color: rgba(90,116,143,.30); border-radius: 20px; background: linear-gradient(180deg, #09131c, #071019); box-shadow: 0 28px 90px rgba(0,0,0,.55); }
 
@@ -1641,9 +1636,13 @@
 .generatedActions {
   grid-template-columns: minmax(130px, .42fr) minmax(200px, 1fr) !important;
 }
-.connectionProtocolPicker button > b .protocolIcon { width: 28px; height: 28px; }
+.connectionProtocolPicker button > b .protocolIcon { width: 32px; height: 32px; }
 
 .connectionGuideProtocols { display: grid; gap: 8px; margin-top: 18px; }
+.connectionGuideSelect { display: grid; gap: 6px; }
+.connectionGuideSelect span { color: #8196a5; font: 700 9px var(--font-mono), monospace; letter-spacing: .08em; text-transform: uppercase; }
+.connectionGuideSelect select { min-height: 38px; padding: 0 11px; border: 1px solid rgba(92,117,141,.24); border-radius: 9px; background: #09131c; color: #e5eef4; }
+.connectionGuideProtocols > .connectionGuideProtocol:not(.is-open) { display: none; }
 .connectionGuideProtocol { overflow: hidden; border: 1px solid rgba(91, 116, 141, .16); border-radius: 12px; background: rgba(6, 15, 22, .42); }
 .connectionGuideProtocol.is-open { border-color: rgba(101, 223, 186, .28); background: rgba(8, 23, 27, .62); }
 .connectionGuideProtocolHead { display: grid; grid-template-columns: 38px minmax(0, 1fr) 24px; align-items: center; width: 100%; gap: 11px; padding: 11px 13px; border: 0; background: transparent; color: #cbd9df; text-align: left; cursor: pointer; }
@@ -1652,7 +1651,7 @@
 .connectionGuideProtocolHead small { color: #718994; font: 8px var(--font-mono), monospace; }
 .connectionGuideProtocolHead > i { color: #72e3c0; font-size: 18px; font-style: normal; text-align: center; }
 .connectionGuideProtocolIcon { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 0; background: transparent; }
-.connectionGuideProtocolIcon img { width: 32px; height: 32px; object-fit: contain; }
+.connectionGuideProtocolIcon img { width: 36px; height: 36px; object-fit: contain; }
 .connectionGuideProtocolBody { padding: 0 15px 15px; border-top: 1px solid rgba(91, 116, 141, .14); }
 .connectionGuideLead { margin: 13px 0; color: #b7c7ce; font-size: 10px; line-height: 1.55; }
 .connectionGuideColumns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(220px, .85fr); gap: 18px; }

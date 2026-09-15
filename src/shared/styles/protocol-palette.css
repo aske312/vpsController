@@ -15,10 +15,10 @@
 .mihomoConnectionCard>header>span[class*="protocol-"],.mihomoConnectionCard>summary>span[class*="protocol-"]{
  color:var(--protocol-color);border-color:transparent;background:transparent;box-shadow:none
 }
-.protocolIcon { display:block; width:1.75em; height:1.75em; object-fit:contain; flex:0 0 auto; }
-.overviewProtocolMark .protocolIcon { width:26px; height:26px; }
-.connectionIdentity .protocolIcon { width:30px; height:30px; }
-.mihomoModuleCode .protocolIcon { width:32px; height:32px; }
-.mihomoProfileProtocolStats .protocolIcon,.mihomoConnectionCard .protocolIcon { width:26px; height:26px; }
-.tunnelModuleRail .protocolIcon { width:28px; height:28px; }
-.tunnelHeroIcon .protocolIcon { width:38px; height:38px; }
+.protocolIcon { display:block; width:1.9em; height:1.9em; object-fit:contain; flex:0 0 auto; }
+.overviewProtocolMark .protocolIcon { width:30px; height:30px; }
+.connectionIdentity .protocolIcon { width:34px; height:34px; }
+.mihomoModuleCode .protocolIcon { width:36px; height:36px; }
+.mihomoProfileProtocolStats .protocolIcon,.mihomoConnectionCard .protocolIcon { width:30px; height:30px; }
+.tunnelModuleRail .protocolIcon { width:32px; height:32px; }
+.tunnelHeroIcon .protocolIcon { width:42px; height:42px; }

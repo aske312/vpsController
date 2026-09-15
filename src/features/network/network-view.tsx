@@ -6,6 +6,7 @@ import type {
   DnsSettings,
   DnsStatus,
   NetworkCapabilityCheck,
+  NetworkEndpointCheck,
   NetworkEndpointSettings,
   NetworkStatus,
 } from "../../shared/types/control-plane";
@@ -366,6 +367,21 @@ function NetworkRouteTags({
   );
 }
 
+function routeStatusFor(domain: NetworkStatus["domains"][number]): NetworkEndpointCheck["status"] | null {
+  const role = domain.role.toLowerCase();
+  const isCdn = role.includes("cdn");
+  const isTls = role.includes("tls");
+  if (!isCdn && !isTls) return null;
+  if (!domain.resolved.length || domain.route === "unresolved") return "unresolved";
+  if (isCdn) return domain.route === "proxy_or_cdn" ? "ready" : "warning";
+  return domain.route === "direct" ? "ready" : "warning";
+}
+
+function NetworkRouteStatus({ status }: { status: NetworkEndpointCheck["status"] | null }) {
+  if (!status) return null;
+  return <span className={`networkRouteStatus ${status}`}>{status === "ready" ? "READY" : status === "warning" ? "WARN" : "ERROR"}</span>;
+}
+
 function NetworkIdentityDetails({
   domain,
 }: {
@@ -513,6 +529,10 @@ function DiagnosticsV2({
       .toLowerCase()
       .includes(query.trim().toLowerCase()),
   );
+  const endpointCheckFor = (value: string) =>
+    Object.values(status.transport_endpoint_checks || {}).find(
+      (check) => check?.domain.toLowerCase() === value.toLowerCase(),
+    );
   const toggleDomain = (key: string) =>
     setExpandedDomains((current) => {
       const next = new Set(current);
@@ -576,10 +596,10 @@ function DiagnosticsV2({
               />
             </label>
             {endpointDraft && (
-              <NetworkEndpoints
-                key={status.detected_at}
-                request={request}
-                draft={endpointDraft}
+                <NetworkEndpoints
+                  request={request}
+                  draft={endpointDraft}
+                  knownCdnDomains={[...new Set(status.domains.filter((domain) => domain.role.toLowerCase().includes("cdn")).map((domain) => domain.value))]}
                 initialChecks={status.transport_endpoint_checks ? {
                   cdn_domain: status.transport_endpoint_checks.cdn,
                   tls_relay_domain: status.transport_endpoint_checks.tls_relay,
@@ -608,6 +628,8 @@ function DiagnosticsV2({
               {domains.map((domain) => {
                 const rowKey = `${domain.role}-${domain.value}`;
                 const expanded = expandedDomains.has(rowKey);
+                const endpointCheck = endpointCheckFor(domain.value);
+                const routeStatus = endpointCheck?.status || routeStatusFor(domain);
                 const rowClass =
                   domain.role === "SERVER"
                     ? "networkServerRouteRow"
@@ -646,6 +668,7 @@ function DiagnosticsV2({
                       </td>
                       <td>
                         <NetworkRouteTags domain={domain} />
+                        <NetworkRouteStatus status={routeStatus} />
                       </td>
                     </tr>
                     {expanded && (
