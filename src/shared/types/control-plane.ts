@@ -40,6 +40,7 @@ export type NetworkStatus = {
   listeners: Array<{ port: number; protocol: string; process: string }>;
   resolvers: string[];
   transport_endpoints: NetworkEndpointSettings;
+  transport_endpoint_checks?: Partial<Record<NetworkEndpointCheck["kind"], NetworkEndpointCheck>>;
   capabilities?: { uplink?: string; checks: NetworkCapabilityCheck[] };
 };
 export type MihomoDnsField = { key: string; label: string; type: "select" | "boolean" | "textarea" | "text"; default: string | number | boolean; options?: Array<string | { value: string; label: string }>; help?: string };

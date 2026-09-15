@@ -146,11 +146,11 @@
 
 .overviewChannelList > div { display:grid; grid-template-columns:38px minmax(0,1fr) auto; align-items:center; gap:8px; }
 
-.overviewProtocolMark { box-sizing:border-box; width:36px; min-width:36px; height:29px; padding:0 3px; display:grid; place-items:center; overflow:hidden; border-radius:8px; font:750 7.5px/1 var(--font-mono); letter-spacing:-.025em; white-space:nowrap; }
+.overviewProtocolMark { box-sizing:border-box; width:36px; min-width:36px; height:29px; padding:0; display:grid; place-items:center; overflow:hidden; border-radius:0; font:750 7.5px/1 var(--font-mono); letter-spacing:-.025em; white-space:nowrap; }
 
-.overviewProtocolMark.violet { color:#c6b7ff; border:1px solid rgba(162,123,255,.28); background:rgba(162,123,255,.10); }
+.overviewProtocolMark.violet { color:#c6b7ff; border:0; background:transparent; }
 
-.overviewProtocolMark.cyan { color:#8beaf1; border:1px solid rgba(86,217,233,.25); background:rgba(86,217,233,.08); }
+.overviewProtocolMark.cyan { color:#8beaf1; border:0; background:transparent; }
 
 .overviewChannelList em,
 .overviewDirectList em { font:750 7px/1 var(--font-mono); font-style:normal; }

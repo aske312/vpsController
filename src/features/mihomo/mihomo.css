@@ -430,7 +430,7 @@
 
 .mihomoModuleCatalog > div.is-installed { background: linear-gradient(90deg, rgba(16, 65, 55, .22), transparent 58%); }
 
-.mihomoModuleCode { box-sizing:border-box; width:46px; min-width:46px; height:40px; padding:0 4px; display:grid; place-items:center; overflow:hidden; border:1px solid rgba(111,93,213,.26); border-radius:10px; background:rgba(43,33,101,.18); color:#c4b9ff; font:800 8px/1 var(--font-mono); letter-spacing:-.025em; white-space:nowrap; }
+.mihomoModuleCode { box-sizing:border-box; width:46px; min-width:46px; height:40px; padding:0; display:grid; place-items:center; overflow:hidden; border:0; border-radius:0; background:transparent; color:#c4b9ff; font:800 8px/1 var(--font-mono); letter-spacing:-.025em; white-space:nowrap; }
 
 .mihomoModuleCatalog p { min-width: 0; margin: 0; }
 

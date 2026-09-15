@@ -47,6 +47,7 @@ APP_ROOT = Path("/opt/vps-control")
 MODULE_ROOT = APP_ROOT / "protocol-images" / "mihomo"
 SUBMODULE_ROOT = MODULE_ROOT / "modules"
 DATA_ROOT = Path("/var/lib/vps-control/mihomo")
+NETWORK_ENDPOINTS_FILE = Path("/var/lib/vps-control/network-endpoints.json")
 CONFIG_ROOT = Path("/etc/vps-control/mihomo")
 PROFILE_FILE = DATA_ROOT / "profiles.json"
 STATE_FILE = DATA_ROOT / "state.json"
@@ -60,6 +61,17 @@ CORE_BIN = RUNTIME_CORE_BIN if RUNTIME_CORE_BIN.is_file() else BUNDLED_CORE_BIN
 CORE_HOME = DATA_ROOT / "core-home"
 MIHOMO_PROXY_GROUP = "312.net"
 SERVER_CITY = os.getenv("SERVER_CITY", "Unknown")
+# SNI values for Mihomo-only REALITY exports. These are high-traffic HTTPS
+# domains normally reachable from Russian networks; the server accepts all of
+# them while each exported profile receives one random value.
+MIHOMO_REALITY_SNI_POOL = (
+    "ya.ru",
+    "yandex.ru",
+    "vk.com",
+    "mail.ru",
+    "rutube.ru",
+    "ozon.ru",
+)
 ACTION_FILE = DATA_ROOT / "action.json"
 REALITY_XRAY_BIN = Path("/usr/local/lib/vps-control-mihomo-reality/xray")
 REALITY_API_SERVER = "127.0.0.1:10086"
@@ -1359,6 +1371,15 @@ def dns_settings() -> dict[str, Any]:
 def routing_settings() -> dict[str, Any]:
     stored = load_json(ROUTING_SETTINGS_FILE, {})
     stored = stored if isinstance(stored, dict) else {}
+    # The former default was 180 seconds. Migrate only an untouched legacy
+    # settings file; an explicit user value remains unchanged once the new
+    # health-check fields have been saved.
+    if stored.get("interval") == 180 and not any(key in stored for key in ("health_timeout", "max_failed_times", "tolerance")):
+        stored = {**stored, "interval": 30}
+    # These values used to be edited in Mihomo. Network ROUTES is now the
+    # single source of truth; discard legacy copies from the policy response.
+    stored.pop("preset_cdn_domain", None)
+    stored.pop("preset_tls_domain", None)
     return {**routing_defaults(), **stored}
 
 
@@ -1621,6 +1642,20 @@ def direct_tls_domain_ready(domain: str) -> bool:
         except ValueError:
             expected = {row[4][0] for row in socket.getaddrinfo(endpoint, 443, type=socket.SOCK_STREAM)}
         return bool(target & expected)
+    except socket.gaierror:
+        return False
+
+
+def mihomo_route_endpoint_ready(kind: str, domain: str) -> bool:
+    """Accept only an address confirmed by the shared Network ROUTES store."""
+    key = {"cdn": "cdn_domain", "tls": "tls_relay_domain", "udp": "udp_relay_domain"}.get(kind)
+    if not key or not domain:
+        return False
+    stored = load_json(NETWORK_ENDPOINTS_FILE, {})
+    if not isinstance(stored, dict) or str(stored.get(key, "")).strip().lower() != domain.strip().lower():
+        return False
+    try:
+        return bool(socket.getaddrinfo(domain, 443, type=socket.SOCK_STREAM))
     except socket.gaierror:
         return False
 
@@ -2387,11 +2422,16 @@ def reality_connection_settings() -> dict[str, Any]:
     except (TypeError, KeyError, IndexError):
         stream = {}
     transport = str(stream.get("network", env.get("TRANSPORT", "xhttp")))
+    configured_names = [str(value).strip() for value in stream.get("realitySettings", {}).get("serverNames", []) if str(value).strip()]
+    available_names = [name for name in MIHOMO_REALITY_SNI_POOL if name in configured_names]
+    # Do not emit a random SNI until the live Xray config advertises the pool;
+    # this keeps existing subscriptions valid during a staged update.
+    selected_servername = secrets.choice(available_names) if len(available_names) >= 5 else env.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0]
     result: dict[str, Any] = {
         "port": int(env.get("PORT", module_settings("transport-reality")["port"])),
         "public_key": env.get("PUBLIC_KEY", ""),
         "short_id": env.get("SHORT_ID", ""),
-        "servername": env.get("TARGET", "www.intel.com:443").rsplit(":", 1)[0],
+        "servername": selected_servername,
         "transport": transport,
     }
     if transport == "xhttp":
@@ -2482,6 +2522,10 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
         raise HTTPException(status_code=422, detail="Unsupported CDN XHTTP mode")
     if cdn_enabled and not re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", cdn_domain):
         raise HTTPException(status_code=422, detail="For CDN specify a valid hostname")
+    if cdn_enabled and not mihomo_route_endpoint_ready("cdn", cdn_domain):
+        raise HTTPException(status_code=409, detail="CDN-адрес не подтверждён в разделе «Сеть»")
+    if tls_enabled and not mihomo_route_endpoint_ready("tls", tls_domain):
+        raise HTTPException(status_code=409, detail="TLS-адрес не подтверждён в разделе «Сеть»")
     result.update({"route_mode": route_mode, "port": port, "target": target, "transport": transport, "transport_path": path, "xhttp_mode": mode, "xpadding": padding, "xmux_concurrency": concurrency, "tls_enabled": tls_enabled, "tls_domain": tls_domain, "tls_transport": tls_transport, "tls_xhttp_mode": tls_xhttp_mode, "cdn_enabled": cdn_enabled, "cdn_domain": cdn_domain, "cdn_transport": cdn_transport, "cdn_xhttp_mode": cdn_xhttp_mode})
     return result
 
@@ -2505,7 +2549,8 @@ def vless_stream(settings: dict[str, Any], private_key: str, short_id: str) -> d
     else:
         stream["rawSettings"] = {"header": {"type": "none"}}
     host = str(settings["target"]).rsplit(":", 1)[0]
-    stream["realitySettings"] = {"show": False, "target": settings["target"], "xver": 0, "serverNames": [host], "privateKey": private_key, "shortIds": [short_id]}
+    server_names = list(dict.fromkeys([host, *MIHOMO_REALITY_SNI_POOL]))
+    stream["realitySettings"] = {"show": False, "target": settings["target"], "xver": 0, "serverNames": server_names, "privateKey": private_key, "shortIds": [short_id]}
     return stream
 
 
@@ -3152,10 +3197,11 @@ def ensure_vless_panel_route(config: dict[str, Any]) -> None:
     rules[:] = [rule, *(item for item in rules if not isinstance(item, dict) or item.get("outboundTag") != "panel-local")]
 
 def device_routing(profile: dict[str, Any], device_id: str) -> dict[str, Any]:
-    """An explicit device routing object takes precedence over legacy routing."""
+    """Profile routing is the base; explicit device values override it."""
     device = next((entry for entry in profile.get("devices", []) if str(entry.get("id")) == device_id), {})
     values = device.get("routing")
-    return values if isinstance(values, dict) else profile.get("routing", {})
+    base = profile.get("routing", {}) if isinstance(profile.get("routing"), dict) else {}
+    return {**base, **values} if isinstance(values, dict) else base
 
 
 def reconcile_profile_encryption(profile: dict[str, Any]) -> None:
@@ -3992,8 +4038,13 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     if group_type in ("fallback", "url-test"):
         lines += [
             f"    url: {q(routing.get('test_url', 'https://www.gstatic.com/generate_204'))}",
-            f"    interval: {int(routing.get('interval', 180))}",
+            f"    interval: {int(routing.get('interval', 30))}",
+            "    lazy: false",
+            f"    timeout: {int(routing.get('health_timeout', 3000))}",
+            f"    max-failed-times: {int(routing.get('max_failed_times', 2))}",
         ]
+        if group_type == "url-test":
+            lines.append(f"    tolerance: {int(routing.get('tolerance', 50))}")
     lines.append("rules:")
     for rule in profile_rules(routing):
         lines.append(f"  - {q(rule.replace(',GATE.312', ',' + MIHOMO_PROXY_GROUP))}")

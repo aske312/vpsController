@@ -1722,10 +1722,34 @@ def network_capabilities(ipv6: dict[str, bool | str] | None = None) -> dict:
     return {"uplink": uplink, "checks": checks}
 
 
+def network_endpoint_check(kind: str, domain: str) -> dict:
+    labels = {"cdn": "CDN", "tls_relay": "TLS", "udp_relay": "UDP"}
+    label = labels.get(kind, kind.upper())
+    probe = network_domain_probe(domain, f"{label} route")
+    if not probe["resolved"]:
+        status, ready, message = "unresolved", False, "Адрес не разрешается через DNS с VPS"
+    elif probe["matches_origin"] and kind in {"cdn", "udp_relay"}:
+        status, ready, message = "warning", False, "Адрес указывает на origin VPS, внешний маршрут не подтверждён"
+    elif kind == "tls_relay" and not probe["matches_origin"]:
+        status, ready, message = "warning", False, "TLS-адрес не указывает на origin VPS"
+    else:
+        status, ready, message = "ready", True, "Адрес подтверждён для этого маршрута"
+    return {**probe, "kind": kind, "status": status, "ready": ready, "message": message}
+
+
 def network_status() -> dict:
     ipv6 = network_ipv6_state()
     domain_items: list[dict] = []
     endpoint_settings = read_network_endpoint_settings()
+    endpoint_checks = {
+        kind: network_endpoint_check(kind, value)
+        for kind, value in (
+            ("cdn", endpoint_settings["cdn_domain"]),
+            ("tls_relay", endpoint_settings["tls_relay_domain"]),
+            ("udp_relay", endpoint_settings["udp_relay_domain"]),
+        )
+        if value
+    }
     candidates = [
         (PUBLIC_DOMAIN, "panel", "environment"),
         (VLESS_CDN_DOMAIN, "VLESS CDN", "environment"),
@@ -1828,6 +1852,7 @@ def network_status() -> dict:
         "listeners": listeners,
         "resolvers": resolvers,
         "transport_endpoints": endpoint_settings,
+        "transport_endpoint_checks": endpoint_checks,
         "capabilities": network_capabilities(ipv6),
     }
 
@@ -1866,12 +1891,7 @@ def check_network_endpoint(payload: NetworkEndpointCheck, _: None = Depends(requ
     valid = valid_hostname(domain) if payload.kind == "cdn" else valid_network_endpoint(domain)
     if not valid:
         raise HTTPException(status_code=422, detail="Укажите корректный домен или IP без схемы https:// и порта")
-    probe = network_domain_probe(domain, {"cdn": "CDN / ECH", "tls_relay": "TLS relay", "udp_relay": "UDP relay"}[payload.kind])
-    if not probe["resolved"]:
-        return {**probe, "kind": payload.kind, "status": "unresolved", "ready": False, "message": "Домен не разрешается через DNS с VPS панели"}
-    if probe["matches_origin"]:
-        return {**probe, "kind": payload.kind, "status": "warning", "ready": True, "message": "Домен уже указывает на VPS панели; соединение возможно, но отдельный edge/relay не скрывает origin"}
-    return {**probe, "kind": payload.kind, "status": "ready", "ready": True, "message": "DNS отвечает, домен не указывает на VPS панели"}
+    return network_endpoint_check(payload.kind, domain)
 
 
 @app.get("/api/security")

@@ -132,7 +132,7 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
         elif strategy == "url-test":
             outbounds.append({"type": "urltest", "tag": proxy_tag, "outbounds": tags,
                               "url": routing.get("test_url", "https://www.gstatic.com/generate_204"),
-                              "interval": f"{int(routing.get('interval', 180))}s"})
+                              "interval": f"{int(routing.get('interval', 30))}s"})
         else:
             raise UnsupportedClientConfig(f"Стратегия {strategy} не поддерживается стандартным sing-box")
     route_rules, rule_sets = singbox_rules(rules, proxy_tag)

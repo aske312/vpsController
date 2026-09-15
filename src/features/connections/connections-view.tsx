@@ -76,6 +76,6 @@ export function ConnectionsView({ installedProtocols, clientStateFilter, setClie
             }) : <div className="connectionsEmpty"><strong>Подключений не найдено</strong><span>Измените фильтры или создайте новое подключение.</span></div>}
           </div>
         </article>
-        <ConnectionGuide />
+        <ConnectionGuide installedProtocols={installedProtocols} />
       </section>;
 }

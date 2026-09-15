@@ -577,8 +577,14 @@ function DiagnosticsV2({
             </label>
             {endpointDraft && (
               <NetworkEndpoints
+                key={status.detected_at}
                 request={request}
                 draft={endpointDraft}
+                initialChecks={status.transport_endpoint_checks ? {
+                  cdn_domain: status.transport_endpoint_checks.cdn,
+                  tls_relay_domain: status.transport_endpoint_checks.tls_relay,
+                  udp_relay_domain: status.transport_endpoint_checks.udp_relay,
+                } : undefined}
                 busy={busy}
                 dirty={endpointDirty}
                 onChange={(key, value) =>

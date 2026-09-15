@@ -8,6 +8,7 @@ import { clientCapabilities, compatibleClientRouting, clientConnectionSupported 
 import { ProfileProtection } from "./profile-protection";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, submitProfileMutation, type ProfileMutation } from "./profile-operation";
+import type { NetworkStatus } from "../../shared/types/control-plane";
 
 import { useNotifier, useFailureNotifications } from "../../shared/notifications/notification-center";
 import { notificationFailure as refreshFailure, type NotificationFailure } from "../../shared/notifications/store";
@@ -51,6 +52,7 @@ export function MihomoPage({
 }) {
   const [view, setView] = useState<View>("overview");
   const [status, setStatus] = useState<Status | null>(null);
+  const [networkStatus, setNetworkStatus] = useState<NetworkStatus | null>(null);
   const [modules, setModules] = useState<Module[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [dnsPolicy, setDnsPolicy] = useState<PolicySettings | null>(null);
@@ -89,7 +91,10 @@ export function MihomoPage({
   const [profileDevices, setProfileDevices] = useState<ProfileDevice[]>([{ id: "profile-common", name: "Общие настройки профиля", scope: "common" }]);
   const [activeDeviceId, setActiveDeviceId] = useState("profile-common");
   const activeProfileDevice = profileDevices.find((device) => device.id === activeDeviceId);
-  const activeProfileRouting = activeProfileDevice?.routing || profileRouting;
+  const commonProfileRouting = profileDevices.find((device) => device.scope === "common")?.routing || profileRouting;
+  const activeProfileRouting = activeProfileDevice?.scope === "common"
+    ? commonProfileRouting
+    : { ...commonProfileRouting, ...(activeProfileDevice?.routing || {}) };
   const activeCapabilities = clientCapabilities(activeProfileRouting.client_config_format, activeProfileDevice?.scope === "common" ? undefined : activeProfileDevice?.os || "unknown", activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name);
   const commonDevice = activeProfileDevice?.scope === "common";
   const visibleProfileStrategies = profileStrategies.filter((strategy) => commonDevice || activeCapabilities.strategies.includes(strategy.value));
@@ -133,6 +138,7 @@ export function MihomoPage({
         let profileItems: Profile[] | undefined;
         const failures = await refreshWorkspaceSections(request, {
           status: { path: "/mihomo/status", accept: (value) => setStatus(value as Status) },
+          network: { path: "/network", accept: (value) => setNetworkStatus(value as NetworkStatus) },
           modules: { path: "/mihomo/modules", accept: (value) => setModules((value as { items: Module[] }).items || []) },
           profiles: { path: "/mihomo/profiles", accept: (value) => {
             profileItems = (value as { items: Profile[] }).items || [];
@@ -348,7 +354,7 @@ export function MihomoPage({
 
   function setProfileRoutingValue(key: string, value: string | boolean) {
     setProfileDevices((current) => current.map((device) => device.id === activeDeviceId
-      ? { ...device, routing: { ...(device.routing || profileRouting), [key]: value } }
+      ? { ...device, routing: { ...(device.scope === "common" ? (device.routing || profileRouting) : (device.routing || {})), [key]: value } }
       : device));
   }
 
@@ -569,7 +575,7 @@ export function MihomoPage({
         : { ...connection.settings },
     })));
     setProfileRouting({ ...(profile.routing || {}) });
-    const devices = (profile.devices?.length ? profile.devices : [{ id: "profile-common", name: "Общие настройки профиля", scope: "common" as const }]).map((device) => ({ ...device, routing: device.scope === "common" ? { ...(device.routing || profile.routing || {}) } : compatibleClientRouting(device.routing || profile.routing || {}, String(device.routing?.client_config_format || "mihomo"), device.os || "unknown", device.manual ? undefined : device.client_name) }));
+    const devices = (profile.devices?.length ? profile.devices : [{ id: "profile-common", name: "Общие настройки профиля", scope: "common" as const }]).map((device) => ({ ...device, routing: device.scope === "common" ? { ...(device.routing || profile.routing || {}) } : compatibleClientRouting(device.routing || {}, String(device.routing?.client_config_format || "mihomo"), device.os || "unknown", device.manual ? undefined : device.client_name) }));
     setProfileDevices(devices);
     setActiveDeviceId(profile.common_device_id || devices.find((device) => device.scope === "common")?.id || devices[0].id);
   }
@@ -584,8 +590,8 @@ export function MihomoPage({
       }
       settings.route_mode = vlessRoute;
       settings.cdn_enabled = vlessRoute === "cdn";
-      if (vlessRoute === "cdn") settings.cdn_domain = String(routingPolicy?.values.preset_cdn_domain || "").trim();
-      if (vlessRoute === "tls") settings.tls_domain = String(routingPolicy?.values.preset_tls_domain || "").trim();
+      if (vlessRoute === "cdn") settings.cdn_domain = networkStatus?.transport_endpoints.cdn_domain || "";
+      if (vlessRoute === "tls") settings.tls_domain = networkStatus?.transport_endpoints.tls_relay_domain || "";
     }
     setProfileConnections((current) => [...current, {
       id: `connection-${clientUuid()}`,
@@ -601,8 +607,8 @@ export function MihomoPage({
   }
 
   function applyProfilePreset(preset: ProfilePreset) {
-    const cdnDomain = String(routingPolicy?.values.preset_cdn_domain || "").trim();
-    const tlsDomain = String(routingPolicy?.values.preset_tls_domain || "").trim();
+    const cdnDomain = networkStatus?.transport_endpoint_checks?.cdn?.ready ? networkStatus.transport_endpoints.cdn_domain : "";
+    const tlsDomain = networkStatus?.transport_endpoint_checks?.tls_relay?.ready ? networkStatus.transport_endpoints.tls_relay_domain : "";
     const usedSingletons = new Set<string>();
     const connections: ProfileConnection[] = [];
     for (const definition of preset.components) {
@@ -1157,11 +1163,10 @@ export function MihomoPage({
               </div></article>
               <article><header><span>02</span><div><b>Проверка доступности</b><small>Health check защищённых каналов</small></div></header><div className="mihomoRoutingFields">
                 <label className="is-wide"><span>Адрес проверки</span><input value={String(routingDraft.test_url || "")} onChange={(event) => updateRoutingDraft("test_url", event.target.value)} /></label>
-                <label className="is-wide"><span>Интервал, секунд</span><input type="number" min={30} max={3600} value={Number(routingDraft.interval || 180)} onChange={(event) => updateRoutingDraft("interval", Number(event.target.value))} /></label>
-              </div></article>
-              <article className="is-wide"><header><span>03</span><div><b>Домены VLESS</b><small>Используются каналами прямого TLS и CDN внутри пресетов</small></div></header><div className="mihomoRoutingFields mihomoDomainFields">
-                <label><span>CDN-домен</span><input value={String(routingDraft.preset_cdn_domain || "")} placeholder="cdn.example.com" onChange={(event) => updateRoutingDraft("preset_cdn_domain", event.target.value)} /><small>{routingDraft.preset_cdn_domain ? "Готов для CDN-транспортов" : "Нужен для CDN-каналов"}</small></label>
-                <label><span>Прямой TLS-домен</span><input value={String(routingDraft.preset_tls_domain || "")} placeholder="tls.example.com" onChange={(event) => updateRoutingDraft("preset_tls_domain", event.target.value)} /><small>{routingDraft.preset_tls_domain ? "Готов для прямого TLS" : "Нужен для TLS-каналов"}</small></label>
+                <label className="is-wide"><span>Интервал, секунд</span><input type="number" min={10} max={3600} value={Number(routingDraft.interval || 30)} onChange={(event) => updateRoutingDraft("interval", Number(event.target.value))} /></label>
+                <label><span>Таймаут, мс</span><input type="number" min={1000} max={10000} value={Number(routingDraft.health_timeout || 3000)} onChange={(event) => updateRoutingDraft("health_timeout", Number(event.target.value))} /></label>
+                <label><span>Ошибок до переключения</span><input type="number" min={1} max={10} value={Number(routingDraft.max_failed_times || 2)} onChange={(event) => updateRoutingDraft("max_failed_times", Number(event.target.value))} /></label>
+                <label><span>Допуск смены, мс</span><input type="number" min={0} max={1000} value={Number(routingDraft.tolerance || 50)} onChange={(event) => updateRoutingDraft("tolerance", Number(event.target.value))} /></label>
               </div></article>
             </div>
           </section>
@@ -1267,8 +1272,8 @@ export function MihomoPage({
               })).map((preset) => {
                 const needsCdn = preset.components.some((item) => item.cdn);
                 const needsTls = preset.components.some((item) => item.tls);
-                const missingCdn = needsCdn && !String(routingPolicy?.values.preset_cdn_domain || "").trim();
-                const missingTls = needsTls && !String(routingPolicy?.values.preset_tls_domain || "").trim();
+                const missingCdn = needsCdn && !networkStatus?.transport_endpoint_checks?.cdn?.ready;
+                const missingTls = needsTls && !networkStatus?.transport_endpoint_checks?.tls_relay?.ready;
                 const missingModules = preset.components.filter((definition) => !modules.some((item) => item.id === definition.id && item.installed));
                 const unavailable = missingCdn || missingTls || missingModules.length > 0;
                 return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><i>+</i><span><b>{preset.name}</b><small>{missingModules.length ? `Сначала установите: ${missingModules.map((item) => item.id.replace("transport-", "")).join(", ")}` : missingCdn && missingTls ? "Укажите CDN- и TLS-домены в Настройках" : missingCdn ? "Укажите CDN-домен в Настройках" : missingTls ? "Укажите TLS-домен в Настройках" : "Создать готовый набор"}</small></span></button>;
@@ -1280,8 +1285,8 @@ export function MihomoPage({
                 {installedChannels.filter((module) => commonDevice || activeCapabilities.components.includes(module.id)).flatMap((module) => {
                   if (module.id === "transport-reality") return [
                     <button key="vless-direct" type="button" onClick={() => addProfileConnection(module, "direct")}>+ VLESS</button>,
-                    <button key="vless-tls" type="button" disabled={!String(routingPolicy?.values.preset_tls_domain || "").trim()} title={!String(routingPolicy?.values.preset_tls_domain || "").trim() ? "Сначала укажите прямой TLS-домен в Настройках" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
-                    <button key="vless-cdn" type="button" disabled={!String(routingPolicy?.values.preset_cdn_domain || "").trim()} title={!String(routingPolicy?.values.preset_cdn_domain || "").trim() ? "Сначала укажите CDN-домен в маршрутизации" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
+                    <button key="vless-tls" type="button" disabled={!networkStatus?.transport_endpoint_checks?.tls_relay?.ready} title={!networkStatus?.transport_endpoint_checks?.tls_relay?.ready ? "Сначала подтвердите TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
+                    <button key="vless-cdn" type="button" disabled={!networkStatus?.transport_endpoint_checks?.cdn?.ready} title={!networkStatus?.transport_endpoint_checks?.cdn?.ready ? "Сначала подтвердите CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
                   ];
                   const singletonUsed = profileConnections.some((item) => item.device_id === activeDeviceId && item.component === module.id);
                   return [<button key={module.id} type="button" disabled={singletonUsed} onClick={() => addProfileConnection(module)}>+ {module.name}</button>];

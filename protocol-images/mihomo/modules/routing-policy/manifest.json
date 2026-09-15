@@ -112,9 +112,36 @@
       "key": "interval",
       "label": "Интервал, сек.",
       "type": "number",
-      "default": 180,
-      "min": 30,
+      "default": 30,
+      "min": 10,
       "max": 3600
+    },
+    {
+      "key": "health_timeout",
+      "label": "Таймаут проверки, мс",
+      "type": "number",
+      "default": 3000,
+      "min": 1000,
+      "max": 10000,
+      "help": "Сколько ждать ответ от канала перед признанием проверки неуспешной."
+    },
+    {
+      "key": "max_failed_times",
+      "label": "Ошибок до переключения",
+      "type": "number",
+      "default": 2,
+      "min": 1,
+      "max": 10,
+      "help": "После этого числа последовательных ошибок Mihomo принудительно запускает проверку группы."
+    },
+    {
+      "key": "tolerance",
+      "label": "Допуск смены, мс",
+      "type": "number",
+      "default": 50,
+      "min": 0,
+      "max": 1000,
+      "help": "url-test не меняет канал из-за небольшой разницы задержки."
     },
     {
       "key": "preset_primary",
@@ -140,13 +167,6 @@
         {"value": "transport-shadowsocks", "label": "Shadowsocks"}
       ]
     },
-    {
-      "key": "preset_cdn_domain",
-      "label": "CDN-домен для быстрых профилей",
-      "type": "text",
-      "default": ""
-    },
-    { "key": "preset_tls_domain", "label": "Прямой TLS-домен для быстрых профилей", "type": "text", "default": "" },
     {
       "key": "block_ads",
       "label": "Блокировка рекламы",

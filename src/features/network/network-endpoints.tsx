@@ -10,6 +10,7 @@ import { checkNetworkEndpoint, type NetworkRequest } from "./network-api";
 export function NetworkEndpoints({
   request,
   draft,
+  initialChecks,
   busy,
   dirty,
   onChange,
@@ -17,6 +18,7 @@ export function NetworkEndpoints({
 }: {
   request: NetworkRequest;
   draft: NetworkEndpointSettings;
+  initialChecks?: Partial<Record<keyof NetworkEndpointSettings, NetworkEndpointCheck>>;
   busy: boolean;
   dirty: boolean;
   onChange: (key: keyof NetworkEndpointSettings, value: string) => void;
@@ -26,7 +28,7 @@ export function NetworkEndpoints({
   const [checking, setChecking] = useState<string | null>(null);
   const [checks, setChecks] = useState<
     Partial<Record<keyof NetworkEndpointSettings, NetworkEndpointCheck>>
-  >({});
+  >(initialChecks || {});
   const fields: Array<{
     key: keyof NetworkEndpointSettings;
     kind: NetworkEndpointCheck["kind"];
@@ -142,10 +144,10 @@ export function NetworkEndpoints({
                       <span className="networkEndpointState">
                         {result
                           ? result.status === "ready"
-                            ? "Готово"
+                            ? "READY"
                             : result.status === "warning"
-                              ? "Проверить"
-                              : "Ошибка"
+                              ? "WARN"
+                              : "ERROR"
                           : value
                             ? "Не проверен"
                             : "Не задан"}

@@ -18,7 +18,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /routing: dict\[str, Any\] = Field\(default_factory=dict\)/);
   assert.match(manager, /device\.get\("routing"\).*dict\(legacy_routing\)/s);
   assert.match(manager, /profile_routing = device_routing\(normalized, selected_device\)/);
-  assert.match(manager, /return values if isinstance\(values, dict\) else profile.get\("routing", \{\}\)/);
+  assert.match(manager, /return \{\*\*base, \*\*values\} if isinstance\(values, dict\) else base/);
   assert.match(manager, /DIRECT_GAME_PROCESSES/);
   assert.match(manager, /TUNNEL_GAME_PROCESSES/);
   assert.match(manager, /DEFAULT_TUNNEL_GAMES = tuple\(TUNNEL_GAME_PROCESSES\)/);
@@ -233,6 +233,11 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /class ProfileDeviceInput/);
   assert.match(manager, /device_id: str/);
   assert.match(manager, /render_profile\(item: dict\[str, Any\], device_id/);
+  assert.match(manager, /max-failed-times/);
+  assert.match(manager, /lazy: false/);
+  assert.match(manager, /tolerance/);
+  assert.match(manager, /MIHOMO_REALITY_SNI_POOL/);
+  assert.match(manager, /secrets\.choice\(available_names\)/);
   assert.match(manager, /network: \{'tcp' if transport == 'raw' else transport\}/);
   assert.match(manager, /grpc-service-name/);
   assert.match(manager, /call_module_script\(module_id, "install"\)[\s\S]*rollback failed/);
@@ -249,7 +254,8 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /\/api\/mihomo\/routing\/presets/);
   assert.match(manager, /"summary": \{"configured": len\(values\)/);
   assert.doesNotMatch(view, /downloadConfig\(createdProfile\)/);
-  assert.match(view, /preset_cdn_domain/);
+  assert.doesNotMatch(view, /preset_cdn_domain|preset_tls_domain/);
+  assert.match(view, /transport_endpoint_checks/);
   assert.doesNotMatch(view, /profileDialog === "new" && <section className="mihomoPresetPicker"/);
   assert.doesNotMatch(view, /const module = modules\.find/, "Next.js reserves the local variable name module");
 });
