@@ -304,17 +304,6 @@
   flex: 0 0 auto;
 }
 
-[data-network-page] .networkV2Actions .networkRoutesLauncher {
-  overflow: visible;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-[data-network-page] .networkV2Actions .networkRoutesLauncher > .networkSectionHeading { display: none; }
-[data-network-page] .networkV2Actions .networkRoutesLauncherBody { padding: 0; }
-[data-network-page] .networkV2Actions .networkRoutesLauncherBody > span { display: none; }
-
 [data-network-page] .networkSearch,
 [data-network-page] .networkProviderSearch {
   position: relative;
@@ -1008,6 +997,22 @@
   background: rgba(28, 103, 81, .38) !important;
 }
 
+[data-network-page] .networkAddRouteButton {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(106, 221, 186, .32);
+  border-radius: 8px;
+  background: rgba(28, 103, 81, .24);
+  color: var(--network-green);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+[data-network-page] .networkAddRouteButton:hover {
+  border-color: rgba(106, 221, 186, .55);
+  background: rgba(28, 103, 81, .38);
+}
+
 /* DNS matrix and endpoint/ECH dialogs. */
 
 [data-network-page] .networkTableWrap .networkDnsMatrix { table-layout: auto; }
@@ -1028,17 +1033,6 @@
 [data-network-page] .networkComponent strong { display: block; color: var(--network-text); font-size: 11px; }
 [data-network-page] .networkComponent small { display: block; margin-top: 3px; color: var(--network-muted); font-size: 9px; }
 
-[data-network-page] .networkRoutesLauncherBody {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 11px 16px;
-  color: var(--network-muted);
-  font-size: 10px;
-}
-
-[data-network-page] .networkEndpointStatus,
 [data-network-page] .networkEndpointState {
   padding: 4px 7px;
   border-radius: 6px;
@@ -1047,7 +1041,6 @@
   font: 700 8px var(--font-mono), monospace;
 }
 
-[data-network-page] .networkEndpointStatus.is-dirty,
 [data-network-page] .networkEndpointCard.ready .networkEndpointState { color: var(--network-green); background: rgba(67, 171, 139, .1); }
 
 [data-network-page] .networkModalBackdrop {
@@ -1230,7 +1223,6 @@
   [data-network-page] .networkEndpointGrid { grid-template-columns: 1fr; }
   [data-network-page] .networkResolverWorkspace { grid-template-columns: 1fr; padding: 10px; }
   [data-network-page] .networkDnsSuggestion,
-  [data-network-page] .networkRoutesLauncherBody,
   [data-network-page] .networkProviderTools { align-items: stretch; flex-direction: column; }
   [data-network-page] .networkSearch,
   [data-network-page] .networkProviderSearch { width: 100%; }

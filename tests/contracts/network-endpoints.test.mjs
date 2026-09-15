@@ -3,11 +3,13 @@ import test from "node:test";
 import { read, readApiSources } from "./support.mjs";
 
 test("network owns shared CDN and relay endpoints while protected channels keep protocol identities", async () => {
-  const [api, page, networkApi, types] = await Promise.all([
+  const [api, page, networkApi, types, endpoint, css] = await Promise.all([
     readApiSources(),
     read("src/features/network/network-view.tsx"),
     read("src/features/network/network-api.ts"),
     read("src/shared/types/control-plane.ts"),
+    read("src/features/network/network-endpoints.tsx"),
+    read("src/features/network/network.css"),
   ]);
   assert.match(api, /NetworkEndpointSettings/);
   assert.match(api, /@app\.put\("\/api\/network\/endpoints"\)/);
@@ -15,6 +17,11 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(api, /tls_relay_domain/);
   assert.match(api, /udp_relay_domain/);
   assert.match(page, /NetworkEndpoints/);
+  assert.match(endpoint, /networkAddRouteButton/);
+  assert.match(endpoint, /Настройка внешних адресов/);
+  assert.match(endpoint, />ROUTES<\/span>/);
+  assert.doesNotMatch(endpoint, /networkRoutesLauncher/);
+  assert.match(css, /networkAddRouteButton/);
   assert.match(page, /expandedDomains/);
   assert.match(page, /networkRouteDetailRow/);
   assert.match(page, /networkRouteCascade/);
