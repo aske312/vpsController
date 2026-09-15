@@ -580,6 +580,18 @@ export function MihomoPage({
     setActiveDeviceId(profile.common_device_id || devices.find((device) => device.scope === "common")?.id || devices[0].id);
   }
 
+  function confirmedNetworkRoute(kind: "cdn" | "tls" | "udp") {
+    const routes = networkStatus?.domains || [];
+    const route = routes.find((item) => {
+      const role = item.role.toLowerCase();
+      if (!item.resolved.length) return false;
+      if (kind === "cdn") return role.includes("cdn") && item.route === "proxy_or_cdn";
+      if (kind === "tls") return (role.includes("panel") || role.includes("tls")) && item.route === "direct";
+      return role.includes("udp") && item.route !== "unresolved";
+    });
+    return route?.value || "";
+  }
+
   function addProfileConnection(module: Module, vlessRoute: "direct" | "tls" | "cdn" = "direct") {
     const settings = Object.fromEntries((module.connection_settings || []).map((field) => [field.key, field.default]));
     if (module.id === "transport-reality") {
@@ -590,8 +602,8 @@ export function MihomoPage({
       }
       settings.route_mode = vlessRoute;
       settings.cdn_enabled = vlessRoute === "cdn";
-      if (vlessRoute === "cdn") settings.cdn_domain = networkStatus?.transport_endpoints.cdn_domain || "";
-      if (vlessRoute === "tls") settings.tls_domain = networkStatus?.transport_endpoints.tls_relay_domain || "";
+      if (vlessRoute === "cdn") settings.cdn_domain = confirmedNetworkRoute("cdn");
+      if (vlessRoute === "tls") settings.tls_domain = confirmedNetworkRoute("tls");
     }
     setProfileConnections((current) => [...current, {
       id: `connection-${clientUuid()}`,
@@ -607,8 +619,8 @@ export function MihomoPage({
   }
 
   function applyProfilePreset(preset: ProfilePreset) {
-    const cdnDomain = networkStatus?.transport_endpoint_checks?.cdn?.ready ? networkStatus.transport_endpoints.cdn_domain : "";
-    const tlsDomain = networkStatus?.transport_endpoint_checks?.tls_relay?.ready ? networkStatus.transport_endpoints.tls_relay_domain : "";
+    const cdnDomain = confirmedNetworkRoute("cdn");
+    const tlsDomain = confirmedNetworkRoute("tls");
     const usedSingletons = new Set<string>();
     const connections: ProfileConnection[] = [];
     for (const definition of preset.components) {
@@ -1272,8 +1284,8 @@ export function MihomoPage({
               })).map((preset) => {
                 const needsCdn = preset.components.some((item) => item.cdn);
                 const needsTls = preset.components.some((item) => item.tls);
-                const missingCdn = needsCdn && !networkStatus?.transport_endpoint_checks?.cdn?.ready;
-                const missingTls = needsTls && !networkStatus?.transport_endpoint_checks?.tls_relay?.ready;
+                const missingCdn = needsCdn && !confirmedNetworkRoute("cdn");
+                const missingTls = needsTls && !confirmedNetworkRoute("tls");
                 const missingModules = preset.components.filter((definition) => !modules.some((item) => item.id === definition.id && item.installed));
                 const unavailable = missingCdn || missingTls || missingModules.length > 0;
                 return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><i>+</i><span><b>{preset.name}</b><small>{missingModules.length ? `Сначала установите: ${missingModules.map((item) => item.id.replace("transport-", "")).join(", ")}` : missingCdn && missingTls ? "Укажите CDN- и TLS-домены в Настройках" : missingCdn ? "Укажите CDN-домен в Настройках" : missingTls ? "Укажите TLS-домен в Настройках" : "Создать готовый набор"}</small></span></button>;
@@ -1285,8 +1297,8 @@ export function MihomoPage({
                 {installedChannels.filter((module) => commonDevice || activeCapabilities.components.includes(module.id)).flatMap((module) => {
                   if (module.id === "transport-reality") return [
                     <button key="vless-direct" type="button" onClick={() => addProfileConnection(module, "direct")}>+ VLESS</button>,
-                    <button key="vless-tls" type="button" disabled={!networkStatus?.transport_endpoint_checks?.tls_relay?.ready} title={!networkStatus?.transport_endpoint_checks?.tls_relay?.ready ? "Сначала подтвердите TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
-                    <button key="vless-cdn" type="button" disabled={!networkStatus?.transport_endpoint_checks?.cdn?.ready} title={!networkStatus?.transport_endpoint_checks?.cdn?.ready ? "Сначала подтвердите CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
+                    <button key="vless-tls" type="button" disabled={!confirmedNetworkRoute("tls")} title={!confirmedNetworkRoute("tls") ? "Сначала подтвердите прямой TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
+                    <button key="vless-cdn" type="button" disabled={!confirmedNetworkRoute("cdn")} title={!confirmedNetworkRoute("cdn") ? "Сначала подтвердите CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
                   ];
                   const singletonUsed = profileConnections.some((item) => item.device_id === activeDeviceId && item.component === module.id);
                   return [<button key={module.id} type="button" disabled={singletonUsed} onClick={() => addProfileConnection(module)}>+ {module.name}</button>];

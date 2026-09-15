@@ -1648,6 +1648,11 @@ def direct_tls_domain_ready(domain: str) -> bool:
 
 def mihomo_route_endpoint_ready(kind: str, domain: str) -> bool:
     """Accept only an address confirmed by the shared Network ROUTES store."""
+    if kind == "tls":
+        # Direct VLESS TLS is validated against the VPS origin. Its hostname
+        # may be the public panel route and does not have to be the external
+        # TLS relay field used by other protocols.
+        return direct_tls_domain_ready(domain)
     key = {"cdn": "cdn_domain", "tls": "tls_relay_domain", "udp": "udp_relay_domain"}.get(kind)
     if not key or not domain:
         return False
