@@ -59,8 +59,25 @@ class NetworkDomainsTests(unittest.TestCase):
                 with patch.object(api, "network_status", return_value={"transport_endpoints": saved}):
                     response = api.update_network_endpoints(api.NetworkEndpointSettings(**saved), None)
                 self.assertEqual(response["transport_endpoints"], saved)
-                with self.assertRaises(api.HTTPException):
-                    api.update_network_endpoints(api.NetworkEndpointSettings(cdn_domain="not a domain"), None)
+            with self.assertRaises(api.HTTPException):
+                api.update_network_endpoints(api.NetworkEndpointSettings(cdn_domain="not a domain"), None)
+
+    def test_transport_endpoint_lists_keep_a_primary_address_and_migrate_old_settings(self):
+        with tempfile.TemporaryDirectory() as root:
+            data_dir = Path(root)
+            endpoint_file = data_dir / "network-endpoints.json"
+            with patch.object(api, "DATA_DIR", data_dir), patch.object(api, "NETWORK_ENDPOINTS_FILE", endpoint_file):
+                saved = api.write_network_endpoint_settings({
+                    "cdn_domain": "cdn-a.example.com",
+                    "cdn_domains": ["cdn-a.example.com", "cdn-b.example.com"],
+                    "tls_relay_domain": "",
+                    "tls_relay_domains": ["relay-a.example.com", "relay-b.example.com"],
+                    "udp_relay_domain": "",
+                    "udp_relay_domains": ["udp-a.example.com"],
+                })
+                self.assertEqual(saved["cdn_domain"], "cdn-a.example.com")
+                self.assertEqual(saved["cdn_domains"], ["cdn-a.example.com", "cdn-b.example.com"])
+                self.assertEqual(api.read_network_endpoint_settings()["tls_relay_domains"], ["relay-a.example.com", "relay-b.example.com"])
 
     def test_protected_channel_mode_requires_matching_endpoint_and_is_exposed_to_channel_settings(self):
         with tempfile.TemporaryDirectory() as root:

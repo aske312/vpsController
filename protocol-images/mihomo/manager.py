@@ -1657,7 +1657,16 @@ def mihomo_route_endpoint_ready(kind: str, domain: str) -> bool:
     if not key or not domain:
         return False
     stored = load_json(NETWORK_ENDPOINTS_FILE, {})
-    if not isinstance(stored, dict) or str(stored.get(key, "")).strip().lower() != domain.strip().lower():
+    if not isinstance(stored, dict):
+        return False
+    configured = stored.get(key, "")
+    configured_domains = stored.get({"cdn_domain": "cdn_domains", "tls_relay_domain": "tls_relay_domains", "udp_relay_domain": "udp_relay_domains"}.get(key, ""), [])
+    allowed = {str(configured).strip().lower()} if configured else set()
+    if isinstance(configured_domains, list):
+        allowed.update(str(value).strip().lower() for value in configured_domains if str(value).strip())
+    if kind == "cdn":
+        allowed.update(str(route.get("domain", "")).strip().lower() for route in cdn_security.read_routes() if route.get("cloudflare", True) and route.get("domain"))
+    if domain.strip().lower() not in allowed:
         return False
     try:
         return bool(socket.getaddrinfo(domain, 443, type=socket.SOCK_STREAM))

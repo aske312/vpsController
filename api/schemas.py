@@ -97,6 +97,9 @@ class NetworkEndpointSettings(BaseModel):
     cdn_domain: str = Field(default="", max_length=253)
     tls_relay_domain: str = Field(default="", max_length=253)
     udp_relay_domain: str = Field(default="", max_length=253)
+    cdn_domains: list[str] = Field(default_factory=list, max_length=32)
+    tls_relay_domains: list[str] = Field(default_factory=list, max_length=32)
+    udp_relay_domains: list[str] = Field(default_factory=list, max_length=32)
 
 
 class NetworkEndpointCheck(BaseModel):

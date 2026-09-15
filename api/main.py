@@ -369,7 +369,7 @@ CHANNEL_MODE_PROTOCOLS = {"wg", "awg", "shadowsocks", "hysteria2", "tuic", "troj
 CHANNEL_MODE_LABELS = {"direct": "Прямой маршрут", "tls_relay": "TLS relay", "udp_relay": "UDP relay"}
 
 
-def read_network_endpoint_settings() -> dict[str, str]:
+def read_network_endpoint_settings() -> dict[str, object]:
     defaults = {"cdn_domain": VLESS_CDN_DOMAIN.strip().lower(), "tls_relay_domain": "", "udp_relay_domain": ""}
     try:
         stored = json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8"))
@@ -377,11 +377,27 @@ def read_network_endpoint_settings() -> dict[str, str]:
         stored = {}
     if not isinstance(stored, dict):
         stored = {}
-    return {key: str(stored.get(key, default) or "").strip().lower() for key, default in defaults.items()}
+    result: dict[str, object] = {key: str(stored.get(key, default) or "").strip().lower() for key, default in defaults.items()}
+    for key, list_key in (("cdn_domain", "cdn_domains"), ("tls_relay_domain", "tls_relay_domains"), ("udp_relay_domain", "udp_relay_domains")):
+        raw = stored.get(list_key, [])
+        values = raw if isinstance(raw, list) else []
+        domains = list(dict.fromkeys(str(value or "").strip().lower() for value in values if str(value or "").strip()))
+        primary = str(result[key])
+        if primary and primary not in domains:
+            domains.insert(0, primary)
+        result[list_key] = domains[:32]
+    return result
 
 
-def write_network_endpoint_settings(settings: dict[str, str]) -> dict[str, str]:
+def write_network_endpoint_settings(settings: dict[str, object]) -> dict[str, object]:
     normalized = {key: str(settings.get(key, "") or "").strip().lower() for key in ("cdn_domain", "tls_relay_domain", "udp_relay_domain")}
+    for key, list_key in (("cdn_domain", "cdn_domains"), ("tls_relay_domain", "tls_relay_domains"), ("udp_relay_domain", "udp_relay_domains")):
+        raw = settings.get(list_key, [])
+        values = raw if isinstance(raw, list) else []
+        domains = list(dict.fromkeys(str(value or "").strip().lower() for value in values if str(value or "").strip()))
+        if normalized[key] and normalized[key] not in domains:
+            domains.insert(0, normalized[key])
+        normalized[list_key] = domains[:32]
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     temporary = NETWORK_ENDPOINTS_FILE.with_suffix(".tmp")
     temporary.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1739,21 +1755,20 @@ def network_status() -> dict:
     ipv6 = network_ipv6_state()
     domain_items: list[dict] = []
     endpoint_settings = read_network_endpoint_settings()
-    endpoint_checks = {
-        kind: network_endpoint_check(kind, value)
-        for kind, value in (
-            ("cdn", endpoint_settings["cdn_domain"]),
-            ("tls_relay", endpoint_settings["tls_relay_domain"]),
-            ("udp_relay", endpoint_settings["udp_relay_domain"]),
-        )
-        if value
-    }
+    endpoint_checks = {}
+    endpoint_checks_by_domain = {}
+    for kind, key, list_key in (("cdn", "cdn_domain", "cdn_domains"), ("tls_relay", "tls_relay_domain", "tls_relay_domains"), ("udp_relay", "udp_relay_domain", "udp_relay_domains")):
+        values = endpoint_settings[list_key] or ([endpoint_settings[key]] if endpoint_settings[key] else [])
+        for value in values:
+            check = network_endpoint_check(kind, str(value))
+            endpoint_checks_by_domain[f"{kind}:{value}"] = check
+            endpoint_checks.setdefault(kind, check)
     candidates = [
         (PUBLIC_DOMAIN, "panel", "environment"),
         (VLESS_CDN_DOMAIN, "VLESS CDN", "environment"),
-        (endpoint_settings["cdn_domain"], "CDN endpoint", "settings"),
-        (endpoint_settings["tls_relay_domain"], "TLS relay", "settings"),
-        (endpoint_settings["udp_relay_domain"], "UDP relay", "settings"),
+        *((value, "CDN endpoint", "settings") for value in endpoint_settings["cdn_domains"]),
+        *((value, "TLS relay", "settings") for value in endpoint_settings["tls_relay_domains"]),
+        *((value, "UDP relay", "settings") for value in endpoint_settings["udp_relay_domains"]),
     ]
     for route in cdn_security.read_routes():
         candidates.append((route.get("domain", ""), "VLESS CDN" if route.get("cloudflare", True) else "VLESS TLS", "gateway"))
@@ -1851,6 +1866,7 @@ def network_status() -> dict:
         "resolvers": resolvers,
         "transport_endpoints": endpoint_settings,
         "transport_endpoint_checks": endpoint_checks,
+        "transport_endpoint_checks_by_domain": endpoint_checks_by_domain,
         "capabilities": network_capabilities(ipv6),
     }
 
@@ -1862,7 +1878,16 @@ def get_network(_: None = Depends(require_token)) -> dict:
 
 @app.put("/api/network/endpoints")
 def update_network_endpoints(payload: NetworkEndpointSettings, _: None = Depends(require_token)) -> dict:
-    settings = {key: str(value or "").strip().lower() for key, value in payload.model_dump().items()}
+    raw = payload.model_dump()
+    settings: dict[str, object] = {key: str(raw.get(key, "") or "").strip().lower() for key in ("cdn_domain", "tls_relay_domain", "udp_relay_domain")}
+    for key, list_key in (("cdn_domain", "cdn_domains"), ("tls_relay_domain", "tls_relay_domains"), ("udp_relay_domain", "udp_relay_domains")):
+        raw_values = raw.get(list_key) or ([settings[key]] if settings[key] else [])
+        values = list(dict.fromkeys(str(value or "").strip().lower() for value in raw_values if str(value or "").strip()))
+        label = "CDN" if key == "cdn_domain" else "TLS relay" if key == "tls_relay_domain" else "UDP relay"
+        if not all((valid_hostname(value) if key == "cdn_domain" else valid_network_endpoint(value)) for value in values):
+            raise HTTPException(status_code=422, detail=f"Укажите корректные адреса для {label}")
+        settings[list_key] = values
+        settings[key] = values[0] if values else ""
     for label, value in (("CDN", settings["cdn_domain"]), ("TLS relay", settings["tls_relay_domain"]), ("UDP relay", settings["udp_relay_domain"])):
         valid = valid_hostname(value) if label == "CDN" else valid_network_endpoint(value)
         if value and not valid:

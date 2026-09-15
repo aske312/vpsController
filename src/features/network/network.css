@@ -1123,6 +1123,12 @@
 [data-network-page] .networkKnownRoutes > div { display:flex; flex-wrap:wrap; gap:5px; }
 [data-network-page] .networkKnownRoutes code { padding:4px 6px; border:1px solid rgba(106,221,186,.24); border-radius:6px; color:var(--network-green); font-size:10px; }
 [data-network-page] .networkKnownRoutes small { color:var(--network-dim); font-size:9px; }
+[data-network-page] .networkEndpointRouteList { display:grid; gap:6px; margin-top:10px; padding-top:10px; border-top:1px solid var(--network-line); }
+[data-network-page] .networkEndpointRouteList > span { color:var(--network-muted); font:700 9px/1.2 var(--font-mono),monospace; letter-spacing:.08em; text-transform:uppercase; }
+[data-network-page] .networkEndpointRouteList > div { display:flex; align-items:center; gap:6px; }
+[data-network-page] .networkEndpointRouteList code { flex:1; overflow:hidden; color:var(--network-text); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+[data-network-page] .networkEndpointRouteList button { border:0; background:transparent; color:var(--network-muted); cursor:pointer; font-size:10px; }
+[data-network-page] .networkEndpointRouteList > button { justify-self:start; padding:5px 8px; border:1px solid var(--network-line); border-radius:5px; background:var(--network-panel); color:var(--network-green); cursor:pointer; font-size:10px; }
 
 [data-network-page] .networkEndpointCard.ready .networkEndpointState { color: var(--network-green); background: rgba(67, 171, 139, .1); }
 
@@ -1214,6 +1220,7 @@
 [data-network-page] .networkEndpointCheck.ready { color: var(--network-green); }
 [data-network-page] .networkEndpointCheck.warning { color: var(--network-amber); }
 [data-network-page] .networkEndpointCheck.unresolved { color: var(--network-red); }
+[data-network-page] .networkEndpointDnsHint { color: var(--network-cyan) !important; }
 
 [data-network-page] .networkEndpointGuide {
   display: grid;

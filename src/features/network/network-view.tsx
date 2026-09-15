@@ -185,7 +185,7 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
       const settings = Object.fromEntries(
         Object.entries(endpointDraft).map(([key, value]) => [
           key,
-          value.trim(),
+          Array.isArray(value) ? value.map((item) => item.trim()) : String(value || "").trim(),
         ]),
       ) as NetworkEndpointSettings;
       const next = await saveNetworkEndpoints(request, settings);
@@ -530,8 +530,9 @@ function DiagnosticsV2({
       .includes(query.trim().toLowerCase()),
   );
   const endpointCheckFor = (value: string) =>
+    status.transport_endpoint_checks_by_domain?.[value] ||
     Object.values(status.transport_endpoint_checks || {}).find(
-      (check) => check?.domain.toLowerCase() === value.toLowerCase(),
+      (check) => (check?.domain || (check as NetworkEndpointCheck & { value?: string }).value)?.toLowerCase() === value.toLowerCase(),
     );
   const toggleDomain = (key: string) =>
     setExpandedDomains((current) => {
@@ -607,9 +608,17 @@ function DiagnosticsV2({
                 } : undefined}
                 busy={busy}
                 dirty={endpointDirty}
-                onChange={(key, value) =>
-                  setEndpointDraft({ ...endpointDraft, [key]: value })
-                }
+                onChange={(key, value) => {
+                  const primaryKey = key as "cdn_domain" | "tls_relay_domain" | "udp_relay_domain";
+                  const listKey = ({ cdn_domain: "cdn_domains", tls_relay_domain: "tls_relay_domains", udp_relay_domain: "udp_relay_domains" } as const)[primaryKey];
+                  const current = endpointDraft[listKey] || (endpointDraft[primaryKey] ? [endpointDraft[primaryKey]] : []);
+                  setEndpointDraft({ ...endpointDraft, [primaryKey]: value, [listKey]: [value, ...current.filter((item) => item !== endpointDraft[primaryKey] && item !== value)] });
+                }}
+                onRouteListChange={(key, values) => {
+                  const primaryKey = key as "cdn_domain" | "tls_relay_domain" | "udp_relay_domain";
+                  const listKey = ({ cdn_domain: "cdn_domains", tls_relay_domain: "tls_relay_domains", udp_relay_domain: "udp_relay_domains" } as const)[primaryKey];
+                  setEndpointDraft({ ...endpointDraft, [primaryKey]: values[0] || "", [listKey]: values });
+                }}
                 onSave={saveEndpoints}
               />
             )}

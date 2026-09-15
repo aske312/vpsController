@@ -16,6 +16,9 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(api, /channel_mode/);
   assert.match(api, /tls_relay_domain/);
   assert.match(api, /udp_relay_domain/);
+  assert.match(api, /cdn_domains/);
+  assert.match(api, /tls_relay_domains/);
+  assert.match(api, /udp_relay_domains/);
   assert.match(page, /NetworkEndpoints/);
   assert.match(endpoint, /networkAddRouteButton/);
   assert.match(endpoint, /Настройка внешних адресов/);
@@ -29,6 +32,8 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(page, /NetworkRouteTags/);
   assert.match(page, /NetworkRouteStatus/);
   assert.match(page, /routeStatusFor/);
+  assert.match(page, /transport_endpoint_checks_by_domain/);
+  assert.match(page, /check\?\.domain/);
   assert.match(page, /networkStateStrip/);
   assert.match(page, /SERVER IPv4/);
   assert.match(page, /SERVER IPv6/);

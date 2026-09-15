@@ -15,6 +15,7 @@ export function NetworkEndpoints({
   busy,
   dirty,
   onChange,
+  onRouteListChange,
   onSave,
 }: {
   request: NetworkRequest;
@@ -24,6 +25,7 @@ export function NetworkEndpoints({
   busy: boolean;
   dirty: boolean;
   onChange: (key: keyof NetworkEndpointSettings, value: string) => void;
+  onRouteListChange: (key: keyof NetworkEndpointSettings, values: string[]) => void;
   onSave: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -64,8 +66,13 @@ export function NetworkEndpoints({
       help: "Укажите домен или IP внешнего relay. Relay должен пересылать нужный UDP-порт.",
     },
   ];
+  const routeValues = (key: keyof NetworkEndpointSettings): string[] => {
+    const listKey = ({ cdn_domain: "cdn_domains", tls_relay_domain: "tls_relay_domains", udp_relay_domain: "udp_relay_domains" } as const)[key as "cdn_domain" | "tls_relay_domain" | "udp_relay_domain"];
+    const values = draft[listKey];
+    return values?.length ? values : (draft[key] ? [String(draft[key])] : []);
+  };
   async function check(field: (typeof fields)[number]) {
-    const domain = draft[field.key].trim();
+    const domain = String(draft[field.key] || "").trim();
     if (!domain) return;
     setChecking(field.key);
     try {
@@ -133,7 +140,8 @@ export function NetworkEndpoints({
             <div className="networkEndpointGrid">
               {fields.map((field) => {
                 const result = checks[field.key];
-                const value = draft[field.key].trim();
+                const value = String(draft[field.key] || "").trim();
+                const values = routeValues(field.key);
                 return (
                   <article
                     className={`networkEndpointCard ${result?.status || ""}`}
@@ -181,6 +189,7 @@ export function NetworkEndpoints({
                       </button>
                     </div>
                     <small>{field.help}</small>
+                    <small className="networkEndpointDnsHint">DNS: {field.kind === "cdn" ? "A/AAAA на origin VPS; для CDN включите proxy у DNS-провайдера." : field.kind === "tls_relay" ? "A/AAAA на внешний TLS relay; порт протокола должен быть проброшен на relay." : "A/AAAA на внешний UDP relay; нужный UDP-порт должен быть проброшен на relay."}</small>
                     {result && (
                       <em className={`networkEndpointCheck ${result.status}`}>
                         {result.message}
@@ -189,6 +198,11 @@ export function NetworkEndpoints({
                           : ""}
                       </em>
                     )}
+                    <div className="networkEndpointRouteList">
+                      <span>Адреса этого типа</span>
+                      {values.slice(1).map((route) => <div key={route}><code>{route}</code><button type="button" onClick={() => onRouteListChange(field.key, values.filter((item) => item !== route))}>Удалить</button></div>)}
+                      <button type="button" onClick={() => { const route = window.prompt("Введите домен или IP relay"); if (route?.trim() && !values.includes(route.trim())) onRouteListChange(field.key, [...values, route.trim()]); }}>Добавить адрес</button>
+                    </div>
                   </article>
                 );
               })}

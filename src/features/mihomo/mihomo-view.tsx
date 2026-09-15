@@ -592,6 +592,17 @@ export function MihomoPage({
     return route?.value || "";
   }
 
+  function confirmedNetworkRoutes(kind: "cdn" | "tls" | "udp") {
+    const routes = networkStatus?.domains || [];
+    return [...new Set(routes.filter((item) => {
+      const role = item.role.toLowerCase();
+      if (!item.resolved.length || item.route === "unresolved") return false;
+      if (kind === "cdn") return role.includes("cdn") && item.route === "proxy_or_cdn";
+      if (kind === "tls") return (role.includes("panel") || role.includes("tls")) && item.route === "direct";
+      return role.includes("udp");
+    }).map((item) => item.value))];
+  }
+
   function addProfileConnection(module: Module, vlessRoute: "direct" | "tls" | "cdn" = "direct") {
     const settings = Object.fromEntries((module.connection_settings || []).map((field) => [field.key, field.default]));
     if (module.id === "transport-reality") {
@@ -1331,7 +1342,7 @@ export function MihomoPage({
                         return true;
                       }).map((field) => <label key={field.key} className={field.type === "boolean" ? "is-toggle" : ""}>
                         <span>{field.label}</span>
-                        {field.type === "select" ? <select value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>
+                        {((field.key === "cdn_domain" && vlessRoute === "cdn") || (field.key === "tls_domain" && vlessRoute === "tls")) && confirmedNetworkRoutes(field.key === "cdn_domain" ? "cdn" : "tls").length > 0 ? <select value={String(connection.settings[field.key] ?? confirmedNetworkRoutes(field.key === "cdn_domain" ? "cdn" : "tls")[0])} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>{confirmedNetworkRoutes(field.key === "cdn_domain" ? "cdn" : "tls").map((domain) => <option key={domain} value={domain}>{domain}</option>)}</select> : field.type === "select" ? <select value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>
                           {(field.options || []).filter((option) => commonDevice || !["transport", "cdn_transport", "tls_transport"].includes(field.key) || activeCapabilities.transports.includes(typeof option === "string" ? option : option.value)).map((option) => { const value = typeof option === "string" ? option : option.value; const label = typeof option === "string" ? option : option.label; return <option key={value} value={value}>{label}</option>; })}
                         </select> : field.type === "boolean" ? <input type="checkbox" checked={Boolean(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.checked)} />
                           : <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, field.type === "number" ? Number(event.target.value) : event.target.value)} />}

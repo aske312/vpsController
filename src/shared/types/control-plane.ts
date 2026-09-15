@@ -23,7 +23,7 @@ export type DnsSettings = { selected_id: string; apply_wg: boolean; apply_awg: b
 export type DnsEffect = { installed: boolean; value: string; scope: "new_profiles" | "client_recommendation" | "server_xray" | "server_system" | "reconnect"; changes_existing: boolean; matches_selected: boolean };
 export type DnsStatus = { settings: DnsSettings; providers: DnsProvider[]; protocol_effect: Record<string, string>; protocol_effect_details?: Record<string, DnsEffect>; system?: { addresses: string[]; source: string; managed: boolean } };
 export type DnsCheck = { id: string; available: boolean; udp_ok: boolean; udp_ms?: number; tcp_ok: boolean; tcp_ms?: number; doh_ok: boolean; doh_ms?: number; latency_ms?: number };
-export type NetworkEndpointSettings = { cdn_domain: string; tls_relay_domain: string; udp_relay_domain: string };
+export type NetworkEndpointSettings = { cdn_domain: string; tls_relay_domain: string; udp_relay_domain: string; cdn_domains?: string[]; tls_relay_domains?: string[]; udp_relay_domains?: string[] };
 export type NetworkEndpointCheck = { kind: "cdn" | "tls_relay" | "udp_relay"; domain: string; resolved: string[]; matches_origin: boolean; route: "direct" | "proxy_or_cdn" | "unresolved"; status: "ready" | "warning" | "unresolved"; ready: boolean; message: string };
 export type NetworkCapabilityCheck = { id: string; label: string; status: "ready" | "warning" | "unsupported"; value: string; detail: string };
 export type NetworkDnsIdentity = { provider: string; nameservers: string[]; source: string };
@@ -41,6 +41,7 @@ export type NetworkStatus = {
   resolvers: string[];
   transport_endpoints: NetworkEndpointSettings;
   transport_endpoint_checks?: Partial<Record<NetworkEndpointCheck["kind"], NetworkEndpointCheck>>;
+  transport_endpoint_checks_by_domain?: Record<string, NetworkEndpointCheck>;
   capabilities?: { uplink?: string; checks: NetworkCapabilityCheck[] };
 };
 export type MihomoDnsField = { key: string; label: string; type: "select" | "boolean" | "textarea" | "text"; default: string | number | boolean; options?: Array<string | { value: string; label: string }>; help?: string };
