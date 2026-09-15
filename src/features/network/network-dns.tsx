@@ -15,23 +15,15 @@ export function DnsView({ dns, dnsDraft, dnsChecks, checkingDns, busy, loading, 
   if (!dns || !dnsDraft) return <p className="networkEmpty">Настройки DNS недоступны. Обновите страницу.</p>;
   const installedComponents = installedDnsComponents(dns);
   const components = installedComponents.filter((item) => item.id !== "system" && item.key !== "apply_system");
-  const independent = components;
   const hasVless = components.some((item) => item.id === "vless-reality-xhttp");
   const hasTunnels = installedComponents.some((item) => ["wg", "awg", "openvpn", "ikev2"].includes(item.id));
   const reserve = !dnsDraft.fallback_enabled ? "off" : dnsDraft.fallback_id || "auto";
   const providers = dns.providers.filter((provider) => provider.id !== "custom");
-  const customUsed = dnsDraft.selected_id === "custom" || independent.some((item) => dnsDraft.profiles?.[item.id] === "custom") || (dnsDraft.fallback_enabled && dnsDraft.fallback_id === "custom");
+  const customUsed = dnsDraft.selected_id === "custom" || (dnsDraft.fallback_enabled && dnsDraft.fallback_id === "custom");
   const customValid = !customUsed || Boolean(dnsDraft.custom?.addresses.length && dnsDraft.custom.addresses.every((address) => address.trim()));
   const update = (patch: Partial<DnsSettings>) => setDnsDraft((current) => current ? { ...current, ...patch } : current);
-  const chooseException = (scope: string, id: string) => setDnsDraft((current) => {
-    if (!current) return current;
-    const profiles = { ...current.profiles };
-    if (id) profiles[scope] = id;
-    else delete profiles[scope];
-    return { ...current, profiles };
-  });
   const providerFor = (id: string) => id === "custom" ? dnsDraft.custom : dns.providers.find((item) => item.id === id);
-  const encryptedIds = [dnsDraft.profiles?.["vless-reality-xhttp"] || dnsDraft.selected_id, ...(dnsDraft.fallback_enabled && dnsDraft.fallback_id ? [dnsDraft.fallback_id] : [])];
+  const encryptedIds = [dnsDraft.selected_id, ...(dnsDraft.fallback_enabled && dnsDraft.fallback_id ? [dnsDraft.fallback_id] : [])];
   const encryptionValid = !hasVless || !dnsDraft.apply_vrx || !dnsDraft.prefer_encrypted || encryptedIds.every((id) => providerFor(id)?.doh_url?.startsWith("https://"));
   const canSave = customValid && encryptionValid;
   const selectedComponents = components.filter((item) => dnsDraft[item.key]);
@@ -39,9 +31,7 @@ export function DnsView({ dns, dnsDraft, dnsChecks, checkingDns, busy, loading, 
     udp: selectedComponents.some((item) => item.id !== "vless-reality-xhttp") || (hasVless && Boolean(dnsDraft.apply_vrx) && !dnsDraft.prefer_encrypted),
     doh: hasVless && Boolean(dnsDraft.apply_vrx) && dnsDraft.prefer_encrypted,
   });
-  const exceptionCount = independent.filter((item) => dnsDraft.profiles?.[item.id]).length;
   const updateCustom = (patch: Partial<NonNullable<DnsSettings["custom"]>>) => setDnsDraft((current) => current ? { ...current, custom: { name: "Сторонний DNS", addresses: [], doh_url: "", ...current.custom, ...patch } } : current);
-  const options = <>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}<option value="custom">{dnsDraft.custom?.name || "Сторонний DNS"}</option></>;
   const latency = (id: string) => {
     const check = dnsChecks[id];
     if (!check) return Infinity;
@@ -54,12 +44,6 @@ export function DnsView({ dns, dnsDraft, dnsChecks, checkingDns, busy, loading, 
     return `UDP: ${format(check.udp_ok, check.udp_ms)}${providerFor(id)?.doh_url ? ` · DoH: ${format(check.doh_ok, check.doh_ms)}` : ""}`;
   };
   const selectAll = (enabled: boolean) => update(Object.fromEntries(components.map((item) => [item.key, enabled])) as Partial<DnsSettings>);
-  const resetExceptions = () => setDnsDraft((current) => {
-    if (!current) return current;
-    const profiles = { ...current.profiles };
-    independent.forEach((item) => delete profiles[item.id]);
-    return { ...current, profiles };
-  });
   return <form className="networkDnsForm" onSubmit={(event) => { event.preventDefault(); if (dirty && canSave) void saveDnsSettings(); }}>
     <fieldset disabled={busy} className="networkDnsFields">
       <section className="networkDnsEditor" aria-label="Общий профиль DNS">
@@ -91,18 +75,18 @@ export function DnsView({ dns, dnsDraft, dnsChecks, checkingDns, busy, loading, 
         })}</div>
       </section>
       <section className="networkApplySection">
-        <header className="networkSectionHeading"><div><h2>Применять к</h2><p>Выберите несколько компонентов. Настройки будут применены после сохранения.</p></div><div className="networkBatchActions"><button type="button" onClick={() => selectAll(true)}>Выбрать все</button><button type="button" onClick={() => selectAll(false)}>Снять выбор</button></div></header>
+        <header className="networkSectionHeading"><div><h2>Применять к</h2><p>Выберите установленные протоколы, к которым нужно применить выбранный DNS-профиль.</p></div><div className="networkBatchActions"><button type="button" onClick={() => selectAll(true)}>Выбрать все</button><button type="button" onClick={() => selectAll(false)}>Снять выбор</button></div></header>
         <div className="networkApplyGrid">{components.map((component) => <button type="button" role="checkbox" aria-checked={Boolean(dnsDraft[component.key])} key={component.id} className={dnsDraft[component.key] ? "networkProvider is-selected" : "networkProvider"} onClick={() => update({ [component.key]: !dnsDraft[component.key] })}><span className="networkProviderCode">{component.code}</span><span className="networkProviderText"><strong>{component.title}</strong><small>{component.hint}</small></span><span className="networkProviderIndicator" aria-hidden="true" /></button>)}</div>
         <p className="networkPolicyNote">DNS системы и служб платформы управляется доменом платформы и здесь не изменяется.</p>
       </section>
       {!encryptionValid && <p className="networkValidation" role="alert">Основной и резервный DNS Vless должны поддерживать HTTPS. Выберите DoH-провайдеров или измените настройку в дополнительных функциях.</p>}
       {customUsed && <section className="networkPanel networkCustom"><header className="networkSectionHeading"><div><h2>Сторонний DNS</h2></div></header><div className="networkCustomFields"><label>Название<input value={dnsDraft.custom?.name || ""} placeholder="Мой DNS" onChange={(event) => updateCustom({ name: event.target.value })} /></label><label>IP-адреса через запятую<input required value={dnsDraft.custom?.addresses.join(",") || ""} placeholder="1.1.1.1,1.0.0.1" onChange={(event) => updateCustom({ addresses: event.target.value.split(",") })} /></label><label>DoH URL<input type="url" value={dnsDraft.custom?.doh_url || ""} placeholder="https://dns.example/dns-query" onChange={(event) => updateCustom({ doh_url: event.target.value })} /></label></div>{!customValid && <p className="networkValidation">Укажите IP-адреса без пустых значений.</p>}</section>}
       <details className="networkAdditional">
-        <summary><span>Дополнительные функции</span><small>{exceptionCount ? `Исключений: ${exceptionCount}` : "Общий профиль без исключений"}</small></summary>
+        <summary><span>Дополнительные функции</span><small>Фильтры выбора и защита запросов</small></summary>
         <div className="networkAdditionalBody">
           <section><h3>Подбор резолвера</h3><div className="networkUtilityOptions"><button type="button" role="checkbox" aria-checked={onlyDoh} className={`networkOptionRow ${onlyDoh ? "is-selected" : ""}`} onClick={() => setOnlyDoh(!onlyDoh)}><span><strong>Показывать только DNS с DoH</strong><small>Оставить только зашифрованные резолверы</small></span><span className="networkOptionMark" aria-hidden="true">{onlyDoh ? "✓" : ""}</span></button><button type="button" role="checkbox" aria-checked={sortByLatency} className={`networkOptionRow ${sortByLatency ? "is-selected" : ""}`} onClick={() => setSortByLatency(!sortByLatency)}><span><strong>Сортировать по измеренной задержке</strong><small>Порядок меняется только в этом списке</small></span><span className="networkOptionMark" aria-hidden="true">{sortByLatency ? "✓" : ""}</span></button></div><p>Фильтры не меняют сохранённый выбор. Задержка измеряется с VPS.</p></section>
           {hasVless && <section><h3>Защита запросов VLESS</h3><button type="button" role="checkbox" aria-checked={dnsDraft.prefer_encrypted} className={`networkOptionRow ${dnsDraft.prefer_encrypted ? "is-selected" : ""}`} onClick={() => update({ prefer_encrypted: !dnsDraft.prefer_encrypted })}><span><strong>Только DoH для основного DNS и резерва</strong><small>Не переходить на обычный DNS при ошибке DoH</small></span><span className="networkOptionMark" aria-hidden="true">{dnsDraft.prefer_encrypted ? "✓" : ""}</span></button><p>Bootstrap используется только для разрешения имён DoH-серверов.</p>{dnsDraft.prefer_encrypted && <label className="networkBootstrapField"><span>Bootstrap DNS</span><select value={dnsDraft.bootstrap_id || "cloudflare"} onChange={(event) => update({ bootstrap_id: event.target.value as DnsSettings["bootstrap_id"] })}><option value="cloudflare">Cloudflare · DoH по IP</option><option value="google">Google · DoH по IP</option><option value="dns-sb">DNS.SB · DoH по IP</option></select><small>Запросы сайтов не используют bootstrap как резерв.</small></label>}</section>}
-          <section><header className="networkAdditionalHeading"><div><h3>Исключения по компонентам</h3><p>Отдельный основной DNS вместо общего. Резерв остаётся общим.</p></div><button type="button" disabled={!exceptionCount} onClick={resetExceptions}>Вернуть общий профиль</button></header><div className="networkExceptionList">{independent.map((component) => <label className="networkExceptionRow" key={component.id}><span><strong>{component.title}</strong><small>{component.hint}</small></span><select disabled={!dnsDraft[component.key]} value={dnsDraft.profiles?.[component.id] || ""} onChange={(event) => chooseException(component.id, event.target.value)}><option value="">Общий профиль</option>{options}</select></label>)}</div></section>
+
           <section><h3>Безопасное применение</h3><p>Перед изменением проверяются основной DNS и резерв. При ошибке проверки настройки не меняются; при ошибке применения выполняется откат.</p><h3>Границы применения</h3><p>Системный DNS и DNS служб платформы управляются доменом платформы. Настройки Mihomo изменяются отдельно.</p>{hasTunnels && <p>DNS в туннеле зависит от маршрутов и настроек клиента. Защита от утечек при отключении VPN настраивается на устройстве.</p>}</section>
         </div>
       </details>

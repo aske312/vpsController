@@ -83,7 +83,7 @@ export function NetworkView({ request, refreshKey = 0 }: Props) {
     savingRef.current = true;
     setBusy(true);
     try {
-      const settings = { ...dnsDraft, custom: dnsDraft.custom ? { ...dnsDraft.custom, addresses: dnsDraft.custom.addresses.map((address) => address.trim()), doh_url: dnsDraft.custom.doh_url.trim() } : dnsDraft.custom };
+      const settings = { ...dnsDraft, profiles: {}, custom: dnsDraft.custom ? { ...dnsDraft.custom, addresses: dnsDraft.custom.addresses.map((address) => address.trim()), doh_url: dnsDraft.custom.doh_url.trim() } : dnsDraft.custom };
       for (const component of dnsComponents) {
         if (component.key !== "apply_system" && !dns?.protocol_effect_details?.[component.id]?.installed) settings[component.key] = false;
       }
@@ -117,7 +117,7 @@ export function NetworkView({ request, refreshKey = 0 }: Props) {
   }, [endpointDraft, notifyError, notifySuccess, request]);
 
   return <div data-network-page="true"><main className="networkBoard">
-    <header className="networkPageHeader"><div className="networkPageIdentity"><p className="eyebrow">Network</p><h1>Сеть</h1></div><div className="networkToolbar"><nav className="networkTabs" aria-label="Разделы сети">{([["diagnostics", "Состояние сети"], ["dns", "Настройки DNS"]] as const).map(([id, label]) => <button type="button" key={id} className={section === id ? "active" : ""} aria-pressed={section === id} onClick={() => setSection(id)}>{label}{id === "dns" && dirty && <span className="networkUnsavedDot" aria-label="Несохранённые изменения" />}</button>)}</nav><div className="networkRefresh"><span>{loading ? "Обновляем…" : loadFailed ? "Ошибка обновления" : status ? formatTime(status.detected_at) : "Нет данных"}</span><button type="button" onClick={() => void load()} disabled={loading || busy}>Обновить</button></div></div></header>
+    <header className="networkPageHeader"><div className="networkPageIdentity"><p className="eyebrow">Network</p><h1>Сеть</h1><nav className="networkTabs" aria-label="Разделы сети">{([["diagnostics", "Состояние сети"], ["dns", "Настройки DNS"]] as const).map(([id, label]) => <button type="button" key={id} className={section === id ? "active" : ""} aria-pressed={section === id} onClick={() => setSection(id)}>{label}{id === "dns" && dirty && <span className="networkUnsavedDot" aria-label="Несохранённые изменения" />}</button>)}</nav></div><div className="networkRefresh"><span>{loading ? "Обновляем…" : loadFailed ? "Ошибка обновления" : status ? formatTime(status.detected_at) : "Нет данных"}</span><button type="button" onClick={() => void load()} disabled={loading || busy}>Обновить</button></div></header>
     {!status ? <section className="networkEmpty" role="status"><NetworkIcon /><h2>{loading ? "Загружаем настройки сети" : "Не удалось получить данные"}</h2><p>{loading ? "Получаем состояние сервера и DNS." : "Повторите загрузку кнопкой «Обновить»."}</p></section> : <>
       {loadFailed && <p className="networkNotice" role="status">Обновление не удалось. Показаны последние полученные данные.</p>}
       <div hidden={section !== "dns"}><DnsView dns={dns} dnsDraft={dnsDraft} dnsChecks={dnsChecks} checkingDns={checkingDns} busy={busy} loading={loading} dirty={dirty} setDnsDraft={setDnsDraft} checkDnsProviders={checkDnsProviders} saveDnsSettings={saveDnsSettings} /></div>
@@ -169,7 +169,7 @@ function DiagnosticsV2({ status, request, endpointDraft, endpointDirty, busy, se
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set());
   const publicIpv4 = status.server.public_ipv4 || (!status.server.public_ip.includes(":") ? status.server.public_ip : "");
   const publicIpv6 = status.server.public_ipv6 || (status.server.public_ip.includes(":") ? status.server.public_ip : "");
-  const serverRoutes: NetworkStatus["domains"] = [publicIpv4, publicIpv6].filter((value, index, values) => Boolean(value) && values.indexOf(value) === index).map((value) => ({ value, role: "SERVER", source: "server", resolved: [value], matches_origin: true, route: "direct", ip_info: status.server.ip_info?.filter((item) => item.address === value) }));
+  const serverRoutes: NetworkStatus["domains"] = [publicIpv4, publicIpv6].filter((value, index, values) => Boolean(value) && values.indexOf(value) === index).map((value) => ({ value, role: "SERVER", source: "VPS", resolved: [value], matches_origin: true, route: "direct", ip_info: status.server.ip_info?.filter((item) => item.address === value) }));
   const domains = [...serverRoutes, ...status.domains].filter((item) => `${item.value} ${item.role} ${item.resolved.join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()));
   const evidence = [...new Set([...status.route.evidence, ...status.edge.evidence])];
   const toggleDomain = (key: string) => setExpandedDomains((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; });
