@@ -1190,6 +1190,10 @@
 .sshAdminStatus strong { display:block; color:#e8dfc9; font-size:12px; }
 .sshAdminStatus p { margin:3px 0 0; color:var(--muted); font-size:10px; line-height:1.5; }
 .sshAdminStatus em { padding:5px 7px; border:1px solid rgba(224,171,75,.24); border-radius:6px; color:var(--warning); font:700 8px var(--font-mono); letter-spacing:.12em; }
+.sshAdminDirectAccess { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:12px; padding:12px 14px; border:1px solid rgba(224,171,75,.25); border-radius:10px; background:rgba(224,171,75,.045); }
+.sshAdminDirectAccess .sshAdminSectionTitle { margin:0 0 5px; }
+.sshAdminDirectAccess p { margin:0; color:var(--muted); font-size:10px; line-height:1.45; }
+.sshAdminDirectAccess .sshStepButton { flex:0 0 auto; margin-top:0; }
 .sshAdminKeys { margin-top:18px; padding:0 12px 12px; border:1px solid rgba(98,126,118,.22); border-radius:10px; background:rgba(255,255,255,.014); }
 .sshAdminKeys .sshAdminSectionTitle { margin-top:12px; }
 .sshKeyList { display:grid; gap:6px; }
@@ -1223,6 +1227,7 @@
 .sshAccessControls { display:grid; gap:8px; }
 .sshOpenBadge { background:rgba(224,171,75,.13) !important; color:var(--warning) !important; }
 .sshOpenButton { border-color:rgba(224,171,75,.36); background:rgba(224,171,75,.09); color:var(--warning); }
+.sshOpenButton:disabled { opacity:.55; cursor:not-allowed; }
 .sshResetKeyButton { margin-top:9px; padding:0; border:0; background:transparent; color:#d0948d; font:9px var(--font-mono); text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
 .sshResetKeyButton:hover { color:#ef8178; }
 .sshResetKeyButton:disabled { opacity:.4; cursor:not-allowed; }
