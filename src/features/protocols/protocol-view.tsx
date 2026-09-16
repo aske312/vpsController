@@ -4,7 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { formatModuleVersion } from "../../shared/lib/format-version";
 import { bytes, duration, safeDateTime } from "../../shared/lib/control-plane-ui";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
-import type { EditableProtocolSetting, Protocol, ProtocolImage, ProtocolStatus, Tab } from "../../shared/types/control-plane";
+import type { Protocol, ProtocolImage, ProtocolStatus, Tab } from "../../shared/types/control-plane";
 
 type ProtocolViewProps = {
   protocolTab: Protocol;
@@ -21,7 +21,6 @@ type ProtocolViewProps = {
   installedProtocols: Protocol[];
   setTab: Dispatch<SetStateAction<Tab>>;
   onSelectProtocol?: (protocol: Protocol) => void;
-  protocolSettingsDraft: Partial<Record<Protocol, Record<string, string | number | boolean>>>;
   diagnosticsOpen: Partial<Record<Protocol, boolean>>;
   resourcesOpen: Partial<Record<Protocol, boolean>>;
   checkingDiagnostics: Protocol | null;
@@ -31,8 +30,6 @@ type ProtocolViewProps = {
   restartProtocol: (protocol: Protocol) => Promise<void> | void;
   updateProtocol: (image: ProtocolImage) => Promise<void> | void;
   removeProtocol: (image: ProtocolImage) => Promise<void> | void;
-  changeProtocolSetting: (protocol: Protocol, key: string, value: string | number | boolean) => void;
-  saveProtocolSettings: (protocol: Protocol) => Promise<void> | void;
   toggleNetworkDiagnostics: (protocol: Protocol) => void;
   checkNetworkDiagnostics: (protocol: Protocol) => Promise<void> | void;
   toggleProtocolResources: (protocol: Protocol) => void;
@@ -149,17 +146,15 @@ export function ProtocolView(props: ProtocolViewProps) {
     protocolIsTunnel, protocolOperational, protocolAvailability, protocolDiagnosticsLabel,
     protocolResourceAvailable, protocolResourceTotal, installedProtocols, setTab, onSelectProtocol,
     diagnosticsOpen, resourcesOpen, checkingDiagnostics, checkingResources,
-    installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol, protocolSettingsDraft,
-    changeProtocolSetting, saveProtocolSettings,
+    installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol,
     toggleNetworkDiagnostics, checkNetworkDiagnostics,
     toggleProtocolResources, checkProtocolResources,
   } = props;
   const profile = profiles[protocolTab];
-  const fields = activeProtocol.editable_settings || [];
   const routeReady = {
-    tls: fields.some((field) => field.key === "tls_enabled"),
-    cdn: fields.some((field) => field.key === "cdn_enabled"),
-    udp: fields.some((field) => field.key === "channel_mode" && (field.options || []).some((option) => option.value === "udp_relay")),
+    tls: Boolean(activeProtocol.routes?.tls?.enabled),
+    cdn: Boolean(activeProtocol.routes?.cdn?.enabled),
+    udp: false,
   };
   const availability = Number.isFinite(Number(protocolAvailability)) ? Math.max(0, Math.min(100, Number(protocolAvailability))) : 0;
   const version = formatModuleVersion(activeProtocolImage?.installed_version, "version n/a");
@@ -169,7 +164,6 @@ export function ProtocolView(props: ProtocolViewProps) {
     ? `${activeProtocol.diagnostics.score}/100`
     : "не проверено";
   const updateBusy = activeProtocolImage ? installingProtocol === `update-${activeProtocolImage.id}` : false;
-  const settingsDraft = protocolSettingsDraft[protocolTab] || {};
 
   return (
     <section className={`protocolWorkspace tunnelsWorkspace tunnelAccent-${profile.accent} protocol-${protocolTab}`}>
@@ -226,21 +220,6 @@ export function ProtocolView(props: ProtocolViewProps) {
           {activeProtocolImage?.removable && <button type="button" className="danger" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить модуль</button>}
         </div>
       </div>
-
-      {fields.length > 0 && <article className="tunnelPanel settingsPanel">
-        <header className="tunnelPanelTitle"><div><small>SETTINGS</small><h2>Настройки {profile.title}</h2></div><span>Только поддерживаемые параметры</span></header>
-        <div className="tunnelSettingsEditor">
-          <div className="tunnelSettingsFields">
-            {fields.map((field: EditableProtocolSetting) => <label className={field.type === "boolean" ? "booleanField" : ""} key={field.key}>
-              <span><strong>{field.label}</strong>{field.help && <small>{field.help}</small>}</span>
-              {field.type === "boolean" ? <input type="checkbox" checked={Boolean(settingsDraft[field.key] ?? field.value)} onChange={(event) => changeProtocolSetting(protocolTab, field.key, event.target.checked)} />
-                : field.type === "select" ? <select value={String(settingsDraft[field.key] ?? field.value)} onChange={(event) => changeProtocolSetting(protocolTab, field.key, event.target.value)}>{(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
-                  : <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(settingsDraft[field.key] ?? field.value)} onChange={(event) => changeProtocolSetting(protocolTab, field.key, field.type === "number" ? Number(event.target.value) : event.target.value)} />}
-            </label>)}
-          </div>
-          <div className="tunnelSettingsActions"><span>Сохранение перезапустит только этот протокол.</span><button type="button" onClick={() => void saveProtocolSettings(protocolTab)} disabled={busy}>Сохранить настройки</button></div>
-        </div>
-      </article>}
 
       <div className="tunnelDashboardGrid">
         <article className="tunnelPanel runtimePanel">

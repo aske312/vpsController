@@ -510,8 +510,16 @@ def supported_channel_modes(protocol: str) -> set[str]:
     return modes
 
 
-def channel_mode_endpoint(protocol: str, fallback: str) -> tuple[str, str]:
-    mode = channel_mode_for(protocol)
+def channel_mode_endpoint(protocol: str, fallback: str, requested_mode: str | None = None) -> tuple[str, str]:
+    """Resolve an endpoint for one client, with legacy global fallback.
+
+    ``requested_mode`` is supplied by new client creation.  The optional
+    fallback keeps old API callers and already stored global preferences
+    readable without making them affect newly created connections.
+    """
+    mode = requested_mode if requested_mode is not None else channel_mode_for(protocol)
+    if mode not in supported_channel_modes(protocol):
+        raise HTTPException(status_code=422, detail="Неизвестный режим защищённого канала")
     if mode == "direct":
         return fallback, mode
     settings = read_network_endpoint_settings()
@@ -4523,7 +4531,7 @@ def create_shadowsocks_client(payload: ClientCreate, client_id: str, safe_name: 
         config_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail="Unable to start Shadowsocks client service")
     userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
-    endpoint, channel_mode = channel_mode_endpoint("shadowsocks", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
+    endpoint, channel_mode = channel_mode_endpoint("shadowsocks", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode)
     client_config = f"ss://{userinfo}@{endpoint}:{port}#{urllib.parse.quote(payload.name)}"
     items = read_clients()
     items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
@@ -4555,7 +4563,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 reload_ikev2()
                 settings = json.loads(IKEV2_SETTINGS.read_text(encoding="utf-8"))
                 endpoint = str(settings.get("endpoint") or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
-                endpoint, channel_mode = channel_mode_endpoint("ikev2", endpoint)
+                endpoint, channel_mode = channel_mode_endpoint("ikev2", endpoint, payload.settings.channel_mode)
                 ca = (IKEV2_SWANCTL_DIR / "x509ca" / "caCert.pem").read_text(encoding="utf-8")
                 client_config = "\n".join([
                     "Connection", f"Server: {endpoint}", "Remote ID: " + str(settings.get("endpoint") or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT),
@@ -4595,7 +4603,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 certificate = (OPENVPN_PKI / "issued" / f"{client_id}.crt").read_text(encoding="utf-8")
                 private_key = (OPENVPN_PKI / "private" / f"{client_id}.key").read_text(encoding="utf-8")
                 tls_crypt = (OPENVPN_DIR / "tls-crypt.key").read_text(encoding="utf-8")
-                endpoint, channel_mode = channel_mode_endpoint("openvpn", PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
+                endpoint, channel_mode = channel_mode_endpoint("openvpn", PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode)
                 port = int(settings.get("port", 1194))
                 transport = str(settings.get("protocol", "udp"))
                 client_config = "\n".join([
@@ -4635,7 +4643,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 temporary.replace(HYSTERIA2_USERS)
                 port = int(settings.get("port", 8443))
                 domain = str(settings.get("domain", "")).strip()
-                endpoint, channel_mode = channel_mode_endpoint("hysteria2", domain or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
+                endpoint, channel_mode = channel_mode_endpoint("hysteria2", domain or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode)
                 tls_mode = str(settings.get("tls_mode", "pinned"))
                 fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt")).partition("=")[2].strip()
                 obfs_lines = (["obfs:", "  type: salamander", "  salamander:", f"    password: {json.dumps(str(settings.get('obfs_password', '')))}"] if settings.get("obfs_enabled") else [])
@@ -4675,7 +4683,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 temporary.replace(TUIC_CONFIG)
                 run("systemctl", "restart", "vps-control-tuic.service", timeout=20, check=True)
                 settings = json.loads(TUIC_SETTINGS.read_text(encoding="utf-8"))
-                endpoint, channel_mode = channel_mode_endpoint("tuic", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
+                endpoint, channel_mode = channel_mode_endpoint("tuic", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode)
                 certificate = (TUIC_DIR / "server.crt").read_text(encoding="utf-8")
                 client = {
                     "log": {"level": "warn"},
@@ -4703,7 +4711,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 result = subprocess.run(["/usr/local/lib/vps-control-trojan/sing-box", "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
                 if result.returncode: raise RuntimeError(result.stderr.strip())
                 temporary.replace(TROJAN_CONFIG); run("systemctl", "restart", "vps-control-trojan.service", timeout=20, check=True)
-                settings=json.loads(TROJAN_SETTINGS.read_text()); endpoint, channel_mode=channel_mode_endpoint("trojan", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT); certificate=(TROJAN_DIR/"server.crt").read_text()
+                settings=json.loads(TROJAN_SETTINGS.read_text()); endpoint, channel_mode=channel_mode_endpoint("trojan", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode); certificate=(TROJAN_DIR/"server.crt").read_text()
                 client={"log":{"level":"warn"},"inbounds":[{"type":"mixed","tag":"mixed-in","listen":"127.0.0.1","listen_port":2080}],"outbounds":[{"type":"trojan","tag":"connection-out","server":endpoint,"server_port":int(settings.get("port",8445)),"password":password,"tls":{"enabled":True,"server_name":certificate_server_name(TROJAN_DIR / "server.crt"),"certificate":certificate}}],"route":{"final":"connection-out"}}
                 items=read_clients(); items.append({"id":client_id,"name":payload.name,"protocol":payload.protocol,"public_key":client_id,"port":int(settings.get("port",8445)),"channel_mode":channel_mode,"settings":payload.settings.model_dump(exclude_none=True),"created_at":datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 return {"id":client_id,"filename":f"{safe_name}.json","config":json.dumps(client,ensure_ascii=False,indent=2)}
@@ -4852,7 +4860,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     client_listen_port = AWG_CLIENT_PORT if payload.protocol == "awg" else None
     client_listen_line = f"ListenPort = {client_listen_port}\n" if client_listen_port is not None else ""
     endpoint_host = PUBLIC_IP_ENDPOINT or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_ENDPOINT
-    endpoint_host, channel_mode = channel_mode_endpoint(payload.protocol, endpoint_host)
+    endpoint_host, channel_mode = channel_mode_endpoint(payload.protocol, endpoint_host, payload.settings.channel_mode)
     client_config = (
         f"[Interface]\nAddress = {address}/32\nDNS = {(current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS))}\n"
         f"PrivateKey = {private_key}\n{client_listen_line}MTU = {mtu}\n{extra}\n[Peer]\n"
@@ -5741,7 +5749,7 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
                 confirmed_cdn_domains = [
                     str(value).strip().lower() for value in cdn_domain_candidates
                     if value and network_endpoint_check("cdn", str(value))["ready"]
-                ] if cdn_enabled else []
+                ]
                 routes = {
                     "direct": {
                         "enabled": True, "security": "REALITY", "transport": transport,

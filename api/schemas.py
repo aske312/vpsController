@@ -118,6 +118,7 @@ class ClientConnectionSettings(BaseModel):
     mtu: int | None = Field(default=None, ge=576, le=1500)
     keepalive: int | None = Field(default=None, ge=0, le=300)
     route_mode: Literal["all", "ipv4"] = "ipv4"
+    channel_mode: Literal["direct", "tls_relay", "udp_relay"] = "direct"
     shadowsocks_mode: Literal["tcp_only", "tcp_and_udp"] = "tcp_and_udp"
     timeout: int | None = Field(default=None, ge=30, le=3600)
     no_delay: bool = True

@@ -24,7 +24,7 @@ import { ApplicationView } from "../features/application/application-view";
 import { ConnectionsView } from "../features/connections/connections-view";
 import { ProtocolView } from "../features/protocols/protocol-view";
 import { LoginView } from "../features/auth/login-view";
-import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, LiveStatus, LoggingSettings, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
+import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, LiveStatus, LoggingSettings, NetworkStatus, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
 import { actionLabels, bytes, CLIENTS_PER_PAGE, directProtocolOrder, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
 import { createSystemActionCompletionTracker, systemActionNeedsReload, systemOperationNotification, type SystemAction } from "./system-operation";
 
@@ -35,6 +35,7 @@ type NewClientSettings = {
   mtu: number;
   keepalive: number;
   route_mode: "all" | "ipv4";
+  channel_mode: ClientChannelMode;
   shadowsocks_mode: "tcp_only" | "tcp_and_udp";
   timeout: number;
   no_delay: boolean;
@@ -42,7 +43,8 @@ type NewClientSettings = {
   cdn_domain: string;
 };
 
-type ClientConnectionType = { protocol: Protocol; routeId?: "direct" | "tls" | "cdn"; name: string; badge: string; description: string };
+type ClientChannelMode = "direct" | "tls_relay" | "udp_relay";
+type ClientConnectionType = { id: string; protocol: Protocol; routeId?: "direct" | "tls" | "cdn"; channelMode?: ClientChannelMode; name: string; badge: string; description: string };
 
 function ClientConnectionSettings({
   selectedConnectionType,
@@ -136,7 +138,7 @@ export function ControlPanel() {
   const [protocolImages, setProtocolImages] = useState<ProtocolImage[]>([]);
   const [protocolStatuses, setProtocolStatuses] = useState<Partial<Record<Protocol, ProtocolStatus>>>({});
   const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number; tx: number }>>>({});
-  const [protocolSettingsDraft, setProtocolSettingsDraft] = useState<Partial<Record<Protocol, Record<string, string | number | boolean>>>>({});
+  const [networkStatus, setNetworkStatus] = useState<NetworkStatus | null>(null);
   const [installingProtocol, setInstallingProtocol] = useState("");
   const [checkingResources, setCheckingResources] = useState<Protocol | null>(null);
   const [checkingDiagnostics, setCheckingDiagnostics] = useState<Protocol | null>(null);
@@ -163,7 +165,7 @@ export function ControlPanel() {
   const [confirmationInput, setConfirmationInput] = useState("");
   const [newClient, setNewClient] = useState({ name: "", protocol: "wg" as Protocol });
   const [newClientVlessRoutes, setNewClientVlessRoutes] = useState<Array<"direct" | "tls" | "cdn">>(["direct"]);
-  const [newClientSettings, setNewClientSettings] = useState({ mtu: 1280, keepalive: 25, route_mode: "ipv4" as "all" | "ipv4", shadowsocks_mode: "tcp_and_udp" as "tcp_only" | "tcp_and_udp", timeout: 300, no_delay: true, fingerprint: "chrome" as "chrome" | "firefox" | "safari", cdn_domain: "" });
+  const [newClientSettings, setNewClientSettings] = useState({ mtu: 1280, keepalive: 25, route_mode: "ipv4" as "all" | "ipv4", channel_mode: "direct" as ClientChannelMode, shadowsocks_mode: "tcp_and_udp" as "tcp_only" | "tcp_and_udp", timeout: 300, no_delay: true, fingerprint: "chrome" as "chrome" | "firefox" | "safari", cdn_domain: "" });
   const [generated, setGenerated] = useState("");
   const [generatedName, setGeneratedName] = useState("client.conf");
   const [generatedProfiles, setGeneratedProfiles] = useState<GeneratedProfile[]>([]);
@@ -172,7 +174,6 @@ export function ControlPanel() {
   const settingsRef = useRef<HTMLDivElement>(null);
   const networkSample = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
-  const protocolSettingsDirty = useRef<Partial<Record<Protocol, boolean>>>({});
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
   const sshAccessLoading = useRef(false);
   const automationDirty = useRef(false);
@@ -256,6 +257,16 @@ export function ControlPanel() {
       setClients(data.items); setLastUpdated(new Date());
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadClients; return next; });
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadClients: refreshFailure(cause, "Не удалось обновить клиентов") })); }
+  }, [request, token]);
+
+  const loadNetworkStatus = useCallback(async (force = false) => {
+    if (!token) return;
+    try {
+      setNetworkStatus(await request<NetworkStatus>("/network", force ? { cache: "no-store" } : undefined));
+      setRefreshErrors((current) => { const next = { ...current }; delete next.loadNetworkStatus; return next; });
+    } catch (cause) {
+      setRefreshErrors((current) => ({ ...current, loadNetworkStatus: refreshFailure(cause, "Не удалось проверить сетевые маршруты") }));
+    }
   }, [request, token]);
 
   const loadSecurity = useCallback(async (force = false) => {
@@ -363,12 +374,6 @@ export function ControlPanel() {
       }
       protocolSamples.current[protocol] = { rx: next.interface_rx_bytes, tx: next.interface_tx_bytes, at: now };
       setProtocolStatuses((statuses) => ({ ...statuses, [protocol]: next }));
-      if (!protocolSettingsDirty.current[protocol]) {
-        setProtocolSettingsDraft((drafts) => ({
-          ...drafts,
-          [protocol]: Object.fromEntries((next.editable_settings || []).map((setting) => [setting.key, setting.value])),
-        }));
-      }
       setLastUpdated(new Date());
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadProtocolStatus; return next; });
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadProtocolStatus: refreshFailure(cause, "Не удалось обновить состояние протокола") })); }
@@ -1138,25 +1143,6 @@ export function ControlPanel() {
     void checkNetworkDiagnostics(protocol);
   }
 
-  function changeProtocolSetting(protocol: Protocol, key: string, value: string | number | boolean) {
-    protocolSettingsDirty.current[protocol] = true;
-    setProtocolSettingsDraft((drafts) => ({ ...drafts, [protocol]: { ...(drafts[protocol] || {}), [key]: value } }));
-  }
-
-  async function saveProtocolSettings(protocol: Protocol) {
-    const fields = protocolStatuses[protocol]?.editable_settings || [];
-    const draft = protocolSettingsDraft[protocol] || {};
-    const body = Object.fromEntries(fields.map((field) => [field.key, draft[field.key] ?? field.value]));
-    setBusy(true);
-    try {
-      await request(`/protocols/${protocol}/settings`, { method: "PATCH", body: JSON.stringify(body) });
-      protocolSettingsDirty.current[protocol] = false;
-      await loadProtocolStatus(protocol);
-      notifySuccess(`Настройки ${labels[protocol]} применены`);
-    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось применить настройки протокола"); }
-    finally { setBusy(false); }
-  }
-
   function toggleProtocolResources(protocol: Protocol) {
     const opening = !resourcesOpen[protocol];
     setResourcesOpen((values) => ({ ...values, [protocol]: opening }));
@@ -1237,25 +1223,39 @@ export function ControlPanel() {
   );
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
   const vlessRouteStatus = protocolStatuses["vless-reality-xhttp"]?.routes || {};
-  const connectionTypeOptions = installedProtocols.flatMap<{ id: string; protocol: Protocol; routeId?: "direct" | "tls" | "cdn"; name: string; badge: string; description: string }>((protocol) => {
-    if (protocol !== "vless-reality-xhttp") return [{
-      id: protocol, protocol, routeId: undefined, name: labels[protocol],
-      badge: protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : protocol.toUpperCase(),
-      description: protocol === "shadowsocks" ? "Шифрованный прокси TCP и UDP" : "Отдельный VPN-туннель",
-    }];
+  const hasNetworkRoute = (kind: "cdn" | "tls_relay" | "udp_relay") => Object.values(networkStatus?.transport_endpoint_checks_by_domain || {}).some((check) => check.kind === kind && check.ready);
+  const connectionTypeOptions = installedProtocols.flatMap<ClientConnectionType>((protocol) => {
+    const badge = protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : protocol.toUpperCase();
+    if (protocol !== "vless-reality-xhttp") {
+      const options: ClientConnectionType[] = [{
+        id: protocol, protocol, channelMode: "direct", name: labels[protocol], badge,
+        description: protocol === "shadowsocks" ? "Прямой шифрованный прокси TCP и UDP" : "Прямой VPN-туннель",
+      }];
+      const supportsTlsRelay = ["shadowsocks", "trojan", "openvpn"].includes(protocol);
+      const supportsUdpRelay = ["wg", "awg", "shadowsocks", "hysteria2", "tuic", "openvpn", "ikev2"].includes(protocol);
+      if (supportsTlsRelay && hasNetworkRoute("tls_relay")) options.push({ id: `${protocol}-tls-relay`, protocol, channelMode: "tls_relay", name: `${labels[protocol]} · TLS relay`, badge, description: "Через подтверждённый TLS relay-домен" });
+      if (supportsUdpRelay && hasNetworkRoute("udp_relay")) options.push({ id: `${protocol}-udp-relay`, protocol, channelMode: "udp_relay", name: `${labels[protocol]} · UDP relay`, badge, description: "Через подтверждённый UDP relay-домен" });
+      return options;
+    }
     return ([
       ["direct", "VLESS REALITY", "RLTY", "Прямой маршрут с маскировкой REALITY"],
       ["tls", "VLESS TLS", "TLS", "Прямой домен с TLS-сертификатом"],
       ["cdn", "VLESS CDN", "CDN", "Маршрут через настроенный CDN-домен"],
-    ] as const).filter(([id]) => id === "direct" ? vlessRouteStatus[id]?.enabled !== false : Boolean(vlessRouteStatus[id]?.enabled)).map(([routeId, name, badge, description]) => ({ id: `vless-${routeId}`, protocol, routeId, name, badge, description }));
+    ] as const).filter(([id]) => id === "direct"
+      ? vlessRouteStatus[id]?.enabled !== false
+      : id === "cdn"
+        ? Boolean(vlessRouteStatus[id]?.confirmed_domains?.length)
+        : Boolean(vlessRouteStatus[id]?.enabled)
+    ).map(([routeId, name, routeBadge, description]) => ({ id: `vless-${routeId}`, protocol, routeId, name, badge: routeBadge, description }));
   });
-  const selectedConnectionType = connectionTypeOptions.find((option) => option.protocol === selectedClientProtocol && (option.protocol !== "vless-reality-xhttp" || option.routeId === newClientVlessRoutes[0])) || connectionTypeOptions[0];
+  const selectedConnectionType = connectionTypeOptions.find((option) => option.protocol === selectedClientProtocol && (option.routeId ? option.routeId === newClientVlessRoutes[0] : option.channelMode === newClientSettings.channel_mode)) || connectionTypeOptions[0];
   const selectedVlessRoute = selectedConnectionType?.routeId ? vlessRouteStatus[selectedConnectionType.routeId] : undefined;
 
   useEffect(() => {
-    if (tab !== "clients" || !installedProtocols.includes("vless-reality-xhttp")) return;
-    void loadProtocolStatus("vless-reality-xhttp");
-  }, [installedProtocols, loadProtocolStatus, tab]);
+    if (tab !== "clients") return;
+    void loadNetworkStatus();
+    if (installedProtocols.includes("vless-reality-xhttp")) void loadProtocolStatus("vless-reality-xhttp");
+  }, [installedProtocols, loadNetworkStatus, loadProtocolStatus, tab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1274,9 +1274,11 @@ export function ControlPanel() {
     try {
       if (!selectedConnectionType) throw new Error("Нет доступного маршрута для подключения");
       const { cdn_domain: selectedCdnDomain, ...commonSettings } = newClientSettings;
-      const settings = selectedConnectionType.routeId === "cdn"
-        ? { ...commonSettings, cdn_domain: selectedCdnDomain || selectedVlessRoute?.confirmed_domains?.[0] || "" }
-        : commonSettings;
+      const settings = {
+        ...commonSettings,
+        channel_mode: selectedConnectionType.routeId ? "direct" as ClientChannelMode : selectedConnectionType.channelMode || "direct",
+        ...(selectedConnectionType.routeId === "cdn" ? { cdn_domain: selectedCdnDomain || selectedVlessRoute?.confirmed_domains?.[0] || "" } : {}),
+      };
       const payload = { ...newClient, protocol: selectedConnectionType.protocol, settings, ...(selectedConnectionType.routeId ? { vless_routes: [selectedConnectionType.routeId] } : {}) };
       const result = await request("/clients", { method: "POST", body: JSON.stringify(payload) }) as { config: string; filename?: string; profiles?: GeneratedProfile[] };
       const profiles = result.profiles?.filter((profile) => profile.config && profile.filename) || [];
@@ -1653,7 +1655,6 @@ export function ControlPanel() {
         installedProtocols={installedProtocols}
         setTab={setTab}
         onSelectProtocol={(protocol) => setSelectedChannel(protocol)}
-        protocolSettingsDraft={protocolSettingsDraft}
         diagnosticsOpen={diagnosticsOpen}
         resourcesOpen={resourcesOpen}
         checkingDiagnostics={checkingDiagnostics}
@@ -1663,8 +1664,6 @@ export function ControlPanel() {
         restartProtocol={restartProtocol}
         updateProtocol={updateProtocol}
         removeProtocol={removeProtocol}
-        changeProtocolSetting={changeProtocolSetting}
-        saveProtocolSettings={saveProtocolSettings}
         toggleNetworkDiagnostics={toggleNetworkDiagnostics}
         checkNetworkDiagnostics={checkNetworkDiagnostics}
         toggleProtocolResources={toggleProtocolResources}
@@ -1706,7 +1705,7 @@ export function ControlPanel() {
               <div className="connectionForm">
                 <label>Название устройства<input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов</small></label>
               </div>
-              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name}</strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
+              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, channel_mode: option.channelMode || "direct", cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name}</strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
               {selectedConnectionType && <ClientConnectionSettings selectedConnectionType={selectedConnectionType} selectedVlessRoute={selectedVlessRoute} newClientSettings={newClientSettings} setNewClientSettings={setNewClientSettings} />}
             </div>
             <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy || !selectedConnectionType}>{busy ? "Создаём…" : "Создать подключение"}</button></div>
