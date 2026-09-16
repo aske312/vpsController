@@ -437,6 +437,251 @@
   display: block;
 }
 
+/* Shared section treatment for the diagnostics workspace. */
+
+[data-network-page] .networkV2 {
+  gap: 18px;
+}
+
+[data-network-page] .networkV2 > .networkPanel {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: none;
+}
+
+[data-network-page] .networkBlockHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 22px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+[data-network-page] .networkBlockHeader > div:first-child {
+  min-width: 0;
+}
+
+[data-network-page] .networkSectionEyebrow {
+  margin: 0;
+  color: var(--dim);
+  font: 700 10px/1 var(--technical-font);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+[data-network-page] .networkBlockHeader h2 {
+  margin: 7px 0 0;
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -.035em;
+  line-height: 1.1;
+}
+
+[data-network-page] .networkBlockHint {
+  display: block;
+  max-width: 70ch;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+[data-network-page] .networkBlockMetric {
+  flex: 0 0 auto;
+  max-width: 36ch;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--green);
+  font: 700 10px/1.3 var(--technical-font);
+  text-align: right;
+}
+
+[data-network-page] .networkStateStrip {
+  padding: 0;
+}
+
+[data-network-page] .networkStateLine {
+  border: 0;
+  border-radius: 0;
+  background: var(--panel-soft);
+}
+
+[data-network-page] .networkStateLine > div {
+  padding: 14px 22px;
+}
+
+[data-network-page] .networkV2Actions {
+  align-self: center;
+}
+
+[data-network-page] .networkTableWrap {
+  padding: 0 14px 14px;
+}
+
+[data-network-page] .networkTableWrap table {
+  min-width: 860px;
+  border-spacing: 0 6px;
+  border-collapse: separate;
+}
+
+[data-network-page] .networkTableWrap th {
+  padding: 12px 10px 7px;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--dim);
+  font: 600 11px/1.2 var(--ui-font);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+[data-network-page] .networkV2RouteBlock th:first-child { width: 34%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(2) { width: 13%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(3) { width: 21%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(4) { width: 14%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(5) { width: 18%; }
+
+[data-network-page] .networkTableWrap tbody > tr.networkRouteRow > td,
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow > td {
+  padding: 15px 10px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-soft);
+}
+
+[data-network-page] .networkTableWrap tbody > tr.networkRouteRow > td:first-child,
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow > td:first-child {
+  border-left: 1px solid var(--line);
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+
+[data-network-page] .networkTableWrap tbody > tr.networkRouteRow > td:last-child,
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow > td:last-child {
+  border-right: 1px solid var(--line);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+[data-network-page] .networkTableWrap tbody > tr.networkRouteRow:hover > td,
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow:hover > td,
+[data-network-page] .networkTableWrap tbody > tr.networkRouteRow.is-expanded > td,
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow.is-expanded > td {
+  background: var(--panel-raised);
+}
+
+[data-network-page] .networkRouteExpand {
+  min-height: 38px;
+}
+
+[data-network-page] .networkRouteExpand strong,
+[data-network-page] .networkServerRoute strong {
+  font-family: var(--technical-font);
+  font-size: 12px;
+}
+
+[data-network-page] .networkTableWrap td:nth-child(2) > span {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+[data-network-page] .networkTableWrap td:nth-child(2) > small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+[data-network-page] .networkRouteTags {
+  gap: 5px;
+}
+
+[data-network-page] .networkRouteTag {
+  min-height: 23px;
+  padding: 3px 8px;
+  font-family: var(--technical-font);
+  font-size: 9px;
+  letter-spacing: .04em;
+}
+
+[data-network-page] .networkRouteStatus {
+  margin: 0;
+  padding: 5px 8px;
+  font-family: var(--technical-font);
+  font-size: 9px;
+}
+
+[data-network-page] .networkRouteActionEmpty {
+  display: block;
+  text-align: left;
+}
+
+[data-network-page] .networkRouteDelete {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  font: 600 10px var(--ui-font);
+}
+
+[data-network-page] .networkRouteDetailRow > td {
+  border-bottom: 0;
+  background: transparent;
+}
+
+[data-network-page] .networkRouteCascade {
+  margin: -6px 10px 2px;
+  padding: 16px 18px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-inset);
+}
+
+[data-network-page] .networkRouteCascadeHeader {
+  padding: 0 0 12px;
+}
+
+[data-network-page] .networkRouteCascadeHeader .networkSectionEyebrow {
+  margin-bottom: 5px;
+}
+
+[data-network-page] .networkV2Capabilities {
+  padding-bottom: 0;
+}
+
+[data-network-page] .networkV2Capabilities .networkCapabilityGrid {
+  padding: 16px 22px 22px;
+}
+
+@media (max-width: 700px) {
+  [data-network-page] .networkBlockHeader {
+    flex-direction: column;
+    gap: 16px;
+    padding: 17px 16px 15px;
+  }
+
+  [data-network-page] .networkBlockMetric {
+    max-width: 100%;
+    text-align: left;
+  }
+
+  [data-network-page] .networkV2Actions,
+  [data-network-page] .networkCapabilityActions {
+    align-self: stretch;
+    width: 100%;
+  }
+
+  [data-network-page] .networkTableWrap {
+    padding: 0 6px 8px;
+  }
+
+  [data-network-page] .networkStateLine > div {
+    padding: 12px 16px;
+  }
+}
+
 [data-network-page] .networkRouteActionEmpty {
   color: var(--network-dim);
   text-align: center;
@@ -645,6 +890,7 @@
 [data-network-page] .networkRouteStatus.warning { color: var(--network-amber); background: rgba(239, 182, 95, .1); }
 [data-network-page] .networkRouteStatus.stale { color: #ffad78; background: rgba(255, 173, 120, .12); }
 [data-network-page] .networkRouteStatus.unresolved { color: var(--network-red, #f17878); background: rgba(241, 120, 120, .1); }
+[data-network-page] .networkRouteStatus.neutral { color: var(--network-muted); background: var(--panel-inset); }
 [data-network-page] .networkRouteStaleNotice { display:grid; gap:4px; margin-top:12px; padding:10px 12px; border:1px solid rgba(255,173,120,.28); border-radius:7px; background:rgba(255,173,120,.06); color:var(--network-muted); font-size:10px; }
 [data-network-page] .networkRouteStaleNotice strong { color:#ffad78; font-size:10px; }
 
@@ -1356,4 +1602,81 @@
   [data-network-page] .networkEndpointInput { align-items: stretch; flex-direction: column; }
   [data-network-page] .networkEndpointGuide b { flex-basis: auto; }
   [data-network-page] .networkEch dl > div { grid-template-columns: 1fr; }
+}
+
+/* Keep the diagnostics layout consistent with the shared application sections. */
+
+[data-network-page] .networkV2 > .networkPanel {
+  border-color: var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: none;
+}
+
+[data-network-page] .networkBlockHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 22px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+[data-network-page] .networkBlockHeader > div:first-child { min-width: 0; }
+[data-network-page] .networkSectionEyebrow { margin: 0; color: var(--dim); font: 700 10px/1 var(--technical-font); letter-spacing: .12em; text-transform: uppercase; }
+[data-network-page] .networkBlockHeader h2 { margin: 7px 0 0; color: var(--text); font-size: 22px; font-weight: 650; letter-spacing: -.035em; line-height: 1.1; }
+[data-network-page] .networkBlockHint { display: block; max-width: 70ch; margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+[data-network-page] .networkBlockMetric { flex: 0 0 auto; max-width: 36ch; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--green); font: 700 10px/1.3 var(--technical-font); text-align: right; }
+
+[data-network-page] .networkStateStrip { padding: 0; }
+[data-network-page] .networkStateLine { border: 0; border-radius: 0; background: var(--panel-soft); }
+[data-network-page] .networkStateLine > div { padding: 14px 22px; }
+[data-network-page] .networkV2Actions { align-self: center; }
+[data-network-page] .networkTableWrap { padding: 0 14px 14px; }
+[data-network-page] .networkTableWrap table { min-width: 860px; border-spacing: 0 6px; border-collapse: separate; }
+[data-network-page] .networkTableWrap th { padding: 12px 10px 7px; border-bottom: 1px solid var(--line); background: transparent; color: var(--dim); font: 600 11px/1.2 var(--ui-font); letter-spacing: 0; text-transform: none; }
+[data-network-page] .networkV2RouteBlock th:first-child { width: 34%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(2) { width: 14%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(3) { width: 21%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(4) { width: 13%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(5) { width: 18%; }
+
+[data-network-page] .networkTableWrap tbody > tr.networkRouteRow > td,
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow > td { padding: 15px 10px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel-soft); }
+[data-network-page] .networkTableWrap tbody > tr.networkRouteRow > td:first-child,
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow > td:first-child { border-left: 1px solid var(--line); border-radius: var(--radius-md) 0 0 var(--radius-md); }
+[data-network-page] .networkTableWrap tbody > tr.networkRouteRow > td:last-child,
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow > td:last-child { border-right: 1px solid var(--line); border-radius: 0 var(--radius-md) var(--radius-md) 0; }
+[data-network-page] .networkTableWrap tbody > tr.networkRouteRow:hover > td,
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow:hover > td,
+[data-network-page] .networkTableWrap tbody > tr.networkRouteRow.is-expanded > td,
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow.is-expanded > td { background: var(--panel-raised); }
+
+[data-network-page] .networkRouteExpand { min-height: 38px; }
+[data-network-page] .networkRouteExpand strong,
+[data-network-page] .networkServerRoute strong { font-family: var(--technical-font); font-size: 12px; }
+[data-network-page] .networkTableWrap td:nth-child(2) > span { color: var(--text); font-size: 11px; font-weight: 600; }
+[data-network-page] .networkTableWrap td:nth-child(2) > small { margin-top: 4px; color: var(--muted); font-size: 10px; }
+[data-network-page] .networkRouteTags { gap: 5px; }
+[data-network-page] .networkRouteTag { min-height: 23px; padding: 3px 8px; font-family: var(--technical-font); font-size: 9px; letter-spacing: .04em; }
+[data-network-page] .networkRouteStatus { margin: 0; padding: 5px 8px; font-family: var(--technical-font); font-size: 9px; }
+[data-network-page] .networkRouteActionEmpty { display: block; color: var(--dim); text-align: left; }
+[data-network-page] .networkRouteDelete { min-height: 30px; padding: 0 10px; border-radius: var(--radius-sm); font: 600 10px var(--ui-font); }
+
+[data-network-page] .networkRouteDetailRow > td { padding: 0; border: 0; background: transparent; }
+[data-network-page] .networkRouteCascade { margin: -6px 10px 2px; padding: 16px 18px 18px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-inset); }
+[data-network-page] .networkRouteCascadeHeader { padding: 0 0 12px; }
+[data-network-page] .networkRouteCascadeHeader .networkSectionEyebrow { margin-bottom: 5px; }
+[data-network-page] .networkV2Capabilities { padding-bottom: 0; }
+[data-network-page] .networkV2Capabilities .networkCapabilityGrid { padding: 16px 22px 22px; }
+
+@media (max-width: 700px) {
+  [data-network-page] .networkBlockHeader { flex-direction: column; gap: 16px; padding: 17px 16px 15px; }
+  [data-network-page] .networkBlockMetric { max-width: 100%; text-align: left; }
+  [data-network-page] .networkV2Actions,
+  [data-network-page] .networkCapabilityActions { align-self: stretch; width: 100%; }
+  [data-network-page] .networkTableWrap { padding: 0 6px 8px; }
+  [data-network-page] .networkStateLine { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-network-page] .networkStateLine > div { padding: 12px 16px; }
 }

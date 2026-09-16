@@ -121,7 +121,7 @@ export function NetworkEndpoints({
           >
             <header className="networkSectionHeading networkModalHeader">
               <div>
-                <span className="networkKicker">ROUTES</span>
+                <p className="eyebrow networkSectionEyebrow">ROUTES</p>
                 <h2 id="network-endpoints-title">Настройка внешних адресов</h2>
                 <p>
                   Адреса попадут в новые конфигурации клиентов после сохранения. Удаление маршрутов доступно прямо в таблице ROUTES.

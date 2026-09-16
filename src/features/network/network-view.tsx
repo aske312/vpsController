@@ -400,7 +400,7 @@ function routeStatusFor(domain: NetworkStatus["domains"][number]): NetworkEndpoi
 }
 
 function NetworkRouteStatus({ status }: { status: NetworkEndpointCheck["status"] | null }) {
-  if (!status) return null;
+  if (!status) return <span className="networkRouteStatus neutral">ACTIVE</span>;
   return <span className={`networkRouteStatus ${status}`}>{status === "ready" ? "READY" : status === "warning" ? "WARN" : status === "stale" ? "OBSOLETE" : "ERROR"}</span>;
 }
 
@@ -576,12 +576,13 @@ function DiagnosticsV2({
         className="networkStateStrip networkPanel"
         aria-label="Состояние сети"
       >
-        <header className="networkStateHeader">
+        <header className="networkBlockHeader">
           <div>
-            <span className="networkKicker">STATE</span>
+            <p className="eyebrow networkSectionEyebrow">STATE</p>
             <h2>Состояние сети</h2>
+            <span className="networkBlockHint">Ключевые адреса и текущая доступность сетевого контура.</span>
           </div>
-          <strong>{status.route.label}</strong>
+          <strong className="networkBlockMetric">{status.route.label}</strong>
         </header>
         <div className="networkStateLine">
           <div>
@@ -610,10 +611,11 @@ function DiagnosticsV2({
         className="networkV2RouteBlock networkPanel"
         aria-label="Домены и IP серверов"
       >
-        <header className="networkV2BlockHead">
+        <header className="networkBlockHeader networkRoutesHeader">
           <div>
-            <span className="networkKicker">ROUTES</span>
-            <h2>Домены и IP серверов</h2>
+            <p className="eyebrow networkSectionEyebrow">ROUTES</p>
+            <h2>Маршруты сети</h2>
+            <span className="networkBlockHint">IP и домены сервера, внешние точки CDN и relay, а также используемые каналы TCP и UDP.</span>
           </div>
           <div className="networkV2Actions">
             <label className="networkSearch">
@@ -740,7 +742,7 @@ function DiagnosticsV2({
                           <div className="networkRouteCascade">
                             <div className="networkRouteCascadeHeader">
                               <div>
-                                <span className="networkKicker">ROUTE DETAILS</span>
+                                <p className="eyebrow networkSectionEyebrow">ROUTE DETAILS</p>
                                 <strong>{domain.value}</strong>
                               </div>
                               <NetworkRouteTags domain={domain} />
@@ -791,10 +793,11 @@ function DiagnosticsV2({
       </section>
       {status.capabilities && (
         <section className="networkV2Capabilities networkPanel">
-          <header className="networkV2BlockHead">
+          <header className="networkBlockHeader">
             <div>
-              <span className="networkKicker">CAPABILITIES</span>
+              <p className="eyebrow networkSectionEyebrow">CAPABILITIES</p>
               <h2>Сетевые возможности</h2>
+              <span className="networkBlockHint">Проверки, которые определяют готовность VPS к работе с сетевыми каналами.</span>
             </div>
             <div className="networkCapabilityActions">
               {status.capabilities.uplink && (
