@@ -229,8 +229,9 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
       <main className="networkBoard">
         <header className="networkPageHeader">
           <div className="networkPageIdentity">
-            <p className="eyebrow">Network</p>
+            <p className="eyebrow networkSectionEyebrow">Network</p>
             <h1>Сеть</h1>
+            <span className="networkBlockHint">Состояние сетевого контура, маршруты и готовность каналов.</span>
             <nav className="networkTabs" aria-label="Разделы сети">
               {(
                 [
@@ -400,8 +401,24 @@ function routeStatusFor(domain: NetworkStatus["domains"][number]): NetworkEndpoi
 }
 
 function NetworkRouteStatus({ status }: { status: NetworkEndpointCheck["status"] | null }) {
-  if (!status) return <span className="networkRouteStatus neutral">ACTIVE</span>;
-  return <span className={`networkRouteStatus ${status}`}>{status === "ready" ? "READY" : status === "warning" ? "WARN" : status === "stale" ? "OBSOLETE" : "ERROR"}</span>;
+  const display = status === "ready"
+    ? { className: "ready", label: "READY" }
+    : status === "stale"
+      ? { className: "obsolete", label: "OBSOLETE" }
+      : status === "unresolved"
+        ? { className: "error", label: "ERROR" }
+        : { className: "active", label: "ACTIVE" };
+  return <span className={`networkRouteStatus ${display.className}`}>{display.label}</span>;
+}
+
+function NetworkStateFact({ label, value, note, mono = false }: { label: string; value: string; note: string; mono?: boolean }) {
+  return (
+    <div>
+      <small>{label}</small>
+      <strong className={mono ? "mono" : ""}>{value}</strong>
+      <span>{note}</span>
+    </div>
+  );
 }
 
 function NetworkIdentityDetails({
@@ -576,36 +593,27 @@ function DiagnosticsV2({
         className="networkStateStrip networkPanel"
         aria-label="Состояние сети"
       >
-        <header className="networkBlockHeader">
-          <div>
+        <header className="networkStateHero">
+          <div className="networkStateHeroIntro">
             <p className="eyebrow networkSectionEyebrow">STATE</p>
-            <h2>Состояние сети</h2>
-            <span className="networkBlockHint">Ключевые адреса и текущая доступность сетевого контура.</span>
+            <div className="networkStateTitleLine">
+              <h2>Состояние сети</h2>
+              <span className={`networkStateBadge ${status.route.mode}`}>{status.route.label}</span>
+            </div>
+            <p className="networkBlockHint">Ключевые адреса и текущая доступность сетевого контура.</p>
           </div>
-          <strong className="networkBlockMetric">{status.route.label}</strong>
+          <div className="networkStateFacts" aria-label="Факты о состоянии сети">
+            <NetworkStateFact label="SERVER IPv4" value={publicIpv4 || "Не обнаружен"} note="origin VPS" mono />
+            <NetworkStateFact label="SERVER IPv6" value={publicIpv6 || "Не обнаружен"} note={publicIpv6 ? "доступен для публикации" : "не обнаружен"} mono />
+            <NetworkStateFact label="DNS" value={status.resolvers.join(", ") || "Нет данных"} note={`${status.resolvers.length} резолвера`} mono />
+            <NetworkStateFact label="EDGE" value={status.edge.provider} note={status.edge.mode} />
+            <NetworkStateFact label="LISTENERS" value={String(status.listeners.length)} note="TCP listeners" />
+          </div>
+          <div className="networkStateEvidence">
+            <span>{status.route.evidence[0] || "Проверка сетевого контура выполнена"}</span>
+            <button type="button" onClick={onRefresh} disabled={busy}>Обновить состояние</button>
+          </div>
         </header>
-        <div className="networkStateLine">
-          <div>
-            <small>SERVER IPv4</small>
-            <code>{publicIpv4 || "Не обнаружен"}</code>
-          </div>
-          <div>
-            <small>SERVER IPv6</small>
-            <code>{publicIpv6 || "Не обнаружен"}</code>
-          </div>
-          <div>
-            <small>DNS</small>
-            <code>{status.resolvers.join(", ") || "Нет данных"}</code>
-          </div>
-          <div>
-            <small>EDGE</small>
-            <strong>{status.edge.provider}</strong>
-          </div>
-          <div>
-            <small>LISTENERS</small>
-            <strong>{status.listeners.length}</strong>
-          </div>
-        </div>
       </section>
       <section
         className="networkV2RouteBlock networkPanel"

@@ -1694,3 +1694,214 @@
   [data-network-page] .networkStateLine { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   [data-network-page] .networkStateLine > div { padding: 12px 16px; }
 }
+
+/* Network uses the same page and fact-card language as the diagnostics sections. */
+
+[data-network-page] .networkPageHeader {
+  min-height: 76px;
+  margin: 0;
+  padding: 20px 22px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+[data-network-page] .networkPageIdentity .networkSectionEyebrow {
+  margin: 0;
+  color: var(--dim);
+}
+
+[data-network-page] .networkPageIdentity h1 {
+  margin: 7px 0 0;
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -.035em;
+  line-height: 1.1;
+}
+
+[data-network-page] .networkPageIdentity .networkBlockHint {
+  margin-top: 8px;
+}
+
+[data-network-page] .networkStateHero {
+  display: grid;
+  gap: 16px;
+  padding: 20px 22px 18px;
+  background: var(--panel);
+}
+
+[data-network-page] .networkStateHeroIntro { min-width: 0; }
+
+[data-network-page] .networkStateTitleLine {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+[data-network-page] .networkStateTitleLine h2 {
+  margin: 7px 0 0;
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -.035em;
+  line-height: 1.1;
+}
+
+[data-network-page] .networkStateBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  margin-top: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-inset);
+  color: var(--muted);
+  font: 700 9px/1 var(--technical-font);
+  letter-spacing: .06em;
+}
+
+[data-network-page] .networkStateBadge.direct,
+[data-network-page] .networkStateBadge.proxy_or_cdn {
+  border-color: color-mix(in srgb, var(--green) 34%, var(--line));
+  background: color-mix(in srgb, var(--green) 9%, var(--panel-inset));
+  color: var(--green);
+}
+
+[data-network-page] .networkStateFacts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid rgba(92, 112, 136, .2);
+  border-radius: 12px;
+  background: rgba(91, 111, 136, .14);
+}
+
+[data-network-page] .networkStateFacts > div {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 74px;
+  padding: 10px 12px;
+  background: var(--panel-inset);
+}
+
+[data-network-page] .networkStateFacts small {
+  overflow: hidden;
+  color: var(--dim);
+  font: 700 9px/1 var(--technical-font);
+  letter-spacing: .1em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-network-page] .networkStateFacts strong {
+  overflow: hidden;
+  color: var(--text);
+  font: 700 14px/1.2 var(--technical-font);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-network-page] .networkStateFacts strong.mono {
+  color: var(--cyan);
+  font-size: 12px;
+}
+
+[data-network-page] .networkStateFacts span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-network-page] .networkStateEvidence {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 2px;
+}
+
+[data-network-page] .networkStateEvidence > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-network-page] .networkStateEvidence button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-inset);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+[data-network-page] .networkStateEvidence button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--cyan) 42%, var(--line));
+  color: var(--cyan);
+}
+
+[data-network-page] .networkRouteStatus {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  min-height: 23px;
+  margin: 0;
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  font: 700 9px/1 var(--technical-font);
+  letter-spacing: .06em;
+  white-space: nowrap;
+}
+
+[data-network-page] .networkRouteStatus.active {
+  border-color: color-mix(in srgb, var(--green) 34%, var(--line));
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+  color: var(--green);
+}
+
+[data-network-page] .networkRouteStatus.ready {
+  border-color: color-mix(in srgb, var(--cyan) 38%, var(--line));
+  background: color-mix(in srgb, var(--cyan) 8%, transparent);
+  color: var(--cyan);
+}
+
+[data-network-page] .networkRouteStatus.obsolete {
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--line));
+  background: color-mix(in srgb, var(--amber) 9%, transparent);
+  color: var(--amber);
+}
+
+[data-network-page] .networkRouteStatus.error {
+  border-color: color-mix(in srgb, var(--red) 42%, var(--line));
+  background: color-mix(in srgb, var(--red) 9%, transparent);
+  color: var(--red);
+}
+
+@media (max-width: 900px) {
+  [data-network-page] .networkStateFacts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  [data-network-page] .networkPageHeader { padding: 17px 16px 15px; }
+  [data-network-page] .networkStateHero { padding: 17px 16px 15px; }
+  [data-network-page] .networkStateFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-network-page] .networkStateFacts > div { min-height: 68px; }
+  [data-network-page] .networkStateEvidence { align-items: stretch; flex-direction: column; }
+  [data-network-page] .networkStateEvidence > span { white-space: normal; }
+  [data-network-page] .networkStateEvidence button { width: 100%; }
+}
