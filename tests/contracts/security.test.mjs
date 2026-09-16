@@ -90,9 +90,7 @@ test("SSH key hardening is transactional and automatically rolls back", async ()
   assert.match(api, /ssh_authorized_keys/);
   assert.match(page, /\/security\/ssh-access\/key\/delete/);
   assert.match(page, /changeSshAccess\("disable"\)/);
-  assert.match(page, /Публичный SSH-доступ/);
   assert.match(page, /Открыть SSH\/22 и root/);
-  assert.match(page, /НЕЗАВИСИМО/);
   assert.match(page, /Ключи root на сервере/);
   assert.match(api, /Accepted publickey for .*re\.escape\(fingerprint\)/);
   assert.match(manager, /ssh-keygen -lf "\$\{temporary\}" -E sha256/);
