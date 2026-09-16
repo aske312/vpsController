@@ -231,7 +231,6 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
           <div className="networkPageIdentity">
             <p className="eyebrow networkSectionEyebrow">Network</p>
             <h1>Сеть</h1>
-            <span className="networkBlockHint">Состояние сетевого контура, маршруты и готовность каналов.</span>
             <nav className="networkTabs" aria-label="Разделы сети">
               {(
                 [
@@ -598,9 +597,7 @@ function DiagnosticsV2({
             <p className="eyebrow networkSectionEyebrow">STATE</p>
             <div className="networkStateTitleLine">
               <h2>Состояние сети</h2>
-              <span className={`networkStateBadge ${status.route.mode}`}>{status.route.label}</span>
             </div>
-            <p className="networkBlockHint">Ключевые адреса и текущая доступность сетевого контура.</p>
           </div>
           <div className="networkStateFacts" aria-label="Факты о состоянии сети">
             <NetworkStateFact label="SERVER IPv4" value={publicIpv4 || "Не обнаружен"} note="origin VPS" mono />
@@ -608,10 +605,6 @@ function DiagnosticsV2({
             <NetworkStateFact label="DNS" value={status.resolvers.join(", ") || "Нет данных"} note={`${status.resolvers.length} резолвера`} mono />
             <NetworkStateFact label="EDGE" value={status.edge.provider} note={status.edge.mode} />
             <NetworkStateFact label="LISTENERS" value={String(status.listeners.length)} note="TCP listeners" />
-          </div>
-          <div className="networkStateEvidence">
-            <span>{status.route.evidence[0] || "Проверка сетевого контура выполнена"}</span>
-            <button type="button" onClick={onRefresh} disabled={busy}>Обновить состояние</button>
           </div>
         </header>
       </section>
@@ -623,7 +616,6 @@ function DiagnosticsV2({
           <div>
             <p className="eyebrow networkSectionEyebrow">ROUTES</p>
             <h2>Маршруты сети</h2>
-            <span className="networkBlockHint">IP и домены сервера, внешние точки CDN и relay, а также используемые каналы TCP и UDP.</span>
           </div>
           <div className="networkV2Actions">
             <label className="networkSearch">
@@ -805,7 +797,6 @@ function DiagnosticsV2({
             <div>
               <p className="eyebrow networkSectionEyebrow">CAPABILITIES</p>
               <h2>Сетевые возможности</h2>
-              <span className="networkBlockHint">Проверки, которые определяют готовность VPS к работе с сетевыми каналами.</span>
             </div>
             <div className="networkCapabilityActions">
               {status.capabilities.uplink && (

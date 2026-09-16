@@ -864,14 +864,14 @@
   letter-spacing: .06em;
 }
 
-[data-network-page] .networkRouteTag.ui { color: var(--network-cyan); border-color: rgba(98, 200, 255, .35); background: rgba(98, 200, 255, .08); }
-[data-network-page] .networkRouteTag.origin { color: var(--network-green); border-color: rgba(106, 221, 186, .32); background: rgba(106, 221, 186, .08); }
+[data-network-page] .networkRouteTag.ui { color: var(--network-cyan); border-color: color-mix(in srgb, var(--network-cyan) 35%, transparent); background: color-mix(in srgb, var(--network-cyan) 8%, transparent); }
+[data-network-page] .networkRouteTag.origin { color: var(--network-green); border-color: color-mix(in srgb, var(--network-green) 32%, transparent); background: color-mix(in srgb, var(--network-green) 8%, transparent); }
 [data-network-page] .networkRouteTag.cdn,
-[data-network-page] .networkRouteTag.proxy { color: var(--network-green); border-color: rgba(106, 221, 186, .35); background: rgba(106, 221, 186, .08); }
+[data-network-page] .networkRouteTag.proxy { color: var(--network-green); border-color: color-mix(in srgb, var(--network-green) 35%, transparent); background: color-mix(in srgb, var(--network-green) 8%, transparent); }
 [data-network-page] .networkRouteTag.tcp,
-[data-network-page] .networkRouteTag.tls { color: var(--network-violet); border-color: rgba(169, 165, 255, .34); background: rgba(169, 165, 255, .08); }
+[data-network-page] .networkRouteTag.tls { color: var(--network-violet); border-color: color-mix(in srgb, var(--network-violet) 34%, transparent); background: color-mix(in srgb, var(--network-violet) 8%, transparent); }
 [data-network-page] .networkRouteTag.udp,
-[data-network-page] .networkRouteTag.relay { color: var(--network-amber); border-color: rgba(239, 182, 95, .34); background: rgba(239, 182, 95, .08); }
+[data-network-page] .networkRouteTag.relay { color: var(--network-amber); border-color: color-mix(in srgb, var(--network-amber) 34%, transparent); background: color-mix(in srgb, var(--network-amber) 8%, transparent); }
 [data-network-page] .networkRouteTag.direct { color: var(--network-muted); }
 [data-network-page] .networkRouteTag.unknown { color: var(--network-amber); }
 [data-network-page] .networkRouteStatus {
@@ -888,11 +888,11 @@
 }
 [data-network-page] .networkRouteStatus.ready { color: var(--network-green); background: rgba(67, 171, 139, .1); }
 [data-network-page] .networkRouteStatus.warning { color: var(--network-amber); background: rgba(239, 182, 95, .1); }
-[data-network-page] .networkRouteStatus.stale { color: #ffad78; background: rgba(255, 173, 120, .12); }
+[data-network-page] .networkRouteStatus.stale { color: var(--network-amber); background: color-mix(in srgb, var(--network-amber) 12%, transparent); }
 [data-network-page] .networkRouteStatus.unresolved { color: var(--network-red, #f17878); background: rgba(241, 120, 120, .1); }
 [data-network-page] .networkRouteStatus.neutral { color: var(--network-muted); background: var(--panel-inset); }
-[data-network-page] .networkRouteStaleNotice { display:grid; gap:4px; margin-top:12px; padding:10px 12px; border:1px solid rgba(255,173,120,.28); border-radius:7px; background:rgba(255,173,120,.06); color:var(--network-muted); font-size:10px; }
-[data-network-page] .networkRouteStaleNotice strong { color:#ffad78; font-size:10px; }
+[data-network-page] .networkRouteStaleNotice { display:grid; gap:4px; margin-top:12px; padding:10px 12px; border:1px solid color-mix(in srgb, var(--network-amber) 28%, transparent); border-radius:7px; background:color-mix(in srgb, var(--network-amber) 6%, transparent); color:var(--network-muted); font-size:10px; }
+[data-network-page] .networkRouteStaleNotice strong { color:var(--network-amber); font-size:10px; }
 
 /* CAPABILITIES. */
 
@@ -1701,9 +1701,10 @@
   min-height: 76px;
   margin: 0;
   padding: 20px 22px 18px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 [data-network-page] .networkPageIdentity .networkSectionEyebrow {
@@ -1718,10 +1719,6 @@
   font-weight: 650;
   letter-spacing: -.035em;
   line-height: 1.1;
-}
-
-[data-network-page] .networkPageIdentity .networkBlockHint {
-  margin-top: 8px;
 }
 
 [data-network-page] .networkStateHero {
@@ -1747,27 +1744,6 @@
   font-weight: 650;
   letter-spacing: -.035em;
   line-height: 1.1;
-}
-
-[data-network-page] .networkStateBadge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 26px;
-  margin-top: 7px;
-  padding: 0 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel-inset);
-  color: var(--muted);
-  font: 700 9px/1 var(--technical-font);
-  letter-spacing: .06em;
-}
-
-[data-network-page] .networkStateBadge.direct,
-[data-network-page] .networkStateBadge.proxy_or_cdn {
-  border-color: color-mix(in srgb, var(--green) 34%, var(--line));
-  background: color-mix(in srgb, var(--green) 9%, var(--panel-inset));
-  color: var(--green);
 }
 
 [data-network-page] .networkStateFacts {
@@ -1820,39 +1796,6 @@
   white-space: nowrap;
 }
 
-[data-network-page] .networkStateEvidence {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-top: 2px;
-}
-
-[data-network-page] .networkStateEvidence > span {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-[data-network-page] .networkStateEvidence button {
-  flex: 0 0 auto;
-  min-height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--panel-inset);
-  color: var(--muted);
-  font-size: 10px;
-}
-
-[data-network-page] .networkStateEvidence button:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--cyan) 42%, var(--line));
-  color: var(--cyan);
-}
-
 [data-network-page] .networkRouteStatus {
   display: inline-flex;
   align-items: center;
@@ -1901,7 +1844,4 @@
   [data-network-page] .networkStateHero { padding: 17px 16px 15px; }
   [data-network-page] .networkStateFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   [data-network-page] .networkStateFacts > div { min-height: 68px; }
-  [data-network-page] .networkStateEvidence { align-items: stretch; flex-direction: column; }
-  [data-network-page] .networkStateEvidence > span { white-space: normal; }
-  [data-network-page] .networkStateEvidence button { width: 100%; }
 }
