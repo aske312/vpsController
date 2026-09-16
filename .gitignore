@@ -61,4 +61,6 @@ __pycache__/
 /.servers/
 /.claude/
 /docs/audit/
+/docs/backlog/
 /AGENTS.md
+/docs/plans/
