@@ -44,6 +44,7 @@ class NetworkDomainsTests(unittest.TestCase):
             ("cdn.example.com", "VLESS CDN", "gateway"),
             ("tls.example.com", "VLESS TLS", "gateway"),
         ])
+        self.assertEqual(domains[2]["endpoint_kind"], "tls_relay")
 
     def test_transport_endpoints_are_saved_and_exposed_as_network_domains(self):
         with tempfile.TemporaryDirectory() as root:
@@ -108,9 +109,25 @@ class NetworkDomainsTests(unittest.TestCase):
             update.assert_called_once()
             self.assertEqual(update.call_args.args[1].cdn_enabled, False)
             self.assertEqual(update.call_args.args[1].cdn_domain, "")
-            retirement = json.loads((data_dir / "retirements.json").read_text())
+            retirement = json.loads((data_dir / "retirements.json").read_text(encoding="utf-8"))
             self.assertEqual(retirement[0]["domain"], "cdn.example.com")
             self.assertTrue(any("Phone" in usage for usage in retirement[0]["usages"]))
+
+    def test_delete_transport_endpoint_removes_unused_retirement_marker(self):
+        with tempfile.TemporaryDirectory() as root:
+            data_dir = Path(root)
+            endpoint_file = data_dir / "network-endpoints.json"
+            retirement_file = data_dir / "retirements.json"
+            retirement_file.write_text(json.dumps([{
+                "kind": "tls_relay",
+                "domain": "tls.example.com",
+                "usages": ["old connection"],
+                "retired_at": "2026-01-01T00:00:00+00:00",
+            }]))
+            with patch.object(api, "DATA_DIR", data_dir), patch.object(api, "NETWORK_ENDPOINTS_FILE", endpoint_file), patch.object(api, "NETWORK_ENDPOINT_RETIREMENTS_FILE", retirement_file), patch.object(api, "VLESS_ENV", data_dir / "missing.env"), patch.object(api, "VLESS_CONFIG", data_dir / "missing.json"), patch.object(api, "MIHOMO_VLESS_CDN_ROUTES", data_dir / "missing-routes"), patch.object(api, "read_clients", return_value=[]), patch.object(api, "network_status", return_value={"transport_endpoints": {}}):
+                api.write_network_endpoint_settings({"tls_relay_domain": "tls.example.com"})
+                api.delete_network_endpoint("tls_relay", "tls.example.com", None)
+            self.assertEqual(json.loads(retirement_file.read_text()), [])
 
     def test_protected_channel_mode_requires_matching_endpoint_and_is_exposed_to_channel_settings(self):
         with tempfile.TemporaryDirectory() as root:

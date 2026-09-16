@@ -579,6 +579,15 @@ function DiagnosticsV2({
     Object.values(status.transport_endpoint_checks || {}).find(
       (check) => (check?.domain || (check as NetworkEndpointCheck & { value?: string }).value)?.toLowerCase() === value.toLowerCase(),
     );
+  const endpointKindFor = (domain: NetworkStatus["domains"][number], check?: NetworkEndpointCheck) => {
+    if (check) return check.kind;
+    if (domain.endpoint_kind) return domain.endpoint_kind;
+    const role = domain.role.toLowerCase();
+    if (role.includes("vless tls") || role.includes("tls relay") || role.includes("tls ·")) return "tls_relay" as const;
+    if (role.includes("vless cdn") || role.includes("cdn endpoint")) return "cdn" as const;
+    if (role.includes("udp relay")) return "udp_relay" as const;
+    return undefined;
+  };
   const toggleDomain = (key: string) =>
     setExpandedDomains((current) => {
       const next = new Set(current);
@@ -671,7 +680,15 @@ function DiagnosticsV2({
                 const rowKey = `${domain.role}-${domain.value}`;
                 const expanded = expandedDomains.has(rowKey);
                 const endpointCheck = endpointCheckFor(domain.value);
+                const endpointKind = endpointKindFor(domain, endpointCheck);
                 const routeStatus = endpointCheck?.status || routeStatusFor(domain);
+                const removeRoute = () => {
+                  if (endpointCheck) {
+                    onRemoveRoute(endpointCheck.kind, domain.value);
+                  } else if (endpointKind) {
+                    onRemoveRoute(endpointKind, domain.value);
+                  }
+                };
                 const rowClass =
                   domain.role === "SERVER"
                     ? "networkServerRouteRow"
@@ -718,13 +735,13 @@ function DiagnosticsV2({
                         <NetworkRouteTags domain={domain} />
                       </td>
                       <td>
-                        {endpointCheck && domain.role !== "SERVER" ? (
+                        {endpointKind && domain.role !== "SERVER" ? (
                           <button
                             type="button"
                             className="networkRouteDelete"
                             onClick={() => {
                               if (window.confirm(`Удалить маршрут ${domain.value}?`)) {
-                                onRemoveRoute(endpointCheck.kind, domain.value);
+                                removeRoute();
                               }
                             }}
                             disabled={busy}

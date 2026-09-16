@@ -426,6 +426,17 @@ def save_network_endpoint_retirements(value: list[dict[str, object]]) -> None:
     temporary.replace(NETWORK_ENDPOINT_RETIREMENTS_FILE)
 
 
+def forget_network_endpoint_retirement(kind: str, domain: str) -> None:
+    normalized = domain.strip().lower()
+    stored = read_network_endpoint_retirements()
+    remaining = [
+        item for item in stored
+        if not (item.get("kind") == kind and str(item.get("domain", "")).strip().lower() == normalized)
+    ]
+    if len(remaining) != len(stored):
+        save_network_endpoint_retirements(remaining)
+
+
 def endpoint_connection_usages(kind: str, domain: str) -> list[str]:
     usages: list[str] = []
     domain = domain.strip().lower()
@@ -2039,29 +2050,33 @@ def network_status() -> dict:
         except OSError:
             pass
     candidates = [
-        (PUBLIC_DOMAIN, "panel", "environment"),
-        (direct_cdn_domain, "VLESS CDN", "environment"),
-        *((value, "CDN endpoint", "settings") for value in endpoint_settings["cdn_domains"]),
-        *((value, "TLS relay", "settings") for value in endpoint_settings["tls_relay_domains"]),
-        *((value, "UDP relay", "settings") for value in endpoint_settings["udp_relay_domains"]),
+        (PUBLIC_DOMAIN, "panel", "environment", None),
+        (direct_cdn_domain, "VLESS CDN", "environment", "cdn"),
+        *((value, "CDN endpoint", "settings", "cdn") for value in endpoint_settings["cdn_domains"]),
+        *((value, "TLS relay", "settings", "tls_relay") for value in endpoint_settings["tls_relay_domains"]),
+        *((value, "UDP relay", "settings", "udp_relay") for value in endpoint_settings["udp_relay_domains"]),
     ]
     for route in cdn_security.read_routes():
-        candidates.append((route.get("domain", ""), "VLESS CDN" if route.get("cloudflare", True) else "VLESS TLS", "gateway"))
+        candidates.append((route.get("domain", ""), "VLESS CDN" if route.get("cloudflare", True) else "VLESS TLS", "gateway", "cdn" if route.get("cloudflare", True) else "tls_relay"))
     active_endpoint_values = {str(value).strip().lower() for value in (*endpoint_settings["cdn_domains"], *endpoint_settings["tls_relay_domains"], *endpoint_settings["udp_relay_domains"], direct_cdn_domain) if value}
     retirements = read_network_endpoint_retirements()
     for retired in retirements:
         retired_domain = str(retired.get("domain", "")).strip().lower()
         if retired_domain and retired_domain not in active_endpoint_values:
             label = {"cdn": "CDN", "tls_relay": "TLS", "udp_relay": "UDP"}.get(str(retired.get("kind")), "Маршрут")
-            candidates.append((retired_domain, f"{label} · УСТАРЕЛ", "connection"))
-    for domain, role, source in candidates:
+            candidates.append((retired_domain, f"{label} · УСТАРЕЛ", "connection", str(retired.get("kind"))))
+    for domain, role, source, endpoint_kind in candidates:
         existing = next((item for item in domain_items if item['value'] == domain), None)
         if existing is not None:
             if role not in existing['role'].split(', '):
                 existing['role'] += ', ' + role
+            if endpoint_kind and not existing.get("endpoint_kind"):
+                existing["endpoint_kind"] = endpoint_kind
         elif domain:
             item = network_domain_probe(domain, role)
             item["source"] = source
+            if endpoint_kind in {"cdn", "tls_relay", "udp_relay"}:
+                item["endpoint_kind"] = endpoint_kind
             retirement = next((entry for entry in retirements if str(entry.get("domain", "")).strip().lower() == str(domain).strip().lower()), None)
             if retirement and source == "connection":
                 item["status"] = "stale"
@@ -2209,7 +2224,14 @@ def delete_network_endpoint(kind: Literal["cdn", "tls_relay", "udp_relay"], doma
     key_by_kind = {"cdn": "cdn_domain", "tls_relay": "tls_relay_domain", "udp_relay": "udp_relay_domain"}
     list_key = f"{key_by_kind[kind]}s" if kind != "tls_relay" else "tls_relay_domains"
     settings = read_network_endpoint_settings()
-    remember_network_endpoint_retirement(kind, domain)
+    # Keep a retirement marker only while an existing client still references
+    # the endpoint. Once the last reference is gone, an explicit delete must
+    # also remove the old marker; otherwise Network renders the same domain
+    # again as an obsolete route and it can never disappear from the panel.
+    if endpoint_connection_usages(kind, domain):
+        remember_network_endpoint_retirement(kind, domain)
+    else:
+        forget_network_endpoint_retirement(kind, domain)
     values = [str(value) for value in (settings.get(list_key) or []) if str(value).strip().lower() != domain]
     settings[list_key] = values
     settings[key_by_kind[kind]] = values[0] if values else ""

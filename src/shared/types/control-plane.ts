@@ -32,7 +32,7 @@ export type NetworkIpIdentity = { address: string; ptr: string; provider: string
 export type NetworkStatus = {
   detected_at: string;
   server: { name: string; public_ip: string; public_ipv4?: string; public_ipv6?: string; ip_info?: NetworkIpIdentity[] };
-  domains: Array<{ value: string; role: string; source: string; resolved: string[]; matches_origin: boolean; route: "direct" | "proxy_or_cdn" | "unresolved"; status?: "stale"; stale_usages?: string[]; dns?: NetworkDnsIdentity; edge?: NetworkEdgeIdentity; ip_info?: NetworkIpIdentity[] }>;
+  domains: Array<{ value: string; role: string; source: string; endpoint_kind?: NetworkEndpointCheck["kind"]; resolved: string[]; matches_origin: boolean; route: "direct" | "proxy_or_cdn" | "unresolved"; status?: "stale"; stale_usages?: string[]; dns?: NetworkDnsIdentity; edge?: NetworkEdgeIdentity; ip_info?: NetworkIpIdentity[] }>;
   route: { mode: "direct" | "proxy_or_cdn" | "none"; label: string; evidence: string[] };
   tls: { mode: string; certificate_source: string; https_expected: boolean };
   edge: { provider: string; mode: string; evidence: string[] };
