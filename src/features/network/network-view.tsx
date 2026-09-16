@@ -660,9 +660,9 @@ function DiagnosticsV2({
             <thead>
               <tr>
                 <th>Адрес</th>
+                <th>Статус</th>
                 <th>Назначение</th>
                 <th>Канал</th>
-                <th>Проверка</th>
                 <th>Управление</th>
               </tr>
             </thead>
@@ -708,14 +708,14 @@ function DiagnosticsV2({
                         </button>
                       </td>
                       <td>
+                        <NetworkRouteStatus status={routeStatus} />
+                      </td>
+                      <td>
                         <span>{domain.role}</span>
                         <small>{domain.source}</small>
                       </td>
                       <td>
                         <NetworkRouteTags domain={domain} />
-                      </td>
-                      <td>
-                        <NetworkRouteStatus status={routeStatus} />
                       </td>
                       <td>
                         {endpointCheck && domain.role !== "SERVER" ? (
