@@ -34,8 +34,10 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(page, /NetworkRouteTags/);
   assert.match(page, /NetworkRouteStatus/);
   assert.match(page, /routeStatusFor/);
-  assert.match(page, /<th>.*Статус/);
-  assert.match(endpoint, /Отключить и удалить/);
+  assert.match(page, /<th>.*Проверка/);
+  assert.match(page, /networkRouteDelete/);
+  assert.match(page, /onRemoveRoute\(endpointCheck\.kind/);
+  assert.doesNotMatch(endpoint, /networkEndpointDelete|Отключить и удалить/);
   assert.match(page, /transport_endpoint_checks_by_domain/);
   assert.match(page, /check\?\.domain/);
   assert.match(page, /networkStateStrip/);
@@ -47,6 +49,8 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(page, /Скопировать IPv6/);
   assert.doesNotMatch(page, /networkEvidence/);
   assert.ok(page.indexOf("networkStateStrip") < page.indexOf("networkV2RouteBlock"));
+  assert.match(css, /\.networkV2[\s\S]+gap: 12px/);
+  assert.match(css, /--network-text: var\(--text\)/);
   assert.match(networkApi, /saveNetworkEndpoints/);
   assert.match(types, /transport_endpoints/);
   assert.match(types, /NetworkEndpointSettings/);

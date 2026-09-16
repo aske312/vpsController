@@ -637,7 +637,6 @@ function DiagnosticsV2({
                 } : undefined}
                 busy={busy}
                 dirty={endpointDirty}
-                onRemoveRoute={onRemoveRoute}
                 onChange={(key, value) => {
                   const primaryKey = key as "cdn_domain" | "tls_relay_domain" | "udp_relay_domain";
                   const listKey = ({ cdn_domain: "cdn_domains", tls_relay_domain: "tls_relay_domains", udp_relay_domain: "udp_relay_domains" } as const)[primaryKey];
@@ -658,10 +657,11 @@ function DiagnosticsV2({
           <table>
             <thead>
               <tr>
-                <th>Домен / IP</th>
-                <th>Роль</th>
-                <th>Маршрут</th>
-                <th>Статус</th>
+                <th>Адрес</th>
+                <th>Назначение</th>
+                <th>Канал</th>
+                <th>Проверка</th>
+                <th>Управление</th>
               </tr>
             </thead>
             <tbody>
@@ -695,9 +695,12 @@ function DiagnosticsV2({
                           <span>
                             <strong>{domain.value}</strong>
                             <small>
+                              {domain.value.includes(":") || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(domain.value)
+                                ? "IP"
+                                : "DOMAIN"}
                               {domain.resolved.length
-                                ? `${domain.resolved.length} IP · раскрыть сведения`
-                                : "раскрыть сведения"}
+                                ? ` · ${domain.resolved.length} IP · раскрыть сведения`
+                                : " · раскрыть сведения"}
                             </small>
                           </span>
                         </button>
@@ -712,10 +715,28 @@ function DiagnosticsV2({
                       <td>
                         <NetworkRouteStatus status={routeStatus} />
                       </td>
+                      <td>
+                        {endpointCheck && domain.role !== "SERVER" ? (
+                          <button
+                            type="button"
+                            className="networkRouteDelete"
+                            onClick={() => {
+                              if (window.confirm(`Удалить маршрут ${domain.value}?`)) {
+                                onRemoveRoute(endpointCheck.kind, domain.value);
+                              }
+                            }}
+                            disabled={busy}
+                          >
+                            Удалить
+                          </button>
+                        ) : (
+                          <span className="networkRouteActionEmpty">—</span>
+                        )}
+                      </td>
                     </tr>
                     {expanded && (
                       <tr className="networkRouteDetailRow">
-                        <td colSpan={4}>
+                        <td colSpan={5}>
                           <div className="networkRouteCascade">
                             <div className="networkRouteCascadeHeader">
                               <div>

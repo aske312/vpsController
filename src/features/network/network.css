@@ -1,21 +1,22 @@
 /* Network workspace: one compact visual system shared with Application, Security and Services. */
 
 [data-network-page] {
-  --network-bg: #071019;
-  --network-panel: #0a151f;
-  --network-panel-soft: #07121b;
-  --network-text: #edf5f9;
-  --network-muted: #8196a5;
-  --network-dim: #607887;
-  --network-line: rgba(105, 137, 162, .16);
-  --network-line-strong: rgba(105, 137, 162, .25);
-  --network-green: #6addba;
-  --network-cyan: #62c8ff;
-  --network-violet: #a9a5ff;
-  --network-amber: #efb65f;
-  --network-red: #ef8585;
+  --network-bg: var(--bg);
+  --network-panel: var(--panel);
+  --network-panel-soft: var(--panel-soft);
+  --network-text: var(--text);
+  --network-muted: var(--muted);
+  --network-dim: var(--dim);
+  --network-line: var(--line);
+  --network-line-strong: var(--line-strong);
+  --network-green: var(--green);
+  --network-cyan: var(--cyan);
+  --network-violet: var(--violet);
+  --network-amber: var(--amber);
+  --network-red: var(--red);
   width: 100%;
   color: var(--network-text);
+  font-family: var(--ui-font);
 }
 
 [data-network-page] *,
@@ -336,7 +337,7 @@
 
 [data-network-page] .networkTableWrap table {
   width: 100%;
-  min-width: 640px;
+  min-width: 760px;
   border-collapse: collapse;
   table-layout: fixed;
   text-align: left;
@@ -352,10 +353,11 @@
   text-transform: uppercase;
 }
 
-[data-network-page] .networkV2RouteBlock th:first-child { width: 46%; }
-[data-network-page] .networkV2RouteBlock th:nth-child(2) { width: 18%; }
-[data-network-page] .networkV2RouteBlock th:nth-child(3) { width: 24%; }
-[data-network-page] .networkV2RouteBlock th:nth-child(4) { width: 12%; }
+[data-network-page] .networkV2RouteBlock th:first-child { width: 38%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(2) { width: 17%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(3) { width: 23%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(4) { width: 10%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(5) { width: 12%; }
 
 [data-network-page] .networkTableWrap td {
   min-width: 0;
@@ -433,6 +435,27 @@
 [data-network-page] .networkTableWrap td > span,
 [data-network-page] .networkTableWrap td > small {
   display: block;
+}
+
+[data-network-page] .networkRouteActionEmpty {
+  color: var(--network-dim);
+  text-align: center;
+}
+
+[data-network-page] .networkRouteDelete {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(240, 123, 123, .28);
+  border-radius: 7px;
+  background: rgba(240, 123, 123, .07);
+  color: var(--network-red);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+[data-network-page] .networkRouteDelete:hover:not(:disabled) {
+  border-color: rgba(240, 123, 123, .5);
+  background: rgba(240, 123, 123, .14);
 }
 
 [data-network-page] .networkRouteDetailRow > td {
@@ -628,6 +651,12 @@
 /* CAPABILITIES. */
 
 [data-network-page] .networkV2Capabilities { padding-bottom: 12px; }
+
+[data-network-page] .networkV2 {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
 
 [data-network-page] .networkCapabilityGrid {
   display: grid;
