@@ -1208,7 +1208,7 @@ PY
 }
 
 ssh_access_add_key() {
-  local public_key="${1:-}" ssh_dir="/root/.ssh" keys_file="/root/.ssh/authorized_keys" temporary fingerprint
+  local public_key="${1:-}" ssh_dir="/root/.ssh" keys_file="/root/.ssh/authorized_keys" state_file="${DATA_DIR}/ssh-access.json" temporary fingerprint phase
   [[ "${public_key}" != *$'\n'* && "${public_key}" != *$'\r'* ]] || die "публичный SSH-ключ должен занимать одну строку"
   [[ "${public_key}" =~ ^(ssh-ed25519|sk-ssh-ed25519@openssh.com|ecdsa-sha2-nistp256)[[:space:]][A-Za-z0-9+/=]+([[:space:]].*)?$ ]] || die "поддерживается публичный ключ ED25519, FIDO2 ED25519 или ECDSA P-256"
   temporary="$(mktemp)"
@@ -1216,6 +1216,14 @@ ssh_access_add_key() {
   fingerprint="$(ssh-keygen -lf "${temporary}" -E sha256 2>/dev/null | awk '{print $2}')"
   rm -f -- "${temporary}"
   [[ "${fingerprint}" == SHA256:* ]] || die "OpenSSH отклонил публичный ключ"
+  read -r phase <<<"$(python3 - "${state_file}" <<'PY'
+import json, sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8")).get("phase", ""))
+except (OSError, ValueError): print("")
+PY
+)"
+  [[ "${phase}" != "awaiting-confirmation" ]] || die "сначала завершите или откатите ожидающее изменение SSH"
   install -d -m 0700 -o root -g root "${ssh_dir}"
   touch "${keys_file}"
   chown root:root "${keys_file}"
@@ -1225,7 +1233,11 @@ ssh_access_add_key() {
     printf '%s\n' "${public_key}" >>"${keys_file}"
   fi
   sshd -t
-  ssh_access_write_state "key-installed" "${fingerprint}" "" "Публичный ключ установлен. Проверьте вход в новой SSH-сессии."
+  if [[ "${phase}" == "hardened" ]]; then
+    ssh_access_write_state "hardened" "${fingerprint}" "" "Новый публичный ключ установлен; защищённый доступ продолжает работать."
+  else
+    ssh_access_write_state "key-installed" "${fingerprint}" "" "Публичный ключ установлен. Проверьте вход в новой SSH-сессии."
+  fi
   ok "публичный ключ ${fingerprint} установлен; парольный вход не изменён."
 }
 
@@ -1239,7 +1251,7 @@ try:
 except (OSError, ValueError): print("", "")
 PY
 )"
-  [[ "${phase}" == "key-installed" || "${phase}" == "rolled-back" ]] || die "безопасное применение уже запущено или ключ ещё не установлен"
+  [[ "${phase}" == "key-installed" || "${phase}" == "rolled-back" || "${phase}" == "open" ]] || die "безопасное применение уже запущено или ключ ещё не установлен"
   [[ "${fingerprint}" == SHA256:* ]] || die "не найден подтверждённый ключ этого мастера"
   install -d -m 0700 "${DATA_DIR}/ssh-access-backup"
   if [[ -f "${dropin}" ]]; then cp -a "${dropin}" "${DATA_DIR}/ssh-access-backup/dropin"; else rm -f "${DATA_DIR}/ssh-access-backup/dropin"; fi
@@ -1331,6 +1343,125 @@ PY
   rm -rf -- "${DATA_DIR}/ssh-access-backup"
   ssh_access_write_state "rolled-back" "${fingerprint}" "" "Предыдущие настройки SSH восстановлены."
   ok "предыдущие настройки SSH восстановлены."
+}
+
+ssh_access_list_keys() {
+  local keys_file="/root/.ssh/authorized_keys"
+  python3 - "${keys_file}" <<'PY'
+import json, re, subprocess, sys, tempfile
+from pathlib import Path
+
+path = Path(sys.argv[1])
+items = []
+if path.is_file():
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[:256]:
+        value = line.strip()
+        if not value or value.startswith("#"):
+            continue
+        tokens = value.split()
+        key_index = next((
+            index for index in range(len(tokens) - 1)
+            if re.fullmatch(r"(?:ssh-|ecdsa-|sk-ssh-)[A-Za-z0-9@._+:-]+", tokens[index])
+            and re.fullmatch(r"[A-Za-z0-9+/=]+", tokens[index + 1])
+        ), None)
+        if key_index is None:
+            continue
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as key_file:
+            key_file.write(value + "\n"); key_file.flush()
+            result = subprocess.run(["ssh-keygen", "-lf", key_file.name, "-E", "sha256"], capture_output=True, text=True, check=False)
+        fields = result.stdout.split() if result.returncode == 0 else []
+        fingerprint = fields[1] if len(fields) > 1 and fields[1].startswith("SHA256:") else ""
+        if not fingerprint:
+            continue
+        items.append({"fingerprint": fingerprint, "type": tokens[key_index], "comment": " ".join(tokens[key_index + 2:])})
+print(json.dumps(items, ensure_ascii=False))
+PY
+}
+
+ssh_access_delete_key() {
+  local target_fingerprint="${1:-}" state_file="${DATA_DIR}/ssh-access.json" phase fingerprint keys_file="/root/.ssh/authorized_keys" temporary
+  [[ "${target_fingerprint}" =~ ^SHA256:[A-Za-z0-9+/=_-]+$ ]] || die "некорректный fingerprint SSH-ключа"
+  read -r phase fingerprint <<<"$(python3 - "${state_file}" <<'PY'
+import json, sys
+try:
+    state=json.load(open(sys.argv[1], encoding="utf-8")); print(state.get("phase", ""), state.get("fingerprint", ""))
+except (OSError, ValueError): print("", "")
+PY
+)"
+  [[ "${phase}" != "awaiting-confirmation" ]] || die "сначала завершите или откатите ожидающее изменение SSH"
+  [[ -f "${keys_file}" ]] || die "список SSH-ключей отсутствует"
+  temporary="$(mktemp)"
+  if ! python3 - "${keys_file}" "${temporary}" "${target_fingerprint}" "${phase}" <<'PY'
+import subprocess, sys, tempfile
+source, target, expected, phase = sys.argv[1:]
+removed = False
+remaining = 0
+with open(source, encoding="utf-8") as handle, open(target, "w", encoding="utf-8") as output:
+    for line in handle:
+        value = line.strip()
+        if not value or value.startswith("#"):
+            output.write(line)
+            continue
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as key_file:
+            key_file.write(value + "\n"); key_file.flush()
+            result = subprocess.run(["ssh-keygen", "-lf", key_file.name, "-E", "sha256"], capture_output=True, text=True, check=False)
+        fingerprint = result.stdout.split()[1] if result.returncode == 0 and len(result.stdout.split()) > 1 else ""
+        if fingerprint == expected:
+            removed = True
+        else:
+            remaining += 1
+            output.write(line)
+if not removed:
+    raise SystemExit("указанный SSH-ключ не найден")
+if phase == "hardened" and remaining == 0:
+    raise SystemExit("нельзя удалить последний SSH-ключ в защищённом режиме")
+PY
+  then
+    rm -f -- "${temporary}"
+    die "не удалось удалить SSH-ключ"
+  fi
+  install -m 0600 -o root -g root "${temporary}" "${keys_file}"
+  rm -f -- "${temporary}"
+  if [[ "${target_fingerprint}" == "${fingerprint}" ]]; then
+    case "${phase}" in
+      hardened) ssh_access_write_state "hardened" "" "" "Ключ мастера удалён; защищённый доступ продолжает работать через оставшийся ключ." ;;
+      open) ssh_access_write_state "open" "" "" "Ключ мастера удалён; парольный SSH-доступ остаётся открытым." ;;
+      *) ssh_access_write_state "password" "" "" "Ключ мастера удалён. Можно установить новый публичный ключ." ;;
+    esac
+  fi
+  ok "ключ ${target_fingerprint} удалён; остальные ключи не изменены."
+}
+
+ssh_access_disable() {
+  local state_file="${DATA_DIR}/ssh-access.json" phase fingerprint dropin="${SSH_ACCESS_DROPIN}" temporary backup had_dropin=no
+  read -r phase fingerprint <<<"$(python3 - "${state_file}" <<'PY'
+import json, sys
+try:
+    state=json.load(open(sys.argv[1], encoding="utf-8")); print(state.get("phase", ""), state.get("fingerprint", ""))
+except (OSError, ValueError): print("", "")
+PY
+)"
+  [[ "${phase}" != "awaiting-confirmation" ]] || die "сначала завершите или откатите ожидающее изменение SSH"
+  install -d -m 0755 "$(dirname -- "${dropin}")"
+  backup="$(mktemp)"
+  if [[ -f "${dropin}" ]]; then cp -a "${dropin}" "${backup}"; had_dropin=yes; fi
+  temporary="$(mktemp)"
+  printf 'PasswordAuthentication yes\nKbdInteractiveAuthentication yes\nPermitRootLogin yes\n' >"${temporary}"
+  install -m 0644 "${temporary}" "${dropin}"
+  rm -f -- "${temporary}"
+  if ! sshd -t; then
+    if [[ "${had_dropin}" == yes ]]; then cp -a "${backup}" "${dropin}"; else rm -f -- "${dropin}"; fi
+    rm -f -- "${backup}"
+    die "открытая конфигурация SSH не прошла проверку"
+  fi
+  rm -f -- "${backup}"
+  systemctl reload ssh.service
+  systemctl stop vps-control-ssh-rollback.timer vps-control-ssh-rollback.service >/dev/null 2>&1 || true
+  if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
+    ufw allow OpenSSH
+  fi
+  ssh_access_write_state "open" "${fingerprint}" "" "Защищённый SSH-доступ отключён: открыт SSH/22 для root по паролю и ключу."
+  ok "защищённый SSH-доступ отключён; SSH/22 и root открыты."
 }
 
 secure_server() {
@@ -3269,8 +3400,9 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|safe-update|auto-safe-update|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update|ssh-key-add|ssh-key-reset|ssh-access-begin|ssh-access-confirm|ssh-access-rollback)
+    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|safe-update|auto-safe-update|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update|ssh-key-add|ssh-key-reset|ssh-key-list|ssh-key-delete|ssh-access-begin|ssh-access-confirm|ssh-access-rollback|ssh-access-disable)
       case "${1}" in
+        ssh-key-list) ;;
         protocol-install|protocol-remove|protocol-update) begin_operation "${1}${2:+:${2}}" ;;
         *) begin_operation "${1}" ;;
       esac
@@ -3357,9 +3489,12 @@ main() {
     optimize) optimize_resources ;;
     ssh-key-add) shift; ssh_access_add_key "$@" ;;
     ssh-key-reset) ssh_access_reset_key ;;
+    ssh-key-list) ssh_access_list_keys ;;
+    ssh-key-delete) shift; ssh_access_delete_key "$@" ;;
     ssh-access-begin) ssh_access_begin_hardening ;;
     ssh-access-confirm) ssh_access_confirm ;;
     ssh-access-rollback) ssh_access_rollback ;;
+    ssh-access-disable) ssh_access_disable ;;
     automation-apply) apply_automation ;;
     logging-config) configure_logging "$@" ;;
     logs-clear) clear_managed_logs ;;

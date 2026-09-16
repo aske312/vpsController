@@ -42,6 +42,7 @@ from schemas import (
     BootstrapRequest,
     AdminPasswordChange,
     SshPublicKeyInstall,
+    SshKeyDelete,
     ApplicationAction,
     ServiceAction,
     PanelAccessSettings,
@@ -1510,6 +1511,27 @@ def change_admin_password(payload: AdminPasswordChange, _: None = Depends(requir
     return {"changed": True, "reauthenticate": True}
 
 
+def ssh_authorized_keys(managed_fingerprint: str = "") -> list[dict[str, str | bool]]:
+    """Return public-key metadata only; never expose authorized_keys contents."""
+    try:
+        raw = run_ssh_access_action("ssh-key-list")
+        loaded = json.loads(raw) if raw else []
+    except (HTTPException, json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(loaded, list):
+        return []
+    return [
+        {
+            "fingerprint": str(item.get("fingerprint", "")),
+            "type": str(item.get("type", "unknown")),
+            "comment": str(item.get("comment", "")),
+            "managed": bool(managed_fingerprint and item.get("fingerprint") == managed_fingerprint),
+        }
+        for item in loaded
+        if isinstance(item, dict) and str(item.get("fingerprint", "")).startswith("SHA256:")
+    ][:256]
+
+
 def ssh_access_state() -> dict:
     state = {"phase": "password", "fingerprint": "", "rollback_deadline": None, "message": ""}
     try:
@@ -1526,10 +1548,11 @@ def ssh_access_state() -> dict:
         fingerprint
         and re.search(rf"Accepted publickey for .* {re.escape(fingerprint)}(?: |$)", public_key_login)
     )
+    state["keys"] = ssh_authorized_keys(fingerprint)
     return state
 
 
-def run_ssh_access_action(action: str, *arguments: str) -> None:
+def run_ssh_access_action(action: str, *arguments: str) -> str:
     unit = f"vps-control-ssh-access-{action}-{int(time.time() * 1000)}"
     result = subprocess.run(
         ["systemd-run", f"--unit={unit}", "--wait", "--collect", "--pipe", "--quiet", "--property=Type=oneshot", CONTROL_COMMAND, action, *arguments],
@@ -1538,6 +1561,7 @@ def run_ssh_access_action(action: str, *arguments: str) -> None:
     if result.returncode:
         detail = (result.stderr or result.stdout).strip().splitlines()
         raise HTTPException(status_code=400, detail=detail[-1] if detail else "Не удалось изменить доступ SSH")
+    return result.stdout.strip()
 
 
 @app.get("/api/security/ssh-access")
@@ -1560,6 +1584,12 @@ def reset_ssh_public_key(_: None = Depends(require_token)) -> dict:
     return ssh_access_state()
 
 
+@app.post("/api/security/ssh-access/key/delete")
+def delete_ssh_public_key(payload: SshKeyDelete, _: None = Depends(require_token)) -> dict:
+    run_ssh_access_action("ssh-key-delete", payload.fingerprint)
+    return ssh_access_state()
+
+
 @app.post("/api/security/ssh-access/begin")
 def begin_ssh_hardening(_: None = Depends(require_token)) -> dict:
     run_ssh_access_action("ssh-access-begin")
@@ -1575,6 +1605,12 @@ def confirm_ssh_hardening(_: None = Depends(require_token)) -> dict:
 @app.post("/api/security/ssh-access/rollback")
 def rollback_ssh_hardening(_: None = Depends(require_token)) -> dict:
     run_ssh_access_action("ssh-access-rollback")
+    return ssh_access_state()
+
+
+@app.post("/api/security/ssh-access/disable")
+def disable_ssh_protection(_: None = Depends(require_token)) -> dict:
+    run_ssh_access_action("ssh-access-disable")
     return ssh_access_state()
 
 

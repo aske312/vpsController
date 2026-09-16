@@ -21,6 +21,10 @@ class SshPublicKeyInstall(BaseModel):
     public_key: str = Field(min_length=80, max_length=2048)
 
 
+class SshKeyDelete(BaseModel):
+    fingerprint: str = Field(min_length=10, max_length=128, pattern=r"^SHA256:[A-Za-z0-9+/=_-]+$")
+
+
 class ApplicationAction(BaseModel):
     action: Literal["restart", "update", "test-update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "safe-update", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
 

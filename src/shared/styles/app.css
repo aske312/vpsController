@@ -1190,6 +1190,15 @@
 .sshAdminStatus strong { display:block; color:#e8dfc9; font-size:12px; }
 .sshAdminStatus p { margin:3px 0 0; color:var(--muted); font-size:10px; line-height:1.5; }
 .sshAdminStatus em { padding:5px 7px; border:1px solid rgba(224,171,75,.24); border-radius:6px; color:var(--warning); font:700 8px var(--font-mono); letter-spacing:.12em; }
+.sshAdminKeys { margin-top:18px; padding:0 12px 12px; border:1px solid rgba(98,126,118,.22); border-radius:10px; background:rgba(255,255,255,.014); }
+.sshAdminKeys .sshAdminSectionTitle { margin-top:12px; }
+.sshKeyList { display:grid; gap:6px; }
+.sshKeyItem { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 10px; border:1px solid rgba(98,126,118,.2); border-radius:7px; background:rgba(9,13,12,.65); }
+.sshKeyItem > div { min-width:0; }
+.sshKeyItem strong { display:block; overflow:hidden; color:#c6d6d1; font:9px var(--font-mono); text-overflow:ellipsis; white-space:nowrap; }
+.sshKeyItem code { display:block; margin-top:4px; overflow-wrap:anywhere; color:#8db7a8; font:9px var(--font-mono); }
+.sshKeyItem .sshResetKeyButton { flex:0 0 auto; margin-top:0; }
+.sshKeysEmpty { margin:0; color:var(--muted); font-size:10px; line-height:1.5; }
 .sshAdminSectionTitle { display:flex; justify-content:space-between; align-items:center; margin:20px 1px 10px; color:var(--text); font:700 10px var(--font-mono); letter-spacing:.08em; text-transform:uppercase; }
 .sshAdminSectionTitle small { color:var(--muted); font:9px var(--font-mono); }
 .sshAdminSteps { display:grid; gap:8px; margin:0; padding:0; list-style:none; counter-reset:none; }
@@ -1211,6 +1220,9 @@
 .sshFingerprint { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px; align-items:center; }
 .sshFingerprint > span { padding:6px 8px; border-radius:6px; background:rgba(83,177,145,.12); color:var(--green); font:700 8px var(--font-mono); text-transform:uppercase; }
 .sshFingerprint code { min-width:0; overflow-wrap:anywhere; }
+.sshAccessControls { display:grid; gap:8px; }
+.sshOpenBadge { background:rgba(224,171,75,.13) !important; color:var(--warning) !important; }
+.sshOpenButton { border-color:rgba(224,171,75,.36); background:rgba(224,171,75,.09); color:var(--warning); }
 .sshResetKeyButton { margin-top:9px; padding:0; border:0; background:transparent; color:#d0948d; font:9px var(--font-mono); text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
 .sshResetKeyButton:hover { color:#ef8178; }
 .sshResetKeyButton:disabled { opacity:.4; cursor:not-allowed; }

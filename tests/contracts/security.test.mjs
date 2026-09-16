@@ -77,13 +77,20 @@ test("security and services expose current logs and retention controls", async (
 });
 
 test("SSH key hardening is transactional and automatically rolls back", async () => {
-  const [api, manager] = await Promise.all([readApiSources(), read("scripts/vps-control.sh")]);
+  const [api, page, manager] = await Promise.all([readApiSources(), readUiSources(), read("scripts/vps-control.sh")]);
   assert.match(api, /class SshPublicKeyInstall/);
+  assert.match(api, /class SshKeyDelete/);
   assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/key"\)/);
   assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/key\/reset"\)/);
+  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/key\/delete"\)/);
   assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/begin"\)/);
   assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/confirm"\)/);
   assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/rollback"\)/);
+  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/disable"\)/);
+  assert.match(api, /ssh_authorized_keys/);
+  assert.match(page, /\/security\/ssh-access\/key\/delete/);
+  assert.match(page, /changeSshAccess\("disable"\)/);
+  assert.match(page, /Ключи root на сервере/);
   assert.match(api, /Accepted publickey for .*re\.escape\(fingerprint\)/);
   assert.match(manager, /ssh-keygen -lf "\$\{temporary\}" -E sha256/);
   assert.match(manager, /PasswordAuthentication no\\nKbdInteractiveAuthentication no\\nPermitRootLogin prohibit-password/);
@@ -94,6 +101,11 @@ test("SSH key hardening is transactional and automatically rolls back", async ()
   assert.match(manager, /ssh_access_write_state "hardened"/);
   assert.match(manager, /ssh_access_write_state "rolled-back"/);
   assert.match(manager, /ssh_access_reset_key\(\)/);
+  assert.match(manager, /ssh_access_list_keys\(\)/);
+  assert.match(manager, /ssh_access_delete_key\(\)/);
+  assert.match(manager, /ssh_access_disable\(\)/);
+  assert.match(manager, /PasswordAuthentication yes\\nKbdInteractiveAuthentication yes\\nPermitRootLogin yes/);
+  assert.match(manager, /ufw allow OpenSSH/);
   assert.match(manager, /fingerprint == expected/);
   assert.match(manager, /остальные ключи не изменены/);
   assert.match(manager, /\[\[ "\$\{phase\}" == "awaiting-confirmation" \]\]/);

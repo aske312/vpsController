@@ -91,7 +91,8 @@ function publicError(message: string, status: number) {
 }
 const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-HISTORY_SAMPLES);
 type GeneratedProfile = { id: string; name: string; filename: string; config: string };
-type SshAccessState = { phase: "password" | "key-installed" | "awaiting-confirmation" | "hardened" | "rolled-back"; fingerprint: string; rollback_deadline?: string | null; message: string; key_login_observed?: boolean };
+type SshAuthorizedKey = { fingerprint: string; type: string; comment?: string; managed?: boolean };
+type SshAccessState = { phase: "password" | "key-installed" | "awaiting-confirmation" | "hardened" | "rolled-back" | "open"; fingerprint: string; rollback_deadline?: string | null; message: string; key_login_observed?: boolean; keys?: SshAuthorizedKey[] };
 export function ControlPanel() {
   const [tab, setTab] = useState<Tab>("overview");
   const [networkRefreshKey, setNetworkRefreshKey] = useState(0);
@@ -173,6 +174,7 @@ export function ControlPanel() {
   const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
   const protocolSettingsDirty = useRef<Partial<Record<Protocol, boolean>>>({});
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
+  const sshAccessLoading = useRef(false);
   const automationDirty = useRef(false);
   const loggingDirty = useRef(false);
   const liveRequestInFlight = useRef(false);
@@ -717,9 +719,11 @@ export function ControlPanel() {
   }
 
   const loadSshAccess = useCallback(async () => {
-    if (!token) return;
+    if (!token || sshAccessLoading.current) return;
+    sshAccessLoading.current = true;
     try { setSshAccessState(await request<SshAccessState>("/security/ssh-access")); setSshCountdownClock(Date.now()); }
     catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось получить состояние SSH-доступа"); }
+    finally { sshAccessLoading.current = false; }
   }, [token, request, notifyError]);
 
   async function installSshKey() {
@@ -731,17 +735,24 @@ export function ControlPanel() {
     finally { setBusy(false); }
   }
 
-  async function resetSshKey() {
-    if (!await askConfirmation({ title: "Удалить установленный SSH-ключ?", message: "Будет удалён только публичный ключ, добавленный этим мастером. Парольный вход и остальные ключи не изменятся.", confirmLabel: "Удалить ключ", danger: true })) return;
+  async function deleteSshKey(fingerprint: string) {
+    if (!await askConfirmation({ title: "Удалить SSH-ключ?", message: `Публичный ключ ${fingerprint} будет удалён из root/.ssh/authorized_keys. Приватный ключ на компьютере не удаляется.`, confirmLabel: "Удалить ключ", danger: true })) return;
     setBusy(true);
     try {
-      const state = await request<SshAccessState>("/security/ssh-access/key/reset", { method: "POST" });
+      const state = await request<SshAccessState>("/security/ssh-access/key/delete", { method: "POST", body: JSON.stringify({ fingerprint }) });
       setSshAccessState(state); setSshPublicKey(""); setSshKeyTested(false);
-    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось удалить публичный ключ"); }
+      await loadSecurity();
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось удалить SSH-ключ"); }
     finally { setBusy(false); }
   }
 
-  async function changeSshAccess(action: "begin" | "confirm" | "rollback") {
+  async function changeSshAccess(action: "begin" | "confirm" | "rollback" | "disable") {
+    if (action === "disable" && !await askConfirmation({
+      title: "Отключить защищённый SSH-доступ?",
+      message: "Будет открыт публичный SSH/22, вход root по паролю и ключу. Это снизит защиту сервера; Fail2ban останется активным.",
+      confirmLabel: "Открыть SSH/22",
+      danger: true,
+    })) return;
     setBusy(true);
     try {
       const state = await request<SshAccessState>(`/security/ssh-access/${action}`, { method: "POST" });
@@ -1732,15 +1743,19 @@ export function ControlPanel() {
           <div className="sshAdminBody">
             <section className="sshAdminStatus">
               <span className="sshAdminStatusMark">!</span>
-              <div><strong>{sshAccessState?.phase === "hardened" ? "Доступ по ключу подтверждён" : sshAccessState?.phase === "awaiting-confirmation" ? "Работает страховочный таймер" : sshAccessState?.phase === "key-installed" ? "Публичный ключ установлен" : "Парольный вход остаётся активным"}</strong><p>{sshAccessState?.message || "Панель ничего не закроет автоматически. Сначала создайте ключ и подтвердите вход в новой сессии."}</p></div>
-              <em>{sshAccessState?.phase === "hardened" ? "HARDENED" : sshAccessState?.phase === "awaiting-confirmation" ? "ROLLBACK ON" : "SAFE MODE"}</em>
+              <div><strong>{sshAccessState?.phase === "hardened" ? "Доступ по ключу подтверждён" : sshAccessState?.phase === "awaiting-confirmation" ? "Работает страховочный таймер" : sshAccessState?.phase === "open" ? "Защищённый доступ отключён" : sshAccessState?.phase === "key-installed" ? "Публичный ключ установлен" : "Парольный вход остаётся активным"}</strong><p>{sshAccessState?.message || "Панель ничего не закроет автоматически. Сначала создайте ключ и подтвердите вход в новой сессии."}</p></div>
+              <em>{sshAccessState?.phase === "hardened" ? "HARDENED" : sshAccessState?.phase === "awaiting-confirmation" ? "ROLLBACK ON" : sshAccessState?.phase === "open" ? "SSH OPEN" : "SAFE MODE"}</em>
+            </section>
+            <section className="sshAdminKeys">
+              <div className="sshAdminSectionTitle"><span>Ключи root на сервере</span><small>{sshAccessState?.keys?.length || 0} записей</small></div>
+              {sshAccessState?.keys?.length ? <div className="sshKeyList">{sshAccessState.keys.map((key) => <div className="sshKeyItem" key={key.fingerprint}><div><strong>{key.type}{key.comment ? ` · ${key.comment}` : ""}</strong><code>{key.fingerprint}{key.managed ? " · ключ мастера" : ""}</code></div><button className="sshResetKeyButton" type="button" disabled={busy || sshAccessState.phase === "awaiting-confirmation"} onClick={() => void deleteSshKey(key.fingerprint)}>Удалить</button></div>)}</div> : <p className="sshKeysEmpty">На сервере нет распознанных публичных ключей root.</p>}
             </section>
             <div className="sshAdminSectionTitle"><span>Порядок настройки</span><small>4 шага</small></div>
             <ol className="sshAdminSteps">
               <li><div className="sshAdminStepNumber">01</div><div className="sshAdminStepContent"><strong>Создайте ключ на компьютере администратора</strong><p>Команда создаст современную пару ED25519. Приватная часть остаётся только на вашем ПК.</p><code>ssh-keygen -t ed25519 -a 64</code></div></li>
-              <li className={sshAccessState?.fingerprint ? "sshAdminStepComplete" : ""}><div className="sshAdminStepNumber">02</div><div className="sshAdminStepContent"><strong>Добавьте публичную часть</strong><p>Вставьте одну строку из файла <b>.pub</b>. Приватный ключ сюда вводить нельзя.</p>{sshAccessState?.fingerprint ? <><div className="sshFingerprint"><span>Установлен</span><code>{sshAccessState.fingerprint}</code></div>{sshAccessState.phase !== "hardened" && sshAccessState.phase !== "awaiting-confirmation" && <button className="sshResetKeyButton" type="button" disabled={busy} onClick={() => void resetSshKey()}>Удалить ключ и начать заново</button>}</> : <><textarea className="sshPublicKeyInput" rows={3} value={sshPublicKey} onChange={(event) => setSshPublicKey(event.target.value)} placeholder="ssh-ed25519 AAAAC3... admin-pc" spellCheck={false} /><button className="sshStepButton" type="button" disabled={busy || sshPublicKey.trim().length < 80} onClick={() => void installSshKey()}>Проверить и установить ключ</button></>}</div></li>
+              <li className={sshAccessState?.fingerprint ? "sshAdminStepComplete" : ""}><div className="sshAdminStepNumber">02</div><div className="sshAdminStepContent"><strong>Добавьте публичную часть</strong><p>Вставьте одну строку из файла <b>.pub</b>. Приватный ключ сюда вводить нельзя.</p>{sshAccessState?.fingerprint ? <><div className="sshFingerprint"><span>Установлен</span><code>{sshAccessState.fingerprint}</code></div>{sshAccessState.phase !== "awaiting-confirmation" && <button className="sshResetKeyButton" type="button" disabled={busy} onClick={() => void deleteSshKey(sshAccessState.fingerprint)}>Удалить ключ и начать заново</button>}</> : <>{sshAccessState?.phase === "hardened" && <small>Для ротации ключа вставьте новый публичный ключ ниже. Защищённый режим сохранится.</small>}<textarea className="sshPublicKeyInput" rows={3} value={sshPublicKey} onChange={(event) => setSshPublicKey(event.target.value)} placeholder="ssh-ed25519 AAAAC3... admin-pc" spellCheck={false} /><button className="sshStepButton" type="button" disabled={busy || sshPublicKey.trim().length < 80} onClick={() => void installSshKey()}>Проверить и установить ключ</button></>}</div></li>
               <li className={sshKeyTested || sshAccessState?.key_login_observed ? "sshAdminStepComplete" : ""}><div className="sshAdminStepNumber">03</div><div className="sshAdminStepContent"><strong>Проверьте вход в отдельном окне</strong><p>Не закрывайте текущую сессию. Откройте новый терминал и подключитесь с созданным ключом.</p><code>ssh root@SERVER</code>{sshAccessState?.fingerprint && sshAccessState.phase !== "awaiting-confirmation" && sshAccessState.phase !== "hardened" && <label className="sshTestCheck"><input type="checkbox" checked={sshKeyTested} onChange={(event) => setSshKeyTested(event.target.checked)} /><span>Я успешно вошёл по ключу в новой SSH-сессии</span></label>}</div></li>
-              <li className={`sshAdminStepFinal ${sshAccessState?.phase === "hardened" ? "sshAdminStepComplete" : ""}`}><div className="sshAdminStepNumber">04</div><div className="sshAdminStepContent"><strong>Безопасно отключите парольный вход</strong><p>Сначала включится автоматический откат на 5 минут. Если подтверждения не будет, прежние настройки восстановятся сами.</p>{sshAccessState?.phase === "awaiting-confirmation" ? <div className="sshRollbackPanel"><div className="sshRollbackHead"><div><strong>Подтвердите повторный вход по ключу</strong><span>До автоматического восстановления настроек</span></div><time className={sshRollbackSeconds <= 60 ? "critical" : ""} dateTime={`PT${sshRollbackSeconds}S`}>{sshRollbackCountdown}</time></div><small>Откат запланирован на {new Date(sshAccessState.rollback_deadline || "").toLocaleTimeString("ru-RU")}</small><label className="sshTestCheck"><input type="checkbox" checked={sshKeyTested} onChange={(event) => setSshKeyTested(event.target.checked)} /><span>После отключения пароля я снова вошёл по ключу</span></label><div className="sshRollbackActions"><button type="button" disabled={busy} onClick={() => void changeSshAccess("rollback")}>Откатить сейчас</button><button className="sshStepButton" type="button" disabled={busy || !sshKeyTested} onClick={() => void changeSshAccess("confirm")}>Подтвердить доступ</button></div></div> : sshAccessState?.phase === "hardened" ? <div className="sshFingerprint"><span>Защищено</span><code>PasswordAuthentication no · Root только по ключу</code></div> : <button className="sshStepButton sshHardeningButton" type="button" disabled={busy || !sshAccessState?.fingerprint || !(sshKeyTested || sshAccessState?.key_login_observed)} onClick={() => void changeSshAccess("begin")}>Запустить безопасное применение</button>}</div></li>
+              <li className={`sshAdminStepFinal ${sshAccessState?.phase === "hardened" ? "sshAdminStepComplete" : ""}`}><div className="sshAdminStepNumber">04</div><div className="sshAdminStepContent"><strong>{sshAccessState?.phase === "hardened" ? "Управление защищённым доступом" : "Безопасно отключите парольный вход"}</strong><p>{sshAccessState?.phase === "hardened" ? "Защищённый режим можно отключить в любой момент. Это откроет SSH/22 и вход root по паролю." : "Сначала включится автоматический откат на 5 минут. Если подтверждения не будет, прежние настройки восстановятся сами."}</p>{sshAccessState?.phase === "awaiting-confirmation" ? <div className="sshRollbackPanel"><div className="sshRollbackHead"><div><strong>Подтвердите повторный вход по ключу</strong><span>До автоматического восстановления настроек</span></div><time className={sshRollbackSeconds <= 60 ? "critical" : ""} dateTime={`PT${sshRollbackSeconds}S`}>{sshRollbackCountdown}</time></div><small>Откат запланирован на {new Date(sshAccessState.rollback_deadline || "").toLocaleTimeString("ru-RU")}</small><label className="sshTestCheck"><input type="checkbox" checked={sshKeyTested} onChange={(event) => setSshKeyTested(event.target.checked)} /><span>После отключения пароля я снова вошёл по ключу</span></label><div className="sshRollbackActions"><button type="button" disabled={busy} onClick={() => void changeSshAccess("rollback")}>Откатить сейчас</button><button className="sshStepButton" type="button" disabled={busy || !sshKeyTested} onClick={() => void changeSshAccess("confirm")}>Подтвердить доступ</button></div></div> : sshAccessState?.phase === "hardened" ? <div className="sshAccessControls"><div className="sshFingerprint"><span>Защищено</span><code>PasswordAuthentication no · Root только по ключу</code></div><button className="sshStepButton sshOpenButton" type="button" disabled={busy} onClick={() => void changeSshAccess("disable")}>Отключить защищённый доступ</button></div> : sshAccessState?.phase === "open" ? <div className="sshAccessControls"><div className="sshFingerprint"><span className="sshOpenBadge">Открыто</span><code>SSH/22 · root по паролю и ключу</code></div><button className="sshStepButton sshHardeningButton" type="button" disabled={busy || !sshAccessState?.fingerprint || !(sshKeyTested || sshAccessState?.key_login_observed)} onClick={() => void changeSshAccess("begin")}>Включить защищённый доступ</button></div> : <button className="sshStepButton sshHardeningButton" type="button" disabled={busy || !sshAccessState?.fingerprint || !(sshKeyTested || sshAccessState?.key_login_observed)} onClick={() => void changeSshAccess("begin")}>Запустить безопасное применение</button>}</div></li>
             </ol>
             <div className="sshAdminNotice"><span>i</span><div><strong>Текущий режим тоже допустим</strong><p>Длинный уникальный пароль вместе с активным Fail2ban — предупреждение, а не неисправность приложения.</p></div></div>
           </div>
