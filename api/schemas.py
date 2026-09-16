@@ -124,6 +124,33 @@ class ClientConnectionSettings(BaseModel):
     no_delay: bool = True
     fingerprint: Literal["chrome", "firefox", "safari"] = "chrome"
     cdn_domain: str | None = Field(default=None, max_length=253, pattern=r"^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+    transport: Literal["xhttp", "raw", "grpc"] = "xhttp"
+    transport_path: str = Field(default="/", min_length=1, max_length=128, pattern=r"^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$")
+    xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] = "auto"
+    xpadding: str = Field(default="100-1000", min_length=1, max_length=32, pattern=r"^\d+(?:-\d+)?$")
+    xmux_concurrency: int = Field(default=12, ge=1, le=64)
+    sni: str | None = Field(default=None, min_length=4, max_length=253, pattern=r"^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$")
+    tls_transport: Literal["websocket", "xhttp", "httpupgrade", "grpc"] = "xhttp"
+    tls_xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] = "auto"
+    cdn_transport: Literal["websocket", "xhttp", "httpupgrade", "grpc"] = "websocket"
+    cdn_xhttp_mode: Literal["auto", "stream-one", "stream-up", "packet-up"] = "auto"
+    jc: int | None = Field(default=None, ge=0, le=128)
+    jmin: int | None = Field(default=None, ge=0, le=128)
+    jmax: int | None = Field(default=None, ge=0, le=128)
+    s1: int | None = Field(default=None, ge=0, le=128)
+    s2: int | None = Field(default=None, ge=0, le=128)
+    h1: int | None = Field(default=None, ge=0, le=4294967295)
+    h2: int | None = Field(default=None, ge=0, le=4294967295)
+    h3: int | None = Field(default=None, ge=0, le=4294967295)
+    h4: int | None = Field(default=None, ge=0, le=4294967295)
+    tls_mode: Literal["pinned", "acme"] = "pinned"
+    obfs_enabled: bool = False
+    obfs_password: str = Field(default="", max_length=128)
+    up_mbps: int = Field(default=100, ge=1, le=10000)
+    down_mbps: int = Field(default=100, ge=1, le=10000)
+    congestion_control: Literal["bbr", "cubic", "new_reno"] = "bbr"
+    heartbeat: Literal["5s", "10s", "15s", "30s"] = "10s"
+    vpn_transport: Literal["udp", "tcp"] = "udp"
 
 
 class ClientCreate(BaseModel):

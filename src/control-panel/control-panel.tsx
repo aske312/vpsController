@@ -41,6 +41,33 @@ type NewClientSettings = {
   no_delay: boolean;
   fingerprint: "chrome" | "firefox" | "safari";
   cdn_domain: string;
+  transport: "xhttp" | "raw" | "grpc";
+  transport_path: string;
+  xhttp_mode: "auto" | "stream-one" | "stream-up" | "packet-up";
+  xpadding: string;
+  xmux_concurrency: number;
+  sni: string;
+  tls_transport: "websocket" | "xhttp" | "httpupgrade" | "grpc";
+  tls_xhttp_mode: "auto" | "stream-one" | "stream-up" | "packet-up";
+  cdn_transport: "websocket" | "xhttp" | "httpupgrade" | "grpc";
+  cdn_xhttp_mode: "auto" | "stream-one" | "stream-up" | "packet-up";
+  jc: number;
+  jmin: number;
+  jmax: number;
+  s1: number;
+  s2: number;
+  h1: number;
+  h2: number;
+  h3: number;
+  h4: number;
+  tls_mode: "pinned" | "acme";
+  obfs_enabled: boolean;
+  obfs_password: string;
+  up_mbps: number;
+  down_mbps: number;
+  congestion_control: "bbr" | "cubic" | "new_reno";
+  heartbeat: "5s" | "10s" | "15s" | "30s";
+  vpn_transport: "udp" | "tcp";
 };
 
 type ClientChannelMode = "direct" | "tls_relay" | "udp_relay";
@@ -53,26 +80,34 @@ function ClientConnectionSettings({
   setNewClientSettings,
 }: {
   selectedConnectionType: ClientConnectionType;
-  selectedVlessRoute?: { transport?: string; confirmed_domains?: string[] };
+  selectedVlessRoute?: { transport?: string; confirmed_domains?: string[]; path?: string };
   newClientSettings: NewClientSettings;
   setNewClientSettings: Dispatch<SetStateAction<NewClientSettings>>;
 }) {
   const update = (value: Partial<NewClientSettings>) => setNewClientSettings((current) => ({ ...current, ...value }));
-  return <fieldset className="connectionTypeSettings"><legend>Настройки подключения</legend><header><span>{selectedConnectionType.badge}</span><div><strong>{selectedConnectionType.name}</strong><small>{selectedConnectionType.protocol === "vless-reality-xhttp" ? "Транспорт задаётся безопасным серверным профилем" : "Индивидуальные параметры клиентского профиля"}</small></div></header><div className="connectionSettingsFields">
-    {selectedConnectionType.protocol === "vless-reality-xhttp" ? <>
-      <label><span>Транспорт</span><select value={selectedVlessRoute?.transport || "xhttp"} disabled><option value={selectedVlessRoute?.transport || "xhttp"}>{(selectedVlessRoute?.transport || "xhttp").toUpperCase()}</option></select><small>Общий проверенный профиль; изменение не затронет других клиентов</small></label>
-      {selectedConnectionType.routeId === "cdn" && <label><span>Подтверждённый CDN-домен</span><select value={newClientSettings.cdn_domain || selectedVlessRoute?.confirmed_domains?.[0] || ""} onChange={(event) => update({ cdn_domain: event.target.value })}>{(selectedVlessRoute?.confirmed_domains || []).map((domain) => <option value={domain} key={domain}>{domain}</option>)}</select><small>Домен проверен через DNS с VPS и используется только этим подключением</small></label>}
-      <label><span>Отпечаток TLS</span><select value={newClientSettings.fingerprint} onChange={(event) => update({ fingerprint: event.target.value as NewClientSettings["fingerprint"] })}><option value="chrome">Chrome — рекомендуется</option><option value="firefox">Firefox</option><option value="safari">Safari</option></select><small>Выбирайте вариант, соответствующий клиентскому устройству</small></label>
-    </> : selectedConnectionType.protocol === "shadowsocks" ? <>
-      <label><span>Режим трафика</span><select value={newClientSettings.shadowsocks_mode} onChange={(event) => update({ shadowsocks_mode: event.target.value as NewClientSettings["shadowsocks_mode"] })}><option value="tcp_and_udp">TCP + UDP — рекомендуется</option><option value="tcp_only">Только TCP</option></select></label>
-      <label><span>MTU</span><input type="number" min={576} max={1500} value={newClientSettings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label>
-      <label><span>Timeout, сек.</span><input type="number" min={30} max={3600} value={newClientSettings.timeout} onChange={(event) => update({ timeout: Number(event.target.value) })} /></label>
-      <label className="connectionCheckbox"><span><strong>TCP No Delay</strong><small>Снижает задержку коротких запросов</small></span><input type="checkbox" checked={newClientSettings.no_delay} onChange={(event) => update({ no_delay: event.target.checked })} /></label>
-    </> : selectedConnectionType.protocol === "wg" || selectedConnectionType.protocol === "awg" ? <>
-      <label><span>MTU</span><input type="number" min={1280} max={1420} value={newClientSettings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label>
-      <label><span>Keepalive, сек.</span><input type="number" min={0} max={300} value={newClientSettings.keepalive} onChange={(event) => update({ keepalive: Number(event.target.value) })} /></label>
-      <label><span>Маршрутизация</span><select value={newClientSettings.route_mode} onChange={(event) => update({ route_mode: event.target.value as NewClientSettings["route_mode"] })}><option value="all">Весь трафик IPv4 + IPv6</option><option value="ipv4">Только IPv4</option></select></label>
-    </> : <p className="connectionSettingsHint">Дополнительные параметры задаются в настройках самого протокола; для этого подключения нет отдельных параметров.</p>}
+  const protocol = selectedConnectionType.protocol;
+  const transportOptions = selectedConnectionType.routeId === "direct"
+    ? [{ value: "xhttp", label: "XHTTP · рекомендуется" }, { value: "raw", label: "RAW · TCP и UDP payload" }, { value: "grpc", label: "gRPC · HTTP/2" }]
+    : [{ value: "websocket", label: "WebSocket" }, { value: "xhttp", label: "XHTTP" }, { value: "httpupgrade", label: "HTTPUpgrade" }, { value: "grpc", label: "gRPC · HTTP/2" }];
+  const vlessTransportKey = selectedConnectionType.routeId === "cdn" ? "cdn_transport" : selectedConnectionType.routeId === "tls" ? "tls_transport" : "transport";
+  const vlessTransport = newClientSettings[vlessTransportKey];
+  const setVlessTransport = (value: string) => update({ [vlessTransportKey]: value } as Partial<NewClientSettings>);
+  return <fieldset className="connectionTypeSettings"><legend>Настройки подключения</legend><header><span>{selectedConnectionType.badge}</span><div><strong>{selectedConnectionType.name}</strong><small>Параметры сохраняются только в создаваемом подключении</small></div></header><div className="connectionSettingsFields">
+    {protocol === "vless-reality-xhttp" ? <>
+      <label><span>Транспорт</span><select value={vlessTransport} onChange={(event) => setVlessTransport(event.target.value)}>{transportOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select><small>Можно выбрать транспорт для этого профиля отдельно</small></label>
+      {selectedConnectionType.routeId !== "cdn" && <label><span>Путь транспорта</span><input value={newClientSettings.transport_path} onChange={(event) => update({ transport_path: event.target.value })} placeholder="/vless" /><small>Для gRPC используется как service name</small></label>}
+      {(vlessTransport === "xhttp") && <label><span>Режим XHTTP</span><select value={selectedConnectionType.routeId === "cdn" ? newClientSettings.cdn_xhttp_mode : selectedConnectionType.routeId === "tls" ? newClientSettings.tls_xhttp_mode : newClientSettings.xhttp_mode} onChange={(event) => update(selectedConnectionType.routeId === "cdn" ? { cdn_xhttp_mode: event.target.value as NewClientSettings["cdn_xhttp_mode"] } : selectedConnectionType.routeId === "tls" ? { tls_xhttp_mode: event.target.value as NewClientSettings["tls_xhttp_mode"] } : { xhttp_mode: event.target.value as NewClientSettings["xhttp_mode"] })}><option value="auto">Автоматически</option><option value="stream-one">Один поток</option><option value="stream-up">Раздельный upload</option><option value="packet-up">Пакетный upload</option></select></label>}
+      {selectedConnectionType.routeId === "cdn" && <label><span>Подтверждённый CDN-домен</span><select value={newClientSettings.cdn_domain || selectedVlessRoute?.confirmed_domains?.[0] || ""} onChange={(event) => update({ cdn_domain: event.target.value })}>{(selectedVlessRoute?.confirmed_domains || []).map((domain) => <option value={domain} key={domain}>{domain}</option>)}</select><small>Домен подтверждён на странице «Сеть»</small></label>}
+      <label><span>Отпечаток TLS</span><select value={newClientSettings.fingerprint} onChange={(event) => update({ fingerprint: event.target.value as NewClientSettings["fingerprint"] })}><option value="chrome">Chrome — рекомендуется</option><option value="firefox">Firefox</option><option value="safari">Safari</option></select></label>
+      {selectedConnectionType.routeId === "direct" && <><label><span>SNI маскировки</span><input value={newClientSettings.sni} onChange={(event) => update({ sni: event.target.value })} placeholder="ya.ru" /></label><label><span>XHTTP padding</span><input value={newClientSettings.xpadding} onChange={(event) => update({ xpadding: event.target.value })} placeholder="100-1000" /></label><label><span>Параллелизм XHTTP</span><input type="number" min={1} max={64} value={newClientSettings.xmux_concurrency} onChange={(event) => update({ xmux_concurrency: Number(event.target.value) })} /></label></>}
+    </> : protocol === "shadowsocks" ? <>
+      <label><span>Режим трафика</span><select value={newClientSettings.shadowsocks_mode} onChange={(event) => update({ shadowsocks_mode: event.target.value as NewClientSettings["shadowsocks_mode"] })}><option value="tcp_and_udp">TCP + UDP — рекомендуется</option><option value="tcp_only">Только TCP</option></select></label><label><span>MTU</span><input type="number" min={576} max={1500} value={newClientSettings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label><label><span>Timeout, сек.</span><input type="number" min={30} max={3600} value={newClientSettings.timeout} onChange={(event) => update({ timeout: Number(event.target.value) })} /></label><label className="connectionCheckbox"><span><strong>TCP No Delay</strong><small>Снижает задержку коротких запросов</small></span><input type="checkbox" checked={newClientSettings.no_delay} onChange={(event) => update({ no_delay: event.target.checked })} /></label>
+    </> : protocol === "wg" || protocol === "awg" ? <>
+      <label><span>MTU</span><input type="number" min={1280} max={1420} value={newClientSettings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label><label><span>Keepalive, сек.</span><input type="number" min={0} max={300} value={newClientSettings.keepalive} onChange={(event) => update({ keepalive: Number(event.target.value) })} /></label><label><span>Маршрутизация</span><select value={newClientSettings.route_mode} onChange={(event) => update({ route_mode: event.target.value as NewClientSettings["route_mode"] })}><option value="all">Весь трафик IPv4 + IPv6</option><option value="ipv4">Только IPv4</option></select></label>
+      {protocol === "awg" && <div className="connectionSettingsGroup"><strong>Параметры AmneziaWG</strong><div className="connectionSettingsFields">{([['jc', 'Jc', 0, 128], ['jmin', 'Jmin', 0, 128], ['jmax', 'Jmax', 0, 128], ['s1', 'S1', 0, 128], ['s2', 'S2', 0, 128], ['h1', 'H1', 0, 4294967295], ['h2', 'H2', 0, 4294967295], ['h3', 'H3', 0, 4294967295], ['h4', 'H4', 0, 4294967295]] as const).map(([key, label, min, max]) => <label key={key}><span>{label}</span><input type="number" min={min} max={max} value={newClientSettings[key]} onChange={(event) => update({ [key]: Number(event.target.value) } as Partial<NewClientSettings>)} /></label>)}</div></div>}
+    </> : protocol === "hysteria2" ? <>
+      <label><span>Tранспорт</span><select value={newClientSettings.channel_mode} disabled={false}><option value={newClientSettings.channel_mode}>{newClientSettings.channel_mode === "udp_relay" ? "UDP relay" : "Прямой UDP"}</option></select></label><label><span>TLS-сертификат</span><select value={newClientSettings.tls_mode} onChange={(event) => update({ tls_mode: event.target.value as NewClientSettings["tls_mode"] })}><option value="pinned">Закреплённый сертификат</option><option value="acme">Публичный сертификат</option></select></label><label className="connectionCheckbox"><span><strong>Salamander obfuscation</strong><small>Должен совпадать с серверным профилем</small></span><input type="checkbox" checked={newClientSettings.obfs_enabled} onChange={(event) => update({ obfs_enabled: event.target.checked })} /></label>{newClientSettings.obfs_enabled && <label><span>Пароль obfuscation</span><input type="text" value={newClientSettings.obfs_password} onChange={(event) => update({ obfs_password: event.target.value })} /></label>}<label><span>Upload, Мбит/с</span><input type="number" min={1} max={10000} value={newClientSettings.up_mbps} onChange={(event) => update({ up_mbps: Number(event.target.value) })} /></label><label><span>Download, Мбит/с</span><input type="number" min={1} max={10000} value={newClientSettings.down_mbps} onChange={(event) => update({ down_mbps: Number(event.target.value) })} /></label>
+    </> : protocol === "tuic" ? <><label><span>Транспорт</span><select value="quic" onChange={() => undefined}><option value="quic">QUIC / UDP</option></select></label><label><span>Congestion control</span><select value={newClientSettings.congestion_control} onChange={(event) => update({ congestion_control: event.target.value as NewClientSettings["congestion_control"] })}><option value="bbr">BBR</option><option value="cubic">CUBIC</option><option value="new_reno">New Reno</option></select></label><label><span>Heartbeat</span><select value={newClientSettings.heartbeat} onChange={(event) => update({ heartbeat: event.target.value as NewClientSettings["heartbeat"] })}><option value="5s">5 сек.</option><option value="10s">10 сек.</option><option value="15s">15 сек.</option><option value="30s">30 сек.</option></select></label></> : protocol === "openvpn" ? <><label><span>Транспорт</span><select value={newClientSettings.vpn_transport} onChange={(event) => update({ vpn_transport: event.target.value as NewClientSettings["vpn_transport"] })}><option value="udp">UDP — рекомендуется</option><option value="tcp">TCP</option></select><small>Параметр будет записан в создаваемый профиль</small></label></> : protocol === "trojan" ? <p className="connectionSettingsHint">Trojan использует TLS-сертификат сервера и индивидуальный пароль. Дополнительные параметры этого подключения не требуются.</p> : <p className="connectionSettingsHint">IKEv2 выдаёт индивидуальные логин, пароль и CA-сертификат. Дополнительные параметры профиля не требуются.</p>}
   </div></fieldset>;
 }
 
@@ -165,7 +200,7 @@ export function ControlPanel() {
   const [confirmationInput, setConfirmationInput] = useState("");
   const [newClient, setNewClient] = useState({ name: "", protocol: "wg" as Protocol });
   const [newClientVlessRoutes, setNewClientVlessRoutes] = useState<Array<"direct" | "tls" | "cdn">>(["direct"]);
-  const [newClientSettings, setNewClientSettings] = useState({ mtu: 1280, keepalive: 25, route_mode: "ipv4" as "all" | "ipv4", channel_mode: "direct" as ClientChannelMode, shadowsocks_mode: "tcp_and_udp" as "tcp_only" | "tcp_and_udp", timeout: 300, no_delay: true, fingerprint: "chrome" as "chrome" | "firefox" | "safari", cdn_domain: "" });
+  const [newClientSettings, setNewClientSettings] = useState<NewClientSettings>({ mtu: 1280, keepalive: 25, route_mode: "ipv4", channel_mode: "direct", shadowsocks_mode: "tcp_and_udp", timeout: 300, no_delay: true, fingerprint: "chrome", cdn_domain: "", transport: "xhttp", transport_path: "/", xhttp_mode: "auto", xpadding: "100-1000", xmux_concurrency: 12, sni: "ya.ru", tls_transport: "xhttp", tls_xhttp_mode: "auto", cdn_transport: "websocket", cdn_xhttp_mode: "auto", jc: 6, jmin: 8, jmax: 80, s1: 64, s2: 112, h1: 150000000, h2: 600000000, h3: 1000000000, h4: 1400000000, tls_mode: "pinned", obfs_enabled: false, obfs_password: "", up_mbps: 100, down_mbps: 100, congestion_control: "bbr", heartbeat: "10s", vpn_transport: "udp" });
   const [generated, setGenerated] = useState("");
   const [generatedName, setGeneratedName] = useState("client.conf");
   const [generatedProfiles, setGeneratedProfiles] = useState<GeneratedProfile[]>([]);

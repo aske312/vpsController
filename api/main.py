@@ -4002,23 +4002,38 @@ def vless_reality_inbound(config: dict) -> dict:
     )
 
 
-def vless_client_query(config: dict, reality: dict, fingerprint: str = "chrome") -> dict[str, str]:
+def vless_client_query(
+    config: dict,
+    reality: dict,
+    fingerprint: str = "chrome",
+    transport: str | None = None,
+    path: str | None = None,
+    xhttp_mode: str | None = None,
+    xpadding: str | None = None,
+    xmux_concurrency: int | None = None,
+    sni: str | None = None,
+) -> dict[str, str]:
     stream = vless_reality_inbound(config)["streamSettings"]
-    transport = str(stream.get("network", "xhttp"))
+    transport = transport or str(stream.get("network", "xhttp"))
     target_host = reality.get("TARGET", "ya.ru:443").rsplit(":", 1)[0]
-    values = {"encryption": "none", "security": "reality", "sni": target_host, "fp": fingerprint, "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", "")}
+    values = {"encryption": "none", "security": "reality", "sni": sni or target_host, "fp": fingerprint, "pbk": reality.get("PUBLIC_KEY", ""), "sid": reality.get("SHORT_ID", "")}
     if transport == "xhttp":
         settings = stream.get("xhttpSettings", {})
-        values.update({"type": "xhttp", "host": target_host, "path": str(settings.get("path", "/")), "mode": str(settings.get("mode", "auto")), "alpn": "h2", "extra": json.dumps(settings.get("extra", {}), separators=(",", ":"))})
+        extra = settings.get("extra", {})
+        if xpadding:
+            extra = {**extra, "xPaddingBytes": xpadding}
+        if xmux_concurrency:
+            extra = {**extra, "xmux": {**extra.get("xmux", {}), "maxConcurrency": str(xmux_concurrency)}}
+        values.update({"type": "xhttp", "host": target_host, "path": path or str(settings.get("path", "/")), "mode": xhttp_mode or str(settings.get("mode", "auto")), "alpn": "h2", "extra": json.dumps(extra, separators=(",", ":"))})
     elif transport == "grpc":
-        values.update({"type": "grpc", "serviceName": str(stream.get("grpcSettings", {}).get("serviceName", "vless")), "mode": "gun", "alpn": "h2"})
+        values.update({"type": "grpc", "serviceName": (path or str(stream.get("grpcSettings", {}).get("serviceName", "vless"))).lstrip("/"), "mode": "gun", "alpn": "h2"})
     else:
         values["type"] = "tcp"
     return values
 
 
-def vless_cdn_client_query(reality: dict, fingerprint: str = "chrome", domain: str | None = None) -> dict[str, str]:
-    transport = reality.get("CDN_TRANSPORT", "websocket")
+def vless_cdn_client_query(reality: dict, fingerprint: str = "chrome", domain: str | None = None, transport: str | None = None, xhttp_mode: str | None = None) -> dict[str, str]:
+    transport = transport or reality.get("CDN_TRANSPORT", "websocket")
     path = reality.get("CDN_PATH", reality.get("WS_PATH", "/"))
     endpoint_domain = domain or reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
     values = {
@@ -4026,7 +4041,7 @@ def vless_cdn_client_query(reality: dict, fingerprint: str = "chrome", domain: s
         "fp": fingerprint, "host": endpoint_domain,
     }
     if transport == "xhttp":
-        values.update({"type": "xhttp", "path": path, "mode": reality.get("CDN_XHTTP_MODE", "auto"), "alpn": "h2"})
+        values.update({"type": "xhttp", "path": path, "mode": xhttp_mode or reality.get("CDN_XHTTP_MODE", "auto"), "alpn": "h2"})
     elif transport == "grpc":
         values.update({"type": "grpc", "serviceName": path.lstrip("/"), "mode": "gun", "alpn": "h2"})
     elif transport == "httpupgrade":
@@ -4036,10 +4051,10 @@ def vless_cdn_client_query(reality: dict, fingerprint: str = "chrome", domain: s
     return values
 
 
-def vless_tls_client_query(reality: dict, fingerprint: str = "chrome") -> dict[str, str]:
+def vless_tls_client_query(reality: dict, fingerprint: str = "chrome", transport: str | None = None, xhttp_mode: str | None = None) -> dict[str, str]:
     mapped = dict(reality)
     mapped.update({"CDN_DOMAIN": reality.get("TLS_DOMAIN", ""), "CDN_PATH": reality.get("TLS_PATH", "/"), "CDN_TRANSPORT": reality.get("TLS_TRANSPORT", "xhttp"), "CDN_XHTTP_MODE": reality.get("TLS_XHTTP_MODE", "auto")})
-    return vless_cdn_client_query(mapped, fingerprint)
+    return vless_cdn_client_query(mapped, fingerprint, transport=transport, xhttp_mode=xhttp_mode)
 
 
 def valid_hostname(value: str) -> bool:
@@ -4605,7 +4620,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 tls_crypt = (OPENVPN_DIR / "tls-crypt.key").read_text(encoding="utf-8")
                 endpoint, channel_mode = channel_mode_endpoint("openvpn", PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode)
                 port = int(settings.get("port", 1194))
-                transport = str(settings.get("protocol", "udp"))
+                transport = payload.settings.vpn_transport
                 client_config = "\n".join([
                     "client", "dev tun", f"proto {'tcp-client' if transport == 'tcp' else 'udp'}",
                     f"remote {endpoint} {port}", "resolv-retry infinite", "nobind", "persist-key", "persist-tun",
@@ -4644,13 +4659,13 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 port = int(settings.get("port", 8443))
                 domain = str(settings.get("domain", "")).strip()
                 endpoint, channel_mode = channel_mode_endpoint("hysteria2", domain or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode)
-                tls_mode = str(settings.get("tls_mode", "pinned"))
+                tls_mode = payload.settings.tls_mode
                 fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt")).partition("=")[2].strip()
-                obfs_lines = (["obfs:", "  type: salamander", "  salamander:", f"    password: {json.dumps(str(settings.get('obfs_password', '')))}"] if settings.get("obfs_enabled") else [])
+                obfs_lines = (["obfs:", "  type: salamander", "  salamander:", f"    password: {json.dumps(payload.settings.obfs_password)}"] if payload.settings.obfs_enabled else [])
                 client_config = "\n".join([
                     f"server: {endpoint}:{port}",
                     f"auth: {client_id}:{password}",
-                    f"bandwidth:", "  up: %s mbps" % int(settings.get("up_mbps", 100)), "  down: %s mbps" % int(settings.get("down_mbps", 100)),
+                    f"bandwidth:", "  up: %s mbps" % payload.settings.up_mbps, "  down: %s mbps" % payload.settings.down_mbps,
                     "tls:",
                     f"  sni: {tls_identity}",
                     f"  insecure: {'false' if tls_mode == 'acme' else 'true'}",
@@ -4688,7 +4703,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 client = {
                     "log": {"level": "warn"},
                     "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080}],
-                    "outbounds": [{"type": "tuic", "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "uuid": user_uuid, "password": password, "congestion_control": settings.get("congestion_control", "bbr"), "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": settings.get("heartbeat", "10s"), "tls": {"enabled": True, "server_name": certificate_server_name(TUIC_DIR / "server.crt"), "certificate": certificate}}],
+                    "outbounds": [{"type": "tuic", "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "uuid": user_uuid, "password": password, "congestion_control": payload.settings.congestion_control, "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": payload.settings.heartbeat, "tls": {"enabled": True, "server_name": certificate_server_name(TUIC_DIR / "server.crt"), "certificate": certificate}}],
                     "route": {"final": "connection-out"},
                 }
                 items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "port": int(settings.get("port", 8444)), "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
@@ -4777,7 +4792,17 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 replaced = True
                 restart_vless_service()
                 port = int(reality.get("PORT", "443"))
-                direct_query = urllib.parse.urlencode(vless_client_query(config_data, reality, payload.settings.fingerprint))
+                direct_query = urllib.parse.urlencode(vless_client_query(
+                    config_data,
+                    reality,
+                    payload.settings.fingerprint,
+                    transport=payload.settings.transport,
+                    path=payload.settings.transport_path,
+                    xhttp_mode=payload.settings.xhttp_mode,
+                    xpadding=payload.settings.xpadding,
+                    xmux_concurrency=payload.settings.xmux_concurrency,
+                    sni=payload.settings.sni,
+                ))
                 direct_config = f"vless://{client_uuid}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}?{direct_query}#{urllib.parse.quote(payload.name + ' Direct')}"
                 direct_transport = str(vless_reality_inbound(config_data).get("streamSettings", {}).get("network", "xhttp")).upper()
                 profiles = []
@@ -4785,12 +4810,12 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     profiles.append({"id": "direct", "name": f"Direct · REALITY/{direct_transport}", "filename": f"{safe_name}-direct.txt", "config": direct_config})
                 tls_domain = reality.get("TLS_DOMAIN", "")
                 if "tls" in requested_routes and tls_domain:
-                    tls_query = urllib.parse.urlencode(vless_tls_client_query(reality, payload.settings.fingerprint))
+                    tls_query = urllib.parse.urlencode(vless_tls_client_query(reality, payload.settings.fingerprint, payload.settings.tls_transport, payload.settings.tls_xhttp_mode))
                     tls_config = f"vless://{client_uuid}@{tls_domain}:443?{tls_query}#{urllib.parse.quote(payload.name + ' TLS')}"
                     profiles.append({"id": "tls", "name": f"TLS · {reality.get('TLS_TRANSPORT', 'xhttp').upper()}", "filename": f"{safe_name}-secure.txt", "config": tls_config})
                 cdn_domain = selected_cdn_domain
                 if "cdn" in requested_routes and cdn_domain:
-                    cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality, payload.settings.fingerprint, cdn_domain))
+                    cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality, payload.settings.fingerprint, cdn_domain, payload.settings.cdn_transport, payload.settings.cdn_xhttp_mode))
                     cdn_config = f"vless://{client_uuid}@{cdn_domain}:443?{cdn_query}#{urllib.parse.quote(payload.name + ' CDN')}"
                     profiles.append({"id": "cdn", "name": f"CDN · TLS/{reality.get('CDN_TRANSPORT', 'websocket').upper()}", "filename": f"{safe_name}-relay.txt", "config": cdn_config})
                 client_config = "\n".join(profile["config"] for profile in profiles)
@@ -4848,11 +4873,6 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     server_public = run(command, "show", interface, "public-key", check=True)
     server_settings = tunnel_interface_settings(config_path)
     extra = ""
-    if payload.protocol == "awg":
-        extra = "".join(
-            f"{name} = {server_settings.get(name, fallback)}\n"
-            for name, fallback in AWG_PROFILE.items()
-        )
     default_port = WG_PORT if payload.protocol == "wg" else AWG_PORT
     default_mtu = WG_MTU if payload.protocol == "wg" else AWG_MTU
     port = configured_int(server_settings, "ListenPort", default_port)
@@ -4861,6 +4881,11 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     client_listen_line = f"ListenPort = {client_listen_port}\n" if client_listen_port is not None else ""
     endpoint_host = PUBLIC_IP_ENDPOINT or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_ENDPOINT
     endpoint_host, channel_mode = channel_mode_endpoint(payload.protocol, endpoint_host, payload.settings.channel_mode)
+    if payload.protocol == "awg":
+        extra = "".join(
+            f"{name} = {getattr(payload.settings, name.lower()) if getattr(payload.settings, name.lower()) is not None else server_settings.get(name, fallback)}\n"
+            for name, fallback in AWG_PROFILE.items()
+        )
     client_config = (
         f"[Interface]\nAddress = {address}/32\nDNS = {(current_env_value('AWG_DNS', AWG_DNS) if payload.protocol == 'awg' else current_env_value('WG_DNS', WG_DNS))}\n"
         f"PrivateKey = {private_key}\n{client_listen_line}MTU = {mtu}\n{extra}\n[Peer]\n"
