@@ -80,6 +80,12 @@ class SingboxFeaturesTests(unittest.TestCase):
         self.assertIn("direct_games_udp_enabled", device_capabilities("singbox", "ios")["rules"])
         self.assertNotIn("direct_games_enabled", device_capabilities("singbox", "ios")["rules"])
 
+    def test_urltest_uses_configured_tolerance(self):
+        config = self.config(routing={"strategy": "url-test", "tolerance": 123})
+        group = next(row for row in config["outbounds"] if row["type"] == "urltest")
+        self.assertEqual(group["tolerance"], 123)
+        self.check(config)
+
     def test_launcher_awg_xhttp_and_encryption_pass_its_core(self):
         connections = self.connections()
         connections[0]["component"] = "transport-awg"

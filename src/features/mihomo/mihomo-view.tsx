@@ -15,7 +15,7 @@ import { notificationFailure as refreshFailure, type NotificationFailure } from 
 import { createApiClient, mutationFailureState } from "../../shared/lib/api-request";
 import { createSettingsSaveQueue } from "./settings-save";
 import { refreshWorkspaceSections } from "./workspace-refresh";
-import { bytes, duration } from "../../shared/lib/control-plane-ui";
+import { bytes, duration, connectionOnline, trafficBytes } from "../../shared/lib/control-plane-ui";
 import QRCode from "qrcode";
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
@@ -103,6 +103,9 @@ export function MihomoPage({
   const [profileStrategyTouched, setProfileStrategyTouched] = useState(false);
   const [profileDevices, setProfileDevices] = useState<ProfileDevice[]>([{ id: "profile-common", name: "Общие настройки профиля", scope: "common" }]);
   const [activeDeviceId, setActiveDeviceId] = useState("profile-common");
+  const [selectedConnectionId, setSelectedConnectionId] = useState("");
+  const deviceConnections = profileConnections.filter((connection) => connection.device_id === activeDeviceId);
+  const selectedConnection = deviceConnections.find((connection) => connection.id === selectedConnectionId) || deviceConnections[0];
   const activeProfileDevice = profileDevices.find((device) => device.id === activeDeviceId);
   const commonProfileRouting = profileDevices.find((device) => device.scope === "common")?.routing || profileRouting;
   const activeProfileRouting = activeProfileDevice?.scope === "common"
@@ -111,7 +114,9 @@ export function MihomoPage({
   const activeCapabilities = clientCapabilities(activeProfileRouting.client_config_format, activeProfileDevice?.scope === "common" ? undefined : activeProfileDevice?.os || "unknown", activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name);
   const commonDevice = activeProfileDevice?.scope === "common";
   const visibleProfileStrategies = profileStrategies.filter((strategy) => commonDevice || activeCapabilities.strategies.includes(strategy.value));
-  const visibleProfileRules = profileDirectRules.filter((rule) => (rule.key !== "windows_geolocation" || commonDevice || activeProfileDevice?.os === "windows") && (commonDevice || activeCapabilities.rules.includes(rule.key)));
+  const visibleProfileRules = profileDirectRules.filter((rule) => commonDevice
+    ? !["windows_geolocation", "direct_games_enabled", "direct_p2p_enabled"].includes(rule.key)
+    : activeCapabilities.rules.includes(rule.key));
   // Poll live delivery/cleanup status without replacing unsaved form fields.
   const liveDialogProfile = profileDialog && profileDialog !== "new"
     ? profiles.find((profile) => profile.id === profileDialog.id) || profileDialog : null;
@@ -570,16 +575,8 @@ export function MihomoPage({
     setProfileDialog("new");
     setProfileName("");
     setProfileConnections([]);
-    const protectionDefaults = {
-      sniffer: true,
-      tcp_concurrent: true,
-      tun_enabled: true,
-      dns_hijack_force: true,
-      dns_fake_ip: true,
-      tun_strict_route: true,
-    };
-    setProfileRouting(protectionDefaults);
-    setProfileDevices([{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: protectionDefaults }]);
+    setProfileRouting({});
+    setProfileDevices([{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: {} }]);
     setActiveDeviceId("profile-common");
   }
 
@@ -637,8 +634,10 @@ export function MihomoPage({
       if (vlessRoute === "cdn") settings.cdn_domain = confirmedNetworkRoute("cdn");
       if (vlessRoute === "tls") settings.tls_domain = confirmedNetworkRoute("tls");
     }
+    const id = `connection-${clientUuid()}`;
+    setSelectedConnectionId(id);
     setProfileConnections((current) => [...current, {
-      id: `connection-${clientUuid()}`,
+      id,
       component: module.id,
       name: module.id === "transport-reality" ? (vlessRoute === "cdn" ? "VLESS CDN" : vlessRoute === "tls" ? "VLESS TLS" : "VLESS REALITY") : module.name,
       device_id: activeDeviceId,
@@ -941,6 +940,7 @@ export function MihomoPage({
     return true;
   });
   const normalizedRuleSearch = ruleSearch.trim().toLocaleLowerCase("ru");
+  const profilePersonalRules = personalRules.filter((rule) => rule.kind !== "process" || (!commonDevice && ["windows", "macos", "linux"].includes(activeProfileDevice?.os || "unknown") && activeCapabilities.rules.includes("direct_games_enabled")));
   const visibleRuleGroups = [...new Set(visibleProfileRules.map((rule) => rule.group))].map((group) => ({
     group,
     rules: profileDirectRules.filter((rule) => rule.group === group && (!normalizedRuleSearch || `${rule.title} ${rule.text} ${rule.code}`.toLocaleLowerCase("ru").includes(normalizedRuleSearch))),
@@ -949,15 +949,17 @@ export function MihomoPage({
   const overviewDevices = profiles.reduce((sum, profile) => sum + registeredProfileDevices(profile).length, 0);
   const overviewConnections = profiles.reduce((sum, profile) => sum + profile.connections.length, 0);
   const overviewActiveConnections = Object.values(profileStats).reduce((sum, item) => sum + Number(item.summary.active || 0), 0);
+  const overviewActivityKnown = profiles.every((profile) => profileStats[profile.id]?.summary && profileStats[profile.id].summary.activity_available !== false);
+  const overviewTrafficKnown = profiles.every((profile) => profileStats[profile.id]?.summary && profileStats[profile.id].summary.stats_available !== false);
   const overviewRx = Object.values(profileStats).reduce((sum, item) => sum + Number(item.summary.rx_bytes || 0), 0);
   const overviewTx = Object.values(profileStats).reduce((sum, item) => sum + Number(item.summary.tx_bytes || 0), 0);
   const overviewActiveProfiles = profiles.filter((profile) => Number(profileStats[profile.id]?.summary.active || 0) > 0).length;
   const overviewIssues = [
-    !status?.active ? { title: "Ядро Mihomo не отвечает", text: "Проверьте состояние сервиса перед выдачей профилей.", view: "channels" as View } : null,
+    !status?.active ? { title: "Менеджер Mihomo не отвечает", text: "Проверьте состояние сервиса перед выдачей профилей.", view: "channels" as View } : null,
     !installedChannels.length ? { title: "Нет компонентов подключения", text: "Установите хотя бы один транспорт.", view: "channels" as View } : null,
     installedChannels.length > 0 && !policiesReady ? { title: "Политики ещё не готовы", text: "Проверьте настройки маршрутизации на странице «Сеть».", view: "routing" as View } : null,
     installedChannels.length > 0 && !profiles.length ? { title: "Нет профилей", text: "Создайте профиль и добавьте устройство.", view: "profiles" as View } : null,
-    profiles.length > 0 && overviewActiveConnections === 0 ? { title: "Нет активных подключений", text: "Профили созданы, но клиенты сейчас не подключены.", view: "profiles" as View } : null,
+    profiles.length > 0 && overviewActivityKnown && overviewActiveConnections === 0 ? { title: "Нет активных подключений", text: "Профили созданы, но клиенты сейчас не подключены.", view: "profiles" as View } : null,
   ].filter(Boolean) as Array<{ title: string; text: string; view: View }>;
   const overviewIssueTargets = overviewIssues.filter((issue, index, items) => items.findIndex((item) => item.view === issue.view) === index);
   const dnsModeField = dnsPolicy?.schema.find((field) => field.key === "enhanced_mode");
@@ -983,9 +985,9 @@ export function MihomoPage({
           </div>
 
           <div className="mihomoHeroFacts">
-            <HeroFact label="ЯДРО" value={status?.core_version || "—"} note={status?.active ? "работает штатно" : "статус недоступен"} />
+            <HeroFact label="ЯДРО" value={status?.core_version || "—"} note={status?.core_version ? "установленная версия" : "версия недоступна"} />
             <HeroFact label="ПРОФИЛИ" value={String(status?.profiles ?? profiles.length)} note={`${status?.profiles_in_use || 0} используются`} />
-            <HeroFact label="АКТИВНЫЕ КАНАЛЫ" value={String(overviewActiveConnections)} note={`${overviewConnections} настроено`} />
+            <HeroFact label="АКТИВНЫЕ КАНАЛЫ" value={overviewActivityKnown ? String(overviewActiveConnections) : "—"} note={`${overviewConnections} настроено`} />
             <HeroFact label="КОМПОНЕНТЫ" value={`${status?.channels_installed ?? installedChannels.length}/${status?.modules_total ?? modules.length}`} note={`${status?.channels_in_use?.length || 0} используются`} />
           </div>
 
@@ -1017,11 +1019,11 @@ export function MihomoPage({
       {view === "overview" && (
         <div className="mihomoOverviewV3">
           <section className="mihomoOverviewPulse">
-            <header><div><p className="eyebrow">СОСТОЯНИЕ СЕТИ</p><h2>{overviewActiveConnections ? `${overviewActiveConnections} подключений активно` : "Ожидание подключений"}</h2><span>{status?.active ? "Ядро Mihomo принимает конфигурации и обслуживает маршруты" : "Проверьте состояние ядра перед выдачей профилей"}</span></div><i className={status?.active ? "is-online" : ""} /></header>
+            <header><div><p className="eyebrow">СОСТОЯНИЕ СЕТИ</p><h2>{!overviewActivityKnown ? "Часть данных о подключениях недоступна" : overviewActiveConnections ? `${overviewActiveConnections} каналов активно` : "Ожидание подключений"}</h2><span>{status?.active ? "Менеджер профилей доступен" : "Проверьте состояние менеджера перед выдачей профилей"}</span></div><i className={status?.active ? "is-online" : ""} /></header>
             <div className="mihomoOverviewPulseGrid">
-              <article><small>ПРОФИЛИ В СЕТИ</small><strong>{overviewActiveProfiles}<i> / {profiles.length}</i></strong><span>с активными клиентами</span></article>
+              <article><small>ПРОФИЛИ В СЕТИ</small><strong>{overviewActivityKnown ? overviewActiveProfiles : "—"}<i> / {profiles.length}</i></strong><span>с активными клиентами</span></article>
               <article><small>HWID-УСТРОЙСТВА</small><strong>{overviewDevices}</strong><span>зарегистрировано</span></article>
-              <article><small>ВХОДЯЩИЙ ТРАФИК</small><strong>↓ {bytes(overviewRx)}</strong><span>↑ {bytes(overviewTx)} исходящего</span></article>
+              <article><small>ВХОДЯЩИЙ ТРАФИК</small><strong>↓ {overviewTrafficKnown ? bytes(overviewRx) : "—"}</strong><span>↑ {overviewTrafficKnown ? bytes(overviewTx) : "—"} исходящего</span></article>
               <article><small>НАСТРОЕННЫЕ КАНАЛЫ</small><strong>{overviewConnections}</strong><span>во всех профилях</span></article>
             </div>
           </section>
@@ -1029,7 +1031,7 @@ export function MihomoPage({
           <section className="mihomoOverviewDesk">
             <article className="mihomoOverviewLiveProfiles">
               <header><div><p className="eyebrow">ПРОФИЛИ</p><h3>Текущая активность</h3></div>{profiles.length > 0 && <button type="button" onClick={() => setView("profiles")}>Все профили</button>}</header>
-              <div>{profiles.slice(0, 8).map((profile) => { const item = profileStats[profile.id]?.summary; const devices = registeredProfileDevices(profile).length; return <div className="mihomoOverviewLiveRow" key={profile.id}><i className={item?.active ? "is-online" : ""} /><p><b>{profile.name}</b><small>{devices} устройств · {profile.connections.length} каналов</small></p><strong>{item ? `${item.active}/${item.configured}` : "—"}<small>активно</small></strong><em>↓ {bytes(item?.rx_bytes || 0)}<small>↑ {bytes(item?.tx_bytes || 0)}</small></em></div>; })}</div>
+              <div>{profiles.slice(0, 8).map((profile) => { const item = profileStats[profile.id]?.summary; const devices = registeredProfileDevices(profile).length; return <div className="mihomoOverviewLiveRow" key={profile.id}><i className={item?.active ? "is-online" : ""} /><p><b>{profile.name}</b><small>{devices} устройств · {profile.connections.length} каналов</small></p><strong>{item && item.activity_available !== false ? `${item.active}/${item.configured}` : "—"}<small>активно</small></strong><em>↓ {trafficBytes(item, "rx_bytes")}<small>↑ {trafficBytes(item, "tx_bytes")}</small></em></div>; })}</div>
               {!profiles.length && <div className="mihomoOverviewBlank"><b>Здесь появится активность профилей</b><span>{installedChannels.length ? "Создайте профиль и добавьте первое устройство." : "Сначала установите компонент подключения."}</span></div>}
             </article>
 
@@ -1059,14 +1061,16 @@ export function MihomoPage({
             {profiles.map((profile) => { const allDevices = profile.devices?.length ? profile.devices : [{ id: "profile-common", name: "Общие настройки профиля", scope: "common" as const }]; const devices = registeredProfileDevices(profile); const commonDevice = allDevices.find((device) => device.scope === "common" || device.id === profile.common_device_id) || allDevices[0]; const stats = profileStats[profile.id]?.summary; return (
               <section className="mihomoProfileCard" key={profile.id}>
                 <header className="mihomoProfileHeader">
-                  <button type="button" className="mihomoProfileToggle" aria-expanded={expandedDeviceLists.has(profile.id)} onClick={() => toggleCollapsed(setExpandedDeviceLists, profile.id)}><div className="mihomoProfileIdentity"><span className="mihomoProfileIcon">M</span><p><b>{profile.name}</b><small>{devices.length} устройств · общий пул {profile.connections.filter((connection) => connection.device_id === commonDevice.id).length} каналов{profile.subscription_status === "obsolete" ? " · подписка устарела, требуется новая установка" : ""}</small><em>ID {profile.id} · обновлён {new Date(profile.updated_at || profile.created_at).toLocaleString("ru-RU")}</em></p></div><div className="mihomoProfileSummary"><div><small>Состояние</small><strong className={stats?.active ? "is-online" : ""}><i />{stats ? `${stats.active} из ${stats.configured}` : "—"}</strong><span>активных каналов</span></div><div><small>Трафик</small><strong>↓ {bytes(stats?.rx_bytes || 0)}</strong><span>↑ {bytes(stats?.tx_bytes || 0)}</span></div></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
+                  <button type="button" className="mihomoProfileToggle" aria-expanded={expandedDeviceLists.has(profile.id)} onClick={() => toggleCollapsed(setExpandedDeviceLists, profile.id)}><div className="mihomoProfileIdentity"><span className="mihomoProfileIcon">M</span><p><b>{profile.name}</b><small>{devices.length} устройств · общий пул {profile.connections.filter((connection) => connection.device_id === commonDevice.id).length} каналов{profile.subscription_status === "obsolete" ? " · подписка устарела, требуется новая установка" : ""}</small><em>ID {profile.id} · обновлён {new Date(profile.updated_at || profile.created_at).toLocaleString("ru-RU")}</em></p></div><div className="mihomoProfileSummary"><div><small>Состояние</small><strong className={stats?.active ? "is-online" : ""}><i />{stats && stats.activity_available !== false ? `${stats.active} из ${stats.configured}` : "—"}</strong><span>активных каналов</span></div><div><small>Трафик</small><strong>↓ {trafficBytes(stats, "rx_bytes")}</strong><span>↑ {trafficBytes(stats, "tx_bytes")}</span></div></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
                   <div className="mihomoRowActions"><button className="primaryButton" onClick={() => void copySubscription(profile)} disabled={busy === `subscription:${profile.id}`}>{profile.subscription_status === "obsolete" ? "Обновить подписку" : "Скопировать подписку"}</button><button onClick={() => { setReadyDevices([]); setCreatedProfile({ ...profile, devices: [commonDevice] }); }}>QR</button><button onClick={() => editProfile(profile)}>Настроить</button><button className="dangerButton" onClick={() => void removeProfile(profile)} disabled={busy === `profile:${profile.id}`}>Удалить</button></div>
                 </header>
                 {expandedDeviceLists.has(profile.id) && <div className="mihomoProfileDevices">
                   {devices.map((device) => {
                     const connections = profile.connections.filter((connection) => connection.device_id === device.id);
                     const connectionStats = connections.map((connection) => profileStats[profile.id]?.connections?.[connection.id]);
-                    const onlineCount = connectionStats.filter((item) => Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0))).length;
+                    const onlineCount = connectionStats.filter((item) => connectionOnline(item)).length;
+                    const deviceTrafficKnown = connectionStats.every((item) => item && item.stats_available !== false);
+                    const deviceActivityKnown = connectionStats.every((item) => item && item.activity_available !== false);
                     const deviceRx = connectionStats.reduce((sum, item) => sum + Number(item?.rx_bytes || 0), 0);
                     const deviceTx = connectionStats.reduce((sum, item) => sum + Number(item?.tx_bytes || 0), 0);
                     const protocolListKey = `${profile.id}:${device.id}`;
@@ -1075,10 +1079,10 @@ export function MihomoPage({
                     const ruleCount = profileDirectRules.filter((rule) => Boolean(device.routing?.[rule.key])).length + new Set(device.personal_rule_ids || []).size;
                     return <section key={device.id} className="mihomoProfileDevice">
                       <header className="mihomoDeviceHeader">
-                        <button type="button" className="mihomoDeviceToggle" aria-expanded={protocolsExpanded} onClick={() => toggleCollapsed(setExpandedProtocolLists, protocolListKey)}><div className="mihomoDeviceIdentity"><span>{device.scope === "common" ? "ALL" : devicePlatformMeta(device).code}</span><p><b><DeviceClientBadge device={device} />{device.scope === "common" ? "Общие настройки профиля" : device.name}</b><small>{connections.length} каналов · {device.scope === "hwid" ? deviceSystemLabel(device) : device.scope === "common" ? "для клиентов без HWID и новых устройств" : device.scope === "manual" ? "Общий sing-box для всех клиентов" : "устаревшее устройство"}</small>{device.scope === "hwid" && <em>{device.last_seen_at ? `Последний запрос ${new Date(device.last_seen_at).toLocaleString("ru-RU")}` : "HWID зарегистрирован"}</em>}</p></div><div className="mihomoDeviceTotals"><span><small>КАНАЛЫ</small><b>{onlineCount}/{connections.length}</b></span><span><small>ПРАВИЛА</small><b>{ruleCount}</b></span><span><small>ТРАФИК</small><b>↓ {bytes(deviceRx)} · ↑ {bytes(deviceTx)}</b></span></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
+                        <button type="button" className="mihomoDeviceToggle" aria-expanded={protocolsExpanded} onClick={() => toggleCollapsed(setExpandedProtocolLists, protocolListKey)}><div className="mihomoDeviceIdentity"><span>{device.scope === "common" ? "ALL" : devicePlatformMeta(device).code}</span><p><b><DeviceClientBadge device={device} />{device.scope === "common" ? "Общие настройки профиля" : device.name}</b><small>{connections.length} каналов · {device.scope === "hwid" ? deviceSystemLabel(device) : device.scope === "common" ? "для клиентов без HWID и новых устройств" : device.scope === "manual" ? "Общий sing-box для всех клиентов" : "устаревшее устройство"}</small>{device.scope === "hwid" && <em>{device.last_seen_at ? `Последний запрос ${new Date(device.last_seen_at).toLocaleString("ru-RU")}` : "HWID зарегистрирован"}</em>}</p></div><div className="mihomoDeviceTotals"><span><small>КАНАЛЫ</small><b>{deviceActivityKnown ? onlineCount : "—"}/{connections.length}</b></span><span><small>ПРАВИЛА</small><b>{ruleCount}</b></span><span><small>ТРАФИК</small><b>↓ {deviceTrafficKnown ? bytes(deviceRx) : "—"} · ↑ {deviceTrafficKnown ? bytes(deviceTx) : "—"}</b></span></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
                         <nav className="mihomoDeviceActions"><button onClick={() => void downloadConfig(profile, device)} disabled={busy === `download:${profile.id}`}>{clientConfigFormat(profile, device) === "uri" ? "Скачать TXT" : clientConfigFormat(profile, device) !== "mihomo" ? "Скачать JSON" : "Скачать YAML"}</button>{device.scope !== "common" && <button className="dangerButton" onClick={() => void removeProfileDevice(profile, device)} disabled={deleting} title="Удалить это устройство и его подключения">{deleting ? "Удаление…" : "Удалить устройство"}</button>}</nav>
                       </header>
-                    {protocolsExpanded && <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = Boolean(item?.active || item?.endpoint || Number(item?.active_connections || 0)); return <div key={connection.id}><span className={`protocol-${connection.component}${online ? " online" : ""}`} title={channelShort[connection.component] || "CH"}><ProtocolIcon protocol={connection.component} /><i /></span><p><b>{connection.name}</b><small>↓ {bytes(item?.rx_bytes || 0)} · ↑ {bytes(item?.tx_bytes || 0)}</small>{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Для устройства пока нет подключений.</p>}</div>}
+                    {protocolsExpanded && <div className="mihomoProfileProtocolStats">{connections.map((connection) => { const item = profileStats[profile.id]?.connections?.[connection.id]; const online = connectionOnline(item); return <div key={connection.id}><span className={`protocol-${connection.component}${online ? " online" : ""}`} title={channelShort[connection.component] || "CH"}><ProtocolIcon protocol={connection.component} /><i /></span><p><b>{connection.name}</b><small>↓ {trafficBytes(item, "rx_bytes")} · ↑ {trafficBytes(item, "tx_bytes")}</small>{item?.stats_available === false && <em>Статистика недоступна</em>}{item?.traffic_scope === "observation" && <em>Учтённый трафик текущего наблюдения</em>}{item?.handshake_age_s != null && <em>Связь {duration(item.handshake_age_s)} назад</em>}</p></div>; })}{!connections.length && <p className="mihomoConnectionEmpty">Для устройства пока нет подключений.</p>}</div>}
                     </section>;
                   })}
                   {!devices.length && <p className="mihomoConnectionEmpty">Подключите приложение с HWID по ссылке профиля или добавьте общий sing-box для клиентов без HWID.</p>}
@@ -1235,7 +1239,7 @@ export function MihomoPage({
               <div><p className="eyebrow">MODULE SETTINGS</p><h2>{editing.name}</h2></div>
               <button type="button" className="iconButton" onClick={() => setEditing(null)}>x</button>
             </header>
-            <p>{editing.description}</p>
+            <p>{editing.description}</p>{editing.category === "transport" && <p>Здесь находятся общие параметры сервера. Параметры отдельного подключения доступны в профиле → Подключения.</p>}
             <div className="mihomoFields">
               {(editing.settings || []).filter((field) => editing.id !== "transport-reality" || String(settingsDraft.transport || "xhttp") === "xhttp" || !["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)).map((field) => (
                 <label key={field.key}>
@@ -1301,10 +1305,12 @@ export function MihomoPage({
             {activeProfileDevice?.scope !== "common" && <section className="mihomoProfileName mihomoProfileGeneral"><header><div><b>Формат при следующей загрузке</b><small>{activeProfileDevice?.manual ? "Общий sing-box JSON, без HWID." : "Формат сохраняется для сочетания HWID и приложения."}</small></div></header>
               {activeProfileDevice?.scope === "hwid" && (activeProfileDevice.supported_formats?.length || 0) > 1 ? <label><span>Файл для клиента</span><select value={String(activeProfileRouting.client_config_format || "mihomo")} onChange={(event) => setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: compatibleClientRouting(device.routing || {}, event.target.value, device.os || "unknown", device.manual ? undefined : device.client_name) } : device))}>{activeProfileDevice.supported_formats?.map((format) => <option key={format} value={format}>{clientCapabilities(format).label}</option>)}</select><small>После сохранения обновите подписку. Если клиент не принимает новый формат — удалите подписку и добавьте ту же ссылку заново. Устройство сохранится, если приложение и HWID не изменятся.</small></label> : <p>{activeCapabilities.label}</p>}
             </section>}
-            <ProfileProtection client={activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name} routing={activeProfileRouting} connections={profileConnections.filter((connection) => connection.device_id === activeDeviceId)} modules={modules} common={activeProfileDevice?.scope === "common"} echAvailable={Boolean(confirmedNetworkRoute("cdn"))} onChange={setProfileRoutingValue} />
+            {profileStep === 2 && (commonDevice
+              ? <section className="mihomoProfileProtection"><header><div><b>Защита устройства</b><small>Выберите устройство слева: параметры защиты зависят от его платформы и VPN-клиента.</small></div></header></section>
+              : <ProfileProtection client={activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name} routing={activeProfileRouting} connections={profileConnections.filter((connection) => connection.device_id === activeDeviceId)} modules={modules} echAvailable={Boolean(confirmedNetworkRoute("cdn"))} onChange={setProfileRoutingValue} />)}
             {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <p className="mihomoMessage is-error" role="status">Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте.</p>}
             {transitionMessage && <p className="mihomoMessage" role="status">{transitionMessage}{activeDeviceId === liveDialogProfile?.common_device_id && " Для клиентов без HWID переход общий: обновление подписки завершает ожидание для всего общего пула."}</p>}
-            <section className="mihomoProfileRules"><header><div><b>Правила устройства</b><small>Включаются только в конфигурации выбранного устройства.</small></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + (activeProfileDevice?.personal_rule_ids || []).length} из {visibleProfileRules.length + personalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div>{personalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{personalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></span></button>; })}</div>}</section>
+            <section className="mihomoProfileRules"><header><div><b>Правила устройства</b><small>Включаются только в конфигурации выбранного устройства.</small></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + profilePersonalRules.filter((rule) => (activeProfileDevice?.personal_rule_ids || []).includes(rule.id)).length} из {visibleProfileRules.length + profilePersonalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div>{profilePersonalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{profilePersonalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></span></button>; })}</div>}</section>
             <section className="mihomoPresetPicker">
               <header><div><b>Создать подключения из пресета</b><small>Готовый набор заменит подключения выбранной конфигурации.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настроить пресеты</button></header>
               <div>{profilePresets.filter((preset) => commonDevice || preset.components.every((item) => {
@@ -1341,18 +1347,20 @@ export function MihomoPage({
                   return [<button key={module.id} type="button" disabled={singletonUsed} onClick={() => addProfileConnection(module)}>+ {module.name}</button>];
                 })}
               </div>
-              <div className="mihomoConnectionList">
-                {profileConnections.filter((connection) => connection.device_id === activeDeviceId).map((connection, index) => {
+              <div className="mihomoConnectionWorkspace">
+                {deviceConnections.length > 0 && <nav className="mihomoConnectionNav" aria-label="Подключения выбранного устройства">{deviceConnections.map((connection) => <button key={connection.id} type="button" className={selectedConnection?.id === connection.id ? "is-active" : ""} aria-pressed={selectedConnection?.id === connection.id} onClick={() => setSelectedConnectionId(connection.id)}><span className={`protocol-${connection.component}`}><ProtocolIcon protocol={connection.component} /></span><span><b>{connection.name}</b><small>{modules.find((module) => module.id === connection.component)?.name} · {connection.settings.route_mode === "cdn" ? "CDN" : connection.settings.route_mode === "tls" ? "TLS" : "Прямое"}</small></span></button>)}</nav>}
+                <div className="mihomoConnectionList">
+                {(selectedConnection ? [selectedConnection] : []).map((connection, index) => {
                   const protocolModule = modules.find((item) => item.id === connection.component);
                   const supported = commonDevice || clientConnectionSupported(connection, activeProfileRouting.client_config_format, activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name);
                   const schema = commonDevice || activeCapabilities.components.includes(connection.component) ? protocolModule?.connection_settings || [] : [];
                   const vlessRoute = connection.component === "transport-reality" ? String(connection.settings.route_mode || (connection.settings.cdn_enabled ? "both" : "direct")) : "";
-                  return <details key={connection.id} className={`mihomoConnectionCard protocol-${connection.component}${vlessRoute ? ` is-vless-${vlessRoute}` : ""}`}>
-                    <summary>
+                  return <article key={connection.id} className={`mihomoConnectionCard mihomoConnectionEditor protocol-${connection.component}${vlessRoute ? ` is-vless-${vlessRoute}` : ""}`}>
+                    <header>
                       <span className={`protocol-${connection.component}`} title={channelShort[connection.component] || "CH"}><ProtocolIcon protocol={connection.component} /></span>
                       <div><b>{vlessRoute === "cdn" ? "VLESS CDN" : vlessRoute === "tls" ? "VLESS TLS" : vlessRoute === "direct" ? "VLESS REALITY" : vlessRoute === "both" ? "VLESS + CDN · прежний формат" : protocolModule?.name || connection.component}</b><small>{vlessRoute === "cdn" ? "Через CDN-домен" : vlessRoute === "tls" ? "Прямой домен с TLS" : vlessRoute === "direct" ? "Прямое REALITY-подключение" : vlessRoute === "both" ? "Можно заменить двумя независимыми подключениями" : `Подключение ${index + 1}`}</small></div>
-                      <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}><span aria-hidden="true">×</span></button><span className="mihomoConnectionChevron">›</span>
-                    </summary>
+                      <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}><span aria-hidden="true">×</span></button>
+                    </header>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
                     {!supported && <p>Подключение несовместимо с форматом клиента. Удалите его или выберите поддерживаемый формат.</p>}
                     <div className="mihomoConnectionFields">
@@ -1364,6 +1372,8 @@ export function MihomoPage({
                         if (connection.component === "transport-reality" && vlessRoute === "tls" && !["route_mode", "tls_domain", "tls_transport", "tls_xhttp_mode"].includes(field.key)) return false;
                         if (["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return connection.settings.transport === "xhttp";
                         if (["cdn_domain", "cdn_transport"].includes(field.key)) return Boolean(connection.settings.cdn_enabled);
+                        if (field.key === "tls_xhttp_mode") return connection.settings.tls_transport === "xhttp";
+                        if (field.key === "transport_path") return connection.settings.transport !== "raw";
                         if (field.key === "cdn_xhttp_mode") return Boolean(connection.settings.cdn_enabled) && connection.settings.cdn_transport === "xhttp";
                         return true;
                       }).map((field) => <label key={field.key} className={field.type === "boolean" ? "is-toggle" : ""}>
@@ -1375,12 +1385,13 @@ export function MihomoPage({
                         {field.help && <small>{field.help}</small>}
                       </label>)}
                     </div>
-                  </details>;
+                  </article>;
                 })}
                 {!profileConnections.some((connection) => connection.device_id === activeDeviceId) && <p className="mihomoConnectionEmpty">Добавьте хотя бы одно подключение для выбранного устройства.</p>}
+                </div>
               </div>
             </section>
-                <aside className="mihomoProfileTechnicalNote">Компонент устанавливает ядро протокола один раз. Каждая карточка создаёт независимые параметры и credential только для этого профиля.</aside>
+                <aside className="mihomoProfileTechnicalNote">Настройки применяются к выбранному подключению. Порты общих серверов, подсети и серверная обфускация задаются в Компонентах. После сохранения обновите подписку на устройстве.</aside>
               </main>
             </div>
             <footer><button type="button" className="ghostButton" onClick={() => setProfileDialog(null)}>Отмена</button><span>{profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id)) ? "Для каждого уровня нужно хотя бы одно подключение" : "Изменения применятся после сохранения"}</span><button type="submit" className="primaryButton" disabled={busy === "profile" || !profileName.trim() || profileDevices.some((device) => !device.name.trim() || !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить изменения"}</button></footer>

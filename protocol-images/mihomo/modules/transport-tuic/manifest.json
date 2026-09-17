@@ -9,12 +9,84 @@
   "default_enabled": false,
   "scope": "mihomo",
   "service": "vps-control-mihomo-tuic.service",
-  "supported_os": ["ubuntu", "debian"],
-  "preflight_packages": ["ca-certificates", "curl", "openssl", "python3", "tar"],
+  "supported_os": [
+    "ubuntu",
+    "debian"
+  ],
+  "preflight_packages": [
+    "ca-certificates",
+    "curl",
+    "openssl",
+    "python3",
+    "tar"
+  ],
   "minimum_free_mb": 128,
   "settings": [
-    { "key": "port", "label": "UDP-порт", "type": "number", "default": 10443, "min": 1024, "max": 65535 },
-    { "key": "congestion_control", "label": "Контроль перегрузки", "type": "select", "default": "bbr", "options": ["bbr", "cubic", "new_reno"] },
-    { "key": "heartbeat", "label": "Heartbeat", "type": "select", "default": "10s", "options": ["5s", "10s", "15s", "30s"] }
+    {
+      "key": "port",
+      "label": "UDP-порт",
+      "type": "number",
+      "default": 10443,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "congestion_control",
+      "label": "Контроль перегрузки сервера",
+      "type": "select",
+      "default": "bbr",
+      "options": [
+        "bbr",
+        "cubic",
+        "new_reno"
+      ]
+    },
+    {
+      "key": "heartbeat",
+      "label": "Heartbeat сервера",
+      "type": "select",
+      "default": "10s",
+      "options": [
+        "5s",
+        "10s",
+        "15s",
+        "30s"
+      ]
+    }
+  ],
+  "connection_settings": [
+    {
+      "key": "congestion_control",
+      "label": "Контроль перегрузки клиента",
+      "type": "select",
+      "default": "bbr",
+      "options": [
+        "bbr",
+        "cubic",
+        "new_reno"
+      ]
+    },
+    {
+      "key": "heartbeat",
+      "label": "Heartbeat клиента",
+      "type": "select",
+      "default": "10s",
+      "options": [
+        "5s",
+        "10s",
+        "15s",
+        "30s"
+      ]
+    },
+    {
+      "key": "udp_relay_mode",
+      "label": "Передача UDP",
+      "type": "select",
+      "default": "native",
+      "options": [
+        "native",
+        "quic"
+      ]
+    }
   ]
 }

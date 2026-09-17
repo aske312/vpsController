@@ -16,3 +16,13 @@ export const uptime = (seconds = 0) => `${Math.floor(seconds / 86400)}д ${Math.
 export const LIVE_SAMPLE_SECONDS = 3;
 export const HISTORY_SAMPLES = 100;
 export const CLIENTS_PER_PAGE = 10;
+
+type Traffic = { stats_available?: boolean; rx_bytes?: number | null; tx_bytes?: number | null };
+export function trafficBytes(stats: Traffic | null | undefined, direction: "rx_bytes" | "tx_bytes"): string {
+  const value = stats?.[direction];
+  return stats?.stats_available === false || value == null ? "—" : bytes(value);
+}
+
+export function connectionOnline(stats: { active?: boolean | null } | null | undefined): boolean {
+  return stats?.active === true;
+}

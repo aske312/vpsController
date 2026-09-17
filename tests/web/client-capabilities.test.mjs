@@ -26,6 +26,11 @@ test("format changes clear unavailable settings without changing shared catalog"
 });
 
 test("desktop process presets are absent on mobile and remain available on desktop", () => {
+  for (const os of ["ios", "android", "macos", "linux", "unknown"]) {
+    assert.equal(clientCapabilities("mihomo", os).rules.includes("windows_geolocation"), false);
+    assert.equal(compatibleClientRouting({ windows_geolocation: true }, "mihomo", os).windows_geolocation, false);
+  }
+  assert.equal(clientCapabilities("mihomo", "windows").rules.includes("windows_geolocation"), true);
   assert.equal(clientCapabilities("mihomo", "ios").rules.includes("direct_games_enabled"), false);
   assert.equal(clientCapabilities("mihomo", "windows").rules.includes("direct_games_enabled"), true);
   assert.equal(clientCapabilities("mihomo").rules.includes("direct_games_enabled"), true);

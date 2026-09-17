@@ -9,8 +9,18 @@
   "default_enabled": false,
   "scope": "mihomo",
   "service": "awg-quick@mh-awg0.service",
-  "supported_os": ["ubuntu", "debian"],
-  "preflight_packages": ["ca-certificates", "curl", "dirmngr", "dkms", "gnupg", "iptables"],
+  "supported_os": [
+    "ubuntu",
+    "debian"
+  ],
+  "preflight_packages": [
+    "ca-certificates",
+    "curl",
+    "dirmngr",
+    "dkms",
+    "gnupg",
+    "iptables"
+  ],
   "minimum_free_mb": 256,
   "requires_kernel_headers": true,
   "package": "amneziawg",
@@ -31,7 +41,7 @@
     },
     {
       "key": "mtu",
-      "label": "MTU",
+      "label": "MTU серверного интерфейса",
       "type": "number",
       "default": 1280,
       "min": 1280,
@@ -90,6 +100,17 @@
       "label": "H4",
       "type": "number",
       "default": 1400000000
+    }
+  ],
+  "connection_settings": [
+    {
+      "key": "mtu",
+      "label": "MTU клиента",
+      "type": "number",
+      "default": 1280,
+      "min": 1280,
+      "max": 1420,
+      "help": "Размер пакета на устройстве. Серверный интерфейс настраивается в Компонентах."
     }
   ]
 }

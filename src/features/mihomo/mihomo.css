@@ -1319,7 +1319,31 @@
 .mihomoProfileDialog.is-step-4 .mihomoProfileTechnicalNote { display:none; }
 .mihomoProfileDialog.is-step-2 .mihomoProfileProtection,
 .mihomoProfileDialog.is-step-3 .mihomoProfileStrategy,
-.mihomoProfileDialog.is-step-3 .mihomoProfileRules,
+.mihomoProfileDialog.is-step-3 .mihomoProfileRules:not(.mihomoProfileProtection),
 .mihomoProfileDialog.is-step-4 .mihomoPresetPicker,
 .mihomoProfileDialog.is-step-4 .mihomoConnectionBuilder { display:grid; }
 .mihomoUnavailableField { color:var(--muted); font-size:10px; line-height:1.4; }
+
+/* Connection selection stays stable while the selected protocol is edited. */
+.mihomoConnectionWorkspace { display:grid; grid-template-columns:minmax(165px,220px) minmax(0,1fr); gap:16px; align-items:start; }
+.mihomoConnectionNav { display:grid; gap:6px; min-width:0; }
+.mihomoConnectionNav > button { display:flex; align-items:center; gap:10px; text-align:left; padding:12px; border:1px solid var(--line); border-radius:10px; background:rgba(8,17,26,.6); color:var(--text); min-width:0; }
+.mihomoConnectionNav > button.is-active { border-color:#59c792; background:rgba(89,199,146,.09); }
+.mihomoConnectionNav > button > span:last-child { display:grid; gap:4px; min-width:0; }
+.mihomoConnectionNav b { overflow-wrap:anywhere; font-size:12px; }
+.mihomoConnectionNav small { color:var(--muted); font-size:10px; }
+.mihomoConnectionNav svg { width:24px; height:24px; }
+.mihomoProfileDialog .mihomoConnectionWorkspace .mihomoConnectionList { grid-template-columns:minmax(0,1fr); }
+.mihomoProfileDialog .mihomoConnectionEditor { padding:18px; gap:18px; }
+.mihomoConnectionEditor > header { padding-bottom:14px; border-bottom:1px solid var(--line); }
+.mihomoProfileDialog .mihomoConnectionEditor .mihomoConnectionFields { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.mihomoProfileDialog .mihomoConnectionEditor .mihomoConnectionFields label > small { display:block; font-size:11px; line-height:1.5; }
+.mihomoConnectionEditor input:not([type=checkbox]), .mihomoConnectionEditor select { width:100%; min-height:40px; box-sizing:border-box; }
+@media (max-width:1000px) {
+  .mihomoConnectionWorkspace { grid-template-columns:minmax(0,1fr); }
+  .mihomoConnectionNav { display:flex; overflow-x:auto; padding-bottom:6px; }
+  .mihomoConnectionNav > button { flex:0 0 175px; }
+}
+@media (max-width:640px) {
+  .mihomoProfileDialog .mihomoConnectionEditor .mihomoConnectionFields { grid-template-columns:minmax(0,1fr); }
+}

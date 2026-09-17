@@ -19,7 +19,7 @@ const CACHE_POLICIES: Array<{ match: RegExp; policy: CachePolicy }> = [
   { match: /^\/network$/, policy: { ttlMs: 15_000, staleMs: 120_000, persist: true } },
   { match: /^\/dns$/, policy: { ttlMs: 15_000, staleMs: 120_000, persist: true } },
   { match: /^\/protocols\/[^/]+\/status$/, policy: { ttlMs: 5_000, staleMs: 30_000, persist: false } },
-  { match: /^\/mihomo\/(?:status|modules|profiles|stats)$/, policy: { ttlMs: 15_000, staleMs: 60_000, persist: false } },
+  { match: /^\/mihomo\/(?:status|modules|profiles)$/, policy: { ttlMs: 15_000, staleMs: 60_000, persist: false } },
 ];
 
 const CACHE_STORAGE_PREFIX = "312-api-cache:";

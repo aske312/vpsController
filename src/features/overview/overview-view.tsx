@@ -1,4 +1,5 @@
 "use client";
+import { trafficBytes } from "../../shared/lib/control-plane-ui";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createApiClient } from "../../shared/lib/api-request";
@@ -410,7 +411,7 @@ export function OverviewDashboard({
                             {assignedComponents.map((component) => <span key={component} title={component.replace("transport-", "")}><ProtocolIcon protocol={component} /></span>)}
                             {!assignedComponents.length && <em>—</em>}
                           </div>
-                          <span className="overviewManagedTraffic"><b>↓ {traffic ? bytes(traffic.rx_bytes) : "—"}</b><small>↑ {traffic ? bytes(traffic.tx_bytes) : "—"}</small></span>
+                          <span className="overviewManagedTraffic"><b>↓ {trafficBytes(traffic, "rx_bytes")}</b><small>↑ {trafficBytes(traffic, "tx_bytes")}</small></span>
                         </div>;
                       })}
                       {mihomoProfiles === null && <p className="overviewEmpty" role="status">{summary.errors.profiles ? "Список профилей временно недоступен." : "Загрузка профилей…"}</p>}

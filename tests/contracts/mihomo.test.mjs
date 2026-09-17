@@ -244,8 +244,9 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /grpc-service-name/);
   assert.match(manager, /call_module_script\(module_id, "install"\)[\s\S]*rollback failed/);
   assert.match(view, /connections: profileConnections/);
-  assert.match(view, /sniffer: true/);
-  assert.match(view, /tun_enabled: true/);
+  assert.doesNotMatch(view, /sniffer: true/);
+  assert.doesNotMatch(view, /tun_enabled: true/);
+  assert.match(view, /profileStep === 2 && \(commonDevice/);
   assert.match(view, /Нет подтвержденных доменов на странице/);
   assert.match(view, /vless_max_connections_per_device/);
   assert.ok(view.indexOf(">Защита</button>") < view.indexOf(">Маршрутизация</button>"), "protection must precede routing in the profile editor");

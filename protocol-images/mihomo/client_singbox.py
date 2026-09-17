@@ -108,14 +108,16 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
             outbounds.append({"type": "hysteria2", "tag": base, "server": endpoint,
                               "server_port": int(credential["port"]), "password": credential["password"],
                               "up_mbps": int(credential["up_mbps"]), "down_mbps": int(credential["down_mbps"]),
-                              "tls": {"enabled": True, "server_name": credential.get("sni", "gate.312"), "insecure": True}})
+                              "tls": {"enabled": True, "server_name": credential.get("sni", "gate.312"), "insecure": True, "alpn": ["h3"]}})
             if credential.get("obfs"):
                 outbounds[-1]["obfs"] = {"type": "salamander", "password": credential["obfs_password"]}
         elif module == "transport-tuic":
             outbounds.append({"type": "tuic", "tag": base, "server": endpoint,
                               "server_port": int(credential["port"]), "uuid": credential["uuid"],
                               "password": credential["password"], "congestion_control": credential.get("congestion_control", "bbr"),
-                              "tls": {"enabled": True, "server_name": credential.get("sni", "gate.312"), "insecure": True}})
+                              "heartbeat": credential.get("heartbeat", "10s"),
+                              "udp_relay_mode": credential.get("udp_relay_mode", "native"),
+                              "tls": {"enabled": True, "server_name": credential.get("sni", "gate.312"), "insecure": True, "alpn": ["h3"]}})
         else:
             raise UnsupportedClientConfig(f"Модуль {module} не поддерживается sing-box")
         tags.extend(item["tag"] for item in outbounds[previous_outbounds:] + endpoints[previous_endpoints:])
@@ -132,7 +134,8 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
         elif strategy == "url-test":
             outbounds.append({"type": "urltest", "tag": proxy_tag, "outbounds": tags,
                               "url": routing.get("test_url", "https://www.gstatic.com/generate_204"),
-                              "interval": f"{int(routing.get('interval', 30))}s"})
+                              "interval": f"{int(routing.get('interval', 30))}s",
+                              "tolerance": int(routing.get("tolerance", 50))})
         else:
             raise UnsupportedClientConfig(f"Стратегия {strategy} не поддерживается стандартным sing-box")
     route_rules, rule_sets = singbox_rules(rules, proxy_tag)

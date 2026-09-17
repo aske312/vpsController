@@ -6,7 +6,8 @@ export function clientCapabilities(format: unknown, os?: string, client?: string
   const base = catalog[format as keyof typeof catalog] || catalog.mihomo;
   const extension = extensions[client as keyof typeof extensions];
   const caps = extension && extension.format === format ? { ...base, components: [...base.components, ...extension.components], transports: [...base.transports, ...extension.transports], features: [...base.features, ...extension.features] } : base;
-  return { ...caps, rules: os !== undefined && !["windows", "macos", "linux"].includes(os) ? caps.rules.filter((key) => !["direct_games_enabled", "direct_p2p_enabled"].includes(key)) : caps.rules };
+  const platformRules = os !== undefined && os !== "windows" ? caps.rules.filter((key) => key !== "windows_geolocation") : caps.rules;
+  return { ...caps, rules: os !== undefined && !["windows", "macos", "linux"].includes(os) ? platformRules.filter((key) => !["direct_games_enabled", "direct_p2p_enabled"].includes(key)) : platformRules };
 }
 
 export function compatibleClientRouting(routing: Record<string, string | number | boolean>, format: string, os?: string, client?: string) {

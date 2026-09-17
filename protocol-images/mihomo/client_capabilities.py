@@ -14,6 +14,8 @@ def device_capabilities(format, os=None, client=None):
     if extension.get("format") == format:
         for key in ("components", "transports", "features"):
             caps[key] += extension.get(key, [])
+    if os is not None and os != "windows":
+        caps["rules"] = [key for key in caps["rules"] if key != "windows_geolocation"]
     if os is not None and os not in {"windows", "macos", "linux"}:
         caps["rules"] = [key for key in caps["rules"] if key not in {"direct_games_enabled", "direct_p2p_enabled"}]
     return caps

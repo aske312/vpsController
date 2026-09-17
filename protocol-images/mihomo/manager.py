@@ -39,6 +39,7 @@ from client_xray import build_xray_configs, xray_rules
 from client_labels import connection_label
 from client_subscription import CLIENT_HINTS, import_page, vless_subscription
 from client_capabilities import CAPABILITIES, FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
+from telemetry import ConnectionTelemetry
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
 import port_allocation
@@ -87,6 +88,8 @@ profile_mutation_lock = threading.Lock()
 github_release_cache: dict[str, dict[str, Any]] = {}
 latency_cache: dict[str, tuple[float, float | None]] = {}
 latency_cache_lock = threading.Lock()
+quic_telemetry_lock = threading.Lock()
+quic_telemetry: dict[str, ConnectionTelemetry] = {}
 
 
 def serialized_profile_mutation(function):
@@ -142,6 +145,10 @@ def profile_runtime_transaction(modules: set[str]):
     config_backup = backup_root / "config"
     profile_backup = backup_root / "profiles.json"
     routing_backup = backup_root / "routing.json"
+    external_backups = {
+        path: backup_root / f"external-{module_id}.conf"
+        for module_id, path in WG_CONFIG_BY_MODULE.items() if module_id in modules
+    }
     service_was_active = {
         module_id: systemctl_active(service)
         for module_id in modules
@@ -153,9 +160,18 @@ def profile_runtime_transaction(modules: set[str]):
         shutil.copy2(PROFILE_FILE, profile_backup)
     if ROUTING_SETTINGS_FILE.exists():
         shutil.copy2(ROUTING_SETTINGS_FILE, routing_backup)
+    for path, backup in external_backups.items():
+        if path.exists():
+            shutil.copy2(path, backup)
     try:
         yield
     except Exception:
+        for path, backup in external_backups.items():
+            if backup.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(backup, path)
+            else:
+                path.unlink(missing_ok=True)
         if routing_backup.exists():
             ROUTING_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(routing_backup, ROUTING_SETTINGS_FILE)
@@ -225,6 +241,11 @@ DNS_PROVIDERS = (
     {"id": "safedns", "name": "SafeDNS — безопасность и категории", "server": "195.46.39.39"},
 )
 
+WG_CONFIG_BY_MODULE = {
+    "transport-wg": Path("/etc/wireguard/mh-wg0.conf"),
+    "transport-awg": Path("/etc/amnezia/amneziawg/mh-awg0.conf"),
+}
+
 SERVICE_BY_MODULE = {
     "transport-wg": "wg-quick@mh-wg0.service",
     "transport-awg": "awg-quick@mh-awg0.service",
@@ -243,11 +264,18 @@ for _module_id in TRANSPORTS:
 
 def transition_worker(stopped: threading.Event) -> None:
     while not stopped.is_set():
-        try:
-            cleanup_profile_transitions()
-        except Exception:
-            # Rollback retains the previous listeners; retry without exposing keys.
-            logger.error("Profile transition cleanup failed; retrying in 60 seconds")
+        for label, job in (
+            ("profile transitions", cleanup_profile_transitions),
+            ("VLESS telemetry", ensure_reality_telemetry),
+            ("Hysteria2 telemetry", lambda: ensure_quic_telemetry("transport-hysteria2")),
+            ("TUIC telemetry", lambda: ensure_quic_telemetry("transport-tuic")),
+        ):
+            if stopped.is_set():
+                break
+            try:
+                job()
+            except Exception:
+                logger.error("Maintenance %s failed; retrying in 60 seconds", label)
         stopped.wait(60)
 
 
@@ -261,6 +289,9 @@ async def manager_lifespan(_app):
     finally:
         stopped.set()
         await asyncio.to_thread(worker.join, 10)
+        for collector in list(quic_telemetry.values()):
+            await asyncio.to_thread(collector.close)
+        quic_telemetry.clear()
 
 
 app = FastAPI(
@@ -522,6 +553,14 @@ def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
     default_device = common_device_id
     for connection in result["connections"]:
         connection.setdefault("device_id", default_device)
+        if connection.get("component") == "transport-shadowsocks":
+            # Old profiles predate per-connection settings. Preserve the cipher
+            # already provisioned instead of rotating it to the new UI default.
+            connection["settings"] = {
+                "method": connection.get("credential", {}).get("method", "chacha20-ietf-poly1305"),
+                "timeout": 300, "mtu": 1200, "no_delay": True,
+                **connection.get("settings", {}),
+            }
     sync_legacy_profile_fields(result)
     return result
 
@@ -736,6 +775,8 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
             continue
         if key in TLS_FRAGMENT_RANGES:
             result[key] = validate_fragment_range(key, raw)
+            if result[key] != TLS_FRAGMENT_RANGES[key][2]:
+                raise HTTPException(status_code=422, detail="sing-box выбирает размер и задержку фрагментации автоматически; ручные диапазоны не поддерживаются")
             continue
         if key not in definition:
             raise HTTPException(status_code=422, detail=f"Unknown routing setting: {key}")
@@ -884,6 +925,7 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "GEOIP,RU,DIRECT,no-resolve",
     ],
     "direct_ru_banks": [
+        "DOMAIN-SUFFIX,sberbank.ru,DIRECT", "DOMAIN-SUFFIX,sber.ru,DIRECT",
         "DOMAIN-SUFFIX,sberbank.com,DIRECT", "DOMAIN-SUFFIX,sberdevices.ru,DIRECT", "DOMAIN-SUFFIX,tinkoff.ru,DIRECT",
         "DOMAIN-SUFFIX,tbank.ru,DIRECT", "DOMAIN-SUFFIX,alfabank.ru,DIRECT", "DOMAIN-SUFFIX,vtb.ru,DIRECT",
         "DOMAIN-SUFFIX,gazprombank.ru,DIRECT", "DOMAIN-SUFFIX,raiffeisen.ru,DIRECT", "DOMAIN-SUFFIX,open.ru,DIRECT",
@@ -2108,6 +2150,10 @@ def get_module_settings(module_id: str) -> dict[str, Any]:
 def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[str, Any]:
     previous_values = module_settings(module_id)
     next_values = validate_settings(module_id, patch.values)
+    if module_id in WG_CONFIG_BY_MODULE and next_values.get("subnet") != previous_values.get("subnet"):
+        if any(connection.get("component") == module_id for profile in profiles()
+               for connection in [*profile.get("connections", []), *profile.get("retiring_connections", [])]):
+            raise HTTPException(status_code=409, detail="Подсеть используется существующими подключениями. Удалите их перед сменой подсети; иначе ранее выданные адреса перестанут работать")
     port_key = MODULE_LISTENERS.get(module_id, (None, set()))[0]
     if port_key and next_values[port_key] != previous_values[port_key]:
         try:
@@ -2288,10 +2334,10 @@ def interface_private_key(path: Path) -> str:
 def add_wg_credential(profile_id: str, module_id: str, connection_id: str = "default") -> dict[str, Any]:
     if module_id == "transport-wg":
         tool, interface = "wg", "mh-wg0"
-        config = Path("/etc/wireguard/mh-wg0.conf")
+        config = WG_CONFIG_BY_MODULE[module_id]
     else:
         tool, interface = "awg", "mh-awg0"
-        config = Path("/etc/amnezia/amneziawg/mh-awg0.conf")
+        config = WG_CONFIG_BY_MODULE[module_id]
     if not config.is_file():
         raise RuntimeError(f"{module_id} configuration is missing")
     client_ip, _ = next_tunnel_address(module_id)
@@ -2321,12 +2367,12 @@ def add_wg_credential(profile_id: str, module_id: str, connection_id: str = "def
 
 def remove_wg_credential(profile_id: str, module_id: str, credential: dict[str, Any]) -> None:
     if module_id == "transport-wg":
-        tool, interface, config = "wg", "mh-wg0", Path("/etc/wireguard/mh-wg0.conf")
+        tool, interface, config = "wg", "mh-wg0", WG_CONFIG_BY_MODULE[module_id]
     else:
-        tool, interface, config = "awg", "mh-awg0", Path("/etc/amnezia/amneziawg/mh-awg0.conf")
+        tool, interface, config = "awg", "mh-awg0", WG_CONFIG_BY_MODULE[module_id]
     public = str(credential.get("public_key", ""))
-    if public:
-        run(tool, "set", interface, "peer", public, "remove")
+    if public and interface in run(tool, "show", "interfaces", check=True).stdout.split():
+        run(tool, "set", interface, "peer", public, "remove", check=True)
     if config.is_file():
         lines = config.read_text(encoding="utf-8").splitlines()
         marker = f"# mihomo-profile:{credential.get('marker') or profile_id}"
@@ -2356,9 +2402,10 @@ def used_ss_ports() -> set[int]:
     return result
 
 
-@port_allocation.release_on_error(lambda profile_id, connection_id="default": f"mihomo:ss:{profile_id}-{connection_id}")
-def add_ss_credential(profile_id: str, connection_id: str = "default") -> dict[str, Any]:
-    settings = module_settings("transport-shadowsocks")
+@port_allocation.release_on_error(lambda profile_id, connection_id="default", connection_settings=None: f"mihomo:ss:{profile_id}-{connection_id}")
+def add_ss_credential(profile_id: str, connection_id: str = "default", connection_settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    settings = {**module_settings("transport-shadowsocks"), **(connection_settings or {})}
+    settings.setdefault("method", "chacha20-ietf-poly1305")
     start = int(settings["port_start"])
     used = used_ss_ports()
     port = free_module_port(start, {"tcp", "udp"}, used=used, count=2000, owner=f"mihomo:ss:{profile_id}-{connection_id}")
@@ -2370,10 +2417,10 @@ def add_ss_credential(profile_id: str, connection_id: str = "default") -> dict[s
         "server_port": port,
         "password": password,
         "method": settings["method"],
-        "timeout": 300,
+        "timeout": int(settings.get("timeout", 300)),
         "mode": "tcp_and_udp",
-        "mtu": 1200,
-        "no_delay": True,
+        "mtu": int(settings.get("mtu", 1200)),
+        "no_delay": bool(settings.get("no_delay", True)),
     }
     instance_id = f"{profile_id}-{connection_id}"
     atomic_json(config_dir / f"{instance_id}.json", config)
@@ -2387,7 +2434,7 @@ def add_ss_credential(profile_id: str, connection_id: str = "default") -> dict[s
 
 def remove_ss_credential(profile_id: str, credential: dict[str, Any]) -> None:
     instance_id = str(credential.get("instance_id") or profile_id)
-    run("systemctl", "disable", "--now", f"vps-control-mihomo-ss@{instance_id}.service")
+    run("systemctl", "disable", "--now", f"vps-control-mihomo-ss@{instance_id}.service", check=True)
     path = CONFIG_ROOT / "shadowsocks" / f"{instance_id}.json"
     path.unlink(missing_ok=True)
     port_allocation.release(f"mihomo:ss:{instance_id}")
@@ -2493,6 +2540,17 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
         raise HTTPException(status_code=409, detail=f"Компонент {manifest(component)['name']} установлен, но его служба не работает. Сначала восстановите службу.")
     result = {**connection_defaults(component), **values}
     if component != "transport-reality":
+        for field in manifest(component).get("connection_settings", []):
+            key, kind = field["key"], field["type"]
+            value = result.get(key)
+            if kind == "number":
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or int(value) != value or not field.get("min", 0) <= value <= field.get("max", 65535):
+                    raise HTTPException(status_code=422, detail=f"Invalid {component} {key}")
+                result[key] = int(value)
+            elif kind == "boolean" and not isinstance(value, bool):
+                raise HTTPException(status_code=422, detail=f"Invalid {component} {key}")
+            elif kind == "select" and value not in field.get("options", []):
+                raise HTTPException(status_code=422, detail=f"Invalid {component} {key}")
         return result
     # Privacy is global; stale clients cannot override it per connection.
     result.pop("privacy_mode", None)
@@ -2635,6 +2693,7 @@ def rebuild_vless_cdn_snippet() -> None:
 
 def apply_reality_config(config_path: Path, config: dict[str, Any], restart_service: bool = True) -> None:
     ensure_vless_panel_route(config)
+    config.setdefault("policy", {}).setdefault("levels", {}).setdefault("0", {})["statsUserOnline"] = True
     # Xray determines the config loader from the final extension. Keep .json
     # last; names such as config.json.candidate are rejected by newer Xray.
     candidate = config_path.with_name(f"{config_path.stem}.candidate.json")
@@ -2880,6 +2939,7 @@ def quic_obfs_secret() -> str:
     return value
 
 
+@port_allocation.release_on_error(lambda module_id: f"mihomo:telemetry:{module_id}")
 def write_quic_runtime(module_id: str) -> None:
     module = quic_module_name(module_id)
     root = quic_root(module_id)
@@ -2895,6 +2955,7 @@ def write_quic_runtime(module_id: str) -> None:
         "tls": {
             "enabled": True,
             "server_name": "gate.312",
+            "alpn": ["h3"],
             "certificate_path": str(CONFIG_ROOT / "quic" / "server.crt"),
             "key_path": str(CONFIG_ROOT / "quic" / "server.key"),
         },
@@ -2906,7 +2967,11 @@ def write_quic_runtime(module_id: str) -> None:
     else:
         inbound.update({"congestion_control": settings["congestion_control"], "auth_timeout": "3s", "zero_rtt_handshake": False, "heartbeat": settings["heartbeat"]})
     candidate = root / "config.candidate.json"
-    atomic_json(candidate, {"log": {"level": "warn"}, "inbounds": [inbound], "outbounds": [{"type": "direct"}]})
+    runtime = {"log": {"level": "warn"}, "inbounds": [inbound], "outbounds": [{"type": "direct"}]}
+    telemetry_service = quic_telemetry_service(module_id, load_json(config_path, {}))
+    if telemetry_service:
+        runtime["services"] = [telemetry_service]
+    atomic_json(candidate, runtime)
     result = run(str(SINGBOX_BIN), "check", "-c", str(candidate))
     if result.returncode:
         candidate.unlink(missing_ok=True)
@@ -2920,6 +2985,8 @@ def write_quic_runtime(module_id: str) -> None:
         run("systemctl", "restart", service, check=True)
         if not service_stably_active(service):
             raise RuntimeError(f"{manifest(module_id)['name']} service did not remain active")
+        start_quic_telemetry(module_id, runtime)
+        port_allocation.release(f"mihomo:telemetry:{module_id}")
         if shutil.which("ufw") and run("ufw", "status").stdout.startswith("Status: active"):
             run("ufw", "allow", f"{int(settings['port'])}/udp", "comment", f"GATE.312 Mihomo {module}")
             old_inbounds = previous_config.get("inbounds", []) if isinstance(previous_config, dict) else []
@@ -2932,6 +2999,73 @@ def write_quic_runtime(module_id: str) -> None:
             os.chmod(config_path, 0o600)
             run("systemctl", "restart", service)
         raise
+
+
+def quic_telemetry_service(module_id: str, config: dict[str, Any]) -> dict[str, Any] | None:
+    existing = next((row for row in config.get("services", []) if row.get("tag") == "panel-telemetry"), None)
+    if existing and existing.get("listen") == "127.0.0.1" and existing.get("secret"):
+        return existing
+    version = re.search(r"(\d+)\.(\d+)", singbox_installed_version())
+    if not version or tuple(map(int, version.groups())) < (1, 14):
+        return None
+    owner = f"mihomo:telemetry:{module_id}"
+    port = free_module_port(19100, {"tcp"}, owner=owner)
+    # The reservation is retained until the saved service config takes over.
+    return {"type": "api", "tag": "panel-telemetry", "listen": "127.0.0.1", "listen_port": port,
+            "secret": secrets.token_urlsafe(32)}
+
+
+def start_quic_telemetry(module_id: str, config: dict[str, Any]) -> None:
+    service = next((row for row in config.get("services", []) if row.get("tag") == "panel-telemetry"), None)
+    if not service or service.get("listen") != "127.0.0.1" or not service.get("secret"):
+        return
+    address, secret = f"127.0.0.1:{int(service['listen_port'])}", service["secret"]
+    with quic_telemetry_lock:
+        previous = quic_telemetry.get(module_id)
+        if previous and previous.address == address and previous.secret == secret:
+            return
+        if previous:
+            previous.close()
+        collector = ConnectionTelemetry(address, secret)
+        quic_telemetry[module_id] = collector
+        collector.start()
+
+
+def ensure_reality_telemetry() -> None:
+    with profile_mutation_lock:
+        path = CONFIG_ROOT / "reality" / "config.json"
+        config = load_json(path, {})
+        if config and not config.get("policy", {}).get("levels", {}).get("0", {}).get("statsUserOnline") and systemctl_active(SERVICE_BY_MODULE["transport-reality"]):
+            with profile_runtime_transaction({"transport-reality"}):
+                apply_reality_config(path, config)
+                if not service_stably_active(SERVICE_BY_MODULE["transport-reality"]):
+                    raise RuntimeError("VLESS did not remain active after telemetry setup")
+
+
+def ensure_quic_telemetry(module_id: str) -> None:
+    with profile_mutation_lock:
+        path = quic_root(module_id) / "config.json"
+        if not path.exists() or not systemctl_active(SERVICE_BY_MODULE[module_id]):
+            return
+        config = load_json(path, {})
+        if not any(row.get("tag") == "panel-telemetry" for row in config.get("services", [])):
+            # API services are available from sing-box 1.14. Older installs
+            # remain usable and expose unknown stats until a core update.
+            version = re.search(r"(\d+)\.(\d+)", singbox_installed_version())
+            if not version or tuple(map(int, version.groups())) < (1, 14):
+                return
+            write_quic_runtime(module_id)
+        else:
+            start_quic_telemetry(module_id, config)
+
+
+def quic_profile_stats(module_id: str, credential: dict[str, Any]) -> dict[str, Any]:
+    with quic_telemetry_lock:
+        collector = quic_telemetry.get(module_id)
+    if collector:
+        return collector.snapshot(str(credential.get("instance_id", "")))
+    return {"active": None, "active_connections": None, "rx_bytes": None, "tx_bytes": None,
+            "stats_available": False, "activity_available": False, "traffic_scope": "observation"}
 
 
 def add_quic_credential(profile_id: str, module_id: str, connection_id: str) -> dict[str, Any]:
@@ -2970,10 +3104,13 @@ def remove_quic_credential(module_id: str, credential: dict[str, Any]) -> None:
         write_quic_runtime(module_id)
 
 
-def wg_like_dump(module_id: str) -> dict[str, dict[str, Any]]:
+def wg_like_dump(module_id: str) -> dict[str, dict[str, Any]] | None:
     tool = "wg" if module_id == "transport-wg" else "awg"
     interface = "mh-wg0" if module_id == "transport-wg" else "mh-awg0"
-    output = run(tool, "show", interface, "dump").stdout
+    result = run(tool, "show", interface, "dump")
+    if result.returncode:
+        return None
+    output = result.stdout
     now = int(time.time())
     peers: dict[str, dict[str, Any]] = {}
     for row in output.splitlines()[1:]:
@@ -2983,9 +3120,13 @@ def wg_like_dump(module_id: str) -> dict[str, dict[str, Any]]:
         key, _, endpoint, _, handshake, rx, tx, _ = columns[:8]
         handshake_at = int(handshake or 0)
         peers[key] = {
+            "active": bool(handshake_at and 0 <= now - handshake_at <= 180),
+            "activity_available": True,
+            "stats_available": True,
+            "activity_source": "handshake_180s",
             "endpoint": endpoint if endpoint and endpoint != "(none)" else None,
-            "rx_bytes": int(rx or 0),
-            "tx_bytes": int(tx or 0),
+            "rx_bytes": int(tx or 0),
+            "tx_bytes": int(rx or 0),
             "handshake_age_s": (now - handshake_at) if handshake_at else None,
         }
     return peers
@@ -3021,18 +3162,24 @@ def endpoint_latency_ms(endpoint: str | None) -> float | None:
 def shadowsocks_profile_stats(profile_id: str, port: int, instance_id: str | None = None) -> dict[str, Any]:
     unit = f"vps-control-mihomo-ss@{instance_id or profile_id}.service"
 
-    def counter(name: str) -> int:
+    def counter(name: str) -> int | None:
         try:
-            return int(run("systemctl", "show", unit, f"--property={name}", "--value").stdout.strip() or 0)
+            result = run("systemctl", "show", unit, f"--property={name}", "--value")
+            return int(result.stdout.strip()) if result.returncode == 0 else None
         except ValueError:
-            return 0
+            return None
 
-    connections = run("ss", "-Htn", "state", "established", f"( sport = :{port} )").stdout
-    active_connections = len([line for line in connections.splitlines() if line.strip()])
+    result = run("ss", "-Htn", "state", "established", f"( sport = :{port} )")
+    active_connections = len([line for line in result.stdout.splitlines() if line.strip()]) if result.returncode == 0 else None
+    rx, tx = counter("IPEgressBytes"), counter("IPIngressBytes")
     return {
-        "active": systemctl_active(unit),
-        "rx_bytes": counter("IPIngressBytes"),
-        "tx_bytes": counter("IPEgressBytes"),
+        "active": active_connections > 0 if active_connections is not None else None,
+        "service_active": systemctl_active(unit),
+        "activity_source": "tcp_sessions",
+        "rx_bytes": rx,
+        "tx_bytes": tx,
+        "stats_available": rx is not None and tx is not None,
+        "activity_available": active_connections is not None,
         "active_connections": active_connections,
     }
 
@@ -3040,12 +3187,14 @@ def shadowsocks_profile_stats(profile_id: str, port: int, instance_id: str | Non
 def reality_profile_stats(profile_id: str, connection_id: str | None = None) -> dict[str, Any]:
     active = systemctl_active("vps-control-mihomo-reality.service")
     if not REALITY_XRAY_BIN.is_file() or not active:
-        return {"active": active, "rx_bytes": 0, "tx_bytes": 0}
+        return {"active": False if not active else None, "rx_bytes": None, "tx_bytes": None,
+                "stats_available": False, "activity_available": not active}
     email = f"mihomo-{profile_id}" + (f"-{connection_id}" if connection_id else "")
-    output = run(
+    result = run(
         str(REALITY_XRAY_BIN), "api", "statsquery",
         f"-server={reality_api_server()}", "-pattern", f"user>>>{email}>>>traffic>>>",
-    ).stdout
+    )
+    output = result.stdout
     uplink = downlink = 0
     try:
         payload = json.loads(output)
@@ -3057,10 +3206,25 @@ def reality_profile_stats(profile_id: str, connection_id: str | None = None) -> 
             elif name.endswith(">>>downlink"):
                 downlink = value
     except (TypeError, ValueError, json.JSONDecodeError):
-        pass
+        return {"active": None, "rx_bytes": None, "tx_bytes": None, "stats_available": False, "activity_available": False}
+    if result.returncode:
+        return {"active": None, "rx_bytes": None, "tx_bytes": None, "stats_available": False, "activity_available": False}
+    online = None
+    query = run(str(REALITY_XRAY_BIN), "api", "statsonline", f"-server={reality_api_server()}", "-email", email)
+    if query.returncode == 0:
+        try:
+            online = int(json.loads(query.stdout)["stat"].get("value", 0))
+        except (KeyError, TypeError, ValueError):
+            pass
+    elif "not found" in (query.stderr + query.stdout).lower():
+        config = load_json(CONFIG_ROOT / "reality" / "config.json", {})
+        if config.get("policy", {}).get("levels", {}).get("0", {}).get("statsUserOnline"):
+            online = 0
     # "uplink"/"downlink" are named from the client's perspective, matching
     # the rx/tx convention used by the wg/awg and Shadowsocks stats above.
-    return {"active": True, "rx_bytes": downlink, "tx_bytes": uplink}
+    return {"active": online > 0 if online is not None else None,
+            "online_ips": online, "rx_bytes": downlink, "tx_bytes": uplink,
+            "stats_available": True, "activity_available": online is not None, "activity_source": "xray_online_20s"}
 
 
 def profile_stats_payload(item: dict[str, Any]) -> dict[str, Any]:
@@ -3068,30 +3232,31 @@ def profile_stats_payload(item: dict[str, Any]) -> dict[str, Any]:
     connections: dict[str, Any] = {}
     wg_dump: dict[str, dict[str, Any]] | None = None
     awg_dump: dict[str, dict[str, Any]] | None = None
-    empty_peer = {"endpoint": None, "rx_bytes": 0, "tx_bytes": 0, "handshake_age_s": None}
+    empty_peer = {"active": False, "endpoint": None, "rx_bytes": 0, "tx_bytes": 0, "handshake_age_s": None}
+    unknown_peer = {"active": None, "rx_bytes": None, "tx_bytes": None, "stats_available": False, "activity_available": False}
     for connection in normalize_profile(item).get("connections", []):
         connection_id = str(connection.get("id", ""))
         module_id = str(connection.get("component", ""))
         credential = connection.get("credential", {})
         if module_id == "transport-wg":
             wg_dump = wg_like_dump("transport-wg") if wg_dump is None else wg_dump
-            connections[connection_id] = wg_dump.get(str(credential.get("public_key", "")), empty_peer)
+            connections[connection_id] = wg_dump.get(str(credential.get("public_key", "")), empty_peer) if wg_dump is not None else dict(unknown_peer)
         elif module_id == "transport-awg":
             awg_dump = wg_like_dump("transport-awg") if awg_dump is None else awg_dump
-            connections[connection_id] = awg_dump.get(str(credential.get("public_key", "")), empty_peer)
+            connections[connection_id] = awg_dump.get(str(credential.get("public_key", "")), empty_peer) if awg_dump is not None else dict(unknown_peer)
         elif module_id == "transport-shadowsocks":
             connections[connection_id] = shadowsocks_profile_stats(profile_id, int(credential.get("port", 0)), credential.get("instance_id"))
         elif module_id == "transport-reality":
             connections[connection_id] = reality_profile_stats(profile_id, connection_id)
         elif module_id in {"transport-hysteria2", "transport-tuic"}:
-            connections[connection_id] = {"active": systemctl_active(SERVICE_BY_MODULE[module_id]), "rx_bytes": 0, "tx_bytes": 0}
+            connections[connection_id] = quic_profile_stats(module_id, credential)
     values = list(connections.values())
     for value in values:
         if value.get("endpoint") and (value.get("active") or int(value.get("active_connections", 0) or 0) > 0 or value.get("handshake_age_s") is not None):
             value["latency_ms"] = endpoint_latency_ms(str(value["endpoint"]))
     rx_bytes = sum(int(value.get("rx_bytes", 0) or 0) for value in values)
     tx_bytes = sum(int(value.get("tx_bytes", 0) or 0) for value in values)
-    active = sum(1 for value in values if value.get("active") or value.get("endpoint") or int(value.get("active_connections", 0) or 0) > 0)
+    active = sum(1 for value in values if value.get("active") is True)
     handshake_ages = [int(value["handshake_age_s"]) for value in values if value.get("handshake_age_s") is not None]
     device_summaries: dict[str, dict[str, Any]] = {}
     for device in item.get("devices", [{"id": "device-1"}]):
@@ -3100,9 +3265,9 @@ def profile_stats_payload(item: dict[str, Any]) -> dict[str, Any]:
         rows = [connections[value] for value in ids if value in connections]
         ages = [int(row["handshake_age_s"]) for row in rows if row.get("handshake_age_s") is not None]
         latencies = [float(row["latency_ms"]) for row in rows if row.get("latency_ms") is not None]
-        device_summaries[device_id] = {"configured": len(rows), "active": sum(1 for row in rows if row.get("active") or row.get("endpoint") or int(row.get("active_connections", 0) or 0) > 0), "rx_bytes": sum(int(row.get("rx_bytes", 0) or 0) for row in rows), "tx_bytes": sum(int(row.get("tx_bytes", 0) or 0) for row in rows), "last_handshake_age_s": min(ages) if ages else None, "latency_ms": min(latencies) if latencies else None}
+        device_summaries[device_id] = {"stats_available": all(row.get("stats_available", True) for row in rows), "activity_available": all(row.get("activity_available", True) for row in rows), "configured": len(rows), "active": sum(1 for row in rows if row.get("active") is True), "rx_bytes": sum(int(row.get("rx_bytes", 0) or 0) for row in rows), "tx_bytes": sum(int(row.get("tx_bytes", 0) or 0) for row in rows), "last_handshake_age_s": min(ages) if ages else None, "latency_ms": min(latencies) if latencies else None}
     latencies = [float(value["latency_ms"]) for value in values if value.get("latency_ms") is not None]
-    return {"id": profile_id, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None, "latency_ms": min(latencies) if latencies else None}}
+    return {"id": profile_id, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "stats_available": all(value.get("stats_available", True) for value in values), "activity_available": all(value.get("activity_available", True) for value in values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None, "latency_ms": min(latencies) if latencies else None}}
 
 
 @app.get("/api/mihomo/stats", dependencies=[Depends(auth_required)])
@@ -3123,7 +3288,7 @@ def provision(profile_id: str, module_id: str, connection_id: str = "default", s
     if module_id in ("transport-wg", "transport-awg"):
         return add_wg_credential(profile_id, module_id, connection_id)
     if module_id == "transport-shadowsocks":
-        return add_ss_credential(profile_id, connection_id)
+        return add_ss_credential(profile_id, connection_id, settings)
     if module_id == "transport-reality":
         return add_reality_credential(profile_id, connection_id, settings or {}, restart_service=not defer_reality_restart, reload_caddy=not defer_reality_restart, privacy_enabled=privacy_enabled)
     if module_id in {"transport-hysteria2", "transport-tuic"}:
@@ -3670,8 +3835,9 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         next_connections: list[dict[str, Any]] = []
         for definition in definitions:
             current_connection = current_connections.get(definition["id"])
-            current_server_settings = {key: value for key, value in (current_connection or {}).get("settings", {}).items() if key not in {"cdn_ech", "privacy_mode"}}
-            next_server_settings = {key: value for key, value in definition.get("settings", {}).items() if key not in {"cdn_ech", "privacy_mode"}}
+            client_keys = client_connection_keys(definition["component"])
+            current_server_settings = {key: value for key, value in (current_connection or {}).get("settings", {}).items() if key not in {"cdn_ech", "privacy_mode"} | client_keys}
+            next_server_settings = {key: value for key, value in definition.get("settings", {}).items() if key not in {"cdn_ech", "privacy_mode"} | client_keys}
             if current_connection and current_connection.get("component") == definition["component"] and current_server_settings == next_server_settings:
                 next_connections.append({**definition, "credential": current_connection.get("credential", {})})
             else:
@@ -3795,6 +3961,54 @@ def q(value: Any) -> str:
     return json.dumps(str(value), ensure_ascii=False)
 
 
+def client_connection_keys(component: str) -> set[str]:
+    return {
+        "transport-wg": {"mtu"}, "transport-awg": {"mtu"},
+        "transport-hysteria2": {"up_mbps", "down_mbps"},
+        "transport-tuic": {"congestion_control", "heartbeat", "udp_relay_mode"},
+    }.get(component, set())
+
+
+def effective_client_connections(connections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Export applied shared listener settings, not a credential's creation-time copy."""
+    result = []
+    for connection in connections:
+        module = connection.get("component")
+        credential = dict(connection.get("credential", {}))
+        if module in {"transport-hysteria2", "transport-tuic"}:
+            config = load_json(quic_root(module) / "config.json", {})
+            inbound = next((row for row in config.get("inbounds", []) if row.get("type") == quic_module_name(module)), {})
+            if inbound.get("listen_port"):
+                credential["port"] = inbound["listen_port"]
+                for key in ("up_mbps", "down_mbps", "congestion_control", "heartbeat"):
+                    if key in inbound:
+                        credential[key] = inbound[key]
+                if module == "transport-hysteria2":
+                    obfs = inbound.get("obfs", {})
+                    credential["obfs"] = obfs.get("type") == "salamander"
+                    if credential["obfs"]:
+                        credential["obfs_password"] = obfs["password"]
+        elif module in WG_CONFIG_BY_MODULE:
+            try:
+                source = WG_CONFIG_BY_MODULE[module].read_text(encoding="utf-8").split("[Peer]", 1)[0]
+            except OSError:
+                source = ""
+            for name, key in (("ListenPort", "port"), ("MTU", "mtu")):
+                match = re.search(r"(?mi)^" + name + r"\s*=\s*(\d+)", source)
+                if match:
+                    credential[key] = int(match[1])
+            if module == "transport-awg" and source:
+                amnezia = dict(credential.get("amnezia", {}))
+                for key in ("jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"):
+                    match = re.search(r"(?mi)^" + key + r"\s*=\s*(\d+)", source)
+                    if match:
+                        amnezia[key] = int(match[1])
+                credential["amnezia"] = amnezia
+        credential.update({key: value for key, value in connection.get("settings", {}).items() if key in client_connection_keys(str(module))})
+        result.append({**connection, "credential": credential})
+    return result
+
+
 def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) -> list[str]:
     server = public_endpoint()
     if module_id in ("transport-wg", "transport-awg"):
@@ -3900,7 +4114,7 @@ def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) ->
             f"    uuid: {q(credential['uuid'])}",
             f"    password: {q(credential['password'])}",
             f"    heartbeat-interval: {heartbeat_ms}",
-            "    udp-relay-mode: native",
+            f"    udp-relay-mode: {q(credential.get('udp_relay_mode', 'native'))}",
             f"    congestion-controller: {q(credential.get('congestion_control', 'bbr'))}",
             f"    sni: {q(credential.get('sni', 'gate.312'))}",
             "    skip-cert-verify: true",
@@ -3952,6 +4166,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "transport-tuic": "TUIC",
     }
     normalized = normalize_profile(item)
+    normalized["connections"] = effective_client_connections(normalized.get("connections", []))
     selected_device = device_id or str(normalized["common_device_id"])
     connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
     if not connections:
@@ -4163,6 +4378,7 @@ def validate_client_capabilities(profile):
 
 def render_client_profile(item: dict[str, Any], device_id: str, requested_format: str | None = None, client_name: str | None = None) -> tuple[str, str]:
     profile = normalize_profile(item)
+    profile["connections"] = effective_client_connections(profile.get("connections", []))
     device = next((entry for entry in profile["devices"] if entry["id"] == device_id), {})
     client_name = None if device.get("manual") else client_name or device.get("client_name")
     device_values = device_routing(profile, device_id)
@@ -4195,6 +4411,9 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
         routing[key] = bool(device_values.get(key, False))
     fragment = None
     if device_values.get("tunnel_fragment", False):
+        for key, (_, _, default) in TLS_FRAGMENT_RANGES.items():
+            if key in device_values and validate_fragment_range(key, device_values[key]) != default:
+                raise HTTPException(status_code=422, detail="Сбросьте ручные диапазоны фрагментации: sing-box выбирает размер и задержку автоматически")
         fragment = {
             "packets": "tlshello",
             "length": validate_fragment_range("tunnel_fragment_size", device_values.get("tunnel_fragment_size", "100-200")),

@@ -146,6 +146,9 @@ def reservations() -> dict[str, set[tuple[str, int]]]:
         if module in {"transport-hysteria2", "transport-tuic"}:
             config = read_json(CONFIG_ROOT / "mihomo/quic" / module.removeprefix("transport-") / "config.json")
             result.setdefault(owner, set()).update(("udp", int(row["listen_port"])) for row in config.get("inbounds", []) if row.get("listen_port"))
+            result.setdefault(f"mihomo:telemetry:{module}", set()).update(
+                ("tcp", int(row["listen_port"])) for row in config.get("services", [])
+                if row.get("type") == "api" and row.get("listen_port"))
         if module in {"transport-wg", "transport-awg"}:
             name = module.removeprefix("transport-")
             path = CONFIG_ROOT.parent / ("wireguard" if name == "wg" else "amnezia/amneziawg") / f"mh-{name}0.conf"

@@ -9,8 +9,14 @@
   "default_enabled": false,
   "scope": "mihomo",
   "service": "wg-quick@mh-wg0.service",
-  "supported_os": ["ubuntu", "debian"],
-  "preflight_packages": ["iptables", "wireguard-tools"],
+  "supported_os": [
+    "ubuntu",
+    "debian"
+  ],
+  "preflight_packages": [
+    "iptables",
+    "wireguard-tools"
+  ],
   "minimum_free_mb": 128,
   "requires_kernel_headers": false,
   "package": "wireguard-tools",
@@ -31,11 +37,22 @@
     },
     {
       "key": "mtu",
-      "label": "MTU",
+      "label": "MTU серверного интерфейса",
       "type": "number",
       "default": 1280,
       "min": 1280,
       "max": 1420
+    }
+  ],
+  "connection_settings": [
+    {
+      "key": "mtu",
+      "label": "MTU клиента",
+      "type": "number",
+      "default": 1280,
+      "min": 1280,
+      "max": 1420,
+      "help": "Размер пакета на устройстве. Серверный интерфейс настраивается в Компонентах."
     }
   ]
 }

@@ -59,9 +59,9 @@ try:
     settings=json.load(open(settings_path,encoding="utf-8"))
 except Exception:
     settings={}
-tls={"enabled":True,"server_name":"gate.312","certificate_path":f"{root}/server.crt","key_path":f"{root}/server.key"}
+tls={"enabled":True,"server_name":"gate.312","alpn":["h3"],"certificate_path":f"{root}/server.crt","key_path":f"{root}/server.key"}
 inbound={"type":module,"tag":f"{module}-in","listen":"::","listen_port":int(port),"users":[],"tls":tls}
-if module == "hysteria2": inbound["bandwidth"]={"up":f"{int(settings.get('up_mbps',100))} mbps","down":f"{int(settings.get('down_mbps',100))} mbps"}
+if module == "hysteria2": inbound.update({"up_mbps":int(settings.get("up_mbps",100)),"down_mbps":int(settings.get("down_mbps",100))})
 if module == "tuic": inbound.update({"congestion_control":settings.get("congestion_control","bbr"),"auth_timeout":"3s","zero_rtt_handshake":False,"heartbeat":settings.get("heartbeat","10s")})
 json.dump({"log":{"level":"warn"},"inbounds":[inbound],"outbounds":[{"type":"direct"}]},open(path,"w",encoding="utf-8"),indent=2)
 PY

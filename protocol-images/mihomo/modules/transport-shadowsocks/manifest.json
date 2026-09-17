@@ -9,8 +9,14 @@
   "default_enabled": false,
   "scope": "mihomo",
   "service": "vps-control-mihomo-ss.target",
-  "supported_os": ["ubuntu", "debian"],
-  "preflight_packages": ["iptables", "shadowsocks-libev"],
+  "supported_os": [
+    "ubuntu",
+    "debian"
+  ],
+  "preflight_packages": [
+    "iptables",
+    "shadowsocks-libev"
+  ],
   "minimum_free_mb": 128,
   "requires_kernel_headers": false,
   "package": "shadowsocks-libev",
@@ -22,7 +28,9 @@
       "default": 31000,
       "min": 1024,
       "max": 64000
-    },
+    }
+  ],
+  "connection_settings": [
     {
       "key": "method",
       "label": "Шифр",
@@ -33,6 +41,30 @@
         "aes-256-gcm",
         "aes-128-gcm"
       ]
+    },
+    {
+      "key": "timeout",
+      "label": "Тайм-аут соединения, с",
+      "type": "number",
+      "default": 300,
+      "min": 10,
+      "max": 3600,
+      "help": ""
+    },
+    {
+      "key": "mtu",
+      "label": "MTU UDP",
+      "type": "number",
+      "default": 1200,
+      "min": 576,
+      "max": 1500,
+      "help": ""
+    },
+    {
+      "key": "no_delay",
+      "label": "TCP без задержки",
+      "type": "boolean",
+      "default": true
     }
   ]
 }

@@ -1,0 +1,24 @@
+syntax = "proto3";
+package daemon;
+// Wire-compatible read-only subset of sing-box 1.14 StartedService.
+// https://github.com/SagerNet/sing-box/blob/v1.14.1/daemon/started_service.proto
+message SubscribeConnectionsRequest { int64 interval = 1; }
+message Connection {
+  string id = 1;
+  string user = 10;
+  int64 closedAt = 13;
+  int64 uplinkTotal = 16;
+  int64 downlinkTotal = 17;
+}
+message ConnectionEvent {
+  int32 type = 1;
+  string id = 2;
+  Connection connection = 3;
+  int64 uplinkDelta = 4;
+  int64 downlinkDelta = 5;
+  int64 closedAt = 6;
+}
+message ConnectionEvents {
+  repeated ConnectionEvent events = 1;
+  bool reset = 2;
+}
