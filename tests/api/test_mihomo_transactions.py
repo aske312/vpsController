@@ -11,6 +11,112 @@ manager = load_module("mihomo_manager_under_test", "protocol-images/mihomo/manag
 
 
 class MihomoTransactionTests(unittest.TestCase):
+    def test_shadowsocks_rollback_restores_instances_and_removes_new_ones(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = root / "config"
+            ss = config / "shadowsocks"
+            ss.mkdir(parents=True)
+            prefix = "vps-control-mihomo-ss@"
+            states = {
+                f"{prefix}deleted.service": [True, "enabled"],
+                f"{prefix}stopped.service": [False, "enabled"],
+                f"{prefix}manual.service": [True, "disabled"],
+                f"{prefix}runtime.service": [False, "enabled-runtime"],
+                f"{prefix}masked.service": [False, "masked"],
+            }
+            before = {unit: list(value) for unit, value in states.items()}
+            for unit in states:
+                (ss / f"{unit[len(prefix):-8]}.json").write_text('"original"', encoding="utf-8")
+            calls = []
+
+            def fake_run(*args, **kwargs):
+                calls.append(args)
+                action = args[1]
+                unit = args[2] if action == "show" else args[-1]
+                output = ""
+                if action in {"list-units", "list-unit-files"}:
+                    output = "\n".join(states)
+                elif action == "show":
+                    active, enabled = states[unit]
+                    output = f"ActiveState={'active' if active else 'inactive'}\nUnitFileState={enabled}\n"
+                elif action == "is-active":
+                    output = "active" if states[unit][0] else "inactive"
+                elif action == "disable":
+                    states[unit][1] = "disabled"
+                    if "--now" in args:
+                        states[unit][0] = False
+                elif action == "unmask":
+                    if states[unit][1].startswith("masked"):
+                        states[unit][1] = "disabled"
+                elif action in {"enable", "mask"}:
+                    states[unit][1] = ("enabled" if action == "enable" else "masked") + ("-runtime" if "--runtime" in args else "")
+                elif action == "restart":
+                    self.assertEqual((ss / f"{unit[len(prefix):-8]}.json").read_text(), '"original"')
+                    states[unit][0] = True
+                elif action == "stop":
+                    states[unit][0] = False
+                else:
+                    self.fail(f"Unexpected command: {args}")
+                return subprocess.CompletedProcess(args, 0, output, "")
+
+            with (
+                patch.object(manager, "CONFIG_ROOT", config),
+                patch.object(manager, "PROFILE_FILE", root / "profiles.json"),
+                patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"),
+                patch.object(manager, "systemctl_active", return_value=True),
+                patch.object(manager, "run", side_effect=fake_run),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "injected"):
+                    with manager.profile_runtime_transaction({"transport-shadowsocks"}):
+                        states[f"{prefix}deleted.service"] = [False, "disabled"]
+                        (ss / "deleted.json").unlink()
+                        states[f"{prefix}stopped.service"][0] = True
+                        states[f"{prefix}runtime.service"][1] = "disabled"
+                        states[f"{prefix}masked.service"][1] = "disabled"
+                        states[f"{prefix}created.service"] = [True, "enabled"]
+                        (ss / "created.json").write_text('"new"', encoding="utf-8")
+                        raise RuntimeError("injected")
+            self.assertEqual({unit: states[unit] for unit in before}, before)
+            self.assertEqual(states[f"{prefix}created.service"], [False, "disabled"])
+            self.assertFalse((ss / "created.json").exists())
+            self.assertNotIn(("systemctl", "restart", f"{prefix}manual.service"), calls)
+
+    def test_shadowsocks_rollback_failure_is_visible_and_other_instances_restore(self):
+        before = {"one": (True, "enabled", b"config"), "two": (True, "enabled", b"config")}
+        calls = []
+
+        def fake_run(*args, **kwargs):
+            calls.append(args)
+            if args[1] == "restart" and args[-1] == "one":
+                raise RuntimeError("restart failed")
+            return subprocess.CompletedProcess(args, 0, "inactive", "")
+
+        with self.assertRaisesRegex(RuntimeError, "rollback incomplete.*one.*restart failed"):
+            manager.ss_runtime.restore(fake_run, before, before)
+        self.assertIn(("systemctl", "restart", "two"), calls)
+
+    def test_shadowsocks_snapshot_failure_prevents_mutation(self):
+        with patch.object(manager.ss_runtime, "snapshot", side_effect=RuntimeError("systemd unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "systemd unavailable"):
+                with manager.profile_runtime_transaction({"transport-shadowsocks"}):
+                    self.fail("Mutation must not begin without a snapshot")
+
+    def test_shadowsocks_rollback_reports_original_and_recovery_errors(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with (
+                patch.object(manager, "CONFIG_ROOT", root / "config"),
+                patch.object(manager, "PROFILE_FILE", root / "profiles.json"),
+                patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"),
+                patch.object(manager, "systemctl_active", return_value=True),
+                patch.object(manager.ss_runtime, "snapshot", return_value={}),
+                patch.object(manager.ss_runtime, "restore", side_effect=RuntimeError("recovery failed")),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "mutation failed; rollback incomplete: recovery failed"):
+                    with manager.profile_runtime_transaction({"transport-shadowsocks"}):
+                        raise RuntimeError("mutation failed")
+
     def test_failed_peer_removal_preserves_config(self):
         for module_id in ("transport-wg", "transport-awg"):
             with self.subTest(module=module_id), tempfile.TemporaryDirectory() as root:

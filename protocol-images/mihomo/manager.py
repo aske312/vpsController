@@ -40,6 +40,7 @@ from client_labels import connection_label
 from client_subscription import CLIENT_HINTS, import_page, vless_subscription
 from client_capabilities import CAPABILITIES, FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
 from telemetry import ConnectionTelemetry
+import ss_runtime
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
 import port_allocation
@@ -137,6 +138,7 @@ def transactional_profile_mutation(function):
 @contextmanager
 def profile_runtime_transaction(modules: set[str]):
     """Restore persisted adapter state and affected services after any failed mutation."""
+    ss_before = ss_runtime.snapshot(run, CONFIG_ROOT) if "transport-shadowsocks" in modules else None
     backup_root = Path(tempfile.mkdtemp(prefix="mihomo-profile-transaction-"))
     config_backup = backup_root / "config"
     profile_backup = backup_root / "profiles.json"
@@ -161,7 +163,15 @@ def profile_runtime_transaction(modules: set[str]):
             shutil.copy2(path, backup)
     try:
         yield
-    except Exception:
+    except Exception as original_error:
+        rollback_errors = []
+        ss_current = None
+        if ss_before is not None:
+            try:
+                ss_current = ss_runtime.snapshot(run, CONFIG_ROOT, strict=False)
+                ss_runtime.remove_created(run, ss_before, ss_current)
+            except Exception as exc:
+                rollback_errors.append(str(exc))
         for path, backup in external_backups.items():
             if backup.exists():
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -186,6 +196,17 @@ def profile_runtime_transaction(modules: set[str]):
         # from its own persisted configuration and restarted at most once.
         for module_id in sorted(modules):
             service = SERVICE_BY_MODULE.get(module_id)
+            if module_id == "transport-shadowsocks":
+                # Restore instances individually; restarting their target also
+                # restarts unrelated live sessions and starts stopped instances.
+                try:
+                    active = systemctl_active(service)
+                    if active != service_was_active.get(module_id, False):
+                        run("systemctl", "start" if service_was_active[module_id] else "stop", service, check=True)
+                    ss_runtime.restore(run, ss_before, ss_current or {})
+                except Exception as exc:
+                    rollback_errors.append(str(exc))
+                continue
             if service and service_was_active.get(module_id, False):
                 run("systemctl", "reset-failed", service)
                 run("systemctl", "restart", service)
@@ -196,6 +217,8 @@ def profile_runtime_transaction(modules: set[str]):
             if Path("/usr/local/sbin/vps-control").is_file():
                 run("/usr/local/sbin/vps-control", "vless-cdn-firewall")
             run("systemctl", "reload", "caddy.service")
+        if rollback_errors:
+            raise RuntimeError(f"{original_error}; rollback incomplete: {'; '.join(rollback_errors)}") from original_error
         raise
     finally:
         shutil.rmtree(backup_root, ignore_errors=True)
