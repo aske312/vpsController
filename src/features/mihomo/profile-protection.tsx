@@ -17,17 +17,20 @@ export function ProfileProtection({ routing, connections, modules, common = fals
     ["dns_ipv6", "IPv6", "Контроль IPv6", "Разрешает IPv6-адреса в этом профиле."],
     ["dns_prefer_h3", "H3", "HTTP/3 для DNS", "Использует быстрый транспорт DoH, если он доступен."],
   ] as const;
-  const enabledCount = [...(common ? ["tunnel_privacy", ...(echAvailable ? ["tunnel_ech"] : []), "tunnel_fragment"] : caps.features.filter((key) => key !== "tunnel_ech" || echAvailable)), ...(showMihomo ? [...mihomoFeatures.map(([key]) => key), "dns_hijack_force", "tun_strict_route"] : [])].filter((key) => routing[key]).length;
-  const totalCount = (common ? 2 + (echAvailable ? 1 : 0) : caps.features.filter((key) => key !== "tunnel_ech" || echAvailable).length) + (showMihomo ? mihomoFeatures.length + 2 : 0);
+  const visibleMihomoFeatures = mihomoFeatures.filter(([key]) => !common || key !== "tun_enabled");
+  const visibleTunnelFeatures = caps.features.filter((key) => key !== "tunnel_ech" || echAvailable);
+  const visibleKeys = [...visibleTunnelFeatures, ...(showMihomo ? visibleMihomoFeatures.map(([key]) => key) : []), ...(showMihomo && !common ? ["dns_hijack_force", "tun_strict_route"] : [])];
+  const enabledCount = visibleKeys.filter((key) => routing[key]).length;
+  const totalCount = visibleKeys.length;
   const compatible = connections.some((connection) => connection.component === "transport-reality" && modules.some((module) => module.id === connection.component && module.installed));
   return <section className="mihomoProfileRules mihomoProfileProtection">
-    <header><div><b>Защита соединений</b><small>Настройки выбранного устройства. После сохранения обновите подписку в клиенте.</small></div><span>Выбрано {enabledCount} из {totalCount}</span></header>
+    <header><div><b>Защита соединений</b><small>{common ? "Общие параметры защиты. Поддержка зависит от ядра VPN-клиента; у устройства можно задать свои значения." : "Настройки выбранного устройства. После сохранения обновите подписку в клиенте."}</small></div><span>Выбрано {enabledCount} из {totalCount}</span></header>
     <div>
-      {(common || caps.features.includes("tunnel_privacy")) && <button type="button" className={`mihomoProfileRuleButton${routing.tunnel_privacy ? " is-enabled" : ""}`} aria-pressed={Boolean(routing.tunnel_privacy)} onClick={() => onChange("tunnel_privacy", !routing.tunnel_privacy)}><i>VPS</i><span><b>Шифрование до VPS</b><small>VLESS Encryption · требуется актуальное ядро клиента</small></span></button>}
-      {echAvailable && (common || caps.features.includes("tunnel_ech")) && <button type="button" className={`mihomoProfileRuleButton${routing.tunnel_ech ? " is-enabled" : ""}`} aria-pressed={Boolean(routing.tunnel_ech)} onClick={() => onChange("tunnel_ech", !routing.tunnel_ech)}><i>ECH</i><span><b>Скрытие имени сервера (ECH)</b></span></button>}
+      {caps.features.includes("tunnel_privacy") && <button type="button" className={`mihomoProfileRuleButton${routing.tunnel_privacy ? " is-enabled" : ""}`} aria-pressed={Boolean(routing.tunnel_privacy)} onClick={() => onChange("tunnel_privacy", !routing.tunnel_privacy)}><i>VPS</i><span><b>Шифрование до VPS</b><small>VLESS Encryption · требуется актуальное ядро клиента</small></span></button>}
+      {echAvailable && caps.features.includes("tunnel_ech") && <button type="button" className={`mihomoProfileRuleButton${routing.tunnel_ech ? " is-enabled" : ""}`} aria-pressed={Boolean(routing.tunnel_ech)} onClick={() => onChange("tunnel_ech", !routing.tunnel_ech)}><i>ECH</i><span><b>Скрытие имени сервера (ECH)</b></span></button>}
       {showFragment && <button type="button" className={`mihomoProfileRuleButton${fragment ? " is-enabled" : ""}`} aria-pressed={fragment} disabled={!compatible && !fragment} onClick={() => onChange("tunnel_fragment", !fragment)}><i>TLS</i><span><b>Фрагментация TLS</b>{common && <small>Только для sing-box клиентов</small>}</span></button>}
-      {showMihomo && mihomoFeatures.map(([key, code, title, text]) => <button key={key} type="button" className={`mihomoProfileRuleButton${routing[key] ? " is-enabled" : ""}`} aria-pressed={Boolean(routing[key])} onClick={() => onChange(key, !routing[key])}><i>{code}</i><span><b>{title}</b><small>{text}</small></span></button>)}
-      {showMihomo && <>
+      {showMihomo && visibleMihomoFeatures.map(([key, code, title, text]) => <button key={key} type="button" className={`mihomoProfileRuleButton${routing[key] ? " is-enabled" : ""}`} aria-pressed={Boolean(routing[key])} onClick={() => onChange(key, !routing[key])}><i>{code}</i><span><b>{title}</b><small>{text}</small></span></button>)}
+      {showMihomo && !common && <>
         <button type="button" className={`mihomoProfileRuleButton${routing.dns_hijack_force ? " is-enabled" : ""}`} aria-pressed={Boolean(routing.dns_hijack_force)} onClick={() => onChange("dns_hijack_force", !routing.dns_hijack_force)}><i>DNS</i><span><b>DNS Hijack · принудительно</b><small>Перехватывает DNS-запросы через Mihomo.</small></span></button>
         <button type="button" className={`mihomoProfileRuleButton${routing.tun_strict_route ? " is-enabled" : ""}`} aria-pressed={Boolean(routing.tun_strict_route)} onClick={() => onChange("tun_strict_route", !routing.tun_strict_route)}><i>ROUTE</i><span><b>TUN · Strict Route</b><small>Запрещает обход маршрутизации мимо TUN.</small></span></button>
       </>}

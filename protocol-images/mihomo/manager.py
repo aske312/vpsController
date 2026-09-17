@@ -63,16 +63,10 @@ CORE_HOME = DATA_ROOT / "core-home"
 MIHOMO_PROXY_GROUP = "312.net"
 SERVER_CITY = os.getenv("SERVER_CITY", "Unknown")
 # SNI values for Mihomo-only REALITY exports. These are high-traffic HTTPS
-# domains normally reachable from Russian networks; the server accepts all of
-# them while each exported profile receives one random value.
-MIHOMO_REALITY_SNI_POOL = (
-    "ya.ru",
-    "yandex.ru",
-    "vk.com",
-    "mail.ru",
-    "rutube.ru",
-    "ozon.ru",
-)
+# candidates checked for TLS 1.3 / h2; reachability varies by network.
+# Each new REALITY connection receives its own matching target and SNI.
+MIHOMO_REALITY_SNI_POOL = tuple(json.loads(Path(__file__).with_name("reality-targets.json").read_text(encoding="utf-8")))
+
 ACTION_FILE = DATA_ROOT / "action.json"
 REALITY_XRAY_BIN = Path("/usr/local/lib/vps-control-mihomo-reality/xray")
 REALITY_API_SERVER = "127.0.0.1:10086"
@@ -547,6 +541,12 @@ def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
     ]
     result["devices"] = devices
     result["common_device_id"] = common_device_id
+    # Retire legacy shared/non-Windows flags so hidden controls cannot block edits.
+    for device in devices:
+        if device.get("routing", {}).get("windows_geolocation") and not (
+            device["id"] != common_device_id and device.get("os") == "windows" and device.get("hwid_hash")
+        ):
+            device["routing"] = {**device["routing"], "windows_geolocation": False}
     subscriptions = result.get("subscriptions")
     result["subscriptions"] = subscriptions if isinstance(subscriptions, dict) else {}
     result["subscription_status"] = "active" if result.get("subscription_token") else ("obsolete" if result["subscriptions"] else "missing")
@@ -2490,14 +2490,9 @@ def reality_connection_settings() -> dict[str, Any]:
         stream = {}
     transport = str(stream.get("network", env.get("TRANSPORT", "xhttp")))
     configured_names = [str(value).strip() for value in stream.get("realitySettings", {}).get("serverNames", []) if str(value).strip()]
-    available_names = [name for name in MIHOMO_REALITY_SNI_POOL if name in configured_names]
-    # Do not emit a random SNI until the live Xray config advertises the pool;
-    # this keeps existing subscriptions valid during a staged update.
-    selected_servername = (
-        secrets.choice(available_names)
-        if len(available_names) >= 5
-        else (available_names[0] if available_names else (configured_names[0] if configured_names else MIHOMO_REALITY_SNI_POOL[0]))
-    )
+    # Legacy shared listeners keep a stable SNI matching their target where possible.
+    target_host = str(stream.get("realitySettings", {}).get("target", "")).rsplit(":", 1)[0]
+    selected_servername = target_host if target_host in configured_names else (configured_names[0] if configured_names else MIHOMO_REALITY_SNI_POOL[0])
     result: dict[str, Any] = {
         "port": int(env.get("PORT", module_settings("transport-reality")["port"])),
         "public_key": env.get("PUBLIC_KEY", ""),
@@ -2539,6 +2534,10 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
     if not module_is_ready(component):
         raise HTTPException(status_code=409, detail=f"Компонент {manifest(component)['name']} установлен, но его служба не работает. Сначала восстановите службу.")
     result = {**connection_defaults(component), **values}
+    if result.get("fingerprint", "chrome") not in {"chrome", "firefox", "safari", "ios", "android", "edge", "random"}:
+        raise HTTPException(status_code=422, detail="Неизвестный TLS fingerprint")
+    if "sni" in result and not re.fullmatch(r"(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", str(result["sni"])):
+        raise HTTPException(status_code=422, detail="SNI должен быть доменным именем без порта")
     if component != "transport-reality":
         for field in manifest(component).get("connection_settings", []):
             key, kind = field["key"], field["type"]
@@ -2561,7 +2560,7 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
         raise HTTPException(status_code=422, detail="VLESS port must be numeric") from exc
     if not 0 <= port <= 65535 or 0 < port < 1024:
         raise HTTPException(status_code=422, detail="VLESS port must be 0 or between 1024 and 65535")
-    target = str(result.get("target", ""))
+    target = str(result.get("target") or f"{MIHOMO_REALITY_SNI_POOL[0]}:443").strip().lower()
     target_match = re.fullmatch(r"([A-Za-z0-9.-]+):(\d{1,5})", target)
     if not target_match or not 1 <= int(target_match.group(2)) <= 65535:
         raise HTTPException(status_code=422, detail="REALITY target must be hostname:port")
@@ -2631,7 +2630,7 @@ def vless_stream(settings: dict[str, Any], private_key: str, short_id: str) -> d
     else:
         stream["rawSettings"] = {"header": {"type": "none"}}
     host = str(settings["target"]).rsplit(":", 1)[0]
-    server_names = list(dict.fromkeys([host, *MIHOMO_REALITY_SNI_POOL]))
+    server_names = [host]
     stream["realitySettings"] = {"show": False, "target": settings["target"], "xver": 0, "serverNames": server_names, "privateKey": private_key, "shortIds": [short_id]}
     return stream
 
@@ -3350,6 +3349,10 @@ def validate_connection_inputs(values: list[ProfileConnectionInput]) -> list[dic
     result: list[dict[str, Any]] = []
     used_ids: set[str] = set()
     used_singletons: set[tuple[str, str]] = set()
+    used_targets: dict[str, set[str]] = {}
+    for value in values:
+        if value.component == "transport-reality" and value.settings.get("route_mode", "direct") in {"direct", "both"} and value.settings.get("target"):
+            used_targets.setdefault(value.device_id, set()).add(str(value.settings["target"]).rsplit(":", 1)[0].lower())
     for index, value in enumerate(values):
         component = value.component
         validate_channels([component])
@@ -3361,7 +3364,16 @@ def validate_connection_inputs(values: list[ProfileConnectionInput]) -> list[dic
         if connection_id in used_ids:
             raise HTTPException(status_code=422, detail=f"Duplicate connection id: {connection_id}")
         used_ids.add(connection_id)
-        settings = validate_connection(component, value.settings)
+        settings_input = dict(value.settings)
+        if component == "transport-reality" and settings_input.get("route_mode", "direct") in {"direct", "both"} and not settings_input.get("target"):
+            used = used_targets.setdefault(value.device_id, set())
+            available = [host for host in MIHOMO_REALITY_SNI_POOL if host not in used]
+            if not available:
+                raise HTTPException(status_code=422, detail="Свободные REALITY SNI закончились: укажите адрес вручную")
+            host = secrets.choice(available)
+            used.add(host)
+            settings_input["target"] = f"{host}:443"
+        settings = validate_connection(component, settings_input)
         result.append({"id": connection_id, "component": component, "name": value.name.strip() or manifest(component).get("name", component), "device_id": value.device_id, "settings": settings})
     return result
 
@@ -3415,7 +3427,10 @@ def device_routing(profile: dict[str, Any], device_id: str) -> dict[str, Any]:
     device = next((entry for entry in profile.get("devices", []) if str(entry.get("id")) == device_id), {})
     values = device.get("routing")
     base = profile.get("routing", {}) if isinstance(profile.get("routing"), dict) else {}
-    return {**base, **values} if isinstance(values, dict) else base
+    result = {**base, **values} if isinstance(values, dict) else dict(base)
+    if "windows_geolocation" in result and not (device.get("os") == "windows" and device.get("hwid_hash") and device_id != profile.get("common_device_id")):
+        result["windows_geolocation"] = False
+    return result
 
 
 def reconcile_profile_encryption(profile: dict[str, Any]) -> None:
@@ -3963,9 +3978,10 @@ def q(value: Any) -> str:
 
 def client_connection_keys(component: str) -> set[str]:
     return {
-        "transport-wg": {"mtu"}, "transport-awg": {"mtu"},
-        "transport-hysteria2": {"up_mbps", "down_mbps"},
-        "transport-tuic": {"congestion_control", "heartbeat", "udp_relay_mode"},
+        "transport-wg": {"mtu", "keepalive"}, "transport-awg": {"mtu", "keepalive"},
+        "transport-reality": {"fingerprint"},
+        "transport-hysteria2": {"up_mbps", "down_mbps", "sni", "skip_cert_verify"},
+        "transport-tuic": {"congestion_control", "heartbeat", "udp_relay_mode", "sni", "skip_cert_verify", "zero_rtt"},
     }.get(component, set())
 
 
@@ -4024,6 +4040,7 @@ def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) ->
             "    allowed-ips: [\"0.0.0.0/0\"]",
             "    udp: true",
             f"    mtu: {int(credential['mtu'])}",
+            f"    persistent-keepalive: {int(credential.get('keepalive', 25))}",
         ]
         if module_id == "transport-awg":
             awg = credential["amnezia"]
@@ -4068,7 +4085,7 @@ def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) ->
             "    udp: true",
             "    tls: true",
             f"    servername: {q(effective['servername'])}",
-            "    client-fingerprint: chrome",
+            f"    client-fingerprint: {q(credential.get('fingerprint', 'chrome'))}",
             f"    network: {'tcp' if transport == 'raw' else transport}",
             "    reality-opts:",
             f"      public-key: {q(effective['public_key'])}",
@@ -4098,7 +4115,7 @@ def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) ->
             f"    up: {q(str(credential['up_mbps']) + ' Mbps')}",
             f"    down: {q(str(credential['down_mbps']) + ' Mbps')}",
             f"    sni: {q(credential.get('sni', 'gate.312'))}",
-            "    skip-cert-verify: true",
+            f"    skip-cert-verify: {str(bool(credential.get('skip_cert_verify', True))).lower()}",
             "    alpn: [h3]",
         ]
         if credential.get("obfs"):
@@ -4114,10 +4131,11 @@ def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) ->
             f"    uuid: {q(credential['uuid'])}",
             f"    password: {q(credential['password'])}",
             f"    heartbeat-interval: {heartbeat_ms}",
+            f"    reduce-rtt: {str(bool(credential.get('zero_rtt', False))).lower()}",
             f"    udp-relay-mode: {q(credential.get('udp_relay_mode', 'native'))}",
             f"    congestion-controller: {q(credential.get('congestion_control', 'bbr'))}",
             f"    sni: {q(credential.get('sni', 'gate.312'))}",
-            "    skip-cert-verify: true",
+            f"    skip-cert-verify: {str(bool(credential.get('skip_cert_verify', True))).lower()}",
             "    alpn: [h3]",
         ]
     return []
@@ -4134,7 +4152,7 @@ def render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
         "    udp: true",
         "    tls: true",
         f"    servername: {q(credential['cdn_domain'])}",
-        "    client-fingerprint: chrome",
+        f"    client-fingerprint: {q(credential.get('fingerprint', 'chrome'))}",
         f"    network: {'ws' if transport in {'websocket', 'httpupgrade'} else transport}",
     ]
     if credential.get("encryption"):
@@ -4335,7 +4353,7 @@ def preflight_client_export_update(current: dict[str, Any], payload: ProfileUpda
     saved = {entry["id"]: entry for entry in current.get("devices", [])}
     for device in candidate.get("devices", []):
         if device["id"] in saved:
-            for key in ("client_name", "user_agent", "import_client"):
+            for key in ("client_name", "user_agent", "import_client", "os", "hwid_hash"):
                 device[key] = saved[device["id"]].get(key)
     validate_client_capabilities(candidate)
 
@@ -4343,9 +4361,11 @@ def preflight_client_export_update(current: dict[str, Any], payload: ProfileUpda
 def validate_client_capabilities(profile):
     common_id = profile.get("common_device_id") or profile.get("devices", [{}])[0].get("id")
     for device in profile.get("devices", []):
+        routing = device.get("routing", {})
+        if routing.get("windows_geolocation") and (device["id"] == common_id or device.get("os") != "windows" or not device.get("hwid_hash")):
+            raise HTTPException(status_code=422, detail="Геолокация Windows доступна только зарегистрированному по HWID устройству Windows")
         if device["id"] == common_id:
             continue
-        routing = device.get("routing", {})
         format = routing.get("client_config_format", "mihomo")
         if format not in CAPABILITIES:
             raise HTTPException(status_code=422, detail="Неизвестный формат клиента")

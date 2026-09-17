@@ -52,12 +52,12 @@ def build_xray_configs(connections, routing, dns, rules, endpoint, direct_settin
                 address, port = endpoint, int(effective["port"])
                 kind, path = effective.get("transport", "xhttp"), effective.get("path", "/")
                 transport_mode = effective.get("xhttp_mode", "auto")
-                stream = {"security": "reality", "realitySettings": {"serverName": effective["servername"], "fingerprint": "chrome", "publicKey": effective["public_key"], "shortId": effective["short_id"]}}
+                stream = {"security": "reality", "realitySettings": {"serverName": effective["servername"], "fingerprint": credential.get("fingerprint", "chrome"), "publicKey": effective["public_key"], "shortId": effective["short_id"]}}
             else:
                 address, port = credential[f"{variant}_domain"], 443
                 kind, path = credential.get(f"{variant}_transport", "websocket" if variant == "cdn" else "xhttp"), credential.get(f"{variant}_path", "/")
                 transport_mode = credential.get(f"{variant}_xhttp_mode", "auto")
-                stream = {"security": "tls", "tlsSettings": {"serverName": address, "fingerprint": "chrome"}}
+                stream = {"security": "tls", "tlsSettings": {"serverName": address, "fingerprint": credential.get("fingerprint", "chrome")}}
             stream["network"] = {"raw": "tcp", "websocket": "ws"}.get(kind, kind)
             if kind == "xhttp":
                 stream["xhttpSettings"] = {"path": path, "mode": transport_mode}

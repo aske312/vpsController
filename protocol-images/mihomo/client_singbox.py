@@ -61,6 +61,7 @@ def _vless(tag, credential, endpoint, variant, routing, fragment, capabilities=N
         path = credential.get(f"{variant}_path", "/")
         mode = credential.get(f"{variant}_xhttp_mode", "auto")
         tls = _tls(server, None, bool(routing.get("tunnel_ech")) and variant == "cdn", fragment)
+    tls["utls"]["fingerprint"] = credential.get("fingerprint", "chrome")
     value = {"type": "vless", "tag": tag, "server": server, "server_port": port,
              "uuid": credential["uuid"], "tls": tls}
     if credential.get("encryption"):
@@ -92,7 +93,7 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
             if module == "transport-awg" and not (capabilities and module in capabilities["components"]):
                 raise UnsupportedClientConfig("AmneziaWG требует клиент с ядром sing-box-lx")
             peer = {"address": endpoint, "port": int(credential["port"]), "public_key": credential["server_public_key"],
-                    "allowed_ips": ["0.0.0.0/0", "::/0"], "persistent_keepalive_interval": 25}
+                    "allowed_ips": ["0.0.0.0/0", "::/0"], "persistent_keepalive_interval": int(credential.get("keepalive", 25))}
             if credential.get("preshared_key"):
                 peer["pre_shared_key"] = credential["preshared_key"]
             value = {"type": "wireguard", "tag": base, "system": False, "address": [credential["ip"]],
@@ -108,7 +109,7 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
             outbounds.append({"type": "hysteria2", "tag": base, "server": endpoint,
                               "server_port": int(credential["port"]), "password": credential["password"],
                               "up_mbps": int(credential["up_mbps"]), "down_mbps": int(credential["down_mbps"]),
-                              "tls": {"enabled": True, "server_name": credential.get("sni", "gate.312"), "insecure": True, "alpn": ["h3"]}})
+                              "tls": {"enabled": True, "server_name": credential.get("sni", "gate.312"), "insecure": bool(credential.get("skip_cert_verify", True)), "alpn": ["h3"]}})
             if credential.get("obfs"):
                 outbounds[-1]["obfs"] = {"type": "salamander", "password": credential["obfs_password"]}
         elif module == "transport-tuic":
@@ -117,7 +118,8 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
                               "password": credential["password"], "congestion_control": credential.get("congestion_control", "bbr"),
                               "heartbeat": credential.get("heartbeat", "10s"),
                               "udp_relay_mode": credential.get("udp_relay_mode", "native"),
-                              "tls": {"enabled": True, "server_name": credential.get("sni", "gate.312"), "insecure": True, "alpn": ["h3"]}})
+                              "zero_rtt_handshake": bool(credential.get("zero_rtt", False)),
+                              "tls": {"enabled": True, "server_name": credential.get("sni", "gate.312"), "insecure": bool(credential.get("skip_cert_verify", True)), "alpn": ["h3"]}})
         else:
             raise UnsupportedClientConfig(f"Модуль {module} не поддерживается sing-box")
         tags.extend(item["tag"] for item in outbounds[previous_outbounds:] + endpoints[previous_endpoints:])
@@ -133,6 +135,7 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
             outbounds.append({"type": "selector", "tag": proxy_tag, "outbounds": tags, "default": tags[0]})
         elif strategy == "url-test":
             outbounds.append({"type": "urltest", "tag": proxy_tag, "outbounds": tags,
+                              "interrupt_exist_connections": False,
                               "url": routing.get("test_url", "https://www.gstatic.com/generate_204"),
                               "interval": f"{int(routing.get('interval', 30))}s",
                               "tolerance": int(routing.get("tolerance", 50))})

@@ -5,6 +5,7 @@ import { presetConnectionOptions, presetOptionGroups, channelShort, dnsProviderM
 import { clientUuid, deviceClientShortName, clientConfigFormat, clientImportUrl, devicePlatformMeta, deviceSystemLabel, registeredProfileDevices, selectedGameIds } from "./profile-utils";
 import { Tab, HeroFact, ModuleCatalog, Empty } from "./components";
 import { clientCapabilities, compatibleClientRouting, clientConnectionSupported } from "./client-capabilities";
+import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, submitProfileMutation, type ProfileMutation } from "./profile-operation";
@@ -116,7 +117,7 @@ export function MihomoPage({
   const visibleProfileStrategies = profileStrategies.filter((strategy) => commonDevice || activeCapabilities.strategies.includes(strategy.value));
   const visibleProfileRules = profileDirectRules.filter((rule) => commonDevice
     ? !["windows_geolocation", "direct_games_enabled", "direct_p2p_enabled"].includes(rule.key)
-    : activeCapabilities.rules.includes(rule.key));
+    : activeCapabilities.rules.includes(rule.key) && (rule.key !== "windows_geolocation" || (activeProfileDevice?.scope === "hwid" && activeProfileDevice.os === "windows")));
   // Poll live delivery/cleanup status without replacing unsaved form fields.
   const liveDialogProfile = profileDialog && profileDialog !== "new"
     ? profiles.find((profile) => profile.id === profileDialog.id) || profileDialog : null;
@@ -370,7 +371,7 @@ export function MihomoPage({
     updateRoutingDraft("direct_p2p_clients", [...selected].join(","), true);
   }
 
-  function setProfileRoutingValue(key: string, value: string | boolean) {
+  function setProfileRoutingValue(key: string, value: string | number | boolean) {
     setProfileDevices((current) => current.map((device) => device.id === activeDeviceId
       ? { ...device, routing: { ...(device.scope === "common" ? (device.routing || profileRouting) : (device.routing || {})), [key]: value } }
       : device));
@@ -621,6 +622,12 @@ export function MihomoPage({
     }).map((item) => item.value))];
   }
 
+  function unusedRealityTarget(connections: ProfileConnection[]) {
+    const used = new Set(connections.filter((connection) => connection.component === "transport-reality" && ["direct", "both"].includes(String(connection.settings.route_mode || "direct"))).map((connection) => String(connection.settings.target || "").split(":")[0].toLowerCase()));
+    const available = realityTargets.filter((host) => !used.has(host));
+    return available.length ? `${available[0]}:443` : "";
+  }
+
   function addProfileConnection(module: Module, vlessRoute: "direct" | "tls" | "cdn" = "direct") {
     const settings = Object.fromEntries((module.connection_settings || []).map((field) => [field.key, field.default]));
     if (module.id === "transport-reality") {
@@ -630,6 +637,7 @@ export function MihomoPage({
         }
       }
       settings.route_mode = vlessRoute;
+      if (vlessRoute === "direct") settings.target = unusedRealityTarget(deviceConnections);
       settings.cdn_enabled = vlessRoute === "cdn";
       if (vlessRoute === "cdn") settings.cdn_domain = confirmedNetworkRoute("cdn");
       if (vlessRoute === "tls") settings.tls_domain = confirmedNetworkRoute("tls");
@@ -675,6 +683,7 @@ export function MihomoPage({
         settings.cdn_enabled = false;
         if (definition.transport) settings.transport = definition.transport;
       }
+      if (componentId === "transport-reality" && settings.route_mode === "direct") settings.target = unusedRealityTarget(connections);
       connections.push({ id: `connection-${clientUuid()}`, component: componentId, name: definition.label || `${componentModule.name}${definition.cdn ? " · CDN" : ""}`, device_id: activeDeviceId, settings });
     }
     setProfileConnections((current) => [...current.filter((connection) => connection.device_id !== activeDeviceId), ...connections]);
@@ -1213,7 +1222,7 @@ export function MihomoPage({
                 <label className="is-wide"><span>Адрес проверки</span><input value={String(routingDraft.test_url || "")} onChange={(event) => updateRoutingDraft("test_url", event.target.value)} /></label>
                 <label className="is-wide"><span>Интервал, секунд</span><input type="number" min={10} max={3600} value={Number(routingDraft.interval || 30)} onChange={(event) => updateRoutingDraft("interval", Number(event.target.value))} /></label>
                 <label><span>Таймаут, мс</span><input type="number" min={1000} max={10000} value={Number(routingDraft.health_timeout || 3000)} onChange={(event) => updateRoutingDraft("health_timeout", Number(event.target.value))} /></label>
-                <label><span>Ошибок до переключения</span><input type="number" min={1} max={10} value={Number(routingDraft.max_failed_times || 2)} onChange={(event) => updateRoutingDraft("max_failed_times", Number(event.target.value))} /></label>
+                <label><span>Ошибок до внеочередной проверки</span><input type="number" min={1} max={10} value={Number(routingDraft.max_failed_times || 2)} onChange={(event) => updateRoutingDraft("max_failed_times", Number(event.target.value))} /></label>
                 <label><span>Допуск смены, мс</span><input type="number" min={0} max={1000} value={Number(routingDraft.tolerance || 50)} onChange={(event) => updateRoutingDraft("tolerance", Number(event.target.value))} /></label>
                 <label><span>VLESS на устройство</span><input type="number" min={1} max={5} value={Number(routingDraft.vless_max_connections_per_device || 5)} onChange={(event) => updateRoutingDraft("vless_max_connections_per_device", Number(event.target.value))} /></label>
               </div></article>
@@ -1302,12 +1311,19 @@ export function MihomoPage({
               </>}
             </section>
             {visibleProfileStrategies.length > 0 && <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа подключений для выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{visibleProfileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>}
+            {profileStep === 3 && ["url-test", "fallback"].includes(String(activeProfileRouting.strategy || routingPolicy?.values.strategy)) && <section className="mihomoProfileStrategy">
+              <header><div><b>Проверка и переключение каналов</b><small>Новый маршрут используется для новых соединений. Рабочие сессии сохраняются; оборванные переподключает приложение.</small></div></header>
+              <div className="mihomoConnectionFields">
+                <label><span>URL проверки</span><input type="url" value={String(activeProfileRouting.test_url ?? routingPolicy?.values.test_url ?? "https://www.gstatic.com/generate_204")} onChange={(event) => setProfileRoutingValue("test_url", event.target.value)} /></label>
+                {([["interval", "Интервал, с", 10, 3600, 30], ["tolerance", "Порог улучшения задержки, мс", 0, 1000, 50], ...(commonDevice || activeProfileRouting.client_config_format === "mihomo" || !activeProfileRouting.client_config_format ? [["health_timeout", "Тайм-аут проверки, мс", 1000, 10000, 3000], ["max_failed_times", "Ошибок до внеочередной проверки", 1, 10, 2]] : [])] as const).filter(([key]) => key !== "tolerance" || (activeProfileRouting.strategy ?? routingPolicy?.values.strategy) === "url-test").map(([key, label, min, max, fallback]) => <label key={String(key)}><span>{label}</span><input type="number" min={Number(min)} max={Number(max)} value={Number(activeProfileRouting[String(key)] ?? routingPolicy?.values[String(key)] ?? fallback)} onChange={(event) => setProfileRoutingValue(String(key), Number(event.target.value))} /></label>)}
+              </div>
+              <button type="button" onClick={() => { setProfileStrategy("url-test"); for (const [key, value] of Object.entries({ interval: 10, health_timeout: 2500, max_failed_times: 1, tolerance: 100 })) setProfileRoutingValue(key, value); }}>Быстрая проверка без частых переключений</button>
+              <small>Проверки каждые 10 секунд, смена при улучшении более 100 мс. URL-test измеряет HTTP-задержку, а не скорость видео или качество UDP; частые проверки расходуют трафик и заряд.</small>
+            </section>}
             {activeProfileDevice?.scope !== "common" && <section className="mihomoProfileName mihomoProfileGeneral"><header><div><b>Формат при следующей загрузке</b><small>{activeProfileDevice?.manual ? "Общий sing-box JSON, без HWID." : "Формат сохраняется для сочетания HWID и приложения."}</small></div></header>
               {activeProfileDevice?.scope === "hwid" && (activeProfileDevice.supported_formats?.length || 0) > 1 ? <label><span>Файл для клиента</span><select value={String(activeProfileRouting.client_config_format || "mihomo")} onChange={(event) => setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: compatibleClientRouting(device.routing || {}, event.target.value, device.os || "unknown", device.manual ? undefined : device.client_name) } : device))}>{activeProfileDevice.supported_formats?.map((format) => <option key={format} value={format}>{clientCapabilities(format).label}</option>)}</select><small>После сохранения обновите подписку. Если клиент не принимает новый формат — удалите подписку и добавьте ту же ссылку заново. Устройство сохранится, если приложение и HWID не изменятся.</small></label> : <p>{activeCapabilities.label}</p>}
             </section>}
-            {profileStep === 2 && (commonDevice
-              ? <section className="mihomoProfileProtection"><header><div><b>Защита устройства</b><small>Выберите устройство слева: параметры защиты зависят от его платформы и VPN-клиента.</small></div></header></section>
-              : <ProfileProtection client={activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name} routing={activeProfileRouting} connections={profileConnections.filter((connection) => connection.device_id === activeDeviceId)} modules={modules} echAvailable={Boolean(confirmedNetworkRoute("cdn"))} onChange={setProfileRoutingValue} />)}
+            {profileStep === 2 && <ProfileProtection common={commonDevice} client={activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name} routing={activeProfileRouting} connections={profileConnections.filter((connection) => connection.device_id === activeDeviceId)} modules={modules} echAvailable={Boolean(confirmedNetworkRoute("cdn"))} onChange={setProfileRoutingValue} />}
             {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <p className="mihomoMessage is-error" role="status">Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте.</p>}
             {transitionMessage && <p className="mihomoMessage" role="status">{transitionMessage}{activeDeviceId === liveDialogProfile?.common_device_id && " Для клиентов без HWID переход общий: обновление подписки завершает ожидание для всего общего пула."}</p>}
             <section className="mihomoProfileRules"><header><div><b>Правила устройства</b><small>Включаются только в конфигурации выбранного устройства.</small></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + profilePersonalRules.filter((rule) => (activeProfileDevice?.personal_rule_ids || []).includes(rule.id)).length} из {visibleProfileRules.length + profilePersonalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div>{profilePersonalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{profilePersonalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></span></button>; })}</div>}</section>
@@ -1347,6 +1363,7 @@ export function MihomoPage({
                   return [<button key={module.id} type="button" disabled={singletonUsed} onClick={() => addProfileConnection(module)}>+ {module.name}</button>];
                 })}
               </div>
+              <datalist id="mihomo-reality-targets">{realityTargets.map((host) => <option key={host} value={`${host}:443`} />)}</datalist>
               <div className="mihomoConnectionWorkspace">
                 {deviceConnections.length > 0 && <nav className="mihomoConnectionNav" aria-label="Подключения выбранного устройства">{deviceConnections.map((connection) => <button key={connection.id} type="button" className={selectedConnection?.id === connection.id ? "is-active" : ""} aria-pressed={selectedConnection?.id === connection.id} onClick={() => setSelectedConnectionId(connection.id)}><span className={`protocol-${connection.component}`}><ProtocolIcon protocol={connection.component} /></span><span><b>{connection.name}</b><small>{modules.find((module) => module.id === connection.component)?.name} · {connection.settings.route_mode === "cdn" ? "CDN" : connection.settings.route_mode === "tls" ? "TLS" : "Прямое"}</small></span></button>)}</nav>}
                 <div className="mihomoConnectionList">
@@ -1369,7 +1386,7 @@ export function MihomoPage({
                         if (connection.component === "transport-reality" && vlessRoute === "cdn" && ["port", "target", "transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute === "direct" && ["cdn_domain", "cdn_transport", "cdn_xhttp_mode"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute !== "tls" && ["tls_domain", "tls_transport", "tls_xhttp_mode"].includes(field.key)) return false;
-                        if (connection.component === "transport-reality" && vlessRoute === "tls" && !["route_mode", "tls_domain", "tls_transport", "tls_xhttp_mode"].includes(field.key)) return false;
+                        if (connection.component === "transport-reality" && vlessRoute === "tls" && !["route_mode", "tls_domain", "tls_transport", "tls_xhttp_mode", "fingerprint"].includes(field.key)) return false;
                         if (["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return connection.settings.transport === "xhttp";
                         if (["cdn_domain", "cdn_transport"].includes(field.key)) return Boolean(connection.settings.cdn_enabled);
                         if (field.key === "tls_xhttp_mode") return connection.settings.tls_transport === "xhttp";
@@ -1381,7 +1398,7 @@ export function MihomoPage({
                         {((field.key === "cdn_domain" && vlessRoute === "cdn") || (field.key === "tls_domain" && vlessRoute === "tls")) ? (() => { const kind = field.key === "cdn_domain" ? "cdn" : "tls"; const routes = confirmedNetworkRoutes(kind); return routes.length > 0 ? <select value={routes.includes(String(connection.settings[field.key] || "")) ? String(connection.settings[field.key]) : routes[0]} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>{routes.map((domain) => <option key={domain} value={domain}>{domain}</option>)}</select> : <span className="mihomoUnavailableField">Нет подтвержденных доменов на странице «Сеть»</span>; })() : field.type === "select" ? <select value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>
                           {(field.options || []).filter((option) => commonDevice || !["transport", "cdn_transport", "tls_transport"].includes(field.key) || activeCapabilities.transports.includes(typeof option === "string" ? option : option.value)).map((option) => { const value = typeof option === "string" ? option : option.value; const label = typeof option === "string" ? option : option.label; return <option key={value} value={value}>{label}</option>; })}
                         </select> : field.type === "boolean" ? <input type="checkbox" checked={Boolean(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.checked)} />
-                          : <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, field.type === "number" ? Number(event.target.value) : event.target.value)} />}
+                          : <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} list={field.key === "target" ? "mihomo-reality-targets" : undefined} placeholder={field.key === "target" ? "Автоматически при сохранении" : undefined} value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, field.type === "number" ? Number(event.target.value) : event.target.value)} />}
                         {field.help && <small>{field.help}</small>}
                       </label>)}
                     </div>

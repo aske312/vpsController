@@ -18,7 +18,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /routing: dict\[str, Any\] = Field\(default_factory=dict\)/);
   assert.match(manager, /device\.get\("routing"\).*dict\(legacy_routing\)/s);
   assert.match(manager, /profile_routing = device_routing\(normalized, selected_device\)/);
-  assert.match(manager, /return \{\*\*base, \*\*values\} if isinstance\(values, dict\) else base/);
+  assert.match(manager, /result = \{\*\*base, \*\*values\} if isinstance\(values, dict\) else dict\(base\)/);
   assert.match(manager, /DIRECT_GAME_PROCESSES/);
   assert.match(manager, /TUNNEL_GAME_PROCESSES/);
   assert.match(manager, /DEFAULT_TUNNEL_GAMES = tuple\(TUNNEL_GAME_PROCESSES\)/);
@@ -239,14 +239,14 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /lazy: false/);
   assert.match(manager, /tolerance/);
   assert.match(manager, /MIHOMO_REALITY_SNI_POOL/);
-  assert.match(manager, /secrets\.choice\(available_names\)/);
+  assert.match(manager, /secrets\.choice\(available\)/);
   assert.match(manager, /network: \{'tcp' if transport == 'raw' else transport\}/);
   assert.match(manager, /grpc-service-name/);
   assert.match(manager, /call_module_script\(module_id, "install"\)[\s\S]*rollback failed/);
   assert.match(view, /connections: profileConnections/);
   assert.doesNotMatch(view, /sniffer: true/);
   assert.doesNotMatch(view, /tun_enabled: true/);
-  assert.match(view, /profileStep === 2 && \(commonDevice/);
+  assert.match(view, /profileStep === 2 && <ProfileProtection common=\{commonDevice\}/);
   assert.match(view, /Нет подтвержденных доменов на странице/);
   assert.match(view, /vless_max_connections_per_device/);
   assert.ok(view.indexOf(">Защита</button>") < view.indexOf(">Маршрутизация</button>"), "protection must precede routing in the profile editor");
