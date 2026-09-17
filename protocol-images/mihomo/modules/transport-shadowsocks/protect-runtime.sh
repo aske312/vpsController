@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# The updater, manager maintenance and component installer may overlap.
+exec 9>/run/lock/vps-control-mihomo-ss-protection.lock
+flock -x 9
+
 # Shared by component installation and application updates; never rewrite keys,
 # ports, profile JSON, or firewall rules during this migration.
 MODULE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

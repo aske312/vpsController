@@ -47,6 +47,7 @@ import port_allocation
 APP_ROOT = Path("/opt/vps-control")
 MODULE_ROOT = APP_ROOT / "protocol-images" / "mihomo"
 SUBMODULE_ROOT = MODULE_ROOT / "modules"
+SHADOWSOCKS_SERVICE_TEMPLATE = Path("/etc/systemd/system/vps-control-mihomo-ss@.service")
 DATA_ROOT = Path("/var/lib/vps-control/mihomo")
 NETWORK_ENDPOINTS_FILE = Path("/var/lib/vps-control/network-endpoints.json")
 CONFIG_ROOT = Path("/etc/vps-control/mihomo")
@@ -257,9 +258,20 @@ for _module_id in TRANSPORTS:
     if isinstance(_manifest_value, dict) and _manifest_value.get("service"):
         SERVICE_BY_MODULE[_module_id] = str(_manifest_value["service"])
 
+def ensure_shadowsocks_protection() -> None:
+    # An older updater can install these files without running the new runtime
+    # migration. Reconcile from the running manager as well; the helper leaves
+    # protected instances and intentionally stopped profiles untouched.
+    if not SHADOWSOCKS_SERVICE_TEMPLATE.is_file() or not shutil.which("ss-server"):
+        return
+    run("bash", str(SUBMODULE_ROOT / "transport-shadowsocks" / "protect-runtime.sh"),
+        "--restart-active", check=True)
+
+
 def transition_worker(stopped: threading.Event) -> None:
     while not stopped.is_set():
         for label, job in (
+            ("Shadowsocks protection", ensure_shadowsocks_protection),
             ("profile transitions", cleanup_profile_transitions),
             ("VLESS telemetry", ensure_reality_telemetry),
             ("Hysteria2 telemetry", lambda: ensure_quic_telemetry("transport-hysteria2")),
