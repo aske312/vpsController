@@ -9,11 +9,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-publishing
+  group: release-publishing-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   api-tests:
+    if: github.ref_name == 'stabl'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -82,7 +83,6 @@ jobs:
           fi
 
   preview:
-    needs: api-tests
     if: github.ref_name == 'main'
     runs-on: ubuntu-24.04
     steps:
@@ -93,15 +93,23 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Check runtime syntax without installing API dependencies
+        env:
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/preview-pycache
+        run: |
+          python3 -m compileall -q api protocol-images
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+          done < <(find scripts protocol-images -type f -name '*.sh' -print0)
+      - name: Check preview UI
+        run: |
+          npm ci --include=dev --include=optional --ignore-scripts
+          npm run check:preview
       - name: Build main preview package
         env:
           BUILD_COMMIT: ${{ github.sha }}
           RELEASE_SKIP_INSTALL: "1"
         run: |
-          npm ci --include=dev --include=optional --ignore-scripts
-          npm run lint
-          npm run typecheck
-          npm test
           version="v$(node -p 'require("./package.json").version')"
           RELEASE_VERSION="$version" bash scripts/build-release.sh \
             "outputs/vps-control-main.tar.gz"

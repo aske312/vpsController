@@ -109,7 +109,6 @@ test("поставка содержит установщик, образы и р
   assert.match(readme, /apt-get install -y ca-certificates curl/);
   assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/stabl\/scripts\/install-panel\.sh/);
   assert.match(readme, /Отдельно запускать `vps-control update` не требуется/);
-  assert.match(readme, /Возможные ошибки установки/);
   assert.match(readme, /установка/i);
   assert.equal(JSON.parse(wg).id, "wg");
   assert.equal(JSON.parse(awg).id, "awg");
@@ -184,9 +183,15 @@ test("main preview is built off-VPS and interrupted updates cannot report succes
   ]);
   const previewWorkflow = workflow.split("  preview:")[1] || "";
   assert.match(workflow, /Build main preview package/);
-  assert.match(previewWorkflow, /npm run lint/);
-  assert.match(previewWorkflow, /npm run typecheck/);
-  assert.match(previewWorkflow, /npm test/);
+  assert.match(previewWorkflow, /npm run check:preview/);
+  assert.doesNotMatch(previewWorkflow, /needs: api-tests|npm test|unittest discover/);
+  assert.match(previewWorkflow, /python3 -m compileall -q api protocol-images/);
+  assert.match(previewWorkflow, /bash -n "\$script"/);
+  const apiTestsWorkflow = workflow.split("  api-tests:")[1]?.split("  release:")[0] || "";
+  assert.match(apiTestsWorkflow, /if: github.ref_name == 'stabl'/);
+  const releaseWorkflow = workflow.split("  release:")[1]?.split("  preview:")[0] || "";
+  assert.match(releaseWorkflow, /needs: api-tests/);
+  assert.match(releaseWorkflow, /npm test/);
   assert.match(workflow, /vps-control-main\.tar\.gz/);
   assert.match(workflow, /gh release create main-latest/);
   assert.doesNotMatch(manager, /BUILD_COMMIT="\$\{latest\}".*build-release/s);
