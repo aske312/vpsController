@@ -63,7 +63,8 @@ class URLTestContinuityTests(unittest.TestCase):
                     {"id": name, "name": name, "component": "transport-shadowsocks", "device_id": "common", "credential": {"port": 31000 + index, "method": "aes-128-gcm", "password": "test"}}
                     for index, name in enumerate(("A", "B"))]}
                 with patch.object(manager, "SUBMODULE_ROOT", ROOT / "protocol-images/mihomo/modules"), patch.object(manager, "public_endpoint", return_value="127.0.0.1"), patch.object(manager, "module_is_installed", return_value=True):
-                    config = yaml.safe_load(manager.render_profile(profile))
+                    with patch.object(manager, "routing_settings", return_value=profile["devices"][0]["routing"]):
+                        config = yaml.safe_load(manager.render_profile(profile))
                 port, api_port = free_port(), free_port()
                 names = [proxy["name"] for proxy in config["proxies"]]
                 config["proxies"] = [{"name": name, "type": "http", "server": "127.0.0.1", "port": server.server_port} for name, server in zip(names, servers)]

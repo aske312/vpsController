@@ -81,7 +81,11 @@ class RuleExportTests(unittest.TestCase):
         for strategy in ("select", "url-test", "fallback"):
             item = profile()
             item["devices"][0]["routing"] = {"strategy": strategy, "interval": 77, "test_url": "http://audit.test/check", "health_timeout": 1700, "max_failed_times": 4, "tolerance": 99}
-            group = yaml.safe_load(manager.render_profile(item))["proxy-groups"][0]
+            shared = {**manager.routing_settings(), "interval": 77, "test_url": "http://audit.test/check", "health_timeout": 1700, "max_failed_times": 4, "tolerance": 99}
+            item["devices"][0]["routing"].update(interval=1, test_url="http://stale.test", tolerance=1, health_timeout=1, max_failed_times=1)
+            item["routing"] = {"interval": 2, "test_url": "http://stale-profile.test"}
+            with patch.object(manager, "routing_settings", return_value=shared):
+                group = yaml.safe_load(manager.render_profile(item))["proxy-groups"][0]
             self.assertEqual(group["type"], strategy)
             if strategy != "select":
                 self.assertEqual((group["interval"], group["timeout"], group["max-failed-times"], group["url"]), (77, 1700, 4, "http://audit.test/check"))

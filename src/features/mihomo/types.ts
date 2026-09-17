@@ -24,6 +24,8 @@ export type Status = {
 };
 
 export type SettingField = {
+  formats?: string[];
+  export_key?: string;
   key: string;
   label: string;
   type: "text" | "number" | "select" | "textarea" | "boolean";

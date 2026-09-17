@@ -59,18 +59,18 @@
       "label": "Отправка с устройства, Мбит/с",
       "type": "number",
       "default": 100,
-      "min": 1,
+      "min": 0,
       "max": 10000,
-      "help": ""
+      "help": "0 в обоих полях скорости — BBR вместо Brutal с фиксированной скоростью."
     },
     {
       "key": "down_mbps",
       "label": "Приём на устройстве, Мбит/с",
       "type": "number",
       "default": 100,
-      "min": 1,
+      "min": 0,
       "max": 10000,
-      "help": ""
+      "help": "0 в обоих полях скорости — BBR вместо Brutal с фиксированной скоростью."
     },
     {
       "key": "sni",
@@ -85,6 +85,153 @@
       "type": "boolean",
       "default": true,
       "help": "Выключайте после установки доверенного сертификата для выбранного SNI."
+    },
+    {
+      "key": "ip_version",
+      "label": "IP-версия подключения",
+      "type": "select",
+      "default": "dual",
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "ip-version",
+      "help": "Для клиента Mihomo. ",
+      "options": [
+        "dual",
+        "ipv4",
+        "ipv6",
+        "ipv4-prefer",
+        "ipv6-prefer"
+      ]
+    },
+    {
+      "key": "name_cert_verify",
+      "label": "Имя для проверки сертификата",
+      "type": "text",
+      "default": "",
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "name-cert-verify",
+      "help": "Для клиента Mihomo. "
+    },
+    {
+      "key": "certificate_fingerprint",
+      "label": "SHA-256 сертификата",
+      "type": "text",
+      "default": "",
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "fingerprint",
+      "help": "Для клиента Mihomo. "
+    },
+    {
+      "key": "bbr_profile",
+      "label": "Профиль BBR",
+      "type": "select",
+      "default": "standard",
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "bbr-profile",
+      "help": "Mihomo: применяется в режиме BBR (обе скорости равны 0).",
+      "options": [
+        "standard",
+        "conservative",
+        "aggressive"
+      ]
+    },
+    {
+      "key": "cwnd",
+      "label": "Начальное окно перегрузки (пакеты)",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "cwnd",
+      "help": "Mihomo: применяется в режиме BBR (обе скорости равны 0).",
+      "min": 0,
+      "max": 65535
+    },
+    {
+      "key": "handshake_timeout",
+      "label": "Тайм-аут рукопожатия, с",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "handshake-timeout",
+      "help": "Для клиента Mihomo. 0 — значение ядра по умолчанию.",
+      "min": 0,
+      "max": 120
+    },
+    {
+      "key": "udp_mtu",
+      "label": "MTU UDP-пакета",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "udp-mtu",
+      "help": "Для клиента Mihomo. 0 — значение ядра по умолчанию.",
+      "min": 0,
+      "max": 1400
+    },
+    {
+      "key": "initial_stream_receive_window",
+      "label": "Начальное окно приёма потока, байт",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "initial-stream-receive-window",
+      "help": "Для клиента Mihomo. 0 — значение ядра по умолчанию.",
+      "min": 0,
+      "max": 1073741824
+    },
+    {
+      "key": "max_stream_receive_window",
+      "label": "Максимальное окно приёма потока, байт",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "max-stream-receive-window",
+      "help": "Для клиента Mihomo. 0 — значение ядра по умолчанию.",
+      "min": 0,
+      "max": 1073741824
+    },
+    {
+      "key": "initial_connection_receive_window",
+      "label": "Начальное окно приёма соединения, байт",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "initial-connection-receive-window",
+      "help": "Для клиента Mihomo. 0 — значение ядра по умолчанию.",
+      "min": 0,
+      "max": 1073741824
+    },
+    {
+      "key": "max_connection_receive_window",
+      "label": "Максимальное окно приёма соединения, байт",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "max-connection-receive-window",
+      "help": "Для клиента Mihomo. 0 — значение ядра по умолчанию.",
+      "min": 0,
+      "max": 1073741824
     }
   ]
 }

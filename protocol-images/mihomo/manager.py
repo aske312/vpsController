@@ -66,6 +66,7 @@ SERVER_CITY = os.getenv("SERVER_CITY", "Unknown")
 # candidates checked for TLS 1.3 / h2; reachability varies by network.
 # Each new REALITY connection receives its own matching target and SNI.
 MIHOMO_REALITY_SNI_POOL = tuple(json.loads(Path(__file__).with_name("reality-targets.json").read_text(encoding="utf-8")))
+MIHOMO_CLIENT_FIELDS = {path.parent.name: tuple(field for field in json.loads(path.read_text(encoding="utf-8")).get("connection_settings", []) if field.get("export_key")) for path in Path(__file__).with_name("modules").glob("transport-*/manifest.json")}
 
 ACTION_FILE = DATA_ROOT / "action.json"
 REALITY_XRAY_BIN = Path("/usr/local/lib/vps-control-mihomo-reality/xray")
@@ -2526,6 +2527,10 @@ def ech_dns_resolvers(dns: dict[str, Any]) -> list[str]:
     return resolvers
 
 
+def valid_sni_hostname(value: str) -> bool:
+    return len(value) <= 253 and all(re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label) for label in value.split("."))
+
+
 def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any]:
     if component not in TRANSPORTS:
         raise HTTPException(status_code=422, detail=f"{component} is not a Mihomo component")
@@ -2536,20 +2541,37 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
     result = {**connection_defaults(component), **values}
     if result.get("fingerprint", "chrome") not in {"chrome", "firefox", "safari", "ios", "android", "edge", "random"}:
         raise HTTPException(status_code=422, detail="Неизвестный TLS fingerprint")
-    if "sni" in result and not re.fullmatch(r"(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", str(result["sni"])):
+    if "sni" in result:
+        result["sni"] = str(result["sni"]).strip().lower()
+    if "sni" in result and not valid_sni_hostname(result["sni"]):
         raise HTTPException(status_code=422, detail="SNI должен быть доменным именем без порта")
+    for field in manifest(component).get("connection_settings", []):
+        if component == "transport-reality" and not field.get("export_key"):
+            continue
+        key, kind = field["key"], field["type"]
+        value = result.get(key)
+        if kind == "number":
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or int(value) != value or not field.get("min", 0) <= value <= field.get("max", 65535):
+                raise HTTPException(status_code=422, detail=f"Invalid {component} {key}")
+            result[key] = int(value)
+        elif kind == "boolean" and not isinstance(value, bool):
+            raise HTTPException(status_code=422, detail=f"Invalid {component} {key}")
+        elif kind == "select" and value not in [option.get("value") if isinstance(option, dict) else option for option in field.get("options", [])]:
+            raise HTTPException(status_code=422, detail=f"Invalid {component} {key}")
+    for key in ("name_cert_verify",):
+        if result.get(key) and not valid_sni_hostname(str(result[key])):
+            raise HTTPException(status_code=422, detail="Имя сертификата должно быть доменным именем")
+    if result.get("certificate_fingerprint"):
+        fingerprint = str(result["certificate_fingerprint"]).replace(":", "").strip()
+        if not re.fullmatch(r"[A-Fa-f0-9]{64}", fingerprint):
+            raise HTTPException(status_code=422, detail="SHA-256 сертификата: 64 шестнадцатеричных символа")
+        result["certificate_fingerprint"] = fingerprint.lower()
+    if component == "transport-awg" and result.get("jmin", 0) > result.get("jmax", 1280):
+        raise HTTPException(status_code=422, detail="Jmin не может превышать Jmax")
+    for initial, maximum in (("initial_stream_receive_window", "max_stream_receive_window"), ("initial_connection_receive_window", "max_connection_receive_window")):
+        if result.get(initial) and result.get(maximum) and result[initial] > result[maximum]:
+            raise HTTPException(status_code=422, detail="Начальное окно не может превышать максимальное")
     if component != "transport-reality":
-        for field in manifest(component).get("connection_settings", []):
-            key, kind = field["key"], field["type"]
-            value = result.get(key)
-            if kind == "number":
-                if isinstance(value, bool) or not isinstance(value, (int, float)) or int(value) != value or not field.get("min", 0) <= value <= field.get("max", 65535):
-                    raise HTTPException(status_code=422, detail=f"Invalid {component} {key}")
-                result[key] = int(value)
-            elif kind == "boolean" and not isinstance(value, bool):
-                raise HTTPException(status_code=422, detail=f"Invalid {component} {key}")
-            elif kind == "select" and value not in field.get("options", []):
-                raise HTTPException(status_code=422, detail=f"Invalid {component} {key}")
         return result
     # Privacy is global; stale clients cannot override it per connection.
     result.pop("privacy_mode", None)
@@ -2562,7 +2584,7 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
         raise HTTPException(status_code=422, detail="VLESS port must be 0 or between 1024 and 65535")
     target = str(result.get("target") or f"{MIHOMO_REALITY_SNI_POOL[0]}:443").strip().lower()
     target_match = re.fullmatch(r"([A-Za-z0-9.-]+):(\d{1,5})", target)
-    if not target_match or not 1 <= int(target_match.group(2)) <= 65535:
+    if not target_match or not valid_sni_hostname(target_match.group(1)) or not 1 <= int(target_match.group(2)) <= 65535:
         raise HTTPException(status_code=422, detail="REALITY target must be hostname:port")
     transport = str(result.get("transport", "xhttp"))
     if transport not in {"xhttp", "raw", "grpc"}:
@@ -3352,7 +3374,7 @@ def validate_connection_inputs(values: list[ProfileConnectionInput]) -> list[dic
     used_targets: dict[str, set[str]] = {}
     for value in values:
         if value.component == "transport-reality" and value.settings.get("route_mode", "direct") in {"direct", "both"} and value.settings.get("target"):
-            used_targets.setdefault(value.device_id, set()).add(str(value.settings["target"]).rsplit(":", 1)[0].lower())
+            used_targets.setdefault(value.device_id, set()).add(str(value.settings["target"]).strip().rsplit(":", 1)[0].lower())
     for index, value in enumerate(values):
         component = value.component
         validate_channels([component])
@@ -3428,6 +3450,8 @@ def device_routing(profile: dict[str, Any], device_id: str) -> dict[str, Any]:
     values = device.get("routing")
     base = profile.get("routing", {}) if isinstance(profile.get("routing"), dict) else {}
     result = {**base, **values} if isinstance(values, dict) else dict(base)
+    for key in ("test_url", "interval", "tolerance", "health_timeout", "max_failed_times"):
+        result.pop(key, None)
     if "windows_geolocation" in result and not (device.get("os") == "windows" and device.get("hwid_hash") and device_id != profile.get("common_device_id")):
         result["windows_geolocation"] = False
     return result
@@ -3977,8 +4001,9 @@ def q(value: Any) -> str:
 
 
 def client_connection_keys(component: str) -> set[str]:
-    return {
-        "transport-wg": {"mtu", "keepalive"}, "transport-awg": {"mtu", "keepalive"},
+    advanced = {field["key"] for field in MIHOMO_CLIENT_FIELDS.get(component, ())}
+    return advanced | {
+        "transport-wg": {"mtu", "keepalive"}, "transport-awg": {"mtu", "keepalive", "jc", "jmin", "jmax"},
         "transport-reality": {"fingerprint"},
         "transport-hysteria2": {"up_mbps", "down_mbps", "sni", "skip_cert_verify"},
         "transport-tuic": {"congestion_control", "heartbeat", "udp_relay_mode", "sni", "skip_cert_verify", "zero_rtt"},
@@ -4021,11 +4046,27 @@ def effective_client_connections(connections: list[dict[str, Any]]) -> list[dict
                         amnezia[key] = int(match[1])
                 credential["amnezia"] = amnezia
         credential.update({key: value for key, value in connection.get("settings", {}).items() if key in client_connection_keys(str(module))})
+        if module == "transport-awg":
+            credential["amnezia"] = {**credential.get("amnezia", {}), **{key: value for key, value in connection.get("settings", {}).items() if key in {"jc", "jmin", "jmax"}}}
         result.append({**connection, "credential": credential})
     return result
 
 
+def mihomo_client_options(component: str, credential: dict[str, Any]) -> list[str]:
+    lines = []
+    for field in MIHOMO_CLIENT_FIELDS.get(component, ()):
+        key = field.get("export_key")
+        value = credential.get(field["key"])
+        if key and value not in (None, "", 0, False):
+            lines.append(f"    {key}: {json.dumps(value, ensure_ascii=False)}")
+    return lines
+
+
 def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) -> list[str]:
+    return _render_proxy(module_id, credential, proxy_name) + mihomo_client_options(module_id, credential)
+
+
+def _render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) -> list[str]:
     server = public_endpoint()
     if module_id in ("transport-wg", "transport-awg"):
         name = "AWG" if module_id == "transport-awg" else "WG"
@@ -4142,6 +4183,10 @@ def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) ->
 
 
 def render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
+    return _render_vless_cdn(credential, proxy_name) + mihomo_client_options("transport-reality", credential)
+
+
+def _render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
     transport = str(credential.get("cdn_transport", "websocket"))
     lines = [
         f"  - name: {q(proxy_name)}",

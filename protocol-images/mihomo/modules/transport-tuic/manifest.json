@@ -108,6 +108,151 @@
       "type": "boolean",
       "default": false,
       "help": "Сокращает рукопожатие; ранние данные не защищены от повторного воспроизведения."
+    },
+    {
+      "key": "ip_version",
+      "label": "IP-версия подключения",
+      "type": "select",
+      "default": "dual",
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "ip-version",
+      "help": "Для клиента Mihomo. ",
+      "options": [
+        "dual",
+        "ipv4",
+        "ipv6",
+        "ipv4-prefer",
+        "ipv6-prefer"
+      ]
+    },
+    {
+      "key": "name_cert_verify",
+      "label": "Имя для проверки сертификата",
+      "type": "text",
+      "default": "",
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "name-cert-verify",
+      "help": "Для клиента Mihomo. "
+    },
+    {
+      "key": "certificate_fingerprint",
+      "label": "SHA-256 сертификата",
+      "type": "text",
+      "default": "",
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "fingerprint",
+      "help": "Для клиента Mihomo. "
+    },
+    {
+      "key": "bbr_profile",
+      "label": "Профиль BBR",
+      "type": "select",
+      "default": "standard",
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "bbr-profile",
+      "help": "Для клиента Mihomo. ",
+      "options": [
+        "standard",
+        "conservative",
+        "aggressive"
+      ]
+    },
+    {
+      "key": "cwnd",
+      "label": "Начальное окно перегрузки (пакеты)",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "cwnd",
+      "help": "Для клиента Mihomo. 0 — значение ядра по умолчанию.",
+      "min": 0,
+      "max": 65535
+    },
+    {
+      "key": "max_udp_relay_packet_size",
+      "label": "Максимальный UDP-пакет, байт",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "max-udp-relay-packet-size",
+      "help": "Для клиента Mihomo. 0 — значение ядра по умолчанию.",
+      "min": 0,
+      "max": 1400
+    },
+    {
+      "key": "max_open_streams",
+      "label": "Максимум открытых потоков",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "max-open-streams",
+      "help": "Для клиента Mihomo. 0 — значение ядра по умолчанию.",
+      "min": 0,
+      "max": 65535
+    },
+    {
+      "key": "recv_window_conn",
+      "label": "Окно приёма потока, байт",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "recv-window-conn",
+      "help": "Для клиента Mihomo. 0 — значение ядра по умолчанию.",
+      "min": 0,
+      "max": 1073741824
+    },
+    {
+      "key": "recv_window",
+      "label": "Окно приёма соединения, байт",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "recv-window",
+      "help": "Для клиента Mihomo. 0 — значение ядра по умолчанию.",
+      "min": 0,
+      "max": 1073741824
+    },
+    {
+      "key": "max_datagram_frame_size",
+      "label": "Размер QUIC datagram, байт",
+      "type": "number",
+      "default": 0,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "max-datagram-frame-size",
+      "help": "Для клиента Mihomo. 0 — значение ядра по умолчанию.",
+      "min": 0,
+      "max": 1400
+    },
+    {
+      "key": "disable_mtu_discovery",
+      "label": "Отключить определение MTU",
+      "type": "boolean",
+      "default": false,
+      "formats": [
+        "mihomo"
+      ],
+      "export_key": "disable-mtu-discovery",
+      "help": "Для клиента Mihomo. "
     }
   ]
 }

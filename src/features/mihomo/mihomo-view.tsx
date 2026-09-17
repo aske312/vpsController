@@ -623,7 +623,7 @@ export function MihomoPage({
   }
 
   function unusedRealityTarget(connections: ProfileConnection[]) {
-    const used = new Set(connections.filter((connection) => connection.component === "transport-reality" && ["direct", "both"].includes(String(connection.settings.route_mode || "direct"))).map((connection) => String(connection.settings.target || "").split(":")[0].toLowerCase()));
+    const used = new Set(connections.filter((connection) => connection.component === "transport-reality" && ["direct", "both"].includes(String(connection.settings.route_mode || "direct"))).map((connection) => String(connection.settings.target || "").trim().split(":")[0].toLowerCase()));
     const available = realityTargets.filter((host) => !used.has(host));
     return available.length ? `${available[0]}:443` : "";
   }
@@ -1311,15 +1311,6 @@ export function MihomoPage({
               </>}
             </section>
             {visibleProfileStrategies.length > 0 && <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа подключений для выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{visibleProfileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>}
-            {profileStep === 3 && ["url-test", "fallback"].includes(String(activeProfileRouting.strategy || routingPolicy?.values.strategy)) && <section className="mihomoProfileStrategy">
-              <header><div><b>Проверка и переключение каналов</b><small>Новый маршрут используется для новых соединений. Рабочие сессии сохраняются; оборванные переподключает приложение.</small></div></header>
-              <div className="mihomoConnectionFields">
-                <label><span>URL проверки</span><input type="url" value={String(activeProfileRouting.test_url ?? routingPolicy?.values.test_url ?? "https://www.gstatic.com/generate_204")} onChange={(event) => setProfileRoutingValue("test_url", event.target.value)} /></label>
-                {([["interval", "Интервал, с", 10, 3600, 30], ["tolerance", "Порог улучшения задержки, мс", 0, 1000, 50], ...(commonDevice || activeProfileRouting.client_config_format === "mihomo" || !activeProfileRouting.client_config_format ? [["health_timeout", "Тайм-аут проверки, мс", 1000, 10000, 3000], ["max_failed_times", "Ошибок до внеочередной проверки", 1, 10, 2]] : [])] as const).filter(([key]) => key !== "tolerance" || (activeProfileRouting.strategy ?? routingPolicy?.values.strategy) === "url-test").map(([key, label, min, max, fallback]) => <label key={String(key)}><span>{label}</span><input type="number" min={Number(min)} max={Number(max)} value={Number(activeProfileRouting[String(key)] ?? routingPolicy?.values[String(key)] ?? fallback)} onChange={(event) => setProfileRoutingValue(String(key), Number(event.target.value))} /></label>)}
-              </div>
-              <button type="button" onClick={() => { setProfileStrategy("url-test"); for (const [key, value] of Object.entries({ interval: 10, health_timeout: 2500, max_failed_times: 1, tolerance: 100 })) setProfileRoutingValue(key, value); }}>Быстрая проверка без частых переключений</button>
-              <small>Проверки каждые 10 секунд, смена при улучшении более 100 мс. URL-test измеряет HTTP-задержку, а не скорость видео или качество UDP; частые проверки расходуют трафик и заряд.</small>
-            </section>}
             {activeProfileDevice?.scope !== "common" && <section className="mihomoProfileName mihomoProfileGeneral"><header><div><b>Формат при следующей загрузке</b><small>{activeProfileDevice?.manual ? "Общий sing-box JSON, без HWID." : "Формат сохраняется для сочетания HWID и приложения."}</small></div></header>
               {activeProfileDevice?.scope === "hwid" && (activeProfileDevice.supported_formats?.length || 0) > 1 ? <label><span>Файл для клиента</span><select value={String(activeProfileRouting.client_config_format || "mihomo")} onChange={(event) => setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: compatibleClientRouting(device.routing || {}, event.target.value, device.os || "unknown", device.manual ? undefined : device.client_name) } : device))}>{activeProfileDevice.supported_formats?.map((format) => <option key={format} value={format}>{clientCapabilities(format).label}</option>)}</select><small>После сохранения обновите подписку. Если клиент не принимает новый формат — удалите подписку и добавьте ту же ссылку заново. Устройство сохранится, если приложение и HWID не изменятся.</small></label> : <p>{activeCapabilities.label}</p>}
             </section>}
@@ -1363,7 +1354,6 @@ export function MihomoPage({
                   return [<button key={module.id} type="button" disabled={singletonUsed} onClick={() => addProfileConnection(module)}>+ {module.name}</button>];
                 })}
               </div>
-              <datalist id="mihomo-reality-targets">{realityTargets.map((host) => <option key={host} value={`${host}:443`} />)}</datalist>
               <div className="mihomoConnectionWorkspace">
                 {deviceConnections.length > 0 && <nav className="mihomoConnectionNav" aria-label="Подключения выбранного устройства">{deviceConnections.map((connection) => <button key={connection.id} type="button" className={selectedConnection?.id === connection.id ? "is-active" : ""} aria-pressed={selectedConnection?.id === connection.id} onClick={() => setSelectedConnectionId(connection.id)}><span className={`protocol-${connection.component}`}><ProtocolIcon protocol={connection.component} /></span><span><b>{connection.name}</b><small>{modules.find((module) => module.id === connection.component)?.name} · {connection.settings.route_mode === "cdn" ? "CDN" : connection.settings.route_mode === "tls" ? "TLS" : "Прямое"}</small></span></button>)}</nav>}
                 <div className="mihomoConnectionList">
@@ -1382,11 +1372,12 @@ export function MihomoPage({
                     {!supported && <p>Подключение несовместимо с форматом клиента. Удалите его или выберите поддерживаемый формат.</p>}
                     <div className="mihomoConnectionFields">
                       {schema.filter((field) => {
+                        if (field.formats && !commonDevice && !field.formats.includes(String(activeProfileRouting.client_config_format || "mihomo"))) return false;
                         if (["route_mode", "cdn_enabled", "privacy_mode", "cdn_ech"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute === "cdn" && ["port", "target", "transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute === "direct" && ["cdn_domain", "cdn_transport", "cdn_xhttp_mode"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute !== "tls" && ["tls_domain", "tls_transport", "tls_xhttp_mode"].includes(field.key)) return false;
-                        if (connection.component === "transport-reality" && vlessRoute === "tls" && !["route_mode", "tls_domain", "tls_transport", "tls_xhttp_mode", "fingerprint"].includes(field.key)) return false;
+                        if (connection.component === "transport-reality" && vlessRoute === "tls" && !field.export_key && !["route_mode", "tls_domain", "tls_transport", "tls_xhttp_mode", "fingerprint"].includes(field.key)) return false;
                         if (["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return connection.settings.transport === "xhttp";
                         if (["cdn_domain", "cdn_transport"].includes(field.key)) return Boolean(connection.settings.cdn_enabled);
                         if (field.key === "tls_xhttp_mode") return connection.settings.tls_transport === "xhttp";
@@ -1395,10 +1386,16 @@ export function MihomoPage({
                         return true;
                       }).map((field) => <label key={field.key} className={field.type === "boolean" ? "is-toggle" : ""}>
                         <span>{field.label}</span>
-                        {((field.key === "cdn_domain" && vlessRoute === "cdn") || (field.key === "tls_domain" && vlessRoute === "tls")) ? (() => { const kind = field.key === "cdn_domain" ? "cdn" : "tls"; const routes = confirmedNetworkRoutes(kind); return routes.length > 0 ? <select value={routes.includes(String(connection.settings[field.key] || "")) ? String(connection.settings[field.key]) : routes[0]} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>{routes.map((domain) => <option key={domain} value={domain}>{domain}</option>)}</select> : <span className="mihomoUnavailableField">Нет подтвержденных доменов на странице «Сеть»</span>; })() : field.type === "select" ? <select value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>
+                        {((field.key === "cdn_domain" && vlessRoute === "cdn") || (field.key === "tls_domain" && vlessRoute === "tls")) ? (() => { const kind = field.key === "cdn_domain" ? "cdn" : "tls"; const routes = confirmedNetworkRoutes(kind); return routes.length > 0 ? <select value={routes.includes(String(connection.settings[field.key] || "")) ? String(connection.settings[field.key]) : routes[0]} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>{routes.map((domain) => <option key={domain} value={domain}>{domain}</option>)}</select> : <span className="mihomoUnavailableField">Нет подтвержденных доменов на странице «Сеть»</span>; })() : ["target", "sni"].includes(field.key) ? <>
+                          <select aria-label={`${field.label}: список адресов`} value="" onChange={(event) => { if (event.target.value) updateConnectionSetting(connection.id, field.key, event.target.value); }}>
+                            <option value="">Выбрать SNI из полного списка…</option>
+                            {realityTargets.map((host) => <option key={host} value={field.key === "target" ? `${host}:443` : host}>{host}</option>)}
+                          </select>
+                          <input aria-label={`${field.label}: свой адрес`} type="text" maxLength={field.key === "target" ? 259 : 253} spellCheck={false} autoCapitalize="none" placeholder={field.key === "target" ? "Домен:443; пусто — автоматически" : "Домен без порта"} value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)} />
+                        </> : field.type === "select" ? <select value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>
                           {(field.options || []).filter((option) => commonDevice || !["transport", "cdn_transport", "tls_transport"].includes(field.key) || activeCapabilities.transports.includes(typeof option === "string" ? option : option.value)).map((option) => { const value = typeof option === "string" ? option : option.value; const label = typeof option === "string" ? option : option.label; return <option key={value} value={value}>{label}</option>; })}
                         </select> : field.type === "boolean" ? <input type="checkbox" checked={Boolean(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.checked)} />
-                          : <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} list={field.key === "target" ? "mihomo-reality-targets" : undefined} placeholder={field.key === "target" ? "Автоматически при сохранении" : undefined} value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, field.type === "number" ? Number(event.target.value) : event.target.value)} />}
+                          : <input type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} placeholder={field.key === "target" ? "Автоматически при сохранении" : undefined} value={String(connection.settings[field.key] ?? field.default)} onChange={(event) => updateConnectionSetting(connection.id, field.key, field.type === "number" ? Number(event.target.value) : event.target.value)} />}
                         {field.help && <small>{field.help}</small>}
                       </label>)}
                     </div>
