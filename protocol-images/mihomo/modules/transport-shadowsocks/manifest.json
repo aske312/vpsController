@@ -1,7 +1,7 @@
 {
   "id": "transport-shadowsocks",
   "name": "Shadowsocks",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "installable": true,
   "description": "Сервер Shadowsocks для подключений Mihomo.",
   "category": "transport",
@@ -44,12 +44,12 @@
     },
     {
       "key": "timeout",
-      "label": "Тайм-аут соединения, с",
+      "label": "Тайм-аут UDP, с",
       "type": "number",
       "default": 300,
       "min": 10,
       "max": 3600,
-      "help": ""
+      "help": "Пустые TCP-подключения закрываются отдельно после 30 с ожидания первых данных. Тайм-аут активных TCP-сессий в libev имеет минимум 24 часа."
     },
     {
       "key": "mtu",

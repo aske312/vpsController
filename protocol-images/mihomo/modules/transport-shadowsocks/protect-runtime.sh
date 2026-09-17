@@ -7,10 +7,13 @@ MODULE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 unit_dir="/etc/systemd/system/vps-control-mihomo-ss@.service.d"
 guard="/usr/local/lib/vps-control-mihomo-ss/guard.py"
 changed=0
-if ! cmp -s "${MODULE_DIR}/guard.py" "${guard}"; then
-  install -D -m 0755 "${MODULE_DIR}/guard.py" "${guard}"
-  changed=1
-fi
+for source in guard.py empty_connections.py; do
+  destination="$(dirname -- "${guard}")/${source}"
+  if ! cmp -s "${MODULE_DIR}/${source}" "${destination}"; then
+    install -D -m 0755 "${MODULE_DIR}/${source}" "${destination}"
+    changed=1
+  fi
+done
 install -d -m 0755 "${unit_dir}"
 draft="$(mktemp)"
 trap 'rm -f -- "${draft}"' EXIT

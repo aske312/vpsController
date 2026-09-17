@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Bound libev error storms and let systemd recover only the affected instance."""
+import json
 import signal
 import subprocess
 import sys
@@ -10,11 +11,28 @@ import time
 RESOURCE_ERRORS = (b"too many open files", b"cannot allocate memory", b"no buffer space available")
 
 
-def supervise(command, stop=None, emit=None):
+def supervise(command, stop=None, emit=None, monitor_factory=None):
     stop = stop if stop is not None else threading.Event()
     emit = emit if emit is not None else lambda message: print(message, flush=True)
     exhausted = threading.Event()
+    monitor_stop = threading.Event()
     child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    def monitor_empty_connections():
+        monitor = monitor_factory(child.pid)
+        warned = False
+        while not monitor_stop.wait(5):
+            try:
+                count = monitor.sweep(stopped=monitor_stop.is_set)
+                if count:
+                    emit(f"Shadowsocks expired {count} TCP connections without payload")
+                warned = False
+            except OSError as error:
+                # Never replace selective cleanup with a restart of healthy flows.
+                # Missing kernel support/permissions must be visible, not silent.
+                if not warned and not monitor_stop.is_set():
+                    emit(f"Shadowsocks empty-connection cleanup unavailable: {error}")
+                warned = True
 
     def read_output():
         window, sent, dropped = time.monotonic(), 0, 0
@@ -40,10 +58,17 @@ def supervise(command, stop=None, emit=None):
 
     reader = threading.Thread(target=read_output, daemon=True)
     reader.start()
+    monitor_thread = None
+    if monitor_factory is not None:
+        monitor_thread = threading.Thread(target=monitor_empty_connections, daemon=True)
+        monitor_thread.start()
     try:
         while child.poll() is None and not stop.is_set() and not exhausted.wait(0.1):
             pass
     finally:
+        monitor_stop.set()
+        if monitor_thread is not None:
+            monitor_thread.join(timeout=3)
         if child.poll() is None:
             child.terminate()
             try:
@@ -65,7 +90,12 @@ def main():
     stop = threading.Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stop.set())
-    return supervise(command, stop)
+    from empty_connections import EmptyConnections
+    with open(command[command.index("-c") + 1], encoding="utf-8") as source:
+        port = int(json.load(source)["server_port"])
+    if not 1 <= port <= 65535:
+        return 2
+    return supervise(command, stop, monitor_factory=lambda pid: EmptyConnections(pid, port))
 
 
 if __name__ == "__main__":
