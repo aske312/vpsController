@@ -37,6 +37,10 @@ systemctl disable --now vps-control-mihomo-ss.target >/dev/null 2>&1 || true
 rm -f /etc/systemd/system/vps-control-mihomo-ss.target \
       /etc/systemd/system/vps-control-mihomo-ss@.service \
       /usr/local/sbin/vps-control-mihomo-ss-firewall
+rm -f /etc/systemd/system/vps-control-mihomo-ss@.service.d/resource-guard.conf
+rmdir /etc/systemd/system/vps-control-mihomo-ss@.service.d 2>/dev/null || true
+rm -f /usr/local/lib/vps-control-mihomo-ss/guard.py
+rmdir /usr/local/lib/vps-control-mihomo-ss 2>/dev/null || true
 rm -rf -- "${CONFIG_DIR}"
 if ! find /etc/vps-control/shadowsocks/clients -mindepth 1 -maxdepth 1 -name '*.json' -print -quit 2>/dev/null | grep -q .; then
   apt-get -o DPkg::Lock::Timeout=300 purge -y shadowsocks-libev

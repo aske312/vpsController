@@ -86,6 +86,7 @@ ProtectHome=true
 WantedBy=vps-control-mihomo-ss.target
 EOF
 
+bash "$(dirname -- "${BASH_SOURCE[0]}")/protect-runtime.sh"
 systemctl daemon-reload
 systemctl enable vps-control-mihomo-ss.target >/dev/null
 systemctl restart vps-control-mihomo-ss.target

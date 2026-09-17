@@ -2411,8 +2411,14 @@ restart_mihomo_manager_if_present() {
 # unbounded restart loop because the generated units still reference ss-server.
 ensure_mihomo_profile_runtimes() {
   local config_dir="/etc/vps-control/mihomo/shadowsocks"
-  find "${config_dir}" -maxdepth 1 -type f -name '*.json' -print -quit 2>/dev/null | grep -q . || return 0
-  command -v ss-server >/dev/null 2>&1 && return 0
+  if [[ ! -f /etc/systemd/system/vps-control-mihomo-ss@.service ]] \
+    && ! find "${config_dir}" -maxdepth 1 -type f -name '*.json' -print -quit 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  if command -v ss-server >/dev/null 2>&1; then
+    bash "${INSTALL_DIR}/protocol-images/mihomo/modules/transport-shadowsocks/protect-runtime.sh" --restart-active || return $?
+    return 0
+  fi
 
   info "Восстановление runtime Mihomo/Shadowsocks для сохранённых профилей"
   if ! apt-get -o DPkg::Lock::Timeout=300 install -y shadowsocks-libev; then
@@ -2420,6 +2426,7 @@ ensure_mihomo_profile_runtimes() {
     apt-get -o DPkg::Lock::Timeout=300 install -y shadowsocks-libev
   fi
   command -v ss-server >/dev/null 2>&1 || die "не удалось восстановить ss-server для профилей Mihomo."
+  bash "${INSTALL_DIR}/protocol-images/mihomo/modules/transport-shadowsocks/protect-runtime.sh" --restart-active || return $?
   systemctl reset-failed 'vps-control-mihomo-ss@*.service' 2>/dev/null || true
   systemctl restart vps-control-mihomo-ss.target 2>/dev/null || true
 }
