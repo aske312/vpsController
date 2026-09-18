@@ -19,6 +19,22 @@ from telemetry_pb2 import Connection, ConnectionEvent, ConnectionEvents, Subscri
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_package_version_discovery_is_shared_and_invalidated_after_mutation(self):
+        with patch.dict(manager.apt_versions_cache, {}, clear=True), patch.object(manager.time, "monotonic", return_value=100) as clock, patch.object(manager, "_apt_package_versions", return_value=("1", "2")) as discover:
+            self.assertEqual(manager.apt_package_versions("amneziawg"), ("1", "2"))
+            self.assertEqual(manager.apt_package_versions("amneziawg"), ("1", "2"))
+            self.assertEqual(discover.call_count, 1)
+            clock.return_value = 161
+            manager.apt_package_versions("amneziawg")
+            self.assertEqual(discover.call_count, 2)
+            @manager.module_mutation("update")
+            def update(_):
+                self.assertEqual(manager.apt_package_versions("amneziawg"), ("1", "2"))
+                return "updated"
+            self.assertEqual(update("transport-awg"), "updated")
+            manager.apt_package_versions("amneziawg")
+            self.assertEqual(discover.call_count, 4)
+
     def test_profile_and_device_totals_keep_available_channel_traffic(self):
         profile = {"id": "partial", "devices": [{"id": "common"}], "connections": [
             {"id": "ss", "device_id": "common", "component": "transport-shadowsocks", "credential": {}},
@@ -38,15 +54,16 @@ class TelemetryTests(unittest.TestCase):
             manager.transition_worker(stopped)
         self.assertEqual([call.args[0] for call in quic.call_args_list], ["transport-hysteria2", "transport-tuic"])
 
-    def test_reality_activity_uses_online_api_not_service_status(self):
-        traffic = subprocess.CompletedProcess([], 0, '{"stat": [{"name": "user>>>mihomo-a>>>traffic>>>downlink", "value": "42"}]}', "")
-        for value, expected in (("2", True), ("0", False), (None, None)):
-            with self.subTest(value=value):
-                online = subprocess.CompletedProcess([], 0 if value is not None else 1, json.dumps({"stat": {"value": value}}) if value is not None else "", "unavailable")
-                with patch.object(manager, "REALITY_XRAY_BIN", Path(__file__)), patch.object(manager, "systemctl_active", return_value=True), patch.object(manager, "reality_api_server", return_value="127.0.0.1:1"), patch.object(manager, "run", side_effect=[traffic, online]):
-                    stats = manager.reality_profile_stats("a")
-                self.assertIs(stats["active"], expected)
+    def test_reality_activity_uses_shared_collector_without_per_user_commands(self):
+        for value in (True, False, None):
+            with self.subTest(active=value):
+                row = {"active": value, "rx_bytes": 42}
+                with patch.object(manager, "reality_api_server", return_value="127.0.0.1:1"), patch.object(manager.xray_telemetry, "snapshot", return_value=row) as snapshot, patch.object(manager, "run") as run:
+                    stats = manager.reality_profile_stats("a", "b")
+                self.assertIs(stats["active"], value)
                 self.assertEqual(stats["rx_bytes"], 42)
+                self.assertEqual(snapshot.call_args.args[:2], ("127.0.0.1:1", "mihomo-a-b"))
+                run.assert_not_called()
 
     def test_counts_users_closed_traffic_and_disconnects(self):
         collector = ConnectionTelemetry("127.0.0.1:1", "test")

@@ -40,6 +40,7 @@ from client_labels import connection_label
 from client_subscription import CLIENT_HINTS, import_page, vless_subscription
 from client_capabilities import CAPABILITIES, FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
 from telemetry import ConnectionTelemetry
+from xray_stats import XrayStats
 import ss_runtime
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
@@ -87,6 +88,9 @@ latency_cache: dict[str, tuple[float, float | None]] = {}
 latency_cache_lock = threading.Lock()
 quic_telemetry_lock = threading.Lock()
 quic_telemetry: dict[str, ConnectionTelemetry] = {}
+xray_telemetry = XrayStats()
+apt_versions_lock = threading.Lock()
+apt_versions_cache: dict[str, tuple[float, tuple[str, str]]] = {}
 
 
 def serialized_profile_mutation(function):
@@ -109,6 +113,9 @@ def module_mutation(action: str):
                     logger.error("Mihomo module action %s:%s timed out", action, module_id)
                     write_action(f"{action}:{module_id}", message, state="unknown", progress=100)
                     raise HTTPException(status_code=504, detail=message) from exc
+                finally:
+                    with apt_versions_lock:
+                        apt_versions_cache.clear()
         return wrapped
     return decorate
 
@@ -322,6 +329,7 @@ async def manager_lifespan(_app):
         for collector in list(quic_telemetry.values()):
             await asyncio.to_thread(collector.close)
         quic_telemetry.clear()
+        xray_telemetry.close()
 
 
 app = FastAPI(
@@ -1771,6 +1779,21 @@ def module_is_ready(module_id: str) -> bool:
 
 
 def apt_package_versions(package: str) -> tuple[str, str]:
+    # Version discovery is not live telemetry. Serialize refreshes across tabs;
+    # package/module mutations invalidate the cache immediately.
+    if profile_mutation_lock.locked():
+        # Installation/update checks must see the package just written by apt.
+        return _apt_package_versions(package)
+    with apt_versions_lock:
+        cached = apt_versions_cache.get(package)
+        if cached and time.monotonic() < cached[0]:
+            return cached[1]
+        result = _apt_package_versions(package)
+        apt_versions_cache[package] = (time.monotonic() + 60, result)
+        return result
+
+
+def _apt_package_versions(package: str) -> tuple[str, str]:
     """Return (installed, candidate) versions for an apt package. Mirrors
     api/main.py's helper of the same name (separate process, no shared
     import)."""
@@ -3240,47 +3263,20 @@ def shadowsocks_profile_stats(profile_id: str, port: int, instance_id: str | Non
     }
 
 
+@functools.lru_cache(maxsize=4)
+def reality_online_enabled(config_path: Path, modified_ns: int) -> bool:
+    config = load_json(config_path, {})
+    return bool(config.get("policy", {}).get("levels", {}).get("0", {}).get("statsUserOnline"))
+
+
 def reality_profile_stats(profile_id: str, connection_id: str | None = None) -> dict[str, Any]:
-    active = systemctl_active("vps-control-mihomo-reality.service")
-    if not REALITY_XRAY_BIN.is_file() or not active:
-        return {"active": False if not active else None, "rx_bytes": None, "tx_bytes": None,
-                "stats_available": False, "activity_available": not active}
     email = f"mihomo-{profile_id}" + (f"-{connection_id}" if connection_id else "")
-    result = run(
-        str(REALITY_XRAY_BIN), "api", "statsquery",
-        f"-server={reality_api_server()}", "-pattern", f"user>>>{email}>>>traffic>>>",
-    )
-    output = result.stdout
-    uplink = downlink = 0
+    config_path = CONFIG_ROOT / "reality" / "config.json"
     try:
-        payload = json.loads(output)
-        for entry in payload.get("stat", []):
-            name = str(entry.get("name", ""))
-            value = int(entry.get("value", 0))
-            if name.endswith(">>>uplink"):
-                uplink = value
-            elif name.endswith(">>>downlink"):
-                downlink = value
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return {"active": None, "rx_bytes": None, "tx_bytes": None, "stats_available": False, "activity_available": False}
-    if result.returncode:
-        return {"active": None, "rx_bytes": None, "tx_bytes": None, "stats_available": False, "activity_available": False}
-    online = None
-    query = run(str(REALITY_XRAY_BIN), "api", "statsonline", f"-server={reality_api_server()}", "-email", email)
-    if query.returncode == 0:
-        try:
-            online = int(json.loads(query.stdout)["stat"].get("value", 0))
-        except (KeyError, TypeError, ValueError):
-            pass
-    elif "not found" in (query.stderr + query.stdout).lower():
-        config = load_json(CONFIG_ROOT / "reality" / "config.json", {})
-        if config.get("policy", {}).get("levels", {}).get("0", {}).get("statsUserOnline"):
-            online = 0
-    # "uplink"/"downlink" are named from the client's perspective, matching
-    # the rx/tx convention used by the wg/awg and Shadowsocks stats above.
-    return {"active": online > 0 if online is not None else None,
-            "online_ips": online, "rx_bytes": downlink, "tx_bytes": uplink,
-            "stats_available": True, "activity_available": online is not None, "activity_source": "xray_online_20s"}
+        enabled = reality_online_enabled(config_path, config_path.stat().st_mtime_ns)
+    except OSError:
+        enabled = False
+    return xray_telemetry.snapshot(reality_api_server(), email, enabled)
 
 
 def profile_stats_payload(item: dict[str, Any]) -> dict[str, Any]:

@@ -23,13 +23,14 @@ draft="$(mktemp)"
 trap 'rm -f -- "${draft}"' EXIT
 cat >"${draft}" <<'EOF'
 [Unit]
-StartLimitIntervalSec=120
+StartLimitIntervalSec=300
 StartLimitBurst=5
 [Service]
 ExecStart=
 ExecStart=/usr/bin/python3 /usr/local/lib/vps-control-mihomo-ss/guard.py /usr/bin/ss-server -c /etc/vps-control/mihomo/shadowsocks/%i.json
 LimitNOFILE=16384:524288
 Restart=on-failure
+RestartPreventExitStatus=78
 RestartSec=30
 KillMode=control-group
 TimeoutStopSec=8
@@ -52,7 +53,9 @@ if [[ "${1:-}" == "--restart-active" ]]; then
     [[ -n "${unit}" ]] || continue
     pid="$(systemctl show "${unit}" --property=MainPID --value)"
     # Retry an interrupted first migration even when the files already match.
-    if (( changed )) || ! tr '\0' '\n' <"/proc/${pid}/cmdline" | grep -Fxq "${guard}"; then
+    # Already guarded instances keep their live sessions. New guard code is
+    # loaded at their next start; systemd retry policy applies after reload.
+    if ! tr '\0' '\n' <"/proc/${pid}/cmdline" | grep -Fxq "${guard}"; then
       systemctl try-restart "${unit}"
     fi
   done <<<"${units}"

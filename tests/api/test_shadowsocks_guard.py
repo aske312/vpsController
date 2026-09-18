@@ -55,6 +55,11 @@ class ShadowsocksGuardTests(unittest.TestCase):
                 self.assertEqual(result, code)
                 self.assertEqual(output, ["startup ok"])
 
+    def test_port_conflict_is_permanent_and_does_not_request_restarts(self):
+        result, output = self.run_child("import sys; print('ERROR: bind: Address already in use', flush=True); sys.exit(255)")
+        self.assertEqual(result, 78)
+        self.assertIn("port conflict", output[0])
+
     def test_operator_stop_reaps_child_without_requesting_restart(self):
         stop = threading.Event()
         timer = threading.Timer(0.3, stop.set)
