@@ -35,7 +35,7 @@ os.replace(tmp, path)
 PY
 systemctl daemon-reload
 systemctl reset-failed >/dev/null 2>&1 || true
-if find /etc/vps-control/mihomo/shadowsocks -mindepth 1 -maxdepth 1 -name '*.json' -print -quit 2>/dev/null | grep -q .; then
+if [[ -f /etc/systemd/system/vps-control-mihomo-ss.target ]] || find /etc/vps-control/mihomo/shadowsocks -mindepth 1 -maxdepth 1 -name '*.json' -print -quit 2>/dev/null | grep -q .; then
   echo "shadowsocks-libev сохранён: пакет используется каналом Mihomo."
 else
   apt-get -o DPkg::Lock::Timeout=300 purge -y shadowsocks-libev

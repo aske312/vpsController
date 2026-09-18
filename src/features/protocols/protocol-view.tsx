@@ -3,8 +3,17 @@
 import type { Dispatch, SetStateAction } from "react";
 import { formatModuleVersion } from "../../shared/lib/format-version";
 import { bytes, duration, safeDateTime } from "../../shared/lib/control-plane-ui";
+import { ProtocolHealthBadge } from "../../shared/components/protocol-health-badge";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import type { Protocol, ProtocolImage, ProtocolStatus, Tab } from "../../shared/types/control-plane";
+
+const checkLabels: Record<string, string> = {
+  route: "Route", dns: "DNS", https: "HTTPS", protocol_service: "Service",
+  service: "Service", udp: "UDP port", forwarding: "Forwarding", mtu: "MTU",
+  pmtu: "Path MTU", load: "Load", services: "System", listener: "Ports",
+  endpoint_dns: "Endpoint DNS", endpoint: "Endpoint", reality_target: "Target TLS",
+  configuration: "Config", diagnostic: "Check",
+};
 
 type ProtocolViewProps = {
   protocolTab: Protocol;
@@ -160,9 +169,6 @@ export function ProtocolView(props: ProtocolViewProps) {
   const version = formatModuleVersion(activeProtocolImage?.installed_version, "version n/a");
   const endpoint = activeProtocol.listen_port ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port}` : activeProtocol.address || "—";
   const health = protocolOperational ? (activeProtocol.diagnostics?.status || "healthy") : "critical";
-  const diagnosticSummary = activeProtocol.diagnostics?.score != null
-    ? `${activeProtocol.diagnostics.score}/100`
-    : "не проверено";
   const updateBusy = activeProtocolImage ? installingProtocol === `update-${activeProtocolImage.id}` : false;
 
   return (
@@ -192,7 +198,7 @@ export function ProtocolView(props: ProtocolViewProps) {
           <p className="eyebrow">TUNNELS / {profile.family}</p>
           <div className="tunnelTitleRow">
             <span className="tunnelHeroIcon"><ProtocolIcon protocol={protocolTab} /></span><h1>{profile.title}</h1>
-            <span className={protocolOperational ? "tunnelState online" : "tunnelState offline"}>{protocolOperational ? "ACTIVE" : "STOPPED"}</span>
+            <ProtocolHealthBadge health={activeProtocol.health} />
           </div>
           <p className="tunnelLead">{profile.description}</p>
           <div className="tunnelHeroMeta">
@@ -200,7 +206,8 @@ export function ProtocolView(props: ProtocolViewProps) {
             <span>{activeProtocol.service_enabled ? "AUTOSTART" : "MANUAL START"}</span>
             <span>{protocolIsTunnel ? "L3 TUNNEL" : activeProtocol.transport || profile.family}</span>
             {activeProtocolImage?.update_available && <span className="warning">UPDATE AVAILABLE</span>}
-            <span className={`tunnelDiagnosticSummary ${health}`}>DIAGNOSTICS · {diagnosticSummary}</span>
+            {activeProtocol.diagnostics?.checks?.map((check) => <span key={check.id} className="protocolCheck" data-state={check.ok ? "READY" : check.severity === "warning" ? "WARN" : "ERROR"} title={`${check.name}: ${check.value}`} aria-label={`${check.name}: ${check.ok ? "OK" : "Проблема"}. ${check.value}`}>{checkLabels[check.id] || check.name}</span>)}
+            {!activeProtocol.diagnostics?.checks?.length && <span>{activeProtocol.health?.reason || "Диагностика выполняется"}</span>}
           </div>
         </div>
         <div className="tunnelOperatorPlaceholder" data-asset="operator_prt_1.webp" aria-label="Заглушка изображения operator_prt_1.webp">

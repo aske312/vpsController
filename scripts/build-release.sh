@@ -38,22 +38,22 @@ while IFS= read -r -d '' shell_script; do
     echo "Shell script contains CRLF line endings: ${shell_script#${STAGE}/}" >&2
     exit 1
   fi
-done < <(find "${STAGE}" -type f -name '*.sh' -print0)
+done < <(find "${STAGE}" -type f \( -name '*.sh' -o -name 'vpn-monitor-sample' \) -print0)
 
 find "${STAGE}/protocol-images" -type f \( -name 'install.sh' -o -name 'uninstall.sh' \) -exec chmod 0755 {} +
 
 # Mihomo is bundled into the prepared release. The server module uses the same
 # pinned binary for config validation; client profiles never download an
 # unverified core from the VPS.
-MIHOMO_VERSION="1.19.28"
+MIHOMO_VERSION="1.19.31"
 case "$(uname -m)" in
   x86_64|amd64)
     mihomo_asset="mihomo-linux-amd64-compatible-v${MIHOMO_VERSION}.gz"
-    mihomo_sha256="70d01cfb8cb7bf7a92fd1af16cb4b9553d90bb4eecde3b5c4849103e27c80ddb"
+    mihomo_sha256="04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc"
     ;;
   aarch64|arm64)
     mihomo_asset="mihomo-linux-arm64-v${MIHOMO_VERSION}.gz"
-    mihomo_sha256="2474450cd1c41dfa53036a54a4e85579f493d3af524d86c3d4b8e2b240b56cd2"
+    mihomo_sha256="9e0f11afbf38426b8bd88fdc594678f8161c57eccb4e1b77acb12b493904f1d4"
     ;;
   *)
     echo "Unsupported Mihomo release architecture: $(uname -m)" >&2
@@ -118,7 +118,9 @@ NODE
 (
   cd "${STAGE}"
   rm -f package-lock.json
-  npm install --include=optional --ignore-scripts --package-lock=false
+  npm install --include=optional --ignore-scripts
+  # Audit the actual runtime dependency tree shipped in the archive.
+  npm audit --omit=dev --audit-level=high
   node --input-type=module -e "await import('rolldown')"
 )
 

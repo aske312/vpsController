@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 CONFIG_DIR="/etc/vps-control/vless-reality-xhttp"
-port="443"
+port=""
 if [[ -s "${CONFIG_DIR}/reality.env" ]]; then
   port="$(sed -n 's/^PORT=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
 fi

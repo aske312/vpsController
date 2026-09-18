@@ -2638,6 +2638,7 @@ install_prebuilt_release() {
   if ! write_caddy_config \
     || ! install_api \
     || ! install_web \
+    || ! install_protocol_monitor \
     || ! ensure_api_write_access \
     || ! ensure_mihomo_profile_runtimes \
     || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
@@ -2834,7 +2835,7 @@ restore_test_app() {
     install -m 0644 "${failed_install}/api/resources/cloudflare-origin-pull-ca.pem" \
       "${INSTALL_DIR}/api/resources/cloudflare-origin-pull-ca.pem"
   fi
-  if ! install_api || ! install_web || ! ensure_api_write_access || ! ensure_mihomo_profile_runtimes \
+  if ! install_api || ! install_web || ! install_protocol_monitor || ! ensure_api_write_access || ! ensure_mihomo_profile_runtimes \
     || ! systemctl daemon-reload \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \

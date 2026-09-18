@@ -70,7 +70,8 @@ test("MIT license, privacy notice and connection guide are included in Russian",
   assert.match(page, /installedProtocols\.length > 0/);
   assert.match(page, /waitForProtocolState/);
   assert.match(page, /const nextProtocol = image\.id === "mihomo"/);
-  assert.match(page, /loadProtocolStatus\(nextProtocol\)/);
+  assert.match(page, /setSelectedChannel\(nextProtocol\)/);
+  assert.match(page, /const reloadBlocked = busy \|\| Boolean\(installingProtocol\);/);
   assert.match(page, /setSelectedChannel\(nextProtocol\)[\s\S]*setTab\("channels"\)/);
   assert.match(page, /2–48 символов/);
 });

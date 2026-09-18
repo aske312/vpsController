@@ -1,6 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSystemActionCompletionTracker, systemActionNeedsReload } from "../../src/control-panel/system-operation.ts";
+import { createSystemActionCompletionTracker, protocolOperationOutcome, systemActionNeedsReload, systemOperationNotification } from "../../src/control-panel/system-operation.ts";
+
+test("module presence and version changes wait for the same command to finish", () => {
+  const started = {unit: "install-1.service", action: "protocol-install:mihomo"};
+  for (const state of ["active", "activating", "running", "unknown"]) {
+    assert.equal(protocolOperationOutcome(started, {...started, state, result:"success"}, true), "pending");
+  }
+  assert.equal(protocolOperationOutcome(started, {unit:"old.service",state:"succeeded",result:"success"}, true), "pending");
+  assert.equal(protocolOperationOutcome(started, {...started,state:"failed",result:"exit-code"}, true), "failed");
+  assert.equal(protocolOperationOutcome(started, {...started,state:"succeeded",result:"success"}, false), "pending");
+  assert.equal(protocolOperationOutcome(started, {...started,state:"succeeded",result:"success"}, true), "success");
+});
+
+test("unknown final results cannot emit successful notifications or reload", () => {
+  const action = {unit:"update-2.service",action:"update"};
+  const track = createSystemActionCompletionTracker();
+  track({...action,state:"running"});
+  assert.equal(track({...action,state:"finished",result:"unknown"}),undefined);
+  assert.equal(systemOperationNotification({...action,state:"finished",result:"unknown"},"Update",false).state,"unknown");
+  assert.equal(systemOperationNotification({...action,state:"finished",result:"exit-code"},"Update",false).state,"error");
+  assert.ok(track({...action,state:"succeeded",result:"success"}));
+});
 
 test("server commands refresh once after completion, never from historical or late polls", () => {
   const track = createSystemActionCompletionTracker();

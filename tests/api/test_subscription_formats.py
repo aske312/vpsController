@@ -3,13 +3,26 @@ from contextlib import nullcontext
 from copy import deepcopy
 from itertools import product
 import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
-from tests.api.support import manager
+from tests.api.support import manager, ROOT
 
 
 class SubscriptionFormatTests(unittest.TestCase):
+    def test_legacy_channels_create_uses_the_common_device(self):
+        for device_id in ("profile-common", "custom-common"):
+            with self.subTest(device_id=device_id), patch.object(manager, "module_is_ready", return_value=True), patch.object(manager, "SUBMODULE_ROOT", ROOT / "protocol-images/mihomo/modules"):
+                profile = manager.create_profile(manager.ProfileCreate(
+                    name="Legacy client", channels=["transport-shadowsocks"],
+                    devices=[manager.ProfileDeviceInput(id=device_id, name="Common")],
+                ))
+                self.assertEqual(profile["common_device_id"], device_id)
+                self.assertEqual(profile["connections"][0]["device_id"], device_id)
+                self.assertEqual(self.provision.call_args.args[1][0]["device_id"], device_id)
+
     def test_browser_qr_opens_import_page_without_registering_device(self):
         before = deepcopy(self.store)
         result = self.fetch("Mozilla/5.0", hwid=None, extra_headers=[(b"accept", b"text/html"), (b"host", b"example.com")])
@@ -130,6 +143,11 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.provision.assert_not_called()
 
     def setUp(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(patch.object(manager, "WG_CONFIG_BY_MODULE", {
+            "transport-wg": root / "wg.conf", "transport-awg": root / "awg.conf",
+        }))
+        self.enterContext(patch.object(manager, "CONFIG_ROOT", root))
         self.initial = {"id": "profile", "name": "Test", "common_device_id": "common", "subscription_token": "test-token",
                         "devices": [{"id": "common", "name": "Common", "routing": {}}],
                         "connections": [{"id": "common-ss", "device_id": "common", "component": "transport-shadowsocks", "settings": {},

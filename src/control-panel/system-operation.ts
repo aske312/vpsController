@@ -3,14 +3,24 @@ import type { NotificationInput } from "../shared/notifications/store";
 export type SystemAction = { unit?: string; action?: string; state?: string; result?: string; started_at?: string; progress?: number; message?: string };
 const rollbackableActions = new Set(["update", "test-update", "test-rollback", "safe-update", "kernel-update"]);
 
+export function systemActionSucceeded(action: SystemAction) {
+  return ["succeeded", "finished"].includes(action.state || "") && (!action.result || action.result === "success");
+}
+
+export function protocolOperationOutcome(started: SystemAction, current: SystemAction | undefined, moduleReady: boolean) {
+  if (!started.unit || current?.unit !== started.unit) return "pending";
+  if (current.state === "failed" || (current.result && !["success", "unknown"].includes(current.result))) return "failed";
+  return systemActionSucceeded(current) && moduleReady ? "success" : "pending";
+}
+
 export function systemOperationId(action: SystemAction) {
   // API and shell record different start timestamps for the same systemd unit.
   return `operation:system:${action.unit || `${action.action}:${action.started_at || ""}`}`;
 }
 
 export function systemOperationNotification(action: SystemAction, title: string, active: boolean, onCancel?: () => void | Promise<void>): NotificationInput {
-  const failed = action.state === "failed" || action.result === "failed";
-  const done = ["succeeded", "finished"].includes(action.state || "");
+  const failed = action.state === "failed" || Boolean(action.result && !["success", "unknown"].includes(action.result));
+  const done = systemActionSucceeded(action);
   return {
     id: systemOperationId(action), source: "system", title, kind: "operation",
     state: failed ? "error" : done ? "success" : active ? "running" : "unknown",
@@ -27,11 +37,11 @@ export function createSystemActionCompletionTracker() {
     if (!action?.unit) return;
     const id = systemOperationId(action);
     const active = ["queued", "active", "activating", "running", "rebooting", "powering-off"].includes(action.state || "");
-    const terminal = ["succeeded", "finished", "failed"].includes(action.state || "");
+    const terminal = systemActionSucceeded(action) || action.state === "failed";
     const wasActive = tracked.get(id) === false;
     if (terminal || (active && !tracked.has(id))) tracked.set(id, terminal);
     if (tracked.size > 200) tracked.delete(tracked.keys().next().value!);
-    if (terminal && wasActive && action.state !== "failed" && action.result !== "failed") return action;
+    if (terminal && wasActive && systemActionSucceeded(action)) return action;
   };
 }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useNotifications, useNotifier, useNotificationList } from "../shared/notifications/notification-center";
-import { isPending } from "../shared/notifications/store";
 import { createApiClient } from "../shared/lib/api-request";
 import { useCdnSecurity } from "../features/application/use-cdn-security";
 import type { CdnSecurityStatus } from "../shared/lib/cdn-security-operation";
@@ -21,12 +20,13 @@ import { ServicesDashboard } from "../features/services/services-view";
 import { NetworkView } from "../features/network/network-view";
 import { SecurityView } from "../features/security/security-view";
 import { ApplicationView } from "../features/application/application-view";
+import { ProtocolHealthBadge } from "../shared/components/protocol-health-badge";
 import { ConnectionsView } from "../features/connections/connections-view";
 import { ProtocolView } from "../features/protocols/protocol-view";
 import { LoginView } from "../features/auth/login-view";
 import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, LiveStatus, LoggingSettings, NetworkStatus, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
 import { actionLabels, bytes, CLIENTS_PER_PAGE, directProtocolOrder, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
-import { createSystemActionCompletionTracker, systemActionNeedsReload, systemOperationNotification, type SystemAction } from "./system-operation";
+import { createSystemActionCompletionTracker, protocolOperationOutcome, systemActionNeedsReload, systemOperationNotification, type SystemAction } from "./system-operation";
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
@@ -285,6 +285,12 @@ export function ControlPanel() {
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadOverview: refreshFailure(cause, "Ошибка соединения") })); }
   }, [installingProtocol, request, token]);
 
+  useEffect(() => {
+    // A restored section also needs the server and module inventory used by
+    // navigation. Previously these were loaded only by opening Overview.
+    if (token && !overview) void loadOverview();
+  }, [loadOverview, overview, token]);
+
   const loadClients = useCallback(async (force = false) => {
     if (!token) return;
     try {
@@ -539,7 +545,9 @@ export function ControlPanel() {
     else void refreshCurrent(false);
   }, [application?.action, refreshCurrent, requestCommandReload, trackActionCompletion]);
 
-  const reloadBlocked = busy || Boolean(installingProtocol) || notificationItems.some((item) => isPending(item) || item.state === "error");
+  // Historical errors and unknown notification cards must not hold a completed
+  // command's reload forever. Only the current mutation owns this boundary.
+  const reloadBlocked = busy || Boolean(installingProtocol);
   useEffect(() => {
     if (!token || !reloadRequested || reloadBlocked) return;
     const timer = window.setTimeout(() => {
@@ -738,7 +746,6 @@ export function ControlPanel() {
     setBusy(true);
     try {
       await request(`/services/${serviceId}/action`, { method: "POST", body: JSON.stringify({ action }) });
-      await Promise.all([loadServices(), loadSecurity()]);
       requestCommandReload();
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось выполнить действие со службой"); }
     finally { setBusy(false); }
@@ -970,7 +977,7 @@ export function ControlPanel() {
     if (error === undefined) requestCommandReload();
   }
 
-  async function waitForProtocolState(image: ProtocolImage, installed: boolean) {
+  async function waitForProtocolState(image: ProtocolImage, installed: boolean, started: SystemAction) {
     for (let attempt = 0; attempt < 120; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 5000));
       try {
@@ -981,11 +988,9 @@ export function ControlPanel() {
         setProtocolImages(imageData.items || []);
         setApplication(status);
         const current = imageData.items?.find((item) => item.id === image.id);
-        const actionState = status.action?.state || "";
-        // The observed module state is authoritative. A transient systemd unit
-        // can disappear immediately after completing and briefly look failed.
-        if (Boolean(current?.installed) === installed) return;
-        if (actionState === "failed" || status.action?.result === "failed") {
+        const outcome = protocolOperationOutcome(started, status.action, Boolean(current?.installed) === installed);
+        if (outcome === "success") return status.action!;
+        if (outcome === "failed") {
           throw new Error(`${installed ? "Установка" : "Удаление"} ${image.name} завершилось с ошибкой`);
         }
       } catch (cause) {
@@ -1011,18 +1016,11 @@ export function ControlPanel() {
         containers: current?.containers || [],
         action: started!,
       }));
-      await waitForProtocolState(image, true);
+      const completed = await waitForProtocolState(image, true, started!);
       if (image.id === "mihomo") {
-        await Promise.all([loadOverview(), loadClients()]);
         setTab("mihomo");
-      } else {
-        await Promise.all([
-          loadOverview(),
-          loadClients(),
-          loadProtocolStatus(image.id as Protocol),
-        ]);
       }
-      finishSystemCommand(started!);
+      finishSystemCommand(completed);
     } catch (cause) {
       setInstallingProtocol("");
       const message = cause instanceof Error ? cause.message : "Не удалось запустить установку протокола";
@@ -1030,7 +1028,7 @@ export function ControlPanel() {
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
 
-  async function waitForProtocolUpdate(image: ProtocolImage) {
+  async function waitForProtocolUpdate(image: ProtocolImage, started: SystemAction) {
     for (let attempt = 0; attempt < 120; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 5000));
       try {
@@ -1041,9 +1039,9 @@ export function ControlPanel() {
         setProtocolImages(imageData.items || []);
         setApplication(status);
         const current = imageData.items?.find((item) => item.id === image.id);
-        const actionState = status.action?.state || "";
-        if (current && !current.update_available) return;
-        if (actionState === "failed" || status.action?.result === "failed") {
+        const outcome = protocolOperationOutcome(started, status.action, Boolean(current && !current.update_available));
+        if (outcome === "success") return status.action!;
+        if (outcome === "failed") {
           throw new Error(`Обновление ${image.name} завершилось с ошибкой`);
         }
       } catch (cause) {
@@ -1076,9 +1074,8 @@ export function ControlPanel() {
         containers: current?.containers || [],
         action: started!,
       }));
-      await waitForProtocolUpdate(image);
-      await Promise.all([loadOverview(), loadProtocolStatus(image.id as Protocol)]);
-      finishSystemCommand(started!);
+      const completed = await waitForProtocolUpdate(image, started!);
+      finishSystemCommand(completed);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Не удалось запустить обновление протокола";
       if (started) finishSystemCommand(started, message); else notifyError(message);
@@ -1094,7 +1091,6 @@ export function ControlPanel() {
     setBusy(true);
     try {
       await request(`/protocols/${protocol}/restart`, { method: "POST" });
-      await Promise.all([loadProtocolStatus(protocol), loadOverview()]);
       requestCommandReload();
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось перезапустить протокол"); }
     finally { setBusy(false); }
@@ -1164,6 +1160,7 @@ export function ControlPanel() {
         const current = statuses[protocol];
         return current ? { ...statuses, [protocol]: { ...current, diagnostics } } : statuses;
       });
+      await loadProtocolStatus(protocol);
     } catch (cause) {
       notifyError(cause instanceof Error ? cause.message : "Не удалось выполнить полную диагностику сети");
     } finally {
@@ -1204,25 +1201,19 @@ export function ControlPanel() {
         containers: current?.containers || [],
         action: started!,
       }));
-      await waitForProtocolState(image, false);
+      const completed = await waitForProtocolState(image, false, started!);
       setProtocolStatuses((current) => {
         const next = { ...current };
         delete next[image.id as Protocol];
         return next;
       });
-      await Promise.all([
-        loadOverview(),
-        loadClients(),
-        loadServices(),
-        ...(nextProtocol ? [loadProtocolStatus(nextProtocol)] : []),
-      ]);
       if (nextProtocol) {
         setSelectedChannel(nextProtocol);
         setTab("channels");
       } else {
         setTab("overview");
       }
-      finishSystemCommand(started!);
+      finishSystemCommand(completed);
     } catch (cause) {
       setInstallingProtocol("");
       const message = cause instanceof Error ? cause.message : "Не удалось запустить удаление протокола";
@@ -1256,6 +1247,13 @@ export function ControlPanel() {
     () => directProtocolOrder.filter((protocol) => protocolImages.some((image) => image.id === protocol && image.installed)),
     [protocolImages],
   );
+  useEffect(() => {
+    if (!token || (tab !== "clients" && !clientDialog)) return;
+    const refresh = () => { for (const protocol of installedProtocols) void loadProtocolStatus(protocol).catch(() => undefined); };
+    refresh();
+    const timer = window.setInterval(refresh, 6000);
+    return () => window.clearInterval(timer);
+  }, [token, tab, clientDialog, installedProtocols, loadProtocolStatus]);
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
   const vlessRouteStatus = protocolStatuses["vless-reality-xhttp"]?.routes || {};
   const hasNetworkRoute = (kind: "cdn" | "tls_relay" | "udp_relay") => Object.values(networkStatus?.transport_endpoint_checks_by_domain || {}).some((check) => check.kind === kind && check.ready);
@@ -1706,6 +1704,7 @@ export function ControlPanel() {
       />}
 
       {tab === "clients" && installedProtocols.length > 0 && <ConnectionsView
+        protocolStatuses={protocolStatuses}
         installedProtocols={installedProtocols}
         clientStateFilter={clientStateFilter}
         setClientStateFilter={setClientStateFilter}
@@ -1740,7 +1739,7 @@ export function ControlPanel() {
               <div className="connectionForm">
                 <label>Название устройства<input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов</small></label>
               </div>
-              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, channel_mode: option.channelMode || "direct", cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name}</strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
+              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, channel_mode: option.channelMode || "direct", cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name} <ProtocolHealthBadge health={protocolStatuses[option.protocol]?.health} /></strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
               {selectedConnectionType && <ClientConnectionSettings selectedConnectionType={selectedConnectionType} selectedVlessRoute={selectedVlessRoute} newClientSettings={newClientSettings} setNewClientSettings={setNewClientSettings} />}
             </div>
             <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy || !selectedConnectionType}>{busy ? "Создаём…" : "Создать подключение"}</button></div>
@@ -1809,44 +1808,11 @@ export function ControlPanel() {
           <div className="confirmActions"><button type="button" onClick={closePasswordDialog}>Отмена</button><button className="confirmPrimary" type="submit" disabled={busy || !currentAdminPassword || newAdminPassword.length < 16 || newAdminPassword !== confirmAdminPassword}>Сохранить пароль</button></div>
         </form>
       </div>}
-      {confirmation && <div className={`confirmBackdrop ${tab === "application" ? "applicationConfirmBackdrop" : tab === "clients" ? "connectionConfirmBackdrop" : protocolTab ? "protocolConfirmBackdrop" : ""}`} role="presentation" onMouseDown={() => closeConfirmation(false)}>
-        <form className={`confirmDialog ${confirmation.danger ? "danger" : ""} ${tab === "application" ? "applicationConfirmDialog" : tab === "clients" ? "connectionConfirmDialog" : protocolTab ? "protocolConfirmDialog" : "standardConfirmDialog"}`} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => {
+      {confirmation && <div className="confirmBackdrop" role="presentation" onMouseDown={() => closeConfirmation(false)}>
+        <form className={`confirmDialog standardConfirmDialog ${confirmation.danger ? "danger" : ""}`} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => {
           event.preventDefault();
-          if (tab === "application" || !confirmation.phrase || confirmationInput === confirmation.phrase) closeConfirmation(true);
+          if (!confirmation.phrase || confirmationInput === confirmation.phrase) closeConfirmation(true);
         }}>
-          {tab === "application" ? <>
-            <div className="applicationConfirmCopy">
-              <h2 id="confirm-title">{confirmation.title}</h2>
-              <p>{confirmation.message}</p>
-            </div>
-            <div className="applicationConfirmActions">
-              <button type="button" onClick={() => closeConfirmation(false)}>Отмена</button>
-              <button className={`applicationConfirmPrimary ${confirmation.danger ? "danger" : ""}`} type="submit">Выполнить</button>
-            </div>
-          </> : tab === "clients" ? <>
-            <div className="connectionConfirmCopy">
-              <h2 id="confirm-title">{confirmation.title}</h2>
-              <p>{confirmation.message}</p>
-            </div>
-            <div className="connectionConfirmActions">
-              <button type="button" onClick={() => closeConfirmation(false)}>Отмена</button>
-              <button className="connectionConfirmPrimary danger" type="submit">Отозвать</button>
-            </div>
-          </> : protocolTab ? <>
-            <div className="protocolConfirmCopy">
-              <p className="eyebrow">ПОДТВЕРЖДЕНИЕ ДЕЙСТВИЯ</p>
-              <h2 id="confirm-title">{confirmation.title}</h2>
-              <p>{confirmation.message}</p>
-              <div className="protocolConfirmObject"><span>Текущий протокол</span><strong>{labels[protocolTab]}</strong></div>
-            </div>
-            {confirmation.phrase && <label className="protocolConfirmPhrase">Для подтверждения введите <strong>{confirmation.phrase}</strong>
-              <input autoFocus value={confirmationInput} onChange={(event) => setConfirmationInput(event.target.value)} autoComplete="off" />
-            </label>}
-            <div className="protocolConfirmActions">
-              <button type="button" onClick={() => closeConfirmation(false)}>Отмена</button>
-              <button className={confirmation.danger ? "danger" : "primary"} type="submit" disabled={Boolean(confirmation.phrase && confirmationInput !== confirmation.phrase)}>{confirmation.confirmLabel}</button>
-            </div>
-          </> : <>
             <header className="standardConfirmHead">
               <div className="confirmMark" aria-hidden="true">{confirmation.danger ? "!" : "✓"}</div>
               <div><p className="eyebrow">ПОДТВЕРЖДЕНИЕ ДЕЙСТВИЯ</p><h2 id="confirm-title">{confirmation.title}</h2></div>
@@ -1861,7 +1827,6 @@ export function ControlPanel() {
               <button type="button" onClick={() => closeConfirmation(false)}>Отмена</button>
               <button className="confirmPrimary" type="submit" disabled={Boolean(confirmation.phrase && confirmationInput !== confirmation.phrase)}>{confirmation.confirmLabel}</button>
             </div>
-          </>}
         </form>
       </div>}
       <VersionFooter />

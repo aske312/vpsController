@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { createApiClient } from "../../shared/lib/api-request";
 import { useFailureNotifications } from "../../shared/notifications/notification-center";
 import { formatModuleVersion } from "../../shared/lib/format-version";
+import { ProtocolHealthBadge, type ProtocolHealth } from "../../shared/components/protocol-health-badge";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import type { Module as MihomoModule } from "../mihomo/types";
 import { createMihomoSummaryStore, EMPTY_MIHOMO_SUMMARY } from "./mihomo-summary";
@@ -81,6 +82,7 @@ function mihomoSummaryStore(token: string) {
 }
 
 type DirectProtocolStatus = {
+  health?: ProtocolHealth;
   protocol: ProtocolId;
   interface?: string;
   active?: boolean;
@@ -334,16 +336,15 @@ export function OverviewDashboard({
     const tx = hasClientRates ? clientTx : rate.tx;
     const serviceActive = statusFailed ? null : status ? Boolean(status.service_active ?? status.active) : null;
     const configured = statusFailed ? null : status ? Boolean(status.interface || status.address || status.listen_port || status.unit) : null;
-    const trafficNow = rx + tx > 64;
-    const inUse = serviceActive === true && (sessions > 0 || trafficNow);
+    const inUse = status?.health?.state === "WORKS";
     const avgLatencyValues = protocolClients.map((client) => client.latency_ms).filter((value): value is number => typeof value === "number");
     const avgLatency = avgLatencyValues.length ? Math.round(avgLatencyValues.reduce((sum, value) => sum + value, 0) / avgLatencyValues.length) : null;
     return { image, protocol, status, statusFailed, protocolClients, sessions, rx, tx, serviceActive, configured, inUse, avgLatency };
   }), [clients, directChannels, directRates, directStatusFailures, directStatuses]);
 
   const directInUseCount = directChannelStates.filter((item) => item.inUse).length;
-  const directReadyCount = directChannelStates.filter((item) => item.serviceActive === true && !item.inUse).length;
-  const directStoppedCount = directChannelStates.filter((item) => item.serviceActive === false).length;
+  const directReadyCount = directChannelStates.filter((item) => item.status?.health?.state === "READY").length;
+  const directStoppedCount = directChannelStates.filter((item) => item.status?.health?.state === "ERROR").length;
   const routesInUse = mihomoInUseCount + directInUseCount;
   const routesReady = mihomoReadyCount + directReadyCount;
   const mihomoUsageKnown = !mihomoInstalled || mihomoProfiles !== null || mihomoStatus !== null;
@@ -435,14 +436,12 @@ export function OverviewDashboard({
                     <div><p className="eyebrow">INDEPENDENT</p><h2>Direct Channels</h2><small>Прямые подключения вне Mihomo</small></div>
                   </div>
                   <span className={`overviewState ${directInUseCount ? "online" : "idle"}`}>
-                    {directInUseCount ? `${directInUseCount} IN USE ${directReadyCount} READY` : `${directReadyCount} READY ${directStoppedCount} STOPPED`}
+                    {directInUseCount ? `${directInUseCount} WORKS ${directReadyCount} READY` : `${directReadyCount} READY ${directStoppedCount} ERROR`}
                   </span>
                 </header>
 
                 <div className="overviewDirectList">
-                  {directChannelStates.map(({ image, protocol, status, statusFailed, protocolClients, sessions, rx, tx, serviceActive, configured, inUse, avgLatency }) => {
-                    const stateClass = statusFailed ? "unavailable" : inUse ? "inuse" : serviceActive === true ? "ready" : serviceActive === false ? "stopped" : "checking";
-                    const stateLabel = statusFailed ? "NO STATUS" : inUse ? "IN USE" : serviceActive === true ? "READY" : serviceActive === false ? "STOPPED" : "CHECKING";
+                  {directChannelStates.map(({ image, protocol, status, statusFailed, protocolClients, sessions, rx, tx, configured, avgLatency }) => {
                     return (
                       <div key={image.id}>
                         <span className={`overviewProtocolMark protocol-${protocol}`} title={directShort[protocol]}><ProtocolIcon protocol={protocol} /></span>
@@ -452,7 +451,7 @@ export function OverviewDashboard({
                         </p>
                         <span className="overviewDirectTraffic"><b>↓ {bytes(rx)}/с</b><small>↑ {bytes(tx)}/с</small></span>
                         <span className="overviewDirectLatency"><b>{avgLatency !== null ? `${avgLatency} ms` : "—"}</b><small>{status?.online_peers ?? 0} peers online</small></span>
-                        <em className={stateClass}>{stateLabel}</em>
+                        <ProtocolHealthBadge health={statusFailed ? undefined : directStatuses[protocol]?.health} />
                       </div>
                     );
                   })}

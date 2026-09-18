@@ -3321,9 +3321,9 @@ def profile_stats_payload(item: dict[str, Any]) -> dict[str, Any]:
         rows = [connections[value] for value in ids if value in connections]
         ages = [int(row["handshake_age_s"]) for row in rows if row.get("handshake_age_s") is not None]
         latencies = [float(row["latency_ms"]) for row in rows if row.get("latency_ms") is not None]
-        device_summaries[device_id] = {"stats_available": all(row.get("stats_available", True) for row in rows), "activity_available": all(row.get("activity_available", True) for row in rows), "configured": len(rows), "active": sum(1 for row in rows if row.get("active") is True), "rx_bytes": sum(int(row.get("rx_bytes", 0) or 0) for row in rows), "tx_bytes": sum(int(row.get("tx_bytes", 0) or 0) for row in rows), "last_handshake_age_s": min(ages) if ages else None, "latency_ms": min(latencies) if latencies else None}
+        device_summaries[device_id] = {"stats_available": not rows or any(row.get("stats_available", True) for row in rows), "stats_partial": any(not row.get("stats_available", True) for row in rows), "activity_available": all(row.get("activity_available", True) for row in rows), "configured": len(rows), "active": sum(1 for row in rows if row.get("active") is True), "rx_bytes": sum(int(row.get("rx_bytes", 0) or 0) for row in rows), "tx_bytes": sum(int(row.get("tx_bytes", 0) or 0) for row in rows), "last_handshake_age_s": min(ages) if ages else None, "latency_ms": min(latencies) if latencies else None}
     latencies = [float(value["latency_ms"]) for value in values if value.get("latency_ms") is not None]
-    return {"id": profile_id, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "stats_available": all(value.get("stats_available", True) for value in values), "activity_available": all(value.get("activity_available", True) for value in values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None, "latency_ms": min(latencies) if latencies else None}}
+    return {"id": profile_id, "connections": connections, "channels": connections, "devices": device_summaries, "summary": {"configured": len(values), "stats_available": not values or any(value.get("stats_available", True) for value in values), "stats_partial": any(not value.get("stats_available", True) for value in values), "activity_available": all(value.get("activity_available", True) for value in values), "active": active, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "last_handshake_age_s": min(handshake_ages) if handshake_ages else None, "latency_ms": min(latencies) if latencies else None}}
 
 
 @app.get("/api/mihomo/stats", dependencies=[Depends(auth_required)])
@@ -3819,6 +3819,9 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     definitions = validate_connection_inputs(payload.connections) if payload.connections is not None else legacy_connection_inputs(payload.channels)
     validate_vless_connection_limit(definitions)
     devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
+    if payload.connections is None:
+        for definition in definitions:
+            definition["device_id"] = devices[0]["id"]
     validate_profile_devices(devices, str(devices[0]["id"]))
     validate_personal_rule_ids(devices)
     validate_client_capabilities({"devices": devices, "connections": definitions, "common_device_id": devices[0]["id"]})

@@ -17,10 +17,19 @@ export const LIVE_SAMPLE_SECONDS = 3;
 export const HISTORY_SAMPLES = 100;
 export const CLIENTS_PER_PAGE = 10;
 
-type Traffic = { stats_available?: boolean; rx_bytes?: number | null; tx_bytes?: number | null };
+type Traffic = { stats_available?: boolean; stats_partial?: boolean; rx_bytes?: number | null; tx_bytes?: number | null };
+export function aggregateTraffic(rows: (Traffic | null | undefined)[]) {
+  const known = rows.filter((row): row is Traffic => Boolean(row && row.stats_available !== false && row.rx_bytes != null && row.tx_bytes != null));
+  return {
+    stats_available: rows.length === 0 || known.length > 0,
+    stats_partial: known.length !== rows.length || known.some((row) => row.stats_partial),
+    rx_bytes: known.reduce((sum, row) => sum + Number(row.rx_bytes), 0),
+    tx_bytes: known.reduce((sum, row) => sum + Number(row.tx_bytes), 0),
+  };
+}
 export function trafficBytes(stats: Traffic | null | undefined, direction: "rx_bytes" | "tx_bytes"): string {
   const value = stats?.[direction];
-  return stats?.stats_available === false || value == null ? "—" : bytes(value);
+  return stats?.stats_available === false || value == null ? "—" : `${stats?.stats_partial ? "≥ " : ""}${bytes(value)}`;
 }
 
 export function connectionOnline(stats: { active?: boolean | null } | null | undefined): boolean {

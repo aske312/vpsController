@@ -8,6 +8,10 @@ from tests.api.support import api
 
 
 class NetworkDomainsTests(unittest.TestCase):
+    def setUp(self):
+        root = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(patch.object(api, "NETWORK_ENDPOINTS_FILE", Path(root) / "network-endpoints.json"))
+
     def test_ipv6_origin_is_ready_before_dns_record_is_added(self):
         def fake_run(*args, **kwargs):
             outputs = {

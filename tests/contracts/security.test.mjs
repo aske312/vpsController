@@ -201,7 +201,7 @@ test("protected panel access uses one stable host through every configured chann
   assert.match(page, /window\.location\.assign\(targetUrl\)/);
   assert.doesNotMatch(view, /serviceModeActive \|\|/);
   assert.match(api, /access_mode != "vpn" and ufw_enabled/);
-  assert.match(page, /Promise\.all\(\[loadServices\(\), loadSecurity\(\)\]\)/);
+  assert.match(page, /await request\(`\/services\/\$\{serviceId\}\/action`[^;]+;\s*requestCommandReload\(\);/);
 });
 
 test("VPN-only mode publishes token subscriptions without exposing Mihomo administration", async () => {

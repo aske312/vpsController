@@ -240,8 +240,10 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
 .standardConfirmDialog {
   width:min(520px,calc(100vw - 28px)) !important;
   padding:0 !important;
-  overflow:hidden !important;
+  overflow:auto !important;
 }
+
+.confirmBackdrop:has(.standardConfirmDialog) { z-index:500 !important; }
 
 .standardConfirmHead {
   min-height:78px;
@@ -353,3 +355,15 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
 
 @media(max-width:980px){.dnsWorkbench,.dnsLowerGrid{grid-template-columns:1fr}.dnsImpactNotice{grid-template-columns:1fr 1fr}.dnsImpactNotice strong{grid-column:1/-1}.dnsPageHead{align-items:flex-start;flex-direction:column}.dnsPageFacts{width:100%}}
 @media(max-width:620px){.dnsResolverCard{grid-template-columns:30px minmax(0,1fr) 50px}.dnsResolverProbe{display:none}.dnsCustomPanel>div{grid-template-columns:1fr}.dnsEffectivePanel>div>span{grid-template-columns:36px minmax(0,1fr)}.dnsEffectivePanel em{grid-column:1/-1;text-align:left}.dnsImpactNotice{grid-template-columns:1fr}.dnsImpactNotice strong{grid-column:auto}.dnsApplyDock>div{display:grid}.dnsApplyDock span{display:none}.dnsPageFacts{display:grid;grid-template-columns:1fr 1fr}.dnsPageFacts>span:first-child{grid-column:1/-1}.overviewTopologyHead{padding-right:0 !important}}
+
+/* Shared API protocol health across inventories, selectors and monitoring. */
+.protocolHealthBadge, .tunnelHeroMeta .protocolCheck {
+  display: inline-flex; align-items: center; gap: 5px; width: fit-content;
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: 5px; padding: 2px 5px;
+  font-size: 9px; font-weight: 600; line-height: 1.35; white-space: nowrap;
+}
+.protocolHealthBadge[data-state="READY"], .tunnelHeroMeta .protocolCheck[data-state="READY"] { color: #82b69d; background: #82b69d0a; }
+.protocolHealthBadge[data-state="WORKS"] { color: #87acd0; background: #87acd00a; }
+.protocolHealthBadge[data-state="WARN"], .tunnelHeroMeta .protocolCheck[data-state="WARN"] { color: #c3b17d; background: #c3b17d0a; }
+.protocolHealthBadge[data-state="ERROR"], .tunnelHeroMeta .protocolCheck[data-state="ERROR"] { color: #ce9298; background: #ce92980a; }
+.connectionProtocolPicker strong { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }

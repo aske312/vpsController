@@ -11,13 +11,85 @@ from concurrent.futures import ThreadPoolExecutor
 import unittest
 from unittest.mock import patch
 
-from tests.api.support import ROOT, manager
+from tests.api.support import ROOT, api, manager
 
 BASH = (next((str(p) for p in (Path('D:/Git/bin/bash.exe'), Path('C:/Program Files/Git/bin/bash.exe')) if p.exists()), None)
         if os.name == 'nt' else shutil.which('bash'))
 
 
 class ModuleInstallationTests(unittest.TestCase):
+    def test_success_marker_waits_for_process_exit_and_status_read_keeps_marker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            action_file = Path(folder) / 'action.json'
+            saved = '{"unit":"test-operation.service","state":"succeeded","progress":100}'
+            action_file.write_text(saved)
+            for state, expected in [('active', 'running'), ('deactivating', 'running'), ('inactive', 'succeeded'), ('unknown', 'succeeded'), ('failed', 'failed')]:
+                def run(*args):
+                    if args == ('systemctl', 'is-active', 'test-operation.service'):
+                        return state
+                    if '--property=Result' in args:
+                        return 'exit-code' if state == 'failed' else 'success'
+                    return 'loaded' if '--property=LoadState' in args else ''
+                with self.subTest(state=state), patch.object(api, 'ACTION_FILE', action_file), patch.object(api, 'DATA_DIR', Path(folder)), patch.object(api, 'run', side_effect=run), patch.object(api.cdn_security, 'settings', return_value={}), patch.object(api.cdn_operation, 'status', return_value=None):
+                    self.assertEqual(api.application_status()['action']['state'], expected)
+                    self.assertEqual(action_file.read_text(), saved)
+
+    @unittest.skipUnless(BASH and os.name != 'nt', 'Requires Linux Bash')
+    def test_reality_uninstall_is_scoped_and_missing_config_keeps_https_firewall(self):
+        cases = (
+            ('protocol-images/vless-reality-xhttp/uninstall.sh', 'vless-reality-xhttp', 'mihomo/reality'),
+            ('protocol-images/mihomo/modules/transport-reality/uninstall.sh', 'mihomo/reality', 'vless-reality-xhttp'),
+        )
+        for source, own, other in cases:
+            for configured in (True, False):
+                with self.subTest(source=source, configured=configured), tempfile.TemporaryDirectory() as folder:
+                    root = Path(folder)
+                    other_config = root / 'etc/vps-control' / other / 'reality.env'
+                    other_config.parent.mkdir(parents=True)
+                    other_config.write_text('PORT=23456\n')
+                    if configured:
+                        own_config = root / 'etc/vps-control' / own / 'reality.env'
+                        own_config.parent.mkdir(parents=True)
+                        own_config.write_text('PORT=12345\n')
+                    script = (ROOT / source).read_text(encoding='utf-8')
+                    for prefix in ('/etc/', '/usr/local/', '/var/lib/', '/opt/'):
+                        script = script.replace(prefix, folder + prefix)
+                    calls = root / 'firewall.log'
+                    stubs = 'systemctl() { :; }; python3() { :; }; ufw() { echo "$*" >> "' + str(calls) + '"; };\n'
+                    script = script.replace('set -Eeuo pipefail', 'set -Eeuo pipefail\n' + stubs)
+                    result = subprocess.run([BASH, '-c', script], capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(other_config.read_text(), 'PORT=23456\n')
+                    commands = calls.read_text() if calls.exists() else ''
+                    self.assertNotIn('23456', commands)
+                    self.assertNotIn('443', commands)
+                    self.assertEqual('12345/tcp' in commands, configured)
+
+    @unittest.skipUnless(BASH and os.name != 'nt', 'Requires Linux Bash')
+    def test_shadowsocks_uninstall_keeps_other_installed_module_without_clients(self):
+        cases = (
+            ('protocol-images/shadowsocks/uninstall.sh', 'vps-control-mihomo-ss.target'),
+            ('protocol-images/mihomo/modules/transport-shadowsocks/uninstall.sh', 'vps-control-shadowsocks.target'),
+        )
+        for source, other_unit in cases:
+            for other_installed in (True, False):
+                with self.subTest(source=source, other_installed=other_installed), tempfile.TemporaryDirectory() as folder:
+                    root = Path(folder)
+                    units = root / 'etc/systemd/system'
+                    units.mkdir(parents=True)
+                    if other_installed:
+                        (units / other_unit).touch()
+                    script = (ROOT / source).read_text(encoding='utf-8')
+                    for prefix in ('/etc/', '/usr/local/', '/var/lib/'):
+                        script = script.replace(prefix, folder + prefix)
+                    stubs = 'systemctl() { :; }; ufw() { return 1; }; apt-get() { echo PACKAGE_PURGE; };\n'
+                    script = script.replace('set -Eeuo pipefail', 'set -Eeuo pipefail\n' + stubs)
+                    result = subprocess.run([BASH, '-c', script], capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual('PACKAGE_PURGE' in result.stdout, not other_installed)
+                    if other_installed:
+                        self.assertTrue((units / other_unit).exists())
+
     def test_stopped_module_remains_installed_and_repair_restarts_it(self):
         with (
             tempfile.TemporaryDirectory() as folder,

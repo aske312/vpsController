@@ -19,6 +19,19 @@ from telemetry_pb2 import Connection, ConnectionEvent, ConnectionEvents, Subscri
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_profile_and_device_totals_keep_available_channel_traffic(self):
+        profile = {"id": "partial", "devices": [{"id": "common"}], "connections": [
+            {"id": "ss", "device_id": "common", "component": "transport-shadowsocks", "credential": {}},
+            {"id": "quic", "device_id": "common", "component": "transport-tuic", "credential": {}},
+        ]}
+        with patch.object(manager, "normalize_profile", return_value=profile), patch.object(manager, "shadowsocks_profile_stats", return_value={"rx_bytes": 1024, "tx_bytes": 256, "stats_available": True}), patch.object(manager, "quic_profile_stats", return_value={"rx_bytes": None, "tx_bytes": None, "stats_available": False}):
+            stats = manager.profile_stats_payload(profile)
+        for row in (stats["summary"], stats["devices"]["common"]):
+            self.assertTrue(row["stats_available"])
+            self.assertTrue(row["stats_partial"])
+            self.assertEqual(row["rx_bytes"], 1024)
+            self.assertEqual(row["tx_bytes"], 256)
+
     def test_maintenance_failure_does_not_disable_other_protocols(self):
         stopped = threading.Event()
         with patch.object(stopped, "wait", side_effect=lambda _: stopped.set()), patch.object(manager, "cleanup_profile_transitions"), patch.object(manager, "ensure_reality_telemetry", side_effect=RuntimeError("unavailable")), patch.object(manager, "ensure_quic_telemetry") as quic, patch.object(manager.logger, "error"):

@@ -285,7 +285,7 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /NOT CONNECTED/);
   assert.doesNotMatch(page, /ProtocolCommandCenter|VlessControlCenter/);
   assert.match(page, /client\.protocol === "tuic" \? "TUIC" : client\.protocol === "trojan" \? "TRJ" : client\.protocol === "openvpn" \? "OVPN" : client\.protocol === "ikev2" \? "IKE" : "VLESS"/);
-  assert.match(page, /if \(Boolean\(current\?\.installed\) === installed\) return;/);
+  assert.match(page, /protocolOperationOutcome\(started, status\.action, Boolean\(current\?\.installed\) === installed\)/);
   for (const operation of ["install", "remove", "update"]) {
     const body = manager.match(new RegExp(`${operation}_protocol_image\\(\\) \\{[\\s\\S]*?\\n\\}`))?.[0] || "";
     assert.match(body, /refresh_protocol_api_access/);

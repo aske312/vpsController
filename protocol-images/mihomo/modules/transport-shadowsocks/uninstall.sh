@@ -43,7 +43,7 @@ rm -f /usr/local/lib/vps-control-mihomo-ss/guard.py
 rm -f /usr/local/lib/vps-control-mihomo-ss/empty_connections.py
 rmdir /usr/local/lib/vps-control-mihomo-ss 2>/dev/null || true
 rm -rf -- "${CONFIG_DIR}"
-if ! find /etc/vps-control/shadowsocks/clients -mindepth 1 -maxdepth 1 -name '*.json' -print -quit 2>/dev/null | grep -q .; then
+if [[ ! -f /etc/systemd/system/vps-control-shadowsocks.target ]] && ! find /etc/vps-control/shadowsocks/clients -mindepth 1 -maxdepth 1 -name '*.json' -print -quit 2>/dev/null | grep -q .; then
   apt-get -o DPkg::Lock::Timeout=300 purge -y shadowsocks-libev
 fi
 systemctl daemon-reload

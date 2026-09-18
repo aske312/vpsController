@@ -38,6 +38,7 @@ import port_allocation
 from dns_policy import build_xray_dns, probe_xray_dns, successful_dns_response
 import cdn_operation
 import ech_settings
+from protocol_health import TrafficSampler, protocol_health
 from schemas import (
     BootstrapRequest,
     AdminPasswordChange,
@@ -200,6 +201,10 @@ network_diagnostic_lock = threading.Lock()
 resource_check_cache: dict[str, dict] = {}
 network_diagnostic_cache: dict[str, dict] = {}
 direct_diagnostic_cache: dict[str, dict] = {}
+protocol_traffic = TrafficSampler()
+protocol_diagnostic_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="direct-diagnostics")
+protocol_diagnostic_pending: set[str] = set()
+protocol_diagnostic_pending_lock = threading.Lock()
 network_identity_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
 stream_stats_cache: dict[str, dict] = {}
@@ -1086,6 +1091,9 @@ def network_diagnostics(protocol: Literal["wg", "awg"], history: dict, force: bo
     try:
         interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
         port = WG_PORT if protocol == "wg" else AWG_PORT
+        actual_port = run("wg" if protocol == "wg" else "awg", "show", interface, "listen-port")
+        if actual_port.isdigit() and 0 < int(actual_port) < 65536:
+            port = int(actual_port)
         route_rows: list[dict] = []
         try:
             route_rows = json.loads(run("ip", "-j", "-4", "route", "show", "default") or "[]")
@@ -1169,6 +1177,8 @@ def network_diagnostics(protocol: Literal["wg", "awg"], history: dict, force: bo
             {"id": "load", "name": "Нагрузка VPS", "ok": load_percent < 90, "value": f"{load_percent}% · load {load1:.2f}/{cpu_count} CPU"},
             {"id": "services", "name": "Системные службы", "ok": failed_units == 0, "value": f"ошибок: {failed_units}"},
         ]
+        for check in checks:
+            check["severity"] = "critical" if check["id"] in {"route", "protocol_service", "udp", "forwarding"} else "warning"
         findings: list[dict] = []
 
         def finding(severity: str, code: str, title: str, detail: str, action: str) -> None:
@@ -1176,22 +1186,22 @@ def network_diagnostics(protocol: Literal["wg", "awg"], history: dict, force: bo
 
         historical_loss = history.get("external_loss_percent")
         if live_loss >= 20 or (historical_loss is not None and historical_loss >= 10):
-            finding("critical", "packet_loss", "Критические потери пакетов", f"Сейчас {live_loss:.1f}%, за 24 часа {historical_loss or 0:.1f}%.", "Проверить маршрут и канал провайдера VPS; сравнить MTR до 1.1.1.1 и 8.8.8.8.")
+            finding("warning", "packet_loss", "Критические потери пакетов", f"Сейчас {live_loss:.1f}%, за 24 часа {historical_loss or 0:.1f}%.", "Проверить маршрут и канал провайдера VPS; сравнить MTR до 1.1.1.1 и 8.8.8.8.")
         elif live_loss > 0 or (historical_loss is not None and historical_loss >= 2):
             finding("warning", "packet_loss", "Нестабильная доставка пакетов", f"Сейчас {live_loss:.1f}%, за 24 часа {historical_loss or 0:.1f}%.", "Снять MTR в обе стороны и проверить, на каком участке начинается потеря.")
         historical_jitter = history.get("jitter_avg_ms")
         if (live_jitter is not None and live_jitter >= 30) or (historical_jitter is not None and historical_jitter >= 30):
             finding("warning", "rtt_variation", "Высокий разброс RTT", f"mdev сейчас {live_jitter or 0:.1f} мс, за 24 часа {historical_jitter or 0:.1f} мс.", "Проверить загрузку канала, очереди и регион размещения VPS.")
         if not mtu_safe or not pmtu_ok:
-            finding("critical" if not mtu_safe else "warning", "mtu", "Риск фрагментации или blackhole MTU", f"MTU туннеля {tunnel_mtu or 'не определён'}, внешний MTU {uplink_mtu or 'не определён'}.", "Уменьшить MTU туннеля и повторить проверку крупных пакетов с DF.")
+            finding("warning", "mtu", "Риск фрагментации или blackhole MTU", f"MTU туннеля {tunnel_mtu or 'не определён'}, внешний MTU {uplink_mtu or 'не определён'}.", "Уменьшить MTU туннеля и повторить проверку крупных пакетов с DF.")
         if history.get("uplink_dropped", 0) > 0 or uplink_dropped > 0:
             finding("warning", "uplink_drops", "Drops на внешнем интерфейсе", f"За 24 часа: {history.get('uplink_dropped', 0)}, всего на интерфейсе: {uplink_dropped}.", "Проверить перегрузку vNIC, qdisc, softnet и лимиты хостинга.")
         if history.get("interface_dropped", 0) > 0:
             finding("warning", "tunnel_drops", "Drops на интерфейсе туннеля", f"За 24 часа: {history.get('interface_dropped', 0)}.", "Проверить MTU, очереди и сетевые буферы UDP.")
         if uplink_errors > 0 or history.get("uplink_errors", 0) > 0:
-            finding("critical", "uplink_errors", "Ошибки внешнего интерфейса", f"Текущее значение: {uplink_errors}.", "Передать показатели rx/tx errors провайдеру VPS.")
+            finding("warning", "uplink_errors", "Ошибки внешнего интерфейса", f"Текущее значение: {uplink_errors}.", "Передать показатели rx/tx errors провайдеру VPS.")
         if conntrack_percent is not None and conntrack_percent >= 80:
-            finding("critical", "conntrack", "Таблица conntrack почти заполнена", f"{conntrack_count} из {conntrack_max} ({conntrack_percent}%).", "Найти всплеск соединений и увеличить nf_conntrack_max только после оценки памяти.")
+            finding("warning", "conntrack", "Таблица conntrack почти заполнена", f"{conntrack_count} из {conntrack_max} ({conntrack_percent}%).", "Найти всплеск соединений и увеличить nf_conntrack_max только после оценки памяти.")
         if load_percent >= 90:
             finding("warning", "server_load", "Высокая нагрузка VPS", f"Load1 {load1:.2f} при {cpu_count} CPU ({load_percent}%).", "Проверить процессы, CPU steal и конкуренцию за ресурсы на стороне хостинга.")
         if memory_used_percent is not None and memory_used_percent >= 90:
@@ -1199,9 +1209,9 @@ def network_diagnostics(protocol: Literal["wg", "awg"], history: dict, force: bo
         if failed_units:
             finding("warning", "failed_services", "Есть службы в состоянии failed", f"Количество: {failed_units}.", "Открыть раздел «Службы» и проверить journalctl для отказавших unit.")
         if not dns_ok:
-            finding("critical", "dns", "DNS не работает", "Сервер не смог разрешить github.com.", "Проверить resolv.conf, systemd-resolved и доступность DNS-серверов.")
+            finding("warning", "dns", "DNS не работает", "Сервер не смог разрешить github.com.", "Проверить resolv.conf, systemd-resolved и доступность DNS-серверов.")
         if not https_ok:
-            finding("critical", "https", "Нет стабильного внешнего HTTPS", f"Ответ HTTP: {https_code or 'нет'}.", "Проверить DNS, маршрут, firewall и доступ провайдера.")
+            finding("warning", "https", "Нет стабильного внешнего HTTPS", f"Ответ HTTP: {https_code or 'нет'}.", "Проверить DNS, маршрут, firewall и доступ провайдера.")
         if not protocol_service_active or not udp_listening or not forwarding:
             finding("critical", "protocol_path", "Трафик протокола не может проходить", f"Служба: {protocol_service_active}; UDP listener: {udp_listening}; IPv4 forwarding: {forwarding}.", "Восстановить службу протокола, UDP listener и net.ipv4.ip_forward.")
 
@@ -1280,7 +1290,8 @@ def _diagnostic_tcp_probe(host: str, port: int, tls: bool = False) -> tuple[bool
 def _diagnostic_listener(ports: list[int], udp: bool) -> tuple[bool, str]:
     output = run("ss", "-H", "-lun" if udp else "-ltn")
     found = [port for port in ports if re.search(rf"(?:^|\s)\S*:{port}(?:\s|$)", output, re.MULTILINE)]
-    return bool(found), ", ".join(str(port) for port in found) if found else "порт не прослушивается"
+    missing = sorted(set(ports) - set(found))
+    return bool(ports) and not missing, ("прослушиваются: " + ", ".join(map(str, found)) if found else "порт не прослушивается") + ("; отсутствуют: " + ", ".join(map(str, missing)) if missing else "")
 
 
 def _direct_diagnostic_target(protocol: str) -> tuple[str, list[int], bool, bool, str]:
@@ -1315,9 +1326,10 @@ def _direct_diagnostic_target(protocol: str) -> tuple[str, list[int], bool, bool
     except (OSError, ValueError, json.JSONDecodeError):
         values = {}
     udp = protocol in {"hysteria2", "tuic"} or (protocol == "openvpn" and values.get("protocol", "udp") == "udp")
-    host = str(values.get("domain", "")) if protocol == "hysteria2" else (PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
-    default_port = 8444 if protocol == "tuic" else 8445 if protocol == "trojan" else 1194
-    return host or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, [_diagnostic_port(values.get("port"), default_port)], udp, not udp, protocol.upper()
+    host = PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT
+    default_port = 8443 if protocol == "hysteria2" else 8444 if protocol == "tuic" else 8445 if protocol == "trojan" else 1194
+    # OpenVPN TCP has its own framing; it is not a plain HTTPS/TLS socket.
+    return host, [_diagnostic_port(values.get("port"), default_port)], udp, protocol == "trojan", protocol.upper()
 
 
 def direct_protocol_diagnostics(protocol: str, force: bool = False) -> dict:
@@ -1338,6 +1350,28 @@ def direct_protocol_diagnostics(protocol: str, force: bool = False) -> dict:
         endpoint, ports, udp, tls, label = _direct_diagnostic_target(protocol)
         service_ok = run("systemctl", "is-active", unit) == "active"
         listener_ok, listener_value = _diagnostic_listener(ports, udp)
+        if protocol == "shadowsocks":
+            configs = list(SHADOWSOCKS_CONFIG_DIR.glob("*.json"))
+            required = {True: [], False: []}
+            valid = True
+            for path in configs:
+                try:
+                    config = json.loads(path.read_text(encoding="utf-8"))
+                    port = _diagnostic_port(config.get("server_port", config.get("port")), 0)
+                    mode = config.get("mode", "tcp_only")
+                    if not port or mode not in ("tcp_only", "udp_only", "tcp_and_udp"):
+                        valid = False
+                    for is_udp in required:
+                        if mode == "tcp_and_udp" or mode == ("udp_only" if is_udp else "tcp_only"):
+                            required[is_udp].append(port)
+                except (OSError, ValueError, TypeError):
+                    valid = False
+            probes = [(is_udp, _diagnostic_listener(values, is_udp)) for is_udp, values in required.items() if values]
+            listener_ok = valid and bool(probes) and all(probe[1][0] for probe in probes)
+            listener_value = "; ".join(("UDP: " if is_udp else "TCP: ") + probe[1] for is_udp, probe in probes) if valid else "Некорректная конфигурация Shadowsocks"
+            if not configs:
+                listener_ok = service_ok and Path("/etc/systemd/system/vps-control-shadowsocks@.service").is_file() and bool(run("sh", "-c", "command -v ss-server"))
+                listener_value = "Шаблон службы и ядро готовы; порты создаются с подключениями" if listener_ok else "Не найден шаблон службы или ядро Shadowsocks"
         addresses = _diagnostic_resolve(endpoint)
         if not endpoint:
             endpoint_ok, endpoint_value = False, "endpoint не задан"
@@ -1349,7 +1383,7 @@ def direct_protocol_diagnostics(protocol: str, force: bool = False) -> dict:
             {"id": "service", "name": "Служба протокола", "ok": service_ok, "value": "active" if service_ok else "не запущена"},
             {"id": "listener", "name": "Реальный порт", "ok": listener_ok, "value": listener_value},
             {"id": "endpoint_dns", "name": "DNS endpoint", "ok": bool(addresses), "value": ", ".join(addresses[:4]) if addresses else "имя не разрешается"},
-            {"id": "endpoint", "name": "Доступность endpoint", "ok": endpoint_ok, "value": endpoint_value},
+            {"id": "endpoint", "name": "Адрес для UDP (без проверки сессии)" if udp else "TCP/TLS endpoint с VPS", "ok": endpoint_ok, "value": endpoint_value, "severity": "warning"},
         ]
         if protocol == "vless-reality-xhttp":
             try:
@@ -1360,13 +1394,12 @@ def direct_protocol_diagnostics(protocol: str, force: bool = False) -> dict:
             target_probe = run(XRAY_BIN, "tls", "ping", target, timeout=10)
             target_ok = "Handshake succeeded" in target_probe
             checks.append({"id": "reality_target", "name": "REALITY target TLS", "ok": target_ok, "value": "handshake завершён" if target_ok else "TLS handshake не прошёл"})
-        elif udp:
-            checks.append({"id": "quic_udp", "name": "QUIC/UDP listener", "ok": listener_ok, "value": "UDP-порт прослушивается" if listener_ok else "UDP-порт не найден"})
         failed = [item for item in checks if not item["ok"]]
+        critical = [item for item in failed if item.get("severity", "critical") == "critical"]
         result = {
-            "checked_at": datetime.now(timezone.utc).isoformat(), "status": "critical" if failed else "healthy", "score": max(0, 100 - len(failed) * 25),
+            "checked_at": datetime.now(timezone.utc).isoformat(), "status": "critical" if critical else "warning" if failed else "healthy", "score": max(0, 100 - len(critical) * 25 - (len(failed) - len(critical)) * 10),
             "live": {"endpoint": endpoint, "resolved": addresses, "ports": ports, "transport": label}, "checks": checks,
-            "findings": [{"severity": "critical", "code": item["id"], "title": item["name"], "detail": item["value"], "action": "Проверить службу, firewall, DNS-запись и соответствие порта настройкам протокола."} for item in failed],
+            "findings": [{"severity": item.get("severity", "critical"), "code": item["id"], "title": item["name"], "detail": item["value"], "action": "Проверить службу, firewall, DNS-запись и соответствие порта настройкам протокола."} for item in failed],
             "_cached_at": time.time(),
         }
         direct_diagnostic_cache[protocol] = result
@@ -2987,6 +3020,14 @@ def application_status(_: None = Depends(require_token)) -> dict:
         elif recorded_state in ("succeeded", "failed"):
             resolved_state = recorded_state
             result = action.get("result", "success" if recorded_state == "succeeded" else "failed")
+            if recorded_state == "succeeded":
+                active_state = run("systemctl", "is-active", unit)
+                unit_result = run("systemctl", "show", unit, "--property=Result", "--value")
+                if active_state in ("active", "activating", "deactivating", "reloading"):
+                    resolved_state = "running"
+                elif active_state == "failed" or unit_result not in ("", "success", "unknown"):
+                    resolved_state = "failed"
+                    result = unit_result or "failed"
         else:
             started_at = action.get("started_at", "")
             try:
@@ -3029,11 +3070,8 @@ def application_status(_: None = Depends(require_token)) -> dict:
                     action["message"] = "Операция завершилась без подтверждения; рабочая версия сохранена"
         action["state"] = resolved_state
         action["result"] = result
-        try:
-            ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
-            os.chmod(ACTION_FILE, 0o600)
-        except OSError:
-            pass
+        # Status reads must not overwrite the command's final marker (or a newer
+        # operation) with a transient systemd snapshot.
     web_unit_loaded = run("systemctl", "show", "vps-control-web.service", "--property=LoadState", "--value") == "loaded"
     caddy_unit_loaded = run("systemctl", "show", "caddy.service", "--property=LoadState", "--value") == "loaded"
     legacy_container_names = run("docker", "ps", "--format", "{{.Names}}") if not (web_unit_loaded and caddy_unit_loaded) else ""
@@ -5610,8 +5648,7 @@ def update_protocol_settings(
     return protocol_status(protocol)
 
 
-@app.get("/api/protocols/{protocol}/status")
-def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"], _: None = Depends(require_token)) -> dict:
+def protocol_status_data(protocol: str) -> dict:
     if protocol == "ikev2":
         unit = "vps-control-ikev2.service"
         try: values = json.loads(IKEV2_SETTINGS.read_text(encoding="utf-8"))
@@ -5890,6 +5927,48 @@ def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality
         "history": history,
         "diagnostics": cached_network_diagnostics(protocol),
       }
+
+
+def schedule_protocol_diagnostics(protocol: str) -> bool:
+    with protocol_diagnostic_pending_lock:
+        if protocol in protocol_diagnostic_pending:
+            return True
+        protocol_diagnostic_pending.add(protocol)
+
+    def diagnose() -> None:
+        try:
+            if protocol in ("wg", "awg"):
+                network_diagnostics(protocol, protocol_history(protocol), force=True)
+            else:
+                direct_protocol_diagnostics(protocol, force=True)
+        except Exception:
+            cache = network_diagnostic_cache if protocol in ("wg", "awg") else direct_diagnostic_cache
+            cache[protocol] = {
+                "_cached_at": time.time(), "checked_at": datetime.now(timezone.utc).isoformat(),
+                "status": "warning", "checks": [{"id": "diagnostic", "name": "Выполнение диагностики", "ok": False, "severity": "warning", "value": "Проверку не удалось завершить; повторим автоматически"}], "findings": [],
+            }
+        finally:
+            with protocol_diagnostic_pending_lock:
+                protocol_diagnostic_pending.discard(protocol)
+
+    protocol_diagnostic_executor.submit(diagnose)
+    return True
+
+
+@app.get("/api/protocols/{protocol}/status")
+def protocol_status(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"], _: None = Depends(require_token)) -> dict:
+    result = protocol_status_data(protocol)
+    cache = network_diagnostic_cache if protocol in ("wg", "awg") else direct_diagnostic_cache
+    cached = cache.get(protocol, {})
+    age = time.time() - cached.get("_cached_at", 0)
+    checking = schedule_protocol_diagnostics(protocol) if age >= 60 else protocol in protocol_diagnostic_pending
+    diagnostics = {key: value for key, value in cached.items() if key != "_cached_at"}
+    if not diagnostics:
+        diagnostics = {"status": "pending", "checks": [], "findings": []}
+    traffic = protocol_traffic.sample(protocol, result.get("interface_rx_bytes"), result.get("interface_tx_bytes"))
+    result["diagnostics"] = diagnostics
+    result["health"] = protocol_health(result, diagnostics, traffic, int(result.get("peers", 0)), stale=age > 180, checking=checking)
+    return result
 
 
 @app.post("/api/protocols/{protocol}/resources/check")
