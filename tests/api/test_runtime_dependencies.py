@@ -11,10 +11,23 @@ import runtime_dependencies as dependencies
 
 
 class DependencyTests(unittest.TestCase):
+    def setUp(self):
+        migration = patch.object(dependencies.legacy_dns, 'migrate', return_value=False)
+        self.migrate_dns = migration.start()
+        self.addCleanup(migration.stop)
+
     def test_newer_caddy_is_preserved_without_installing_anything(self):
         with patch.object(dependencies.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, 'v2.12.0', '')) as run:
             dependencies.install()
             self.assertEqual(run.call_count, 1)
+            self.migrate_dns.assert_called_once_with()
+
+    def test_dns_migration_failure_prevents_package_changes(self):
+        self.migrate_dns.side_effect = RuntimeError('Invalid legacy DNS')
+        with patch.object(dependencies.subprocess, 'run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'Invalid legacy DNS'):
+                dependencies.install()
+        run.assert_not_called()
 
     def test_bundled_package_hash_is_verified_before_extraction(self):
         with tempfile.TemporaryDirectory() as temp:
