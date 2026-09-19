@@ -15,6 +15,7 @@ def supervise(command, stop=None, emit=None, monitor_factory=None):
     stop = stop if stop is not None else threading.Event()
     emit = emit if emit is not None else lambda message: print(message, flush=True)
     exhausted = threading.Event()
+    configuration_error = threading.Event()
     monitor_stop = threading.Event()
     child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
@@ -41,6 +42,11 @@ def supervise(command, stop=None, emit=None, monitor_factory=None):
             line = child.stdout.readline(4096)
             if not line:
                 break
+            if b"bind: address already in use" in line.lower():
+                configuration_error.set()
+                exhausted.set()
+                emit("Shadowsocks port conflict; automatic restart disabled until configuration is corrected")
+                return
             if any(error in line.lower() for error in RESOURCE_ERRORS):
                 exhausted.set()
                 emit("Shadowsocks resource exhaustion; stopping this instance for automatic recovery")
@@ -80,6 +86,8 @@ def supervise(command, stop=None, emit=None, monitor_factory=None):
         child.stdout.close()
     if stop.is_set():
         return 0
+    if configuration_error.is_set():
+        return 78
     return 75 if exhausted.is_set() else (child.returncode if child.returncode >= 0 else 1)
 
 

@@ -13,6 +13,8 @@ import subprocess
 import tempfile
 import urllib.request
 
+import legacy_dns
+
 ROOT = Path(__file__).resolve().parent
 CADDY_CONFIG = Path('/etc/caddy/Caddyfile')
 
@@ -78,6 +80,10 @@ def candidate_caddy():
 
 
 def install() -> None:
+    # Old installed updaters invoke this entrypoint from the new payload before
+    # swapping releases. Run migrations even when Caddy is already current.
+    if legacy_dns.migrate():
+        print("Legacy DNS: boot ordering fixed; running services were not restarted.", flush=True)
     if caddy_is_current():
         return
     with tempfile.TemporaryDirectory(prefix='vps-caddy-install-') as temp:

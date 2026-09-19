@@ -2189,6 +2189,11 @@ ensure_runtime_dependencies() {
 }
 
 install_api() {
+  # Older releases left Unbound bound to tunnel addresses. Fix its next boot
+  # without restarting DNS or WG/AWG; older rollback payloads lack this helper.
+  if [[ -f "${INSTALL_DIR}/api/legacy_dns.py" ]]; then
+    python3 "${INSTALL_DIR}/api/legacy_dns.py" || return $?
+  fi
   local requirements_hash requirements_marker="${INSTALL_DIR}/venv/.requirements.sha256"
   requirements_hash="$(sha256sum "${INSTALL_DIR}/api/requirements.txt" | awk '{print $1}')"
   if [[ ! -x "${INSTALL_DIR}/venv/bin/python" ]]; then

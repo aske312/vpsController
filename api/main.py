@@ -39,6 +39,7 @@ from dns_policy import build_xray_dns, probe_xray_dns, successful_dns_response
 import cdn_operation
 import ech_settings
 from protocol_health import TrafficSampler, protocol_health
+from cpu_sampler import CpuSampler
 from schemas import (
     BootstrapRequest,
     AdminPasswordChange,
@@ -213,8 +214,7 @@ XRAY_GITHUB_REPO = "XTLS/Xray-core"
 github_release_lock = threading.Lock()
 github_release_cache: dict[str, dict] = {}
 client_mutation_lock = threading.Lock()
-cpu_usage_lock = threading.Lock()
-cpu_previous: tuple[int, int] | None = None
+cpu_sampler = CpuSampler()
 RESOURCE_TARGETS = (
     ("Google", "https://www.google.com/generate_204"),
     ("YouTube", "https://www.youtube.com/"),
@@ -1437,24 +1437,7 @@ def network_info() -> tuple[int, int]:
 
 
 def cpu_usage_percent() -> float:
-    global cpu_previous
-    try:
-        values = [int(value) for value in Path("/proc/stat").read_text().splitlines()[0].split()[1:]]
-    except (OSError, ValueError, IndexError):
-        return 0.0
-    total = sum(values)
-    idle = sum(values[index] for index in (3, 4) if index < len(values))
-    with cpu_usage_lock:
-        previous = cpu_previous
-        cpu_previous = (total, idle)
-    if not previous:
-        time.sleep(0.1)
-        return cpu_usage_percent()
-    total_delta = total - previous[0]
-    idle_delta = idle - previous[1]
-    if total_delta <= 0:
-        return 0.0
-    return round(max(0.0, min(100.0, (total_delta - idle_delta) / total_delta * 100)), 1)
+    return cpu_sampler.percent_used()
 
 
 def refresh_updates_cache() -> None:
