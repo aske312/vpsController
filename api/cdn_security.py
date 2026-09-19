@@ -13,6 +13,7 @@ import time
 import urllib.request
 from pathlib import Path
 from typing import Callable
+from component_registry import ComponentRegistry
 
 RESOURCES = Path(__file__).resolve().parent / "resources"
 STATE = Path("/etc/vps-control/cdn-security.json")
@@ -55,12 +56,16 @@ def networks() -> list[str]:
 
 
 def read_routes() -> list[dict]:
-    values = read_env(DIRECT_ENV)
+    registry = ComponentRegistry(Path(os.getenv("DATA_DIR", "/var/lib/vps-control")))
+    def available(image_id):
+        return os.getenv("VPS_CONTROL_EXCLUDE_COMPONENT") != image_id and (
+            not registry.management(image_id).get("retained") or os.getenv("VPS_CONTROL_RESTORE_COMPONENT") == image_id)
+    values = read_env(DIRECT_ENV) if available("vless-reality-xhttp") else {}
     routes = []
     for prefix in ("CDN", "TLS"):
         if values.get(f"{prefix}_ENABLED") == "yes" and values.get(f"{prefix}_DOMAIN"):
             routes.append({"domain": values[f"{prefix}_DOMAIN"], "path": values.get(f"{prefix}_PATH", values.get("WS_PATH", "/")), "port": int(values.get(f"{prefix}_PORT", "10087")), "transport": values.get(f"{prefix}_TRANSPORT", "websocket"), "cloudflare": prefix == "CDN"})
-    for path in sorted(ROUTES.glob("*.json")):
+    for path in sorted(ROUTES.glob("*.json")) if available("mihomo") else []:
         value = json.loads(path.read_text(encoding="utf-8"))
         # Old descriptors used the tls- filename prefix, before an explicit flag.
         value.setdefault("cloudflare", not path.stem.startswith("tls-"))

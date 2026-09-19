@@ -22,7 +22,7 @@ import time
 import uuid
 import urllib.request
 import urllib.parse
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, ExitStack
 from pathlib import Path
 from typing import Any, Literal
 
@@ -44,7 +44,9 @@ from xray_stats import XrayStats
 import ss_runtime
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
+import application_operation
 import port_allocation
+from component_registry import ComponentRegistry, RegistryError
 
 APP_ROOT = Path("/opt/vps-control")
 MODULE_ROOT = APP_ROOT / "protocol-images" / "mihomo"
@@ -289,6 +291,8 @@ for _module_id in TRANSPORTS:
         SERVICE_BY_MODULE[_module_id] = str(_manifest_value["service"])
 
 def ensure_shadowsocks_protection() -> None:
+    if not component_is_managed():
+        return
     # An older updater can install these files without running the new runtime
     # migration. Reconcile from the running manager as well; the helper leaves
     # protected instances and intentionally stopped profiles untouched.
@@ -300,6 +304,9 @@ def ensure_shadowsocks_protection() -> None:
 
 def transition_worker(stopped: threading.Event) -> None:
     while not stopped.is_set():
+        if not component_is_managed():
+            stopped.wait(60)
+            continue
         for label, job in (
             ("Shadowsocks protection", ensure_shadowsocks_protection),
             ("profile transitions", cleanup_profile_transitions),
@@ -310,7 +317,10 @@ def transition_worker(stopped: threading.Event) -> None:
             if stopped.is_set():
                 break
             try:
-                job()
+                with application_operation.short_mutation(DATA_ROOT.parent):
+                    job()
+            except application_operation.OperationConflict:
+                break  # User operation owns the runtime; retry on the next tick.
             except Exception:
                 logger.error("Maintenance %s failed; retrying in 60 seconds", label)
         stopped.wait(60)
@@ -478,13 +488,23 @@ def write_action(action: str, message: str, state: str = "running", progress: in
     if state == "failed":
         logger.error("Mihomo action %s failed: %s", action, message)
         message = public_message or PUBLIC_COMMAND_ERROR
-    atomic_json(ACTION_FILE, {
+    previous = get_action_payload()
+    continuing = previous.get("action") == action and previous.get("state") in {"running", "queued", "unknown"} and not (state == "running" and progress <= 15)
+    identity = previous.get("id") if continuing else None
+    identity = identity or uuid.uuid4().hex
+    payload = {
+        "id": identity,
         "action": action,
         "message": message,
         "state": state,
         "progress": progress,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    })
+        "started_at": previous.get("started_at") if continuing and previous.get("started_at") else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    atomic_json(ACTION_FILE, payload)
+    application_operation.atomic_json(ACTION_FILE.parent / "operations" / f"{identity}.json", {**payload, "state": "succeeded" if state == "done" else state, "source": "mihomo"})
+    if state in {"done", "failed"}:
+        application_operation.prune(ACTION_FILE.parent, identity)
 
 
 def get_action_payload() -> dict[str, Any]:
@@ -1476,6 +1496,8 @@ def routing_settings() -> dict[str, Any]:
 
 
 def ensure_policy_settings() -> None:
+    if not component_is_managed():
+        return
     SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
     if not DNS_SETTINGS_FILE.exists():
         atomic_json(DNS_SETTINGS_FILE, dns_defaults())
@@ -1630,6 +1652,27 @@ def auth_required(authorization: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
+def component_is_managed() -> bool:
+    management = ComponentRegistry(DATA_ROOT.parent).management("mihomo")
+    return management["state"] == "managed" and not management.get("retained")
+
+
+def require_mihomo_management(_: None = Depends(auth_required)) -> None:
+    try:
+        ComponentRegistry(DATA_ROOT.parent).require_managed("mihomo")
+    except RegistryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+def require_mihomo_mutation(_: None = Depends(auth_required)):
+    try:
+        with application_operation.short_mutation(DATA_ROOT.parent):
+            require_mihomo_management()
+            yield
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
 @app.get("/api/mihomo/action", dependencies=[Depends(auth_required)])
 def get_action() -> dict[str, Any]:
     return get_action_payload()
@@ -1641,7 +1684,7 @@ def get_routing_schema() -> dict[str, Any]:
     return {"schema": routing_schema(), "values": values, "presets": profile_presets(), "rule_lists": routing_rule_lists(values), "personal_rules": personal_rules()}
 
 
-@app.post("/api/mihomo/routing/personal-rules", dependencies=[Depends(auth_required)])
+@app.post("/api/mihomo/routing/personal-rules", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def create_personal_rule(payload: PersonalRuleInput) -> dict[str, Any]:
     rules = personal_rules()
@@ -1651,7 +1694,7 @@ def create_personal_rule(payload: PersonalRuleInput) -> dict[str, Any]:
     return rule
 
 
-@app.patch("/api/mihomo/routing/personal-rules/{rule_id}", dependencies=[Depends(auth_required)])
+@app.patch("/api/mihomo/routing/personal-rules/{rule_id}", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def update_personal_rule(rule_id: str, payload: PersonalRuleInput) -> dict[str, Any]:
     rules = personal_rules()
@@ -1664,7 +1707,7 @@ def update_personal_rule(rule_id: str, payload: PersonalRuleInput) -> dict[str, 
     return rule
 
 
-@app.delete("/api/mihomo/routing/personal-rules/{rule_id}", dependencies=[Depends(auth_required)])
+@app.delete("/api/mihomo/routing/personal-rules/{rule_id}", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def delete_personal_rule(rule_id: str) -> dict[str, Any]:
     rules = personal_rules()
@@ -1684,7 +1727,7 @@ def delete_personal_rule(rule_id: str) -> dict[str, Any]:
     return {"removed": rule_id}
 
 
-@app.patch("/api/mihomo/routing/presets", dependencies=[Depends(auth_required)])
+@app.patch("/api/mihomo/routing/presets", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def patch_profile_presets(patch: PresetSettingsPatch) -> dict[str, Any]:
     next_presets = validate_profile_presets(patch.presets)
@@ -1692,7 +1735,7 @@ def patch_profile_presets(patch: PresetSettingsPatch) -> dict[str, Any]:
     return {"presets": next_presets}
 
 
-@app.patch("/api/mihomo/routing/settings", dependencies=[Depends(auth_required)])
+@app.patch("/api/mihomo/routing/settings", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
     next_values = validate_routing({key: value for key, value in patch.values.items() if key != "tunnel_privacy"}, current=routing_settings())
@@ -1705,7 +1748,7 @@ def get_dns_settings() -> dict[str, Any]:
     return {"schema": dns_schema(), "values": dns_settings()}
 
 
-@app.patch("/api/mihomo/dns/settings", dependencies=[Depends(auth_required)])
+@app.patch("/api/mihomo/dns/settings", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def patch_dns_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
     next_values = validate_dns(patch.values)
@@ -2204,7 +2247,7 @@ def get_module_settings(module_id: str) -> dict[str, Any]:
     }
 
 
-@app.patch("/api/mihomo/modules/{module_id}/settings", dependencies=[Depends(auth_required)])
+@app.patch("/api/mihomo/modules/{module_id}/settings", dependencies=[Depends(require_mihomo_mutation)])
 @module_mutation("module-settings")
 def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[str, Any]:
     previous_values = module_settings(module_id)
@@ -2249,7 +2292,7 @@ def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[st
     return get_module_settings(module_id)
 
 
-@app.post("/api/mihomo/modules/{module_id}/install", dependencies=[Depends(auth_required)])
+@app.post("/api/mihomo/modules/{module_id}/install", dependencies=[Depends(require_mihomo_mutation)])
 @module_mutation("module-install")
 def install_module(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
@@ -2291,7 +2334,7 @@ def install_module(module_id: str) -> dict[str, Any]:
     return module_payload(module_id)
 
 
-@app.delete("/api/mihomo/modules/{module_id}", dependencies=[Depends(auth_required)])
+@app.delete("/api/mihomo/modules/{module_id}", dependencies=[Depends(require_mihomo_mutation)])
 @module_mutation("module-remove")
 def remove_module(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
@@ -2319,7 +2362,7 @@ def remove_module(module_id: str) -> dict[str, Any]:
     return module_payload(module_id)
 
 
-@app.post("/api/mihomo/modules/{module_id}/update", dependencies=[Depends(auth_required)])
+@app.post("/api/mihomo/modules/{module_id}/update", dependencies=[Depends(require_mihomo_mutation)])
 @module_mutation("module-update")
 def update_module(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
@@ -3111,6 +3154,8 @@ def start_quic_telemetry(module_id: str, config: dict[str, Any]) -> None:
 
 
 def ensure_reality_telemetry() -> None:
+    if not component_is_managed():
+        return
     with profile_mutation_lock:
         path = CONFIG_ROOT / "reality" / "config.json"
         config = load_json(path, {})
@@ -3122,6 +3167,8 @@ def ensure_reality_telemetry() -> None:
 
 
 def ensure_quic_telemetry(module_id: str) -> None:
+    if not component_is_managed():
+        return
     with profile_mutation_lock:
         path = quic_root(module_id) / "config.json"
         if not path.exists() or not systemctl_active(SERVICE_BY_MODULE[module_id]):
@@ -3551,6 +3598,8 @@ def remove_retiring_connections(profile: dict[str, Any], connection_id: str) -> 
 
 @serialized_profile_mutation
 def cleanup_profile_transitions() -> None:
+    if not component_is_managed():
+        return
     data = profiles()
     now = time.time()
     due = [(profile, entry) for profile in data for entry in profile.get("retiring_connections", []) if entry["expires_at"] <= now]
@@ -3698,7 +3747,7 @@ def get_reconciliation() -> dict[str, Any]:
     return reconciliation_report(False)
 
 
-@app.post("/api/mihomo/reconciliation", dependencies=[Depends(auth_required)])
+@app.post("/api/mihomo/reconciliation", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 @transactional_profile_mutation
 def repair_reconciliation() -> dict[str, Any]:
@@ -3805,7 +3854,7 @@ def validate_profile_devices(devices: list[dict[str, Any]], common_id: str, exis
                 raise HTTPException(status_code=422, detail="Индивидуальные устройства регистрируются автоматически по HWID")
 
 
-@app.post("/api/mihomo/profiles", dependencies=[Depends(auth_required)])
+@app.post("/api/mihomo/profiles", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     if payload.operation_id:
@@ -3856,7 +3905,7 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     return profile_response(item)
 
 
-@app.patch("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(auth_required)])
+@app.patch("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 @transactional_profile_mutation
 def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
@@ -3961,7 +4010,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     return profile_response(item)
 
 
-@app.delete("/api/mihomo/profiles/{profile_id}/devices/{device_id}", dependencies=[Depends(auth_required)])
+@app.delete("/api/mihomo/profiles/{profile_id}/devices/{device_id}", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 @transactional_profile_mutation
 def delete_profile_device(profile_id: str, device_id: str) -> dict[str, Any]:
@@ -3998,7 +4047,7 @@ def delete_profile_device(profile_id: str, device_id: str) -> dict[str, Any]:
     return {"removed": device_id}
 
 
-@app.delete("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(auth_required)])
+@app.delete("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 @transactional_profile_mutation
 def delete_profile(profile_id: str) -> dict[str, Any]:
@@ -4582,6 +4631,7 @@ def profile_subscription(profile_id: str, device_id: str | None = None) -> dict[
         raise HTTPException(status_code=404, detail="Profile device not found")
     token = str(item.get("subscription_token", ""))
     if not token:
+        require_mihomo_management()
         token = secrets.token_urlsafe(32)
         item["subscription_token"] = token
         item["subscriptions"] = {}
@@ -4656,6 +4706,8 @@ def subscription_device_metadata(request: Request) -> dict[str, str]:
 
 
 def save_subscription_profile(profile: dict[str, Any]) -> None:
+    if not component_is_managed():
+        return
     data = profiles()
     for index, saved in enumerate(data):
         if saved.get("id") == profile.get("id"):
@@ -4664,8 +4716,10 @@ def save_subscription_profile(profile: dict[str, Any]) -> None:
             return
 
 
-def record_common_subscription_access(profile: dict[str, Any], metadata: dict[str, str]) -> dict[str, Any]:
+def record_common_subscription_access(profile: dict[str, Any], metadata: dict[str, str], *, read_only=False) -> dict[str, Any]:
     normalized = normalize_profile(profile)
+    if read_only or not component_is_managed():
+        return normalized
     normalized["common_access"] = {
         **{key: value for key, value in metadata.items() if value and key != "device_name"},
         "last_seen_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -4675,10 +4729,16 @@ def record_common_subscription_access(profile: dict[str, Any], metadata: dict[st
     return normalized
 
 
-def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, metadata: dict[str, str]) -> tuple[dict[str, Any], str]:
+def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, metadata: dict[str, str], *, read_only=False) -> tuple[dict[str, Any], str]:
     hwid_hash = hmac.new(token.encode(), raw_hwid.encode(), hashlib.sha256).hexdigest()
     normalized = normalize_profile(profile)
     existing = next((device for device in normalized["devices"] if hmac.compare_digest(str(device.get("hwid_hash") or ""), hwid_hash) and device_matches_client(device, metadata)), None)
+    if read_only or not component_is_managed():
+        if existing:
+            return normalized, str(existing["id"])
+        if read_only:
+            raise HTTPException(status_code=409, detail="Сейчас доступна только выдача конфигураций существующим устройствам")
+        require_mihomo_management()
     if existing:
         existing["client_identity_key"] = client_identity_key(metadata)
         selected_format = device_client_format(existing, metadata)
@@ -4727,6 +4787,8 @@ def subscription_device(profile: dict[str, Any], raw_hwid: str, token: str, meta
 
 @serialized_profile_mutation
 def record_transition_delivery(profile_id: str, device_id: str, revision: str) -> None:
+    if not component_is_managed():
+        return
     # Runs after ASGI sends the YAML body. A short settling period lets the
     # client apply it before the existing worker removes the old listeners.
     try:
@@ -4740,9 +4802,20 @@ def record_transition_delivery(profile_id: str, device_id: str, revision: str) -
         logger.error("Could not record updated subscription delivery")
 
 
+def subscription_mutation_access():
+    with ExitStack() as stack:
+        allowed = component_is_managed()
+        if allowed:
+            try:
+                stack.enter_context(application_operation.short_mutation(DATA_ROOT.parent))
+            except application_operation.OperationConflict:
+                allowed = False
+        yield allowed
+
+
 @app.get("/s/{token}", response_class=PlainTextResponse)
 @app.get("/api/mihomo/subscriptions/{token}", response_class=PlainTextResponse)
-def public_profile_subscription(token: str, request: Request) -> PlainTextResponse:
+def public_profile_subscription(token: str, request: Request, allow_changes: bool = Depends(subscription_mutation_access)) -> PlainTextResponse:
     selected_profile: dict[str, Any] | None = None
     bound_device: str | None = None
     for item in profiles():
@@ -4787,6 +4860,9 @@ def public_profile_subscription(token: str, request: Request) -> PlainTextRespon
                         if saved_hash and (not hwid_hash or not hmac.compare_digest(str(saved_hash), hwid_hash)):
                             raise HTTPException(status_code=403, detail="Ссылка привязана к другому HWID или клиент не передал HWID")
                         if hwid_hash and not saved_hash:
+                            if allow_changes is False:
+                                raise HTTPException(status_code=409, detail="Привязка нового устройства временно недоступна")
+                            require_mihomo_management()
                             if any(other.get("hwid_hash") == hwid_hash and device_matches_client(other, metadata) and str(other["id"]) != bound_device for other in selected_profile["devices"]):
                                 raise HTTPException(status_code=409, detail="Этот HWID уже привязан к другому устройству профиля")
                             device["hwid_hash"] = hwid_hash
@@ -4796,15 +4872,16 @@ def public_profile_subscription(token: str, request: Request) -> PlainTextRespon
                         device["routing"] = {**device_routing(selected_profile, bound_device), "client_config_format": device_client_format(device, metadata)}
                         device.update({key: value for key, value in metadata.items() if value and value != "unknown" and key != "device_name"})
                     device["last_seen_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            save_subscription_profile(selected_profile)
+            if allow_changes is not False:
+                save_subscription_profile(selected_profile)
     elif raw_hwid:
         with profile_mutation_lock:
             latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
-            selected_profile, selected_device = subscription_device(latest, raw_hwid, token, subscription_device_metadata(request))
+            selected_profile, selected_device = subscription_device(latest, raw_hwid, token, subscription_device_metadata(request), read_only=allow_changes is False)
     else:
         with profile_mutation_lock:
             latest = next((item for item in profiles() if item.get("id") == selected_profile.get("id")), selected_profile)
-            selected_profile = record_common_subscription_access(latest, subscription_device_metadata(request))
+            selected_profile = record_common_subscription_access(latest, subscription_device_metadata(request), read_only=allow_changes is False)
     selected = next(device for device in normalize_profile(selected_profile)["devices"] if str(device["id"]) == selected_device)
     requested_format = None
     if not raw_hwid and bound_device is None:
@@ -4814,7 +4891,7 @@ def public_profile_subscription(token: str, request: Request) -> PlainTextRespon
         requested_format = device_client_format(selected, subscription_device_metadata(request))
     config, extension = render_client_profile(selected_profile, selected_device, requested_format, subscription_device_metadata(request).get("client_name"))
     delivery = None
-    if any(entry.get("device_id") == selected_device for entry in selected_profile.get("retiring_connections", [])):
+    if allow_changes is not False and any(entry.get("device_id") == selected_device for entry in selected_profile.get("retiring_connections", [])):
         delivery = BackgroundTask(record_transition_delivery, selected_profile["id"], selected_device,
                                   transition_delivery_revision(selected_profile, selected_device))
     return PlainTextResponse(

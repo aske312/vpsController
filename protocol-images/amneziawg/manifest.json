@@ -8,11 +8,63 @@
   "category_name": "Защищённые туннели",
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
-  "supported_os": ["ubuntu", "debian"],
-  "preflight_packages": ["ca-certificates", "curl", "dirmngr", "dkms", "gnupg", "iptables"],
+  "supported_os": [
+    "ubuntu",
+    "debian"
+  ],
+  "preflight_packages": [
+    "ca-certificates",
+    "curl",
+    "dirmngr",
+    "dkms",
+    "gnupg",
+    "iptables"
+  ],
   "minimum_free_mb": 256,
   "requires_kernel_headers": true,
   "interface_env": "AWG_INTERFACE",
   "service": "awg-quick@{interface}.service",
-  "package": "amneziawg"
+  "package": "amneziawg",
+  "installation": {
+    "required_paths": [
+      {
+        "path": "/etc/amnezia/amneziawg/{interface}.conf",
+        "env": "AWG_CONFIG"
+      }
+    ],
+    "backup_paths": [
+      {
+        "path": "/etc/amnezia/amneziawg/{interface}.conf",
+        "env": "AWG_CONFIG"
+      },
+      {
+        "path": "/etc/systemd/system/awg-quick@{interface}.service"
+      },
+      {
+        "path": "/etc/vps-control/environment",
+        "env": "ENV_FILE"
+      },
+      {
+        "path": "{data_dir}/clients.json"
+      },
+      {
+        "path": "/etc/amnezia/amneziawg/{interface}.conf"
+      },
+      {
+        "path": "/etc/amnezia/{interface}.conf"
+      }
+    ],
+    "data_paths": [
+      {
+        "path": "/etc/amnezia/amneziawg/{interface}.conf",
+        "env": "AWG_CONFIG"
+      },
+      {
+        "path": "/etc/amnezia/amneziawg/{interface}.conf"
+      },
+      {
+        "path": "/etc/amnezia/{interface}.conf"
+      }
+    ]
+  }
 }

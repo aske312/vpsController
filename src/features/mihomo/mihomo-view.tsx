@@ -16,6 +16,7 @@ import { notificationFailure as refreshFailure, type NotificationFailure } from 
 import { createApiClient, mutationFailureState } from "../../shared/lib/api-request";
 import { createSettingsSaveQueue } from "./settings-save";
 import { refreshWorkspaceSections } from "./workspace-refresh";
+import { profilePage, PROFILES_PER_PAGE } from "./profile-pagination";
 import { duration, connectionOnline, trafficBytes, aggregateTraffic } from "../../shared/lib/control-plane-ui";
 import QRCode from "qrcode";
 import Image from "next/image";
@@ -53,22 +54,30 @@ export function MihomoPage({
   token,
   confirmAction,
   coreBusy,
+  readOnly,
   onRemoveCore,
   onCommandComplete,
   onLoadingChange,
+  profilesPage,
+  setProfilesPage,
 }: {
   token: string;
   confirmAction: (options: ConfirmOptions) => Promise<boolean>;
   coreBusy: boolean;
+  readOnly: boolean;
   onRemoveCore: () => Promise<void>;
   onCommandComplete: () => void;
   onLoadingChange?: (loading: boolean, run?: number) => void;
+  profilesPage: number;
+  setProfilesPage: Dispatch<SetStateAction<number>>;
 }) {
   const [view, setView] = useState<View>("overview");
   const [status, setStatus] = useState<Status | null>(null);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatus | null>(null);
   const [modules, setModules] = useState<Module[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const pagination = profilePage(profiles.length, profilesPage);
+  const visibleProfiles = profiles.slice(pagination.offset, pagination.offset + PROFILES_PER_PAGE);
   const [dnsPolicy, setDnsPolicy] = useState<PolicySettings | null>(null);
   const [dnsDraft, setDnsDraft] = useState<Record<string, string | number | boolean>>({});
   const [dnsDirty, setDnsDirty] = useState(false);
@@ -138,9 +147,17 @@ export function MihomoPage({
     profileCanvasRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, [profileStep, profileDialog]);
 
-  const request = useMemo(() => createApiClient(token, {
-    formatHttpError: (detail, status) => status === 401 ? "Сессия панели завершена. Войдите заново." : publicError(detail, status),
-  }), [token]);
+  const request = useMemo(() => {
+    const client = createApiClient(token, {
+      formatHttpError: (detail, status) => status === 401 ? "Сессия панели завершена. Войдите заново." : publicError(detail, status),
+    });
+    return async <T,>(path: string, options?: RequestInit): Promise<T> => {
+      if (readOnly && !["GET", "HEAD"].includes((options?.method || "GET").toUpperCase())) {
+        throw new Error("Mihomo доступен только для просмотра. Примите компонент под управление в разделе «Обзор».");
+      }
+      return client<T>(path, options);
+    };
+  }, [token, readOnly]);
   const saveRouting = useMemo(() => createSettingsSaveQueue((values: Record<string, string | number | boolean>) =>
     request<PolicySettings>("/mihomo/routing/settings", { method: "PATCH", body: JSON.stringify({ values }) })), [request]);
 
@@ -162,6 +179,8 @@ export function MihomoPage({
           profiles: { path: "/mihomo/profiles", accept: (value) => {
             profileItems = (value as { items: Profile[] }).items || [];
             setProfiles(profileItems);
+            const count = profileItems.length;
+            setProfilesPage((current) => profilePage(count, current).page);
           } },
           dns: { path: "/mihomo/dns/settings", accept: (value) => {
             setDnsPolicy(value as PolicySettings);
@@ -195,7 +214,7 @@ export function MihomoPage({
     });
     refreshInFlight.current = job;
     return job;
-  }, [onLoadingChange, request]);
+  }, [onLoadingChange, request, setProfilesPage]);
 
   function reportMutationFailure(id: string, label: string, cause: unknown, fallback: string) {
     const state = mutationFailureState(cause);
@@ -462,7 +481,7 @@ export function MihomoPage({
         message:
           `Найдено профилей с подключениями: ${usedProfiles}. Credentials: ${credentials}.` +
           (channels ? ` Используемые компоненты: ${channels}.` : "") +
-          " Удаление каскадно отзовёт эти credentials, удалит профили, компоненты, DNS и маршрутизацию Mihomo.",
+          " Удаление остановит внутренние каналы. Профили, ключи, настройки DNS и маршрутизации сохранятся для повторной установки; до неё подключения не работают.",
         confirmLabel: "Продолжить удаление",
         phrase: "УДАЛИТЬ MIHOMO",
         danger: true,
@@ -974,6 +993,7 @@ export function MihomoPage({
 
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
+      {readOnly && <p role="status">Только просмотр и диагностика. Для изменения Mihomo примите его под управление в разделе «Обзор».</p>}
       <article className="mihomoCommandHero">
         <div className="mihomoHeroContent">
           <div className="mihomoHeroIntro">
@@ -1003,7 +1023,7 @@ export function MihomoPage({
               className="dangerButton"
               type="button"
               onClick={() => void requestCoreRemoval()}
-              disabled={coreBusy || Boolean(busy)}
+              disabled={readOnly || coreBusy || Boolean(busy)}
             >
               {coreBusy ? "Удаляется…" : "Удалить Mihomo"}
             </button>
@@ -1063,7 +1083,15 @@ export function MihomoPage({
             <div className="mihomoHint">Сначала установите хотя бы один компонент протокола Mihomo.</div>
           )}
           <div className="mihomoProfiles">
-            {profiles.map((profile) => { const allDevices = profile.devices?.length ? profile.devices : [{ id: "profile-common", name: "Общие настройки профиля", scope: "common" as const }]; const devices = registeredProfileDevices(profile); const commonDevice = allDevices.find((device) => device.scope === "common" || device.id === profile.common_device_id) || allDevices[0]; const stats = profileStats[profile.id]?.summary; return (
+            {pagination.pages > 1 && <nav className="mihomoProfilesPagination" aria-label="Страницы профилей Mihomo">
+              <span>{pagination.start}–{pagination.end} из {profiles.length}</span>
+              <div>
+                <button type="button" disabled={pagination.page === 1} onClick={() => setProfilesPage(pagination.page - 1)}>Назад</button>
+                <strong aria-live="polite">{pagination.page} / {pagination.pages}</strong>
+                <button type="button" disabled={pagination.page === pagination.pages} onClick={() => setProfilesPage(pagination.page + 1)}>Дальше</button>
+              </div>
+            </nav>}
+            {visibleProfiles.map((profile) => { const allDevices = profile.devices?.length ? profile.devices : [{ id: "profile-common", name: "Общие настройки профиля", scope: "common" as const }]; const devices = registeredProfileDevices(profile); const commonDevice = allDevices.find((device) => device.scope === "common" || device.id === profile.common_device_id) || allDevices[0]; const stats = profileStats[profile.id]?.summary; return (
               <section className="mihomoProfileCard" key={profile.id}>
                 <header className="mihomoProfileHeader">
                   <button type="button" className="mihomoProfileToggle" aria-expanded={expandedDeviceLists.has(profile.id)} onClick={() => toggleCollapsed(setExpandedDeviceLists, profile.id)}><div className="mihomoProfileIdentity"><span className="mihomoProfileIcon">M</span><p><b>{profile.name}</b><small>{devices.length} устройств · общий пул {profile.connections.filter((connection) => connection.device_id === commonDevice.id).length} каналов{profile.subscription_status === "obsolete" ? " · подписка устарела, требуется новая установка" : ""}</small><em>ID {profile.id} · обновлён {new Date(profile.updated_at || profile.created_at).toLocaleString("ru-RU")}</em></p></div><div className="mihomoProfileSummary"><div><small>Состояние</small><strong className={stats?.active ? "is-online" : ""}><i />{stats && stats.activity_available !== false ? `${stats.active} из ${stats.configured}` : "—"}</strong><span>активных каналов</span></div><div><small>Трафик</small><strong>↓ {trafficBytes(stats, "rx_bytes")}</strong><span>↑ {trafficBytes(stats, "tx_bytes")}</span></div></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>

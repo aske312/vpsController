@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 systemctl disable --now vps-control-trojan.service 2>/dev/null || true; /usr/local/lib/vps-control-trojan/firewall.sh delete 2>/dev/null || true
-rm -f /etc/systemd/system/vps-control-trojan.service; rm -rf /etc/vps-control/trojan /usr/local/lib/vps-control-trojan
+rm -f /etc/systemd/system/vps-control-trojan.service
+[[ "${PRESERVE_COMPONENT_DATA:-1}" == 1 ]] || rm -rf /etc/vps-control/trojan
+rm -rf /usr/local/lib/vps-control-trojan
 python3 - <<'PY'
+import os, sys
+if os.getenv("PRESERVE_COMPONENT_DATA", "1") == "1":
+    sys.exit(0)
 import json
 from pathlib import Path
 p=Path('/var/lib/vps-control/clients.json')

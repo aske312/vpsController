@@ -8,10 +8,47 @@
   "category_name": "Защищённые туннели",
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
-  "supported_os": ["ubuntu", "debian"],
-  "preflight_packages": ["iptables", "shadowsocks-libev"],
+  "supported_os": [
+    "ubuntu",
+    "debian"
+  ],
+  "preflight_packages": [
+    "iptables",
+    "shadowsocks-libev"
+  ],
   "minimum_free_mb": 128,
   "requires_kernel_headers": false,
   "service": "vps-control-shadowsocks.target",
-  "package": "shadowsocks-libev"
+  "package": "shadowsocks-libev",
+  "installation": {
+    "required_paths": [
+      {
+        "path": "/etc/vps-control/shadowsocks/clients",
+        "kind": "directory"
+      },
+      {
+        "path": "/etc/systemd/system/vps-control-shadowsocks@.service"
+      }
+    ],
+    "backup_paths": [
+      {
+        "path": "/etc/vps-control/shadowsocks"
+      },
+      {
+        "path": "/etc/systemd/system/vps-control-shadowsocks.target"
+      },
+      {
+        "path": "/etc/vps-control/environment",
+        "env": "ENV_FILE"
+      },
+      {
+        "path": "{data_dir}/clients.json"
+      }
+    ],
+    "data_paths": [
+      {
+        "path": "/etc/vps-control/shadowsocks"
+      }
+    ]
+  }
 }

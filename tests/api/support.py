@@ -4,6 +4,8 @@ import socket
 import sys
 import time
 import types
+import tempfile
+from unittest.mock import patch
 from pathlib import Path
 
 try:
@@ -11,6 +13,7 @@ try:
 except ImportError:
     fcntl = types.ModuleType("fcntl")
     fcntl.LOCK_EX = 2
+    fcntl.LOCK_NB = 4
     fcntl.flock = lambda *_: None
     sys.modules["fcntl"] = fcntl
 
@@ -27,6 +30,15 @@ def load_module(name, path):
 
 api = load_module("privacy_api", "api/main.py")
 manager = load_module("privacy_manager", "protocol-images/mihomo/manager.py")
+
+
+def managed_mihomo_fixture(test_case):
+    """An explicitly owned component for tests of its managed lifecycle."""
+    from component_registry import ComponentRegistry
+    root = Path(test_case.enterContext(tempfile.TemporaryDirectory()))
+    ComponentRegistry(root).write_receipt("mihomo", "installed")
+    test_case.enterContext(patch.object(manager, "DATA_ROOT", root / "mihomo"))
+    return root
 
 
 def free_port():

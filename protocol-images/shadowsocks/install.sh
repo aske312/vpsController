@@ -137,5 +137,6 @@ EOF
 systemctl daemon-reload
 systemctl enable vps-control-shadowsocks.target >/dev/null
 systemctl restart vps-control-shadowsocks.target
+python3 /opt/vps-control/protocol-images/mihomo/ss_runtime.py restore --direct
 systemctl is-active --quiet vps-control-shadowsocks.target
 echo "Shadowsocks установлен. Подключения и порты создаются панелью индивидуально."

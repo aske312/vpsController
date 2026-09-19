@@ -1,7 +1,22 @@
 import type { NotificationInput } from "../shared/notifications/store";
 
-export type SystemAction = { unit?: string; action?: string; state?: string; result?: string; started_at?: string; progress?: number; message?: string };
+import type { SystemAction } from "../shared/types/control-plane";
+export type { SystemAction } from "../shared/types/control-plane";
 const rollbackableActions = new Set(["update", "test-update", "test-rollback", "safe-update", "kernel-update"]);
+
+export async function submitSystemOperation(request: (path: string, options?: RequestInit) => Promise<SystemAction>, path: string, options: RequestInit) {
+  const id = crypto.randomUUID().replaceAll("-", "");
+  const headers = new Headers(options.headers);
+  headers.set("X-Operation-ID", id);
+  try {
+    return await request(path, {...options, headers});
+  } catch (cause) {
+    if (cause && typeof cause === "object" && "status" in cause && typeof cause.status === "number" && cause.status >= 400 && cause.status < 500) throw cause;
+    // A lost response is reconciled by identity, never by repeating a mutation.
+    try { return await request(`/application/operations/${id}`); }
+    catch { throw new Error(`Результат команды пока неизвестен. Проверьте центр операций перед следующим действием. ID: ${id}`); }
+  }
+}
 
 export function systemActionSucceeded(action: SystemAction) {
   return ["succeeded", "finished"].includes(action.state || "") && (!action.result || action.result === "success");
@@ -46,5 +61,10 @@ export function createSystemActionCompletionTracker() {
 }
 
 export function systemActionNeedsReload(action: SystemAction) {
-  return Boolean(action.action) && !["network-check", "integrity-check", "poweroff"].includes(action.action!.split(":")[0]);
+  return Boolean(action.action) && !["network-check", "integrity-check", "poweroff", "logging-config", "logs-clear", "service-action", "automation-config", "ssh-key-add", "ssh-key-reset", "ssh-key-delete", "ssh-access-begin", "ssh-access-confirm", "ssh-access-rollback", "ssh-access-disable"].includes(action.action!.split(":")[0]);
+}
+
+export function systemActionNeedsPolling(action?: SystemAction | null) {
+  return Boolean(action && (["queued", "active", "activating", "running", "unknown", "rebooting", "powering-off"].includes(action.state || "")
+    || action.state === "finished" && action.result === "unknown"));
 }

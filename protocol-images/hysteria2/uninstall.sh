@@ -10,8 +10,12 @@ systemctl disable --now vps-control-hysteria2.service vps-control-hysteria2-auth
 rm -f /etc/systemd/system/vps-control-hysteria2.service /etc/systemd/system/vps-control-hysteria2-auth.service
 iptables -D INPUT -p udp --dport "${port}" -m comment --comment vps-control-hysteria2 -j ACCEPT 2>/dev/null || true
 command -v ip6tables >/dev/null && ip6tables -D INPUT -p udp --dport "${port}" -m comment --comment vps-control-hysteria2 -j ACCEPT 2>/dev/null || true
-rm -rf /etc/vps-control/hysteria2 /var/lib/vps-control/hysteria2 /usr/local/lib/vps-control-hysteria2
+[[ "${PRESERVE_COMPONENT_DATA:-1}" == 1 ]] || rm -rf /etc/vps-control/hysteria2 /var/lib/vps-control/hysteria2
+rm -rf /usr/local/lib/vps-control-hysteria2
 python3 - <<'PY'
+import os, sys
+if os.getenv("PRESERVE_COMPONENT_DATA", "1") == "1":
+    sys.exit(0)
 import json
 from pathlib import Path
 path=Path('/var/lib/vps-control/clients.json')

@@ -20,13 +20,15 @@ import urllib.parse
 import urllib.request
 import uuid
 import platform
+import sqlite3
+from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version as installed_python_package_version
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Header
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -37,10 +39,17 @@ import cdn_security
 import port_allocation
 from dns_policy import build_xray_dns, probe_xray_dns, successful_dns_response
 import cdn_operation
+import application_operation
+import operation_policy
 import ech_settings
 from protocol_health import TrafficSampler, protocol_health
-from cpu_sampler import CpuSampler
+from service_state import observe_service, ssh_observation, failed_unit_count
+from component_state import image_files, component_state
+from component_registry import ComponentRegistry, RegistryError, paths_from_manifest, inventory, fingerprint
+from system_metrics import CpuSampler, collect_resources
+from metrics_history import MetricsHistory, MetricsMonitor, SettingsConflict
 from schemas import (
+    ComponentPurge,
     BootstrapRequest,
     AdminPasswordChange,
     SshPublicKeyInstall,
@@ -52,6 +61,9 @@ from schemas import (
     EchSettings,
     ServiceModeSettings,
     LoggingSettings,
+    MetricsSettings,
+    ComponentAdoption,
+    OperationHistorySettings,
     AutomationSchedule,
     AutomationSettings,
     DnsCustomResolver,
@@ -64,7 +76,22 @@ from schemas import (
     ProtocolSettingsUpdate,
 )
 
-app = FastAPI(title="Infrastructure API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None)
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    global metrics_monitor
+    # Linux is the supported server runtime. Importing the API starts no threads.
+    if platform.system() == "Linux":
+        metrics_monitor = MetricsMonitor(metrics_history_store, collect_system_resources)
+        metrics_monitor.start()
+    try:
+        yield
+    finally:
+        if metrics_monitor is not None:
+            metrics_monitor.stop()
+            metrics_monitor = None
+
+
+app = FastAPI(title="Infrastructure API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 logger = logging.getLogger("vps-control.api")
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
 app.add_middleware(
@@ -175,6 +202,8 @@ AWG_PROFILE = {
     "H3": os.getenv("AWG_H3", "1000000000"), "H4": os.getenv("AWG_H4", "1400000000"),
 }
 DATA_DIR = Path(os.getenv("DATA_DIR", "/var/lib/vps-control"))
+metrics_history_store = MetricsHistory(DATA_DIR / "metrics" / "history.sqlite3")
+metrics_monitor: MetricsMonitor | None = None
 ENV_FILE = Path(os.getenv("ENV_FILE", "/etc/vps-control/environment"))
 CLIENTS_FILE = DATA_DIR / "clients.json"
 ACTION_FILE = DATA_DIR / "application-action.json"
@@ -214,7 +243,6 @@ XRAY_GITHUB_REPO = "XTLS/Xray-core"
 github_release_lock = threading.Lock()
 github_release_cache: dict[str, dict] = {}
 client_mutation_lock = threading.Lock()
-cpu_sampler = CpuSampler()
 RESOURCE_TARGETS = (
     ("Google", "https://www.google.com/generate_204"),
     ("YouTube", "https://www.youtube.com/"),
@@ -265,10 +293,18 @@ DNS_PROVIDERS = (
 def require_token(credentials: HTTPBasicCredentials | None = Depends(basic_auth)) -> None:
     if credentials is None or not ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Administrator credentials are required", headers={"WWW-Authenticate": "Basic"})
-    valid_user = hmac.compare_digest(credentials.username, ADMIN_USER)
-    valid_password = hmac.compare_digest(credentials.password, ADMIN_PASSWORD)
+    valid_user = hmac.compare_digest(credentials.username.encode("utf-8"), ADMIN_USER.encode("utf-8"))
+    valid_password = hmac.compare_digest(credentials.password.encode("utf-8"), ADMIN_PASSWORD.encode("utf-8"))
     if not (valid_user and valid_password):
         raise HTTPException(status_code=401, detail="Invalid administrator credentials", headers={"WWW-Authenticate": "Basic"})
+
+
+async def require_short_mutation(_: None = Depends(require_token)):
+    try:
+        with application_operation.short_mutation(DATA_DIR):
+            yield
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 def system_boot_time() -> datetime | None:
@@ -1413,7 +1449,7 @@ def memory_info() -> tuple[int, int]:
     for line in Path("/proc/meminfo").read_text().splitlines():
         key, value = line.split(":", 1)
         values[key] = int(value.strip().split()[0]) * 1024
-    return values.get("MemTotal", 0), values.get("MemAvailable", 0)
+    return values["MemTotal"], values["MemAvailable"]
 
 
 def disk_info() -> tuple[int, int]:
@@ -1430,14 +1466,60 @@ def network_info() -> tuple[int, int]:
         if interface.strip() == "lo":
             continue
         columns = values.split()
-        if len(columns) >= 9:
-            received += int(columns[0])
-            transmitted += int(columns[8])
+        if len(columns) < 9:
+            raise ValueError("Incomplete network counters")
+        received += int(columns[0])
+        transmitted += int(columns[8])
     return received, transmitted
 
 
-def cpu_usage_percent() -> float:
-    return cpu_sampler.percent_used()
+cpu_sampler = CpuSampler()
+
+
+def cpu_usage_percent() -> float | None:
+    return cpu_sampler.sample()
+
+
+def collect_system_resources() -> dict:
+    return collect_resources({
+        "cpu": lambda: (cpu_usage_percent(), os.cpu_count()),
+        "load": lambda: os.getloadavg(),
+        "memory": memory_info,
+        "disk": disk_info,
+        "network": network_info,
+        "uptime": lambda: (float(Path("/proc/uptime").read_text().split()[0]),),
+    })
+
+
+def system_resources() -> dict:
+    snapshot = metrics_monitor.snapshot() if metrics_monitor else None
+    return snapshot if snapshot is not None else collect_system_resources()
+
+
+@app.get("/api/metrics/history")
+def get_metrics_history(period: Literal["live", "day", "week", "quarter"] = "live", _: None = Depends(require_token)) -> dict:
+    try:
+        return {**metrics_history_store.query(period), "error": metrics_monitor.error if metrics_monitor else ""}
+    except (OSError, sqlite3.Error, ValueError):
+        raise HTTPException(status_code=503, detail="История метрик временно недоступна") from None
+
+
+@app.get("/api/services/metrics")
+def get_metrics_settings(_: None = Depends(require_token)) -> dict:
+    try:
+        return {**metrics_history_store.settings(), "error": metrics_monitor.error if metrics_monitor else ""}
+    except (OSError, sqlite3.Error, ValueError):
+        raise HTTPException(status_code=503, detail="Настройки хранения метрик временно недоступны") from None
+
+
+@app.put("/api/services/metrics")
+def update_metrics_settings(payload: MetricsSettings, _: None = Depends(require_token)) -> dict:
+    try:
+        return metrics_history_store.configure(payload.model_dump(), payload.expected_revision)
+    except SettingsConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except (OSError, sqlite3.Error):
+        raise HTTPException(status_code=503, detail="Не удалось сохранить настройки хранения метрик") from None
 
 
 def refresh_updates_cache() -> None:
@@ -1500,15 +1582,15 @@ def auth_status() -> dict:
     return {"configured": bool(ADMIN_USER and ADMIN_PASSWORD)}
 
 
-@app.put("/api/security/admin-password")
+@app.put("/api/security/admin-password", dependencies=[Depends(require_short_mutation)])
 def change_admin_password(payload: AdminPasswordChange, _: None = Depends(require_token)) -> dict:
     global ADMIN_PASSWORD
-    if not hmac.compare_digest(payload.current_password, ADMIN_PASSWORD):
+    if not hmac.compare_digest(payload.current_password.encode("utf-8"), ADMIN_PASSWORD.encode("utf-8")):
         raise HTTPException(status_code=400, detail="Текущий пароль указан неверно")
     if payload.new_password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="Новые пароли не совпадают")
     password = payload.new_password
-    if hmac.compare_digest(password, ADMIN_PASSWORD):
+    if hmac.compare_digest(password.encode("utf-8"), ADMIN_PASSWORD.encode("utf-8")):
         raise HTTPException(status_code=400, detail="Новый пароль должен отличаться от текущего")
     if any(ord(character) < 33 or ord(character) > 126 for character in password):
         raise HTTPException(status_code=400, detail="Используйте печатные латинские символы без пробелов")
@@ -1537,8 +1619,16 @@ def change_admin_password(payload: AdminPasswordChange, _: None = Depends(requir
                 break
         if not replaced:
             lines.append(f"ADMIN_PASSWORD={encoded}")
-        ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        os.chmod(ENV_FILE, 0o600)
+        temporary = ENV_FILE.with_name(f".{ENV_FILE.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with temporary.open("x", encoding="utf-8") as target:
+                os.chmod(temporary, 0o600)
+                target.write("\n".join(lines) + "\n")
+                target.flush()
+                os.fsync(target.fileno())
+            temporary.replace(ENV_FILE)
+        finally:
+            temporary.unlink(missing_ok=True)
     except OSError as exc:
         raise HTTPException(status_code=500, detail="Unable to persist administrator password") from exc
     ADMIN_PASSWORD = password
@@ -1587,16 +1677,8 @@ def ssh_access_state() -> dict:
     return state
 
 
-def run_ssh_access_action(action: str, *arguments: str) -> str:
-    unit = f"vps-control-ssh-access-{action}-{int(time.time() * 1000)}"
-    result = subprocess.run(
-        ["systemd-run", f"--unit={unit}", "--wait", "--collect", "--pipe", "--quiet", "--property=Type=oneshot", CONTROL_COMMAND, action, *arguments],
-        capture_output=True, text=True, timeout=45, check=False,
-    )
-    if result.returncode:
-        detail = (result.stderr or result.stdout).strip().splitlines()
-        raise HTTPException(status_code=400, detail=detail[-1] if detail else "Не удалось изменить доступ SSH")
-    return result.stdout.strip()
+def run_ssh_access_action(action: str, *arguments: str, operation_id=None) -> dict:
+    return start_control_task(action, action, *arguments, operation_id=operation_id)
 
 
 @app.get("/api/security/ssh-access")
@@ -1604,59 +1686,47 @@ def get_ssh_access(_: None = Depends(require_token)) -> dict:
     return ssh_access_state()
 
 
-@app.post("/api/security/ssh-access/key")
-def install_ssh_public_key(payload: SshPublicKeyInstall, _: None = Depends(require_token)) -> dict:
+@app.post("/api/security/ssh-access/key", status_code=202)
+def install_ssh_public_key(payload: SshPublicKeyInstall, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
     public_key = payload.public_key.strip()
     if "\n" in public_key or "\r" in public_key:
         raise HTTPException(status_code=400, detail="Публичный ключ должен занимать одну строку")
-    run_ssh_access_action("ssh-key-add", public_key)
-    return ssh_access_state()
+    return run_ssh_access_action("ssh-key-add", public_key, operation_id=operation_id)
 
 
-@app.post("/api/security/ssh-access/key/reset")
-def reset_ssh_public_key(_: None = Depends(require_token)) -> dict:
-    run_ssh_access_action("ssh-key-reset")
-    return ssh_access_state()
+@app.post("/api/security/ssh-access/key/reset", status_code=202)
+def reset_ssh_public_key(_: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return run_ssh_access_action("ssh-key-reset", operation_id=operation_id)
 
 
-@app.post("/api/security/ssh-access/key/delete")
-def delete_ssh_public_key(payload: SshKeyDelete, _: None = Depends(require_token)) -> dict:
-    run_ssh_access_action("ssh-key-delete", payload.fingerprint)
-    return ssh_access_state()
+@app.post("/api/security/ssh-access/key/delete", status_code=202)
+def delete_ssh_public_key(payload: SshKeyDelete, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return run_ssh_access_action("ssh-key-delete", payload.fingerprint, operation_id=operation_id)
 
 
-@app.post("/api/security/ssh-access/begin")
-def begin_ssh_hardening(_: None = Depends(require_token)) -> dict:
-    run_ssh_access_action("ssh-access-begin")
-    return ssh_access_state()
+@app.post("/api/security/ssh-access/begin", status_code=202)
+def begin_ssh_hardening(_: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return run_ssh_access_action("ssh-access-begin", operation_id=operation_id)
 
 
-@app.post("/api/security/ssh-access/confirm")
-def confirm_ssh_hardening(_: None = Depends(require_token)) -> dict:
-    run_ssh_access_action("ssh-access-confirm")
-    return ssh_access_state()
+@app.post("/api/security/ssh-access/confirm", status_code=202)
+def confirm_ssh_hardening(_: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return run_ssh_access_action("ssh-access-confirm", operation_id=operation_id)
 
 
-@app.post("/api/security/ssh-access/rollback")
-def rollback_ssh_hardening(_: None = Depends(require_token)) -> dict:
-    run_ssh_access_action("ssh-access-rollback")
-    return ssh_access_state()
+@app.post("/api/security/ssh-access/rollback", status_code=202)
+def rollback_ssh_hardening(_: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return run_ssh_access_action("ssh-access-rollback", operation_id=operation_id)
 
 
-@app.post("/api/security/ssh-access/disable")
-def disable_ssh_protection(_: None = Depends(require_token)) -> dict:
-    run_ssh_access_action("ssh-access-disable")
-    return ssh_access_state()
+@app.post("/api/security/ssh-access/disable", status_code=202)
+def disable_ssh_protection(_: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return run_ssh_access_action("ssh-access-disable", operation_id=operation_id)
 
 
 @app.get("/api/overview")
 def overview(_: None = Depends(require_token)) -> dict:
-    mem_total, mem_available = memory_info()
-    disk_total, disk_available = disk_info()
-    uptime_s = float(Path("/proc/uptime").read_text().split()[0])
-    load = os.getloadavg()
-    cpu_percent = cpu_usage_percent()
-    network_rx, network_tx = network_info()
+    resources = system_resources()
     return {
         "server": {
             "name": SERVER_NAME,
@@ -1672,21 +1742,9 @@ def overview(_: None = Depends(require_token)) -> dict:
             "city": SERVER_CITY,
             "country": SERVER_COUNTRY,
             "country_code": SERVER_COUNTRY_CODE,
-            "uptime_s": uptime_s,
+            "uptime_s": resources["uptime_s"],
         },
-        "resources": {
-            "load1": load[0],
-            "load5": load[1],
-            "load15": load[2],
-            "cpu_percent": cpu_percent,
-            "cpu_count": os.cpu_count() or 1,
-            "memory_total": mem_total,
-            "memory_available": mem_available,
-            "disk_total": disk_total,
-            "disk_available": disk_available,
-            "network_rx": network_rx,
-            "network_tx": network_tx,
-        },
+        "resources": resources,
         "protocols": {
             "wg": {"interface": WG_INTERFACE, "port": WG_PORT, "active": bool(run("wg", "show", WG_INTERFACE))},
             "awg": {"interface": AWG_INTERFACE, "port": AWG_PORT, "active": bool(run("awg", "show", AWG_INTERFACE))},
@@ -2201,7 +2259,7 @@ def get_network(_: None = Depends(require_token)) -> dict:
     return network_status()
 
 
-@app.put("/api/network/endpoints")
+@app.put("/api/network/endpoints", dependencies=[Depends(require_short_mutation)])
 def update_network_endpoints(payload: NetworkEndpointSettings, _: None = Depends(require_token)) -> dict:
     raw = payload.model_dump()
     settings: dict[str, object] = {key: str(raw.get(key, "") or "").strip().lower() for key in ("cdn_domain", "tls_relay_domain", "udp_relay_domain")}
@@ -2224,6 +2282,7 @@ def update_network_endpoints(payload: NetworkEndpointSettings, _: None = Depends
     if cdn_domain and VLESS_CONFIG.exists() and VLESS_ENV.exists():
         reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
         if reality.get("CDN_DOMAIN", "").strip().lower() != cdn_domain or reality.get("CDN_ENABLED") != "yes":
+            require_owned_components("vless-reality-xhttp")
             update_protocol_settings(
                 "vless-reality-xhttp",
                 ProtocolSettingsUpdate(cdn_enabled=True, cdn_domain=cdn_domain),
@@ -2242,9 +2301,11 @@ def check_network_endpoint(payload: NetworkEndpointCheck, _: None = Depends(requ
     return network_endpoint_check(payload.kind, domain)
 
 
-@app.delete("/api/network/endpoints/{kind}/{domain}")
+@app.delete("/api/network/endpoints/{kind}/{domain}", dependencies=[Depends(require_short_mutation)])
 def delete_network_endpoint(kind: Literal["cdn", "tls_relay", "udp_relay"], domain: str, _: None = Depends(require_token)) -> dict:
     domain = domain.strip().lower()
+    if kind in {"cdn", "tls_relay"}:
+        require_route_management()
     key_by_kind = {"cdn": "cdn_domain", "tls_relay": "tls_relay_domain", "udp_relay": "udp_relay_domain"}
     list_key = f"{key_by_kind[kind]}s" if kind != "tls_relay" else "tls_relay_domains"
     settings = read_network_endpoint_settings()
@@ -2778,6 +2839,13 @@ def protocol_image_manifests() -> dict[str, dict]:
     images: dict[str, dict] = {}
     if not PROTOCOL_IMAGES_DIR.exists():
         return images
+    try:
+        action = json.loads(ACTION_FILE.read_text(encoding="utf-8"))
+        action = action if isinstance(action, dict) else None
+    except FileNotFoundError:
+        action = {}
+    except (OSError, ValueError):
+        action = None
     for manifest_path in PROTOCOL_IMAGES_DIR.glob("*/manifest.json"):
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -2797,20 +2865,19 @@ def protocol_image_manifests() -> dict[str, dict]:
         ):
             continue
         interface_env = str(manifest.get("interface_env", ""))
-        interface = os.getenv(interface_env, "") if interface_env else ""
+        interface = {"WG_INTERFACE": WG_INTERFACE, "AWG_INTERFACE": AWG_INTERFACE}.get(interface_env, os.getenv(interface_env, "")) if interface_env else ""
         service_template = str(manifest.get("service", ""))
         # Stream proxies do not create a tunnel interface. Their manifests use a
         # fixed systemd unit, while WG-like images may still interpolate one.
         service = service_template.replace("{interface}", interface) if service_template else ""
-        # Installed and running are different states. A stopped tunnel must
-        # remain manageable instead of being offered for installation again.
-        # is-enabled (not LoadState) is required here: wg/awg use templated
-        # units (wg-quick@.service, awg-quick@.service) shared with Mihomo's
-        # isolated mh-wg0/mh-awg0 channels. Once Mihomo installs the same
-        # package, LoadState=loaded for *any* instance name, including the
-        # direct wg0/awg0 one that was never actually installed. is-enabled
-        # is set per instance by each installer's own `systemctl enable`.
-        installed = bool(service and run("systemctl", "is-enabled", service) == "enabled")
+        # Shared wg/awg templates alone do not prove a Direct instance exists.
+        # Legacy installed means detected; component_state carries the full
+        # installation proof, and management separately controls mutations.
+        unit = observe_service(service)
+        files = image_files(manifest, interface, INSTALL_DIR)
+        installed = any(value is True for value in files) or unit["active"] or ("@" not in service_template and unit["unit_present"] is True)
+        versions = protocol_version_info(manifest, image_id, installed)
+        diagnostics = (network_diagnostic_cache if image_id in ("wg", "awg") else direct_diagnostic_cache).get(image_id)
         images[image_id] = {
             "id": image_id,
             "name": str(manifest.get("name", image_id)),
@@ -2821,11 +2888,19 @@ def protocol_image_manifests() -> dict[str, dict]:
             "interface": interface,
             "service": service,
             "installed": installed,
-            "active": bool(service and run("systemctl", "is-active", service) == "active"),
+            "active": unit["active"],
             "installable": installable,
             "removable": bool(uninstaller),
-            **protocol_version_info(manifest, image_id, installed),
+            **versions,
+            "component_state": component_state(image_id, manifest, files, unit, versions.get("installed_version", ""), diagnostics, action),
+            "management": ComponentRegistry(DATA_DIR).management(image_id),
         }
+        if images[image_id]["management"].get("retained") and not unit["active"]:
+            images[image_id]["installed"] = False
+            images[image_id]["component_state"]["installation"] = {
+                "state": "not_installed", "reason": "Исполняемая часть удалена; настройки и подключения сохранены",
+                "checked_at": unit["runtime"]["checked_at"],
+            }
     return images
 
 
@@ -2834,46 +2909,247 @@ def protocol_images(_: None = Depends(require_token)) -> dict:
     return {"items": list(protocol_image_manifests().values())}
 
 
-@app.post("/api/protocol-images/{image_id}/install")
-def install_protocol_image(image_id: str, _: None = Depends(require_token)) -> dict:
+def adoption_plan(image_id: str) -> tuple[dict, list[Path], dict]:
+    image = protocol_image_manifests().get(image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Компонент не найден")
+    manifest = None
+    for path in PROTOCOL_IMAGES_DIR.glob("*/manifest.json"):
+        try:
+            candidate = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(candidate, dict) and candidate.get("id") == image_id:
+            manifest = candidate
+            break
+    if not manifest:
+        raise HTTPException(status_code=404, detail="Описание компонента не найдено")
+    blockers = []
+    if image["component_state"]["installation"]["state"] != "installed":
+        blockers.append("Не подтверждены обязательные файлы, регистрация службы или версия")
+    if image["component_state"]["operation"]:
+        blockers.append("Дождитесь подтверждённого завершения текущей операции")
+    try:
+        os_info = platform.freedesktop_os_release()
+    except OSError:
+        os_info = {}
+    supported = {"debian": {"12", "13"}, "ubuntu": {"22.04", "24.04", "26.04"}}
+    system, release = os_info.get("ID", ""), os_info.get("VERSION_ID", "")
+    arch = platform.machine().lower()
+    if system not in manifest.get("supported_os", []) or release not in supported.get(system, set()) or arch not in {"x86_64", "aarch64", "amd64", "arm64"}:
+        blockers.append("Совместимость с ОС и архитектурой сервера не подтверждена")
+    paths = paths_from_manifest(manifest, image["interface"], INSTALL_DIR, DATA_DIR)
+    context = {"id": image_id, "version": image.get("installed_version", ""), "service": image["service"],
+               "os": system, "release": release, "arch": arch, "manifest": manifest}
+    entries = inventory(paths)
+    if not entries:
+        blockers.append("Не найдена конфигурация для резервного копирования")
+    return {"id": image_id, "name": image["name"], "management": image["management"], "compatible": not blockers,
+            "blockers": blockers, "fingerprint": fingerprint(entries, context), "files": len(entries),
+            "backup_bytes": sum(entry["size"] for entry in entries),
+            "effects": ["Будет сохранена закрытая резервная копия конфигурации и подключений",
+                        "Панель получит право изменять настройки, управлять службами, обновлять и удалять компонент",
+                        "Принятие не переустанавливает, не запускает и не перезапускает компонент"]}, paths, context
+
+
+@app.get("/api/protocol-images/{image_id}/adoption")
+def preview_component_adoption(image_id: str, _: None = Depends(require_token)) -> dict:
+    try:
+        return adoption_plan(image_id)[0]
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, RegistryError) else "Не удалось проверить конфигурацию компонента") from None
+
+
+@app.post("/api/protocol-images/{image_id}/adoption")
+def adopt_component(image_id: str, payload: ComponentAdoption, _: None = Depends(require_token)) -> dict:
+    try:
+        registry = ComponentRegistry(DATA_DIR)
+        if registry.receipt(image_id):
+            return registry.management(image_id)
+        with application_operation.mutation_lock(DATA_DIR), application_operation.locked(DATA_DIR):
+            current = application_operation.read(ACTION_FILE)
+            if current and current.get("state") not in application_operation.TERMINAL:
+                raise HTTPException(status_code=409, detail="Дождитесь подтверждённого завершения текущей операции")
+            plan, paths, context = adoption_plan(image_id)
+            if not plan["compatible"]:
+                raise HTTPException(status_code=409, detail="; ".join(plan["blockers"]))
+            return registry.adopt(image_id, paths, context, payload.fingerprint)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc) if isinstance(exc, RegistryError) else "Не удалось сохранить конфигурацию; компонент не принят под управление") from None
+
+
+def require_owned_components(*image_ids: str) -> None:
+    try:
+        registry = ComponentRegistry(DATA_DIR)
+        for image_id in image_ids:
+            registry.require_managed(image_id)
+    except RegistryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+def require_route_management(domain: str | None = None) -> None:
+    """Check every consumer before changing shared proxy configuration."""
+    try:
+        if VLESS_ENV.exists():
+            values = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+            if any(values.get(f"{prefix}_ENABLED") == "yes" and values.get(f"{prefix}_DOMAIN") and
+                   (domain is None or values[f"{prefix}_DOMAIN"].strip().lower() == domain) for prefix in ("CDN", "TLS")):
+                require_owned_components("vless-reality-xhttp")
+        for path in MIHOMO_VLESS_CDN_ROUTES.glob("*.json"):
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(value, dict):
+                raise ValueError("Invalid route descriptor")
+            if domain is None or str(value.get("domain", "")).strip().lower() == domain:
+                require_owned_components("mihomo")
+    except (OSError, ValueError):
+        raise HTTPException(status_code=409, detail="Не удалось проверить владельцев маршрутов; изменение не запущено") from None
+
+
+async def check_component_management(request: Request) -> None:
+    """Enforce ownership at the API boundary, including indirect mutations."""
+    image_id = request.path_params.get("image_id") or request.path_params.get("protocol")
+    if "client_id" in request.path_params:
+        client = next((item for item in read_clients() if item.get("id") == request.path_params["client_id"]), {})
+        image_id = client.get("protocol")
+    if "service_id" in request.path_params:
+        image_id = managed_services().get(request.path_params["service_id"], {}).get("component_id")
+    ids = [image_id] if image_id else []
+    if request.url.path in {"/api/clients", "/api/dns/settings"}:
+        try:
+            data = await request.json()
+            data = (ClientCreate if request.url.path == "/api/clients" else DnsSettingsUpdate).model_validate(data).model_dump()
+        except ValueError:
+            return  # The endpoint's schema returns 422 for an invalid body.
+        if not isinstance(data, dict):
+            return
+        if request.url.path == "/api/clients":
+            ids = [data.get("protocol")] if data.get("protocol") else []
+        else:
+            images = protocol_image_manifests()
+            ids = [key for key, flag in (("wg", "apply_wg"), ("awg", "apply_awg"), ("shadowsocks", "apply_shadowsocks"),
+                   ("vless-reality-xhttp", "apply_vrx"), ("openvpn", "apply_openvpn"), ("ikev2", "apply_ikev2"))
+                   if data.get(flag) and key in images and images[key]["component_state"]["installation"]["state"] != "not_installed"]
+    try:
+        for image_id in ids:
+            if request.url.path.endswith("/install"):
+                image = protocol_image_manifests().get(image_id)
+                if image and image.get("management", {}).get("state") != "unknown" and image["component_state"]["installation"]["state"] == "not_installed":
+                    continue
+            ComponentRegistry(DATA_DIR).require_managed(image_id)
+    except RegistryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+async def require_component_management(request: Request, _: None = Depends(require_token)):
+    if request.headers.get("X-Operation-ID") and request.path_params.get("image_id"):
+        operation = replay_application_operation(request.headers["X-Operation-ID"])
+        if operation:
+            # Returning a previous result is read-only. The endpoint verifies
+            # that this identity belongs to exactly the requested action.
+            yield
+            return
+    try:
+        if request.path_params.get("image_id"):
+            with application_operation.short_mutation(DATA_DIR):
+                await check_component_management(request)
+            yield
+            return
+        with application_operation.short_mutation(DATA_DIR):
+            await check_component_management(request)
+            yield
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+def replay_application_operation(identity, expected_action: str | None = None) -> dict | None:
+    if not isinstance(identity, str):
+        return None
+    try:
+        identity = application_operation.operation_id(identity)
+        existing = application_operation.read(DATA_DIR / "operations" / f"{identity}.json")
+        if not existing:
+            return None
+        if expected_action and existing.get("action") != expected_action:
+            raise HTTPException(status_code=409, detail="Идентификатор операции уже использован для другой команды")
+        return get_application_operation(identity, None)
+    except ValueError:
+        raise HTTPException(status_code=409, detail="Не удалось прочитать предыдущую операцию") from None
+
+
+def start_application_operation(action: str, command: list[str], *, operation_id=None, properties=()) -> dict:
+    try:
+        return application_operation.start(DATA_DIR, ACTION_FILE, action, command, subprocess.run,
+            request_id=operation_id if isinstance(operation_id, str) else None, properties=properties, observe=observe_service)
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except OSError:
+        raise HTTPException(status_code=503, detail="Не удалось сохранить операцию; команда не запущена") from None
+
+
+@app.get("/api/application/operations")
+def application_operations(_: None = Depends(require_token)) -> dict:
+    try:
+        current = application_operation.read(ACTION_FILE)
+        if current.get("id"):
+            current = get_application_operation(current["id"], None)
+        items = [{**item, "source": "system"} for item in application_operation.history(DATA_DIR)]
+        items = [{**item, **current} if item.get("id") == current.get("id") else item for item in items]
+        items.extend({**item, "source": "mihomo"} for item in application_operation.history(DATA_DIR / "mihomo"))
+        for path in sorted(cdn_operation.DIRECTORY.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)[:100]:
+            if not re.fullmatch(r"[0-9a-f]{32}", path.stem):
+                continue
+            if any(item.get("id") == path.stem for item in items):
+                continue  # CDN now shares admission; retain older records too.
+            try:
+                item = application_operation.read(path)
+            except application_operation.OperationConflict:
+                items.append({"id": path.stem, "source": "cdn", "state": "unknown", "message": "Запись операции недоступна"})
+                continue
+            items.append({"id": item.get("id", path.stem), "source": "cdn", "action": "ech" if item.get("kind") == "ech" else "cdn-security",
+                          "state": item.get("state", "unknown"), "message": item.get("message", ""), "progress": item.get("progress"),
+                          "started_at": datetime.fromtimestamp(item["created_at"], timezone.utc).isoformat() if isinstance(item.get("created_at"), (int, float)) else None})
+        return {"items": sorted(items, key=lambda item: item.get("started_at") or item.get("updated_at") or "", reverse=True)[:100]}
+    except (OSError, ValueError):
+        raise HTTPException(status_code=503, detail="История операций временно недоступна") from None
+
+
+@app.get("/api/application/operations/{operation_id}")
+def get_application_operation(operation_id: str, _: None = Depends(require_token)) -> dict:
+    try:
+        identity = application_operation.operation_id(operation_id)
+        with application_operation.locked(DATA_DIR):
+            value = application_operation.read(DATA_DIR / "operations" / f"{identity}.json")
+            current = application_operation.read(ACTION_FILE)
+            if current.get("id") == identity:
+                value = application_operation.reconcile(DATA_DIR, ACTION_FILE, value, observe_service)
+    except ValueError:
+        raise HTTPException(status_code=409, detail="Не удалось прочитать операцию") from None
+    if not value:
+        raise HTTPException(status_code=404, detail="Операция не найдена")
+    return value
+
+
+@app.post("/api/protocol-images/{image_id}/install", dependencies=[Depends(require_component_management)])
+def install_protocol_image(image_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    previous = replay_application_operation(operation_id, f"protocol-install:{image_id}")
+    if previous:
+        return previous
     image = protocol_image_manifests().get(image_id)
     if not image:
         raise HTTPException(status_code=404, detail="Protocol image not found")
     if not image.get("installable"):
         raise HTTPException(status_code=409, detail="Protocol image is not available for installation")
-    if ACTION_FILE.exists():
-        try:
-            previous_unit = json.loads(ACTION_FILE.read_text(encoding="utf-8")).get("unit", "")
-            if previous_unit and run("systemctl", "is-active", previous_unit) in ("active", "activating"):
-                raise HTTPException(status_code=409, detail="Another application action is already running")
-        except (json.JSONDecodeError, OSError):
-            pass
-    unit = f"vps-control-protocol-{image_id}-{int(time.time())}"
-    result = subprocess.run(
-        [
-            "systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec",
-            CONTROL_COMMAND, "protocol-install", image_id,
-        ],
-        capture_output=True, text=True, timeout=10, check=False,
-    )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to install protocol image")
-    action = {
-        "unit": f"{unit}.service",
-        "action": f"protocol-install:{image_id}",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "state": "activating",
-        "progress": 3,
-        "message": "Запуск установки протокола",
-    }
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
-    os.chmod(ACTION_FILE, 0o600)
+    action = start_application_operation(f"protocol-install:{image_id}", [CONTROL_COMMAND, "protocol-install", image_id], operation_id=operation_id)
     return action
 
 
-@app.post("/api/protocol-images/{image_id}/update")
-def update_protocol_image(image_id: str, _: None = Depends(require_token)) -> dict:
+@app.post("/api/protocol-images/{image_id}/update", dependencies=[Depends(require_component_management)])
+def update_protocol_image(image_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    previous = replay_application_operation(operation_id, f"protocol-update:{image_id}")
+    if previous:
+        return previous
     image = protocol_image_manifests().get(image_id)
     if not image:
         raise HTTPException(status_code=404, detail="Protocol image not found")
@@ -2881,33 +3157,15 @@ def update_protocol_image(image_id: str, _: None = Depends(require_token)) -> di
         raise HTTPException(status_code=409, detail="Protocol is not installed")
     if not image.get("update_available"):
         raise HTTPException(status_code=409, detail="No update available")
-    if ACTION_FILE.exists():
-        try:
-            previous_unit = json.loads(ACTION_FILE.read_text(encoding="utf-8")).get("unit", "")
-            if previous_unit and run("systemctl", "is-active", previous_unit) in ("active", "activating"):
-                raise HTTPException(status_code=409, detail="Another application action is already running")
-        except (json.JSONDecodeError, OSError):
-            pass
-    unit = f"vps-control-protocol-update-{image_id}-{int(time.time())}"
-    result = subprocess.run(
-        ["systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec", CONTROL_COMMAND, "protocol-update", image_id],
-        capture_output=True, text=True, timeout=10, check=False,
-    )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to update protocol")
-    action = {
-        "unit": f"{unit}.service", "action": f"protocol-update:{image_id}",
-        "started_at": datetime.now(timezone.utc).isoformat(), "state": "activating",
-        "progress": 3, "message": "Запуск обновления протокола",
-    }
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
-    os.chmod(ACTION_FILE, 0o600)
+    action = start_application_operation(f"protocol-update:{image_id}", [CONTROL_COMMAND, "protocol-update", image_id], operation_id=operation_id)
     return action
 
 
-@app.delete("/api/protocol-images/{image_id}")
-def remove_protocol_image(image_id: str, _: None = Depends(require_token)) -> dict:
+@app.delete("/api/protocol-images/{image_id}", dependencies=[Depends(require_component_management)])
+def remove_protocol_image(image_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    previous = replay_application_operation(operation_id, f"protocol-remove:{image_id}")
+    if previous:
+        return previous
     image = protocol_image_manifests().get(image_id)
     if not image:
         raise HTTPException(status_code=404, detail="Protocol image not found")
@@ -2944,29 +3202,26 @@ def remove_protocol_image(image_id: str, _: None = Depends(require_token)) -> di
                 status_code=409,
                 detail="Нельзя удалить последний активный канал доступа к закрытой панели. Сначала включите другой VPN-протокол или публичный доступ.",
             )
-    if ACTION_FILE.exists():
-        try:
-            previous_unit = json.loads(ACTION_FILE.read_text(encoding="utf-8")).get("unit", "")
-            if previous_unit and run("systemctl", "is-active", previous_unit) in ("active", "activating"):
-                raise HTTPException(status_code=409, detail="Another application action is already running")
-        except (json.JSONDecodeError, OSError):
-            pass
-    unit = f"vps-control-protocol-remove-{image_id}-{int(time.time())}"
-    result = subprocess.run(
-        ["systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec", CONTROL_COMMAND, "protocol-remove", image_id],
-        capture_output=True, text=True, timeout=10, check=False,
-    )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to remove protocol")
-    action = {
-        "unit": f"{unit}.service", "action": f"protocol-remove:{image_id}",
-        "started_at": datetime.now(timezone.utc).isoformat(), "state": "activating",
-        "progress": 3, "message": f"Удаление {image.get('name', image_id)} запущено; дождитесь подтверждения сервера",
-    }
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
-    os.chmod(ACTION_FILE, 0o600)
+    action = start_application_operation(f"protocol-remove:{image_id}", [CONTROL_COMMAND, "protocol-remove", image_id], operation_id=operation_id)
     return action
+
+
+@app.post("/api/protocol-images/{image_id}/purge")
+def purge_component_data(image_id: str, payload: ComponentPurge, _: None = Depends(require_token),
+                         operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    if payload.confirmation != image_id:
+        raise HTTPException(status_code=422, detail="Подтвердите идентификатор очищаемого компонента")
+    previous = replay_application_operation(operation_id, f"protocol-purge:{image_id}")
+    if previous:
+        return previous
+    try:
+        registry = ComponentRegistry(DATA_DIR)
+        registry.require_managed(image_id, allow_retained=True)
+        if not registry.management(image_id).get("retained"):
+            raise RegistryError("Сначала удалите исполняемую часть компонента")
+    except RegistryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return start_application_operation(f"protocol-purge:{image_id}", [CONTROL_COMMAND, "protocol-purge", image_id], operation_id=operation_id)
 
 
 @app.get("/api/application/metadata")
@@ -2987,6 +3242,13 @@ def application_status(_: None = Depends(require_token)) -> dict:
         except (json.JSONDecodeError, OSError):
             action = {}
     unit = action.get("unit", "")
+    if action.get("id"):
+        try:
+            with application_operation.locked(DATA_DIR):
+                action = application_operation.reconcile(DATA_DIR, ACTION_FILE, application_operation.read(ACTION_FILE), observe_service)
+        except (OSError, ValueError):
+            action = {**action, "state": "unknown", "message": "Состояние операции временно недоступно"}
+        unit = ""  # Legacy inference below is only for pre-migration markers.
     if unit:
         recorded_state = action.get("state", "")
         if recorded_state in ("rebooting", "powering-off"):
@@ -3055,25 +3317,29 @@ def application_status(_: None = Depends(require_token)) -> dict:
         action["result"] = result
         # Status reads must not overwrite the command's final marker (or a newer
         # operation) with a transient systemd snapshot.
-    web_unit_loaded = run("systemctl", "show", "vps-control-web.service", "--property=LoadState", "--value") == "loaded"
-    caddy_unit_loaded = run("systemctl", "show", "caddy.service", "--property=LoadState", "--value") == "loaded"
-    legacy_container_names = run("docker", "ps", "--format", "{{.Names}}") if not (web_unit_loaded and caddy_unit_loaded) else ""
+    observed_units = {unit: observe_service(unit) for unit in (
+        "vps-control-api.service", "vps-control-web.service", "caddy.service")}
+    web_unit_loaded = observed_units["vps-control-web.service"]["unit_present"]
+    caddy_unit_loaded = observed_units["caddy.service"]["unit_present"]
+    legacy_container_names = run("docker", "ps", "--format", "{{.Names}}") if web_unit_loaded is False or caddy_unit_loaded is False else ""
     legacy_runtime = any(name.startswith(("vps-control-web-", "vps-control-gateway-")) for name in legacy_container_names.splitlines())
     containers = []
     for service, unit, component_name, purpose in (
         ("web", "vps-control-web.service", "Веб-интерфейс", "Отдаёт интерфейс управления сервером"),
         ("gateway", "caddy.service", "Сетевой шлюз", "Публикует панель и направляет запросы к API"),
     ):
-        active = run("systemctl", "is-active", unit) == "active"
+        observed = observed_units[unit]
         containers.append({
-            "Service": service, "State": "running" if active else "stopped",
-            "component_name": component_name, "purpose": purpose, "healthy": active,
-            "status_text": "systemd-служба запущена" if active else "systemd-служба остановлена или неисправна",
+            "Service": service, "State": observed["runtime"]["state"],
+            "component_name": component_name, "purpose": purpose, "healthy": None,
+            "runtime": observed["runtime"], "status_text": observed["runtime"]["reason"],
         })
+    api_observation = observed_units["vps-control-api.service"]
     return {
         "api": {
-            "active": run("systemctl", "is-active", "vps-control-api.service") == "active",
-            "enabled": run("systemctl", "is-enabled", "vps-control-api.service") == "enabled",
+            "active": None if api_observation["runtime"]["state"] == "unknown" else api_observation["active"],
+            "enabled": None if api_observation["unit_file_state"] == "unknown" else api_observation["enabled"],
+            "runtime": api_observation["runtime"],
         },
         "containers": containers,
         "cdn_security": {**cdn_security.settings(), "operation": cdn_operation.status()},
@@ -3087,52 +3353,20 @@ def application_status(_: None = Depends(require_token)) -> dict:
             "report_available": (DATA_DIR / "recovery" / "safe-update-report.txt").is_file(),
         },
         "runtime": {
-            "mode": "systemd" if web_unit_loaded and caddy_unit_loaded else "legacy-docker" if legacy_runtime else "incomplete",
+            "mode": "systemd" if web_unit_loaded and caddy_unit_loaded else "legacy-docker" if legacy_runtime else "unknown" if web_unit_loaded is None or caddy_unit_loaded is None else "incomplete",
             "migration_required": legacy_runtime,
         },
     }
 
 
 @app.post("/api/application/action")
-def application_action(payload: ApplicationAction, _: None = Depends(require_token)) -> dict:
+def application_action(payload: ApplicationAction, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
     if payload.action in ("test-update", "test-rollback") and not SERVICE_MODE_FILE.exists():
         raise HTTPException(status_code=409, detail="Test version requires active service mode")
-    if ACTION_FILE.exists():
-        try:
-            previous = json.loads(ACTION_FILE.read_text(encoding="utf-8"))
-            previous_unit = previous.get("unit", "")
-            if previous_unit and run("systemctl", "is-active", previous_unit) in ("active", "activating"):
-                raise HTTPException(status_code=409, detail="Another application action is already running")
-        except json.JSONDecodeError:
-            pass
-    unit = f"vps-control-action-{int(time.time())}"
     bundled_command = INSTALL_DIR / "scripts" / "vps-control.sh"
-    command = (
-        ["/bin/bash", str(bundled_command), payload.action]
-        if bundled_command.exists()
-        else [CONTROL_COMMAND, payload.action]
-    )
-    result = subprocess.run(
-        [
-            "systemd-run", f"--unit={unit}", "--collect",
-            "--property=Type=exec", f"--property=RuntimeMaxSec={'60min' if payload.action == 'safe-update' else '20min'}",
-            "--property=TimeoutStopSec=45s", *command,
-        ],
-        capture_output=True, text=True, timeout=10, check=False,
-    )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to start application action")
-    action = {
-        "unit": f"{unit}.service",
-        "action": payload.action,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "state": "activating",
-        "progress": 3,
-        "message": "Команда передана серверу",
-    }
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
-    os.chmod(ACTION_FILE, 0o600)
+    command = (["/bin/bash", str(bundled_command), payload.action] if bundled_command.exists() else [CONTROL_COMMAND, payload.action])
+    action = start_application_operation(payload.action, command, operation_id=operation_id,
+        properties=(f"--property=RuntimeMaxSec={'60min' if payload.action == 'safe-update' else '20min'}", "--property=TimeoutStopSec=45s"))
     return action
 
 
@@ -3146,6 +3380,8 @@ def cancel_application_action(_: None = Depends(require_token)) -> dict:
         raise HTTPException(status_code=409, detail="Application action state is unavailable") from exc
     unit = str(action.get("unit", ""))
     state = str(action.get("state", ""))
+    if action.get("action") not in {"update", "test-update", "test-rollback", "safe-update", "kernel-update"}:
+        raise HTTPException(status_code=409, detail="Эта операция не поддерживает безопасную остановку из панели")
     if not re.fullmatch(r"vps-control-action-[0-9]+\.service", unit):
         raise HTTPException(status_code=409, detail="This operation cannot be rolled back from the panel")
     if state not in {"queued", "active", "activating", "running"}:
@@ -3155,7 +3391,8 @@ def cancel_application_action(_: None = Depends(require_token)) -> dict:
         capture_output=True, text=True, timeout=10, check=False,
     )
     if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to stop application action")
+        print(result.stderr, file=sys.stderr)
+        raise HTTPException(status_code=500, detail="Не удалось остановить операцию; подробности в журнале")
     return {"unit": unit, "action": action.get("action"), "state": "stopping", "message": "Остановка команды и откат изменений запущены"}
 
 
@@ -3219,7 +3456,7 @@ def protocol_managed_services() -> dict[str, dict]:
     # mihomo itself) shows up here automatically, so new protocol images
     # never need a matching entry added by hand.
     services: dict[str, dict] = {
-        image["id"]: {"name": image["name"], "unit": image["service"], "controls": ["start", "stop", "restart"]}
+        image["id"]: {"name": image["name"], "unit": image["service"], "controls": ["start", "stop", "restart"], "component_id": image["id"]}
         for image in protocol_image_manifests().values()
         if image.get("installed") and image.get("service")
     }
@@ -3231,7 +3468,7 @@ def protocol_managed_services() -> dict[str, dict]:
     mihomo_modules = mihomo_modules if isinstance(mihomo_modules, dict) else {}
     for module_id, service in mihomo_module_services().items():
         if mihomo_modules.get(module_id):
-            services[f"mihomo-{module_id}"] = service
+            services[f"mihomo-{module_id}"] = {**service, "component_id": "mihomo"}
     return services
 
 
@@ -3380,44 +3617,22 @@ def application_dependency_versions() -> list[dict[str, str]]:
 
 def service_details(service_id: str, definition: dict) -> dict:
     unit = definition["unit"]
-    properties = {}
-    for line in run(
-        "systemctl", "show", unit,
-        "--property=LoadState,ActiveState,SubState,UnitFileState,NRestarts,ActiveEnterTimestamp,Description",
-    ).splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            properties[key] = value
+    observation = observe_service(unit)
+    if service_id == "ssh":
+        observation = ssh_observation(observation, observe_service("ssh.socket"))
     details = {
+        **observation,
         "id": service_id,
         "name": definition["name"],
-        "unit": unit,
-        # A loaded unit is present on this server even when it is disabled.
-        # Keep presence, runtime state and autostart as separate facts so an
-        # actually running disabled unit never disappears from the UI.
-        "installed": properties.get("LoadState") == "loaded",
-        "active": properties.get("ActiveState") == "active",
-        "state": properties.get("ActiveState", "unknown"),
-        "substate": properties.get("SubState", "unknown"),
-        "enabled": properties.get("UnitFileState") in ("enabled", "enabled-runtime", "static"),
-        "unit_file_state": properties.get("UnitFileState", "unknown"),
-        "restarts": int(properties.get("NRestarts") or 0),
-        "active_since": properties.get("ActiveEnterTimestamp", ""),
-        "description": properties.get("Description", ""),
+        "unit": "ssh.service + ssh.socket" if service_id == "ssh" else unit,
         "controls": definition["controls"],
         "disabled_controls": definition.get("disabled_controls", []),
     }
-    if service_id == "ssh":
-        # Socket-activated: ssh.service itself is typically enabled=disabled
-        # with ssh.socket holding the actual enablement, so installed/active/
-        # enabled must all fall back to the socket's state too.
-        socket_active = run("systemctl", "is-active", "ssh.socket") == "active"
-        socket_enabled = run("systemctl", "is-enabled", "ssh.socket") in ("enabled", "enabled-runtime", "static")
-        details["installed"] = details["installed"] or socket_enabled
-        details["active"] = details["active"] or socket_active
-        details["enabled"] = details["enabled"] or socket_enabled
-        details["unit"] = "ssh.service + ssh.socket"
-        details["substate"] = "socket activation" if socket_active and properties.get("ActiveState") != "active" else details["substate"]
+    if definition.get("component_id"):
+        details["management"] = ComponentRegistry(DATA_DIR).management(definition["component_id"])
+        if details["management"]["state"] != "managed":
+            details["controls"] = []
+            details["disabled_controls"] = []
     return details
 
 
@@ -3457,9 +3672,28 @@ def timer_details(timer_id: str) -> dict:
     }
 
 
+@app.get("/api/services/operation-history")
+def operation_history_settings(_: None = Depends(require_token)) -> dict:
+    try:
+        return operation_policy.status(DATA_DIR)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=503, detail="Настройки хранения истории операций недоступны; очистка приостановлена") from None
+
+
+@app.put("/api/services/operation-history")
+def update_operation_history_settings(payload: OperationHistorySettings, _: None = Depends(require_token)) -> dict:
+    try:
+        operation_policy.configure(DATA_DIR, payload.model_dump(), payload.expected_revision)
+        return operation_policy.status(DATA_DIR)
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except (OSError, ValueError):
+        raise HTTPException(status_code=503, detail="Не удалось сохранить настройки истории; проверьте текущее состояние") from None
+
+
 @app.get("/api/services")
 def services_status(_: None = Depends(require_token)) -> dict:
-    failed = run("systemctl", "--failed", "--no-legend", "--plain").splitlines()
+    failed = failed_unit_count()
     items = []
     for service_id, definition in managed_services().items():
         details = service_details(service_id, definition)
@@ -3469,7 +3703,7 @@ def services_status(_: None = Depends(require_token)) -> dict:
         # actually installed, so no separate module_configured check remains.
         if service_id == "monitor" and not (WG_CONFIG.exists() or AWG_CONFIG.exists()):
             continue
-        if details["installed"]:
+        if details["unit_present"] is not False:
             items.append(details)
     vpn_urls = []
     panel_channels = configured_panel_channels()
@@ -3497,9 +3731,10 @@ def services_status(_: None = Depends(require_token)) -> dict:
         retention_days = 30
     return {
         "items": items,
-        "failed_units": len([line for line in failed if line.strip()]),
+        "failed_units": failed,
         "reboot_required": Path("/var/run/reboot-required").exists(),
         "automation": read_automation(),
+        "automation_recovery_required": AUTOMATION_FILE.with_name("automation-recovery.json").exists(),
         "timers": {
             "reboot": timer_details("reboot"), "cleanup": timer_details("cleanup"),
             "update": timer_details("update"),
@@ -3526,20 +3761,32 @@ def services_status(_: None = Depends(require_token)) -> dict:
 @app.get("/api/live-status")
 def live_status(_: None = Depends(require_token)) -> dict:
     """Cheap sub-second telemetry without diagnostics, package checks or ICMP."""
-    mem_total, mem_available = memory_info()
-    disk_total, disk_available = disk_info()
-    load = os.getloadavg()
-    network_rx, network_tx = network_info()
+    resources = system_resources()
     ufw_config = Path("/etc/ufw/ufw.conf")
-    live_clients = all_client_dump(include_quality=False)
+    unavailable = []
+
+    def source(name, read):
+        try:
+            return read()
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError, HTTPException):
+            unavailable.append(name)
+            return None
+
+    live_clients = source("clients", lambda: all_client_dump(include_quality=False))
 
     def protocol_live(protocol: str, interface: str) -> dict:
+        if live_clients is None:
+            raise ValueError("Client observation is unavailable")
         protocol_clients = [client for client in live_clients if client["protocol"] == protocol]
         statistics = Path(f"/sys/class/net/{interface}/statistics")
         try:
             received = int((statistics / "rx_bytes").read_text())
             transmitted = int((statistics / "tx_bytes").read_text())
         except (OSError, ValueError):
+            # A missing interface is stopped; unreadable counters on a present
+            # interface are not a measurement of zero traffic.
+            if Path(f"/sys/class/net/{interface}").exists():
+                raise
             received = transmitted = 0
         return {
             "active": Path(f"/sys/class/net/{interface}").exists(),
@@ -3556,23 +3803,13 @@ def live_status(_: None = Depends(require_token)) -> dict:
 
     return {
         "checked_at": datetime.now(timezone.utc).isoformat(),
-        "resources": {
-            "load1": load[0],
-            "cpu_percent": cpu_usage_percent(),
-            "cpu_count": os.cpu_count() or 1,
-            "memory_total": mem_total,
-            "memory_available": mem_available,
-            "disk_total": disk_total,
-            "disk_available": disk_available,
-            "network_rx": network_rx,
-            "network_tx": network_tx,
-        },
+        "resources": resources,
         "protocols": {
-            "wg": protocol_live("wg", WG_INTERFACE),
-            "awg": protocol_live("awg", AWG_INTERFACE),
+            "wg": source("wg", lambda: protocol_live("wg", WG_INTERFACE)),
+            "awg": source("awg", lambda: protocol_live("awg", AWG_INTERFACE)),
         },
         "clients": live_clients,
-        "security": {
+        "security": source("security", lambda: {
             "firewall_active": (
                 ufw_config.exists()
                 and "ENABLED=yes" in ufw_config.read_text(encoding="utf-8")
@@ -3582,7 +3819,8 @@ def live_status(_: None = Depends(require_token)) -> dict:
                 re.search(r"(^|[\[\]:.])22\s", line)
                 for line in run("ss", "-Hlnt").splitlines()
             ),
-        },
+        }),
+        "unavailable": unavailable,
     }
 
 
@@ -3601,11 +3839,12 @@ def manage_ssh_units(action: Literal["start", "stop", "restart"]) -> None:
     run("systemctl", action if (socket_active or service_active) else "start", unit, timeout=30, check=True)
 
 
-@app.post("/api/services/{service_id}/action")
-def manage_service(service_id: str, payload: ServiceAction, _: None = Depends(require_token)) -> dict:
+def service_action_definition(service_id: str, payload: ServiceAction) -> dict:
     definition = managed_services().get(service_id)
     if not definition:
         raise HTTPException(status_code=404, detail="Unknown managed service")
+    if definition.get("component_id"):
+        require_owned_components(definition["component_id"])
     if payload.action not in definition["controls"]:
         raise HTTPException(status_code=409, detail="Action is not allowed for this service")
     if service_id in ("wg", "awg") and payload.action == "stop" and os.getenv("ACCESS_MODE", "external") == "vpn":
@@ -3636,11 +3875,32 @@ def manage_service(service_id: str, payload: ServiceAction, _: None = Depends(re
                 status_code=409,
                 detail="SSH cannot be stopped until the VPN and control panel recovery path are active",
             )
+    return definition
+
+
+def perform_service_action(service_id: str, payload: ServiceAction) -> dict:
+    definition = service_action_definition(service_id, payload)
     if service_id == "ssh":
         manage_ssh_units(payload.action)
     else:
         run("systemctl", payload.action, definition["unit"], timeout=30, check=True)
-    return service_details(service_id, definition)
+    observed = service_details(service_id, definition)
+    expected = "stopped" if payload.action == "stop" else "running"
+    if observed.get("runtime", {}).get("state") != expected:
+        raise HTTPException(status_code=409, detail="Команда отправлена, но ожидаемое состояние службы не подтверждено. Проверьте диагностику перед следующим действием.")
+    return observed
+
+
+@app.post("/api/services/{service_id}/action", status_code=202)
+def manage_service(service_id: str, payload: ServiceAction, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    action = f"service-action:{service_id}:{payload.action}"
+    replay = replay_application_operation(operation_id, action)
+    if replay:
+        return replay
+    service_action_definition(service_id, payload)
+    return start_application_operation(action,
+        [sys.executable, str(Path(__file__).with_name("service_worker.py")), service_id, payload.action],
+        operation_id=operation_id, properties=(f"--property=EnvironmentFile={ENV_FILE}",))
 
 
 @app.get("/api/application/cdn-security")
@@ -3656,6 +3916,7 @@ def cdn_security_status(operation_id: str | None = None, _: None = Depends(requi
 
 @app.put("/api/application/cdn-security", status_code=202)
 def update_cdn_security(payload: CdnSecuritySettings, _: None = Depends(require_token)) -> dict:
+    require_route_management()
     if payload.authenticated_origin_pulls and not (cdn_security.RESOURCES / "cloudflare-origin-pull-ca.pem").is_file():
         raise HTTPException(status_code=409, detail="В установленном релизе отсутствует публичный сертификат Cloudflare. Обновите приложение до исправленного релиза; настройки Cloudflare менять не требуется для устранения этой ошибки.")
     try:
@@ -3680,6 +3941,7 @@ def ech_status(domain: str, _: None = Depends(require_token)) -> dict:
 
 @app.put('/api/application/ech', status_code=202)
 def prepare_ech(payload: EchSettings, _: None = Depends(require_token)) -> dict:
+    require_route_management()
     try:
         ech_settings.require_support()
         domain = ech_settings.check_domain(payload.domain)
@@ -3690,123 +3952,49 @@ def prepare_ech(payload: EchSettings, _: None = Depends(require_token)) -> dict:
 
 
 @app.put("/api/services/panel-access", status_code=202)
-def update_panel_access(payload: PanelAccessSettings, _: None = Depends(require_token)) -> dict:
+def update_panel_access(payload: PanelAccessSettings, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    require_route_management()
     if payload.mode == "vpn":
         channels = configured_panel_channels()
         if not channels:
             raise HTTPException(status_code=409, detail="Сначала настройте хотя бы одно защищённое подключение")
-    unit = f"vps-control-access-{int(time.time())}"
-    result = subprocess.run(
-        [
-            # access-mode restarts the API service after changing the gateway.
-            # Waiting here can terminate this request before acknowledgement.
-            "systemd-run", f"--unit={unit}", "--collect",
-            "--property=Type=exec",
-            CONTROL_COMMAND, "access-mode", payload.mode,
-        ],
-        capture_output=True, text=True, timeout=10, check=False,
-    )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to change panel access")
-    return {
-        "action": "access-mode", "mode": payload.mode, "state": "activating", "unit": f"{unit}.service",
-        "internal_url": internal_panel_url(), "external_url": external_panel_url(),
-        "available_channels": configured_panel_channels(),
-    }
+    action = start_application_operation("access-mode", [CONTROL_COMMAND, "access-mode", payload.mode], operation_id=operation_id)
+    return {**action, "mode": payload.mode, "internal_url": internal_panel_url(), "external_url": external_panel_url(),
+            "available_channels": configured_panel_channels()}
+
 
 
 @app.put("/api/services/service-mode")
-def update_service_mode(payload: ServiceModeSettings, _: None = Depends(require_token)) -> dict:
-    unit = f"vps-control-service-mode-{int(time.time())}"
-    result = subprocess.run(
-        [
-            "systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec",
-            CONTROL_COMMAND, "service-mode", "enable" if payload.active else "disable",
-        ],
-        capture_output=True, text=True, timeout=10, check=False,
-    )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to change service mode")
-    action = {
-        "unit": f"{unit}.service",
-        "action": "service-mode",
-        "active": payload.active,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "state": "activating",
-        "progress": 3,
-        "message": "Команда передана серверу",
-    }
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
-    os.chmod(ACTION_FILE, 0o600)
-    return action
+def update_service_mode(payload: ServiceModeSettings, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return {**start_application_operation("service-mode", [CONTROL_COMMAND, "service-mode", "enable" if payload.active else "disable"], operation_id=operation_id), "active": payload.active}
 
 
-def start_control_task(name: str, *arguments: str) -> dict:
-    unit = f"vps-control-{name}-{int(time.time())}"
+
+def start_control_task(name: str, *arguments: str, operation_id=None) -> dict:
     bundled_command = INSTALL_DIR / "scripts" / "vps-control.sh"
-    command = (
-        ["/bin/bash", str(bundled_command), *arguments]
-        if bundled_command.exists()
-        else [CONTROL_COMMAND, *arguments]
-    )
-    result = subprocess.run(
-        [
-            "systemd-run", f"--unit={unit}", "--wait", "--collect",
-            "--property=Type=exec", *command,
-        ],
-        capture_output=True, text=True, timeout=120, check=False,
-    )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or f"Unable to run {name}")
-    return {"state": "finished", "unit": f"{unit}.service"}
+    command = (["/bin/bash", str(bundled_command), *arguments]
+               if bundled_command.exists() else [CONTROL_COMMAND, *arguments])
+    return start_application_operation(name, command, operation_id=operation_id)
 
 
-@app.put("/api/services/logging")
-def update_logging(payload: LoggingSettings, _: None = Depends(require_token)) -> dict:
-    return start_control_task(
-        "logging-config",
-        "logging-config",
-        "enable" if payload.persistent else "disable",
-        str(payload.retention_days),
-    )
+@app.put("/api/services/logging", status_code=202)
+def update_logging(payload: LoggingSettings, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return start_control_task("logging-config", "logging-config",
+                              "enable" if payload.persistent else "disable",
+                              str(payload.retention_days), operation_id=operation_id)
 
 
-@app.post("/api/services/logging/clear")
-def clear_logs(_: None = Depends(require_token)) -> dict:
-    return start_control_task("logs-clear", "logs-clear")
+@app.post("/api/services/logging/clear", status_code=202)
+def clear_logs(_: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return start_control_task("logs-clear", "logs-clear", operation_id=operation_id)
 
 
-@app.put("/api/services/automation")
-def update_automation(payload: AutomationSettings, _: None = Depends(require_token)) -> dict:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = AUTOMATION_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
-    os.chmod(tmp, 0o600)
-    tmp.replace(AUTOMATION_FILE)
-    unit = f"vps-control-automation-apply-{int(time.time())}"
-    bundled_command = INSTALL_DIR / "scripts" / "vps-control.sh"
-    command = (
-        ["/bin/bash", str(bundled_command), "automation-apply"]
-        if bundled_command.exists()
-        else [CONTROL_COMMAND, "automation-apply"]
-    )
-    result = subprocess.run(
-        [
-            "systemd-run", f"--unit={unit}", "--wait", "--collect", "--property=Type=exec",
-            *command,
-        ],
-        capture_output=True, text=True, timeout=30, check=False,
-    )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to apply automation settings")
-    return {
-        "automation": read_automation(),
-        "timers": {
-            "reboot": timer_details("reboot"), "cleanup": timer_details("cleanup"),
-            "update": timer_details("update"),
-        },
-    }
+@app.put("/api/services/automation", status_code=202)
+def update_automation(payload: AutomationSettings, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return start_application_operation("automation-config",
+        [sys.executable, str(Path(__file__).with_name("service_worker.py")), "--automation",
+         json.dumps(payload.model_dump(), sort_keys=True, separators=(",", ":"))],
+        operation_id=operation_id, properties=(f"--property=EnvironmentFile={ENV_FILE}",))
 
 
 @app.get("/api/clients")
@@ -3851,7 +4039,7 @@ def dns_status(_: None = Depends(require_token)) -> dict:
     }
 
 
-@app.put("/api/dns/settings")
+@app.put("/api/dns/settings", dependencies=[Depends(require_component_management)])
 def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_token)) -> dict:
     data = payload.model_dump()
     if data.get("custom"):
@@ -3942,48 +4130,52 @@ def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_to
         temporary.replace(DNS_SETTINGS_FILE)
     except Exception as exc:
         logger.exception("DNS settings transaction failed; restoring previous state")
+        recovery_failed = False
+
+        def restore_step(callback):
+            nonlocal recovery_failed
+            try:
+                callback()
+            except Exception:
+                recovery_failed = True
+                logger.exception("DNS rollback step failed; continuing remaining recovery steps")
+
+        def restore_file(path, original, mode=None):
+            if original is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(original)
+                if mode is not None:
+                    os.chmod(path, mode)
+
         for path, original in tunnel_originals.items():
-            path.write_bytes(original)
+            restore_step(lambda path=path, original=original: restore_file(path, original))
         for scope, _, _, _ in tunnel_updates:
-            try:
-                restart_dns_tunnel(scope)
-            except Exception:
-                logger.exception("Tunnel restart failed during DNS rollback: %s", scope)
-        if env_original is None:
-            ENV_FILE.unlink(missing_ok=True)
-        else:
-            ENV_FILE.write_bytes(env_original)
-            os.chmod(ENV_FILE, 0o600)
-        if settings_original is None:
-            DNS_SETTINGS_FILE.unlink(missing_ok=True)
-        else:
-            DNS_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            DNS_SETTINGS_FILE.write_bytes(settings_original)
-            os.chmod(DNS_SETTINGS_FILE, 0o600)
+            restore_step(lambda scope=scope: restart_dns_tunnel(scope))
+        restore_step(lambda: restore_file(ENV_FILE, env_original, 0o600))
+        restore_step(lambda: restore_file(DNS_SETTINGS_FILE, settings_original, 0o600))
         if vrx_original is not None:
-            VLESS_CONFIG.write_bytes(vrx_original)
-            os.chmod(VLESS_CONFIG, 0o640)
-            os.chown(VLESS_CONFIG, 0, 65534)
-            try:
-                restart_vless_service()
-            except Exception:
-                logger.exception("VRX restart failed during DNS rollback")
-        if system_dropin_original is None:
-            SYSTEM_RESOLVED_DROPIN.unlink(missing_ok=True)
-        else:
-            SYSTEM_RESOLVED_DROPIN.parent.mkdir(parents=True, exist_ok=True)
-            SYSTEM_RESOLVED_DROPIN.write_bytes(system_dropin_original)
-            os.chmod(SYSTEM_RESOLVED_DROPIN, 0o644)
+            restore_step(lambda: restore_file(VLESS_CONFIG, vrx_original, 0o640))
+            restore_step(lambda: os.chown(VLESS_CONFIG, 0, 65534))
+            restore_step(restart_vless_service)
+        restore_step(lambda: restore_file(SYSTEM_RESOLVED_DROPIN, system_dropin_original, 0o644))
         if resolv_original is not None:
-            SYSTEM_RESOLV_CONF.write_bytes(resolv_original)
-        try:
-            if run("systemctl", "is-active", "systemd-resolved.service") == "active":
+            restore_step(lambda: restore_file(SYSTEM_RESOLV_CONF, resolv_original))
+
+        def restore_system_runtime():
+            observation = observe_service("systemd-resolved.service")
+            if observation["unit_present"] is False:
+                return
+            if observation["runtime"]["state"] in {"unknown", "error"}:
+                raise RuntimeError("System DNS runtime cannot be confirmed")
+            if observation["runtime"]["state"] == "running":
                 run("systemctl", "restart", "systemd-resolved", check=True)
-        except Exception:
-            logger.exception("System DNS restart failed during DNS rollback")
-        detail = exc.detail if isinstance(exc, HTTPException) else "Не удалось сохранить DNS; предыдущие настройки восстановлены"
-        status_code = exc.status_code if isinstance(exc, HTTPException) else 500
-        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+        restore_step(restore_system_runtime)
+        detail = ("Не удалось полностью восстановить DNS; проверьте настройки и службы перед повтором"
+                  if recovery_failed else "Изменение DNS не применено. Файлы прежних настроек восстановлены; проверьте работоспособность подключений")
+        raise HTTPException(status_code=500, detail=detail) from exc
     finally:
         temporary.unlink(missing_ok=True)
     return dns_status()
@@ -4575,7 +4767,7 @@ def create_shadowsocks_client(payload: ClientCreate, client_id: str, safe_name: 
     return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config}
 
 
-@app.post("/api/clients")
+@app.post("/api/clients", dependencies=[Depends(require_component_management)])
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
     client_id = secrets.token_hex(8)
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
@@ -4930,7 +5122,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     return {"id": client_id, "filename": f"{safe_name}.conf", "config": client_config}
 
 
-@app.delete("/api/clients/{client_id}")
+@app.delete("/api/clients/{client_id}", dependencies=[Depends(require_component_management)])
 def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     items = read_clients()
     item = next((entry for entry in items if entry["id"] == client_id), None)
@@ -5292,7 +5484,7 @@ def persist_vrx_target(host: str) -> None:
     temporary.replace(VLESS_ENV)
 
 
-@app.patch("/api/protocols/{protocol}/settings")
+@app.patch("/api/protocols/{protocol}/settings", dependencies=[Depends(require_component_management)])
 def update_protocol_settings(
     protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"],
     payload: ProtocolSettingsUpdate,
@@ -5972,7 +6164,7 @@ def check_network_diagnostics(
     return direct_protocol_diagnostics(protocol, force=True)
 
 
-@app.post("/api/protocols/{protocol}/restart")
+@app.post("/api/protocols/{protocol}/restart", dependencies=[Depends(require_component_management)])
 def restart_protocol(protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"], _: None = Depends(require_token)) -> dict:
     if protocol == "shadowsocks":
         unit = "vps-control-shadowsocks.target"

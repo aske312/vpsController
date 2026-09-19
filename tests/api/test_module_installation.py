@@ -18,6 +18,58 @@ BASH = (next((str(p) for p in (Path('D:/Git/bin/bash.exe'), Path('C:/Program Fil
 
 
 class ModuleInstallationTests(unittest.TestCase):
+    @unittest.skipUnless(BASH, "Requires Bash for an isolated shell fixture")
+    def test_failed_reinstall_does_not_uninstall_existing_component_or_expose_log_tail(self):
+        source = (ROOT / "scripts/vps-control.sh").read_text(encoding="utf-8")
+        function = re.search(r"^install_protocol_image\(\) \{.*?^\}", source, re.M | re.S).group()
+        function = function.replace("/var/log/", "${PWD}/logs/")
+        for kind in ("existing", "fresh"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                image = root / "protocol-images/wireguard"
+                image.mkdir(parents=True)
+                for name in ("manifest.json", "install.sh", "uninstall.sh"):
+                    (image / name).touch()
+                (root / "logs").mkdir()
+                stubs = r'''
+set -eu
+INSTALL_DIR="$PWD" DATA_DIR="$PWD/data" WG_INTERFACE=wg0 AWG_INTERFACE=awg0
+WG_PORT=51820 AWG_PORT=51821 ENV_FILE="$PWD/env" ENABLE_UFW=no APP_NAME=fixture ACTION_PROGRESS=10
+ID=debian
+source() { :; }
+info() { :; }
+prepare_protocol_ports() { :; }
+prepare_package_manager() { :; }
+preflight_protocol_image() { :; }
+apt-get() { :; }
+refresh_protocol_api_access() { :; }
+env_value() { :; }
+die() { exit 43; }
+write_action_status() { printf '%s\n' "$3" > "$PWD/status"; }
+python3() {
+  if [[ "$1" == -c ]]; then
+    case "$2" in
+      *uninstaller*) echo uninstall.sh ;;
+      *installer*) echo install.sh ;;
+      *) echo wg ;;
+    esac
+  elif [[ "${2:-}" == check-install ]]; then
+    echo "$INSTALL_KIND"
+  fi
+}
+bash() {
+  case "$1" in
+    *uninstall.sh) echo UNINSTALL >> "$PWD/calls" ;;
+    *) echo INSTALL >> "$PWD/calls"; echo fixture-private-error-detail; return 1 ;;
+  esac
+}
+'''
+                result = subprocess.run([BASH, "-c", stubs + function + "\ninstall_protocol_image protocol-install wg\n"],
+                                        cwd=root, env={**os.environ, "INSTALL_KIND": kind}, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 43, result.stderr)
+                self.assertEqual("UNINSTALL" in (root / "calls").read_text(), kind == "fresh")
+                self.assertNotIn("fixture-private-error-detail", (root / "status").read_text(encoding="utf-8"))
+
     def test_success_marker_waits_for_process_exit_and_status_read_keeps_marker(self):
         with tempfile.TemporaryDirectory() as folder:
             action_file = Path(folder) / 'action.json'

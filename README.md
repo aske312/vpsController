@@ -46,16 +46,6 @@ Caddy автоматически настроит HTTPS. Без `--domain` па�
 sudo vps-control credentials
 ```
 
-## Основные команды
-
-```bash
-sudo vps-control status
-sudo vps-control verify
-sudo vps-control integrity-check
-sudo vps-control restart
-sudo vps-control update
-```
-
 Полное удаление панели и её конфигурации:
 
 ```bash
@@ -71,13 +61,6 @@ sudo vps-control install-release /root/vps-control-release.tar.gz
 ```
 
 Обычным пользователям рекомендуется обновление из панели или командой `sudo vps-control update`.
-
-На старых установках с DNS Unbound, настроенным панелью на адрес WG/AWG,
-обновление добавляет проверенную настройку `ip-freebind: yes`. Она предотвращает
-сбой запуска DNS, если адрес туннеля ещё не появился при загрузке VPS.
-Миграция не перезапускает DNS и туннели, не меняет адреса, ключи и правила доступа.
-Если Unbound уже находится в состоянии `failed`, после проверки его конфигурации
-службу DNS нужно запустить отдельно. Новые установки без Unbound не затрагиваются.
 
 ## Разработка
 

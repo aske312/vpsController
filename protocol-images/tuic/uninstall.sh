@@ -3,8 +3,12 @@ set -Eeuo pipefail
 systemctl disable --now vps-control-tuic.service 2>/dev/null || true
 rm -f /etc/systemd/system/vps-control-tuic.service
 /usr/local/lib/vps-control-tuic/firewall.sh delete 2>/dev/null || true
-rm -rf /etc/vps-control/tuic /usr/local/lib/vps-control-tuic
+[[ "${PRESERVE_COMPONENT_DATA:-1}" == 1 ]] || rm -rf /etc/vps-control/tuic
+rm -rf /usr/local/lib/vps-control-tuic
 python3 - <<'PY'
+import os, sys
+if os.getenv("PRESERVE_COMPONENT_DATA", "1") == "1":
+    sys.exit(0)
 import json
 from pathlib import Path
 p=Path('/var/lib/vps-control/clients.json')

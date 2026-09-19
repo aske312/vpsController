@@ -1,50 +1,21 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 
-type AutomationSchedule = {
-  enabled: boolean;
-  cadence: "daily" | "weekly" | "monthly";
-  weekday: string;
-  hour: number;
-  minute: number;
-};
-
-type ServiceItem = {
-  id: string;
-  name: string;
-  unit: string;
-  installed: boolean;
-  active: boolean;
-  state: string;
-  substate: string;
-  enabled: boolean;
-  unit_file_state: string;
-  restarts: number;
-  active_since: string;
-  description: string;
-  controls: string[];
-  disabled_controls?: string[];
-};
-
-type ServicesStatus = {
-  items: ServiceItem[];
-  failed_units: number;
-  reboot_required: boolean;
-  automation: { reboot: AutomationSchedule; cleanup: AutomationSchedule; update: AutomationSchedule };
-  timers: Record<"reboot" | "cleanup" | "update", { installed: boolean; active: boolean; last_trigger: string; next_run: string }>;
-  panel_access?: { mode: "external" | "vpn"; public: boolean; vpn_urls: string[]; internal_url?: string; available_channels?: string[]; can_enable?: boolean };
-  service_mode?: { active: boolean };
-  logging?: { persistent: boolean; retention_days: number; automatic_cleanup: boolean; disk_usage: string };
-};
-
-type LoggingSettings = { persistent: boolean; retention_days: number };
+import type { AutomationSchedule, LoggingSettings, MetricsSettings, ServiceItem, ServicesStatus } from "../../shared/types/control-plane";
+import { runtimeState, servicesSummary } from "./service-state";
 
 type Props = {
+  operationHistorySettings?: ReactNode;
   services: ServicesStatus | null;
   busy: boolean;
   serviceModeActive: boolean;
   loggingDraft: LoggingSettings | null;
+  metricsSettings: MetricsSettings | null;
+  metricsDraft: MetricsSettings | null;
+  onMetricsChange: (patch: Partial<MetricsSettings>) => void;
+  onSaveMetrics: () => void;
+  onResetMetrics: () => void;
   automationDraft: ServicesStatus["automation"] | null;
   onServiceAction: (serviceId: string, serviceName: string, action: "start" | "stop" | "restart") => void;
   onServiceModeChange: (active: boolean) => void;
@@ -79,10 +50,11 @@ function serviceGroup(service: ServiceItem): ServiceGroupId {
 }
 
 function serviceBadge(service: ServiceItem) {
-  const state = (service.state || "").toLowerCase();
+  const state = runtimeState(service);
   const substate = (service.substate || "").toLowerCase();
-  if (state === "failed" || substate === "failed") return { className: "failed", label: "FAILED" };
-  if (service.active) {
+  if (state === "unknown") return { className: "stopped", label: "Unknown" };
+  if (state === "error") return { className: "failed", label: "Error" };
+  if (state === "running") {
     if (substate === "exited") return { className: "ready", label: "ACTIVE  EXITED" };
     if (substate === "waiting") return { className: "ready", label: "ACTIVE  WAITING" };
     return { className: "running", label: "RUNNING" };
@@ -103,15 +75,22 @@ function formatRetention(days: number | undefined) {
 }
 
 function runtimeSummary(service: ServiceItem) {
-  const autostart = service.enabled ? "Autostart ON" : "Autostart OFF";
-  const restartLabel = service.restarts === 1 ? "1 restart" : `${service.restarts || 0} restarts`;
+  if (runtimeState(service) === "unknown") return service.runtime?.reason || "Состояние службы пока недоступно";
+  const autostart = service.unit_file_state === "unknown" ? "Autostart Unknown" : service.enabled ? "Autostart ON" : "Autostart OFF";
+  const restartLabel = service.restarts == null ? "— restarts" : service.restarts === 1 ? "1 restart" : `${service.restarts} restarts`;
   return `${autostart}  ${restartLabel}  ${compactSince(service.active_since)}`;
 }
 
 export function ServicesDashboard({
+  operationHistorySettings,
   services,
   busy,
   loggingDraft,
+  metricsSettings,
+  metricsDraft,
+  onMetricsChange,
+  onSaveMetrics,
+  onResetMetrics,
   automationDraft,
   onServiceAction,
   onLoggingChange,
@@ -121,19 +100,16 @@ export function ServicesDashboard({
   onSaveAutomation,
 }: Props) {
   const items = useMemo(() => services?.items || [], [services?.items]);
-  const installed = items.filter((item) => item.installed);
-  const active = installed.filter((item) => item.active);
-  const enabled = installed.filter((item) => item.enabled);
-  const totalRestarts = installed.reduce((sum, item) => sum + Number(item.restarts || 0), 0);
+  const summary = servicesSummary(services);
   const schedulesActive = [automationDraft?.reboot?.enabled, automationDraft?.cleanup?.enabled, automationDraft?.update?.enabled].filter(Boolean).length;
 
   const orderedItems = useMemo(() => {
     const groupOrder: Record<ServiceGroupId, number> = { control: 0, network: 1, security: 2, system: 3 };
     return [...items].sort((left, right) => groupOrder[serviceGroup(left)] - groupOrder[serviceGroup(right)]);
   }, [items]);
-  const nodeTone = services?.reboot_required || services?.failed_units ? "attention" : "healthy";
-  const nodeTitle = services?.reboot_required ? "Требуется перезагрузка" : services?.failed_units ? "Требует внимания" : "Система в норме";
-  const nodeHint = services?.reboot_required ? "Обновления ожидают reboot" : services?.failed_units ? `${services.failed_units} аварийных unit` : "Systemd без аварий";
+  const nodeTone = summary.tone;
+  const nodeTitle = summary.title;
+  const nodeHint = summary.hint;
 
   return (
     <section className="servicesWorkspace" aria-label="Службы и обслуживание">
@@ -150,10 +126,10 @@ export function ServicesDashboard({
             <span>{nodeHint}</span>
           </div>
           <div className="servicesStats">
-            <Metric label="ACTIVE" value={`${active.length}/${installed.length || 0}`} tone={services?.failed_units ? "warn" : "ok"} />
-            <Metric label="FAILED" value={String(services?.failed_units || 0)} tone={services?.failed_units ? "bad" : "ok"} />
-            <Metric label="AUTOSTART" value={`${enabled.length}/${installed.length || 0}`} />
-            <Metric label="RESTARTS" value={String(totalRestarts)} />
+            <Metric label="ACTIVE" value={summary.active} tone={nodeTone === "healthy" ? "ok" : "warn"} />
+            <Metric label="FAILED" value={summary.failed} tone={services?.failed_units ? "bad" : ""} />
+            <Metric label="AUTOSTART" value={summary.enabled} />
+            <Metric label="RESTARTS" value={summary.restarts} />
           </div>
         </div>
       </article>
@@ -193,6 +169,7 @@ export function ServicesDashboard({
         </header>
 
         <div className="servicesOperationsGrid">
+        {operationHistorySettings}
         <section className="servicesLog">
           <div className="operationsTitle">
             <p className="eyebrow">LOG MANAGEMENT</p>
@@ -226,6 +203,28 @@ export function ServicesDashboard({
           </div>
         </section>
 
+        <section className="servicesLog servicesMetrics">
+          <div className="operationsTitle">
+            <p className="eyebrow">METRICS HISTORY</p><h3>История метрик VPS</h3>
+            <small>Собирается сервером независимо от открытой панели. Содержимое трафика и секреты не записываются.</small>
+          </div>
+          {metricsSettings?.error && <p role="status">{metricsSettings.error}</p>}
+          {metricsSettings?.trimmed_at && <p>Часть старых измерений удалена по дисковому лимиту.</p>}
+          {metricsSettings && metricsDraft && metricsSettings.revision !== metricsDraft.revision && <p role="status">Настройки изменились на сервере. Ваши правки сохранены в форме; отмените их, чтобы загрузить актуальные значения.</p>}
+          <div className="servicesLogControls">
+            <label className="opsField"><span>Сохранять историю</span><input type="checkbox" checked={metricsDraft?.enabled ?? false} disabled={busy || !metricsDraft} onChange={(event) => onMetricsChange({ enabled: event.target.checked })} /></label>
+            {([
+              ["raw_hours", "Подробные, часы", 1, 168], ["minute_days", "Минутные, дни", 1, 90],
+              ["hour_days", "Часовые, дни", 1, 730], ["disk_limit_mb", "Лимит, МБ", 8, 1024],
+            ] as const).map(([key, label, min, max]) => <label className="opsField" key={key}><span>{label}</span><input type="number" min={min} max={max} value={metricsDraft?.[key] ?? ""} disabled={busy || !metricsDraft} onChange={(event) => onMetricsChange({ [key]: Number(event.target.value) })} /></label>)}
+            <small>{metricsSettings ? `Занято ${(metricsSettings.used_bytes / 1024 / 1024).toFixed(1)} МБ` : "Данные недоступны"}. Снижение сроков или лимита удаляет старые измерения при следующей очистке. Сводки создаются до очистки подробных данных.</small>
+            <div className="servicesLogActions">
+              <button type="button" className="servicePrimary" onClick={onSaveMetrics} disabled={busy || !metricsDraft || metricsSettings?.revision !== metricsDraft.revision}>Сохранить</button>
+              <button type="button" onClick={onResetMetrics} disabled={busy || !metricsSettings}>Отменить правки</button>
+            </div>
+          </div>
+        </section>
+
         <section className="servicesMaintenance">
           <header className="servicesMaintenanceHead">
             <div className="operationsTitle">
@@ -233,8 +232,9 @@ export function ServicesDashboard({
               <h3>Плановые задачи</h3>
               <small>Перезагрузка, очистка и консервативные обновления в заданное окно.</small>
             </div>
-            <button type="button" className="servicePrimary ghost" onClick={onSaveAutomation} disabled={busy || !services}>Сохранить расписание</button>
+            <button type="button" className="servicePrimary ghost" onClick={onSaveAutomation} disabled={busy || !services || services.automation_recovery_required}>Сохранить расписание</button>
           </header>
+          {services?.automation_recovery_required && <p role="alert">Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Перед новым применением требуется проверить и восстановить службы; отображаемые настройки могут отличаться от их состояния.</p>}
           <div className="maintenanceRows">
             <ScheduleRow title="Перезагрузка" value={automationDraft?.reboot} timer={services?.timers.reboot} busy={busy} onChange={(patch) => onAutomationChange("reboot", patch)} />
             <ScheduleRow title="Очистка" value={automationDraft?.cleanup} timer={services?.timers.cleanup} busy={busy} onChange={(patch) => onAutomationChange("cleanup", patch)} />
@@ -253,6 +253,7 @@ function Metric({ label, value, tone = "" }: { label: string; value: string; ton
 
 function ServiceRow({ service, groupId, busy, onAction }: { service: ServiceItem; groupId: ServiceGroupId; busy: boolean; onAction: Props["onServiceAction"] }) {
   const badge = serviceBadge(service);
+  const stateUnknown = runtimeState(service) === "unknown";
   const canPrimary = service.controls.includes(service.active ? "restart" : "start");
   const canStop = service.active && (service.controls.includes("stop") || service.disabled_controls?.includes("stop"));
   const stopDisabled = Boolean(service.disabled_controls?.includes("stop"));
@@ -268,12 +269,12 @@ function ServiceRow({ service, groupId, busy, onAction }: { service: ServiceItem
         </div>
       </div>
       <div className="serviceRuntime">
-        <span className={`serviceState ${badge.className}`}>{badge.label}</span>
+        <span className={`serviceState ${badge.className}`} title={service.runtime ? `${service.runtime.reason} · ${service.runtime.checked_at}` : undefined}>{badge.label}</span>
         <small>{runtimeSummary(service)}</small>
       </div>
       <div className="serviceActions">
-        {canPrimary && <button type="button" className="serviceActionPrimary" onClick={() => onAction(service.id, service.name, service.active ? "restart" : "start")} disabled={busy}>{service.active ? "Перезапуск" : "Запуск"}</button>}
-        {canStop && <button type="button" className={`serviceActionSecondary ${stopDisabled ? "protected" : "danger"}`} onClick={() => onAction(service.id, service.name, "stop")} disabled={busy || stopDisabled} title={stopDisabled ? "Остановка этой службы отключит панель или путь восстановления" : undefined}>{stopDisabled ? "Защищено" : "Стоп"}</button>}
+        {canPrimary && <button type="button" className="serviceActionPrimary" onClick={() => onAction(service.id, service.name, service.active ? "restart" : "start")} disabled={busy || stateUnknown}>{service.active ? "Перезапуск" : "Запуск"}</button>}
+        {canStop && <button type="button" className={`serviceActionSecondary ${stopDisabled ? "protected" : "danger"}`} onClick={() => onAction(service.id, service.name, "stop")} disabled={busy || stopDisabled || stateUnknown} title={stopDisabled ? "Остановка этой службы отключит панель или путь восстановления" : undefined}>{stopDisabled ? "Защищено" : "Стоп"}</button>}
       </div>
     </div>
   );

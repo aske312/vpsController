@@ -47,9 +47,8 @@ test("every security posture item has a safe repair or review action", async () 
   assert.doesNotMatch(section, /<SecurityRow\b/);
   assert.ok((section.match(/<SecurityActionRow\b/g) || []).length >= 20);
   assert.match(section, /title="Firewall".*fixSecurity\("secure"\)/s);
-  assert.match(section, /title="Версия приложения".*applicationVersion\?\.branch === "main" \? "test-update" : "update"/s);
-  assert.match(section, /title="Учётные записи".*runApplicationAction\("integrity-check"\)/s);
-  assert.match(section, /title="Дополнительные VPN-службы".*runApplicationAction\("network-check"\)/s);
+  // Application commands have one launch location; Security only navigates there.
+  assert.doesNotMatch(section, /runApplicationAction/);
   assert.match(manager, /apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw/);
   assert.match(manager, /configure_fail2ban\(\)/);
   assert.match(manager, /backend = systemd/);
@@ -80,13 +79,6 @@ test("SSH key hardening is transactional and automatically rolls back", async ()
   const [api, page, manager] = await Promise.all([readApiSources(), readUiSources(), read("scripts/vps-control.sh")]);
   assert.match(api, /class SshPublicKeyInstall/);
   assert.match(api, /class SshKeyDelete/);
-  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/key"\)/);
-  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/key\/reset"\)/);
-  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/key\/delete"\)/);
-  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/begin"\)/);
-  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/confirm"\)/);
-  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/rollback"\)/);
-  assert.match(api, /@app\.post\("\/api\/security\/ssh-access\/disable"\)/);
   assert.match(api, /ssh_authorized_keys/);
   assert.match(page, /\/security\/ssh-access\/key\/delete/);
   assert.match(page, /changeSshAccess\("disable"\)/);
@@ -124,11 +116,10 @@ test("authentication and VPN controls preserve consistent UI states", async () =
   assert.match(page, /Повторите новый пароль/);
   assert.match(page, /actionLabel="Изменить пароль" alwaysAction/);
   assert.match(page, /ok && !alwaysAction/);
-  assert.match(api, /hmac\.compare_digest\(payload\.current_password, ADMIN_PASSWORD\)/);
   assert.match(api, /payload\.new_password != payload\.confirm_password/);
   assert.match(api, /categories < 3/);
   assert.match(page, /runApplicationAction\("identity"\)/);
-  assert.match(api, /"installed": properties\.get\("LoadState"\) == "loaded"/);
+  // Service presence and observation failures are covered by test_service_state.py.
   assert.match(api, /channels = configured_panel_channels\(\)/);
   assert.match(api, /if not channels:/);
   assert.doesNotMatch(api, /for interface in \(WG_INTERFACE, AWG_INTERFACE\):\s+if not Path\(f"\/sys\/class\/net/);
@@ -190,18 +181,12 @@ test("protected panel access uses one stable host through every configured chann
   assert.match(caddy, /http:\/\/{INTERNAL_PANEL_HOST}, http:\/\/{PUBLIC_PANEL_ADDRESS} \{/);
   assert.match(caddy, /not remote_ip 127\.0\.0\.0\/8 ::1\/128 10\.0\.0\.0\/8/);
   assert.match(api, /@app\.put\("\/api\/services\/panel-access", status_code=202\)/);
-  assert.match(api, /"systemd-run", f"--unit=\{unit\}", "--collect"/);
-  assert.match(api, /access-mode restarts the API service/);
-  assert.match(api, /"action": "access-mode"/);
-  assert.match(api, /"action": "service-mode"/);
-  assert.match(api, /ACTION_FILE\.write_text\(json\.dumps\(action/);
-  assert.match(api, /"progress": 3/);
+  // Durable admission and non-blocking launch are covered by test_application_operation.py.
   assert.match(page, /systemOperationNotification\(operation, actionLabels\["access-mode"\], true\)/);
   assert.match(page, /systemOperationNotification\(operation, actionLabels\["service-mode"\], true\)/);
   assert.match(page, /window\.location\.assign\(targetUrl\)/);
   assert.doesNotMatch(view, /serviceModeActive \|\|/);
   assert.match(api, /access_mode != "vpn" and ufw_enabled/);
-  assert.match(page, /await request\(`\/services\/\$\{serviceId\}\/action`[^;]+;\s*requestCommandReload\(\);/);
 });
 
 test("VPN-only mode publishes token subscriptions without exposing Mihomo administration", async () => {

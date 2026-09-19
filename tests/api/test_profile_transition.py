@@ -11,13 +11,14 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from tests.api.support import manager
+from tests.api.support import manager, managed_mihomo_fixture
 
 render_profile = manager.render_profile
 
 
 class ProfileTransitionTests(unittest.TestCase):
     def setUp(self):
+        managed_mihomo_fixture(self)
         stack = self.enterContext(ExitStack())
         self.root = Path(stack.enter_context(tempfile.TemporaryDirectory()))
         self.config_root = self.root / "config"

@@ -211,6 +211,7 @@ class MihomoTransactionTests(unittest.TestCase):
             with (
                 patch.object(manager, "CONFIG_ROOT", config),
                 patch.object(manager, "PROFILE_FILE", profile),
+                patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"),
                 patch.object(manager, "SERVICE_BY_MODULE", {}),
             ):
                 with self.assertRaisesRegex(RuntimeError, "injected"):

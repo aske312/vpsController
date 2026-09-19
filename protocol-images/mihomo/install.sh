@@ -111,13 +111,15 @@ modules = {
 try:
     with open(path, encoding="utf-8") as handle:
         current = json.load(handle)
-except (OSError, ValueError):
+except FileNotFoundError:
     current = {}
 if not isinstance(current, dict):
-    current = {}
+    raise SystemExit('Retained Mihomo state is invalid; installation stopped')
 stored = current.get("modules")
-if not isinstance(stored, dict):
+if stored is None:
     stored = {}
+if not isinstance(stored, dict):
+    raise SystemExit('Retained Mihomo module state is invalid; installation stopped')
 for key, value in modules.items():
     stored.setdefault(key, value)
 current["modules"] = stored
@@ -157,6 +159,22 @@ NoNewPrivileges=true
 WantedBy=multi-user.target
 EOF
 
+if [[ "${VPS_CONTROL_RESTORE_COMPONENT:-}" == "mihomo" ]]; then
+  # Reinstall the previously selected dependencies with their saved settings.
+  # Their installers validate retained configuration before starting services.
+  while IFS= read -r module; do
+    [[ "${module}" =~ ^transport-[a-z0-9-]+$ ]] || { echo "Invalid retained module" >&2; exit 1; }
+    [[ -f "${MODULE_DIR}/modules/${module}/install.sh" ]] || { echo "Retained module is unavailable: ${module}" >&2; exit 1; }
+    MIHOMO_SETTINGS_FILE="${DATA_DIR}/settings/${module}.json" bash "${MODULE_DIR}/modules/${module}/install.sh"
+  done < <(python3 - "${DATA_DIR}/state.json" <<'PY'
+import json, sys
+state = json.load(open(sys.argv[1]))
+for name, installed in state.get('modules', {}).items():
+    if installed and name.startswith('transport-'):
+        print(name)
+PY
+)
+fi
 systemctl daemon-reload
 systemctl enable --now vps-control-mihomo-manager.service
 

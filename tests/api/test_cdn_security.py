@@ -28,6 +28,8 @@ class CdnSecurityTests(unittest.TestCase):
 
     def test_missing_packaged_ca_is_reported_before_starting_mutation(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(security, "RESOURCES", Path(temp)), patch.object(api.subprocess, "run") as run:
+            self.enterContext(patch.object(api, "VLESS_ENV", Path(temp) / "reality.env"))
+            self.enterContext(patch.object(api, "MIHOMO_VLESS_CDN_ROUTES", Path(temp) / "routes"))
             with self.assertRaises(api.HTTPException) as error:
                 api.update_cdn_security(api.CdnSecuritySettings(authenticated_origin_pulls=True))
             self.assertEqual(error.exception.status_code, 409)
@@ -131,14 +133,17 @@ class RealCaddyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "api").mkdir()
-            shutil.copy2(ROOT / "api/cdn_security.py", root / "api/cdn_security.py")
+            policy = (ROOT / "api/cdn_security.py").read_text(encoding="utf-8")
+            for prefix in ("/etc/", "/var/lib/"):
+                policy = policy.replace('Path("' + prefix, 'Path("' + str(root) + prefix)
+            (root / "api/cdn_security.py").write_text(policy, encoding="utf-8")
+            shutil.copy2(ROOT / "api/component_registry.py", root / "api/component_registry.py")
             shutil.copytree(ROOT / "api/resources", root / "api/resources")
             (root / "snippets").mkdir()
             template = (ROOT / "Caddyfile").read_text().replace("/etc/caddy/vps-control.d/*.caddy", str(root / "snippets/*.caddy"))
             (root / "Caddyfile").write_text(template)
             source = (ROOT / "scripts/vps-control.sh").read_text()
             function = source[source.index("write_caddy_config() {"):source.index("\nenv_value() {")]
-            function = function.replace('python3 "${INSTALL_DIR}/api/cdn_security.py" rebuild', ': # no system mutation in template test')
             script = f'''set -eu
 INSTALL_DIR='{root}'
 CADDY_CONFIG='{root}/rendered.Caddyfile'

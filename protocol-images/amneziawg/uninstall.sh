@@ -28,10 +28,13 @@ if command -v ufw >/dev/null 2>&1; then
     while ufw --force delete route allow in on "${AWG_INTERFACE}" out on "${UPLINK_INTERFACE}" from "${AWG_SUBNET}" >/dev/null 2>&1; do :; done
   fi
 fi
-rm -f -- "${PACKAGE_CONFIG}" "${CONFIGURED_AWG_CONFIG}" "${QUICK_CONFIG}" \
-  /etc/sysctl.d/99-vps-control-amneziawg.conf \
+[[ "${PRESERVE_COMPONENT_DATA:-1}" == 1 ]] || rm -f -- "${PACKAGE_CONFIG}" "${CONFIGURED_AWG_CONFIG}" "${QUICK_CONFIG}"
+rm -f -- /etc/sysctl.d/99-vps-control-amneziawg.conf \
   /var/lib/vps-control/monitor/awg.csv /var/lib/vps-control/monitor/awg.state
 python3 - <<'PY'
+import os, sys
+if os.getenv("PRESERVE_COMPONENT_DATA", "1") == "1":
+    sys.exit(0)
 import json
 from pathlib import Path
 path = Path("/var/lib/vps-control/clients.json")

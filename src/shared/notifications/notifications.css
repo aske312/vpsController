@@ -72,3 +72,14 @@
   .gateOperationTrack.indeterminate > i { animation:none; }
   .gateOperationTrack > i { transition:none; }
 }
+.operationHistoryDialog { width:min(760px, calc(100vw - 32px)); max-height:85dvh; padding:24px; border:1px solid #364352; border-radius:12px; background:#141c25; color:#e0ebef; }
+.operationHistoryDialog::backdrop { background:rgba(0,0,0,.65); }
+.operationHistoryDialog header, .operationHistoryDialog nav, .operationHistoryList article > div { display:flex; gap:16px; justify-content:space-between; align-items:start; }
+.operationHistoryDialog header p, .operationHistoryDialog small { color:#a1b2c3; }
+.operationHistoryDialog nav { padding:16px 0; }
+.operationHistoryDialog button { padding:6px 12px; border:1px solid #465666; border-radius:6px; }
+.operationHistoryList { display:grid; gap:12px; overflow-wrap:anywhere; }
+.operationHistoryList article { padding:14px; border:1px solid #364352; border-radius:8px; }
+.operationHistoryList p { margin:8px 0; }
+.operationHistoryList details { font-size:12px; margin-top:8px; }
+.operationHistoryList article > div > span { flex-shrink:0; font-size:12px; }

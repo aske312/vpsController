@@ -23,6 +23,25 @@ const CACHE_POLICIES: Array<{ match: RegExp; policy: CachePolicy }> = [
 ];
 
 const CACHE_STORAGE_PREFIX = "312-api-cache:";
+let nextSessionGeneration = 0;
+const sessionGenerations = new Map<string, number>();
+const sessionExpiryListeners = new Map<string, Set<() => void>>();
+
+export function onApiSessionExpired(token: string, callback: () => void) {
+  const listeners = sessionExpiryListeners.get(token) || new Set<() => void>();
+  listeners.add(callback);
+  sessionExpiryListeners.set(token, listeners);
+  return () => {
+    listeners.delete(callback);
+    if (!listeners.size) sessionExpiryListeners.delete(token);
+  };
+}
+
+export function invalidateApiSession(token: string, notify = true) {
+  if (!sessionGenerations.delete(token)) return;
+  clearPersistedCache(token);
+  if (notify) for (const callback of sessionExpiryListeners.get(token) || []) callback();
+}
 
 function cachePolicy(path: string): CachePolicy | null {
   const endpoint = path.split("?", 1)[0];
@@ -102,17 +121,22 @@ export function mutationFailureState(cause: unknown): "unknown" | "error" {
 // stale-while-revalidate cache so switching tabs and reopening the panel feels
 // immediate without making live telemetry or logs stale.
 export function createApiClient(token: string, options: RequestOptions = {}) {
+  if (!sessionGenerations.has(token)) sessionGenerations.set(token, ++nextSessionGeneration);
+  const sessionGeneration = sessionGenerations.get(token);
+  const currentSession = () => Boolean(token) && sessionGenerations.get(token) === sessionGeneration;
+  const expired = () => new ApiRequestError("Сессия панели завершена. Войдите заново.", "http", 401);
   const pending = new Map<string, Promise<ApiResult>>();
   const cache = new Map<string, CachedResponse>();
   readPersistedCache(token, cache);
   const request = async (path: string, init: RequestInit = {}): Promise<ApiResult> => {
-    if (!token) throw new ApiRequestError("Сессия панели завершена. Войдите заново.", "http", 401);
+    if (!currentSession()) throw expired();
     const method = (init.method || "GET").toUpperCase();
     const read = method === "GET" && init.body == null;
     const delays = read ? (options.retryDelaysMs ?? [400, 1200]) : [];
     // Do not expose query strings, subscription tokens, or authentication in errors.
     const operation = path.split("?")[0].replace(/\/s\/[^/]+|\/subscriptions\/[^/]+/g, "/subscription");
     for (let attempt = 0; ; attempt += 1) {
+      if (!currentSession()) throw expired();
       if (init.signal?.aborted) throw init.signal.reason || new DOMException("Aborted", "AbortError");
       const controller = new AbortController();
       const abort = () => controller.abort(init.signal?.reason);
@@ -123,7 +147,9 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
         headers.set("Authorization", `Basic ${token}`);
         if (init.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
         const response = await fetch(`/api${path}`, { ...init, method, headers, signal: controller.signal, cache: read ? "no-store" : init.cache });
+        if (!currentSession()) throw expired();
         if (!response.ok) {
+          if (response.status === 401) invalidateApiSession(token);
           const raw = await response.text();
           let detail = `HTTP ${response.status}`;
           try {
@@ -140,6 +166,7 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
         if (response.status === 204 || method === "HEAD") return null;
         // Consume inside the retry boundary: a stream may break after headers arrive.
         const body = await response.text();
+        if (!currentSession()) throw expired();
         if ((response.headers.get("content-type") || "").includes("text/plain")) return body;
         let value: ApiResult;
         try { value = JSON.parse(body); }
@@ -169,6 +196,7 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
     }
   };
   return <T = ApiResult>(path: string, init: RequestInit = {}): Promise<T> => {
+    if (!currentSession()) return Promise.reject(expired());
     const method = (init.method || "GET").toUpperCase();
     const read = method === "GET" && init.body == null;
     const share = read && !init.headers && !init.signal;
@@ -181,7 +209,7 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
         if (age <= policy.ttlMs) return Promise.resolve(entry.value) as Promise<T>;
         if (age <= policy.staleMs) {
           if (!pending.has(path)) {
-            const revalidation = request(path, init).finally(() => {
+            const revalidation = request(path, init).catch(() => undefined).finally(() => {
               if (pending.get(path) === revalidation) pending.delete(path);
             });
             pending.set(path, revalidation);

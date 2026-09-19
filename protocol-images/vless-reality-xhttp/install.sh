@@ -28,6 +28,10 @@ TLS_ENABLED="no"
 CDN_ENABLED="no"
 [[ -z "${CDN_DOMAIN}" ]] || CDN_ENABLED="yes"
 if [[ -s "${CONFIG_DIR}/reality.env" ]]; then
+  for key in PORT TARGET TLS_PORT TLS_XHTTP_MODE; do
+    saved="$(sed -n "s/^${key}=//p" "${CONFIG_DIR}/reality.env" | tail -n 1)"
+    [[ -z "${saved}" ]] || printf -v "${key}" '%s' "${saved}"
+  done
   saved_cdn_domain="$(sed -n 's/^CDN_DOMAIN=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
   saved_cdn_port="$(sed -n 's/^CDN_PORT=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
   saved_cdn_enabled="$(sed -n 's/^CDN_ENABLED=//p' "${CONFIG_DIR}/reality.env" | tail -n 1)"
@@ -45,7 +49,9 @@ if [[ -s "${CONFIG_DIR}/reality.env" ]]; then
   [[ -z "${saved_tls_enabled}" ]] || TLS_ENABLED="${saved_tls_enabled}"
   [[ -z "${saved_tls_transport}" ]] || TLS_TRANSPORT="${saved_tls_transport}"
 fi
-[[ "${TARGET}" != "www.microsoft.com:443" && "${TARGET}" != "www.apple.com:443" ]] || TARGET="ya.ru:443"
+if [[ ! -s "${CONFIG_DIR}/config.json" ]]; then
+  [[ "${TARGET}" != "www.microsoft.com:443" && "${TARGET}" != "www.apple.com:443" ]] || TARGET="ya.ru:443"
+fi
 [[ "${PORT}" =~ ^[0-9]+$ && "${PORT}" -ge 1 && "${PORT}" -le 65535 ]] || { echo "Некорректный VLESS_REALITY_PORT" >&2; exit 1; }
 [[ "${TARGET}" =~ ^[A-Za-z0-9.-]+:[0-9]+$ ]] || { echo "Некорректный VLESS_REALITY_TARGET" >&2; exit 1; }
 [[ "${CDN_PORT}" =~ ^[0-9]+$ && "${CDN_PORT}" -ge 1024 && "${CDN_PORT}" -le 65535 ]] || { echo "Некорректный VLESS_CDN_PORT" >&2; exit 1; }
@@ -140,6 +146,7 @@ install -m 0755 "${tmp_dir}/xray" "${MODULE_DIR}/xray"
 
 install -d -m 0750 -o root -g nogroup "${CONFIG_DIR}"
 
+if [[ ! -s "${CONFIG_DIR}/config.json" ]]; then
 tls_probe="$("${MODULE_DIR}/xray" tls ping "${TARGET}" 2>&1)"
 grep -q 'Handshake succeeded' <<<"${tls_probe}" \
   || { echo "REALITY target ${TARGET} не завершает TLS handshake" >&2; exit 1; }
@@ -281,6 +288,7 @@ config = {
 with open(output, "w", encoding="utf-8") as handle:
     json.dump(config, handle, ensure_ascii=False, indent=2)
 PY
+fi
 chown root:nogroup "${CONFIG_DIR}/config.json"
 chmod 0640 "${CONFIG_DIR}/config.json"
 chmod 0600 "${CONFIG_DIR}/reality.env"

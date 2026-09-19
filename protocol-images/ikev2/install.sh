@@ -10,6 +10,14 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends charon
 systemctl disable --now charon-systemd.service strongswan.service strongswan-starter.service 2>/dev/null || true
 install -d -m 0700 "$ROOT" "$SWAN/private" "$SWAN/x509" "$SWAN/x509ca"; install -d -m 0755 /usr/local/lib/vps-control-ikev2
 ENDPOINT="${PUBLIC_DOMAIN:-${PUBLIC_IPV4:-${PUBLIC_IPV6:-}}}"; [[ -n "$ENDPOINT" ]] || { echo 'Public endpoint is required' >&2; exit 1; }
+if [[ -s "$ROOT/settings.json" ]]; then
+  IFS=$'\t' read -r POOL DNS ENDPOINT < <(python3 - "$ROOT/settings.json" <<'PY'
+import json, sys
+settings = json.load(open(sys.argv[1]))
+print(settings['pool'], settings['dns'], settings['endpoint'], sep='\t')
+PY
+)
+fi
 if [[ ! -s "$SWAN/x509ca/caCert.pem" ]]; then
   pki --gen --type rsa --size 3072 --outform pem >"$SWAN/private/caKey.pem"
   pki --self --ca --lifetime 3650 --in "$SWAN/private/caKey.pem" --dn 'CN=Private Root CA' --outform pem >"$SWAN/x509ca/caCert.pem"
@@ -19,12 +27,13 @@ if [[ ! -s "$SWAN/x509/serverCert.pem" ]]; then
   pki --pub --in "$SWAN/private/serverKey.pem" | pki --issue --lifetime 1825 --cacert "$SWAN/x509ca/caCert.pem" --cakey "$SWAN/private/caKey.pem" --dn "CN=$ENDPOINT" --san "$ENDPOINT" --flag serverAuth --flag ikeIntermediate --outform pem >"$SWAN/x509/serverCert.pem"
 fi
 [[ -s "$ROOT/users.json" ]] || printf '{}\n' >"$ROOT/users.json"
-printf '{"pool":"%s","dns":"%s","endpoint":"%s"}\n' "$POOL" "$DNS" "$ENDPOINT" >"$ROOT/settings.json"
+[[ -s "$ROOT/settings.json" ]] || printf '{"pool":"%s","dns":"%s","endpoint":"%s"}\n' "$POOL" "$DNS" "$ENDPOINT" >"$ROOT/settings.json"
 if [[ ! -s "$SWAN/users.conf" ]]; then cat >"$SWAN/users.conf" <<'EOF'
 secrets {
 }
 EOF
 fi
+if [[ ! -s "$SWAN/swanctl.conf" ]]; then
 cat >"$SWAN/swanctl.conf" <<EOF
 connections {
   ikev2-eap {
@@ -58,6 +67,7 @@ pools {
 }
 include users.conf
 EOF
+fi
 chmod 0600 "$ROOT"/*.json "$SWAN"/*.conf "$SWAN/private"/*
 printf 'net.ipv4.ip_forward=1\n' >/etc/sysctl.d/90-vps-control-ikev2.conf; sysctl --system >/dev/null
 install -m 0755 "$(dirname "$0")/firewall.sh" /usr/local/lib/vps-control-ikev2/firewall.sh

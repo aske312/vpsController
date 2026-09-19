@@ -1,1 +1,79 @@
-{"id":"ikev2","name":"IKEv2","version":"5.9","installable":true,"description":"Системный IKEv2 VPN с отдельной EAP-учётной записью на каждое устройство","category":"secure-tunnels","category_name":"Защищённые туннели","installer":"install.sh","uninstaller":"uninstall.sh","supported_os":["ubuntu","debian"],"preflight_packages":["charon-systemd","strongswan-pki","strongswan-swanctl","libcharon-extra-plugins","libstrongswan-extra-plugins","libstrongswan-standard-plugins","iptables"],"minimum_free_mb":256,"requires_kernel_headers":false,"service":"vps-control-ikev2.service","package":"charon-systemd"}
+{
+  "id": "ikev2",
+  "name": "IKEv2",
+  "version": "5.9",
+  "installable": true,
+  "description": "Системный IKEv2 VPN с отдельной EAP-учётной записью на каждое устройство",
+  "category": "secure-tunnels",
+  "category_name": "Защищённые туннели",
+  "installer": "install.sh",
+  "uninstaller": "uninstall.sh",
+  "supported_os": [
+    "ubuntu",
+    "debian"
+  ],
+  "preflight_packages": [
+    "charon-systemd",
+    "strongswan-pki",
+    "strongswan-swanctl",
+    "libcharon-extra-plugins",
+    "libstrongswan-extra-plugins",
+    "libstrongswan-standard-plugins",
+    "iptables"
+  ],
+  "minimum_free_mb": 256,
+  "requires_kernel_headers": false,
+  "service": "vps-control-ikev2.service",
+  "package": "charon-systemd",
+  "installation": {
+    "required_paths": [
+      {
+        "path": "/etc/swanctl/swanctl.conf"
+      },
+      {
+        "path": "/etc/vps-control/ikev2/settings.json"
+      }
+    ],
+    "backup_paths": [
+      {
+        "path": "/etc/vps-control/ikev2"
+      },
+      {
+        "path": "/etc/swanctl"
+      },
+      {
+        "path": "/etc/systemd/system/vps-control-ikev2.service"
+      },
+      {
+        "path": "/etc/vps-control/environment",
+        "env": "ENV_FILE"
+      },
+      {
+        "path": "{data_dir}/clients.json"
+      }
+    ],
+    "data_paths": [
+      {
+        "path": "/etc/vps-control/ikev2"
+      },
+      {
+        "path": "/etc/swanctl/swanctl.conf"
+      },
+      {
+        "path": "/etc/swanctl/users.conf"
+      },
+      {
+        "path": "/etc/swanctl/private/caKey.pem"
+      },
+      {
+        "path": "/etc/swanctl/private/serverKey.pem"
+      },
+      {
+        "path": "/etc/swanctl/x509ca/caCert.pem"
+      },
+      {
+        "path": "/etc/swanctl/x509/serverCert.pem"
+      }
+    ]
+  }
+}

@@ -3,17 +3,17 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 import re
 import subprocess
 import sys
 import time
 import traceback
-import uuid
 from pathlib import Path
 
 import cdn_security
 import ech_settings
+import application_operation
+from service_state import observe_service
 
 DIRECTORY = Path("/var/lib/vps-control/cdn-operations")
 ACTIVE = {"queued", "running"}
@@ -31,10 +31,16 @@ def operation_path(operation_id: str) -> Path:
 
 def write(operation: dict) -> None:
     path = operation_path(operation["id"])
-    temporary = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
-    temporary.write_text(json.dumps(operation, ensure_ascii=False), encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    temporary.replace(path)
+    application_operation.atomic_json(path, operation)
+    current = application_operation.read(DIRECTORY.parent / "operations" / f"{operation['id']}.json")
+    if current:
+        application_operation.write_status(
+            DIRECTORY.parent, DIRECTORY.parent / "application-action.json", current["action"],
+            operation["state"], operation.get("progress", 0), operation.get("message", ""),
+            current["started_at"], operation["id"], current.get("unit", ""),
+        )
+    if operation.get("state") in application_operation.TERMINAL:
+        application_operation.prune(DIRECTORY.parent, operation["id"], directory=DIRECTORY)
 
 
 def status(operation_id: str | None = None) -> dict | None:
@@ -51,7 +57,7 @@ def status(operation_id: str | None = None) -> dict | None:
     # A successful exit is never inferred from an absent unit or settings alone.
     try:
         result = subprocess.run(
-            ["systemctl", "show", f"vps-control-cdn-security-{operation_id}.service", "--property=ActiveState", "--property=LoadState"],
+            ["systemctl", "show", operation.get("unit") or f"vps-control-cdn-security-{operation_id}.service", "--property=ActiveState", "--property=LoadState"],
             capture_output=True, text=True, timeout=5, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -85,35 +91,43 @@ def start(enabled: bool, operation_id: str, control_command: str, *, domain: str
         }
         if domain is not None:
             operation.update(kind='ech', domain=domain)
-        # Persist before launch: a fast worker must not have its result overwritten.
-        write(operation)
-        pointer = DIRECTORY / "current.tmp"
-        pointer.write_text(operation_id)
-        pointer.replace(DIRECTORY / "current")
+        def launch(command, **kwargs):
+            # Common admission reserves the server before this CDN-specific
+            # record is published. Both records precede the actual launch.
+            unit = next(item.split("=", 1)[1] for item in command if item.startswith("--unit="))
+            operation["unit"] = f"{unit}.service"
+            write(operation)
+            pointer = DIRECTORY / "current.tmp"
+            pointer.write_text(operation_id)
+            pointer.replace(DIRECTORY / "current")
+            return subprocess.run(command, **kwargs)
+
         try:
-            result = subprocess.run(
-                ["systemd-run", f"--unit=vps-control-cdn-security-{operation_id}", "--collect", "--property=Type=exec",
-                 control_command, "cdn-security", "enable" if enabled else "disable", operation_id],
-                capture_output=True, text=True, timeout=10, check=False,
+            admitted = application_operation.start(
+                DIRECTORY.parent, DIRECTORY.parent / "application-action.json",
+                f"ech:{domain}" if domain is not None else "cdn-security",
+                [control_command, "cdn-security", "enable" if enabled else "disable", operation_id],
+                launch, request_id=operation_id, observe=observe_service,
             )
-        except subprocess.TimeoutExpired:
-            # Launch acknowledgement may be lost; only the status reader resolves it.
-            return operation
-        except OSError:
-            traceback.print_exc()
-            result = None
-        if result is None or result.returncode:
-            existing = status(operation_id)
-            if existing["state"] != "queued":
-                return existing
-            if result is not None:
-                print(result.stderr, file=sys.stderr)
-            operation.update(state="failed", message="Не удалось запустить проверку CF. Подробности сохранены в журнале.")
+        except application_operation.OperationConflict as exc:
+            raise OperationConflict(str(exc)) from exc
+        if admitted["state"] == "failed":
+            operation.update(state="failed", message=admitted["message"])
             write(operation)
         return status(operation_id)
 
 
 def run(operation_id: str) -> None:
+    # The durable reservation blocks API mutations before the worker starts;
+    # the same lock as other workers protects the actual gateway change.
+    with application_operation.mutation_lock(DIRECTORY.parent):
+        current = application_operation.read(DIRECTORY.parent / "application-action.json")
+        if current and current.get("id") != operation_id:
+            raise OperationConflict("Другая операция уже управляет сервером")
+        _run(operation_id)
+
+
+def _run(operation_id: str) -> None:
     operation = json.loads(operation_path(operation_id).read_text(encoding="utf-8"))
 
     def progress(value: int, message: str) -> None:

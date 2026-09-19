@@ -7,6 +7,14 @@ CONFIG="${ROOT}/config.yaml"
 PORT="${HYSTERIA2_PORT:-8443}"
 AUTH_PORT="${HYSTERIA2_AUTH_PORT:-18081}"
 STATS_PORT="${HYSTERIA2_STATS_PORT:-18082}"
+if [[ -s "${ROOT}/settings.json" ]]; then
+  read -r PORT AUTH_PORT STATS_PORT < <(python3 - "${ROOT}/settings.json" <<'PY'
+import json, sys
+settings = json.load(open(sys.argv[1]))
+print(*(int(settings.get(key, default)) for key, default in (("port", 8443), ("auth_port", 18081), ("stats_port", 18082))))
+PY
+)
+fi
 
 case "$(dpkg --print-architecture)" in amd64) asset_arch=amd64;; arm64) asset_arch=arm64;; *) echo 'Unsupported architecture' >&2; exit 2;; esac
 apt-get update
@@ -46,6 +54,7 @@ with open(path,encoding='utf-8') as source: values=json.load(source)
 values.update(zip(('port','auth_port','stats_port'),map(int,sys.argv[2:])))
 with open(path,'w',encoding='utf-8') as target: json.dump(values,target)
 PY
+if [[ ! -s "${CONFIG}" ]]; then
 cat >"${CONFIG}" <<EOF
 listen: :${PORT}
 tls:
@@ -65,6 +74,7 @@ masquerade:
     content: Not Found
     statusCode: 404
 EOF
+fi
 chmod 0600 "${CONFIG}"
 install -m 0755 "$(dirname "$0")/user-api.py" /usr/local/lib/vps-control-hysteria2/user-api.py
 install -m 0755 "$(dirname "$0")/firewall.sh" /usr/local/lib/vps-control-hysteria2/firewall.sh

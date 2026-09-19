@@ -1347,3 +1347,9 @@
 @media (max-width:640px) {
   .mihomoProfileDialog .mihomoConnectionEditor .mihomoConnectionFields { grid-template-columns:minmax(0,1fr); }
 }
+
+.mihomoProfilesPagination { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; grid-column:1 / -1; padding:10px 14px; border:1px solid var(--line); border-radius:10px; color:var(--muted); font-size:12px; }
+.mihomoProfilesPagination > div { display:flex; align-items:center; gap:12px; }
+.mihomoProfilesPagination button { min-height:32px; padding:0 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel-soft); color:inherit; }
+.mihomoProfilesPagination button:disabled { opacity:.45; cursor:default; }
+.mihomoProfilesPagination strong { white-space:nowrap; font-family:var(--font-mono),monospace; }

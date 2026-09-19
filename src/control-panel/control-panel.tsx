@@ -1,7 +1,7 @@
 "use client";
 
 import { useNotifications, useNotifier, useNotificationList } from "../shared/notifications/notification-center";
-import { createApiClient } from "../shared/lib/api-request";
+import { createApiClient, invalidateApiSession, onApiSessionExpired } from "../shared/lib/api-request";
 import { useCdnSecurity } from "../features/application/use-cdn-security";
 import type { CdnSecurityStatus } from "../shared/lib/cdn-security-operation";
 import { RefreshNotices, refreshFailure } from "./components/refresh-notices";
@@ -16,6 +16,8 @@ import { ProtocolIcon } from "../shared/components/protocol-icon";
 import { MihomoPage } from "../features/mihomo/mihomo-view";
 import { OverviewDashboard } from "../features/overview/overview-view";
 import { AppWorkspace } from "./components/app-workspace";
+import { OperationHistory } from "./components/operation-history";
+import { OperationHistorySettings, useOperationHistorySettings } from "../features/services/operation-history-settings";
 import { ServicesDashboard } from "../features/services/services-view";
 import { NetworkView } from "../features/network/network-view";
 import { SecurityView } from "../features/security/security-view";
@@ -26,7 +28,9 @@ import { ProtocolView } from "../features/protocols/protocol-view";
 import { LoginView } from "../features/auth/login-view";
 import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, LiveStatus, LoggingSettings, NetworkStatus, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
 import { actionLabels, bytes, CLIENTS_PER_PAGE, directProtocolOrder, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
-import { createSystemActionCompletionTracker, protocolOperationOutcome, systemActionNeedsReload, systemOperationNotification, type SystemAction } from "./system-operation";
+import { submitSystemOperation, systemActionSucceeded, createSystemActionCompletionTracker, protocolOperationOutcome, systemActionNeedsReload, systemActionNeedsPolling, systemOperationNotification, type SystemAction } from "./system-operation";
+import { appendResources, networkSample as sampleNetwork, usedBytes, usedPercent } from "../shared/lib/resource-metrics";
+import type { AdoptionPlan, ComponentManagement, MetricsSettings } from "../shared/types/control-plane";
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
@@ -126,7 +130,6 @@ function publicError(message: string, status: number) {
   }
   return value || "Команда не выполнена.";
 }
-const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-HISTORY_SAMPLES);
 type GeneratedProfile = { id: string; name: string; filename: string; config: string };
 type SshAuthorizedKey = { fingerprint: string; type: string; comment?: string; managed?: boolean };
 type SshAccessState = { phase: "password" | "key-installed" | "awaiting-confirmation" | "hardened" | "rolled-back" | "open"; fingerprint: string; rollback_deadline?: string | null; message: string; key_login_observed?: boolean; keys?: SshAuthorizedKey[] };
@@ -157,6 +160,8 @@ export function ControlPanel() {
   const [clientStateFilter, setClientStateFilter] = useState<"all" | "online" | "attention" | "offline">("all");
   const [automationDraft, setAutomationDraft] = useState<ServicesStatus["automation"] | null>(null);
   const [loggingDraft, setLoggingDraft] = useState<LoggingSettings | null>(null);
+  const [metricsSettings, setMetricsSettings] = useState<MetricsSettings | null>(null);
+  const [metricsDraft, setMetricsDraft] = useState<MetricsSettings | null>(null);
   const notifications = useNotifications();
   const notificationItems = useNotificationList();
   const { error: notifyError, success: notifySuccess } = useNotifier("panel", "Панель");
@@ -168,7 +173,7 @@ export function ControlPanel() {
   const [viewLoading, setViewLoading] = useState(false);
   const viewLoadingTimer = useRef<number | null>(null);
   const viewLoadingRun = useRef(0);
-  const [networkRate, setNetworkRate] = useState({ rx: 0, tx: 0 });
+  const [networkRate, setNetworkRate] = useState<{ rx: number | null; tx: number | null }>({ rx: null, tx: null });
   const [resourceHistory, setResourceHistory] = useState<ResourceHistory>({ load: [], memory: [], disk: [], rx: [], tx: [] });
   const [protocolImages, setProtocolImages] = useState<ProtocolImage[]>([]);
   const [protocolStatuses, setProtocolStatuses] = useState<Partial<Record<Protocol, ProtocolStatus>>>({});
@@ -190,9 +195,11 @@ export function ControlPanel() {
   const [sshPublicKey, setSshPublicKey] = useState("");
   const [sshAccessState, setSshAccessState] = useState<SshAccessState | null>(null);
   const [sshKeyTested, setSshKeyTested] = useState(false);
+  const pendingSsh = useRef<{ id?: string; key?: string } | null>(null);
   const [sshCountdownClock, setSshCountdownClock] = useState(() => Date.now());
   const [clientDialog, setClientDialog] = useState(false);
   const [clientPage, setClientPage] = useState(1);
+  const [mihomoProfilesPage, setMihomoProfilesPage] = useState(1);
   const [currentAdminPassword, setCurrentAdminPassword] = useState("");
   const [newAdminPassword, setNewAdminPassword] = useState("");
   const [confirmAdminPassword, setConfirmAdminPassword] = useState("");
@@ -212,8 +219,35 @@ export function ControlPanel() {
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
   const sshAccessLoading = useRef(false);
   const automationDirty = useRef(false);
+  const pendingAutomation = useRef<{ id?: string; draft: ServicesStatus["automation"] } | null>(null);
   const loggingDirty = useRef(false);
+  const pendingLogging = useRef<{ id?: string; draft: LoggingSettings } | null>(null);
+  const metricsDirty = useRef(false);
   const liveRequestInFlight = useRef(false);
+  const pendingConfirmation = useRef<ConfirmationRequest | null>(null);
+  useEffect(() => { pendingConfirmation.current = confirmation; }, [confirmation]);
+  const clearSession = useCallback(() => {
+    sessionStorage.removeItem("312-token");
+    pendingConfirmation.current?.resolve(false);
+    pendingConfirmation.current = null;
+    setConfirmation(null); setConfirmationInput("");
+    setToken(""); setLoginPassword(""); setLoginPasswordVisible(false);
+    setCurrentAdminPassword(""); setNewAdminPassword(""); setConfirmAdminPassword("");
+    setPasswordDialog(false); setClientDialog(false); setSshAdminDialog(false);
+    setSshPublicKey(""); setSshAccessState(null); setSshKeyTested(false);
+    setGenerated(""); setGeneratedQr(""); setGeneratedQrError(""); setGeneratedProfiles([]);
+    setNewClientSettings((current) => ({...current, obfs_password: ""}));
+    setClients([]); setProtocolStatuses({}); setApplicationLogs([]); setSecurityLogs([]);
+    setBusy(false); setInstallingProtocol(""); setReloadRequested(false);
+    notifications.reset();
+  }, [notifications]);
+  useEffect(() => {
+    if (!token) return;
+    return onApiSessionExpired(token, () => {
+      clearSession();
+      notifyError("Сессия панели завершена. Войдите заново.");
+    });
+  }, [token, clearSession, notifyError]);
 
   useEffect(() => {
     const target = new URL(window.location.href);
@@ -250,6 +284,8 @@ export function ControlPanel() {
     formatHttpError: (detail, status) => status === 401 ? "Сессия панели завершена. Войдите заново." : publicError(detail, status),
   }), [token]);
 
+  const operationHistoryPolicy = useOperationHistorySettings(request, Boolean(token));
+
   function askConfirmation(options: Omit<ConfirmationRequest, "resolve">): Promise<boolean> {
     setConfirmationInput("");
     return new Promise((resolve) => setConfirmation({ ...options, resolve }));
@@ -271,17 +307,27 @@ export function ControlPanel() {
   const loadOverview = useCallback(async (force = false) => {
     if (!token) return;
     try {
-      const [next, imageData] = await Promise.all([
+      const [next, imageData] = await Promise.allSettled([
         request("/overview", force ? { cache: "no-store" } : undefined) as Promise<Overview>,
         request("/protocol-images", force ? { cache: "no-store" } : undefined) as Promise<{ items: ProtocolImage[] }>,
       ]);
-      setOverview(next);
-      setProtocolImages(imageData.items || []);
-      if (installingProtocol && imageData.items.some((image) => image.id === installingProtocol && image.installed)) {
-        setInstallingProtocol("");
+      if (next.status === "fulfilled") setOverview(next.value);
+      else setOverview((current) => current ? { ...current, resources: { ...current.resources, stale: true } } : current);
+      if (imageData.status === "fulfilled") {
+        setProtocolImages(imageData.value.items || []);
+        if (installingProtocol && imageData.value.items.some((image) => image.id === installingProtocol && image.installed)) {
+          setInstallingProtocol("");
+        }
       }
-      setLastUpdated(new Date());
-      setRefreshErrors((current) => { const next = { ...current }; delete next.loadOverview; return next; });
+      if (next.status === "fulfilled" || imageData.status === "fulfilled") setLastUpdated(new Date());
+      setRefreshErrors((current) => {
+        const errors = { ...current };
+        if (next.status === "fulfilled") delete errors.loadOverview;
+        else errors.loadOverview = refreshFailure(next.reason, "Не удалось обновить телеметрию VPS");
+        if (imageData.status === "fulfilled") delete errors.loadProtocolImages;
+        else errors.loadProtocolImages = refreshFailure(imageData.reason, "Не удалось обновить каталог компонентов");
+        return errors;
+      });
     } catch (cause) { setRefreshErrors((current) => ({ ...current, loadOverview: refreshFailure(cause, "Ошибка соединения") })); }
   }, [installingProtocol, request, token]);
 
@@ -330,8 +376,12 @@ export function ControlPanel() {
 
   const loadServices = useCallback(async (force = false) => {
     if (!token) return;
-    try {
-      const next = await request("/services", force ? { cache: "no-store" } : undefined) as ServicesStatus;
+    const [serviceResult, metricsResult] = await Promise.allSettled([
+      request<ServicesStatus>("/services", force ? { cache: "no-store" } : undefined),
+      request<MetricsSettings>("/services/metrics", force ? { cache: "no-store" } : undefined),
+    ]);
+    if (serviceResult.status === "fulfilled") {
+      const next = serviceResult.value;
       setServices(next);
       if (!automationDirty.current) setAutomationDraft(next.automation);
       if (!loggingDirty.current) setLoggingDraft({
@@ -339,8 +389,19 @@ export function ControlPanel() {
         retention_days: next.logging?.retention_days ?? 30,
       });
       setLastUpdated(new Date());
-      setRefreshErrors((current) => { const next = { ...current }; delete next.loadServices; return next; });
-    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadServices: refreshFailure(cause, "Не удалось обновить состояние служб") })); }
+    }
+    if (metricsResult.status === "fulfilled") {
+      setMetricsSettings(metricsResult.value);
+      if (!metricsDirty.current) setMetricsDraft(metricsResult.value);
+    }
+    setRefreshErrors((current) => {
+      const errors = { ...current };
+      if (serviceResult.status === "fulfilled") delete errors.loadServices;
+      else errors.loadServices = refreshFailure(serviceResult.reason, "Не удалось обновить состояние служб");
+      if (metricsResult.status === "fulfilled") delete errors.loadMetricsSettings;
+      else errors.loadMetricsSettings = refreshFailure(metricsResult.reason, "Не удалось обновить настройки хранения метрик");
+      return errors;
+    });
   }, [request, token]);
 
   const loadApplicationMetadata = useCallback(async (force = false) => {
@@ -515,27 +576,27 @@ export function ControlPanel() {
     sessionStorage.setItem("312-token", token);
   }, [token]);
 
+  const actionNeedsPolling = systemActionNeedsPolling(application?.action);
+
   useEffect(() => {
     if (!token || !autoRefresh) return;
     // Security data is intentionally refreshed only when entering the tab;
     // its checks are expensive and the page displays the last known snapshot.
     if (tab === "security") return;
-    const actionRunning = ["queued", "active", "activating", "running", "rebooting", "powering-off"].includes(application?.action?.state || "");
-    const updateRunning = actionRunning && ["update", "test-update", "test-rollback", "safe-update", "kernel-update"].includes(application?.action?.action || "");
+    const updateRunning = actionNeedsPolling && ["update", "test-update", "test-rollback", "safe-update", "kernel-update"].includes(application?.action?.action || "");
     const delay = updateRunning ? 3000
       : tab === "overview" ? 30000
         : ["channels", "wg", "awg", "shadowsocks", "vless-reality-xhttp", "clients"].includes(tab) ? 15000
           : 10000;
     const timer = window.setInterval(() => { if (document.visibilityState === "visible") void refreshCurrent(false); }, delay);
     return () => window.clearInterval(timer);
-  }, [application?.action?.action, application?.action?.state, autoRefresh, refreshCurrent, tab, token]);
+  }, [application?.action?.action, actionNeedsPolling, autoRefresh, refreshCurrent, tab, token]);
 
   useEffect(() => {
-    const actionRunning = ["queued", "active", "activating", "running", "rebooting", "powering-off"].includes(application?.action?.state || "");
-    if (!token || !actionRunning) return;
+    if (!token || !actionNeedsPolling) return;
     const timer = window.setInterval(() => void loadApplication(), 2000);
     return () => window.clearInterval(timer);
-  }, [application?.action?.state, autoRefresh, loadApplication, token]);
+  }, [actionNeedsPolling, loadApplication, token]);
 
   useEffect(() => {
     const completed = trackActionCompletion(application?.action);
@@ -544,6 +605,32 @@ export function ControlPanel() {
     if (systemActionNeedsReload(completed)) requestCommandReload();
     else void refreshCurrent(false);
   }, [application?.action, refreshCurrent, requestCommandReload, trackActionCompletion]);
+
+  useEffect(() => {
+    const action = application?.action;
+    const pending = pendingLogging.current;
+    if (!pending?.id || action?.id !== pending.id) return;
+    if (systemActionSucceeded(action)) {
+      pendingLogging.current = null;
+      // An edit made while the worker runs must remain a local draft.
+      if (JSON.stringify(loggingDraft) === JSON.stringify(pending.draft)) loggingDirty.current = false;
+      void loadServices(true);
+    } else if (action.state === "failed") pendingLogging.current = null;
+  }, [application?.action, loggingDraft, loadServices]);
+
+  useEffect(() => {
+    const action = application?.action;
+    const pending = pendingAutomation.current;
+    if (!pending?.id || action?.id !== pending.id) return;
+    if (systemActionSucceeded(action)) {
+      pendingAutomation.current = null;
+      if (JSON.stringify(automationDraft) === JSON.stringify(pending.draft)) automationDirty.current = false;
+      void loadServices(true);
+    } else if (action.state === "failed") {
+      pendingAutomation.current = null;
+      void loadServices(true);
+    }
+  }, [application?.action, automationDraft, loadServices]);
 
   // Historical errors and unknown notification cards must not hold a completed
   // command's reload forever. Only the current mutation owns this boundary.
@@ -594,35 +681,22 @@ export function ControlPanel() {
     try {
       const next = await request("/live-status") as LiveStatus;
       const now = Date.now();
-      const previous = networkSample.current;
-      let nextRxRate = 0;
-      let nextTxRate = 0;
-      if (previous) {
-        const seconds = Math.max((now - previous.at) / 1000, 0.1);
-        nextRxRate = Math.max(0, (next.resources.network_rx - previous.rx) / seconds);
-        nextTxRate = Math.max(0, (next.resources.network_tx - previous.tx) / seconds);
-        setNetworkRate({ rx: nextRxRate, tx: nextTxRate });
-      }
-      const memoryUsed = next.resources.memory_total ? 100 - next.resources.memory_available / next.resources.memory_total * 100 : 0;
-      const diskUsed = next.resources.disk_total ? 100 - next.resources.disk_available / next.resources.disk_total * 100 : 0;
-      setResourceHistory((history) => ({
-        load: appendSample(history.load, next.resources.cpu_percent || 0),
-        memory: appendSample(history.memory, memoryUsed),
-        disk: appendSample(history.disk, diskUsed),
-        rx: previous ? appendSample(history.rx, nextRxRate) : history.rx,
-        tx: previous ? appendSample(history.tx, nextTxRate) : history.tx,
-      }));
-      networkSample.current = { rx: next.resources.network_rx, tx: next.resources.network_tx, at: now };
+      const sampled = sampleNetwork(next.resources, networkSample.current, now);
+      setNetworkRate(sampled.rate);
+      setResourceHistory((history) => appendResources(history, next.resources, sampled.rate, HISTORY_SAMPLES));
+      networkSample.current = sampled.sample;
       setOverview((current) => current ? {
         ...current,
+        server: { ...current.server, uptime_s: next.resources.uptime_s === undefined ? current.server.uptime_s : next.resources.uptime_s },
         resources: next.resources,
         protocols: {
-          wg: { ...current.protocols.wg, active: next.protocols.wg.active },
-          awg: { ...current.protocols.awg, active: next.protocols.awg.active },
+          wg: { ...current.protocols.wg, active: next.protocols.wg?.active ?? current.protocols.wg.active },
+          awg: { ...current.protocols.awg, active: next.protocols.awg?.active ?? current.protocols.awg.active },
         },
       } : current);
-      if (tab === "overview" || tab === "clients") {
-        setClients((current) => next.clients.map((client) => ({
+      const liveClients = next.clients;
+      if (liveClients && (tab === "overview" || tab === "clients")) {
+        setClients((current) => liveClients.map((client) => ({
           ...current.find((existing) => existing.id === client.id && existing.protocol === client.protocol),
           ...client,
         })));
@@ -631,22 +705,33 @@ export function ControlPanel() {
         setProtocolStatuses((current) => {
           const updated = { ...current };
           (["wg", "awg"] as TunnelProtocol[]).forEach((protocol) => {
-            if (updated[protocol]) updated[protocol] = { ...updated[protocol]!, ...next.protocols[protocol] };
+            if (updated[protocol] && next.protocols[protocol]) updated[protocol] = { ...updated[protocol]!, ...next.protocols[protocol] };
           });
           return updated;
         });
       }
-      if (tab === "security") {
+      const liveSecurity = next.security;
+      if (tab === "security" && liveSecurity) {
         setSecurity((current) => current ? {
           ...current,
-          firewall: { ...((current.firewall as Record<string, unknown> | undefined) || {}), active: next.security.firewall_active },
-          fail2ban: { ...((current.fail2ban as Record<string, unknown> | undefined) || {}), active: next.security.fail2ban_active },
-          ssh: { ...((current.ssh as Record<string, unknown> | undefined) || {}), active: next.security.ssh_listening },
+          firewall: { ...((current.firewall as Record<string, unknown> | undefined) || {}), active: liveSecurity.firewall_active },
+          fail2ban: { ...((current.fail2ban as Record<string, unknown> | undefined) || {}), active: liveSecurity.fail2ban_active },
+          ssh: { ...((current.ssh as Record<string, unknown> | undefined) || {}), active: liveSecurity.ssh_listening },
         } : current);
       }
+      setRefreshErrors((current) => {
+        const errors = { ...current };
+        if (next.unavailable?.length) errors.liveSources = { message: `Stale — не обновились: ${next.unavailable.join(", ")}`, network: false };
+        else delete errors.liveSources;
+        return errors;
+      });
       setLastUpdated(new Date());
     } catch {
       // Full module refresh reports persistent errors; live telemetry stays silent.
+      networkSample.current = null;
+      setNetworkRate({ rx: null, tx: null });
+      setOverview((current) => current ? { ...current, resources: { ...current.resources, stale: true } } : current);
+      setResourceHistory((history) => Object.fromEntries(Object.entries(history).map(([key, values]) => [key, [...values, null].slice(-HISTORY_SAMPLES)])) as ResourceHistory);
     } finally {
       liveRequestInFlight.current = false;
     }
@@ -702,11 +787,11 @@ export function ControlPanel() {
     })) return;
     setBusy(true);
     try {
-      const started = await request("/application/action", { method: "POST", body: JSON.stringify({ action }) });
+      const started = await submitSystemOperation(request, "/application/action", { method: "POST", body: JSON.stringify({ action }) });
       trackActionCompletion(started);
       setApplication((current) => ({
         ...current,
-        api: current?.api || { active: true, enabled: true },
+        api: current?.api || { active: null, enabled: null },
         containers: current?.containers || [],
         action: started,
         service_mode: current?.service_mode,
@@ -745,8 +830,8 @@ export function ControlPanel() {
     })) return;
     setBusy(true);
     try {
-      await request(`/services/${serviceId}/action`, { method: "POST", body: JSON.stringify({ action }) });
-      requestCommandReload();
+      const started = await submitSystemOperation(request, `/services/${serviceId}/action`, { method: "POST", body: JSON.stringify({ action }) });
+      setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: started }));
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось выполнить действие со службой"); }
     finally { setBusy(false); }
   }
@@ -773,11 +858,25 @@ export function ControlPanel() {
     finally { sshAccessLoading.current = false; }
   }, [token, request, notifyError]);
 
+  useEffect(() => {
+    const action = application?.action;
+    const pending = pendingSsh.current;
+    if (!pending?.id || action?.id !== pending.id) return;
+    if (!systemActionSucceeded(action) && action.state !== "failed") return;
+    pendingSsh.current = null;
+    if (systemActionSucceeded(action)) {
+      if (pending.key !== undefined && sshPublicKey === pending.key) setSshPublicKey("");
+      setSshKeyTested(false);
+    }
+    void loadSshAccess();
+  }, [application?.action, loadSshAccess, sshPublicKey]);
+
   async function installSshKey() {
     setBusy(true);
     try {
-      const state = await request<SshAccessState>("/security/ssh-access/key", { method: "POST", body: JSON.stringify({ public_key: sshPublicKey.trim() }) });
-      setSshAccessState(state); setSshPublicKey(""); setSshKeyTested(false);
+      const started = await submitSystemOperation(request, "/security/ssh-access/key", { method: "POST", body: JSON.stringify({ public_key: sshPublicKey.trim() }) });
+      pendingSsh.current = { id: started.id, key: sshPublicKey };
+      setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: started }));
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось установить публичный ключ"); }
     finally { setBusy(false); }
   }
@@ -786,8 +885,9 @@ export function ControlPanel() {
     if (!await askConfirmation({ title: "Удалить SSH-ключ?", message: `Публичный ключ ${fingerprint} будет удалён из root/.ssh/authorized_keys. Приватный ключ на компьютере не удаляется.`, confirmLabel: "Удалить ключ", danger: true })) return;
     setBusy(true);
     try {
-      const state = await request<SshAccessState>("/security/ssh-access/key/delete", { method: "POST", body: JSON.stringify({ fingerprint }) });
-      setSshAccessState(state); setSshPublicKey(""); setSshKeyTested(false);
+      const started = await submitSystemOperation(request, "/security/ssh-access/key/delete", { method: "POST", body: JSON.stringify({ fingerprint }) });
+      pendingSsh.current = { id: started.id, key: sshPublicKey };
+      setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: started }));
       await loadSecurity();
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось удалить SSH-ключ"); }
     finally { setBusy(false); }
@@ -802,8 +902,9 @@ export function ControlPanel() {
     })) return;
     setBusy(true);
     try {
-      const state = await request<SshAccessState>(`/security/ssh-access/${action}`, { method: "POST" });
-      setSshAccessState(state); setSshCountdownClock(Date.now());
+      const started = await submitSystemOperation(request, `/security/ssh-access/${action}`, { method: "POST" });
+      pendingSsh.current = { id: started.id };
+      setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: started }));
       if (action !== "rollback") setSshKeyTested(false);
       await loadSecurity();
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось изменить SSH-доступ"); }
@@ -864,8 +965,8 @@ export function ControlPanel() {
     setBusy(true);
     try {
       await request("/security/admin-password", { method: "PUT", body: JSON.stringify({ current_password: currentAdminPassword, new_password: newAdminPassword, confirm_password: confirmAdminPassword }) });
-      sessionStorage.removeItem("312-token");
-      closePasswordDialog(); setToken(""); setLoginPassword("");
+      invalidateApiSession(token, false);
+      clearSession();
       notifySuccess("Пароль изменён. Войдите заново с новым паролем.");
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось изменить пароль"); }
     finally { setBusy(false); }
@@ -882,10 +983,10 @@ export function ControlPanel() {
     if (!automationDraft) return;
     setBusy(true);
     try {
-      await request("/services/automation", { method: "PUT", body: JSON.stringify(automationDraft) });
-      automationDirty.current = false;
-      await Promise.all([loadServices(), loadApplication()]);
-      notifySuccess("Расписание обслуживания сохранено и применено");
+      const draft = structuredClone(automationDraft);
+      const started = await submitSystemOperation(request, "/services/automation", { method: "PUT", body: JSON.stringify(draft) });
+      pendingAutomation.current = { id: started.id, draft };
+      setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: started }));
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить расписания"); }
     finally { setBusy(false); }
   }
@@ -909,7 +1010,7 @@ export function ControlPanel() {
     })) return;
     setBusy(true);
     try {
-      const started = await request("/services/panel-access", { method: "PUT", body: JSON.stringify({ mode }) }) as SystemAction;
+      const started = await submitSystemOperation(request, "/services/panel-access", { method: "PUT", body: JSON.stringify({ mode }) }) as SystemAction;
       const operation = { ...started, action: "access-mode" };
       notifications.upsert(systemOperationNotification(operation, actionLabels["access-mode"], true));
       setApplication((current) => current ? { ...current, action: { ...current.action, ...operation } } : current);
@@ -937,7 +1038,7 @@ export function ControlPanel() {
     setBusy(true);
     try {
       setAutoRefresh(false);
-      const started = await request("/services/service-mode", { method: "PUT", body: JSON.stringify({ active }) }) as SystemAction;
+      const started = await submitSystemOperation(request, "/services/service-mode", { method: "PUT", body: JSON.stringify({ active }) }) as SystemAction;
       const operation = { ...started, action: "service-mode" };
       notifications.upsert(systemOperationNotification(operation, actionLabels["service-mode"], true));
       setApplication((current) => current ? { ...current, action: { ...current.action, ...operation } } : current);
@@ -1001,6 +1102,51 @@ export function ControlPanel() {
     throw new Error(`Сервер не подтвердил ${installed ? "установку" : "удаление"} ${image.name} за 10 минут`);
   }
 
+  async function adoptProtocol(image: ProtocolImage) {
+    let plan: AdoptionPlan;
+    setBusy(true);
+    try {
+      plan = await request<AdoptionPlan>(`/protocol-images/${image.id}/adoption`, { cache: "no-store" });
+      if (!plan.compatible) { notifyError(plan.blockers.join(". ")); return; }
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Request failed"); return; }
+    finally { setBusy(false); }
+    if (!await askConfirmation({ title: `Принять ${image.name} под управление?`,
+      message: `${plan.effects.join(". ")}. Резервная копия: ${plan.files} файлов/каталогов, ${(plan.backup_bytes / 1024 / 1024).toFixed(1)} МБ.`,
+      confirmLabel: "Принять под управление", danger: true,
+    })) return;
+    setBusy(true);
+    try {
+      await request<ComponentManagement>(`/protocol-images/${image.id}/adoption`, { method: "POST", body: JSON.stringify({ fingerprint: plan.fingerprint, confirmed: true }) });
+      notifySuccess(`${image.name} принят под управление. Конфигурация сохранена.`);
+    } catch (cause) {
+      // Never retry adoption after a lost response; first read its result.
+      try {
+        const current = await request<AdoptionPlan>(`/protocol-images/${image.id}/adoption`, { cache: "no-store" });
+        if (current.management.state === "managed") notifySuccess(`${image.name} принят под управление. Результат подтверждён сервером.`);
+        else notifyError(cause instanceof Error ? cause.message : "Request failed");
+      } catch { notifyError("Результат принятия пока неизвестен. Обновите каталог перед следующим действием."); }
+    } finally { setBusy(false); await loadOverview(true); await loadServices(true); }
+  }
+
+  async function purgeProtocol(image: ProtocolImage) {
+    if (!await askConfirmation({
+      title: `Очистить данные ${image.name}?`,
+      message: "Настройки, ключи, подключения и резервные копии этого компонента будут удалены без возможности восстановления. Следующая установка начнётся с настроек образа.",
+      confirmLabel: "Очистить данные", phrase: image.id, danger: true,
+    })) return;
+    setBusy(true); setInstallingProtocol(`purge-${image.id}`);
+    let started: SystemAction | undefined;
+    try {
+      started = await submitSystemOperation(request, `/protocol-images/${image.id}/purge`, {method: "POST", body: JSON.stringify({confirmation: image.id})});
+      setApplication((current) => ({api: current?.api || {active: null, enabled: null}, containers: current?.containers || [], action: started!}));
+      finishSystemCommand(await waitForProtocolState(image, false, started));
+      await loadOverview(true);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Не удалось очистить данные";
+      if (started) finishSystemCommand(started, message); else notifyError(message);
+    } finally { setInstallingProtocol(""); setBusy(false); }
+  }
+
   async function installProtocol(image: ProtocolImage) {
     if (!await askConfirmation({
       title: `Установить ${image.name}?`,
@@ -1010,9 +1156,9 @@ export function ControlPanel() {
     setBusy(true); setInstallingProtocol(image.id);
     let started: SystemAction | undefined;
     try {
-      started = await request(`/protocol-images/${image.id}/install`, { method: "POST" });
+      started = await submitSystemOperation(request, `/protocol-images/${image.id}/install`, { method: "POST" });
       setApplication((current) => ({
-        api: current?.api || { active: true, enabled: true },
+        api: current?.api || { active: null, enabled: null },
         containers: current?.containers || [],
         action: started!,
       }));
@@ -1068,9 +1214,9 @@ export function ControlPanel() {
     setBusy(true); setInstallingProtocol(`update-${image.id}`);
     let started: SystemAction | undefined;
     try {
-      started = await request(`/protocol-images/${image.id}/update`, { method: "POST" });
+      started = await submitSystemOperation(request, `/protocol-images/${image.id}/update`, { method: "POST" });
       setApplication((current) => ({
-        api: current?.api || { active: true, enabled: true },
+        api: current?.api || { active: null, enabled: null },
         containers: current?.containers || [],
         action: started!,
       }));
@@ -1080,20 +1226,6 @@ export function ControlPanel() {
       const message = cause instanceof Error ? cause.message : "Не удалось запустить обновление протокола";
       if (started) finishSystemCommand(started, message); else notifyError(message);
     } finally { setInstallingProtocol(""); setBusy(false); }
-  }
-
-  async function restartProtocol(protocol: Protocol) {
-    if (!await askConfirmation({
-      title: "Перезапустить протокол?",
-      message: `${labels[protocol]} будет перезапущен. Активные соединения могут кратковременно прерваться.`,
-      confirmLabel: "Перезапустить",
-    })) return;
-    setBusy(true);
-    try {
-      await request(`/protocols/${protocol}/restart`, { method: "POST" });
-      requestCommandReload();
-    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось перезапустить протокол"); }
-    finally { setBusy(false); }
   }
 
   async function checkProtocolResources(protocol: Protocol) {
@@ -1125,15 +1257,33 @@ export function ControlPanel() {
     })) return;
     setBusy(true);
     try {
-      await request("/services/logging", {
-        method: "PUT",
-        body: JSON.stringify(loggingDraft),
+      const draft = { ...loggingDraft };
+      const started = await submitSystemOperation(request, "/services/logging", {
+        method: "PUT", body: JSON.stringify(draft),
       });
-      loggingDirty.current = false;
-      await loadServices();
-      notifySuccess("Настройки записи и хранения журналов сохранены");
+      pendingLogging.current = { id: started.id, draft };
+      setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: started }));
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить настройки журналов"); }
     finally { setBusy(false); }
+  }
+
+  async function saveMetricsSettings() {
+    if (!metricsDraft) return;
+    if (metricsSettings && (["raw_hours", "minute_days", "hour_days", "disk_limit_mb"] as const).some((key) => metricsDraft[key] < metricsSettings[key]) && !await askConfirmation({
+      title: "Сократить историю метрик?", message: "При следующей очистке данные за пределами новых сроков и лимита места будут удалены. Восстановить удалённые измерения нельзя.", confirmLabel: "Сохранить и сократить", danger: true,
+    })) return;
+    setBusy(true);
+    try {
+      const { enabled, raw_hours, minute_days, hour_days, disk_limit_mb, revision } = metricsDraft;
+      const saved = await request<MetricsSettings>("/services/metrics", { method: "PUT", body: JSON.stringify({ enabled, raw_hours, minute_days, hour_days, disk_limit_mb, expected_revision: revision }) });
+      setMetricsSettings(saved);
+      setMetricsDraft(saved);
+      metricsDirty.current = false;
+      notifySuccess("Настройки хранения метрик сохранены");
+    } catch (cause) {
+      notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить настройки хранения метрик");
+      await loadServices(true); // Reconcile only; never repeat a write after a lost response.
+    } finally { setBusy(false); }
   }
 
   async function clearManagedLogs() {
@@ -1144,10 +1294,8 @@ export function ControlPanel() {
     })) return;
     setBusy(true);
     try {
-      await request("/services/logging/clear", { method: "POST" });
-      setSecurityLogs([]); setApplicationLogs([]);
-      await loadServices();
-      notifySuccess("Управляемые журналы очищены");
+      const started = await submitSystemOperation(request, "/services/logging/clear", { method: "POST" });
+      setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: started }));
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось очистить журналы"); }
     finally { setBusy(false); }
   }
@@ -1185,8 +1333,8 @@ export function ControlPanel() {
     if (!alreadyConfirmed && !await askConfirmation({
       title: image.id === "mihomo" ? `Удалить ${image.name}?` : "Удалить протокол?",
       message: image.id === "mihomo"
-        ? "Будут удалены Mihomo Core, его профили, внутренние каналы, DNS и маршрутизация. Direct-подключения GATE.312 не изменятся."
-        : `${image.name} будет удалён из панели. Его конфигурация и связанные подключения станут недоступны; модуль можно установить повторно.`,
+        ? "Mihomo Core и внутренние службы будут остановлены и удалены. Профили, настройки, ключи и подключения сохранятся для повторной установки. Сохранённые подключения не будут работать до восстановления компонента."
+        : `Исполняемая часть ${image.name} будет удалена. Настройки, ключи и подключения сохранятся для повторной установки; до неё подключения не работают.`,
       confirmLabel: image.id === "mihomo" ? "Удалить модуль" : "Удалить", phrase: image.id === "mihomo" ? "УДАЛИТЬ" : undefined, danger: true,
     })) return;
     const nextProtocol = image.id === "mihomo"
@@ -1195,9 +1343,9 @@ export function ControlPanel() {
     setBusy(true); setInstallingProtocol(`remove-${image.id}`);
     let started: SystemAction | undefined;
     try {
-      started = await request(`/protocol-images/${image.id}`, { method: "DELETE" });
+      started = await submitSystemOperation(request, `/protocol-images/${image.id}`, { method: "DELETE" });
       setApplication((current) => ({
-        api: current?.api || { active: true, enabled: true },
+        api: current?.api || { active: null, enabled: null },
         containers: current?.containers || [],
         action: started!,
       }));
@@ -1392,10 +1540,10 @@ export function ControlPanel() {
     />;
   }
 
-  const memUsed = overview ? 100 - overview.resources.memory_available / overview.resources.memory_total * 100 : 0;
-  const diskUsed = overview ? 100 - overview.resources.disk_available / overview.resources.disk_total * 100 : 0;
-  const memoryUsedBytes = overview ? Math.max(0, overview.resources.memory_total - overview.resources.memory_available) : 0;
-  const diskUsedBytes = overview ? Math.max(0, overview.resources.disk_total - overview.resources.disk_available) : 0;
+  const memUsed = usedPercent(overview?.resources.memory_total, overview?.resources.memory_available);
+  const diskUsed = usedPercent(overview?.resources.disk_total, overview?.resources.disk_available);
+  const memoryUsedBytes = usedBytes(overview?.resources.memory_total, overview?.resources.memory_available);
+  const diskUsedBytes = usedBytes(overview?.resources.disk_total, overview?.resources.disk_available);
   const firewall = security?.firewall as {
     active?: boolean; rules?: string[]; forwarding_enabled?: boolean; stateful_return?: boolean;
     uplink_interface?: string; vpn_policy_healthy?: boolean;
@@ -1553,16 +1701,17 @@ export function ControlPanel() {
     applicationStateTitle={applicationStateTitle}
     uptimeLabel={uptime(overview?.server.uptime_s)}
     loadLabel={overview?.resources.load1?.toFixed(2) || "—"}
-    cpuLabel={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%  ${overview?.resources.cpu_count || "—"}c`}
-    ramLabel={`${memUsed.toFixed(0)}%`}
-    networkLabel={`↓ ${bytes(networkRate.rx)}/с`}
+    cpuLabel={`${overview?.resources.cpu_percent?.toFixed(0) ?? "—"}%  ${overview?.resources.cpu_count ?? "—"}c${overview?.resources.stale ? " · Stale" : ""}`}
+    ramLabel={`${memUsed?.toFixed(0) ?? "—"}%${overview?.resources.stale ? " · Stale" : ""}`}
+    networkLabel={networkRate.rx === null ? "—" : `↓ ${bytes(networkRate.rx)}/с`}
     autoRefresh={autoRefresh}
     busy={busy}
     lastUpdated={lastUpdated}
     onToggleAutoRefresh={() => setAutoRefresh((value) => !value)}
     viewLoading={viewLoading}
     onRefresh={() => void refreshCurrent(true, true)}
-    onLogout={() => { notifications.reset(); setReloadRequested(false); sessionStorage.removeItem("312-token"); setToken(""); }}
+    onLogout={() => { invalidateApiSession(token, false); clearSession(); }}
+    operationHistory={<OperationHistory token={token} />}
   >
       {tab !== "overview" && tab !== "network" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
       <RefreshNotices errors={refreshErrors} reconnecting={cdnCommand.pending} />
@@ -1582,12 +1731,18 @@ export function ControlPanel() {
           busy={busy}
           onInstallProtocol={(image) => void installProtocol(image)}
           onUpdateProtocol={(image) => void updateProtocol(image)}
+          onOpenProtocol={(image) => { setSelectedChannel(image.id as Protocol); setTab("channels"); }}
+          onAdoptProtocol={(image) => void adoptProtocol(image)}
+          onPurgeProtocol={(image) => void purgeProtocol(image)}
         />
       )}
 
       {tab === "mihomo" && (
         <MihomoPage
+          profilesPage={mihomoProfilesPage}
+          setProfilesPage={setMihomoProfilesPage}
           token={token}
+          readOnly={protocolImages.find((image) => image.id === "mihomo")?.management?.state !== "managed"}
           confirmAction={askConfirmation}
           coreBusy={installingProtocol === "remove-mihomo"}
           onCommandComplete={requestCommandReload}
@@ -1629,7 +1784,7 @@ export function ControlPanel() {
         securityLogsUpdatedAt={securityLogsUpdatedAt}
         securityNewLogCount={securityNewLogCount}
         fixSecurity={fixSecurity}
-        runApplicationAction={runApplicationAction}
+        onOpenApplication={() => setTab("application")}
         setPasswordDialog={setPasswordDialog}
         openSshAdminDialog={openSshAdminDialog}
         setSecurityLogsOpen={setSecurityLogsOpen}
@@ -1658,10 +1813,16 @@ export function ControlPanel() {
       />}
 
       {tab === "services" && <ServicesDashboard
+        operationHistorySettings={<OperationHistorySettings policy={operationHistoryPolicy} confirm={askConfirmation} busy={busy} />}
         services={services}
         busy={busy}
         serviceModeActive={serviceModeActive}
         loggingDraft={loggingDraft}
+        metricsSettings={metricsSettings}
+        metricsDraft={metricsDraft}
+        onMetricsChange={(patch) => { metricsDirty.current = true; setMetricsDraft((current) => current ? { ...current, ...patch } : current); }}
+        onSaveMetrics={() => void saveMetricsSettings()}
+        onResetMetrics={() => { metricsDirty.current = false; setMetricsDraft(metricsSettings); }}
         automationDraft={automationDraft}
         onServiceAction={(serviceId, serviceName, action) => void runServiceAction(serviceId, serviceName, action)}
         onServiceModeChange={(active) => void changeServiceMode(active)}
@@ -1694,7 +1855,6 @@ export function ControlPanel() {
         checkingResources={checkingResources}
         installingProtocol={installingProtocol}
         busy={busy}
-        restartProtocol={restartProtocol}
         updateProtocol={updateProtocol}
         removeProtocol={removeProtocol}
         toggleNetworkDiagnostics={toggleNetworkDiagnostics}

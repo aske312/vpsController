@@ -5,11 +5,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests.api.support import api
+from component_registry import ComponentRegistry
 
 
 class NetworkDomainsTests(unittest.TestCase):
     def setUp(self):
         root = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(patch.object(api, "DATA_DIR", Path(root)))
+        for image in ("mihomo", "vless-reality-xhttp"):
+            ComponentRegistry(Path(root)).write_receipt(image, "installed")
         self.enterContext(patch.object(api, "NETWORK_ENDPOINTS_FILE", Path(root) / "network-endpoints.json"))
 
     def test_ipv6_origin_is_ready_before_dns_record_is_added(self):
@@ -87,6 +91,7 @@ class NetworkDomainsTests(unittest.TestCase):
     def test_delete_transport_endpoint_removes_setting_and_mihomo_route(self):
         with tempfile.TemporaryDirectory() as root:
             data_dir = Path(root)
+            ComponentRegistry(data_dir).write_receipt("mihomo", "installed")
             routes_dir = data_dir / "caddy-routes"
             routes_dir.mkdir()
             (routes_dir / "route.json").write_text(json.dumps({"domain": "tls.example.com", "path": "/route"}))
@@ -103,6 +108,7 @@ class NetworkDomainsTests(unittest.TestCase):
     def test_delete_transport_endpoint_disables_matching_direct_vless_route(self):
         with tempfile.TemporaryDirectory() as root:
             data_dir = Path(root)
+            ComponentRegistry(data_dir).write_receipt("vless-reality-xhttp", "installed")
             env = data_dir / "reality.env"
             config = data_dir / "config.json"
             env.write_text("CDN_ENABLED=yes\nCDN_DOMAIN=cdn.example.com\n")
@@ -186,6 +192,7 @@ class NetworkDomainsTests(unittest.TestCase):
     def test_cdn_endpoint_connects_existing_panel_vless_origin(self):
         with tempfile.TemporaryDirectory() as root:
             data_dir = Path(root)
+            ComponentRegistry(data_dir).write_receipt("vless-reality-xhttp", "installed")
             config = data_dir / "vless.json"
             env = data_dir / "reality.env"
             config.write_text("{}")

@@ -59,6 +59,7 @@ type AppWorkspaceProps = {
   onToggleAutoRefresh: () => void;
   onRefresh: () => void;
   onLogout: () => void;
+  operationHistory?: ReactNode;
   children: ReactNode;
 };
 
@@ -91,6 +92,7 @@ export function AppWorkspace({
   onToggleAutoRefresh,
   onRefresh,
   onLogout,
+  operationHistory,
   children,
 }: AppWorkspaceProps) {
   const country = String(server?.country || "").toLowerCase();
@@ -136,6 +138,7 @@ export function AppWorkspace({
           </div>
 
           <div className="gateMastActions">
+            {operationHistory}
             <div className={`refreshControl ${autoRefresh ? "active" : ""}`} aria-label="Управление обновлением данных">
               <button className="autoButton" disabled={busy} onClick={onToggleAutoRefresh} aria-label={autoRefresh ? "Остановить автообновление" : "Включить автообновление"}><i /></button>
               <button className="iconButton" onClick={onRefresh} aria-label="Обновить текущий модуль">↻</button>

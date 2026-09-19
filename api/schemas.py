@@ -29,6 +29,10 @@ class ApplicationAction(BaseModel):
     action: Literal["restart", "update", "test-update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "safe-update", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
 
 
+class ComponentPurge(BaseModel):
+    confirmation: str = Field(min_length=1, max_length=128, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+
+
 class ServiceAction(BaseModel):
     action: Literal["start", "stop", "restart"]
 
@@ -56,12 +60,32 @@ class LoggingSettings(BaseModel):
     retention_days: int = Field(ge=0, le=365)
 
 
+class ComponentAdoption(BaseModel):
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    confirmed: Literal[True]
+
+
+class MetricsSettings(BaseModel):
+    enabled: bool = True
+    raw_hours: int = Field(default=24, ge=1, le=168)
+    minute_days: int = Field(default=7, ge=1, le=90)
+    hour_days: int = Field(default=90, ge=1, le=730)
+    disk_limit_mb: int = Field(default=64, ge=8, le=1024)
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{32}$")
+
+
 class AutomationSchedule(BaseModel):
     enabled: bool
     cadence: Literal["daily", "weekly", "monthly"]
     weekday: Literal["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] = "Sun"
     hour: int = Field(ge=0, le=23)
     minute: int = Field(ge=0, le=59)
+
+
+class OperationHistorySettings(BaseModel):
+    retention_days: int = Field(ge=1, le=730)
+    disk_limit_mb: int = Field(ge=1, le=1024)
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{32}$")
 
 
 class AutomationSettings(BaseModel):

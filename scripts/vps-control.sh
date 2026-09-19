@@ -168,6 +168,10 @@ write_action_status() {
   [[ -n "${CURRENT_ACTION}" ]] || return 0
   local state="$1" progress="$2" message="$3"
   install -d -m 0750 "${DATA_DIR}"
+  if [[ -n "${VPS_CONTROL_OPERATION_ID:-}" && -f "${INSTALL_DIR}/api/application_operation.py" ]]; then
+    python3 "${INSTALL_DIR}/api/application_operation.py" "${ACTION_FILE}" "${CURRENT_ACTION}" "${state}" "${progress}" "${message}" "${ACTION_STARTED_AT}"
+    return
+  fi
   python3 - "${ACTION_FILE}" "${CURRENT_ACTION}" "${state}" "${progress}" "${message}" "${ACTION_STARTED_AT}" <<'PY'
 import json
 import os
@@ -199,6 +203,11 @@ PY
 }
 
 begin_operation() {
+  install -d -m 0750 "${DATA_DIR}"
+  exec 9>"${DATA_DIR}/application-worker.lock"
+  flock -w 5 9 || die "другая операция уже выполняется; дождитесь её завершения."
+  export VPS_CONTROL_OPERATION_ID="${VPS_CONTROL_OPERATION_ID:-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')}"
+  export VPS_CONTROL_WORKER_PID="$$"
   CURRENT_ACTION="$1"
   ACTION_STARTED_AT="$(date --iso-8601=seconds)"
   ACTION_PROGRESS=3
@@ -1739,7 +1748,7 @@ install_protocol_image() {
     fi
   done < <(find "${image_dir}" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print)
   [[ -n "${manifest}" ]] || die "образ ${image_id} не найден."
-  local installer uninstaller image_root module_log failure_message installer_status
+  local installer uninstaller image_root module_log failure_message installer_status installation_kind
   image_root="$(dirname -- "${manifest}")"
   installer="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("installer",""))' "${manifest}")"
   uninstaller="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("uninstaller",""))' "${manifest}")"
@@ -1758,6 +1767,9 @@ PY
   [[ "${installer}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${installer}" ]] \
     || die "образ ${image_id} содержит некорректный installer."
   info "Установка образа ${image_id}"
+  installation_kind="$(DATA_DIR="${DATA_DIR}" WG_INTERFACE="${WG_INTERFACE}" AWG_INTERFACE="${AWG_INTERFACE}" \
+    python3 "${INSTALL_DIR}/api/component_registry.py" check-install --manifest "${manifest}" --data-dir "${DATA_DIR}")" \
+    || die "компонент не разрешён к установке; проверьте принятие под управление в панели."
   prepare_protocol_ports "${image_id}"
   RESERVED_PROTOCOL_IMAGE="${image_id}"
   prepare_package_manager
@@ -1767,9 +1779,13 @@ PY
     || die "пакетный менеджер не готов к установке ${image_id}; выполните apt-get check."
   refresh_protocol_api_access
   module_log="/var/log/${APP_NAME}-protocol-${image_id}.log"
+  DATA_DIR="${DATA_DIR}" WG_INTERFACE="${WG_INTERFACE}" AWG_INTERFACE="${AWG_INTERFACE}" \
+    python3 "${INSTALL_DIR}/api/component_registry.py" begin-install --manifest "${manifest}" --data-dir "${DATA_DIR}" \
+    || die "не удалось зафиксировать начало установки компонента."
   install -m 0600 /dev/null "${module_log}"
   set +e
-  ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+  VPS_CONTROL_RESTORE_COMPONENT="${image_id}" \
+    ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
     PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
     bash "${image_root}/${installer}" >"${module_log}" 2>&1
@@ -1781,9 +1797,10 @@ PY
   set -e
   if [[ "${installer_status}" -ne 0 ]]; then
       tail -n 40 "${module_log}" >&2 || true
-      failure_message="$(tail -n 1 "${module_log}" | tr '\n\r' ' ' | cut -c1-240)"
-      [[ -n "${failure_message}" ]] || failure_message="установщик завершился с ошибкой"
-      if [[ "${uninstaller}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${uninstaller}" ]]; then
+      failure_message="Установка не завершена; проверьте диагностику компонента"
+      # An uninstaller is only partial cleanup for a confirmed fresh install.
+      # It is never a rollback of a pre-existing installation or retained data.
+      if [[ "${installation_kind}" == "fresh" && "${uninstaller}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${uninstaller}" ]]; then
         echo "Откат частично установленного образа ${image_id}" >>"${module_log}"
         ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
           AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
@@ -1792,7 +1809,7 @@ PY
           || echo "Автоматическая очистка завершилась не полностью" >>"${module_log}"
       fi
       if [[ "${installer_status}" -eq 75 ]]; then
-        failure_message="Требуется одна перезагрузка VPS: ${failure_message}"
+        failure_message="Установщик сообщает о необходимости перезагрузки VPS; проверьте диагностику перед её выполнением"
       fi
       write_action_status "failed" "${ACTION_PROGRESS}" "${failure_message}; журнал: ${module_log}"
       CURRENT_ACTION=""
@@ -1805,6 +1822,8 @@ PY
   # Protocol status/configuration is read live; installation does not change
   # the API code or environment and does not require an API restart.
   sync_protocol_monitor
+  python3 "${INSTALL_DIR}/api/component_registry.py" record-install --manifest "${manifest}" --data-dir "${DATA_DIR}" \
+    || die "компонент установлен, но запись управления не сохранена; проверьте состояние в панели."
   ok "Образ ${image_id} установлен."
   release_protocol_ports "${image_id}"
   RESERVED_PROTOCOL_IMAGE=""
@@ -1824,6 +1843,8 @@ remove_protocol_image() {
   [[ "${uninstaller}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${uninstaller}" ]] \
     || die "образ ${image_id} не поддерживает удаление."
   info "Удаление установленного протокола ${image_id}"
+  python3 "${INSTALL_DIR}/api/component_registry.py" check-managed --manifest "${manifest}" --data-dir "${DATA_DIR}" \
+    || die "сначала примите компонент под управление в панели."
   refresh_protocol_api_access
   ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
@@ -1832,7 +1853,28 @@ remove_protocol_image() {
   release_protocol_ports "${image_id}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
+  WG_INTERFACE="${WG_INTERFACE}" AWG_INTERFACE="${AWG_INTERFACE}" \
+    python3 "${INSTALL_DIR}/api/component_registry.py" record-removal --manifest "${manifest}" --data-dir "${DATA_DIR}" \
+    || die "компонент удалён; не удалось отметить сохранённые данные."
   ok "Протокол ${image_id} удалён; образ сохранён."
+}
+
+purge_protocol_data() {
+  local image_id="${2:-}" manifest
+  [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
+  manifest="$(python3 - "${INSTALL_DIR}/protocol-images" "${image_id}" <<'PY'
+import json, sys
+from pathlib import Path
+for path in Path(sys.argv[1]).glob('*/manifest.json'):
+    if json.loads(path.read_text(encoding='utf-8')).get('id') == sys.argv[2]:
+        print(path)
+        break
+PY
+)"
+  [[ -n "${manifest}" ]] || die "образ не найден."
+  WG_INTERFACE="${WG_INTERFACE}" AWG_INTERFACE="${AWG_INTERFACE}" \
+    python3 "${INSTALL_DIR}/api/component_registry.py" purge --manifest "${manifest}" --data-dir "${DATA_DIR}"
+  ok "Сохранённые данные выбранного компонента очищены."
 }
 
 update_protocol_image() {
@@ -1847,11 +1889,13 @@ update_protocol_image() {
     fi
   done < <(find "${image_dir}" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print)
   [[ -n "${manifest}" ]] || die "образ ${image_id} не найден."
-  local image_root package installer module_log failure_message
+  local image_root package installer module_log
   image_root="$(dirname -- "${manifest}")"
   package="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("package",""))' "${manifest}")"
   installer="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("installer",""))' "${manifest}")"
   info "Обновление образа ${image_id}"
+  python3 "${INSTALL_DIR}/api/component_registry.py" check-managed --manifest "${manifest}" --data-dir "${DATA_DIR}" \
+    || die "сначала примите компонент под управление в панели."
   refresh_protocol_api_access
   module_log="/var/log/${APP_NAME}-protocol-${image_id}.log"
   install -m 0600 /dev/null "${module_log}"
@@ -1866,9 +1910,7 @@ update_protocol_image() {
       apt-get -o DPkg::Lock::Timeout=300 install --only-upgrade -y "${package}"
     } >"${module_log}" 2>&1 || {
       tail -n 40 "${module_log}" >&2 || true
-      failure_message="$(tail -n 1 "${module_log}" | tr '\n\r' ' ' | cut -c1-240)"
-      [[ -n "${failure_message}" ]] || failure_message="обновление пакета завершилось с ошибкой"
-      write_action_status "failed" "${ACTION_PROGRESS}" "${failure_message}; журнал: ${module_log}"
+      write_action_status "failed" "${ACTION_PROGRESS}" "Обновление пакета не завершено; журнал: ${module_log}"
       CURRENT_ACTION=""
       die "не удалось обновить ${image_id}; журнал: ${module_log}"
     }
@@ -1886,9 +1928,7 @@ update_protocol_image() {
       XRAY_UPDATE_ONLY=1 MIHOMO_UPDATE_ONLY=1 \
       bash "${image_root}/${installer}" >"${module_log}" 2>&1 || {
         tail -n 40 "${module_log}" >&2 || true
-        failure_message="$(tail -n 1 "${module_log}" | tr '\n\r' ' ' | cut -c1-240)"
-        [[ -n "${failure_message}" ]] || failure_message="установщик завершился с ошибкой"
-        write_action_status "failed" "${ACTION_PROGRESS}" "${failure_message}; журнал: ${module_log}"
+        write_action_status "failed" "${ACTION_PROGRESS}" "Обновление компонента не завершено; журнал: ${module_log}"
         CURRENT_ACTION=""
         die "не удалось обновить ${image_id}; журнал: ${module_log}"
       }
@@ -2415,6 +2455,8 @@ restart_mihomo_manager_if_present() {
 # runtime before restarting preserved instances; otherwise systemd enters an
 # unbounded restart loop because the generated units still reference ss-server.
 ensure_mihomo_profile_runtimes() {
+  python3 "${INSTALL_DIR}/api/component_registry.py" check-managed \
+    --manifest "${INSTALL_DIR}/protocol-images/mihomo/manifest.json" --data-dir "${DATA_DIR}" >/dev/null 2>&1 || return 0
   local config_dir="/etc/vps-control/mihomo/shadowsocks"
   if [[ ! -f /etc/systemd/system/vps-control-mihomo-ss@.service ]] \
     && ! find "${config_dir}" -maxdepth 1 -type f -name '*.json' -print -quit 2>/dev/null | grep -q .; then
@@ -2742,6 +2784,7 @@ update_prebuilt_branch() {
 
   install -d -m 0750 "${DATA_DIR}/tmp"
   UPDATE_TEMP_DIR="$(mktemp -d "${DATA_DIR}/tmp/update.XXXXXX")"
+  python3 "${INSTALL_DIR}/api/resource_cleanup.py" register "${DATA_DIR}" "${UPDATE_TEMP_DIR}"
   archive="${UPDATE_TEMP_DIR}/vps-control-release.tar.gz"
   info "Загрузка подготовленного релиза ветки ${branch}"
   curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
@@ -2792,6 +2835,7 @@ update_test_branch() {
 
   install -d -m 0750 "${DATA_DIR}/tmp"
   UPDATE_TEMP_DIR="$(mktemp -d "${DATA_DIR}/tmp/update.XXXXXX")"
+  python3 "${INSTALL_DIR}/api/resource_cleanup.py" register "${DATA_DIR}" "${UPDATE_TEMP_DIR}"
   archive="${UPDATE_TEMP_DIR}/vps-control-main.tar.gz"
   info "загрузка готовой тестовой сборки main без сборки на VPS"
   curl --fail --location --silent --show-error --retry 4 --retry-all-errors --retry-delay 2 \
@@ -2995,10 +3039,8 @@ optimize_resources() {
     journalctl --vacuum-time="${log_retention_days}d"
   fi
   if [[ -d "${DATA_DIR}/tmp" ]]; then
-    find "${DATA_DIR}/tmp" -mindepth 1 -maxdepth 1 -type d -name 'update.*' -mtime +1 -exec rm -rf -- {} +
+    python3 "${INSTALL_DIR}/api/resource_cleanup.py" cleanup "${DATA_DIR}"
   fi
-  sync
-  printf '3\n' >/proc/sys/vm/drop_caches
   disk_after="$(df -B1 / | awk 'NR==2 {print $4}')"
   mem_after="$(awk '/MemAvailable/ {print $2 * 1024}' /proc/meminfo)"
   ok "освобождено на диске: $(((disk_after - disk_before) / 1024 / 1024)) МБ; доступная память: $((mem_before / 1024 / 1024)) → $((mem_after / 1024 / 1024)) МБ."
@@ -3040,11 +3082,12 @@ clear_managed_logs() {
 
 apply_automation() {
   info "Применение расписаний обслуживания"
-  [[ -r "${AUTOMATION_FILE}" ]] || die "не найден ${AUTOMATION_FILE}."
+  local settings_file="${1:-${AUTOMATION_FILE}}"
+  [[ -r "${settings_file}" ]] || die "не найден файл расписаний."
   local values reboot_enabled reboot_cadence reboot_weekday reboot_hour reboot_minute
   local cleanup_enabled cleanup_cadence cleanup_weekday cleanup_hour cleanup_minute
   local update_enabled update_cadence update_weekday update_hour update_minute
-  values="$(python3 - "${AUTOMATION_FILE}" <<'PY'
+  values="$(python3 - "${settings_file}" <<'PY'
 import json
 import shlex
 import sys
@@ -3413,10 +3456,11 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|safe-update|auto-safe-update|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update|ssh-key-add|ssh-key-reset|ssh-key-list|ssh-key-delete|ssh-access-begin|ssh-access-confirm|ssh-access-rollback|ssh-access-disable)
+    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|safe-update|auto-safe-update|kernel-update|vpn-firewall|vless-cdn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-purge|protocol-update|ssh-key-add|ssh-key-reset|ssh-key-list|ssh-key-delete|ssh-access-begin|ssh-access-confirm|ssh-access-rollback|ssh-access-disable)
       case "${1}" in
         ssh-key-list) ;;
-        protocol-install|protocol-remove|protocol-update) begin_operation "${1}${2:+:${2}}" ;;
+        automation-apply) [[ "${VPS_CONTROL_AUTOMATION_CHILD:-}" == "1" ]] || begin_operation "${1}" ;;
+        protocol-install|protocol-remove|protocol-purge|protocol-update) begin_operation "${1}${2:+:${2}}" ;;
         *) begin_operation "${1}" ;;
       esac
       trap handle_exit EXIT
@@ -3508,7 +3552,7 @@ main() {
     ssh-access-confirm) ssh_access_confirm ;;
     ssh-access-rollback) ssh_access_rollback ;;
     ssh-access-disable) ssh_access_disable ;;
-    automation-apply) apply_automation ;;
+    automation-apply) apply_automation "${2:-${AUTOMATION_FILE}}" ;;
     logging-config) configure_logging "$@" ;;
     logs-clear) clear_managed_logs ;;
     access-mode) change_access_mode "$@" ;;
@@ -3517,6 +3561,7 @@ main() {
     poweroff) poweroff_server ;;
     protocol-install) install_protocol_image "$@" ;;
     protocol-remove) remove_protocol_image "$@" ;;
+    protocol-purge) purge_protocol_data "$@" ;;
     protocol-update) update_protocol_image "$@" ;;
     client-firewall) client_firewall "$@" ;;
     credentials) show_credentials ;;

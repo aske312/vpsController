@@ -14,7 +14,8 @@ cd "$ROOT/easy-rsa"; export EASYRSA_BATCH=1 EASYRSA_PKI="$PKI" EASYRSA_REQ_CN='P
 [[ -s "$PKI/issued/server.crt" ]] || ./easyrsa build-server-full server nopass
 ./easyrsa gen-crl; install -m 0644 "$PKI/crl.pem" "$ROOT/crl.pem"
 [[ -s "$ROOT/tls-crypt.key" ]] || openvpn --genkey secret "$ROOT/tls-crypt.key"
-printf '{"port":%s,"protocol":"%s","subnet":"10.74.0.0/24","dns":"%s"}\n' "$PORT" "$PROTO" "$DNS" >"$ROOT/settings.json"
+[[ -s "$ROOT/settings.json" ]] || printf '{"port":%s,"protocol":"%s","subnet":"10.74.0.0/24","dns":"%s"}\n' "$PORT" "$PROTO" "$DNS" >"$ROOT/settings.json"
+if [[ ! -s "$ROOT/server.conf" ]]; then
 cat >"$ROOT/server.conf" <<EOF
 port $PORT
 proto $([[ "$PROTO" == tcp ]] && echo tcp-server || echo udp)
@@ -42,6 +43,7 @@ push "redirect-gateway def1 bypass-dhcp"
 $(printf '%s\n' "$DNS" | tr -d ' ' | tr ',' '\n' | while IFS= read -r resolver; do printf 'push "dhcp-option DNS %s"\n' "$resolver"; done)
 verb 3
 EOF
+fi
 chmod 0600 "$ROOT"/*.key "$ROOT/settings.json" "$ROOT/server.conf"
 printf 'net.ipv4.ip_forward=1\n' >/etc/sysctl.d/90-vps-control-openvpn.conf; sysctl --system >/dev/null
 install -m 0755 "$(dirname "$0")/firewall.sh" /usr/local/lib/vps-control-openvpn/firewall.sh

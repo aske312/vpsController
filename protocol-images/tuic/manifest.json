@@ -8,9 +8,48 @@
   "category_name": "Защищённые туннели",
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
-  "supported_os": ["ubuntu", "debian"],
-  "preflight_packages": ["ca-certificates", "curl", "iptables", "openssl", "tar"],
+  "supported_os": [
+    "ubuntu",
+    "debian"
+  ],
+  "preflight_packages": [
+    "ca-certificates",
+    "curl",
+    "iptables",
+    "openssl",
+    "tar"
+  ],
   "minimum_free_mb": 192,
   "requires_kernel_headers": false,
-  "service": "vps-control-tuic.service"
+  "service": "vps-control-tuic.service",
+  "installation": {
+    "required_paths": [
+      {
+        "path": "/etc/vps-control/tuic/config.json"
+      },
+      {
+        "path": "/etc/vps-control/tuic/settings.json"
+      }
+    ],
+    "backup_paths": [
+      {
+        "path": "/etc/vps-control/tuic"
+      },
+      {
+        "path": "/etc/systemd/system/vps-control-tuic.service"
+      },
+      {
+        "path": "/etc/vps-control/environment",
+        "env": "ENV_FILE"
+      },
+      {
+        "path": "{data_dir}/clients.json"
+      }
+    ],
+    "data_paths": [
+      {
+        "path": "/etc/vps-control/tuic"
+      }
+    ]
+  }
 }

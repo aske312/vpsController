@@ -239,8 +239,6 @@ test("web and gateway run as systemd services without Docker", async () => {
   assert.match(api, /"vps-control-web\.service"/);
   assert.match(api, /"caddy\.service"/);
   assert.match(page, /Контур служб узла/);
-  assert.match(api, /"installed": properties\.get\("LoadState"\) == "loaded"/);
-  assert.match(api, /"active": properties\.get\("ActiveState"\) == "active"/);
 });
 
 test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", async () => {

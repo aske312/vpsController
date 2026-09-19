@@ -1,6 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSystemActionCompletionTracker, protocolOperationOutcome, systemActionNeedsReload, systemOperationNotification } from "../../src/control-panel/system-operation.ts";
+import { submitSystemOperation, createSystemActionCompletionTracker, protocolOperationOutcome, systemActionNeedsReload, systemActionNeedsPolling, systemOperationNotification } from "../../src/control-panel/system-operation.ts";
+
+test("lost mutation response is reconciled by identity without a second POST", async () => {
+  const calls = [];
+  let id;
+  const result = await submitSystemOperation(async (path, options) => {
+    calls.push([path, options?.method || "GET"]);
+    if (options?.method === "POST") {
+      id = options.headers.get("X-Operation-ID");
+      throw new Error("Connection lost");
+    }
+    assert.equal(path, `/application/operations/${id}`);
+    return {id, state: "running"};
+  }, "/application/action", {method: "POST"});
+  assert.equal(result.id, id);
+  assert.match(id, /^[0-9a-f]{32}$/);
+  assert.deepEqual(calls.map((call) => call[1]), ["POST", "GET"]);
+});
+
+test("definite authorization failure is not retried or presented as a running operation", async () => {
+  let calls = 0;
+  await assert.rejects(submitSystemOperation(async () => {
+    calls += 1;
+    throw Object.assign(new Error("Unauthorized"), {status: 401});
+  }, "/application/action", {method: "POST"}), /Unauthorized/);
+  assert.equal(calls, 1);
+});
 
 test("module presence and version changes wait for the same command to finish", () => {
   const started = {unit: "install-1.service", action: "protocol-install:mihomo"};
@@ -54,7 +80,17 @@ test("failures and read-only diagnostics do not trigger a page reload", () => {
   for (const action of ["protocol-install:mihomo", "protocol-remove:wireguard", "protocol-update:mihomo", "restart", "update", "test-update", "test-rollback", "safe-update", "kernel-update", "reboot"]) {
     assert.equal(systemActionNeedsReload({ action }), true, action);
   }
-  for (const action of ["network-check", "integrity-check", "poweroff", ""]) {
+  for (const action of ["network-check", "integrity-check", "poweroff", "logging-config", "logs-clear", "service-action:wg:restart", ""]) {
     assert.equal(systemActionNeedsReload({ action }), false, action);
   }
+});
+
+
+test("unknown operations continue read-only reconciliation until confirmed terminal state", () => {
+  for (const state of ["queued", "running", "unknown", "rebooting"])
+    assert.equal(systemActionNeedsPolling({ state }), true);
+  assert.equal(systemActionNeedsPolling({ state: "finished", result: "unknown" }), true);
+  for (const state of ["succeeded", "failed", "cancelled"])
+    assert.equal(systemActionNeedsPolling({ state }), false);
+  assert.equal(systemActionNeedsPolling(null), false);
 });

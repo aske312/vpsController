@@ -314,7 +314,7 @@ test("protocol pages safely edit channel settings and VLESS links select HTTP2",
   const [page, api] = await Promise.all([
     readUiSources(), readApiSources(), readStyles(),
   ]);
-  assert.match(api, /@app\.patch\("\/api\/protocols\/\{protocol\}\/settings"\)/);
+  assert.match(api, /@app\.patch\("\/api\/protocols\/\{protocol\}\/settings", dependencies=\[Depends\(require_component_management\)\]\)/);
   assert.match(api, /class ProtocolSettingsUpdate/);
   assert.match(api, /persist_tunnel_mtu/);
   assert.match(api, /XRAY_BIN, "run", "-test"/);
@@ -345,7 +345,7 @@ test("DNS API preserves component application and encrypted fallback boundaries"
   const api = await readApiSources();
   // Only API/configuration contracts, not provider labels or editor markup.
   assert.match(api, /@app\.get\("\/api\/dns"\)/);
-  assert.match(api, /@app\.put\("\/api\/dns\/settings"\)/);
+  assert.match(api, /@app\.put\("\/api\/dns\/settings", dependencies=\[Depends\(require_component_management\)\]\)/);
   assert.match(api, /@app\.post\("\/api\/dns\/check"\)/);
   for (const key of ["WG_DNS", "AWG_DNS", "SHADOWSOCKS_DNS", "VRX_DNS"]) {
     assert.ok(api.includes('env_updates["' + key + '"]'), key + " remains independently applied");

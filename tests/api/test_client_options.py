@@ -7,11 +7,12 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from tests.api.support import manager
+from tests.api.support import manager, managed_mihomo_fixture
 
 
 class ClientOptionsTests(unittest.TestCase):
     def setUp(self):
+        managed_mihomo_fixture(self)
         self.profile = {
             "id": "profile", "name": "Profile", "common_device_id": "common",
             "devices": [{"id": device, "name": device, "routing": {}} for device in ("common", "phone")],
