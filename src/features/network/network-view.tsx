@@ -1,5 +1,7 @@
 "use client";
 
+import { submitSystemOperation } from "../../control-panel/system-operation";
+import { ConfirmationDialog } from "../../shared/components/confirmation-dialog";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type {
   DnsCheck,
@@ -9,6 +11,7 @@ import type {
   NetworkEndpointCheck,
   NetworkEndpointSettings,
   NetworkStatus,
+  SystemAction,
 } from "../../shared/types/control-plane";
 import { useNotifier } from "../../shared/notifications/notification-center";
 import {
@@ -24,8 +27,15 @@ import { NetworkEch } from "./network-ech";
 import { NetworkEndpoints } from "./network-endpoints";
 import { dnsComponents } from "./system-dns-control";
 
+export type NetworkListState = { query: string; expanded: string[] };
+
 type Props = {
+  operation?: SystemAction;
+  onOperation: (operation: SystemAction) => void;
+  listState: NetworkListState;
+  onListStateChange: (state: NetworkListState) => void;
   request: NetworkRequest;
+  onDirtyChange?: (dirty: boolean) => void;
   refreshKey?: number;
   onLoadingChange?: (loading: boolean, run?: number) => void;
 };
@@ -42,8 +52,8 @@ function NetworkIcon() {
   );
 }
 
-export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props) {
-  const { error: notifyError, success: notifySuccess } = useNotifier(
+export function NetworkView({ request, refreshKey = 0, onLoadingChange, onDirtyChange, listState, onListStateChange, operation, onOperation }: Props) {
+  const { error: notifyError } = useNotifier(
     "network",
     "Сеть",
   );
@@ -55,7 +65,10 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
   const [dnsChecks, setDnsChecks] = useState<Record<string, DnsCheck>>({});
   const [loading, setLoading] = useState(true);
   const [checkingDns, setCheckingDns] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [requestBusy, setBusy] = useState(false);
+  const [confirmRecovery, setConfirmRecovery] = useState(false);
+  const [pending, setPending] = useState<{ id?: string; kind: "dns" | "endpoints" | "delete"; draft?: DnsSettings | NetworkEndpointSettings } | null>(null);
+  const busy = requestBusy || Boolean(pending);
   const [section, setSection] = useState<Section>("diagnostics");
   const [loadFailed, setLoadFailed] = useState(false);
   const loadingRef = useRef(false);
@@ -75,6 +88,9 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
     JSON.stringify(status.transport_endpoints) !==
       JSON.stringify(endpointDraft),
   );
+
+  useEffect(() => { onDirtyChange?.(dirty || endpointDirty); }, [dirty, endpointDirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   const load = useCallback(async () => {
     if (loadingRef.current || savingRef.current) return;
@@ -120,6 +136,27 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
     void load();
   }, [load, refreshKey]);
 
+  useEffect(() => {
+    if (!pending?.id || operation?.id !== pending.id) return;
+    if (!["succeeded", "failed", "cancelled"].includes(operation.state || "")) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const next = await readNetworkControl(request, true);
+        if (cancelled) return;
+        setStatus(next.network); setDns(next.dns);
+        savedRef.current = next.dns.settings;
+        savedEndpointRef.current = next.network.transport_endpoints;
+        if (operation.state === "succeeded") {
+          if (pending.kind === "dns") setDnsDraft((current) => JSON.stringify(current) === JSON.stringify(pending.draft) ? next.dns.settings : current);
+          else setEndpointDraft((current) => pending.kind === "delete" || JSON.stringify(current) === JSON.stringify(pending.draft) ? next.network.transport_endpoints : current);
+        }
+      } catch (cause) { if (!cancelled) notifyError(cause instanceof Error ? cause.message : "Не удалось проверить применённые настройки"); }
+      finally { if (!cancelled) setPending(null); }
+    })();
+    return () => { cancelled = true; };
+  }, [pending, operation?.id, operation?.state, request, notifyError]);
+
   const checkDnsProviders = useCallback(async () => {
     if (checkingRef.current) return;
     checkingRef.current = true;
@@ -139,7 +176,7 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
   }, [notifyError, request]);
 
   const saveDnsSettings = useCallback(async () => {
-    if (!dnsDraft || savingRef.current || loadingRef.current) return;
+    if (!dnsDraft || pending || savingRef.current || loadingRef.current) return;
     savingRef.current = true;
     setBusy(true);
     try {
@@ -163,11 +200,9 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
         )
           settings[component.key] = false;
       }
-      const next = await saveNetworkDns(request, settings);
-      savedRef.current = next.settings;
-      setDns(next);
-      setDnsDraft(next.settings);
-      notifySuccess("DNS-политика сохранена и применена");
+      const started = await saveNetworkDns(request, settings);
+      setPending({ id: started.id, kind: "dns", draft: dnsDraft });
+      onOperation(started);
     } catch (cause) {
       notifyError(
         cause instanceof Error ? cause.message : "Не удалось сохранить DNS",
@@ -176,10 +211,10 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
       savingRef.current = false;
       setBusy(false);
     }
-  }, [dns, dnsDraft, notifyError, notifySuccess, request]);
+  }, [dns, dnsDraft, notifyError, onOperation, pending, request]);
 
   const saveEndpoints = useCallback(async () => {
-    if (!endpointDraft || savingRef.current || loadingRef.current) return;
+    if (!endpointDraft || pending || savingRef.current || loadingRef.current) return;
     savingRef.current = true;
     setBusy(true);
     try {
@@ -189,11 +224,9 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
           Array.isArray(value) ? value.map((item) => item.trim()) : String(value || "").trim(),
         ]),
       ) as NetworkEndpointSettings;
-      const next = await saveNetworkEndpoints(request, settings);
-      setStatus(next);
-      setEndpointDraft(next.transport_endpoints);
-      savedEndpointRef.current = next.transport_endpoints;
-      notifySuccess("Домены защищённых каналов сохранены");
+      const started = await saveNetworkEndpoints(request, settings);
+      setPending({ id: started.id, kind: "endpoints", draft: endpointDraft });
+      onOperation(started);
     } catch (cause) {
       notifyError(
         cause instanceof Error
@@ -204,28 +237,32 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
       savingRef.current = false;
       setBusy(false);
     }
-  }, [endpointDraft, notifyError, notifySuccess, request]);
+  }, [endpointDraft, notifyError, onOperation, pending, request]);
 
   const removeEndpoint = useCallback(async (kind: NetworkEndpointCheck["kind"], domain: string) => {
-    if (savingRef.current || loadingRef.current) return;
+    if (pending || savingRef.current || loadingRef.current) return;
     savingRef.current = true;
     setBusy(true);
     try {
-      const next = await deleteNetworkEndpoint(request, kind, domain);
-      setStatus(next);
-      setEndpointDraft(next.transport_endpoints);
-      savedEndpointRef.current = next.transport_endpoints;
-      notifySuccess(`Адрес ${domain} отключён от сервера и удалён из настроек`);
+      const started = await deleteNetworkEndpoint(request, kind, domain, status?.transport_endpoints.revision);
+      setPending({ id: started.id, kind: "delete" });
+      onOperation(started);
     } catch (cause) {
       notifyError(cause instanceof Error ? cause.message : "Не удалось отключить адрес");
     } finally {
       savingRef.current = false;
       setBusy(false);
     }
-  }, [loadingRef, notifyError, notifySuccess, request]);
+  }, [loadingRef, notifyError, onOperation, pending, request, status]);
 
   return (
     <div data-network-page="true">
+      {confirmRecovery && <ConfirmationDialog request={{ title: "Восстановить DNS?", message: "Будут восстановлены DNS-файлы и состояния служб до прерванного применения. Подключения могут кратковременно прерваться.", confirmLabel: "Восстановить DNS", danger: true }} onClose={(confirmed) => {
+        setConfirmRecovery(false);
+        if (!confirmed) return;
+        setBusy(true);
+        void submitSystemOperation(request, "/dns/recover", { method: "POST" }).then((started) => { setPending({ id: started.id, kind: "dns", draft: dnsDraft || undefined }); onOperation(started); }).catch((cause) => notifyError(cause instanceof Error ? cause.message : "Не удалось начать восстановление DNS")).finally(() => setBusy(false));
+      }} />}
       <main className="networkBoard">
         <header className="networkPageHeader">
           <div className="networkPageIdentity">
@@ -308,10 +345,13 @@ export function NetworkView({ request, refreshKey = 0, onLoadingChange }: Props)
                 setDnsDraft={setDnsDraft}
                 checkDnsProviders={checkDnsProviders}
                 saveDnsSettings={saveDnsSettings}
+                recoverDns={() => setConfirmRecovery(true)}
               />
             </div>
             <div hidden={section !== "diagnostics"}>
               <DiagnosticsV2
+                listState={listState}
+                onListStateChange={onListStateChange}
                 status={status}
                 request={request}
                 endpointDraft={endpointDraft}
@@ -525,6 +565,8 @@ function NetworkCapabilityCard({ check }: { check: NetworkCapabilityCheck }) {
   );
 }
 function DiagnosticsV2({
+  listState,
+  onListStateChange,
   status,
   request,
   endpointDraft,
@@ -535,6 +577,8 @@ function DiagnosticsV2({
   saveEndpoints,
   onRefresh,
 }: {
+  listState: NetworkListState;
+  onListStateChange: (state: NetworkListState) => void;
   status: NetworkStatus;
   request: NetworkRequest;
   endpointDraft: NetworkEndpointSettings | null;
@@ -545,10 +589,10 @@ function DiagnosticsV2({
   saveEndpoints: () => void;
   onRefresh: () => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [expandedDomains, setExpandedDomains] = useState<Set<string>>(
-    new Set(),
-  );
+  const query = listState.query;
+  const setQuery = (query: string) => onListStateChange({ ...listState, query });
+  const [deletion, setDeletion] = useState<{ domain: string; remove: () => void } | null>(null);
+  const expandedDomains = new Set(listState.expanded);
   const publicIpv4 =
     status.server.public_ipv4 ||
     (!status.server.public_ip.includes(":") ? status.server.public_ip : "");
@@ -588,15 +632,15 @@ function DiagnosticsV2({
     if (role.includes("udp relay")) return "udp_relay" as const;
     return undefined;
   };
-  const toggleDomain = (key: string) =>
-    setExpandedDomains((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  const toggleDomain = (key: string) => {
+    const next = new Set(listState.expanded);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    onListStateChange({ ...listState, expanded: [...next] });
+  };
   return (
     <div className="networkV2">
+      {deletion && <ConfirmationDialog request={{ title: `Удалить маршрут ${deletion.domain}?`, message: "Адрес будет удалён из списка маршрутов. Существующие подключения и их настройки сохранятся с отметкой Stale. Новые подключения не смогут выбрать этот маршрут. Перенаправление на внешнем relay сохраняется.", confirmLabel: "Удалить маршрут", phrase: deletion.domain, danger: true }} onClose={(confirmed) => { const pending = deletion; setDeletion(null); if (confirmed) pending.remove(); }} />}
+
       <section
         className="networkStateStrip networkPanel"
         aria-label="Состояние сети"
@@ -659,6 +703,7 @@ function DiagnosticsV2({
                   const listKey = ({ cdn_domain: "cdn_domains", tls_relay_domain: "tls_relay_domains", udp_relay_domain: "udp_relay_domains" } as const)[primaryKey];
                   setEndpointDraft({ ...endpointDraft, [primaryKey]: values[0] || "", [listKey]: values });
                 }}
+                onReset={() => setEndpointDraft(status.transport_endpoints)}
                 onSave={saveEndpoints}
               />
             )}
@@ -739,12 +784,11 @@ function DiagnosticsV2({
                           <button
                             type="button"
                             className="networkRouteDelete"
+                            title={endpointDirty ? "Сначала сохраните или отмените правки адресов" : "Удалить маршрут"}
                             onClick={() => {
-                              if (window.confirm(`Удалить маршрут ${domain.value}?`)) {
-                                removeRoute();
-                              }
+                              setDeletion({ domain: domain.value, remove: removeRoute });
                             }}
-                            disabled={busy}
+                            disabled={busy || endpointDirty}
                           >
                             Удалить
                           </button>

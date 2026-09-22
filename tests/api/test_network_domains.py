@@ -88,7 +88,7 @@ class NetworkDomainsTests(unittest.TestCase):
                 self.assertEqual(saved["cdn_domains"], ["cdn-a.example.com", "cdn-b.example.com"])
                 self.assertEqual(api.read_network_endpoint_settings()["tls_relay_domains"], ["relay-a.example.com", "relay-b.example.com"])
 
-    def test_delete_transport_endpoint_removes_setting_and_mihomo_route(self):
+    def test_delete_transport_endpoint_preserves_mihomo_runtime(self):
         with tempfile.TemporaryDirectory() as root:
             data_dir = Path(root)
             ComponentRegistry(data_dir).write_receipt("mihomo", "installed")
@@ -100,12 +100,12 @@ class NetworkDomainsTests(unittest.TestCase):
             with patch.object(api, "DATA_DIR", data_dir), patch.object(api, "NETWORK_ENDPOINTS_FILE", endpoint_file), patch.object(api, "MIHOMO_VLESS_CDN_ROUTES", routes_dir), patch.object(api.cdn_security, "read_routes", return_value=[{"domain": "keep.example.com", "path": "/keep", "port": 11445, "transport": "xhttp"}]), patch.object(api.cdn_security, "write_snippet"), patch.object(api.cdn_security, "reload_caddy"), patch.object(api, "VLESS_ENV", data_dir / "missing.env"), patch.object(api, "VLESS_CONFIG", data_dir / "missing.json"), patch.object(api, "network_status", return_value={"transport_endpoints": {}}):
                 api.write_network_endpoint_settings({"cdn_domain": "", "tls_relay_domain": "tls.example.com", "tls_relay_domains": ["tls.example.com", "keep.example.com"], "udp_relay_domain": ""})
                 response = api.delete_network_endpoint("tls_relay", "tls.example.com", None)
-            self.assertFalse((routes_dir / "route.json").exists())
+            self.assertTrue((routes_dir / "route.json").exists())
             self.assertTrue((routes_dir / "keep.json").exists())
             self.assertEqual(json.loads(endpoint_file.read_text())["tls_relay_domains"], ["keep.example.com"])
             self.assertEqual(response["transport_endpoints"], {})
 
-    def test_delete_transport_endpoint_disables_matching_direct_vless_route(self):
+    def test_delete_transport_endpoint_preserves_matching_direct_vless_route(self):
         with tempfile.TemporaryDirectory() as root:
             data_dir = Path(root)
             ComponentRegistry(data_dir).write_receipt("vless-reality-xhttp", "installed")
@@ -116,9 +116,8 @@ class NetworkDomainsTests(unittest.TestCase):
             with patch.object(api, "DATA_DIR", data_dir), patch.object(api, "NETWORK_ENDPOINTS_FILE", data_dir / "network-endpoints.json"), patch.object(api, "NETWORK_ENDPOINT_RETIREMENTS_FILE", data_dir / "retirements.json"), patch.object(api, "VLESS_ENV", env), patch.object(api, "VLESS_CONFIG", config), patch.object(api, "MIHOMO_VLESS_CDN_ROUTES", data_dir / "missing-routes"), patch.object(api, "read_clients", return_value=[{"name": "Phone", "protocol": "vless-reality-xhttp", "vless_routes": ["cdn"]}]), patch.object(api, "update_protocol_settings") as update, patch.object(api, "network_status", return_value={"transport_endpoints": {}}):
                 api.write_network_endpoint_settings({"cdn_domain": "cdn.example.com"})
                 api.delete_network_endpoint("cdn", "cdn.example.com", None)
-            update.assert_called_once()
-            self.assertEqual(update.call_args.args[1].cdn_enabled, False)
-            self.assertEqual(update.call_args.args[1].cdn_domain, "")
+            update.assert_not_called()
+            self.assertIn("CDN_ENABLED=yes", env.read_text())
             retirement = json.loads((data_dir / "retirements.json").read_text(encoding="utf-8"))
             self.assertEqual(retirement[0]["domain"], "cdn.example.com")
             self.assertTrue(any("Phone" in usage for usage in retirement[0]["usages"]))

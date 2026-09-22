@@ -83,6 +83,8 @@ class AutomationSchedule(BaseModel):
 
 
 class OperationHistorySettings(BaseModel):
+    log_retention_days: int = Field(default=7, ge=1, le=730)
+    log_disk_limit_mb: int = Field(default=20, ge=1, le=1024)
     retention_days: int = Field(ge=1, le=730)
     disk_limit_mb: int = Field(ge=1, le=1024)
     expected_revision: str = Field(pattern=r"^[0-9a-f]{32}$")
@@ -101,6 +103,7 @@ class DnsCustomResolver(BaseModel):
 
 
 class DnsSettingsUpdate(BaseModel):
+    expected_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     selected_id: str = Field(min_length=2, max_length=64, pattern=r"^[a-z0-9-]+$")
     apply_wg: bool = True
     apply_awg: bool = True
@@ -122,6 +125,7 @@ class DnsCheckRequest(BaseModel):
 
 
 class NetworkEndpointSettings(BaseModel):
+    expected_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     cdn_domain: str = Field(default="", max_length=253)
     tls_relay_domain: str = Field(default="", max_length=253)
     udp_relay_domain: str = Field(default="", max_length=253)

@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from tests.api.support import api
-from automation_transaction import configure, KINDS
+from automation_transaction import configure, recover, KINDS
 
 
 class AutomationTransactionTests(unittest.TestCase):
@@ -98,3 +98,38 @@ class AutomationTransactionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "требуется проверка"):
             configure(self.settings, self.settings_file, ["control"], unit_dir=self.units, run=ineffective_stop)
         self.assertTrue(self.settings_file.with_name("automation-recovery.json").exists())
+
+
+    def test_explicit_recovery_after_interruption_restores_original_and_is_idempotent(self):
+        def killed(args, **kwargs):
+            result = self.fake_command(args, **kwargs)
+            if args[0] == "control":
+                raise KeyboardInterrupt()
+            return result
+        with self.assertRaises(KeyboardInterrupt):
+            configure(self.settings, self.settings_file, ["control"], unit_dir=self.units, run=killed)
+        recover(self.settings_file, unit_dir=self.units, run=self.fake_command)
+        self.assertEqual(json.loads(self.settings_file.read_text()), self.before)
+        self.assertFalse(any(self.active.values()))
+        self.assertFalse(self.settings_file.with_name("automation-recovery.json").exists())
+        self.calls.clear()
+        recover(self.settings_file, unit_dir=self.units, run=self.fake_command)
+        self.assertEqual(self.calls, [])
+
+    def test_corrupt_snapshot_cannot_redirect_recovery_to_arbitrary_files(self):
+        def killed(args, **kwargs):
+            result = self.fake_command(args, **kwargs)
+            if args[0] == "control":
+                raise KeyboardInterrupt()
+            return result
+        with self.assertRaises(KeyboardInterrupt):
+            configure(self.settings, self.settings_file, ["control"], unit_dir=self.units, run=killed)
+        path = self.settings_file.with_name("automation-recovery.json")
+        snapshot = json.loads(path.read_text())
+        snapshot["files"][str(self.root / "foreign")] = None
+        path.write_text(json.dumps(snapshot))
+        self.calls.clear()
+        with self.assertRaises(ValueError):
+            recover(self.settings_file, unit_dir=self.units, run=self.fake_command)
+        self.assertTrue(path.exists())
+        self.assertEqual(self.calls, [])

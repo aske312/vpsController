@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
 import fcntl
 import base64
 import ipaddress
@@ -41,6 +42,7 @@ from dns_policy import build_xray_dns, probe_xray_dns, successful_dns_response
 import cdn_operation
 import application_operation
 import operation_policy
+import network_routes
 import ech_settings
 from protocol_health import TrafficSampler, protocol_health
 from service_state import observe_service, ssh_observation, failed_unit_count
@@ -307,6 +309,17 @@ async def require_short_mutation(_: None = Depends(require_token)):
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
+async def require_mutation_admission(request: Request, _: None = Depends(require_token)):
+    identity = request.headers.get("X-Operation-ID")
+    if identity and replay_application_operation(identity):
+        return
+    try:
+        with application_operation.short_mutation(DATA_DIR):
+            pass
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
 def system_boot_time() -> datetime | None:
     try:
         value = next(line.split()[1] for line in Path("/proc/stat").read_text().splitlines() if line.startswith("btime "))
@@ -443,12 +456,72 @@ def write_network_endpoint_settings(settings: dict[str, object]) -> dict[str, ob
         if normalized[key] and normalized[key] not in domains:
             domains.insert(0, normalized[key])
         normalized[list_key] = domains[:32]
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    temporary = NETWORK_ENDPOINTS_FILE.with_suffix(".tmp")
-    temporary.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    temporary.replace(NETWORK_ENDPOINTS_FILE)
-    return normalized
+    try:
+        previous = json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8")) if NETWORK_ENDPOINTS_FILE.exists() else read_network_endpoint_settings()
+        if not isinstance(previous, dict):
+            raise ValueError("Invalid Network settings")
+        normalized["route_registry"] = network_routes.synchronize(previous, normalized, network_consumers())
+        application_operation.atomic_json(NETWORK_ENDPOINTS_FILE, normalized)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Не удалось сохранить реестр маршрутов; проверьте текущее состояние") from exc
+    return {key: value for key, value in normalized.items() if key != "route_registry"}
+
+
+def network_consumers() -> list[dict]:
+    """References only: never copy credentials into the shared registry."""
+    result = []
+    settings = read_network_endpoint_settings()
+    reality = {}
+    if VLESS_ENV.exists():
+        reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+    if CLIENTS_FILE.exists() and not isinstance(json.loads(CLIENTS_FILE.read_text(encoding="utf-8")), list):
+        raise ValueError("Invalid Direct clients")
+    for item in read_clients():
+        if not item.get("id"):
+            continue
+        routes = []
+        if item.get("protocol") == "vless-reality-xhttp":
+            for route, kind, key in (("cdn", "cdn", "CDN_DOMAIN"), ("tls", "tls_relay", "TLS_DOMAIN")):
+                if route in item.get("vless_routes", []):
+                    address = item.get("route_endpoints", {}).get(kind) or (item.get("settings", {}).get("cdn_domain") if kind == "cdn" else None) or reality.get(key)
+                    if address:
+                        routes.append((kind, address, "snapshot" if item.get("route_endpoints") else "legacy"))
+        elif item.get("channel_mode") in {"tls_relay", "udp_relay"}:
+            kind = item["channel_mode"]
+            if item.get("route_endpoint"):
+                routes.append((kind, item["route_endpoint"], "snapshot"))
+            else:
+                # Legacy records lack the chosen export address. Preserve all
+                # possible references rather than silently picking another one.
+                routes.extend((kind, address, "legacy-uncertain") for address in settings.get(f"{kind}_domains", []))
+        for kind, address, confidence in routes:
+            result.append({"id": f"direct:{item['id']}", "owner": "direct", "label": str(item.get("name") or item["id"]),
+                           "kind": kind, "address": str(address).strip().lower(), "reference": confidence})
+    path = DATA_DIR / "mihomo" / "profiles.json"
+    profiles = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+    if not isinstance(profiles, list):
+        raise ValueError("Invalid Mihomo profiles")
+    for profile in profiles:
+        for connection in [*profile.get("connections", []), *profile.get("retiring_connections", [])]:
+            if connection.get("component") != "transport-reality":
+                continue
+            mode = connection.get("settings", {}).get("route_mode") or connection.get("credential", {}).get("route_mode") or "direct"
+            for kind, key in (("cdn", "cdn_domain"), ("tls_relay", "tls_domain")):
+                if (kind == "cdn" and mode not in {"cdn", "both"}) or (kind == "tls_relay" and mode != "tls"):
+                    continue
+                address = connection.get("settings", {}).get(key) or connection.get("credential", {}).get(key)
+                if address:
+                    result.append({"id": f"mihomo:{profile['id']}:{connection['id']}", "owner": "mihomo", "label": str(profile.get("name") or profile["id"]),
+                                   "kind": kind, "address": str(address).strip().lower(), "reference": "snapshot"})
+    return result
+
+
+def read_route_registry() -> dict:
+    try:
+        stored = json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8")) if NETWORK_ENDPOINTS_FILE.exists() else read_network_endpoint_settings()
+        return network_routes.migrate(stored)
+    except (OSError, ValueError, TypeError):
+        raise HTTPException(status_code=503, detail="Реестр маршрутов недоступен") from None
 
 
 def read_network_endpoint_retirements() -> list[dict[str, object]]:
@@ -940,7 +1013,15 @@ def stream_proxy_dump() -> list[dict]:
 
 
 def all_client_dump(include_quality: bool = True) -> list[dict]:
-    return interface_dump("wg", include_quality) + interface_dump("awg", include_quality) + stream_proxy_dump()
+    items = interface_dump("wg", include_quality) + interface_dump("awg", include_quality) + stream_proxy_dump()
+    try:
+        registry = read_route_registry()
+        for item in items:
+            item["route_state"] = network_routes.consumer_state(registry, f"direct:{item['id']}")
+    except HTTPException:
+        for item in items:
+            item["route_state"] = {"state": "unknown", "reason": "Реестр маршрутов недоступен", "addresses": [], "bindings": []}
+    return items
 
 
 def client_connection_quality(peer: dict) -> dict:
@@ -2098,20 +2179,39 @@ def network_capabilities(ipv6: dict[str, bool | str] | None = None) -> dict:
     return {"uplink": uplink, "checks": checks}
 
 
-def network_endpoint_check(kind: str, domain: str) -> dict:
+def network_endpoint_check(kind: str, domain: str, *, include_saved: bool = True) -> dict:
     labels = {"cdn": "CDN", "tls_relay": "TLS", "udp_relay": "UDP"}
     label = labels.get(kind, kind.upper())
     probe = network_domain_probe(domain, f"{label} route")
-    if not probe["resolved"]:
+    if network_routes.retired(read_route_registry(), kind, domain):
+        status, ready, message = "stale", False, "Маршрут удалён; недоступен для новых подключений"
+    elif not probe["resolved"]:
         status, ready, message = "unresolved", False, "Адрес не разрешается через DNS с VPS"
     elif probe["matches_origin"] and kind in {"cdn", "tls_relay", "udp_relay"}:
         status, ready, message = "warning", False, "Адрес указывает на origin VPS, внешний маршрут не подтверждён"
     else:
         status, ready, message = "ready", True, "Адрес подтверждён для этого маршрута"
-    return {**probe, "kind": kind, "status": status, "ready": ready, "message": message}
+    result = {**probe, "kind": kind, "status": status, "ready": ready, "message": message}
+    # An explicit probe may have a stronger per-binding result than the
+    # stateless DNS/origin observation (for example, the tenth failed check).
+    try:
+        if not include_saved:
+            return result
+        registry = network_routes.migrate(json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8"))) if NETWORK_ENDPOINTS_FILE.exists() else {}
+        binding = next((item for item in registry.get("bindings", [])
+                        if item.get("kind") == kind and item.get("address") == domain
+                        and item.get("state") == "active"), None)
+        saved = binding.get("check", {}) if binding else {}
+        if saved.get("state") in {"ready", "warning", "error", "stale"}:
+            result.update(status=saved["state"], ready=bool(saved.get("ready")),
+                          message=saved.get("reason") or result["message"])
+    except (OSError, ValueError, json.JSONDecodeError, TypeError):
+        pass
+    return result
 
 
 def network_status() -> dict:
+    settings_revision = network_settings_revision("network-settings")
     ipv6 = network_ipv6_state()
     domain_items: list[dict] = []
     endpoint_settings = read_network_endpoint_settings()
@@ -2147,7 +2247,11 @@ def network_status() -> dict:
         if retired_domain and retired_domain not in active_endpoint_values:
             label = {"cdn": "CDN", "tls_relay": "TLS", "udp_relay": "UDP"}.get(str(retired.get("kind")), "Маршрут")
             candidates.append((retired_domain, f"{label} · УСТАРЕЛ", "connection", str(retired.get("kind"))))
+    retired_keys = {(item["kind"], item["address"]) for item in read_route_registry()["bindings"] if item["state"] == "retired"}
+    active_keys = network_routes.addresses(endpoint_settings)
     for domain, role, source, endpoint_kind in candidates:
+        if (endpoint_kind, str(domain).strip().lower()) in retired_keys - active_keys:
+            continue
         existing = next((item for item in domain_items if item['value'] == domain), None)
         if existing is not None:
             if role not in existing['role'].split(', '):
@@ -2247,7 +2351,7 @@ def network_status() -> dict:
         "access": {"mode": "external" if PUBLIC_DOMAIN else "direct", "panel_url": panel_url, "direct_url": direct_url, "protected_url": f"https://{INTERNAL_PANEL_HOST}"},
         "listeners": listeners,
         "resolvers": resolvers,
-        "transport_endpoints": endpoint_settings,
+        "transport_endpoints": {**endpoint_settings, "revision": network_settings_revision("network-settings", settings_revision)},
         "transport_endpoint_checks": endpoint_checks,
         "transport_endpoint_checks_by_domain": endpoint_checks_by_domain,
         "capabilities": network_capabilities(ipv6),
@@ -2259,7 +2363,79 @@ def get_network(_: None = Depends(require_token)) -> dict:
     return network_status()
 
 
-@app.put("/api/network/endpoints", dependencies=[Depends(require_short_mutation)])
+@app.get("/api/network/routes", dependencies=[Depends(require_token)])
+def network_route_registry() -> dict:
+    registry = read_route_registry()
+    consumers = network_consumers()
+    for binding in registry["bindings"]:
+        if binding["state"] == "active":
+            binding["consumers"] = [item for item in consumers if (item["kind"], item["address"]) == (binding["kind"], binding["address"])]
+    return registry
+
+
+def network_settings_revision(name: str, observed: str | None = None) -> str:
+    path = DNS_SETTINGS_FILE if name == "dns-settings" else NETWORK_ENDPOINTS_FILE
+    try:
+        content = path.read_bytes() if path.exists() else b""
+    except OSError:
+        raise HTTPException(status_code=503, detail="Не удалось прочитать версию настроек") from None
+    revision = hashlib.sha256(content).hexdigest()
+    if observed is not None and observed != revision:
+        raise HTTPException(status_code=409, detail="Настройки изменились во время чтения; обновите данные")
+    return revision
+
+
+def check_network_revision(name: str, payload: dict) -> None:
+    revision = payload.get("expected_revision")
+    if revision is not None and revision != network_settings_revision(name):
+        raise HTTPException(status_code=409, detail="Настройки изменились. Обновите данные и проверьте свой черновик перед сохранением")
+
+
+def start_network_mutation(name: str, payload: dict, identity: str | None) -> dict:
+    try:
+        identity = application_operation.operation_id(identity)
+        with application_operation.locked(DATA_DIR):
+            if name != "dns-recover" and not application_operation.read(DATA_DIR / "operations" / f"{identity}.json"):
+                check_network_revision(name, payload)
+            path, digest = application_operation.persist_payload(DATA_DIR, identity, payload)
+        return start_application_operation(name,
+            [sys.executable, str(Path(__file__).with_name("service_worker.py")), "--network", name, str(path), digest],
+            operation_id=identity, properties=(f"--property=EnvironmentFile={ENV_FILE}",))
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except (OSError, ValueError):
+        raise HTTPException(status_code=503, detail="Не удалось сохранить запрос операции; проверьте историю перед повтором") from None
+
+
+@app.put("/api/network/endpoints", status_code=202, dependencies=[Depends(require_mutation_admission)])
+def submit_network_settings(payload: NetworkEndpointSettings, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return start_network_mutation("network-settings", payload.model_dump(), operation_id)
+
+
+@app.delete("/api/network/endpoints/{kind}/{domain}", status_code=202, dependencies=[Depends(require_mutation_admission)])
+def submit_network_delete(kind: Literal["cdn", "tls_relay", "udp_relay"], domain: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID"), expected_revision: str | None = Header(default=None, alias="If-Match")) -> dict:
+    return start_network_mutation("network-delete", {"kind": kind, "domain": domain.strip().lower(), "expected_revision": expected_revision}, operation_id)
+
+
+@app.post("/api/dns/recover", status_code=202)
+def submit_dns_recovery(_: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return start_network_mutation("dns-recover", {}, operation_id)
+
+
+def require_dns_management(settings: DnsSettingsUpdate) -> None:
+    images = protocol_image_manifests()
+    for component, field in (("wg", "apply_wg"), ("awg", "apply_awg"), ("shadowsocks", "apply_shadowsocks"), ("vless-reality-xhttp", "apply_vrx"), ("openvpn", "apply_openvpn"), ("ikev2", "apply_ikev2")):
+        if getattr(settings, field) and component in images and images[component]["component_state"]["installation"]["state"] != "not_installed":
+            require_owned_components(component)
+
+
+@app.put("/api/dns/settings", status_code=202, dependencies=[Depends(require_mutation_admission)])
+def submit_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    if not (operation_id and replay_application_operation(operation_id)):
+        require_dns_management(payload)
+    return start_network_mutation("dns-settings", payload.model_dump(), operation_id)
+
+
 def update_network_endpoints(payload: NetworkEndpointSettings, _: None = Depends(require_token)) -> dict:
     raw = payload.model_dump()
     settings: dict[str, object] = {key: str(raw.get(key, "") or "").strip().lower() for key in ("cdn_domain", "tls_relay_domain", "udp_relay_domain")}
@@ -2281,6 +2457,9 @@ def update_network_endpoints(payload: NetworkEndpointSettings, _: None = Depends
     cdn_domain = settings["cdn_domain"]
     if cdn_domain and VLESS_CONFIG.exists() and VLESS_ENV.exists():
         reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+        previous_domain = reality.get("CDN_DOMAIN", "").strip().lower()
+        if previous_domain and previous_domain != cdn_domain and endpoint_connection_usages("cdn", previous_domain):
+            raise HTTPException(status_code=409, detail="Текущий CDN используется подключениями. Смена общего listener требует перехода подключений; сохраните прежний основной адрес")
         if reality.get("CDN_DOMAIN", "").strip().lower() != cdn_domain or reality.get("CDN_ENABLED") != "yes":
             require_owned_components("vless-reality-xhttp")
             update_protocol_settings(
@@ -2292,16 +2471,28 @@ def update_network_endpoints(payload: NetworkEndpointSettings, _: None = Depends
     return network_status()
 
 
-@app.post("/api/network/endpoints/check")
+@app.post("/api/network/endpoints/check", dependencies=[Depends(require_mutation_admission)])
 def check_network_endpoint(payload: NetworkEndpointCheck, _: None = Depends(require_token)) -> dict:
     domain = payload.domain.strip().lower()
     valid = valid_hostname(domain) if payload.kind == "cdn" else valid_network_endpoint(domain)
     if not valid:
         raise HTTPException(status_code=422, detail="Укажите корректный домен или IP без схемы https:// и порта")
-    return network_endpoint_check(payload.kind, domain)
+    result = network_endpoint_check(payload.kind, domain, include_saved=False)
+    try:
+        with application_operation.locked(DATA_DIR):
+            settings = json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8")) if NETWORK_ENDPOINTS_FILE.exists() else read_network_endpoint_settings()
+            registry = network_routes.record_check(network_routes.migrate(settings), payload.kind, domain, result)
+            settings["route_registry"] = registry
+            application_operation.atomic_json(NETWORK_ENDPOINTS_FILE, settings)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        # A check result is useful even for a legacy/unregistered address, but a
+        # corrupt registry must remain visible instead of being replaced.
+        if isinstance(exc, ValueError) and str(exc) == "Unknown route binding":
+            return result
+        raise HTTPException(status_code=503, detail="Не удалось сохранить результат проверки маршрута") from exc
+    return result
 
 
-@app.delete("/api/network/endpoints/{kind}/{domain}", dependencies=[Depends(require_short_mutation)])
 def delete_network_endpoint(kind: Literal["cdn", "tls_relay", "udp_relay"], domain: str, _: None = Depends(require_token)) -> dict:
     domain = domain.strip().lower()
     if kind in {"cdn", "tls_relay"}:
@@ -2320,29 +2511,8 @@ def delete_network_endpoint(kind: Literal["cdn", "tls_relay", "udp_relay"], doma
     values = [str(value) for value in (settings.get(list_key) or []) if str(value).strip().lower() != domain]
     settings[list_key] = values
     settings[key_by_kind[kind]] = values[0] if values else ""
-    if kind in {"cdn", "tls_relay"} and VLESS_ENV.exists() and VLESS_CONFIG.exists():
-        try:
-            reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
-        except OSError:
-            reality = {}
-        if kind == "cdn" and reality.get("CDN_DOMAIN", "").strip().lower() == domain and reality.get("CDN_ENABLED") == "yes":
-            update_protocol_settings("vless-reality-xhttp", ProtocolSettingsUpdate(cdn_enabled=False, cdn_domain=""), None)
-        if kind == "tls_relay" and reality.get("TLS_DOMAIN", "").strip().lower() == domain and reality.get("TLS_ENABLED") == "yes":
-            update_protocol_settings("vless-reality-xhttp", ProtocolSettingsUpdate(tls_enabled=False, tls_domain=""), None)
-    if kind in {"cdn", "tls_relay"} and MIHOMO_VLESS_CDN_ROUTES.exists():
-        for descriptor in MIHOMO_VLESS_CDN_ROUTES.glob("*.json"):
-            try:
-                value = json.loads(descriptor.read_text(encoding="utf-8"))
-            except (OSError, ValueError, TypeError):
-                continue
-            if isinstance(value, dict) and str(value.get("domain", "")).strip().lower() == domain:
-                descriptor.unlink(missing_ok=True)
-        routes = cdn_security.read_routes()
-        if routes:
-            cdn_security.write_snippet(cdn_security.render_routes(routes))
-        else:
-            cdn_security.SNIPPET.unlink(missing_ok=True)
-        cdn_security.reload_caddy()
+    # Registry + removed admission are committed together. Consumers and local
+    # listeners remain untouched; external forwarding requires explicit teardown.
     write_network_endpoint_settings(settings)
     return network_status()
 
@@ -3113,6 +3283,19 @@ def application_operations(_: None = Depends(require_token)) -> dict:
         return {"items": sorted(items, key=lambda item: item.get("started_at") or item.get("updated_at") or "", reverse=True)[:100]}
     except (OSError, ValueError):
         raise HTTPException(status_code=503, detail="История операций временно недоступна") from None
+
+
+@app.get("/api/application/operations/{operation_id}/log")
+def get_operation_log(operation_id: str, source: Literal["system", "mihomo", "cdn"] = "system", _: None = Depends(require_token)) -> dict:
+    from operation_log import get
+    try:
+        application_operation.operation_id(operation_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Некорректный идентификатор операции") from None
+    try:
+        return get(DATA_DIR, source, operation_id)
+    except (OSError, ValueError, KeyError, TypeError):
+        raise HTTPException(status_code=503, detail="Журнал операции временно недоступен") from None
 
 
 @app.get("/api/application/operations/{operation_id}")
@@ -3997,6 +4180,13 @@ def update_automation(payload: AutomationSettings, _: None = Depends(require_tok
         operation_id=operation_id, properties=(f"--property=EnvironmentFile={ENV_FILE}",))
 
 
+@app.post("/api/services/automation/recover", status_code=202)
+def recover_automation(_: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
+    return start_application_operation("automation-recover",
+        [sys.executable, str(Path(__file__).with_name("service_worker.py")), "--automation-recover"],
+        operation_id=operation_id, properties=(f"--property=EnvironmentFile={ENV_FILE}",))
+
+
 @app.get("/api/clients")
 def clients(_: None = Depends(require_token)) -> dict:
     return {"items": all_client_dump()}
@@ -4004,6 +4194,7 @@ def clients(_: None = Depends(require_token)) -> dict:
 
 @app.get("/api/dns")
 def dns_status(_: None = Depends(require_token)) -> dict:
+    settings_revision = network_settings_revision("dns-settings")
     settings = read_dns_settings()
     providers = dns_provider_list(settings)
     expected = {scope: ", ".join(dns_resolvers_for(settings, providers, scope)[0]) for scope in ("wg", "awg", "shadowsocks")}
@@ -4025,7 +4216,8 @@ def dns_status(_: None = Depends(require_token)) -> dict:
         "vless-reality-xhttp": VLESS_CONFIG.exists() and run("systemctl", "is-enabled", "vps-control-vless-reality-xhttp.service") == "enabled",
     }
     return {
-        "settings": settings,
+        "recovery_required": (DATA_DIR / "dns-recovery.json").exists(),
+        "settings": {**settings, "revision": network_settings_revision("dns-settings", settings_revision)},
         "providers": providers,
         "protocol_effect": effects,
         "protocol_effect_details": {
@@ -4039,9 +4231,8 @@ def dns_status(_: None = Depends(require_token)) -> dict:
     }
 
 
-@app.put("/api/dns/settings", dependencies=[Depends(require_component_management)])
 def update_dns_settings(payload: DnsSettingsUpdate, _: None = Depends(require_token)) -> dict:
-    data = payload.model_dump()
+    data = payload.model_dump(exclude={"expected_revision"})
     if data.get("custom"):
         for address in data["custom"]["addresses"]:
             try:
@@ -4762,7 +4953,7 @@ def create_shadowsocks_client(payload: ClientCreate, client_id: str, safe_name: 
     endpoint, channel_mode = channel_mode_endpoint("shadowsocks", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode)
     client_config = f"ss://{userinfo}@{endpoint}:{port}#{urllib.parse.quote(payload.name)}"
     items = read_clients()
-    items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+    items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "channel_mode": channel_mode, "route_endpoint": endpoint, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
     write_clients(items)
     return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config}
 
@@ -4799,7 +4990,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     "Install the CA certificate below as a trusted root certificate:", "", ca.strip(), "",
                 ])
                 items = read_clients()
-                items.append({"id": client_id, "name": payload.name, "protocol": "ikev2", "public_key": client_id, "endpoint": endpoint, "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+                items.append({"id": client_id, "name": payload.name, "protocol": "ikev2", "public_key": client_id, "endpoint": endpoint, "channel_mode": channel_mode, "route_endpoint": endpoint, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config}
             except HTTPException:
@@ -4843,7 +5034,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     "<key>", private_key.strip(), "</key>", "<tls-crypt>", tls_crypt.strip(), "</tls-crypt>", "",
                 ])
                 items = read_clients()
-                items.append({"id": client_id, "name": payload.name, "protocol": "openvpn", "public_key": client_id, "port": port, "transport": transport, "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+                items.append({"id": client_id, "name": payload.name, "protocol": "openvpn", "public_key": client_id, "port": port, "transport": transport, "channel_mode": channel_mode, "route_endpoint": endpoint, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}.ovpn", "config": client_config}
             except HTTPException:
@@ -4887,7 +5078,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     "socks5:", "  listen: 127.0.0.1:1080", "  disableUDP: false",
                 ]) + "\n"
                 items = read_clients()
-                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "domain": domain, "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "domain": domain, "channel_mode": channel_mode, "route_endpoint": endpoint, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}.yaml", "config": client_config}
             except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -4919,7 +5110,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     "outbounds": [{"type": "tuic", "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "uuid": user_uuid, "password": password, "congestion_control": payload.settings.congestion_control, "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": payload.settings.heartbeat, "tls": {"enabled": True, "server_name": certificate_server_name(TUIC_DIR / "server.crt"), "certificate": certificate}}],
                     "route": {"final": "connection-out"},
                 }
-                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "port": int(settings.get("port", 8444)), "channel_mode": channel_mode, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
+                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "port": int(settings.get("port", 8444)), "channel_mode": channel_mode, "route_endpoint": endpoint, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}.json", "config": json.dumps(client, ensure_ascii=False, indent=2)}
             except HTTPException:
                 raise
@@ -4941,7 +5132,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 temporary.replace(TROJAN_CONFIG); run("systemctl", "restart", "vps-control-trojan.service", timeout=20, check=True)
                 settings=json.loads(TROJAN_SETTINGS.read_text()); endpoint, channel_mode=channel_mode_endpoint("trojan", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode); certificate=(TROJAN_DIR/"server.crt").read_text()
                 client={"log":{"level":"warn"},"inbounds":[{"type":"mixed","tag":"mixed-in","listen":"127.0.0.1","listen_port":2080}],"outbounds":[{"type":"trojan","tag":"connection-out","server":endpoint,"server_port":int(settings.get("port",8445)),"password":password,"tls":{"enabled":True,"server_name":certificate_server_name(TROJAN_DIR / "server.crt"),"certificate":certificate}}],"route":{"final":"connection-out"}}
-                items=read_clients(); items.append({"id":client_id,"name":payload.name,"protocol":payload.protocol,"public_key":client_id,"port":int(settings.get("port",8445)),"channel_mode":channel_mode,"settings":payload.settings.model_dump(exclude_none=True),"created_at":datetime.now(timezone.utc).isoformat()}); write_clients(items)
+                items=read_clients(); items.append({"id":client_id,"name":payload.name,"protocol":payload.protocol,"public_key":client_id,"port":int(settings.get("port",8445)),"channel_mode":channel_mode,"route_endpoint":endpoint,"settings":payload.settings.model_dump(exclude_none=True),"created_at":datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 return {"id":client_id,"filename":f"{safe_name}.json","config":json.dumps(client,ensure_ascii=False,indent=2)}
             except HTTPException:
                 raise
@@ -4988,6 +5179,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                         allowed_cdn_domains.add(str(reality["CDN_DOMAIN"]).strip().lower())
                     if selected_cdn_domain not in allowed_cdn_domains or not network_endpoint_check("cdn", selected_cdn_domain)["ready"]:
                         raise HTTPException(status_code=409, detail="Выбранный CDN-домен не подтверждён на странице «Сеть»")
+                if "tls" in requested_routes and network_routes.retired(read_route_registry(), "tls_relay", reality.get("TLS_DOMAIN", "")):
+                    raise HTTPException(status_code=409, detail="TLS-маршрут удалён из Network; выберите актуальный маршрут")
                 selected_inbounds = [inbound for route in requested_routes for inbound in route_inbounds[route]]
                 for inbound in selected_inbounds:
                     inbound.setdefault("settings", {}).setdefault("clients", []).append({"id": client_uuid, "email": f"{client_id}@312.net"})
@@ -5034,7 +5227,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 client_config = "\n".join(profile["config"] for profile in profiles)
                 stage = "сохранение подключения"
                 items = read_clients()
-                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "vless_routes": requested_routes, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "vless_routes": requested_routes, "route_endpoints": {"cdn": selected_cdn_domain, "tls_relay": reality.get("TLS_DOMAIN", "")}, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config, "profiles": profiles}
             except HTTPException:
@@ -5115,6 +5308,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             "address": f"{address}/32",
             "settings": payload.settings.model_dump(exclude_none=True),
             "channel_mode": channel_mode,
+            "route_endpoint": endpoint_host,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
     )

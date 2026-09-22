@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import json
+from pathlib import Path
 import sys
 
 import application_operation as operations
@@ -38,12 +39,41 @@ def execute_operation(api, name: str, perform, identity: str, unit: str) -> bool
         return True
 
 
+def apply_network_request(api, name: str, path: Path, digest: str, identity: str):
+    payload = operations.load_payload(api.DATA_DIR, identity, path, digest)
+    if name != "dns-recover":
+        api.check_network_revision(name, payload)
+    if name == "dns-settings":
+        settings = api.DnsSettingsUpdate.model_validate(payload)
+        api.require_dns_management(settings)
+        from dns_transaction import configure
+        configure(api, settings)
+    elif name == "dns-recover":
+        from dns_transaction import recover
+        recover(api)
+    elif name == "network-settings":
+        api.update_network_endpoints(api.NetworkEndpointSettings.model_validate(payload))
+    elif name == "network-delete":
+        if payload["kind"] not in {"cdn", "tls_relay", "udp_relay"}:
+            raise ValueError("Invalid route kind")
+        api.delete_network_endpoint(payload["kind"], payload["domain"])
+    else:
+        raise ValueError("Unknown network operation")
+
+
 if __name__ == "__main__":
     import main as api
 
     identity = os.environ["VPS_CONTROL_OPERATION_ID"]
     unit = os.environ["VPS_CONTROL_OPERATION_UNIT"]
-    if sys.argv[1] == "--automation":
+    if sys.argv[1] == "--network":
+        name, path, digest = sys.argv[2:5]
+        success = execute_operation(api, name, lambda: apply_network_request(api, name, Path(path), digest, identity), identity, unit)
+    elif sys.argv[1] == "--automation-recover":
+        from automation_transaction import recover
+
+        success = execute_operation(api, "automation-recover", lambda: recover(api.AUTOMATION_FILE), identity, unit)
+    elif sys.argv[1] == "--automation":
         from automation_transaction import configure
 
         settings = api.AutomationSettings.model_validate(json.loads(sys.argv[2])).model_dump()

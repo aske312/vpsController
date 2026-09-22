@@ -80,6 +80,7 @@ PRODUCTION_BRANCH="stabl"
 ACTION_FILE="${DATA_DIR}/application-action.json"
 RECOVERY_DIR="${DATA_DIR}/recovery"
 SAFE_UPDATE_REPORT="${RECOVERY_DIR}/safe-update-report.txt"
+SECURITY_RECOVERY_MARKER="${RECOVERY_DIR}/security-recovery.txt"
 AUTOMATION_FILE="${DATA_DIR}/automation.json"
 SERVICE_MODE_FILE="${DATA_DIR}/service-mode.json"
 CURRENT_ACTION=""
@@ -206,6 +207,12 @@ begin_operation() {
   install -d -m 0750 "${DATA_DIR}"
   exec 9>"${DATA_DIR}/application-worker.lock"
   flock -w 5 9 || die "другая операция уже выполняется; дождитесь её завершения."
+  if [[ -f "${DATA_DIR}/dns-recovery.json" || -f "${DATA_DIR}/automation-recovery.json" || -f "${DATA_DIR}/mihomo/profile-recovery/manifest.json" || -f "${SECURITY_RECOVERY_MARKER}" ]]; then
+    case "$1" in
+      network-check|integrity-check|doctor|ssh-access-rollback|ssh-access-disable) ;;
+      *) die "Сначала восстановите прерванные настройки DNS/расписаний/защиты через панель." ;;
+    esac
+  fi
   export VPS_CONTROL_OPERATION_ID="${VPS_CONTROL_OPERATION_ID:-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')}"
   export VPS_CONTROL_WORKER_PID="$$"
   CURRENT_ACTION="$1"
@@ -1474,16 +1481,23 @@ PY
 }
 
 secure_server() {
+  local archive
   info "Настройка защиты сервера"
-  prepare_package_manager
-  apt-get -o DPkg::Lock::Timeout=300 update
-  apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw
-  configure_fail2ban
-  systemctl enable --now unattended-upgrades
-  systemctl enable --now auditd
-  systemctl enable --now apparmor.service >/dev/null 2>&1 || warn "AppArmor установлен, но для активации может потребоваться перезагрузка."
-  install -d -m 0755 /etc/sysctl.d /etc/ssh/sshd_config.d
-  cat >/etc/sysctl.d/99-vps-control-routing.conf <<'EOF'
+  security_preflight
+  install -d -m 0700 "${RECOVERY_DIR}"
+  archive="$(create_recovery_point)"
+  printf '%s\n' "${archive}" >"${SECURITY_RECOVERY_MARKER}"
+  chmod 0600 "${SECURITY_RECOVERY_MARKER}"
+  if ! {
+    prepare_package_manager
+    apt-get -o DPkg::Lock::Timeout=300 update
+    apt-get -o DPkg::Lock::Timeout=300 install -y apparmor apparmor-utils auditd fail2ban unattended-upgrades ufw
+    configure_fail2ban
+    systemctl enable --now unattended-upgrades
+    systemctl enable --now auditd
+    systemctl enable --now apparmor.service >/dev/null 2>&1
+    install -d -m 0755 /etc/sysctl.d /etc/ssh/sshd_config.d
+    cat >/etc/sysctl.d/99-vps-control-routing.conf <<'EOF'
 net.ipv4.tcp_syncookies = 1
 net.ipv4.conf.all.accept_redirects = 0
 net.ipv4.conf.default.accept_redirects = 0
@@ -1493,27 +1507,51 @@ net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
 kernel.dmesg_restrict = 1
 EOF
-  sysctl --system >/dev/null 2>&1 || true
-  cat >/etc/ssh/sshd_config.d/99-vps-control-tunnels.conf <<'EOF'
+    sysctl --system >/dev/null 2>&1
+    cat >/etc/ssh/sshd_config.d/99-vps-control-tunnels.conf <<'EOF'
 X11Forwarding no
 AllowTcpForwarding yes
 PermitTunnel yes
 EOF
-  sshd -t >/dev/null 2>&1 && systemctl reload ssh.service 2>/dev/null || true
-  if [[ -f "${ENV_FILE}" ]]; then
-    chown root:root "${ENV_FILE}"
-    chmod 0600 "${ENV_FILE}"
+    sshd -t >/dev/null 2>&1
+    systemctl reload ssh.service
+    if [[ -f "${ENV_FILE}" ]]; then
+      chown root:root "${ENV_FILE}"
+      chmod 0600 "${ENV_FILE}"
+    fi
+    if [[ -f "${COMMAND_PATH}" ]]; then
+      chown root:root "${COMMAND_PATH}"
+      chmod 0755 "${COMMAND_PATH}"
+    fi
+    configure_access
+    configure_firewall "panel-only"
+    install_api
+    ensure_api_write_access
+    systemctl restart "${APP_NAME}-api.service"
+  }; then
+    warn "Настройка защиты не завершена; восстанавливается предыдущая конфигурация"
+    if ! restore_recovery_point "${archive}"; then
+      printf '%s\n' "${archive}" >"${SECURITY_RECOVERY_MARKER}"
+      chmod 0600 "${SECURITY_RECOVERY_MARKER}"
+      die "Откат защиты не подтверждён; точка восстановления сохранена"
+    fi
+    rm -f -- "${SECURITY_RECOVERY_MARKER}"
+    die "Настройка защиты остановлена; предыдущая конфигурация восстановлена"
   fi
-  if [[ -f "${COMMAND_PATH}" ]]; then
-    chown root:root "${COMMAND_PATH}"
-    chmod 0755 "${COMMAND_PATH}"
-  fi
-  configure_access
-  configure_firewall "panel-only"
-  install_api
-  ensure_api_write_access
-  systemctl restart "${APP_NAME}-api.service"
+  rm -f -- "${SECURITY_RECOVERY_MARKER}"
   ok "Firewall, Fail2ban, AppArmor, auditd, sysctl, SSH, API, права и автоматические security-обновления проверены."
+}
+
+security_preflight() {
+  [[ "${EUID}" -eq 0 ]] || die "Настройка защиты требует root."
+  local command
+  for command in apt-get systemctl sshd sysctl tar openssl; do
+    command -v "${command}" >/dev/null 2>&1 || die "Для настройки защиты не найдено: ${command}."
+  done
+  sshd -t >/dev/null 2>&1 || die "Текущая конфигурация SSH не проходит проверку; hardening остановлен."
+  if [[ "${ENABLE_UFW}" == "yes" && "$(command -v ufw || true)" ]]; then
+    ufw status >/dev/null 2>&1 || die "UFW недоступен для проверки; hardening остановлен."
+  fi
 }
 
 check_vpn() {

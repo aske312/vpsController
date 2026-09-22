@@ -57,6 +57,13 @@ test("every security posture item has a safe repair or review action", async () 
   assert.match(manager, /kernel\.dmesg_restrict = 1/);
   assert.match(manager, /chmod 0600 "\$\{ENV_FILE\}"/);
   assert.match(manager, /configure_firewall "panel-only"/);
+  assert.match(manager, /archive="\$\(create_recovery_point\)"/);
+  assert.match(manager, /restore_recovery_point "\$\{archive\}"/);
+  assert.match(manager, /SECURITY_RECOVERY_MARKER/);
+  assert.match(manager, /security_preflight\(\)/);
+  assert.match(manager, /sshd -t[\s\S]*Текущая конфигурация SSH/);
+  assert.doesNotMatch(manager, /sysctl --system[^\n]*\|\| true/);
+  assert.doesNotMatch(manager, /sshd -t[^\n]*&& systemctl reload ssh\.service[^\n]*\|\| true/);
   assert.doesNotMatch(manager, /systemctl (?:disable|stop).*strongswan|systemctl (?:disable|stop).*xl2tpd/);
 });
 

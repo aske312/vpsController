@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ConfirmationDialog } from "../../shared/components/confirmation-dialog";
+import { useDialogFocus } from "../../shared/components/use-dialog-focus";
 import type {
   NetworkEndpointCheck,
   NetworkEndpointSettings,
@@ -17,6 +19,7 @@ export function NetworkEndpoints({
   onChange,
   onRouteListChange,
   onSave,
+  onReset,
 }: {
   request: NetworkRequest;
   draft: NetworkEndpointSettings;
@@ -27,8 +30,21 @@ export function NetworkEndpoints({
   onChange: (key: keyof NetworkEndpointSettings, value: string) => void;
   onRouteListChange: (key: keyof NetworkEndpointSettings, values: string[]) => void;
   onSave: () => void;
+  onReset: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [discard, setDiscard] = useState(false);
+  const [extra, setExtra] = useState<Record<string, string>>({});
+  const pendingAddress = Object.values(extra).some((value) => value.trim());
+  const hasChanges = dirty || pendingAddress;
+  useEffect(() => {
+    if (!open || !hasChanges) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [open, hasChanges]);
+  const close = () => { if (hasChanges) setDiscard(true); else setOpen(false); };
+  const dialogRef = useDialogFocus(open, close);
   const [checking, setChecking] = useState<string | null>(null);
   const [checks, setChecks] = useState<
     Partial<Record<keyof NetworkEndpointSettings, NetworkEndpointCheck>>
@@ -110,10 +126,12 @@ export function NetworkEndpoints({
           className="networkModalBackdrop"
           role="presentation"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setOpen(false);
+            if (event.target === event.currentTarget) close();
           }}
         >
           <section
+            ref={dialogRef}
+            tabIndex={-1}
             className="networkModal"
             role="dialog"
             aria-modal="true"
@@ -131,7 +149,7 @@ export function NetworkEndpoints({
               <button
                 type="button"
                 className="networkModalClose"
-                onClick={() => setOpen(false)}
+                onClick={close}
                 aria-label="Закрыть"
               >
                 ×
@@ -139,7 +157,8 @@ export function NetworkEndpoints({
             </header>
             <div className="networkEndpointGrid">
               {fields.map((field) => {
-                const result = checks[field.key];
+                const checked = checks[field.key];
+                const result = checked?.domain.toLowerCase() === String(draft[field.key] || "").trim().toLowerCase() ? checked : undefined;
                 const value = String(draft[field.key] || "").trim();
                 const values = routeValues(field.key);
                 return (
@@ -201,7 +220,14 @@ export function NetworkEndpoints({
                     <div className="networkEndpointRouteList">
                       <span>Адреса этого типа</span>
                       {values.slice(1).map((route) => <div key={route}><code>{route}</code></div>)}
-                      <button type="button" onClick={() => { const route = window.prompt("Введите домен или IP relay"); if (route?.trim() && !values.includes(route.trim())) onRouteListChange(field.key, [...values, route.trim()]); }}>Добавить адрес</button>
+                      <label>Дополнительный адрес · {field.label}
+                        <input type="text" value={extra[field.key] || ""} placeholder={field.placeholder} autoComplete="off" disabled={busy} onChange={(event) => setExtra((current) => ({ ...current, [field.key]: event.target.value }))} />
+                      </label>
+                      <button type="button" disabled={busy || !extra[field.key]?.trim() || values.includes(extra[field.key].trim().toLowerCase())} onClick={() => {
+                        const route = extra[field.key].trim().toLowerCase();
+                        onRouteListChange(field.key, [...values, route]);
+                        setExtra((current) => ({ ...current, [field.key]: "" }));
+                      }}>Добавить адрес</button>
                     </div>
                   </article>
                 );
@@ -231,16 +257,17 @@ export function NetworkEndpoints({
                 </span>
               </div>
             </div>
+            {pendingAddress && <p role="status">Нажмите «Добавить адрес» для заполненного дополнительного поля или очистите его перед сохранением.</p>}
             <div className="networkEndpointFooter">
               <p>
-                CDN/ECH требует домен. Для отдельного relay достаточно IP:порт,
+                CDN/ECH требует домен. Для relay укажите домен или IP без порта,
                 но порт самого протокола должен быть открыт на relay.
               </p>
               <button
                 type="button"
                 className="networkPrimaryButton"
                 onClick={onSave}
-                disabled={busy || !dirty}
+                disabled={busy || !dirty || pendingAddress}
               >
                 {busy ? "Сохраняем…" : "Сохранить адреса"}
               </button>
@@ -248,6 +275,10 @@ export function NetworkEndpoints({
           </section>
         </div>
       )}
+      {discard && <ConfirmationDialog request={{ title: "Закрыть без сохранения?", message: "Изменения внешних адресов будут потеряны. Настройки на сервере не изменятся.", cancelLabel: "Остаться", confirmLabel: "Уйти без сохранения" }} onClose={(confirmed) => {
+        setDiscard(false);
+        if (confirmed) { onReset(); setExtra({}); setOpen(false); }
+      }} />}
     </>
   );
 }

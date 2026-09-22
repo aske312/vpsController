@@ -102,8 +102,26 @@ class ApplicationOperationTests(unittest.TestCase):
         first = self.start()
         operations.write_status(self.root, self.current, first["action"], "succeeded", 100, "Done", first["started_at"], first["id"])
         second = self.start("2" * 32)
+        inputs = self.root / "operation-inputs"
+        inputs.mkdir()
+        for identity in (first["id"], second["id"]):
+            (inputs / f"{identity}.json").write_text("private request")
+        recovery = self.root / "dns-recovery.json"
+        operations.atomic_json(recovery, {"operation_id": first["id"]})
         operations.prune(self.root, second["id"], byte_budget=1)
+        self.assertTrue((inputs / f"{first['id']}.json").exists())
+        recovery.unlink()
+        operations.prune(self.root, second["id"], byte_budget=1)
+        self.assertFalse((inputs / f"{first['id']}.json").exists())
+        self.assertTrue((inputs / f"{second['id']}.json").exists())
         self.assertEqual([value["id"] for value in operations.history(self.root)], [second["id"]])
+
+    def test_security_recovery_marker_blocks_mutations_and_preserves_history(self):
+        marker = self.root / "recovery" / "security-recovery.txt"
+        marker.parent.mkdir()
+        marker.write_text("/var/lib/vps-control/recovery/recovery-test.tar.gz.enc")
+        with self.assertRaisesRegex(operations.OperationConflict, "защиты"):
+            operations.require_recovery_clear(self.root)
 
     def test_success_from_previous_boot_does_not_observe_reused_process_identity(self):
         value = {"id": "a" * 32, "state": "succeeded", "boot_id": "previous", "worker_pid": 25, "worker_start": "100"}

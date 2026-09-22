@@ -32,6 +32,8 @@ def operation_path(operation_id: str) -> Path:
 def write(operation: dict) -> None:
     path = operation_path(operation["id"])
     application_operation.atomic_json(path, operation)
+    from operation_log import append
+    append(DIRECTORY.parent, operation, "cdn")
     current = application_operation.read(DIRECTORY.parent / "operations" / f"{operation['id']}.json")
     if current:
         application_operation.write_status(

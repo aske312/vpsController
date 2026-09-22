@@ -45,6 +45,8 @@ import ss_runtime
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
 import application_operation
+import network_routes
+from service_state import observe_service
 import port_allocation
 from component_registry import ComponentRegistry, RegistryError
 
@@ -146,91 +148,15 @@ def transactional_profile_mutation(function):
 
 @contextmanager
 def profile_runtime_transaction(modules: set[str]):
-    """Restore persisted adapter state and affected services after any failed mutation."""
-    ss_before = ss_runtime.snapshot(run, CONFIG_ROOT) if "transport-shadowsocks" in modules else None
-    backup_root = Path(tempfile.mkdtemp(prefix="mihomo-profile-transaction-"))
-    config_backup = backup_root / "config"
-    profile_backup = backup_root / "profiles.json"
-    routing_backup = backup_root / "routing.json"
-    external_backups = {
-        path: backup_root / f"external-{module_id}.conf"
-        for module_id, path in WG_CONFIG_BY_MODULE.items() if module_id in modules
-    }
-    service_was_active = {
-        module_id: systemctl_active(service)
-        for module_id in modules
-        if (service := SERVICE_BY_MODULE.get(module_id))
-    }
-    if CONFIG_ROOT.exists():
-        shutil.copytree(CONFIG_ROOT, config_backup)
-    if PROFILE_FILE.exists():
-        shutil.copy2(PROFILE_FILE, profile_backup)
-    if ROUTING_SETTINGS_FILE.exists():
-        shutil.copy2(ROUTING_SETTINGS_FILE, routing_backup)
-    for path, backup in external_backups.items():
-        if path.exists():
-            shutil.copy2(path, backup)
-    try:
+    from profile_recovery import transaction
+    with transaction(sys.modules[__name__], modules):
         yield
-    except Exception as original_error:
-        rollback_errors = []
-        ss_current = None
-        if ss_before is not None:
-            try:
-                ss_current = ss_runtime.snapshot(run, CONFIG_ROOT, strict=False)
-                ss_runtime.remove_created(run, ss_before, ss_current)
-            except Exception as exc:
-                rollback_errors.append(str(exc))
-        for path, backup in external_backups.items():
-            if backup.exists():
-                path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(backup, path)
-            else:
-                path.unlink(missing_ok=True)
-        if routing_backup.exists():
-            ROUTING_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(routing_backup, ROUTING_SETTINGS_FILE)
-        elif ROUTING_SETTINGS_FILE.exists():
-            ROUTING_SETTINGS_FILE.unlink()
-        if CONFIG_ROOT.exists():
-            shutil.rmtree(CONFIG_ROOT)
-        if config_backup.exists():
-            shutil.copytree(config_backup, CONFIG_ROOT)
-        if profile_backup.exists():
-            PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(profile_backup, PROFILE_FILE)
-        elif PROFILE_FILE.exists():
-            PROFILE_FILE.unlink()
-        # Restarts happen only on rollback. Each independent adapter is restored
-        # from its own persisted configuration and restarted at most once.
-        for module_id in sorted(modules):
-            service = SERVICE_BY_MODULE.get(module_id)
-            if module_id == "transport-shadowsocks":
-                # Restore instances individually; restarting their target also
-                # restarts unrelated live sessions and starts stopped instances.
-                try:
-                    active = systemctl_active(service)
-                    if active != service_was_active.get(module_id, False):
-                        run("systemctl", "start" if service_was_active[module_id] else "stop", service, check=True)
-                    ss_runtime.restore(run, ss_before, ss_current or {})
-                except Exception as exc:
-                    rollback_errors.append(str(exc))
-                continue
-            if service and service_was_active.get(module_id, False):
-                run("systemctl", "reset-failed", service)
-                run("systemctl", "restart", service)
-            elif service and systemctl_active(service):
-                run("systemctl", "stop", service)
-        if service_was_active.get("transport-reality", False):
-            rebuild_vless_cdn_snippet()
-            if Path("/usr/local/sbin/vps-control").is_file():
-                run("/usr/local/sbin/vps-control", "vless-cdn-firewall")
-            run("systemctl", "reload", "caddy.service")
-        if rollback_errors:
-            raise RuntimeError(f"{original_error}; rollback incomplete: {'; '.join(rollback_errors)}") from original_error
-        raise
-    finally:
-        shutil.rmtree(backup_root, ignore_errors=True)
+
+
+def recover_profile_runtime():
+    from profile_recovery import recover
+    recover(sys.modules[__name__])
+
 
 BUILTIN_TRANSPORTS = {
     "transport-wg",
@@ -482,6 +408,8 @@ def atomic_json(path: Path, value: Any, mode: int = 0o600) -> None:
 
 
 def write_action(action: str, message: str, state: str = "running", progress: int = 10, *, public_message: str | None = None) -> None:
+    if os.getenv("VPS_CONTROL_MIHOMO_OPERATION_ID") and state == "done":
+        state, progress = "running", 95
     # FastAPI dispatches these sync endpoints to a threadpool, so a client can
     # poll get_action() from a separate request while a long install/profile
     # operation is still running on another worker thread.
@@ -491,7 +419,8 @@ def write_action(action: str, message: str, state: str = "running", progress: in
     previous = get_action_payload()
     continuing = previous.get("action") == action and previous.get("state") in {"running", "queued", "unknown"} and not (state == "running" and progress <= 15)
     identity = previous.get("id") if continuing else None
-    identity = identity or uuid.uuid4().hex
+    admitted_identity = os.getenv("VPS_CONTROL_MIHOMO_OPERATION_ID")
+    identity = application_operation.operation_id(admitted_identity) if admitted_identity else identity or uuid.uuid4().hex
     payload = {
         "id": identity,
         "action": action,
@@ -503,6 +432,13 @@ def write_action(action: str, message: str, state: str = "running", progress: in
     }
     atomic_json(ACTION_FILE, payload)
     application_operation.atomic_json(ACTION_FILE.parent / "operations" / f"{identity}.json", {**payload, "state": "succeeded" if state == "done" else state, "source": "mihomo"})
+    from operation_log import append
+    append(ACTION_FILE.parent, payload, "mihomo")
+    if admitted_identity and state == "running":
+        admitted = application_operation.read(DATA_ROOT.parent / "operations" / f"{identity}.json")
+        if admitted:
+            application_operation.write_status(DATA_ROOT.parent, DATA_ROOT.parent / "application-action.json",
+                admitted["action"], "running", progress, message, admitted["started_at"], identity, admitted.get("unit", ""))
     if state in {"done", "failed"}:
         application_operation.prune(ACTION_FILE.parent, identity)
 
@@ -521,8 +457,6 @@ def state() -> dict[str, Any]:
     for module_id in KNOWN_MODULES:
         modules.setdefault(module_id, False)
     value["modules"] = modules
-    if any(bool(modules.get(module_id)) for module_id in TRANSPORTS):
-        ensure_policy_settings()
     return value
 
 
@@ -660,7 +594,14 @@ def profile_export_filename(item: dict[str, Any]) -> str:
 
 
 def profile_response(item: dict[str, Any]) -> dict[str, Any]:
-    result = {key: value for key, value in normalize_profile(item).items() if key not in {"subscriptions", "subscription_token", "retiring_connections"}}
+    result = {key: value for key, value in normalize_profile(deepcopy(item)).items() if key not in {"subscriptions", "subscription_token", "retiring_connections"}}
+    try:
+        route_registry = network_routes.migrate(json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8")) if NETWORK_ENDPOINTS_FILE.exists() else {})
+        for connection in result.get("connections", []):
+            connection["route_state"] = network_routes.consumer_state(route_registry, f"mihomo:{item['id']}:{connection['id']}")
+    except (OSError, ValueError, KeyError, TypeError):
+        for connection in result.get("connections", []):
+            connection["route_state"] = {"state": "unknown", "reason": "Реестр маршрутов недоступен", "addresses": [], "bindings": []}
     result["export_filename"] = profile_export_filename(item)
     result["protection_status"] = {}
     for device in result["devices"]:
@@ -1646,8 +1587,8 @@ def auth_required(authorization: str | None = Header(default=None)) -> None:
     expected_user = os.getenv("ADMIN_USER", "admin")
     expected_password = os.getenv("ADMIN_PASSWORD", "")
     if not expected_password or not (
-        hmac.compare_digest(username, expected_user)
-        and hmac.compare_digest(password, expected_password)
+        hmac.compare_digest(username.encode("utf-8"), expected_user.encode("utf-8"))
+        and hmac.compare_digest(password.encode("utf-8"), expected_password.encode("utf-8"))
     ):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -1671,6 +1612,19 @@ def require_mihomo_mutation(_: None = Depends(auth_required)):
             yield
     except application_operation.OperationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+def require_mihomo_admission(request: Request, _: None = Depends(auth_required)):
+    try:
+        identity = request.headers.get("X-Operation-ID")
+        if identity and application_operation.read(DATA_ROOT.parent / "operations" / f"{application_operation.operation_id(identity)}.json"):
+            return
+        require_mihomo_management()
+        application_operation.require_recovery_clear(DATA_ROOT.parent)
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Некорректный идентификатор операции") from None
 
 
 @app.get("/api/mihomo/action", dependencies=[Depends(auth_required)])
@@ -1783,6 +1737,13 @@ def direct_tls_domain_ready(domain: str) -> bool:
 
 def mihomo_route_endpoint_ready(kind: str, domain: str) -> bool:
     """Accept only an address confirmed by the shared Network ROUTES store."""
+    try:
+        stored = json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8")) if NETWORK_ENDPOINTS_FILE.exists() else {}
+        route_kind = {"cdn": "cdn", "tls": "tls_relay", "udp": "udp_relay"}[kind]
+        if network_routes.retired(network_routes.migrate(stored), route_kind, domain):
+            return False
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
     if kind == "tls":
         # Direct VLESS TLS is validated against the VPS origin. Its hostname
         # may be the public panel route and does not have to be the external
@@ -1790,9 +1751,6 @@ def mihomo_route_endpoint_ready(kind: str, domain: str) -> bool:
         return direct_tls_domain_ready(domain)
     key = {"cdn": "cdn_domain", "tls": "tls_relay_domain", "udp": "udp_relay_domain"}.get(kind)
     if not key or not domain:
-        return False
-    stored = load_json(NETWORK_ENDPOINTS_FILE, {})
-    if not isinstance(stored, dict):
         return False
     configured = stored.get(key, "")
     configured_domains = stored.get({"cdn_domain": "cdn_domains", "tls_relay_domain": "tls_relay_domains", "udp_relay_domain": "udp_relay_domains"}.get(key, ""), [])
@@ -2155,6 +2113,8 @@ def call_module_script(module_id: str, action: str, extra_env: dict[str, str] | 
 
 
 def core_status() -> dict[str, Any]:
+    manager_observation = observe_service("vps-control-mihomo-manager.service")
+    runtime = manager_observation["runtime"]
     module_state = state()
     installed_modules = [module_id for module_id in KNOWN_MODULES if module_is_installed(module_id)]
     profile_items = profiles()
@@ -2182,7 +2142,10 @@ def core_status() -> dict[str, Any]:
     return {
         "id": "mihomo",
         "name": "Mihomo",
-        "active": systemctl_active("vps-control-mihomo-manager.service"),
+        "active": True if runtime["state"] == "running" else False if runtime["state"] == "stopped" else None,
+        "runtime": runtime,
+        "recovery_required": (PROFILE_FILE.parent / "profile-recovery" / "manifest.json").exists(),
+        "health": {"state": "unchecked", "reason": "Состояние systemd не заменяет проверку подключений", "checked_at": None},
         "installed": True,
         "version": core_version,
         "core_version": core_version,
@@ -2207,12 +2170,14 @@ def stable_protocol_status() -> dict[str, Any]:
     return {
         "protocol": "mihomo",
         "active": status["active"],
+        "runtime": status["runtime"],
+        "health": status["health"],
         "interface": "",
         "port": 0,
         "editable_settings": [],
         "diagnostics": {
-            "state": "healthy" if status["active"] else "unavailable",
-            "summary": "Mihomo Manager работает" if status["active"] else "Mihomo Manager остановлен",
+            "state": "unchecked" if status["active"] is True else "unknown" if status["active"] is None else "unavailable",
+            "summary": status["runtime"]["reason"],
         },
         "resources": {},
     }
@@ -2247,7 +2212,6 @@ def get_module_settings(module_id: str) -> dict[str, Any]:
     }
 
 
-@app.patch("/api/mihomo/modules/{module_id}/settings", dependencies=[Depends(require_mihomo_mutation)])
 @module_mutation("module-settings")
 def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[str, Any]:
     previous_values = module_settings(module_id)
@@ -2292,7 +2256,98 @@ def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[st
     return get_module_settings(module_id)
 
 
-@app.post("/api/mihomo/modules/{module_id}/install", dependencies=[Depends(require_mihomo_mutation)])
+def start_module_operation(module_id: str, action: str, identity: str | None):
+    name = f"mihomo-module-{action}:{module_id}"
+    try:
+        if not identity or not application_operation.read(DATA_ROOT.parent / "operations" / f"{application_operation.operation_id(identity)}.json"):
+            require_mihomo_management()
+            if action != "recover":
+                manifest(module_id)
+        from service_state import observe_service
+        return application_operation.start(DATA_ROOT.parent, DATA_ROOT.parent / "application-action.json", name,
+            [sys.executable, str(Path(__file__).resolve()), "--module-operation", action, module_id], subprocess.run,
+            request_id=identity, properties=("--property=EnvironmentFile=/etc/vps-control/environment",), observe=observe_service)
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Некорректный идентификатор операции") from None
+    except OSError:
+        raise HTTPException(status_code=503, detail="Не удалось сохранить операцию Mihomo") from None
+
+
+def start_profile_operation(action: str, payload: dict, identity: str | None):
+    if identity is None and (legacy_id := payload.get("settings", {}).get("operation_id")):
+        identity = legacy_id if re.fullmatch(r"[0-9a-f]{32}", legacy_id) else uuid.uuid5(uuid.NAMESPACE_URL, "mihomo:" + legacy_id).hex
+    try:
+        identity = application_operation.operation_id(identity)
+        root = DATA_ROOT.parent
+        with application_operation.locked(root):
+            if not application_operation.read(root / "operations" / f"{identity}.json"):
+                require_mihomo_management()
+                application_operation.require_recovery_clear(root)
+            path, digest = application_operation.persist_payload(root, identity, payload)
+        return application_operation.start(root, root / "application-action.json", f"mihomo-profile-{action}",
+            [sys.executable, str(Path(__file__).resolve()), "--profile-operation", action, str(path), digest], subprocess.run,
+            request_id=identity, properties=("--property=EnvironmentFile=/etc/vps-control/environment",), observe=observe_service)
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Некорректный запрос операции") from None
+    except OSError:
+        raise HTTPException(status_code=503, detail="Не удалось сохранить запрос профиля") from None
+
+
+@app.patch("/api/mihomo/modules/{module_id}/settings", status_code=202, dependencies=[Depends(require_mihomo_admission)])
+def submit_module_settings(module_id: str, payload: ModuleSettingsPatch, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    manifest(module_id)
+    return start_profile_operation("module-settings", {"module_id": module_id, "settings": payload.model_dump()}, operation_id)
+
+
+@app.post("/api/mihomo/profiles", status_code=202, dependencies=[Depends(require_mihomo_admission)])
+def submit_profile_create(payload: ProfileCreate, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    return start_profile_operation("create", {"settings": payload.model_dump()}, operation_id)
+
+
+@app.patch("/api/mihomo/profiles/{profile_id}", status_code=202, dependencies=[Depends(require_mihomo_admission)])
+def submit_profile_update(profile_id: str, payload: ProfileUpdate, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    return start_profile_operation("update", {"profile_id": profile_id, "settings": payload.model_dump(exclude_unset=True)}, operation_id)
+
+
+@app.delete("/api/mihomo/profiles/{profile_id}", status_code=202, dependencies=[Depends(require_mihomo_admission)])
+def submit_profile_delete(profile_id: str, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    return start_profile_operation("delete", {"profile_id": profile_id}, operation_id)
+
+
+@app.delete("/api/mihomo/profiles/{profile_id}/devices/{device_id}", status_code=202, dependencies=[Depends(require_mihomo_admission)])
+def submit_device_delete(profile_id: str, device_id: str, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    return start_profile_operation("device-delete", {"profile_id": profile_id, "device_id": device_id}, operation_id)
+
+
+@app.post("/api/mihomo/reconciliation", status_code=202, dependencies=[Depends(require_mihomo_admission)])
+def submit_reconciliation(operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    return start_profile_operation("reconcile", {}, operation_id)
+
+
+@app.post("/api/mihomo/recovery", status_code=202, dependencies=[Depends(auth_required)])
+def submit_profile_recovery(operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    return start_module_operation("profiles", "recover", operation_id)
+
+
+@app.post("/api/mihomo/modules/{module_id}/install", status_code=202, dependencies=[Depends(auth_required)])
+def submit_module_install(module_id: str, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    return start_module_operation(module_id, "install", operation_id)
+
+
+@app.delete("/api/mihomo/modules/{module_id}", status_code=202, dependencies=[Depends(auth_required)])
+def submit_module_remove(module_id: str, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    return start_module_operation(module_id, "remove", operation_id)
+
+
+@app.post("/api/mihomo/modules/{module_id}/update", status_code=202, dependencies=[Depends(auth_required)])
+def submit_module_update(module_id: str, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    return start_module_operation(module_id, "update", operation_id)
+
+
 @module_mutation("module-install")
 def install_module(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
@@ -2334,7 +2389,6 @@ def install_module(module_id: str) -> dict[str, Any]:
     return module_payload(module_id)
 
 
-@app.delete("/api/mihomo/modules/{module_id}", dependencies=[Depends(require_mihomo_mutation)])
 @module_mutation("module-remove")
 def remove_module(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
@@ -2362,7 +2416,6 @@ def remove_module(module_id: str) -> dict[str, Any]:
     return module_payload(module_id)
 
 
-@app.post("/api/mihomo/modules/{module_id}/update", dependencies=[Depends(require_mihomo_mutation)])
 @module_mutation("module-update")
 def update_module(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
@@ -3747,7 +3800,6 @@ def get_reconciliation() -> dict[str, Any]:
     return reconciliation_report(False)
 
 
-@app.post("/api/mihomo/reconciliation", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 @transactional_profile_mutation
 def repair_reconciliation() -> dict[str, Any]:
@@ -3854,7 +3906,6 @@ def validate_profile_devices(devices: list[dict[str, Any]], common_id: str, exis
                 raise HTTPException(status_code=422, detail="Индивидуальные устройства регистрируются автоматически по HWID")
 
 
-@app.post("/api/mihomo/profiles", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     if payload.operation_id:
@@ -3905,7 +3956,6 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
     return profile_response(item)
 
 
-@app.patch("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 @transactional_profile_mutation
 def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
@@ -4010,7 +4060,6 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     return profile_response(item)
 
 
-@app.delete("/api/mihomo/profiles/{profile_id}/devices/{device_id}", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 @transactional_profile_mutation
 def delete_profile_device(profile_id: str, device_id: str) -> dict[str, Any]:
@@ -4047,7 +4096,6 @@ def delete_profile_device(profile_id: str, device_id: str) -> dict[str, Any]:
     return {"removed": device_id}
 
 
-@app.delete("/api/mihomo/profiles/{profile_id}", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 @transactional_profile_mutation
 def delete_profile(profile_id: str) -> dict[str, Any]:
@@ -4816,6 +4864,8 @@ def subscription_mutation_access():
 @app.get("/s/{token}", response_class=PlainTextResponse)
 @app.get("/api/mihomo/subscriptions/{token}", response_class=PlainTextResponse)
 def public_profile_subscription(token: str, request: Request, allow_changes: bool = Depends(subscription_mutation_access)) -> PlainTextResponse:
+    if not token.isascii() or len(token) > 512:
+        raise HTTPException(status_code=404, detail="Subscription not found")
     selected_profile: dict[str, Any] | None = None
     bound_device: str | None = None
     for item in profiles():
@@ -4904,3 +4954,79 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
             "Profile-Update-Interval": "24",
         },
     )
+
+
+def execute_module_operation(action: str, module_id: str, identity: str, unit: str) -> bool:
+    from types import SimpleNamespace
+    from service_worker import execute_operation
+    functions = {"install": install_module, "update": update_module, "remove": remove_module, "recover": lambda _: recover_profile_runtime()}
+    if action not in functions:
+        raise ValueError("Unknown module operation")
+    name = f"mihomo-module-{action}:{module_id}"
+    adapter = SimpleNamespace(DATA_DIR=DATA_ROOT.parent, ACTION_FILE=DATA_ROOT.parent / "application-action.json", logger=logger)
+    stored = application_operation.read(adapter.DATA_DIR / "operations" / f"{application_operation.operation_id(identity)}.json")
+    if stored.get("action") != name or stored.get("unit") != unit:
+        raise application_operation.OperationConflict("Module command does not match admission")
+    if stored.get("state") in application_operation.TERMINAL:
+        return stored["state"] == "succeeded"
+    def perform():
+        require_mihomo_management()
+        if action != "recover":
+            manifest(module_id)
+        functions[action](module_id)
+    success = execute_operation(adapter, name, perform, identity, unit)
+    final = application_operation.read(adapter.DATA_DIR / "operations" / f"{identity}.json")
+    payload = {**final, "action": f"module-{action}:{module_id}", "state": "done" if success else "failed"}
+    atomic_json(ACTION_FILE, payload)
+    application_operation.atomic_json(ACTION_FILE.parent / "operations" / f"{identity}.json", {**final, "source": "mihomo"})
+    from operation_log import append
+    append(DATA_ROOT, payload, "mihomo")
+    return success
+
+
+def execute_profile_operation(action: str, path: Path, digest: str, identity: str, unit: str) -> bool:
+    from types import SimpleNamespace
+    from service_worker import execute_operation
+    adapter = SimpleNamespace(DATA_DIR=DATA_ROOT.parent, ACTION_FILE=DATA_ROOT.parent / "application-action.json", logger=logger)
+    def perform():
+        require_mihomo_management()
+        payload = application_operation.load_payload(adapter.DATA_DIR, identity, path, digest)
+        if action == "create":
+            create_profile(ProfileCreate.model_validate(payload["settings"]))
+        elif action == "update":
+            update_profile(payload["profile_id"], ProfileUpdate.model_validate(payload["settings"]))
+        elif action == "delete":
+            delete_profile(payload["profile_id"])
+        elif action == "device-delete":
+            delete_profile_device(payload["profile_id"], payload["device_id"])
+        elif action == "reconcile":
+            repair_reconciliation()
+        elif action == "module-settings":
+            patch_module_settings(payload["module_id"], ModuleSettingsPatch.model_validate(payload["settings"]))
+        else:
+            raise ValueError("Unknown profile operation")
+    stored = application_operation.read(adapter.DATA_DIR / "operations" / f"{application_operation.operation_id(identity)}.json")
+    if stored.get("action") != f"mihomo-profile-{action}" or stored.get("unit") != unit:
+        raise application_operation.OperationConflict("Profile command does not match admission")
+    if stored.get("state") in application_operation.TERMINAL:
+        return stored["state"] == "succeeded"
+    success = execute_operation(adapter, f"mihomo-profile-{action}", perform, identity, unit)
+    final = application_operation.read(adapter.DATA_DIR / "operations" / f"{identity}.json")
+    atomic_json(ACTION_FILE, {**final, "state": "done" if success else "failed"})
+    application_operation.atomic_json(ACTION_FILE.parent / "operations" / f"{identity}.json", {**final, "source": "mihomo"})
+    from operation_log import append
+    append(DATA_ROOT, final, "mihomo")
+    return success
+
+
+if __name__ == "__main__":
+    identity = application_operation.operation_id(os.environ["VPS_CONTROL_OPERATION_ID"])
+    os.environ["VPS_CONTROL_MIHOMO_OPERATION_ID"] = identity
+    unit = os.environ["VPS_CONTROL_OPERATION_UNIT"]
+    if len(sys.argv) == 4 and sys.argv[1] == "--module-operation":
+        success = execute_module_operation(sys.argv[2], sys.argv[3], identity, unit)
+    elif len(sys.argv) == 5 and sys.argv[1] == "--profile-operation":
+        success = execute_profile_operation(sys.argv[2], Path(sys.argv[3]), sys.argv[4], identity, unit)
+    else:
+        raise SystemExit("Unsupported worker invocation")
+    raise SystemExit(0 if success else 1)

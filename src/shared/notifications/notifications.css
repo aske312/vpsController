@@ -51,7 +51,7 @@
 .gateOperationActions { display:flex; align-items:flex-start; gap:6px; min-height:27px; }
 .gateNotificationClose { width:26px; height:26px; display:grid; place-items:center; border:0; border-radius:6px; background:rgba(255,255,255,.04); color:#b9c9d3; font-size:18px; cursor:pointer; }
 .gateNotificationClose:hover { background:rgba(255,255,255,.1); color:#fff; }
-.gateNotificationCancel { width:26px; height:26px; display:grid; place-items:center; border:1px solid color-mix(in srgb, var(--notification-color) 35%, transparent); border-radius:6px; background:transparent; color:var(--notification-color); font-size:18px; line-height:1; cursor:pointer; }
+.gateNotificationCancel { padding:6px 8px; min-height:32px; display:grid; place-items:center; border:1px solid color-mix(in srgb, var(--notification-color) 35%, transparent); border-radius:6px; background:transparent; color:var(--notification-color); font-size:11px; line-height:1.3; cursor:pointer; }
 .gateNotificationCancel:hover { background:color-mix(in srgb, var(--notification-color) 12%, transparent); }
 .gateNotificationCancel:disabled { opacity:.6; cursor:wait; }
 .gateOperationPercent { align-self:center; color:#d9e6ec; font:700 10px/1 var(--font-mono), monospace; }
@@ -83,3 +83,6 @@
 .operationHistoryList p { margin:8px 0; }
 .operationHistoryList details { font-size:12px; margin-top:8px; }
 .operationHistoryList article > div > span { flex-shrink:0; font-size:12px; }
+
+.gateOperationActions { flex-wrap:wrap; }
+.gateOperationText { overflow-wrap:anywhere; }

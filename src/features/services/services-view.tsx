@@ -25,6 +25,7 @@ type Props = {
   onClearLogs: () => void;
   onAutomationChange: (kind: keyof ServicesStatus["automation"], patch: Partial<AutomationSchedule>) => void;
   onSaveAutomation: () => void;
+  onRecoverAutomation: () => void;
 };
 
 type ServiceGroupId = "control" | "network" | "security" | "system";
@@ -98,6 +99,7 @@ export function ServicesDashboard({
   onClearLogs,
   onAutomationChange,
   onSaveAutomation,
+  onRecoverAutomation,
 }: Props) {
   const items = useMemo(() => services?.items || [], [services?.items]);
   const summary = servicesSummary(services);
@@ -234,7 +236,7 @@ export function ServicesDashboard({
             </div>
             <button type="button" className="servicePrimary ghost" onClick={onSaveAutomation} disabled={busy || !services || services.automation_recovery_required}>Сохранить расписание</button>
           </header>
-          {services?.automation_recovery_required && <p role="alert">Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Перед новым применением требуется проверить и восстановить службы; отображаемые настройки могут отличаться от их состояния.</p>}
+          {services?.automation_recovery_required && <p role="alert">Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Отображаемые настройки могут отличаться от состояния служб. <button type="button" disabled={busy} onClick={onRecoverAutomation}>Восстановить расписания</button></p>}
           <div className="maintenanceRows">
             <ScheduleRow title="Перезагрузка" value={automationDraft?.reboot} timer={services?.timers.reboot} busy={busy} onChange={(patch) => onAutomationChange("reboot", patch)} />
             <ScheduleRow title="Очистка" value={automationDraft?.cleanup} timer={services?.timers.cleanup} busy={busy} onChange={(patch) => onAutomationChange("cleanup", patch)} />

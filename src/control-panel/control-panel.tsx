@@ -11,6 +11,8 @@ import type { ApplicationMetadata } from "../shared/types/control-plane";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
+import { AccessReveal } from "../shared/components/access-reveal";
+import { ConfirmationDialog } from "../shared/components/confirmation-dialog";
 import { LegalFooter } from "../shared/components/legal-footer";
 import { ProtocolIcon } from "../shared/components/protocol-icon";
 import { MihomoPage } from "../features/mihomo/mihomo-view";
@@ -19,7 +21,7 @@ import { AppWorkspace } from "./components/app-workspace";
 import { OperationHistory } from "./components/operation-history";
 import { OperationHistorySettings, useOperationHistorySettings } from "../features/services/operation-history-settings";
 import { ServicesDashboard } from "../features/services/services-view";
-import { NetworkView } from "../features/network/network-view";
+import { NetworkView, type NetworkListState } from "../features/network/network-view";
 import { SecurityView } from "../features/security/security-view";
 import { ApplicationView } from "../features/application/application-view";
 import { ProtocolHealthBadge } from "../shared/components/protocol-health-badge";
@@ -135,6 +137,8 @@ type SshAuthorizedKey = { fingerprint: string; type: string; comment?: string; m
 type SshAccessState = { phase: "password" | "key-installed" | "awaiting-confirmation" | "hardened" | "rolled-back" | "open"; fingerprint: string; rollback_deadline?: string | null; message: string; key_login_observed?: boolean; keys?: SshAuthorizedKey[] };
 export function ControlPanel() {
   const [tab, setTab] = useState<Tab>("overview");
+  const [sectionDirty, setSectionDirty] = useState(false);
+  const [networkListState, setNetworkListState] = useState<NetworkListState>({ query: "", expanded: [] });
   const [networkRefreshKey, setNetworkRefreshKey] = useState(0);
   const [selectedChannel, setSelectedChannel] = useState<Protocol>("awg");
   const [token, setToken] = useState("");
@@ -204,7 +208,6 @@ export function ControlPanel() {
   const [newAdminPassword, setNewAdminPassword] = useState("");
   const [confirmAdminPassword, setConfirmAdminPassword] = useState("");
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
-  const [confirmationInput, setConfirmationInput] = useState("");
   const [newClient, setNewClient] = useState({ name: "", protocol: "wg" as Protocol });
   const [newClientVlessRoutes, setNewClientVlessRoutes] = useState<Array<"direct" | "tls" | "cdn">>(["direct"]);
   const [newClientSettings, setNewClientSettings] = useState<NewClientSettings>({ mtu: 1280, keepalive: 25, route_mode: "ipv4", channel_mode: "direct", shadowsocks_mode: "tcp_and_udp", timeout: 300, no_delay: true, fingerprint: "chrome", cdn_domain: "", transport: "xhttp", transport_path: "/", xhttp_mode: "auto", xpadding: "100-1000", xmux_concurrency: 12, sni: "ya.ru", tls_transport: "xhttp", tls_xhttp_mode: "auto", cdn_transport: "websocket", cdn_xhttp_mode: "auto", jc: 6, jmin: 8, jmax: 80, s1: 64, s2: 112, h1: 150000000, h2: 600000000, h3: 1000000000, h4: 1400000000, tls_mode: "pinned", obfs_enabled: false, obfs_password: "", up_mbps: 100, down_mbps: 100, congestion_control: "bbr", heartbeat: "10s", vpn_transport: "udp" });
@@ -220,6 +223,7 @@ export function ControlPanel() {
   const sshAccessLoading = useRef(false);
   const automationDirty = useRef(false);
   const pendingAutomation = useRef<{ id?: string; draft: ServicesStatus["automation"] } | null>(null);
+  const pendingAutomationRecovery = useRef<string | null>(null);
   const loggingDirty = useRef(false);
   const pendingLogging = useRef<{ id?: string; draft: LoggingSettings } | null>(null);
   const metricsDirty = useRef(false);
@@ -230,7 +234,7 @@ export function ControlPanel() {
     sessionStorage.removeItem("312-token");
     pendingConfirmation.current?.resolve(false);
     pendingConfirmation.current = null;
-    setConfirmation(null); setConfirmationInput("");
+    setConfirmation(null);
     setToken(""); setLoginPassword(""); setLoginPasswordVisible(false);
     setCurrentAdminPassword(""); setNewAdminPassword(""); setConfirmAdminPassword("");
     setPasswordDialog(false); setClientDialog(false); setSshAdminDialog(false);
@@ -284,18 +288,43 @@ export function ControlPanel() {
     formatHttpError: (detail, status) => status === 401 ? "Сессия панели завершена. Войдите заново." : publicError(detail, status),
   }), [token]);
 
+  const acceptSystemOperation = useCallback((operation: SystemAction) => {
+    setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: operation }));
+  }, []);
+
   const operationHistoryPolicy = useOperationHistorySettings(request, Boolean(token));
 
   function askConfirmation(options: Omit<ConfirmationRequest, "resolve">): Promise<boolean> {
-    setConfirmationInput("");
-    return new Promise((resolve) => setConfirmation({ ...options, resolve }));
+
+    pendingConfirmation.current?.resolve(false);
+    return new Promise((resolve) => {
+      const next = { ...options, resolve };
+      pendingConfirmation.current = next;
+      setConfirmation(next);
+    });
+  }
+
+  const settingsDirty = sectionDirty || Boolean(loggingDirty.current || automationDirty.current || metricsDirty.current)
+    || Boolean(operationHistoryPolicy.draft && operationHistoryPolicy.saved && JSON.stringify(operationHistoryPolicy.draft) !== JSON.stringify(operationHistoryPolicy.saved));
+  useEffect(() => {
+    if (!settingsDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [settingsDirty]);
+
+  async function navigateTo(next: Tab) {
+    if (next === tab) return;
+    if (sectionDirty && !await askConfirmation({ title: "Уйти без сохранения?", message: "Несохранённые настройки текущего раздела будут потеряны. Серверные настройки не изменятся.", cancelLabel: "Остаться", confirmLabel: "Уйти без сохранения" })) return;
+    setTab(next);
   }
 
   function closeConfirmation(confirmed: boolean) {
-    const current = confirmation;
+    const current = pendingConfirmation.current;
     if (!current) return;
+    pendingConfirmation.current = null;
     setConfirmation(null);
-    setConfirmationInput("");
+
     current.resolve(confirmed);
   }
 
@@ -631,6 +660,15 @@ export function ControlPanel() {
       void loadServices(true);
     }
   }, [application?.action, automationDraft, loadServices]);
+
+  useEffect(() => {
+    const action = application?.action;
+    if (!pendingAutomationRecovery.current || action?.id !== pendingAutomationRecovery.current) return;
+    if (action.state === "succeeded" || action.state === "failed" || action.state === "cancelled") {
+      pendingAutomationRecovery.current = null;
+      void loadServices(true);
+    }
+  }, [application?.action, loadServices]);
 
   // Historical errors and unknown notification cards must not hold a completed
   // command's reload forever. Only the current mutation owns this boundary.
@@ -1286,6 +1324,17 @@ export function ControlPanel() {
     } finally { setBusy(false); }
   }
 
+  async function recoverAutomation() {
+    if (!await askConfirmation({ title: "Восстановить расписания?", message: "Файлы расписаний и состояние таймеров будут восстановлены из снимка перед прерванной операцией. Текущие расписания будут заменены.", confirmLabel: "Восстановить расписания", danger: true })) return;
+    setBusy(true);
+    try {
+      const started = await submitSystemOperation(request, "/services/automation/recover", { method: "POST" });
+      pendingAutomationRecovery.current = started.id || null;
+      setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: started }));
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось начать восстановление расписаний"); }
+    finally { setBusy(false); }
+  }
+
   async function clearManagedLogs() {
     if (!await askConfirmation({
       title: "Очистить все управляемые журналы?",
@@ -1689,7 +1738,7 @@ export function ControlPanel() {
         const channel = installedProtocols.includes(selectedChannel) ? selectedChannel : installedProtocols[0];
         setSelectedChannel(channel);
       }
-      setTab(id as Tab);
+      void navigateTo(id as Tab);
     }}
     commandOperation={cdnCommand.operation}
     onRecheckCommand={cdnCommand.recheck}
@@ -1739,13 +1788,15 @@ export function ControlPanel() {
 
       {tab === "mihomo" && (
         <MihomoPage
+          onSystemOperation={acceptSystemOperation}
+          systemOperation={application?.action}
+          onDirtyChange={setSectionDirty}
           profilesPage={mihomoProfilesPage}
           setProfilesPage={setMihomoProfilesPage}
           token={token}
           readOnly={protocolImages.find((image) => image.id === "mihomo")?.management?.state !== "managed"}
           confirmAction={askConfirmation}
           coreBusy={installingProtocol === "remove-mihomo"}
-          onCommandComplete={requestCommandReload}
           onLoadingChange={handleMihomoLoadingChange}
           onRemoveCore={async () => {
             const image = protocolImages.find((item) => item.id === "mihomo" && item.installed);
@@ -1754,7 +1805,7 @@ export function ControlPanel() {
         />
       )}
 
-      {tab === "network" && <NetworkView request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} />}
+      {tab === "network" && <NetworkView operation={application?.action} onOperation={acceptSystemOperation} listState={networkListState} onListStateChange={setNetworkListState} onDirtyChange={setSectionDirty} request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} />}
 
       {tab === "security" && <SecurityView
         securityLoading={securityLoading}
@@ -1832,6 +1883,7 @@ export function ControlPanel() {
         onClearLogs={() => void clearManagedLogs()}
         onAutomationChange={updateAutomation}
         onSaveAutomation={() => void saveAutomation()}
+        onRecoverAutomation={() => void recoverAutomation()}
       />}
 
       {protocolTab && activeProtocol && <ProtocolView
@@ -1908,12 +1960,14 @@ export function ControlPanel() {
               <div className="connectionGeneratedSummary">
                 <div><span>CONFIGURATION</span><strong>{generatedName}</strong></div>
                 <div><span>PROTOCOL</span><strong>{labels[selectedClientProtocol]}</strong></div>
-                <p>Конфигурация содержит приватный ключ. Передавайте её только владельцу устройства.</p>
+                <p>Конфигурация содержит данные доступа. Передавайте её только владельцу устройства.</p>
               </div>
               <div className="connectionGeneratedGrid">
                 <section className="connectionQrPanel">
                   <header><span>QR CODE</span><strong>Сканирование на устройстве</strong></header>
+                  <AccessReveal key={generatedName}>
                   {generatedQr ? <div className="connectionQrCanvas"><Image src={generatedQr} width={284} height={284} unoptimized alt={`QR-код конфигурации ${generatedName}`} /></div> : <div className="connectionQrCanvas pending"><span>{generatedQrError || "Создаём QR-код…"}</span></div>}
+                  </AccessReveal>
                   <p>{generatedQrError ? "Эта конфигурация слишком велика для QR-кода. Скачайте файл и импортируйте его в клиент протокола." : selectedClientProtocol === "awg" ? "Откройте именно приложение AmneziaWG (не WireGuard) и отсканируйте код." : "Откройте клиент протокола на устройстве и отсканируйте код."}</p>
                 </section>
                 <section className="connectionTransfer">
@@ -1968,27 +2022,7 @@ export function ControlPanel() {
           <div className="confirmActions"><button type="button" onClick={closePasswordDialog}>Отмена</button><button className="confirmPrimary" type="submit" disabled={busy || !currentAdminPassword || newAdminPassword.length < 16 || newAdminPassword !== confirmAdminPassword}>Сохранить пароль</button></div>
         </form>
       </div>}
-      {confirmation && <div className="confirmBackdrop" role="presentation" onMouseDown={() => closeConfirmation(false)}>
-        <form className={`confirmDialog standardConfirmDialog ${confirmation.danger ? "danger" : ""}`} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => {
-          event.preventDefault();
-          if (!confirmation.phrase || confirmationInput === confirmation.phrase) closeConfirmation(true);
-        }}>
-            <header className="standardConfirmHead">
-              <div className="confirmMark" aria-hidden="true">{confirmation.danger ? "!" : "✓"}</div>
-              <div><p className="eyebrow">ПОДТВЕРЖДЕНИЕ ДЕЙСТВИЯ</p><h2 id="confirm-title">{confirmation.title}</h2></div>
-            </header>
-            <div className="standardConfirmBody">
-              <p>{confirmation.message}</p>
-              {confirmation.phrase && <label>Для подтверждения введите <strong>{confirmation.phrase}</strong>
-                <input autoFocus value={confirmationInput} onChange={(event) => setConfirmationInput(event.target.value)} autoComplete="off" />
-              </label>}
-            </div>
-            <div className="confirmActions">
-              <button type="button" onClick={() => closeConfirmation(false)}>Отмена</button>
-              <button className="confirmPrimary" type="submit" disabled={Boolean(confirmation.phrase && confirmationInput !== confirmation.phrase)}>{confirmation.confirmLabel}</button>
-            </div>
-        </form>
-      </div>}
+      {confirmation && <ConfirmationDialog request={confirmation} onClose={closeConfirmation} />}
       <VersionFooter />
   </AppWorkspace>;
 }

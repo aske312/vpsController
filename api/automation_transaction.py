@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import base64
+import json
 import subprocess
 import tempfile
 from pathlib import Path
@@ -68,42 +69,97 @@ def configure(settings: dict, settings_file: Path, control: list[str], *,
             atomic_json(settings_file, settings)
             recovery_file.unlink()
         except Exception as cause:
-            restored = True
-            for unit in states:
-                restored &= command("systemctl", "disable", "--now", unit).returncode == 0
-            for path, snapshot in snapshots.items():
-                try:
-                    if snapshot is None:
-                        path.unlink(missing_ok=True)
-                    else:
-                        path.write_bytes(snapshot[0])
-                        path.chmod(snapshot[1])
-                except OSError:
-                    restored = False
-            restored &= command("systemctl", "daemon-reload").returncode == 0
-            for unit, values in states.items():
-                if values.get("UnitFileState") == "enabled":
-                    restored &= command("systemctl", "enable", unit).returncode == 0
-                if values.get("ActiveState") == "active":
-                    restored &= command("systemctl", "start", unit).returncode == 0
-            for unit, expected in states.items():
-                try:
-                    result = command("systemctl", "show", unit, "--property=LoadState,ActiveState,UnitFileState")
-                    observed = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
-                    restored &= result.returncode in (0, 4) and observed.get("LoadState") == expected.get("LoadState")
-                    if expected.get("LoadState") == "loaded":
-                        restored &= all(observed.get(key) == expected.get(key) for key in ("ActiveState", "UnitFileState"))
-                except (OSError, subprocess.SubprocessError):
-                    restored = False
             try:
-                if previous is None:
-                    settings_file.unlink(missing_ok=True)
-                else:
-                    settings_file.write_bytes(previous)
-                    settings_file.chmod(0o600)
-            except OSError:
-                restored = False
-            if restored:
-                recovery_file.unlink()
-            message = "Не удалось применить расписания; прежние настройки восстановлены" if restored else "Не удалось полностью восстановить расписания; требуется проверка служб"
-            raise RuntimeError(message) from cause
+                recover(settings_file, unit_dir=unit_dir, run=run)
+            except Exception as recovery_error:
+                raise RuntimeError("Не удалось полностью восстановить расписания; требуется проверка служб") from recovery_error
+            raise RuntimeError("Не удалось применить расписания; прежние настройки восстановлены") from cause
+
+
+def recover(settings_file: Path, *, unit_dir=Path("/etc/systemd/system"), run=subprocess.run) -> None:
+    """Restore the persisted snapshot under the caller's mutation lock.
+
+    Validate the complete snapshot before any command or write. Keep it until
+    all files, settings and systemd observations confirm recovery.
+    """
+    recovery_file = settings_file.with_name("automation-recovery.json")
+    if not recovery_file.exists():
+        return
+    value = json.loads(recovery_file.read_text(encoding="utf-8"))
+    expected_units = {f"vps-control-auto-{kind}.timer" for kind in KINDS}
+    expected_paths = {str(unit_dir / f"vps-control-auto-{kind}.{suffix}") for kind in KINDS for suffix in ("service", "timer")}
+    if not isinstance(value, dict) or not isinstance(value.get("states"), dict) or set(value["states"]) != expected_units or not isinstance(value.get("files"), dict) or set(value["files"]) != expected_paths:
+        raise ValueError("Неверный снимок восстановления расписаний")
+    files = {}
+    for name, snapshot in value["files"].items():
+        path = Path(name)
+        if path.is_symlink():
+            raise ValueError("Файл расписания заменён ссылкой; восстановление остановлено")
+        if snapshot is None:
+            files[path] = None
+        else:
+            if not isinstance(snapshot, dict) or type(snapshot.get("mode")) is not int or not 0 <= snapshot["mode"] <= 0o777:
+                raise ValueError("Неверные права в снимке расписаний")
+            files[path] = (base64.b64decode(snapshot["content"], validate=True), snapshot["mode"])
+    for state in value["states"].values():
+        if not isinstance(state, dict) or state.get("LoadState") not in {"loaded", "not-found"}:
+            raise ValueError("Неверное состояние службы в снимке")
+        if state["LoadState"] == "loaded" and (state.get("ActiveState") not in {"active", "inactive"} or state.get("UnitFileState") not in {"enabled", "disabled"}):
+            raise ValueError("Неподдерживаемое состояние службы в снимке")
+    previous = base64.b64decode(value["settings"], validate=True) if value["settings"] is not None else None
+    if settings_file.is_symlink():
+        raise ValueError("Настройки заменены ссылкой; восстановление остановлено")
+
+    def command(*args):
+        return run(list(args), capture_output=True, text=True, timeout=30, check=False)
+
+    failed = []
+    def attempt(callback):
+        try:
+            callback()
+        except Exception as error:
+            failed.append(type(error).__name__)
+
+    def restore(path, snapshot):
+        if snapshot is None:
+            path.unlink(missing_ok=True)
+            return
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".automation-restore-", dir=path.parent)
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as target:
+                target.write(snapshot[0])
+                target.flush()
+                os.fsync(target.fileno())
+            temporary.chmod(snapshot[1])
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    # Missing timers may reject disable; readback below is the authority.
+    for unit in expected_units:
+        attempt(lambda unit=unit: command("systemctl", "disable", "--now", unit))
+    for path, snapshot in files.items():
+        attempt(lambda path=path, snapshot=snapshot: restore(path, snapshot))
+    attempt(lambda: restore(settings_file, (previous, 0o600) if previous is not None else None))
+    result = command("systemctl", "daemon-reload")
+    if result.returncode:
+        failed.append("daemon-reload")
+    if not failed:
+        for unit, state in value["states"].items():
+            if state.get("UnitFileState") == "enabled":
+                attempt(lambda unit=unit: command("systemctl", "enable", unit))
+            if state.get("ActiveState") == "active":
+                attempt(lambda unit=unit: command("systemctl", "start", unit))
+    for unit, expected in value["states"].items():
+        def verify(unit=unit, expected=expected):
+            result = command("systemctl", "show", unit, "--property=LoadState,ActiveState,UnitFileState")
+            observed = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+            if result.returncode not in (0, 4) or observed.get("LoadState") != expected["LoadState"]:
+                raise RuntimeError("Не подтверждена установка таймера")
+            if expected["LoadState"] == "loaded" and any(observed.get(key) != expected[key] for key in ("ActiveState", "UnitFileState")):
+                raise RuntimeError("Не подтверждено восстановление таймера")
+        attempt(verify)
+    if failed:
+        raise RuntimeError("Восстановление расписаний не подтверждено; снимок сохранён")
+    recovery_file.unlink()

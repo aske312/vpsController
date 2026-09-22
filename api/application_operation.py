@@ -95,6 +95,40 @@ def atomic_json(path: Path, value: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def persist_payload(data_dir: Path, identity: str, value: dict) -> tuple[Path, str]:
+    """Caller holds admission lock. Secrets stay out of argv and public history."""
+    identity = operation_id(identity)
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    digest = hashlib.sha256(encoded).hexdigest()
+    path = data_dir / "operation-inputs" / f"{identity}.json"
+    if path.is_symlink():
+        raise OperationConflict("Файл запроса заменён ссылкой")
+    if path.exists():
+        if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            raise OperationConflict("Идентификатор уже используется для другого запроса")
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with path.open("xb") as target:
+            os.chmod(path, 0o600)
+            target.write(encoded)
+            target.flush()
+            os.fsync(target.fileno())
+    return path, digest
+
+
+def load_payload(data_dir: Path, identity: str, path: Path, digest: str) -> dict:
+    expected = data_dir / "operation-inputs" / f"{operation_id(identity)}.json"
+    if path.is_symlink() or path.resolve() != expected.resolve():
+        raise ValueError("Invalid operation payload path")
+    encoded = path.read_bytes()
+    if hashlib.sha256(encoded).hexdigest() != digest:
+        raise ValueError("Operation payload changed after admission")
+    value = json.loads(encoded)
+    if not isinstance(value, dict):
+        raise ValueError("Invalid operation payload")
+    return value
+
+
 @contextmanager
 def locked(data_dir: Path):
     with _mutex:
@@ -122,8 +156,17 @@ def mutation_lock(data_dir: Path):
         _worker_mutex.release()
 
 
+def require_recovery_clear(data_dir: Path, action: str | None = None) -> None:
+    if action in {"mihomo-module-recover:profiles", "dns-recover", "automation-recover", "network-check", "integrity-check", "doctor", "ssh-access-rollback", "ssh-access-disable"}:
+        return
+    pending = [name for name in ("dns-recovery.json", "automation-recovery.json", "mihomo/profile-recovery/manifest.json", "recovery/security-recovery.txt") if (data_dir / name).exists()]
+    if pending:
+        raise OperationConflict("Сначала восстановите прерванные настройки DNS/расписаний/Mihomo/защиты; новые изменения заблокированы")
+
+
 @contextmanager
 def short_mutation(data_dir: Path):
+    require_recovery_clear(data_dir)
     with mutation_lock(data_dir):
         with locked(data_dir):
             current = read(data_dir / "application-action.json")
@@ -138,6 +181,9 @@ def save(data_dir: Path, action_file: Path, value: dict) -> None:
     if value.get("id"):
         atomic_json(data_dir / "operations" / f"{operation_id(value['id'])}.json", value)
     atomic_json(action_file, value)
+    if value.get("id"):
+        from operation_log import append
+        append(data_dir, value)
     if value.get("state") in TERMINAL:
         prune(data_dir, value.get("id"))
 
@@ -155,6 +201,7 @@ def start(data_dir: Path, action_file: Path, action: str, command: list[str], la
                 return reconcile(data_dir, action_file, existing, observe)
             return existing
         with mutation_lock(data_dir):
+            require_recovery_clear(data_dir, action)
             previous = read(action_file)
             if previous.get("id") and observe:
                 previous = reconcile(data_dir, action_file, previous, observe)
@@ -243,6 +290,13 @@ def prune(data_dir: Path, protected: str | None, *, retention_days=None, byte_bu
     retention_days = policy["retention_days"] if retention_days is None else retention_days
     byte_budget = policy["disk_limit_mb"] * 1024 * 1024 if byte_budget is None else byte_budget
     protected_ids = {protected}
+    recovery_root = data_dir.parent if data_dir.name == "mihomo" else data_dir
+    for recovery in (recovery_root / "dns-recovery.json", recovery_root / "automation-recovery.json", recovery_root / "mihomo/profile-recovery/manifest.json", recovery_root / "recovery/security-recovery.txt"):
+        if recovery.exists():
+            try:
+                protected_ids.add(read(recovery).get("operation_id"))
+            except OperationConflict:
+                return  # Preserve recovery evidence when its owner is unknown.
     for marker in (data_dir / "tmp").glob("*/.vps-control-temp.json"):
         try:
             protected_ids.add(json.loads(marker.read_text(encoding="utf-8")).get("operation_id"))
@@ -260,6 +314,14 @@ def prune(data_dir: Path, protected: str | None, *, retention_days=None, byte_bu
             continue
         details = path.stat()
         if value.get("state") in TERMINAL and (details.st_mtime < threshold or total > byte_budget):
+            if directory is None:
+                payload = data_dir / "operation-inputs" / f"{path.stem}.json"
+                if payload.is_symlink():
+                    continue
+                try:
+                    payload.unlink(missing_ok=True)
+                except OSError:
+                    continue
             path.unlink()
             total -= details.st_size
 

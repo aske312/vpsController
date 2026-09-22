@@ -6,6 +6,9 @@ import { createApiClient } from "../../shared/lib/api-request";
 type Policy = {
   retention_days: number;
   disk_limit_mb: number;
+  log_retention_days: number;
+  log_disk_limit_mb: number;
+  logs?: { used_bytes: number; over_limit: boolean };
   revision: string;
   sources: Record<string, { used_bytes: number; over_limit: boolean }>;
 };
@@ -36,7 +39,7 @@ export function useOperationHistorySettings(request: Client, enabled: boolean) {
   const save = async (confirm: Confirmation) => {
     if (!current?.saved || !current.draft || current.saving) return;
     const { saved, draft } = current;
-    if ((draft.retention_days < saved.retention_days || draft.disk_limit_mb < saved.disk_limit_mb) && !await confirm({
+    if ((draft.retention_days < saved.retention_days || draft.disk_limit_mb < saved.disk_limit_mb || draft.log_retention_days < saved.log_retention_days || draft.log_disk_limit_mb < saved.log_disk_limit_mb) && !await confirm({
       title: "Сократить историю операций?", message: "При следующей очистке старые завершённые операции могут быть удалены. Активные операции и операции с неизвестным результатом сохраняются.", confirmLabel: "Сохранить лимиты", danger: true,
     })) return;
     if (currentClient.current !== request) return;
@@ -44,6 +47,7 @@ export function useOperationHistorySettings(request: Client, enabled: boolean) {
     try {
       const result = await request<Policy>(endpoint, { method: "PUT", body: JSON.stringify({
         retention_days: draft.retention_days, disk_limit_mb: draft.disk_limit_mb, expected_revision: draft.revision,
+        log_retention_days: draft.log_retention_days, log_disk_limit_mb: draft.log_disk_limit_mb,
       }) });
       if (currentClient.current === request) setState({ client: request, saved: result, draft: result });
     } catch (error) {
@@ -60,7 +64,7 @@ export function useOperationHistorySettings(request: Client, enabled: boolean) {
     ...current,
     load,
     save,
-    change: (patch: Partial<Pick<Policy, "retention_days" | "disk_limit_mb">>) => setState((previous) => previous?.client === request && previous.draft ? { ...previous, draft: { ...previous.draft, ...patch } } : previous),
+    change: (patch: Partial<Pick<Policy, "retention_days" | "disk_limit_mb" | "log_retention_days" | "log_disk_limit_mb">>) => setState((previous) => previous?.client === request && previous.draft ? { ...previous, draft: { ...previous.draft, ...patch } } : previous),
     reset: () => setState((previous) => previous?.client === request ? { ...previous, draft: previous.saved, error: undefined } : previous),
   };
 }
@@ -70,7 +74,7 @@ export function OperationHistorySettings({ policy, confirm, busy }: {
 }) {
   const { saved, draft, error, saving } = policy;
   const conflict = Boolean(saved && draft && saved.revision !== draft.revision);
-  const valid = draft && Number.isInteger(draft.retention_days) && draft.retention_days >= 1 && draft.retention_days <= 730 && Number.isInteger(draft.disk_limit_mb) && draft.disk_limit_mb >= 1 && draft.disk_limit_mb <= 1024;
+  const valid = draft && [draft.retention_days, draft.log_retention_days].every((value) => Number.isInteger(value) && value >= 1 && value <= 730) && [draft.disk_limit_mb, draft.log_disk_limit_mb].every((value) => Number.isInteger(value) && value >= 1 && value <= 1024);
   return <section className="servicesLog" aria-label="Хранение истории операций">
     <h3>История операций</h3>
     <p>Срок хранения завершённых операций и лимит каждого архива: системы, Mihomo и CDN.</p>
@@ -80,8 +84,13 @@ export function OperationHistorySettings({ policy, confirm, busy }: {
       <label className="opsField"><span>Хранить, дней</span><input type="number" min={1} max={730} value={draft?.retention_days ?? ""} disabled={!draft || busy || saving} onChange={(event) => policy.change({ retention_days: Number(event.target.value) })} /></label>
       <label className="opsField"><span>На каждый архив, МиБ</span><input type="number" min={1} max={1024} value={draft?.disk_limit_mb ?? ""} disabled={!draft || busy || saving} onChange={(event) => policy.change({ disk_limit_mb: Number(event.target.value) })} /></label>
     </div>
+    <div className="opsFields">
+      <label className="opsField"><span>Журналы этапов, дней</span><input type="number" min={1} max={730} value={draft?.log_retention_days ?? ""} disabled={!draft || busy || saving} onChange={(event) => policy.change({ log_retention_days: Number(event.target.value) })} /></label>
+      <label className="opsField"><span>Все журналы этапов, МиБ</span><input type="number" min={1} max={1024} value={draft?.log_disk_limit_mb ?? ""} disabled={!draft || busy || saving} onChange={(event) => policy.change({ log_disk_limit_mb: Number(event.target.value) })} /></label>
+    </div>
+    {saved?.logs && <p>Журналы этапов: {(saved.logs.used_bytes / 1024 / 1024).toFixed(1)} МиБ{saved.logs.over_limit ? " — лимит превышен" : ""}.</p>}
     {saved && <p>{Object.entries(saved.sources).map(([name, source]) => `${({ system: "Система", mihomo: "Mihomo", cdn: "CDN" } as Record<string, string>)[name] ?? name}: ${(source.used_bytes / 1024 / 1024).toFixed(1)} МиБ${source.over_limit ? " — лимит превышен" : ""}`).join("; ")}</p>}
-    <p>Лимиты применяются при следующей очистке истории. Активные, неизвестные операции и записи с нужными временными файлами защищены; поэтому архив может превышать лимит. Подробные журналы настраиваются отдельно.</p>
+    <p>Лимиты применяются при следующей очистке истории. Активные, неизвестные операции и записи с нужными временными файлами защищены; поэтому архив может превышать лимит. Журнал хранит последние 256 этапов операции; вывод команд и секреты не записываются.</p>
     <div className="opsActions">
       <button type="button" className="servicePrimary" disabled={busy || saving || !valid || conflict} onClick={() => void policy.save(confirm)}>{saving ? "Сохранение…" : "Сохранить"}</button>
       <button type="button" disabled={saving || !saved} onClick={policy.reset}>Отменить правки</button>

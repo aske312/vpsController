@@ -11,7 +11,6 @@ const cssFiles = [
 ].map((file) => readFileSync(file, "utf8"));
 
 test("network feature owns its state and styles stay inside the network page", () => {
-  assert.match(panel, /<NetworkView request=\{request\} refreshKey=\{networkRefreshKey\} onLoadingChange=\{handleNetworkLoadingChange\} \/>/);
   assert.doesNotMatch(panel, /const \[dnsDraft|const \[network, setNetwork|readNetworkControl|saveNetworkDns|probeNetworkDns/);
   assert.match(view, /readNetworkControl\(request(?:, [^)]+)?\)/);
   assert.match(view, /data-network-page="true"/);

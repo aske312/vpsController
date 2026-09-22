@@ -87,3 +87,53 @@ test("recovery has a deadline and a later manual check only reads the saved resu
     return { items: [confirmed] };
   }, mutation, () => {}, options), confirmed);
 });
+
+
+test("accepted profile mutation waits for worker success before returning persisted profile", async () => {
+  const id = "a".repeat(32);
+  const currentMutation = { profileId: "profile-1", payload: { operation_id: id } };
+  let writes = 0, polls = 0, profileReads = 0;
+  const result = await submitProfileMutation(async (path, init) => {
+    if (init?.method === "PATCH") {
+      writes++;
+      assert.equal(init.headers["X-Operation-ID"], id);
+      return { id, action: "mihomo-profile-update", state: "queued" };
+    }
+    if (path.startsWith("/application/operations/")) {
+      return { id, action: "mihomo-profile-update", state: ++polls === 1 ? "running" : "succeeded" };
+    }
+    profileReads++;
+    assert.equal(polls, 2);
+    return { items: [{ id: "profile-1", last_operation_id: id }] };
+  }, currentMutation, () => {}, options);
+  assert.equal(result.last_operation_id, id);
+  assert.equal(writes, 1);
+  assert.equal(profileReads, 1);
+});
+
+test("failed durable worker cannot be mistaken for saved profile", async () => {
+  const id = "b".repeat(32);
+  await assert.rejects(submitProfileMutation(async (path, init) => {
+    if (init?.method === "PATCH") return { id, action: "mihomo-profile-update", state: "queued" };
+    assert.ok(path.startsWith("/application/operations/"));
+    return { id, state: "failed", message: "Rollback required" };
+  }, { profileId: "profile-1", payload: { operation_id: id } }, () => {}, options), /Rollback required/);
+});
+
+test("temporary operation lookup failures are retried without repeating the mutation", async () => {
+  const id = "c".repeat(32);
+  let writes = 0, polls = 0;
+  const updates = [];
+  const result = await submitProfileMutation(async (path, init) => {
+    if (init?.method === "PATCH") { writes++; throw interrupted(); }
+    if (path.startsWith("/application/operations/")) {
+      if (++polls <= 2) throw Object.assign(new Error("temporarily unavailable"), { kind: "http", status: polls === 1 ? 404 : 503 });
+      return { id, state: "succeeded" };
+    }
+    return { items: [{ id: "profile-1", last_operation_id: id }] };
+  }, { profileId: "profile-1", payload: { operation_id: id } }, () => {}, { ...options, onOperation: (value) => updates.push(value) });
+  assert.equal(result.last_operation_id, id);
+  assert.equal(writes, 1);
+  assert.equal(polls, 3);
+  assert.equal(updates.length, 1);
+});

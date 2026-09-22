@@ -21,6 +21,53 @@ class ServiceOperationTests(unittest.TestCase):
         self.enterContext(patch.object(api, "observe_service", return_value={"unit_present": None}))
         self.launch = self.enterContext(patch.object(api.subprocess, "run", return_value=SimpleNamespace(returncode=0)))
 
+    def test_network_payload_is_private_and_replay_does_not_repeat_mutation(self):
+        identity = "c" * 32
+        payload = {"cdn_domain": "cdn.example", "cdn_domains": ["cdn.example"]}
+        started = api.start_network_mutation("network-settings", payload, identity)
+        command = self.launch.call_args.args[0]
+        self.assertNotIn("cdn.example", " ".join(command))
+        self.assertEqual(api.start_network_mutation("network-settings", payload, identity)["id"], identity)
+        self.launch.assert_called_once()
+        with self.assertRaises(HTTPException) as failure:
+            api.start_network_mutation("network-settings", {"cdn_domain": "changed.example"}, identity)
+        self.assertEqual(failure.exception.status_code, 409)
+        apply = self.enterContext(patch.object(api, "update_network_endpoints"))
+        path, digest = Path(command[-2]), command[-1]
+        perform = lambda: service_worker.apply_network_request(api, "network-settings", path, digest, identity)
+        self.assertTrue(service_worker.execute_operation(api, "network-settings", perform, identity, started["unit"]))
+        self.assertTrue(service_worker.execute_operation(api, "network-settings", perform, identity, started["unit"]))
+        apply.assert_called_once()
+
+    def test_modified_operation_payload_is_rejected_before_any_change(self):
+        identity = "d" * 32
+        api.start_network_mutation("network-delete", {"kind": "cdn", "domain": "cdn.example"}, identity)
+        command = self.launch.call_args.args[0]
+        path, digest = Path(command[-2]), command[-1]
+        path.write_text('{"kind":"cdn","domain":"another.example"}')
+        with patch.object(api, "delete_network_endpoint") as apply, self.assertRaises(ValueError):
+            service_worker.apply_network_request(api, "network-delete", path, digest, identity)
+        apply.assert_not_called()
+
+    def test_network_revision_conflict_before_admission_and_before_execution(self):
+        with patch.object(api, "NETWORK_ENDPOINTS_FILE", self.root / "network.json"):
+            revision = api.network_settings_revision("network-settings")
+            payload = {"cdn_domain": "cdn.example", "expected_revision": revision}
+            started = api.start_network_mutation("network-settings", payload, "1" * 32)
+            command = self.launch.call_args.args[0]
+            api.NETWORK_ENDPOINTS_FILE.write_text('{"cdn_domain":"new.example"}')
+            replay = api.start_network_mutation("network-settings", payload, "1" * 32)
+            self.assertEqual(replay["id"], started["id"])
+            self.launch.assert_called_once()
+            with patch.object(api, "update_network_endpoints") as apply, self.assertRaises(HTTPException) as failure:
+                service_worker.apply_network_request(api, "network-settings", Path(command[-2]), command[-1], started["id"])
+            self.assertEqual(failure.exception.status_code, 409)
+            apply.assert_not_called()
+            with self.assertRaises(HTTPException) as failure:
+                api.start_network_mutation("network-settings", payload, "2" * 32)
+            self.assertEqual(failure.exception.status_code, 409)
+            self.assertFalse((self.root / "operation-inputs" / ("2" * 32 + ".json")).exists())
+
     def test_ssh_commands_require_auth_and_return_durable_operations(self):
         client = TestClient(api.app)
         cases = [("key", {"public_key": "ssh-ed25519 " + "A" * 80}, "ssh-key-add"),

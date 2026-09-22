@@ -125,7 +125,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /toggleProfileRule/);
   assert.match(page, /device\.routing\?\.\[rule\.key\]/);
   assert.match(page, /new Set\(device\.personal_rule_ids \|\| \[\]\)\.size/);
-  assert.match(page, /routingAutosaveRef/);
+  // UI-Q-02 requires explicit form submission; timer-driven routing writes were removed.
   assert.match(page, /available_rules/);
   assert.match(page, /routingDraft\[selectedRuleList\.key\]/);
   assert.match(routingManifest.settings.map((item) => item.key).join(","), /direct_games/);

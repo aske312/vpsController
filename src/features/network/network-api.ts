@@ -1,3 +1,4 @@
+import { submitSystemOperation } from "../../control-panel/system-operation";
 import type { DnsCheck, DnsSettings, DnsStatus, NetworkEndpointCheck, NetworkEndpointSettings, NetworkStatus } from "../../shared/types/control-plane";
 
 export type NetworkRequest = <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
@@ -13,19 +14,19 @@ export async function readNetworkControl(request: NetworkRequest, force = false)
 }
 
 export function saveNetworkDns(request: NetworkRequest, settings: DnsSettings) {
-  return request<DnsStatus>("/dns/settings", { method: "PUT", body: JSON.stringify(settings) });
+  return submitSystemOperation(request, "/dns/settings", { method: "PUT", body: JSON.stringify({ ...settings, expected_revision: settings.revision }) });
 }
 
 export function saveNetworkEndpoints(request: NetworkRequest, settings: NetworkEndpointSettings) {
-  return request<NetworkStatus>("/network/endpoints", { method: "PUT", body: JSON.stringify(settings) });
+  return submitSystemOperation(request, "/network/endpoints", { method: "PUT", body: JSON.stringify({ ...settings, expected_revision: settings.revision }) });
 }
 
 export function checkNetworkEndpoint(request: NetworkRequest, kind: NetworkEndpointCheck["kind"], domain: string) {
   return request<NetworkEndpointCheck>("/network/endpoints/check", { method: "POST", body: JSON.stringify({ kind, domain }) });
 }
 
-export function deleteNetworkEndpoint(request: NetworkRequest, kind: NetworkEndpointCheck["kind"], domain: string) {
-  return request<NetworkStatus>(`/network/endpoints/${kind}/${encodeURIComponent(domain)}`, { method: "DELETE" });
+export function deleteNetworkEndpoint(request: NetworkRequest, kind: NetworkEndpointCheck["kind"], domain: string, revision?: string) {
+  return submitSystemOperation(request, `/network/endpoints/${kind}/${encodeURIComponent(domain)}`, { method: "DELETE", headers: revision ? { "If-Match": revision } : undefined });
 }
 
 export async function probeNetworkDns(request: NetworkRequest, providerId?: string) {
