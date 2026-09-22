@@ -221,6 +221,36 @@ class MihomoTransactionTests(unittest.TestCase):
             self.assertEqual(json.loads((config / "adapter.json").read_text()), {"before": True})
             self.assertEqual(json.loads(profile.read_text()), [{"id": "before"}])
 
+    def test_reality_rollback_restores_dynamic_user_permissions(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            config = root / "config"
+            reality = config / "reality"
+            reality.mkdir(parents=True)
+            (reality / "config.json").write_text('{}\n', encoding="utf-8")
+            with (
+                patch.object(manager, "CONFIG_ROOT", config),
+                patch.object(manager, "PROFILE_FILE", root / "profiles.json"),
+                patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"),
+                patch.object(manager, "systemctl_active", return_value=False),
+                patch.object(manager.shutil, "chown") as chown,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "injected"):
+                    with manager.profile_runtime_transaction({"transport-reality"}):
+                        raise RuntimeError("injected")
+            chown.assert_any_call(reality, user="root", group="nogroup")
+            chown.assert_any_call(reality / "config.json", user="root", group="nogroup")
+
+    def test_caddy_validation_uses_service_identity_and_storage(self):
+        with patch.object(manager, "run") as run:
+            manager.validate_caddy_config()
+        run.assert_called_once_with(
+            "runuser", "-u", "caddy", "--", "env",
+            "HOME=/var/lib/caddy", "XDG_DATA_HOME=/var/lib/caddy/.local/share",
+            "caddy", "validate", "--config", "/etc/caddy/Caddyfile",
+            check=True,
+        )
+
     def test_batched_reality_apply_restarts_and_reloads_once(self):
         calls = []
 

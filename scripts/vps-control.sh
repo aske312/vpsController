@@ -2410,6 +2410,26 @@ restart_mihomo_manager_if_present() {
     && systemctl restart vps-control-mihomo-manager.service 2>/dev/null || true
 }
 
+# Older Mihomo installations shipped a capability probe as a oneshot service
+# with RemainAfterExit=yes.  That leaves an OnUnitActiveSec timer without a
+# next execution.  Keep existing installations self-healing during every
+# release swap; the drop-in is harmless when the optional probe is absent.
+repair_mihomo_capabilities_timer() {
+  local service="vps-control-mihomo-capabilities.service"
+  local timer="vps-control-mihomo-capabilities.timer"
+  local probe="/usr/local/lib/vps-control-mihomo/probe.py"
+  systemctl list-unit-files "${timer}" --no-legend 2>/dev/null | grep -q . || return 0
+  [[ -f "${probe}" ]] || return 0
+  install -d -m 0755 "/etc/systemd/system/${service}.d"
+  cat >"/etc/systemd/system/${service}.d/10-periodic.conf" <<'EOF'
+[Service]
+RemainAfterExit=no
+EOF
+  systemctl daemon-reload
+  systemctl restart "${timer}"
+  systemctl start "${service}"
+}
+
 # Profiles survive application releases, while their package-backed transport
 # may have been removed by an older uninstaller or an administrator. Repair the
 # runtime before restarting preserved instances; otherwise systemd enters an
@@ -2654,6 +2674,7 @@ install_prebuilt_release() {
     || ! systemctl reload-or-restart caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! restart_mihomo_manager_if_present \
+    || ! repair_mihomo_capabilities_timer \
     || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 \
       "http://127.0.0.1:8000/api/health" >/dev/null \
     || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 \

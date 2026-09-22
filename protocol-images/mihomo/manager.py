@@ -194,6 +194,21 @@ def profile_runtime_transaction(modules: set[str]):
             shutil.rmtree(CONFIG_ROOT)
         if config_backup.exists():
             shutil.copytree(config_backup, CONFIG_ROOT)
+            # copytree preserves modes but creates directories with the
+            # current process owner/group.  The REALITY unit is a DynamicUser
+            # member of nogroup, so a rollback must restore traversal access.
+            if "transport-reality" in modules:
+                reality_root = CONFIG_ROOT / "reality"
+                reality_config = reality_root / "config.json"
+                try:
+                    if reality_root.exists():
+                        shutil.chown(reality_root, user="root", group="nogroup")
+                        os.chmod(reality_root, 0o750)
+                    if reality_config.exists():
+                        shutil.chown(reality_config, user="root", group="nogroup")
+                        os.chmod(reality_config, 0o640)
+                except (OSError, LookupError) as exc:
+                    rollback_errors.append(str(exc))
         if profile_backup.exists():
             PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(profile_backup, PROFILE_FILE)
@@ -434,6 +449,16 @@ def run(*args: str, check: bool = False, input_text: str | None = None) -> subpr
         message = result.stderr.strip() or result.stdout.strip() or f"Command failed: {' '.join(args)}"
         raise RuntimeError(message)
     return result
+
+
+def validate_caddy_config() -> subprocess.CompletedProcess[str]:
+    """Validate with the same identity and storage directory as Caddy."""
+    return run(
+        "runuser", "-u", "caddy", "--", "env",
+        "HOME=/var/lib/caddy", "XDG_DATA_HOME=/var/lib/caddy/.local/share",
+        "caddy", "validate", "--config", "/etc/caddy/Caddyfile",
+        check=True,
+    )
 
 
 def systemctl_active(unit: str) -> bool:
@@ -2483,8 +2508,11 @@ def add_ss_credential(profile_id: str, connection_id: str = "default", connectio
     }
     instance_id = f"{profile_id}-{connection_id}"
     atomic_json(config_dir / f"{instance_id}.json", config)
-    port_allocation.release(f"mihomo:ss:{instance_id}")
     run("systemctl", "enable", "--now", f"vps-control-mihomo-ss@{instance_id}.service", check=True)
+    # Retain the reservation until systemd has started the listener. Releasing
+    # it before enable --now lets the next connection in the same batch select
+    # the same port before it appears in the socket table.
+    port_allocation.release(f"mihomo:ss:{instance_id}")
     if shutil.which("ufw") and run("ufw", "status").stdout.startswith("Status: active"):
         run("ufw", "allow", f"{port}/tcp")
         run("ufw", "allow", f"{port}/udp")
@@ -2951,7 +2979,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         apply_reality_config(config_path, config, restart_service=restart_service)
         port_allocation.release_prefix(allocation_owner + ":")
         if reload_caddy and (settings["cdn_enabled"] or settings["tls_enabled"]):
-            run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
+            validate_caddy_config()
             run("systemctl", "reload", "caddy.service", check=True)
     except Exception:
         write_mihomo_vless_cdn(route_id, False, "", "", 0, rebuild=reload_caddy)
@@ -3443,7 +3471,7 @@ def apply_batched_reality_runtime(restart_service: bool = True) -> None:
         raise RuntimeError("Mihomo Reality server configuration is invalid")
     apply_reality_config(config_path, config, restart_service=False)
     rebuild_vless_cdn_snippet()
-    run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
+    validate_caddy_config()
     firewall_helper = Path("/usr/local/sbin/vps-control-mihomo-vless-firewall")
     if firewall_helper.is_file():
         run(str(firewall_helper), "sync", check=True)
