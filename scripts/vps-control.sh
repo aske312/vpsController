@@ -2456,6 +2456,21 @@ ensure_mihomo_profile_runtimes() {
   systemctl restart vps-control-mihomo-ss.target 2>/dev/null || true
 }
 
+# AmneziaWG is provided by DKMS and must be rebuilt for every running kernel.
+# Debian may install a new kernel before its matching headers, leaving the
+# enabled AWG units failed with "Protocol not supported" after reboot. Repair
+# the module before preserved Mihomo profiles are used by the API.
+ensure_amneziawg_kernel_module() {
+  local units=() headers="linux-headers-$(uname -r)"
+  systemctl list-unit-files --no-legend 'awg-quick@*.service' 2>/dev/null | grep -q . || return 0
+  modprobe -n amneziawg >/dev/null 2>&1 && return 0
+  command -v apt-get >/dev/null 2>&1 || return 1
+  apt-get -o DPkg::Lock::Timeout=300 install -y "${headers}" amneziawg-dkms >/dev/null \
+    || { apt-get -o DPkg::Lock::Timeout=300 update >/dev/null && apt-get -o DPkg::Lock::Timeout=300 install -y "${headers}" amneziawg-dkms >/dev/null; }
+  depmod -a "$(uname -r)"
+  modprobe amneziawg
+}
+
 deploy() {
   check_source
   ensure_runtime_dependencies
@@ -2666,6 +2681,7 @@ install_prebuilt_release() {
     || ! install_protocol_monitor \
     || ! ensure_api_write_access \
     || ! ensure_mihomo_profile_runtimes \
+    || ! ensure_amneziawg_kernel_module \
     || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
     || ! build_commit="$(awk -F= '$1 == "commit" {print $2}' "${INSTALL_DIR}/.prebuilt-release")" \
     || ! printf '%s\n' "${build_commit:-manual}" >"${INSTALL_DIR}/.build-commit" \
