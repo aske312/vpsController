@@ -195,18 +195,11 @@ def profile_runtime_transaction(modules: set[str]):
         if config_backup.exists():
             shutil.copytree(config_backup, CONFIG_ROOT)
             # copytree preserves modes but creates directories with the
-            # current process owner/group.  The REALITY unit is a DynamicUser
+            # current process owner/group. The REALITY unit is a DynamicUser
             # member of nogroup, so a rollback must restore traversal access.
             if "transport-reality" in modules:
-                reality_root = CONFIG_ROOT / "reality"
-                reality_config = reality_root / "config.json"
                 try:
-                    if reality_root.exists():
-                        shutil.chown(reality_root, user="root", group="nogroup")
-                        os.chmod(reality_root, 0o750)
-                    if reality_config.exists():
-                        shutil.chown(reality_config, user="root", group="nogroup")
-                        os.chmod(reality_config, 0o640)
+                    ensure_reality_config_permissions(CONFIG_ROOT / "reality" / "config.json")
                 except (OSError, LookupError) as exc:
                     rollback_errors.append(str(exc))
         if profile_backup.exists():
@@ -494,6 +487,17 @@ def atomic_json(path: Path, value: Any, mode: int = 0o600) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def ensure_reality_config_permissions(config_path: Path) -> None:
+    """Keep the DynamicUser Xray service able to traverse and read its config."""
+    reality_root = config_path.parent
+    if reality_root.exists():
+        shutil.chown(reality_root, user="root", group="nogroup")
+        os.chmod(reality_root, 0o750)
+    if config_path.exists():
+        shutil.chown(config_path, user="root", group="nogroup")
+        os.chmod(config_path, 0o640)
 
 
 def write_action(action: str, message: str, state: str = "running", progress: int = 10, *, public_message: str | None = None) -> None:
@@ -2811,11 +2815,10 @@ def apply_reality_config(config_path: Path, config: dict[str, Any], restart_serv
         candidate.unlink(missing_ok=True)
         raise RuntimeError((result.stderr or result.stdout).strip() or "Xray rejected VLESS configuration")
     os.replace(candidate, config_path)
-    # The Xray unit runs as nobody:nogroup. Keep the generated file readable
-    # after every atomic replace, even when the destination already had an
-    # unexpected owner or mode from a previous manual/runtime write.
-    os.chmod(config_path, 0o640)
-    shutil.chown(config_path, user="root", group="nogroup")
+    # Updates and older rollback code can leave the directory root:root/0750.
+    # Repair traversal as well as the replaced file before systemd starts the
+    # DynamicUser service; fixing only config.json still yields EACCES.
+    ensure_reality_config_permissions(config_path)
     if not restart_service:
         return
     # Profile mutations can legitimately restart Xray several times in a

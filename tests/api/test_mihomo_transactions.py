@@ -241,6 +241,30 @@ class MihomoTransactionTests(unittest.TestCase):
             chown.assert_any_call(reality, user="root", group="nogroup")
             chown.assert_any_call(reality / "config.json", user="root", group="nogroup")
 
+    def test_reality_apply_repairs_directory_traversal_before_restart(self):
+        with tempfile.TemporaryDirectory() as root:
+            config = Path(root) / "reality/config.json"
+            config.parent.mkdir(parents=True)
+            config.write_text('{"inbounds": []}', encoding="utf-8")
+            calls = []
+
+            def run(*args, **kwargs):
+                calls.append(args)
+                return subprocess.CompletedProcess(args, 0, "", "")
+
+            with (
+                patch.object(manager, "run", side_effect=run),
+                patch.object(manager.shutil, "chown"),
+                patch.object(manager, "ensure_reality_config_permissions") as permissions,
+            ):
+                manager.apply_reality_config(config, {"inbounds": []})
+
+            permissions.assert_called_once_with(config)
+            self.assertLess(
+                calls.index((str(manager.REALITY_XRAY_BIN), "run", "-test", "-config", str(config.with_name("config.candidate.json")))),
+                calls.index(("systemctl", "restart", "vps-control-mihomo-reality.service")),
+            )
+
     def test_caddy_validation_uses_service_identity_and_storage(self):
         with patch.object(manager, "run") as run:
             manager.validate_caddy_config()
