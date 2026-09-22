@@ -95,6 +95,13 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 EOF
+install -d -m 0755 /etc/systemd/system/vps-control-mihomo-reality.service.d
+cat >/etc/systemd/system/vps-control-mihomo-reality.service.d/10-config-permissions.conf <<EOF
+[Service]
+ExecStartPre=+/usr/bin/install -d -o root -g nogroup -m 0750 ${CONFIG_DIR}
+ExecStartPre=+/usr/bin/chown root:nogroup ${CONFIG_DIR}/config.json
+ExecStartPre=+/usr/bin/chmod 0640 ${CONFIG_DIR}/config.json
+EOF
 systemctl daemon-reload; systemctl enable vps-control-mihomo-reality.service >/dev/null; systemctl restart vps-control-mihomo-reality.service
 systemctl is-active --quiet vps-control-mihomo-reality.service
 echo "Mihomo/VLESS: ядро готово; подключения создаются в профилях (порты ${PORT_START}/${CDN_PORT_START})"

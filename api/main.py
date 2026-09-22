@@ -295,6 +295,15 @@ def run(*args: str, timeout: int = 8, check: bool = False) -> str:
     return result.stdout.strip()
 
 
+def validate_caddy_config(timeout: int = 15) -> str:
+    """Validate with Caddy's service identity and persistent storage paths."""
+    return run(
+        "runuser", "-u", "caddy", "--", "env",
+        "HOME=/var/lib/caddy", "XDG_DATA_HOME=/var/lib/caddy/.local/share",
+        "caddy", "validate", "--config", "/etc/caddy/Caddyfile", timeout=timeout, check=True,
+    )
+
+
 def command_succeeds(*args: str, timeout: int = 8) -> bool:
     try:
         return subprocess.run(
@@ -5589,11 +5598,11 @@ def update_protocol_settings(
                     "CDN_XHTTP_MODE": cdn_xhttp_mode,
                 }, quoted=False)
                 write_vless_cdn_snippet(cdn_enabled, cdn_domain, reality.get("CDN_PATH", reality.get("WS_PATH", "/")), cdn_transport)
-                run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", timeout=15, check=True)
+                validate_caddy_config()
             if tls_changed:
                 update_key_value_file(VLESS_ENV, {key: reality.get(key, "") for key in ("TLS_ENABLED", "TLS_DOMAIN", "TLS_PORT", "TLS_PATH", "TLS_TRANSPORT", "TLS_XHTTP_MODE")}, quoted=False)
                 write_vless_cdn_snippet(reality.get("CDN_ENABLED") == "yes", reality.get("CDN_DOMAIN", ""), reality.get("CDN_PATH", reality.get("WS_PATH", "/")), reality.get("CDN_TRANSPORT", "websocket"))
-                run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", timeout=15, check=True)
+                validate_caddy_config()
             restart_vless_service()
             if cdn_changed or tls_changed:
                 run("systemctl", "reload", "caddy.service", timeout=20, check=True)

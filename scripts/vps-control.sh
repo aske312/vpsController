@@ -164,6 +164,11 @@ run_with_status() {
   printf '\033[1;32m│  ✔ ГОТОВО\033[0m %s\n' "${label}"
 }
 
+caddy_validate() {
+  runuser -u caddy -- env HOME=/var/lib/caddy XDG_DATA_HOME=/var/lib/caddy/.local/share \
+    caddy validate --config "${CADDY_CONFIG}"
+}
+
 write_action_status() {
   [[ -n "${CURRENT_ACTION}" ]] || return 0
   local state="$1" progress="$2" message="$3"
@@ -2352,7 +2357,7 @@ WantedBy=multi-user.target
 EOF
   install -d -m 0755 /etc/caddy
   write_caddy_config || return
-  caddy validate --config "${CADDY_CONFIG}" >/dev/null || return
+  caddy_validate >/dev/null || return
   systemctl daemon-reload || return
   systemctl enable "${APP_NAME}-web.service" caddy.service >>"${INSTALL_LOG}" 2>&1
 }
@@ -2911,7 +2916,7 @@ change_access_mode() {
   configure_access
   configure_firewall "panel-only"
   write_caddy_config
-  caddy validate --config "${CADDY_CONFIG}" >/dev/null
+  caddy_validate >/dev/null
   systemctl restart caddy.service
   systemctl restart "${APP_NAME}-api.service"
   if [[ "${ACCESS_MODE}" == "vpn" ]]; then
@@ -3372,7 +3377,7 @@ integrity_check() {
   "${INSTALL_DIR}/venv/bin/python" -m py_compile "${INSTALL_DIR}/api/main.py" \
     || die "Python API не проходит синтаксическую проверку."
   [[ -r "${WEB_SERVICE_FILE}" ]] || die "не найден systemd-профиль web ${WEB_SERVICE_FILE}."
-  caddy validate --config "${CADDY_CONFIG}" >/dev/null || die "Caddy содержит ошибку конфигурации."
+  caddy_validate >/dev/null || die "Caddy содержит ошибку конфигурации."
   systemctl is-active --quiet "${APP_NAME}-api.service" || die "API-служба не запущена."
   systemctl is-active --quiet "${APP_NAME}-web.service" || die "web-служба не запущена."
   systemctl is-active --quiet caddy.service || die "Caddy не запущен."
