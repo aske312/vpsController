@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 import hashlib
 import fcntl
@@ -81,16 +82,36 @@ from schemas import (
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global metrics_monitor
+    migration_task = None
     # Linux is the supported server runtime. Importing the API starts no threads.
     if platform.system() == "Linux":
+        migration_task = asyncio.create_task(migrate_legacy_components())
         metrics_monitor = MetricsMonitor(metrics_history_store, collect_system_resources)
         metrics_monitor.start()
     try:
         yield
     finally:
+        if migration_task is not None:
+            migration_task.cancel()
+            try:
+                await migration_task
+            except asyncio.CancelledError:
+                pass
         if metrics_monitor is not None:
             metrics_monitor.stop()
             metrics_monitor = None
+
+
+async def migrate_legacy_components():
+    from component_migration import migrate
+    # Retry admission when an existing worker/recovery gate temporarily owns
+    # the data. Migration never runs as a side effect of reading component state.
+    import sys
+    try:
+        while not await asyncio.to_thread(migrate, sys.modules[__name__]):
+            await asyncio.sleep(5)
+    except Exception:
+        logger.warning("Legacy component migration unavailable; manual adoption remains available")
 
 
 app = FastAPI(title="Infrastructure API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)

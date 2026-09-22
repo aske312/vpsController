@@ -160,7 +160,7 @@ class ComponentRegistry:
             temporary.unlink(missing_ok=True)
         return value
 
-    def adopt(self, image_id: str, paths: list[Path], context: dict, expected_fingerprint: str) -> dict:
+    def adopt(self, image_id: str, paths: list[Path], context: dict, expected_fingerprint: str, *, migrated=False, verify_provenance=None) -> dict:
         with self.locked():
             existing = self.receipt(image_id)
             if existing:
@@ -184,13 +184,16 @@ class ComponentRegistry:
                     os.fsync(raw.fileno())
                 if inventory(paths) != entries:
                     raise RegistryError("Конфигурация изменилась во время копирования; принятие остановлено")
+                if migrated and (verify_provenance is None or not verify_provenance()):
+                    raise RegistryError("Происхождение компонента не подтверждено; автоматическая миграция остановлена")
                 metadata = backup / "manifest.json"
                 with metadata.open("x", encoding="utf-8") as target:
                     os.chmod(metadata, 0o600)
                     json.dump({"schema": 1, "id": image_id, "files": entries, "context": context}, target, ensure_ascii=False)
                     target.flush()
                     os.fsync(target.fileno())
-                self.write_receipt(image_id, "adopted", backup_id=backup_id, fingerprint=expected_fingerprint)
+                self.write_receipt(image_id, "installed" if migrated else "adopted", backup_id=backup_id,
+                                   fingerprint=expected_fingerprint, **({"migration": "legacy-panel-v1"} if migrated else {}))
             except Exception:
                 # Only this just-created, fixed subtree can be removed.
                 boundary = (self.data_dir / "component-backups").resolve()
