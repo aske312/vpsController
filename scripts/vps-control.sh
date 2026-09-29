@@ -438,21 +438,23 @@ build_web() {
   ok "веб-интерфейс собран"
 }
 
-check_ubuntu() {
-  [[ -r /etc/os-release ]] || die "не удалось определить операционную систему."
-  # shellcheck source=/dev/null
-  source /etc/os-release
-  [[ ${ID:-} == "ubuntu" ]] || die "поддерживается только Ubuntu; обнаружена ${PRETTY_NAME:-неизвестная ОС}."
-  [[ -n "${VERSION_ID:-}" ]] || die "не удалось определить версию Ubuntu."
-  case "${VERSION_ID}" in
-    22.04|24.04) ;;
-    *) warn "Ubuntu ${VERSION_ID} не проходила расширенную проверку; продолжаем установку с базовыми проверками." ;;
+check_os() {
+  local ID="" VERSION_ID="" PRETTY_NAME=""
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck source=/dev/null
+    source /etc/os-release
+  fi
+  case "${ID}:${VERSION_ID}" in
+    ubuntu:22.04|ubuntu:24.04|debian:13) ;;
+    *) warn "${PRETTY_NAME:-Неизвестная ОС} не проходила проверку совместимости; продолжаем с проверкой зависимостей apt/dpkg и systemd." ;;
   esac
 }
 
 doctor() {
-  check_ubuntu
+  check_os
   local failed=0 memory_kb disk_kb architecture
+  command -v apt-get >/dev/null && command -v dpkg >/dev/null \
+    && ok "apt/dpkg доступны" || { warn "для установки зависимостей необходимы apt-get и dpkg"; failed=1; }
   architecture="$(dpkg --print-architecture 2>/dev/null || uname -m)"
   case "${architecture}" in amd64|arm64|x86_64|aarch64) ok "архитектура: ${architecture}" ;; *) warn "архитектура ${architecture} не проверена"; failed=1 ;; esac
   command -v systemctl >/dev/null && [[ "$(cat /proc/1/comm 2>/dev/null)" == "systemd" ]] \

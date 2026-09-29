@@ -21,6 +21,8 @@
 # misc
 .DS_Store
 *.pem
+# Public Cloudflare CA shipped with the application, never a private key.
+!/api/resources/cloudflare-origin-pull-ca.pem
 
 # debug
 npm-debug.log*
@@ -35,11 +37,14 @@ yarn-error.log*
 .vercel
 
 # typescript
+*.tsbuildinfo
 next-env.d.ts
 /dist/
 /.wrangler/
 /.runtime/
 /outputs/
+/output/
+/tmp/
 /work/
 .dev-out.log
 .dev-err.log
@@ -54,3 +59,9 @@ __pycache__/
 /.idea/
 /vps-d.txt
 /.servers/
+/.claude/
+/docs/audit/
+/docs/backlog/
+/AGENTS.md
+/docs/plans/
+/docs/direct-audit/

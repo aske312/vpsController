@@ -52,14 +52,23 @@ fi
 
 # Загруженный отдельно файл служит bootstrap и получает полный stabl-архив.
 banner
-if [[ ! -r /etc/os-release ]] || ! grep -q '^ID=ubuntu$' /etc/os-release; then
-  printf 'Ошибка: установщик поддерживает только Ubuntu Server.\n' >&2
+ID="" VERSION_ID="" PRETTY_NAME=""
+if [[ -r /etc/os-release ]]; then
+  # shellcheck source=/dev/null
+  source /etc/os-release
+fi
+case "${ID}:${VERSION_ID}" in
+  ubuntu:22.04|ubuntu:24.04|debian:13) ;;
+  *) printf 'Предупреждение: %s не проходила проверку совместимости; продолжаем с проверкой зависимостей.\n' "${PRETTY_NAME:-Неизвестная ОС}" >&2 ;;
+esac
+if ! command -v apt-get >/dev/null || ! command -v dpkg >/dev/null; then
+  printf 'Ошибка: для установки зависимостей необходимы apt-get и dpkg.\n' >&2
   exit 1
 fi
 
 export DEBIAN_FRONTEND=noninteractive
 : >"${BOOTSTRAP_LOG}"
-run_stage "${yellow}" "Проверяем каталоги Ubuntu" apt-get -o DPkg::Lock::Timeout=300 update
+run_stage "${yellow}" "Обновляем список системных пакетов" apt-get -o DPkg::Lock::Timeout=300 update
 run_stage "${magenta}" "Добавляем инструменты загрузки" apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl tar
 
 BOOTSTRAP_DIR="$(mktemp -d /tmp/vps-control-bootstrap.XXXXXX)"
