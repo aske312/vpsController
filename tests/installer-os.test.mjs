@@ -9,15 +9,19 @@ const bash = process.env.BASH_BIN || (process.platform === "win32"
   : "bash");
 const manager = readFileSync(new URL("../scripts/vps-control.sh", import.meta.url), "utf8");
 const bootstrap = readFileSync(new URL("../scripts/install-panel.sh", import.meta.url), "utf8");
+const amnezia = readFileSync(new URL("../protocol-images/amneziawg/install.sh", import.meta.url), "utf8");
 const checks = [
   ["manager", manager.match(/check_os\(\) \{([\s\S]*?)\n\}/)[1]],
   ["bootstrap", bootstrap.slice(bootstrap.indexOf('ID="" VERSION_ID='), bootstrap.indexOf("export DEBIAN_FRONTEND"))],
+  ["amneziawg", amnezia.slice(amnezia.indexOf('ID="" VERSION_ID='), amnezia.indexOf("export DEBIAN_FRONTEND"))],
 ];
 
 for (const [entry, check] of checks) {
   test(`${entry}: OS detection warns without rejecting unknown distributions`, () => {
     for (const [release, warning] of [
       ['ID=debian\nVERSION_ID="13"', false],
+      ['ID=debian\nVERSION_ID="12"', true],
+      ['ID=ubuntu\nVERSION_ID="26.04"', true],
       ['ID="ubuntu"\nVERSION_ID="24.04"', false],
       ['ID=ubuntu\nVERSION_ID="22.04"', false],
       ['ID=ubuntu\nVERSION_ID="99"', true],
@@ -37,6 +41,7 @@ dpkg() { :; }
 check() {
 ${check.replaceAll("/etc/os-release", '"$release"')}
 }
+
 check
 printf 'CONTINUED\\n'
 `;
@@ -47,3 +52,44 @@ printf 'CONTINUED\\n'
     }
   });
 }
+
+test("kernel update keeps the installed Debian/Ubuntu kernel flavor", () => {
+  const body = manager.match(/installed_kernel_packages\(\) \{([\s\S]*?)\n\}/)[1];
+  for (const [packages, expected] of [
+    ["linux-image-amd64 ii \nlinux-headers-amd64 ii \nlinux-image-6.12.85+deb13-amd64 ii ", ["linux-image-amd64", "linux-headers-amd64"]],
+    ["linux-image-cloud-arm64 ii \nlinux-headers-cloud-arm64 ii ", ["linux-image-cloud-arm64", "linux-headers-cloud-arm64"]],
+    ["linux-generic-hwe-22.04 ii \nlinux-image-generic-hwe-22.04 ii \nlinux-headers-generic-hwe-22.04 ii ", ["linux-generic-hwe-22.04", "linux-image-generic-hwe-22.04", "linux-headers-generic-hwe-22.04"]],
+    ["linux-virtual ii \nlinux-generic rc \nlinux-image-6.8.0-1-generic ii ", ["linux-virtual"]],
+    ["linux-image-custom ii \nlinux-libc-dev:amd64 ii ", []],
+  ]) {
+    const script = `set -Eeuo pipefail\ndpkg-query() { cat <<'PACKAGES'\n${packages}\nPACKAGES\n}\n${body}`;
+    const result = spawnSync(bash, ["-c", script], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split("\n").filter(Boolean), expected);
+  }
+});
+
+test("Node runtime minimum matches the application requirement", () => {
+  const expression = manager.match(/node_runtime_supported\(\) \{\s+node -e '([^']+)'/)[1];
+  for (const [version, supported] of [["20.20.0", false], ["22.12.0", false], ["22.13.0", true], ["22.23.3", true], ["24.0.0", true]]) {
+    const result = spawnSync(process.execPath, ["-e", expression.replace("process.versions.node", JSON.stringify(version))]);
+    assert.equal(result.status, supported ? 0 : 1, version);
+  }
+});
+
+test("SSH management only includes a socket unit when installed", () => {
+  const body = manager.match(/ssh_units_action\(\) \{([\s\S]*?)\n\}/)[1];
+  for (const state of ["loaded", "not-found", ""]) {
+    const script = `set -Eeuo pipefail
+systemctl() {
+  if [[ "$1" == show ]]; then printf '%s' '${state}'; else printf '%s\\n' "$*"; fi
+}
+ssh_units_action() {${body}
+}
+ssh_units_action start
+`;
+    const result = spawnSync(bash, ["-c", script], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), state === "loaded" ? "start ssh.socket ssh.service" : "start ssh.service");
+  }
+});

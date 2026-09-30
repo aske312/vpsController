@@ -17,6 +17,8 @@ rsync -a --delete \
   --exclude '.git/' --exclude '.idea/' --exclude '.runtime/' --exclude '.vinext/' \
   --exclude '.wrangler/' --exclude 'node_modules/' --exclude 'dist/' --exclude 'outputs/' \
   --exclude '.env*' --exclude 'venv/' \
+  --exclude '.servers/' --exclude 'docs/audit/' --exclude 'docs/backlog/' \
+  --exclude 'AGENTS.md' --exclude 'tmp/' --exclude 'output/' --exclude 'work/' \
   "${ROOT_DIR}/" "${STAGE}/"
 
 commit="$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || printf manual)"

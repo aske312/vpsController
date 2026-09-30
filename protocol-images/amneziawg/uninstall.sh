@@ -31,5 +31,6 @@ if path.exists():
     path.chmod(0o600)
 PY
 apt-get -o DPkg::Lock::Timeout=300 purge -y amneziawg amneziawg-tools amneziawg-dkms
+rm -f -- /etc/apt/sources.list.d/vps-control-amneziawg.list /etc/apt/keyrings/vps-control-amneziawg.gpg
 add-apt-repository --remove -y ppa:amnezia/ppa >/dev/null 2>&1 || true
 sysctl --system >/dev/null 2>&1 || true

@@ -1377,7 +1377,7 @@ def managed_services() -> dict[str, dict]:
         "monitor": {"name": "Мониторинг VPN", "unit": "vpn-monitor.timer", "controls": ["start", "stop", "restart"]},
         "fail2ban": {"name": "Fail2ban", "unit": "fail2ban.service", "controls": ["start", "stop", "restart"]},
         "updates": {
-            "name": "Автообновления Ubuntu", "unit": "unattended-upgrades.service",
+            "name": "Автообновления системы", "unit": "unattended-upgrades.service",
             "controls": ["start", "stop", "restart"],
         },
         "ssh": {
@@ -1693,12 +1693,10 @@ def manage_service(service_id: str, payload: ServiceAction, _: None = Depends(re
                 detail="SSH cannot be stopped until the VPN and control panel recovery path are active",
             )
     if service_id == "ssh":
-        if payload.action == "stop":
-            run("systemctl", "stop", "ssh.socket", "ssh.service", timeout=30, check=True)
-        elif payload.action == "start":
-            run("systemctl", "start", "ssh.socket", "ssh.service", timeout=30, check=True)
-        else:
-            run("systemctl", "restart", "ssh.socket", "ssh.service", timeout=30, check=True)
+        units = ["ssh.service"]
+        if run("systemctl", "show", "ssh.socket", "--property=LoadState", "--value") == "loaded":
+            units.insert(0, "ssh.socket")
+        run("systemctl", payload.action, *units, timeout=30, check=True)
     else:
         run("systemctl", payload.action, definition["unit"], timeout=30, check=True)
     return service_details(service_id, definition)

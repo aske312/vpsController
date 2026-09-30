@@ -36,14 +36,47 @@ systemctl is-active --quiet "awg-quick@${AWG_INTERFACE}.service" 2>/dev/null && 
 [[ "${AWG_PORT}" =~ ^[0-9]+$ && "${AWG_PORT}" -ge 1 && "${AWG_PORT}" -le 65535 ]] || { echo "Некорректный UDP-порт" >&2; exit 1; }
 [[ "${AWG_MTU}" =~ ^[0-9]+$ && "${AWG_MTU}" -ge 1280 && "${AWG_MTU}" -le 1420 ]] || { echo "AWG_MTU должен быть от 1280 до 1420" >&2; exit 1; }
 [[ -n "${UPLINK_INTERFACE}" ]] || { echo "Не найден внешний сетевой интерфейс" >&2; exit 1; }
-grep -qi '^ID=ubuntu' /etc/os-release || { echo "Образ поддерживает Ubuntu 22.04/24.04" >&2; exit 1; }
+ID="" VERSION_ID=""
+[[ ! -r /etc/os-release ]] || source /etc/os-release
+case "${ID}:${VERSION_ID}" in
+  ubuntu:22.04|ubuntu:24.04|debian:13) ;;
+  *) echo "Предупреждение: ОС не проверена с AmneziaWG; продолжаем с проверкой зависимостей." >&2 ;;
+esac
+command -v apt-get >/dev/null && command -v dpkg >/dev/null \
+  || { echo "Для установки AmneziaWG необходимы apt-get и dpkg." >&2; exit 1; }
 
 export DEBIAN_FRONTEND=noninteractive
 if ! command -v awg >/dev/null 2>&1 || ! command -v awg-quick >/dev/null 2>&1 || ! modinfo amneziawg >/dev/null 2>&1; then
   apt-get -o DPkg::Lock::Timeout=300 update
-  apt-get -o DPkg::Lock::Timeout=300 install -y software-properties-common python3-launchpadlib gnupg2 "linux-headers-$(uname -r)" iptables
-  if ! grep -Rqs 'ppa.launchpadcontent.net/amnezia/ppa' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
-    add-apt-repository -y ppa:amnezia/ppa
+  headers="linux-headers-$(uname -r)"
+  if [[ ! -e "/lib/modules/$(uname -r)/build/Makefile" ]] && ! apt-cache show "${headers}" >/dev/null 2>&1; then
+    echo "Не найдены ${headers}. Установите заголовки именно запущенного ядра либо обновите ядро и перезагрузите сервер перед повторной установкой." >&2
+    exit 1
+  fi
+  apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl gnupg kmod "${headers}" iptables
+  if [[ "${ID}" == ubuntu ]]; then
+    apt-get -o DPkg::Lock::Timeout=300 install -y software-properties-common python3-launchpadlib
+    if ! grep -Rqs 'ppa.launchpadcontent.net/amnezia/ppa' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+      add-apt-repository -y ppa:amnezia/ppa
+    fi
+  else
+    # Official Debian installation uses the focal PPA; apt-key is absent on Debian 13.
+    key_fingerprint="75C9DD72C799870E310542E24166F2C257290828"
+    key_file="$(mktemp)"
+    trap 'rm -f -- "${key_file}"' EXIT
+    curl --fail --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 \
+      "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x${key_fingerprint}" >"${key_file}"
+    actual_fingerprint="$(gpg --batch --show-keys --with-colons "${key_file}" | awk -F: '$1 == "fpr" {print $10; exit}')"
+    [[ "${actual_fingerprint}" == "${key_fingerprint}" ]] || { echo "Не совпадает отпечаток ключа репозитория AmneziaWG." >&2; exit 1; }
+    install -d -m 0755 /etc/apt/keyrings
+    gpg --batch --yes --dearmor --output /etc/apt/keyrings/vps-control-amneziawg.gpg "${key_file}"
+    chmod 0644 /etc/apt/keyrings/vps-control-amneziawg.gpg
+    printf '%s\n' \
+      'deb [signed-by=/etc/apt/keyrings/vps-control-amneziawg.gpg] https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main' \
+      'deb-src [signed-by=/etc/apt/keyrings/vps-control-amneziawg.gpg] https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main' \
+      >/etc/apt/sources.list.d/vps-control-amneziawg.list
+    rm -f -- "${key_file}"
+    trap - EXIT
   fi
   apt-get -o DPkg::Lock::Timeout=300 update
   apt-get -o DPkg::Lock::Timeout=300 install -y amneziawg

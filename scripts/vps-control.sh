@@ -472,21 +472,25 @@ doctor() {
   ok "сервер совместим с установкой 312.net."
 }
 
+node_runtime_supported() {
+  node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 13) ? 0 : 1)' >/dev/null 2>&1
+}
+
 install_packages() {
   info "Установка системных зависимостей"
   export DEBIAN_FRONTEND=noninteractive
   install -d -m 0750 "$(dirname -- "${INSTALL_LOG}")"
   prepare_package_manager
   run_with_status "Загрузка списка пакетов" apt-get -o DPkg::Lock::Timeout=300 update
-  run_with_status "Установка системных зависимостей" apt-get -o DPkg::Lock::Timeout=300 install -y auditd build-essential ca-certificates caddy curl fail2ban git iproute2 openssh-server openssl procps python3 python3-venv rsync tar ufw unattended-upgrades
-  if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1 || [[ "$(node -p 'process.versions.node.split(`.`)[0]' 2>/dev/null || echo 0)" -lt 22 ]]; then
+  run_with_status "Установка системных зависимостей" apt-get -o DPkg::Lock::Timeout=300 install -y auditd build-essential ca-certificates caddy curl fail2ban git iproute2 iputils-ping openssh-server openssl procps python3 python3-venv rsync tar ufw unattended-upgrades
+  if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1 || ! node_runtime_supported; then
     run_with_status "Подключение Node.js 22" bash -c 'curl -fsSL https://deb.nodesource.com/setup_22.x | bash -'
     run_with_status "Установка Node.js 22" apt-get -o DPkg::Lock::Timeout=300 install -y nodejs
   fi
 }
 
 secure_server() {
-  info "Настройка защиты Ubuntu"
+  info "Настройка защиты системы"
   apt-get update
   apt-get install -y auditd fail2ban unattended-upgrades
   install -d -m 0755 /etc/fail2ban/jail.d
@@ -699,6 +703,13 @@ sync_release() {
     --exclude '.git/' \
     --exclude '.idea/' \
     --exclude '.openai/' \
+    --exclude '.servers/' \
+    --exclude 'docs/audit/' \
+    --exclude 'docs/backlog/' \
+    --exclude 'AGENTS.md' \
+    --exclude 'tmp/' \
+    --exclude 'output/' \
+    --exclude 'work/' \
     --include '.env.example' \
     --exclude '.env*' \
     --exclude 'node_modules/' \
@@ -768,7 +779,7 @@ ensure_runtime_dependencies() {
       return
     fi
   done
-  if [[ "$(node -p 'process.versions.node.split(`.`)[0]' 2>/dev/null || echo 0)" -lt 22 ]]; then
+  if ! node_runtime_supported; then
     install_packages
   fi
 }
@@ -1026,10 +1037,18 @@ restart_services() {
   ok "Панель перезапущена."
 }
 
+ssh_units_action() {
+  local units=(ssh.service)
+  if [[ "$(systemctl show ssh.socket --property=LoadState --value 2>/dev/null)" == loaded ]]; then
+    units=(ssh.socket "${units[@]}")
+  fi
+  systemctl "$1" "${units[@]}"
+}
+
 prepare_update_ssh() {
   if ! systemctl is-active --quiet ssh.service && ! systemctl is-active --quiet ssh.socket; then
     info "Временный запуск SSH на время обновления"
-    systemctl start ssh.socket ssh.service
+    ssh_units_action start
     SSH_TEMP_STARTED="yes"
   fi
   if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
@@ -1046,7 +1065,7 @@ restore_update_ssh() {
     SSH_TEMP_RULE="no"
   fi
   if [[ "${SSH_TEMP_STARTED}" == "yes" ]]; then
-    systemctl stop ssh.socket ssh.service >/dev/null 2>&1 || true
+    ssh_units_action stop >/dev/null 2>&1 || true
     SSH_TEMP_STARTED="no"
   fi
 }
@@ -1294,7 +1313,7 @@ with open(path, "w", encoding="utf-8") as stream:
                "enabled_at": datetime.now(timezone.utc).isoformat()}, stream)
 os.chmod(path, 0o600)
 PY
-    systemctl start ssh.socket ssh.service
+    ssh_units_action start
     ufw allow OpenSSH
     change_access_mode "$1" external
     ok "сервисный режим включён; версия приложения не изменена."
@@ -1322,22 +1341,29 @@ PY
     change_access_mode "$1" "${previous_access}"
     [[ "${ssh_public}" == "yes" ]] || ufw delete allow OpenSSH >/dev/null 2>&1 || true
     [[ "${ssh_service_active}" == "yes" ]] || systemctl stop ssh.service
-    [[ "${ssh_socket_active}" == "yes" ]] || systemctl stop ssh.socket
+    if [[ "${ssh_socket_active}" != "yes" && "$(systemctl show ssh.socket --property=LoadState --value 2>/dev/null)" == loaded ]]; then
+      systemctl stop ssh.socket
+    fi
     ok "сервисный режим выключен; исходные состояния восстановлены."
   fi
 }
 
+installed_kernel_packages() {
+  dpkg-query -W -f='${binary:Package} ${db:Status-Abbrev}\n' 'linux-*' 2>/dev/null \
+    | awk '$2 == "ii" {
+      sub(/:.*/, "", $1)
+      if ($1 ~ /^linux-(image-|headers-)?(generic|virtual|aws|azure|gcp|oracle|raspi)(-[a-zA-Z0-9.+-]+)?$/ ||
+          $1 ~ /^linux-(image|headers)-(cloud-|rt-)?(amd64|arm64)$/) print $1
+    }'
+}
+
 update_kernel() {
-  info "Проверка обновления ядра Ubuntu"
+  info "Проверка обновления ядра"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
   local packages=()
-  for package in linux-virtual linux-generic linux-image-virtual linux-headers-virtual linux-image-generic linux-headers-generic; do
-    if dpkg-query -W -f='${db:Status-Abbrev}' "${package}" 2>/dev/null | grep -q '^ii'; then
-      packages+=("${package}")
-    fi
-  done
-  ((${#packages[@]})) || die "не найден поддерживаемый метапакет ядра Ubuntu."
+  mapfile -t packages < <(installed_kernel_packages)
+  ((${#packages[@]})) || die "не найден установленный метапакет ядра Debian/Ubuntu; обновление произвольного ядра автоматически не выполняется."
   if apt-get -s install --only-upgrade "${packages[@]}" 2>/dev/null | grep -q '^Inst '; then
     REBOOT_AFTER_UPDATE="yes"
   fi
@@ -1651,8 +1677,8 @@ usage() {
   network-check    проверить интернет, панель и установленные WG/AWG-туннели
   integrity-check  проверить файлы, права, конфигурацию и компоненты приложения
   identity         повторно определить IP и геолокацию сервера
-  secure           установить и включить базовую защиту Ubuntu
-  kernel-update    обновить ядро Ubuntu
+  secure           установить и включить базовую защиту системы
+  kernel-update    обновить установленные метапакеты ядра Debian/Ubuntu
   vpn-firewall     восстановить маршрутизацию и NAT установленных WG/AWG
   optimize         очистить безопасные кэши и старые журналы
   automation-apply применить сохранённые расписания обслуживания
