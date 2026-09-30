@@ -131,17 +131,26 @@ restore_update_gateway
             (installed / "venv/bin/python").chmod(0o755)
             (installed / "venv/.requirements.sha256").write_text("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n")
             (installed / "original").write_text("working release")
+            (payload / ".prebuilt-release").write_text(
+                "schema=1\nedition=pro\nchannel=production\nversion=v1.0.0\n"
+                "commit=0000000000000000000000000000000000000000\n"
+                "platform=linux\narchitecture=amd64\n"
+            )
             subprocess.run(["bash", "-c", "sha256sum .prebuilt-release > release.sha256"], cwd=payload, check=True)
             archive = root / "release.tar.gz"
             subprocess.run(["tar", "-czf", str(archive), "vps-control-release"], cwd=root, check=True)
             script = f'''set -eu
 INSTALL_DIR={shlex.quote(str(installed))}
+PRODUCT_EDITION=pro
 ACCESS_MODE=vpn
 HTTP_PORT=8080
 mktemp() {{ command mktemp -d {shlex.quote(temp)}/stage.XXXXXX; }}
 python3() {{ case "$1" in *{failing_script}) return 17;; *) return 0;; esac; }}
 systemctl() {{ touch {shlex.quote(temp)}/services-touched; return 91; }}
+system_architecture() {{ printf amd64; }}
+ensure_product_identity() {{ return 0; }}
 die() {{ exit 43; }}
+{function('release_metadata_value')}
 {function('install_prebuilt_release')}
 install_prebuilt_release install-release {shlex.quote(str(archive))}
 '''
