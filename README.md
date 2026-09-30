@@ -20,16 +20,16 @@
 
 ```bash
 apt-get update && apt-get install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh -o /root/install-312.sh
-bash /root/install-312.sh
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh -o /root/install-312.sh
+bash /root/install-312.sh --edition pro
 ```
 
 Под пользователем с `sudo`:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/stabl/scripts/install-panel.sh -o install-312.sh
-sudo bash ./install-312.sh
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh -o install-312.sh
+sudo bash ./install-312.sh --edition pro
 ```
 
 Для панели с доменом заранее направьте A-запись на IPv4 сервера и откройте TCP-порты 80 и 443:
@@ -64,7 +64,7 @@ sudo vps-control install-release /root/vps-control-release.tar.gz
 
 ## Разработка
 
-Ветка `main` используется для разработки, `stabl` — для стабильных установок и обновлений.
+Ветка `test-pro` используется для разработки, `pro` — для production-установок и обновлений. Публичная точка установки находится в ветке `installer`.
 
 ## Лицензия
 

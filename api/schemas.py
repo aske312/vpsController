@@ -26,7 +26,7 @@ class SshKeyDelete(BaseModel):
 
 
 class ApplicationAction(BaseModel):
-    action: Literal["restart", "update", "test-update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "safe-update", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
+    action: Literal["restart", "update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "safe-update", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
 
 
 class ComponentPurge(BaseModel):

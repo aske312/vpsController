@@ -3565,7 +3565,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
 
 @app.post("/api/application/action")
 def application_action(payload: ApplicationAction, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
-    if payload.action in ("test-update", "test-rollback") and not SERVICE_MODE_FILE.exists():
+    if payload.action == "test-rollback" and not SERVICE_MODE_FILE.exists():
         raise HTTPException(status_code=409, detail="Test version requires active service mode")
     bundled_command = INSTALL_DIR / "scripts" / "vps-control.sh"
     command = (["/bin/bash", str(bundled_command), payload.action] if bundled_command.exists() else [CONTROL_COMMAND, payload.action])
@@ -3584,7 +3584,7 @@ def cancel_application_action(_: None = Depends(require_token)) -> dict:
         raise HTTPException(status_code=409, detail="Application action state is unavailable") from exc
     unit = str(action.get("unit", ""))
     state = str(action.get("state", ""))
-    if action.get("action") not in {"update", "test-update", "test-rollback", "safe-update", "kernel-update"}:
+    if action.get("action") not in {"update", "test-rollback", "safe-update", "kernel-update"}:
         raise HTTPException(status_code=409, detail="Эта операция не поддерживает безопасную остановку из панели")
     if not re.fullmatch(r"vps-control-action-[0-9]+\.service", unit):
         raise HTTPException(status_code=409, detail="This operation cannot be rolled back from the panel")
@@ -3706,7 +3706,7 @@ def installed_build_commit() -> str:
 
 
 def expected_application_branch() -> str:
-    return "main" if SERVICE_MODE_FILE.exists() and TEST_BACKUP_DIR.is_dir() else "stabl"
+    return "test-pro" if SERVICE_MODE_FILE.exists() and TEST_BACKUP_DIR.is_dir() else "pro"
 
 
 def application_repository_url() -> str:

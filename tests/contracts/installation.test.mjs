@@ -107,94 +107,46 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /--retry 18 --retry-all-errors --retry-delay 5/);
   assert.match(readme, /Ubuntu Server 22\.04, 24\.04, 26\.04 или Debian 12\/13/);
   assert.match(readme, /apt-get install -y ca-certificates curl/);
-  assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/stabl\/scripts\/install-panel\.sh/);
+  assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/installer\/install\.sh/);
   assert.match(readme, /Отдельно запускать `vps-control update` не требуется/);
   assert.match(readme, /установка/i);
   assert.equal(JSON.parse(wg).id, "wg");
   assert.equal(JSON.parse(awg).id, "awg");
 });
 
-test("service mode deploys main from an isolated preview while stabl remains the production channel", async () => {
-  const [api, page, manager, stablWorkflow] = await Promise.all([
+test("test-pro creates private artifacts and installs them only from a local archive", async () => {
+  const [api, page, manager, workflow] = await Promise.all([
     readApiSources(), readUiSources(), read("scripts/vps-control.sh"),
-    read(".github/workflows/stabl-release.yml"),
+    read(".github/workflows/ci.yml"),
   ]);
-  assert.match(manager, /PRODUCTION_BRANCH="stabl"/);
-  assert.doesNotMatch(manager, /SERVICE_BRANCH=/);
-  assert.match(manager, /update_prebuilt_branch "\$\{PRODUCTION_BRANCH\}" "stabl-latest"/);
-  assert.match(manager, /update_test_branch\(\)/);
-  assert.doesNotMatch(manager, /archive\/refs\/heads\/main\.tar\.gz/);
-  assert.doesNotMatch(manager, /archive\/\$\{latest\}\.tar\.gz/);
-  assert.match(manager, /mktemp -d "\$\{DATA_DIR\}\/tmp\/update\.XXXXXX"/);
-  assert.match(manager, /releases\/download\/main-latest\/vps-control-main\.tar\.gz/);
-  assert.match(manager, /refs\/tags\/main-latest/);
-  assert.match(manager, /curl --fail --location --silent --show-error --range 0-0/);
-  assert.doesNotMatch(manager, /curl[^\n]*--head/);
-  assert.match(manager, /release_commit.*== "\$\{latest\}"/s);
-  assert.match(manager, /STABL_RELEASE_WAIT_ATTEMPTS=30/);
-  assert.match(manager, /MAIN_RELEASE_WAIT_ATTEMPTS=90/);
-  assert.match(manager, /for attempt in \$\(seq 1 "\$\{MAIN_RELEASE_WAIT_ATTEMPTS\}"\)/);
-  assert.match(manager, /--max-time "\$\{UPDATE_DOWNLOAD_TIMEOUT\}"/);
-  assert.match(manager, /подготовленный релиз не соответствует актуальной ревизии ветки \$\{branch\}/);
-  assert.match(manager, /vpn-monitor\.timer vps-control-auto-reboot\.timer/);
-  assert.match(manager, /"ssh_service_was_active": ssh_service == "yes"/);
-  assert.match(manager, /"ssh_socket_was_active": ssh_socket == "yes"/);
-  assert.match(manager, /сервисный режим включён; версия приложения не изменена/);
-  assert.match(manager, /переход на тестовую версию разрешён только в сервисном режиме/);
-  assert.match(api, /payload\.action in \("test-update", "test-rollback"\) and not SERVICE_MODE_FILE\.exists\(\)/);
-  assert.match(api, /def expected_application_branch\(\)/);
-  assert.match(api, /return "main" if SERVICE_MODE_FILE\.exists\(\) and TEST_BACKUP_DIR\.is_dir\(\) else "stabl"/);
-  assert.match(api, /branch = expected_application_branch\(\)/);
-  assert.match(api, /expected_branch = expected_application_branch\(\)/);
-  assert.match(api, /cached\.get\("current_commit"\) != installed_commit/);
-  assert.match(page, /applicationVersion\?\.branch \|\| "—"/);
-  assert.match(page, /setAutoRefresh\(false\)/);
-  assert.match(page, /const autoRefreshAfterChange = autoRefresh/);
-  assert.match(page, /setAutoRefresh\(autoRefreshAfterChange\)/);
-  assert.match(page, /className=\{`refreshControl \$\{autoRefresh \? "active" : ""\}`\}/);
-  assert.match(page, /className="autoButton" disabled=\{busy\} onClick=\{onToggleAutoRefresh\}/);
-  assert.match(page, /className="iconButton" onClick=\{onRefresh\}/);
-  assert.doesNotMatch(page, /autoRefreshLabel/);
-  assert.doesNotMatch(page, /disabled=\{serviceModeActive\}.*Авто · выкл/);
-  assert.match(page, /serviceModeActive && <button onClick=\{\(\) => void runApplicationAction\("test-update"\)\}/);
-  assert.match(page, /Переход на тестовую версию/);
-  assert.match(page, /application\?\.service_mode\?\.rollback_available/);
-  assert.match(page, /Rollback/);
-  assert.match(manager, /TEST_BACKUP_DIR="\$\{DATA_DIR\}\/test-app-backup"/);
-  assert.match(manager, /restore_test_app\(\)/);
-  assert.match(manager, /cloudflare-origin-pull-ca\.pem/);
-  assert.match(manager, /systemctl daemon-reload/);
-  assert.match(manager, /Keep the marker until the final access configuration succeeds/);
-  assert.match(manager, /if \[\[ -d "\$\{TEST_BACKUP_DIR\}" \]\]; then\s+info "возврат к сохранённой стабильной версии перед выключением сервисного режима"\s+restore_test_app/s);
-  assert.match(page, /Будет восстановлена стабильная версия stabl/);
-  assert.match(stablWorkflow, /branches: \[stabl, main\]/);
-  assert.match(stablWorkflow, /gh release create stabl-latest/);
-  assert.match(stablWorkflow, /gh release create main-latest/);
-  assert.match(stablWorkflow, /npm run lint/);
-  assert.match(stablWorkflow, /npm run typecheck/);
-  assert.match(stablWorkflow, /npm test/);
+  assert.match(manager, /PRODUCT_EDITION="pro"/);
+  assert.match(manager, /PRODUCTION_BRANCH="pro"/);
+  assert.match(manager, /PRODUCTION_RELEASE_TAG="pro-latest"/);
+  assert.doesNotMatch(manager, /main-latest|update_test_branch\(\)/);
+  assert.match(manager, /test-update <архив>/);
+  assert.match(manager, /install_prebuilt_release install-release "\$\{archive\}" yes test/);
+  assert.match(manager, /PRODUCT_FILE="\$\{DATA_DIR\}\/product\.json"/);
+  assert.match(manager, /архив редакции \$\{release_edition:-unknown\} нельзя установить поверх \$\{PRODUCT_EDITION\}/);
+  assert.match(api, /payload\.action == "test-rollback" and not SERVICE_MODE_FILE\.exists\(\)/);
+  assert.match(api, /return "test-pro" if SERVICE_MODE_FILE\.exists\(\) and TEST_BACKUP_DIR\.is_dir\(\) else "pro"/);
+  assert.doesNotMatch(page, /runApplicationAction\("test-update"\)/);
+  assert.match(page, /production-версия PRO/);
+  assert.match(workflow, /branches: \[test-pro\]/);
+  assert.match(workflow, /RELEASE_CHANNEL: test/);
+  assert.match(workflow, /actions\/upload-artifact@v4/);
+  assert.match(workflow, /ubuntu-24\.04-arm/);
+  assert.doesNotMatch(workflow, /gh release|contents: write/);
 });
 
-test("main preview is built off-VPS and interrupted updates cannot report success", async () => {
-  const [workflow, manager, api] = await Promise.all([
-    read(".github/workflows/stabl-release.yml"),
-    read("scripts/vps-control.sh"),
-    readApiSources(),
+test("PRO test metadata binds edition, channel, architecture and full commit", async () => {
+  const [builder, manager, api] = await Promise.all([
+    read("scripts/build-release.sh"), read("scripts/vps-control.sh"), readApiSources(),
   ]);
-  const previewWorkflow = workflow.split("  preview:")[1] || "";
-  assert.match(workflow, /Build main preview package/);
-  assert.match(previewWorkflow, /npm run check:preview/);
-  assert.doesNotMatch(previewWorkflow, /needs: api-tests|npm test|unittest discover/);
-  assert.match(previewWorkflow, /python3 -m compileall -q api protocol-images/);
-  assert.match(previewWorkflow, /bash -n "\$script"/);
-  const apiTestsWorkflow = workflow.split("  api-tests:")[1]?.split("  release:")[0] || "";
-  assert.match(apiTestsWorkflow, /if: github.ref_name == 'stabl'/);
-  const releaseWorkflow = workflow.split("  release:")[1]?.split("  preview:")[0] || "";
-  assert.match(releaseWorkflow, /needs: api-tests/);
-  assert.match(releaseWorkflow, /npm test/);
-  assert.match(workflow, /vps-control-main\.tar\.gz/);
-  assert.match(workflow, /gh release create main-latest/);
-  assert.doesNotMatch(manager, /BUILD_COMMIT="\$\{latest\}".*build-release/s);
+  assert.match(builder, /RELEASE_EDITION="\$\{RELEASE_EDITION:-pro\}"/);
+  assert.match(builder, /RELEASE_CHANNEL="\$\{RELEASE_CHANNEL:-test\}"/);
+  assert.match(builder, /schema=1/);
+  assert.match(builder, /Release requires a full git commit SHA/);
+  assert.match(manager, /release_schema.*release_edition.*release_channel.*release_architecture.*release_commit/s);
   assert.match(manager, /rollback_interrupted_update/);
   assert.match(manager, /Update was interrupted after the application swap; restoring the previous release/);
   assert.match(manager, /UPDATE_SWAP_ACTIVE="yes"/);
@@ -204,7 +156,6 @@ test("main preview is built off-VPS and interrupted updates cannot report succes
   assert.match(api, /Операция прервана перезагрузкой/);
   assert.match(api, /int\(action\.get\("progress"/);
   assert.match(api, /awaiting_final_status[\s\S]*total_seconds\(\) < 30/);
-  assert.match(manager, /write_action_status "succeeded" 100 "Тестовое обновление установлено и проверено"/);
 });
 
 test("missing main preview is reported as not installed rather than a broken server update", async () => {
@@ -302,7 +253,7 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(releaseInstall, /PROJECT_DIR="\$\{INSTALL_DIR\}"\s+if ! write_caddy_config/);
   assert.match(releaseInstall, /http:\/\/127\.0\.0\.1:3000\//);
   assert.match(page, /runApplicationAction\("update"\)/);
-  assert.match(page, /стабильная версия stabl/);
+  assert.match(page, /production-версия PRO/);
   assert.match(readme, /Ручное обновление без сборки на VPS/);
   assert.match(manager, /TimeoutStopSec=15/);
   assert.match(manager, /KillMode=mixed/);
