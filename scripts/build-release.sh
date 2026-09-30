@@ -21,9 +21,20 @@ rsync -a --delete \
   --exclude 'AGENTS.md' --exclude 'tmp/' --exclude 'output/' --exclude 'work/' \
   "${ROOT_DIR}/" "${STAGE}/"
 
-commit="$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || printf manual)"
+RELEASE_EDITION="${RELEASE_EDITION:-light}"
+RELEASE_CHANNEL="${RELEASE_CHANNEL:-production}"
+[[ "${RELEASE_EDITION}" == "light" ]] || { echo "Invalid release edition: ${RELEASE_EDITION}" >&2; exit 1; }
+[[ "${RELEASE_CHANNEL}" == "production" || "${RELEASE_CHANNEL}" == "test" ]] \
+  || { echo "Invalid release channel: ${RELEASE_CHANNEL}" >&2; exit 1; }
+commit="${BUILD_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || printf manual)}"
+[[ "${commit}" =~ ^[0-9a-f]{40}$ ]] || { echo "Release requires a full git commit SHA: ${commit}" >&2; exit 1; }
 app_version="${RELEASE_VERSION:-$(node -e 'const p=require(process.argv[1]); const v=String(p.version||"1.0.0").split("."); process.stdout.write("v"+[v[0]||"1",v[1]||"0",v[2]||"0"].join("."))' "${ROOT_DIR}/package.json")}"
 [[ "${app_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid release version: ${app_version}" >&2; exit 1; }
+case "$(uname -m)" in
+  x86_64|amd64) release_architecture="amd64" ;;
+  aarch64|arm64) release_architecture="arm64" ;;
+  *) echo "Unsupported release architecture: $(uname -m)" >&2; exit 1 ;;
+esac
 
 (
   cd "${ROOT_DIR}"
@@ -57,7 +68,9 @@ NODE
   node --input-type=module -e "await import('rolldown')"
 )
 
-printf 'version=%s\ncommit=%s\nbuilt_at=%s\nplatform=linux\n' "${app_version}" "${commit}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"${STAGE}/.prebuilt-release"
+printf 'schema=1\nedition=%s\nchannel=%s\nversion=%s\ncommit=%s\nbuilt_at=%s\nplatform=linux\narchitecture=%s\n' \
+  "${RELEASE_EDITION}" "${RELEASE_CHANNEL}" "${app_version}" "${commit}" \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${release_architecture}" >"${STAGE}/.prebuilt-release"
 (
   cd "${STAGE}"
   find . -type f ! -name release.sha256 -print0 | sort -z | xargs -0 sha256sum >release.sha256

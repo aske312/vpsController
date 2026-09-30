@@ -1301,12 +1301,12 @@ def application_status(_: None = Depends(require_token)) -> dict:
 
 
 class ApplicationAction(BaseModel):
-    action: Literal["restart", "update", "test-update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
+    action: Literal["restart", "update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
 
 
 @app.post("/api/application/action")
 def application_action(payload: ApplicationAction, _: None = Depends(require_token)) -> dict:
-    if payload.action in ("test-update", "test-rollback") and not SERVICE_MODE_FILE.exists():
+    if payload.action == "test-rollback" and not SERVICE_MODE_FILE.exists():
         raise HTTPException(status_code=409, detail="Test version requires active service mode")
     if ACTION_FILE.exists():
         try:
@@ -1413,7 +1413,7 @@ def refresh_application_version_cache() -> None:
         return
     try:
         current = installed_build_commit()
-        branch = "stabl"
+        branch = "light"
         repository = application_repository_url()
         latest = ""
         error = ""
@@ -1449,7 +1449,7 @@ def application_version_status() -> dict:
     except (OSError, json.JSONDecodeError):
         pass
     age = time.time() - APP_VERSION_FILE.stat().st_mtime if APP_VERSION_FILE.exists() else float("inf")
-    expected_branch = "stabl"
+    expected_branch = "light"
     installed_commit = installed_build_commit()
     refreshing = (
         age > 600

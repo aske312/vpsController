@@ -17,7 +17,7 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /doctor\)/);
   assert.match(manager, /install\)/);
   assert.match(manager, /update\)/);
-  assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/stabl\/scripts\/install-panel\.sh/);
+  assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/installer\/install\.sh/);
   assert.match(readme, /Возможные ошибки установки/);
   assert.match(readme, /установка/i);
   assert.equal(JSON.parse(wg).id, "wg");
@@ -160,36 +160,40 @@ test("service settings are staged, saved explicitly and survive background refre
   assert.match(manager, /install -m 0755 "\$\{PROJECT_DIR\}\/scripts\/vps-control\.sh" "\$\{COMMAND_PATH\}"/);
 });
 
-test("service mode exposes an explicit main test release while stabl remains production", async () => {
+test("Light keeps production updates public and accepts test builds only from local archives", async () => {
   const [api, page, manager] = await Promise.all([
     read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"),
   ]);
-  assert.match(manager, /PRODUCTION_BRANCH="stabl"/);
+  assert.match(manager, /PRODUCT_EDITION="light"/);
+  assert.match(manager, /PRODUCTION_BRANCH="light"/);
+  assert.match(manager, /PRODUCTION_RELEASE_TAG="light-latest"/);
   assert.doesNotMatch(manager, /SERVICE_BRANCH=/);
-  assert.match(manager, /update_prebuilt_branch "\$\{PRODUCTION_BRANCH\}" "stabl-latest"/);
-  assert.match(manager, /update_prebuilt_branch "main" "main-latest"/);
-  assert.match(manager, /APP_TEST_RELEASE_URL/);
+  assert.match(manager, /update_prebuilt_branch "\$\{PRODUCTION_BRANCH\}" "\$\{PRODUCTION_RELEASE_TAG\}"/);
+  assert.doesNotMatch(manager, /main-latest|APP_TEST_RELEASE_URL/);
   assert.match(manager, /for attempt in \$\(seq 1 48\)/);
   assert.match(manager, /подготовленный релиз не соответствует актуальной ревизии ветки \$\{branch\}/);
+  assert.match(manager, /test-update <архив>/);
+  assert.match(manager, /install_prebuilt_release install-release "\$\{archive\}" yes test/);
   assert.match(manager, /vpn-monitor\.timer vps-control-auto-reboot\.timer/);
   assert.match(manager, /"ssh_service_was_active": ssh_service == "yes"/);
   assert.match(manager, /"ssh_socket_was_active": ssh_socket == "yes"/);
   assert.match(manager, /сервисный режим включён; версия приложения не изменена/);
   assert.match(manager, /переход на тестовую версию разрешён только в сервисном режиме/);
-  assert.match(api, /payload\.action in \("test-update", "test-rollback"\) and not SERVICE_MODE_FILE\.exists\(\)/);
-  assert.match(api, /branch = "stabl"/);
-  assert.match(api, /expected_branch = "stabl"/);
+  assert.match(api, /payload\.action == "test-rollback" and not SERVICE_MODE_FILE\.exists\(\)/);
+  assert.match(api, /branch = "light"/);
+  assert.match(api, /expected_branch = "light"/);
   assert.match(api, /cached\.get\("current_commit"\) != installed_commit/);
-  assert.match(page, /applicationVersion\.branch \|\| "stabl"/);
+  assert.match(page, /applicationVersion\.branch \|\| "light"/);
   assert.match(page, /setAutoRefresh\(false\)/);
   assert.match(page, /if \(active\) autoRefreshBeforeServiceMode\.current = autoRefresh/);
   assert.match(page, /setAutoRefresh\(autoRefreshBeforeServiceMode\.current\)/);
-  assert.match(page, /serviceModeActive && <button onClick=\{\(\) => void runApplicationAction\("test-update"\)\}/);
-  assert.match(page, /Переход на тестовую версию/);
+  assert.doesNotMatch(page, /runApplicationAction\("test-update"\)/);
   assert.match(page, /application\?\.service_mode\?\.rollback_available/);
   assert.match(page, /Вернуться к рабочей версии/);
   assert.match(manager, /TEST_BACKUP_DIR="\$\{DATA_DIR\}\/test-app-backup"/);
   assert.match(manager, /restore_test_app\(\)/);
+  assert.match(manager, /PRODUCT_FILE="\$\{DATA_DIR\}\/product\.json"/);
+  assert.match(manager, /архив редакции \$\{release_edition:-unknown\} нельзя установить поверх \$\{PRODUCT_EDITION\}/);
 });
 
 test("live system status refreshes below one second without overlapping heavy checks", async () => {
@@ -327,7 +331,10 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.doesNotMatch(manager.match(/install_prebuilt_release\(\) \{([\s\S]*?)\n\}/)?.[1] || "", /apt-get|npm |docker (build|compose)/);
   assert.doesNotMatch(api, /Application updates require a prepared release archive/);
   assert.match(page, /runApplicationAction\("update"\)/);
-  assert.match(page, /основной ветки stabl/);
+  assert.match(page, /production-релиз Light/);
+  assert.match(builder, /schema=1/);
+  assert.match(builder, /RELEASE_EDITION="\$\{RELEASE_EDITION:-light\}"/);
+  assert.match(builder, /RELEASE_CHANNEL="\$\{RELEASE_CHANNEL:-production\}"/);
   assert.match(readme, /Ручное обновление без сборки на VPS/);
   assert.match(manager, /TimeoutStopSec=15/);
   assert.match(manager, /KillMode=mixed/);

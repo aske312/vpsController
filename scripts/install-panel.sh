@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 REPOSITORY="${VPS_CONTROL_REPOSITORY:-https://github.com/aske312/vpsController}"
-BRANCH="${VPS_CONTROL_BRANCH:-stabl}"
+BRANCH="${VPS_CONTROL_BRANCH:-light}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BOOTSTRAP_DIR=""
 BOOTSTRAP_LOG="/tmp/vps-control-bootstrap.log"
@@ -50,7 +50,7 @@ if [[ -x "${SCRIPT_DIR}/vps-control.sh" ]]; then
   exec "${SCRIPT_DIR}/vps-control.sh" install "$@"
 fi
 
-# Загруженный отдельно файл служит bootstrap и получает полный stabl-архив.
+# Загруженный отдельно файл служит bootstrap и получает полный архив Light.
 banner
 ID="" VERSION_ID="" PRETTY_NAME=""
 if [[ -r /etc/os-release ]]; then

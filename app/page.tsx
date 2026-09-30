@@ -656,7 +656,7 @@ export default function Home() {
       title: active ? "Включить сервисный режим?" : "Завершить сервисный режим?",
       message: active
         ? "Будет безопасно развёрнута ветка service. Панель станет публичной, SSH будет запущен, фоновые проверки и автоматические задачи будут приостановлены."
-        : "Сначала будет развёрнута и проверена ветка main. Только после успешной проверки восстановятся доступ, SSH и автоматические задачи.",
+        : "Будет восстановлена production-версия Light, сохранённая перед локальной test-сборкой. Только после успешной проверки восстановятся доступ, SSH и автоматические задачи.",
       confirmLabel: active ? "Включить режим" : "Завершить обслуживание",
       danger: active,
     })) return;
@@ -1202,7 +1202,7 @@ export default function Home() {
               : applicationVersion?.error
                 ? applicationVersion.error
                 : applicationVersion?.outdated
-                  ? `Устарела: ${applicationVersion.current_commit || "unknown"} · ${applicationVersion.branch || "stabl"}: ${applicationVersion.latest_commit || "unknown"}`
+                  ? `Устарела: ${applicationVersion.current_commit || "unknown"} · ${applicationVersion.branch || "light"}: ${applicationVersion.latest_commit || "unknown"}`
                   : `Актуальна: ${applicationVersion?.current_commit || "unknown"} · ветка ${applicationVersion?.branch || "main"}`}
           />
           <SecurityRow ok={Boolean(securitySystem?.apparmor?.active)} title="AppArmor" text={`${securitySystem?.apparmor?.profiles || 0} профилей · ${securitySystem?.apparmor?.active ? "активен" : "выключен"}`} />
@@ -1260,8 +1260,7 @@ export default function Home() {
           <div className="panelHead"><div><p className="eyebrow">SUDO VPS-CONTROL</p><h2>Доступные действия</h2></div></div>
           <div className="actionButtons">
             <button onClick={() => void runApplicationAction("restart")} disabled={busy}><strong>Перезапустить приложение</strong><small>Перезапускает панель и API без перезагрузки VPS</small></button>
-            <button onClick={() => void runApplicationAction("update")} disabled={busy}><strong>Обновить приложение</strong><small>Устанавливает проверенный релиз из основной ветки stabl</small></button>
-            {serviceModeActive && <button onClick={() => void runApplicationAction("test-update")} disabled={busy}><strong>Переход на тестовую версию</strong><small>Устанавливает подготовленный тестовый релиз из ветки main</small></button>}
+            <button onClick={() => void runApplicationAction("update")} disabled={busy}><strong>Обновить приложение</strong><small>Устанавливает проверенный production-релиз Light</small></button>
             {serviceModeActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={busy}><strong>Вернуться к рабочей версии</strong><small>Восстанавливает приложение, сохранённое перед переходом на main</small></button>}
             <button onClick={() => void runApplicationAction("network-check")} disabled={busy}><strong>Проверить подключения</strong><small>Проверяет интернет, WG, AWG и доступность портов</small></button>
             <button onClick={() => void runApplicationAction("integrity-check")} disabled={busy}><strong>Проверить целостность</strong><small>Проверяет файлы, права доступа и настройки компонентов</small></button>

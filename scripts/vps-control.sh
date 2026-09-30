@@ -4,6 +4,7 @@ set -Eeuo pipefail
 APP_NAME="vps-control"
 INSTALL_DIR="/opt/${APP_NAME}"
 DATA_DIR="/var/lib/${APP_NAME}"
+PRODUCT_FILE="${DATA_DIR}/product.json"
 TEST_BACKUP_DIR="${DATA_DIR}/test-app-backup"
 ENV_FILE="/etc/${APP_NAME}.env"
 MANAGER_CONFIG="/etc/${APP_NAME}-manager.conf"
@@ -48,7 +49,10 @@ SSH_TEMP_RULE="no"
 APP_VERSION="v1.0.0"
 BUILD_COMMIT="unknown"
 PRESERVE_MANAGER="no"
-PRODUCTION_BRANCH="stabl"
+PRODUCT_EDITION="light"
+PRODUCTION_BRANCH="light"
+PRODUCTION_RELEASE_TAG="light-latest"
+TEST_BRANCH="test-light"
 ACTION_FILE="${DATA_DIR}/application-action.json"
 AUTOMATION_FILE="${DATA_DIR}/automation.json"
 SERVICE_MODE_FILE="${DATA_DIR}/service-mode.json"
@@ -202,6 +206,50 @@ ok() {
 }
 warn() { printf '\033[1;33m!\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
+
+system_architecture() {
+  case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
+    amd64|x86_64) printf 'amd64\n' ;;
+    arm64|aarch64) printf 'arm64\n' ;;
+    *) die "неподдерживаемая архитектура сервера." ;;
+  esac
+}
+
+release_metadata_value() {
+  local metadata="$1" key="$2"
+  awk -F= -v key="${key}" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "${metadata}"
+}
+
+ensure_product_identity() {
+  local mode="${1:-write}"
+  install -d -m 0750 "${DATA_DIR}"
+  python3 - "${PRODUCT_FILE}" "${PRODUCT_EDITION}" "${mode}" <<'PY'
+import json, os, sys, tempfile
+path, expected, mode = sys.argv[1:]
+if os.path.exists(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            actual = json.load(handle).get("edition")
+    except (OSError, ValueError, AttributeError) as exc:
+        raise SystemExit(f"invalid product identity: {exc}")
+    if actual != expected:
+        raise SystemExit(f"installed edition is {actual!r}, expected {expected!r}")
+    raise SystemExit(0)
+if mode == "check":
+    raise SystemExit(0)
+directory = os.path.dirname(path)
+fd, temporary = tempfile.mkstemp(prefix="product.", dir=directory, text=True)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump({"schema": 1, "edition": expected}, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PY
+}
 
 cleanup_update_dir() {
   [[ -n "${UPDATE_TEMP_DIR}" ]] || return 0
@@ -1071,7 +1119,8 @@ restore_update_ssh() {
 }
 
 install_prebuilt_release() {
-  local archive="${2:-}" preserve_previous="${3:-no}" archive_path archive_listing stage_root payload rollback requirements_hash installed_requirements_hash build_commit legacy_runtime="no"
+  local archive="${2:-}" preserve_previous="${3:-no}" expected_channel="${4:-production}" archive_path archive_listing stage_root payload rollback requirements_hash installed_requirements_hash build_commit legacy_runtime="no"
+  local metadata release_schema release_edition release_channel release_architecture release_commit
   [[ -n "${archive}" ]] || die "укажите путь к подготовленному vps-control-release.tar.gz."
   archive_path="$(readlink -f -- "${archive}")"
   [[ -f "${archive_path}" ]] || die "архив релиза не найден: ${archive}."
@@ -1089,6 +1138,18 @@ install_prebuilt_release() {
     cd "${payload}"
     sha256sum -c release.sha256 >/dev/null
   ) || { rm -rf -- "${stage_root}"; die "контрольные суммы подготовленного релиза не совпали."; }
+  metadata="${payload}/.prebuilt-release"
+  release_schema="$(release_metadata_value "${metadata}" schema)"
+  release_edition="$(release_metadata_value "${metadata}" edition)"
+  release_channel="$(release_metadata_value "${metadata}" channel)"
+  release_architecture="$(release_metadata_value "${metadata}" architecture)"
+  release_commit="$(release_metadata_value "${metadata}" commit)"
+  [[ "${release_schema}" == "1" ]] || { rm -rf -- "${stage_root}"; die "неподдерживаемая схема метаданных релиза."; }
+  [[ "${release_edition}" == "${PRODUCT_EDITION}" ]] || { rm -rf -- "${stage_root}"; die "архив редакции ${release_edition:-unknown} нельзя установить поверх ${PRODUCT_EDITION}."; }
+  [[ "${release_channel}" == "${expected_channel}" ]] || { rm -rf -- "${stage_root}"; die "ожидался канал ${expected_channel}, получен ${release_channel:-unknown}."; }
+  [[ "${release_architecture}" == "$(system_architecture)" ]] || { rm -rf -- "${stage_root}"; die "архив предназначен для другой архитектуры."; }
+  [[ "${release_commit}" =~ ^[0-9a-f]{40}$ ]] || { rm -rf -- "${stage_root}"; die "архив не содержит полный commit SHA."; }
+  ensure_product_identity || { rm -rf -- "${stage_root}"; die "идентичность установленной редакции не прошла проверку."; }
   [[ -x "${payload}/node_modules/.bin/vinext" && -f "${payload}/dist/server/index.js" && -f "${payload}/api/main.py" ]] \
     || { rm -rf -- "${stage_root}"; die "в архиве отсутствует готовая web/API-сборка."; }
 
@@ -1161,11 +1222,11 @@ update_prebuilt_branch() {
   elif [[ "${remote}" =~ ^ssh://git@github\.com/(.+)$ ]]; then
     remote="https://github.com/${BASH_REMATCH[1]}"
   fi
-  [[ "${branch}" == "stabl" || "${branch}" == "main" ]] || die "неподдерживаемая ветка приложения."
+  [[ "${branch}" == "${PRODUCTION_BRANCH}" ]] || die "готовые релизы публикуются только из ветки ${PRODUCTION_BRANCH}."
   latest="$(git ls-remote "${remote}" "refs/heads/${branch}" 2>/dev/null | awk 'NR == 1 {print $1}')"
   [[ "${latest}" =~ ^[0-9a-f]{40}$ ]] || die "не удалось получить актуальную ревизию ветки ${branch}."
   current="$(cat "${INSTALL_DIR}/.build-commit" 2>/dev/null || true)"
-  if [[ -n "${current}" && "${latest}" == "${current}"* ]]; then
+  if [[ -n "${current}" && "${latest}" == "${current}" ]]; then
     ok "установлена актуальная версия ветки ${branch} (${current})."
     return 0
   fi
@@ -1188,14 +1249,10 @@ update_prebuilt_branch() {
   [[ "${ready}" == "yes" ]] \
     || die "релиз для актуальной версии ${branch} не опубликован; проверьте GitHub Actions."
 
-  if [[ "${branch}" == "main" ]]; then
-    release_url="${APP_TEST_RELEASE_URL:-}"
-  else
-    release_url="${APP_RELEASE_URL:-}"
-  fi
+  release_url="${APP_RELEASE_URL:-}"
   if [[ -z "${release_url}" && "${remote}" =~ ^https://github\.com/([^/]+/[^/]+)$ ]]; then
     repository_path="${BASH_REMATCH[1]%.git}"
-    release_url="https://github.com/${repository_path}/releases/download/${release_tag}/vps-control-release.tar.gz"
+    release_url="https://github.com/${repository_path}/releases/download/${release_tag}/vps-control-${PRODUCT_EDITION}-linux-$(system_architecture).tar.gz"
   fi
   [[ "${release_url}" =~ ^https:// ]] || die "не настроен HTTPS-адрес подготовленного релиза ${branch}."
 
@@ -1207,28 +1264,26 @@ update_prebuilt_branch() {
     --connect-timeout 15 --max-time 900 --output "${archive}" "${release_url}"
   release_commit="$(tar -xOf "${archive}" vps-control-release/.prebuilt-release 2>/dev/null \
     | awk -F= '$1 == "commit" {print $2}')"
-  [[ "${release_commit}" =~ ^[0-9a-f]{7,40}$ && "${latest}" == "${release_commit}"* ]] \
+  [[ "${release_commit}" =~ ^[0-9a-f]{40}$ && "${latest}" == "${release_commit}" ]] \
     || die "подготовленный релиз не соответствует актуальной ревизии ветки ${branch}."
 
-  if [[ "${branch}" == "main" ]]; then
-    if [[ -d "${TEST_BACKUP_DIR}" ]]; then
-      install_prebuilt_release install-release "${archive}"
-    else
-      install_prebuilt_release install-release "${archive}" yes
-    fi
-  else
-    install_prebuilt_release install-release "${archive}"
-  fi
+  install_prebuilt_release install-release "${archive}"
   ok "приложение обновлено до ${branch} ${release_commit}."
 }
 
 update_app() {
-  update_prebuilt_branch "${PRODUCTION_BRANCH}" "stabl-latest"
+  update_prebuilt_branch "${PRODUCTION_BRANCH}" "${PRODUCTION_RELEASE_TAG}"
 }
 
 update_test_app() {
+  local archive="${2:-}"
   [[ -r "${SERVICE_MODE_FILE}" ]] || die "переход на тестовую версию разрешён только в сервисном режиме."
-  update_prebuilt_branch "main" "main-latest"
+  [[ -n "${archive}" ]] || die "укажите путь к локальному test-архиву."
+  if [[ -d "${TEST_BACKUP_DIR}" ]]; then
+    install_prebuilt_release install-release "${archive}" no test
+  else
+    install_prebuilt_release install-release "${archive}" yes test
+  fi
 }
 
 restore_test_app() {
@@ -1665,9 +1720,10 @@ usage() {
   start            запустить API и веб-панель
   stop             остановить панель
   restart          перезапустить панель
-  update           обновить приложение проверенным релизом основной ветки stabl
-  test-update      перейти на подготовленную тестовую версию ветки main (только сервисный режим)
-  test-rollback    вернуться к версии приложения, сохранённой перед переходом на main
+  update           обновить Light проверенным production-релизом ветки light
+  test-update <архив>
+                   установить локальную test-сборку Light (только сервисный режим)
+  test-rollback    вернуться к production-версии, сохранённой перед test-сборкой
   install-release <архив>
                    вручную установить заранее собранный Linux-релиз без Docker, npm и apt
   status           показать состояние сервисов
@@ -1719,15 +1775,17 @@ main() {
       ui_done "сервер совместим"
       ui_stage "Системные зависимости"
       install_packages
+      ensure_product_identity check
       ui_done "зависимости установлены"
       ui_stage "Сетевой доступ панели"
       configure_firewall
       ui_done "правила доступа применены"
       ui_stage "Подготовка источника обновлений"
       save_source_path
-      ui_done "ветка stabl назначена источником релизов"
+      ui_done "ветка light назначена источником релизов"
       ui_stage "Развёртывание локальной версии"
       deploy full
+      ensure_product_identity
       verify_app
       ui_done "локальная версия установлена"
       ui_stage "Режим обновлений"
@@ -1749,7 +1807,7 @@ main() {
     stop) stop_services ;;
     restart) check_vpn; restart_services ;;
     update) update_app ;;
-    test-update) update_test_app ;;
+    test-update) update_test_app "$@" ;;
     test-rollback) restore_test_app ;;
     status) status_app ;;
     logs) logs_app "$@" ;;
