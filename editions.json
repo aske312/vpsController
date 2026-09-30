@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "repository": "aske312/vpsController",
+  "editions": {
+    "light": {
+      "name": "Light",
+      "branch": "light",
+      "release_tag": "light-latest",
+      "installer": "scripts/install-panel.sh"
+    },
+    "pro": {
+      "name": "PRO",
+      "branch": "pro",
+      "release_tag": "pro-latest",
+      "installer": "scripts/install-panel.sh"
+    }
+  }
+}
