@@ -134,7 +134,7 @@ bash() {
                     script = (ROOT / source).read_text(encoding='utf-8')
                     for prefix in ('/etc/', '/usr/local/', '/var/lib/', '/opt/'):
                         script = script.replace(prefix, folder + prefix)
-                    stubs = 'systemctl() { :; }; ufw() { return 1; }; apt-get() { echo PACKAGE_PURGE; };\n'
+                    stubs = 'systemctl() { :; }; python3() { :; }; ufw() { return 1; }; apt-get() { echo PACKAGE_PURGE; };\n'
                     script = script.replace('set -Eeuo pipefail', 'set -Eeuo pipefail\n' + stubs)
                     result = subprocess.run([BASH, '-c', script], capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
