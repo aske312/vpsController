@@ -46,6 +46,11 @@ curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/ins
 - `pro` / `test-pro`;
 - `light` / `test-light`.
 
+## Документация проверки
+
+- [Что осталось сделать](REMAINING_WORK.md)
+- [Полный стендовый тест-план](TEST_PLAN.md)
+
 ## Лицензия
 
 Проект распространяется по лицензии [MIT](LICENSE).
