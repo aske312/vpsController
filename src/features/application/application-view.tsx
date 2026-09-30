@@ -78,7 +78,6 @@ export function ApplicationView({ application, services, applicationVersion, app
             <div className="applicationSecondaryActions">
               <button onClick={() => void runApplicationAction("identity")} disabled={busy}>Обновить данные VPS</button>
               <button onClick={() => void runApplicationAction("optimize")} disabled={busy}>Освободить ресурсы</button>
-              {serviceModeActive && <button onClick={() => void runApplicationAction("test-update")} disabled={busy}>Тестовая версия</button>}
               {serviceModeActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={busy}>Rollback</button>}
             </div>
           </div>
@@ -97,7 +96,7 @@ export function ApplicationView({ application, services, applicationVersion, app
             <header><div><p className="eyebrow">DEPLOYMENT & ACCESS</p><h2>Режим и публикация</h2></div><span>{applicationVersion?.branch || "main"}  {applicationVersion?.current_commit?.slice(0, 12) || "unknown"}</span></header>
             <div className="applicationEnvironmentRows">
               <label>
-                <span><strong>Сервисный режим</strong><small>{serviceModeActive ? "Разрешены test-update, rollback и операции обслуживания" : "Обычная production-работа"}</small></span>
+                <span><strong>Сервисный режим</strong><small>{serviceModeActive ? "Разрешены локальная test-сборка, rollback и операции обслуживания" : "Обычная production-работа"}</small></span>
                 <span className="applicationSwitch"><input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy} /><i /></span>
               </label>
               <label>

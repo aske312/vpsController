@@ -3104,7 +3104,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
 
 @app.post("/api/application/action")
 def application_action(payload: ApplicationAction, _: None = Depends(require_token)) -> dict:
-    if payload.action in ("test-update", "test-rollback") and not SERVICE_MODE_FILE.exists():
+    if payload.action == "test-rollback" and not SERVICE_MODE_FILE.exists():
         raise HTTPException(status_code=409, detail="Test version requires active service mode")
     if ACTION_FILE.exists():
         try:
@@ -3274,7 +3274,7 @@ def installed_build_commit() -> str:
 
 
 def expected_application_branch() -> str:
-    return "main" if SERVICE_MODE_FILE.exists() and TEST_BACKUP_DIR.is_dir() else "stabl"
+    return "test-pro" if SERVICE_MODE_FILE.exists() and TEST_BACKUP_DIR.is_dir() else "pro"
 
 
 def application_repository_url() -> str:

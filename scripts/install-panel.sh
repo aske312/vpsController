@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 REPOSITORY="${VPS_CONTROL_REPOSITORY:-https://github.com/aske312/vpsController}"
-BRANCH="${VPS_CONTROL_BRANCH:-stabl}"
+BRANCH="${VPS_CONTROL_BRANCH:-pro}"
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR="$(pwd)"
 [[ -z "${SCRIPT_PATH}" ]] || SCRIPT_DIR="$(cd -- "$(dirname -- "${SCRIPT_PATH}")" && pwd)"
@@ -149,7 +149,7 @@ if [[ -x "${SCRIPT_DIR}/vps-control.sh" ]]; then
   exec "${SCRIPT_DIR}/vps-control.sh" install "$@"
 fi
 
-# Загруженный отдельно файл служит bootstrap и получает полный stabl-архив.
+# Загруженный отдельно файл служит bootstrap и получает полный архив PRO.
 banner
 if [[ ! -r /etc/os-release ]] || ! grep -Eq '^ID=(ubuntu|debian)$' /etc/os-release; then
   printf 'Ошибка: установщик поддерживает Ubuntu Server и Debian.\n' >&2
@@ -219,8 +219,8 @@ fi
 "${source_dir}/scripts/install-panel.sh" "$@"
 
 if command -v vps-control >/dev/null 2>&1; then
-  printf "\n${cyan}◆${reset} Проверяем последний подготовленный релиз stabl.\n"
+  printf "\n${cyan}◆${reset} Проверяем последний подготовленный релиз PRO.\n"
   if ! vps-control update; then
-    printf "${yellow}Предупреждение:${reset} stabl-latest пока недоступен; исходная установка продолжает работать. Повторите vps-control update позднее.\n" >&2
+    printf "${yellow}Предупреждение:${reset} pro-latest пока недоступен; исходная установка продолжает работать. Повторите vps-control update позднее.\n" >&2
   fi
 fi
