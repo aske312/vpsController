@@ -2838,6 +2838,7 @@ install_prebuilt_release() {
     mv -- "${rollback}" "${INSTALL_DIR}"
     PROJECT_DIR="${INSTALL_DIR}"
     restore_update_gateway
+    write_integrity_manifest
     if [[ "${legacy_runtime}" == "yes" ]]; then
       systemctl stop "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
       start_legacy_containers
@@ -2965,6 +2966,7 @@ restore_test_app() {
       "${INSTALL_DIR}/api/resources/cloudflare-origin-pull-ca.pem"
   fi
   if ! install_api || ! install_web || ! install_protocol_monitor || ! ensure_api_write_access || ! ensure_mihomo_profile_runtimes \
+    || ! write_integrity_manifest \
     || ! systemctl daemon-reload \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
