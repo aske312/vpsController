@@ -66,3 +66,6 @@ __pycache__/
 /docs/plans/
 /docs/direct-audit/
 /docs/BRANCH_AND_INSTALLER_PLAN.md
+/docs/.audit/
+/docs/.backlog/
+/docs/.plans/
