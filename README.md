@@ -1,55 +1,48 @@
 # 312.net VPS Controller
 
-Единая точка установки двух редакций панели управления Linux VPS.
-
-## Статус веток
-
-- `installer` — основная ветка репозитория и единая точка установки;
-- `light` / `test-light` — production и test-разработка редакции Light;
-- `pro` / `test-pro` — production и test-разработка редакции PRO;
+312.net — self-hosted панель управления Linux VPS. Продукт устанавливается на сервер пользователя и доступен в двух редакциях.
 
 ## Редакции
 
-- **Light** — бесплатная компактная панель с WireGuard и AmneziaWG.
-- **PRO** — расширенная редакция с Mihomo, DNS, relay-маршрутами, дополнительными протоколами и средствами защиты.
+- **Light** — бесплатная компактная панель для мониторинга сервера и управления подключениями WireGuard и AmneziaWG.
+- **PRO** — расширенная панель с дополнительными протоколами, Mihomo, DNS, relay-маршрутами и средствами защиты.
 
-Редакции устанавливаются и обновляются независимо. Обычное обновление никогда не заменяет Light на PRO или PRO на Light.
+Редакция выбирается во время установки. Обновления сохраняют выбранную редакцию и не переключают Light на PRO или PRO на Light.
 
 ## Требования
 
-- Debian 13 — основная поддерживаемая ОС;
-- Ubuntu Server 22.04/24.04 — дополнительная совместимость;
-- `amd64` или `arm64`;
-- root или `sudo`;
-- systemd, apt/dpkg, curl и доступ к GitHub.
+- Light: Debian 13 или Ubuntu Server 22.04/24.04;
+- PRO: Debian 12/13 или Ubuntu Server 22.04/24.04/26.04;
+- архитектура `amd64` или `arm64`;
+- от 1 ГБ оперативной памяти и 5 ГБ свободного места;
+- root-доступ или пользователь с `sudo`;
+- доступ сервера к GitHub и системным репозиториям.
 
-## Интерактивная установка
+Для новой установки рекомендуется Debian 13.
+
+## Установка
+
+Интерактивный выбор редакции:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh | sudo bash
 ```
 
-## Прямая установка
-
-Light:
+Установка Light:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
   | sudo bash -s -- --edition light
 ```
 
-PRO:
+Установка PRO:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
   | sudo bash -s -- --edition pro
 ```
 
-Установщик проверяет ОС и архитектуру, читает разрешённый маршрут из `editions.json`, а затем запускает установщик выбранной production-редакции.
-
-Production и test-каналы редакций разделены и проверяются независимо. Test-ветки создают только временные CI artifacts и не публикуют GitHub Releases.
-
-Изменения в `light`, `test-light`, `pro` и `test-pro` принимаются через pull request после обязательных проверок `verify` и сборки пакетов для `amd64`/`arm64`. Прямые push, force-push и удаление этих веток защищены настройками GitHub.
+Установщик проверит совместимость сервера, установит выбранную редакцию и покажет адрес панели и данные для входа.
 
 ## Лицензия
 
