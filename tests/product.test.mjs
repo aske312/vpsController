@@ -193,6 +193,8 @@ test("Light keeps production updates public and accepts test builds only from lo
   assert.match(page, /Вернуться к рабочей версии/);
   assert.match(manager, /TEST_BACKUP_DIR="\$\{DATA_DIR\}\/test-app-backup"/);
   assert.match(manager, /restore_test_app\(\)/);
+  assert.match(manager, /mv -- "\$\{rollback\}" "\$\{INSTALL_DIR\}"\s+PROJECT_DIR="\$\{INSTALL_DIR\}"\s+write_integrity_manifest/);
+  assert.match(manager, /rm -rf -- "\$\{failed_install\}"\s+write_integrity_manifest/);
   assert.match(manager, /PRODUCT_FILE="\$\{DATA_DIR\}\/product\.json"/);
   assert.match(manager, /архив редакции \$\{release_edition:-unknown\} нельзя установить поверх \$\{PRODUCT_EDITION\}/);
 });

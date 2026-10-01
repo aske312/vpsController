@@ -1212,6 +1212,8 @@ install_prebuilt_release() {
     fi
     rm -rf -- "${INSTALL_DIR}"
     mv -- "${rollback}" "${INSTALL_DIR}"
+    PROJECT_DIR="${INSTALL_DIR}"
+    write_integrity_manifest
     if [[ "${legacy_runtime}" == "yes" ]]; then
       systemctl stop "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
       start_legacy_containers
@@ -1333,11 +1335,14 @@ restore_test_app() {
     fi
     mv -- "${INSTALL_DIR}" "${TEST_BACKUP_DIR}"
     mv -- "${failed_install}" "${INSTALL_DIR}"
+    PROJECT_DIR="${INSTALL_DIR}"
+    write_integrity_manifest
     systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
     die "возврат отклонён; тестовая версия продолжает работать."
   fi
   [[ "${failed_install}" == "${INSTALL_DIR}.failed-test."* ]] || die "небезопасный путь очистки тестовой версии."
   rm -rf -- "${failed_install}"
+  write_integrity_manifest
   install -m 0755 "${INSTALL_DIR}/scripts/vps-control.sh" "${COMMAND_PATH}"
   rm -f "${DATA_DIR}/application-version.json"
   ok "рабочая версия приложения восстановлена; WG/AWG, клиенты и модули не изменялись."
