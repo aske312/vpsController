@@ -20,7 +20,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --cache --cache-strategy content --cache-location .runtime/eslint-cache"
   },
   "dependencies": {
-    "next": "16.3.5",
+    "next": "16.3.8",
     "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8"
