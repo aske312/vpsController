@@ -1366,6 +1366,8 @@ change_access_mode() {
   caddy validate --config "${CADDY_CONFIG}" >/dev/null
   systemctl restart caddy.service
   systemctl restart "${APP_NAME}-api.service"
+  curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 \
+    "http://127.0.0.1:8000/api/health" >/dev/null
   if [[ "${ACCESS_MODE}" == "vpn" ]]; then
     ok "панель доступна только через WG/AWG."
   else
