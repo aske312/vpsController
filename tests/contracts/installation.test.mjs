@@ -106,9 +106,10 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /value="\$\{value:1:\$\{#value\}-2\}"/);
   assert.match(manager, /--retry 18 --retry-all-errors --retry-delay 5/);
   assert.match(readme, /Ubuntu Server 22\.04, 24\.04, 26\.04 или Debian 12\/13/);
-  assert.match(readme, /apt-get install -y ca-certificates curl/);
   assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/installer\/install\.sh/);
-  assert.match(readme, /Отдельно запускать `vps-control update` не требуется/);
+  assert.match(readme, /Подключение клиентских устройств/);
+  assert.match(readme, /sudo vps-control update/);
+  assert.doesNotMatch(readme, /test-pro|CI|Разработка|Ручное обновление без сборки/);
   assert.match(readme, /установка/i);
   assert.equal(JSON.parse(wg).id, "wg");
   assert.equal(JSON.parse(awg).id, "awg");
@@ -289,7 +290,7 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(releaseInstall, /http:\/\/127\.0\.0\.1:3000\//);
   assert.match(page, /runApplicationAction\("update"\)/);
   assert.match(page, /production-версия PRO/);
-  assert.match(readme, /Ручное обновление без сборки на VPS/);
+  assert.match(readme, /sudo vps-control update/);
   assert.match(manager, /TimeoutStopSec=15/);
   assert.match(manager, /KillMode=mixed/);
   assert.match(

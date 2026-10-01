@@ -34,10 +34,6 @@
 
 Лицензия не может отменить ответственность, которую обязательный закон прямо запрещает исключать или ограничивать. Обязательные права потребителей и иные неотчуждаемые права сохраняются.
 
-### 7. Вклады в проект
-
-Если участник добровольно направляет изменение в официальный репозиторий без отдельного письменного уведомления, он предлагает распространять свой вклад на условиях MIT, подтверждает наличие необходимых прав и не передаёт секреты или персональные данные третьих лиц.
-
 ## EN
 
 ### 1. Free software licence
@@ -69,7 +65,3 @@ Under the MIT License, the Software is provided “as is”, without express or 
 To the maximum extent permitted by applicable law, authors and copyright holders are not liable for claims, damages or other liability arising from the Software, its use or other dealings in it, regardless of the legal basis asserted.
 
 The licence cannot displace liability that mandatory law expressly prohibits excluding or limiting. Mandatory consumer and other non-waivable rights remain unaffected.
-
-### 7. Contributions
-
-A contributor voluntarily submitting a change to the official repository without a separate written notice offers that contribution under the MIT License, represents that it has the necessary rights, and must not submit secrets or third-party personal data.

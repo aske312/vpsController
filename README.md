@@ -1,71 +1,69 @@
-# 312.net
+# 312.net PRO
 
-Панель управления Удаленным сервером со сторонними модулями. Позволяющая контролировать, мониторить и управлять работой системы.
+312.net PRO — self-hosted панель управления Linux VPS для мониторинга сервера, управления защищёнными подключениями и настройки сетевых маршрутов.
+
+## Возможности
+
+- мониторинг ресурсов, сети, служб и событий безопасности;
+- WireGuard, AmneziaWG, Shadowsocks, VLESS, Hysteria2, TUIC, Trojan, OpenVPN и IKEv2;
+- создание конфигураций, ссылок и QR-кодов для клиентских устройств;
+- Mihomo, DNS-политики и маршрутизация трафика;
+- relay-маршруты и дополнительные средства защиты;
+- диагностика, обновление и восстановление приложения.
 
 ## Требования
 
 - Ubuntu Server 22.04, 24.04, 26.04 или Debian 12/13;
-- amd64 или arm64, systemd, от 1 ГБ RAM и 5 ГБ свободного места;
-- root-доступ или пользователь с `sudo`.
+- архитектура `amd64` или `arm64` и systemd;
+- от 1 ГБ оперативной памяти и 5 ГБ свободного места;
+- root-доступ или пользователь с `sudo`;
+- доступ сервера к GitHub и системным репозиториям.
 
-Рекомендуемая ОС для новой установки — **Debian 13**: основная среда проверки
-совместимости всех компонентов. Остальные перечисленные версии остаются в матрице
-поддержки. Совместимость конкретного модуля зависит также от архитектуры, ядра и
-доступных зависимостей; наличие ОС в списке не гарантирует работу каждого модуля
-на любом ядре. Перед установкой выполняются предварительные проверки.
+Для новой установки рекомендуется Debian 13. Доступность отдельных протоколов зависит от ОС, архитектуры и ядра сервера и проверяется перед установкой модуля.
 
 ## Установка
 
-Под `root`:
-
 ```bash
-apt-get update && apt-get install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh -o /root/install-312.sh
-bash /root/install-312.sh --edition pro
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
+  | sudo bash -s -- --edition pro
 ```
 
-Под пользователем с `sudo`:
+Для работы панели по доменному имени заранее направьте A-запись на IPv4 сервера и откройте TCP-порты 80 и 443:
 
 ```bash
-sudo apt-get update && sudo apt-get install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh -o install-312.sh
-sudo bash ./install-312.sh --edition pro
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
+  | sudo bash -s -- --edition pro --domain vpn.example.com
 ```
 
-Для панели с доменом заранее направьте A-запись на IPv4 сервера и откройте TCP-порты 80 и 443:
-
-```bash
-sudo bash ./install-312.sh --domain vpn.example.com
-```
-
-Caddy автоматически настроит HTTPS. Без `--domain` панель будет доступна по IP и порту 8080. Установщик сам определяет доступные адреса и местоположение сервера. Отдельно запускать `vps-control update` не требуется.
-
-После установки адрес панели, логин и пароль выводятся в терминал. Повторно показать их можно командой:
+После завершения установки в терминале будут показаны адрес панели и данные для входа. Повторно вывести их можно командой:
 
 ```bash
 sudo vps-control credentials
 ```
 
-Полное удаление панели и её конфигурации:
+## Управление
+
+```bash
+sudo vps-control status
+sudo vps-control restart
+sudo vps-control verify
+sudo vps-control update
+```
+
+## Удаление
+
+Команда удаляет панель, её настройки и данные. Установленные системные пакеты сохраняются.
 
 ```bash
 sudo vps-control uninstall --yes
 ```
 
-## Ручное обновление без сборки на VPS
+## Документы
 
-Подготовленный Linux-релиз устанавливается командой:
-
-```bash
-sudo vps-control install-release /root/vps-control-release.tar.gz
-```
-
-Обычным пользователям рекомендуется обновление из панели или командой `sudo vps-control update`.
-
-## Разработка
-
-Ветка `test-pro` используется для разработки, `pro` — для production-установок и обновлений. Публичная точка установки находится в ветке `installer`.
+- [Подключение клиентских устройств](docs/CONNECTION_GUIDE.md)
+- [Уведомление о приватности](docs/PRIVACY_POLICY.md)
+- [Условия использования](docs/TERMS_OF_USE.md)
 
 ## Лицензия
 
-[MIT](LICENSE)
+312.net PRO распространяется по лицензии [MIT](LICENSE).
