@@ -2568,11 +2568,47 @@ stop_services() {
   ok "панель остановлена."
 }
 
+cleanup_installed_protocol_images() {
+  local manifest image_root image_id uninstaller service_template interface_env interface_value service
+  local -a protocol_meta
+  [[ -d "${INSTALL_DIR}/protocol-images" ]] || return 0
+  while IFS= read -r manifest; do
+    image_root="$(dirname -- "${manifest}")"
+    readarray -t protocol_meta < <(python3 - "${manifest}" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+for key in ("id", "uninstaller", "service", "interface_env"):
+    print(str(data.get(key, "")))
+PY
+)
+    image_id="${protocol_meta[0]:-}"
+    uninstaller="${protocol_meta[1]:-}"
+    service_template="${protocol_meta[2]:-}"
+    interface_env="${protocol_meta[3]:-}"
+    [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || continue
+    [[ "${uninstaller}" =~ ^[A-Za-z0-9._-]+$ && -f "${image_root}/${uninstaller}" ]] || continue
+    [[ -z "${interface_env}" || "${interface_env}" =~ ^[A-Z][A-Z0-9_]*$ ]] || continue
+    interface_value=""
+    [[ -z "${interface_env}" ]] || interface_value="${!interface_env:-}"
+    service="${service_template/\{interface\}/${interface_value}}"
+    [[ -n "${service}" ]] || continue
+    systemctl is-enabled --quiet "${service}" 2>/dev/null || continue
+    info "Удаление установленного протокола ${image_id}"
+    ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+      AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+      PUBLIC_IP="$(env_value PUBLIC_IP)" ENABLE_UFW="${ENABLE_UFW}" \
+      bash "${image_root}/${uninstaller}" \
+      || die "не удалось полностью удалить протокол ${image_id}."
+  done < <(find "${INSTALL_DIR}/protocol-images" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print | sort)
+}
+
+
 uninstall_app() {
   [[ "${2:-}" == "--yes" ]] || die "полное удаление необратимо; повторите команду с параметром --yes."
   info "Удаление служб, данных и конфигурации панели"
   stop_legacy_containers
   systemctl disable --now "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
+  cleanup_installed_protocol_images
   systemctl disable --now vpn-monitor.timer 2>/dev/null || true
   rm -f "${SERVICE_FILE}" "${WEB_SERVICE_FILE}" /etc/systemd/system/vpn-monitor.service /etc/systemd/system/vpn-monitor.timer \
     /etc/logrotate.d/vps-control-monitor "${COMMAND_PATH}"

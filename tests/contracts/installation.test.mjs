@@ -157,9 +157,11 @@ test("full uninstall removes owned panel state without recreating action data", 
   const manager = await readFileText("scripts/vps-control.sh");
   const uninstall = manager.match(/uninstall_app\(\) \{([\s\S]*?)\n\}/)?.[1] || "";
   assert.match(uninstall, /disable --now[^\n]+caddy\.service/);
+  assert.match(uninstall, /cleanup_installed_protocol_images/);
   assert.match(uninstall, /CURRENT_ACTION=""[\s\S]*rm -rf -- "\$\{INSTALL_DIR\}" "\$\{DATA_DIR\}" "\$\{CONFIG_DIR\}"/);
   assert.match(uninstall, /rm -f -- "\$\{CADDY_CONFIG\}"/);
   assert.match(uninstall, /ufw --force delete allow 443\/tcp/);
+  assert.match(manager, /systemctl is-enabled --quiet "\$\{service\}"/);
 });
 
 test("PRO release metadata binds edition, channel, architecture and full commit", async () => {
