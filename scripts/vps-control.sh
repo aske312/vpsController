@@ -669,18 +669,6 @@ detect_public_endpoints() {
   [[ "${public_ipv6}" == *:* ]] || public_ipv6=""
   configured_domain="${PUBLIC_DOMAIN:-$(env_value PUBLIC_DOMAIN)}"
   domain="${configured_domain}"
-  if [[ -z "${domain}" && -n "${public_ipv4}" ]]; then
-    domain="$(python3 - "${public_ipv4}" <<'PY' 2>/dev/null || true
-import socket, sys
-try:
-    name = socket.gethostbyaddr(sys.argv[1])[0].rstrip(".")
-    if "." in name:
-        print(name)
-except (OSError, IndexError):
-    pass
-PY
-)"
-  fi
   domain_mode="none"
   if [[ -n "${domain}" ]]; then
     domain_mode="$(python3 - "${domain}" "${public_ipv4}" "${public_ipv6}" <<'PY' 2>/dev/null || true

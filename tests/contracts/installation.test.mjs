@@ -201,13 +201,13 @@ test("web and gateway run as systemd services without Docker", async () => {
   assert.match(page, /Контур служб узла/);
 });
 
-test("installation discovers dual-stack endpoints and reserves 443 for HTTPS", async () => {
+test("installation discovers dual-stack endpoints without adopting reverse DNS and reserves 443 for HTTPS", async () => {
   const [manager, api, config, caddy] = await Promise.all([
     read("scripts/vps-control.sh"), readApiSources(), read("install.conf"), read("Caddyfile"),
   ]);
   assert.match(manager, /detect_public_endpoints\(\)/);
   assert.match(manager, /curl -6 .*api64\.ipify\.org/);
-  assert.match(manager, /socket\.gethostbyaddr/);
+  assert.doesNotMatch(manager, /socket\.gethostbyaddr/);
   assert.match(manager, /socket\.getaddrinfo/);
   assert.match(manager, /set_env_value "PUBLIC_ENDPOINT"/);
   assert.match(manager, /set_env_value "PUBLIC_IP_ENDPOINT"/);
