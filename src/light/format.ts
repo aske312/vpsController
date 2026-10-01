@@ -1,0 +1,3 @@
+export function bytes(value = 0) { if (!Number.isFinite(value) || value <= 0) return "0 Б"; const units = ["Б", "КБ", "МБ", "ГБ", "ТБ"]; const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1); return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`; }
+export function duration(seconds = 0) { const days = Math.floor(seconds / 86400); const hours = Math.floor(seconds % 86400 / 3600); return days ? `${days} д ${hours} ч` : `${hours} ч`; }
+export function percent(available: number, total: number) { return total > 0 ? Math.max(0, Math.min(100, 100 - available / total * 100)) : 0; }
