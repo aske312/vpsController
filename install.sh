@@ -4,7 +4,9 @@ set -Eeuo pipefail
 REPOSITORY_SLUG="${VPS_CONTROL_REPOSITORY_SLUG:-aske312/vpsController}"
 INSTALLER_BRANCH="${VPS_CONTROL_INSTALLER_BRANCH:-installer}"
 RAW_BASE="https://raw.githubusercontent.com/${REPOSITORY_SLUG}"
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+[[ -z "${SCRIPT_PATH}" ]] || SCRIPT_DIR="$(cd -- "$(dirname -- "${SCRIPT_PATH}")" && pwd)"
 WORK_DIR=""
 EDITION=""
 PASSTHROUGH=()
@@ -78,7 +80,7 @@ fi
   || { printf 'Ошибка: редакция должна быть light или pro.\n' >&2; exit 2; }
 
 WORK_DIR="$(mktemp -d /tmp/vps-controller-installer.XXXXXX)"
-if [[ -r "${SCRIPT_DIR}/editions.json" ]]; then
+if [[ -n "${SCRIPT_DIR}" && -r "${SCRIPT_DIR}/editions.json" ]]; then
   cp -- "${SCRIPT_DIR}/editions.json" "${WORK_DIR}/editions.json"
 else
   curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
