@@ -2624,14 +2624,20 @@ uninstall_app() {
   [[ "${2:-}" == "--yes" ]] || die "полное удаление необратимо; повторите команду с параметром --yes."
   info "Удаление служб, данных и конфигурации панели"
   stop_legacy_containers
-  systemctl disable --now "${APP_NAME}-api.service" "${APP_NAME}-web.service" 2>/dev/null || true
+  systemctl disable --now "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
   systemctl disable --now vpn-monitor.timer 2>/dev/null || true
   rm -f "${SERVICE_FILE}" "${WEB_SERVICE_FILE}" /etc/systemd/system/vpn-monitor.service /etc/systemd/system/vpn-monitor.timer \
     /etc/logrotate.d/vps-control-monitor "${COMMAND_PATH}"
   systemctl daemon-reload
-  rm -rf -- "${INSTALL_DIR}" "${DATA_DIR}"
-  rm -f -- "${ENV_FILE}" "${INSTALL_CONFIG}" "${MANAGER_CONFIG}"
-  ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
+  rm -f -- "${CADDY_CONFIG}"
+  rm -rf -- "${CADDY_SNIPPET_DIR}"
+  CURRENT_ACTION=""
+  rm -rf -- "${INSTALL_DIR}" "${DATA_DIR}" "${CONFIG_DIR}"
+  rm -f -- "${LEGACY_ENV_FILE}" "${INSTALL_CONFIG}" "${MANAGER_CONFIG}"
+  ufw --force delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
+  ufw --force delete allow 80/tcp >/dev/null 2>&1 || true
+  ufw --force delete allow 443/tcp >/dev/null 2>&1 || true
+  sed -i '/# 312\.net internal panel$/d' /etc/hosts
   ok "панель полностью удалена; общие системные пакеты сохранены."
 }
 
