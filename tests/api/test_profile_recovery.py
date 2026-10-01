@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from tests.api.support import manager
 import application_operation as operations
@@ -81,3 +81,11 @@ class ProfileRecoveryTests(unittest.TestCase):
             manager.recover_profile_runtime()
         self.assertTrue(path.exists())
         self.command.assert_not_called()
+
+    def test_restore_file_reapplies_captured_owner(self):
+        target = self.root / "owned.json"
+        saved = {"content": b'{}', "mode": 0o640, "uid": 123, "gid": 456}
+        with patch.object(recovery.os, "chown", create=True) as chown:
+            recovery.restore_file(target, saved)
+        self.assertEqual(target.read_bytes(), b'{}')
+        chown.assert_called_once_with(ANY, 123, 456)

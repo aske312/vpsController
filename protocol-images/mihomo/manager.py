@@ -157,7 +157,6 @@ def recover_profile_runtime():
     from profile_recovery import recover
     recover(sys.modules[__name__])
 
-
 BUILTIN_TRANSPORTS = {
     "transport-wg",
     "transport-awg",
@@ -372,6 +371,16 @@ def run(*args: str, check: bool = False, input_text: str | None = None) -> subpr
     return result
 
 
+def validate_caddy_config() -> subprocess.CompletedProcess[str]:
+    """Validate with the same identity and storage directory as Caddy."""
+    return run(
+        "runuser", "-u", "caddy", "--", "env",
+        "HOME=/var/lib/caddy", "XDG_DATA_HOME=/var/lib/caddy/.local/share",
+        "caddy", "validate", "--config", "/etc/caddy/Caddyfile",
+        check=True,
+    )
+
+
 def systemctl_active(unit: str) -> bool:
     return run("systemctl", "is-active", "--quiet", unit).returncode == 0
 
@@ -405,6 +414,17 @@ def atomic_json(path: Path, value: Any, mode: int = 0o600) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def ensure_reality_config_permissions(config_path: Path) -> None:
+    """Keep the DynamicUser Xray service able to traverse and read its config."""
+    reality_root = config_path.parent
+    if reality_root.exists():
+        shutil.chown(reality_root, user="root", group="nogroup")
+        os.chmod(reality_root, 0o750)
+    if config_path.exists():
+        shutil.chown(config_path, user="root", group="nogroup")
+        os.chmod(config_path, 0o640)
 
 
 def write_action(action: str, message: str, state: str = "running", progress: int = 10, *, public_message: str | None = None) -> None:
@@ -2579,8 +2599,11 @@ def add_ss_credential(profile_id: str, connection_id: str = "default", connectio
     }
     instance_id = f"{profile_id}-{connection_id}"
     atomic_json(config_dir / f"{instance_id}.json", config)
-    port_allocation.release(f"mihomo:ss:{instance_id}")
     run("systemctl", "enable", "--now", f"vps-control-mihomo-ss@{instance_id}.service", check=True)
+    # Retain the reservation until systemd has started the listener. Releasing
+    # it before enable --now lets the next connection in the same batch select
+    # the same port before it appears in the socket table.
+    port_allocation.release(f"mihomo:ss:{instance_id}")
     if shutil.which("ufw") and run("ufw", "status").stdout.startswith("Status: active"):
         run("ufw", "allow", f"{port}/tcp")
         run("ufw", "allow", f"{port}/udp")
@@ -2879,11 +2902,10 @@ def apply_reality_config(config_path: Path, config: dict[str, Any], restart_serv
         candidate.unlink(missing_ok=True)
         raise RuntimeError((result.stderr or result.stdout).strip() or "Xray rejected VLESS configuration")
     os.replace(candidate, config_path)
-    # The Xray unit runs as nobody:nogroup. Keep the generated file readable
-    # after every atomic replace, even when the destination already had an
-    # unexpected owner or mode from a previous manual/runtime write.
-    os.chmod(config_path, 0o640)
-    shutil.chown(config_path, user="root", group="nogroup")
+    # Updates and older rollback code can leave the directory root:root/0750.
+    # Repair traversal as well as the replaced file before systemd starts the
+    # DynamicUser service; fixing only config.json still yields EACCES.
+    ensure_reality_config_permissions(config_path)
     if not restart_service:
         return
     # Profile mutations can legitimately restart Xray several times in a
@@ -3047,7 +3069,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         apply_reality_config(config_path, config, restart_service=restart_service)
         port_allocation.release_prefix(allocation_owner + ":")
         if reload_caddy and (settings["cdn_enabled"] or settings["tls_enabled"]):
-            run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
+            validate_caddy_config()
             run("systemctl", "reload", "caddy.service", check=True)
     except Exception:
         write_mihomo_vless_cdn(route_id, False, "", "", 0, rebuild=reload_caddy)
@@ -3543,7 +3565,7 @@ def apply_batched_reality_runtime(restart_service: bool = True) -> None:
         raise RuntimeError("Mihomo Reality server configuration is invalid")
     apply_reality_config(config_path, config, restart_service=False)
     rebuild_vless_cdn_snippet()
-    run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", check=True)
+    validate_caddy_config()
     firewall_helper = Path("/usr/local/sbin/vps-control-mihomo-vless-firewall")
     if firewall_helper.is_file():
         run(str(firewall_helper), "sync", check=True)

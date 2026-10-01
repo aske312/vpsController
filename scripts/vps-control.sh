@@ -169,6 +169,11 @@ run_with_status() {
   printf '\033[1;32m│  ✔ ГОТОВО\033[0m %s\n' "${label}"
 }
 
+caddy_validate() {
+  runuser -u caddy -- env HOME=/var/lib/caddy XDG_DATA_HOME=/var/lib/caddy/.local/share \
+    caddy validate --config "${CADDY_CONFIG}"
+}
+
 write_action_status() {
   [[ -n "${CURRENT_ACTION}" ]] || return 0
   local state="$1" progress="$2" message="$3"
@@ -2466,7 +2471,7 @@ WantedBy=multi-user.target
 EOF
   install -d -m 0755 /etc/caddy
   write_caddy_config || return
-  caddy validate --config "${CADDY_CONFIG}" >/dev/null || return
+  caddy_validate >/dev/null || return
   systemctl daemon-reload || return
   systemctl enable "${APP_NAME}-web.service" caddy.service >>"${INSTALL_LOG}" 2>&1
 }
@@ -2524,6 +2529,26 @@ restart_mihomo_manager_if_present() {
     && systemctl restart vps-control-mihomo-manager.service 2>/dev/null || true
 }
 
+# Older Mihomo installations shipped a capability probe as a oneshot service
+# with RemainAfterExit=yes.  That leaves an OnUnitActiveSec timer without a
+# next execution.  Keep existing installations self-healing during every
+# release swap; the drop-in is harmless when the optional probe is absent.
+repair_mihomo_capabilities_timer() {
+  local service="vps-control-mihomo-capabilities.service"
+  local timer="vps-control-mihomo-capabilities.timer"
+  local probe="/usr/local/lib/vps-control-mihomo/probe.py"
+  systemctl list-unit-files "${timer}" --no-legend 2>/dev/null | grep -q . || return 0
+  [[ -f "${probe}" ]] || return 0
+  install -d -m 0755 "/etc/systemd/system/${service}.d"
+  cat >"/etc/systemd/system/${service}.d/10-periodic.conf" <<'EOF'
+[Service]
+RemainAfterExit=no
+EOF
+  systemctl daemon-reload
+  systemctl restart "${timer}"
+  systemctl start "${service}"
+}
+
 # Profiles survive application releases, while their package-backed transport
 # may have been removed by an older uninstaller or an administrator. Repair the
 # runtime before restarting preserved instances; otherwise systemd enters an
@@ -2550,6 +2575,21 @@ ensure_mihomo_profile_runtimes() {
   bash "${INSTALL_DIR}/protocol-images/mihomo/modules/transport-shadowsocks/protect-runtime.sh" --restart-active || return $?
   systemctl reset-failed 'vps-control-mihomo-ss@*.service' 2>/dev/null || true
   systemctl restart vps-control-mihomo-ss.target 2>/dev/null || true
+}
+
+# AmneziaWG is provided by DKMS and must be rebuilt for every running kernel.
+# Debian may install a new kernel before its matching headers, leaving the
+# enabled AWG units failed with "Protocol not supported" after reboot. Repair
+# the module before preserved Mihomo profiles are used by the API.
+ensure_amneziawg_kernel_module() {
+  local units=() headers="linux-headers-$(uname -r)"
+  systemctl list-unit-files --no-legend 'awg-quick@*.service' 2>/dev/null | grep -q . || return 0
+  modprobe -n amneziawg >/dev/null 2>&1 && return 0
+  command -v apt-get >/dev/null 2>&1 || return 1
+  apt-get -o DPkg::Lock::Timeout=300 install -y "${headers}" amneziawg-dkms >/dev/null \
+    || { apt-get -o DPkg::Lock::Timeout=300 update >/dev/null && apt-get -o DPkg::Lock::Timeout=300 install -y "${headers}" amneziawg-dkms >/dev/null; }
+  depmod -a "$(uname -r)"
+  modprobe amneziawg
 }
 
 deploy() {
@@ -2817,6 +2857,7 @@ install_prebuilt_release() {
     || ! install_protocol_monitor \
     || ! ensure_api_write_access \
     || ! ensure_mihomo_profile_runtimes \
+    || ! ensure_amneziawg_kernel_module \
     || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
     || ! build_commit="$(awk -F= '$1 == "commit" {print $2}' "${INSTALL_DIR}/.prebuilt-release")" \
     || ! printf '%s\n' "${build_commit:-manual}" >"${INSTALL_DIR}/.build-commit" \
@@ -2825,6 +2866,7 @@ install_prebuilt_release() {
     || ! systemctl reload-or-restart caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! restart_mihomo_manager_if_present \
+    || ! repair_mihomo_capabilities_timer \
     || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 \
       "http://127.0.0.1:8000/api/health" >/dev/null \
     || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 \
@@ -3005,7 +3047,7 @@ change_access_mode() {
   configure_access
   configure_firewall "panel-only"
   write_caddy_config
-  caddy validate --config "${CADDY_CONFIG}" >/dev/null
+  caddy_validate >/dev/null
   systemctl restart caddy.service
   systemctl restart "${APP_NAME}-api.service"
   if [[ "${ACCESS_MODE}" == "vpn" ]]; then
@@ -3465,7 +3507,7 @@ integrity_check() {
   "${INSTALL_DIR}/venv/bin/python" -m py_compile "${INSTALL_DIR}/api/main.py" \
     || die "Python API не проходит синтаксическую проверку."
   [[ -r "${WEB_SERVICE_FILE}" ]] || die "не найден systemd-профиль web ${WEB_SERVICE_FILE}."
-  caddy validate --config "${CADDY_CONFIG}" >/dev/null || die "Caddy содержит ошибку конфигурации."
+  caddy_validate >/dev/null || die "Caddy содержит ошибку конфигурации."
   systemctl is-active --quiet "${APP_NAME}-api.service" || die "API-служба не запущена."
   systemctl is-active --quiet "${APP_NAME}-web.service" || die "web-служба не запущена."
   systemctl is-active --quiet caddy.service || die "Caddy не запущен."

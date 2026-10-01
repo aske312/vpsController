@@ -136,6 +136,22 @@ class ModulePortsTests(unittest.TestCase):
         saved = json.loads((manager.CONFIG_ROOT / "shadowsocks/profile-new.json").read_text())
         self.assertEqual(saved["server_port"], credential["port"])
 
+    def test_shadowsocks_releases_port_only_after_service_start(self):
+        events = []
+
+        def run(*args, **kwargs):
+            if args[:3] == ("systemctl", "enable", "--now"):
+                events.append("start")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with (
+            patch.object(manager, "run", side_effect=run),
+            patch.object(manager.port_allocation, "release", side_effect=lambda *_: events.append("release")),
+            patch.object(manager.shutil, "which", return_value=None),
+        ):
+            manager.add_ss_credential("profile", "new")
+        self.assertEqual(events, ["start", "release"])
+
     @unittest.skipUnless(os.name == "posix", "Requires Linux ss and real loopback sockets")
     def test_real_tcp_and_udp_listeners_are_excluded(self):
         with socket.socket() as tcp, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:

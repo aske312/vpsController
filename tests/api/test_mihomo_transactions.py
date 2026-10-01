@@ -222,6 +222,40 @@ class MihomoTransactionTests(unittest.TestCase):
             self.assertEqual(json.loads((config / "adapter.json").read_text()), {"before": True})
             self.assertEqual(json.loads(profile.read_text()), [{"id": "before"}])
 
+    def test_reality_apply_repairs_directory_traversal_before_restart(self):
+        with tempfile.TemporaryDirectory() as root:
+            config = Path(root) / "reality/config.json"
+            config.parent.mkdir(parents=True)
+            config.write_text('{"inbounds": []}', encoding="utf-8")
+            calls = []
+
+            def run(*args, **kwargs):
+                calls.append(args)
+                return subprocess.CompletedProcess(args, 0, "", "")
+
+            with (
+                patch.object(manager, "run", side_effect=run),
+                patch.object(manager.shutil, "chown"),
+                patch.object(manager, "ensure_reality_config_permissions") as permissions,
+            ):
+                manager.apply_reality_config(config, {"inbounds": []})
+
+            permissions.assert_called_once_with(config)
+            self.assertLess(
+                calls.index((str(manager.REALITY_XRAY_BIN), "run", "-test", "-config", str(config.with_name("config.candidate.json")))),
+                calls.index(("systemctl", "restart", "vps-control-mihomo-reality.service")),
+            )
+
+    def test_caddy_validation_uses_service_identity_and_storage(self):
+        with patch.object(manager, "run") as run:
+            manager.validate_caddy_config()
+        run.assert_called_once_with(
+            "runuser", "-u", "caddy", "--", "env",
+            "HOME=/var/lib/caddy", "XDG_DATA_HOME=/var/lib/caddy/.local/share",
+            "caddy", "validate", "--config", "/etc/caddy/Caddyfile",
+            check=True,
+        )
+
     def test_batched_reality_apply_restarts_and_reloads_once(self):
         calls = []
 
