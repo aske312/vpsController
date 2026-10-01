@@ -1047,7 +1047,7 @@ PY
   stop_legacy_containers
   systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
   systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
-  curl --fail --silent --show-error --retry 6 --retry-connrefused --retry-delay 2 \
+  curl --fail --silent --retry 6 --retry-connrefused --retry-delay 2 \
     "http://127.0.0.1:${HTTP_PORT}/" >/dev/null
   cleanup_legacy_runtime
   ok "панель запущена: ${PANEL_URL}"
@@ -1074,7 +1074,7 @@ uninstall_app() {
   [[ "${2:-}" == "--yes" ]] || die "полное удаление необратимо; повторите команду с параметром --yes."
   info "Удаление служб, данных и конфигурации панели"
   stop_legacy_containers
-  systemctl disable --now "${APP_NAME}-api.service" "${APP_NAME}-web.service" 2>/dev/null || true
+  systemctl disable --now "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
   systemctl disable --now vpn-monitor.timer 2>/dev/null || true
   if [[ -f "${INSTALL_DIR}/protocol-images/wireguard/uninstall.sh" && -s "/etc/wireguard/${WG_INTERFACE}.conf" ]]; then
     ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
@@ -1089,7 +1089,7 @@ uninstall_app() {
     /etc/logrotate.d/vps-control-monitor "${COMMAND_PATH}" /usr/local/sbin/vpn-monitor-sample
   systemctl daemon-reload
   rm -rf -- "${INSTALL_DIR}" "${DATA_DIR}"
-  rm -f -- "${ENV_FILE}" "${INSTALL_CONFIG}" "${MANAGER_CONFIG}"
+  rm -f -- "${ENV_FILE}" "${INSTALL_CONFIG}" "${MANAGER_CONFIG}" "${CADDY_CONFIG}"
   rmdir --ignore-fail-on-non-empty /etc/wireguard /etc/amnezia/amneziawg /etc/amnezia 2>/dev/null || true
   ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
   CURRENT_ACTION=""
@@ -1197,7 +1197,7 @@ install_prebuilt_release() {
     || ! write_integrity_manifest \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
-    || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 \
+    || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 \
       "http://127.0.0.1:${HTTP_PORT}/" >/dev/null; then
     warn "новый релиз не прошёл проверку; выполняется откат."
     systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
@@ -1319,7 +1319,7 @@ restore_test_app() {
   if ! install_api || ! install_web || ! ensure_api_write_access \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
-    || ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:${HTTP_PORT}/" >/dev/null; then
+    || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:${HTTP_PORT}/" >/dev/null; then
     warn "сохранённая версия не запустилась; тестовая версия восстанавливается."
     systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
     if [[ -d "${INSTALL_DIR}/venv" && ! -e "${failed_install}/venv" ]]; then
@@ -1628,7 +1628,7 @@ verify_app() {
   systemctl is-active --quiet caddy.service || die "Caddy не запущен."
   curl --fail --silent --show-error http://127.0.0.1:8000/api/health
   printf '\n'
-  curl --fail --silent --show-error --retry 6 --retry-connrefused --retry-delay 5 "${PANEL_URL}/" >/dev/null \
+  curl --fail --silent --retry 6 --retry-connrefused --retry-delay 5 "${PANEL_URL}/" >/dev/null \
     || die "веб-панель не отвечает."
   ok "установка исправна; веб-интерфейс отвечает."
 }

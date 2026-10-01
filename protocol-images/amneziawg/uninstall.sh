@@ -15,7 +15,9 @@ systemctl disable --now "awg-quick@${AWG_INTERFACE}.service" 2>/dev/null || true
 if command -v ufw >/dev/null 2>&1; then
   ufw --force delete allow "${AWG_PORT}/udp" >/dev/null 2>&1 || true
   if [[ -n "${UPLINK_INTERFACE}" ]]; then
-    while ufw --force route delete allow in on "${AWG_INTERFACE}" out on "${UPLINK_INTERFACE}" from "${AWG_SUBNET}" >/dev/null 2>&1; do :; done
+    while ufw status | grep -Fq "${AWG_SUBNET} on ${AWG_INTERFACE}"; do
+      ufw --force route delete allow in on "${AWG_INTERFACE}" out on "${UPLINK_INTERFACE}" from "${AWG_SUBNET}" >/dev/null 2>&1 || break
+    done
   fi
 fi
 rm -f -- "${PACKAGE_CONFIG}" "${CONFIGURED_AWG_CONFIG}" \

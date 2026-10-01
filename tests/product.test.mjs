@@ -285,6 +285,8 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(api, /The last active VPN module cannot be removed while panel access is VPN-only/);
   assert.match(wgRemove, /route delete allow in on "\$\{WG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{WG_SUBNET\}"/);
   assert.match(awgRemove, /route delete allow in on "\$\{AWG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{AWG_SUBNET\}"/);
+  assert.match(wgRemove, /ufw status \| grep -Fq "\$\{WG_SUBNET\} on \$\{WG_INTERFACE\}"/);
+  assert.match(awgRemove, /ufw status \| grep -Fq "\$\{AWG_SUBNET\} on \$\{AWG_INTERFACE\}"/);
   assert.match(wgRemove, /99-vps-control-wireguard\.conf/);
   assert.match(awgRemove, /99-vps-control-amneziawg\.conf/);
   assert.match(api, /protocol-install/);
@@ -305,7 +307,16 @@ test("full uninstall removes managed protocol state without recreating applicati
   assert.match(uninstall, /protocol-images\/wireguard\/uninstall\.sh/);
   assert.match(uninstall, /protocol-images\/amneziawg\/uninstall\.sh/);
   assert.match(uninstall, /\/usr\/local\/sbin\/vpn-monitor-sample/);
+  assert.match(uninstall, /caddy\.service/);
+  assert.match(uninstall, /"\$\{CADDY_CONFIG\}"/);
   assert.match(uninstall, /CURRENT_ACTION=""/);
+});
+
+test("successful readiness retries do not print transient HTTP errors", async () => {
+  const manager = await read("scripts/vps-control.sh");
+  const retries = [...manager.matchAll(/curl --fail --silent[^\n]+--retry (?:6|10)[^\n]+/g)].map((match) => match[0]);
+  assert.ok(retries.length >= 5);
+  for (const command of retries) assert.doesNotMatch(command, /--show-error/);
 });
 
 test("the interface uses one fixed visual design without personalization", async () => {
