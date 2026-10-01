@@ -32,13 +32,9 @@
 
 Это уведомление описывает продукт, но не заменяет индивидуальную политику администратора. Если экземпляр используется для обработки персональных данных других лиц, администратор должен подготовить собственное уведомление с необходимыми контактами и сведениями по применимому праву.
 
-### 5. Добровольные обращения
+### 5. Запросы
 
-Если пользователь самостоятельно публикует issue, discussion, pull request или иной материал на внешней платформе, данные обрабатываются этой платформой по её правилам. Не следует включать в обращения пароли, закрытые ключи, конфигурации клиентов, журналы с персональными данными или иные секреты.
-
-### 6. Запросы и изменения
-
-Запросы о данных конкретного self-hosted экземпляра направляются его администратору: участники проекта технически не имеют к ним доступа. Обновления этого уведомления публикуются вместе с исходным кодом. История Git позволяет определить текст, действовавший в конкретной версии.
+Запросы о данных конкретного self-hosted экземпляра направляются его администратору: участники проекта технически не имеют к ним доступа. Не передавайте в обращениях пароли, закрытые ключи, конфигурации клиентов и журналы с персональными данными.
 
 ## EN
 
@@ -70,10 +66,6 @@ The user, administrator or organisation controlling an instance determines the p
 
 This notice describes the product and does not replace the administrator’s own notice. An administrator processing other persons’ data must provide the identity, contact and other information required by applicable law in its own documentation.
 
-### 5. Voluntary submissions
+### 5. Requests
 
-If a user submits an issue, discussion, pull request or other material through an external platform, that platform processes the submission under its own rules. Passwords, private keys, client configurations, personal-data logs and other secrets must not be submitted.
-
-### 6. Requests and changes
-
-Requests concerning a particular self-hosted instance must be sent to its administrator because project contributors have no technical access to that data. Updates to this notice are published with the source code, and Git history identifies the text applicable to each version.
+Requests concerning a particular self-hosted instance must be sent to its administrator because project contributors have no technical access to that data. Do not include passwords, private keys, client configurations or personal-data logs in support requests.

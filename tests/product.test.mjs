@@ -4,7 +4,7 @@ import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("поставка содержит установщик, образы и русскую документацию", async () => {
+test("поставка содержит установщик, образы и клиентскую документацию", async () => {
   const [bootstrap, manager, readme, wg, awg] = await Promise.all([
     read("scripts/install-panel.sh"),
     read("scripts/vps-control.sh"),
@@ -20,6 +20,8 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /update\)/);
   assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/installer\/install\.sh/);
   assert.match(readme, /Возможные ошибки установки/);
+  assert.match(readme, /Подключение WireGuard и AmneziaWG/);
+  assert.doesNotMatch(readme, /test-light|CI|Git-клон|Ручное обновление без сборки/);
   assert.match(readme, /установка/i);
   assert.equal(JSON.parse(wg).id, "wg");
   assert.equal(JSON.parse(awg).id, "awg");
@@ -363,7 +365,7 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(builder, /schema=1/);
   assert.match(builder, /RELEASE_EDITION="\$\{RELEASE_EDITION:-light\}"/);
   assert.match(builder, /RELEASE_CHANNEL="\$\{RELEASE_CHANNEL:-production\}"/);
-  assert.match(readme, /Ручное обновление без сборки на VPS/);
+  assert.match(readme, /sudo vps-control update/);
   assert.match(manager, /TimeoutStopSec=15/);
   assert.match(manager, /KillMode=mixed/);
   assert.match(manager, /mv -- "\$\{INSTALL_DIR\}\/venv" "\$\{rollback\}\/venv"/);
