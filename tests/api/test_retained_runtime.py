@@ -8,6 +8,22 @@ from tests.api.support import manager
 
 
 class RetainedRuntimeTests(unittest.TestCase):
+    def test_empty_systemd_glob_is_an_empty_snapshot(self):
+        with tempfile.TemporaryDirectory() as folder:
+            result = manager.ss_runtime.snapshot(
+                lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="", stderr=""),
+                Path(folder),
+            )
+        self.assertEqual(result, {})
+
+    def test_systemd_discovery_error_is_not_hidden(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(RuntimeError, "Failed to connect"):
+                manager.ss_runtime.snapshot(
+                    lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="", stderr="Failed to connect"),
+                    Path(folder),
+                )
+
     def test_snapshot_is_scoped_to_instances_and_excludes_retention_metadata(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
