@@ -162,8 +162,8 @@ test("service settings are staged, saved explicitly and survive background refre
 });
 
 test("Light keeps production updates public and accepts test builds only from local archives", async () => {
-  const [api, page, manager] = await Promise.all([
-    read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"),
+  const [api, page, manager, styles] = await Promise.all([
+    read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"), read("app/globals.css"),
   ]);
   assert.match(manager, /PRODUCT_EDITION="light"/);
   assert.match(manager, /PRODUCTION_BRANCH="light"/);
@@ -190,6 +190,8 @@ test("Light keeps production updates public and accepts test builds only from lo
   assert.match(page, /setAutoRefresh\(autoRefreshBeforeServiceMode\.current\)/);
   assert.doesNotMatch(page, /runApplicationAction\("test-update"\)/);
   assert.match(page, /application\?\.service_mode\?\.rollback_available/);
+  assert.match(styles, /\.loginPage \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(styles, /\.loginCard \{[^}]*max-width: 420px; min-width: 0/);
   assert.match(page, /Вернуться к рабочей версии/);
   assert.match(manager, /TEST_BACKUP_DIR="\$\{DATA_DIR\}\/test-app-backup"/);
   assert.match(manager, /restore_test_app\(\)/);
