@@ -510,7 +510,10 @@ doctor() {
   memory_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
   (( memory_kb >= 900000 )) && ok "оперативная память: $((memory_kb / 1024)) МБ" \
     || { warn "требуется не менее 1 ГБ RAM"; failed=1; }
-  disk_kb="$(df -Pk "${PROJECT_DIR}" | awk 'NR==2 {print $4}')"
+  # Bootstrap sources may live on a small /tmp tmpfs. Installation itself is
+  # written below /opt, so validate the target filesystem rather than /tmp.
+  disk_kb="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $4}')"
+  [[ -n "${disk_kb}" ]] || disk_kb="$(df -Pk / | awk 'NR==2 {print $4}')"
   (( disk_kb >= 5000000 )) && ok "свободное место: $((disk_kb / 1024 / 1024)) ГБ" \
     || { warn "требуется не менее 5 ГБ свободного места"; failed=1; }
   getent hosts github.com >/dev/null 2>&1 && ok "DNS и GitHub доступны" \
@@ -617,6 +620,8 @@ install_protocol_image() {
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
   systemctl restart "${APP_NAME}-api.service"
+  curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 \
+    "http://127.0.0.1:8000/api/health" >/dev/null
   ok "Образ ${image_id} установлен."
 }
 
@@ -640,6 +645,8 @@ remove_protocol_image() {
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
   systemctl restart "${APP_NAME}-api.service"
+  curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 \
+    "http://127.0.0.1:8000/api/health" >/dev/null
   ok "Протокол ${image_id} удалён; образ сохранён."
 }
 
@@ -1069,12 +1076,23 @@ uninstall_app() {
   stop_legacy_containers
   systemctl disable --now "${APP_NAME}-api.service" "${APP_NAME}-web.service" 2>/dev/null || true
   systemctl disable --now vpn-monitor.timer 2>/dev/null || true
+  if [[ -f "${INSTALL_DIR}/protocol-images/wireguard/uninstall.sh" && -s "/etc/wireguard/${WG_INTERFACE}.conf" ]]; then
+    ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+      bash "${INSTALL_DIR}/protocol-images/wireguard/uninstall.sh"
+  fi
+  if [[ -f "${INSTALL_DIR}/protocol-images/amneziawg/uninstall.sh" ]] \
+    && [[ -s "/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf" || -s "/etc/amnezia/${AWG_INTERFACE}.conf" ]]; then
+    ENV_FILE="${ENV_FILE}" AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+      bash "${INSTALL_DIR}/protocol-images/amneziawg/uninstall.sh"
+  fi
   rm -f "${SERVICE_FILE}" "${WEB_SERVICE_FILE}" /etc/systemd/system/vpn-monitor.service /etc/systemd/system/vpn-monitor.timer \
-    /etc/logrotate.d/vps-control-monitor "${COMMAND_PATH}"
+    /etc/logrotate.d/vps-control-monitor "${COMMAND_PATH}" /usr/local/sbin/vpn-monitor-sample
   systemctl daemon-reload
   rm -rf -- "${INSTALL_DIR}" "${DATA_DIR}"
   rm -f -- "${ENV_FILE}" "${INSTALL_CONFIG}" "${MANAGER_CONFIG}"
+  rmdir --ignore-fail-on-non-empty /etc/wireguard /etc/amnezia/amneziawg /etc/amnezia 2>/dev/null || true
   ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
+  CURRENT_ACTION=""
   ok "панель полностью удалена; общие системные пакеты сохранены."
 }
 

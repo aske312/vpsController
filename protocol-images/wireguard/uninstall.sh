@@ -14,7 +14,7 @@ systemctl disable --now "wg-quick@${WG_INTERFACE}.service" 2>/dev/null || true
 if command -v ufw >/dev/null 2>&1; then
   ufw --force delete allow "${WG_PORT}/udp" >/dev/null 2>&1 || true
   if [[ -n "${UPLINK_INTERFACE}" ]]; then
-    while ufw --force delete route allow in on "${WG_INTERFACE}" out on "${UPLINK_INTERFACE}" from "${WG_SUBNET}" >/dev/null 2>&1; do :; done
+    while ufw --force route delete allow in on "${WG_INTERFACE}" out on "${UPLINK_INTERFACE}" from "${WG_SUBNET}" >/dev/null 2>&1; do :; done
   fi
 fi
 rm -f -- "${WG_CONFIG}" /etc/sysctl.d/99-vps-control-wireguard.conf \

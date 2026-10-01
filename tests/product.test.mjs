@@ -14,6 +14,7 @@ test("поставка содержит установщик, образы и р
   ]);
   assert.match(bootstrap, /archive\/refs\/heads\/\$\{BRANCH\}\.tar\.gz/);
   assert.match(bootstrap, /DPkg::Lock::Timeout=300/);
+  assert.match(manager, /df -Pk \/opt/);
   assert.match(manager, /doctor\)/);
   assert.match(manager, /install\)/);
   assert.match(manager, /update\)/);
@@ -282,8 +283,8 @@ test("WG and AWG modules install and uninstall independently", async () => {
   const baseDependencies = manager.match(/Установка системных зависимостей" apt-get install -y ([^\n]+)/)?.[1] || "";
   assert.doesNotMatch(baseDependencies, /wireguard-tools/);
   assert.match(api, /The last active VPN module cannot be removed while panel access is VPN-only/);
-  assert.match(wgRemove, /delete route allow in on "\$\{WG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{WG_SUBNET\}"/);
-  assert.match(awgRemove, /delete route allow in on "\$\{AWG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{AWG_SUBNET\}"/);
+  assert.match(wgRemove, /route delete allow in on "\$\{WG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{WG_SUBNET\}"/);
+  assert.match(awgRemove, /route delete allow in on "\$\{AWG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{AWG_SUBNET\}"/);
   assert.match(wgRemove, /99-vps-control-wireguard\.conf/);
   assert.match(awgRemove, /99-vps-control-amneziawg\.conf/);
   assert.match(api, /protocol-install/);
@@ -295,6 +296,16 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(awgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(wgInstall, /if ! command -v wg.*command -v wg-quick/s);
   assert.match(awgInstall, /if ! command -v awg.*command -v awg-quick.*modinfo amneziawg/s);
+  assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 1/);
+});
+
+test("full uninstall removes managed protocol state without recreating application data", async () => {
+  const manager = await read("scripts/vps-control.sh");
+  const uninstall = manager.slice(manager.indexOf("uninstall_app()"), manager.indexOf("restart_services()"));
+  assert.match(uninstall, /protocol-images\/wireguard\/uninstall\.sh/);
+  assert.match(uninstall, /protocol-images\/amneziawg\/uninstall\.sh/);
+  assert.match(uninstall, /\/usr\/local\/sbin\/vpn-monitor-sample/);
+  assert.match(uninstall, /CURRENT_ACTION=""/);
 });
 
 test("the interface uses one fixed visual design without personalization", async () => {
