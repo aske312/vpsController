@@ -12,8 +12,17 @@ def snapshot(run, config_root, *, strict=True, prefix=None, directory=None):
     pattern = re.compile(re.escape(prefix) + r"[A-Za-z0-9_-]+\.service")
     names = {f"{prefix}{path.stem}.service" for path in directory.glob("*.json") if not path.name.startswith(".")}
     for command in ("list-units", "list-unit-files"):
-        result = run("systemctl", command, "--all", "--plain", "--no-legend", f"{prefix}*.service", check=True)
-        names.update(line.split()[0] for line in result.stdout.splitlines() if line.strip())
+        result = run("systemctl", command, "--all", "--plain", "--no-legend", f"{prefix}*.service")
+        returncode = getattr(result, "returncode", 0)
+        stdout = getattr(result, "stdout", "") or ""
+        stderr = getattr(result, "stderr", "") or ""
+        # systemctl list-unit-files returns 1 with no output when the glob has
+        # no matches. That is a valid empty snapshot during a clean uninstall.
+        if returncode != 0:
+            if returncode == 1 and not stdout.strip() and not stderr.strip():
+                continue
+            raise RuntimeError(f"Cannot list Shadowsocks instances: {stderr.strip() or returncode}")
+        names.update(line.split()[0] for line in stdout.splitlines() if line.strip())
     result = {}
     for unit in sorted(names):
         if not pattern.fullmatch(unit):
