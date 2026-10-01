@@ -1,11 +1,48 @@
 import assert from "node:assert/strict";
 import { test, afterEach } from "node:test";
-import { createApiClient } from "../../src/shared/lib/api-request.ts";
+import { createApiClient, invalidateApiSession, onApiSessionExpired } from "../../src/shared/lib/api-request.ts";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 const client = (options = {}) => createApiClient("test-token", { retryDelaysMs: [0, 0], ...options });
 const ok = () => new Response('{"ok":true}', { headers: { "content-type": "application/json" } });
+
+test("401 expires all clients of the same session and clears access to cached responses", async () => {
+  const first = createApiClient("expired-session", {retryDelaysMs: []});
+  const second = createApiClient("expired-session", {retryDelaysMs: []});
+  const independent = createApiClient("independent-session", {retryDelaysMs: []});
+  let expired = 0;
+  const unsubscribe = onApiSessionExpired("expired-session", () => { expired += 1; });
+  try {
+    globalThis.fetch = async () => ok();
+    await second("/overview");
+    globalThis.fetch = async () => Response.json({detail: "Unauthorized"}, {status: 401});
+    await assert.rejects(first("/private"), {status: 401});
+    globalThis.fetch = async () => { throw new Error("Expired session must not fetch"); };
+    await assert.rejects(second("/overview"), {status: 401});
+    assert.equal(expired, 1);
+    globalThis.fetch = async () => ok();
+    assert.deepEqual(await independent("/overview"), {ok: true});
+  } finally { unsubscribe(); }
+});
+
+test("late response from a signed-out session cannot populate state or expire a new login", async () => {
+  let complete;
+  const old = createApiClient("same-credentials", {retryDelaysMs: []});
+  globalThis.fetch = () => new Promise((resolve) => { complete = resolve; });
+  const pending = old("/generated-config");
+  invalidateApiSession("same-credentials", false);
+  const fresh = createApiClient("same-credentials", {retryDelaysMs: []});
+  let expired = 0;
+  const unsubscribe = onApiSessionExpired("same-credentials", () => { expired += 1; });
+  try {
+    complete(Response.json({private_key: "old-private-data"}));
+    await assert.rejects(pending, {status: 401});
+    assert.equal(expired, 0);
+    globalThis.fetch = async () => ok();
+    assert.deepEqual(await fresh("/overview"), {ok: true});
+  } finally { unsubscribe(); }
+});
 
 test("validation details remain HTTP errors with a text formatter", async () => {
   let calls = 0;

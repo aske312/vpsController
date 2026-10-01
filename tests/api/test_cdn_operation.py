@@ -17,9 +17,11 @@ class CdnOperationTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.override = patch.object(operations, "DIRECTORY", Path(self.directory.name))
+        self.override = patch.object(operations, "DIRECTORY", Path(self.directory.name) / "cdn-operations")
         self.override.start()
         self.addCleanup(self.override.stop)
+        for name in ("VLESS_ENV", "MIHOMO_VLESS_CDN_ROUTES"):
+            self.enterContext(patch.object(api, name, Path(self.directory.name) / name))
 
     def start(self):
         with patch.object(operations.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as launch:
@@ -102,6 +104,27 @@ class CdnOperationTests(unittest.TestCase):
         status = operations.status(ID)
         self.assertEqual(status["state"], "failed")
         self.assertNotIn("private technical detail", status["message"])
+
+    def test_gateway_and_other_mutations_share_admission_and_worker_lock(self):
+        common = operations.application_operation
+        root = operations.DIRECTORY.parent
+        with common.short_mutation(root), self.assertRaises(operations.OperationConflict):
+            self.start()
+        self.assertIsNone(operations.status())
+        result, _ = self.start()
+        self.assertEqual(common.read(root / "application-action.json")["id"], result["id"])
+        with self.assertRaises(common.OperationConflict):
+            with common.short_mutation(root):
+                self.fail("Queued gateway work must reserve mutations")
+        def configure(*args, **kwargs):
+            with self.assertRaises(common.OperationConflict):
+                with common.mutation_lock(root):
+                    self.fail("Gateway worker must own the shared lock")
+        with patch.object(operations.cdn_security, "configure_aop", side_effect=configure):
+            operations.run(ID)
+        self.assertEqual(common.read(root / "application-action.json")["state"], "succeeded")
+        with common.short_mutation(root):
+            pass
 
     def test_status_endpoint_checks_authentication_and_returns_current_setting(self):
         from fastapi.testclient import TestClient

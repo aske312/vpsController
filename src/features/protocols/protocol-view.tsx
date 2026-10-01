@@ -36,7 +36,6 @@ type ProtocolViewProps = {
   checkingResources: Protocol | null;
   installingProtocol: string;
   busy: boolean;
-  restartProtocol: (protocol: Protocol) => Promise<void> | void;
   updateProtocol: (image: ProtocolImage) => Promise<void> | void;
   removeProtocol: (image: ProtocolImage) => Promise<void> | void;
   toggleNetworkDiagnostics: (protocol: Protocol) => void;
@@ -155,11 +154,12 @@ export function ProtocolView(props: ProtocolViewProps) {
     protocolIsTunnel, protocolOperational, protocolAvailability, protocolDiagnosticsLabel,
     protocolResourceAvailable, protocolResourceTotal, installedProtocols, setTab, onSelectProtocol,
     diagnosticsOpen, resourcesOpen, checkingDiagnostics, checkingResources,
-    installingProtocol, busy, restartProtocol, updateProtocol, removeProtocol,
+    installingProtocol, busy, updateProtocol, removeProtocol,
     toggleNetworkDiagnostics, checkNetworkDiagnostics,
     toggleProtocolResources, checkProtocolResources,
   } = props;
   const profile = profiles[protocolTab];
+  const readOnly = activeProtocolImage?.management?.state !== "managed" || Boolean(activeProtocolImage?.management?.retained);
   const routeReady = {
     tls: Boolean(activeProtocol.routes?.tls?.enabled),
     cdn: Boolean(activeProtocol.routes?.cdn?.enabled),
@@ -215,16 +215,17 @@ export function ProtocolView(props: ProtocolViewProps) {
         </div>
       </header>
 
+      {readOnly && <p role="status">Только просмотр и диагностика. Для изменения компонента примите его под управление в разделе «Обзор».</p>}
       <div className="tunnelCommandBar">
         <div>
           <span className={`healthDot ${health}`} />
           <p><small>RUNTIME</small><strong>{protocolOperational ? "ACTIVE" : "STOPPED"}</strong><span>{activeProtocol.unit || activeProtocol.interface || profile.title}</span></p>
         </div>
         <div className="tunnelCommandActions">
-          <button type="button" onClick={() => void restartProtocol(protocolTab)} disabled={busy}>Перезапустить</button>
+          <button type="button" onClick={() => setTab("services")}>Управление службой</button>
           <button type="button" onClick={() => toggleNetworkDiagnostics(protocolTab)} disabled={busy || checkingDiagnostics === protocolTab}>{checkingDiagnostics === protocolTab ? "Проверяем…" : "Проверить сеть"}</button>
-          {activeProtocolImage?.update_available && <button type="button" className="accent" onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy}>{updateBusy ? "Обновляем…" : "Обновить"}</button>}
-          {activeProtocolImage?.removable && <button type="button" className="danger" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить модуль</button>}
+          {activeProtocolImage?.update_available && <button type="button" className="accent" onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy || readOnly}>{updateBusy ? "Обновляем…" : "Обновить"}</button>}
+          {activeProtocolImage?.removable && <button type="button" className="danger" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy || readOnly}>Удалить модуль</button>}
         </div>
       </div>
 

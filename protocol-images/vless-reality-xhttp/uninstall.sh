@@ -8,9 +8,13 @@ if [[ -s "${CONFIG_DIR}/reality.env" ]]; then
 fi
 systemctl disable --now vps-control-vless-reality-xhttp.service 2>/dev/null || true
 rm -f -- /etc/systemd/system/vps-control-vless-reality-xhttp.service
-rm -rf -- /etc/vps-control/vless-reality-xhttp /usr/local/lib/vps-control-vless-reality-xhttp
-python3 /opt/vps-control/api/cdn_security.py rebuild
+[[ "${PRESERVE_COMPONENT_DATA:-1}" == 1 ]] || rm -rf -- /etc/vps-control/vless-reality-xhttp
+rm -rf -- /usr/local/lib/vps-control-vless-reality-xhttp
+VPS_CONTROL_EXCLUDE_COMPONENT=vless-reality-xhttp python3 /opt/vps-control/api/cdn_security.py rebuild
 python3 - <<'PY'
+import os, sys
+if os.getenv("PRESERVE_COMPONENT_DATA", "1") == "1":
+    sys.exit(0)
 import json, os
 path = "/var/lib/vps-control/clients.json"
 try:

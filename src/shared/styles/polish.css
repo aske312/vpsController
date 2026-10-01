@@ -367,3 +367,11 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
 .protocolHealthBadge[data-state="WARN"], .tunnelHeroMeta .protocolCheck[data-state="WARN"] { color: #c3b17d; background: #c3b17d0a; }
 .protocolHealthBadge[data-state="ERROR"], .tunnelHeroMeta .protocolCheck[data-state="ERROR"] { color: #ce9298; background: #ce92980a; }
 .connectionProtocolPicker strong { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+
+/* Access-bearing QR codes are revealed explicitly, with wrapping at phone widths. */
+.accessReveal { min-width:0; display:grid; gap:10px; overflow-wrap:anywhere; }
+.accessReveal > p { margin:0; font-size:12px; line-height:1.5; color:var(--muted); }
+.accessReveal > button { min-height:40px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; color:var(--text); background:transparent; cursor:pointer; }
+.accessReveal img { max-width:100%; height:auto; }
+.accessReveal > button:focus-visible { outline:2px solid var(--text); outline-offset:3px; }
+.mihomoDnsFooter, .mihomoRoutingFooter { flex-wrap:wrap; gap:10px; }

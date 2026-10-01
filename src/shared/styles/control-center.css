@@ -145,8 +145,8 @@
 .overviewComponentCounters { display:flex !important; align-items:center; gap:5px !important; }
 .overviewComponentCounters span { padding:6px 7px; border-radius:8px; background:var(--cc-inset); }
 .overviewComponentRegistry { min-height:0; margin-top:8px; overflow:hidden; border:0; background:transparent; }
-.overviewComponentRegistry > div { height:100%; display:grid; align-content:start; gap:6px !important; overflow-y:auto; padding:0 3px 3px 0; scrollbar-width:thin; scrollbar-color:rgba(100,184,255,.28) transparent; }
-.overviewComponentRow { grid-template-columns:minmax(0,1fr) auto !important; grid-template-areas:'identity state' 'version action'; min-height:78px !important; padding:9px !important; border:1px solid rgba(106,137,160,.11) !important; border-radius:10px; background:var(--cc-inset); }
+.overviewComponentRegistry > div { height:100%; display:grid; grid-auto-rows:max-content; align-content:start; gap:6px !important; overflow-y:auto; padding:0 3px 3px 0; scrollbar-width:thin; scrollbar-color:rgba(100,184,255,.28) transparent; }
+.overviewComponentRow { grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important; grid-template-areas:'identity version' 'state state' 'action action'; min-height:78px !important; padding:9px !important; border:1px solid rgba(106,137,160,.11) !important; border-radius:10px; background:var(--cc-inset); }
 .overviewComponentRow:last-child { border-bottom:1px solid rgba(106,137,160,.11) !important; }
 .overviewComponentIdentity { grid-area:identity !important; gap:8px; }
 .overviewComponentIdentity b { font-size:11px; }
@@ -155,8 +155,10 @@
 .overviewComponentVersion small { display:block; color:#5f7888; font-size:7.5px; }
 .overviewComponentState { grid-area:state !important; align-self:start; justify-self:end; padding:4px 6px; border:0; background:rgba(100,184,255,.07); }
 .overviewComponentState.unavailable { background:rgba(110,73,73,.10); color:#8b7478; }
-.overviewComponentAction { grid-area:action !important; align-self:end; justify-self:end; }
-.overviewComponentAction button { min-width:96px; }
+.overviewComponentAction { grid-area:action !important; align-self:end; justify-self:stretch; min-width:0; flex-wrap:wrap; gap:6px; }
+.overviewComponentAction > div { display:flex; flex-direction:column; align-items:flex-end; gap:6px; min-width:0; max-width:100%; }
+.overviewComponentAction small { white-space:normal; overflow-wrap:anywhere; }
+.overviewComponentAction button { min-width:96px; max-width:100%; height:auto; white-space:normal; overflow-wrap:anywhere; }
 
 /* DNS — resolver field is the main visual surface; policy remains a compact console. */
 .dnsPageHead { padding:3px 2px 7px !important; }

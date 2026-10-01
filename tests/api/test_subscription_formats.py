@@ -8,10 +8,30 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from tests.api.support import manager, ROOT
+from tests.api.support import manager, ROOT, managed_mihomo_fixture
 
 
 class SubscriptionFormatTests(unittest.TestCase):
+    def test_readonly_legacy_subscriptions_keep_existing_devices_without_writes(self):
+        self.fetch("ClashMeta/1.0")
+        device_id = self.store[0]["devices"][1]["id"]
+        bound_token = manager.device_subscription_token("test-token", device_id)
+        from component_registry import ComponentRegistry
+        ComponentRegistry(manager.DATA_ROOT.parent).receipt_path("mihomo").unlink()
+        before = deepcopy(self.store)
+        calls = self.provision.call_count
+        with patch.object(manager, "save_profiles", side_effect=AssertionError("Read-only subscription wrote profiles")):
+            self.fetch("ClashMeta/1.0")
+            self.fetch("ClashMeta/1.0", hwid=None)
+            request = manager.Request({"type": "http", "method": "GET", "path": "/s/" + bound_token,
+                "query_string": b"", "headers": [(b"user-agent", b"ClashMeta/1.0"), (b"x-hwid", b"phone")]})
+            self.assertEqual(manager.public_profile_subscription(bound_token, request).status_code, 200)
+            with self.assertRaises(manager.HTTPException) as denied:
+                self.fetch("ClashMeta/1.0", hwid="new-device")
+            self.assertEqual(denied.exception.status_code, 409)
+        self.assertEqual(self.store, before)
+        self.assertEqual(self.provision.call_count, calls)
+
     def test_legacy_channels_create_uses_the_common_device(self):
         for device_id in ("profile-common", "custom-common"):
             with self.subTest(device_id=device_id), patch.object(manager, "module_is_ready", return_value=True), patch.object(manager, "SUBMODULE_ROOT", ROOT / "protocol-images/mihomo/modules"):
@@ -143,6 +163,7 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.provision.assert_not_called()
 
     def setUp(self):
+        managed_mihomo_fixture(self)
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(patch.object(manager, "WG_CONFIG_BY_MODULE", {
             "transport-wg": root / "wg.conf", "transport-awg": root / "awg.conf",

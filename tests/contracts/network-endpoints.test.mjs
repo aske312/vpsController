@@ -12,7 +12,7 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
     read("src/features/network/network.css"),
   ]);
   assert.match(api, /NetworkEndpointSettings/);
-  assert.match(api, /@app\.put\("\/api\/network\/endpoints"\)/);
+  // HTTP admission and mutation conflicts are covered by test_core_auth.py.
   assert.match(api, /channel_mode/);
   assert.match(api, /tls_relay_domain/);
   assert.match(api, /udp_relay_domain/);

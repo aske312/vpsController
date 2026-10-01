@@ -11,7 +11,9 @@ export type ConfirmOptions = {
 };
 
 export type Status = {
-  active: boolean;
+  recovery_required?: boolean;
+  active: boolean | null;
+  runtime?: { state: "running" | "stopped" | "error" | "unknown"; reason: string; checked_at: string };
   core_version: string;
   profiles: number;
   profiles_in_use: number;
@@ -73,6 +75,7 @@ export type Profile = {
 };
 
 export type ProfileConnection = {
+  route_state?: { state: "current" | "stale" | "unknown"; reason: string; addresses: string[]; bindings: string[] };
   id: string;
   component: string;
   name: string;

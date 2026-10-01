@@ -12,9 +12,70 @@
     "ubuntu",
     "debian"
   ],
-  "preflight_packages": ["ca-certificates", "curl", "gzip"],
+  "preflight_packages": [
+    "ca-certificates",
+    "curl",
+    "gzip"
+  ],
   "minimum_free_mb": 256,
   "requires_kernel_headers": false,
   "service": "vps-control-mihomo-manager.service",
-  "removable": true
+  "removable": true,
+  "installation": {
+    "required_paths": [
+      {
+        "path": "/etc/systemd/system/vps-control-mihomo-manager.service"
+      },
+      {
+        "path": "/var/lib/vps-control/mihomo/bin/mihomo"
+      }
+    ],
+    "backup_paths": [
+      {
+        "path": "/etc/vps-control/mihomo"
+      },
+      {
+        "path": "{data_dir}/mihomo/profiles.json"
+      },
+      {
+        "path": "{data_dir}/mihomo/state.json"
+      },
+      {
+        "path": "{data_dir}/mihomo/settings"
+      },
+      {
+        "path": "/etc/systemd/system/vps-control-mihomo-manager.service"
+      },
+      {
+        "path": "/etc/vps-control/environment",
+        "env": "ENV_FILE"
+      },
+      {
+        "path": "/etc/wireguard/mh-wg0.conf"
+      },
+      {
+        "path": "/etc/amnezia/amneziawg/mh-awg0.conf"
+      },
+      {
+        "path": "/etc/amnezia/mh-awg0.conf"
+      }
+    ],
+    "data_paths": [
+      {
+        "path": "/etc/vps-control/mihomo"
+      },
+      {
+        "path": "{data_dir}/mihomo"
+      },
+      {
+        "path": "/etc/wireguard/mh-wg0.conf"
+      },
+      {
+        "path": "/etc/amnezia/amneziawg/mh-awg0.conf"
+      },
+      {
+        "path": "/etc/amnezia/mh-awg0.conf"
+      }
+    ]
+  }
 }

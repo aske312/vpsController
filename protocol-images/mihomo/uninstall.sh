@@ -94,9 +94,14 @@ rm -f /etc/systemd/system/vps-control-mihomo-manager.service \
 rm -rf -- "${CAPABILITIES_HELPER_DIR}"
 rm -f -- "${CAPABILITIES_DATA}"
 systemctl daemon-reload
+VPS_CONTROL_EXCLUDE_COMPONENT=mihomo python3 "${APP_ROOT}/api/cdn_security.py" rebuild
 
 # Profiles, generated credentials, sub-module settings and all Mihomo-only configs.
-rm -rf -- "${CONFIG_DIR}" "${DATA_DIR}"
+if [[ "${PRESERVE_COMPONENT_DATA:-1}" == 1 ]]; then
+  rm -rf -- "${DATA_DIR}/bin"
+else
+  rm -rf -- "${CONFIG_DIR}" "${DATA_DIR}"
+fi
 
-echo "Mihomo удалён каскадно: profiles=${PROFILE_COUNT:-0}, credentials=${CREDENTIAL_COUNT:-0}."
+echo "Исполняемые компоненты Mihomo удалены; сохранение настроек и подключений: ${PRESERVE_COMPONENT_DATA:-1}."
 echo "Direct-модули и общие системные пакеты GATE.312 не изменялись."

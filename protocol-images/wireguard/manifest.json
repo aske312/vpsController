@@ -8,11 +8,47 @@
   "category_name": "Защищённые туннели",
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
-  "supported_os": ["ubuntu", "debian"],
-  "preflight_packages": ["iptables", "wireguard-tools"],
+  "supported_os": [
+    "ubuntu",
+    "debian"
+  ],
+  "preflight_packages": [
+    "iptables",
+    "wireguard-tools"
+  ],
   "minimum_free_mb": 128,
   "requires_kernel_headers": false,
   "interface_env": "WG_INTERFACE",
   "service": "wg-quick@{interface}.service",
-  "package": "wireguard-tools"
+  "package": "wireguard-tools",
+  "installation": {
+    "required_paths": [
+      {
+        "path": "/etc/wireguard/{interface}.conf",
+        "env": "WG_CONFIG"
+      }
+    ],
+    "backup_paths": [
+      {
+        "path": "/etc/wireguard/{interface}.conf",
+        "env": "WG_CONFIG"
+      },
+      {
+        "path": "/etc/systemd/system/wg-quick@{interface}.service"
+      },
+      {
+        "path": "/etc/vps-control/environment",
+        "env": "ENV_FILE"
+      },
+      {
+        "path": "{data_dir}/clients.json"
+      }
+    ],
+    "data_paths": [
+      {
+        "path": "/etc/wireguard/{interface}.conf",
+        "env": "WG_CONFIG"
+      }
+    ]
+  }
 }

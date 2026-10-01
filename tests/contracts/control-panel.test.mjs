@@ -96,18 +96,8 @@ test("network diagnostics measure loss, jitter, MTU and server path health", asy
   assert.doesNotMatch(api, /threading\.Thread\(target=network_diagnostics/);
 });
 
-test("primary resource metrics use CPU percent and readable RAM and disk units", async () => {
-  const [api, page, overview] = await Promise.all([readApiSources(), readUiSources(), read("src/features/overview/overview-view.tsx")]);
-  assert.match(api, /def cpu_usage_percent/);
-  assert.match(api, /"cpu_percent": cpu_percent/);
-  assert.match(page, /label="CPU"[\s\S]*cpu_percent/);
-  assert.match(page, /label="MEMORY"[\s\S]*bytes\(memoryUsedBytes\)/);
-  assert.match(page, /label="DISK USED"[\s\S]*bytes\(diskUsedBytes\)/);
-  assert.match(page, /bytes\(memoryFree\)/);
-  assert.match(page, /bytes\(diskFree\)/);
-  assert.match(overview, /Number\.isFinite\(value\) \|\| value <= 0/);
-  assert.match(overview, /Math\.max\(0, Math\.min\(Math\.floor\(Math\.log\(value\)/);
-});
+// Resource observations and chart gaps are covered behaviorally in
+// tests/api/test_system_metrics.py and tests/web/resource-metrics.test.mjs.
 
 test("service settings are staged, saved explicitly and survive background refresh", async () => {
   const [api, page, manager] = await Promise.all([
@@ -119,7 +109,7 @@ test("service settings are staged, saved explicitly and survive background refre
   assert.match(page, /automationDraft/);
   assert.match(page, /loggingDraft/);
   assert.match(page, /loggingDirty\.current/);
-  assert.match(page, /Настройки записи и хранения журналов сохранены/);
+  // Completion and lost responses are covered by system-operation and service-operation tests.
   assert.match(manager, /install -m 0755 "\$\{PROJECT_DIR\}\/scripts\/vps-control\.sh" "\$\{COMMAND_PATH\}"/);
 });
 
@@ -206,13 +196,8 @@ test("connection latency labels identify the real measurement source", async () 
   assert.match(page, /latency_source === "server_icmp_tunnel_ip"/);
 });
 
-test("node components distinguish installable images and refresh real versions", async () => {
-  const page = await readUiSources();
-  assert.match(page, /!item\.installed && item\.installable/);
-  assert.match(page, /!image\.installed && !image\.installable/);
-  assert.match(page, /displayedVersion = image\.installed[\s\S]*?installedVersion[\s\S]*?image\.installable \? "АКТУАЛЬНАЯ" : "—"/);
-  assert.match(page, /await loadOverview\(\)/);
-});
+// Component action/state presentation is behaviorally covered by component-state.test.mjs.
+
 
 test("legacy users beta surface and orchestration are removed", async () => {
   const [ui, api, navigation, globals] = await Promise.all([

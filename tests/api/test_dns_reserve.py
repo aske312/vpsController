@@ -44,7 +44,8 @@ class DnsReserveTests(unittest.TestCase):
     def test_save_applies_backup_to_system_and_protocols(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for name in ("ENV_FILE", "VLESS_CONFIG", "DNS_SETTINGS_FILE", "SYSTEM_RESOLVED_DROPIN", "SYSTEM_RESOLV_CONF"):
+            for name in ("ENV_FILE", "VLESS_CONFIG", "DNS_SETTINGS_FILE", "SYSTEM_RESOLVED_DROPIN", "SYSTEM_RESOLV_CONF",
+                         "OPENVPN_CONFIG", "OPENVPN_SETTINGS", "IKEV2_CONFIG", "IKEV2_SETTINGS"):
                 self.enterContext(patch.object(api, name, root / name))
             api.VLESS_CONFIG.write_text("{}")
             self.enterContext(patch.object(api, "dns_provider_list", return_value=self.providers))
@@ -68,6 +69,37 @@ class DnsReserveTests(unittest.TestCase):
         with patch.object(api, "read_dns_settings", return_value=self.settings), patch.object(api, "dns_provider_list", return_value=self.providers), patch.object(api, "current_env_value", side_effect=lambda key, default: actual[key]), patch.object(api, "run", return_value="enabled"), patch.object(api, "system_dns_state", return_value={}), patch.object(api, "direct_dns_effects", return_value={}), patch.object(api, "actual_vrx_dns", return_value=actual["VRX_DNS"]):
             details = api.dns_status()["protocol_effect_details"]
         self.assertTrue(all(effect["matches_selected"] for effect in details.values()))
+
+    def test_failed_rollback_continues_and_does_not_claim_recovery(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ("ENV_FILE", "VLESS_CONFIG", "DNS_SETTINGS_FILE", "SYSTEM_RESOLVED_DROPIN", "SYSTEM_RESOLV_CONF",
+                         "OPENVPN_CONFIG", "OPENVPN_SETTINGS", "IKEV2_CONFIG", "IKEV2_SETTINGS"):
+                self.enterContext(patch.object(api, name, root / name))
+            api.ENV_FILE.write_text("before-env")
+            api.DNS_SETTINGS_FILE.write_text("before-settings")
+            api.SYSTEM_RESOLVED_DROPIN.write_text("before-resolver")
+            self.enterContext(patch.object(api, "dns_provider_list", return_value=self.providers))
+            self.enterContext(patch.object(api, "dns_wire_query", return_value=(True, 1.0)))
+            self.enterContext(patch.object(api, "observe_service", return_value={"unit_present": True, "runtime": {"state": "running"}}))
+            runtime = self.enterContext(patch.object(api, "run", side_effect=RuntimeError("restart failed")))
+            def fail_apply(_):
+                api.ENV_FILE.write_text("changed")
+                api.SYSTEM_RESOLVED_DROPIN.write_text("changed")
+                raise RuntimeError("apply failed")
+            self.enterContext(patch.object(api, "apply_system_dns", side_effect=fail_apply))
+            real_write = Path.write_bytes
+            def fail_one_restore(path, data):
+                if path == api.ENV_FILE:
+                    raise OSError("disk failure")
+                return real_write(path, data)
+            with patch.object(Path, "write_bytes", fail_one_restore), self.assertRaises(api.HTTPException) as raised:
+                api.update_dns_settings(api.DnsSettingsUpdate(selected_id="primary", apply_system=True, apply_vrx=False))
+            self.assertEqual(raised.exception.status_code, 500)
+            self.assertIn("Не удалось полностью восстановить", raised.exception.detail)
+            self.assertEqual(api.DNS_SETTINGS_FILE.read_text(), "before-settings")
+            self.assertEqual(api.SYSTEM_RESOLVED_DROPIN.read_text(), "before-resolver")
+            runtime.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -13,12 +13,15 @@ from unittest.mock import patch
 
 import yaml
 import grpc
-from tests.api.support import manager, free_port, wait_port
+from tests.api.support import manager, free_port, wait_port, managed_mihomo_fixture
 from telemetry import ConnectionTelemetry
 from telemetry_pb2 import Connection, ConnectionEvent, ConnectionEvents, SubscribeConnectionsRequest
 
 
 class TelemetryTests(unittest.TestCase):
+    def setUp(self):
+        managed_mihomo_fixture(self)
+
     def test_package_version_discovery_is_shared_and_invalidated_after_mutation(self):
         with patch.dict(manager.apt_versions_cache, {}, clear=True), patch.object(manager.time, "monotonic", return_value=100) as clock, patch.object(manager, "_apt_package_versions", return_value=("1", "2")) as discover:
             self.assertEqual(manager.apt_package_versions("amneziawg"), ("1", "2"))
@@ -104,6 +107,9 @@ class QuicTrafficTests(unittest.TestCase):
     def probe(self, module, client_format):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
+            self.enterContext(patch.object(manager.port_allocation, "DATA_ROOT", root / "data"))
+            self.enterContext(patch.object(manager.port_allocation, "CONFIG_ROOT", root / "managed"))
+            self.enterContext(patch.object(manager.port_allocation, "ENV_FILE", root / "environment"))
             release = threading.Event()
             class Origin(http.server.BaseHTTPRequestHandler):
                 def do_GET(self):

@@ -90,4 +90,5 @@ bash "$(dirname -- "${BASH_SOURCE[0]}")/protect-runtime.sh"
 systemctl daemon-reload
 systemctl enable vps-control-mihomo-ss.target >/dev/null
 systemctl restart vps-control-mihomo-ss.target
+python3 /opt/vps-control/protocol-images/mihomo/ss_runtime.py restore
 echo "Mihomo/Shadowsocks готов. Профили получат отдельные порты от ${PORT_START}; cipher ${METHOD}."

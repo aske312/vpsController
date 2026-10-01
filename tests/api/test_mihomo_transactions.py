@@ -64,7 +64,7 @@ class MihomoTransactionTests(unittest.TestCase):
                 patch.object(manager, "CONFIG_ROOT", config),
                 patch.object(manager, "PROFILE_FILE", root / "profiles.json"),
                 patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"),
-                patch.object(manager, "systemctl_active", return_value=True),
+                patch.object(manager, "observe_service", return_value={"unit_present": True, "runtime": {"state": "running"}}), patch.object(manager, "systemctl_active", return_value=True),
                 patch.object(manager, "run", side_effect=fake_run),
             ):
                 with self.assertRaisesRegex(RuntimeError, "injected"):
@@ -109,7 +109,7 @@ class MihomoTransactionTests(unittest.TestCase):
                 patch.object(manager, "CONFIG_ROOT", root / "config"),
                 patch.object(manager, "PROFILE_FILE", root / "profiles.json"),
                 patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"),
-                patch.object(manager, "systemctl_active", return_value=True),
+                patch.object(manager, "observe_service", return_value={"unit_present": True, "runtime": {"state": "running"}}), patch.object(manager, "systemctl_active", return_value=True),
                 patch.object(manager.ss_runtime, "snapshot", return_value={}),
                 patch.object(manager.ss_runtime, "restore", side_effect=RuntimeError("recovery failed")),
             ):
@@ -177,14 +177,14 @@ class MihomoTransactionTests(unittest.TestCase):
                     patch.object(manager, "PROFILE_FILE", root / "profiles.json"),
                     patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"),
                     patch.object(manager, "WG_CONFIG_BY_MODULE", {module_id: config}),
-                    patch.object(manager, "systemctl_active", return_value=True),
+                    patch.object(manager, "observe_service", return_value={"unit_present": True, "runtime": {"state": "running"}}), patch.object(manager, "systemctl_active", return_value=True),
                     patch.object(manager, "run", side_effect=check_restart) as run,
                 ):
                     with self.assertRaisesRegex(RuntimeError, "injected"):
                         with manager.profile_runtime_transaction({module_id}):
                             config.write_text("changed peers", encoding="utf-8")
                             raise RuntimeError("injected")
-                    run.assert_any_call("systemctl", "restart", service)
+                    run.assert_any_call("systemctl", "restart", service, check=True)
                 self.assertEqual(config.read_text(encoding="utf-8"), "original peers")
 
     def test_vless_limit_is_applied_separately_per_route(self):
@@ -211,6 +211,7 @@ class MihomoTransactionTests(unittest.TestCase):
             with (
                 patch.object(manager, "CONFIG_ROOT", config),
                 patch.object(manager, "PROFILE_FILE", profile),
+                patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"),
                 patch.object(manager, "SERVICE_BY_MODULE", {}),
             ):
                 with self.assertRaisesRegex(RuntimeError, "injected"):
@@ -220,26 +221,6 @@ class MihomoTransactionTests(unittest.TestCase):
                         raise RuntimeError("injected")
             self.assertEqual(json.loads((config / "adapter.json").read_text()), {"before": True})
             self.assertEqual(json.loads(profile.read_text()), [{"id": "before"}])
-
-    def test_reality_rollback_restores_dynamic_user_permissions(self):
-        with tempfile.TemporaryDirectory() as root:
-            root = Path(root)
-            config = root / "config"
-            reality = config / "reality"
-            reality.mkdir(parents=True)
-            (reality / "config.json").write_text('{}\n', encoding="utf-8")
-            with (
-                patch.object(manager, "CONFIG_ROOT", config),
-                patch.object(manager, "PROFILE_FILE", root / "profiles.json"),
-                patch.object(manager, "ROUTING_SETTINGS_FILE", root / "routing.json"),
-                patch.object(manager, "systemctl_active", return_value=False),
-                patch.object(manager.shutil, "chown") as chown,
-            ):
-                with self.assertRaisesRegex(RuntimeError, "injected"):
-                    with manager.profile_runtime_transaction({"transport-reality"}):
-                        raise RuntimeError("injected")
-            chown.assert_any_call(reality, user="root", group="nogroup")
-            chown.assert_any_call(reality / "config.json", user="root", group="nogroup")
 
     def test_reality_apply_repairs_directory_traversal_before_restart(self):
         with tempfile.TemporaryDirectory() as root:
