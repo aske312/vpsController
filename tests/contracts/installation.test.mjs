@@ -153,6 +153,15 @@ test("PRO keeps production releases public and accepts test builds only from loc
   assert.doesNotMatch(releaseWorkflow, /main-latest|test-pro/);
 });
 
+test("full uninstall removes owned panel state without recreating action data", async () => {
+  const manager = await readFileText("scripts/vps-control.sh");
+  const uninstall = manager.match(/uninstall_app\(\) \{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(uninstall, /disable --now[^\n]+caddy\.service/);
+  assert.match(uninstall, /CURRENT_ACTION=""[\s\S]*rm -rf -- "\$\{INSTALL_DIR\}" "\$\{DATA_DIR\}" "\$\{CONFIG_DIR\}"/);
+  assert.match(uninstall, /rm -f -- "\$\{CADDY_CONFIG\}"/);
+  assert.match(uninstall, /ufw --force delete allow 443\/tcp/);
+});
+
 test("PRO release metadata binds edition, channel, architecture and full commit", async () => {
   const [builder, manager] = await Promise.all([
     read("scripts/build-release.sh"), read("scripts/vps-control.sh"),
