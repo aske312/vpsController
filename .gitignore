@@ -65,3 +65,6 @@ __pycache__/
 /AGENTS.md
 /docs/plans/
 /docs/direct-audit/
+/docs/.audit/
+/docs/.backlog/
+/docs/.plans/
