@@ -149,6 +149,7 @@ test("full uninstall removes owned panel state without recreating action data", 
   assert.match(manager, /systemctl is-enabled --quiet "\$\{service\}"/);
   assert.match(manager, /restore_test_app\(\)[\s\S]*write_integrity_manifest/);
   assert.match(manager, /restore_update_gateway\s+write_integrity_manifest/);
+  assert.match(manager, /автоматический откат выполнен, но восстановленная версия не запустилась/);
 });
 
 test("PRO test metadata binds edition, channel, architecture and full commit", async () => {
