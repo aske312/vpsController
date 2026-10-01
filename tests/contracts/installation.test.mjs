@@ -162,6 +162,8 @@ test("full uninstall removes owned panel state without recreating action data", 
   assert.match(uninstall, /rm -f -- "\$\{CADDY_CONFIG\}"/);
   assert.match(uninstall, /ufw --force delete allow 443\/tcp/);
   assert.match(manager, /systemctl is-enabled --quiet "\$\{service\}"/);
+  assert.match(manager, /restore_test_app\(\)[\s\S]*write_integrity_manifest/);
+  assert.match(manager, /restore_update_gateway\s+write_integrity_manifest/);
 });
 
 test("PRO release metadata binds edition, channel, architecture and full commit", async () => {
