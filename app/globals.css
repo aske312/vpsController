@@ -101,6 +101,11 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .nodeStatus strong { font-size: 11px; }
 .nodeStatus small { color: var(--muted); font: 8px var(--font-geist-mono); margin-top: 5px; }
 .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.metricsHeader { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 15px 17px; border: 1px solid rgba(97, 207, 216, .16); border-radius: 9px; background: linear-gradient(100deg, rgba(97, 207, 216, .055), rgba(55, 105, 148, .035)), #0c1821; }
+.metricsHeader h2 { margin: 0; font-size: 18px; }
+.metricsHeader small { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; }
+.metricsHeader label { display: grid; gap: 5px; color: var(--muted); font: 8px var(--font-mono); text-transform: uppercase; letter-spacing: .8px; }
+.metricsHeader select { min-width: 132px; height: 34px; padding: 0 9px; border: 1px solid rgba(97, 207, 216, .24); border-radius: 6px; background: #0d1a24; color: var(--text); font: 10px var(--font-mono); }
 .metricCard { min-height: 155px; display: flex; flex-direction: column; }
 .metricCard h2 { margin: 0; font: 500 29px var(--font-geist-mono); letter-spacing: -1px; }
 .metricCard > small { margin-top: 10px; color: var(--muted); font-size: 9px; }
@@ -1134,6 +1139,8 @@ input, select { height: 46px; font-size: 11px; }
 }
 
 @media (max-width: 700px) {
+  .metricsHeader { align-items: stretch; flex-direction: column; }
+  .metricsHeader select { width: 100%; }
   .servicesHero, .automationSave, .panelAccess { align-items: flex-start; flex-direction: column; }
   .panelAccessActions { width: 100%; justify-content: space-between; }
   .serviceRow { grid-template-columns: 10px minmax(0, 1fr); }

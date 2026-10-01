@@ -6,7 +6,18 @@ import { LegalFooter } from "./legal";
 
 type Tab = "overview" | "security" | "application" | "services" | "wg" | "awg" | "clients";
 type Protocol = "wg" | "awg";
-type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
+type MetricsPeriod = "live" | "day" | "week" | "quarter";
+type ResourceHistory = { load: Array<number | null>; memory: Array<number | null>; disk: Array<number | null>; rx: Array<number | null>; tx: Array<number | null> };
+type MetricsHistory = {
+  period: MetricsPeriod;
+  resolution_s: number;
+  points: Array<{
+    at: number; cpu_percent: number | null; memory_used_percent: number | null; disk_used_percent: number | null;
+    rx_bps: number | null; tx_bps: number | null;
+  }>;
+  settings: { enabled: boolean; raw_hours: number; minute_days: number; hour_days: number; disk_limit_mb: number; used_bytes: number; trimmed_at?: number | null };
+  error?: string;
+};
 type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" | "network-check" | "integrity-check" | "identity" | "secure" | "kernel-update" | "vpn-firewall" | "optimize" | "reboot" | "poweroff";
 type Client = {
   id: string; name: string; protocol: Protocol; public_key: string; endpoint?: string;
@@ -15,7 +26,7 @@ type Client = {
 };
 type Overview = {
   server: { name: string; public_ip: string; city: string; country: string; country_code: string; uptime_s: number };
-  resources: { load1: number; cpu_percent: number; cpu_count: number; memory_total: number; memory_available: number; disk_total: number; disk_available: number; network_rx: number; network_tx: number };
+  resources: { load1: number; cpu_percent: number; cpu_count: number; memory_total: number; memory_available: number; disk_total: number; disk_available: number; network_rx: number; network_tx: number; uptime_s?: number };
   protocols: Record<Protocol, { interface: string; port: number; active: boolean }>;
 };
 type ApplicationStatus = {
@@ -125,7 +136,7 @@ const duration = (seconds?: number) => {
   return `${Math.floor(seconds / 3600)} ч назад`;
 };
 const uptime = (seconds = 0) => `${Math.floor(seconds / 86400)}д ${Math.floor((seconds % 86400) / 3600)}ч`;
-const appendSample = (values: number[], value: number) => [...values, Math.max(0, value)].slice(-48);
+const appendSample = (values: Array<number | null>, value: number) => [...values, Math.max(0, value)].slice(-48);
 export default function Home() {
   const [tab, setTab] = useState<Tab>("overview");
   const [token, setToken] = useState("");
@@ -151,6 +162,10 @@ export default function Home() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [networkRate, setNetworkRate] = useState({ rx: 0, tx: 0 });
   const [resourceHistory, setResourceHistory] = useState<ResourceHistory>({ load: [], memory: [], disk: [], rx: [], tx: [] });
+  const [metricsPeriod, setMetricsPeriod] = useState<MetricsPeriod>("live");
+  const [metricsHistory, setMetricsHistory] = useState<MetricsHistory | null>(null);
+  const [metricsHistoryLoading, setMetricsHistoryLoading] = useState(false);
+  const [metricsHistoryError, setMetricsHistoryError] = useState("");
   const [protocolImages, setProtocolImages] = useState<ProtocolImage[]>([]);
   const [protocolStatuses, setProtocolStatuses] = useState<Partial<Record<Protocol, ProtocolStatus>>>({});
   const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number; tx: number }>>>({});
@@ -240,7 +255,8 @@ export default function Home() {
       const previous = networkSample.current;
       let nextRxRate = 0;
       let nextTxRate = 0;
-      if (previous) {
+      const countersChanged = !previous || next.resources.network_rx !== previous.rx || next.resources.network_tx !== previous.tx;
+      if (previous && countersChanged) {
         const seconds = Math.max((now - previous.at) / 1000, 0.1);
         nextRxRate = Math.max(0, (next.resources.network_rx - previous.rx) / seconds);
         nextTxRate = Math.max(0, (next.resources.network_tx - previous.tx) / seconds);
@@ -252,10 +268,10 @@ export default function Home() {
         load: appendSample(history.load, next.resources.cpu_percent || 0),
         memory: appendSample(history.memory, memoryUsed),
         disk: appendSample(history.disk, diskUsed),
-        rx: previous ? appendSample(history.rx, nextRxRate) : history.rx,
-        tx: previous ? appendSample(history.tx, nextTxRate) : history.tx,
+        rx: previous && countersChanged ? appendSample(history.rx, nextRxRate) : history.rx,
+        tx: previous && countersChanged ? appendSample(history.tx, nextTxRate) : history.tx,
       }));
-      networkSample.current = { rx: next.resources.network_rx, tx: next.resources.network_tx, at: now };
+      if (countersChanged) networkSample.current = { rx: next.resources.network_rx, tx: next.resources.network_tx, at: now };
       setOverview(next);
       setProtocolImages(imageData.items || []);
       if (installingProtocol && imageData.items.some((image) => image.id === installingProtocol && image.installed)) {
@@ -264,6 +280,20 @@ export default function Home() {
       setLastUpdated(new Date());
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Ошибка соединения"); }
   }, [installingProtocol, request, token]);
+
+  const loadMetricsHistory = useCallback(async () => {
+    if (!token) return;
+    setMetricsHistoryLoading(true);
+    try {
+      const data = await request(`/metrics/history?period=${metricsPeriod}`) as MetricsHistory;
+      setMetricsHistory(data);
+      setMetricsHistoryError(data.error || "");
+    } catch (cause) {
+      setMetricsHistoryError(cause instanceof Error ? cause.message : "История метрик временно недоступна");
+    } finally {
+      setMetricsHistoryLoading(false);
+    }
+  }, [metricsPeriod, request, token]);
 
   const loadClients = useCallback(async () => {
     if (!token) return;
@@ -327,7 +357,7 @@ export default function Home() {
     if (showBusy) setBusy(true);
     setError("");
     try {
-      if (tab === "overview") await Promise.all([loadOverview(), loadClients(), loadApplication(), loadServices()]);
+      if (tab === "overview") await Promise.all([loadOverview(), loadMetricsHistory(), loadClients(), loadApplication(), loadServices()]);
       else if (tab === "security") await Promise.all([loadSecurity(), loadServices()]);
       else if (tab === "application") await loadApplication();
       else if (tab === "services") await loadServices();
@@ -336,7 +366,7 @@ export default function Home() {
     } finally {
       if (showBusy) setBusy(false);
     }
-  }, [loadApplication, loadClients, loadOverview, loadProtocolStatus, loadSecurity, loadServices, tab, token]);
+  }, [loadApplication, loadClients, loadMetricsHistory, loadOverview, loadProtocolStatus, loadSecurity, loadServices, tab, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -413,6 +443,16 @@ export default function Home() {
     void refreshCurrent(false);
   }, [refreshCurrent, tab, token]);
 
+  useEffect(() => {
+    if (!token || tab !== "overview") return;
+    const initial = window.setTimeout(() => void loadMetricsHistory(), 0);
+    const timer = window.setInterval(() => void loadMetricsHistory(), metricsPeriod === "live" ? 15000 : 60000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(timer);
+    };
+  }, [loadMetricsHistory, metricsPeriod, tab, token]);
+
   const loadSecurityLogs = useCallback(async () => {
     if (!token) return;
     try {
@@ -445,7 +485,8 @@ export default function Home() {
       const previous = networkSample.current;
       let nextRxRate = 0;
       let nextTxRate = 0;
-      if (previous) {
+      const countersChanged = !previous || next.resources.network_rx !== previous.rx || next.resources.network_tx !== previous.tx;
+      if (previous && countersChanged) {
         const seconds = Math.max((now - previous.at) / 1000, 0.1);
         nextRxRate = Math.max(0, (next.resources.network_rx - previous.rx) / seconds);
         nextTxRate = Math.max(0, (next.resources.network_tx - previous.tx) / seconds);
@@ -457,12 +498,13 @@ export default function Home() {
         load: appendSample(history.load, next.resources.cpu_percent || 0),
         memory: appendSample(history.memory, memoryUsed),
         disk: appendSample(history.disk, diskUsed),
-        rx: previous ? appendSample(history.rx, nextRxRate) : history.rx,
-        tx: previous ? appendSample(history.tx, nextTxRate) : history.tx,
+        rx: previous && countersChanged ? appendSample(history.rx, nextRxRate) : history.rx,
+        tx: previous && countersChanged ? appendSample(history.tx, nextTxRate) : history.tx,
       }));
-      networkSample.current = { rx: next.resources.network_rx, tx: next.resources.network_tx, at: now };
+      if (countersChanged) networkSample.current = { rx: next.resources.network_rx, tx: next.resources.network_tx, at: now };
       setOverview((current) => current ? {
         ...current,
+        server: { ...current.server, uptime_s: next.resources.uptime_s ?? current.server.uptime_s },
         resources: next.resources,
         protocols: {
           wg: { ...current.protocols.wg, active: next.protocols.wg.active },
@@ -968,6 +1010,22 @@ export default function Home() {
   const diskUsed = overview ? 100 - overview.resources.disk_available / overview.resources.disk_total * 100 : 0;
   const memoryUsedBytes = overview ? Math.max(0, overview.resources.memory_total - overview.resources.memory_available) : 0;
   const diskUsedBytes = overview ? Math.max(0, overview.resources.disk_total - overview.resources.disk_available) : 0;
+  const activeMetricsHistory = metricsHistory?.period === metricsPeriod ? metricsHistory : null;
+  const chartHistory: ResourceHistory = activeMetricsHistory ? {
+    load: activeMetricsHistory.points.map((point) => point.cpu_percent),
+    memory: activeMetricsHistory.points.map((point) => point.memory_used_percent),
+    disk: activeMetricsHistory.points.map((point) => point.disk_used_percent),
+    rx: activeMetricsHistory.points.map((point) => point.rx_bps),
+    tx: activeMetricsHistory.points.map((point) => point.tx_bps),
+  } : resourceHistory;
+  const metricsResolution = activeMetricsHistory?.resolution_s || 1;
+  const metricsStatus = metricsHistoryError
+    ? "История временно недоступна · показаны текущие данные"
+    : metricsHistoryLoading && !activeMetricsHistory
+      ? "Загрузка истории с VPS…"
+      : activeMetricsHistory?.settings.enabled === false
+        ? "Запись истории выключена"
+        : "История хранится локально на VPS";
   const firewall = security?.firewall as {
     active?: boolean; rules?: string[]; forwarding_enabled?: boolean; stateful_return?: boolean;
     uplink_interface?: string; vpn_policy_healthy?: boolean;
@@ -1118,12 +1176,18 @@ export default function Home() {
           <div className={`nodeStatus ${nodeState}`}><span className="pulse" /><div><strong>{applicationStateTitle}</strong><small>{operationActive ? application?.action?.message || "Команда выполняется" : `Uptime ${uptime(overview?.server.uptime_s)}`}</small></div></div>
         </article>
         <div className="metrics">
-          <Metric title="CPU" value={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%`} percent={overview?.resources.cpu_percent || 0} detail={`Load ${overview?.resources.load1.toFixed(2) || "—"} · ${overview?.resources.cpu_count || "—"} vCPU`} history={resourceHistory.load} />
-          <Metric title="RAM" value={bytes(memoryUsedBytes)} percent={memUsed} detail={`${memUsed.toFixed(0)}% · всего ${bytes(overview?.resources.memory_total)}`} history={resourceHistory.memory} />
-          <Metric title="Disk" value={bytes(diskUsedBytes)} percent={diskUsed} detail={`${diskUsed.toFixed(0)}% · всего ${bytes(overview?.resources.disk_total)}`} history={resourceHistory.disk} />
+          <header className="metricsHeader">
+            <div><p className="eyebrow">SERVER MONITORING</p><h2>Ресурсы VPS</h2><small>{metricsStatus}</small></div>
+            <label>Период<select value={metricsPeriod} onChange={(event) => setMetricsPeriod(event.target.value as MetricsPeriod)} aria-label="Период истории метрик">
+              <option value="live">5 минут</option><option value="day">24 часа</option><option value="week">7 дней</option><option value="quarter">90 дней</option>
+            </select></label>
+          </header>
+          <Metric title="CPU" value={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%`} percent={overview?.resources.cpu_percent || 0} detail={`Load ${overview?.resources.load1.toFixed(2) || "—"} · ${overview?.resources.cpu_count || "—"} vCPU`} history={chartHistory.load} resolutionSeconds={metricsResolution} />
+          <Metric title="RAM" value={bytes(memoryUsedBytes)} percent={memUsed} detail={`${memUsed.toFixed(0)}% · всего ${bytes(overview?.resources.memory_total)}`} history={chartHistory.memory} resolutionSeconds={metricsResolution} />
+          <Metric title="Disk" value={bytes(diskUsedBytes)} percent={diskUsed} detail={`${diskUsed.toFixed(0)}% · всего ${bytes(overview?.resources.disk_total)}`} history={chartHistory.disk} resolutionSeconds={metricsResolution} />
           <article className="panel metricCard networkMetric">
             <div><p className="eyebrow">NETWORK</p><h2>{bytes(networkRate.rx)}<small>/с</small></h2></div>
-            <TrendGraph values={resourceHistory.rx} secondary={resourceHistory.tx} relative formatValue={(value) => `${bytes(value)}/с`} ariaLabel="История сетевой нагрузки" />
+            <TrendGraph values={chartHistory.rx} secondary={chartHistory.tx} relative resolutionSeconds={metricsResolution} formatValue={(value) => `${bytes(value)}/с`} ariaLabel="История сетевой нагрузки" />
             <div className="networkDirections">
               <span>↓ Входящая <strong>{bytes(networkRate.rx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.rx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
               <span>↑ Исходящая <strong>{bytes(networkRate.tx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.tx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
@@ -1646,56 +1710,68 @@ function AutomationEditor({
     <label className="automationSwitch"><input type="checkbox" checked={value.enabled} onChange={(event) => onChange({ enabled: event.target.checked })} /><span /><em>{value.enabled ? "Вкл" : "Выкл"}</em></label>
   </div>;
 }
-function TrendGraph({ values, secondary, relative = false, formatValue = (value) => `${Math.round(value)}%`, ariaLabel }: {
-  values: number[]; secondary?: number[]; relative?: boolean; formatValue?: (value: number) => string; ariaLabel: string;
+function TrendGraph({ values, secondary, relative = false, resolutionSeconds = 1, formatValue = (value) => `${Math.round(value)}%`, ariaLabel }: {
+  values: Array<number | null>; secondary?: Array<number | null>; relative?: boolean; resolutionSeconds?: number; formatValue?: (value: number) => string; ariaLabel: string;
 }) {
   const width = 240;
   const height = 72;
-  const all = secondary ? [...values, ...secondary] : values;
+  const known = (value: number | null): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+  const all = (secondary ? [...values, ...secondary] : values).filter(known);
   const ceiling = relative ? Math.max(1, ...all) : 100;
-  const coordinates = (series: number[]) => series.map((value, index) => {
-    const x = series.length > 1 ? index / (series.length - 1) * width : width;
-    const y = height - Math.min(value / ceiling, 1) * height;
-    return { x, y };
-  });
-  const primaryCoordinates = coordinates(values);
-  const secondaryCoordinates = secondary ? coordinates(secondary) : [];
+  const coordinates = (series: Array<number | null>) => {
+    const segments: Array<Array<{ x: number; y: number }>> = [];
+    let segment: Array<{ x: number; y: number }> = [];
+    series.forEach((value, index) => {
+      if (!known(value)) {
+        if (segment.length) segments.push(segment);
+        segment = [];
+        return;
+      }
+      const x = series.length > 1 ? index / (series.length - 1) * width : width;
+      segment.push({ x, y: height - Math.min(value / ceiling, 1) * height });
+    });
+    if (segment.length) segments.push(segment);
+    return segments;
+  };
+  const primarySegments = coordinates(values);
+  const secondarySegments = secondary ? coordinates(secondary) : [];
   const stepPath = (coordinatesList: Array<{ x: number; y: number }>) => coordinatesList.reduce((path, point, index) => {
     if (!index) return `M ${point.x.toFixed(1)} ${point.y.toFixed(1)}`;
     return `${path} H ${point.x.toFixed(1)} V ${point.y.toFixed(1)}`;
   }, "");
-  const primaryPath = stepPath(primaryCoordinates);
-  const secondaryPath = stepPath(secondaryCoordinates);
-  const primaryLast = primaryCoordinates.at(-1);
-  const secondaryLast = secondaryCoordinates.at(-1);
-  const primaryPeak = values.length ? Math.max(...values) : 0;
-  const secondaryPeak = secondary?.length ? Math.max(...secondary) : 0;
-  const elapsedSeconds = Math.max(0, (values.length - 1) * 5);
-  const elapsedLabel = elapsedSeconds >= 60 ? `${Math.round(elapsedSeconds / 60)} мин` : `${elapsedSeconds} сек`;
+  const primaryValues = values.filter(known);
+  const secondaryValues = secondary?.filter(known) || [];
+  const primaryLast = primarySegments.at(-1)?.at(-1);
+  const secondaryLast = secondarySegments.at(-1)?.at(-1);
+  const primaryPeak = primaryValues.length ? Math.max(...primaryValues) : 0;
+  const secondaryPeak = secondaryValues.length ? Math.max(...secondaryValues) : 0;
+  const elapsedSeconds = Math.max(0, (values.length - 1) * resolutionSeconds);
+  const elapsedLabel = elapsedSeconds >= 86400 ? `${Math.round(elapsedSeconds / 86400)} д` : elapsedSeconds >= 3600 ? `${Math.round(elapsedSeconds / 3600)} ч` : elapsedSeconds >= 60 ? `${Math.round(elapsedSeconds / 60)} мин` : `${elapsedSeconds} сек`;
+  const intervalLabel = resolutionSeconds >= 3600 ? `${Math.round(resolutionSeconds / 3600)} ч` : resolutionSeconds >= 60 ? `${Math.round(resolutionSeconds / 60)} мин` : `${resolutionSeconds} сек`;
   return <div className={`trendGraph ${secondary ? "dual" : ""}`} role="img" aria-label={ariaLabel}>
     <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-      {values.length > 1 && <path className="primaryArea" d={`${primaryPath} V ${height} H 0 Z`} />}
-      {values.length > 1 && <path className="primaryTrend" d={primaryPath} />}
-      {secondary && secondary.length > 1 && <path className="secondaryTrend" d={secondaryPath} />}
-      {primaryLast && values.length > 1 && <circle className="primaryPoint" cx={primaryLast.x} cy={primaryLast.y} r="2.8" />}
-      {secondaryLast && secondary && secondary.length > 1 && <circle className="secondaryPoint" cx={secondaryLast.x} cy={secondaryLast.y} r="2.4" />}
+      {primarySegments.map((segment, index) => segment.length > 1 && <path key={`area-${index}`} className="primaryArea" d={`${stepPath(segment)} V ${height} H ${segment[0].x.toFixed(1)} Z`} />)}
+      {primarySegments.map((segment, index) => segment.length > 1 && <path key={`primary-${index}`} className="primaryTrend" d={stepPath(segment)} />)}
+      {secondarySegments.map((segment, index) => segment.length > 1 && <path key={`secondary-${index}`} className="secondaryTrend" d={stepPath(segment)} />)}
+      {primaryLast && primaryValues.length > 1 && <circle className="primaryPoint" cx={primaryLast.x} cy={primaryLast.y} r="2.8" />}
+      {secondaryLast && secondaryValues.length > 1 && <circle className="secondaryPoint" cx={secondaryLast.x} cy={secondaryLast.y} r="2.4" />}
     </svg>
     <span className="trendYAxis"><b>{formatValue(ceiling)}</b><b>{formatValue(0)}</b></span>
     <span className="trendXAxis"><b>−{elapsedLabel}</b><b>сейчас</b></span>
     <span className="trendSummary">
-      <b>Сейчас {formatValue(values.at(-1) || 0)}</b>
+      <b>Сейчас {formatValue(primaryValues.at(-1) || 0)}</b>
       <b>Пик {formatValue(primaryPeak)}</b>
       {secondary && <b>TX пик {formatValue(secondaryPeak)}</b>}
     </span>
     {secondary && <span className="trendLegend"><i /> RX <i /> TX</span>}
-    <small>{values.length < 2 ? "Сбор данных…" : `${values.length} замеров · интервал 5 сек`}</small>
+    <small>{primaryValues.length < 2 ? "Сбор данных…" : `${primaryValues.length} замеров · интервал ${intervalLabel}`}</small>
   </div>;
 }
-function Metric({ title, value, percent, detail, history }: { title: string; value: string; percent: number; detail: string; history: number[] }) {
+function Metric({ title, value, percent, detail, history, resolutionSeconds }: { title: string; value: string; percent: number; detail: string; history: Array<number | null>; resolutionSeconds: number }) {
   const normalized = Math.max(0, Math.min(100, percent));
   return <article className="panel metricCard">
     <div className="metricCopy"><p className="eyebrow">{title.toUpperCase()}</p><h2>{value}</h2><small>{detail}</small></div>
-    <TrendGraph values={history} ariaLabel={`${title}: ${value}, ${Math.round(normalized)} процентов`} />
+    <TrendGraph values={history} resolutionSeconds={resolutionSeconds} ariaLabel={`${title}: ${value}, ${Math.round(normalized)} процентов`} />
   </article>;
 }
 function SecurityRow({ ok, title, text, okLabel = "Confirmed", badLabel = "Attention" }: { ok: boolean; title: string; text: string; okLabel?: string; badLabel?: string }) {
