@@ -1611,7 +1611,7 @@ export default function Home() {
 }
 
 function Logo() {
-  return <div className="brand"><span className="brandMark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 7h12l6 6v12H13l-6-6V7Z" /><path d="M11 12h8l2 2v6h-8l-2-2v-6Z" /></svg></span><div><strong>312<span>.net</span></strong><small>INFRASTRUCTURE</small></div></div>;
+  return <div className="brand"><span className="brandMark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4.5 5.5h23L16 27 4.5 5.5Z" /><path d="m16 10 6 11H10l6-11Z" /></svg></span><div><strong>312<span>.net</span></strong><small>INFRASTRUCTURE</small></div></div>;
 }
 function AutomationEditor({
   title, description, value, timer, onChange,

@@ -27,13 +27,18 @@ test("поставка содержит установщик, образы и к
   assert.equal(JSON.parse(awg).id, "awg");
 });
 
-test("интерфейс и метаданные относятся к продукту 312.net", async () => {
-  const [layout, page, packageJson] = await Promise.all([
+test("интерфейс использует фирменные метаданные и знак 312.net", async () => {
+  const [layout, page, favicon, packageJson] = await Promise.all([
     read("app/layout.tsx"),
     read("app/page.tsx"),
+    read("public/favicon.svg"),
     read("package.json"),
   ]);
-  assert.match(layout, /312\.net/);
+  assert.match(layout, /title: "Infrastructure Control"/);
+  assert.match(layout, /description: "Управление серверной инфраструктурой\."/);
+  assert.match(page, /M4\.5 5\.5h23L16 27 4\.5 5\.5Z/);
+  assert.match(favicon, /312\.net triangle mark/);
+  assert.match(favicon, /M170 220h684L512 850 170 220Z/);
   assert.match(page, /Безопасность/);
   assert.equal(JSON.parse(packageJson).name, "312-net-control");
   assert.doesNotMatch(`${layout}\n${page}`, /ChatGPT|Starter Project|Codex/i);

@@ -45,9 +45,8 @@ button { cursor: pointer; }
 .brand { display: flex; align-items: center; gap: 12px; }
 .sidebar > .brand { padding: 0 8px 36px; }
 .brandMark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; border: 1px solid rgba(97, 207, 216, .32); background: linear-gradient(145deg, rgba(97, 207, 216, .16), rgba(112, 183, 232, .08)); color: var(--cyan); font-weight: 900; font-size: 11px; letter-spacing: -.5px; box-shadow: 0 0 24px rgba(97, 207, 216, .12); }
-.brandMark svg { width: 24px; height: 24px; }
-.brandMark svg path:first-child { fill: #061017; }
-.brandMark svg path:last-child { fill: var(--accent); }
+.brandMark svg { width: 24px; height: 24px; fill: none; stroke: var(--accent); stroke-width: 1.7; }
+.brandMark svg path:first-child { fill: rgba(97, 207, 216, .08); }
 .brand > div { display: flex; flex-direction: column; }
 .brand strong { font-size: 18px; letter-spacing: -.8px; line-height: 1; }
 .brand strong span { color: var(--accent); }
