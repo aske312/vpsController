@@ -1,7 +1,0 @@
-export type Protocol = "wg" | "awg";
-export type View = "overview" | "connections" | Protocol;
-export type Client = { id: string; name: string; protocol: Protocol; address: string; endpoint?: string; handshake_age_s?: number; rx_bytes: number; tx_bytes: number; quality?: "stable" | "warning" | "error" | "offline" };
-export type Overview = { server: { name: string; public_ip: string; city: string; country: string; uptime_s: number }; resources: { cpu_percent: number; cpu_count: number; memory_total: number; memory_available: number; disk_total: number; disk_available: number; network_rx: number; network_tx: number }; protocols: Record<Protocol, { interface: string; port: number; active: boolean }> };
-export type ProtocolImage = { id: Protocol; name: string; version: string; description: string; installed: boolean; removable: boolean; interface: string };
-export type ProtocolStatus = { protocol: Protocol; interface: string; active: boolean; service_active: boolean; service_enabled: boolean; address: string; listen_port: number; mtu: number; peers: number; online_peers: number; last_handshake_age_s?: number; interface_rx_bytes: number; interface_tx_bytes: number; resources?: { checked_at?: string; items: Array<{ name: string; available: boolean; latency_ms: number }> }; diagnostics?: Record<string, unknown> };
-export const edition = { id: "light", name: "312.net Light", protocols: ["wg", "awg"] as const, views: ["overview", "connections", "wg", "awg"] as const };
