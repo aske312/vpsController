@@ -102,12 +102,15 @@ test("network diagnostics measure loss, jitter, MTU and server path health", asy
 });
 
 test("primary resource metrics use CPU percent and readable RAM and disk units", async () => {
-  const [api, page] = await Promise.all([read("api/main.py"), read("app/page.tsx")]);
+  const [api, history, page] = await Promise.all([read("api/main.py"), read("api/metrics_history.py"), read("app/page.tsx")]);
   assert.match(api, /def cpu_usage_percent/);
-  assert.match(api, /"cpu_percent": cpu_percent/);
+  assert.match(api, /def collect_system_resources/);
+  assert.match(api, /@app\.get\("\/api\/metrics\/history"\)/);
+  assert.match(history, /"live": \(300, 3\).*"day": \(86400, 60\).*"week": \(604800, 3600\).*"quarter": \(7776000, 3600\)/s);
   assert.match(page, /title="CPU".*cpu_percent/s);
   assert.match(page, /title="RAM" value=\{bytes\(memoryUsedBytes\)\}/);
   assert.match(page, /title="Disk" value=\{bytes\(diskUsedBytes\)\}/);
+  assert.match(page, /aria-label="Период истории метрик"/);
 });
 
 test("security distinguishes public SSH from public panel access", async () => {

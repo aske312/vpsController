@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import hmac
 import ipaddress
 import json
@@ -7,7 +8,9 @@ import csv
 import os
 import re
 import secrets
+import sqlite3
 import subprocess
+import sys
 import threading
 import time
 import platform
@@ -21,7 +24,26 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="312.net Infrastructure API", version="0.1.0")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from metrics_history import MetricsHistory, MetricsMonitor
+from system_metrics import CpuSampler, collect_resources
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    global metrics_monitor
+    if platform.system() == "Linux":
+        metrics_monitor = MetricsMonitor(metrics_history_store, collect_system_resources)
+        metrics_monitor.start()
+    try:
+        yield
+    finally:
+        if metrics_monitor is not None:
+            metrics_monitor.stop()
+            metrics_monitor = None
+
+
+app = FastAPI(title="312.net Infrastructure API", version="0.1.0", lifespan=lifespan)
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -54,6 +76,8 @@ AWG_PROFILE = {
     "H3": os.getenv("AWG_H3", "1000000000"), "H4": os.getenv("AWG_H4", "1400000000"),
 }
 DATA_DIR = Path(os.getenv("DATA_DIR", "/var/lib/vps-control"))
+metrics_history_store = MetricsHistory(DATA_DIR / "metrics" / "history.sqlite3")
+metrics_monitor: MetricsMonitor | None = None
 ENV_FILE = Path(os.getenv("ENV_FILE", "/etc/vps-control.env"))
 CLIENTS_FILE = DATA_DIR / "clients.json"
 ACTION_FILE = DATA_DIR / "application-action.json"
@@ -73,8 +97,6 @@ network_diagnostic_lock = threading.Lock()
 resource_check_cache: dict[str, dict] = {}
 network_diagnostic_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
-cpu_usage_lock = threading.Lock()
-cpu_previous: tuple[int, int] | None = None
 RESOURCE_TARGETS = (
     ("Google", "https://www.google.com/generate_204"),
     ("YouTube", "https://www.youtube.com/"),
@@ -618,25 +640,27 @@ def network_info() -> tuple[int, int]:
     return received, transmitted
 
 
-def cpu_usage_percent() -> float:
-    global cpu_previous
-    try:
-        values = [int(value) for value in Path("/proc/stat").read_text().splitlines()[0].split()[1:]]
-    except (OSError, ValueError, IndexError):
-        return 0.0
-    total = sum(values)
-    idle = sum(values[index] for index in (3, 4) if index < len(values))
-    with cpu_usage_lock:
-        previous = cpu_previous
-        cpu_previous = (total, idle)
-    if not previous:
-        time.sleep(0.1)
-        return cpu_usage_percent()
-    total_delta = total - previous[0]
-    idle_delta = idle - previous[1]
-    if total_delta <= 0:
-        return 0.0
-    return round(max(0.0, min(100.0, (total_delta - idle_delta) / total_delta * 100)), 1)
+cpu_sampler = CpuSampler()
+
+
+def cpu_usage_percent() -> float | None:
+    return cpu_sampler.sample()
+
+
+def collect_system_resources() -> dict:
+    return collect_resources({
+        "cpu": lambda: (cpu_usage_percent(), os.cpu_count()),
+        "load": lambda: os.getloadavg(),
+        "memory": memory_info,
+        "disk": disk_info,
+        "network": network_info,
+        "uptime": lambda: (float(Path("/proc/uptime").read_text().split()[0]),),
+    })
+
+
+def system_resources() -> dict:
+    snapshot = metrics_monitor.snapshot() if metrics_monitor else None
+    return snapshot if snapshot is not None else collect_system_resources()
 
 
 def refresh_updates_cache() -> None:
@@ -754,12 +778,7 @@ def change_admin_password(payload: AdminPasswordChange, _: None = Depends(requir
 
 @app.get("/api/overview")
 def overview(_: None = Depends(require_token)) -> dict:
-    mem_total, mem_available = memory_info()
-    disk_total, disk_available = disk_info()
-    uptime_s = float(Path("/proc/uptime").read_text().split()[0])
-    load = os.getloadavg()
-    cpu_percent = cpu_usage_percent()
-    network_rx, network_tx = network_info()
+    resources = system_resources()
     return {
         "server": {
             "name": SERVER_NAME,
@@ -767,21 +786,9 @@ def overview(_: None = Depends(require_token)) -> dict:
             "city": SERVER_CITY,
             "country": SERVER_COUNTRY,
             "country_code": SERVER_COUNTRY_CODE,
-            "uptime_s": uptime_s,
+            "uptime_s": resources.get("uptime_s"),
         },
-        "resources": {
-            "load1": load[0],
-            "load5": load[1],
-            "load15": load[2],
-            "cpu_percent": cpu_percent,
-            "cpu_count": os.cpu_count() or 1,
-            "memory_total": mem_total,
-            "memory_available": mem_available,
-            "disk_total": disk_total,
-            "disk_available": disk_available,
-            "network_rx": network_rx,
-            "network_tx": network_tx,
-        },
+        "resources": resources,
         "protocols": {
             "wg": {"interface": WG_INTERFACE, "port": WG_PORT, "active": bool(run("wg", "show", WG_INTERFACE))},
             "awg": {"interface": AWG_INTERFACE, "port": AWG_PORT, "active": bool(run("awg", "show", AWG_INTERFACE))},
@@ -1592,13 +1599,18 @@ def services_status(_: None = Depends(require_token)) -> dict:
     }
 
 
+@app.get("/api/metrics/history")
+def get_metrics_history(period: Literal["live", "day", "week", "quarter"] = "live", _: None = Depends(require_token)) -> dict:
+    try:
+        return {**metrics_history_store.query(period), "error": metrics_monitor.error if metrics_monitor else ""}
+    except (OSError, sqlite3.Error, ValueError):
+        raise HTTPException(status_code=503, detail="История метрик временно недоступна") from None
+
+
 @app.get("/api/live-status")
 def live_status(_: None = Depends(require_token)) -> dict:
     """Cheap sub-second telemetry without diagnostics, package checks or ICMP."""
-    mem_total, mem_available = memory_info()
-    disk_total, disk_available = disk_info()
-    load = os.getloadavg()
-    network_rx, network_tx = network_info()
+    resources = system_resources()
     ufw_config = Path("/etc/ufw/ufw.conf")
     live_clients = interface_dump("wg", include_quality=False) + interface_dump("awg", include_quality=False)
 
@@ -1623,17 +1635,7 @@ def live_status(_: None = Depends(require_token)) -> dict:
 
     return {
         "checked_at": datetime.now(timezone.utc).isoformat(),
-        "resources": {
-            "load1": load[0],
-            "cpu_percent": cpu_usage_percent(),
-            "cpu_count": os.cpu_count() or 1,
-            "memory_total": mem_total,
-            "memory_available": mem_available,
-            "disk_total": disk_total,
-            "disk_available": disk_available,
-            "network_rx": network_rx,
-            "network_tx": network_tx,
-        },
+        "resources": resources,
         "protocols": {
             "wg": protocol_live("wg", WG_INTERFACE),
             "awg": protocol_live("awg", AWG_INTERFACE),
