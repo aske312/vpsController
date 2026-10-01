@@ -50,6 +50,8 @@ curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/ins
 
 Production и test-каналы редакций разделены и проверяются независимо. Test-ветки создают только временные CI artifacts и не публикуют GitHub Releases.
 
+Изменения в `light`, `test-light`, `pro` и `test-pro` принимаются через pull request после обязательных проверок `verify` и сборки пакетов для `amd64`/`arm64`. Прямые push, force-push и удаление этих веток защищены настройками GitHub.
+
 ## Документация проверки
 
 - [Что осталось сделать](REMAINING_WORK.md)
