@@ -1,0 +1,58 @@
+name: Test Light
+
+on:
+  push:
+    branches: [test-light]
+  pull_request:
+    branches: [test-light, light]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-light-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --include=dev --include=optional --ignore-scripts
+      - run: npm run lint
+      - run: npm test
+
+  package:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-24.04
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build private Light test artifact
+        env:
+          BUILD_COMMIT: ${{ github.sha }}
+          RELEASE_EDITION: light
+          RELEASE_CHANNEL: test
+        run: bash scripts/build-release.sh "outputs/vps-control-light-test-linux-${{ matrix.architecture }}.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: light-test-${{ matrix.architecture }}
+          path: outputs/vps-control-light-test-linux-${{ matrix.architecture }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
