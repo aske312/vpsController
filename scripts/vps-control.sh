@@ -1108,7 +1108,13 @@ ssh_units_action() {
   if [[ "$(systemctl show ssh.socket --property=LoadState --value 2>/dev/null)" == loaded ]]; then
     units=(ssh.socket "${units[@]}")
   fi
-  systemctl "$1" "${units[@]}"
+  if [[ "$1" == "start" ]]; then
+    # Debian refuses to start ssh.socket while ssh.service already owns port 22.
+    # The service alone is sufficient to keep SSH available during maintenance.
+    systemctl start ssh.service
+  else
+    systemctl "$1" "${units[@]}"
+  fi
 }
 
 prepare_update_ssh() {

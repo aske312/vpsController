@@ -77,19 +77,24 @@ test("Node runtime minimum matches the application requirement", () => {
   }
 });
 
-test("SSH management only includes a socket unit when installed", () => {
+test("SSH management starts the service directly and stops an installed socket", () => {
   const body = manager.match(/ssh_units_action\(\) \{([\s\S]*?)\n\}/)[1];
   for (const state of ["loaded", "not-found", ""]) {
+    for (const action of ["start", "stop"]) {
     const script = `set -Eeuo pipefail
 systemctl() {
   if [[ "$1" == show ]]; then printf '%s' '${state}'; else printf '%s\\n' "$*"; fi
 }
 ssh_units_action() {${body}
 }
-ssh_units_action start
+ssh_units_action ${action}
 `;
     const result = spawnSync(bash, ["-c", script], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout.trim(), state === "loaded" ? "start ssh.socket ssh.service" : "start ssh.service");
+    const expected = action === "start"
+      ? "start ssh.service"
+      : state === "loaded" ? "stop ssh.socket ssh.service" : "stop ssh.service";
+    assert.equal(result.stdout.trim(), expected);
+    }
   }
 });
