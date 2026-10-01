@@ -502,12 +502,13 @@ input, select { height: 46px; font-size: 11px; }
 .heroPanel {
   min-height: 190px; padding: 32px; border-radius: 10px;
   background:
-    linear-gradient(110deg, #10191b 0 56%, transparent 56%),
-    repeating-linear-gradient(135deg, #142320 0 1px, transparent 1px 18px), #09141c;
+    linear-gradient(110deg, #0d1a24 0 56%, transparent 56%),
+    repeating-linear-gradient(135deg, rgba(97, 207, 216, .075) 0 1px, transparent 1px 18px), #09141c;
 }
 .heroPanel::after { right: 34%; transform: rotate(0); background: var(--line); }
 .heroPanel h2 { font-size: 44px; font-weight: 650; }
-.nodeStatus { padding: 15px 17px; border: 1px solid #294652; border-radius: 8px; background: #0b1414cc; }
+.nodeStatus { padding: 15px 17px; border: 1px solid rgba(97, 207, 216, .28); border-radius: 8px; background: linear-gradient(135deg, rgba(97, 207, 216, .09), rgba(55, 105, 148, .08)); }
+.nodeStatus.healthy .pulse { background: var(--accent); box-shadow: 0 0 0 4px rgba(97, 207, 216, .10), 0 0 14px rgba(97, 207, 216, .42); }
 .nodeStatus.working { border-color: #5d4b27; background: #1a1710cc; }
 .nodeStatus.working .pulse { background: #e8b761; box-shadow: 0 0 0 4px #e8b76118, 0 0 14px #e8b76166; }
 .nodeStatus.error { border-color: #653835; background: #1b1112cc; }
@@ -943,10 +944,11 @@ input, select { height: 46px; font-size: 11px; }
 .serviceRow {
   display: grid; grid-template-columns: 10px minmax(190px, 1.2fr) minmax(240px, 1fr) auto;
   align-items: center; gap: 14px; min-height: 66px; padding: 10px 12px;
-  border: 1px solid var(--line); border-radius: 9px; background: #101615;
+  border: 1px solid rgba(97, 207, 216, .16); border-radius: 9px;
+  background: linear-gradient(100deg, rgba(97, 207, 216, .055), rgba(55, 105, 148, .035)), #0c1821;
 }
 .serviceOnline, .serviceOffline { width: 7px; height: 7px; border-radius: 50%; background: #e06b66; box-shadow: 0 0 9px #e06b6655; }
-.serviceOnline { background: var(--green); box-shadow: 0 0 9px rgba(105, 200, 170, .46); }
+.serviceOnline { background: var(--accent); box-shadow: 0 0 9px rgba(97, 207, 216, .46); }
 .serviceRow strong, .serviceRow small { display: block; }
 .serviceRow small { margin-top: 4px; color: #91a6b3; font: 9px var(--font-mono); }
 .serviceRow dl { display: grid; grid-template-columns: 90px minmax(120px, 1fr); gap: 10px; margin: 0; }

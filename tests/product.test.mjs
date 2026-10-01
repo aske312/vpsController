@@ -338,6 +338,8 @@ test("the interface uses one fixed visual design without personalization", async
   assert.match(css, /--accent: var\(--cyan\)/);
   assert.match(css, /\.shell \.metricCard \{ border-left: 2px solid var\(--accent\)/);
   assert.match(css, /\.primaryButton \{[^}]+background: linear-gradient\(100deg, rgba\(39, 124, 137, \.28\)/);
+  assert.match(css, /\.nodeStatus\.healthy \.pulse \{ background: var\(--accent\)/);
+  assert.match(css, /\.serviceOnline \{ background: var\(--accent\)/);
   assert.match(manager, /rm -f -- "\$\{DATA_DIR\}\/personalization\.json"/);
 });
 
