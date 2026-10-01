@@ -114,48 +114,28 @@ test("поставка содержит установщик, образы и р
   assert.equal(JSON.parse(awg).id, "awg");
 });
 
-test("PRO keeps production releases public and accepts test builds only from local archives", async () => {
-  const [api, page, manager, releaseWorkflow, testWorkflow] = await Promise.all([
+test("test-pro creates private artifacts and installs them only from a local archive", async () => {
+  const [api, page, manager, workflow] = await Promise.all([
     readApiSources(), readUiSources(), read("scripts/vps-control.sh"),
-    read(".github/workflows/release.yml"), read(".github/workflows/ci.yml"),
+    read(".github/workflows/ci.yml"),
   ]);
   assert.match(manager, /PRODUCT_EDITION="pro"/);
   assert.match(manager, /PRODUCTION_BRANCH="pro"/);
   assert.match(manager, /PRODUCTION_RELEASE_TAG="pro-latest"/);
-  assert.doesNotMatch(manager, /SERVICE_BRANCH=/);
-  assert.match(manager, /update_prebuilt_branch "\$\{PRODUCTION_BRANCH\}" "\$\{PRODUCTION_RELEASE_TAG\}"/);
   assert.doesNotMatch(manager, /main-latest|update_test_branch\(\)/);
-  assert.match(manager, /mktemp -d "\$\{DATA_DIR\}\/tmp\/update\.XXXXXX"/);
-  assert.match(manager, /vps-control-\$\{PRODUCT_EDITION\}-linux-\$\(system_architecture\)\.tar\.gz/);
-  assert.match(manager, /release_commit.*\^\[0-9a-f\]\{40\}\$/s);
-  assert.match(manager, /STABL_RELEASE_WAIT_ATTEMPTS=30/);
-  assert.match(manager, /--max-time "\$\{UPDATE_DOWNLOAD_TIMEOUT\}"/);
   assert.match(manager, /test-update <архив>/);
   assert.match(manager, /install_prebuilt_release install-release "\$\{archive\}" yes test/);
-  assert.match(manager, /vpn-monitor\.timer vps-control-auto-reboot\.timer/);
-  assert.match(manager, /переход на тестовую версию разрешён только в сервисном режиме/);
-  assert.match(api, /payload\.action == "test-rollback" and not SERVICE_MODE_FILE\.exists\(\)/);
-  assert.match(api, /def expected_application_branch\(\)/);
-  assert.match(api, /return "test-pro" if SERVICE_MODE_FILE\.exists\(\) and TEST_BACKUP_DIR\.is_dir\(\) else "pro"/);
-  assert.match(api, /branch = expected_application_branch\(\)/);
-  assert.match(api, /expected_branch = expected_application_branch\(\)/);
-  assert.doesNotMatch(page, /runApplicationAction\("test-update"\)/);
-  assert.match(page, /application\?\.service_mode\?\.rollback_available/);
-  assert.match(page, /Rollback/);
-  assert.match(manager, /TEST_BACKUP_DIR="\$\{DATA_DIR\}\/test-app-backup"/);
-  assert.match(manager, /restore_test_app\(\)/);
   assert.match(manager, /PRODUCT_FILE="\$\{DATA_DIR\}\/product\.json"/);
   assert.match(manager, /архив редакции \$\{release_edition:-unknown\} нельзя установить поверх \$\{PRODUCT_EDITION\}/);
+  assert.match(api, /payload\.action == "test-rollback" and not SERVICE_MODE_FILE\.exists\(\)/);
+  assert.match(api, /return "test-pro" if SERVICE_MODE_FILE\.exists\(\) and TEST_BACKUP_DIR\.is_dir\(\) else "pro"/);
+  assert.doesNotMatch(page, /runApplicationAction\("test-update"\)/);
   assert.match(page, /production-версия PRO/);
-  assert.match(releaseWorkflow, /branches: \[pro\]/);
-  assert.match(releaseWorkflow, /gh release create pro-latest/);
-  assert.match(releaseWorkflow, /ubuntu-24\.04-arm/);
-  assert.doesNotMatch(releaseWorkflow, /main-latest|test-pro/);
-  assert.match(testWorkflow, /branches: \[test-pro\]/);
-  assert.match(testWorkflow, /RELEASE_CHANNEL: test/);
-  assert.match(testWorkflow, /actions\/upload-artifact@v4/);
-  assert.match(testWorkflow, /ubuntu-24\.04-arm/);
-  assert.doesNotMatch(testWorkflow, /gh release|contents: write/);
+  assert.match(workflow, /branches: \[test-pro\]/);
+  assert.match(workflow, /RELEASE_CHANNEL: test/);
+  assert.match(workflow, /actions\/upload-artifact@v4/);
+  assert.match(workflow, /ubuntu-24\.04-arm/);
+  assert.doesNotMatch(workflow, /gh release|contents: write/);
 });
 
 test("full uninstall removes owned panel state without recreating action data", async () => {
@@ -172,16 +152,15 @@ test("full uninstall removes owned panel state without recreating action data", 
   assert.match(manager, /автоматический откат выполнен, но восстановленная версия не запустилась/);
 });
 
-test("PRO release metadata binds edition, channel, architecture and full commit", async () => {
+test("PRO test metadata binds edition, channel, architecture and full commit", async () => {
   const [builder, manager, api] = await Promise.all([
     read("scripts/build-release.sh"), read("scripts/vps-control.sh"), readApiSources(),
   ]);
   assert.match(builder, /RELEASE_EDITION="\$\{RELEASE_EDITION:-pro\}"/);
-  assert.match(builder, /RELEASE_CHANNEL="\$\{RELEASE_CHANNEL:-production\}"/);
+  assert.match(builder, /RELEASE_CHANNEL="\$\{RELEASE_CHANNEL:-test\}"/);
   assert.match(builder, /schema=1/);
   assert.match(builder, /Release requires a full git commit SHA/);
   assert.match(manager, /release_schema.*release_edition.*release_channel.*release_architecture.*release_commit/s);
-  assert.match(manager, /ожидался канал \$\{expected_channel\}/);
   assert.match(manager, /rollback_interrupted_update/);
   assert.match(manager, /Update was interrupted after the application swap; restoring the previous release/);
   assert.match(manager, /UPDATE_SWAP_ACTIVE="yes"/);

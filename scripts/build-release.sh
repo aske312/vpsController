@@ -85,7 +85,7 @@ with open(path, "w", encoding="utf-8") as handle:
 PY
 
 RELEASE_EDITION="${RELEASE_EDITION:-pro}"
-RELEASE_CHANNEL="${RELEASE_CHANNEL:-production}"
+RELEASE_CHANNEL="${RELEASE_CHANNEL:-test}"
 [[ "${RELEASE_EDITION}" == "pro" ]] || { echo "Invalid release edition: ${RELEASE_EDITION}" >&2; exit 1; }
 [[ "${RELEASE_CHANNEL}" == "production" || "${RELEASE_CHANNEL}" == "test" ]] \
   || { echo "Invalid release channel: ${RELEASE_CHANNEL}" >&2; exit 1; }
