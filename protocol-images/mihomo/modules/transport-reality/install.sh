@@ -76,6 +76,7 @@ for tool in iptables ip6tables; do
   "${tool}" -X "${chain}" 2>/dev/null || true
  fi
 done
+exit 0
 SH
 chmod 0755 /usr/local/sbin/vps-control-mihomo-vless-firewall
 cat >/etc/systemd/system/vps-control-mihomo-reality.service <<EOF

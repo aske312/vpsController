@@ -536,6 +536,7 @@ test("successful protocol installs are immediately reachable and health-checked"
   assert.match(mihomoReality, /vps-control-mihomo-vless-firewall sync/);
   assert.match(mihomoReality, /VPS_MIHOMO_VLESS/);
   assert.match(mihomoReality, /for tool in iptables ip6tables/);
+  assert.match(mihomoReality, /done\nexit 0\nSH/);
 });
 
 test("WG removal accepts live non-WG fallback channels and reports blockers", async () => {
