@@ -1221,6 +1221,9 @@ install_prebuilt_release() {
     else
       systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
     fi
+    curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 \
+      "http://127.0.0.1:${HTTP_PORT}/" >/dev/null \
+      || warn "предыдущая версия восстановлена, но ещё не отвечает на проверку готовности."
     rm -rf -- "${stage_root}"
     die "подготовленный релиз отклонён; предыдущая версия восстановлена."
   fi
@@ -1338,6 +1341,9 @@ restore_test_app() {
     PROJECT_DIR="${INSTALL_DIR}"
     write_integrity_manifest
     systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
+    curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 \
+      "http://127.0.0.1:${HTTP_PORT}/" >/dev/null \
+      || warn "тестовая версия восстановлена, но ещё не отвечает на проверку готовности."
     die "возврат отклонён; тестовая версия продолжает работать."
   fi
   [[ "${failed_install}" == "${INSTALL_DIR}.failed-test."* ]] || die "небезопасный путь очистки тестовой версии."
