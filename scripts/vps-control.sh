@@ -2810,6 +2810,11 @@ install_prebuilt_release() {
       systemctl reload-or-restart caddy.service
     fi
     restart_mihomo_manager_if_present
+    if ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:8000/api/health" >/dev/null \
+      || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:3000/" >/dev/null; then
+      rm -rf -- "${stage_root}"
+      die "автоматический откат выполнен, но восстановленная версия не запустилась."
+    fi
     rm -rf -- "${stage_root}"
     die "подготовленный релиз отклонён; предыдущая версия восстановлена."
   fi
