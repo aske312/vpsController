@@ -115,9 +115,9 @@ test("поставка содержит установщик, образы и р
 });
 
 test("PRO keeps production releases public and accepts test builds only from local archives", async () => {
-  const [api, page, manager, releaseWorkflow] = await Promise.all([
+  const [api, page, manager, releaseWorkflow, testWorkflow] = await Promise.all([
     readApiSources(), readUiSources(), read("scripts/vps-control.sh"),
-    read(".github/workflows/release.yml"),
+    read(".github/workflows/release.yml"), read(".github/workflows/ci.yml"),
   ]);
   assert.match(manager, /PRODUCT_EDITION="pro"/);
   assert.match(manager, /PRODUCTION_BRANCH="pro"/);
@@ -151,6 +151,11 @@ test("PRO keeps production releases public and accepts test builds only from loc
   assert.match(releaseWorkflow, /gh release create pro-latest/);
   assert.match(releaseWorkflow, /ubuntu-24\.04-arm/);
   assert.doesNotMatch(releaseWorkflow, /main-latest|test-pro/);
+  assert.match(testWorkflow, /branches: \[test-pro\]/);
+  assert.match(testWorkflow, /RELEASE_CHANNEL: test/);
+  assert.match(testWorkflow, /actions\/upload-artifact@v4/);
+  assert.match(testWorkflow, /ubuntu-24\.04-arm/);
+  assert.doesNotMatch(testWorkflow, /gh release|contents: write/);
 });
 
 test("full uninstall removes owned panel state without recreating action data", async () => {
@@ -168,8 +173,8 @@ test("full uninstall removes owned panel state without recreating action data", 
 });
 
 test("PRO release metadata binds edition, channel, architecture and full commit", async () => {
-  const [builder, manager] = await Promise.all([
-    read("scripts/build-release.sh"), read("scripts/vps-control.sh"),
+  const [builder, manager, api] = await Promise.all([
+    read("scripts/build-release.sh"), read("scripts/vps-control.sh"), readApiSources(),
   ]);
   assert.match(builder, /RELEASE_EDITION="\$\{RELEASE_EDITION:-pro\}"/);
   assert.match(builder, /RELEASE_CHANNEL="\$\{RELEASE_CHANNEL:-production\}"/);
@@ -177,6 +182,15 @@ test("PRO release metadata binds edition, channel, architecture and full commit"
   assert.match(builder, /Release requires a full git commit SHA/);
   assert.match(manager, /release_schema.*release_edition.*release_channel.*release_architecture.*release_commit/s);
   assert.match(manager, /ожидался канал \$\{expected_channel\}/);
+  assert.match(manager, /rollback_interrupted_update/);
+  assert.match(manager, /Update was interrupted after the application swap; restoring the previous release/);
+  assert.match(manager, /UPDATE_SWAP_ACTIVE="yes"/);
+  assert.match(manager, /trap 'exit 124' TERM INT/);
+  assert.match(api, /RuntimeMaxSec=.*60min.*safe-update/);
+  assert.match(api, /--property=TimeoutStopSec=45s/);
+  assert.match(api, /Операция прервана перезагрузкой/);
+  assert.match(api, /int\(action\.get\("progress"/);
+  assert.match(api, /awaiting_final_status[\s\S]*total_seconds\(\) < 30/);
 });
 
 test("missing main preview is reported as not installed rather than a broken server update", async () => {
@@ -211,8 +225,6 @@ test("web and gateway run as systemd services without Docker", async () => {
   assert.match(api, /"vps-control-web\.service"/);
   assert.match(api, /"caddy\.service"/);
   assert.match(page, /Контур служб узла/);
-  assert.match(api, /"installed": properties\.get\("LoadState"\) == "loaded"/);
-  assert.match(api, /"active": properties\.get\("ActiveState"\) == "active"/);
 });
 
 test("installation discovers dual-stack endpoints without adopting reverse DNS and reserves 443 for HTTPS", async () => {

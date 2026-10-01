@@ -1,7 +1,6 @@
 "use client";
 
 import type { CSSProperties, Dispatch, SetStateAction } from "react";
-import type { ApplicationAction } from "../../shared/types/control-plane";
 
 type LogSource = "ssh" | "firewall" | "system";
 type FirewallView = { active?: boolean; rules?: string[]; forwarding_enabled?: boolean; stateful_return?: boolean; vpn_policy_healthy?: boolean };
@@ -19,13 +18,13 @@ type SecurityViewProps = {
   firewall?: FirewallView; ssh?: SshView; updates?: UpdatesView; applicationVersion?: AppVersionView; securitySystem?: SystemView; fail2ban?: Fail2banView; listeners: string[]; listenerSummary?: ListenerSummary;
   legacy: Record<string, { active?: boolean; enabled?: string }>; applicationSecurity?: AppSecurity; panelSecurity?: PanelSecurity; panelAccessHealthy: boolean; sshProtected: boolean; failedSshRecords24h: string;
   autoRefresh: boolean; securityLogsOpen: boolean; securityLogSource: LogSource; securityLogs: string[]; securityLogsUpdatedAt: Date | null; securityNewLogCount: number;
-  fixSecurity: (action: "secure" | "kernel-update" | "vpn-firewall") => Promise<void> | void; runApplicationAction: (action: ApplicationAction) => Promise<void> | void;
+  fixSecurity: (action: "secure" | "kernel-update" | "vpn-firewall") => Promise<void> | void; onOpenApplication: () => void;
   setPasswordDialog: Dispatch<SetStateAction<boolean>>; openSshAdminDialog: () => void; setSecurityLogsOpen: Dispatch<SetStateAction<boolean>>; setSecurityLogSource: Dispatch<SetStateAction<LogSource>>; setSecurityLogs: Dispatch<SetStateAction<string[]>>;
   loadSecurityLogs: () => Promise<void> | void; downloadLogs: (filename: string, lines: string[]) => void;
 };
 
 export function SecurityView(props: SecurityViewProps) {
-  const { securityLoading, securityScore, securityChecks, securityPerimeterChecks, securitySystemChecks, securityApplicationChecks, firewall, ssh, updates, applicationVersion, securitySystem, fail2ban, listeners, listenerSummary, legacy, applicationSecurity, panelSecurity, panelAccessHealthy, sshProtected, failedSshRecords24h, autoRefresh, securityLogsOpen, securityLogSource, securityLogs, securityLogsUpdatedAt, securityNewLogCount, fixSecurity, runApplicationAction, setPasswordDialog, openSshAdminDialog, setSecurityLogsOpen, setSecurityLogSource, setSecurityLogs, loadSecurityLogs, downloadLogs } = props;
+  const { securityLoading, securityScore, securityChecks, securityPerimeterChecks, securitySystemChecks, securityApplicationChecks, firewall, ssh, updates, applicationVersion, securitySystem, fail2ban, listeners, listenerSummary, legacy, applicationSecurity, panelSecurity, panelAccessHealthy, sshProtected, failedSshRecords24h, autoRefresh, securityLogsOpen, securityLogSource, securityLogs, securityLogsUpdatedAt, securityNewLogCount, fixSecurity, onOpenApplication, setPasswordDialog, openSshAdminDialog, setSecurityLogsOpen, setSecurityLogSource, setSecurityLogs, loadSecurityLogs, downloadLogs } = props;
   return <section className="securityWorkspace">
         <article className="securityOverview">
           <div className="securityOverviewLead">
@@ -103,9 +102,9 @@ export function SecurityView(props: SecurityViewProps) {
             <section className="securityDomain application">
               <header><div><p className="eyebrow">APPLICATION SECURITY</p><h3>Панель и права доступа</h3></div><strong>{securityApplicationChecks.filter(Boolean).length}/{securityApplicationChecks.length}</strong></header>
               <div className="securityRows">
-                <SecurityActionRow ok={applicationVersion?.outdated === false} title="Версия приложения" text={applicationVersion?.refreshing && applicationVersion?.outdated == null ? `Проверяется ${applicationVersion?.branch || "main"}…` : applicationVersion?.error ? applicationVersion.error : applicationVersion?.outdated ? `Устарела: ${applicationVersion.current_commit || "unknown"}  latest ${applicationVersion.latest_commit || "unknown"}` : `Актуальна: ${applicationVersion?.current_commit || "unknown"}  ${applicationVersion?.branch || "main"}`} onAction={() => void runApplicationAction(applicationVersion?.branch === "main" ? "test-update" : "update")} actionLabel="Обновить" />
-                <SecurityActionRow ok title="Учётные записи" text={`sudo ${securitySystem?.sudo_users?.length || 0}  login ${securitySystem?.login_users?.length || 0}`} onAction={() => void runApplicationAction("integrity-check")} actionLabel="Проверить" alwaysAction />
-                <SecurityActionRow ok title="Дополнительные VPN-службы" text={Object.values(legacy).some((service) => service.active) ? `Активно ${Object.values(legacy).filter((service) => service.active).length}  вне управления панели` : "Не обнаружены"} onAction={() => void runApplicationAction("network-check")} actionLabel="Проверить" alwaysAction />
+                <SecurityActionRow ok={applicationVersion?.outdated === false} title="Версия приложения" text={applicationVersion?.refreshing && applicationVersion?.outdated == null ? `Проверяется ${applicationVersion?.branch || "main"}…` : applicationVersion?.error ? applicationVersion.error : applicationVersion?.outdated ? `Устарела: ${applicationVersion.current_commit || "unknown"}  latest ${applicationVersion.latest_commit || "unknown"}` : `Актуальна: ${applicationVersion?.current_commit || "unknown"}  ${applicationVersion?.branch || "main"}`} onAction={onOpenApplication} actionLabel="К обновлению" />
+                <SecurityActionRow ok title="Учётные записи" text={`sudo ${securitySystem?.sudo_users?.length || 0}  login ${securitySystem?.login_users?.length || 0}`} onAction={onOpenApplication} actionLabel="К проверкам" alwaysAction />
+                <SecurityActionRow ok title="Дополнительные VPN-службы" text={Object.values(legacy).some((service) => service.active) ? `Активно ${Object.values(legacy).filter((service) => service.active).length}  вне управления панели` : "Не обнаружены"} onAction={onOpenApplication} actionLabel="К проверкам" alwaysAction />
                 <SecurityActionRow ok={Boolean(applicationSecurity?.admin_password_strong)} title="Пароль администратора" text={applicationSecurity?.admin_password_strong ? "Пароль соответствует требованиям" : "Стандартный пароль считается небезопасным"} onAction={() => setPasswordDialog(true)} actionLabel="Изменить пароль" alwaysAction />
                 <SecurityActionRow ok={Boolean(applicationSecurity?.secrets_protected)} title="Секреты приложения" text={`/etc/vps-control.env  ${applicationSecurity?.secrets_mode || "не определены"}  root`} onAction={() => void fixSecurity("secure")} />
                 <SecurityActionRow ok={Boolean(applicationSecurity?.api_local_only)} title="Локальный API" text={applicationSecurity?.api_local_only ? "API слушает только 127.0.0.1:8000" : "API доступен не только локально или не найден"} onAction={() => void fixSecurity("secure")} />

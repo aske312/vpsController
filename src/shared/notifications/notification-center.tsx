@@ -73,6 +73,7 @@ function NotificationViewport({ items }: { items: Notification[] }) {
 function NotificationCard({ item }: { item: Notification }) {
   const store = useNotifications();
   const [checking, setChecking] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const [canceling, setCanceling] = useState(false);
   const pending = isPending(item);
   const progress = Number.isFinite(item.progress) ? Math.max(0, Math.min(100, item.progress!)) : undefined;
@@ -87,16 +88,20 @@ function NotificationCard({ item }: { item: Notification }) {
     if (canceling || !item.onCancel) return;
     setCanceling(true);
     try { await item.onCancel(); }
-    catch (cause) { store.upsert({ ...item, state: "error", message: cause instanceof Error ? cause.message : "Не удалось остановить команду" }); }
+    catch (cause) { store.notify(item.source, "Остановка операции", "error", cause instanceof Error ? cause.message : "Не удалось подтвердить остановку команды; проверьте её результат"); }
     finally { setCanceling(false); }
   }
+  if (hidden && pending) return <section className={`gateOperationCard ${item.state}`} aria-label={item.title}>
+    <div className="gateOperationContent"><div className="gateOperationText"><strong>{item.title}</strong><small>{item.state === "unknown" ? "Unknown · ожидаем результат" : "Операция продолжается"}</small></div><button type="button" className="gateOperationButton" onClick={() => setHidden(false)}>Показать</button></div>
+  </section>;
   return <section className={`gateOperationCard ${item.state}`} role={item.state === "error" ? "alert" : "status"} aria-atomic="true" aria-label={item.title}>
     <div className="gateOperationContent">
       <span className="gateOperationIcon" aria-hidden="true">{item.state === "error" ? "!" : item.state === "success" ? "✓" : pending ? "…" : "i"}</span>
       <div className="gateOperationText"><span>{item.kind === "operation" ? "ВЫПОЛНЕНИЕ КОМАНДЫ" : "УВЕДОМЛЕНИЕ"}{item.count > 1 ? ` · ×${item.count}` : ""}</span><strong>{item.title}</strong><small>{item.message}</small></div>
       <div className="gateOperationActions">
         {pending && <b className="gateOperationPercent">{progress === undefined || item.state === "unknown" ? "…" : `${progress}%`}</b>}
-        {pending && item.onCancel && <button type="button" className="gateNotificationCancel" onClick={() => void cancelOperation()} disabled={canceling} aria-label={`Остановить и откатить: ${item.title}`}>{canceling ? "…" : "×"}</button>}
+        {pending && item.onCancel && <button type="button" className="gateNotificationCancel" onClick={() => void cancelOperation()} disabled={canceling} aria-label={`Остановить и откатить: ${item.title}`}>{canceling ? "Останавливаем…" : "Остановить / откатить"}</button>}
+        {pending && <button type="button" className="gateOperationButton" onClick={() => setHidden(true)} aria-label={`Скрыть карточку без остановки: ${item.title}`}>Скрыть</button>}
         {!pending && <button type="button" className="gateNotificationClose" onClick={() => store.dismiss(item.id)} aria-label={`Закрыть: ${item.title}`}>×</button>}
       </div>
     </div>

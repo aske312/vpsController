@@ -20,6 +20,7 @@ type Props = {
   setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>>;
   checkDnsProviders: () => Promise<void>;
   saveDnsSettings: () => Promise<void>;
+  recoverDns: () => void;
 };
 
 export function DnsView({
@@ -33,6 +34,7 @@ export function DnsView({
   setDnsDraft,
   checkDnsProviders,
   saveDnsSettings,
+  recoverDns,
 }: Props) {
   const [showRecommendation, setShowRecommendation] = useState(false);
   const [search, setSearch] = useState("");
@@ -538,6 +540,7 @@ export function DnsView({
           </div>
         </details>
       </fieldset>
+      {dns.recovery_required && <p role="alert">Предыдущее применение DNS прервано. Перед новыми изменениями восстановите сохранённые настройки. <button type="button" disabled={busy} onClick={recoverDns}>Восстановить DNS</button></p>}
       <footer className={`networkSaveBar ${dirty ? "dirty" : ""}`}>
         <div role="status">
           <strong>
@@ -560,7 +563,7 @@ export function DnsView({
           <button
             type="submit"
             className="networkPrimaryButton"
-            disabled={!dirty || busy || loading || !canSave}
+            disabled={!dirty || busy || loading || !canSave || dns.recovery_required}
           >
             {busy ? "Применяем…" : "Применить настройки"}
           </button>

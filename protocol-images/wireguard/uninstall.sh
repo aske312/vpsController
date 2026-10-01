@@ -26,9 +26,13 @@ if command -v ufw >/dev/null 2>&1; then
     while ufw --force delete route allow in on "${WG_INTERFACE}" out on "${UPLINK_INTERFACE}" from "${WG_SUBNET}" >/dev/null 2>&1; do :; done
   fi
 fi
-rm -f -- "${WG_CONFIG}" /etc/sysctl.d/99-vps-control-wireguard.conf \
+[[ "${PRESERVE_COMPONENT_DATA:-1}" == 1 ]] || rm -f -- "${WG_CONFIG}"
+rm -f -- /etc/sysctl.d/99-vps-control-wireguard.conf \
   /var/lib/vps-control/monitor/wg.csv /var/lib/vps-control/monitor/wg.state
 python3 - <<'PY'
+import os, sys
+if os.getenv("PRESERVE_COMPONENT_DATA", "1") == "1":
+    sys.exit(0)
 import json
 from pathlib import Path
 path = Path("/var/lib/vps-control/clients.json")

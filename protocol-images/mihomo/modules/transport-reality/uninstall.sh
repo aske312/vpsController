@@ -6,6 +6,7 @@ systemctl disable --now vps-control-mihomo-reality.service >/dev/null 2>&1 || tr
 [[ -z "${PORT}" ]] || { command -v ufw >/dev/null && ufw delete allow "${PORT}/tcp" >/dev/null 2>&1 || true; }
 rm -f /etc/systemd/system/vps-control-mihomo-reality.service
 rm -rf /etc/systemd/system/vps-control-mihomo-reality.service.d
-rm -rf /etc/vps-control/mihomo/reality /usr/local/lib/vps-control-mihomo-reality
+[[ "${PRESERVE_COMPONENT_DATA:-1}" == 1 ]] || rm -rf /etc/vps-control/mihomo/reality
+rm -rf /usr/local/lib/vps-control-mihomo-reality
 systemctl daemon-reload
 echo "Mihomo/Reality удалён; direct Xray/Reality не изменялся."

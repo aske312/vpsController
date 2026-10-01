@@ -4,10 +4,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.api.support import manager
+from tests.api.support import manager, managed_mihomo_fixture
 
 
 class ShadowsocksMigrationTests(unittest.TestCase):
+    def setUp(self):
+        managed_mihomo_fixture(self)
+
     def test_existing_runtime_is_migrated_even_when_binary_is_installed(self):
         with tempfile.TemporaryDirectory() as temp:
             template = Path(temp) / "ss.service"

@@ -21,6 +21,7 @@ import uuid
 from unittest.mock import patch
 
 from tests.api.support import manager, free_port
+from component_registry import ComponentRegistry, RegistryError, fingerprint, inventory
 
 
 def stop_process(process):
@@ -140,6 +141,23 @@ class ShadowsocksSystemdTests(unittest.TestCase):
                 if traffic:
                     connect_proxy("old")
                     preserved_stream = connect_proxy("manual")
+                # Adoption of legacy data must grant explicit ownership without
+                # rewriting files, restarting a live instance or dropping traffic.
+                registry = ComponentRegistry(root / "ownership")
+                before_files = inventory([ss])
+                context = {"id": "shadowsocks", "service": target, "version": "fixture"}
+                with self.assertRaises(RegistryError):
+                    registry.require_managed("shadowsocks")
+                accepted = registry.adopt("shadowsocks", [ss], context, fingerprint(before_files, context))
+                registry.require_managed("shadowsocks")
+                self.assertEqual(inventory([ss]), before_files)
+                self.assertEqual(command("show", instances[2], "--property=MainPID", "--value").stdout, manual_pid)
+                backup = registry.data_dir / "component-backups/shadowsocks" / accepted["backup_id"]
+                self.assertEqual(backup.stat().st_mode & 0o777, 0o700)
+                self.assertEqual((backup / "configuration.tar").stat().st_mode & 0o777, 0o600)
+                if traffic:
+                    preserved_stream.sendall(b"after adoption")
+                    self.assertEqual(receive(preserved_stream, 14), b"after adoption")
                 with (
                     patch.object(manager, "CONFIG_ROOT", config),
                     patch.object(manager, "PROFILE_FILE", root / "profiles.json"),

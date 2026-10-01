@@ -11,13 +11,14 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from tests.api.support import manager
+from tests.api.support import manager, managed_mihomo_fixture
 
 render_profile = manager.render_profile
 
 
 class ProfileTransitionTests(unittest.TestCase):
     def setUp(self):
+        managed_mihomo_fixture(self)
         stack = self.enterContext(ExitStack())
         self.root = Path(stack.enter_context(tempfile.TemporaryDirectory()))
         self.config_root = self.root / "config"
@@ -52,6 +53,7 @@ class ProfileTransitionTests(unittest.TestCase):
         stack.enter_context(patch.object(manager, "render_profile", return_value="yaml"))
         stack.enter_context(patch.object(manager, "validate_rendered_profile"))
         stack.enter_context(patch.object(manager, "systemctl_active", return_value=False))
+        stack.enter_context(patch.object(manager, "observe_service", return_value={"unit_present": True, "runtime": {"state": "stopped"}}))
         stack.enter_context(patch.object(manager, "module_is_installed", return_value=False))
         stack.enter_context(patch.object(manager, "write_action"))
         stack.enter_context(patch.object(manager, "apply_reality_config", side_effect=lambda path, value, **_: path.write_text(json.dumps(value))))

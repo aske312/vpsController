@@ -1,6 +1,7 @@
 "use client";
 
 import type { ApplicationAction, ApplicationDependency, ApplicationStatus, ServicesStatus } from "../../shared/types/control-plane";
+import { applicationRuntime } from "./runtime-state";
 import { actionLabels, applicationActionState } from "../../shared/lib/control-plane-ui";
 
 type ApplicationVersion = { branch?: string; current_commit?: string; latest_commit?: string; outdated?: boolean | null; checked_at?: string; error?: string; refreshing?: boolean };
@@ -20,6 +21,11 @@ type ApplicationViewProps = {
 
 export function ApplicationView({ application, services, applicationVersion, applicationDependencies, updates, serviceModeActive, busy, applicationLogs, runApplicationAction, changeServiceMode, changePanelAccess, changeCdnSecurity, loadApplicationLogs, downloadLogs, downloadUpdateReport }: ApplicationViewProps) {
   const actionState = applicationActionState(application?.action);
+  const apiRuntime = applicationRuntime(application?.api);
+  const runtimeItems = (application?.containers || []).map((item) => ({ ...item, presentation: applicationRuntime(item) }));
+  const runningCount = application && runtimeItems.every((item) => item.presentation.state !== "unknown")
+    ? `${runtimeItems.filter((item) => item.presentation.state === "running").length}/${runtimeItems.length}` : "—";
+  const autostart = application?.api.enabled == null ? "Unknown" : application.api.enabled ? "ON" : "OFF";
   return <section className="applicationWorkspace">
         <article className="applicationSummary">
           <div className="applicationSummaryCopy">
@@ -28,8 +34,8 @@ export function ApplicationView({ application, services, applicationVersion, app
             <p>Фактическое состояние API и web-службы, установленная ветка, доступ панели и безопасные операции обновления.</p>
           </div>
           <div className="applicationSummaryStats">
-            <span className={application?.api.active ? "ok" : "bad"}><small>API</small><strong>{application?.api.active ? "ONLINE" : "STOPPED"}</strong><em>autostart {application?.api.enabled ? "ON" : "OFF"}</em></span>
-            <span><small>RUNTIME</small><strong>{(application?.containers || []).filter((container) => container.healthy).length}/{application?.containers.length || 0}</strong><em>healthy components</em></span>
+            <span><small>API</small><strong>{apiRuntime.label}</strong><em>autostart {autostart}</em></span>
+            <span><small>RUNTIME</small><strong>{runningCount}</strong><em>Запущенные службы</em></span>
             <span><small>BRANCH</small><strong>{applicationVersion?.branch || "—"}</strong><em>{applicationVersion?.current_commit?.slice(0, 12) || "commit unknown"}</em></span>
             <span className={serviceModeActive ? "warn" : ""}><small>MODE</small><strong>{serviceModeActive ? "SERVICE" : "NORMAL"}</strong><em>{services?.panel_access?.public ? "public access" : "protected access"}</em></span>
           </div>
@@ -45,21 +51,21 @@ export function ApplicationView({ application, services, applicationVersion, app
                 <span>Основные операции выполняются через системный task runner и отображаются в общем progress dock.</span>
               </div>
               <div className="applicationControlBadges">
-                <span className={application?.api.active ? "ok" : "bad"}>API {application?.api.active ? "READY" : "DOWN"}</span>
-                <span>{(application?.containers || []).filter((container) => container.healthy).length}/{application?.containers.length || 0} runtime</span>
+                <span>API {apiRuntime.label}</span>
+                <span>{runningCount} runtime</span>
               </div>
             </header>
 
             <div className="applicationRuntimeList">
-              <div className={application?.api.active ? "healthy" : "failed"}>
+              <div className={apiRuntime.tone}>
                 <i />
-                <span><strong>API панели</strong><small>{application?.api.active ? `Принимает команды  autostart ${application.api.enabled ? "ON" : "OFF"}` : "API не принимает команды"}</small></span>
-                <b>{application?.api.active ? "RUNNING" : "STOPPED"}</b>
+                <span><strong>API панели</strong><small>{apiRuntime.reason} · autostart {autostart}</small></span>
+                <b>{apiRuntime.label}</b>
               </div>
-              {(application?.containers || []).map((container, index) => <div className={container.healthy ? "healthy" : "failed"} key={`${container.Name || container.Service}-${index}`}>
+              {runtimeItems.map((container, index) => <div className={container.presentation.tone} key={`${container.Name || container.Service}-${index}`}>
                 <i />
-                <span><strong>{container.component_name || container.Service || `Компонент ${index + 1}`}</strong><small>{container.purpose || container.status_text || container.Status || container.State || "Компонент приложения"}</small></span>
-                <b>{container.healthy ? "RUNNING" : "STOPPED"}</b>
+                <span><strong>{container.component_name || container.Service || `Компонент ${index + 1}`}</strong><small>{container.purpose} · {container.presentation.reason}</small></span>
+                <b>{container.presentation.label}</b>
               </div>)}
               {application?.action?.action && <div className={actionState === "FAILED" ? "failed" : actionState === "DONE" ? "healthy" : "pending"}>
                 <i />

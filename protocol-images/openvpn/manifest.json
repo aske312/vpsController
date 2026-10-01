@@ -1,1 +1,55 @@
-{"id":"openvpn","name":"OpenVPN","version":"2.6","installable":true,"description":"Классический VPN с отдельным сертификатом и возможностью отзыва каждого клиента","category":"secure-tunnels","category_name":"Защищённые туннели","installer":"install.sh","uninstaller":"uninstall.sh","supported_os":["ubuntu","debian"],"preflight_packages":["openvpn","easy-rsa","iptables"],"minimum_free_mb":256,"requires_kernel_headers":false,"service":"vps-control-openvpn.service","package":"openvpn"}
+{
+  "id": "openvpn",
+  "name": "OpenVPN",
+  "version": "2.6",
+  "installable": true,
+  "description": "Классический VPN с отдельным сертификатом и возможностью отзыва каждого клиента",
+  "category": "secure-tunnels",
+  "category_name": "Защищённые туннели",
+  "installer": "install.sh",
+  "uninstaller": "uninstall.sh",
+  "supported_os": [
+    "ubuntu",
+    "debian"
+  ],
+  "preflight_packages": [
+    "openvpn",
+    "easy-rsa",
+    "iptables"
+  ],
+  "minimum_free_mb": 256,
+  "requires_kernel_headers": false,
+  "service": "vps-control-openvpn.service",
+  "package": "openvpn",
+  "installation": {
+    "required_paths": [
+      {
+        "path": "/etc/vps-control/openvpn/server.conf"
+      },
+      {
+        "path": "/etc/vps-control/openvpn/pki",
+        "kind": "directory"
+      }
+    ],
+    "backup_paths": [
+      {
+        "path": "/etc/vps-control/openvpn"
+      },
+      {
+        "path": "/etc/systemd/system/vps-control-openvpn.service"
+      },
+      {
+        "path": "/etc/vps-control/environment",
+        "env": "ENV_FILE"
+      },
+      {
+        "path": "{data_dir}/clients.json"
+      }
+    ],
+    "data_paths": [
+      {
+        "path": "/etc/vps-control/openvpn"
+      }
+    ]
+  }
+}

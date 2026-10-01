@@ -1,5 +1,8 @@
 "use client";
-import { trafficBytes } from "../../shared/lib/control-plane-ui";
+import { trafficBytes, uptime } from "../../shared/lib/control-plane-ui";
+
+import type { MetricsPeriod, Overview as OverviewData, ProtocolImage, ResourceHistory } from "../../shared/types/control-plane";
+import { graphSegments, knownMetric } from "../../shared/lib/resource-metrics";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createApiClient } from "../../shared/lib/api-request";
@@ -9,56 +12,10 @@ import { ProtocolHealthBadge, type ProtocolHealth } from "../../shared/component
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import type { Module as MihomoModule } from "../mihomo/types";
 import { createMihomoSummaryStore, EMPTY_MIHOMO_SUMMARY } from "./mihomo-summary";
+import { componentPresentation } from "./component-state";
+import { useMetricsHistory } from "./use-metrics-history";
 
 type ProtocolId = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2" | "tuic" | "trojan" | "openvpn" | "ikev2";
-type ResourceHistory = { load: number[]; memory: number[]; disk: number[]; rx: number[]; tx: number[] };
-
-type OverviewData = {
-  server: {
-    name: string;
-    public_ip: string;
-    public_ipv4?: string;
-    public_ipv6?: string;
-    public_domain?: string;
-    public_endpoint?: string;
-    city: string;
-    country: string;
-    country_code: string;
-    uptime_s: number;
-  };
-  resources: {
-    load1: number;
-    cpu_percent: number;
-    cpu_count: number;
-    memory_total: number;
-    memory_available: number;
-    disk_total: number;
-    disk_available: number;
-    network_rx: number;
-    network_tx: number;
-  };
-  protocols: Record<"wg" | "awg", { interface: string; port: number; active: boolean }>;
-};
-
-type ProtocolImage = {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  category: string;
-  category_name: string;
-  interface: string;
-  installed: boolean;
-  active?: boolean;
-  installable: boolean;
-  removable: boolean;
-  installed_version?: string;
-  available_version?: string;
-  update_available?: boolean;
-  update_breaking?: boolean;
-  update_via_release?: boolean;
-};
-
 type Client = {
   id: string;
   name: string;
@@ -103,11 +60,11 @@ type DirectProtocolStatus = {
 type Props = {
   token: string;
   overview: OverviewData | null;
-  memUsed: number;
-  diskUsed: number;
-  memoryUsedBytes: number;
-  diskUsedBytes: number;
-  networkRate: { rx: number; tx: number };
+  memUsed: number | null;
+  diskUsed: number | null;
+  memoryUsedBytes: number | null;
+  diskUsedBytes: number | null;
+  networkRate: { rx: number | null; tx: number | null };
   resourceHistory: ResourceHistory;
   clients: Client[];
   protocolImages: ProtocolImage[];
@@ -115,6 +72,9 @@ type Props = {
   busy: boolean;
   onInstallProtocol: (image: ProtocolImage) => void;
   onUpdateProtocol: (image: ProtocolImage) => void;
+  onOpenProtocol: (image: ProtocolImage) => void;
+  onAdoptProtocol: (image: ProtocolImage) => void;
+  onPurgeProtocol: (image: ProtocolImage) => void;
 };
 
 const directShort: Record<ProtocolId, string> = {
@@ -141,20 +101,12 @@ const directName: Record<ProtocolId, string> = {
   ikev2: "IKEv2",
 };
 
-const bytes = (value = 0) => {
+const bytes = (value?: number | null) => {
+  if (!knownMetric(value)) return "—";
   if (!Number.isFinite(value) || value <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
   const index = Math.max(0, Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1));
   return `${(value / 1024 ** index).toFixed(index > 2 ? 1 : 0)} ${units[index]}`;
-};
-
-const duration = (seconds = 0) => {
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (days) return `${days}д ${hours}ч`;
-  if (hours) return `${hours}ч ${minutes}м`;
-  return `${minutes}м`;
 };
 
 const protocolMark = (id: string) => id === "mihomo" ? "M" : directShort[id as ProtocolId] || id.toUpperCase();
@@ -202,7 +154,19 @@ export function OverviewDashboard({
   busy,
   onInstallProtocol,
   onUpdateProtocol,
+  onOpenProtocol,
+  onAdoptProtocol,
+  onPurgeProtocol,
 }: Props) {
+  const [metricsPeriod, setMetricsPeriod] = useState<MetricsPeriod>("live");
+  const metricsHistory = useMetricsHistory(token, metricsPeriod);
+  const chartHistory = metricsHistory.data ? {
+    load: metricsHistory.data.points.map((point) => point.cpu_percent),
+    memory: metricsHistory.data.points.map((point) => point.memory_used_percent),
+    rx: metricsHistory.data.points.map((point) => point.rx_bps),
+    tx: metricsHistory.data.points.map((point) => point.tx_bps),
+  } : metricsPeriod === "live" ? resourceHistory : { load: [], memory: [], rx: [], tx: [] };
+  const resolution = metricsHistory.data?.resolution_s ?? 3;
   const mihomoImage = protocolImages.find((item) => item.id === "mihomo");
   const mihomoInstalled = Boolean(mihomoImage?.installed);
   const summaryStore = useMemo(() => mihomoSummaryStore(mihomoInstalled ? token : ""), [mihomoInstalled, token]);
@@ -290,8 +254,8 @@ export function OverviewDashboard({
     [summary.modules],
   );
 
-  const installedServerModules = useMemo(() => protocolImages.filter((item) => item.installed), [protocolImages]);
-  const installableModules = useMemo(() => protocolImages.filter((item) => !item.installed && item.installable), [protocolImages]);
+  const installedServerModules = useMemo(() => protocolImages.filter((item) => item.component_state?.installation.state === "installed"), [protocolImages]);
+  const installableModules = useMemo(() => protocolImages.filter((item) => componentPresentation(item).canInstall), [protocolImages]);
   const componentImages = useMemo(() => [...protocolImages].sort((left, right) => {
     const rank = (item: ProtocolImage) => item.installed ? 0 : item.installable ? 1 : 2;
     return rank(left) - rank(right) || left.name.localeCompare(right.name, "ru");
@@ -303,11 +267,14 @@ export function OverviewDashboard({
   const profileCount = mihomoProfiles?.length ?? mihomoStatus?.profiles ?? (mihomoInstalled ? "—" : 0);
   const credentialsCount = mihomoProfiles?.reduce((count, profile) => count + profile.connections.length, 0) ?? mihomoStatus?.credentials;
   const totalAccessObjects = mihomoInstalled && credentialsCount === undefined ? null : (credentialsCount || 0) + clients.length;
-  const memoryTotal = overview?.resources.memory_total || 0;
-  const diskTotal = overview?.resources.disk_total || 0;
-  const memoryFree = overview?.resources.memory_available || 0;
-  const diskFree = overview?.resources.disk_available || 0;
-  const networkTotal = (overview?.resources.network_rx || 0) + (overview?.resources.network_tx || 0);
+  const memoryTotal = overview?.resources.memory_total;
+  const diskTotal = overview?.resources.disk_total;
+  const memoryFree = overview?.resources.memory_available;
+  const diskFree = overview?.resources.disk_available;
+  const networkRx = overview?.resources.network_rx;
+  const networkTx = overview?.resources.network_tx;
+  const networkTotal = knownMetric(networkRx) && knownMetric(networkTx) ? networkRx + networkTx : null;
+  const missingMetrics = Object.entries(overview?.resources.observations || {}).filter(([, sample]) => !sample.available).map(([name]) => name);
 
   const mihomoChannelStates = useMemo(() => installedMihomoChannels.map((module) => {
     const profileRefs = (mihomoProfiles || []).filter((profile) => profile.channels.some((channel) => valueMatchesChannel(channel, module))).length;
@@ -475,35 +442,44 @@ export function OverviewDashboard({
       <section className="overviewTelemetry">
         <header>
           <div><p className="eyebrow">LIVE SYSTEM</p><h2>Телеметрия VPS</h2></div>
-          <small>Шкала времени формируется из текущей сессии панели  шаг ~3 сек</small>
+          <label>Период <select value={metricsPeriod} onChange={(event) => setMetricsPeriod(event.target.value as MetricsPeriod)} aria-label="Период истории метрик">
+            <option value="live">5 минут</option><option value="day">24 часа</option><option value="week">7 дней</option><option value="quarter">90 дней</option>
+          </select></label>
+          <small>{overview?.resources.stale || metricsHistory.stale ? "Stale — данные временно не обновляются" : missingMetrics.length ? `Данные недоступны: ${missingMetrics.join(", ")}` : metricsHistory.pending ? "Загрузка серверной истории…" : "История хранится на VPS · пропуски показаны разрывами"}
+            {metricsHistory.data?.settings.enabled === false && " · запись истории выключена в Службах"}
+            {metricsHistory.data?.settings.trimmed_at && " · старые данные сокращены по лимиту места"}
+          </small>
         </header>
 
         <div className="overviewTaskGraphs">
           <TaskGraph
             label="CPU"
-            value={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%`}
-            detail={`load ${overview?.resources.load1?.toFixed(2) || "—"}  ${overview?.resources.cpu_count || 0} cores`}
-            series={[{ values: resourceHistory.load, tone: "blue" }]}
+            value={overview?.resources.cpu_percent == null ? "—" : `${overview.resources.cpu_percent.toFixed(0)}%`}
+            detail={`load ${overview?.resources.load1?.toFixed(2) ?? "—"}  ${overview?.resources.cpu_count ?? "—"} cores`}
+            series={[{ values: chartHistory.load, tone: "blue" }]}
+            resolution={resolution}
             maxValue={100}
             yFormatter={(value) => `${Math.round(value)}%`}
           />
           <TaskGraph
             label="MEMORY"
-            value={`${memUsed.toFixed(0)}%`}
+            value={memUsed == null ? "—" : `${memUsed.toFixed(0)}%`}
             detail={`${bytes(memoryUsedBytes)} / ${bytes(memoryTotal)}  free ${bytes(memoryFree)}`}
-            series={[{ values: resourceHistory.memory, tone: "green" }]}
+            series={[{ values: chartHistory.memory, tone: "green" }]}
+            resolution={resolution}
             maxValue={100}
             yFormatter={(value) => `${Math.round(value)}%`}
           />
           <TaskGraph
             label="NETWORK"
-            value={`↓ ${bytes(networkRate.rx)}/с  ↑ ${bytes(networkRate.tx)}/с`}
-            detail={`interface total ↓ ${bytes(overview?.resources.network_rx || 0)}  ↑ ${bytes(overview?.resources.network_tx || 0)}`}
+            value={networkRate.rx == null || networkRate.tx == null ? "—" : `↓ ${bytes(networkRate.rx)}/с  ↑ ${bytes(networkRate.tx)}/с`}
+            detail={`interface total ↓ ${bytes(networkRx)}  ↑ ${bytes(networkTx)}`}
             series={[
-              { values: resourceHistory.rx, tone: "blue" },
-              { values: resourceHistory.tx, tone: "green" },
+              { values: chartHistory.rx, tone: "blue" },
+              { values: chartHistory.tx, tone: "green" },
             ]}
-            maxValue={prettyMax(Math.max(networkRate.rx, networkRate.tx, ...resourceHistory.rx, ...resourceHistory.tx, 1))}
+            resolution={resolution}
+            maxValue={prettyMax(Math.max(...[networkRate.rx, networkRate.tx, ...chartHistory.rx, ...chartHistory.tx, 1].filter(knownMetric)))}
             yFormatter={(value) => `${bytes(value)}/с`}
             wide
             legend={["RX", "TX"]}
@@ -511,14 +487,14 @@ export function OverviewDashboard({
         </div>
 
         <div className="overviewSystemFacts">
-          <FactCard label="DISK USED" value={`${diskUsed.toFixed(0)}%`} detail={`${bytes(diskUsedBytes)} / ${bytes(diskTotal)}  free ${bytes(diskFree)}`} />
-          <FactCard label="UPTIME" value={duration(overview?.server.uptime_s || 0)} detail={`${overview?.server.city || "Город не определён"}  ${overview?.server.country || "—"}`} />
-          <FactCard label="LOAD 1M" value={overview?.resources.load1?.toFixed(2) || "—"} detail={`${overview?.resources.cpu_count || 0} CPU cores`} />
-          <FactCard label="TRAFFIC TOTAL" value={bytes(networkTotal)} detail={`↓ ${bytes(overview?.resources.network_rx || 0)}  ↑ ${bytes(overview?.resources.network_tx || 0)}`} />
+          <FactCard label="DISK USED" value={diskUsed == null ? "—" : `${diskUsed.toFixed(0)}%`} detail={`${bytes(diskUsedBytes)} / ${bytes(diskTotal)}  free ${bytes(diskFree)}`} />
+          <FactCard label="UPTIME" value={uptime(overview?.server.uptime_s)} detail={`${overview?.server.city || "Город не определён"}  ${overview?.server.country || "—"}`} />
+          <FactCard label="LOAD 1M" value={overview?.resources.load1?.toFixed(2) ?? "—"} detail={`${overview?.resources.cpu_count ?? "—"} CPU cores`} />
+          <FactCard label="TRAFFIC TOTAL" value={bytes(networkTotal)} detail={`↓ ${bytes(networkRx)}  ↑ ${bytes(networkTx)}`} />
           <FactCard label="DIRECT CLIENTS" value={`${clients.length}`} detail={`${stableDirectClients} stable  ${attentionDirectClients} attention  ${offlineDirectClients} offline`} />
           <FactCard label="MIHOMO CREDENTIALS" value={`${credentialsCount ?? (mihomoInstalled ? "—" : 0)}`} detail={`${profileCount} profiles  ${mihomoProfiles?.filter((profile) => profile.connections.length > 0).length ?? mihomoStatus?.profiles_in_use ?? (mihomoInstalled ? "—" : 0)} in use`} />
           <FactCard label="ROUTES IN USE" value={`${routesInUseLabel}`} detail={`${routesReadyLabel} ready / idle`} />
-          <FactCard label="FREE MEMORY" value={bytes(memoryFree)} detail={`${memUsed.toFixed(0)}% currently used`} />
+          <FactCard label="FREE MEMORY" value={bytes(memoryFree)} detail={memUsed == null ? "Unknown" : `${memUsed.toFixed(0)}% currently used`} />
         </div>
       </section>
 
@@ -537,20 +513,7 @@ export function OverviewDashboard({
           </header>
           <div>
             {componentImages.map((image) => {
-              const protocol = image.id as ProtocolId;
-              const isDirect = (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(image.id);
-              const directStatus = isDirect ? directStatuses[protocol] : undefined;
-              const statusFailed = isDirect && Boolean(directStatusFailures[protocol]);
-              const statusKnown = image.id === "mihomo"
-                ? Boolean(mihomoStatus) || Boolean(summary.errors.status)
-                : isDirect
-                  ? Boolean(directStatus) || statusFailed
-                  : typeof image.active === "boolean";
-              const running = image.id === "mihomo"
-                ? Boolean(mihomoStatus?.active)
-                : directStatus
-                  ? Boolean(directStatus.service_active ?? directStatus.active)
-                  : Boolean(image.active);
+              const state = componentPresentation(image);
               const installedVersion = image.id === "mihomo" && mihomoStatus?.core_version
                 ? formatModuleVersion(mihomoStatus.core_version)
                 : image.installed_version
@@ -562,17 +525,6 @@ export function OverviewDashboard({
               const availableVersion = image.available_version
                 ? formatModuleVersion(image.available_version)
                 : "НЕ ОПРЕДЕЛЕНА";
-              const state = !image.installed && !image.installable
-                ? { className: "unavailable", label: "НЕДОСТУПЕН" }
-                : !image.installed
-                ? { className: "available", label: "ДОСТУПЕН" }
-                : !statusKnown
-                  ? { className: "checking", label: "ПРОВЕРКА" }
-                  : statusFailed || (image.id === "mihomo" && Boolean(summary.errors.status) && !mihomoStatus)
-                    ? { className: "unavailable", label: "НЕТ ДАННЫХ" }
-                    : running
-                      ? { className: "online", label: "РАБОТАЕТ" }
-                      : { className: "stopped", label: "ОСТАНОВЛЕН" };
 
               return (
                 <div className="overviewComponentRow" key={image.id}>
@@ -584,14 +536,24 @@ export function OverviewDashboard({
                     <b>{displayedVersion}</b>
                     <small>{image.installed ? image.update_available || image.update_via_release ? `новая: ${availableVersion}` : "фактическая версия" : image.installable ? "версия для установки" : "образ не готов"}</small>
                   </div>
-                  <span className={`overviewComponentState ${state.className}`}>{state.label}</span>
+                  <div className="overviewComponentState checking" aria-label="Component state">
+                    <span title={image.component_state?.installation.reason}>Installation: {state.installation}</span>
+                    <span title={image.component_state?.runtime.reason}>Runtime: {state.runtime}</span>
+                    <span title={image.component_state?.health.reason}>Health: {state.health}</span>
+                    {state.operation && <span>Operation: {state.operation}</span>}
+                  </div>
                   <div className="overviewComponentAction">
-                    {!image.installed ? (
-                      <button type="button" disabled={!image.installable || busy || Boolean(installingProtocol)} onClick={() => onInstallProtocol(image)}>
+                    {image.management?.retained && <div><small>Настройки и подключения сохранены</small><button type="button" disabled={busy || Boolean(installingProtocol) || Boolean(image.component_state?.operation)} onClick={() => onPurgeProtocol(image)}>Очистить данные</button></div>}
+                    {image.installed && image.management && image.management.state !== "managed" ? (
+                      <div><small title={image.management.reason}>Только просмотр и диагностика</small><button type="button" disabled={busy || !state.canAdopt} onClick={() => onAdoptProtocol(image)}>Принять под управление</button></div>
+                    ) : !image.installed ? (
+                      <button type="button" disabled={!state.canInstall || busy || Boolean(installingProtocol)} onClick={() => onInstallProtocol(image)}>
                         {!image.installable ? "В разработке" : installingProtocol === image.id ? "Установка…" : "Установить"}
                       </button>
+                    ) : image.update_available && image.id !== "mihomo" ? (
+                      <button type="button" onClick={() => onOpenProtocol(image)}>Открыть компонент · доступно обновление</button>
                     ) : image.update_available ? (
-                      <button type="button" className={image.update_breaking ? "warning" : ""} disabled={busy || Boolean(installingProtocol)} onClick={() => onUpdateProtocol(image)}>
+                      <button type="button" className={image.update_breaking ? "warning" : ""} disabled={busy || !state.canUpdate || Boolean(installingProtocol)} onClick={() => onUpdateProtocol(image)}>
                         {installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}
                       </button>
                     ) : (
@@ -611,7 +573,7 @@ export function OverviewDashboard({
 }
 
 type GraphTone = "blue" | "green";
-type GraphSeries = { values: number[]; tone: GraphTone };
+type GraphSeries = { values: (number | null)[]; tone: GraphTone };
 
 function TaskGraph({
   label,
@@ -622,6 +584,7 @@ function TaskGraph({
   yFormatter,
   wide = false,
   legend,
+  resolution = 3,
 }: {
   label: string;
   value: string;
@@ -631,9 +594,10 @@ function TaskGraph({
   yFormatter: (value: number) => string;
   wide?: boolean;
   legend?: string[];
+  resolution?: number;
 }) {
   const dataLength = Math.max(...series.map((item) => item.values.length), 1);
-  const sampleWindow = Math.max((dataLength - 1) * 3, 3);
+  const sampleWindow = Math.max((dataLength - 1) * resolution, resolution);
   const yTicks = [1, .75, .5, .25, 0];
   const xTicks = [1, .75, .5, .25, 0];
   const top = Math.max(maxValue, 1);
@@ -650,29 +614,22 @@ function TaskGraph({
             {[0, 12.5, 25, 37.5, 50].map((y) => <line key={`y-${y}`} x1="0" x2="100" y1={y} y2={y} />)}
             {[0, 20, 40, 60, 80, 100].map((x) => <line key={`x-${x}`} x1={x} x2={x} y1="0" y2="50" />)}
           </g>
-          {series.map((item, index) => <polyline key={index} className={`taskSeries ${item.tone}`} points={graphPoints(item.values, top)} />)}
+          {series.flatMap((item, index) => graphSegments(item.values, top).map((points, segment) => <polyline key={`${index}-${segment}`} className={`taskSeries ${item.tone}`} points={points} />))}
         </svg>
         <div className="taskYAxis">
           {yTicks.map((ratio) => <span key={ratio}>{yFormatter(top * ratio)}</span>)}
         </div>
         <div className="taskXAxis">
-          {xTicks.map((ratio) => <span key={ratio}>{ratio === 0 ? "now" : `-${Math.round(sampleWindow * ratio)}s`}</span>)}
+          {xTicks.map((ratio) => {
+            const seconds = sampleWindow * ratio;
+            const unit = seconds >= 86400 ? [86400, "д"] as const : seconds >= 3600 ? [3600, "ч"] as const : seconds >= 60 ? [60, "м"] as const : [1, "с"] as const;
+            return <span key={ratio}>{ratio === 0 ? "now" : `−${Math.round(seconds / unit[0])}${unit[1]}`}</span>;
+          })}
         </div>
       </div>
       <small>{detail}</small>
     </section>
   );
-}
-
-function graphPoints(values: number[], maxValue: number) {
-  const data = values.slice(-48);
-  if (!data.length) return "0,50 100,50";
-  const max = Math.max(maxValue, 1);
-  return data.map((value, index) => {
-    const x = data.length === 1 ? 100 : (index / (data.length - 1)) * 100;
-    const y = 50 - Math.min(50, Math.max(0, value / max * 50));
-    return `${x.toFixed(2)},${y.toFixed(2)}`;
-  }).join(" ");
 }
 
 function FactCard({ label, value, detail }: { label: string; value: string; detail: string }) {
