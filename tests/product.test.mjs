@@ -189,6 +189,8 @@ test("Light keeps production updates public and accepts test builds only from lo
   assert.match(manager, /for attempt in \$\(seq 1 48\)/);
   assert.match(manager, /подготовленный релиз не соответствует актуальной ревизии ветки \$\{branch\}/);
   assert.match(manager, /test-update <архив>/);
+  assert.match(api, /def installed_release_branch\(\)/);
+  assert.match(api, /return "test-light" if values\.get\("channel"\) == "test" else "light"/);
   assert.match(manager, /install_prebuilt_release install-release "\$\{archive\}" yes test/);
   assert.match(manager, /vpn-monitor\.timer vps-control-auto-reboot\.timer/);
   assert.match(manager, /"ssh_service_was_active": ssh_service == "yes"/);
@@ -196,8 +198,8 @@ test("Light keeps production updates public and accepts test builds only from lo
   assert.match(manager, /сервисный режим включён; версия приложения не изменена/);
   assert.match(manager, /переход на тестовую версию разрешён только в сервисном режиме/);
   assert.match(api, /payload\.action == "test-rollback" and not SERVICE_MODE_FILE\.exists\(\)/);
-  assert.match(api, /branch = "light"/);
-  assert.match(api, /expected_branch = "light"/);
+  assert.match(api, /branch = installed_release_branch\(\)/);
+  assert.match(api, /expected_branch = installed_release_branch\(\)/);
   assert.match(api, /cached\.get\("current_commit"\) != installed_commit/);
   assert.match(page, /applicationVersion\.branch \|\| "light"/);
   assert.match(page, /setAutoRefresh\(false\)/);
