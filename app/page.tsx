@@ -4,8 +4,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { ConnectionGuide } from "./connection-guide";
 import { LegalFooter } from "./legal";
 
-type Tab = "overview" | "security" | "application" | "services" | "wg" | "awg" | "clients";
-type Protocol = "wg" | "awg";
+type Protocol = "wg" | "awg" | "hysteria2" | "tuic" | "trojan";
+type Tab = "overview" | "security" | "application" | "services" | Protocol | "clients";
 type MetricsPeriod = "live" | "day" | "week" | "quarter";
 type ResourceHistory = { load: Array<number | null>; memory: Array<number | null>; disk: Array<number | null>; rx: Array<number | null>; tx: Array<number | null> };
 type MetricsHistory = {
@@ -27,7 +27,7 @@ type Client = {
 type Overview = {
   server: { name: string; public_ip: string; city: string; country: string; country_code: string; uptime_s: number };
   resources: { load1: number; cpu_percent: number; cpu_count: number; memory_total: number; memory_available: number; disk_total: number; disk_available: number; network_rx: number; network_tx: number; uptime_s?: number };
-  protocols: Record<Protocol, { interface: string; port: number; active: boolean }>;
+  protocols: Partial<Record<Protocol, { interface: string; port: number; active: boolean }>>;
 };
 type ApplicationStatus = {
   api: { active: boolean; enabled: boolean };
@@ -65,9 +65,9 @@ type ServicesStatus = {
 };
 type LiveStatus = {
   resources: Overview["resources"];
-  protocols: Record<Protocol, {
+  protocols: Partial<Record<Protocol, {
     active: boolean; peers: number; online_peers: number; interface_rx_bytes: number; interface_tx_bytes: number;
-  }>;
+  }>>;
   clients: Client[];
   security: { firewall_active: boolean; fail2ban_active: boolean; ssh_listening: boolean };
 };
@@ -84,6 +84,7 @@ type ProtocolStatus = {
   endpoints: number; last_handshake_age_s?: number; peer_rx_bytes: number; peer_tx_bytes: number;
   interface_rx_bytes: number; interface_tx_bytes: number; rx_errors: number; tx_errors: number;
   rx_dropped: number; tx_dropped: number;
+  transport?: string;
   resources: {
     checked_at?: string;
     items: Array<{ name: string; available: boolean; status_code?: number; latency_ms: number }>;
@@ -107,12 +108,15 @@ type ProtocolStatus = {
 };
 
 const labels: Record<Tab, string> = {
-  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", clients: "Подключения",
+  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", hysteria2: "Hysteria2", tuic: "TUIC v5", trojan: "Trojan", clients: "Подключения",
 };
 const navigationLabels: Record<Tab, string> = {
   overview: "OVERVIEW", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
-  wg: "WIREGUARD", awg: "AMNEZIAWG", clients: "CONNECTIONS",
+  wg: "WIREGUARD", awg: "AMNEZIAWG", hysteria2: "HYSTERIA2", tuic: "TUIC V5", trojan: "TROJAN", clients: "CONNECTIONS",
 };
+const protocolIds: Protocol[] = ["wg", "awg", "hysteria2", "tuic", "trojan"];
+const lightModuleIds: Protocol[] = ["awg", "hysteria2", "tuic", "trojan"];
+const isProtocolTab = (value: Tab): value is Protocol => protocolIds.includes(value as Protocol);
 const actionLabels: Record<string, string> = {
   install: "Установка 312.net", start: "Запуск приложения", stop: "Остановка приложения",
   restart: "Перезапуск приложения", update: "Обновление приложения", "test-update": "Переход на тестовую версию", "test-rollback": "Возврат к рабочей версии", "network-check": "Проверка сети и туннелей", identity: "Обновление данных сервера",
@@ -183,7 +187,7 @@ export default function Home() {
   const [confirmAdminPassword, setConfirmAdminPassword] = useState("");
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
   const [confirmationInput, setConfirmationInput] = useState("");
-  const [newClient, setNewClient] = useState({ name: "", protocol: "wg" as Protocol });
+  const [newClient, setNewClient] = useState({ name: "", protocol: "awg" as Protocol });
   const [generated, setGenerated] = useState("");
   const [generatedName, setGeneratedName] = useState("client.conf");
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -361,7 +365,7 @@ export default function Home() {
       else if (tab === "security") await Promise.all([loadSecurity(), loadServices()]);
       else if (tab === "application") await loadApplication();
       else if (tab === "services") await loadServices();
-      else if (tab === "wg" || tab === "awg") await Promise.all([loadClients(), loadProtocolStatus(tab)]);
+      else if (isProtocolTab(tab)) await Promise.all([loadClients(), loadProtocolStatus(tab)]);
       else await loadClients();
     } finally {
       if (showBusy) setBusy(false);
@@ -506,10 +510,10 @@ export default function Home() {
         ...current,
         server: { ...current.server, uptime_s: next.resources.uptime_s ?? current.server.uptime_s },
         resources: next.resources,
-        protocols: {
-          wg: { ...current.protocols.wg, active: next.protocols.wg.active },
-          awg: { ...current.protocols.awg, active: next.protocols.awg.active },
-        },
+        protocols: Object.fromEntries(protocolIds.map((protocol) => [protocol, {
+          ...current.protocols[protocol],
+          active: next.protocols[protocol]?.active ?? current.protocols[protocol]?.active ?? false,
+        }])) as Overview["protocols"],
       } : current);
       setClients((current) => next.clients.map((client) => ({
         ...current.find((existing) => existing.id === client.id && existing.protocol === client.protocol),
@@ -517,8 +521,8 @@ export default function Home() {
       })));
       setProtocolStatuses((current) => {
         const updated = { ...current };
-        (["wg", "awg"] as Protocol[]).forEach((protocol) => {
-          if (updated[protocol]) updated[protocol] = { ...updated[protocol]!, ...next.protocols[protocol] };
+        protocolIds.forEach((protocol) => {
+          if (updated[protocol] && next.protocols[protocol]) updated[protocol] = { ...updated[protocol]!, ...next.protocols[protocol] };
         });
         return updated;
       });
@@ -537,7 +541,7 @@ export default function Home() {
   }, [request, token]);
 
   useEffect(() => {
-    if (!token || !autoRefresh || !["overview", "clients", "wg", "awg", "security"].includes(tab)) return;
+    if (!token || !autoRefresh || !["overview", "clients", ...protocolIds, "security"].includes(tab)) return;
     const initial = window.setTimeout(() => void loadLiveStatus(), 0);
     const timer = window.setInterval(() => void loadLiveStatus(), 800);
     return () => {
@@ -905,11 +909,11 @@ export default function Home() {
   }
 
   const protocolClients = useMemo(
-    () => tab === "wg" || tab === "awg" ? clients.filter((client) => client.protocol === tab) : clients,
+    () => isProtocolTab(tab) ? clients.filter((client) => client.protocol === tab) : clients,
     [clients, tab],
   );
   const installedProtocols = useMemo(
-    () => protocolImages.filter((image) => image.installed && (image.id === "wg" || image.id === "awg")).map((image) => image.id as Protocol),
+    () => protocolImages.filter((image) => image.installed && lightModuleIds.includes(image.id as Protocol)).map((image) => image.id as Protocol),
     [protocolImages],
   );
   const protocolCategories = useMemo(() => {
@@ -926,7 +930,7 @@ export default function Home() {
     () => (["overview", "clients"] as Tab[]).filter((id) => id !== "clients" || installedProtocols.length > 0),
     [installedProtocols],
   );
-  const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
+  const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "awg";
 
   async function addClient(event: FormEvent) {
     event.preventDefault(); setBusy(true); setGenerated(""); setError("");
@@ -945,7 +949,7 @@ export default function Home() {
   }
 
   function downloadConfig(filename: string, config: string) {
-    const blob = new Blob([config], { type: "application/x-wireguard-profile;charset=utf-8" });
+    const blob = new Blob([config], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url; anchor.download = filename; anchor.click();
@@ -1079,9 +1083,9 @@ export default function Home() {
     Boolean(applicationSecurity?.control_command_protected),
   ];
   const securityScore = Math.round(securityChecks.filter(Boolean).length / securityChecks.length * 100);
-  const activeProtocol = tab === "wg" || tab === "awg" ? protocolStatuses[tab] : undefined;
-  const activeProtocolRate = tab === "wg" || tab === "awg" ? protocolRates[tab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
-  const activeProtocolImage = tab === "wg" || tab === "awg" ? protocolImages.find((image) => image.id === tab) : undefined;
+  const activeProtocol = isProtocolTab(tab) ? protocolStatuses[tab] : undefined;
+  const activeProtocolRate = isProtocolTab(tab) ? protocolRates[tab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
+  const activeProtocolImage = isProtocolTab(tab) ? protocolImages.find((image) => image.id === tab) : undefined;
   const operationActive = ["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(application?.action?.state || "");
   const operationProgress = Math.max(0, Math.min(100, application?.action?.progress || (operationActive ? 5 : 100)));
   const operationName = application?.action?.action || "";
@@ -1160,7 +1164,7 @@ export default function Home() {
       <header className="topbar">
         <div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p className="subtitle">{overview?.server.city}, {overview?.server.country} · управление инфраструктурой</p></div>
         <div className="topActions">
-          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={serviceModeActive} onClick={() => setAutoRefresh((value) => !value)}><i />{serviceModeActive ? "Авто · выкл" : autoRefresh ? `Авто · ${["overview", "clients", "wg", "awg", "security"].includes(tab) ? "<1" : tab === "application" || tab === "services" ? "5" : "30"}с` : "Пауза"}</button>
+          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={serviceModeActive} onClick={() => setAutoRefresh((value) => !value)}><i />{serviceModeActive ? "Авто · выкл" : autoRefresh ? `Авто · ${["overview", "clients", ...protocolIds, "security"].includes(tab) ? "<1" : tab === "application" || tab === "services" ? "5" : "30"}с` : "Пауза"}</button>
           {lastUpdated && <span className="updatedAt">{lastUpdated.toLocaleTimeString("ru-RU")}</span>}
           <button className="iconButton" onClick={() => void refreshCurrent(true)} aria-label="Обновить текущий модуль">↻</button>
           <button className="ghostButton" onClick={() => { sessionStorage.removeItem("312-token"); setToken(""); }}>Выйти</button>
@@ -1196,9 +1200,9 @@ export default function Home() {
         </div>
         <article className="panel protocolSummary">
           <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div></div>
-          {(["wg", "awg"] as Protocol[]).filter((protocol) => overview?.protocols[protocol].active).map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
-            <span className={`protocol ${protocol}`}>{protocol === "wg" ? "WG" : "AW"}</span>
-            <p><strong>{protocol === "wg" ? "WireGuard" : "AmneziaWG"}</strong><small>{overview?.protocols[protocol].interface} · UDP {overview?.protocols[protocol].port}</small></p>
+          {installedProtocols.filter((protocol) => overview?.protocols[protocol]?.active).map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
+            <span className={`protocol ${protocol}`}>{protocol === "hysteria2" ? "HY2" : protocol === "trojan" ? "TR" : protocol.toUpperCase()}</span>
+            <p><strong>{labels[protocol]}</strong><small>{overview?.protocols[protocol]?.interface} · {overview?.protocols[protocol]?.port}</small></p>
             <em className="onlinePill">Активен</em><b>›</b>
           </button>)}
           {protocolImages.filter((image) => !image.installed).map((image) =>
@@ -1210,7 +1214,7 @@ export default function Home() {
               </button>
             </div>
           )}
-          {!overview?.protocols.wg.active && !overview?.protocols.awg.active && !protocolImages.length && <div className="protocolEmpty"><span>—</span><p><strong>Нет доступных образов</strong><small>Добавьте manifest.json в каталог protocol-images</small></p></div>}
+          {!installedProtocols.some((protocol) => overview?.protocols[protocol]?.active) && !protocolImages.length && <div className="protocolEmpty"><span>—</span><p><strong>Нет доступных образов</strong><small>Добавьте manifest.json в каталог protocol-images</small></p></div>}
         </article>
       </section>}
 
@@ -1497,12 +1501,12 @@ export default function Home() {
         </article>
       </section>}
 
-      {(tab === "wg" || tab === "awg") && activeProtocol && <section className="protocolMonitor">
+      {isProtocolTab(tab) && activeProtocol && <section className="protocolMonitor">
         <article className="panel protocolLiveHero">
           <div>
             <p className="eyebrow">LIVE TUNNEL</p>
-            <h2>{tab === "wg" ? "WireGuard" : "AmneziaWG"}</h2>
-            <p className="mono">{activeProtocol.interface} · {activeProtocol.address || "адрес не назначен"} · UDP {activeProtocol.listen_port || "—"}</p>
+            <h2>{labels[tab]}</h2>
+            <p className="mono">{activeProtocol.interface} · {activeProtocol.address || "адрес не назначен"} · {activeProtocol.transport || "UDP"} {activeProtocol.listen_port || "—"}</p>
           </div>
           <div className="protocolControlStack">
             <div className={activeProtocol.active && activeProtocol.service_active ? "protocolHealth online" : "protocolHealth"}>
@@ -1635,7 +1639,7 @@ export default function Home() {
           <button className="primaryButton" disabled={busy}>Создать конфигурацию <span>→</span></button>
         </form>{generated && <div className="generated">
           <div className="generatedHead"><span>✓</span><div><small>КОНФИГУРАЦИЯ ГОТОВА</small><strong>{generatedName}</strong><p>Сохраните файл сейчас — приватный ключ повторно не показывается.</p></div></div>
-          <button className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать конфигурацию</strong><small>WIREGUARD · .CONF</small></div></button>
+          <button className="downloadButton" onClick={() => downloadConfig(generatedName, generated)}><span>↓</span><div><strong>Скачать конфигурацию</strong><small>{selectedClientProtocol.toUpperCase()} · {generatedName.split(".").pop()?.toUpperCase() || "CONFIG"}</small></div></button>
           <details><summary>Показать техническое содержимое <span>⌄</span></summary><textarea readOnly value={generated} /></details>
           <button className="copyButton" onClick={() => navigator.clipboard.writeText(generated)}>Копировать содержимое</button>
         </div>}</article>
