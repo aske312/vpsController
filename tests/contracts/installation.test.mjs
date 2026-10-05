@@ -41,12 +41,13 @@ test("Unix shell entrypoints are protected from Windows line endings", async () 
 });
 
 test("поставка содержит установщик, образы и русскую документацию", async () => {
-  const [bootstrap, manager, readme, wg, awg] = await Promise.all([
+  const [bootstrap, manager, readme, wg, awg, config] = await Promise.all([
     read("scripts/install-panel.sh"),
     read("scripts/vps-control.sh"),
     read("README.md"),
     read("protocol-images/wireguard/manifest.json"),
     read("protocol-images/amneziawg/manifest.json"),
+    read("install.conf"),
   ]);
   assert.match(bootstrap, /archive\/refs\/heads\/\$\{BRANCH\}\.tar\.gz/);
   assert.match(bootstrap, /DPkg::Lock::Timeout=300/);
@@ -100,7 +101,11 @@ test("поставка содержит установщик, образы и р
   assert.match(manager, /VPS_CONTROL_ACCESS_MODE/);
   assert.match(manager, /VPS_CONTROL_HTTP_PORT/);
   assert.match(manager, /VPS_CONTROL_VLESS_PORT/);
-  assert.match(manager, /od -An -N18 -tx1 \/dev\/urandom/);
+  assert.match(manager, /generate_admin_password\(\).*od -An -N18 -tx1 \/dev\/urandom/s);
+  assert.match(manager, /elif \[\[ "\$\{fresh_install\}" == "yes" \]\]; then/);
+  assert.doesNotMatch(manager, /^ADMIN_PASSWORD=".+"$/m);
+  assert.doesNotMatch(config, /^ADMIN_PASSWORD=/m);
+  assert.match(config, /VPS_CONTROL_ADMIN_PASSWORD/);
   assert.match(manager, /tail -n 1 \| tr -d '\\r'/);
   assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 2/);
   assert.match(manager, /value="\$\{value:1:\$\{#value\}-2\}"/);

@@ -14,6 +14,7 @@ export type Status = {
   recovery_required?: boolean;
   active: boolean | null;
   runtime?: { state: "running" | "stopped" | "error" | "unknown"; reason: string; checked_at: string };
+  health?: { state: "healthy" | "possible_issues" | "error" | "unchecked" | "unknown"; reason: string; checked_at: string | null };
   core_version: string;
   profiles: number;
   profiles_in_use: number;

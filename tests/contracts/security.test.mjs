@@ -7,6 +7,10 @@ test("security distinguishes public SSH from public panel access", async () => {
   assert.match(api, /"panel_access": \{/);
   assert.match(api, /"publicly_accessible": panel_publicly_accessible/);
   assert.match(api, /panel_access_consistent/);
+  assert.match(api, /panel_port = "443" if PUBLIC_DOMAIN else http_port/);
+  assert.match(api, /parts\[2\] != panel_port/);
+  assert.doesNotMatch(section, /Обновления Ubuntu/);
+  assert.match(section, /Обновления системы/);
   assert.match(page, /ssh\?\.password_authentication === "no"/);
   assert.match(page, /ssh\?\.permit_root_login !== "yes"/);
   assert.match(page, /Безопасный доступ по SSH/);
@@ -20,6 +24,7 @@ test("security distinguishes public SSH from public panel access", async () => {
   assert.match(page, /now >= deadline.*loadSshAccess/s);
   assert.match(section, /title="SSH  административный доступ"[\s\S]*onAction=\{openSshAdminDialog\}[\s\S]*actionLabel="Настроить"/);
   assert.match(page, /title="Доступ к панели"/);
+  assert.match(page, /aria-pressed=\{selectedConnectionType\?\.id === option\.id\}/);
   assert.match(page, /SSH  административный доступ/);
   assert.match(page, /title="Дополнительные VPN-службы"/);
   assert.match(page, /вне управления панели/);

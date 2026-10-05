@@ -887,6 +887,7 @@
   line-height: 1;
 }
 [data-network-page] .networkRouteStatus.ready { color: var(--network-green); background: rgba(67, 171, 139, .1); }
+[data-network-page] .networkRouteStatus.unchecked { color: var(--network-amber); background: rgba(239, 182, 95, .1); }
 [data-network-page] .networkRouteStatus.warning { color: var(--network-amber); background: rgba(239, 182, 95, .1); }
 [data-network-page] .networkRouteStatus.stale { color: var(--network-amber); background: color-mix(in srgb, var(--network-amber) 12%, transparent); }
 [data-network-page] .networkRouteStatus.unresolved { color: var(--network-red, #f17878); background: rgba(241, 120, 120, .1); }
@@ -1468,6 +1469,7 @@
 }
 
 [data-network-page] .networkEndpointCard.ready { border-color: rgba(106, 221, 186, .3); }
+[data-network-page] .networkEndpointCard.unchecked { border-color: rgba(239, 182, 95, .3); }
 [data-network-page] .networkEndpointCard.warning { border-color: rgba(239, 182, 95, .3); }
 [data-network-page] .networkEndpointCard.unresolved { border-color: rgba(239, 133, 133, .3); }
 
@@ -1497,6 +1499,7 @@
 [data-network-page] .networkEndpointCard > small { color: var(--network-dim); font-size: 9px; line-height: 1.4; }
 [data-network-page] .networkEndpointCheck { color: var(--network-muted); font-size: 9px; line-height: 1.4; }
 [data-network-page] .networkEndpointCheck.ready { color: var(--network-green); }
+[data-network-page] .networkEndpointCheck.unchecked { color: var(--network-amber); }
 [data-network-page] .networkEndpointCheck.warning { color: var(--network-amber); }
 [data-network-page] .networkEndpointCheck.unresolved { color: var(--network-red); }
 [data-network-page] .networkEndpointDnsHint { color: var(--network-cyan) !important; }
@@ -1821,6 +1824,13 @@
   border-color: color-mix(in srgb, var(--cyan) 38%, var(--line));
   background: color-mix(in srgb, var(--cyan) 8%, transparent);
   color: var(--cyan);
+}
+
+[data-network-page] .networkRouteStatus.unchecked,
+[data-network-page] .networkRouteStatus.warning {
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--line));
+  background: color-mix(in srgb, var(--amber) 9%, transparent);
+  color: var(--amber);
 }
 
 [data-network-page] .networkRouteStatus.obsolete {

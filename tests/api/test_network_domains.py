@@ -150,11 +150,12 @@ class NetworkDomainsTests(unittest.TestCase):
                 with self.assertRaises(api.HTTPException):
                     api.save_channel_mode("trojan", "udp_relay")
 
-    def test_endpoint_check_reports_dns_and_origin_warning(self):
+    def test_endpoint_check_keeps_dns_only_route_unchecked_and_reports_origin_warning(self):
         with patch.object(api, "PUBLIC_IPV4", "198.51.100.1"), patch.object(api, "PUBLIC_IPV6", ""), patch.object(api, "PUBLIC_IP", "198.51.100.1"), patch.object(api.socket, "getaddrinfo", return_value=[(0, 0, 0, "", ("198.51.100.2", 0))]):
             result = api.check_network_endpoint(api.NetworkEndpointCheck(kind="tls_relay", domain="relay.example.com"), None)
-        self.assertEqual(result["status"], "ready")
-        self.assertTrue(result["ready"])
+        self.assertEqual(result["status"], "unchecked")
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["verification"], "dns_only")
         with patch.object(api.socket, "getaddrinfo", return_value=[]):
             result = api.check_network_endpoint(api.NetworkEndpointCheck(kind="udp_relay", domain="missing.example.com"), None)
         self.assertEqual(result["status"], "unresolved")

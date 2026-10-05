@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.api.support import api, manager
+from tests.api.support import ROOT, api, manager
 import network_routes as routes
 
 
@@ -18,6 +18,37 @@ class NetworkRouteTests(unittest.TestCase):
                     path.write_text(content)
                     self.assertFalse(manager.mihomo_route_endpoint_ready("tls", "relay.example"))
                 probe.assert_not_called()
+
+    def test_mihomo_cdn_requires_end_to_end_route_but_preserves_existing_connection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "network.json"
+            registry = routes.migrate({"cdn_domains": ["cdn.example"]})
+            path.write_text(json.dumps({"route_registry": registry}))
+            with patch.object(manager, "NETWORK_ENDPOINTS_FILE", path):
+                self.assertFalse(manager.mihomo_route_endpoint_ready("cdn", "cdn.example"))
+                registry["bindings"][0]["check"] = {
+                    "state": "ready", "ready": True, "verification": "end_to_end",
+                    "reason": "Listener, forwarding and data exchange confirmed",
+                }
+                path.write_text(json.dumps({"route_registry": registry}))
+                self.assertTrue(manager.mihomo_route_endpoint_ready("cdn", "cdn.example"))
+
+        requested = manager.ProfileConnectionInput(
+            id="existing", device_id="common", component="transport-reality",
+            settings={"route_mode": "cdn", "cdn_domain": "cdn.example"},
+        )
+        with patch.object(manager, "SUBMODULE_ROOT", ROOT / "protocol-images/mihomo/modules"), \
+             patch.object(manager, "validate_channels"), \
+             patch.object(manager, "module_is_installed", return_value=True), \
+             patch.object(manager, "module_is_ready", return_value=True), \
+             patch.object(manager, "mihomo_route_endpoint_ready", return_value=False):
+            existing = [{"id": "existing", "device_id": "common", "component": "transport-reality",
+                         "settings": {**manager.connection_defaults("transport-reality"),
+                                      "route_mode": "cdn", "cdn_domain": "cdn.example"}}]
+            retained = manager.validate_connection_inputs([requested], existing)
+            self.assertEqual(retained[0]["settings"]["cdn_domain"], "cdn.example")
+            with self.assertRaises(manager.HTTPException):
+                manager.validate_connection_inputs([requested])
 
     def test_migration_groups_addresses_but_preserves_independent_bindings(self):
         settings = {"cdn_domains": ["same.example"], "tls_relay_domains": ["same.example"]}
@@ -110,7 +141,7 @@ class NetworkRouteTests(unittest.TestCase):
         for index in range(1, 10):
             routes.record_check(registry, "tls_relay", "relay.example", {**failed, "message": f"Ошибка {index}"})
         self.assertEqual(registry["bindings"][0]["check"]["state"], "error")
-        routes.record_check(registry, "tls_relay", "relay.example", {"status": "ready", "ready": True,
+        routes.record_check(registry, "tls_relay", "relay.example", {"status": "ready", "ready": True, "verification": "end_to_end",
                              "route": "proxy_or_cdn", "resolved": ["203.0.113.10"], "matches_origin": False,
                              "message": "Адрес подтверждён"})
         self.assertEqual(registry["bindings"][0]["check"]["state"], "ready")
@@ -118,3 +149,42 @@ class NetworkRouteTests(unittest.TestCase):
         registry["bindings"][0]["desired_revision"] = 2
         routes.record_check(registry, "tls_relay", "relay.example", failed)
         self.assertEqual(registry["bindings"][0]["check"]["failed_checks"], 1)
+
+    def test_dns_and_edge_evidence_stays_unchecked_without_end_to_end_probe(self):
+        registry = routes.migrate({"cdn_domains": ["cdn.example"]})
+        probe = {"domain": "cdn.example", "resolved": ["203.0.113.10"], "matches_origin": False,
+                 "route": "proxy_or_cdn"}
+        with patch.object(api, "read_route_registry", return_value=registry), \
+             patch.object(api, "network_domain_probe", return_value=probe):
+            result = api.network_endpoint_check("cdn", "cdn.example", include_saved=False)
+        self.assertEqual(result["status"], "unchecked")
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["verification"], "dns_only")
+
+        legacy = registry["bindings"][0]
+        legacy["check"] = {"state": "ready", "ready": True, "reason": "Старый DNS-only результат"}
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(api, "NETWORK_ENDPOINTS_FILE", Path(temporary) / "network.json"), \
+             patch.object(api, "read_route_registry", return_value=registry), \
+             patch.object(api, "network_domain_probe", return_value=probe):
+            api.NETWORK_ENDPOINTS_FILE.write_text(json.dumps({"route_registry": registry}))
+            result = api.network_endpoint_check("cdn", "cdn.example")
+        self.assertEqual(result["status"], "unchecked")
+        self.assertFalse(result["ready"])
+
+    def test_ready_requires_end_to_end_verification(self):
+        registry = routes.migrate({"tls_relay_domains": ["relay.example"]})
+        routes.record_check(registry, "tls_relay", "relay.example", {
+            "status": "ready", "ready": True, "route": "proxy_or_cdn",
+            "resolved": ["203.0.113.10"], "matches_origin": False,
+            "message": "Только DNS",
+        })
+        self.assertEqual(registry["bindings"][0]["check"]["state"], "unknown")
+        self.assertFalse(registry["bindings"][0]["check"]["ready"])
+
+        legacy = routes.migrate({"cdn_domains": ["cdn.example"]})
+        legacy["bindings"][0]["check"] = {"state": "ready", "ready": True, "reason": "DNS ok"}
+        migrated = routes.migrate({"route_registry": legacy})
+        self.assertEqual(migrated["bindings"][0]["check"]["state"], "unknown")
+        self.assertFalse(migrated["bindings"][0]["check"]["ready"])
+        self.assertEqual(migrated["bindings"][0]["check"]["verification"], "dns_only")

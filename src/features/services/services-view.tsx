@@ -33,7 +33,7 @@ type ServiceGroupId = "control" | "network" | "security" | "system";
 const groupMeta: Record<ServiceGroupId, { eyebrow: string; title: string; hint: string }> = {
   control: { eyebrow: "CONTROL PLANE", title: "Панель и reverse proxy", hint: "API, web-интерфейс и HTTP(S)-контур." },
   network: { eyebrow: "SECURE CHANNELS", title: "Защищённые каналы", hint: "VPN, Mihomo и transport/runtime-службы." },
-  security: { eyebrow: "SECURITY & OS", title: "Защита и система", hint: "SSH, Fail2ban, мониторинг и обслуживание Ubuntu." },
+  security: { eyebrow: "SECURITY & OS", title: "Защита и система", hint: "SSH, Fail2ban, мониторинг и обслуживание ОС." },
   system: { eyebrow: "SYSTEM", title: "Прочие службы", hint: "Остальные управляемые systemd units." },
 };
 

@@ -175,6 +175,8 @@ export function NetworkEndpoints({
                         {result
                           ? result.status === "ready"
                             ? "READY"
+                            : result.status === "unchecked"
+                              ? "UNCHECKED"
                             : result.status === "warning"
                               ? "WARN"
                               : "ERROR"

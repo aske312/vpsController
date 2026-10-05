@@ -435,17 +435,21 @@ function routeStatusFor(domain: NetworkStatus["domains"][number]): NetworkEndpoi
   const isUdp = role.includes("udp");
   if (!isCdn && !isTls && !isUdp) return null;
   if (!domain.resolved.length || domain.route === "unresolved") return "unresolved";
-  if (isCdn) return domain.route === "proxy_or_cdn" ? "ready" : "warning";
-  return domain.route === "direct" ? "warning" : "ready";
+  if (isCdn) return domain.route === "proxy_or_cdn" ? "unchecked" : "warning";
+  return domain.route === "direct" ? "warning" : "unchecked";
 }
 
 function NetworkRouteStatus({ status }: { status: NetworkEndpointCheck["status"] | null }) {
   const display = status === "ready"
     ? { className: "ready", label: "READY" }
+    : status === "unchecked"
+      ? { className: "unchecked", label: "UNCHECKED" }
     : status === "stale"
       ? { className: "obsolete", label: "OBSOLETE" }
-      : status === "unresolved"
-        ? { className: "error", label: "ERROR" }
+    : status === "unresolved"
+      ? { className: "error", label: "ERROR" }
+      : status === "warning"
+        ? { className: "warning", label: "WARN" }
         : { className: "active", label: "ACTIVE" };
   return <span className={`networkRouteStatus ${display.className}`}>{display.label}</span>;
 }

@@ -1760,7 +1760,8 @@ def mihomo_route_endpoint_ready(kind: str, domain: str) -> bool:
     try:
         stored = json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8")) if NETWORK_ENDPOINTS_FILE.exists() else {}
         route_kind = {"cdn": "cdn", "tls": "tls_relay", "udp": "udp_relay"}[kind]
-        if network_routes.retired(network_routes.migrate(stored), route_kind, domain):
+        registry = network_routes.migrate(stored)
+        if network_routes.retired(registry, route_kind, domain):
             return False
     except (OSError, ValueError, KeyError, TypeError):
         return False
@@ -1769,22 +1770,12 @@ def mihomo_route_endpoint_ready(kind: str, domain: str) -> bool:
         # may be the public panel route and does not have to be the external
         # TLS relay field used by other protocols.
         return direct_tls_domain_ready(domain)
-    key = {"cdn": "cdn_domain", "tls": "tls_relay_domain", "udp": "udp_relay_domain"}.get(kind)
-    if not key or not domain:
-        return False
-    configured = stored.get(key, "")
-    configured_domains = stored.get({"cdn_domain": "cdn_domains", "tls_relay_domain": "tls_relay_domains", "udp_relay_domain": "udp_relay_domains"}.get(key, ""), [])
-    allowed = {str(configured).strip().lower()} if configured else set()
-    if isinstance(configured_domains, list):
-        allowed.update(str(value).strip().lower() for value in configured_domains if str(value).strip())
-    if kind == "cdn":
-        allowed.update(str(route.get("domain", "")).strip().lower() for route in cdn_security.read_routes() if route.get("cloudflare", True) and route.get("domain"))
-    if domain.strip().lower() not in allowed:
-        return False
-    try:
-        return bool(socket.getaddrinfo(domain, 443, type=socket.SOCK_STREAM))
-    except socket.gaierror:
-        return False
+    binding = next((item for item in registry.get("bindings", [])
+                    if item.get("kind") == route_kind
+                    and item.get("address") == domain.strip().lower()
+                    and item.get("state") == "active"), None)
+    check = binding.get("check", {}) if binding else {}
+    return bool(check.get("ready") and check.get("verification") == "end_to_end")
 
 
 def module_is_installed(module_id: str) -> bool:
@@ -2708,7 +2699,7 @@ def valid_sni_hostname(value: str) -> bool:
     return len(value) <= 253 and all(re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label) for label in value.split("."))
 
 
-def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any]:
+def validate_connection(component: str, values: dict[str, Any], *, allow_unverified_network_route: bool = False) -> dict[str, Any]:
     if component not in TRANSPORTS:
         raise HTTPException(status_code=422, detail=f"{component} is not a Mihomo component")
     if not module_is_installed(component):
@@ -2802,7 +2793,7 @@ def validate_connection(component: str, values: dict[str, Any]) -> dict[str, Any
         raise HTTPException(status_code=422, detail="Unsupported CDN XHTTP mode")
     if cdn_enabled and not re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", cdn_domain):
         raise HTTPException(status_code=422, detail="For CDN specify a valid hostname")
-    if cdn_enabled and not mihomo_route_endpoint_ready("cdn", cdn_domain):
+    if cdn_enabled and not allow_unverified_network_route and not mihomo_route_endpoint_ready("cdn", cdn_domain):
         raise HTTPException(status_code=409, detail="CDN-адрес не подтверждён в разделе «Сеть»")
     if tls_enabled and not mihomo_route_endpoint_ready("tls", tls_domain):
         raise HTTPException(status_code=409, detail="TLS-адрес не подтверждён в разделе «Сеть»")
@@ -3520,8 +3511,9 @@ def validate_vless_connection_limit(values: list[dict[str, Any]]) -> None:
                 raise HTTPException(status_code=422, detail=f"Для одного устройства можно добавить не более {limit} VLESS-подключений в режиме {route_labels[route]}")
 
 
-def validate_connection_inputs(values: list[ProfileConnectionInput]) -> list[dict[str, Any]]:
+def validate_connection_inputs(values: list[ProfileConnectionInput], existing_connections: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
+    existing_by_id = {str(item.get("id")): item for item in (existing_connections or [])}
     used_ids: set[str] = set()
     used_singletons: set[tuple[str, str]] = set()
     used_targets: dict[str, set[str]] = {}
@@ -3548,7 +3540,15 @@ def validate_connection_inputs(values: list[ProfileConnectionInput]) -> list[dic
             host = secrets.choice(available)
             used.add(host)
             settings_input["target"] = f"{host}:443"
-        settings = validate_connection(component, settings_input)
+        saved = existing_by_id.get(connection_id, {})
+        saved_settings = saved.get("settings", {}) if saved.get("component") == component else {}
+        candidate_settings = {**connection_defaults(component), **settings_input}
+        route_keys = ("route_mode", "cdn_domain", "tls_domain")
+        preserves_network_route = bool(saved_settings) and all(
+            str(candidate_settings.get(key, "")).strip().lower() == str(saved_settings.get(key, "")).strip().lower()
+            for key in route_keys
+        )
+        settings = validate_connection(component, settings_input, allow_unverified_network_route=preserves_network_route)
         result.append({"id": connection_id, "component": component, "name": value.name.strip() or manifest(component).get("name", component), "device_id": value.device_id, "settings": settings})
     return result
 
@@ -4013,7 +4013,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         item["subscriptions"] = {}
     if payload.connections is not None:
         reality_changed = False
-        definitions = validate_connection_inputs(payload.connections)
+        definitions = validate_connection_inputs(payload.connections, item.get("connections", []))
         validate_vless_connection_limit(definitions)
         device_ids = {str(device.get("id")) for device in item.get("devices", [])}
         if any(definition.get("device_id") not in device_ids for definition in definitions):

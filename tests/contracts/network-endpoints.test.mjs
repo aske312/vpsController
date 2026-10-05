@@ -34,6 +34,10 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(page, /NetworkRouteTags/);
   assert.match(page, /NetworkRouteStatus/);
   assert.match(page, /routeStatusFor/);
+  assert.match(page, /label: "UNCHECKED"/);
+  assert.match(endpoint, /result\.status === "unchecked"/);
+  assert.match(api, /"verification": "dns_only"/);
+  assert.match(api, /saved\.get\("verification"\) == "end_to_end"/);
   assert.match(page, /<th>Адрес[\s\S]+<th>Статус[\s\S]+<th>Назначение[\s\S]+<th>Канал[\s\S]+<th>Управление/);
   assert.match(page, /networkRouteDelete/);
   assert.match(page, /onRemoveRoute\(endpointCheck\.kind/);

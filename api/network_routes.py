@@ -59,6 +59,17 @@ def migrate(settings: dict) -> dict:
             consumers = item.get("consumers")
             if not isinstance(consumers, list) or any(not isinstance(consumer, dict) or not isinstance(consumer.get("id"), str) or not consumer["id"] for consumer in consumers):
                 raise ValueError("Invalid route consumers")
+            check = item.get("check")
+            if not isinstance(check, dict):
+                raise ValueError("Invalid route check")
+            if check.get("state") == "ready" and check.get("verification") != "end_to_end":
+                item["check"] = {
+                    **check,
+                    "state": "unknown",
+                    "ready": False,
+                    "verification": "dns_only",
+                    "reason": "Предыдущая DNS-проверка не подтверждает listener, forwarding, handshake и обмен данными",
+                }
         return registry
     registry = {"schema": 1, "endpoints": [], "bindings": []}
     for kind, address in sorted(addresses(settings)):
@@ -129,21 +140,26 @@ def record_check(registry: dict, kind: str, address: str, result: dict) -> dict:
         return registry
     check = dict(binding.get("check") or {})
     revision = binding.get("desired_revision", 1)
-    payload = {key: result.get(key) for key in ("status", "ready", "route", "resolved", "matches_origin", "message")}
+    payload = {key: result.get(key) for key in ("status", "ready", "verification", "route", "resolved", "matches_origin", "message")}
     result_key = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     same_revision = check.get("checked_revision") == revision
     duplicate = same_revision and check.get("result_key") == result_key
-    ready = bool(result.get("ready"))
+    verification = str(result.get("verification") or "dns_only")
+    ready = bool(result.get("ready")) and verification == "end_to_end"
     if not duplicate:
         if ready:
             failed_checks = 0
             state = "ready"
+        elif result.get("status") == "unchecked" or bool(result.get("ready")):
+            failed_checks = int(check.get("failed_checks", 0)) if same_revision else 0
+            state = "unknown"
         else:
             failed_checks = int(check.get("failed_checks", 0)) + 1 if same_revision else 1
             state = "error" if failed_checks >= 10 else "warning"
         check.update({"state": state, "ready": ready, "failed_checks": failed_checks,
                       "checked_revision": revision, "result_key": result_key,
+                      "verification": verification,
                       "reason": str(result.get("message") or "Проверка маршрута не подтверждена"),
-                      "last_error": None if ready else str(result.get("message") or "Проверка не пройдена")})
+                      "last_error": None if ready or state == "unknown" else str(result.get("message") or "Проверка не пройдена")})
     binding["check"] = check
     return registry

@@ -109,6 +109,10 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(page, /overviewIssueTargets/);
   assert.match(page, /overviewActiveConnections/);
   assert.match(page, /overviewIssues/);
+  assert.match(page, /status\.health\?\.state !== "healthy"/);
+  assert.match(page, /Готовность подключений не проверена/);
+  assert.match(page, /Требуется внимание/);
+  assert.match(page, /Готовность не подтверждена — проверьте пункты выше/);
   assert.match(manager, /cache-algorithm:/);
   assert.match(manager, /fake-ip-filter:/);
   assert.match(dnsManifest.settings.map((item) => item.key).join(","), /ipv6,prefer_h3,cache_algorithm,fake_ip_filter/);

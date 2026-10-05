@@ -947,8 +947,16 @@ export function MihomoPage({
   const overviewActivityKnown = profiles.every((profile) => profileStats[profile.id]?.summary && profileStats[profile.id].summary.activity_available !== false);
   const overviewTraffic = aggregateTraffic(profiles.map((profile) => profileStats[profile.id]?.summary));
   const overviewActiveProfiles = profiles.filter((profile) => Number(profileStats[profile.id]?.summary.active || 0) > 0).length;
+  const mihomoHealthIssue = status?.active === true && status.health?.state !== "healthy"
+    ? {
+        title: status.health?.state === "unchecked" ? "Готовность подключений не проверена" : "Состояние подключений неизвестно",
+        text: status.health?.reason || "Работа службы не подтверждает доступность клиентских подключений.",
+        view: "channels" as View,
+      }
+    : null;
   const overviewIssues = [
     !status?.active ? { title: "Менеджер Mihomo не отвечает", text: "Проверьте состояние сервиса перед выдачей профилей.", view: "channels" as View } : null,
+    mihomoHealthIssue,
     !installedChannels.length ? { title: "Нет компонентов подключения", text: "Установите хотя бы один транспорт.", view: "channels" as View } : null,
     installedChannels.length > 0 && !policiesReady ? { title: "Политики ещё не готовы", text: "Проверьте настройки маршрутизации на странице «Сеть».", view: "routing" as View } : null,
     installedChannels.length > 0 && !profiles.length ? { title: "Нет профилей", text: "Создайте профиль и добавьте устройство.", view: "profiles" as View } : null,
@@ -1031,9 +1039,9 @@ export function MihomoPage({
             </article>
 
             <aside className={`mihomoOverviewHealth${overviewIssueTargets.length ? " has-issues" : ""}`}>
-              <header><p className="eyebrow">СОСТОЯНИЕ</p><h3>{overviewIssueTargets.length ? "Нужна настройка" : "Система готова"}</h3><span>{overviewIssueTargets.length || "OK"}</span></header>
+              <header><p className="eyebrow">СОСТОЯНИЕ</p><h3>{overviewIssueTargets.length ? "Требуется внимание" : "Система готова"}</h3><span>{overviewIssueTargets.length || "OK"}</span></header>
               <div>{overviewIssueTargets.length ? overviewIssueTargets.map((issue) => <button type="button" key={issue.view} onClick={() => setView(issue.view)}><i /><p><b>{issue.title}</b><small>{issue.text}</small></p><em>→</em></button>) : <><div className="mihomoOverviewCheck"><i /><p><b>Ядро</b><small>{status?.core_version || "Работает"}</small></p></div><div className="mihomoOverviewCheck"><i /><p><b>Компоненты</b><small>{installedChannels.length} установлено</small></p></div><div className="mihomoOverviewCheck"><i /><p><b>DNS и правила</b><small>Доступны профилям</small></p></div></>}</div>
-              <footer>{!installedChannels.length ? <button type="button" className="primaryButton" onClick={() => setView("channels")}>Установить компонент</button> : !profiles.length ? <button type="button" className="primaryButton" onClick={newProfile}>Создать профиль</button> : <small>Дополнительных действий не требуется</small>}</footer>
+              <footer>{!installedChannels.length ? <button type="button" className="primaryButton" onClick={() => setView("channels")}>Установить компонент</button> : !profiles.length ? <button type="button" className="primaryButton" onClick={newProfile}>Создать профиль</button> : overviewIssueTargets.length ? <small>Готовность не подтверждена — проверьте пункты выше</small> : <small>Дополнительных действий не требуется</small>}</footer>
             </aside>
           </section>
         </div>

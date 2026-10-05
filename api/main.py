@@ -2232,8 +2232,9 @@ def network_endpoint_check(kind: str, domain: str, *, include_saved: bool = True
     elif probe["matches_origin"] and kind in {"cdn", "tls_relay", "udp_relay"}:
         status, ready, message = "warning", False, "Адрес указывает на origin VPS, внешний маршрут не подтверждён"
     else:
-        status, ready, message = "ready", True, "Адрес подтверждён для этого маршрута"
-    result = {**probe, "kind": kind, "status": status, "ready": ready, "message": message}
+        status, ready = "unchecked", False
+        message = "DNS и внешний адрес определены, но listener, forwarding, handshake и обмен данными не проверены"
+    result = {**probe, "kind": kind, "status": status, "ready": ready, "verification": "dns_only", "message": message}
     # An explicit probe may have a stronger per-binding result than the
     # stateless DNS/origin observation (for example, the tenth failed check).
     try:
@@ -2244,7 +2245,11 @@ def network_endpoint_check(kind: str, domain: str, *, include_saved: bool = True
                         if item.get("kind") == kind and item.get("address") == domain
                         and item.get("state") == "active"), None)
         saved = binding.get("check", {}) if binding else {}
-        if saved.get("state") in {"ready", "warning", "error", "stale"}:
+        if saved.get("state") == "ready" and saved.get("verification") == "end_to_end":
+            result.update(status="ready", ready=True,
+                          verification="end_to_end",
+                          message=saved.get("reason") or "Маршрут проверен до целевого listener")
+        elif saved.get("state") in {"warning", "error", "stale"}:
             result.update(status=saved["state"], ready=bool(saved.get("ready")),
                           message=saved.get("reason") or result["message"])
     except (OSError, ValueError, json.JSONDecodeError, TypeError):
@@ -2625,8 +2630,12 @@ def security(_: None = Depends(require_token)) -> dict:
                 break
     access_mode = os.getenv("ACCESS_MODE", "external")
     http_port = str(os.getenv("HTTP_PORT", "80"))
+    # With a public domain Caddy terminates the panel connection on HTTPS/443
+    # and proxies it to the private application port.  Security posture must
+    # observe that public gateway, not the internal HTTP_PORT.
+    panel_port = "443" if PUBLIC_DOMAIN else http_port
     panel_listening = any(
-        re.search(rf"(?:0\.0\.0\.0|\*|\[::\]):{re.escape(http_port)}\b", line)
+        re.search(rf"(?:0\.0\.0\.0|\*|\[::\]):{re.escape(panel_port)}\b", line)
         for line in listeners
     )
     panel_public_rule = False
@@ -2641,7 +2650,7 @@ def security(_: None = Depends(require_token)) -> dict:
         ikev2_pool = ""
     for rule in ufw_rules:
         parts = rule.split()
-        if len(parts) < 6 or parts[2] != http_port or parts[0] != "allow":
+        if len(parts) < 6 or parts[2] != panel_port or parts[0] != "allow":
             continue
         interface_tokens = {
             part.removeprefix("in_")
@@ -2765,7 +2774,7 @@ def security(_: None = Depends(require_token)) -> dict:
             "protocol_policies": protocol_policies,
             "panel_access": {
                 "mode": access_mode,
-                "port": int(http_port),
+                "port": int(panel_port),
                 "listening": panel_listening,
                 "public_rule": panel_public_rule,
                 "publicly_accessible": panel_publicly_accessible,
@@ -3708,7 +3717,7 @@ def managed_services() -> dict[str, dict]:
         "monitor": {"name": "Мониторинг VPN", "unit": "vpn-monitor.timer", "controls": ["start", "stop", "restart"]},
         "fail2ban": {"name": "Fail2ban", "unit": "fail2ban.service", "controls": ["start", "stop", "restart"]},
         "updates": {
-            "name": "Автообновления Ubuntu", "unit": "unattended-upgrades.service",
+            "name": "Автоматические обновления ОС", "unit": "unattended-upgrades.service",
             "controls": ["start", "stop", "restart"],
         },
         "ssh": {

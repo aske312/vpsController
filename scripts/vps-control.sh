@@ -29,7 +29,7 @@ fi
 
 ACCESS_MODE="external"
 ADMIN_USER="admin"
-ADMIN_PASSWORD="VpsAdmin-2026-7Qm!rK2#"
+ADMIN_PASSWORD=""
 LOCAL_ADDRESS=""
 LOCAL_CIDR=""
 HTTP_PORT="8080"
@@ -394,6 +394,7 @@ ok() {
 }
 warn() { printf '\033[1;33m!\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
+generate_admin_password() { od -An -N18 -tx1 /dev/urandom | tr -d ' \n'; }
 
 system_architecture() {
   case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
@@ -514,8 +515,12 @@ load_install_config() {
   [[ -z "${admin_user_override}" ]] || ADMIN_USER="${admin_user_override}"
   if [[ -n "${admin_password_override}" ]]; then
     ADMIN_PASSWORD="${admin_password_override}"
-  elif [[ "${fresh_install}" == "yes" && "${VPS_CONTROL_RANDOM_ADMIN_PASSWORD:-no}" == "yes" ]]; then
-    ADMIN_PASSWORD="$(od -An -N18 -tx1 /dev/urandom | tr -d ' \n')"
+  elif [[ "${fresh_install}" == "yes" ]]; then
+    ADMIN_PASSWORD="$(generate_admin_password)"
+  else
+    # Credentials live only in the protected environment file.  Never reuse a
+    # password left in a legacy install.conf when recovering a missing env.
+    ADMIN_PASSWORD=""
   fi
   [[ -z "${domain_override}" ]] || PUBLIC_DOMAIN="${domain_override}"
   [[ -z "${access_override}" ]] || ACCESS_MODE="${access_override}"
@@ -2246,6 +2251,7 @@ ensure_environment() {
   fi
   rm -f -- "${DATA_DIR}/personalization.json"
   if [[ ! -s "${ENV_FILE}" ]]; then
+    [[ -n "${ADMIN_PASSWORD}" ]] || ADMIN_PASSWORD="$(generate_admin_password)"
     install -m 0600 "${PROJECT_DIR}/.env.example" "${ENV_FILE}"
     ln -sfn "${ENV_FILE}" "${LEGACY_ENV_FILE}"
     # Архив мог быть подготовлен на Windows. CR в EnvironmentFile становится
@@ -2279,6 +2285,7 @@ PY
 )"
       [[ -n "${existing_password}" ]] && set_env_value "ADMIN_PASSWORD" "${existing_password}"
     else
+      [[ -n "${ADMIN_PASSWORD}" ]] || ADMIN_PASSWORD="$(generate_admin_password)"
       set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
     fi
   fi
