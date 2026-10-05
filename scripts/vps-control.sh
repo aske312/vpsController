@@ -28,6 +28,9 @@ LOCAL_CIDR=""
 HTTP_PORT="80"
 WG_PORT="51820"
 AWG_PORT="51822"
+HYSTERIA2_PORT="8443"
+TUIC_PORT="8444"
+TROJAN_PORT="8445"
 WG_INTERFACE="wg0"
 AWG_INTERFACE="awg0"
 AWG_MTU="1280"
@@ -355,6 +358,9 @@ configure_access() {
   set_env_value "ACCESS_MODE" "${ACCESS_MODE}"
   set_env_value "WG_PORT" "${WG_PORT}"
   set_env_value "AWG_PORT" "${AWG_PORT}"
+  set_env_value "HYSTERIA2_PORT" "${HYSTERIA2_PORT}"
+  set_env_value "TUIC_PORT" "${TUIC_PORT}"
+  set_env_value "TROJAN_PORT" "${TROJAN_PORT}"
   set_env_value "WG_INTERFACE" "${WG_INTERFACE}"
   set_env_value "AWG_INTERFACE" "${AWG_INTERFACE}"
   set_env_value "AWG_MTU" "${AWG_MTU}"
@@ -578,9 +584,7 @@ EOF
 }
 
 check_vpn() {
-  command -v wg >/dev/null 2>&1 || warn "WireGuard CLI пока не установлен."
   command -v awg >/dev/null 2>&1 || warn "AmneziaWG CLI пока не установлен; панель покажет AWG остановленным."
-  [[ -s "/etc/wireguard/${WG_INTERFACE}.conf" ]] || warn "отсутствует /etc/wireguard/${WG_INTERFACE}.conf; WireGuard пока недоступен."
   [[ -s "/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf" || -s "/etc/amnezia/${AWG_INTERFACE}.conf" ]] \
     || warn "отсутствует конфигурация ${AWG_INTERFACE}; AmneziaWG пока недоступен."
 }
@@ -616,6 +620,7 @@ install_protocol_image() {
   prepare_package_manager
   ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" TROJAN_PORT="${TROJAN_PORT}" \
     bash "${image_root}/${installer}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
@@ -639,8 +644,9 @@ remove_protocol_image() {
   [[ "${uninstaller}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${uninstaller}" ]] \
     || die "образ ${image_id} не поддерживает удаление."
   info "Удаление установленного протокола ${image_id}"
-  ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+  PRESERVE_COMPONENT_DATA=0 ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" TROJAN_PORT="${TROJAN_PORT}" \
     bash "${image_root}/${uninstaller}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
@@ -873,7 +879,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=-/etc/vps-control.env -/etc/wireguard -/etc/amnezia ${DATA_DIR}
+ReadWritePaths=-/etc/vps-control.env -/etc/wireguard -/etc/amnezia -/etc/vps-control ${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -883,8 +889,9 @@ EOF
 }
 
 ensure_api_write_access() {
-  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/wireguard -/etc/amnezia ${DATA_DIR}"
-  if ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}"; then
+  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/wireguard -/etc/amnezia -/etc/vps-control ${DATA_DIR}"
+  if ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
+    || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
     systemctl daemon-reload
   fi
@@ -1076,15 +1083,17 @@ uninstall_app() {
   stop_legacy_containers
   systemctl disable --now "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
   systemctl disable --now vpn-monitor.timer 2>/dev/null || true
-  if [[ -f "${INSTALL_DIR}/protocol-images/wireguard/uninstall.sh" && -s "/etc/wireguard/${WG_INTERFACE}.conf" ]]; then
-    ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
-      bash "${INSTALL_DIR}/protocol-images/wireguard/uninstall.sh"
-  fi
   if [[ -f "${INSTALL_DIR}/protocol-images/amneziawg/uninstall.sh" ]] \
     && [[ -s "/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf" || -s "/etc/amnezia/${AWG_INTERFACE}.conf" ]]; then
     ENV_FILE="${ENV_FILE}" AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
       bash "${INSTALL_DIR}/protocol-images/amneziawg/uninstall.sh"
   fi
+  local protocol_id
+  for protocol_id in hysteria2 tuic trojan; do
+    if [[ -f "${INSTALL_DIR}/protocol-images/${protocol_id}/uninstall.sh" ]]; then
+      PRESERVE_COMPONENT_DATA=0 bash "${INSTALL_DIR}/protocol-images/${protocol_id}/uninstall.sh"
+    fi
+  done
   rm -f "${SERVICE_FILE}" "${WEB_SERVICE_FILE}" /etc/systemd/system/vpn-monitor.service /etc/systemd/system/vpn-monitor.timer \
     /etc/logrotate.d/vps-control-monitor "${COMMAND_PATH}" /usr/local/sbin/vpn-monitor-sample
   systemctl daemon-reload

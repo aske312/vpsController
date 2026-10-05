@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import platform
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -89,6 +90,15 @@ LOGGING_CONFIG_FILE = Path("/etc/vps-control-logging.conf")
 INSTALL_DIR = Path(os.getenv("INSTALL_DIR", "/opt/vps-control"))
 CONTROL_COMMAND = os.getenv("CONTROL_COMMAND", "/usr/local/sbin/vps-control")
 PROTOCOL_IMAGES_DIR = INSTALL_DIR / "protocol-images"
+HYSTERIA2_DIR = Path("/etc/vps-control/hysteria2")
+HYSTERIA2_SETTINGS = HYSTERIA2_DIR / "settings.json"
+HYSTERIA2_USERS = HYSTERIA2_DIR / "users.json"
+TUIC_DIR = Path("/etc/vps-control/tuic")
+TUIC_SETTINGS = TUIC_DIR / "settings.json"
+TUIC_CONFIG = TUIC_DIR / "config.json"
+TROJAN_DIR = Path("/etc/vps-control/trojan")
+TROJAN_SETTINGS = TROJAN_DIR / "settings.json"
+TROJAN_CONFIG = TROJAN_DIR / "config.json"
 MONITOR_DIR = DATA_DIR / "monitor"
 updates_refresh_lock = threading.Lock()
 app_version_refresh_lock = threading.Lock()
@@ -97,6 +107,8 @@ network_diagnostic_lock = threading.Lock()
 resource_check_cache: dict[str, dict] = {}
 network_diagnostic_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
+client_mutation_lock = threading.Lock()
+DIRECT_PROTOCOLS = ("hysteria2", "tuic", "trojan")
 RESOURCE_TARGETS = (
     ("Google", "https://www.google.com/generate_204"),
     ("YouTube", "https://www.youtube.com/"),
@@ -231,6 +243,35 @@ def write_clients(items: list[dict]) -> None:
     tmp.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
     os.chmod(tmp, 0o600)
     tmp.replace(CLIENTS_FILE)
+
+
+def direct_client_rows() -> list[dict]:
+    rows = []
+    for item in read_clients():
+        if item.get("protocol") not in DIRECT_PROTOCOLS:
+            continue
+        rows.append({**item, "address": item.get("endpoint") or PUBLIC_IP,
+                     "endpoint": item.get("endpoint") or PUBLIC_IP, "rx_bytes": 0, "tx_bytes": 0,
+                     "handshake_age_s": None, "quality": "offline",
+                     "quality_reason": "Учётная запись готова; активность определяется службой протокола"})
+    return rows
+
+
+def certificate_server_name(path: Path) -> str:
+    extensions = run("openssl", "x509", "-in", str(path), "-noout", "-ext", "subjectAltName", check=True)
+    match = re.search(r"DNS:([A-Za-z0-9.-]+)", extensions)
+    if not match:
+        raise HTTPException(status_code=409, detail="Server certificate has no DNS identity")
+    return match.group(1)
+
+
+def service_bytes(unit: str) -> tuple[int, int]:
+    def value(name: str) -> int:
+        try:
+            return int(run("systemctl", "show", unit, "--property=" + name, "--value") or 0)
+        except ValueError:
+            return 0
+    return value("IPIngressBytes"), value("IPEgressBytes")
 
 
 def interface_dump(protocol: Literal["wg", "awg"], include_quality: bool = True) -> list[dict]:
@@ -612,6 +653,26 @@ def cached_network_diagnostics(protocol: Literal["wg", "awg"]) -> dict:
     }
 
 
+def direct_protocol_diagnostics(protocol: str) -> dict:
+    unit, port, transport = {
+        "hysteria2": ("vps-control-hysteria2.service", 8443, "udp"),
+        "tuic": ("vps-control-tuic.service", 8444, "udp"),
+        "trojan": ("vps-control-trojan.service", 8445, "tcp"),
+    }[protocol]
+    settings_path = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "trojan": TROJAN_SETTINGS}[protocol]
+    try:
+        port = int(json.loads(settings_path.read_text(encoding="utf-8")).get("port", port))
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+    active = run("systemctl", "is-active", unit) == "active"
+    listeners = run("ss", "-H", "-ln" + ("u" if transport == "udp" else "t"))
+    listening = any(re.search(rf"(?:^|[:.]){port}(?:\s|$)", line) for line in listeners.splitlines())
+    checks = [{"id": "service", "name": "Служба протокола", "ok": active, "value": "работает" if active else "остановлена"},
+              {"id": "listener", "name": f"{transport.upper()} listener", "ok": listening, "value": str(port) if listening else "не найден"}]
+    findings = [] if all(item["ok"] for item in checks) else [{"severity": "critical", "code": "protocol_path", "title": "Протокол недоступен", "detail": "Служба или listener не подтверждены", "action": "Проверьте службу и журнал модуля"}]
+    return {"checked_at": datetime.now(timezone.utc).isoformat(), "status": "healthy" if not findings else "critical", "score": 100 if not findings else 40, "checks": checks, "findings": findings, "network": {}}
+
+
 def memory_info() -> tuple[int, int]:
     values: dict[str, int] = {}
     for line in Path("/proc/meminfo").read_text().splitlines():
@@ -779,6 +840,19 @@ def change_admin_password(payload: AdminPasswordChange, _: None = Depends(requir
 @app.get("/api/overview")
 def overview(_: None = Depends(require_token)) -> dict:
     resources = system_resources()
+    direct_protocols = {}
+    for protocol in DIRECT_PROTOCOLS:
+        settings_path = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "trojan": TROJAN_SETTINGS}[protocol]
+        default_port = {"hysteria2": 8443, "tuic": 8444, "trojan": 8445}[protocol]
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            settings = {}
+        direct_protocols[protocol] = {
+            "interface": "QUIC/UDP" if protocol != "trojan" else "TCP/TLS",
+            "port": int(settings.get("port", default_port)),
+            "active": run("systemctl", "is-active", f"vps-control-{protocol}.service") == "active",
+        }
     return {
         "server": {
             "name": SERVER_NAME,
@@ -792,6 +866,7 @@ def overview(_: None = Depends(require_token)) -> dict:
         "protocols": {
             "wg": {"interface": WG_INTERFACE, "port": WG_PORT, "active": bool(run("wg", "show", WG_INTERFACE))},
             "awg": {"interface": AWG_INTERFACE, "port": AWG_PORT, "active": bool(run("awg", "show", AWG_INTERFACE))},
+            **direct_protocols,
         },
     }
 
@@ -1127,7 +1202,7 @@ def protocol_image_manifests() -> dict[str, dict]:
         interface_env = str(manifest.get("interface_env", ""))
         interface = os.getenv(interface_env, "") if interface_env else ""
         service_template = str(manifest.get("service", ""))
-        service = service_template.replace("{interface}", interface) if interface and service_template else ""
+        service = service_template.replace("{interface}", interface) if service_template and (interface or "{interface}" not in service_template) else ""
         images[image_id] = {
             "id": image_id,
             "name": str(manifest.get("name", image_id)),
@@ -1136,6 +1211,7 @@ def protocol_image_manifests() -> dict[str, dict]:
             "category": str(manifest.get("category", "network")),
             "category_name": str(manifest.get("category_name", "Сетевые модули")),
             "interface": interface,
+            "service": service,
             # Installed and running are different states. A stopped tunnel must
             # remain manageable instead of being offered for installation again.
             "installed": bool(service and run("systemctl", "show", service, "--property=LoadState", "--value") == "loaded"),
@@ -1381,6 +1457,9 @@ def managed_services() -> dict[str, dict]:
         "gateway": {"name": "Caddy", "unit": "caddy.service", "controls": ["restart"], "disabled_controls": ["stop"]},
         "wg": {"name": "WireGuard", "unit": f"wg-quick@{WG_INTERFACE}.service", "controls": ["start", "stop", "restart"]},
         "awg": {"name": "AmneziaWG", "unit": f"awg-quick@{AWG_INTERFACE}.service", "controls": ["start", "stop", "restart"]},
+        "hysteria2": {"name": "Hysteria2", "unit": "vps-control-hysteria2.service", "controls": ["start", "stop", "restart"]},
+        "tuic": {"name": "TUIC v5", "unit": "vps-control-tuic.service", "controls": ["start", "stop", "restart"]},
+        "trojan": {"name": "Trojan", "unit": "vps-control-trojan.service", "controls": ["start", "stop", "restart"]},
         "monitor": {"name": "Мониторинг VPN", "unit": "vpn-monitor.timer", "controls": ["start", "stop", "restart"]},
         "fail2ban": {"name": "Fail2ban", "unit": "fail2ban.service", "controls": ["start", "stop", "restart"]},
         "updates": {
@@ -1612,7 +1691,7 @@ def live_status(_: None = Depends(require_token)) -> dict:
     """Cheap sub-second telemetry without diagnostics, package checks or ICMP."""
     resources = system_resources()
     ufw_config = Path("/etc/ufw/ufw.conf")
-    live_clients = interface_dump("wg", include_quality=False) + interface_dump("awg", include_quality=False)
+    live_clients = interface_dump("wg", include_quality=False) + interface_dump("awg", include_quality=False) + direct_client_rows()
 
     def protocol_live(protocol: str, interface: str) -> dict:
         protocol_clients = [client for client in live_clients if client["protocol"] == protocol]
@@ -1633,12 +1712,25 @@ def live_status(_: None = Depends(require_token)) -> dict:
             "interface_tx_bytes": transmitted,
         }
 
+    def direct_protocol_live(protocol: str) -> dict:
+        unit = f"vps-control-{protocol}.service"
+        received, transmitted = service_bytes(unit)
+        protocol_clients = [client for client in live_clients if client["protocol"] == protocol]
+        return {
+            "active": run("systemctl", "is-active", unit) == "active",
+            "peers": len(protocol_clients),
+            "online_peers": 0,
+            "interface_rx_bytes": received,
+            "interface_tx_bytes": transmitted,
+        }
+
     return {
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "resources": resources,
         "protocols": {
             "wg": protocol_live("wg", WG_INTERFACE),
             "awg": protocol_live("awg", AWG_INTERFACE),
+            **{protocol: direct_protocol_live(protocol) for protocol in DIRECT_PROTOCOLS},
         },
         "clients": live_clients,
         "security": {
@@ -1837,12 +1929,12 @@ def update_automation(payload: AutomationSettings, _: None = Depends(require_tok
 
 @app.get("/api/clients")
 def clients(_: None = Depends(require_token)) -> dict:
-    return {"items": interface_dump("wg") + interface_dump("awg")}
+    return {"items": interface_dump("wg") + interface_dump("awg") + direct_client_rows()}
 
 
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
-    protocol: Literal["wg", "awg"]
+    protocol: Literal["wg", "awg", "hysteria2", "tuic", "trojan"]
 
 
 def key(command: str) -> str:
@@ -1875,6 +1967,55 @@ def append_peer(config: Path, client_id: str, public_key: str, psk: str, address
 
 @app.post("/api/clients")
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
+    client_id = secrets.token_hex(8)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
+    if payload.protocol == "hysteria2":
+        if not HYSTERIA2_SETTINGS.exists() or run("systemctl", "is-enabled", "vps-control-hysteria2.service") != "enabled":
+            raise HTTPException(status_code=409, detail="Hysteria2 protocol is not installed")
+        with client_mutation_lock:
+            try:
+                settings = json.loads(HYSTERIA2_SETTINGS.read_text(encoding="utf-8"))
+                users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8")) if HYSTERIA2_USERS.exists() else {}
+                password = secrets.token_urlsafe(32); users[client_id] = password
+                temporary = HYSTERIA2_USERS.with_suffix(".tmp")
+                temporary.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(temporary, 0o600); temporary.replace(HYSTERIA2_USERS)
+                endpoint = str(settings.get("domain", "")).strip() or PUBLIC_IP
+                identity = str(settings.get("domain", "")).strip() or certificate_server_name(HYSTERIA2_DIR / "server.crt")
+                fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt")).partition("=")[2].strip()
+                config = "\n".join([f"server: {endpoint}:{int(settings.get('port', 8443))}", f"auth: {client_id}:{password}", "tls:", f"  sni: {identity}", "  insecure: true", f"  pinSHA256: {fingerprint}", "socks5:", "  listen: 127.0.0.1:1080", "  disableUDP: false", ""])
+                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
+                return {"id": client_id, "filename": f"{safe_name}.yaml", "config": config}
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                raise HTTPException(status_code=500, detail="Unable to create Hysteria2 connection") from exc
+    if payload.protocol in {"tuic", "trojan"}:
+        config_path = TUIC_CONFIG if payload.protocol == "tuic" else TROJAN_CONFIG
+        settings_path = TUIC_SETTINGS if payload.protocol == "tuic" else TROJAN_SETTINGS
+        binary = f"/usr/local/lib/vps-control-{payload.protocol}/sing-box"
+        unit = f"vps-control-{payload.protocol}.service"
+        if not config_path.exists() or run("systemctl", "is-enabled", unit) != "enabled":
+            raise HTTPException(status_code=409, detail=f"{payload.protocol} protocol is not installed")
+        with client_mutation_lock:
+            original = config_path.read_bytes(); temporary = config_path.with_suffix(".tmp.json")
+            try:
+                server = json.loads(original); inbound = next(row for row in server.get("inbounds", []) if row.get("type") == payload.protocol)
+                password = secrets.token_urlsafe(32); user_uuid = str(uuid.uuid4())
+                user = {"name": client_id, "password": password, **({"uuid": user_uuid} if payload.protocol == "tuic" else {})}
+                inbound.setdefault("users", []).append(user); temporary.write_text(json.dumps(server, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(temporary, 0o600)
+                result = subprocess.run([binary, "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
+                if result.returncode: raise RuntimeError(result.stderr.strip() or "sing-box rejected configuration")
+                temporary.replace(config_path); run("systemctl", "restart", unit, timeout=20, check=True)
+                settings = json.loads(settings_path.read_text(encoding="utf-8")); endpoint = PUBLIC_IP; certificate = (config_path.parent / "server.crt").read_text(encoding="utf-8")
+                outbound = {"type": payload.protocol, "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444 if payload.protocol == "tuic" else 8445)), "password": password,
+                            "tls": {"enabled": True, "server_name": certificate_server_name(config_path.parent / "server.crt"), "certificate": certificate}}
+                if payload.protocol == "tuic": outbound.update({"uuid": user_uuid, "congestion_control": str(settings.get("congestion_control", "bbr")), "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": str(settings.get("heartbeat", "10s"))})
+                client = {"log": {"level": "warn"}, "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080}], "outbounds": [outbound], "route": {"final": "connection-out"}}
+                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid if payload.protocol == "tuic" else client_id, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
+                return {"id": client_id, "filename": f"{safe_name}.json", "config": json.dumps(client, ensure_ascii=False, indent=2)}
+            except Exception as exc:
+                config_path.write_bytes(original); os.chmod(config_path, 0o600); run("systemctl", "restart", unit, timeout=20)
+                raise HTTPException(status_code=500, detail=f"Unable to create {payload.protocol} connection") from exc
+            finally:
+                temporary.unlink(missing_ok=True)
     command = "wg" if payload.protocol == "wg" else "awg"
     config_path = WG_CONFIG if payload.protocol == "wg" else AWG_CONFIG
     if not config_path.exists():
@@ -1883,7 +2024,6 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     public_key = key(f"printf '%s' '{private_key}' | {command} pubkey")
     psk = key(f"{command} genpsk")
     address = next_address(payload.protocol)
-    client_id = secrets.token_hex(8)
     interface = WG_INTERFACE if payload.protocol == "wg" else AWG_INTERFACE
     append_peer(config_path, client_id, public_key, psk, str(address))
     run_with_input(
@@ -1914,7 +2054,6 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         }
     )
     write_clients(items)
-    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
     return {"id": client_id, "filename": f"{safe_name}-{payload.protocol}.conf", "config": client_config}
 
 
@@ -1925,6 +2064,23 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     if not item:
         raise HTTPException(status_code=404, detail="Client not found")
     protocol = item["protocol"]
+    if protocol == "hysteria2":
+        if HYSTERIA2_USERS.exists():
+            with client_mutation_lock:
+                users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8")); users.pop(client_id, None)
+                temporary = HYSTERIA2_USERS.with_suffix(".tmp"); temporary.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(temporary, 0o600); temporary.replace(HYSTERIA2_USERS)
+        write_clients([entry for entry in items if entry["id"] != client_id]); return {"deleted": client_id}
+    if protocol in {"tuic", "trojan"}:
+        config_path = TUIC_CONFIG if protocol == "tuic" else TROJAN_CONFIG; binary = f"/usr/local/lib/vps-control-{protocol}/sing-box"; unit = f"vps-control-{protocol}.service"
+        if config_path.exists() and Path(binary).exists():
+            with client_mutation_lock:
+                config_data = json.loads(config_path.read_text(encoding="utf-8")); inbound = next(row for row in config_data.get("inbounds", []) if row.get("type") == protocol)
+                inbound["users"] = [user for user in inbound.get("users", []) if user.get("name") != client_id]
+                temporary = config_path.with_suffix(".tmp.json"); temporary.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(temporary, 0o600)
+                result = subprocess.run([binary, "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
+                if result.returncode: temporary.unlink(missing_ok=True); raise HTTPException(status_code=500, detail=f"Unable to remove {protocol} connection")
+                temporary.replace(config_path); run("systemctl", "restart", unit, timeout=20, check=True)
+        write_clients([entry for entry in items if entry["id"] != client_id]); return {"deleted": client_id}
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
     config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
@@ -1937,7 +2093,20 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
 
 
 @app.get("/api/protocols/{protocol}/status")
-def protocol_status(protocol: Literal["wg", "awg"], _: None = Depends(require_token)) -> dict:
+def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "trojan"], _: None = Depends(require_token)) -> dict:
+    if protocol in DIRECT_PROTOCOLS:
+        unit = f"vps-control-{protocol}.service"
+        settings_path = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "trojan": TROJAN_SETTINGS}[protocol]
+        default_port = {"hysteria2": 8443, "tuic": 8444, "trojan": 8445}[protocol]
+        try: settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError): settings = {}
+        rx, tx = service_bytes(unit); active = run("systemctl", "is-active", unit) == "active"; protocol_clients = [item for item in read_clients() if item.get("protocol") == protocol]
+        return {"protocol": protocol, "interface": "QUIC/UDP" if protocol != "trojan" else "TCP/TLS", "active": active, "service_active": active,
+                "service_enabled": run("systemctl", "is-enabled", unit) == "enabled", "active_since": run("systemctl", "show", unit, "--property=ActiveEnterTimestamp", "--value"),
+                "address": PUBLIC_IP, "listen_port": int(settings.get("port", default_port)), "mtu": 0, "peers": len(protocol_clients), "online_peers": 0, "endpoints": 0,
+                "last_handshake_age_s": None, "peer_rx_bytes": rx, "peer_tx_bytes": tx, "interface_rx_bytes": rx, "interface_tx_bytes": tx,
+                "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0, "transport": "QUIC / UDP" if protocol != "trojan" else "TCP / TLS",
+                "resources": cached_resource_availability(protocol), "history": protocol_history(protocol), "diagnostics": direct_protocol_diagnostics(protocol)}
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
     unit = f"{'wg-quick' if protocol == 'wg' else 'awg-quick'}@{interface}.service"
@@ -2009,17 +2178,17 @@ def protocol_status(protocol: Literal["wg", "awg"], _: None = Depends(require_to
 
 
 @app.post("/api/protocols/{protocol}/resources/check")
-def check_protocol_resources(protocol: Literal["wg", "awg"], _: None = Depends(require_token)) -> dict:
+def check_protocol_resources(protocol: Literal["wg", "awg", "hysteria2", "tuic", "trojan"], _: None = Depends(require_token)) -> dict:
     return check_resource_availability(protocol)
 
 
 @app.post("/api/protocols/{protocol}/diagnostics/check")
-def check_network_diagnostics(protocol: Literal["wg", "awg"], _: None = Depends(require_token)) -> dict:
-    return network_diagnostics(protocol, protocol_history(protocol), force=True)
+def check_network_diagnostics(protocol: Literal["wg", "awg", "hysteria2", "tuic", "trojan"], _: None = Depends(require_token)) -> dict:
+    return network_diagnostics(protocol, protocol_history(protocol), force=True) if protocol in ("wg", "awg") else direct_protocol_diagnostics(protocol)
 
 
 @app.post("/api/protocols/{protocol}/restart")
-def restart_protocol(protocol: Literal["wg", "awg"], _: None = Depends(require_token)) -> dict:
-    unit = f"wg-quick@{WG_INTERFACE}.service" if protocol == "wg" else f"awg-quick@{AWG_INTERFACE}.service"
+def restart_protocol(protocol: Literal["wg", "awg", "hysteria2", "tuic", "trojan"], _: None = Depends(require_token)) -> dict:
+    unit = f"wg-quick@{WG_INTERFACE}.service" if protocol == "wg" else f"awg-quick@{AWG_INTERFACE}.service" if protocol == "awg" else f"vps-control-{protocol}.service"
     run("systemctl", "restart", unit, timeout=20, check=True)
     return {"protocol": protocol, "active": run("systemctl", "is-active", unit) == "active"}

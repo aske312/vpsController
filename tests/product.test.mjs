@@ -5,12 +5,14 @@ import test from "node:test";
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("поставка содержит установщик, образы и клиентскую документацию", async () => {
-  const [bootstrap, manager, readme, wg, awg] = await Promise.all([
+  const [bootstrap, manager, readme, awg, hysteria2, tuic, trojan] = await Promise.all([
     read("scripts/install-panel.sh"),
     read("scripts/vps-control.sh"),
     read("README.md"),
-    read("protocol-images/wireguard/manifest.json"),
     read("protocol-images/amneziawg/manifest.json"),
+    read("protocol-images/hysteria2/manifest.json"),
+    read("protocol-images/tuic/manifest.json"),
+    read("protocol-images/trojan/manifest.json"),
   ]);
   assert.match(bootstrap, /archive\/refs\/heads\/\$\{BRANCH\}\.tar\.gz/);
   assert.match(bootstrap, /DPkg::Lock::Timeout=300/);
@@ -20,11 +22,14 @@ test("поставка содержит установщик, образы и к
   assert.match(manager, /update\)/);
   assert.match(readme, /raw\.githubusercontent\.com\/aske312\/vpsController\/installer\/install\.sh/);
   assert.match(readme, /Возможные ошибки установки/);
-  assert.match(readme, /Подключение WireGuard и AmneziaWG/);
+  assert.match(readme, /AmneziaWG/);
   assert.doesNotMatch(readme, /test-light|CI|Git-клон|Ручное обновление без сборки/);
   assert.match(readme, /установка/i);
-  assert.equal(JSON.parse(wg).id, "wg");
   assert.equal(JSON.parse(awg).id, "awg");
+  assert.equal(JSON.parse(hysteria2).id, "hysteria2");
+  assert.equal(JSON.parse(tuic).id, "tuic");
+  assert.equal(JSON.parse(trojan).id, "trojan");
+  await assert.rejects(read("protocol-images/wireguard/manifest.json"), { code: "ENOENT" });
 });
 
 test("интерфейс использует фирменные метаданные и знак 312.net", async () => {
@@ -288,40 +293,46 @@ test("web and gateway run as systemd services without Docker", async () => {
   assert.match(page, /службы<\/span>/);
 });
 
-test("WG and AWG modules install and uninstall independently", async () => {
-  const [api, manager, wgInstall, awgInstall, wgRemove, awgRemove] = await Promise.all([
+test("Light protocol modules install and uninstall independently", async () => {
+  const [api, manager, awgInstall, awgRemove, hysteriaInstall, hysteriaRemove, tuicInstall, tuicRemove, trojanInstall, trojanRemove] = await Promise.all([
     read("api/main.py"), read("scripts/vps-control.sh"),
-    read("protocol-images/wireguard/install.sh"),
     read("protocol-images/amneziawg/install.sh"),
-    read("protocol-images/wireguard/uninstall.sh"),
     read("protocol-images/amneziawg/uninstall.sh"),
+    read("protocol-images/hysteria2/install.sh"), read("protocol-images/hysteria2/uninstall.sh"),
+    read("protocol-images/tuic/install.sh"), read("protocol-images/tuic/uninstall.sh"),
+    read("protocol-images/trojan/install.sh"), read("protocol-images/trojan/uninstall.sh"),
   ]);
   const baseDependencies = manager.match(/Установка системных зависимостей" apt-get install -y ([^\n]+)/)?.[1] || "";
   assert.doesNotMatch(baseDependencies, /wireguard-tools/);
   assert.match(api, /The last active VPN module cannot be removed while panel access is VPN-only/);
-  assert.match(wgRemove, /route delete allow in on "\$\{WG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{WG_SUBNET\}"/);
   assert.match(awgRemove, /route delete allow in on "\$\{AWG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{AWG_SUBNET\}"/);
-  assert.match(wgRemove, /ufw status \| grep -Fq "\$\{WG_SUBNET\} on \$\{WG_INTERFACE\}"/);
   assert.match(awgRemove, /ufw status \| grep -Fq "\$\{AWG_SUBNET\} on \$\{AWG_INTERFACE\}"/);
-  assert.match(wgRemove, /99-vps-control-wireguard\.conf/);
   assert.match(awgRemove, /99-vps-control-amneziawg\.conf/);
   assert.match(api, /protocol-install/);
   assert.match(manager, /prepare_package_manager\(\)/);
   assert.match(manager, /\n  prepare_package_manager\r?\n/);
   assert.match(manager, /dpkg --audit/);
   assert.match(manager, /DPkg::Lock::Timeout=300 -f install -y/);
-  assert.match(wgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(awgInstall, /DPkg::Lock::Timeout=300/);
-  assert.match(wgInstall, /if ! command -v wg.*command -v wg-quick/s);
   assert.match(awgInstall, /if ! command -v awg.*command -v awg-quick.*modinfo amneziawg/s);
+  for (const installer of [hysteriaInstall, tuicInstall, trojanInstall]) {
+    assert.match(installer, /DPkg::Lock::Timeout=300/);
+    assert.match(installer, /sha256sum -c -/);
+    assert.match(installer, /IPAccounting=true/);
+  }
+  for (const uninstaller of [hysteriaRemove, tuicRemove, trojanRemove]) {
+    assert.match(uninstaller, /PRESERVE_COMPONENT_DATA/);
+  }
+  await assert.rejects(read("protocol-images/wireguard/install.sh"), { code: "ENOENT" });
   assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 1/);
 });
 
 test("full uninstall removes managed protocol state without recreating application data", async () => {
   const manager = await read("scripts/vps-control.sh");
   const uninstall = manager.slice(manager.indexOf("uninstall_app()"), manager.indexOf("restart_services()"));
-  assert.match(uninstall, /protocol-images\/wireguard\/uninstall\.sh/);
   assert.match(uninstall, /protocol-images\/amneziawg\/uninstall\.sh/);
+  assert.match(uninstall, /for protocol_id in hysteria2 tuic trojan/);
+  assert.match(uninstall, /PRESERVE_COMPONENT_DATA=0/);
   assert.match(uninstall, /\/usr\/local\/sbin\/vpn-monitor-sample/);
   assert.match(uninstall, /caddy\.service/);
   assert.match(uninstall, /"\$\{CADDY_CONFIG\}"/);
