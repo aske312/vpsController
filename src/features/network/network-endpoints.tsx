@@ -217,6 +217,12 @@ export function NetworkEndpoints({
                         {result.resolved.length
                           ? ` · ${result.resolved.join(", ")}`
                           : ""}
+                        {result.failed_checks
+                          ? ` · неудач подряд: ${result.failed_checks}`
+                          : ""}
+                        {result.checked_at
+                          ? ` · ${new Date(result.checked_at).toLocaleString("ru-RU")}`
+                          : ""}
                       </em>
                     )}
                     <div className="networkEndpointRouteList">

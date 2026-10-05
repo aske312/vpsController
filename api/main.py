@@ -2252,6 +2252,10 @@ def network_endpoint_check(kind: str, domain: str, *, include_saved: bool = True
         elif saved.get("state") in {"warning", "error", "stale"}:
             result.update(status=saved["state"], ready=bool(saved.get("ready")),
                           message=saved.get("reason") or result["message"])
+        if saved:
+            result.update(check_id=saved.get("check_id"), checked_at=saved.get("checked_at"),
+                          checked_revision=saved.get("checked_revision"),
+                          failed_checks=int(saved.get("failed_checks", 0)))
     except (OSError, ValueError, json.JSONDecodeError, TypeError):
         pass
     return result
@@ -2524,19 +2528,46 @@ def check_network_endpoint(payload: NetworkEndpointCheck, _: None = Depends(requ
     valid = valid_hostname(domain) if payload.kind == "cdn" else valid_network_endpoint(domain)
     if not valid:
         raise HTTPException(status_code=422, detail="Укажите корректный домен или IP без схемы https:// и порта")
+    check_id = uuid.uuid4().hex
+    try:
+        with application_operation.locked(DATA_DIR):
+            prepared_settings = json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8")) if NETWORK_ENDPOINTS_FILE.exists() else read_network_endpoint_settings()
+            prepared_registry = network_routes.migrate(prepared_settings)
+            target = next((item for item in prepared_registry["bindings"]
+                           if item.get("kind") == payload.kind and item.get("address") == domain
+                           and item.get("state") == "active"), None)
+    except (OSError, ValueError, json.JSONDecodeError, TypeError) as exc:
+        raise HTTPException(status_code=503, detail="Не удалось подготовить проверку маршрута") from exc
     result = network_endpoint_check(payload.kind, domain, include_saved=False)
+    result.update(check_id=check_id, checked_at=datetime.now(timezone.utc).isoformat())
+    if target:
+        result.update(checked_revision=target["desired_revision"])
+    else:
+        return result
     try:
         with application_operation.locked(DATA_DIR):
             settings = json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8")) if NETWORK_ENDPOINTS_FILE.exists() else read_network_endpoint_settings()
-            registry = network_routes.record_check(network_routes.migrate(settings), payload.kind, domain, result)
+            recorded_result = {**result, "binding_id": target["id"]}
+            registry = network_routes.record_check(network_routes.migrate(settings), payload.kind, domain, recorded_result)
             settings["route_registry"] = registry
             application_operation.atomic_json(NETWORK_ENDPOINTS_FILE, settings)
+            saved = next((item.get("check", {}) for item in registry["bindings"]
+                          if item.get("id") == target["id"]), {})
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         # A check result is useful even for a legacy/unregistered address, but a
         # corrupt registry must remain visible instead of being replaced.
         if isinstance(exc, ValueError) and str(exc) == "Unknown route binding":
+            result.update(status="stale", ready=False,
+                          message="Маршрут изменился во время проверки; запустите новую проверку")
             return result
         raise HTTPException(status_code=503, detail="Не удалось сохранить результат проверки маршрута") from exc
+    if saved.get("check_id") == check_id:
+        result.update(status=("unchecked" if saved.get("state") == "unknown" else saved.get("state", result["status"])),
+                      ready=bool(saved.get("ready")), failed_checks=int(saved.get("failed_checks", 0)),
+                      message=saved.get("reason") or result["message"])
+    else:
+        result.update(status="stale", ready=False,
+                      message="Маршрут изменился во время проверки; запустите новую проверку")
     return result
 
 

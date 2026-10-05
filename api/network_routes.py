@@ -6,8 +6,6 @@ only removes admission for new consumers and preserves the old binding snapshot.
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import uuid
 from datetime import datetime, timezone
 
@@ -133,17 +131,26 @@ def record_check(registry: dict, kind: str, address: str, result: dict) -> dict:
                if item.get("kind") == kind and item.get("address") == address]
     if not matches:
         raise ValueError("Unknown route binding")
-    binding = next((item for item in matches if item.get("state") == "active"), matches[-1])
+    binding_id = str(result.get("binding_id") or "")
+    binding = next((item for item in matches if item.get("id") == binding_id), None) if binding_id else None
+    if binding is None:
+        binding = next((item for item in matches if item.get("state") == "active"), matches[-1])
     if binding.get("state") != "active":
         binding["check"] = {**binding.get("check", {}), "state": "stale", "ready": False,
                              "reason": "Маршрут удалён; внешнее forwarding сохранено"}
         return registry
     check = dict(binding.get("check") or {})
     revision = binding.get("desired_revision", 1)
-    payload = {key: result.get(key) for key in ("status", "ready", "verification", "route", "resolved", "matches_origin", "message")}
-    result_key = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    check_id = str(result.get("check_id") or "")
+    checked_revision = result.get("checked_revision")
+    if not check_id or type(checked_revision) is not int:
+        raise ValueError("Invalid route check identity")
+    # A result prepared for an older binding revision must not affect the new
+    # series, even if it completes after the settings mutation.
+    if checked_revision != revision or (binding_id and binding_id != binding.get("id")):
+        return registry
     same_revision = check.get("checked_revision") == revision
-    duplicate = same_revision and check.get("result_key") == result_key
+    duplicate = same_revision and check.get("check_id") == check_id
     verification = str(result.get("verification") or "dns_only")
     ready = bool(result.get("ready")) and verification == "end_to_end"
     if not duplicate:
@@ -157,7 +164,8 @@ def record_check(registry: dict, kind: str, address: str, result: dict) -> dict:
             failed_checks = int(check.get("failed_checks", 0)) + 1 if same_revision else 1
             state = "error" if failed_checks >= 10 else "warning"
         check.update({"state": state, "ready": ready, "failed_checks": failed_checks,
-                      "checked_revision": revision, "result_key": result_key,
+                      "checked_revision": revision, "check_id": check_id,
+                      "checked_at": result.get("checked_at"),
                       "verification": verification,
                       "reason": str(result.get("message") or "Проверка маршрута не подтверждена"),
                       "last_error": None if ready or state == "unknown" else str(result.get("message") or "Проверка не пройдена")})

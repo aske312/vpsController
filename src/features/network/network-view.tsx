@@ -442,6 +442,8 @@ function routeStatusFor(domain: NetworkStatus["domains"][number]): NetworkEndpoi
 function NetworkRouteStatus({ status }: { status: NetworkEndpointCheck["status"] | null }) {
   const display = status === "ready"
     ? { className: "ready", label: "READY" }
+    : status === "error"
+      ? { className: "error", label: "ERROR" }
     : status === "unchecked"
       ? { className: "unchecked", label: "UNCHECKED" }
     : status === "stale"
@@ -622,11 +624,6 @@ function DiagnosticsV2({
       .toLowerCase()
       .includes(query.trim().toLowerCase()),
   );
-  const endpointCheckFor = (value: string) =>
-    Object.entries(status.transport_endpoint_checks_by_domain || {}).find(([, check]) => check?.domain?.toLowerCase() === value.toLowerCase())?.[1] ||
-    Object.values(status.transport_endpoint_checks || {}).find(
-      (check) => (check?.domain || (check as NetworkEndpointCheck & { value?: string }).value)?.toLowerCase() === value.toLowerCase(),
-    );
   const endpointKindFor = (domain: NetworkStatus["domains"][number], check?: NetworkEndpointCheck) => {
     if (check) return check.kind;
     if (domain.endpoint_kind) return domain.endpoint_kind;
@@ -635,6 +632,13 @@ function DiagnosticsV2({
     if (role.includes("vless cdn") || role.includes("cdn endpoint")) return "cdn" as const;
     if (role.includes("udp relay")) return "udp_relay" as const;
     return undefined;
+  };
+  const endpointCheckFor = (domain: NetworkStatus["domains"][number]) => {
+    const kind = endpointKindFor(domain);
+    const keyed = kind ? status.transport_endpoint_checks_by_domain?.[`${kind}:${domain.value}`] : undefined;
+    return keyed || Object.values(status.transport_endpoint_checks || {}).find(
+      (check) => check?.kind === kind && (check?.domain || (check as NetworkEndpointCheck & { value?: string }).value)?.toLowerCase() === domain.value.toLowerCase(),
+    );
   };
   const toggleDomain = (key: string) => {
     const next = new Set(listState.expanded);
@@ -728,7 +732,7 @@ function DiagnosticsV2({
               {domains.map((domain) => {
                 const rowKey = `${domain.role}-${domain.value}`;
                 const expanded = expandedDomains.has(rowKey);
-                const endpointCheck = endpointCheckFor(domain.value);
+                const endpointCheck = endpointCheckFor(domain);
                 const endpointKind = endpointKindFor(domain, endpointCheck);
                 const routeStatus = endpointCheck?.status || routeStatusFor(domain);
                 const removeRoute = () => {
@@ -827,6 +831,16 @@ function DiagnosticsV2({
                               </div>
                             </div>
                             <NetworkIdentityDetails domain={domain} />
+                            {endpointCheck && (
+                              <div className={`networkRouteCheckNotice ${endpointCheck.status}`}>
+                                <strong>Последняя проверка маршрута</strong>
+                                <span>{endpointCheck.message}</span>
+                                <small>
+                                  {endpointCheck.checked_at ? formatTime(endpointCheck.checked_at) : "Время не записано"}
+                                  {endpointCheck.failed_checks ? ` · неудач подряд: ${endpointCheck.failed_checks}` : ""}
+                                </small>
+                              </div>
+                            )}
                             {domain.status === "stale" && domain.stale_usages?.length ? (
                               <div className="networkRouteStaleNotice">
                                 <strong>Домен сохранён в подключениях:</strong>

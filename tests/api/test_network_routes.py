@@ -129,26 +129,56 @@ class NetworkRouteTests(unittest.TestCase):
     def test_explicit_probe_counts_new_failures_per_revision_and_deduplicates(self):
         registry = routes.migrate({"tls_relay_domains": ["relay.example"]})
         failed = {"status": "unresolved", "ready": False, "route": "unresolved", "resolved": [],
-                  "matches_origin": False, "message": "DNS не подтверждён"}
-        for _ in range(9):
-            routes.record_check(registry, "tls_relay", "relay.example", failed)
+                  "matches_origin": False, "message": "DNS не подтверждён",
+                  "binding_id": registry["bindings"][0]["id"], "checked_revision": 1}
+        for index in range(9):
+            routes.record_check(registry, "tls_relay", "relay.example", {**failed, "check_id": f"check-{index}"})
         check = registry["bindings"][0]["check"]
         self.assertEqual(check["state"], "warning")
-        self.assertEqual(check["failed_checks"], 1)
-        # The same observed failure is one completed check, even if the UI polls it.
-        routes.record_check(registry, "tls_relay", "relay.example", {**failed, "message": "DNS не подтверждён"})
-        self.assertEqual(registry["bindings"][0]["check"]["failed_checks"], 1)
-        for index in range(1, 10):
-            routes.record_check(registry, "tls_relay", "relay.example", {**failed, "message": f"Ошибка {index}"})
+        self.assertEqual(check["failed_checks"], 9)
+        # Redelivery of one result is ignored, while the same failure observed
+        # by a new explicit check belongs to a new completed check.
+        routes.record_check(registry, "tls_relay", "relay.example", {**failed, "check_id": "check-8"})
+        self.assertEqual(registry["bindings"][0]["check"]["failed_checks"], 9)
+        routes.record_check(registry, "tls_relay", "relay.example", {**failed, "check_id": "check-9"})
         self.assertEqual(registry["bindings"][0]["check"]["state"], "error")
         routes.record_check(registry, "tls_relay", "relay.example", {"status": "ready", "ready": True, "verification": "end_to_end",
                              "route": "proxy_or_cdn", "resolved": ["203.0.113.10"], "matches_origin": False,
-                             "message": "Адрес подтверждён"})
+                             "message": "Адрес подтверждён", "binding_id": registry["bindings"][0]["id"],
+                             "checked_revision": 1, "check_id": "check-ready"})
         self.assertEqual(registry["bindings"][0]["check"]["state"], "ready")
         self.assertEqual(registry["bindings"][0]["check"]["failed_checks"], 0)
         registry["bindings"][0]["desired_revision"] = 2
-        routes.record_check(registry, "tls_relay", "relay.example", failed)
+        routes.record_check(registry, "tls_relay", "relay.example", {**failed, "checked_revision": 2, "check_id": "check-new-revision"})
         self.assertEqual(registry["bindings"][0]["check"]["failed_checks"], 1)
+
+    def test_late_probe_from_previous_revision_does_not_change_current_check(self):
+        registry = routes.migrate({"cdn_domains": ["cdn.example"]})
+        binding = registry["bindings"][0]
+        binding["desired_revision"] = 2
+        before = dict(binding["check"])
+        routes.record_check(registry, "cdn", "cdn.example", {
+            "status": "unresolved", "ready": False, "message": "Поздний ответ",
+            "binding_id": binding["id"], "checked_revision": 1, "check_id": "old-check",
+        })
+        self.assertEqual(binding["check"], before)
+
+    def test_each_explicit_api_probe_gets_an_identity_and_counts_same_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.enterContext(patch.object(api, "DATA_DIR", root))
+            self.enterContext(patch.object(api, "NETWORK_ENDPOINTS_FILE", root / "network.json"))
+            self.enterContext(patch.object(api, "network_consumers", return_value=[]))
+            api.write_network_endpoint_settings({"tls_relay_domains": ["relay.example"]})
+            failure = {"domain": "relay.example", "resolved": [], "matches_origin": False, "route": "unresolved"}
+            with patch.object(api, "network_domain_probe", return_value=failure):
+                first = api.check_network_endpoint(api.NetworkEndpointCheck(kind="tls_relay", domain="relay.example"))
+                second = api.check_network_endpoint(api.NetworkEndpointCheck(kind="tls_relay", domain="relay.example"))
+            self.assertNotEqual(first["check_id"], second["check_id"])
+            self.assertEqual(first["failed_checks"], 1)
+            self.assertEqual(second["failed_checks"], 2)
+            stored = json.loads(api.NETWORK_ENDPOINTS_FILE.read_text())
+            self.assertEqual(stored["route_registry"]["bindings"][0]["check"]["failed_checks"], 2)
 
     def test_dns_and_edge_evidence_stays_unchecked_without_end_to_end_probe(self):
         registry = routes.migrate({"cdn_domains": ["cdn.example"]})
@@ -177,7 +207,8 @@ class NetworkRouteTests(unittest.TestCase):
         routes.record_check(registry, "tls_relay", "relay.example", {
             "status": "ready", "ready": True, "route": "proxy_or_cdn",
             "resolved": ["203.0.113.10"], "matches_origin": False,
-            "message": "Только DNS",
+            "message": "Только DNS", "binding_id": registry["bindings"][0]["id"],
+            "checked_revision": 1, "check_id": "dns-only",
         })
         self.assertEqual(registry["bindings"][0]["check"]["state"], "unknown")
         self.assertFalse(registry["bindings"][0]["check"]["ready"])
