@@ -131,7 +131,7 @@ NODE
   rm -f package-lock.json
   npm install --include=optional --ignore-scripts
   # Audit the actual runtime dependency tree shipped in the archive.
-  npm audit --omit=dev --audit-level=high
+  node "${ROOT_DIR}/scripts/audit-runtime.mjs"
   node --input-type=module -e "await import('rolldown')"
 )
 

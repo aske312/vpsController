@@ -89,6 +89,24 @@ class ServiceOperationTests(unittest.TestCase):
                 finally:
                     api.app.dependency_overrides.clear()
 
+    def test_ssh_key_listing_is_read_only_and_does_not_create_an_operation(self):
+        self.launch.return_value = SimpleNamespace(
+            returncode=0,
+            stdout='[{"fingerprint":"SHA256:key","type":"ssh-ed25519","comment":"fixture"}]',
+            stderr="",
+        )
+        keys = api.ssh_authorized_keys("SHA256:key")
+        self.assertEqual(keys, [{
+            "fingerprint": "SHA256:key",
+            "type": "ssh-ed25519",
+            "comment": "fixture",
+            "managed": True,
+        }])
+        command = self.launch.call_args.args[0]
+        self.assertIn("--wait", command)
+        self.assertEqual(command[-2:], [api.CONTROL_COMMAND, "ssh-key-list"])
+        self.assertFalse((self.root / "operations").exists())
+
     def test_logging_replay_is_durable_and_does_not_wait_for_worker(self):
         payload = api.LoggingSettings(persistent=True, retention_days=30)
         started = api.update_logging(payload, None, "a" * 32)

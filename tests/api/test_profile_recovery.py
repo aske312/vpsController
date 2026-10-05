@@ -51,6 +51,31 @@ class ProfileRecoveryTests(unittest.TestCase):
         manager.recover_profile_runtime()
         self.command.assert_not_called()
 
+    def test_reality_recovery_applies_firewall_without_nested_control_operation(self):
+        real_is_file = Path.is_file
+
+        def is_file(path):
+            if str(path).replace("\\", "/") == "/opt/vps-control/api/cdn_security.py":
+                return True
+            return real_is_file(path)
+
+        with patch.object(manager, "SERVICE_BY_MODULE", {"transport-reality": "fixture.service"}):
+            with self.assertRaises(KeyboardInterrupt):
+                with manager.profile_runtime_transaction({"transport-reality"}):
+                    manager.PROFILE_FILE.write_text('[]')
+                    self.state = "error"
+                    raise KeyboardInterrupt()
+            with (
+                patch.object(recovery.Path, "is_file", autospec=True, side_effect=is_file),
+                patch.object(manager, "rebuild_vless_cdn_snippet"),
+            ):
+                manager.recover_profile_runtime()
+        self.assertIn(
+            ("/usr/bin/python3", str(Path("/opt/vps-control/api/cdn_security.py")), "firewall"),
+            [call.args for call in self.command.call_args_list],
+        )
+        self.assertFalse(recovery.marker(manager).exists())
+
     def test_restore_error_retains_snapshot_and_other_files_restore(self):
         self.interrupt()
         original = recovery.restore_file

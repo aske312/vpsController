@@ -3569,9 +3569,9 @@ def apply_batched_reality_runtime(restart_service: bool = True) -> None:
     firewall_helper = Path("/usr/local/sbin/vps-control-mihomo-vless-firewall")
     if firewall_helper.is_file():
         run(str(firewall_helper), "sync", check=True)
-    control = Path("/usr/local/sbin/vps-control")
-    if control.is_file():
-        run(str(control), "vless-cdn-firewall", check=True)
+    firewall_policy = APP_ROOT / "api" / "cdn_security.py"
+    if firewall_policy.is_file():
+        run("/usr/bin/python3", str(firewall_policy), "firewall", check=True)
     if restart_service:
         run("systemctl", "reset-failed", "vps-control-mihomo-reality.service")
         run("systemctl", "restart", "vps-control-mihomo-reality.service", check=True)

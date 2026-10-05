@@ -1750,9 +1750,21 @@ def change_admin_password(payload: AdminPasswordChange, _: None = Depends(requir
 def ssh_authorized_keys(managed_fingerprint: str = "") -> list[dict[str, str | bool]]:
     """Return public-key metadata only; never expose authorized_keys contents."""
     try:
-        raw = run_ssh_access_action("ssh-key-list")
+        result = subprocess.run(
+            [
+                "systemd-run", "--wait", "--collect", "--pipe", "--quiet",
+                "--property=Type=oneshot", CONTROL_COMMAND, "ssh-key-list",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if result.returncode:
+            return []
+        raw = result.stdout.strip()
         loaded = json.loads(raw) if raw else []
-    except (HTTPException, json.JSONDecodeError, TypeError):
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, TypeError):
         return []
     if not isinstance(loaded, list):
         return []
