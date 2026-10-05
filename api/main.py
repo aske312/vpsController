@@ -4518,9 +4518,9 @@ def vless_client_query(
     return values
 
 
-def vless_cdn_client_query(reality: dict, fingerprint: str = "chrome", domain: str | None = None, transport: str | None = None, xhttp_mode: str | None = None) -> dict[str, str]:
+def vless_cdn_client_query(reality: dict, fingerprint: str = "chrome", domain: str | None = None, transport: str | None = None, xhttp_mode: str | None = None, path: str | None = None) -> dict[str, str]:
     transport = transport or reality.get("CDN_TRANSPORT", "websocket")
-    path = reality.get("CDN_PATH", reality.get("WS_PATH", "/"))
+    path = path or reality.get("CDN_PATH", reality.get("WS_PATH", "/"))
     endpoint_domain = domain or reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)
     values = {
         "encryption": "none", "security": "tls", "sni": endpoint_domain,
@@ -4537,10 +4537,46 @@ def vless_cdn_client_query(reality: dict, fingerprint: str = "chrome", domain: s
     return values
 
 
-def vless_tls_client_query(reality: dict, fingerprint: str = "chrome", transport: str | None = None, xhttp_mode: str | None = None) -> dict[str, str]:
+def vless_tls_client_query(reality: dict, fingerprint: str = "chrome", transport: str | None = None, xhttp_mode: str | None = None, path: str | None = None) -> dict[str, str]:
     mapped = dict(reality)
     mapped.update({"CDN_DOMAIN": reality.get("TLS_DOMAIN", ""), "CDN_PATH": reality.get("TLS_PATH", "/"), "CDN_TRANSPORT": reality.get("TLS_TRANSPORT", "xhttp"), "CDN_XHTTP_MODE": reality.get("TLS_XHTTP_MODE", "auto")})
-    return vless_cdn_client_query(mapped, fingerprint, transport=transport, xhttp_mode=xhttp_mode)
+    return vless_cdn_client_query(mapped, fingerprint, transport=transport, xhttp_mode=xhttp_mode, path=path)
+
+
+def vless_stream_profile(inbound: dict) -> dict[str, str]:
+    """Return the client-visible shape of one already configured listener."""
+    stream = inbound.get("streamSettings", {})
+    transport = str(stream.get("network", "xhttp"))
+    if transport == "xhttp":
+        settings = stream.get("xhttpSettings", {})
+        return {"transport": transport, "path": str(settings.get("path", "/")), "xhttp_mode": str(settings.get("mode", "auto"))}
+    if transport == "grpc":
+        service = str(stream.get("grpcSettings", {}).get("serviceName", "vless")).lstrip("/") or "vless"
+        return {"transport": transport, "path": f"/{service}", "xhttp_mode": "auto"}
+    return {"transport": "raw" if transport in {"raw", "tcp"} else transport, "path": "", "xhttp_mode": "auto"}
+
+
+def validate_vless_client_route(settings: ClientConnectionSettings, route: str, inbound: dict, reality: dict) -> dict[str, str]:
+    """Reject exports that do not match the listener receiving the connection."""
+    profile = vless_stream_profile(inbound)
+    requested_transport = str(getattr(settings, {"direct": "transport", "tls": "tls_transport", "cdn": "cdn_transport"}[route]))
+    if requested_transport != profile["transport"]:
+        raise HTTPException(status_code=422, detail=f"Транспорт {route.upper()} не совпадает с активным listener: {profile['transport']}")
+    if route == "direct":
+        if profile["transport"] != "raw" and settings.transport_path != profile["path"]:
+            raise HTTPException(status_code=422, detail=f"Путь Direct listener изменён; используйте {profile['path']}")
+        stream = inbound.get("streamSettings", {})
+        target_host = str(reality.get("TARGET", "ya.ru:443")).rsplit(":", 1)[0]
+        server_names = stream.get("realitySettings", {}).get("serverNames", [])
+        allowed_sni = {str(value).strip().lower() for value in server_names if value} or {target_host.lower()}
+        if settings.sni and settings.sni.strip().lower() not in allowed_sni:
+            raise HTTPException(status_code=422, detail="SNI не обслуживается активным REALITY listener")
+        requested_mode = settings.xhttp_mode
+    else:
+        requested_mode = settings.tls_xhttp_mode if route == "tls" else settings.cdn_xhttp_mode
+    if profile["transport"] == "xhttp" and requested_mode != profile["xhttp_mode"]:
+        raise HTTPException(status_code=422, detail=f"Режим XHTTP {route.upper()} не совпадает с активным listener: {profile['xhttp_mode']}")
+    return profile
 
 
 def valid_hostname(value: str) -> bool:
@@ -5253,6 +5289,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 unavailable = [route for route in requested_routes if not route_inbounds[route]]
                 if unavailable:
                     raise HTTPException(status_code=409, detail=f"Маршрут VLESS не настроен: {', '.join(unavailable)}")
+                route_profiles = {
+                    route: validate_vless_client_route(payload.settings, route, route_inbounds[route][0], reality)
+                    for route in requested_routes
+                }
                 selected_cdn_domain = str(payload.settings.cdn_domain or reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN)).strip().lower()
                 if "cdn" in requested_routes:
                     configured = read_network_endpoint_settings().get("cdn_domains", [])
@@ -5284,32 +5324,39 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     config_data,
                     reality,
                     payload.settings.fingerprint,
-                    transport=payload.settings.transport,
-                    path=payload.settings.transport_path,
-                    xhttp_mode=payload.settings.xhttp_mode,
                     xpadding=payload.settings.xpadding,
                     xmux_concurrency=payload.settings.xmux_concurrency,
                     sni=payload.settings.sni,
                 ))
                 direct_config = f"vless://{client_uuid}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}?{direct_query}#{urllib.parse.quote(payload.name + ' Direct')}"
-                direct_transport = str(vless_reality_inbound(config_data).get("streamSettings", {}).get("network", "xhttp")).upper()
+                direct_transport = vless_stream_profile(vless_reality_inbound(config_data))["transport"].upper()
                 profiles = []
                 if "direct" in requested_routes:
                     profiles.append({"id": "direct", "name": f"Direct · REALITY/{direct_transport}", "filename": f"{safe_name}-direct.txt", "config": direct_config})
                 tls_domain = reality.get("TLS_DOMAIN", "")
                 if "tls" in requested_routes and tls_domain:
-                    tls_query = urllib.parse.urlencode(vless_tls_client_query(reality, payload.settings.fingerprint, payload.settings.tls_transport, payload.settings.tls_xhttp_mode))
+                    tls_profile = route_profiles["tls"]
+                    tls_query = urllib.parse.urlencode(vless_tls_client_query(reality, payload.settings.fingerprint, tls_profile["transport"], tls_profile["xhttp_mode"], tls_profile["path"]))
                     tls_config = f"vless://{client_uuid}@{tls_domain}:443?{tls_query}#{urllib.parse.quote(payload.name + ' TLS')}"
-                    profiles.append({"id": "tls", "name": f"TLS · {reality.get('TLS_TRANSPORT', 'xhttp').upper()}", "filename": f"{safe_name}-secure.txt", "config": tls_config})
+                    profiles.append({"id": "tls", "name": f"TLS · {tls_profile['transport'].upper()}", "filename": f"{safe_name}-secure.txt", "config": tls_config})
                 cdn_domain = selected_cdn_domain
                 if "cdn" in requested_routes and cdn_domain:
-                    cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality, payload.settings.fingerprint, cdn_domain, payload.settings.cdn_transport, payload.settings.cdn_xhttp_mode))
+                    cdn_profile = route_profiles["cdn"]
+                    cdn_query = urllib.parse.urlencode(vless_cdn_client_query(reality, payload.settings.fingerprint, cdn_domain, cdn_profile["transport"], cdn_profile["xhttp_mode"], cdn_profile["path"]))
                     cdn_config = f"vless://{client_uuid}@{cdn_domain}:443?{cdn_query}#{urllib.parse.quote(payload.name + ' CDN')}"
-                    profiles.append({"id": "cdn", "name": f"CDN · TLS/{reality.get('CDN_TRANSPORT', 'websocket').upper()}", "filename": f"{safe_name}-relay.txt", "config": cdn_config})
+                    profiles.append({"id": "cdn", "name": f"CDN · TLS/{cdn_profile['transport'].upper()}", "filename": f"{safe_name}-relay.txt", "config": cdn_config})
                 client_config = "\n".join(profile["config"] for profile in profiles)
                 stage = "сохранение подключения"
                 items = read_clients()
-                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "vless_routes": requested_routes, "route_endpoints": {"cdn": selected_cdn_domain, "tls_relay": reality.get("TLS_DOMAIN", "")}, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
+                saved_settings = payload.settings.model_dump(exclude_none=True)
+                for route, profile in route_profiles.items():
+                    transport_key = {"direct": "transport", "tls": "tls_transport", "cdn": "cdn_transport"}[route]
+                    mode_key = {"direct": "xhttp_mode", "tls": "tls_xhttp_mode", "cdn": "cdn_xhttp_mode"}[route]
+                    saved_settings[transport_key] = profile["transport"]
+                    saved_settings[mode_key] = profile["xhttp_mode"]
+                    if route == "direct" and profile["path"]:
+                        saved_settings["transport_path"] = profile["path"]
+                items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_uuid, "port": port, "vless_routes": requested_routes, "route_endpoints": {"cdn": selected_cdn_domain, "tls_relay": reality.get("TLS_DOMAIN", "")}, "settings": saved_settings, "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config, "profiles": profiles}
             except HTTPException:
@@ -6225,13 +6272,17 @@ def protocol_status_data(protocol: str) -> dict:
                     "TLS transport": reality.get("TLS_TRANSPORT", "xhttp").upper() if reality.get("TLS_ENABLED") == "yes" else "отключён",
                 }
                 config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
-                stream_values = vless_reality_inbound(config_data)["streamSettings"]
+                direct_inbound = vless_reality_inbound(config_data)
+                stream_values = direct_inbound["streamSettings"]
                 cdn_inbound = next((item for item in config_data.get("inbounds", []) if item.get("tag") in {"vless-cdn", "vless-cdn-websocket", "vless-tls-websocket"}), None)
                 transport = str(stream_values.get("network", "xhttp"))
+                direct_profile = vless_stream_profile(direct_inbound)
+                direct_server_names = stream_values.get("realitySettings", {}).get("serverNames", [])
+                direct_server_name = str(next((value for value in direct_server_names if value), target.rsplit(":", 1)[0] if ":" in target else target))
                 xhttp_values = dict(stream_values.get("xhttpSettings", {}))
                 xhttp_values["transport"] = transport
                 xhttp_values["transportPath"] = xhttp_values.get("path", "/") if transport == "xhttp" else "/" + str(stream_values.get("grpcSettings", {}).get("serviceName", "vless"))
-                xhttp_values["sni"] = target.rsplit(":", 1)[0] if ":" in target else target
+                xhttp_values["sni"] = direct_server_name
                 xhttp_values["loglevel"] = config_data.get("log", {}).get("loglevel", "warning")
                 xhttp_values["xPaddingBytes"] = xhttp_values.get("extra", {}).get("xPaddingBytes", "100-1000")
                 max_concurrency = xhttp_values.get("extra", {}).get("xmux", {}).get("maxConcurrency", "12")
@@ -6241,18 +6292,13 @@ def protocol_status_data(protocol: str) -> dict:
                 xhttp_values["cdnTransport"] = reality.get("CDN_TRANSPORT", "websocket")
                 xhttp_values["cdnXhttpMode"] = reality.get("CDN_XHTTP_MODE", "auto")
                 tls_inbound = next((item for item in config_data.get("inbounds", []) if item.get("tag") == "vless-tls"), None)
+                tls_profile = vless_stream_profile(tls_inbound) if tls_inbound else {"transport": "xhttp", "path": "", "xhttp_mode": "auto"}
+                cdn_profile = vless_stream_profile(cdn_inbound) if cdn_inbound else {"transport": "websocket", "path": "", "xhttp_mode": "auto"}
                 xhttp_values["tlsEnabled"] = tls_inbound is not None and reality.get("TLS_ENABLED", "no") == "yes"
                 xhttp_values["tlsDomain"] = reality.get("TLS_DOMAIN", "")
                 xhttp_values["tlsTransport"] = reality.get("TLS_TRANSPORT", "xhttp")
                 xhttp_values["tlsXhttpMode"] = reality.get("TLS_XHTTP_MODE", "auto")
                 editable_settings = editable_protocol_settings(protocol, xhttp_values)
-                direct_path = (
-                    str(stream_values.get("xhttpSettings", {}).get("path", "/"))
-                    if transport == "xhttp"
-                    else str(stream_values.get("grpcSettings", {}).get("serviceName", "vless"))
-                    if transport == "grpc"
-                    else "—"
-                )
                 cdn_enabled = cdn_inbound is not None and reality.get("CDN_ENABLED", "yes") == "yes"
                 configured_cdn_domains = read_network_endpoint_settings().get("cdn_domains", [])
                 cdn_domain_candidates = list(dict.fromkeys([
@@ -6265,18 +6311,19 @@ def protocol_status_data(protocol: str) -> dict:
                 ]
                 routes = {
                     "direct": {
-                        "enabled": True, "security": "REALITY", "transport": transport,
+                        "enabled": True, "security": "REALITY", "transport": direct_profile["transport"],
                         "endpoint": f"{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{listen_port}",
-                        "server_name": target.rsplit(":", 1)[0] if ":" in target else target,
-                        "path": direct_path,
+                        "server_name": direct_server_name,
+                        "path": direct_profile["path"], "xhttp_mode": direct_profile["xhttp_mode"],
                     },
-                    "tls": {"enabled": tls_inbound is not None and reality.get("TLS_ENABLED", "no") == "yes", "security": "TLS", "transport": reality.get("TLS_TRANSPORT", "xhttp"), "endpoint": f"{reality.get('TLS_DOMAIN', '')}:443" if tls_inbound else "", "server_name": reality.get("TLS_DOMAIN", "") if tls_inbound else "", "path": reality.get("TLS_PATH", "/") if tls_inbound else ""},
+                    "tls": {"enabled": tls_inbound is not None and reality.get("TLS_ENABLED", "no") == "yes", "security": "TLS", "transport": tls_profile["transport"], "endpoint": f"{reality.get('TLS_DOMAIN', '')}:443" if tls_inbound else "", "server_name": reality.get("TLS_DOMAIN", "") if tls_inbound else "", "path": tls_profile["path"], "xhttp_mode": tls_profile["xhttp_mode"]},
                     "cdn": {
                         "enabled": cdn_enabled, "security": "TLS",
-                        "transport": reality.get("CDN_TRANSPORT", "websocket"),
+                        "transport": cdn_profile["transport"],
                         "endpoint": f"{reality.get('CDN_DOMAIN', VLESS_CDN_DOMAIN)}:443" if cdn_enabled else "",
                         "server_name": reality.get("CDN_DOMAIN", VLESS_CDN_DOMAIN) if cdn_enabled else "",
-                        "path": reality.get("CDN_PATH", reality.get("WS_PATH", "/")) if cdn_enabled else "",
+                        "path": cdn_profile["path"],
+                        "xhttp_mode": cdn_profile["xhttp_mode"],
                         "confirmed_domains": confirmed_cdn_domains,
                     },
                 }

@@ -392,6 +392,8 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(api, /def vless_reality_inbound/);
   assert.match(api, /def vless_cdn_client_query/);
   assert.match(api, /def vless_tls_client_query/);
+  assert.match(api, /def validate_vless_client_route/);
+  assert.match(api, /route_profiles =/);
   assert.match(api, /def configure_vless_tls/);
   assert.match(api, /DNS only.*Cloudflare/);
   assert.ok(api.indexOf('cdn_enabled = bool(supplied.get("cdn_enabled", current_cdn_enabled))') < api.indexOf('if tls_changed:'), "TLS-only updates must initialize the current CDN state");
@@ -414,6 +416,9 @@ test("VLESS image supports independent REALITY, TLS and CDN profiles", async () 
   assert.match(page, /profile\.id === "cdn"/);
   assert.match(page, /VLESS REALITY/);
   assert.match(page, /Тип подключения/);
+  assert.match(page, /Параметры транспорта соответствуют активному listener/);
+  assert.match(page, /Транспорт listener/);
+  assert.doesNotMatch(page, /Можно выбрать транспорт для этого профиля отдельно/);
   assert.match(page, /tunnelsWorkspace/);
   assert.match(manager, /configure_vless_cdn_firewall/);
   assert.match(api, /Транспорт прямого VLESS/);

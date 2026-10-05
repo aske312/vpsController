@@ -86,26 +86,22 @@ function ClientConnectionSettings({
   setNewClientSettings,
 }: {
   selectedConnectionType: ClientConnectionType;
-  selectedVlessRoute?: { transport?: string; confirmed_domains?: string[]; path?: string };
+  selectedVlessRoute?: { transport?: string; confirmed_domains?: string[]; path?: string; xhttp_mode?: string; server_name?: string };
   newClientSettings: NewClientSettings;
   setNewClientSettings: Dispatch<SetStateAction<NewClientSettings>>;
 }) {
   const update = (value: Partial<NewClientSettings>) => setNewClientSettings((current) => ({ ...current, ...value }));
   const protocol = selectedConnectionType.protocol;
-  const transportOptions = selectedConnectionType.routeId === "direct"
-    ? [{ value: "xhttp", label: "XHTTP · рекомендуется" }, { value: "raw", label: "RAW · TCP и UDP payload" }, { value: "grpc", label: "gRPC · HTTP/2" }]
-    : [{ value: "websocket", label: "WebSocket" }, { value: "xhttp", label: "XHTTP" }, { value: "httpupgrade", label: "HTTPUpgrade" }, { value: "grpc", label: "gRPC · HTTP/2" }];
   const vlessTransportKey = selectedConnectionType.routeId === "cdn" ? "cdn_transport" : selectedConnectionType.routeId === "tls" ? "tls_transport" : "transport";
   const vlessTransport = newClientSettings[vlessTransportKey];
-  const setVlessTransport = (value: string) => update({ [vlessTransportKey]: value } as Partial<NewClientSettings>);
-  return <fieldset className="connectionTypeSettings"><legend>Настройки подключения</legend><header><span>{selectedConnectionType.badge}</span><div><strong>{selectedConnectionType.name}</strong><small>Параметры сохраняются только в создаваемом подключении</small></div></header><div className="connectionSettingsFields">
+  return <fieldset className="connectionTypeSettings"><legend>Настройки подключения</legend><header><span>{selectedConnectionType.badge}</span><div><strong>{selectedConnectionType.name}</strong><small>{protocol === "vless-reality-xhttp" ? "Параметры транспорта соответствуют активному listener" : "Параметры сохраняются только в создаваемом подключении"}</small></div></header><div className="connectionSettingsFields">
     {protocol === "vless-reality-xhttp" ? <>
-      <label><span>Транспорт</span><select value={vlessTransport} onChange={(event) => setVlessTransport(event.target.value)}>{transportOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select><small>Можно выбрать транспорт для этого профиля отдельно</small></label>
-      {selectedConnectionType.routeId !== "cdn" && <label><span>Путь транспорта</span><input value={newClientSettings.transport_path} onChange={(event) => update({ transport_path: event.target.value })} placeholder="/vless" /><small>Для gRPC используется как service name</small></label>}
-      {(vlessTransport === "xhttp") && <label><span>Режим XHTTP</span><select value={selectedConnectionType.routeId === "cdn" ? newClientSettings.cdn_xhttp_mode : selectedConnectionType.routeId === "tls" ? newClientSettings.tls_xhttp_mode : newClientSettings.xhttp_mode} onChange={(event) => update(selectedConnectionType.routeId === "cdn" ? { cdn_xhttp_mode: event.target.value as NewClientSettings["cdn_xhttp_mode"] } : selectedConnectionType.routeId === "tls" ? { tls_xhttp_mode: event.target.value as NewClientSettings["tls_xhttp_mode"] } : { xhttp_mode: event.target.value as NewClientSettings["xhttp_mode"] })}><option value="auto">Автоматически</option><option value="stream-one">Один поток</option><option value="stream-up">Раздельный upload</option><option value="packet-up">Пакетный upload</option></select></label>}
+      <label><span>Транспорт listener</span><input value={vlessTransport.toUpperCase()} readOnly /><small>Меняется в настройках модуля, а не для отдельного подключения</small></label>
+      {selectedConnectionType.routeId === "direct" && vlessTransport !== "raw" && <label><span>Путь listener</span><input value={newClientSettings.transport_path} readOnly /></label>}
+      {(vlessTransport === "xhttp") && <label><span>Режим XHTTP listener</span><input value={selectedConnectionType.routeId === "cdn" ? newClientSettings.cdn_xhttp_mode : selectedConnectionType.routeId === "tls" ? newClientSettings.tls_xhttp_mode : newClientSettings.xhttp_mode} readOnly /></label>}
       {selectedConnectionType.routeId === "cdn" && <label><span>Подтверждённый CDN-домен</span><select value={newClientSettings.cdn_domain || selectedVlessRoute?.confirmed_domains?.[0] || ""} onChange={(event) => update({ cdn_domain: event.target.value })}>{(selectedVlessRoute?.confirmed_domains || []).map((domain) => <option value={domain} key={domain}>{domain}</option>)}</select><small>Домен подтверждён на странице «Сеть»</small></label>}
       <label><span>Отпечаток TLS</span><select value={newClientSettings.fingerprint} onChange={(event) => update({ fingerprint: event.target.value as NewClientSettings["fingerprint"] })}><option value="chrome">Chrome — рекомендуется</option><option value="firefox">Firefox</option><option value="safari">Safari</option></select></label>
-      {selectedConnectionType.routeId === "direct" && <><label><span>SNI маскировки</span><input value={newClientSettings.sni} onChange={(event) => update({ sni: event.target.value })} placeholder="ya.ru" /></label><label><span>XHTTP padding</span><input value={newClientSettings.xpadding} onChange={(event) => update({ xpadding: event.target.value })} placeholder="100-1000" /></label><label><span>Параллелизм XHTTP</span><input type="number" min={1} max={64} value={newClientSettings.xmux_concurrency} onChange={(event) => update({ xmux_concurrency: Number(event.target.value) })} /></label></>}
+      {selectedConnectionType.routeId === "direct" && <><label><span>SNI маскировки</span><input value={newClientSettings.sni} readOnly /></label>{vlessTransport === "xhttp" && <><label><span>XHTTP padding</span><input value={newClientSettings.xpadding} onChange={(event) => update({ xpadding: event.target.value })} placeholder="100-1000" /></label><label><span>Параллелизм XHTTP</span><input type="number" min={1} max={64} value={newClientSettings.xmux_concurrency} onChange={(event) => update({ xmux_concurrency: Number(event.target.value) })} /></label></>}</>}
     </> : protocol === "shadowsocks" ? <>
       <label><span>Режим трафика</span><select value={newClientSettings.shadowsocks_mode} onChange={(event) => update({ shadowsocks_mode: event.target.value as NewClientSettings["shadowsocks_mode"] })}><option value="tcp_and_udp">TCP + UDP — рекомендуется</option><option value="tcp_only">Только TCP</option></select></label><label><span>MTU</span><input type="number" min={576} max={1500} value={newClientSettings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label><label><span>Timeout, сек.</span><input type="number" min={30} max={3600} value={newClientSettings.timeout} onChange={(event) => update({ timeout: Number(event.target.value) })} /></label><label className="connectionCheckbox"><span><strong>TCP No Delay</strong><small>Снижает задержку коротких запросов</small></span><input type="checkbox" checked={newClientSettings.no_delay} onChange={(event) => update({ no_delay: event.target.checked })} /></label>
     </> : protocol === "wg" || protocol === "awg" ? <>
@@ -1480,6 +1476,29 @@ export function ControlPanel() {
   });
   const selectedConnectionType = connectionTypeOptions.find((option) => option.protocol === selectedClientProtocol && (option.routeId ? option.routeId === newClientVlessRoutes[0] : option.channelMode === newClientSettings.channel_mode)) || connectionTypeOptions[0];
   const selectedVlessRoute = selectedConnectionType?.routeId ? vlessRouteStatus[selectedConnectionType.routeId] : undefined;
+
+  useEffect(() => {
+    const route = selectedConnectionType?.routeId;
+    const transport = selectedVlessRoute?.transport;
+    if (!route || !transport) return;
+    setNewClientSettings((current) => {
+      const next = { ...current };
+      if (route === "direct") {
+        if (!["xhttp", "raw", "grpc"].includes(transport)) return current;
+        next.transport = transport as NewClientSettings["transport"];
+        next.transport_path = selectedVlessRoute.path || "/";
+        next.xhttp_mode = (selectedVlessRoute.xhttp_mode || "auto") as NewClientSettings["xhttp_mode"];
+        next.sni = selectedVlessRoute.server_name || current.sni;
+      } else if (route === "tls") {
+        next.tls_transport = transport as NewClientSettings["tls_transport"];
+        next.tls_xhttp_mode = (selectedVlessRoute.xhttp_mode || "auto") as NewClientSettings["tls_xhttp_mode"];
+      } else {
+        next.cdn_transport = transport as NewClientSettings["cdn_transport"];
+        next.cdn_xhttp_mode = (selectedVlessRoute.xhttp_mode || "auto") as NewClientSettings["cdn_xhttp_mode"];
+      }
+      return JSON.stringify(next) === JSON.stringify(current) ? current : next;
+    });
+  }, [selectedConnectionType?.routeId, selectedVlessRoute?.path, selectedVlessRoute?.server_name, selectedVlessRoute?.transport, selectedVlessRoute?.xhttp_mode]);
 
   useEffect(() => {
     if (tab !== "clients") return;
