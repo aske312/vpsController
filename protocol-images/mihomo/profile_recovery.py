@@ -178,8 +178,9 @@ def recover(api):
             attempt(restore_runtime)
         if states.get("transport-reality") == "running":
             attempt(api.rebuild_vless_cdn_snippet)
-            if Path("/usr/local/sbin/vps-control").is_file():
-                attempt(lambda: api.run("/usr/local/sbin/vps-control", "vless-cdn-firewall", check=True))
+            firewall_policy = Path("/opt/vps-control/api/cdn_security.py")
+            if firewall_policy.is_file():
+                attempt(lambda: api.run("/usr/bin/python3", str(firewall_policy), "firewall", check=True))
             attempt(lambda: api.run("systemctl", "reload", "caddy.service", check=True))
     if failures:
         raise RuntimeError("; ".join(failures))

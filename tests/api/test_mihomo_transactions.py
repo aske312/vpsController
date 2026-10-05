@@ -269,11 +269,15 @@ class MihomoTransactionTests(unittest.TestCase):
             patch.object(manager, "rebuild_vless_cdn_snippet"),
             patch.object(manager, "service_stably_active", return_value=True),
             patch.object(manager, "run", side_effect=fake_run),
-            patch.object(manager.Path, "is_file", return_value=False),
+            patch.object(manager.Path, "is_file", return_value=True),
         ):
             manager.apply_batched_reality_runtime()
         self.assertEqual(sum(call[:2] == ("systemctl", "restart") for call in calls), 1)
         self.assertEqual(sum(call[:2] == ("systemctl", "reload") for call in calls), 1)
+        self.assertIn(
+            ("/usr/bin/python3", str(manager.APP_ROOT / "api" / "cdn_security.py"), "firewall"),
+            calls,
+        )
 
 
 if __name__ == "__main__":
