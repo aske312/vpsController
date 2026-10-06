@@ -599,6 +599,14 @@ input, select { height: 46px; font-size: 11px; }
 .dangerButton, input, select, textarea, .primaryButton { border-radius: 6px; }
 
 .protocolMonitor { display: grid; gap: 12px; margin-bottom: 12px; }
+.protocolPageRail { min-width: 0; display: flex; align-items: center; gap: 6px; padding: 7px; border: 1px solid var(--line); border-radius: 10px; background: #09141c; }
+.protocolPageRail > span { flex: 0 0 auto; padding: 0 8px; color: #637b8b; font: 700 8px var(--font-mono); letter-spacing: .12em; }
+.protocolPageRail button { min-width: 0; height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #8397a5; cursor: pointer; }
+.protocolPageRail button:hover { border-color: #294652; color: var(--text); }
+.protocolPageRail button.active { border-color: #315d68; background: var(--accent-dim); color: var(--accent); }
+.protocolPageRail button i { width: 20px; height: 20px; display: grid; place-items: center; font-style: normal; }
+.protocolPageRail button .protocolIcon { width: 20px; height: 20px; }
+.protocolPageRail button strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .protocolLiveHero {
   min-height: 134px; display: flex; align-items: center; justify-content: space-between; gap: 24px;
   background: linear-gradient(105deg, #0e1b25, #0e1b25 62%);
@@ -788,6 +796,9 @@ input, select { height: 46px; font-size: 11px; }
   .systemControls { align-items: flex-start; flex-direction: column; }
   .systemButtons { grid-template-columns: 1fr; width: 100%; }
   .protocolLiveHero { align-items: flex-start; flex-direction: column; }
+  .protocolPageRail { overflow-x: auto; }
+  .protocolPageRail > span { display: none; }
+  .protocolPageRail button { flex: 0 0 auto; }
   .protocolHealth { width: 100%; }
   .protocolControlStack { width: 100%; min-width: 0; }
   .protocolActions { flex-wrap: wrap; }

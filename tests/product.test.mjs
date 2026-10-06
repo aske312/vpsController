@@ -444,6 +444,9 @@ test("the interface uses one fixed visual design without personalization", async
   assert.match(navigation, /className="gateSidebar"/);
   assert.match(navigation, /label="WORKSPACE"/);
   assert.match(navigation, /label="TUNNELS"/);
+  assert.match(navigation, /protocols\.length === 1/);
+  assert.match(navigation, /label="Протоколы" badge=\{String\(protocols\.length\)\}/);
+  assert.match(page, /installedProtocols\.length > 1.*className="protocolPageRail"/s);
   assert.match(navigation, /label="SYSTEM"/);
   assert.match(layout, /<NotificationProvider>\{children\}<\/NotificationProvider>/);
   assert.match(page, /notifications\.finishOperation\(input\)/);

@@ -1556,6 +1556,12 @@ export default function Home() {
       </section>}
 
       {isProtocolTab(tab) && activeProtocol && <section className="protocolMonitor">
+        {installedProtocols.length > 1 && <nav className="protocolPageRail" aria-label="Установленные протоколы">
+          <span>ПРОТОКОЛЫ</span>
+          {installedProtocols.map((protocol) => <button type="button" key={protocol} className={tab === protocol ? "active" : ""} onClick={() => setTab(protocol)}>
+            <i><ProtocolIcon protocol={protocol} /></i><strong>{labels[protocol]}</strong>
+          </button>)}
+        </nav>}
         <article className="panel protocolLiveHero">
           <div>
             <p className="eyebrow">LIVE TUNNEL</p>

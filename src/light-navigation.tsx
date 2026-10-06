@@ -18,6 +18,7 @@ type Props = {
 
 export function LightNavigation({ activeTab, protocolImages, clientsCount, nodeState, nodeStateLabel, server, onNavigate }: Props) {
   const protocols = protocolImages.filter((item) => item.installed && item.kind !== "agent");
+  const selectedProtocol = protocols.find((item) => item.id === activeTab) || protocols[0];
   return <aside className="gateSidebar">
     <button className="gateBrand" type="button" onClick={() => onNavigate("overview")} aria-label="Открыть обзор">
       <span className="gateBrandMark"><BrandGlyph /></span>
@@ -29,9 +30,11 @@ export function LightNavigation({ activeTab, protocolImages, clientsCount, nodeS
         <NavButton active={activeTab === "clients"} icon="connections" label="Подключения" badge={String(clientsCount)} onClick={() => onNavigate("clients")} />
       </NavGroup>
       {protocols.length > 0 && <NavGroup label="TUNNELS">
-        {protocols.map((protocol) => <button type="button" key={protocol.id} className={`gateNavButton cyan compact ${activeTab === protocol.id ? "active" : ""}`} onClick={() => onNavigate(protocol.id)}>
-          <span className="gateNavGlyph protocolGlyph"><ProtocolIcon protocol={protocol.id} /></span><b>{protocol.name}</b>
-        </button>)}
+        {protocols.length === 1
+          ? <button type="button" className={`gateNavButton cyan compact ${activeTab === protocols[0].id ? "active" : ""}`} onClick={() => onNavigate(protocols[0].id)}>
+              <span className="gateNavGlyph protocolGlyph"><ProtocolIcon protocol={protocols[0].id} /></span><b>{protocols[0].name}</b>
+            </button>
+          : <NavButton active={protocols.some((protocol) => activeTab === protocol.id)} icon="transport" label="Протоколы" badge={String(protocols.length)} onClick={() => selectedProtocol && onNavigate(selectedProtocol.id)} />}
       </NavGroup>}
       <NavGroup label="SYSTEM">
         <NavButton active={activeTab === "security"} icon="security" label="Безопасность" onClick={() => onNavigate("security")} />
@@ -58,6 +61,7 @@ function NavButton({ active, icon, label, badge, onClick }: { active: boolean; i
 function NavGlyph({ name }: { name: string }) {
   if (name === "overview") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-8.5Z" /></svg>;
   if (name === "connections") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="7" r="2.5"/><circle cx="18" cy="17" r="2.5"/><path d="m8.3 10.9 7.4-3M8.3 13.1l7.4 3"/></svg>;
+  if (name === "transport") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h11M12 4l3 3-3 3M20 17H9M12 14l-3 3 3 3"/></svg>;
   if (name === "security") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 6v5c0 5.2-3.2 8.5-8 10-4.8-1.5-8-4.8-8-10V6l8-3Z"/><path d="m9 12 2 2 4-5"/></svg>;
   if (name === "application") return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 9h16M8 7h.01M11 7h.01"/></svg>;
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v5H5zM5 15h14v5H5z"/><path d="M8 6.5h.01M8 17.5h.01M11 6.5h5M11 17.5h5"/></svg>;
