@@ -22,7 +22,8 @@ fi
 
 ACCESS_MODE="external"
 ADMIN_USER="admin"
-ADMIN_PASSWORD="VpsAdmin-2026-7Qm!rK2#"
+ADMIN_PASSWORD=""
+PUBLIC_DOMAIN=""
 LOCAL_ADDRESS=""
 LOCAL_CIDR=""
 HTTP_PORT="80"
@@ -30,7 +31,7 @@ WG_PORT="51820"
 AWG_PORT="51822"
 HYSTERIA2_PORT="8443"
 TUIC_PORT="8444"
-TROJAN_PORT="8445"
+XRAY_PORT="8445"
 WG_INTERFACE="wg0"
 AWG_INTERFACE="awg0"
 AWG_MTU="1280"
@@ -45,7 +46,12 @@ AWG_H3="1000000000"
 AWG_H4="1400000000"
 ENABLE_UFW="yes"
 GEOLOCATION_PRIMARY_URL="https://api.2ip.io"
-GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code"
+GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code,latitude,longitude"
+GEOLOCATION_TERTIARY_URL="https://ip.guide"
+GEOLOCATION_QUATERNARY_URL="https://ipapi.co"
+GEOLOCATION_QUINARY_URL="https://free.freeipapi.com/api/json"
+GEOLOCATION_SENARY_URL="https://ipinfo.io"
+PUBLIC_IP_DISCOVERY_URL="https://api64.ipify.org"
 UPDATE_TEMP_DIR=""
 SSH_TEMP_STARTED="no"
 SSH_TEMP_RULE="no"
@@ -63,6 +69,7 @@ SERVICE_MODE_FILE="${DATA_DIR}/service-mode.json"
 CURRENT_ACTION=""
 ACTION_STARTED_AT=""
 ACTION_PROGRESS=0
+ACTION_FAILURE_MESSAGE=""
 REBOOT_AFTER_UPDATE="no"
 INSTALL_LOG="/var/log/vps-control-install.log"
 
@@ -173,16 +180,16 @@ finish_operation() {
       poweroff) write_action_status "powering-off" 100 "Сервер выключается" ;;
       kernel-update)
         if [[ "${REBOOT_AFTER_UPDATE}" == "yes" ]]; then
-          write_action_status "rebooting" 100 "Kernel updated; server is rebooting"
+          write_action_status "rebooting" 100 "Ядро обновлено; сервер перезагружается"
           systemctl --no-block --no-wall reboot
         else
-          write_action_status "succeeded" 100 "Kernel is already up to date"
+          write_action_status "succeeded" 100 "Установлена актуальная версия ядра"
         fi
         ;;
       *) write_action_status "succeeded" 100 "Операция завершена" ;;
     esac
   else
-    write_action_status "failed" "${ACTION_PROGRESS}" "Операция завершилась с ошибкой"
+    write_action_status "failed" "${ACTION_PROGRESS}" "${ACTION_FAILURE_MESSAGE:-Операция завершилась с ошибкой}"
   fi
 }
 
@@ -209,7 +216,11 @@ ok() {
   fi
 }
 warn() { printf '\033[1;33m!\033[0m %s\n' "$*" >&2; }
-die() { printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
+die() { ACTION_FAILURE_MESSAGE="$*"; printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
+
+generate_admin_password() {
+  od -An -N18 -tx1 /dev/urandom | tr -d ' \n'
+}
 
 system_architecture() {
   case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
@@ -266,7 +277,7 @@ cleanup_update_dir() {
 }
 
 require_root() {
-  [[ ${EUID} -eq 0 ]] || die "запустите команду через sudo."
+  [[ ${EUID} -eq 0 ]] || die "запустите команду от root."
 }
 
 load_manager_config() {
@@ -298,17 +309,36 @@ load_manager_config() {
   fi
 }
 
+valid_public_domain() {
+  local domain="$1"
+  [[ ${#domain} -le 253 && "${domain}" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]
+}
+
 load_install_config() {
-  local config="${INSTALL_CONFIG}"
+  local config="${INSTALL_CONFIG}" domain_override="${VPS_CONTROL_PUBLIC_DOMAIN:-}"
   [[ -r "${config}" ]] || config="${PROJECT_DIR}/install.conf"
   if [[ -r "${config}" ]]; then
     # Конфиг принадлежит администратору и содержит только shell-переменные.
     # shellcheck source=/dev/null
     source "${config}"
   fi
+  if [[ -n "${domain_override}" ]]; then
+    PUBLIC_DOMAIN="${domain_override}"
+  fi
+  PUBLIC_DOMAIN="${PUBLIC_DOMAIN%.}"
+  PUBLIC_DOMAIN="${PUBLIC_DOMAIN,,}"
+  # Обновления сохраняют старый /etc/vps-control-install.conf. Дополняем
+  # прежний URL координатами в памяти, не перезаписывая настройки владельца.
+  if [[ "${GEOLOCATION_FALLBACK_URL}" == "https://ipwho.is/?fields=success,ip,city,country,country_code" ]]; then
+    GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code,latitude,longitude"
+  fi
   [[ "${ACCESS_MODE}" == "external" || "${ACCESS_MODE}" == "local" || "${ACCESS_MODE}" == "vpn" ]] \
     || die "ACCESS_MODE должен быть external, local или vpn."
   [[ "${HTTP_PORT}" =~ ^[0-9]+$ ]] || die "HTTP_PORT должен быть числом."
+  if [[ -n "${PUBLIC_DOMAIN}" ]]; then
+    valid_public_domain "${PUBLIC_DOMAIN}" \
+      || die "PUBLIC_DOMAIN должен содержать корректное доменное имя без схемы и пути."
+  fi
 }
 
 detect_local_network() {
@@ -322,12 +352,33 @@ detect_local_network() {
   [[ -n "${LOCAL_CIDR}" ]] || die "не удалось определить локальную сеть; задайте LOCAL_CIDR в install.conf."
 }
 
+domain_points_to_public_ip() {
+  local domain="$1" public_ip="$2"
+  python3 - "${domain}" "${public_ip}" <<'PY'
+import ipaddress
+import socket
+import sys
+
+domain, expected = sys.argv[1:]
+try:
+    expected_ip = ipaddress.ip_address(expected)
+    addresses = {
+        ipaddress.ip_address(item[4][0])
+        for item in socket.getaddrinfo(domain, None, type=socket.SOCK_STREAM)
+    }
+except (OSError, ValueError):
+    raise SystemExit(1)
+raise SystemExit(0 if expected_ip in addresses else 1)
+PY
+}
+
 configure_access() {
-  local public_ip
+  local public_ip confirmed_domain=""
   public_ip="$(env_value PUBLIC_IP)"
   if [[ "${ACCESS_MODE}" == "local" ]]; then
     detect_local_network
     set_env_value "PANEL_HOST" "${LOCAL_ADDRESS}"
+    set_env_value "PUBLIC_DOMAIN" ""
     set_env_value "CORS_ORIGINS" "http://${LOCAL_ADDRESS}:${HTTP_PORT}"
     PANEL_URL="http://${LOCAL_ADDRESS}:${HTTP_PORT}"
   elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
@@ -342,6 +393,7 @@ configure_access() {
       vpn_origins+="http://${awg_address}:${HTTP_PORT}"
     fi
     set_env_value "PANEL_HOST" "0.0.0.0"
+    set_env_value "PUBLIC_DOMAIN" ""
     set_env_value "CORS_ORIGINS" "${vpn_origins}"
     PANEL_URL="${vpn_origins%%,*}"
   else
@@ -352,8 +404,21 @@ configure_access() {
     [[ -z "${wg_address}" ]] || origins+=",http://${wg_address}:${HTTP_PORT}"
     [[ -z "${awg_address}" ]] || origins+=",http://${awg_address}:${HTTP_PORT}"
     set_env_value "PANEL_HOST" "0.0.0.0"
+    if [[ -n "${PUBLIC_DOMAIN}" ]]; then
+      if domain_points_to_public_ip "${PUBLIC_DOMAIN}" "${public_ip}"; then
+        confirmed_domain="${PUBLIC_DOMAIN}"
+        origins="https://${confirmed_domain},${origins}"
+      else
+        warn "домен ${PUBLIC_DOMAIN} пока не указывает на ${public_ip}; панель продолжит работать по IP. После обновления DNS выполните vps-control identity."
+      fi
+    fi
+    set_env_value "PUBLIC_DOMAIN" "${confirmed_domain}"
     set_env_value "CORS_ORIGINS" "${origins}"
-    PANEL_URL="http://${public_ip}:${HTTP_PORT}"
+    if [[ -n "${confirmed_domain}" ]]; then
+      PANEL_URL="https://${confirmed_domain}"
+    else
+      PANEL_URL="http://${public_ip}:${HTTP_PORT}"
+    fi
   fi
   set_env_value "HTTP_PORT" "${HTTP_PORT}"
   set_env_value "ACCESS_MODE" "${ACCESS_MODE}"
@@ -361,7 +426,7 @@ configure_access() {
   set_env_value "AWG_PORT" "${AWG_PORT}"
   set_env_value "HYSTERIA2_PORT" "${HYSTERIA2_PORT}"
   set_env_value "TUIC_PORT" "${TUIC_PORT}"
-  set_env_value "TROJAN_PORT" "${TROJAN_PORT}"
+  set_env_value "XRAY_PORT" "${XRAY_PORT}"
   set_env_value "WG_INTERFACE" "${WG_INTERFACE}"
   set_env_value "AWG_INTERFACE" "${AWG_INTERFACE}"
   set_env_value "AWG_MTU" "${AWG_MTU}"
@@ -411,27 +476,53 @@ set_config_value() {
 }
 
 refresh_server_identity() {
-  local geo_file="${DATA_DIR}/tmp/geolocation.json"
-  local public_ip city country country_code override_city override_country override_country_code
+  local geo_file="${DATA_DIR}/tmp/geolocation"
+  local public_ip city country country_code agreement override_city override_country override_country_code
   info "Определение публичного IP и локации"
   install -d -m 0750 "${DATA_DIR}/tmp"
-  if curl -4 --fail --silent --show-error --max-time 12 \
-    "${GEOLOCATION_PRIMARY_URL}" >"${geo_file}" || curl -4 --fail --silent --show-error --max-time 12 \
-    "${GEOLOCATION_FALLBACK_URL}" >"${geo_file}"; then
-    readarray -t geo < <(python3 - "${geo_file}" <<'PY'
+  rm -f -- "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" \
+    "${geo_file}.quaternary.json" "${geo_file}.quinary.json" "${geo_file}.senary.json" "${geo_file}.result"
+  curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 \
+    "${GEOLOCATION_PRIMARY_URL}" >"${geo_file}.primary.json" || rm -f -- "${geo_file}.primary.json"
+  curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 \
+    "${GEOLOCATION_FALLBACK_URL}" >"${geo_file}.fallback.json" || rm -f -- "${geo_file}.fallback.json"
+  public_ip="$(python3 - "${geo_file}.primary.json" "${geo_file}.fallback.json" <<'PY'
 import json
 import sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-if data.get("success") is False or not data.get("ip"):
-    raise SystemExit(1)
-for value in (data.get("ip"), data.get("city"), data.get("country"), data.get("country_code") or data.get("code")):
-    print(str(value or ""))
+for path in sys.argv[1:]:
+    try:
+        data = json.load(open(path, encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        continue
+    value = str(data.get("ip") or data.get("ipAddress") or "")
+    if value:
+        print(value)
+        break
 PY
-)
+  )"
+  if [[ ! "${public_ip}" =~ ^[0-9a-fA-F:.]+$ ]]; then
+    public_ip="$(curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 \
+      "${PUBLIC_IP_DISCOVERY_URL}" 2>/dev/null || true)"
+  fi
+  if [[ -n "${public_ip}" ]]; then
+    curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 \
+      "${GEOLOCATION_TERTIARY_URL}/${public_ip}" >"${geo_file}.tertiary.json" || rm -f -- "${geo_file}.tertiary.json"
+    curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 -H "Accept: application/json" \
+      "${GEOLOCATION_QUATERNARY_URL}/${public_ip}/json/" >"${geo_file}.quaternary.json" || rm -f -- "${geo_file}.quaternary.json"
+    curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 -H "Accept: application/json" \
+      "${GEOLOCATION_QUINARY_URL}/${public_ip}" >"${geo_file}.quinary.json" || rm -f -- "${geo_file}.quinary.json"
+    curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 -H "Accept: application/json" \
+      "${GEOLOCATION_SENARY_URL}/${public_ip}/json" >"${geo_file}.senary.json" || rm -f -- "${geo_file}.senary.json"
+  fi
+  if python3 "${PROJECT_DIR}/scripts/resolve-geolocation.py" \
+    "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" \
+    "${geo_file}.quaternary.json" "${geo_file}.quinary.json" "${geo_file}.senary.json" >"${geo_file}.result"; then
+    readarray -t geo <"${geo_file}.result"
     public_ip="${geo[0]:-}"
     city="${geo[1]:-Unknown}"
     country="${geo[2]:-Unknown}"
     country_code="${geo[3]:-}"
+    agreement="${geo[4]:-}"
     override_city="$(env_value SERVER_CITY_OVERRIDE)"
     override_country="$(env_value SERVER_COUNTRY_OVERRIDE)"
     override_country_code="$(env_value SERVER_COUNTRY_CODE_OVERRIDE)"
@@ -447,13 +538,14 @@ PY
       if [[ -n "${override_city}${override_country}${override_country_code}" ]]; then
         ok "применена подтверждённая локация: ${city}, ${country} (${public_ip})."
       else
-        ok "определена приблизительная локация: ${city}, ${country} (${public_ip})."
+        ok "локация подтверждена независимыми источниками (${agreement}): ${city}, ${country} (${public_ip})."
       fi
     fi
   else
-    warn "геолокация недоступна; сохранены предыдущие значения."
+    warn "геолокация недоступна или источники не согласованы; сохранены предыдущие значения."
   fi
-  rm -f "${geo_file}"
+  rm -f -- "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" \
+    "${geo_file}.quaternary.json" "${geo_file}.quinary.json" "${geo_file}.senary.json" "${geo_file}.result"
   public_ip="$(env_value PUBLIC_IP)"
   [[ -n "${public_ip}" ]] || die "не удалось определить PUBLIC_IP; задайте его в ${ENV_FILE}."
   configure_access
@@ -621,7 +713,7 @@ install_protocol_image() {
   prepare_package_manager
   ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
-    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" TROJAN_PORT="${TROJAN_PORT}" \
+    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
     bash "${image_root}/${installer}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
@@ -647,7 +739,7 @@ remove_protocol_image() {
   info "Удаление установленного протокола ${image_id}"
   PRESERVE_COMPONENT_DATA=0 ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
-    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" TROJAN_PORT="${TROJAN_PORT}" \
+    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
     bash "${image_root}/${uninstaller}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
@@ -655,6 +747,94 @@ remove_protocol_image() {
   curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 \
     "http://127.0.0.1:8000/api/health" >/dev/null
   ok "Протокол ${image_id} удалён; образ сохранён."
+}
+
+set_protocol_client_update_state() {
+  local protocol="$1" state="${2:-}" message="${3:-}"
+  python3 - "${DATA_DIR}/clients.json" "${protocol}" "${state}" "${message}" <<'PY'
+import json, os, sys
+path, protocol, state, message = sys.argv[1:]
+try:
+    with open(path, encoding="utf-8") as source:
+        clients = json.load(source)
+except (FileNotFoundError, json.JSONDecodeError):
+    clients = []
+for client in clients:
+    if client.get("protocol") != protocol:
+        continue
+    if state:
+        client["update_state"] = state
+        client["update_message"] = message
+    else:
+        client.pop("update_state", None)
+        client.pop("update_message", None)
+os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+temporary = path + ".update"
+with open(temporary, "w", encoding="utf-8") as output:
+    json.dump(clients, output, ensure_ascii=False, indent=2)
+os.chmod(temporary, 0o600)
+os.replace(temporary, path)
+PY
+}
+
+protocol_binary_version() {
+  local binary="$1"
+  [[ -x "${binary}" ]] || return 0
+  local output
+  output="$("${binary}" version 2>/dev/null || "${binary}" --version 2>/dev/null || true)"
+  grep -Eo 'v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?' <<<"${output}" | head -n1 | sed 's/^v//' || true
+}
+
+update_protocol_image() {
+  local image_id="${2:-}"
+  [[ "${image_id}" =~ ^(awg|hysteria2|tuic|xray)$ ]] || die "протокол ${image_id} не поддерживает обновление."
+  local manifest image_root installer service binary old_version new_version was_active="no"
+  manifest="$(find "${INSTALL_DIR}/protocol-images" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print | while read -r candidate; do
+    [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' "${candidate}")" == "${image_id}" ]] && { echo "${candidate}"; break; }
+  done)"
+  [[ -n "${manifest}" ]] || die "образ ${image_id} не найден."
+  image_root="$(dirname -- "${manifest}")"
+  installer="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("installer",""))' "${manifest}")"
+  [[ "${installer}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${installer}" ]] || die "для ${image_id} отсутствует безопасный installer."
+  case "${image_id}" in
+    awg) service="awg-quick@${AWG_INTERFACE}.service"; binary="$(command -v awg || true)" ;;
+    hysteria2) service="vps-control-hysteria2.service"; binary="/usr/local/lib/vps-control-hysteria2/hysteria" ;;
+    tuic) service="vps-control-tuic.service"; binary="/usr/local/lib/vps-control-tuic/sing-box" ;;
+    xray) service="vps-control-xray.service"; binary="/usr/local/lib/vps-control-xray/xray" ;;
+  esac
+  systemctl is-active --quiet "${service}" && was_active="yes"
+  old_version="$(protocol_binary_version "${binary}")"
+  local backup_dir
+  backup_dir="$(mktemp -d "${DATA_DIR}/protocol-update-${image_id}.XXXXXX")"
+  chmod 0700 "${backup_dir}"
+  [[ -n "${binary}" && -f "${binary}" ]] && install -m 0755 "${binary}" "${backup_dir}/binary"
+  set_protocol_client_update_state "${image_id}" "paused" "Обновление протокола запущено: подключение временно приостановлено"
+  info "Обновление ${image_id}; существующие подключения помечены как приостановленные"
+  if ! (prepare_package_manager && \
+    ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+      AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+      HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
+      bash "${image_root}/${installer}"); then
+    if [[ -f "${backup_dir}/binary" && -n "${binary}" ]]; then
+      install -m 0755 "${backup_dir}/binary" "${binary}"
+      systemctl restart "${service}" || true
+    fi
+    set_protocol_client_update_state "${image_id}" "incompatible" "Новая версия не прошла проверку совместимости; сохранена предыдущая версия протокола"
+    rm -rf -- "${backup_dir}"
+    die "обновление ${image_id} отклонено: новая версия нарушает запуск или текущую конфигурацию."
+  fi
+  [[ "${was_active}" == "yes" ]] || systemctl stop "${service}"
+  new_version="$(protocol_binary_version "${binary}")"
+  if [[ -n "${old_version}" && -n "${new_version}" && "${old_version%%.*}" != "${new_version%%.*}" ]]; then
+    set_protocol_client_update_state "${image_id}" "attention" "После смены основной версии проверьте подключение; при необходимости пересоздайте клиентский профиль"
+  else
+    set_protocol_client_update_state "${image_id}" "" ""
+  fi
+  rm -rf -- "${backup_dir}"
+  sync_protocol_monitor
+  systemctl restart "${APP_NAME}-api.service"
+  curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 "http://127.0.0.1:8000/api/health" >/dev/null
+  ok "${image_id} обновлён${new_version:+ до версии ${new_version}}."
 }
 
 configure_firewall() {
@@ -679,6 +859,10 @@ configure_firewall() {
     ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
   else
     ufw allow "${HTTP_PORT}/tcp"
+    if [[ -n "${PUBLIC_DOMAIN}" ]]; then
+      ufw allow 80/tcp
+      ufw allow 443/tcp
+    fi
   fi
   ufw --force enable
 }
@@ -755,6 +939,7 @@ save_source_path() {
   } >"${MANAGER_CONFIG}"
   chmod 0600 "${MANAGER_CONFIG}"
   install -m 0600 "${PROJECT_DIR}/install.conf" "${INSTALL_CONFIG}"
+  set_config_value "${INSTALL_CONFIG}" "PUBLIC_DOMAIN" "${PUBLIC_DOMAIN}"
 }
 
 sync_release() {
@@ -815,6 +1000,7 @@ ensure_environment() {
   rm -f -- "${DATA_DIR}/personalization.json"
   if [[ ! -s "${ENV_FILE}" ]]; then
     install -m 0600 "${PROJECT_DIR}/.env.example" "${ENV_FILE}"
+    [[ -n "${ADMIN_PASSWORD}" ]] || ADMIN_PASSWORD="$(generate_admin_password)"
     set_env_value "ADMIN_USER" "${ADMIN_USER}"
     set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
     chmod 0600 "${ENV_FILE}"
@@ -822,7 +1008,10 @@ ensure_environment() {
   else
     ok "существующий ${ENV_FILE} сохранён."
     [[ -n "$(env_value ADMIN_USER)" ]] || set_env_value "ADMIN_USER" "${ADMIN_USER}"
-    [[ -n "$(env_value ADMIN_PASSWORD)" ]] || set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
+    if [[ -z "$(env_value ADMIN_PASSWORD)" ]]; then
+      [[ -n "${ADMIN_PASSWORD}" ]] || ADMIN_PASSWORD="$(generate_admin_password)"
+      set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
+    fi
   fi
   if [[ -z "$(env_value PUBLIC_IP)" ]]; then
     refresh_server_identity
@@ -976,10 +1165,24 @@ ReadWritePaths=${DATA_DIR}/web
 WantedBy=multi-user.target
 EOF
   install -d -m 0755 /etc/caddy
-  sed "s/{\$HTTP_PORT}/${HTTP_PORT}/g" "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
+  write_caddy_config
   caddy validate --config "${CADDY_CONFIG}" >/dev/null
   systemctl daemon-reload
   systemctl enable "${APP_NAME}-web.service" caddy.service >>"${INSTALL_LOG}" 2>&1
+}
+
+write_caddy_config() {
+  local confirmed_domain site_address
+  confirmed_domain="$(env_value PUBLIC_DOMAIN)"
+  site_address=":${HTTP_PORT}"
+  if [[ "${ACCESS_MODE}" == "external" && -n "${confirmed_domain}" ]]; then
+    site_address="${confirmed_domain}"
+  fi
+  sed \
+    -e "s|:{\$HTTP_PORT}|${site_address}|g" \
+    -e "s|{\$SITE_ADDRESS}|${site_address}|g" \
+    -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
+    "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
 }
 
 stop_legacy_containers() {
@@ -1025,6 +1228,36 @@ sync_protocol_monitor() {
   install_protocol_monitor
 }
 
+remove_obsolete_trojan() {
+  sed -i '/^TROJAN_PORT=/d' "${ENV_FILE}" "${INSTALL_CONFIG}" 2>/dev/null || true
+  [[ -e /etc/systemd/system/vps-control-trojan.service || -d /usr/local/lib/vps-control-trojan || -d /etc/vps-control/trojan ]] || return 0
+  info "Удаление исключённого модуля Trojan"
+  systemctl disable --now vps-control-trojan.service 2>/dev/null || true
+  if [[ -x /usr/local/lib/vps-control-trojan/firewall.sh ]]; then
+    /usr/local/lib/vps-control-trojan/firewall.sh delete 2>/dev/null || true
+  fi
+  rm -f -- /etc/systemd/system/vps-control-trojan.service
+  rm -rf -- /usr/local/lib/vps-control-trojan /etc/vps-control/trojan
+  python3 - "${DATA_DIR}/clients.json" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+try:
+    clients = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    clients = []
+if any(item.get("protocol") == "trojan" for item in clients):
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps([item for item in clients if item.get("protocol") != "trojan"], ensure_ascii=False, indent=2), encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(path)
+PY
+  systemctl daemon-reload
+  ok "модуль Trojan и его подключения удалены."
+}
+
 deploy() {
   check_source
   ensure_runtime_dependencies
@@ -1044,6 +1277,7 @@ PY
   if [[ ! -r "${INSTALL_CONFIG}" ]]; then
     install -m 0600 "${PROJECT_DIR}/install.conf" "${INSTALL_CONFIG}"
   fi
+  remove_obsolete_trojan
   sync_release
   write_integrity_manifest
   printf '%s\n' "${BUILD_COMMIT}" >"${INSTALL_DIR}/.build-commit"
@@ -1093,7 +1327,7 @@ uninstall_app() {
       bash "${INSTALL_DIR}/protocol-images/amneziawg/uninstall.sh"
   fi
   local protocol_id
-  for protocol_id in hysteria2 tuic trojan; do
+  for protocol_id in hysteria2 tuic xray; do
     if [[ -f "${INSTALL_DIR}/protocol-images/${protocol_id}/uninstall.sh" ]]; then
       PRESERVE_COMPONENT_DATA=0 bash "${INSTALL_DIR}/protocol-images/${protocol_id}/uninstall.sh"
     fi
@@ -1386,7 +1620,7 @@ change_access_mode() {
   set_config_value "${INSTALL_DIR}/install.conf" "ACCESS_MODE" "${ACCESS_MODE}"
   configure_access
   configure_firewall "panel-only"
-  sed "s/{\$HTTP_PORT}/${HTTP_PORT}/g" "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
+  write_caddy_config
   caddy validate --config "${CADDY_CONFIG}" >/dev/null
   systemctl restart caddy.service
   systemctl restart "${APP_NAME}-api.service"
@@ -1413,7 +1647,7 @@ change_service_mode() {
     ssh_socket_active="$([[ "$(systemctl is-active ssh.socket)" == "active" ]] && printf yes || printf no)"
     ssh_public="$([[ "$(ufw status | grep -Ec '^OpenSSH[[:space:]]+ALLOW[[:space:]]+Anywhere([[:space:]]|$)')" -gt 0 ]] && printf yes || printf no)"
     active_timers=""
-    for timer in vpn-monitor.timer vps-control-auto-reboot.timer vps-control-auto-cleanup.timer vps-control-auto-update.timer apt-daily.timer apt-daily-upgrade.timer; do
+    for timer in vpn-monitor.timer vps-control-auto-reboot.timer vps-control-auto-cleanup.timer vps-control-auto-protocol-scan.timer vps-control-auto-update.timer apt-daily.timer apt-daily-upgrade.timer; do
       if systemctl is-active --quiet "${timer}"; then
         active_timers+="${timer},"
         systemctl stop "${timer}"
@@ -1477,45 +1711,183 @@ installed_kernel_packages() {
     }'
 }
 
-update_kernel() {
-  info "Проверка обновления ядра"
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  local packages=()
-  mapfile -t packages < <(installed_kernel_packages)
-  ((${#packages[@]})) || die "не найден установленный метапакет ядра Debian/Ubuntu; обновление произвольного ядра автоматически не выполняется."
-  if apt-get -s install --only-upgrade "${packages[@]}" 2>/dev/null | grep -q '^Inst '; then
-    REBOOT_AFTER_UPDATE="yes"
+fallback_kernel_package() {
+  local os_id="" architecture kernel_release flavor
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck source=/dev/null
+    source /etc/os-release
+    os_id="${ID:-}"
   fi
-  apt-get install -y --only-upgrade "${packages[@]}"
-  ok "Пакеты ядра проверены и обновлены; при наличии нового ядра выполните reboot."
+  architecture="$(dpkg --print-architecture 2>/dev/null || true)"
+  kernel_release="$(uname -r)"
+  case "${os_id}" in
+    debian)
+      case "${kernel_release}" in
+        *-cloud-*) printf 'linux-image-cloud-%s\n' "${architecture}" ;;
+        *-rt-*) printf 'linux-image-rt-%s\n' "${architecture}" ;;
+        *) printf 'linux-image-%s\n' "${architecture}" ;;
+      esac
+      ;;
+    ubuntu)
+      flavor="${kernel_release##*-}"
+      case "${flavor}" in
+        generic|virtual|aws|azure|gcp|oracle|raspi|kvm) printf 'linux-%s\n' "${flavor}" ;;
+        *) printf 'linux-generic\n' ;;
+      esac
+      ;;
+    *)
+      die "автоматический выбор пакета ядра поддерживается только для Debian и Ubuntu."
+      ;;
+  esac
+}
+
+kernel_update_packages() {
+  local package candidate
+  local installed=() packages=()
+  mapfile -t installed < <(installed_kernel_packages)
+  if ((${#installed[@]})); then
+    packages=("${installed[@]}")
+  else
+    mapfile -t packages < <(fallback_kernel_package)
+  fi
+  if ((${#packages[@]})) && [[ -n "$(registered_dkms_modules)" ]]; then
+    for package in "${packages[@]}"; do
+      candidate=""
+      case "${package}" in
+        linux-image-*) candidate="linux-headers-${package#linux-image-}" ;;
+        linux-generic*|linux-virtual*|linux-aws*|linux-azure*|linux-gcp*|linux-oracle*|linux-raspi*|linux-kvm*)
+          candidate="linux-headers-${package#linux-}"
+          ;;
+      esac
+      if [[ -n "${candidate}" ]] && apt-cache show "${candidate}" >/dev/null 2>&1; then
+        packages+=("${candidate}")
+      fi
+    done
+  fi
+  printf '%s\n' "${packages[@]}" | awk 'NF && !seen[$0]++'
+}
+
+newest_installed_kernel() {
+  find /boot -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%f\n' 2>/dev/null \
+    | sed 's/^vmlinuz-//' | sort -V | tail -n 1
+}
+
+registered_dkms_modules() {
+  command -v dkms >/dev/null 2>&1 || return 0
+  dkms status 2>/dev/null | awk -F'[/,]' '/^[a-zA-Z0-9_.+-]+\// {print $1}' | sort -u
+}
+
+prepare_dkms_for_kernel() {
+  local kernel="$1" module
+  local modules=() failed=()
+  mapfile -t modules < <(registered_dkms_modules)
+  ((${#modules[@]})) || return 0
+  [[ -e "/lib/modules/${kernel}/build" ]] \
+    || die "ядро ${kernel} установлено без headers; перезагрузка отменена, активные подключения сохранены."
+  info "Сборка DKMS-модулей для ядра ${kernel}"
+  if ! dkms autoinstall -k "${kernel}"; then
+    die "DKMS не смог собрать модули для ядра ${kernel}; перезагрузка отменена, активные подключения сохранены."
+  fi
+  depmod -a "${kernel}"
+  for module in "${modules[@]}"; do
+    dkms status -m "${module}" -k "${kernel}" 2>/dev/null | grep -Eq ':[[:space:]]+installed$' \
+      || failed+=("${module}")
+  done
+  ((${#failed[@]} == 0)) \
+    || die "модули ${failed[*]} не готовы для ядра ${kernel}; перезагрузка отменена, активные подключения сохранены."
+  ok "Все DKMS-модули готовы для ядра ${kernel}."
+}
+
+active_managed_protocol_units() {
+  local unit
+  for unit in \
+    "wg-quick@${WG_INTERFACE}.service" \
+    "awg-quick@${AWG_INTERFACE}.service" \
+    vps-control-hysteria2.service \
+    vps-control-tuic.service \
+    vps-control-xray.service; do
+    systemctl is-active --quiet "${unit}" && printf '%s\n' "${unit}"
+  done
+}
+
+verify_managed_protocol_units() {
+  local unit
+  for unit in "$@"; do
+    if ! systemctl is-active --quiet "${unit}"; then
+      warn "Служба ${unit} остановилась во время обновления; выполняется восстановление."
+      systemctl restart "${unit}" \
+        || die "служба протокола ${unit} не восстановилась; перезагрузка отменена."
+    fi
+  done
+}
+
+update_kernel() {
+  local running_kernel newest_kernel simulation package
+  local packages=() active_protocol_units=()
+  info "Проверка репозиториев и пакета ядра"
+  export DEBIAN_FRONTEND=noninteractive
+  prepare_package_manager
+  apt-get -o DPkg::Lock::Timeout=300 update
+  mapfile -t active_protocol_units < <(active_managed_protocol_units)
+  mapfile -t packages < <(kernel_update_packages)
+  ((${#packages[@]})) || die "не удалось определить метапакет ядра."
+  for package in "${packages[@]}"; do
+    apt-cache show "${package}" >/dev/null 2>&1 \
+      || die "пакет ядра ${package} отсутствует в настроенных репозиториях."
+  done
+  simulation="$(apt-get -o DPkg::Lock::Timeout=300 -s install "${packages[@]}")"
+  if grep -q '^Inst ' <<<"${simulation}"; then
+    info "Доступно обновление пакета ядра"
+  else
+    info "Новых пакетов ядра в репозитории нет"
+  fi
+  apt-get -o DPkg::Lock::Timeout=300 install -y "${packages[@]}"
+  running_kernel="$(uname -r)"
+  newest_kernel="$(newest_installed_kernel)"
+  [[ -n "${newest_kernel}" ]] || die "не удалось определить установленное ядро после обновления."
+  prepare_dkms_for_kernel "${newest_kernel}"
+  verify_managed_protocol_units "${active_protocol_units[@]}"
+  if [[ -n "${newest_kernel}" && "${newest_kernel}" != "${running_kernel}" ]]; then
+    REBOOT_AFTER_UPDATE="yes"
+    ok "Ядро ${newest_kernel} установлено; сервер будет перезагружен для его активации."
+  else
+    ok "Ядро ${running_kernel} уже актуально; перезагрузка не требуется."
+  fi
   if [[ "${REBOOT_AFTER_UPDATE}" == "yes" && -z "${CURRENT_ACTION}" ]]; then
     systemctl --no-block --no-wall reboot
   fi
 }
 
 optimize_resources() {
-  local disk_before disk_after mem_before mem_after log_retention_days=30
+  local disk_before disk_after disk_freed mem_before mem_after log_retention_days=30
   disk_before="$(df -B1 / | awk 'NR==2 {print $4}')"
   mem_before="$(awk '/MemAvailable/ {print $2 * 1024}' /proc/meminfo)"
-  info "Безопасная очистка кэшей и неиспользуемых данных"
-  apt-get clean
+  info "Удаление неиспользуемых пакетов и пакетных кэшей"
+  prepare_package_manager
+  apt-get -o DPkg::Lock::Timeout=300 autoremove --purge -y
+  apt-get -o DPkg::Lock::Timeout=300 clean
   if [[ -r /etc/vps-control-logging.conf ]]; then
     # shellcheck source=/dev/null
     source /etc/vps-control-logging.conf
     log_retention_days="${LOG_RETENTION_DAYS:-30}"
   fi
   if (( log_retention_days > 0 )); then
+    journalctl --rotate
     journalctl --vacuum-time="${log_retention_days}d"
+    journalctl --vacuum-size=500M
   fi
+  info "Очистка временных файлов по системным правилам"
+  systemd-tmpfiles --clean
   if [[ -d "${DATA_DIR}/tmp" ]]; then
     find "${DATA_DIR}/tmp" -mindepth 1 -maxdepth 1 -type d -name 'update.*' -mtime +1 -exec rm -rf -- {} +
+    find "${DATA_DIR}/tmp" -xdev -depth -mindepth 1 -mtime +7 -delete
   fi
   sync
   printf '3\n' >/proc/sys/vm/drop_caches
   disk_after="$(df -B1 / | awk 'NR==2 {print $4}')"
   mem_after="$(awk '/MemAvailable/ {print $2 * 1024}' /proc/meminfo)"
-  ok "освобождено на диске: $(((disk_after - disk_before) / 1024 / 1024)) МБ; доступная память: $((mem_before / 1024 / 1024)) → $((mem_after / 1024 / 1024)) МБ."
+  disk_freed=$((disk_after > disk_before ? (disk_after - disk_before) / 1024 / 1024 : 0))
+  ok "Освобождено на диске: ${disk_freed} МБ; доступная память: $((mem_before / 1024 / 1024)) → $((mem_after / 1024 / 1024)) МБ."
 }
 
 configure_logging() {
@@ -1552,34 +1924,76 @@ clear_managed_logs() {
   ok "управляемые журналы очищены."
 }
 
+check_protocol_versions() {
+  info "Проверка актуальных версий модулей протоколов"
+  python3 - "${ENV_FILE}" <<'PY'
+import base64
+import json
+import sys
+import urllib.request
+
+env_path = sys.argv[1]
+values = {}
+with open(env_path, encoding="utf-8") as stream:
+    for raw_line in stream:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key] = value.strip().strip('"')
+user = values.get("ADMIN_USER", "admin")
+password = values.get("ADMIN_PASSWORD", "")
+if not password:
+    raise SystemExit("administrator credentials are not configured")
+token = base64.b64encode(f"{user}:{password}".encode()).decode()
+request = urllib.request.Request(
+    "http://127.0.0.1:8000/api/protocol-images/versions/check",
+    data=b"{}",
+    method="POST",
+    headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"},
+)
+with urllib.request.urlopen(request, timeout=90) as response:
+    payload = json.load(response)
+items = payload.get("items", [])
+updates = [item.get("name", item.get("id", "module")) for item in items if item.get("update_available")]
+print("updates: " + ", ".join(updates) if updates else "updates: none")
+PY
+  ok "версии модулей протоколов проверены; установка обновлений не выполнялась."
+}
+
 apply_automation() {
   info "Применение расписаний обслуживания"
   [[ -r "${AUTOMATION_FILE}" ]] || die "не найден ${AUTOMATION_FILE}."
   local values reboot_enabled reboot_cadence reboot_weekday reboot_hour reboot_minute
   local cleanup_enabled cleanup_cadence cleanup_weekday cleanup_hour cleanup_minute
-  local update_enabled update_cadence update_weekday update_hour update_minute
+  local protocol_scan_enabled protocol_scan_cadence protocol_scan_weekday protocol_scan_hour protocol_scan_minute
   values="$(python3 - "${AUTOMATION_FILE}" <<'PY'
 import json
 import shlex
 import sys
 
 data = json.load(open(sys.argv[1], encoding="utf-8"))
-for section in ("reboot", "cleanup", "update"):
+defaults = {
+    "reboot": ("weekly", "Sun", 4, 0),
+    "cleanup": ("weekly", "Sun", 3, 0),
+    "protocol_scan": ("daily", "Sun", 2, 30),
+}
+for section in ("reboot", "cleanup", "protocol_scan"):
     item = data.get(section, {})
+    cadence, weekday, hour, minute = defaults[section]
     values = (
         "yes" if item.get("enabled") else "no",
-        str(item.get("cadence", "weekly")),
-        str(item.get("weekday", "Sun")),
-        str(int(item.get("hour", 4))),
-        str(int(item.get("minute", 0))),
+        str(item.get("cadence", cadence)),
+        str(item.get("weekday", weekday)),
+        str(int(item.get("hour", hour))),
+        str(int(item.get("minute", minute))),
     )
     print(" ".join(shlex.quote(value) for value in values))
 PY
 )"
   read -r reboot_enabled reboot_cadence reboot_weekday reboot_hour reboot_minute <<<"$(sed -n '1p' <<<"${values}")"
   read -r cleanup_enabled cleanup_cadence cleanup_weekday cleanup_hour cleanup_minute <<<"$(sed -n '2p' <<<"${values}")"
-  read -r update_enabled update_cadence update_weekday update_hour update_minute <<<"$(sed -n '3p' <<<"${values}")"
-  update_enabled="false"
+  read -r protocol_scan_enabled protocol_scan_cadence protocol_scan_weekday protocol_scan_hour protocol_scan_minute <<<"$(sed -n '3p' <<<"${values}")"
 
   automation_calendar() {
     local cadence="$1" weekday="$2" hour="$3" minute="$4"
@@ -1627,13 +2041,16 @@ EOF
     fi
   }
 
-  local reboot_calendar cleanup_calendar update_calendar
+  local reboot_calendar cleanup_calendar protocol_scan_calendar
   reboot_calendar="$(automation_calendar "${reboot_cadence}" "${reboot_weekday}" "${reboot_hour}" "${reboot_minute}")"
   cleanup_calendar="$(automation_calendar "${cleanup_cadence}" "${cleanup_weekday}" "${cleanup_hour}" "${cleanup_minute}")"
-  update_calendar="$(automation_calendar "${update_cadence}" "${update_weekday}" "${update_hour}" "${update_minute}")"
+  protocol_scan_calendar="$(automation_calendar "${protocol_scan_cadence}" "${protocol_scan_weekday}" "${protocol_scan_hour}" "${protocol_scan_minute}")"
   install_automation_timer "reboot" "Scheduled VPS reboot by 312.net" "reboot" "${reboot_enabled}" "${reboot_calendar}"
   install_automation_timer "cleanup" "Scheduled VPS cleanup by 312.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}"
-  install_automation_timer "update" "Scheduled 312.net application update" "update" "${update_enabled}" "${update_calendar}"
+  install_automation_timer "protocol-scan" "Scheduled protocol version scan by 312.net" "protocol-version-check" "${protocol_scan_enabled}" "${protocol_scan_calendar}"
+  systemctl disable --now vps-control-auto-update.timer >/dev/null 2>&1 || true
+  rm -f -- /etc/systemd/system/vps-control-auto-update.timer /etc/systemd/system/vps-control-auto-update.service
+  systemctl daemon-reload
   ok "расписания обслуживания применены."
 }
 
@@ -1673,7 +2090,10 @@ verify_app() {
   systemctl is-active --quiet "${APP_NAME}-api.service" || die "API не запущен."
   systemctl is-active --quiet "${APP_NAME}-web.service" || die "веб-служба не запущена."
   systemctl is-active --quiet caddy.service || die "Caddy не запущен."
-  curl --fail --silent --show-error http://127.0.0.1:8000/api/health
+  # Commands such as `identity` restart the API immediately before verification.
+  # Treat its short startup window as readiness, not as a failed operation.
+  curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 \
+    http://127.0.0.1:8000/api/health
   printf '\n'
   curl --fail --silent --retry 6 --retry-connrefused --retry-delay 5 "${PANEL_URL}/" >/dev/null \
     || die "веб-панель не отвечает."
@@ -1768,6 +2188,35 @@ integrity_check() {
 show_credentials() {
   [[ -r "${ENV_FILE}" ]] || die "${ENV_FILE} не найден."
   printf 'Логин: '; env_value ADMIN_USER
+  printf 'Пароль: '; env_value ADMIN_PASSWORD
+}
+
+change_public_domain() {
+  local requested="${2:-}" confirmed
+  [[ -n "${requested}" ]] || die "укажите домен без схемы и пути либо off."
+  requested="${requested%.}"
+  requested="${requested,,}"
+  if [[ "${requested}" == "off" ]]; then
+    PUBLIC_DOMAIN=""
+  else
+    valid_public_domain "${requested}" || die "укажите корректное доменное имя без схемы и пути."
+    PUBLIC_DOMAIN="${requested}"
+  fi
+  set_config_value "${INSTALL_CONFIG}" "PUBLIC_DOMAIN" "${PUBLIC_DOMAIN}"
+  set_config_value "${INSTALL_DIR}/install.conf" "PUBLIC_DOMAIN" "${PUBLIC_DOMAIN}"
+  configure_access
+  configure_firewall "panel-only"
+  write_caddy_config
+  caddy validate --config "${CADDY_CONFIG}" >/dev/null
+  systemctl restart caddy.service "${APP_NAME}-api.service"
+  confirmed="$(env_value PUBLIC_DOMAIN)"
+  if [[ -n "${confirmed}" ]]; then
+    ok "домен ${confirmed} подтверждён; панель доступна по https://${confirmed}."
+  elif [[ -n "${PUBLIC_DOMAIN}" ]]; then
+    ok "домен ${PUBLIC_DOMAIN} сохранён; до подтверждения DNS панель работает по IP."
+  else
+    ok "домен отключён; панель работает по IP."
+  fi
 }
 
 usage() {
@@ -1775,8 +2224,8 @@ usage() {
 312.net — управление инфраструктурой
 
 Использование:
-  sudo bash scripts/vps-control.sh install
-  sudo vps-control <команда>
+  bash scripts/vps-control.sh install
+  vps-control <команда>
 
 Команды:
   install          установить зависимости и развернуть панель
@@ -1803,11 +2252,14 @@ usage() {
   vpn-firewall     восстановить маршрутизацию и NAT установленных WG/AWG
   optimize         очистить безопасные кэши и старые журналы
   automation-apply применить сохранённые расписания обслуживания
+  protocol-version-check
+                   проверить новые версии модулей протоколов без установки
   logging-config <enable|disable> <0..365>
                    настроить постоянную запись и срок хранения журналов
   logs-clear       очистить системные, контейнерные и мониторинговые журналы
   access-mode <external|vpn>
                    изменить доступность панели
+  domain <имя|off> сохранить домен панели или отключить его
   service-mode <enable|disable>
                    включить или выключить сервисный режим
   reboot           перезагрузить сервер
@@ -1816,6 +2268,8 @@ usage() {
                    установить протокол из образа
   protocol-remove <id>
                    удалить протокол, сохранив образ
+  protocol-update <id>
+                   вручную обновить протокол с проверкой и откатом бинарного файла
   credentials      показать логин и пароль администратора
   help             показать эту справку
 EOF
@@ -1826,8 +2280,11 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove)
-      begin_operation "${1}"
+    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|domain|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
+      case "${1}" in
+        protocol-install|protocol-remove|protocol-update) begin_operation "${1}:${2:-}" ;;
+        *) begin_operation "${1}" ;;
+      esac
       trap handle_exit EXIT
       ;;
   esac
@@ -1853,8 +2310,9 @@ main() {
       ensure_product_identity
       verify_app
       ui_done "локальная версия установлена"
-      ui_stage "Режим обновлений"
-      ui_done "последующие релизы устанавливаются вручную из готового архива"
+      ui_stage "Обновление до стабильной версии"
+      update_app
+      ui_done "установлен последний проверенный production-релиз Light"
       ui_stage "Проверка файлов и служб"
       verify_app
       integrity_check
@@ -1862,7 +2320,8 @@ main() {
       ui_stage "Завершение"
       ui_summary
       printf '\nОткройте: %s\n' "${PANEL_URL}"
-      printf 'Логин: %s\n' "${ADMIN_USER}"
+      show_credentials
+      printf 'Сохраните пароль: после завершения установки он не будет показан автоматически.\n'
       ui_done "установка завершена"
       ;;
     uninstall) uninstall_app "$@" ;;
@@ -1881,6 +2340,9 @@ main() {
     integrity-check) integrity_check ;;
     identity)
       refresh_server_identity
+      configure_firewall "panel-only"
+      write_caddy_config
+      caddy validate --config "${CADDY_CONFIG}" >/dev/null
       systemctl restart "${APP_NAME}-api.service"
       systemctl restart caddy.service
       verify_app
@@ -1890,14 +2352,17 @@ main() {
     vpn-firewall) configure_vpn_firewall_policy ;;
     optimize) optimize_resources ;;
     automation-apply) apply_automation ;;
+    protocol-version-check) check_protocol_versions ;;
     logging-config) configure_logging "$@" ;;
     logs-clear) clear_managed_logs ;;
     access-mode) change_access_mode "$@" ;;
+    domain) change_public_domain "$@" ;;
     service-mode) change_service_mode "$@" ;;
     reboot) reboot_server ;;
     poweroff) poweroff_server ;;
     protocol-install) install_protocol_image "$@" ;;
     protocol-remove) remove_protocol_image "$@" ;;
+    protocol-update) update_protocol_image "$@" ;;
     credentials) show_credentials ;;
     help|-h|--help) usage ;;
     *) usage >&2; exit 2 ;;

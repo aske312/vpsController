@@ -58,7 +58,7 @@ function NotificationCard({ item }: { item: Notification }) {
   const [hidden, setHidden] = useState(false);
   const pending = isPending(item);
   const progress = Number.isFinite(item.progress) ? Math.max(0, Math.min(100, item.progress!)) : undefined;
-  if (hidden && pending) return <section className={`gateOperationCard ${item.state}`} aria-label={item.title}>
+  if (hidden && pending) return <section className={`gateOperationCard collapsed ${item.state}`} aria-label={item.title}>
     <div className="gateOperationContent"><div className="gateOperationText"><strong>{item.title}</strong><small>Операция продолжается</small></div><button type="button" className="gateOperationButton" onClick={() => setHidden(false)}>Показать</button></div>
   </section>;
   return <section className={`gateOperationCard ${item.state}`} role={item.state === "error" ? "alert" : "status"} aria-atomic="true" aria-label={item.title}>

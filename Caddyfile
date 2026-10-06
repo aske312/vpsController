@@ -1,4 +1,4 @@
-:{$HTTP_PORT} {
+{$SITE_ADDRESS} {
     bind 0.0.0.0
 
     handle /api/* {

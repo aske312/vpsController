@@ -7,6 +7,37 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BOOTSTRAP_DIR=""
 BOOTSTRAP_LOG="/tmp/vps-control-bootstrap.log"
 
+usage() {
+  cat <<'EOF'
+Использование: bash scripts/install-panel.sh [--domain panel.example.com]
+
+  --domain DOMAIN  включить HTTPS после подтверждения DNS-записи домена
+EOF
+}
+
+while (($#)); do
+  case "$1" in
+    --domain)
+      [[ $# -ge 2 ]] || { printf 'Ошибка: после --domain укажите доменное имя.\n' >&2; exit 2; }
+      export VPS_CONTROL_PUBLIC_DOMAIN="$2"
+      shift 2
+      ;;
+    --domain=*)
+      export VPS_CONTROL_PUBLIC_DOMAIN="${1#*=}"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'Ошибка: неизвестный параметр %s.\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
 cyan='\033[1;36m'
 green='\033[1;32m'
 yellow='\033[1;33m'
@@ -41,7 +72,7 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ "${EUID}" -ne 0 ]]; then
-  printf 'Ошибка: установщик необходимо запустить через sudo или от root.\n' >&2
+  printf 'Ошибка: установщик необходимо запустить от root.\n' >&2
   exit 1
 fi
 
@@ -82,4 +113,4 @@ source_dir="$(find "${BOOTSTRAP_DIR}" -mindepth 1 -maxdepth 1 -type d -name 'vps
   || { printf 'Ошибка: загруженный архив не содержит установщик 312.net.\n' >&2; exit 1; }
 
 printf "\n${green}◆ Базовая подготовка завершена.${reset} Запускаем мастер приложения.\n\n"
-"${source_dir}/scripts/install-panel.sh" "$@"
+"${source_dir}/scripts/install-panel.sh"

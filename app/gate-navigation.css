@@ -1,4 +1,5 @@
 .shell.gateShell { display:grid !important; grid-template-columns:232px minmax(0,1fr) !important; min-height:100vh; background:radial-gradient(circle at 76% -12%,rgba(68,130,191,.10),transparent 34%),linear-gradient(180deg,#071019,#060d14 72%); color:var(--text); }
+.gateShell::before,.gateShell::after { display:none !important; content:none !important; }
 .gateSidebar { position:sticky; top:0; z-index:80; height:100vh; min-width:0; display:flex; flex-direction:column; padding:22px 14px 16px; background:linear-gradient(180deg,rgba(10,21,31,.98),rgba(5,13,20,.99)),var(--sidebar); border-right:1px solid var(--line); box-shadow:16px 0 42px rgba(0,0,0,.14); }
 .gateBrand { appearance:none; width:100%; display:flex; align-items:center; gap:12px; padding:5px 7px 22px; border:0; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
 .gateBrandMark { width:38px; height:38px; display:grid; place-items:center; flex:0 0 auto; border:1px solid rgba(86,217,233,.30); border-radius:11px; background:linear-gradient(145deg,rgba(87,217,233,.22),rgba(74,137,255,.09)); box-shadow:inset 0 1px rgba(255,255,255,.08),0 10px 28px rgba(0,0,0,.16); }
@@ -31,12 +32,51 @@
 .gateSidebarNode.yellow .gateNodePulse { background:var(--amber); color:var(--amber); }
 .gateSidebarNode.red .gateNodePulse { background:var(--red); color:var(--red); }
 .gateSidebarNode.green .gateNodePulse { background:var(--green); color:var(--green); }
+.gateSidebarNode.gray .gateNodePulse { background:#6e7b83; color:#6e7b83; box-shadow:none; }
+.gateSidebarNode.blue .gateNodePulse { background:var(--blue); color:var(--blue); }
 .gateSidebarNode > div { min-width:0; display:grid; gap:3px; }
 .gateSidebarNode small { color:#6f8796; font:700 9px/1.15 var(--font-mono); letter-spacing:.12em; }
 .gateSidebarNode strong { overflow:hidden; font:700 13px/1.2 var(--font-sans); text-overflow:ellipsis; white-space:nowrap; }
 .gateNodeLocation,.gateNodeAddress { display:block; min-width:0; overflow:hidden; color:#8499a6; font:500 10.5px/1.35 var(--font-sans); text-overflow:ellipsis; white-space:nowrap; }
 .gateNodeAddress { color:#6f8796; font-family:var(--font-mono); font-size:9.5px; }
-.gateShell > .content { width:100% !important; max-width:none !important; min-width:0; padding:28px clamp(18px,3vw,52px) 52px !important; background:transparent !important; }
+.gateShell > .content { width:100% !important; max-width:none !important; min-width:0; padding:16px clamp(18px,2.3vw,34px) 52px !important; background:transparent !important; }
+.gateShell .panel { border-radius:13px; }
+.gateMasthead { position:sticky; top:10px; z-index:140; min-height:70px; display:grid; grid-template-columns:minmax(260px,.95fr) minmax(430px,1.45fr) auto; align-items:center; gap:10px; margin:0 0 12px; padding:8px 9px; border:1px solid var(--line); border-radius:14px; background:linear-gradient(180deg,rgba(7,17,25,.96),rgba(5,14,22,.94)); box-shadow:0 10px 32px rgba(0,0,0,.28),inset 0 1px rgba(255,255,255,.025); backdrop-filter:blur(16px); }
+.gateMastNode { min-width:0; display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:10px; padding:2px 8px 2px 4px; }
+.gateMastIdentity { min-width:0; }
+.gateMastIdentity > span { display:block; color:#617988; font:750 7px/1 var(--font-mono); letter-spacing:.13em; }
+.gateMastIdentity h2 { min-width:0; margin:3px 0 0; overflow:hidden; color:var(--text); font:700 13px/1.25 var(--font-sans); white-space:nowrap; text-overflow:ellipsis; }
+.gateMastIdentity p { margin:2px 0 0; color:var(--muted); font:500 9px/1.35 var(--font-sans); }
+.gateMastIdentity p > span { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gateMastIdentity p > .mono { margin-top:1px; color:#718897; font-size:9px; }
+.gateCountryFlag { flex:0 0 auto; width:32px; height:22px; display:inline-flex; overflow:hidden; border:1px solid rgba(255,255,255,.24); border-radius:3px; background:#101b24; box-shadow:0 2px 8px rgba(0,0,0,.38); }
+.gateCountryFlag svg { display:block; width:100%; height:100%; }
+.gateCountryFlag.unknown { align-items:center; justify-content:center; color:#78909f; font:700 13px/1 var(--font-mono); }
+.gateMastState { margin:0; padding:6px 8px; border:0; border-radius:8px; color:var(--green); background:rgba(98,215,180,.055); font:750 9px/1 var(--font-mono); letter-spacing:.03em; white-space:nowrap; }
+.gateMastState.yellow { color:var(--amber); background:rgba(232,183,97,.055); }
+.gateMastState.red { color:var(--red); background:rgba(240,123,123,.055); }
+.gateMastState.gray { color:#84939b; background:rgba(132,147,155,.055); }
+.gateMastState.green { color:var(--green); background:rgba(98,215,180,.055); }
+.gateMastState.blue { color:var(--blue); background:rgba(100,184,255,.065); }
+.gateMastFacts { min-width:0; display:grid; grid-template-columns:repeat(5,minmax(62px,1fr)); overflow:hidden; border:1px solid rgba(121,151,174,.10); border-radius:10px; background:rgba(2,9,15,.30); }
+.gateMastFacts > div { min-width:0; min-height:43px; padding:7px 9px; border-right:1px solid rgba(121,151,174,.09); }
+.gateMastFacts > div:last-child { border-right:0; }
+.gateMastFacts span { display:block; color:#6f8796; font:700 7px/1 var(--font-mono); letter-spacing:.11em; }
+.gateMastFacts strong { display:block; margin-top:4px; overflow:hidden; color:#d9e7ed; font:650 10px/1.1 var(--font-mono); text-overflow:ellipsis; white-space:nowrap; }
+.gateMastActions { display:flex; align-items:center; gap:5px; }
+.gateMastActions .autoButton,.gateMastActions .iconButton,.gateMastActions .ghostButton { height:32px !important; min-height:32px; border:0 !important; border-radius:8px !important; background:transparent !important; color:#8ea3b0 !important; box-shadow:none !important; }
+.gateMastActions .iconButton { width:32px !important; padding:0 !important; }
+.gateMastActions .ghostButton { padding:0 10px !important; border:1px solid var(--line) !important; background:#0c1821 !important; }
+.gateMastActions .updatedAt { color:#718897; font:600 9px/1 var(--font-mono); }
+.refreshControl { display:inline-flex; align-items:center; overflow:hidden; border:1px solid var(--line); border-radius:8px; background:#0c1821; }
+.refreshControl .autoButton,.refreshControl .iconButton { border-radius:0 !important; }
+.refreshControl .autoButton { width:27px !important; min-width:27px; padding:0 !important; justify-content:center; }
+.refreshControl .iconButton { border-left:1px solid var(--line) !important; }
+.refreshControl.active { border-color:rgba(98,215,180,.22); }
+.refreshControl.active .autoButton { color:var(--green) !important; }
+.gateSectionIntro { margin:12px 2px 18px; display:flex; align-items:flex-end; justify-content:space-between; gap:16px; }
+.gateSectionIntro h1 { margin:2px 0 0; color:var(--text); font:720 28px/1.1 var(--font-sans); letter-spacing:-.8px; }
+.gateSectionIntro p:last-child { margin:5px 0 0; color:var(--muted); font:500 11px/1.45 var(--font-sans); }
 @media (max-width:1240px) {
   .shell.gateShell { grid-template-columns:88px minmax(0,1fr) !important; }
   .gateSidebar { padding:18px 10px 14px; }
@@ -44,7 +84,10 @@
   .gateBrand > span:last-child,.gateNavGroup > p,.gateNavButton b,.gateSidebarNode > div,.gateNavBeta { display:none; }
   .gateNavButton,.gateNavButton.hasBadge { grid-template-columns:1fr; justify-items:center; padding:0; }
   .gateSidebarNode { grid-template-columns:1fr; justify-items:center; padding:11px 0; }
+  .gateMasthead { grid-template-columns:minmax(220px,1fr) auto; }
+  .gateMastFacts { display:none; }
 }
+@media (max-width:470px) { .gateMastState { display:none; } }
 @media (max-width:760px) {
   .shell.gateShell { display:block !important; padding-bottom:68px; }
   .gateSidebar { position:fixed; z-index:120; inset:auto 0 0; width:100%; height:64px; display:block; padding:6px 8px max(6px,env(safe-area-inset-bottom)); border-top:1px solid var(--line); border-right:0; background:rgba(6,14,21,.96); backdrop-filter:blur(18px); }
@@ -55,5 +98,10 @@
   .gateNavButton,.gateNavButton.hasBadge { width:52px; min-width:52px; min-height:50px; grid-template-columns:1fr; justify-items:center; padding:0; border-radius:10px; }
   .gateNavButton b,.gateNavBeta { display:none; }
   .gateNavButton.active::before { inset:auto 12px -1px; width:auto; height:2px; }
-  .gateShell > .content { padding:18px 10px 28px !important; }
+  .gateShell > .content { padding:10px 10px 28px !important; }
+  .gateMasthead { min-height:64px; grid-template-columns:minmax(0,1fr) auto; margin-bottom:10px; padding:8px 9px; border-radius:12px; top:8px; z-index:145; }
+  .gateMastActions .autoButton,.gateMastActions .updatedAt,.gateMastActions .ghostButton { display:none !important; }
+  .gateMastActions .iconButton { display:grid !important; }
+  .gateSectionIntro { margin:8px 2px 12px; }
+  .gateSectionIntro h1 { font-size:22px; }
 }

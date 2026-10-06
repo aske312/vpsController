@@ -7,7 +7,7 @@ import { ProtocolIcon } from "./protocol-icon";
 import { LightNavigation } from "../src/light-navigation";
 import { useNotifications } from "../src/notifications/notification-center";
 
-type Protocol = "wg" | "awg" | "hysteria2" | "tuic" | "trojan";
+type Protocol = "wg" | "awg" | "hysteria2" | "tuic" | "xray";
 type Tab = "overview" | "security" | "application" | "services" | Protocol | "clients";
 type MetricsPeriod = "live" | "day" | "week" | "quarter";
 type ResourceHistory = { load: Array<number | null>; memory: Array<number | null>; disk: Array<number | null>; rx: Array<number | null>; tx: Array<number | null> };
@@ -26,6 +26,7 @@ type Client = {
   id: string; name: string; protocol: Protocol; public_key: string; endpoint?: string;
   address: string; handshake_age_s?: number; rx_bytes: number; tx_bytes: number;
   quality?: "stable" | "warning" | "error" | "offline"; latency_ms?: number; jitter_ms?: number; packet_loss_percent?: number; quality_reason?: string;
+  update_state?: "paused" | "attention" | "incompatible"; update_message?: string;
 };
 type Overview = {
   server: { name: string; public_ip: string; city: string; country: string; country_code: string; uptime_s: number };
@@ -48,7 +49,10 @@ type ApplicationStatus = {
 };
 type ProtocolImage = {
   id: string; name: string; version: string; description: string; category: string; category_name: string;
+  kind: "tunnel" | "agent"; status: "available" | "planned"; installable: boolean;
   interface: string; installed: boolean; removable: boolean;
+  installed_version?: string; available_version?: string; update_available?: boolean; update_breaking?: boolean;
+  version_checked_at?: string; version_error?: string; version_channel?: "release" | "package";
 };
 type AutomationSchedule = {
   enabled: boolean; cadence: "daily" | "weekly" | "monthly"; weekday: string; hour: number; minute: number;
@@ -61,8 +65,8 @@ type ServicesStatus = {
   }>;
   failed_units: number;
   reboot_required: boolean;
-  automation: { reboot: AutomationSchedule; cleanup: AutomationSchedule; update: AutomationSchedule };
-  timers: Record<"reboot" | "cleanup" | "update", { installed: boolean; active: boolean; last_trigger: string; next_run: string }>;
+  automation: { reboot: AutomationSchedule; cleanup: AutomationSchedule; protocol_scan: AutomationSchedule };
+  timers: Record<"reboot" | "cleanup" | "protocol_scan", { installed: boolean; active: boolean; last_trigger: string; next_run: string }>;
   panel_access?: { mode: "external" | "vpn"; public: boolean; vpn_urls: string[] };
   service_mode?: { active: boolean };
   logging?: { persistent: boolean; retention_days: number; automatic_cleanup: boolean; disk_usage: string };
@@ -113,14 +117,14 @@ type ProtocolStatus = {
 };
 
 const labels: Record<Tab, string> = {
-  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", hysteria2: "Hysteria2", tuic: "TUIC v5", trojan: "Trojan", clients: "Подключения",
+  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", hysteria2: "Hysteria2", tuic: "TUIC v5", xray: "Xray", clients: "Подключения",
 };
 const navigationLabels: Record<Tab, string> = {
   overview: "OVERVIEW", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
-  wg: "WIREGUARD", awg: "AMNEZIAWG", hysteria2: "HYSTERIA2", tuic: "TUIC V5", trojan: "TROJAN", clients: "CONNECTIONS",
+  wg: "WIREGUARD", awg: "AMNEZIAWG", hysteria2: "HYSTERIA2", tuic: "TUIC V5", xray: "XRAY", clients: "CONNECTIONS",
 };
-const protocolIds: Protocol[] = ["wg", "awg", "hysteria2", "tuic", "trojan"];
-const lightModuleIds: Protocol[] = ["awg", "hysteria2", "tuic", "trojan"];
+const protocolIds: Protocol[] = ["wg", "awg", "hysteria2", "tuic", "xray"];
+const lightModuleIds: Protocol[] = ["awg", "hysteria2", "tuic", "xray"];
 const isProtocolTab = (value: Tab): value is Protocol => protocolIds.includes(value as Protocol);
 const actionLabels: Record<string, string> = {
   install: "Установка 312.net", start: "Запуск приложения", stop: "Остановка приложения",
@@ -129,7 +133,7 @@ const actionLabels: Record<string, string> = {
   secure: "Настройка защиты", "kernel-update": "Обновление ядра", "vpn-firewall": "Восстановление VPN firewall", optimize: "Оптимизация ресурсов",
   "service-mode": "Переключение сервисного режима",
   reboot: "Перезагрузка сервера", poweroff: "Выключение сервера",
-  "protocol-install": "Установка протокола", "protocol-remove": "Удаление протокола",
+  "protocol-install": "Установка протокола", "protocol-remove": "Удаление протокола", "protocol-update": "Обновление протокола",
 };
 
 const bytes = (value = 0) => {
@@ -178,6 +182,7 @@ export default function Home() {
   const [protocolStatuses, setProtocolStatuses] = useState<Partial<Record<Protocol, ProtocolStatus>>>({});
   const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number; tx: number }>>>({});
   const [installingProtocol, setInstallingProtocol] = useState("");
+  const [checkingProtocolVersion, setCheckingProtocolVersion] = useState("");
   const [checkingResources, setCheckingResources] = useState<Protocol | null>(null);
   const [checkingDiagnostics, setCheckingDiagnostics] = useState<Protocol | null>(null);
   const [resourcesOpen, setResourcesOpen] = useState<Partial<Record<Protocol, boolean>>>({});
@@ -691,7 +696,7 @@ export default function Home() {
     finally { setBusy(false); }
   }
 
-  function updateAutomation(kind: "reboot" | "cleanup", patch: Partial<AutomationSchedule>) {
+  function updateAutomation(kind: "reboot" | "cleanup" | "protocol_scan", patch: Partial<AutomationSchedule>) {
     automationDirty.current = true;
     setAutomationDraft((current) => current ? {
       ...current, [kind]: { ...current[kind], ...patch },
@@ -816,6 +821,57 @@ export default function Home() {
     } catch (cause) {
       setInstallingProtocol("");
       setError(cause instanceof Error ? cause.message : "Не удалось запустить установку протокола");
+    } finally { setInstallingProtocol(""); setBusy(false); }
+  }
+
+  async function checkProtocolVersion(image: ProtocolImage) {
+    setCheckingProtocolVersion(image.id); setError("");
+    try {
+      const result = await request(`/protocol-images/${image.id}/version/check`, { method: "POST" }) as { item: ProtocolImage };
+      setProtocolImages((current) => current.map((entry) => entry.id === result.item.id ? result.item : entry));
+      if (result.item.version_error) setError(`Не удалось проверить версию ${image.name}; повторите проверку позже`);
+      else setNotice(result.item.update_available ? `Для ${image.name} доступна версия ${result.item.available_version}` : `${image.name}: установлена актуальная версия`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : `Не удалось проверить версию ${image.name}`);
+    } finally { setCheckingProtocolVersion(""); }
+  }
+
+  async function waitForProtocolUpdate(image: ProtocolImage) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 5000));
+      try {
+        const status = await request("/application/status") as ApplicationStatus;
+        setApplication(status);
+        const state = status.action?.state || "";
+        if (state === "failed" || status.action?.result === "failed") throw new Error(`Обновление ${image.name} завершилось с ошибкой совместимости`);
+        if (state === "succeeded" || status.action?.result === "success") return;
+      } catch (cause) {
+        if (cause instanceof Error && cause.message.includes("ошибкой совместимости")) throw cause;
+      }
+    }
+    throw new Error(`Сервер не подтвердил обновление ${image.name} за 10 минут`);
+  }
+
+  async function updateProtocol(image: ProtocolImage) {
+    if (!await askConfirmation({
+      title: `Обновить ${image.name}?`,
+      message: image.update_breaking
+        ? `Версия ${image.available_version} меняет основную версию (сейчас ${image.installed_version || "не определена"}). Подключения будут приостановлены; после обновления может потребоваться новый профиль.`
+        : image.version_channel === "package"
+          ? `Доступна новая пакетная сборка ${image.available_version}. Версия протокола сейчас ${image.installed_version || "не определена"}; подключения будут приостановлены только на время проверки и перезапуска.`
+        : `Будет установлена версия ${image.available_version}. На время проверки и перезапуска активные подключения этого протокола будут кратковременно приостановлены.`,
+      confirmLabel: "Обновить протокол",
+    })) return;
+    setBusy(true); setError(""); setInstallingProtocol(`update-${image.id}`);
+    try {
+      const started = await request(`/protocol-images/${image.id}/update`, { method: "POST" });
+      setApplication((current) => ({ api: current?.api || { active: true, enabled: true }, containers: current?.containers || [], action: started }));
+      await waitForProtocolUpdate(image);
+      await Promise.all([loadOverview(), loadClients(), loadProtocolStatus(image.id as Protocol)]);
+      setNotice(`${image.name} обновлён. Проверьте предупреждения у подключений.`);
+    } catch (cause) {
+      await loadClients();
+      setError(cause instanceof Error ? cause.message : "Не удалось обновить протокол");
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
 
@@ -1107,50 +1163,69 @@ export default function Home() {
   const operationActive = ["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(application?.action?.state || "");
   const operationName = application?.action?.action || "";
   const operationLabel = actionLabels[operationName.split(":")[0]] || operationName;
-  const nodeHasError = Boolean(error) || application?.action?.state === "failed" || application?.action?.result === "failed";
-  const nodeDegraded = application?.api.active === false
-    || Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
+  // A failed command belongs to the operation center; it does not mean that the
+  // node itself is unavailable. Only live health data may turn the node red.
+  const nodeHasError = application?.api.active === false;
+  const nodeDegraded = Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
   const serviceModeActive = Boolean(services?.service_mode?.active || application?.service_mode?.active);
   const release = application?.release || applicationVersion;
   const releaseBranch = release?.branch || "light";
   const testReleaseActive = releaseBranch === "test-light";
-  const nodeState = nodeHasError ? "error" : operationActive || nodeDegraded || serviceModeActive ? "working" : "healthy";
-  const nodeStateLabel = nodeState === "error" ? "УЗЕЛ С ОШИБКОЙ" : nodeState === "working" ? "ТРЕБУЕТ ВНИМАНИЯ" : "УЗЕЛ В СЕТИ";
-  const applicationStateTitle = nodeState === "error"
+  const nodeState = !application ? "checking" : nodeHasError ? "error" : serviceModeActive ? "service" : operationActive || nodeDegraded ? "working" : "healthy";
+  const nodeStateLabel = nodeState === "checking" ? "ПРОВЕРКА УЗЛА"
+    : nodeState === "error" ? "УЗЕЛ С ОШИБКОЙ"
+    : nodeState === "service" ? "СЕРВИСНЫЙ РЕЖИМ"
+    : nodeState === "working" ? "ТРЕБУЕТ ВНИМАНИЯ"
+    : "УЗЕЛ В СЕТИ";
+  const applicationStateTitle = nodeState === "checking"
+    ? "Проверка состояния"
+    : nodeState === "error"
     ? "Есть ошибки"
     : operationActive ? operationLabel
     : serviceModeActive ? "Сервисный режим"
     : nodeDegraded ? "Нарушение работы"
     : "В сети";
+  const navigationState = nodeState === "checking" ? "gray" : nodeState === "error" ? "red" : nodeState === "service" ? "blue" : nodeState === "working" ? "yellow" : "green";
+  const countryCode = overview?.server.country_code?.toLowerCase() || "";
 
   return <main className="shell gateShell">
     <LightNavigation
       activeTab={tab}
       protocolImages={protocolImages}
       clientsCount={clients.length}
-      nodeState={nodeState === "error" ? "red" : nodeState === "working" ? "yellow" : "green"}
+      nodeState={navigationState}
       nodeStateLabel={nodeStateLabel}
       server={overview?.server}
       onNavigate={(next) => setTab(next as Tab)}
     />
 
     <section className="content">
-      <header className="topbar">
-        <div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p className="subtitle">{overview?.server.city}, {overview?.server.country} · управление инфраструктурой</p></div>
-        <div className="topActions">
-          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={serviceModeActive} onClick={() => setAutoRefresh((value) => !value)}><i />{serviceModeActive ? "Авто · выкл" : autoRefresh ? `Авто · ${["overview", "clients", ...protocolIds, "security"].includes(tab) ? "<1" : tab === "application" || tab === "services" ? "5" : "30"}с` : "Пауза"}</button>
+      <header className="gateMasthead" aria-label="Состояние сервера">
+        <div className="gateMastNode">
+          <CountryFlag code={countryCode} label={overview?.server.country || "Страна не определена"} />
+          <div className="gateMastIdentity"><span>PRIMARY NODE</span><h2>{overview?.server.city || overview?.server.name || "VPS"}</h2><p><span>{overview?.server.country || "—"}</span><span className="mono">{overview?.server.public_ip || "—"}</span></p></div>
+          <div className={`gateMastState ${navigationState}`}>{applicationStateTitle}</div>
+        </div>
+        <div className="gateMastFacts" aria-label="Метрики сервера">
+          <div><span>UPTIME</span><strong>{uptime(overview?.server.uptime_s)}</strong></div>
+          <div><span>LOAD</span><strong>{overview?.resources.load1.toFixed(2) || "—"}</strong></div>
+          <div><span>CPU</span><strong>{(overview?.resources.cpu_percent || 0).toFixed(0)}%</strong></div>
+          <div><span>RAM</span><strong>{memUsed.toFixed(0)}%</strong></div>
+          <div><span>NETWORK</span><strong>↓ {bytes(networkRate.rx)}/с</strong></div>
+        </div>
+        <div className="gateMastActions">
+          <div className={`refreshControl ${autoRefresh ? "active" : ""}`} data-refresh-interval="<1" aria-label="Управление обновлением данных">
+            <button className="autoButton" disabled={serviceModeActive} onClick={() => setAutoRefresh((value) => !value)} aria-label={autoRefresh ? "Остановить автообновление" : "Включить автообновление"}><i /></button>
+            <button className="iconButton" onClick={() => void refreshCurrent(true)} aria-label="Обновить текущий модуль">↻</button>
+          </div>
           {lastUpdated && <span className="updatedAt">{lastUpdated.toLocaleTimeString("ru-RU")}</span>}
-          <button className="iconButton" onClick={() => void refreshCurrent(true)} aria-label="Обновить текущий модуль">↻</button>
           <button className="ghostButton" onClick={() => { sessionStorage.removeItem("312-token"); setToken(""); }}>Выйти</button>
         </div>
       </header>
+      {tab !== "overview" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "страна не определена"} · управление инфраструктурой</p></div></div>}
       {busy && <div className="loadingLine" />}
 
       {tab === "overview" && <section className="overview">
-        <article className="heroPanel panel">
-          <div><p className="eyebrow">PRIMARY NODE</p><h2>{overview?.server.city}</h2><p className="mono">{overview?.server.country} · {overview?.server.public_ip}</p></div>
-          <div className={`nodeStatus ${nodeState}`}><span className="pulse" /><div><strong>{applicationStateTitle}</strong><small>{operationActive ? application?.action?.message || "Команда выполняется" : `Uptime ${uptime(overview?.server.uptime_s)}`}</small></div></div>
-        </article>
         <div className="metrics">
           <header className="metricsHeader">
             <div><p className="eyebrow">SERVER MONITORING</p><h2>Ресурсы VPS</h2><small>{metricsStatus}</small></div>
@@ -1172,20 +1247,26 @@ export default function Home() {
         </div>
         <article className="panel protocolSummary">
           <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div></div>
-          {installedProtocols.map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
-            <span className={`protocol ${protocol}`}><ProtocolIcon protocol={protocol} /></span>
-            <p><strong>{labels[protocol]}</strong><small>{overview?.protocols[protocol]?.interface} · {overview?.protocols[protocol]?.port}</small></p>
-            <em className={overview?.protocols[protocol]?.active ? "onlinePill" : "offlinePill"}>{overview?.protocols[protocol]?.active ? "Работает" : "Остановлен"}</em><b>›</b>
-          </button>)}
-          {protocolImages.filter((image) => !image.installed).map((image) =>
-            <div className="protocolInstaller" key={image.id}>
-              <span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span>
-              <p><strong>{image.name}</strong><small>{image.description} · образ {image.version}</small></p>
-              <button onClick={() => void installProtocol(image)} disabled={busy || Boolean(installingProtocol)}>
-                {installingProtocol === image.id ? "Устанавливается…" : "Установить"}
-              </button>
-            </div>
-          )}
+          <div className="protocolModuleGrid">
+          {protocolImages.map((image) => {
+            const protocol = image.id as Protocol;
+            const isTunnel = image.kind === "tunnel" && lightModuleIds.includes(protocol);
+            const state = isTunnel ? overview?.protocols[protocol] : undefined;
+            const moduleState = image.installed ? state?.active ? "ACTIVE" : "STOPPED" : image.status === "planned" ? "PLANNED" : "AVAILABLE";
+            const version = image.installed ? image.installed_version || "UNKNOWN" : image.installable ? image.available_version || "НЕ ПРОВЕРЕНО" : "—";
+            return <article className={`protocolModuleCard${image.installed ? " installed" : ""}${image.kind === "agent" ? " agent" : ""}`} key={image.id}>
+              <header><button className="protocolModuleOpen" onClick={() => image.installed && isTunnel && setTab(protocol)} disabled={!image.installed || !isTunnel}><span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span><span><strong>{image.name}</strong><small>{image.kind === "agent" ? "AGENT" : "TUNNEL"}</small></span></button><em className={moduleState.toLowerCase()}>{moduleState}</em></header>
+              <dl><div><dt>VERSION</dt><dd title={image.update_available ? `${version} → ${image.available_version}` : version}>{version}{image.update_available ? ` → ${image.available_version}` : ""}</dd></div><div><dt>PORT</dt><dd>{state?.port || "—"}</dd></div></dl>
+              <footer>
+                {image.installed && isTunnel && <button className="danger" onClick={() => void removeProtocol(image)} disabled={busy}>Удалить</button>}
+                {image.installed && isTunnel && (image.update_available
+                  ? <button className={image.update_breaking ? "warning" : ""} onClick={() => void updateProtocol(image)} disabled={busy}>{installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}</button>
+                  : <button onClick={() => void checkProtocolVersion(image)} disabled={busy || Boolean(checkingProtocolVersion)}>{checkingProtocolVersion === image.id ? "Проверка…" : "Проверить"}</button>)}
+                {!image.installed && <button onClick={() => image.installable && void installProtocol(image)} disabled={!image.installable || busy || Boolean(installingProtocol)}>{!image.installable ? "Недоступно" : installingProtocol === image.id ? "Установка…" : "Установить"}</button>}
+              </footer>
+            </article>;
+          })}
+          </div>
           {!protocolImages.length && <div className="protocolEmpty"><span>—</span><p><strong>Нет доступных образов</strong><small>Добавьте manifest.json в каталог protocol-images</small></p></div>}
         </article>
       </section>}
@@ -1203,7 +1284,7 @@ export default function Home() {
         <article className="panel systemControls">
           <div><p className="eyebrow">SYSTEM POWER & KERNEL</p><h2>Системные действия</h2><span>Команды выполняются вне процесса панели через systemd</span></div>
           <div className="systemButtons">
-            <button onClick={() => void runApplicationAction("kernel-update")} disabled={busy}><strong>Обновить сервер</strong><small>{updates?.kernel_available ? "ядро и пакеты · доступно обновление" : "ядро и системные пакеты"}</small></button>
+            <button onClick={() => void runApplicationAction("kernel-update")} disabled={busy}><strong>Обновить ядро</strong><small>{updates?.kernel_available ? "проверит модули протоколов и перезагрузит VPS" : "проверит ядро, headers и модули протоколов"}</small></button>
             <button onClick={() => void runApplicationAction("reboot")} disabled={busy}><strong>Перезагрузить сервер</strong><small>Корректно завершает службы и запускает VPS заново</small></button>
             <button className="poweroffButton" onClick={() => void runApplicationAction("poweroff")} disabled={busy}><strong>Выключить сервер</strong><small>потребуется запуск у провайдера</small></button>
           </div>
@@ -1232,7 +1313,7 @@ export default function Home() {
               ? "Служба остановлена · входящие SSH-подключения не принимаются"
               : `Из интернета: ${ssh?.publicly_allowed ? "открыт по согласованной политике" : "закрыт"} · Fail2ban: ${fail2ban?.active && fail2ban?.jail_active ? "защищает" : "не защищает"} · Password: ${String(ssh?.password_authentication || "unknown")} · Root: ${String(ssh?.permit_root_login || "unknown")}`}
           />
-          <SecurityActionRow ok={securityLoading || (Number(updates?.available || 0) === 0 && !updates?.reboot_required)} title="Обновления Ubuntu" text={`${String(updates?.available ?? "—")} пакетов${updates?.reboot_required ? " · нужен reboot" : ""}`} onAction={() => void fixSecurity("kernel-update")} actionLabel="Обновить" />
+          <SecurityActionRow ok={securityLoading || (!updates?.kernel_available && !updates?.reboot_required)} title="Обновление ядра" text={updates?.reboot_required ? "Новое ядро установлено · требуется перезагрузка" : updates?.kernel_available ? "Доступна новая версия ядра" : "Установлена актуальная версия ядра"} onAction={() => void fixSecurity("kernel-update")} actionLabel="Обновить" />
           <SecurityActionRow ok={Boolean(updates?.automatic)} title="Автоматические обновления" text={updates?.automatic ? "Unattended upgrades · ON" : "Unattended upgrades · OFF"} onAction={() => void fixSecurity("secure")} />
           <SecurityRow
             ok={applicationVersion?.outdated === false}
@@ -1306,13 +1387,13 @@ export default function Home() {
             <button onClick={() => void runApplicationAction("network-check")} disabled={busy}><strong>Проверить подключения</strong><small>Проверяет интернет, установленные протоколы и доступность портов</small></button>
             <button onClick={() => void runApplicationAction("integrity-check")} disabled={busy}><strong>Проверить целостность</strong><small>Проверяет файлы, права доступа и настройки компонентов</small></button>
             <button onClick={() => void runApplicationAction("identity")} disabled={busy}><strong>Обновить данные сервера</strong><small>Повторно определяет публичный IP и географические данные VPS</small></button>
-            <button onClick={() => void runApplicationAction("optimize")} disabled={busy}><strong>Освободить ресурсы</strong><small>Удаляет безопасные временные данные и освобождает место</small></button>
+            <button onClick={() => void runApplicationAction("optimize")} disabled={busy}><strong>Освободить ресурсы</strong><small>Удаляет неиспользуемые пакеты, кэши, временные файлы и старые журналы</small></button>
           </div>
         </article>
         <article className="panel systemControls">
           <div><p className="eyebrow">SYSTEM POWER &amp; KERNEL</p><h2>Системные действия</h2><span>Команды выполняются через systemd и не блокируют интерфейс панели.</span></div>
           <div className="systemButtons">
-            <button onClick={() => void runApplicationAction("kernel-update")} disabled={busy}><strong>Обновить сервер</strong><small>{updates?.kernel_available ? "Ядро и пакеты · доступно обновление" : "Ядро и системные пакеты"}</small></button>
+            <button onClick={() => void runApplicationAction("kernel-update")} disabled={busy}><strong>Обновить ядро</strong><small>{updates?.kernel_available ? "Проверит модули протоколов и перезагрузит VPS" : "Проверит ядро, headers и модули протоколов"}</small></button>
             <button onClick={() => void runApplicationAction("reboot")} disabled={busy}><strong>Перезагрузить сервер</strong><small>Корректно завершает службы и запускает VPS заново</small></button>
             <button className="poweroffButton" onClick={() => void runApplicationAction("poweroff")} disabled={busy}><strong>Выключить сервер</strong><small>Потребуется запуск у провайдера</small></button>
           </div>
@@ -1452,7 +1533,7 @@ export default function Home() {
 
         <article className="panel automationCenter">
           <div className="automationCenterHead">
-            <div><p className="eyebrow">MAINTENANCE SCHEDULE</p><h2>Плановое обслуживание</h2><small>Перезагрузка и безопасная очистка по расписанию</small></div>
+            <div><p className="eyebrow">MAINTENANCE SCHEDULE</p><h2>Плановое обслуживание</h2><small>Перезагрузка, безопасная очистка и проверка версий по расписанию</small></div>
             <button onClick={() => void saveAutomation()} disabled={busy || !services}>Сохранить изменения</button>
           </div>
           <div className="automationRows"><AutomationEditor
@@ -1469,17 +1550,30 @@ export default function Home() {
             timer={services?.timers.cleanup}
             onChange={(patch) => updateAutomation("cleanup", patch)}
           />
+          <AutomationEditor
+            title="Проверка версий протоколов"
+            description="Сканирует официальные источники модулей и отмечает доступные версии. Обновления не устанавливаются автоматически."
+            value={automationDraft?.protocol_scan}
+            timer={services?.timers.protocol_scan}
+            onChange={(patch) => updateAutomation("protocol_scan", patch)}
+          />
           </div>
           <div className="automationNote">Persistent=true · пропущенная задача будет выполнена после следующего запуска сервера</div>
         </article>
       </section>}
 
       {isProtocolTab(tab) && activeProtocol && <section className="protocolMonitor">
+        {installedProtocols.length > 1 && <nav className="protocolPageRail" aria-label="Установленные протоколы">
+          <span>ПРОТОКОЛЫ</span>
+          {installedProtocols.map((protocol) => <button type="button" key={protocol} className={tab === protocol ? "active" : ""} onClick={() => setTab(protocol)}>
+            <i><ProtocolIcon protocol={protocol} /></i><strong>{labels[protocol]}</strong>
+          </button>)}
+        </nav>}
         <article className="panel protocolLiveHero">
           <div>
             <p className="eyebrow">LIVE TUNNEL</p>
             <div className="protocolTitle"><ProtocolIcon protocol={tab} /><h2>{labels[tab]}</h2></div>
-            <p className="mono">{activeProtocol.interface} · {activeProtocol.address || "адрес не назначен"} · {activeProtocol.transport || "UDP"} {activeProtocol.listen_port || "—"}</p>
+            <p className="mono">{activeProtocol.interface} · {activeProtocol.address || "адрес не назначен"} · {activeProtocol.transport || "UDP"} {activeProtocol.listen_port || "—"} · версия {activeProtocolImage?.installed_version || "не определена"}</p>
           </div>
           <div className="protocolControlStack">
             <div className={activeProtocol.active && activeProtocol.service_active ? "protocolHealth online" : "protocolHealth"}>
@@ -1491,7 +1585,9 @@ export default function Home() {
             </div>
             <div className="protocolActions">
               <button onClick={() => void restartProtocol(tab)} disabled={busy}>{activeProtocol.service_active ? "Перезапустить" : "Запустить"}</button>
-              {activeProtocolImage?.removable && <button className="removeProtocolButton" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить протокол</button>}
+              {activeProtocolImage && <button onClick={() => void checkProtocolVersion(activeProtocolImage)} disabled={busy || Boolean(checkingProtocolVersion)}>{checkingProtocolVersion === activeProtocolImage.id ? "Проверяем…" : "Проверить версию"}</button>}
+              {activeProtocolImage && <button className={activeProtocolImage.update_breaking ? "updateProtocolButton warning" : "updateProtocolButton"} onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy || !activeProtocolImage.update_available}>{installingProtocol === `update-${activeProtocolImage.id}` ? "Обновление…" : activeProtocolImage.update_available ? `Обновить до ${activeProtocolImage.available_version}` : activeProtocolImage.version_checked_at ? "Обновлений нет" : "Версия не проверена"}</button>}
+              {activeProtocolImage?.removable && <button className="removeProtocolButton" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить</button>}
             </div>
           </div>
         </article>
@@ -1600,7 +1696,7 @@ export default function Home() {
       {tab === "clients" && installedProtocols.length > 0 && <section className="clientsLayout">
         <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все клиенты" : labels[tab]}</h2></div><span>{protocolClients.length} подключений</span></div>
           <div className="clientTable">{protocolClients.length ? protocolClients.map((client) =>
-            <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><span className={`protocol ${client.protocol}`}><ProtocolIcon protocol={client.protocol} /></span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address} · {client.quality_reason || "состояние уточняется"}</small></p>
+            <div className={`clientRow quality-${client.quality || "offline"}${client.update_state ? ` update-${client.update_state}` : ""}`} key={client.id}><span className={`protocol ${client.protocol}`}><ProtocolIcon protocol={client.protocol} /></span><p><strong><i className={`clientQuality ${client.update_state === "incompatible" ? "error" : client.update_state ? "warning" : client.quality || "offline"}`} />{client.name}</strong><small>{client.update_message || `${client.address} · ${client.quality_reason || "состояние уточняется"}`}</small></p>
               <span className="traffic"><small>ПОЛУЧЕНО <b>↓ {bytes(client.rx_bytes)}</b></small><small>ОТПРАВЛЕНО <b>↑ {bytes(client.tx_bytes)}</b></small></span><span className="handshake"><small>ПОСЛЕДНЯЯ СВЯЗЬ</small><strong>{duration(client.handshake_age_s)}</strong></span>
               <span className="clientLink"><small>LINK QUALITY</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} ms` : "—"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · loss ${client.packet_loss_percent}%` : ""}</strong></span>
               <button className="dangerButton" onClick={() => void removeClient(client.id)}>Отозвать</button></div>
@@ -1756,6 +1852,35 @@ function SecurityRow({ ok, title, text, okLabel = "Confirmed", badLabel = "Atten
 }
 function SecurityActionRow({ ok, title, text, onAction, actionLabel = "Исправить", alwaysAction = false }: { ok: boolean; title: string; text: string; onAction: () => void; actionLabel?: string; alwaysAction?: boolean }) {
   return <div><span className={ok ? "check" : "warning"}>{ok ? "✓" : "!"}</span><p><strong>{title}</strong><small>{text}</small></p>{ok && !alwaysAction ? <em className="onlinePill">Готово</em> : <button className="securityFixButton" onClick={onAction}>{actionLabel}</button>}</div>;
+}
+function CountryFlag({ code, label }: { code: string; label: string }) {
+  const normalized = code.trim().toLowerCase();
+  const horizontal: Record<string, [string, string, string]> = {
+    de: ["#000000", "#dd0000", "#ffce00"], es: ["#aa151b", "#f1bf00", "#aa151b"],
+    lv: ["#9e3039", "#ffffff", "#9e3039"], nl: ["#ae1c28", "#ffffff", "#21468b"],
+    ru: ["#ffffff", "#1c57a7", "#d52b1e"],
+  };
+  let flag: React.ReactNode = null;
+  if (horizontal[normalized]) {
+    const stripes = horizontal[normalized];
+    flag = <><rect width="27" height="18" fill={stripes[0]} />{normalized === "lv" ? <rect y="8" width="27" height="2" fill={stripes[1]} /> : normalized === "es" ? <rect y="4.5" width="27" height="9" fill={stripes[1]} /> : <><rect y="6" width="27" height="6" fill={stripes[1]} /><rect y="12" width="27" height="6" fill={stripes[2]} /></>}</>;
+  } else if (normalized === "fi" || normalized === "se") {
+    const background = normalized === "fi" ? "#ffffff" : "#006aa7";
+    const cross = normalized === "fi" ? "#003580" : "#fecc00";
+    flag = <><rect width="27" height="18" fill={background} /><rect x="8" width="3" height="18" fill={cross} /><rect y="7.5" width="27" height="3" fill={cross} /></>;
+  } else if (normalized === "jp") {
+    flag = <><rect width="27" height="18" fill="#ffffff" /><circle cx="13.5" cy="9" r="4.5" fill="#bc002d" /></>;
+  } else if (normalized === "sg") {
+    flag = <><rect width="27" height="9" fill="#ef3340" /><rect y="9" width="27" height="9" fill="#ffffff" /><circle cx="7" cy="4.7" r="3.1" fill="#ffffff" /><circle cx="8.2" cy="4.7" r="2.6" fill="#ef3340" />{[[10.6, 2.2], [12, 4], [11.5, 6.2], [9.5, 6.8], [9.2, 3.4]].map(([x, y]) => <circle key={`${x}-${y}`} cx={x} cy={y} r=".45" fill="#ffffff" />)}</>;
+  } else if (normalized === "kz") {
+    flag = <><rect width="27" height="18" fill="#00afca" /><path d="M3 1v16M5 1v16" stroke="#f6c600" strokeWidth=".7" strokeDasharray="1 1" /><circle cx="16" cy="6.5" r="2.2" fill="#f6c600" /><path d="M10 11.5q6 4 12 0-6 2-12 0Z" fill="#f6c600" /></>;
+  } else if (normalized === "by") {
+    flag = <><rect width="27" height="12" fill="#ce1720" /><rect y="12" width="27" height="6" fill="#007c30" /><rect width="4" height="18" fill="#ffffff" /><path d="M.5 1.5 3.5 4.5.5 7.5l3 3-3 3 3 3" stroke="#ce1720" strokeWidth="1" fill="none" /></>;
+  } else if (normalized === "us") {
+    flag = <><rect width="27" height="18" fill="#ffffff" />{[0, 4, 8, 12, 16].map((y) => <rect key={y} y={y} width="27" height="2" fill="#b22234" />)}<rect width="12" height="9.8" fill="#3c3b6e" />{[[2, 2], [5, 2], [8, 2], [3.5, 5], [6.5, 5], [9.5, 5], [2, 8], [5, 8], [8, 8]].map(([x, y]) => <circle key={`${x}-${y}`} cx={x} cy={y} r=".45" fill="#ffffff" />)}</>;
+  }
+  if (!flag) return <span className="gateCountryFlag unknown" role="img" aria-label={label}>◎</span>;
+  return <span className="gateCountryFlag" role="img" aria-label={label}><svg viewBox="0 0 27 18" aria-hidden="true"><g clipPath="url(#country-flag-clip)">{flag}</g><defs><clipPath id="country-flag-clip"><rect width="27" height="18" rx="2" /></clipPath></defs></svg></span>;
 }
 function VersionFooter() {
   return <LegalFooter version={appVersion} branch={buildBranch} commit={buildCommit} />;

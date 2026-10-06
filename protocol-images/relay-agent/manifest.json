@@ -1,0 +1,15 @@
+{
+  "id": "relay-agent",
+  "name": "Relay Agent",
+  "version": "preview",
+  "installable": false,
+  "status": "planned",
+  "kind": "agent",
+  "description": "Сетевой агент интеграции с управляющим контуром PRO; туннель не создаёт",
+  "category": "network-agents",
+  "category_name": "Сетевые агенты",
+  "installer": "",
+  "uninstaller": "",
+  "supported_os": ["ubuntu", "debian"],
+  "service": ""
+}

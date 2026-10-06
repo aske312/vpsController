@@ -98,3 +98,50 @@ ssh_units_action ${action}
     }
   }
 });
+
+test("kernel update selects a distribution meta-package when one is missing", () => {
+  const body = manager.match(/fallback_kernel_package\(\) \{([\s\S]*?)\n\}/)[1]
+    .replaceAll("/etc/os-release", '"$release"');
+  for (const [osRelease, kernel, architecture, expected] of [
+    ["ID=debian", "6.12.111+deb13-amd64", "amd64", "linux-image-amd64"],
+    ["ID=debian", "6.12.0-1-cloud-amd64", "amd64", "linux-image-cloud-amd64"],
+    ["ID=ubuntu", "6.8.0-1018-azure", "amd64", "linux-azure"],
+    ["ID=ubuntu", "6.8.0-90-generic", "amd64", "linux-generic"],
+  ]) {
+    const script = `set -Eeuo pipefail
+release=$(mktemp)
+trap 'rm -f "$release"' EXIT
+printf '%s\\n' '${osRelease}' >"$release"
+dpkg() { printf '%s\\n' '${architecture}'; }
+uname() { printf '%s\\n' '${kernel}'; }
+die() { printf '%s\\n' "$*" >&2; exit 1; }
+fallback_kernel_package() {${body}
+}
+fallback_kernel_package
+`;
+    const result = spawnSync(bash, ["-c", script], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), expected);
+  }
+});
+
+test("kernel update adds matching headers for every registered DKMS module", () => {
+  const body = manager.match(/kernel_update_packages\(\) \{([\s\S]*?)\n\}/)[1];
+  for (const [dkmsOutput, expected] of [
+    ["amneziawg", ["linux-image-amd64", "linux-headers-amd64"]],
+    ["", ["linux-image-amd64"]],
+  ]) {
+    const script = `set -Eeuo pipefail
+installed_kernel_packages() { printf '%s\\n' linux-image-amd64; }
+fallback_kernel_package() { printf '%s\\n' linux-image-amd64; }
+registered_dkms_modules() { printf '%s\\n' '${dkmsOutput}'; }
+apt-cache() { return 0; }
+kernel_update_packages() {${body}
+}
+kernel_update_packages
+`;
+    const result = spawnSync(bash, ["-c", script], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split("\n").filter(Boolean), expected);
+  }
+});

@@ -59,6 +59,9 @@ nav { display: grid; gap: 5px; }
 .navItem.active { color: var(--text); background: linear-gradient(90deg, #11212c, #0e1b25); box-shadow: inset 2px 0 var(--accent); }
 .navItem span { width: 22px; font: 14px var(--font-mono); color: #70b7e8; text-align: center; }
 .protocolIcon { width: 28px; height: 28px; flex: 0 0 auto; object-fit: contain; }
+.protocolIconVector { display: grid; place-items: center; color: #75d9d2; background: #11242a; }
+.protocolIconVector svg { width: 72%; height: 72%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.protocolIconVector.relay { color: #8ca0b5; background: #151d27; }
 .navItem > .protocolIcon { width: 24px; height: 24px; }
 .navItem.active span { color: var(--accent); }
 .navItem b { font-size: 12px; font-weight: 560; }
@@ -128,9 +131,15 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .protocolEmpty small { margin-top: 5px; font: 8px var(--font-mono); }
 .protocolInstaller { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 12px; align-items: center; border-top: 1px solid var(--line); padding: 15px 10px; }
 .protocolInstaller p { display: flex; flex-direction: column; min-width: 0; margin: 0; }
+.protocolInstaller p strong em { margin-left: 8px; color: #8ca0b5; font: 700 7px var(--font-mono); letter-spacing: .08em; }
+.protocolInstaller.agent { border-style: dashed; }
+.protocolInstaller.agent button:disabled { cursor: default; color: #8ca0b5; background: #111923; }
 .protocolInstaller strong { font-size: 11px; }
 .protocolInstaller small { color: var(--muted); font: 8px/1.5 var(--font-mono); margin-top: 5px; }
-.protocolInstaller button { border: 1px solid #31505c; border-radius: 6px; background: var(--accent-dim); color: var(--accent); padding: 8px 11px; font-size: 8px; }
+.protocolInstaller .protocolVersionLine { color: #8ca0b5; }
+.protocolInstallerActions { display: flex; justify-content: flex-end; gap: 6px; min-width: 210px; }
+.protocolInstaller button { min-width: 88px; border: 1px solid #31505c; border-radius: 6px; background: var(--accent-dim); color: var(--accent); padding: 8px 11px; font-size: 8px; white-space: nowrap; }
+.protocolInstaller button.warning { border-color: #72552a; color: var(--amber); background: #251d12; }
 .protocolInstaller button:disabled { opacity: .55; cursor: wait; }
 .protocolCategory { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 14px; align-items: center; border-top: 1px solid var(--line); padding: 17px 10px; }
 .categoryMark { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 6px; color: #70b7e8; background: #11212c; font: 750 9px var(--font-mono); }
@@ -244,6 +253,8 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .clientRow.quality-warning { border-left: 3px solid var(--amber); }
 .clientRow.quality-error { border-left: 3px solid var(--red); background: color-mix(in srgb, var(--red) 5%, #0e1b25); }
 .clientRow.quality-offline { border-left: 3px solid #6b8190; opacity: .78; }
+.clientRow.update-paused, .clientRow.update-attention { border-left-color: var(--amber); opacity: 1; background: color-mix(in srgb, var(--amber) 5%, #0e1b25); }
+.clientRow.update-incompatible { border-left-color: var(--red); opacity: 1; background: color-mix(in srgb, var(--red) 7%, #0e1b25); }
 .traffic { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; text-align: left; }
 .traffic small, .handshake small, .clientLink small { color: #60716e; font: 7px var(--font-mono); letter-spacing: .7px; }
 .traffic b { display: block; margin-top: 5px; color: #b3c4cd; font: 500 9px var(--font-mono); }
@@ -430,6 +441,8 @@ input, select { height: 46px; font-size: 11px; }
   .applicationHero, .applicationLogs { grid-column: 1; }
   .updatedAt { display: none; }
   .clientRow { grid-template-columns: 38px 1fr auto; }
+  .protocolInstaller { grid-template-columns: 38px minmax(0, 1fr); }
+  .protocolInstallerActions { grid-column: 2; justify-content: flex-start; min-width: 0; flex-wrap: wrap; }
   .traffic, .handshake { display: none; }
   .clientLink { align-items: flex-end; }
   .clientRow .dangerButton { grid-column: 2 / -1; }
@@ -586,6 +599,14 @@ input, select { height: 46px; font-size: 11px; }
 .dangerButton, input, select, textarea, .primaryButton { border-radius: 6px; }
 
 .protocolMonitor { display: grid; gap: 12px; margin-bottom: 12px; }
+.protocolPageRail { min-width: 0; display: flex; align-items: center; gap: 6px; padding: 7px; border: 1px solid var(--line); border-radius: 10px; background: #09141c; }
+.protocolPageRail > span { flex: 0 0 auto; padding: 0 8px; color: #637b8b; font: 700 8px var(--font-mono); letter-spacing: .12em; }
+.protocolPageRail button { min-width: 0; height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #8397a5; cursor: pointer; }
+.protocolPageRail button:hover { border-color: #294652; color: var(--text); }
+.protocolPageRail button.active { border-color: #315d68; background: var(--accent-dim); color: var(--accent); }
+.protocolPageRail button i { width: 20px; height: 20px; display: grid; place-items: center; font-style: normal; }
+.protocolPageRail button .protocolIcon { width: 20px; height: 20px; }
+.protocolPageRail button strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .protocolLiveHero {
   min-height: 134px; display: flex; align-items: center; justify-content: space-between; gap: 24px;
   background: linear-gradient(105deg, #0e1b25, #0e1b25 62%);
@@ -601,12 +622,14 @@ input, select { height: 46px; font-size: 11px; }
 .protocolHealth div { display: grid; gap: 5px; }
 .protocolHealth strong { font-size: 11px; }
 .protocolHealth small { color: var(--muted); font-size: 8px; }
-.protocolControlStack { display: grid; gap: 8px; min-width: 250px; }
-.protocolControlStack .protocolHealth { min-width: 0; }
-.protocolActions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-.protocolActions button { height: 34px; border: 1px solid var(--line); border-radius: 6px; background: #0e1b25; color: var(--muted); font-size: 8px; }
+.protocolControlStack { min-width: 390px; align-self: stretch; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+.protocolControlStack .protocolHealth { min-width: 0; padding: 9px 12px; }
+.protocolActions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: nowrap; gap: 6px; margin-top: auto; }
+.protocolActions button { flex: 0 1 auto; width: auto; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: #0e1b25; color: var(--muted); font-size: 8px; white-space: nowrap; }
 .protocolActions button:hover { border-color: #3b5d54; color: var(--text); }
 .protocolActions .removeProtocolButton { border-color: #493033; color: #f28f8f; }
+.protocolActions .updateProtocolButton { border-color: #31505c; color: var(--accent); }
+.protocolActions .updateProtocolButton.warning { border-color: #72552a; color: var(--amber); background: #251d12; }
 .protocolActions button:disabled { opacity: .45; cursor: wait; }
 .protocolMonitorGrid { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(230px, .75fr)); gap: 12px; }
 .protocolFlow, .protocolTelemetry { min-height: 190px; }
@@ -773,8 +796,12 @@ input, select { height: 46px; font-size: 11px; }
   .systemControls { align-items: flex-start; flex-direction: column; }
   .systemButtons { grid-template-columns: 1fr; width: 100%; }
   .protocolLiveHero { align-items: flex-start; flex-direction: column; }
+  .protocolPageRail { overflow-x: auto; }
+  .protocolPageRail > span { display: none; }
+  .protocolPageRail button { flex: 0 0 auto; }
   .protocolHealth { width: 100%; }
   .protocolControlStack { width: 100%; min-width: 0; }
+  .protocolActions { flex-wrap: wrap; }
   .protocolMonitorGrid { grid-template-columns: 1fr; }
   .protocolFlow { grid-column: 1; }
   .flowValues { grid-template-columns: 1fr; }
@@ -785,6 +812,47 @@ input, select { height: 46px; font-size: 11px; }
   .legalScreen > header, .legalScreen > article, .legalScreen > footer { padding-inline: 18px; }
   .legalLanguage { margin-inline: 18px; }
   .guideSteps { grid-template-columns: 1fr; }
+}
+
+/* Compact module deck: a separate card system, independent from legacy rows. */
+.overview { grid-template-columns: minmax(0, 1fr); }
+.overview > .metrics, .overview > .protocolSummary { grid-column: 1; }
+.overview > .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.protocolSummary { align-self: start; padding: 12px 14px; }
+.protocolModuleGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.protocolModuleCard { min-width: 0; min-height: 154px; display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid #22343d; border-radius: 8px; background: linear-gradient(145deg, #101e28, #0a151d); }
+.protocolModuleCard.installed { border-color: #2d4852; }
+.protocolModuleCard.agent { border-style: dashed; }
+.protocolModuleCard header { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.protocolModuleCard header .protocol { width: 32px; height: 32px; border-radius: 6px; }
+.protocolModuleCard header > div { min-width: 0; display: grid; gap: 3px; }
+.protocolModuleCard header strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.protocolModuleCard header small { margin: 0; color: #718896; font: 6px var(--font-mono); letter-spacing: .08em; }
+.protocolModuleCard header em { padding: 4px 5px; border: 1px solid #314550; border-radius: 4px; color: #79909c; font: normal 6px var(--font-mono); }
+.protocolModuleCard header em.active { border-color: #31574d; color: var(--green); }
+.protocolModuleCard header em.stopped { border-color: #69532e; color: var(--amber); }
+.protocolModuleCard p { min-height: 28px; display: -webkit-box; overflow: hidden; margin: 0; color: #8da0aa; font: 8px/1.45 var(--ui-font); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.protocolModuleCard dl { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0; }
+.protocolModuleCard dl > div { min-width: 0; display: grid; gap: 3px; }
+.protocolModuleCard dt { color: #526b77; font: 6px var(--font-mono); letter-spacing: .07em; }
+.protocolModuleCard dd { overflow: hidden; margin: 0; color: #afc0c7; font: 8px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.protocolModuleEndpoint { overflow: hidden; margin: -3px 0 0; color: #718896; font: 7px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.protocolModuleCard footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: auto; }
+.protocolModuleCard footer button { min-width: 0; height: 27px; overflow: hidden; padding: 0 6px; border: 1px solid #31505c; border-radius: 5px; background: var(--accent-dim); color: var(--accent); font: 7px var(--ui-font); text-overflow: ellipsis; white-space: nowrap; }
+.protocolModuleCard footer button:only-child { grid-column: 1 / -1; }
+.protocolModuleCard footer button.warning { border-color: #72552a; color: var(--amber); background: #251d12; }
+.protocolModuleCard footer button:disabled { cursor: default; opacity: .48; }
+
+@media (max-width: 1050px) {
+  .overview > .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .protocolModuleGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .overview > .metrics, .protocolModuleGrid { grid-template-columns: minmax(0, 1fr); }
+  .protocolSummary .panelHead { align-items: flex-start; gap: 10px; }
+  .protocolSummary .panelHead .miniButton { flex: 0 0 auto; }
+  .protocolModuleCard { min-height: 148px; }
 }
 
 /* Compact operations layout: useful state fits into a typical 1440×900 viewport. */
@@ -1263,4 +1331,38 @@ input, select { height: 46px; font-size: 11px; }
     font-size: 13px;
     line-height: 1.65;
   }
+}
+
+/* Keep the compact module controls beside the primary server statistics. */
+.overview { grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; }
+.overview > .metrics { grid-column: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.overview > .protocolSummary { grid-column: 2; align-self: start; padding: 10px 12px; }
+.protocolModuleGrid { grid-template-columns: minmax(0, 1fr); gap: 7px; }
+.protocolModuleCard { min-height: 108px; gap: 8px; padding: 10px; }
+.protocolModuleCard header { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.protocolModuleOpen { min-width: 0; display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
+.protocolModuleOpen:disabled { cursor: default; opacity: 1; }
+.protocolModuleOpen:not(:disabled) { cursor: pointer; }
+.protocolModuleOpen .protocol { width: 32px; height: 32px; border-radius: 6px; }
+.protocolModuleOpen > span:last-child { min-width: 0; display: grid; gap: 2px; }
+.protocolModuleOpen strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.protocolModuleOpen small { margin: 0; color: #718896; font: 8px var(--font-mono); letter-spacing: .08em; }
+.protocolModuleCard header em { padding: 4px 6px; font-size: 8px; }
+.protocolModuleCard dl { gap: 5px; }
+.protocolModuleCard dt { font-size: 8px; }
+.protocolModuleCard dd { font-size: 10px; }
+.protocolModuleCard footer { display: flex; align-items: center; justify-content: flex-start; gap: 6px; }
+.protocolModuleCard footer button { width: auto; min-width: 82px; height: 28px; padding: 0 10px; font-size: 9px; }
+.protocolModuleCard footer button:only-child { grid-column: auto; }
+.protocolModuleCard footer button.danger { border-color: #6a3232; background: #241416; color: #ef8d8d; }
+
+@media (max-width: 1050px) {
+  .overview { grid-template-columns: minmax(0, 1fr); }
+  .overview > .metrics, .overview > .protocolSummary { grid-column: 1; }
+  .overview > .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .protocolModuleGrid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 700px) {
+  .overview > .metrics, .protocolModuleGrid { grid-template-columns: minmax(0, 1fr); }
 }

@@ -3,7 +3,7 @@
   "name": "TUIC v5",
   "version": "1.14.0",
   "installable": true,
-  "description": "Быстрый QUIC-прокси TUIC v5 с отдельными учётными данными клиентов",
+  "description": "QUIC/UDP-прокси TUIC v5 с TLS и индивидуальной UUID-аутентификацией",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",
   "installer": "install.sh",

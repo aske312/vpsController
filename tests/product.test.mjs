@@ -1,18 +1,21 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("поставка содержит установщик, образы и клиентскую документацию", async () => {
-  const [bootstrap, manager, readme, awg, hysteria2, tuic, trojan] = await Promise.all([
+  const [bootstrap, manager, readme, awg, hysteria2, tuic, xray, relay] = await Promise.all([
     read("scripts/install-panel.sh"),
     read("scripts/vps-control.sh"),
     read("README.md"),
     read("protocol-images/amneziawg/manifest.json"),
     read("protocol-images/hysteria2/manifest.json"),
     read("protocol-images/tuic/manifest.json"),
-    read("protocol-images/trojan/manifest.json"),
+    read("protocol-images/xray/manifest.json"),
+    read("protocol-images/relay-agent/manifest.json"),
   ]);
   assert.match(bootstrap, /archive\/refs\/heads\/\$\{BRANCH\}\.tar\.gz/);
   assert.match(bootstrap, /DPkg::Lock::Timeout=300/);
@@ -28,8 +31,37 @@ test("поставка содержит установщик, образы и к
   assert.equal(JSON.parse(awg).id, "awg");
   assert.equal(JSON.parse(hysteria2).id, "hysteria2");
   assert.equal(JSON.parse(tuic).id, "tuic");
-  assert.equal(JSON.parse(trojan).id, "trojan");
+  assert.equal(JSON.parse(xray).id, "xray");
+  assert.equal(JSON.parse(relay).id, "relay-agent");
+  assert.equal(JSON.parse(relay).installable, false);
+  await assert.rejects(read("protocol-images/trojan/manifest.json"), { code: "ENOENT" });
   await assert.rejects(read("protocol-images/wireguard/manifest.json"), { code: "ENOENT" });
+});
+
+test("fresh install generates credentials, supports a verified domain and finishes on stable Light", async () => {
+  const [bootstrap, manager, config, caddy, readme] = await Promise.all([
+    read("scripts/install-panel.sh"),
+    read("scripts/vps-control.sh"),
+    read("install.conf"),
+    read("Caddyfile"),
+    read("README.md"),
+  ]);
+  assert.match(manager, /generate_admin_password\(\)[\s\S]*?\/dev\/urandom/);
+  assert.match(manager, /printf 'Пароль: '; env_value ADMIN_PASSWORD/);
+  assert.doesNotMatch(manager, /^ADMIN_PASSWORD=".+"$/m);
+  assert.doesNotMatch(config, /^ADMIN_PASSWORD=".+"$/m);
+  assert.match(bootstrap, /--domain/);
+  assert.match(bootstrap, /VPS_CONTROL_PUBLIC_DOMAIN/);
+  assert.match(manager, /domain_points_to_public_ip/);
+  assert.match(manager, /domain\) change_public_domain/);
+  assert.match(manager, /PANEL_URL="https:\/\/\$\{confirmed_domain\}"/);
+  assert.match(manager, /s\|:\{\\\$HTTP_PORT\}\|\$\{site_address\}\|g/);
+  assert.match(caddy, /^\{\$SITE_ADDRESS\}/);
+  assert.match(manager, /ui_stage "Обновление до стабильной версии"\s+update_app/);
+  assert.match(manager, /update_prebuilt_branch "\$\{PRODUCTION_BRANCH\}" "\$\{PRODUCTION_RELEASE_TAG\}"/);
+  assert.match(readme, /--domain panel\.example\.com/);
+  assert.match(readme, /vps-control domain panel\.example\.com/);
+  assert.doesNotMatch(readme, /sudo/);
 });
 
 test("интерфейс использует фирменные метаданные и знак 312.net", async () => {
@@ -49,6 +81,9 @@ test("интерфейс использует фирменные метадан�
   assert.doesNotMatch(`${layout}\n${page}`, /ChatGPT|Starter Project|Codex/i);
   assert.match(page, /NEXT_PUBLIC_APP_VERSION \|\| "v1\.0\.0"/);
   assert.match(page, /NEXT_PUBLIC_RELEASE_BRANCH \|\| "light"/);
+  for (const countryCode of ["de", "fi", "sg", "kz", "jp", "by", "es", "se", "us"]) {
+    assert.match(page, new RegExp(`normalized === \\"${countryCode}\\"|${countryCode}: \\["`));
+  }
   assert.equal(JSON.parse(packageJson).version, "1.0.0");
 });
 
@@ -169,13 +204,50 @@ test("service settings are staged, saved explicitly and survive background refre
     read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"),
   ]);
   assert.match(api, /"cleanup": \{"enabled": False/);
+  assert.match(api, /"protocol_scan": \{"enabled": False, "cadence": "daily"/);
   assert.match(api, /LOG_RETENTION_DAYS", "30"/);
   assert.match(api, /INSTALL_DIR \/ "scripts" \/ "vps-control\.sh"/);
   assert.match(page, /automationDraft/);
+  assert.match(page, /Проверка версий протоколов/);
+  assert.match(page, /updateAutomation\("protocol_scan", patch\)/);
+  assert.match(manager, /vps-control-auto-protocol-scan\.timer/);
+  assert.match(manager, /protocol-version-check/);
   assert.match(page, /loggingDraft/);
   assert.match(page, /loggingDirty\.current/);
   assert.match(page, /Настройки записи и хранения журналов сохранены/);
   assert.match(manager, /install -m 0755 "\$\{PROJECT_DIR\}\/scripts\/vps-control\.sh" "\$\{COMMAND_PATH\}"/);
+});
+
+test("SUDO VPS-CONTROL actions map to real manager commands", async () => {
+  const [api, page, manager] = await Promise.all([
+    read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"),
+  ]);
+  for (const [action, implementation] of [
+    ["restart", "restart_services"],
+    ["update", "update_app"],
+    ["test-update", "update_test_app"],
+    ["test-rollback", "restore_test_app"],
+    ["network-check", "network_check"],
+    ["integrity-check", "integrity_check"],
+    ["identity", "refresh_server_identity"],
+    ["optimize", "optimize_resources"],
+    ["kernel-update", "update_kernel"],
+    ["reboot", "reboot_server"],
+    ["poweroff", "poweroff_server"],
+  ]) {
+    assert.match(api, new RegExp(`class ApplicationAction[\\s\\S]*?"${action}"`), `API action ${action}`);
+    assert.match(page, new RegExp(`runApplicationAction\\("${action}"\\)`), `UI action ${action}`);
+    assert.match(manager, new RegExp(`${action}\\)[\\s\\S]{0,240}${implementation}`), `manager action ${action}`);
+  }
+  assert.match(page, /title="Обновление ядра"/);
+  assert.doesNotMatch(page, /Обновления Ubuntu|Обновить сервер/);
+  assert.match(manager, /apt-get -o DPkg::Lock::Timeout=300 autoremove --purge -y/);
+  assert.match(manager, /systemd-tmpfiles --clean/);
+  assert.match(manager, /journalctl --vacuum-size=500M/);
+  assert.doesNotMatch(manager.match(/update_kernel\(\) \{([\s\S]*?)\n\}/)?.[1] || "", /--only-upgrade/);
+  assert.match(manager, /dkms autoinstall -k "\$\{kernel\}"/);
+  assert.match(manager, /перезагрузка отменена, активные подключения сохранены/);
+  assert.match(manager, /verify_managed_protocol_units "\$\{active_protocol_units\[@\]\}"/);
 });
 
 test("Light keeps production updates public and gates the test-light channel behind service mode", async () => {
@@ -224,6 +296,7 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(workflow, /version="\$\{latest#light-\}"/);
   assert.match(workflow, /verify:\s+if: github\.ref_name == 'light'/);
   assert.match(workflow, /needs\.verify\.result == 'success' \|\| github\.ref_name == 'test-light'/);
+  assert.match(workflow, /release_flags=\(--prerelease\)/);
   assert.match(workflow, /publish:\s+needs: build\s+if: always\(\) && needs\.build\.result == 'success'/);
   assert.match(ciWorkflow, /push:\s+branches: \[light\]/);
   assert.match(ciWorkflow, /pull_request:\s+branches: \[light\]/);
@@ -274,7 +347,7 @@ test("authentication and VPN controls preserve consistent UI states", async () =
   assert.match(api, /payload\.new_password != payload\.confirm_password/);
   assert.match(api, /categories < 3/);
   assert.match(page, /runApplicationAction\("identity"\)/);
-  assert.match(api, /"installed": bool\(service and run\("systemctl", "show", service, "--property=LoadState", "--value"\) == "loaded"\)/);
+  assert.match(api, /installed = bool\(service and run\("systemctl", "show", service, "--property=LoadState", "--value"\) == "loaded"\)/);
   assert.match(api, /if not available_interfaces:/);
   assert.doesNotMatch(api, /for interface in \(WG_INTERFACE, AWG_INTERFACE\):\s+if not Path\(f"\/sys\/class\/net/);
   assert.match(api, /"web": \{"name": "Web 312\.net"/);
@@ -315,13 +388,15 @@ test("web and gateway run as systemd services without Docker", async () => {
 });
 
 test("Light protocol modules install and uninstall independently", async () => {
-  const [api, manager, awgInstall, awgRemove, hysteriaInstall, hysteriaRemove, tuicInstall, tuicRemove, trojanInstall, trojanRemove] = await Promise.all([
+  const [api, manager, page, awgInstall, awgRemove, hysteriaInstall, hysteriaRemove, tuicInstall, tuicRemove, xrayInstall, xrayRemove, relayManifest] = await Promise.all([
     read("api/main.py"), read("scripts/vps-control.sh"),
+    read("app/page.tsx"),
     read("protocol-images/amneziawg/install.sh"),
     read("protocol-images/amneziawg/uninstall.sh"),
     read("protocol-images/hysteria2/install.sh"), read("protocol-images/hysteria2/uninstall.sh"),
     read("protocol-images/tuic/install.sh"), read("protocol-images/tuic/uninstall.sh"),
-    read("protocol-images/trojan/install.sh"), read("protocol-images/trojan/uninstall.sh"),
+    read("protocol-images/xray/install.sh"), read("protocol-images/xray/uninstall.sh"),
+    read("protocol-images/relay-agent/manifest.json"),
   ]);
   const baseDependencies = manager.match(/Установка системных зависимостей" apt-get install -y ([^\n]+)/)?.[1] || "";
   assert.doesNotMatch(baseDependencies, /wireguard-tools/);
@@ -329,22 +404,48 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(awgRemove, /route delete allow in on "\$\{AWG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{AWG_SUBNET\}"/);
   assert.match(awgRemove, /ufw status \| grep -Fq "\$\{AWG_SUBNET\} on \$\{AWG_INTERFACE\}"/);
   assert.match(awgRemove, /99-vps-control-amneziawg\.conf/);
+  assert.equal(JSON.parse(await read("protocol-images/amneziawg/manifest.json")).requires_kernel_headers, true);
   assert.match(api, /protocol-install/);
+  assert.match(api, /protocol-images\/versions\/check/);
+  assert.match(api, /protocol-images\/\{image_id\}\/version\/check/);
+  assert.match(api, /PROTOCOL_VERSIONS_FILE/);
+  assert.match(api, /protocol-update/);
+  assert.match(manager, /set_protocol_client_update_state/);
+  assert.match(manager, /"paused" "Обновление протокола запущено/);
+  assert.match(manager, /"incompatible" "Новая версия не прошла проверку совместимости/);
+  assert.match(page, /checkProtocolVersion\(image\)/);
+  assert.match(page, /Обновить до/);
   assert.match(manager, /prepare_package_manager\(\)/);
   assert.match(manager, /\n  prepare_package_manager\r?\n/);
   assert.match(manager, /dpkg --audit/);
   assert.match(manager, /DPkg::Lock::Timeout=300 -f install -y/);
   assert.match(awgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(awgInstall, /if ! command -v awg.*command -v awg-quick.*modinfo amneziawg/s);
-  for (const installer of [hysteriaInstall, tuicInstall, trojanInstall]) {
+  for (const installer of [hysteriaInstall, tuicInstall, xrayInstall]) {
     assert.match(installer, /DPkg::Lock::Timeout=300/);
     assert.match(installer, /sha256sum -c -/);
     assert.match(installer, /IPAccounting=true/);
   }
-  for (const uninstaller of [hysteriaRemove, tuicRemove, trojanRemove]) {
+  for (const uninstaller of [hysteriaRemove, tuicRemove, xrayRemove]) {
     assert.match(uninstaller, /PRESERVE_COMPONENT_DATA/);
   }
   await assert.rejects(read("protocol-images/wireguard/install.sh"), { code: "ENOENT" });
+  await assert.rejects(read("protocol-images/trojan/install.sh"), { code: "ENOENT" });
+  assert.match(xrayInstall, /'protocol': 'vless'/);
+  assert.match(xrayInstall, /'network': 'xhttp'/);
+  assert.match(xrayInstall, /'security': 'reality'/);
+  assert.match(xrayInstall, /\/\^\(Password\|PublicKey\)\//);
+  assert.match(api, /Unable to create Xray connection/);
+  assert.doesNotMatch(api + page, /\bTrojan\b|"trojan"/);
+  assert.equal(JSON.parse(relayManifest).kind, "agent");
+  assert.match(page, /Недоступно/);
+  assert.match(page, /protocolImages\.map/);
+  assert.match(page, /image\.available_version \|\| "НЕ ПРОВЕРЕНО"/);
+  assert.match(page, /image\.update_available\s*\?/);
+  assert.match(page, />Удалить<\/button>/);
+  assert.match(page, /checkingProtocolVersion === image\.id \? "Проверка…"/);
+  assert.match(page, /className="removeProtocolButton".*removeProtocol\(activeProtocolImage\).*?>Удалить<\/button>/s);
+  assert.match(page, /disabled=\{busy \|\| !activeProtocolImage\.update_available\}/);
   assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 1/);
 });
 
@@ -352,7 +453,7 @@ test("full uninstall removes managed protocol state without recreating applicati
   const manager = await read("scripts/vps-control.sh");
   const uninstall = manager.slice(manager.indexOf("uninstall_app()"), manager.indexOf("restart_services()"));
   assert.match(uninstall, /protocol-images\/amneziawg\/uninstall\.sh/);
-  assert.match(uninstall, /for protocol_id in hysteria2 tuic trojan/);
+  assert.match(uninstall, /for protocol_id in hysteria2 tuic xray/);
   assert.match(uninstall, /PRESERVE_COMPONENT_DATA=0/);
   assert.match(uninstall, /\/usr\/local\/sbin\/vpn-monitor-sample/);
   assert.match(uninstall, /caddy\.service/);
@@ -365,6 +466,33 @@ test("successful readiness retries do not print transient HTTP errors", async ()
   const retries = [...manager.matchAll(/curl --fail --silent[^\n]+--retry (?:6|10)[^\n]+/g)].map((match) => match[0]);
   assert.ok(retries.length >= 5);
   for (const command of retries) assert.doesNotMatch(command, /--show-error/);
+  const verify = manager.slice(manager.indexOf("verify_app()"), manager.indexOf("network_check()"));
+  assert.match(verify, /--retry 10 --retry-connrefused --retry-delay 1/);
+});
+
+test("геолокация требует согласия независимых источников", async () => {
+  const [manager, resolver, config] = await Promise.all([
+    read("scripts/vps-control.sh"),
+    read("scripts/resolve-geolocation.py"),
+    read("install.conf"),
+  ]);
+  assert.match(manager, /resolve-geolocation\.py/);
+  assert.match(manager, /GEOLOCATION_SENARY_URL/);
+  assert.match(resolver, /country_quorum = max\(2,/);
+  assert.match(resolver, /if votes < country_quorum:/);
+  assert.match(resolver, /"finland": "FI"/);
+  assert.match(resolver, /"germany": "DE"/);
+  assert.match(config, /GEOLOCATION_SENARY_URL="https:\/\/ipinfo\.io"/);
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const python = process.platform === "win32" ? "python" : "python3";
+  const result = spawnSync(python, [
+    `${root}scripts/resolve-geolocation.py`,
+    `${root}tests/fixtures/geo-singapore.json`,
+    `${root}tests/fixtures/geo-finland-ipwho.json`,
+    `${root}tests/fixtures/geo-finland-ipinfo.json`,
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split(/\r?\n/), ["85.209.155.229", "Helsinki", "Finland", "FI", "2/3"]);
 });
 
 test("the interface uses one fixed visual design without personalization", async () => {
@@ -377,9 +505,15 @@ test("the interface uses one fixed visual design without personalization", async
   assert.doesNotMatch(css, /personalization|data-(?:style|palette|density|theme)|task-manager/i);
   assert.match(page, /<main className="shell gateShell">/);
   assert.match(page, /<LightNavigation/);
+  assert.match(page, /className="gateMasthead"/);
+  assert.match(page, /const nodeHasError = application\?\.api\.active === false/);
+  assert.doesNotMatch(page, /const nodeHasError =[^;]+action\?\.state === "failed"/);
   assert.match(navigation, /className="gateSidebar"/);
   assert.match(navigation, /label="WORKSPACE"/);
   assert.match(navigation, /label="TUNNELS"/);
+  assert.match(navigation, /protocols\.length === 1/);
+  assert.match(navigation, /label="Протоколы" badge=\{String\(protocols\.length\)\}/);
+  assert.match(page, /installedProtocols\.length > 1.*className="protocolPageRail"/s);
   assert.match(navigation, /label="SYSTEM"/);
   assert.match(layout, /<NotificationProvider>\{children\}<\/NotificationProvider>/);
   assert.match(page, /notifications\.finishOperation\(input\)/);
@@ -424,7 +558,7 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(builder, /RELEASE_BRANCH="\$\{RELEASE_BRANCH:-/);
   assert.match(builder, /branch=%s/);
   assert.match(manager, /NEXT_PUBLIC_RELEASE_BRANCH="\$\{RELEASE_BRANCH\}"/);
-  assert.match(readme, /sudo vps-control update/);
+  assert.match(readme, /vps-control update/);
   assert.match(manager, /TimeoutStopSec=15/);
   assert.match(manager, /KillMode=mixed/);
   assert.match(manager, /mv -- "\$\{INSTALL_DIR\}\/venv" "\$\{rollback\}\/venv"/);
