@@ -1777,9 +1777,33 @@ function SecurityActionRow({ ok, title, text, onAction, actionLabel = "Испр�
   return <div><span className={ok ? "check" : "warning"}>{ok ? "✓" : "!"}</span><p><strong>{title}</strong><small>{text}</small></p>{ok && !alwaysAction ? <em className="onlinePill">Готово</em> : <button className="securityFixButton" onClick={onAction}>{actionLabel}</button>}</div>;
 }
 function CountryFlag({ code, label }: { code: string; label: string }) {
-  if (!['nl', 'lv', 'ru'].includes(code)) return <span className="gateCountryFlag unknown" role="img" aria-label={label}>◎</span>;
-  const stripes = code === "nl" ? ["#ae1c28", "#ffffff", "#21468b"] : code === "lv" ? ["#9e3039", "#ffffff", "#9e3039"] : ["#ffffff", "#1c57a7", "#d52b1e"];
-  return <span className="gateCountryFlag" role="img" aria-label={label}><svg viewBox="0 0 27 18" aria-hidden="true"><rect width="27" height="18" rx="2" fill={stripes[0]} />{code === "lv" ? <rect y="8" width="27" height="2" fill={stripes[1]} /> : <><rect y="6" width="27" height="6" fill={stripes[1]} /><rect y="12" width="27" height="6" fill={stripes[2]} /></>}</svg></span>;
+  const normalized = code.trim().toLowerCase();
+  const horizontal: Record<string, [string, string, string]> = {
+    de: ["#000000", "#dd0000", "#ffce00"], es: ["#aa151b", "#f1bf00", "#aa151b"],
+    lv: ["#9e3039", "#ffffff", "#9e3039"], nl: ["#ae1c28", "#ffffff", "#21468b"],
+    ru: ["#ffffff", "#1c57a7", "#d52b1e"],
+  };
+  let flag: React.ReactNode = null;
+  if (horizontal[normalized]) {
+    const stripes = horizontal[normalized];
+    flag = <><rect width="27" height="18" fill={stripes[0]} />{normalized === "lv" ? <rect y="8" width="27" height="2" fill={stripes[1]} /> : normalized === "es" ? <rect y="4.5" width="27" height="9" fill={stripes[1]} /> : <><rect y="6" width="27" height="6" fill={stripes[1]} /><rect y="12" width="27" height="6" fill={stripes[2]} /></>}</>;
+  } else if (normalized === "fi" || normalized === "se") {
+    const background = normalized === "fi" ? "#ffffff" : "#006aa7";
+    const cross = normalized === "fi" ? "#003580" : "#fecc00";
+    flag = <><rect width="27" height="18" fill={background} /><rect x="8" width="3" height="18" fill={cross} /><rect y="7.5" width="27" height="3" fill={cross} /></>;
+  } else if (normalized === "jp") {
+    flag = <><rect width="27" height="18" fill="#ffffff" /><circle cx="13.5" cy="9" r="4.5" fill="#bc002d" /></>;
+  } else if (normalized === "sg") {
+    flag = <><rect width="27" height="9" fill="#ef3340" /><rect y="9" width="27" height="9" fill="#ffffff" /><circle cx="7" cy="4.7" r="3.1" fill="#ffffff" /><circle cx="8.2" cy="4.7" r="2.6" fill="#ef3340" />{[[10.6, 2.2], [12, 4], [11.5, 6.2], [9.5, 6.8], [9.2, 3.4]].map(([x, y]) => <circle key={`${x}-${y}`} cx={x} cy={y} r=".45" fill="#ffffff" />)}</>;
+  } else if (normalized === "kz") {
+    flag = <><rect width="27" height="18" fill="#00afca" /><path d="M3 1v16M5 1v16" stroke="#f6c600" strokeWidth=".7" strokeDasharray="1 1" /><circle cx="16" cy="6.5" r="2.2" fill="#f6c600" /><path d="M10 11.5q6 4 12 0-6 2-12 0Z" fill="#f6c600" /></>;
+  } else if (normalized === "by") {
+    flag = <><rect width="27" height="12" fill="#ce1720" /><rect y="12" width="27" height="6" fill="#007c30" /><rect width="4" height="18" fill="#ffffff" /><path d="M.5 1.5 3.5 4.5.5 7.5l3 3-3 3 3 3" stroke="#ce1720" strokeWidth="1" fill="none" /></>;
+  } else if (normalized === "us") {
+    flag = <><rect width="27" height="18" fill="#ffffff" />{[0, 4, 8, 12, 16].map((y) => <rect key={y} y={y} width="27" height="2" fill="#b22234" />)}<rect width="12" height="9.8" fill="#3c3b6e" />{[[2, 2], [5, 2], [8, 2], [3.5, 5], [6.5, 5], [9.5, 5], [2, 8], [5, 8], [8, 8]].map(([x, y]) => <circle key={`${x}-${y}`} cx={x} cy={y} r=".45" fill="#ffffff" />)}</>;
+  }
+  if (!flag) return <span className="gateCountryFlag unknown" role="img" aria-label={label}>◎</span>;
+  return <span className="gateCountryFlag" role="img" aria-label={label}><svg viewBox="0 0 27 18" aria-hidden="true"><g clipPath="url(#country-flag-clip)">{flag}</g><defs><clipPath id="country-flag-clip"><rect width="27" height="18" rx="2" /></clipPath></defs></svg></span>;
 }
 function VersionFooter() {
   return <LegalFooter version={appVersion} branch={buildBranch} commit={buildCommit} />;

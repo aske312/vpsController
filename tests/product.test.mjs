@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -49,6 +51,9 @@ test("интерфейс использует фирменные метадан�
   assert.doesNotMatch(`${layout}\n${page}`, /ChatGPT|Starter Project|Codex/i);
   assert.match(page, /NEXT_PUBLIC_APP_VERSION \|\| "v1\.0\.0"/);
   assert.match(page, /NEXT_PUBLIC_RELEASE_BRANCH \|\| "light"/);
+  for (const countryCode of ["de", "fi", "sg", "kz", "jp", "by", "es", "se", "us"]) {
+    assert.match(page, new RegExp(`normalized === \\"${countryCode}\\"|${countryCode}: \\["`));
+  }
   assert.equal(JSON.parse(packageJson).version, "1.0.0");
 });
 
@@ -367,6 +372,31 @@ test("successful readiness retries do not print transient HTTP errors", async ()
   for (const command of retries) assert.doesNotMatch(command, /--show-error/);
   const verify = manager.slice(manager.indexOf("verify_app()"), manager.indexOf("network_check()"));
   assert.match(verify, /--retry 10 --retry-connrefused --retry-delay 1/);
+});
+
+test("геолокация требует согласия независимых источников", async () => {
+  const [manager, resolver, config] = await Promise.all([
+    read("scripts/vps-control.sh"),
+    read("scripts/resolve-geolocation.py"),
+    read("install.conf"),
+  ]);
+  assert.match(manager, /resolve-geolocation\.py/);
+  assert.match(manager, /GEOLOCATION_SENARY_URL/);
+  assert.match(resolver, /country_quorum = max\(2,/);
+  assert.match(resolver, /if votes < country_quorum:/);
+  assert.match(resolver, /"finland": "FI"/);
+  assert.match(resolver, /"germany": "DE"/);
+  assert.match(config, /GEOLOCATION_SENARY_URL="https:\/\/ipinfo\.io"/);
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const python = process.platform === "win32" ? "python" : "python3";
+  const result = spawnSync(python, [
+    `${root}scripts/resolve-geolocation.py`,
+    `${root}tests/fixtures/geo-singapore.json`,
+    `${root}tests/fixtures/geo-finland-ipwho.json`,
+    `${root}tests/fixtures/geo-finland-ipinfo.json`,
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split(/\r?\n/), ["85.209.155.229", "Helsinki", "Finland", "FI", "2/3"]);
 });
 
 test("the interface uses one fixed visual design without personalization", async () => {

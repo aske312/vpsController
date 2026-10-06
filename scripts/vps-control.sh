@@ -45,7 +45,12 @@ AWG_H3="1000000000"
 AWG_H4="1400000000"
 ENABLE_UFW="yes"
 GEOLOCATION_PRIMARY_URL="https://api.2ip.io"
-GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code"
+GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code,latitude,longitude"
+GEOLOCATION_TERTIARY_URL="https://ip.guide"
+GEOLOCATION_QUATERNARY_URL="https://ipapi.co"
+GEOLOCATION_QUINARY_URL="https://free.freeipapi.com/api/json"
+GEOLOCATION_SENARY_URL="https://ipinfo.io"
+PUBLIC_IP_DISCOVERY_URL="https://api64.ipify.org"
 UPDATE_TEMP_DIR=""
 SSH_TEMP_STARTED="no"
 SSH_TEMP_RULE="no"
@@ -306,6 +311,11 @@ load_install_config() {
     # shellcheck source=/dev/null
     source "${config}"
   fi
+  # Обновления сохраняют старый /etc/vps-control-install.conf. Дополняем
+  # прежний URL координатами в памяти, не перезаписывая настройки владельца.
+  if [[ "${GEOLOCATION_FALLBACK_URL}" == "https://ipwho.is/?fields=success,ip,city,country,country_code" ]]; then
+    GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code,latitude,longitude"
+  fi
   [[ "${ACCESS_MODE}" == "external" || "${ACCESS_MODE}" == "local" || "${ACCESS_MODE}" == "vpn" ]] \
     || die "ACCESS_MODE должен быть external, local или vpn."
   [[ "${HTTP_PORT}" =~ ^[0-9]+$ ]] || die "HTTP_PORT должен быть числом."
@@ -411,27 +421,53 @@ set_config_value() {
 }
 
 refresh_server_identity() {
-  local geo_file="${DATA_DIR}/tmp/geolocation.json"
-  local public_ip city country country_code override_city override_country override_country_code
+  local geo_file="${DATA_DIR}/tmp/geolocation"
+  local public_ip city country country_code agreement override_city override_country override_country_code
   info "Определение публичного IP и локации"
   install -d -m 0750 "${DATA_DIR}/tmp"
-  if curl -4 --fail --silent --show-error --max-time 12 \
-    "${GEOLOCATION_PRIMARY_URL}" >"${geo_file}" || curl -4 --fail --silent --show-error --max-time 12 \
-    "${GEOLOCATION_FALLBACK_URL}" >"${geo_file}"; then
-    readarray -t geo < <(python3 - "${geo_file}" <<'PY'
+  rm -f -- "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" \
+    "${geo_file}.quaternary.json" "${geo_file}.quinary.json" "${geo_file}.senary.json" "${geo_file}.result"
+  curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 \
+    "${GEOLOCATION_PRIMARY_URL}" >"${geo_file}.primary.json" || rm -f -- "${geo_file}.primary.json"
+  curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 \
+    "${GEOLOCATION_FALLBACK_URL}" >"${geo_file}.fallback.json" || rm -f -- "${geo_file}.fallback.json"
+  public_ip="$(python3 - "${geo_file}.primary.json" "${geo_file}.fallback.json" <<'PY'
 import json
 import sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-if data.get("success") is False or not data.get("ip"):
-    raise SystemExit(1)
-for value in (data.get("ip"), data.get("city"), data.get("country"), data.get("country_code") or data.get("code")):
-    print(str(value or ""))
+for path in sys.argv[1:]:
+    try:
+        data = json.load(open(path, encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        continue
+    value = str(data.get("ip") or data.get("ipAddress") or "")
+    if value:
+        print(value)
+        break
 PY
-)
+  )"
+  if [[ ! "${public_ip}" =~ ^[0-9a-fA-F:.]+$ ]]; then
+    public_ip="$(curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 \
+      "${PUBLIC_IP_DISCOVERY_URL}" 2>/dev/null || true)"
+  fi
+  if [[ -n "${public_ip}" ]]; then
+    curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 \
+      "${GEOLOCATION_TERTIARY_URL}/${public_ip}" >"${geo_file}.tertiary.json" || rm -f -- "${geo_file}.tertiary.json"
+    curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 -H "Accept: application/json" \
+      "${GEOLOCATION_QUATERNARY_URL}/${public_ip}/json/" >"${geo_file}.quaternary.json" || rm -f -- "${geo_file}.quaternary.json"
+    curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 -H "Accept: application/json" \
+      "${GEOLOCATION_QUINARY_URL}/${public_ip}" >"${geo_file}.quinary.json" || rm -f -- "${geo_file}.quinary.json"
+    curl -4 --fail --silent --show-error --retry 1 --retry-all-errors --max-time 12 -H "Accept: application/json" \
+      "${GEOLOCATION_SENARY_URL}/${public_ip}/json" >"${geo_file}.senary.json" || rm -f -- "${geo_file}.senary.json"
+  fi
+  if python3 "${PROJECT_DIR}/scripts/resolve-geolocation.py" \
+    "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" \
+    "${geo_file}.quaternary.json" "${geo_file}.quinary.json" "${geo_file}.senary.json" >"${geo_file}.result"; then
+    readarray -t geo <"${geo_file}.result"
     public_ip="${geo[0]:-}"
     city="${geo[1]:-Unknown}"
     country="${geo[2]:-Unknown}"
     country_code="${geo[3]:-}"
+    agreement="${geo[4]:-}"
     override_city="$(env_value SERVER_CITY_OVERRIDE)"
     override_country="$(env_value SERVER_COUNTRY_OVERRIDE)"
     override_country_code="$(env_value SERVER_COUNTRY_CODE_OVERRIDE)"
@@ -447,13 +483,14 @@ PY
       if [[ -n "${override_city}${override_country}${override_country_code}" ]]; then
         ok "применена подтверждённая локация: ${city}, ${country} (${public_ip})."
       else
-        ok "определена приблизительная локация: ${city}, ${country} (${public_ip})."
+        ok "локация подтверждена независимыми источниками (${agreement}): ${city}, ${country} (${public_ip})."
       fi
     fi
   else
-    warn "геолокация недоступна; сохранены предыдущие значения."
+    warn "геолокация недоступна или источники не согласованы; сохранены предыдущие значения."
   fi
-  rm -f "${geo_file}"
+  rm -f -- "${geo_file}.primary.json" "${geo_file}.fallback.json" "${geo_file}.tertiary.json" \
+    "${geo_file}.quaternary.json" "${geo_file}.quinary.json" "${geo_file}.senary.json" "${geo_file}.result"
   public_ip="$(env_value PUBLIC_IP)"
   [[ -n "${public_ip}" ]] || die "не удалось определить PUBLIC_IP; задайте его в ${ENV_FILE}."
   configure_access
