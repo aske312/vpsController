@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { ProtocolIcon } from "../app/protocol-icon";
 
-type ProtocolImage = { id: string; name: string; installed: boolean };
+type ProtocolImage = { id: string; name: string; installed: boolean; kind?: "tunnel" | "agent" };
 type ServerInfo = { city?: string; country?: string; public_ip?: string };
 
 type Props = {
@@ -17,7 +17,7 @@ type Props = {
 };
 
 export function LightNavigation({ activeTab, protocolImages, clientsCount, nodeState, nodeStateLabel, server, onNavigate }: Props) {
-  const protocols = protocolImages.filter((item) => item.installed);
+  const protocols = protocolImages.filter((item) => item.installed && item.kind !== "agent");
   return <aside className="gateSidebar">
     <button className="gateBrand" type="button" onClick={() => onNavigate("overview")} aria-label="Открыть обзор">
       <span className="gateBrandMark"><BrandGlyph /></span>

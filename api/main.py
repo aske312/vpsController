@@ -96,9 +96,9 @@ HYSTERIA2_USERS = HYSTERIA2_DIR / "users.json"
 TUIC_DIR = Path("/etc/vps-control/tuic")
 TUIC_SETTINGS = TUIC_DIR / "settings.json"
 TUIC_CONFIG = TUIC_DIR / "config.json"
-TROJAN_DIR = Path("/etc/vps-control/trojan")
-TROJAN_SETTINGS = TROJAN_DIR / "settings.json"
-TROJAN_CONFIG = TROJAN_DIR / "config.json"
+XRAY_DIR = Path("/etc/vps-control/xray")
+XRAY_SETTINGS = XRAY_DIR / "settings.json"
+XRAY_CONFIG = XRAY_DIR / "config.json"
 MONITOR_DIR = DATA_DIR / "monitor"
 updates_refresh_lock = threading.Lock()
 app_version_refresh_lock = threading.Lock()
@@ -108,7 +108,8 @@ resource_check_cache: dict[str, dict] = {}
 network_diagnostic_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
 client_mutation_lock = threading.Lock()
-DIRECT_PROTOCOLS = ("hysteria2", "tuic", "trojan")
+DIRECT_PROTOCOLS = ("hysteria2", "tuic", "xray")
+MODULE_ORDER = {module_id: index for index, module_id in enumerate(("awg", "tuic", "hysteria2", "xray", "relay-agent"))}
 RESOURCE_TARGETS = (
     ("Google", "https://www.google.com/generate_204"),
     ("YouTube", "https://www.youtube.com/"),
@@ -657,9 +658,9 @@ def direct_protocol_diagnostics(protocol: str) -> dict:
     unit, port, transport = {
         "hysteria2": ("vps-control-hysteria2.service", 8443, "udp"),
         "tuic": ("vps-control-tuic.service", 8444, "udp"),
-        "trojan": ("vps-control-trojan.service", 8445, "tcp"),
+        "xray": ("vps-control-xray.service", 8445, "tcp"),
     }[protocol]
-    settings_path = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "trojan": TROJAN_SETTINGS}[protocol]
+    settings_path = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "xray": XRAY_SETTINGS}[protocol]
     try:
         port = int(json.loads(settings_path.read_text(encoding="utf-8")).get("port", port))
     except (OSError, ValueError, json.JSONDecodeError):
@@ -842,14 +843,14 @@ def overview(_: None = Depends(require_token)) -> dict:
     resources = system_resources()
     direct_protocols = {}
     for protocol in DIRECT_PROTOCOLS:
-        settings_path = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "trojan": TROJAN_SETTINGS}[protocol]
-        default_port = {"hysteria2": 8443, "tuic": 8444, "trojan": 8445}[protocol]
+        settings_path = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "xray": XRAY_SETTINGS}[protocol]
+        default_port = {"hysteria2": 8443, "tuic": 8444, "xray": 8445}[protocol]
         try:
             settings = json.loads(settings_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             settings = {}
         direct_protocols[protocol] = {
-            "interface": "QUIC/UDP" if protocol != "trojan" else "TCP/TLS",
+            "interface": "QUIC/UDP" if protocol != "xray" else "XHTTP/TCP",
             "port": int(settings.get("port", default_port)),
             "active": run("systemctl", "is-active", f"vps-control-{protocol}.service") == "active",
         }
@@ -1190,9 +1191,10 @@ def protocol_image_manifests() -> dict[str, dict]:
         image_id = str(manifest.get("id", ""))
         installer = str(manifest.get("installer", ""))
         uninstaller = str(manifest.get("uninstaller", ""))
+        installable = bool(manifest.get("installable", True))
         if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", image_id):
             continue
-        if not re.fullmatch(r"[A-Za-z0-9._-]+", installer) or not (manifest_path.parent / installer).is_file():
+        if installable and (not re.fullmatch(r"[A-Za-z0-9._-]+", installer) or not (manifest_path.parent / installer).is_file()):
             continue
         if uninstaller and (
             not re.fullmatch(r"[A-Za-z0-9._-]+", uninstaller)
@@ -1210,6 +1212,9 @@ def protocol_image_manifests() -> dict[str, dict]:
             "description": str(manifest.get("description", "")),
             "category": str(manifest.get("category", "network")),
             "category_name": str(manifest.get("category_name", "Сетевые модули")),
+            "kind": str(manifest.get("kind", "tunnel")),
+            "status": str(manifest.get("status", "available")),
+            "installable": installable,
             "interface": interface,
             "service": service,
             # Installed and running are different states. A stopped tunnel must
@@ -1222,13 +1227,18 @@ def protocol_image_manifests() -> dict[str, dict]:
 
 @app.get("/api/protocol-images")
 def protocol_images(_: None = Depends(require_token)) -> dict:
-    return {"items": list(protocol_image_manifests().values())}
+    items = list(protocol_image_manifests().values())
+    items.sort(key=lambda item: (MODULE_ORDER.get(item["id"], 999), item["name"].casefold()))
+    return {"items": items}
 
 
 @app.post("/api/protocol-images/{image_id}/install")
 def install_protocol_image(image_id: str, _: None = Depends(require_token)) -> dict:
-    if image_id not in protocol_image_manifests():
+    image = protocol_image_manifests().get(image_id)
+    if not image:
         raise HTTPException(status_code=404, detail="Protocol image not found")
+    if not image.get("installable"):
+        raise HTTPException(status_code=409, detail="Module is not available for installation yet")
     if ACTION_FILE.exists():
         try:
             previous_unit = json.loads(ACTION_FILE.read_text(encoding="utf-8")).get("unit", "")
@@ -1460,7 +1470,7 @@ def managed_services() -> dict[str, dict]:
         "awg": {"name": "AmneziaWG", "unit": f"awg-quick@{AWG_INTERFACE}.service", "controls": ["start", "stop", "restart"]},
         "hysteria2": {"name": "Hysteria2", "unit": "vps-control-hysteria2.service", "controls": ["start", "stop", "restart"]},
         "tuic": {"name": "TUIC v5", "unit": "vps-control-tuic.service", "controls": ["start", "stop", "restart"]},
-        "trojan": {"name": "Trojan", "unit": "vps-control-trojan.service", "controls": ["start", "stop", "restart"]},
+        "xray": {"name": "Xray", "unit": "vps-control-xray.service", "controls": ["start", "stop", "restart"]},
         "monitor": {"name": "Мониторинг VPN", "unit": "vpn-monitor.timer", "controls": ["start", "stop", "restart"]},
         "fail2ban": {"name": "Fail2ban", "unit": "fail2ban.service", "controls": ["start", "stop", "restart"]},
         "updates": {
@@ -1962,7 +1972,7 @@ def clients(_: None = Depends(require_token)) -> dict:
 
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
-    protocol: Literal["wg", "awg", "hysteria2", "tuic", "trojan"]
+    protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"]
 
 
 def key(command: str) -> str:
@@ -2015,11 +2025,11 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 return {"id": client_id, "filename": f"{safe_name}.yaml", "config": config}
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 raise HTTPException(status_code=500, detail="Unable to create Hysteria2 connection") from exc
-    if payload.protocol in {"tuic", "trojan"}:
-        config_path = TUIC_CONFIG if payload.protocol == "tuic" else TROJAN_CONFIG
-        settings_path = TUIC_SETTINGS if payload.protocol == "tuic" else TROJAN_SETTINGS
-        binary = f"/usr/local/lib/vps-control-{payload.protocol}/sing-box"
-        unit = f"vps-control-{payload.protocol}.service"
+    if payload.protocol == "tuic":
+        config_path = TUIC_CONFIG
+        settings_path = TUIC_SETTINGS
+        binary = "/usr/local/lib/vps-control-tuic/sing-box"
+        unit = "vps-control-tuic.service"
         if not config_path.exists() or run("systemctl", "is-enabled", unit) != "enabled":
             raise HTTPException(status_code=409, detail=f"{payload.protocol} protocol is not installed")
         with client_mutation_lock:
@@ -2027,21 +2037,74 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             try:
                 server = json.loads(original); inbound = next(row for row in server.get("inbounds", []) if row.get("type") == payload.protocol)
                 password = secrets.token_urlsafe(32); user_uuid = str(uuid.uuid4())
-                user = {"name": client_id, "password": password, **({"uuid": user_uuid} if payload.protocol == "tuic" else {})}
+                user = {"name": client_id, "password": password, "uuid": user_uuid}
                 inbound.setdefault("users", []).append(user); temporary.write_text(json.dumps(server, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(temporary, 0o600)
                 result = subprocess.run([binary, "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
                 if result.returncode: raise RuntimeError(result.stderr.strip() or "sing-box rejected configuration")
                 temporary.replace(config_path); run("systemctl", "restart", unit, timeout=20, check=True)
                 settings = json.loads(settings_path.read_text(encoding="utf-8")); endpoint = PUBLIC_IP; certificate = (config_path.parent / "server.crt").read_text(encoding="utf-8")
-                outbound = {"type": payload.protocol, "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444 if payload.protocol == "tuic" else 8445)), "password": password,
+                outbound = {"type": payload.protocol, "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "password": password,
                             "tls": {"enabled": True, "server_name": certificate_server_name(config_path.parent / "server.crt"), "certificate": certificate}}
-                if payload.protocol == "tuic": outbound.update({"uuid": user_uuid, "congestion_control": str(settings.get("congestion_control", "bbr")), "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": str(settings.get("heartbeat", "10s"))})
+                outbound.update({"uuid": user_uuid, "congestion_control": str(settings.get("congestion_control", "bbr")), "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": str(settings.get("heartbeat", "10s"))})
                 client = {"log": {"level": "warn"}, "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080}], "outbounds": [outbound], "route": {"final": "connection-out"}}
-                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid if payload.protocol == "tuic" else client_id, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
+                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 return {"id": client_id, "filename": f"{safe_name}.json", "config": json.dumps(client, ensure_ascii=False, indent=2)}
             except Exception as exc:
                 config_path.write_bytes(original); os.chmod(config_path, 0o600); run("systemctl", "restart", unit, timeout=20)
                 raise HTTPException(status_code=500, detail=f"Unable to create {payload.protocol} connection") from exc
+            finally:
+                temporary.unlink(missing_ok=True)
+    if payload.protocol == "xray":
+        binary = "/usr/local/lib/vps-control-xray/xray"
+        unit = "vps-control-xray.service"
+        if not XRAY_CONFIG.exists() or not Path(binary).exists() or run("systemctl", "is-enabled", unit) != "enabled":
+            raise HTTPException(status_code=409, detail="Xray protocol is not installed")
+        with client_mutation_lock:
+            original = XRAY_CONFIG.read_bytes()
+            temporary = XRAY_CONFIG.with_suffix(".tmp.json")
+            try:
+                server = json.loads(original)
+                inbound = next(row for row in server.get("inbounds", []) if row.get("protocol") == "vless")
+                user_uuid = str(uuid.uuid4())
+                inbound.setdefault("settings", {}).setdefault("clients", []).append({"id": user_uuid, "email": f"{client_id}@312.net"})
+                temporary.write_text(json.dumps(server, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(temporary, 0o600)
+                result = subprocess.run([binary, "run", "-test", "-config", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
+                if result.returncode:
+                    raise RuntimeError(result.stderr.strip() or "Xray rejected configuration")
+                temporary.replace(XRAY_CONFIG)
+                run("systemctl", "restart", unit, timeout=20, check=True)
+                settings = json.loads(XRAY_SETTINGS.read_text(encoding="utf-8"))
+                endpoint = PUBLIC_IP
+                path = str(settings.get("path", "/xhttp"))
+                client = {
+                    "log": {"loglevel": "warning"},
+                    "inbounds": [
+                        {"listen": "127.0.0.1", "port": 10808, "protocol": "socks", "settings": {"udp": True}},
+                        {"listen": "127.0.0.1", "port": 10809, "protocol": "http"},
+                    ],
+                    "outbounds": [{
+                        "tag": "xray-out", "protocol": "vless",
+                        "settings": {"address": endpoint, "port": int(settings.get("port", 8445)), "id": user_uuid, "encryption": "none"},
+                        "streamSettings": {
+                            "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path},
+                            "realitySettings": {
+                                "serverName": str(settings.get("server_name", "www.microsoft.com")),
+                                "fingerprint": "chrome", "password": str(settings.get("password", "")),
+                                "shortId": str(settings.get("short_id", "")), "spiderX": path,
+                            },
+                        },
+                    }],
+                }
+                items = read_clients()
+                items.append({"id": client_id, "name": payload.name, "protocol": "xray", "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()})
+                write_clients(items)
+                return {"id": client_id, "filename": f"{safe_name}-xray.json", "config": json.dumps(client, ensure_ascii=False, indent=2)}
+            except Exception as exc:
+                XRAY_CONFIG.write_bytes(original)
+                os.chmod(XRAY_CONFIG, 0o600)
+                run("systemctl", "restart", unit, timeout=20)
+                raise HTTPException(status_code=500, detail="Unable to create Xray connection") from exc
             finally:
                 temporary.unlink(missing_ok=True)
     command = "wg" if payload.protocol == "wg" else "awg"
@@ -2098,8 +2161,8 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
                 users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8")); users.pop(client_id, None)
                 temporary = HYSTERIA2_USERS.with_suffix(".tmp"); temporary.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(temporary, 0o600); temporary.replace(HYSTERIA2_USERS)
         write_clients([entry for entry in items if entry["id"] != client_id]); return {"deleted": client_id}
-    if protocol in {"tuic", "trojan"}:
-        config_path = TUIC_CONFIG if protocol == "tuic" else TROJAN_CONFIG; binary = f"/usr/local/lib/vps-control-{protocol}/sing-box"; unit = f"vps-control-{protocol}.service"
+    if protocol == "tuic":
+        config_path = TUIC_CONFIG; binary = "/usr/local/lib/vps-control-tuic/sing-box"; unit = "vps-control-tuic.service"
         if config_path.exists() and Path(binary).exists():
             with client_mutation_lock:
                 config_data = json.loads(config_path.read_text(encoding="utf-8")); inbound = next(row for row in config_data.get("inbounds", []) if row.get("type") == protocol)
@@ -2109,6 +2172,26 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
                 if result.returncode: temporary.unlink(missing_ok=True); raise HTTPException(status_code=500, detail=f"Unable to remove {protocol} connection")
                 temporary.replace(config_path); run("systemctl", "restart", unit, timeout=20, check=True)
         write_clients([entry for entry in items if entry["id"] != client_id]); return {"deleted": client_id}
+    if protocol == "xray":
+        binary = "/usr/local/lib/vps-control-xray/xray"
+        if XRAY_CONFIG.exists() and Path(binary).exists():
+            with client_mutation_lock:
+                original = XRAY_CONFIG.read_bytes()
+                config_data = json.loads(original)
+                inbound = next(row for row in config_data.get("inbounds", []) if row.get("protocol") == "vless")
+                users = inbound.setdefault("settings", {}).setdefault("clients", [])
+                inbound["settings"]["clients"] = [user for user in users if user.get("email") != f"{client_id}@312.net"]
+                temporary = XRAY_CONFIG.with_suffix(".tmp.json")
+                temporary.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(temporary, 0o600)
+                result = subprocess.run([binary, "run", "-test", "-config", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
+                if result.returncode:
+                    temporary.unlink(missing_ok=True)
+                    raise HTTPException(status_code=500, detail="Unable to remove Xray connection")
+                temporary.replace(XRAY_CONFIG)
+                run("systemctl", "restart", "vps-control-xray.service", timeout=20, check=True)
+        write_clients([entry for entry in items if entry["id"] != client_id])
+        return {"deleted": client_id}
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
     config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
@@ -2121,19 +2204,19 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
 
 
 @app.get("/api/protocols/{protocol}/status")
-def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "trojan"], _: None = Depends(require_token)) -> dict:
+def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
     if protocol in DIRECT_PROTOCOLS:
         unit = f"vps-control-{protocol}.service"
-        settings_path = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "trojan": TROJAN_SETTINGS}[protocol]
-        default_port = {"hysteria2": 8443, "tuic": 8444, "trojan": 8445}[protocol]
+        settings_path = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "xray": XRAY_SETTINGS}[protocol]
+        default_port = {"hysteria2": 8443, "tuic": 8444, "xray": 8445}[protocol]
         try: settings = json.loads(settings_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError): settings = {}
         rx, tx = service_bytes(unit); active = run("systemctl", "is-active", unit) == "active"; protocol_clients = [item for item in read_clients() if item.get("protocol") == protocol]
-        return {"protocol": protocol, "interface": "QUIC/UDP" if protocol != "trojan" else "TCP/TLS", "active": active, "service_active": active,
+        return {"protocol": protocol, "interface": "QUIC/UDP" if protocol != "xray" else "XHTTP/TCP", "active": active, "service_active": active,
                 "service_enabled": run("systemctl", "is-enabled", unit) == "enabled", "active_since": run("systemctl", "show", unit, "--property=ActiveEnterTimestamp", "--value"),
                 "address": PUBLIC_IP, "listen_port": int(settings.get("port", default_port)), "mtu": 0, "peers": len(protocol_clients), "online_peers": 0, "endpoints": 0,
                 "last_handshake_age_s": None, "peer_rx_bytes": rx, "peer_tx_bytes": tx, "interface_rx_bytes": rx, "interface_tx_bytes": tx,
-                "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0, "transport": "QUIC / UDP" if protocol != "trojan" else "TCP / TLS",
+                "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0, "transport": "VLESS / XHTTP / REALITY" if protocol == "xray" else "QUIC / UDP",
                 "resources": cached_resource_availability(protocol), "history": protocol_history(protocol), "diagnostics": direct_protocol_diagnostics(protocol)}
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
@@ -2206,17 +2289,17 @@ def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "trojan"
 
 
 @app.post("/api/protocols/{protocol}/resources/check")
-def check_protocol_resources(protocol: Literal["wg", "awg", "hysteria2", "tuic", "trojan"], _: None = Depends(require_token)) -> dict:
+def check_protocol_resources(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
     return check_resource_availability(protocol)
 
 
 @app.post("/api/protocols/{protocol}/diagnostics/check")
-def check_network_diagnostics(protocol: Literal["wg", "awg", "hysteria2", "tuic", "trojan"], _: None = Depends(require_token)) -> dict:
+def check_network_diagnostics(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
     return network_diagnostics(protocol, protocol_history(protocol), force=True) if protocol in ("wg", "awg") else direct_protocol_diagnostics(protocol)
 
 
 @app.post("/api/protocols/{protocol}/restart")
-def restart_protocol(protocol: Literal["wg", "awg", "hysteria2", "tuic", "trojan"], _: None = Depends(require_token)) -> dict:
+def restart_protocol(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
     unit = f"wg-quick@{WG_INTERFACE}.service" if protocol == "wg" else f"awg-quick@{AWG_INTERFACE}.service" if protocol == "awg" else f"vps-control-{protocol}.service"
     run("systemctl", "restart", unit, timeout=20, check=True)
     return {"protocol": protocol, "active": run("systemctl", "is-active", unit) == "active"}

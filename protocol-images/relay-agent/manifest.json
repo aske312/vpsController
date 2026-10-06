@@ -1,0 +1,15 @@
+{
+  "id": "relay-agent",
+  "name": "Relay Agent",
+  "version": "preview",
+  "installable": false,
+  "status": "planned",
+  "kind": "agent",
+  "description": "Заготовка агента подключения Light к единой сети с модулем PRO",
+  "category": "network-agents",
+  "category_name": "Сетевые агенты",
+  "installer": "",
+  "uninstaller": "",
+  "supported_os": ["ubuntu", "debian"],
+  "service": ""
+}

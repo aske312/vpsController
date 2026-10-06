@@ -59,6 +59,9 @@ nav { display: grid; gap: 5px; }
 .navItem.active { color: var(--text); background: linear-gradient(90deg, #11212c, #0e1b25); box-shadow: inset 2px 0 var(--accent); }
 .navItem span { width: 22px; font: 14px var(--font-mono); color: #70b7e8; text-align: center; }
 .protocolIcon { width: 28px; height: 28px; flex: 0 0 auto; object-fit: contain; }
+.protocolIconVector { display: grid; place-items: center; color: #75d9d2; background: #11242a; }
+.protocolIconVector svg { width: 72%; height: 72%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.protocolIconVector.relay { color: #8ca0b5; background: #151d27; }
 .navItem > .protocolIcon { width: 24px; height: 24px; }
 .navItem.active span { color: var(--accent); }
 .navItem b { font-size: 12px; font-weight: 560; }
@@ -128,6 +131,9 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .protocolEmpty small { margin-top: 5px; font: 8px var(--font-mono); }
 .protocolInstaller { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 12px; align-items: center; border-top: 1px solid var(--line); padding: 15px 10px; }
 .protocolInstaller p { display: flex; flex-direction: column; min-width: 0; margin: 0; }
+.protocolInstaller p strong em { margin-left: 8px; color: #8ca0b5; font: 700 7px var(--font-mono); letter-spacing: .08em; }
+.protocolInstaller.agent { border-style: dashed; }
+.protocolInstaller.agent button:disabled { cursor: default; color: #8ca0b5; background: #111923; }
 .protocolInstaller strong { font-size: 11px; }
 .protocolInstaller small { color: var(--muted); font: 8px/1.5 var(--font-mono); margin-top: 5px; }
 .protocolInstaller button { border: 1px solid #31505c; border-radius: 6px; background: var(--accent-dim); color: var(--accent); padding: 8px 11px; font-size: 8px; }

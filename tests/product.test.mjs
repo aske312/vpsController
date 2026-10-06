@@ -7,14 +7,15 @@ import test from "node:test";
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("поставка содержит установщик, образы и клиентскую документацию", async () => {
-  const [bootstrap, manager, readme, awg, hysteria2, tuic, trojan] = await Promise.all([
+  const [bootstrap, manager, readme, awg, hysteria2, tuic, xray, relay] = await Promise.all([
     read("scripts/install-panel.sh"),
     read("scripts/vps-control.sh"),
     read("README.md"),
     read("protocol-images/amneziawg/manifest.json"),
     read("protocol-images/hysteria2/manifest.json"),
     read("protocol-images/tuic/manifest.json"),
-    read("protocol-images/trojan/manifest.json"),
+    read("protocol-images/xray/manifest.json"),
+    read("protocol-images/relay-agent/manifest.json"),
   ]);
   assert.match(bootstrap, /archive\/refs\/heads\/\$\{BRANCH\}\.tar\.gz/);
   assert.match(bootstrap, /DPkg::Lock::Timeout=300/);
@@ -30,7 +31,10 @@ test("поставка содержит установщик, образы и к
   assert.equal(JSON.parse(awg).id, "awg");
   assert.equal(JSON.parse(hysteria2).id, "hysteria2");
   assert.equal(JSON.parse(tuic).id, "tuic");
-  assert.equal(JSON.parse(trojan).id, "trojan");
+  assert.equal(JSON.parse(xray).id, "xray");
+  assert.equal(JSON.parse(relay).id, "relay-agent");
+  assert.equal(JSON.parse(relay).installable, false);
+  await assert.rejects(read("protocol-images/trojan/manifest.json"), { code: "ENOENT" });
   await assert.rejects(read("protocol-images/wireguard/manifest.json"), { code: "ENOENT" });
 });
 
@@ -320,13 +324,15 @@ test("web and gateway run as systemd services without Docker", async () => {
 });
 
 test("Light protocol modules install and uninstall independently", async () => {
-  const [api, manager, awgInstall, awgRemove, hysteriaInstall, hysteriaRemove, tuicInstall, tuicRemove, trojanInstall, trojanRemove] = await Promise.all([
+  const [api, manager, page, awgInstall, awgRemove, hysteriaInstall, hysteriaRemove, tuicInstall, tuicRemove, xrayInstall, xrayRemove, relayManifest] = await Promise.all([
     read("api/main.py"), read("scripts/vps-control.sh"),
+    read("app/page.tsx"),
     read("protocol-images/amneziawg/install.sh"),
     read("protocol-images/amneziawg/uninstall.sh"),
     read("protocol-images/hysteria2/install.sh"), read("protocol-images/hysteria2/uninstall.sh"),
     read("protocol-images/tuic/install.sh"), read("protocol-images/tuic/uninstall.sh"),
-    read("protocol-images/trojan/install.sh"), read("protocol-images/trojan/uninstall.sh"),
+    read("protocol-images/xray/install.sh"), read("protocol-images/xray/uninstall.sh"),
+    read("protocol-images/relay-agent/manifest.json"),
   ]);
   const baseDependencies = manager.match(/Установка системных зависимостей" apt-get install -y ([^\n]+)/)?.[1] || "";
   assert.doesNotMatch(baseDependencies, /wireguard-tools/);
@@ -341,15 +347,23 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(manager, /DPkg::Lock::Timeout=300 -f install -y/);
   assert.match(awgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(awgInstall, /if ! command -v awg.*command -v awg-quick.*modinfo amneziawg/s);
-  for (const installer of [hysteriaInstall, tuicInstall, trojanInstall]) {
+  for (const installer of [hysteriaInstall, tuicInstall, xrayInstall]) {
     assert.match(installer, /DPkg::Lock::Timeout=300/);
     assert.match(installer, /sha256sum -c -/);
     assert.match(installer, /IPAccounting=true/);
   }
-  for (const uninstaller of [hysteriaRemove, tuicRemove, trojanRemove]) {
+  for (const uninstaller of [hysteriaRemove, tuicRemove, xrayRemove]) {
     assert.match(uninstaller, /PRESERVE_COMPONENT_DATA/);
   }
   await assert.rejects(read("protocol-images/wireguard/install.sh"), { code: "ENOENT" });
+  await assert.rejects(read("protocol-images/trojan/install.sh"), { code: "ENOENT" });
+  assert.match(xrayInstall, /'protocol': 'vless'/);
+  assert.match(xrayInstall, /'network': 'xhttp'/);
+  assert.match(xrayInstall, /'security': 'reality'/);
+  assert.match(api, /Unable to create Xray connection/);
+  assert.doesNotMatch(api + page, /\bTrojan\b|"trojan"/);
+  assert.equal(JSON.parse(relayManifest).kind, "agent");
+  assert.match(page, /В разработке/);
   assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 1/);
 });
 
@@ -357,7 +371,7 @@ test("full uninstall removes managed protocol state without recreating applicati
   const manager = await read("scripts/vps-control.sh");
   const uninstall = manager.slice(manager.indexOf("uninstall_app()"), manager.indexOf("restart_services()"));
   assert.match(uninstall, /protocol-images\/amneziawg\/uninstall\.sh/);
-  assert.match(uninstall, /for protocol_id in hysteria2 tuic trojan/);
+  assert.match(uninstall, /for protocol_id in hysteria2 tuic xray/);
   assert.match(uninstall, /PRESERVE_COMPONENT_DATA=0/);
   assert.match(uninstall, /\/usr\/local\/sbin\/vpn-monitor-sample/);
   assert.match(uninstall, /caddy\.service/);

@@ -30,7 +30,7 @@ WG_PORT="51820"
 AWG_PORT="51822"
 HYSTERIA2_PORT="8443"
 TUIC_PORT="8444"
-TROJAN_PORT="8445"
+XRAY_PORT="8445"
 WG_INTERFACE="wg0"
 AWG_INTERFACE="awg0"
 AWG_MTU="1280"
@@ -371,7 +371,7 @@ configure_access() {
   set_env_value "AWG_PORT" "${AWG_PORT}"
   set_env_value "HYSTERIA2_PORT" "${HYSTERIA2_PORT}"
   set_env_value "TUIC_PORT" "${TUIC_PORT}"
-  set_env_value "TROJAN_PORT" "${TROJAN_PORT}"
+  set_env_value "XRAY_PORT" "${XRAY_PORT}"
   set_env_value "WG_INTERFACE" "${WG_INTERFACE}"
   set_env_value "AWG_INTERFACE" "${AWG_INTERFACE}"
   set_env_value "AWG_MTU" "${AWG_MTU}"
@@ -658,7 +658,7 @@ install_protocol_image() {
   prepare_package_manager
   ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
-    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" TROJAN_PORT="${TROJAN_PORT}" \
+    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
     bash "${image_root}/${installer}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
@@ -684,7 +684,7 @@ remove_protocol_image() {
   info "Удаление установленного протокола ${image_id}"
   PRESERVE_COMPONENT_DATA=0 ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
-    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" TROJAN_PORT="${TROJAN_PORT}" \
+    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
     bash "${image_root}/${uninstaller}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
@@ -1062,6 +1062,36 @@ sync_protocol_monitor() {
   install_protocol_monitor
 }
 
+remove_obsolete_trojan() {
+  sed -i '/^TROJAN_PORT=/d' "${ENV_FILE}" "${INSTALL_CONFIG}" 2>/dev/null || true
+  [[ -e /etc/systemd/system/vps-control-trojan.service || -d /usr/local/lib/vps-control-trojan || -d /etc/vps-control/trojan ]] || return 0
+  info "Удаление исключённого модуля Trojan"
+  systemctl disable --now vps-control-trojan.service 2>/dev/null || true
+  if [[ -x /usr/local/lib/vps-control-trojan/firewall.sh ]]; then
+    /usr/local/lib/vps-control-trojan/firewall.sh delete 2>/dev/null || true
+  fi
+  rm -f -- /etc/systemd/system/vps-control-trojan.service
+  rm -rf -- /usr/local/lib/vps-control-trojan /etc/vps-control/trojan
+  python3 - "${DATA_DIR}/clients.json" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+try:
+    clients = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    clients = []
+if any(item.get("protocol") == "trojan" for item in clients):
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps([item for item in clients if item.get("protocol") != "trojan"], ensure_ascii=False, indent=2), encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(path)
+PY
+  systemctl daemon-reload
+  ok "модуль Trojan и его подключения удалены."
+}
+
 deploy() {
   check_source
   ensure_runtime_dependencies
@@ -1081,6 +1111,7 @@ PY
   if [[ ! -r "${INSTALL_CONFIG}" ]]; then
     install -m 0600 "${PROJECT_DIR}/install.conf" "${INSTALL_CONFIG}"
   fi
+  remove_obsolete_trojan
   sync_release
   write_integrity_manifest
   printf '%s\n' "${BUILD_COMMIT}" >"${INSTALL_DIR}/.build-commit"
@@ -1130,7 +1161,7 @@ uninstall_app() {
       bash "${INSTALL_DIR}/protocol-images/amneziawg/uninstall.sh"
   fi
   local protocol_id
-  for protocol_id in hysteria2 tuic trojan; do
+  for protocol_id in hysteria2 tuic xray; do
     if [[ -f "${INSTALL_DIR}/protocol-images/${protocol_id}/uninstall.sh" ]]; then
       PRESERVE_COMPONENT_DATA=0 bash "${INSTALL_DIR}/protocol-images/${protocol_id}/uninstall.sh"
     fi

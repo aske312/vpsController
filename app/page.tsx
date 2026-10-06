@@ -7,7 +7,7 @@ import { ProtocolIcon } from "./protocol-icon";
 import { LightNavigation } from "../src/light-navigation";
 import { useNotifications } from "../src/notifications/notification-center";
 
-type Protocol = "wg" | "awg" | "hysteria2" | "tuic" | "trojan";
+type Protocol = "wg" | "awg" | "hysteria2" | "tuic" | "xray";
 type Tab = "overview" | "security" | "application" | "services" | Protocol | "clients";
 type MetricsPeriod = "live" | "day" | "week" | "quarter";
 type ResourceHistory = { load: Array<number | null>; memory: Array<number | null>; disk: Array<number | null>; rx: Array<number | null>; tx: Array<number | null> };
@@ -48,6 +48,7 @@ type ApplicationStatus = {
 };
 type ProtocolImage = {
   id: string; name: string; version: string; description: string; category: string; category_name: string;
+  kind: "tunnel" | "agent"; status: "available" | "planned"; installable: boolean;
   interface: string; installed: boolean; removable: boolean;
 };
 type AutomationSchedule = {
@@ -113,14 +114,14 @@ type ProtocolStatus = {
 };
 
 const labels: Record<Tab, string> = {
-  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", hysteria2: "Hysteria2", tuic: "TUIC v5", trojan: "Trojan", clients: "Подключения",
+  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", hysteria2: "Hysteria2", tuic: "TUIC v5", xray: "Xray", clients: "Подключения",
 };
 const navigationLabels: Record<Tab, string> = {
   overview: "OVERVIEW", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
-  wg: "WIREGUARD", awg: "AMNEZIAWG", hysteria2: "HYSTERIA2", tuic: "TUIC V5", trojan: "TROJAN", clients: "CONNECTIONS",
+  wg: "WIREGUARD", awg: "AMNEZIAWG", hysteria2: "HYSTERIA2", tuic: "TUIC V5", xray: "XRAY", clients: "CONNECTIONS",
 };
-const protocolIds: Protocol[] = ["wg", "awg", "hysteria2", "tuic", "trojan"];
-const lightModuleIds: Protocol[] = ["awg", "hysteria2", "tuic", "trojan"];
+const protocolIds: Protocol[] = ["wg", "awg", "hysteria2", "tuic", "xray"];
+const lightModuleIds: Protocol[] = ["awg", "hysteria2", "tuic", "xray"];
 const isProtocolTab = (value: Tab): value is Protocol => protocolIds.includes(value as Protocol);
 const actionLabels: Record<string, string> = {
   install: "Установка 312.net", start: "Запуск приложения", stop: "Остановка приложения",
@@ -1197,11 +1198,11 @@ export default function Home() {
             <em className={overview?.protocols[protocol]?.active ? "onlinePill" : "offlinePill"}>{overview?.protocols[protocol]?.active ? "Работает" : "Остановлен"}</em><b>›</b>
           </button>)}
           {protocolImages.filter((image) => !image.installed).map((image) =>
-            <div className="protocolInstaller" key={image.id}>
+            <div className={`protocolInstaller ${image.kind === "agent" ? "agent" : ""}`} key={image.id}>
               <span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span>
-              <p><strong>{image.name}</strong><small>{image.description} · образ {image.version}</small></p>
-              <button onClick={() => void installProtocol(image)} disabled={busy || Boolean(installingProtocol)}>
-                {installingProtocol === image.id ? "Устанавливается…" : "Установить"}
+              <p><strong>{image.name}{image.kind === "agent" && <em>АГЕНТ</em>}</strong><small>{image.description} · {image.status === "planned" ? "заготовка" : `образ ${image.version}`}</small></p>
+              <button onClick={() => image.installable && void installProtocol(image)} disabled={!image.installable || busy || Boolean(installingProtocol)}>
+                {!image.installable ? "В разработке" : installingProtocol === image.id ? "Устанавливается…" : "Установить"}
               </button>
             </div>
           )}
