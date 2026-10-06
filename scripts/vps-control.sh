@@ -725,7 +725,9 @@ PY
 protocol_binary_version() {
   local binary="$1"
   [[ -x "${binary}" ]] || return 0
-  "${binary}" version 2>/dev/null | grep -Eo 'v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?' | head -n1 | sed 's/^v//'
+  local output
+  output="$("${binary}" version 2>/dev/null || "${binary}" --version 2>/dev/null || true)"
+  grep -Eo 'v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?' <<<"${output}" | head -n1 | sed 's/^v//' || true
 }
 
 update_protocol_image() {
@@ -753,11 +755,11 @@ update_protocol_image() {
   [[ -n "${binary}" && -f "${binary}" ]] && install -m 0755 "${binary}" "${backup_dir}/binary"
   set_protocol_client_update_state "${image_id}" "paused" "Обновление протокола запущено: подключение временно приостановлено"
   info "Обновление ${image_id}; существующие подключения помечены как приостановленные"
-  prepare_package_manager
-  if ! ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
-    AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
-    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
-    bash "${image_root}/${installer}"; then
+  if ! (prepare_package_manager && \
+    ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+      AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+      HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
+      bash "${image_root}/${installer}"); then
     if [[ -f "${backup_dir}/binary" && -n "${binary}" ]]; then
       install -m 0755 "${backup_dir}/binary" "${binary}"
       systemctl restart "${service}" || true
