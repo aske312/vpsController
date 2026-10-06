@@ -154,7 +154,7 @@ class ProfileTransitionTests(unittest.TestCase):
                                    "headers": [(b"x-device-id", hwid.encode())] if hwid else []})
         return manager.public_profile_subscription("test-token", request)
 
-    def test_new_yaml_delivery_finishes_waiting_after_send_and_shortens_cleanup(self):
+    def test_new_yaml_delivery_is_recorded_without_shortening_cleanup(self):
         self.profile["subscription_token"] = "test-token"
         self.transition()
         new_uuid = self.profile["connections"][0]["credential"]["uuid"]
@@ -181,14 +181,14 @@ class ProfileTransitionTests(unittest.TestCase):
 
         asyncio.run(response({"type": "http"}, receive, send))
         stored = manager.profiles()[0]
-        self.assertEqual(stored["retiring_connections"][0]["expires_at"], 1030)
+        self.assertEqual(stored["retiring_connections"][0]["expires_at"], 1900)
         self.assertEqual(manager.profile_response(stored)["protection_status"]["common"]["yaml_served_at"], 1000)
         self.clock = 1020
         asyncio.run(self.subscription_response().background())
-        self.assertEqual(manager.profiles()[0]["retiring_connections"][0]["expires_at"], 1030)
+        self.assertEqual(manager.profiles()[0]["retiring_connections"][0]["expires_at"], 1900)
         manager.cleanup_profile_transitions()
         self.assertEqual(len(json.loads(self.config.read_text())["inbounds"]), 6)
-        self.clock = 1030
+        self.clock = 1900
         manager.cleanup_profile_transitions()
         self.assertEqual(manager.profiles()[0]["retiring_connections"], [])
         self.assertEqual(len(json.loads(self.config.read_text())["inbounds"]), 3)
@@ -208,7 +208,7 @@ class ProfileTransitionTests(unittest.TestCase):
         status = manager.profile_response(manager.profiles()[0])["protection_status"]
         self.assertNotIn("yaml_served_at", status["common"])
         self.assertEqual(status["common"]["previous_valid_until"], 1900)
-        self.assertEqual(status["hwid-device"]["previous_valid_until"], 1030)
+        self.assertEqual(status["hwid-device"]["previous_valid_until"], 1900)
         self.assertEqual(status["hwid-device"]["yaml_served_at"], 1000)
 
     def test_old_response_and_admin_download_cannot_finish_a_new_transition(self):

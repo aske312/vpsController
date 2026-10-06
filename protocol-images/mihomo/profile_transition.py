@@ -6,7 +6,6 @@ import secrets
 import uuid
 
 GRACE_SECONDS = 15 * 60
-DELIVERY_SETTLE_SECONDS = 30
 
 
 def transition_delivery_revision(profile, device_id):
@@ -30,8 +29,10 @@ def mark_transition_delivered(profile, device_id, revision, served_at):
     for entry in profile.get("retiring_connections", []):
         if entry.get("device_id") == device_id and entry.get("yaml_served_revision") != revision:
             entry.setdefault("transition_deadline", entry["expires_at"])
-            entry.update(yaml_served_revision=revision, yaml_served_at=served_at,
-                         expires_at=min(entry["expires_at"], served_at + DELIVERY_SETTLE_SECONDS))
+            # Delivery proves only that the server sent the current revision.
+            # A third-party client does not acknowledge applying it or passing
+            # traffic, so the original grace deadline must remain unchanged.
+            entry.update(yaml_served_revision=revision, yaml_served_at=served_at)
             changed = True
     return changed
 

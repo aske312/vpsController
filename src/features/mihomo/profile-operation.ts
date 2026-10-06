@@ -14,12 +14,11 @@ export function profileTransitionMessage(profile: Profile, deviceId?: string): s
   const statuses = deviceId ? [profile.protection_status?.[deviceId]] : Object.values(profile.protection_status ?? {});
   const transitions = statuses.filter((status) => status?.previous_valid_until);
   if (!transitions.length) return "";
-  const waiting = transitions.filter((status) => status?.yaml_served_at == null);
-  if (!waiting.length) return "Новая конфигурация выдана клиенту. Ожидание обновления завершено; прежние подключения отключаются.";
-  const deadlines = waiting.map((status) => status!.previous_valid_until! * 1000);
+  const delivered = transitions.every((status) => status?.yaml_served_at != null);
+  const deadlines = transitions.map((status) => status!.previous_valid_until! * 1000);
   const deadline = Math.min(...deadlines);
   return deadline > Date.now()
-    ? `Старая конфигурация доступна до ${new Date(deadline).toLocaleTimeString("ru-RU")} или до обновления подписки клиентом. Обновите подписку в VPN-клиенте; до перехода действует прежняя защита.`
+    ? `${delivered ? "Новая конфигурация выдана, но рабочее подключение ещё не подтверждено. " : ""}Старая конфигурация доступна до ${new Date(deadline).toLocaleTimeString("ru-RU")}. Обновите подписку в VPN-клиенте; до подтверждения перехода сохраняется прежнее подключение.`
     : "Старая конфигурация ожидает отключения. Обновите подписку в VPN-клиенте.";
 }
 
