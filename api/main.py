@@ -1247,12 +1247,21 @@ def refresh_protocol_version(image_id: str) -> dict:
     checked_at = datetime.now(timezone.utc).isoformat()
     try:
         if image_id == "awg":
-            available = apt_package_versions("amneziawg")[1]
+            installed_package, available = apt_package_versions("amneziawg")
         else:
             available = latest_github_version(repositories[image_id])
         if not available:
             raise ValueError("Не удалось определить последнюю версию")
         value = {"available_version": available, "version_checked_at": checked_at, "version_error": ""}
+        if image_id == "awg":
+            # The kernel module and the repository package use different
+            # version schemes. Compare package-to-package and never infer a
+            # breaking protocol change from those unrelated numbers.
+            value.update({
+                "update_available": bool(installed_package and available and installed_package != available),
+                "update_breaking": False,
+                "version_channel": "package",
+            })
     except (KeyError, ValueError) as cause:
         value = {"available_version": "", "version_checked_at": checked_at, "version_error": str(cause)}
     protocol_version_cache[image_id] = value
@@ -1289,7 +1298,9 @@ def protocol_image_manifests() -> dict[str, dict]:
         installed_version = protocol_installed_version(image_id, installed)
         version_info = protocol_version_cache.get(image_id, {})
         available_version = str(version_info.get("available_version", ""))
-        update_available = bool(installed_version and available_version and installed_version != available_version)
+        compared_update = bool(installed_version and available_version and installed_version != available_version)
+        update_available = bool(version_info.get("update_available", compared_update))
+        compared_breaking = bool(update_available and version_major(installed_version) != version_major(available_version))
         images[image_id] = {
             "id": image_id,
             "name": str(manifest.get("name", image_id)),
@@ -1309,7 +1320,8 @@ def protocol_image_manifests() -> dict[str, dict]:
             "installed_version": installed_version,
             "available_version": available_version,
             "update_available": update_available,
-            "update_breaking": bool(update_available and version_major(installed_version) != version_major(available_version)),
+            "update_breaking": bool(version_info.get("update_breaking", compared_breaking)),
+            "version_channel": version_info.get("version_channel", "release"),
             "version_checked_at": version_info.get("version_checked_at"),
             "version_error": version_info.get("version_error", ""),
         }

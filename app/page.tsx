@@ -52,7 +52,7 @@ type ProtocolImage = {
   kind: "tunnel" | "agent"; status: "available" | "planned"; installable: boolean;
   interface: string; installed: boolean; removable: boolean;
   installed_version?: string; available_version?: string; update_available?: boolean; update_breaking?: boolean;
-  version_checked_at?: string; version_error?: string;
+  version_checked_at?: string; version_error?: string; version_channel?: "release" | "package";
 };
 type AutomationSchedule = {
   enabled: boolean; cadence: "daily" | "weekly" | "monthly"; weekday: string; hour: number; minute: number;
@@ -859,6 +859,8 @@ export default function Home() {
       title: `Обновить ${image.name}?`,
       message: image.update_breaking
         ? `Версия ${image.available_version} меняет основную версию (сейчас ${image.installed_version || "не определена"}). Подключения будут приостановлены; после обновления может потребоваться новый профиль.`
+        : image.version_channel === "package"
+          ? `Доступна новая пакетная сборка ${image.available_version}. Версия протокола сейчас ${image.installed_version || "не определена"}; подключения будут приостановлены только на время проверки и перезапуска.`
         : `Будет установлена версия ${image.available_version}. На время проверки и перезапуска активные подключения этого протокола будут кратковременно приостановлены.`,
       confirmLabel: "Обновить протокол",
     })) return;
