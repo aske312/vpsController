@@ -25,6 +25,10 @@
 Команды выполняются в shell пользователя `root`; `sudo` не требуется и может
 отсутствовать в минимальном образе VPS.
 
+Установщик: [install.sh](https://github.com/aske312/vpsController/blob/installer/install.sh)
+
+Прямая ссылка для `curl`: `https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh`
+
 Интерактивный выбор редакции:
 
 ```bash
@@ -43,6 +47,45 @@ curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/ins
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
   | bash -s -- --edition pro
+```
+
+Установка сразу с доменом:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
+  | bash -s -- --edition light --domain panel.example.com
+```
+
+До запуска создайте DNS-запись `A` или `AAAA`, направленную на VPS, и разрешите
+входящие TCP-порты `80` и `443` во внешнем firewall провайдера. Если DNS ещё не
+обновился, Light сохранит домен и продолжит работать по IP; повторная проверка
+выполняется командой `vps-control identity`.
+
+> Поддержка `--domain` для Light сейчас проходит проверку в `test-light` и начнёт
+> действовать в обычной установке после её переноса в стабильную ветку `light`.
+
+## Параметры установки
+
+Параметры указываются после `bash -s --` и могут объединяться в одной команде.
+
+| Параметр | Редакция | Назначение |
+| --- | --- | --- |
+| `--edition light` | Light | установить Light без интерактивного выбора |
+| `--edition pro` | PRO | установить PRO без интерактивного выбора |
+| `--domain DOMAIN` | PRO, `test-light` | сохранить домен панели и настроить HTTPS после проверки DNS |
+| `--location-city CITY` | PRO | явно указать физический город сервера |
+| `--location-country COUNTRY` | PRO | явно указать физическую страну сервера |
+| `--location-country-code CODE` | PRO | указать двухбуквенный код страны, например `NL` |
+| `--manual` | PRO | разрешить интерактивное восстановление `dpkg`/GRUB |
+| `--no-os-update` | PRO | не обновлять уже установленные пакеты ОС |
+| `--no-apt` | PRO | не использовать `apt`/`dpkg`; зависимости должны быть установлены заранее |
+
+Пример PRO с доменом и подтверждённой локацией:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
+  | bash -s -- --edition pro --domain panel.example.com \
+    --location-city Helsinki --location-country Finland --location-country-code FI
 ```
 
 Установщик проверит совместимость сервера, установит выбранную редакцию и покажет адрес панели и данные для входа.
