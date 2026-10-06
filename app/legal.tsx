@@ -60,7 +60,7 @@ const documents: Record<Language, Record<LegalDocument, LocalizedDocument>> = {
   },
 };
 
-export function LegalFooter({ version, commit }: { version: string; commit: string }) {
+export function LegalFooter({ version, branch, commit }: { version: string; branch: string; commit: string }) {
   const [openDocument, setOpenDocument] = useState<LegalDocument | null>(null);
   const [language, setLanguage] = useState<Language>("ru");
 
@@ -74,7 +74,7 @@ export function LegalFooter({ version, commit }: { version: string; commit: stri
   const current = openDocument ? documents[language][openDocument] : null;
   return <>
     <footer className="versionFooter">
-      <span>{version} build {commit}</span>
+      <span>{version} · branch {branch} · build {commit}</span>
       <nav aria-label="Правовые документы / Legal documents">
         <button type="button" onClick={() => setOpenDocument("privacy")}>Приватность / Privacy</button>
         <button type="button" onClick={() => setOpenDocument("terms")}>Лицензия / License</button>
