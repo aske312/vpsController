@@ -2,18 +2,19 @@ name: Publish PRO release
 
 on:
   push:
-    branches: [pro]
+    branches: [pro, test-pro]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pro-production-release
+  group: pro-${{ github.ref_name }}-release
   cancel-in-progress: false
 
 jobs:
   verify:
+    if: github.ref_name == 'pro'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -33,6 +34,7 @@ jobs:
 
   build:
     needs: verify
+    if: always() && (needs.verify.result == 'success' || github.ref_name == 'test-pro')
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +59,10 @@ jobs:
           base="$(node -p 'require("./package.json").version')"
           major_minor="${base%.*}"
           latest="$(git tag --list "pro-v${major_minor}.*" --sort=-v:refname | head -n 1)"
-          if [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
+          if [[ "$GITHUB_REF_NAME" == "test-pro" ]]; then
+            [[ -n "$latest" ]] || { echo "Production PRO version tag is missing" >&2; exit 1; }
+            version="${latest#pro-}"
+          elif [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
             version="${latest#pro-}"
           elif [[ -z "$latest" ]]; then
             version="v${base}"
@@ -66,11 +71,12 @@ jobs:
             version="v${major_minor}.$((patch + 1))"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Build PRO production archive
+      - name: Build PRO archive
         env:
           BUILD_COMMIT: ${{ github.sha }}
           RELEASE_EDITION: pro
-          RELEASE_CHANNEL: production
+          RELEASE_CHANNEL: ${{ github.ref_name == 'test-pro' && 'test' || 'production' }}
+          RELEASE_BRANCH: ${{ github.ref_name }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: bash scripts/build-release.sh "outputs/vps-control-pro-linux-${{ matrix.architecture }}.tar.gz"
       - uses: actions/upload-artifact@v4
@@ -82,6 +88,7 @@ jobs:
 
   publish:
     needs: build
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -104,7 +111,10 @@ jobs:
           base="$(node -p 'require("./package.json").version')"
           major_minor="${base%.*}"
           latest="$(git tag --list "pro-v${major_minor}.*" --sort=-v:refname | head -n 1)"
-          if [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
+          if [[ "$GITHUB_REF_NAME" == "test-pro" ]]; then
+            [[ -n "$latest" ]] || { echo "Production PRO version tag is missing" >&2; exit 1; }
+            version="${latest#pro-}"
+          elif [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
             version="${latest#pro-}"
           elif [[ -z "$latest" ]]; then
             version="v${base}"
@@ -113,17 +123,30 @@ jobs:
             version="v${major_minor}.$((patch + 1))"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Publish PRO production release
+      - name: Publish PRO release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release delete pro-latest --cleanup-tag --yes || true
-          gh release create pro-latest outputs/vps-control-pro-linux-*.tar.gz \
+          if [[ "$GITHUB_REF_NAME" == "test-pro" ]]; then
+            release_tag="pro-test-latest"
+            release_title="Test build ${VERSION} (test-pro)"
+            release_notes="Rolling PRO test build ${VERSION} for ${GITHUB_SHA}. Not a production release."
+            release_flags=(--prerelease)
+          else
+            release_tag="pro-latest"
+            release_title="PRO ${VERSION}"
+            release_notes="PRO production release ${VERSION} for ${GITHUB_SHA}"
+            release_flags=()
+          fi
+          gh release delete "$release_tag" --cleanup-tag --yes || true
+          gh release create "$release_tag" outputs/vps-control-pro-linux-*.tar.gz \
             --target "$GITHUB_SHA" \
-            --title "PRO ${VERSION}" \
-            --notes "PRO production release ${VERSION} for ${GITHUB_SHA}" \
+            --title "$release_title" \
+            --notes "$release_notes" \
+            "${release_flags[@]}" \
             --latest=false
+          [[ "$GITHUB_REF_NAME" == "pro" ]] || exit 0
           version_tag="pro-${VERSION}"
           if ! git rev-parse "$version_tag" >/dev/null 2>&1; then
             git tag "$version_tag" "$GITHUB_SHA"

@@ -1,8 +1,6 @@
 name: Test PRO
 
 on:
-  push:
-    branches: [test-pro]
   pull_request:
     branches: [test-pro, pro]
   workflow_dispatch:
@@ -11,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: test-pro-${{ github.ref }}
+  group: pro-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -32,35 +30,3 @@ jobs:
       - run: python -m unittest discover -s tests/api -t . -p 'test_*.py'
       - run: npm ci --include=dev --include=optional --ignore-scripts
       - run: npm run check
-
-  package:
-    needs: verify
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture: amd64
-            runner: ubuntu-24.04
-          - architecture: arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-      - name: Build private PRO test artifact
-        env:
-          BUILD_COMMIT: ${{ github.sha }}
-          RELEASE_EDITION: pro
-          RELEASE_CHANNEL: test
-        run: bash scripts/build-release.sh "outputs/vps-control-pro-test-linux-${{ matrix.architecture }}.tar.gz"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pro-test-${{ matrix.architecture }}
-          path: outputs/vps-control-pro-test-linux-${{ matrix.architecture }}.tar.gz
-          if-no-files-found: error
-          retention-days: 7

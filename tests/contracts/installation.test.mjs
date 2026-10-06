@@ -120,7 +120,7 @@ test("поставка содержит установщик, образы и р
   assert.equal(JSON.parse(awg).id, "awg");
 });
 
-test("PRO keeps production releases public and accepts test builds only from local archives", async () => {
+test("PRO publishes rolling pre-releases from test-pro and keeps production updates on pro", async () => {
   const [api, page, manager, releaseWorkflow, testWorkflow] = await Promise.all([
     readApiSources(), readUiSources(), read("scripts/vps-control.sh"),
     read(".github/workflows/release.yml"), read(".github/workflows/ci.yml"),
@@ -153,15 +153,17 @@ test("PRO keeps production releases public and accepts test builds only from loc
   assert.match(manager, /PRODUCT_FILE="\$\{DATA_DIR\}\/product\.json"/);
   assert.match(manager, /архив редакции \$\{release_edition:-unknown\} нельзя установить поверх \$\{PRODUCT_EDITION\}/);
   assert.match(page, /production-версия PRO/);
-  assert.match(releaseWorkflow, /branches: \[pro\]/);
-  assert.match(releaseWorkflow, /gh release create pro-latest/);
+  assert.match(releaseWorkflow, /branches: \[pro, test-pro\]/);
+  assert.match(releaseWorkflow, /release_tag="pro-test-latest"/);
+  assert.match(releaseWorkflow, /release_flags=\(--prerelease\)/);
+  assert.match(releaseWorkflow, /release_tag="pro-latest"/);
+  assert.match(releaseWorkflow, /github\.ref_name == 'test-pro' && 'test' \|\| 'production'/);
   assert.match(releaseWorkflow, /ubuntu-24\.04-arm/);
-  assert.doesNotMatch(releaseWorkflow, /main-latest|test-pro/);
-  assert.match(testWorkflow, /branches: \[test-pro\]/);
-  assert.match(testWorkflow, /RELEASE_CHANNEL: test/);
-  assert.match(testWorkflow, /actions\/upload-artifact@v4/);
-  assert.match(testWorkflow, /ubuntu-24\.04-arm/);
-  assert.doesNotMatch(testWorkflow, /gh release|contents: write/);
+  assert.doesNotMatch(releaseWorkflow, /main-latest/);
+  assert.match(testWorkflow, /pull_request:[\s\S]*branches: \[test-pro, pro\]/);
+  assert.match(testWorkflow, /python -m unittest discover/);
+  assert.match(testWorkflow, /npm run check/);
+  assert.doesNotMatch(testWorkflow, /\n  package:|RELEASE_CHANNEL|upload-artifact|ubuntu-24\.04-arm|gh release|contents: write/);
 });
 
 test("full uninstall removes owned panel state without recreating action data", async () => {
