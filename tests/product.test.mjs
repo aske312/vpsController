@@ -377,6 +377,9 @@ test("the interface uses one fixed visual design without personalization", async
   assert.doesNotMatch(css, /personalization|data-(?:style|palette|density|theme)|task-manager/i);
   assert.match(page, /<main className="shell gateShell">/);
   assert.match(page, /<LightNavigation/);
+  assert.match(page, /className="gateMasthead"/);
+  assert.match(page, /const nodeHasError = application\?\.api\.active === false/);
+  assert.doesNotMatch(page, /const nodeHasError =[^;]+action\?\.state === "failed"/);
   assert.match(navigation, /className="gateSidebar"/);
   assert.match(navigation, /label="WORKSPACE"/);
   assert.match(navigation, /label="TUNNELS"/);

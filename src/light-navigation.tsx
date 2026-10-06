@@ -10,7 +10,7 @@ type Props = {
   activeTab: string;
   protocolImages: ProtocolImage[];
   clientsCount: number;
-  nodeState: "green" | "yellow" | "red";
+  nodeState: "gray" | "green" | "yellow" | "red" | "blue";
   nodeStateLabel: string;
   server?: ServerInfo;
   onNavigate: (tab: string) => void;

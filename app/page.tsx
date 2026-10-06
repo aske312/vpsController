@@ -1107,50 +1107,69 @@ export default function Home() {
   const operationActive = ["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(application?.action?.state || "");
   const operationName = application?.action?.action || "";
   const operationLabel = actionLabels[operationName.split(":")[0]] || operationName;
-  const nodeHasError = Boolean(error) || application?.action?.state === "failed" || application?.action?.result === "failed";
-  const nodeDegraded = application?.api.active === false
-    || Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
+  // A failed command belongs to the operation center; it does not mean that the
+  // node itself is unavailable. Only live health data may turn the node red.
+  const nodeHasError = application?.api.active === false;
+  const nodeDegraded = Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
   const serviceModeActive = Boolean(services?.service_mode?.active || application?.service_mode?.active);
   const release = application?.release || applicationVersion;
   const releaseBranch = release?.branch || "light";
   const testReleaseActive = releaseBranch === "test-light";
-  const nodeState = nodeHasError ? "error" : operationActive || nodeDegraded || serviceModeActive ? "working" : "healthy";
-  const nodeStateLabel = nodeState === "error" ? "УЗЕЛ С ОШИБКОЙ" : nodeState === "working" ? "ТРЕБУЕТ ВНИМАНИЯ" : "УЗЕЛ В СЕТИ";
-  const applicationStateTitle = nodeState === "error"
+  const nodeState = !application ? "checking" : nodeHasError ? "error" : serviceModeActive ? "service" : operationActive || nodeDegraded ? "working" : "healthy";
+  const nodeStateLabel = nodeState === "checking" ? "ПРОВЕРКА УЗЛА"
+    : nodeState === "error" ? "УЗЕЛ С ОШИБКОЙ"
+    : nodeState === "service" ? "СЕРВИСНЫЙ РЕЖИМ"
+    : nodeState === "working" ? "ТРЕБУЕТ ВНИМАНИЯ"
+    : "УЗЕЛ В СЕТИ";
+  const applicationStateTitle = nodeState === "checking"
+    ? "Проверка состояния"
+    : nodeState === "error"
     ? "Есть ошибки"
     : operationActive ? operationLabel
     : serviceModeActive ? "Сервисный режим"
     : nodeDegraded ? "Нарушение работы"
     : "В сети";
+  const navigationState = nodeState === "checking" ? "gray" : nodeState === "error" ? "red" : nodeState === "service" ? "blue" : nodeState === "working" ? "yellow" : "green";
+  const countryCode = overview?.server.country_code?.toLowerCase() || "";
 
   return <main className="shell gateShell">
     <LightNavigation
       activeTab={tab}
       protocolImages={protocolImages}
       clientsCount={clients.length}
-      nodeState={nodeState === "error" ? "red" : nodeState === "working" ? "yellow" : "green"}
+      nodeState={navigationState}
       nodeStateLabel={nodeStateLabel}
       server={overview?.server}
       onNavigate={(next) => setTab(next as Tab)}
     />
 
     <section className="content">
-      <header className="topbar">
-        <div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p className="subtitle">{overview?.server.city}, {overview?.server.country} · управление инфраструктурой</p></div>
-        <div className="topActions">
-          <button className={`autoButton ${autoRefresh ? "active" : ""}`} disabled={serviceModeActive} onClick={() => setAutoRefresh((value) => !value)}><i />{serviceModeActive ? "Авто · выкл" : autoRefresh ? `Авто · ${["overview", "clients", ...protocolIds, "security"].includes(tab) ? "<1" : tab === "application" || tab === "services" ? "5" : "30"}с` : "Пауза"}</button>
+      <header className="gateMasthead" aria-label="Состояние сервера">
+        <div className="gateMastNode">
+          <CountryFlag code={countryCode} label={overview?.server.country || "Страна не определена"} />
+          <div className="gateMastIdentity"><span>PRIMARY NODE</span><h2>{overview?.server.city || overview?.server.name || "VPS"}</h2><p><span>{overview?.server.country || "—"}</span><span className="mono">{overview?.server.public_ip || "—"}</span></p></div>
+          <div className={`gateMastState ${navigationState}`}>{applicationStateTitle}</div>
+        </div>
+        <div className="gateMastFacts" aria-label="Метрики сервера">
+          <div><span>UPTIME</span><strong>{uptime(overview?.server.uptime_s)}</strong></div>
+          <div><span>LOAD</span><strong>{overview?.resources.load1.toFixed(2) || "—"}</strong></div>
+          <div><span>CPU</span><strong>{(overview?.resources.cpu_percent || 0).toFixed(0)}%</strong></div>
+          <div><span>RAM</span><strong>{memUsed.toFixed(0)}%</strong></div>
+          <div><span>NETWORK</span><strong>↓ {bytes(networkRate.rx)}/с</strong></div>
+        </div>
+        <div className="gateMastActions">
+          <div className={`refreshControl ${autoRefresh ? "active" : ""}`} data-refresh-interval="<1" aria-label="Управление обновлением данных">
+            <button className="autoButton" disabled={serviceModeActive} onClick={() => setAutoRefresh((value) => !value)} aria-label={autoRefresh ? "Остановить автообновление" : "Включить автообновление"}><i /></button>
+            <button className="iconButton" onClick={() => void refreshCurrent(true)} aria-label="Обновить текущий модуль">↻</button>
+          </div>
           {lastUpdated && <span className="updatedAt">{lastUpdated.toLocaleTimeString("ru-RU")}</span>}
-          <button className="iconButton" onClick={() => void refreshCurrent(true)} aria-label="Обновить текущий модуль">↻</button>
           <button className="ghostButton" onClick={() => { sessionStorage.removeItem("312-token"); setToken(""); }}>Выйти</button>
         </div>
       </header>
+      {tab !== "overview" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "страна не определена"} · управление инфраструктурой</p></div></div>}
       {busy && <div className="loadingLine" />}
 
       {tab === "overview" && <section className="overview">
-        <article className="heroPanel panel">
-          <div><p className="eyebrow">PRIMARY NODE</p><h2>{overview?.server.city}</h2><p className="mono">{overview?.server.country} · {overview?.server.public_ip}</p></div>
-          <div className={`nodeStatus ${nodeState}`}><span className="pulse" /><div><strong>{applicationStateTitle}</strong><small>{operationActive ? application?.action?.message || "Команда выполняется" : `Uptime ${uptime(overview?.server.uptime_s)}`}</small></div></div>
-        </article>
         <div className="metrics">
           <header className="metricsHeader">
             <div><p className="eyebrow">SERVER MONITORING</p><h2>Ресурсы VPS</h2><small>{metricsStatus}</small></div>
@@ -1756,6 +1775,11 @@ function SecurityRow({ ok, title, text, okLabel = "Confirmed", badLabel = "Atten
 }
 function SecurityActionRow({ ok, title, text, onAction, actionLabel = "Исправить", alwaysAction = false }: { ok: boolean; title: string; text: string; onAction: () => void; actionLabel?: string; alwaysAction?: boolean }) {
   return <div><span className={ok ? "check" : "warning"}>{ok ? "✓" : "!"}</span><p><strong>{title}</strong><small>{text}</small></p>{ok && !alwaysAction ? <em className="onlinePill">Готово</em> : <button className="securityFixButton" onClick={onAction}>{actionLabel}</button>}</div>;
+}
+function CountryFlag({ code, label }: { code: string; label: string }) {
+  if (!['nl', 'lv', 'ru'].includes(code)) return <span className="gateCountryFlag unknown" role="img" aria-label={label}>◎</span>;
+  const stripes = code === "nl" ? ["#ae1c28", "#ffffff", "#21468b"] : code === "lv" ? ["#9e3039", "#ffffff", "#9e3039"] : ["#ffffff", "#1c57a7", "#d52b1e"];
+  return <span className="gateCountryFlag" role="img" aria-label={label}><svg viewBox="0 0 27 18" aria-hidden="true"><rect width="27" height="18" rx="2" fill={stripes[0]} />{code === "lv" ? <rect y="8" width="27" height="2" fill={stripes[1]} /> : <><rect y="6" width="27" height="6" fill={stripes[1]} /><rect y="12" width="27" height="6" fill={stripes[2]} /></>}</svg></span>;
 }
 function VersionFooter() {
   return <LegalFooter version={appVersion} branch={buildBranch} commit={buildCommit} />;
