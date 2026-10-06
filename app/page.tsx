@@ -1249,20 +1249,25 @@ export default function Home() {
         </div>
         <article className="panel protocolSummary">
           <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div><button className="miniButton" onClick={() => void checkProtocolVersions()} disabled={busy || checkingProtocolVersions}>{checkingProtocolVersions ? "Проверяем…" : "Проверить обновления"}</button></div>
+          <div className="protocolModuleGrid">
           {protocolImages.map((image) => {
             const protocol = image.id as Protocol;
             const isTunnel = image.kind === "tunnel" && lightModuleIds.includes(protocol);
             const state = isTunnel ? overview?.protocols[protocol] : undefined;
-            return <div className={`protocolInstaller${image.installed ? " installed" : ""}${image.kind === "agent" ? " agent" : ""}`} key={image.id}>
-              <span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span>
-              <p><strong>{image.name}{image.kind === "agent" && <em>АГЕНТ</em>}</strong><small>{image.description}</small><small className="protocolVersionLine">{image.installed ? `Версия: ${image.installed_version || "не определена"}` : image.status === "planned" ? "Статус: проектирование" : `Версия образа: ${image.version}`}{image.update_available ? ` · доступно: ${image.available_version}` : ""}{state ? ` · ${state.interface}:${state.port}` : ""}</small></p>
-              <div className="protocolInstallerActions">
+            const moduleState = image.installed ? state?.active ? "ACTIVE" : "STOPPED" : image.status === "planned" ? "PLANNED" : "AVAILABLE";
+            return <article className={`protocolModuleCard${image.installed ? " installed" : ""}${image.kind === "agent" ? " agent" : ""}`} key={image.id}>
+              <header><span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span><div><strong>{image.name}</strong><small>{image.kind === "agent" ? "NETWORK AGENT" : "TUNNEL MODULE"}</small></div><em className={moduleState.toLowerCase()}>{moduleState}</em></header>
+              <p>{image.description}</p>
+              <dl><div><dt>INSTALLED</dt><dd title={image.installed_version || "—"}>{image.installed_version || "—"}</dd></div><div><dt>AVAILABLE</dt><dd title={image.available_version || image.version}>{image.available_version || (image.installed ? "NOT CHECKED" : image.version)}</dd></div></dl>
+              {state && <small className="protocolModuleEndpoint">{state.interface}:{state.port}</small>}
+              <footer>
                 {image.installed && isTunnel && <button onClick={() => setTab(protocol)}>Открыть</button>}
-                {image.installed && isTunnel && <button className={image.update_breaking ? "warning" : ""} onClick={() => void updateProtocol(image)} disabled={busy || !image.update_available}>{installingProtocol === `update-${image.id}` ? "Обновление…" : image.update_available ? `Обновить до ${image.available_version}` : image.version_checked_at ? "Обновлений нет" : "Версия не проверена"}</button>}
+                {image.installed && isTunnel && <button className={image.update_breaking ? "warning" : ""} onClick={() => void updateProtocol(image)} disabled={busy || !image.update_available}>{installingProtocol === `update-${image.id}` ? "Обновление…" : image.update_available ? "Обновить" : image.version_checked_at ? "Актуально" : "Не проверено"}</button>}
                 {!image.installed && <button onClick={() => image.installable && void installProtocol(image)} disabled={!image.installable || busy || Boolean(installingProtocol)}>{!image.installable ? "Недоступно" : installingProtocol === image.id ? "Установка…" : "Установить"}</button>}
-              </div>
-            </div>;
+              </footer>
+            </article>;
           })}
+          </div>
           {!protocolImages.length && <div className="protocolEmpty"><span>—</span><p><strong>Нет доступных образов</strong><small>Добавьте manifest.json в каталог protocol-images</small></p></div>}
         </article>
       </section>}

@@ -802,6 +802,47 @@ input, select { height: 46px; font-size: 11px; }
   .guideSteps { grid-template-columns: 1fr; }
 }
 
+/* Compact module deck: a separate card system, independent from legacy rows. */
+.overview { grid-template-columns: minmax(0, 1fr); }
+.overview > .metrics, .overview > .protocolSummary { grid-column: 1; }
+.overview > .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.protocolSummary { align-self: start; padding: 12px 14px; }
+.protocolModuleGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.protocolModuleCard { min-width: 0; min-height: 154px; display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid #22343d; border-radius: 8px; background: linear-gradient(145deg, #101e28, #0a151d); }
+.protocolModuleCard.installed { border-color: #2d4852; }
+.protocolModuleCard.agent { border-style: dashed; }
+.protocolModuleCard header { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.protocolModuleCard header .protocol { width: 32px; height: 32px; border-radius: 6px; }
+.protocolModuleCard header > div { min-width: 0; display: grid; gap: 3px; }
+.protocolModuleCard header strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.protocolModuleCard header small { margin: 0; color: #718896; font: 6px var(--font-mono); letter-spacing: .08em; }
+.protocolModuleCard header em { padding: 4px 5px; border: 1px solid #314550; border-radius: 4px; color: #79909c; font: normal 6px var(--font-mono); }
+.protocolModuleCard header em.active { border-color: #31574d; color: var(--green); }
+.protocolModuleCard header em.stopped { border-color: #69532e; color: var(--amber); }
+.protocolModuleCard p { min-height: 28px; display: -webkit-box; overflow: hidden; margin: 0; color: #8da0aa; font: 8px/1.45 var(--ui-font); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.protocolModuleCard dl { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0; }
+.protocolModuleCard dl > div { min-width: 0; display: grid; gap: 3px; }
+.protocolModuleCard dt { color: #526b77; font: 6px var(--font-mono); letter-spacing: .07em; }
+.protocolModuleCard dd { overflow: hidden; margin: 0; color: #afc0c7; font: 8px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.protocolModuleEndpoint { overflow: hidden; margin: -3px 0 0; color: #718896; font: 7px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.protocolModuleCard footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: auto; }
+.protocolModuleCard footer button { min-width: 0; height: 27px; overflow: hidden; padding: 0 6px; border: 1px solid #31505c; border-radius: 5px; background: var(--accent-dim); color: var(--accent); font: 7px var(--ui-font); text-overflow: ellipsis; white-space: nowrap; }
+.protocolModuleCard footer button:only-child { grid-column: 1 / -1; }
+.protocolModuleCard footer button.warning { border-color: #72552a; color: var(--amber); background: #251d12; }
+.protocolModuleCard footer button:disabled { cursor: default; opacity: .48; }
+
+@media (max-width: 1050px) {
+  .overview > .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .protocolModuleGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .overview > .metrics, .protocolModuleGrid { grid-template-columns: minmax(0, 1fr); }
+  .protocolSummary .panelHead { align-items: flex-start; gap: 10px; }
+  .protocolSummary .panelHead .miniButton { flex: 0 0 auto; }
+  .protocolModuleCard { min-height: 148px; }
+}
+
 /* Compact operations layout: useful state fits into a typical 1440×900 viewport. */
 @media (min-width: 1051px) {
   .sidebar { height: 68px; padding-inline: clamp(20px, 3vw, 48px); gap: 24px; }
@@ -1278,4 +1319,19 @@ input, select { height: 46px; font-size: 11px; }
     font-size: 13px;
     line-height: 1.65;
   }
+}
+
+/* Final responsive placement for the compact module deck. */
+.overview { grid-template-columns: minmax(0, 1fr); }
+.overview > .metrics, .overview > .protocolSummary { grid-column: 1; }
+.overview > .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.protocolModuleGrid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+
+@media (max-width: 1050px) {
+  .overview > .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .protocolModuleGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .overview > .metrics, .protocolModuleGrid { grid-template-columns: minmax(0, 1fr); }
 }
