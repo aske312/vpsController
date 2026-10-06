@@ -4,6 +4,7 @@ import ipaddress
 from pathlib import Path
 import tempfile
 import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -40,6 +41,29 @@ class PortabilityTests(unittest.TestCase):
                     api.manage_service('ssh', api.ServiceAction(action=action))
                 units = ('ssh.socket', 'ssh.service') if state == 'loaded' else ('ssh.service',)
                 self.assertIn(('systemctl', action, *units), calls)
+
+    def test_metrics_history_endpoint_returns_persisted_server_samples(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = api.MetricsHistory(Path(directory) / 'history.sqlite3')
+            now = int(time.time() // 3) * 3
+            store.record({
+                'cpu_percent': 37,
+                'memory_total': 100,
+                'memory_available': 40,
+                'disk_total': 1000,
+                'disk_available': 750,
+                'network_rx': 10,
+                'network_tx': 20,
+                'uptime_s': 100,
+            }, now)
+            api.app.dependency_overrides[api.require_token] = lambda: None
+            self.addCleanup(api.app.dependency_overrides.clear)
+            with patch.object(api, 'metrics_history_store', store):
+                response = TestClient(api.app).get('/api/metrics/history?period=live')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['period'], 'live')
+            self.assertEqual(response.json()['resolution_s'], 3)
+            self.assertTrue(any(point['cpu_percent'] == 37 for point in response.json()['points']))
 
     def test_client_create_delete_isolated_for_both_protocols(self):
         with tempfile.TemporaryDirectory() as directory:

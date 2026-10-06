@@ -2,18 +2,19 @@ name: Publish Light release
 
 on:
   push:
-    branches: [light]
+    branches: [light, test-light]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: light-production-release
+  group: light-${{ github.ref_name }}-release
   cancel-in-progress: false
 
 jobs:
   verify:
+    if: github.ref_name == 'light'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -27,6 +28,7 @@ jobs:
 
   build:
     needs: verify
+    if: always() && (needs.verify.result == 'success' || github.ref_name == 'test-light')
     strategy:
       fail-fast: false
       matrix:
@@ -51,7 +53,10 @@ jobs:
           base="$(node -p 'require("./package.json").version')"
           major_minor="${base%.*}"
           latest="$(git tag --list "light-v${major_minor}.*" --sort=-v:refname | head -n 1)"
-          if [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
+          if [[ "$GITHUB_REF_NAME" == "test-light" ]]; then
+            [[ -n "$latest" ]] || { echo "Production Light version tag is missing" >&2; exit 1; }
+            version="${latest#light-}"
+          elif [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
             version="${latest#light-}"
           elif [[ -z "$latest" ]]; then
             version="v${base}"
@@ -60,11 +65,11 @@ jobs:
             version="v${major_minor}.$((patch + 1))"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Build Light production archive
+      - name: Build Light archive
         env:
           BUILD_COMMIT: ${{ github.sha }}
           RELEASE_EDITION: light
-          RELEASE_CHANNEL: production
+          RELEASE_CHANNEL: ${{ github.ref_name == 'test-light' && 'test' || 'production' }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: bash scripts/build-release.sh "outputs/vps-control-light-linux-${{ matrix.architecture }}.tar.gz"
       - uses: actions/upload-artifact@v4
@@ -76,6 +81,7 @@ jobs:
 
   publish:
     needs: build
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -98,7 +104,10 @@ jobs:
           base="$(node -p 'require("./package.json").version')"
           major_minor="${base%.*}"
           latest="$(git tag --list "light-v${major_minor}.*" --sort=-v:refname | head -n 1)"
-          if [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
+          if [[ "$GITHUB_REF_NAME" == "test-light" ]]; then
+            [[ -n "$latest" ]] || { echo "Production Light version tag is missing" >&2; exit 1; }
+            version="${latest#light-}"
+          elif [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
             version="${latest#light-}"
           elif [[ -z "$latest" ]]; then
             version="v${base}"
@@ -107,17 +116,27 @@ jobs:
             version="v${major_minor}.$((patch + 1))"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Publish Light production release
+      - name: Publish Light release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release delete light-latest --cleanup-tag --yes || true
-          gh release create light-latest outputs/vps-control-light-linux-*.tar.gz \
+          if [[ "$GITHUB_REF_NAME" == "test-light" ]]; then
+            release_tag="light-test-latest"
+            release_title="Light test ${VERSION}"
+            release_notes="Light test release ${VERSION} for ${GITHUB_SHA}"
+          else
+            release_tag="light-latest"
+            release_title="Light ${VERSION}"
+            release_notes="Light production release ${VERSION} for ${GITHUB_SHA}"
+          fi
+          gh release delete "$release_tag" --cleanup-tag --yes || true
+          gh release create "$release_tag" outputs/vps-control-light-linux-*.tar.gz \
             --target "$GITHUB_SHA" \
-            --title "Light ${VERSION}" \
-            --notes "Light production release ${VERSION} for ${GITHUB_SHA}" \
+            --title "$release_title" \
+            --notes "$release_notes" \
             --latest=false
+          [[ "$GITHUB_REF_NAME" == "light" ]] || exit 0
           version_tag="light-${VERSION}"
           if ! git rev-parse "$version_tag" >/dev/null 2>&1; then
             git tag "$version_tag" "$GITHUB_SHA"
