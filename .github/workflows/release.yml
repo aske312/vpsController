@@ -14,7 +14,6 @@ concurrency:
 
 jobs:
   verify:
-    if: github.ref_name == 'pro'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -34,7 +33,7 @@ jobs:
 
   build:
     needs: verify
-    if: always() && (needs.verify.result == 'success' || github.ref_name == 'test-pro')
+    if: needs.verify.result == 'success'
     strategy:
       fail-fast: false
       matrix:
