@@ -28,6 +28,9 @@ LOCAL_CIDR=""
 HTTP_PORT="80"
 WG_PORT="51820"
 AWG_PORT="51822"
+HYSTERIA2_PORT="8443"
+TUIC_PORT="8444"
+TROJAN_PORT="8445"
 WG_INTERFACE="wg0"
 AWG_INTERFACE="awg0"
 AWG_MTU="1280"
@@ -53,6 +56,7 @@ PRODUCT_EDITION="light"
 PRODUCTION_BRANCH="light"
 PRODUCTION_RELEASE_TAG="light-latest"
 TEST_BRANCH="test-light"
+TEST_RELEASE_TAG="light-test-latest"
 ACTION_FILE="${DATA_DIR}/application-action.json"
 AUTOMATION_FILE="${DATA_DIR}/automation.json"
 SERVICE_MODE_FILE="${DATA_DIR}/service-mode.json"
@@ -355,6 +359,9 @@ configure_access() {
   set_env_value "ACCESS_MODE" "${ACCESS_MODE}"
   set_env_value "WG_PORT" "${WG_PORT}"
   set_env_value "AWG_PORT" "${AWG_PORT}"
+  set_env_value "HYSTERIA2_PORT" "${HYSTERIA2_PORT}"
+  set_env_value "TUIC_PORT" "${TUIC_PORT}"
+  set_env_value "TROJAN_PORT" "${TROJAN_PORT}"
   set_env_value "WG_INTERFACE" "${WG_INTERFACE}"
   set_env_value "AWG_INTERFACE" "${AWG_INTERFACE}"
   set_env_value "AWG_MTU" "${AWG_MTU}"
@@ -578,9 +585,7 @@ EOF
 }
 
 check_vpn() {
-  command -v wg >/dev/null 2>&1 || warn "WireGuard CLI пока не установлен."
   command -v awg >/dev/null 2>&1 || warn "AmneziaWG CLI пока не установлен; панель покажет AWG остановленным."
-  [[ -s "/etc/wireguard/${WG_INTERFACE}.conf" ]] || warn "отсутствует /etc/wireguard/${WG_INTERFACE}.conf; WireGuard пока недоступен."
   [[ -s "/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf" || -s "/etc/amnezia/${AWG_INTERFACE}.conf" ]] \
     || warn "отсутствует конфигурация ${AWG_INTERFACE}; AmneziaWG пока недоступен."
 }
@@ -616,6 +621,7 @@ install_protocol_image() {
   prepare_package_manager
   ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" TROJAN_PORT="${TROJAN_PORT}" \
     bash "${image_root}/${installer}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
@@ -639,8 +645,9 @@ remove_protocol_image() {
   [[ "${uninstaller}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${uninstaller}" ]] \
     || die "образ ${image_id} не поддерживает удаление."
   info "Удаление установленного протокола ${image_id}"
-  ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+  PRESERVE_COMPONENT_DATA=0 ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
     AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" TROJAN_PORT="${TROJAN_PORT}" \
     bash "${image_root}/${uninstaller}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
@@ -873,7 +880,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=-/etc/vps-control.env -/etc/wireguard -/etc/amnezia ${DATA_DIR}
+ReadWritePaths=-/etc/vps-control.env -/etc/wireguard -/etc/amnezia -/etc/vps-control ${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -883,8 +890,9 @@ EOF
 }
 
 ensure_api_write_access() {
-  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/wireguard -/etc/amnezia ${DATA_DIR}"
-  if ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}"; then
+  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/wireguard -/etc/amnezia -/etc/vps-control ${DATA_DIR}"
+  if ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
+    || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
     systemctl daemon-reload
   fi
@@ -1076,15 +1084,17 @@ uninstall_app() {
   stop_legacy_containers
   systemctl disable --now "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
   systemctl disable --now vpn-monitor.timer 2>/dev/null || true
-  if [[ -f "${INSTALL_DIR}/protocol-images/wireguard/uninstall.sh" && -s "/etc/wireguard/${WG_INTERFACE}.conf" ]]; then
-    ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
-      bash "${INSTALL_DIR}/protocol-images/wireguard/uninstall.sh"
-  fi
   if [[ -f "${INSTALL_DIR}/protocol-images/amneziawg/uninstall.sh" ]] \
     && [[ -s "/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf" || -s "/etc/amnezia/${AWG_INTERFACE}.conf" ]]; then
     ENV_FILE="${ENV_FILE}" AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
       bash "${INSTALL_DIR}/protocol-images/amneziawg/uninstall.sh"
   fi
+  local protocol_id
+  for protocol_id in hysteria2 tuic trojan; do
+    if [[ -f "${INSTALL_DIR}/protocol-images/${protocol_id}/uninstall.sh" ]]; then
+      PRESERVE_COMPONENT_DATA=0 bash "${INSTALL_DIR}/protocol-images/${protocol_id}/uninstall.sh"
+    fi
+  done
   rm -f "${SERVICE_FILE}" "${WEB_SERVICE_FILE}" /etc/systemd/system/vpn-monitor.service /etc/systemd/system/vpn-monitor.timer \
     /etc/logrotate.d/vps-control-monitor "${COMMAND_PATH}" /usr/local/sbin/vpn-monitor-sample
   systemctl daemon-reload
@@ -1242,7 +1252,7 @@ install_prebuilt_release() {
 }
 
 update_prebuilt_branch() {
-  local branch="$1" release_tag="$2"
+  local branch="$1" release_tag="$2" expected_channel="${3:-production}" preserve_previous="${4:-no}"
   local remote="${REMOTE_URL:-https://github.com/aske312/vpsController.git}"
   local latest current repository_path release_url archive release_commit release_revision ready attempt
 
@@ -1251,7 +1261,9 @@ update_prebuilt_branch() {
   elif [[ "${remote}" =~ ^ssh://git@github\.com/(.+)$ ]]; then
     remote="https://github.com/${BASH_REMATCH[1]}"
   fi
-  [[ "${branch}" == "${PRODUCTION_BRANCH}" ]] || die "готовые релизы публикуются только из ветки ${PRODUCTION_BRANCH}."
+  [[ "${branch}:${expected_channel}" == "${PRODUCTION_BRANCH}:production" \
+    || "${branch}:${expected_channel}" == "${TEST_BRANCH}:test" ]] \
+    || die "ветка ${branch} не соответствует каналу ${expected_channel}."
   latest="$(git ls-remote "${remote}" "refs/heads/${branch}" 2>/dev/null | awk 'NR == 1 {print $1}')"
   [[ "${latest}" =~ ^[0-9a-f]{40}$ ]] || die "не удалось получить актуальную ревизию ветки ${branch}."
   current="$(cat "${INSTALL_DIR}/.build-commit" 2>/dev/null || true)"
@@ -1278,7 +1290,11 @@ update_prebuilt_branch() {
   [[ "${ready}" == "yes" ]] \
     || die "релиз для актуальной версии ${branch} не опубликован; проверьте GitHub Actions."
 
-  release_url="${APP_RELEASE_URL:-}"
+  if [[ "${expected_channel}" == "test" ]]; then
+    release_url="${TEST_RELEASE_URL:-}"
+  else
+    release_url="${APP_RELEASE_URL:-}"
+  fi
   if [[ -z "${release_url}" && "${remote}" =~ ^https://github\.com/([^/]+/[^/]+)$ ]]; then
     repository_path="${BASH_REMATCH[1]%.git}"
     release_url="https://github.com/${repository_path}/releases/download/${release_tag}/vps-control-${PRODUCT_EDITION}-linux-$(system_architecture).tar.gz"
@@ -1296,7 +1312,7 @@ update_prebuilt_branch() {
   [[ "${release_commit}" =~ ^[0-9a-f]{40}$ && "${latest}" == "${release_commit}" ]] \
     || die "подготовленный релиз не соответствует актуальной ревизии ветки ${branch}."
 
-  install_prebuilt_release install-release "${archive}"
+  install_prebuilt_release install-release "${archive}" "${preserve_previous}" "${expected_channel}"
   ok "приложение обновлено до ${branch} ${release_commit}."
 }
 
@@ -1307,11 +1323,16 @@ update_app() {
 update_test_app() {
   local archive="${2:-}"
   [[ -r "${SERVICE_MODE_FILE}" ]] || die "переход на тестовую версию разрешён только в сервисном режиме."
-  [[ -n "${archive}" ]] || die "укажите путь к локальному test-архиву."
-  if [[ -d "${TEST_BACKUP_DIR}" ]]; then
-    install_prebuilt_release install-release "${archive}" no test
+  if [[ -n "${archive}" ]]; then
+    if [[ -d "${TEST_BACKUP_DIR}" ]]; then
+      install_prebuilt_release install-release "${archive}" no test
+    else
+      install_prebuilt_release install-release "${archive}" yes test
+    fi
+  elif [[ -d "${TEST_BACKUP_DIR}" ]]; then
+    update_prebuilt_branch "${TEST_BRANCH}" "${TEST_RELEASE_TAG}" test no
   else
-    install_prebuilt_release install-release "${archive}" yes test
+    update_prebuilt_branch "${TEST_BRANCH}" "${TEST_RELEASE_TAG}" test yes
   fi
 }
 
@@ -1378,6 +1399,10 @@ change_access_mode() {
 change_service_mode() {
   local requested="${2:-}" previous_access ssh_service_active ssh_socket_active ssh_public active_timers
   [[ "${requested}" == "enable" || "${requested}" == "disable" ]] || die "режим должен быть enable или disable."
+  if [[ "${requested}" == "disable" && -r "${INSTALL_DIR}/.prebuilt-release" \
+    && "$(release_metadata_value "${INSTALL_DIR}/.prebuilt-release" channel)" == "test" ]]; then
+    die "сначала вернитесь на light, затем выключите сервисный режим."
+  fi
   if [[ "${requested}" == "enable" ]]; then
     [[ ! -f "${SERVICE_MODE_FILE}" ]] || { warn "сервисный режим уже включён."; return; }
     previous_access="${ACCESS_MODE}"
@@ -1758,8 +1783,8 @@ usage() {
   stop             остановить панель
   restart          перезапустить панель
   update           обновить Light проверенным production-релизом ветки light
-  test-update <архив>
-                   установить локальную test-сборку Light (только сервисный режим)
+  test-update [архив]
+                   обновить из test-light или установить локальный test-архив (только сервисный режим)
   test-rollback    вернуться к production-версии, сохранённой перед test-сборкой
   install-release <архив>
                    вручную установить заранее собранный Linux-релиз без Docker, npm и apt
