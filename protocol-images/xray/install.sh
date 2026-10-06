@@ -36,7 +36,7 @@ mv -f "${BIN}.new" "${BIN}"
 if [[ ! -s "${ROOT}/settings.json" ]]; then
   key_output="$(${BIN} x25519)"
   private_key="$(awk -F ': ' '/PrivateKey:/ {print $2; exit}' <<<"${key_output}")"
-  password="$(awk -F ': ' '/^(Password|PublicKey):/ {print $2; exit}' <<<"${key_output}")"
+  password="$(awk -F ': ' '/^(Password|PublicKey)/ {print $2; exit}' <<<"${key_output}")"
   [[ -n "${private_key}" && -n "${password}" ]] || { echo 'Unable to generate REALITY key pair' >&2; exit 1; }
   short_id="$(openssl rand -hex 8)"
   path="/$(openssl rand -hex 8)"

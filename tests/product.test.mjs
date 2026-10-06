@@ -360,6 +360,7 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(xrayInstall, /'protocol': 'vless'/);
   assert.match(xrayInstall, /'network': 'xhttp'/);
   assert.match(xrayInstall, /'security': 'reality'/);
+  assert.match(xrayInstall, /\/\^\(Password\|PublicKey\)\//);
   assert.match(api, /Unable to create Xray connection/);
   assert.doesNotMatch(api + page, /\bTrojan\b|"trojan"/);
   assert.equal(JSON.parse(relayManifest).kind, "agent");
