@@ -1,0 +1,34 @@
+.gateNotificationDock { position:fixed; z-index:1000; top:18px; right:18px; width:min(390px,calc(100vw - 36px)); display:grid; gap:8px; pointer-events:auto; }
+.gateNotificationHeader { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:9px 11px; border:1px solid var(--line); border-radius:9px; background:rgba(8,18,27,.96); box-shadow:0 14px 36px rgba(0,0,0,.34); backdrop-filter:blur(16px); }
+.gateNotificationHeader strong { font-size:12px; }
+.gateNotificationHeader strong span { margin-left:5px; color:var(--muted); }
+.gateNotificationHeader strong small { display:block; margin-top:3px; color:var(--muted); font-size:9px; font-weight:500; }
+.gateNotificationHeader > div { display:flex; gap:12px; }
+.gateNotificationHeader button { padding:3px 0; border:0; background:none; color:var(--muted); font-size:10px; cursor:pointer; }
+.gateNotificationList { display:grid; gap:7px; max-height:72vh; overflow:auto; outline:none; }
+.gateNotificationDock:not(.is-expanded) .gateOperationCard:nth-child(n+4) { display:none; }
+.gateOperationCard { --notification-color:var(--amber); overflow:hidden; border:1px solid color-mix(in srgb,var(--notification-color) 38%,transparent); border-radius:10px; background:rgba(8,18,27,.97); box-shadow:0 16px 42px rgba(0,0,0,.36); backdrop-filter:blur(18px); }
+.gateOperationCard.error { --notification-color:var(--red); }
+.gateOperationCard.success { --notification-color:var(--green); }
+.gateOperationCard.info { --notification-color:var(--blue); }
+.gateOperationContent { display:flex; align-items:center; gap:10px; padding:11px; }
+.gateOperationIcon { width:26px; height:26px; flex:0 0 auto; display:grid; place-items:center; border:1px solid color-mix(in srgb,var(--notification-color) 24%,transparent); border-radius:8px; color:var(--notification-color); background:color-mix(in srgb,var(--notification-color) 9%,transparent); font:700 12px var(--font-mono); }
+.gateOperationText { min-width:0; flex:1; display:grid; gap:3px; }
+.gateOperationText > span { color:var(--notification-color); font:700 7px var(--font-mono); letter-spacing:.12em; }
+.gateOperationText strong { overflow:hidden; color:var(--text); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+.gateOperationText small { color:var(--muted); font-size:9px; line-height:1.4; }
+.gateOperationActions { display:flex; align-items:center; gap:7px; }
+.gateOperationPercent { color:var(--notification-color); font:700 9px var(--font-mono); }
+.gateNotificationClose { width:26px; height:26px; display:grid; place-items:center; border:0; border-radius:6px; background:rgba(255,255,255,.04); color:#b9c9d3; font-size:18px; cursor:pointer; }
+.gateNotificationClose:hover { background:rgba(255,255,255,.1); color:#fff; }
+.gateOperationButton { padding:6px 9px; border:1px solid color-mix(in srgb,var(--notification-color) 35%,transparent); border-radius:6px; color:var(--notification-color); background:transparent; font:600 10px/1.3 var(--font-sans); cursor:pointer; }
+.gateOperationTrack { height:3px; overflow:hidden; background:rgba(255,255,255,.055); }
+.gateOperationTrack > i { display:block; height:100%; background:var(--notification-color); transition:width .35s ease; }
+.gateOperationTrack.indeterminate > i { animation:gate-operation-progress 1.2s ease-in-out infinite; }
+@keyframes gate-operation-progress { 0%{transform:translateX(-110%)} 100%{transform:translateX(300%)} }
+.gateNotificationDock :is(button,[tabindex]):focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+@media (max-width:760px) {
+  .gateNotificationDock { top:auto; right:10px; bottom:calc(76px + env(safe-area-inset-bottom)); left:10px; width:auto; }
+  .gateNotificationList { max-height:45dvh; }
+  .gateNotificationDock:not(.is-expanded) .gateOperationCard:nth-child(n+2) { display:none; }
+}

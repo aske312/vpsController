@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "./gate-navigation.css";
+@import "./notifications.css";
 
 :root {
   color-scheme: dark;

@@ -72,7 +72,7 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(legalUi, /Уведомление о приватности/);
   assert.match(legalUi, /Privacy Notice/);
   assert.match(legalUi, /MIT LICENSE/);
-  assert.match(legalUi, /\{version\} · branch \{branch\} · build \{commit\}/);
+  assert.match(legalUi, /\{branch\} \{version\} build:\{commit\.slice\(0, 18\)\}/);
   assert.doesNotMatch(legalUi, /EU \/ EEA|ЕС \/ ЕЭЗ|GDPR/);
   assert.match(guide, /Подключение с помощью WireGuard \(WG\) и AmneziaWG \(AWG\)/);
   assert.match(guide, /WireGuard \(WG\).*локальным подключением/s);
@@ -368,13 +368,24 @@ test("successful readiness retries do not print transient HTTP errors", async ()
 });
 
 test("the interface uses one fixed visual design without personalization", async () => {
-  const [page, api, css, manager] = await Promise.all([
+  const [page, api, css, manager, navigation, notificationCenter, layout] = await Promise.all([
     read("app/page.tsx"), read("api/main.py"), read("app/globals.css"), read("scripts/vps-control.sh"),
+    read("src/light-navigation.tsx"), read("src/notifications/notification-center.tsx"), read("app/layout.tsx"),
   ]);
   assert.doesNotMatch(page, /personalization|data-(?:style|palette|density|theme)/i);
   assert.doesNotMatch(api, /personalization/i);
   assert.doesNotMatch(css, /personalization|data-(?:style|palette|density|theme)|task-manager/i);
-  assert.match(page, /<main className="shell">/);
+  assert.match(page, /<main className="shell gateShell">/);
+  assert.match(page, /<LightNavigation/);
+  assert.match(navigation, /className="gateSidebar"/);
+  assert.match(navigation, /label="WORKSPACE"/);
+  assert.match(navigation, /label="TUNNELS"/);
+  assert.match(navigation, /label="SYSTEM"/);
+  assert.match(layout, /<NotificationProvider>\{children\}<\/NotificationProvider>/);
+  assert.match(page, /notifications\.finishOperation\(input\)/);
+  assert.match(notificationCenter, /gateNotificationDock/);
+  assert.doesNotMatch(page, /<aside className="operationBanner"/);
+  assert.doesNotMatch(page, /className="successNotice"/);
   assert.match(css, /--accent: var\(--cyan\)/);
   assert.match(css, /\.shell \.metricCard \{ border-left: 2px solid var\(--accent\)/);
   assert.match(css, /\.primaryButton \{[^}]+background: linear-gradient\(100deg, rgba\(39, 124, 137, \.28\)/);

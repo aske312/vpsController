@@ -4,6 +4,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { ConnectionGuide } from "./connection-guide";
 import { LegalFooter } from "./legal";
 import { ProtocolIcon } from "./protocol-icon";
+import { LightNavigation } from "../src/light-navigation";
+import { useNotifications } from "../src/notifications/notification-center";
 
 type Protocol = "wg" | "awg" | "hysteria2" | "tuic" | "trojan";
 type Tab = "overview" | "security" | "application" | "services" | Protocol | "clients";
@@ -145,6 +147,7 @@ const duration = (seconds?: number) => {
 const uptime = (seconds = 0) => `${Math.floor(seconds / 86400)}д ${Math.floor((seconds % 86400) / 3600)}ч`;
 const appendSample = (values: Array<number | null>, value: number) => [...values, Math.max(0, value)].slice(-48);
 export default function Home() {
+  const notifications = useNotifications();
   const [tab, setTab] = useState<Tab>("overview");
   const [token, setToken] = useState("");
   const [loginUser, setLoginUser] = useState("admin");
@@ -164,8 +167,6 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [applicationLogs, setApplicationLogs] = useState<string[]>([]);
   const [securityLogsOpen, setSecurityLogsOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [moduleMenuOpen, setModuleMenuOpen] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [networkRate, setNetworkRate] = useState({ rx: 0, tx: 0 });
   const [resourceHistory, setResourceHistory] = useState<ResourceHistory>({ load: [], memory: [], disk: [], rx: [], tx: [] });
@@ -193,7 +194,6 @@ export default function Home() {
   const [newClient, setNewClient] = useState({ name: "", protocol: "awg" as Protocol });
   const [generated, setGenerated] = useState("");
   const [generatedName, setGeneratedName] = useState("client.conf");
-  const settingsRef = useRef<HTMLDivElement>(null);
   const networkSample = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
   const autoRefreshBeforeServiceMode = useRef(true);
@@ -201,6 +201,7 @@ export default function Home() {
   const automationDirty = useRef(false);
   const loggingDirty = useRef(false);
   const trackedActionUnit = useRef("");
+  const notifiedActionUnits = useRef(new Set<string>());
   const liveRequestInFlight = useRef(false);
 
   useEffect(() => {
@@ -215,13 +216,20 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    function closeSettings(event: PointerEvent) {
-      if (settingsOpen && settingsRef.current && !settingsRef.current.contains(event.target as Node)) setSettingsOpen(false);
-      if (moduleMenuOpen && !(event.target as Element).closest(".moduleMenuWrap")) setModuleMenuOpen("");
+    if (!token) {
+      notifiedActionUnits.current.clear();
+      notifications.reset();
+      return;
     }
-    document.addEventListener("pointerdown", closeSettings);
-    return () => document.removeEventListener("pointerdown", closeSettings);
-  }, [moduleMenuOpen, settingsOpen]);
+    if (error) notifications.upsert({ id: "light:error", source: "light", title: "Ошибка", message: error, state: "error" });
+    else notifications.resolve("light:error");
+  }, [error, notifications, token]);
+
+  useEffect(() => {
+    if (!token) return;
+    if (notice) notifications.upsert({ id: "light:notice", source: "light", title: "Готово", message: notice, state: "success" });
+    else notifications.resolve("light:notice");
+  }, [notice, notifications, token]);
 
   const request = useCallback(async (path: string, init?: RequestInit) => {
     const response = await fetch(`/api${path}`, {
@@ -405,6 +413,28 @@ export default function Home() {
   useEffect(() => {
     const action = application?.action;
     if (!action?.unit) return;
+    const id = `operation:system:${action.unit}`;
+    const active = ["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(action.state || "");
+    if (active) notifiedActionUnits.current.add(id);
+    if (!notifiedActionUnits.current.has(id)) return;
+    const failed = action.state === "failed" || Boolean(action.result && !["success", "unknown"].includes(action.result));
+    const succeeded = ["succeeded", "finished"].includes(action.state || "") && (!action.result || action.result === "success");
+    const input = {
+      id,
+      source: "system",
+      title: actionLabels[(action.action || "").split(":")[0]] || action.action || "Системная операция",
+      message: failed ? action.message || "Команда завершилась с ошибкой." : action.message || "",
+      state: failed ? "error" as const : succeeded ? "success" as const : active ? "running" as const : "unknown" as const,
+      kind: "operation" as const,
+      progress: active ? action.progress : undefined,
+    };
+    if (failed || succeeded) notifications.finishOperation(input);
+    else notifications.upsert(input);
+  }, [application?.action, notifications]);
+
+  useEffect(() => {
+    const action = application?.action;
+    if (!action?.unit) return;
     if (["active", "activating", "running"].includes(action.state || "")) {
       trackedActionUnit.current = action.unit;
       return;
@@ -414,7 +444,6 @@ export default function Home() {
     const label = actionLabels[(action.action || "").split(":")[0]] || "Операция";
     const timer = window.setTimeout(() => {
       if (action.state === "failed" || action.result === "failed") {
-        setError(`${label}: выполнение завершилось с ошибкой`);
         return;
       }
       const message = `${label}: успешно завершено`;
@@ -423,7 +452,6 @@ export default function Home() {
         window.setTimeout(() => window.location.reload(), 600);
         return;
       }
-      setNotice(message);
       void refreshCurrent(false);
     }, 0);
     return () => window.clearTimeout(timer);
@@ -920,20 +948,6 @@ export default function Home() {
     () => protocolImages.filter((image) => image.installed && lightModuleIds.includes(image.id as Protocol)).map((image) => image.id as Protocol),
     [protocolImages],
   );
-  const protocolCategories = useMemo(() => {
-    const groups = new Map<string, { id: string; name: string; images: ProtocolImage[] }>();
-    for (const image of protocolImages) {
-      const id = image.category || "network";
-      const group = groups.get(id) || { id, name: image.category_name || "Сетевые модули", images: [] };
-      group.images.push(image);
-      groups.set(id, group);
-    }
-    return [...groups.values()];
-  }, [protocolImages]);
-  const navigation = useMemo(
-    () => (["overview", "clients"] as Tab[]).filter((id) => id !== "clients" || installedProtocols.length > 0),
-    [installedProtocols],
-  );
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "awg";
 
   async function addClient(event: FormEvent) {
@@ -1091,7 +1105,6 @@ export default function Home() {
   const activeProtocolRate = isProtocolTab(tab) ? protocolRates[tab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
   const activeProtocolImage = isProtocolTab(tab) ? protocolImages.find((image) => image.id === tab) : undefined;
   const operationActive = ["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(application?.action?.state || "");
-  const operationProgress = Math.max(0, Math.min(100, application?.action?.progress || (operationActive ? 5 : 100)));
   const operationName = application?.action?.action || "";
   const operationLabel = actionLabels[operationName.split(":")[0]] || operationName;
   const nodeHasError = Boolean(error) || application?.action?.state === "failed" || application?.action?.result === "failed";
@@ -1110,65 +1123,18 @@ export default function Home() {
     : nodeDegraded ? "Нарушение работы"
     : "В сети";
 
-  return <main className="shell">
-    <aside className="sidebar">
-      <Logo />
-      <nav>{navigation.map((id) =>
-        <button key={id} onClick={() => setTab(id)} className={`navItem ${tab === id ? "active" : ""}`}>
-          <b>{labels[id]}</b>{id === "clients" && <em>{clients.length}</em>}
-        </button>
-      )}
-        {protocolCategories.filter((category) => category.images.some((image) => image.installed)).map((category) => {
-          const available = category.images.filter((image) => image.installed);
-          if (available.length === 1) {
-            const image = available[0];
-            return <button key={category.id} onClick={() => setTab(image.id as Protocol)} className={`navItem ${tab === image.id ? "active" : ""}`}>
-              <ProtocolIcon protocol={image.id} />
-              <b>{image.name}</b>
-            </button>;
-          }
-          return <div className="settingsWrap moduleMenuWrap" key={category.id}>
-            <button onClick={() => {
-              setSettingsOpen(false);
-              setModuleMenuOpen((value) => value === category.id ? "" : category.id);
-            }} className={`navItem moduleToggle ${available.some((image) => image.id === tab) ? "active" : ""}`}>
-              <b>{category.name}</b>
-            </button>
-            {moduleMenuOpen === category.id && <div className="settingsMenu moduleMenu">
-              {available.map((image) => <button key={image.id} onClick={() => {
-                setTab(image.id as Protocol);
-                setModuleMenuOpen("");
-              }} className={`navItem ${tab === image.id ? "active" : ""}`}><ProtocolIcon protocol={image.id} /><b>{image.name}</b></button>)}
-            </div>}
-          </div>;
-        })}
-        <div className="settingsWrap" ref={settingsRef}><button onClick={() => {
-          setModuleMenuOpen("");
-          setSettingsOpen((value) => !value);
-        }} className={`navItem settingsToggle ${tab === "security" || tab === "application" || tab === "services" ? "active" : ""}`}>
-          <b>Настройки</b>
-        </button>
-        {settingsOpen && <div className="settingsMenu">
-          {(["security", "application", "services"] as Tab[]).map((id) =>
-            <button key={id} onClick={() => { setTab(id); setSettingsOpen(false); }} className={`navItem ${tab === id ? "active" : ""}`}>
-              <b>{labels[id]}</b>
-            </button>
-          )}
-        </div>}
-        </div>
-      </nav>
-      <div className={`locationCard ${nodeState}`}><span className="healthDot" /><div><small>{nodeStateLabel}</small><strong>{overview?.server.city}</strong><p>{overview?.server.country} · {overview?.server.public_ip}</p></div></div>
-    </aside>
+  return <main className="shell gateShell">
+    <LightNavigation
+      activeTab={tab}
+      protocolImages={protocolImages}
+      clientsCount={clients.length}
+      nodeState={nodeState === "error" ? "red" : nodeState === "working" ? "yellow" : "green"}
+      nodeStateLabel={nodeStateLabel}
+      server={overview?.server}
+      onNavigate={(next) => setTab(next as Tab)}
+    />
 
     <section className="content">
-      {operationActive && <aside className="operationBanner" aria-live="polite">
-        <span className="operationSpinner" />
-        <div>
-          <strong>{operationLabel || "Выполняется системная операция"}</strong>
-          <small>{application?.action?.message || "Сервер выполняет команду…"} · {operationProgress}%</small>
-          <i><b style={{ width: `${operationProgress}%` }} /></i>
-        </div>
-      </aside>}
       <header className="topbar">
         <div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p className="subtitle">{overview?.server.city}, {overview?.server.country} · управление инфраструктурой</p></div>
         <div className="topActions">
@@ -1178,8 +1144,6 @@ export default function Home() {
           <button className="ghostButton" onClick={() => { sessionStorage.removeItem("312-token"); setToken(""); }}>Выйти</button>
         </div>
       </header>
-      {error && <div className="errorBox">{error}</div>}
-      {notice && <div className="successNotice" role="status"><span>✓</span>{notice}<button onClick={() => setNotice("")} aria-label="Закрыть уведомление">×</button></div>}
       {busy && <div className="loadingLine" />}
 
       {tab === "overview" && <section className="overview">

@@ -74,7 +74,7 @@ export function LegalFooter({ version, branch, commit }: { version: string; bran
   const current = openDocument ? documents[language][openDocument] : null;
   return <>
     <footer className="versionFooter">
-      <span>{version} · branch {branch} · build {commit}</span>
+      <span>{branch} {version} build:{commit.slice(0, 18)}</span>
       <nav aria-label="Правовые документы / Legal documents">
         <button type="button" onClick={() => setOpenDocument("privacy")}>Приватность / Privacy</button>
         <button type="button" onClick={() => setOpenDocument("terms")}>Лицензия / License</button>
