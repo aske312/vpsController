@@ -14,7 +14,26 @@ test("интерфейс относится к 312.net, публичные ме�
   assert.equal(JSON.parse(packageJson).name, "312-net-control");
   assert.doesNotMatch(`${layout}\n${page}`, /ChatGPT|Starter Project|Codex/i);
   assert.match(page, /NEXT_PUBLIC_APP_VERSION \|\| "v1\.0\.0"/);
+  assert.match(page, /NEXT_PUBLIC_RELEASE_CHANNEL \|\| "production"/);
   assert.match(JSON.parse(packageJson).version, /^\d+\.\d+\.\d+$/);
+});
+
+test("PRO shows ISO country flags and the release identity used by Light", async () => {
+  const [workspace, legalUi, page] = await Promise.all([
+    read("src/control-panel/components/app-workspace.tsx"),
+    read("src/shared/components/legal-footer.tsx"),
+    readUiSources(),
+  ]);
+  for (const countryCode of ["de", "fi", "sg", "kz", "jp", "by", "es", "se", "us"]) {
+    assert.match(workspace, new RegExp(`normalized === \\"${countryCode}\\"|${countryCode}: \\[`));
+  }
+  for (const countryCode of ["fr", "gb", "pl", "lt", "ee", "ca", "au", "in", "ae"]) {
+    assert.match(workspace, new RegExp(`normalized === \\"${countryCode}\\"|${countryCode}: \\[`));
+  }
+  assert.match(workspace, /resolveCountryCode\(server\?\.country_code, server\?\.country\)/);
+  assert.match(legalUi, /commit\.slice\(0, 18\)/);
+  assert.match(legalUi, /\{displayChannel\} \{displayVersion\} build:\{buildId\}/);
+  assert.match(page, /channel=\{releaseChannel\}/);
 });
 
 test("MIT license, privacy notice and connection guide are included in Russian", async () => {

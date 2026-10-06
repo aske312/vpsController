@@ -76,6 +76,7 @@ SSH_TEMP_STARTED="no"
 SSH_TEMP_RULE="no"
 APP_VERSION="v1.0.0"
 BUILD_COMMIT="unknown"
+RELEASE_CHANNEL="production"
 PRESERVE_MANAGER="no"
 PRODUCT_EDITION="pro"
 PRODUCTION_BRANCH="pro"
@@ -2609,9 +2610,15 @@ print("v" + ".".join((version + ["0", "0"])[:3]))
 PY
 )"
   BUILD_COMMIT="$(git -C "${PROJECT_DIR}" rev-parse --short HEAD 2>/dev/null || printf unknown)"
-  export APP_VERSION BUILD_COMMIT
+  if [[ "$(git -C "${PROJECT_DIR}" branch --show-current 2>/dev/null || true)" == "${TEST_BRANCH}" ]]; then
+    RELEASE_CHANNEL="test"
+  else
+    RELEASE_CHANNEL="production"
+  fi
+  export APP_VERSION BUILD_COMMIT RELEASE_CHANNEL
   export NEXT_PUBLIC_APP_VERSION="${APP_VERSION}"
   export NEXT_PUBLIC_BUILD_COMMIT="${BUILD_COMMIT}"
+  export NEXT_PUBLIC_RELEASE_CHANNEL="${RELEASE_CHANNEL}"
   if [[ ! -r "${INSTALL_CONFIG}" ]]; then
     install -m 0600 "${PROJECT_DIR}/install.conf" "${INSTALL_CONFIG}"
   fi

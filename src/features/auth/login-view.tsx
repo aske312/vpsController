@@ -4,9 +4,9 @@ import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { BrandGlyph } from "../../shared/components/brand-glyph";
 import { LegalFooter } from "../../shared/components/legal-footer";
 
-type LoginViewProps = { loginUser: string; loginPassword: string; loginPasswordVisible: boolean; busy: boolean; version: string; commit: string; setLoginUser: Dispatch<SetStateAction<string>>; setLoginPassword: Dispatch<SetStateAction<string>>; setLoginPasswordVisible: Dispatch<SetStateAction<boolean>>; login: (event: FormEvent) => Promise<void> | void; };
+type LoginViewProps = { loginUser: string; loginPassword: string; loginPasswordVisible: boolean; busy: boolean; version: string; channel: string; commit: string; setLoginUser: Dispatch<SetStateAction<string>>; setLoginPassword: Dispatch<SetStateAction<string>>; setLoginPasswordVisible: Dispatch<SetStateAction<boolean>>; login: (event: FormEvent) => Promise<void> | void; };
 
-export function LoginView({ loginUser, loginPassword, loginPasswordVisible, busy, version, commit, setLoginUser, setLoginPassword, setLoginPasswordVisible, login }: LoginViewProps) {
+export function LoginView({ loginUser, loginPassword, loginPasswordVisible, busy, version, channel, commit, setLoginUser, setLoginPassword, setLoginPasswordVisible, login }: LoginViewProps) {
   return (
     <main className="loginPage visualLogin loginRedesign">
       <div className="loginBackdrop" aria-hidden="true" />
@@ -34,7 +34,7 @@ export function LoginView({ loginUser, loginPassword, loginPasswordVisible, busy
           </form>
         </div>
       </section>
-      <LegalFooter version={version} commit={commit} />
+      <LegalFooter version={version} channel={channel} commit={commit} />
     </main>
   );
 }
