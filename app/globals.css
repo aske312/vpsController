@@ -1325,7 +1325,7 @@ input, select { height: 46px; font-size: 11px; }
 .overview { grid-template-columns: minmax(0, 1fr) 390px; gap: 12px; }
 .overview > .metrics { grid-column: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .overview > .protocolSummary { grid-column: 2; align-self: start; padding: 10px 12px; }
-.protocolModuleGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.protocolModuleGrid { grid-template-columns: minmax(0, 1fr); gap: 7px; }
 .protocolModuleCard { min-height: 100px; gap: 7px; padding: 9px; }
 .protocolModuleCard header { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
 .protocolModuleOpen { min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
@@ -1344,7 +1344,7 @@ input, select { height: 46px; font-size: 11px; }
   .overview { grid-template-columns: minmax(0, 1fr); }
   .overview > .metrics, .overview > .protocolSummary { grid-column: 1; }
   .overview > .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .protocolModuleGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .protocolModuleGrid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 700px) {
