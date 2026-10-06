@@ -40,6 +40,7 @@ type ApplicationStatus = {
     progress?: number; message?: string;
   };
   service_mode?: { active: boolean; rollback_available?: boolean };
+  release?: { branch: "light" | "test-light"; current_commit: string; latest_commit?: string; outdated?: boolean | null; error?: string; refreshing?: boolean };
   runtime?: { mode: "systemd" | "legacy-docker" | "incomplete"; migration_required: boolean };
 };
 type ProtocolImage = {
@@ -118,7 +119,7 @@ const actionLabels: Record<string, string> = {
   restart: "Перезапуск приложения", update: "Обновление приложения", "test-update": "Переход на тестовую версию", "test-rollback": "Возврат к рабочей версии", "network-check": "Проверка сети и туннелей", identity: "Обновление данных сервера",
   "integrity-check": "Проверка целостности",
   secure: "Настройка защиты", "kernel-update": "Обновление ядра", "vpn-firewall": "Восстановление VPN firewall", optimize: "Оптимизация ресурсов",
-  "service-mode": "Переключение режима и ветки",
+  "service-mode": "Переключение сервисного режима",
   reboot: "Перезагрузка сервера", poweroff: "Выключение сервера",
   "protocol-install": "Установка протокола", "protocol-remove": "Удаление протокола",
 };
@@ -590,6 +591,7 @@ export default function Home() {
         containers: current?.containers || [],
         action: started,
         service_mode: current?.service_mode,
+        release: current?.release,
         runtime: current?.runtime,
       }));
       if (action === "reboot" || action === "poweroff") return;
@@ -697,7 +699,7 @@ export default function Home() {
     if (!await askConfirmation({
       title: active ? "Включить сервисный режим?" : "Завершить сервисный режим?",
       message: active
-        ? "Будет безопасно развёрнута ветка service. Панель станет публичной, SSH будет запущен, фоновые проверки и автоматические задачи будут приостановлены."
+        ? "Панель станет публичной, SSH будет запущен, а фоновые проверки и автоматические задачи будут приостановлены. После включения станет доступен переход на test-light."
         : "Будет восстановлена production-версия Light, сохранённая перед локальной test-сборкой. Только после успешной проверки восстановятся доступ, SSH и автоматические задачи.",
       confirmLabel: active ? "Включить режим" : "Завершить обслуживание",
       danger: active,
@@ -1090,6 +1092,9 @@ export default function Home() {
   const nodeDegraded = application?.api.active === false
     || Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
   const serviceModeActive = Boolean(services?.service_mode?.active || application?.service_mode?.active);
+  const release = application?.release || applicationVersion;
+  const releaseBranch = release?.branch || "light";
+  const testReleaseActive = releaseBranch === "test-light";
   const nodeState = nodeHasError ? "error" : operationActive || nodeDegraded || serviceModeActive ? "working" : "healthy";
   const nodeStateLabel = nodeState === "error" ? "УЗЕЛ С ОШИБКОЙ" : nodeState === "working" ? "ТРЕБУЕТ ВНИМАНИЯ" : "УЗЕЛ В СЕТИ";
   const applicationStateTitle = nodeState === "error"
@@ -1324,8 +1329,9 @@ export default function Home() {
           <div className="panelHead"><div><p className="eyebrow">SUDO VPS-CONTROL</p><h2>Доступные действия</h2></div></div>
           <div className="actionButtons">
             <button onClick={() => void runApplicationAction("restart")} disabled={busy}><strong>Перезапустить приложение</strong><small>Перезапускает панель и API без перезагрузки VPS</small></button>
-            <button onClick={() => void runApplicationAction("update")} disabled={busy}><strong>Обновить приложение</strong><small>Устанавливает проверенный production-релиз Light</small></button>
-            {serviceModeActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={busy}><strong>Вернуться к рабочей версии</strong><small>Восстанавливает приложение, сохранённое перед переходом на main</small></button>}
+            {!testReleaseActive && <button onClick={() => void runApplicationAction("update")} disabled={busy}><strong>{release?.outdated ? "Обновить light" : "Проверить обновление light"}</strong><small>{release?.outdated ? "Доступна новая production-версия" : "Текущий канал: light · production"}</small></button>}
+            {serviceModeActive && <button onClick={() => void runApplicationAction("test-update")} disabled={busy}><strong>{testReleaseActive ? "Обновить test-light" : "Перейти на test-light"}</strong><small>{testReleaseActive ? "Устанавливает актуальную тестовую сборку" : "Сохраняет light для безопасного возврата"}</small></button>}
+            {serviceModeActive && testReleaseActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={busy}><strong>Вернуться на light</strong><small>Восстанавливает production-версию, сохранённую перед тестированием</small></button>}
             <button onClick={() => void runApplicationAction("network-check")} disabled={busy}><strong>Проверить подключения</strong><small>Проверяет интернет, WG, AWG и доступность портов</small></button>
             <button onClick={() => void runApplicationAction("integrity-check")} disabled={busy}><strong>Проверить целостность</strong><small>Проверяет файлы, права доступа и настройки компонентов</small></button>
             <button onClick={() => void runApplicationAction("identity")} disabled={busy}><strong>Обновить данные сервера</strong><small>Повторно определяет публичный IP и географические данные VPS</small></button>
@@ -1348,8 +1354,8 @@ export default function Home() {
           </div>
           <div className="panelAccessActions">
             <label className="serviceModeSwitch">
-              <span><strong>Сервисный режим</strong><small>{serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
-              <input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy} /><i />
+              <span><strong>Сервисный режим</strong><small>{testReleaseActive ? "сначала вернитесь на light" : serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
+              <input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy || testReleaseActive} /><i />
             </label>
             <label className="serviceModeSwitch protectedAccessSwitch">
               <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? "публичный адрес открыт" : "только локальная сеть"}</small></span>

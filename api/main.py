@@ -1300,6 +1300,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
             "active": SERVICE_MODE_FILE.exists(),
             "rollback_available": (DATA_DIR / "test-app-backup").is_dir(),
         },
+        "release": application_version_status(),
         "runtime": {
             "mode": "systemd" if web_unit_loaded and caddy_unit_loaded else "legacy-docker" if legacy_runtime else "incomplete",
             "migration_required": legacy_runtime,
@@ -1308,12 +1309,12 @@ def application_status(_: None = Depends(require_token)) -> dict:
 
 
 class ApplicationAction(BaseModel):
-    action: Literal["restart", "update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
+    action: Literal["restart", "update", "test-update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
 
 
 @app.post("/api/application/action")
 def application_action(payload: ApplicationAction, _: None = Depends(require_token)) -> dict:
-    if payload.action == "test-rollback" and not SERVICE_MODE_FILE.exists():
+    if payload.action in ("test-update", "test-rollback") and not SERVICE_MODE_FILE.exists():
         raise HTTPException(status_code=409, detail="Test version requires active service mode")
     if ACTION_FILE.exists():
         try:
@@ -1401,6 +1402,19 @@ def installed_build_commit() -> str:
         return os.getenv("BUILD_COMMIT", "unknown").strip()
 
 
+def installed_release_branch() -> str:
+    metadata = INSTALL_DIR / ".prebuilt-release"
+    try:
+        values = dict(
+            line.split("=", 1)
+            for line in metadata.read_text(encoding="utf-8").splitlines()
+            if "=" in line
+        )
+    except OSError:
+        return "light"
+    return "test-light" if values.get("channel") == "test" else "light"
+
+
 def application_repository_url() -> str:
     configured = os.getenv("APP_REPOSITORY_URL", "").strip()
     if configured:
@@ -1420,7 +1434,7 @@ def refresh_application_version_cache() -> None:
         return
     try:
         current = installed_build_commit()
-        branch = "light"
+        branch = installed_release_branch()
         repository = application_repository_url()
         latest = ""
         error = ""
@@ -1456,7 +1470,7 @@ def application_version_status() -> dict:
     except (OSError, json.JSONDecodeError):
         pass
     age = time.time() - APP_VERSION_FILE.stat().st_mtime if APP_VERSION_FILE.exists() else float("inf")
-    expected_branch = "light"
+    expected_branch = installed_release_branch()
     installed_commit = installed_build_commit()
     refreshing = (
         age > 600
@@ -1466,7 +1480,19 @@ def application_version_status() -> dict:
     if refreshing and not app_version_refresh_lock.locked():
         threading.Thread(target=refresh_application_version_cache, daemon=True).start()
     if cached:
-        return {**cached, "refreshing": refreshing}
+        cache_matches_install = (
+            cached.get("branch") == expected_branch
+            and cached.get("current_commit") == installed_commit
+        )
+        return {
+            **cached,
+            "branch": expected_branch,
+            "current_commit": installed_commit,
+            "latest_commit": cached.get("latest_commit", "") if cache_matches_install else "",
+            "outdated": cached.get("outdated") if cache_matches_install else None,
+            "error": cached.get("error", "") if cache_matches_install else "",
+            "refreshing": refreshing,
+        }
     return {
         "branch": expected_branch, "current_commit": installed_commit, "latest_commit": "",
         "outdated": None, "checked_at": None, "error": "", "refreshing": True,
@@ -1736,6 +1762,8 @@ class ServiceModeSettings(BaseModel):
 
 @app.put("/api/services/service-mode")
 def update_service_mode(payload: ServiceModeSettings, _: None = Depends(require_token)) -> dict:
+    if not payload.active and installed_release_branch() == "test-light":
+        raise HTTPException(status_code=409, detail="Return to light before disabling service mode")
     unit = f"vps-control-service-mode-{int(time.time())}"
     result = subprocess.run(
         [
