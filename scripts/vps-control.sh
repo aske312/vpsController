@@ -1673,7 +1673,10 @@ verify_app() {
   systemctl is-active --quiet "${APP_NAME}-api.service" || die "API не запущен."
   systemctl is-active --quiet "${APP_NAME}-web.service" || die "веб-служба не запущена."
   systemctl is-active --quiet caddy.service || die "Caddy не запущен."
-  curl --fail --silent --show-error http://127.0.0.1:8000/api/health
+  # Commands such as `identity` restart the API immediately before verification.
+  # Treat its short startup window as readiness, not as a failed operation.
+  curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 \
+    http://127.0.0.1:8000/api/health
   printf '\n'
   curl --fail --silent --retry 6 --retry-connrefused --retry-delay 5 "${PANEL_URL}/" >/dev/null \
     || die "веб-панель не отвечает."

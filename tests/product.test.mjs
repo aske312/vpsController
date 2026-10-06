@@ -365,6 +365,8 @@ test("successful readiness retries do not print transient HTTP errors", async ()
   const retries = [...manager.matchAll(/curl --fail --silent[^\n]+--retry (?:6|10)[^\n]+/g)].map((match) => match[0]);
   assert.ok(retries.length >= 5);
   for (const command of retries) assert.doesNotMatch(command, /--show-error/);
+  const verify = manager.slice(manager.indexOf("verify_app()"), manager.indexOf("network_check()"));
+  assert.match(verify, /--retry 10 --retry-connrefused --retry-delay 1/);
 });
 
 test("the interface uses one fixed visual design without personalization", async () => {
