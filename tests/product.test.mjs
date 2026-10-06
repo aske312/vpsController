@@ -177,9 +177,9 @@ test("service settings are staged, saved explicitly and survive background refre
 });
 
 test("Light keeps production updates public and gates the test-light channel behind service mode", async () => {
-  const [api, page, manager, styles, workflow, protocolIcon] = await Promise.all([
+  const [api, page, manager, styles, workflow, ciWorkflow, protocolIcon] = await Promise.all([
     read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"), read("app/globals.css"),
-    read(".github/workflows/release.yml"), read("app/protocol-icon.tsx"),
+    read(".github/workflows/release.yml"), read(".github/workflows/ci.yml"), read("app/protocol-icon.tsx"),
   ]);
   assert.match(manager, /PRODUCT_EDITION="light"/);
   assert.match(manager, /PRODUCTION_BRANCH="light"/);
@@ -220,6 +220,11 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(workflow, /release_tag="light-test-latest"/);
   assert.match(workflow, /GITHUB_REF_NAME" == "test-light"/);
   assert.match(workflow, /version="\$\{latest#light-\}"/);
+  assert.match(workflow, /verify:\s+if: github\.ref_name == 'light'/);
+  assert.match(workflow, /needs\.verify\.result == 'success' \|\| github\.ref_name == 'test-light'/);
+  assert.match(ciWorkflow, /push:\s+branches: \[light\]/);
+  assert.match(ciWorkflow, /pull_request:\s+branches: \[light\]/);
+  assert.doesNotMatch(ciWorkflow, /branches: \[[^\]]*test-light/);
   assert.match(protocolIcon, /hysteria2: "HY2"/);
   assert.match(manager, /TEST_BACKUP_DIR="\$\{DATA_DIR\}\/test-app-backup"/);
   assert.match(manager, /restore_test_app\(\)/);
