@@ -283,7 +283,7 @@ test("authentication and VPN controls preserve consistent UI states", async () =
   assert.match(api, /payload\.new_password != payload\.confirm_password/);
   assert.match(api, /categories < 3/);
   assert.match(page, /runApplicationAction\("identity"\)/);
-  assert.match(api, /"installed": bool\(service and run\("systemctl", "show", service, "--property=LoadState", "--value"\) == "loaded"\)/);
+  assert.match(api, /installed = bool\(service and run\("systemctl", "show", service, "--property=LoadState", "--value"\) == "loaded"\)/);
   assert.match(api, /if not available_interfaces:/);
   assert.doesNotMatch(api, /for interface in \(WG_INTERFACE, AWG_INTERFACE\):\s+if not Path\(f"\/sys\/class\/net/);
   assert.match(api, /"web": \{"name": "Web 312\.net"/);
@@ -341,6 +341,13 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(awgRemove, /ufw status \| grep -Fq "\$\{AWG_SUBNET\} on \$\{AWG_INTERFACE\}"/);
   assert.match(awgRemove, /99-vps-control-amneziawg\.conf/);
   assert.match(api, /protocol-install/);
+  assert.match(api, /protocol-images\/versions\/check/);
+  assert.match(api, /protocol-update/);
+  assert.match(manager, /set_protocol_client_update_state/);
+  assert.match(manager, /"paused" "Обновление протокола запущено/);
+  assert.match(manager, /"incompatible" "Новая версия не прошла проверку совместимости/);
+  assert.match(page, /Проверить обновления/);
+  assert.match(page, /Обновить до/);
   assert.match(manager, /prepare_package_manager\(\)/);
   assert.match(manager, /\n  prepare_package_manager\r?\n/);
   assert.match(manager, /dpkg --audit/);

@@ -694,6 +694,92 @@ remove_protocol_image() {
   ok "Протокол ${image_id} удалён; образ сохранён."
 }
 
+set_protocol_client_update_state() {
+  local protocol="$1" state="${2:-}" message="${3:-}"
+  python3 - "${DATA_DIR}/clients.json" "${protocol}" "${state}" "${message}" <<'PY'
+import json, os, sys
+path, protocol, state, message = sys.argv[1:]
+try:
+    with open(path, encoding="utf-8") as source:
+        clients = json.load(source)
+except (FileNotFoundError, json.JSONDecodeError):
+    clients = []
+for client in clients:
+    if client.get("protocol") != protocol:
+        continue
+    if state:
+        client["update_state"] = state
+        client["update_message"] = message
+    else:
+        client.pop("update_state", None)
+        client.pop("update_message", None)
+os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+temporary = path + ".update"
+with open(temporary, "w", encoding="utf-8") as output:
+    json.dump(clients, output, ensure_ascii=False, indent=2)
+os.chmod(temporary, 0o600)
+os.replace(temporary, path)
+PY
+}
+
+protocol_binary_version() {
+  local binary="$1"
+  [[ -x "${binary}" ]] || return 0
+  "${binary}" version 2>/dev/null | grep -Eo 'v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?' | head -n1 | sed 's/^v//'
+}
+
+update_protocol_image() {
+  local image_id="${2:-}"
+  [[ "${image_id}" =~ ^(awg|hysteria2|tuic|xray)$ ]] || die "протокол ${image_id} не поддерживает обновление."
+  local manifest image_root installer service binary old_version new_version was_active="no"
+  manifest="$(find "${INSTALL_DIR}/protocol-images" -mindepth 2 -maxdepth 2 -type f -name manifest.json -print | while read -r candidate; do
+    [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' "${candidate}")" == "${image_id}" ]] && { echo "${candidate}"; break; }
+  done)"
+  [[ -n "${manifest}" ]] || die "образ ${image_id} не найден."
+  image_root="$(dirname -- "${manifest}")"
+  installer="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("installer",""))' "${manifest}")"
+  [[ "${installer}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${installer}" ]] || die "для ${image_id} отсутствует безопасный installer."
+  case "${image_id}" in
+    awg) service="awg-quick@${AWG_INTERFACE}.service"; binary="$(command -v awg || true)" ;;
+    hysteria2) service="vps-control-hysteria2.service"; binary="/usr/local/lib/vps-control-hysteria2/hysteria" ;;
+    tuic) service="vps-control-tuic.service"; binary="/usr/local/lib/vps-control-tuic/sing-box" ;;
+    xray) service="vps-control-xray.service"; binary="/usr/local/lib/vps-control-xray/xray" ;;
+  esac
+  systemctl is-active --quiet "${service}" && was_active="yes"
+  old_version="$(protocol_binary_version "${binary}")"
+  local backup_dir
+  backup_dir="$(mktemp -d "${DATA_DIR}/protocol-update-${image_id}.XXXXXX")"
+  chmod 0700 "${backup_dir}"
+  [[ -n "${binary}" && -f "${binary}" ]] && install -m 0755 "${binary}" "${backup_dir}/binary"
+  set_protocol_client_update_state "${image_id}" "paused" "Обновление протокола запущено: подключение временно приостановлено"
+  info "Обновление ${image_id}; существующие подключения помечены как приостановленные"
+  prepare_package_manager
+  if ! ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+    AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
+    bash "${image_root}/${installer}"; then
+    if [[ -f "${backup_dir}/binary" && -n "${binary}" ]]; then
+      install -m 0755 "${backup_dir}/binary" "${binary}"
+      systemctl restart "${service}" || true
+    fi
+    set_protocol_client_update_state "${image_id}" "incompatible" "Новая версия не прошла проверку совместимости; сохранена предыдущая версия протокола"
+    rm -rf -- "${backup_dir}"
+    die "обновление ${image_id} отклонено: новая версия нарушает запуск или текущую конфигурацию."
+  fi
+  [[ "${was_active}" == "yes" ]] || systemctl stop "${service}"
+  new_version="$(protocol_binary_version "${binary}")"
+  if [[ -n "${old_version}" && -n "${new_version}" && "${old_version%%.*}" != "${new_version%%.*}" ]]; then
+    set_protocol_client_update_state "${image_id}" "attention" "После смены основной версии проверьте подключение; при необходимости пересоздайте клиентский профиль"
+  else
+    set_protocol_client_update_state "${image_id}" "" ""
+  fi
+  rm -rf -- "${backup_dir}"
+  sync_protocol_monitor
+  systemctl restart "${APP_NAME}-api.service"
+  curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 "http://127.0.0.1:8000/api/health" >/dev/null
+  ok "${image_id} обновлён${new_version:+ до версии ${new_version}}."
+}
+
 configure_firewall() {
   info "Настройка firewall"
   [[ "${ENABLE_UFW}" == "yes" ]] || { warn "настройка UFW отключена в install.conf."; return; }
@@ -1887,6 +1973,8 @@ usage() {
                    установить протокол из образа
   protocol-remove <id>
                    удалить протокол, сохранив образ
+  protocol-update <id>
+                   вручную обновить протокол с проверкой и откатом бинарного файла
   credentials      показать логин и пароль администратора
   help             показать эту справку
 EOF
@@ -1897,8 +1985,11 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove)
-      begin_operation "${1}"
+    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
+      case "${1}" in
+        protocol-install|protocol-remove|protocol-update) begin_operation "${1}:${2:-}" ;;
+        *) begin_operation "${1}" ;;
+      esac
       trap handle_exit EXIT
       ;;
   esac
@@ -1969,6 +2060,7 @@ main() {
     poweroff) poweroff_server ;;
     protocol-install) install_protocol_image "$@" ;;
     protocol-remove) remove_protocol_image "$@" ;;
+    protocol-update) update_protocol_image "$@" ;;
     credentials) show_credentials ;;
     help|-h|--help) usage ;;
     *) usage >&2; exit 2 ;;

@@ -250,6 +250,8 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .clientRow.quality-warning { border-left: 3px solid var(--amber); }
 .clientRow.quality-error { border-left: 3px solid var(--red); background: color-mix(in srgb, var(--red) 5%, #0e1b25); }
 .clientRow.quality-offline { border-left: 3px solid #6b8190; opacity: .78; }
+.clientRow.update-paused, .clientRow.update-attention { border-left-color: var(--amber); opacity: 1; background: color-mix(in srgb, var(--amber) 5%, #0e1b25); }
+.clientRow.update-incompatible { border-left-color: var(--red); opacity: 1; background: color-mix(in srgb, var(--red) 7%, #0e1b25); }
 .traffic { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; text-align: left; }
 .traffic small, .handshake small, .clientLink small { color: #60716e; font: 7px var(--font-mono); letter-spacing: .7px; }
 .traffic b { display: block; margin-top: 5px; color: #b3c4cd; font: 500 9px var(--font-mono); }
@@ -613,6 +615,8 @@ input, select { height: 46px; font-size: 11px; }
 .protocolActions button { height: 34px; border: 1px solid var(--line); border-radius: 6px; background: #0e1b25; color: var(--muted); font-size: 8px; }
 .protocolActions button:hover { border-color: #3b5d54; color: var(--text); }
 .protocolActions .removeProtocolButton { border-color: #493033; color: #f28f8f; }
+.protocolActions .updateProtocolButton { border-color: #31505c; color: var(--accent); }
+.protocolActions .updateProtocolButton.warning { border-color: #72552a; color: var(--amber); background: #251d12; }
 .protocolActions button:disabled { opacity: .45; cursor: wait; }
 .protocolMonitorGrid { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(230px, .75fr)); gap: 12px; }
 .protocolFlow, .protocolTelemetry { min-height: 190px; }

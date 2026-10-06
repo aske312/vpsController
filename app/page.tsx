@@ -26,6 +26,7 @@ type Client = {
   id: string; name: string; protocol: Protocol; public_key: string; endpoint?: string;
   address: string; handshake_age_s?: number; rx_bytes: number; tx_bytes: number;
   quality?: "stable" | "warning" | "error" | "offline"; latency_ms?: number; jitter_ms?: number; packet_loss_percent?: number; quality_reason?: string;
+  update_state?: "paused" | "attention" | "incompatible"; update_message?: string;
 };
 type Overview = {
   server: { name: string; public_ip: string; city: string; country: string; country_code: string; uptime_s: number };
@@ -50,6 +51,8 @@ type ProtocolImage = {
   id: string; name: string; version: string; description: string; category: string; category_name: string;
   kind: "tunnel" | "agent"; status: "available" | "planned"; installable: boolean;
   interface: string; installed: boolean; removable: boolean;
+  installed_version?: string; available_version?: string; update_available?: boolean; update_breaking?: boolean;
+  version_checked_at?: string; version_error?: string;
 };
 type AutomationSchedule = {
   enabled: boolean; cadence: "daily" | "weekly" | "monthly"; weekday: string; hour: number; minute: number;
@@ -130,7 +133,7 @@ const actionLabels: Record<string, string> = {
   secure: "Настройка защиты", "kernel-update": "Обновление ядра", "vpn-firewall": "Восстановление VPN firewall", optimize: "Оптимизация ресурсов",
   "service-mode": "Переключение сервисного режима",
   reboot: "Перезагрузка сервера", poweroff: "Выключение сервера",
-  "protocol-install": "Установка протокола", "protocol-remove": "Удаление протокола",
+  "protocol-install": "Установка протокола", "protocol-remove": "Удаление протокола", "protocol-update": "Обновление протокола",
 };
 
 const bytes = (value = 0) => {
@@ -179,6 +182,7 @@ export default function Home() {
   const [protocolStatuses, setProtocolStatuses] = useState<Partial<Record<Protocol, ProtocolStatus>>>({});
   const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number; tx: number }>>>({});
   const [installingProtocol, setInstallingProtocol] = useState("");
+  const [checkingProtocolVersions, setCheckingProtocolVersions] = useState(false);
   const [checkingResources, setCheckingResources] = useState<Protocol | null>(null);
   const [checkingDiagnostics, setCheckingDiagnostics] = useState<Protocol | null>(null);
   const [resourcesOpen, setResourcesOpen] = useState<Partial<Record<Protocol, boolean>>>({});
@@ -820,6 +824,57 @@ export default function Home() {
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
 
+  async function checkProtocolVersions() {
+    setCheckingProtocolVersions(true); setError("");
+    try {
+      const result = await request("/protocol-images/versions/check", { method: "POST" }) as { items: ProtocolImage[] };
+      setProtocolImages(result.items || []);
+      const updates = (result.items || []).filter((image) => image.update_available).length;
+      const errors = (result.items || []).filter((image) => image.installed && image.version_error).length;
+      if (errors) setError(`Не удалось проверить версию у ${errors} модулей; повторите проверку позже`);
+      else setNotice(updates ? `Найдено обновлений протоколов: ${updates}` : "Установлены актуальные версии протоколов");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось проверить версии протоколов");
+    } finally { setCheckingProtocolVersions(false); }
+  }
+
+  async function waitForProtocolUpdate(image: ProtocolImage) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 5000));
+      try {
+        const status = await request("/application/status") as ApplicationStatus;
+        setApplication(status);
+        const state = status.action?.state || "";
+        if (state === "failed" || status.action?.result === "failed") throw new Error(`Обновление ${image.name} завершилось с ошибкой совместимости`);
+        if (state === "succeeded" || status.action?.result === "success") return;
+      } catch (cause) {
+        if (cause instanceof Error && cause.message.includes("ошибкой совместимости")) throw cause;
+      }
+    }
+    throw new Error(`Сервер не подтвердил обновление ${image.name} за 10 минут`);
+  }
+
+  async function updateProtocol(image: ProtocolImage) {
+    if (!await askConfirmation({
+      title: `Обновить ${image.name}?`,
+      message: image.update_breaking
+        ? `Версия ${image.available_version} меняет основную версию (сейчас ${image.installed_version || "не определена"}). Подключения будут приостановлены; после обновления может потребоваться новый профиль.`
+        : `Будет установлена версия ${image.available_version}. На время проверки и перезапуска активные подключения этого протокола будут кратковременно приостановлены.`,
+      confirmLabel: "Обновить протокол",
+    })) return;
+    setBusy(true); setError(""); setInstallingProtocol(`update-${image.id}`);
+    try {
+      const started = await request(`/protocol-images/${image.id}/update`, { method: "POST" });
+      setApplication((current) => ({ api: current?.api || { active: true, enabled: true }, containers: current?.containers || [], action: started }));
+      await waitForProtocolUpdate(image);
+      await Promise.all([loadOverview(), loadClients(), loadProtocolStatus(image.id as Protocol)]);
+      setNotice(`${image.name} обновлён. Проверьте предупреждения у подключений.`);
+    } catch (cause) {
+      await loadClients();
+      setError(cause instanceof Error ? cause.message : "Не удалось обновить протокол");
+    } finally { setInstallingProtocol(""); setBusy(false); }
+  }
+
   async function restartProtocol(protocol: Protocol) {
     if (!await askConfirmation({
       title: `Перезапустить ${labels[protocol]}?`,
@@ -1191,10 +1246,10 @@ export default function Home() {
           </article>
         </div>
         <article className="panel protocolSummary">
-          <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div></div>
+          <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div><button className="miniButton" onClick={() => void checkProtocolVersions()} disabled={busy || checkingProtocolVersions}>{checkingProtocolVersions ? "Проверяем…" : "Проверить обновления"}</button></div>
           {installedProtocols.map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
             <span className={`protocol ${protocol}`}><ProtocolIcon protocol={protocol} /></span>
-            <p><strong>{labels[protocol]}</strong><small>{overview?.protocols[protocol]?.interface} · {overview?.protocols[protocol]?.port}</small></p>
+            <p><strong>{labels[protocol]}</strong><small>{overview?.protocols[protocol]?.interface} · {overview?.protocols[protocol]?.port} · версия {protocolImages.find((image) => image.id === protocol)?.installed_version || "не определена"}{protocolImages.find((image) => image.id === protocol)?.update_available ? ` · доступно ${protocolImages.find((image) => image.id === protocol)?.available_version}` : ""}</small></p>
             <em className={overview?.protocols[protocol]?.active ? "onlinePill" : "offlinePill"}>{overview?.protocols[protocol]?.active ? "Работает" : "Остановлен"}</em><b>›</b>
           </button>)}
           {protocolImages.filter((image) => !image.installed).map((image) =>
@@ -1499,7 +1554,7 @@ export default function Home() {
           <div>
             <p className="eyebrow">LIVE TUNNEL</p>
             <div className="protocolTitle"><ProtocolIcon protocol={tab} /><h2>{labels[tab]}</h2></div>
-            <p className="mono">{activeProtocol.interface} · {activeProtocol.address || "адрес не назначен"} · {activeProtocol.transport || "UDP"} {activeProtocol.listen_port || "—"}</p>
+            <p className="mono">{activeProtocol.interface} · {activeProtocol.address || "адрес не назначен"} · {activeProtocol.transport || "UDP"} {activeProtocol.listen_port || "—"} · версия {activeProtocolImage?.installed_version || "не определена"}</p>
           </div>
           <div className="protocolControlStack">
             <div className={activeProtocol.active && activeProtocol.service_active ? "protocolHealth online" : "protocolHealth"}>
@@ -1511,6 +1566,7 @@ export default function Home() {
             </div>
             <div className="protocolActions">
               <button onClick={() => void restartProtocol(tab)} disabled={busy}>{activeProtocol.service_active ? "Перезапустить" : "Запустить"}</button>
+              {activeProtocolImage?.update_available && <button className={activeProtocolImage.update_breaking ? "updateProtocolButton warning" : "updateProtocolButton"} onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy}>{installingProtocol === `update-${activeProtocolImage.id}` ? "Обновление…" : `Обновить до ${activeProtocolImage.available_version}`}</button>}
               {activeProtocolImage?.removable && <button className="removeProtocolButton" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить протокол</button>}
             </div>
           </div>
@@ -1620,7 +1676,7 @@ export default function Home() {
       {tab === "clients" && installedProtocols.length > 0 && <section className="clientsLayout">
         <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все клиенты" : labels[tab]}</h2></div><span>{protocolClients.length} подключений</span></div>
           <div className="clientTable">{protocolClients.length ? protocolClients.map((client) =>
-            <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><span className={`protocol ${client.protocol}`}><ProtocolIcon protocol={client.protocol} /></span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address} · {client.quality_reason || "состояние уточняется"}</small></p>
+            <div className={`clientRow quality-${client.quality || "offline"}${client.update_state ? ` update-${client.update_state}` : ""}`} key={client.id}><span className={`protocol ${client.protocol}`}><ProtocolIcon protocol={client.protocol} /></span><p><strong><i className={`clientQuality ${client.update_state === "incompatible" ? "error" : client.update_state ? "warning" : client.quality || "offline"}`} />{client.name}</strong><small>{client.update_message || `${client.address} · ${client.quality_reason || "состояние уточняется"}`}</small></p>
               <span className="traffic"><small>ПОЛУЧЕНО <b>↓ {bytes(client.rx_bytes)}</b></small><small>ОТПРАВЛЕНО <b>↑ {bytes(client.tx_bytes)}</b></small></span><span className="handshake"><small>ПОСЛЕДНЯЯ СВЯЗЬ</small><strong>{duration(client.handshake_age_s)}</strong></span>
               <span className="clientLink"><small>LINK QUALITY</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} ms` : "—"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · loss ${client.packet_loss_percent}%` : ""}</strong></span>
               <button className="dangerButton" onClick={() => void removeClient(client.id)}>Отозвать</button></div>

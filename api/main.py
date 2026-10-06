@@ -108,6 +108,8 @@ resource_check_cache: dict[str, dict] = {}
 network_diagnostic_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
 client_mutation_lock = threading.Lock()
+protocol_version_lock = threading.Lock()
+protocol_version_cache: dict[str, dict] = {}
 DIRECT_PROTOCOLS = ("hysteria2", "tuic", "xray")
 MODULE_ORDER = {module_id: index for index, module_id in enumerate(("awg", "tuic", "hysteria2", "xray", "relay-agent"))}
 RESOURCE_TARGETS = (
@@ -304,6 +306,8 @@ def interface_dump(protocol: Literal["wg", "awg"], include_quality: bool = True)
                 "tx_bytes": int(tx),
                 "keepalive": 0 if keepalive == "off" else int(keepalive),
                 "enabled": True,
+                "update_state": meta.get("update_state"),
+                "update_message": meta.get("update_message"),
         })
     online_peers = [peer for peer in peers if peer["handshake_age_s"] is not None and peer["handshake_age_s"] < 180]
     if include_quality and online_peers:
@@ -1179,6 +1183,82 @@ def security_logs(
     return {"source": source, "lines": run(*commands[source], timeout=12).splitlines()}
 
 
+def semantic_version(binary: Path, *arguments: str) -> str:
+    if not binary.is_file():
+        return ""
+    output = run(str(binary), *arguments, timeout=5)
+    match = re.search(r"\bv?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b", output)
+    return match.group(1) if match else ""
+
+
+def apt_package_versions(package: str) -> tuple[str, str]:
+    output = run("env", "LC_ALL=C", "apt-cache", "policy", package, timeout=10)
+    installed = candidate = ""
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("Installed:"):
+            installed = line.split(":", 1)[1].strip()
+        elif line.startswith("Candidate:"):
+            candidate = line.split(":", 1)[1].strip()
+    return ("" if installed == "(none)" else installed, "" if candidate == "(none)" else candidate)
+
+
+def protocol_installed_version(image_id: str, installed: bool) -> str:
+    if not installed:
+        return ""
+    if image_id == "awg":
+        output = run("modinfo", "-F", "version", "amneziawg", timeout=5) or run("awg", "--version", timeout=5)
+        match = re.search(r"\bv?(\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?)\b", output)
+        return match.group(1) if match else apt_package_versions("amneziawg")[0]
+    binaries = {
+        "hysteria2": (Path("/usr/local/lib/vps-control-hysteria2/hysteria"), ("version",)),
+        "tuic": (Path("/usr/local/lib/vps-control-tuic/sing-box"), ("version",)),
+        "xray": (Path("/usr/local/lib/vps-control-xray/xray"), ("version",)),
+    }
+    binary = binaries.get(image_id)
+    return semantic_version(binary[0], *binary[1]) if binary else ""
+
+
+def latest_github_version(repository: str) -> str:
+    output = run(
+        "curl", "--silent", "--show-error", "--fail", "--location",
+        "--connect-timeout", "4", "--max-time", "10",
+        "-H", "Accept: application/vnd.github+json",
+        f"https://api.github.com/repos/{repository}/releases/latest", timeout=12,
+    )
+    try:
+        tag = str(json.loads(output).get("tag_name", "")).lstrip("v")
+    except (ValueError, json.JSONDecodeError):
+        tag = ""
+    return tag if re.fullmatch(r"[0-9][0-9A-Za-z._+-]*", tag) else ""
+
+
+def version_major(value: str) -> str:
+    match = re.search(r"\d+", value.split(":")[-1])
+    return match.group(0) if match else ""
+
+
+def refresh_protocol_version(image_id: str) -> dict:
+    repositories = {
+        "hysteria2": "apernet/hysteria",
+        "tuic": "SagerNet/sing-box",
+        "xray": "XTLS/Xray-core",
+    }
+    checked_at = datetime.now(timezone.utc).isoformat()
+    try:
+        if image_id == "awg":
+            available = apt_package_versions("amneziawg")[1]
+        else:
+            available = latest_github_version(repositories[image_id])
+        if not available:
+            raise ValueError("Не удалось определить последнюю версию")
+        value = {"available_version": available, "version_checked_at": checked_at, "version_error": ""}
+    except (KeyError, ValueError) as cause:
+        value = {"available_version": "", "version_checked_at": checked_at, "version_error": str(cause)}
+    protocol_version_cache[image_id] = value
+    return value
+
+
 def protocol_image_manifests() -> dict[str, dict]:
     images: dict[str, dict] = {}
     if not PROTOCOL_IMAGES_DIR.exists():
@@ -1205,6 +1285,11 @@ def protocol_image_manifests() -> dict[str, dict]:
         interface = os.getenv(interface_env, "") if interface_env else ""
         service_template = str(manifest.get("service", ""))
         service = service_template.replace("{interface}", interface) if service_template and (interface or "{interface}" not in service_template) else ""
+        installed = bool(service and run("systemctl", "show", service, "--property=LoadState", "--value") == "loaded")
+        installed_version = protocol_installed_version(image_id, installed)
+        version_info = protocol_version_cache.get(image_id, {})
+        available_version = str(version_info.get("available_version", ""))
+        update_available = bool(installed_version and available_version and installed_version != available_version)
         images[image_id] = {
             "id": image_id,
             "name": str(manifest.get("name", image_id)),
@@ -1219,8 +1304,14 @@ def protocol_image_manifests() -> dict[str, dict]:
             "service": service,
             # Installed and running are different states. A stopped tunnel must
             # remain manageable instead of being offered for installation again.
-            "installed": bool(service and run("systemctl", "show", service, "--property=LoadState", "--value") == "loaded"),
+            "installed": installed,
             "removable": bool(uninstaller),
+            "installed_version": installed_version,
+            "available_version": available_version,
+            "update_available": update_available,
+            "update_breaking": bool(update_available and version_major(installed_version) != version_major(available_version)),
+            "version_checked_at": version_info.get("version_checked_at"),
+            "version_error": version_info.get("version_error", ""),
         }
     return images
 
@@ -1230,6 +1321,22 @@ def protocol_images(_: None = Depends(require_token)) -> dict:
     items = list(protocol_image_manifests().values())
     items.sort(key=lambda item: (MODULE_ORDER.get(item["id"], 999), item["name"].casefold()))
     return {"items": items}
+
+
+@app.post("/api/protocol-images/versions/check")
+def check_protocol_versions(_: None = Depends(require_token)) -> dict:
+    if not protocol_version_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Проверка версий уже выполняется")
+    try:
+        images = protocol_image_manifests()
+        for image_id, image in images.items():
+            if image.get("installed") and image_id in {"awg", "hysteria2", "tuic", "xray"}:
+                refresh_protocol_version(image_id)
+        items = list(protocol_image_manifests().values())
+        items.sort(key=lambda item: (MODULE_ORDER.get(item["id"], 999), item["name"].casefold()))
+        return {"items": items, "checked_at": datetime.now(timezone.utc).isoformat()}
+    finally:
+        protocol_version_lock.release()
 
 
 @app.post("/api/protocol-images/{image_id}/install")
@@ -1263,6 +1370,40 @@ def install_protocol_image(image_id: str, _: None = Depends(require_token)) -> d
         "state": "activating",
         "progress": 3,
         "message": "Запуск установки протокола",
+    }
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
+    os.chmod(ACTION_FILE, 0o600)
+    return action
+
+
+@app.post("/api/protocol-images/{image_id}/update")
+def update_protocol_image(image_id: str, _: None = Depends(require_token)) -> dict:
+    image = protocol_image_manifests().get(image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Protocol image not found")
+    if not image.get("installed"):
+        raise HTTPException(status_code=409, detail="Protocol is not installed")
+    if not image.get("update_available"):
+        raise HTTPException(status_code=409, detail="Новая версия не найдена. Сначала выполните проверку обновлений")
+    if ACTION_FILE.exists():
+        try:
+            previous_unit = json.loads(ACTION_FILE.read_text(encoding="utf-8")).get("unit", "")
+            if previous_unit and run("systemctl", "is-active", previous_unit) in ("active", "activating"):
+                raise HTTPException(status_code=409, detail="Another application action is already running")
+        except (json.JSONDecodeError, OSError):
+            pass
+    unit = f"vps-control-protocol-update-{image_id}-{int(time.time())}"
+    result = subprocess.run(
+        ["systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec", CONTROL_COMMAND, "protocol-update", image_id],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    if result.returncode:
+        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to update protocol")
+    action = {
+        "unit": f"{unit}.service", "action": f"protocol-update:{image_id}",
+        "started_at": datetime.now(timezone.utc).isoformat(), "state": "activating",
+        "progress": 3, "message": "Запуск обновления протокола",
     }
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
