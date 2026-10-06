@@ -218,6 +218,8 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(page, /Вернуться на light/);
   assert.match(workflow, /branches: \[light, test-light\]/);
   assert.match(workflow, /release_tag="light-test-latest"/);
+  assert.match(workflow, /GITHUB_REF_NAME" == "test-light"/);
+  assert.match(workflow, /version="\$\{latest#light-\}"/);
   assert.match(protocolIcon, /hysteria2: "HY2"/);
   assert.match(manager, /TEST_BACKUP_DIR="\$\{DATA_DIR\}\/test-app-backup"/);
   assert.match(manager, /restore_test_app\(\)/);
