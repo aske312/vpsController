@@ -182,7 +182,7 @@ export default function Home() {
   const [protocolStatuses, setProtocolStatuses] = useState<Partial<Record<Protocol, ProtocolStatus>>>({});
   const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number; tx: number }>>>({});
   const [installingProtocol, setInstallingProtocol] = useState("");
-  const [checkingProtocolVersions, setCheckingProtocolVersions] = useState(false);
+  const [checkingProtocolVersion, setCheckingProtocolVersion] = useState("");
   const [checkingResources, setCheckingResources] = useState<Protocol | null>(null);
   const [checkingDiagnostics, setCheckingDiagnostics] = useState<Protocol | null>(null);
   const [resourcesOpen, setResourcesOpen] = useState<Partial<Record<Protocol, boolean>>>({});
@@ -824,18 +824,16 @@ export default function Home() {
     } finally { setInstallingProtocol(""); setBusy(false); }
   }
 
-  async function checkProtocolVersions() {
-    setCheckingProtocolVersions(true); setError("");
+  async function checkProtocolVersion(image: ProtocolImage) {
+    setCheckingProtocolVersion(image.id); setError("");
     try {
-      const result = await request("/protocol-images/versions/check", { method: "POST" }) as { items: ProtocolImage[] };
-      setProtocolImages(result.items || []);
-      const updates = (result.items || []).filter((image) => image.update_available).length;
-      const errors = (result.items || []).filter((image) => image.installed && image.version_error).length;
-      if (errors) setError(`Не удалось проверить версию у ${errors} модулей; повторите проверку позже`);
-      else setNotice(updates ? `Найдено обновлений протоколов: ${updates}` : "Установлены актуальные версии протоколов");
+      const result = await request(`/protocol-images/${image.id}/version/check`, { method: "POST" }) as { item: ProtocolImage };
+      setProtocolImages((current) => current.map((entry) => entry.id === result.item.id ? result.item : entry));
+      if (result.item.version_error) setError(`Не удалось проверить версию ${image.name}; повторите проверку позже`);
+      else setNotice(result.item.update_available ? `Для ${image.name} доступна версия ${result.item.available_version}` : `${image.name}: установлена актуальная версия`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось проверить версии протоколов");
-    } finally { setCheckingProtocolVersions(false); }
+      setError(cause instanceof Error ? cause.message : `Не удалось проверить версию ${image.name}`);
+    } finally { setCheckingProtocolVersion(""); }
   }
 
   async function waitForProtocolUpdate(image: ProtocolImage) {
@@ -1263,7 +1261,7 @@ export default function Home() {
                 {image.installed && isTunnel && <button className="danger" onClick={() => void removeProtocol(image)} disabled={busy}>Удалить</button>}
                 {image.installed && isTunnel && (image.update_available
                   ? <button className={image.update_breaking ? "warning" : ""} onClick={() => void updateProtocol(image)} disabled={busy}>{installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}</button>
-                  : <button onClick={() => void checkProtocolVersions()} disabled={busy || checkingProtocolVersions}>{checkingProtocolVersions ? "Проверка…" : "Проверить"}</button>)}
+                  : <button onClick={() => void checkProtocolVersion(image)} disabled={busy || Boolean(checkingProtocolVersion)}>{checkingProtocolVersion === image.id ? "Проверка…" : "Проверить"}</button>)}
                 {!image.installed && <button onClick={() => image.installable && void installProtocol(image)} disabled={!image.installable || busy || Boolean(installingProtocol)}>{!image.installable ? "Недоступно" : installingProtocol === image.id ? "Установка…" : "Установить"}</button>}
               </footer>
             </article>;
@@ -1574,9 +1572,8 @@ export default function Home() {
             </div>
             <div className="protocolActions">
               <button onClick={() => void restartProtocol(tab)} disabled={busy}>{activeProtocol.service_active ? "Перезапустить" : "Запустить"}</button>
-              <button onClick={() => void checkProtocolVersions()} disabled={busy || checkingProtocolVersions}>{checkingProtocolVersions ? "Проверяем…" : "Проверить версию"}</button>
+              {activeProtocolImage && <button onClick={() => void checkProtocolVersion(activeProtocolImage)} disabled={busy || Boolean(checkingProtocolVersion)}>{checkingProtocolVersion === activeProtocolImage.id ? "Проверяем…" : "Проверить версию"}</button>}
               {activeProtocolImage && <button className={activeProtocolImage.update_breaking ? "updateProtocolButton warning" : "updateProtocolButton"} onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy || !activeProtocolImage.update_available}>{installingProtocol === `update-${activeProtocolImage.id}` ? "Обновление…" : activeProtocolImage.update_available ? `Обновить до ${activeProtocolImage.available_version}` : activeProtocolImage.version_checked_at ? "Обновлений нет" : "Версия не проверена"}</button>}
-              {activeProtocolImage?.removable && <button className="removeProtocolButton" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить протокол</button>}
             </div>
           </div>
         </article>

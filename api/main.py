@@ -1351,6 +1351,25 @@ def check_protocol_versions(_: None = Depends(require_token)) -> dict:
         protocol_version_lock.release()
 
 
+@app.post("/api/protocol-images/{image_id}/version/check")
+def check_protocol_version(image_id: str, _: None = Depends(require_token)) -> dict:
+    image = protocol_image_manifests().get(image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Protocol image not found")
+    if not image.get("installed") or image_id not in {"awg", "hysteria2", "tuic", "xray"}:
+        raise HTTPException(status_code=409, detail="Protocol is not installed or does not support version checks")
+    if not protocol_version_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Проверка версии уже выполняется")
+    try:
+        refresh_protocol_version(image_id)
+        item = protocol_image_manifests().get(image_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Protocol image not found")
+        return {"item": item, "checked_at": datetime.now(timezone.utc).isoformat()}
+    finally:
+        protocol_version_lock.release()
+
+
 @app.post("/api/protocol-images/{image_id}/install")
 def install_protocol_image(image_id: str, _: None = Depends(require_token)) -> dict:
     image = protocol_image_manifests().get(image_id)
