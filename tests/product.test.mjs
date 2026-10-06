@@ -222,6 +222,7 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(workflow, /version="\$\{latest#light-\}"/);
   assert.match(workflow, /verify:\s+if: github\.ref_name == 'light'/);
   assert.match(workflow, /needs\.verify\.result == 'success' \|\| github\.ref_name == 'test-light'/);
+  assert.match(workflow, /publish:\s+needs: build\s+if: always\(\) && needs\.build\.result == 'success'/);
   assert.match(ciWorkflow, /push:\s+branches: \[light\]/);
   assert.match(ciWorkflow, /pull_request:\s+branches: \[light\]/);
   assert.doesNotMatch(ciWorkflow, /branches: \[[^\]]*test-light/);
