@@ -124,3 +124,24 @@ fallback_kernel_package
     assert.equal(result.stdout.trim(), expected);
   }
 });
+
+test("kernel update adds matching headers for every registered DKMS module", () => {
+  const body = manager.match(/kernel_update_packages\(\) \{([\s\S]*?)\n\}/)[1];
+  for (const [dkmsOutput, expected] of [
+    ["amneziawg", ["linux-image-amd64", "linux-headers-amd64"]],
+    ["", ["linux-image-amd64"]],
+  ]) {
+    const script = `set -Eeuo pipefail
+installed_kernel_packages() { printf '%s\\n' linux-image-amd64; }
+fallback_kernel_package() { printf '%s\\n' linux-image-amd64; }
+registered_dkms_modules() { printf '%s\\n' '${dkmsOutput}'; }
+apt-cache() { return 0; }
+kernel_update_packages() {${body}
+}
+kernel_update_packages
+`;
+    const result = spawnSync(bash, ["-c", script], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split("\n").filter(Boolean), expected);
+  }
+});

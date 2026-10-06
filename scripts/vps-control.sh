@@ -68,6 +68,7 @@ SERVICE_MODE_FILE="${DATA_DIR}/service-mode.json"
 CURRENT_ACTION=""
 ACTION_STARTED_AT=""
 ACTION_PROGRESS=0
+ACTION_FAILURE_MESSAGE=""
 REBOOT_AFTER_UPDATE="no"
 INSTALL_LOG="/var/log/vps-control-install.log"
 
@@ -187,7 +188,7 @@ finish_operation() {
       *) write_action_status "succeeded" 100 "Операция завершена" ;;
     esac
   else
-    write_action_status "failed" "${ACTION_PROGRESS}" "Операция завершилась с ошибкой"
+    write_action_status "failed" "${ACTION_PROGRESS}" "${ACTION_FAILURE_MESSAGE:-Операция завершилась с ошибкой}"
   fi
 }
 
@@ -214,7 +215,7 @@ ok() {
   fi
 }
 warn() { printf '\033[1;33m!\033[0m %s\n' "$*" >&2; }
-die() { printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
+die() { ACTION_FAILURE_MESSAGE="$*"; printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
 
 system_architecture() {
   case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
@@ -1664,13 +1665,29 @@ fallback_kernel_package() {
 }
 
 kernel_update_packages() {
-  local installed=()
+  local package candidate
+  local installed=() packages=()
   mapfile -t installed < <(installed_kernel_packages)
   if ((${#installed[@]})); then
-    printf '%s\n' "${installed[@]}"
+    packages=("${installed[@]}")
   else
-    fallback_kernel_package
+    mapfile -t packages < <(fallback_kernel_package)
   fi
+  if ((${#packages[@]})) && [[ -n "$(registered_dkms_modules)" ]]; then
+    for package in "${packages[@]}"; do
+      candidate=""
+      case "${package}" in
+        linux-image-*) candidate="linux-headers-${package#linux-image-}" ;;
+        linux-generic*|linux-virtual*|linux-aws*|linux-azure*|linux-gcp*|linux-oracle*|linux-raspi*|linux-kvm*)
+          candidate="linux-headers-${package#linux-}"
+          ;;
+      esac
+      if [[ -n "${candidate}" ]] && apt-cache show "${candidate}" >/dev/null 2>&1; then
+        packages+=("${candidate}")
+      fi
+    done
+  fi
+  printf '%s\n' "${packages[@]}" | awk 'NF && !seen[$0]++'
 }
 
 newest_installed_kernel() {
@@ -1678,13 +1695,63 @@ newest_installed_kernel() {
     | sed 's/^vmlinuz-//' | sort -V | tail -n 1
 }
 
+registered_dkms_modules() {
+  command -v dkms >/dev/null 2>&1 || return 0
+  dkms status 2>/dev/null | awk -F'[/,]' '/^[a-zA-Z0-9_.+-]+\// {print $1}' | sort -u
+}
+
+prepare_dkms_for_kernel() {
+  local kernel="$1" module
+  local modules=() failed=()
+  mapfile -t modules < <(registered_dkms_modules)
+  ((${#modules[@]})) || return 0
+  [[ -e "/lib/modules/${kernel}/build" ]] \
+    || die "ядро ${kernel} установлено без headers; перезагрузка отменена, активные подключения сохранены."
+  info "Сборка DKMS-модулей для ядра ${kernel}"
+  if ! dkms autoinstall -k "${kernel}"; then
+    die "DKMS не смог собрать модули для ядра ${kernel}; перезагрузка отменена, активные подключения сохранены."
+  fi
+  depmod -a "${kernel}"
+  for module in "${modules[@]}"; do
+    dkms status -m "${module}" -k "${kernel}" 2>/dev/null | grep -Eq ':[[:space:]]+installed$' \
+      || failed+=("${module}")
+  done
+  ((${#failed[@]} == 0)) \
+    || die "модули ${failed[*]} не готовы для ядра ${kernel}; перезагрузка отменена, активные подключения сохранены."
+  ok "Все DKMS-модули готовы для ядра ${kernel}."
+}
+
+active_managed_protocol_units() {
+  local unit
+  for unit in \
+    "wg-quick@${WG_INTERFACE}.service" \
+    "awg-quick@${AWG_INTERFACE}.service" \
+    vps-control-hysteria2.service \
+    vps-control-tuic.service \
+    vps-control-xray.service; do
+    systemctl is-active --quiet "${unit}" && printf '%s\n' "${unit}"
+  done
+}
+
+verify_managed_protocol_units() {
+  local unit
+  for unit in "$@"; do
+    if ! systemctl is-active --quiet "${unit}"; then
+      warn "Служба ${unit} остановилась во время обновления; выполняется восстановление."
+      systemctl restart "${unit}" \
+        || die "служба протокола ${unit} не восстановилась; перезагрузка отменена."
+    fi
+  done
+}
+
 update_kernel() {
   local running_kernel newest_kernel simulation package
-  local packages=()
+  local packages=() active_protocol_units=()
   info "Проверка репозиториев и пакета ядра"
   export DEBIAN_FRONTEND=noninteractive
   prepare_package_manager
   apt-get -o DPkg::Lock::Timeout=300 update
+  mapfile -t active_protocol_units < <(active_managed_protocol_units)
   mapfile -t packages < <(kernel_update_packages)
   ((${#packages[@]})) || die "не удалось определить метапакет ядра."
   for package in "${packages[@]}"; do
@@ -1700,6 +1767,9 @@ update_kernel() {
   apt-get -o DPkg::Lock::Timeout=300 install -y "${packages[@]}"
   running_kernel="$(uname -r)"
   newest_kernel="$(newest_installed_kernel)"
+  [[ -n "${newest_kernel}" ]] || die "не удалось определить установленное ядро после обновления."
+  prepare_dkms_for_kernel "${newest_kernel}"
+  verify_managed_protocol_units "${active_protocol_units[@]}"
   if [[ -n "${newest_kernel}" && "${newest_kernel}" != "${running_kernel}" ]]; then
     REBOOT_AFTER_UPDATE="yes"
     ok "Ядро ${newest_kernel} установлено; сервер будет перезагружен для его активации."

@@ -219,6 +219,9 @@ test("SUDO VPS-CONTROL actions map to real manager commands", async () => {
   assert.match(manager, /systemd-tmpfiles --clean/);
   assert.match(manager, /journalctl --vacuum-size=500M/);
   assert.doesNotMatch(manager.match(/update_kernel\(\) \{([\s\S]*?)\n\}/)?.[1] || "", /--only-upgrade/);
+  assert.match(manager, /dkms autoinstall -k "\$\{kernel\}"/);
+  assert.match(manager, /перезагрузка отменена, активные подключения сохранены/);
+  assert.match(manager, /verify_managed_protocol_units "\$\{active_protocol_units\[@\]\}"/);
 });
 
 test("Light keeps production updates public and gates the test-light channel behind service mode", async () => {
@@ -375,6 +378,7 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(awgRemove, /route delete allow in on "\$\{AWG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{AWG_SUBNET\}"/);
   assert.match(awgRemove, /ufw status \| grep -Fq "\$\{AWG_SUBNET\} on \$\{AWG_INTERFACE\}"/);
   assert.match(awgRemove, /99-vps-control-amneziawg\.conf/);
+  assert.equal(JSON.parse(await read("protocol-images/amneziawg/manifest.json")).requires_kernel_headers, true);
   assert.match(api, /protocol-install/);
   assert.match(api, /protocol-images\/versions\/check/);
   assert.match(api, /protocol-images\/\{image_id\}\/version\/check/);

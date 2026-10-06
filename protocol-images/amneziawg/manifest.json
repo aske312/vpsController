@@ -7,6 +7,8 @@
   "category_name": "Защищённые туннели",
   "installer": "install.sh",
   "uninstaller": "uninstall.sh",
+  "supported_os": ["ubuntu", "debian"],
+  "requires_kernel_headers": true,
   "interface_env": "AWG_INTERFACE",
   "service": "awg-quick@{interface}.service"
 }
