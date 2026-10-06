@@ -1249,20 +1249,20 @@ export default function Home() {
         </div>
         <article className="panel protocolSummary">
           <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div><button className="miniButton" onClick={() => void checkProtocolVersions()} disabled={busy || checkingProtocolVersions}>{checkingProtocolVersions ? "Проверяем…" : "Проверить обновления"}</button></div>
-          {installedProtocols.map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
-            <span className={`protocol ${protocol}`}><ProtocolIcon protocol={protocol} /></span>
-            <p><strong>{labels[protocol]}</strong><small>{overview?.protocols[protocol]?.interface} · {overview?.protocols[protocol]?.port} · версия {protocolImages.find((image) => image.id === protocol)?.installed_version || "не определена"}{protocolImages.find((image) => image.id === protocol)?.update_available ? ` · доступно ${protocolImages.find((image) => image.id === protocol)?.available_version}` : ""}</small></p>
-            <em className={overview?.protocols[protocol]?.active ? "onlinePill" : "offlinePill"}>{overview?.protocols[protocol]?.active ? "Работает" : "Остановлен"}</em><b>›</b>
-          </button>)}
-          {protocolImages.filter((image) => !image.installed).map((image) =>
-            <div className={`protocolInstaller ${image.kind === "agent" ? "agent" : ""}`} key={image.id}>
+          {protocolImages.map((image) => {
+            const protocol = image.id as Protocol;
+            const isTunnel = image.kind === "tunnel" && lightModuleIds.includes(protocol);
+            const state = isTunnel ? overview?.protocols[protocol] : undefined;
+            return <div className={`protocolInstaller${image.installed ? " installed" : ""}${image.kind === "agent" ? " agent" : ""}`} key={image.id}>
               <span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span>
-              <p><strong>{image.name}{image.kind === "agent" && <em>АГЕНТ</em>}</strong><small>{image.description} · {image.status === "planned" ? "заготовка" : `образ ${image.version}`}</small></p>
-              <button onClick={() => image.installable && void installProtocol(image)} disabled={!image.installable || busy || Boolean(installingProtocol)}>
-                {!image.installable ? "В разработке" : installingProtocol === image.id ? "Устанавливается…" : "Установить"}
-              </button>
-            </div>
-          )}
+              <p><strong>{image.name}{image.kind === "agent" && <em>АГЕНТ</em>}</strong><small>{image.description}</small><small className="protocolVersionLine">{image.installed ? `Версия: ${image.installed_version || "не определена"}` : image.status === "planned" ? "Статус: проектирование" : `Версия образа: ${image.version}`}{image.update_available ? ` · доступно: ${image.available_version}` : ""}{state ? ` · ${state.interface}:${state.port}` : ""}</small></p>
+              <div className="protocolInstallerActions">
+                {image.installed && isTunnel && <button onClick={() => setTab(protocol)}>Открыть</button>}
+                {image.installed && isTunnel && <button className={image.update_breaking ? "warning" : ""} onClick={() => void updateProtocol(image)} disabled={busy || !image.update_available}>{installingProtocol === `update-${image.id}` ? "Обновление…" : image.update_available ? `Обновить до ${image.available_version}` : image.version_checked_at ? "Обновлений нет" : "Версия не проверена"}</button>}
+                {!image.installed && <button onClick={() => image.installable && void installProtocol(image)} disabled={!image.installable || busy || Boolean(installingProtocol)}>{!image.installable ? "Недоступно" : installingProtocol === image.id ? "Установка…" : "Установить"}</button>}
+              </div>
+            </div>;
+          })}
           {!protocolImages.length && <div className="protocolEmpty"><span>—</span><p><strong>Нет доступных образов</strong><small>Добавьте manifest.json в каталог protocol-images</small></p></div>}
         </article>
       </section>}
@@ -1568,7 +1568,8 @@ export default function Home() {
             </div>
             <div className="protocolActions">
               <button onClick={() => void restartProtocol(tab)} disabled={busy}>{activeProtocol.service_active ? "Перезапустить" : "Запустить"}</button>
-              {activeProtocolImage?.update_available && <button className={activeProtocolImage.update_breaking ? "updateProtocolButton warning" : "updateProtocolButton"} onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy}>{installingProtocol === `update-${activeProtocolImage.id}` ? "Обновление…" : `Обновить до ${activeProtocolImage.available_version}`}</button>}
+              <button onClick={() => void checkProtocolVersions()} disabled={busy || checkingProtocolVersions}>{checkingProtocolVersions ? "Проверяем…" : "Проверить версию"}</button>
+              {activeProtocolImage && <button className={activeProtocolImage.update_breaking ? "updateProtocolButton warning" : "updateProtocolButton"} onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy || !activeProtocolImage.update_available}>{installingProtocol === `update-${activeProtocolImage.id}` ? "Обновление…" : activeProtocolImage.update_available ? `Обновить до ${activeProtocolImage.available_version}` : activeProtocolImage.version_checked_at ? "Обновлений нет" : "Версия не проверена"}</button>}
               {activeProtocolImage?.removable && <button className="removeProtocolButton" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить протокол</button>}
             </div>
           </div>

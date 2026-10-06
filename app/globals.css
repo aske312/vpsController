@@ -136,7 +136,10 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .protocolInstaller.agent button:disabled { cursor: default; color: #8ca0b5; background: #111923; }
 .protocolInstaller strong { font-size: 11px; }
 .protocolInstaller small { color: var(--muted); font: 8px/1.5 var(--font-mono); margin-top: 5px; }
-.protocolInstaller button { border: 1px solid #31505c; border-radius: 6px; background: var(--accent-dim); color: var(--accent); padding: 8px 11px; font-size: 8px; }
+.protocolInstaller .protocolVersionLine { color: #8ca0b5; }
+.protocolInstallerActions { display: flex; justify-content: flex-end; gap: 6px; min-width: 210px; }
+.protocolInstaller button { min-width: 88px; border: 1px solid #31505c; border-radius: 6px; background: var(--accent-dim); color: var(--accent); padding: 8px 11px; font-size: 8px; white-space: nowrap; }
+.protocolInstaller button.warning { border-color: #72552a; color: var(--amber); background: #251d12; }
 .protocolInstaller button:disabled { opacity: .55; cursor: wait; }
 .protocolCategory { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 14px; align-items: center; border-top: 1px solid var(--line); padding: 17px 10px; }
 .categoryMark { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 6px; color: #70b7e8; background: #11212c; font: 750 9px var(--font-mono); }
@@ -438,6 +441,8 @@ input, select { height: 46px; font-size: 11px; }
   .applicationHero, .applicationLogs { grid-column: 1; }
   .updatedAt { display: none; }
   .clientRow { grid-template-columns: 38px 1fr auto; }
+  .protocolInstaller { grid-template-columns: 38px minmax(0, 1fr); }
+  .protocolInstallerActions { grid-column: 2; justify-content: flex-start; min-width: 0; flex-wrap: wrap; }
   .traffic, .handshake { display: none; }
   .clientLink { align-items: flex-end; }
   .clientRow .dangerButton { grid-column: 2 / -1; }

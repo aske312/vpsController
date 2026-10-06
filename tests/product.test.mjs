@@ -371,7 +371,10 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(api, /Unable to create Xray connection/);
   assert.doesNotMatch(api + page, /\bTrojan\b|"trojan"/);
   assert.equal(JSON.parse(relayManifest).kind, "agent");
-  assert.match(page, /В разработке/);
+  assert.match(page, /Недоступно/);
+  assert.match(page, /protocolImages\.map/);
+  assert.match(page, /disabled=\{busy \|\| !image\.update_available\}/);
+  assert.match(page, /disabled=\{busy \|\| !activeProtocolImage\.update_available\}/);
   assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 1/);
 });
 

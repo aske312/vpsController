@@ -3,7 +3,7 @@
   "name": "Xray",
   "version": "latest-stable",
   "installable": true,
-  "description": "VLESS через XHTTP с транспортной защитой REALITY/TLS",
+  "description": "Xray-core: VLESS поверх XHTTP с транспортной защитой REALITY/TLS",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",
   "kind": "tunnel",

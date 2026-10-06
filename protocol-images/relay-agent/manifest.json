@@ -5,7 +5,7 @@
   "installable": false,
   "status": "planned",
   "kind": "agent",
-  "description": "Заготовка агента подключения Light к единой сети с модулем PRO",
+  "description": "Сетевой агент интеграции с управляющим контуром PRO; туннель не создаёт",
   "category": "network-agents",
   "category_name": "Сетевые агенты",
   "installer": "",
