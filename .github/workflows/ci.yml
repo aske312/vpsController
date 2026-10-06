@@ -2,16 +2,16 @@ name: Test Light
 
 on:
   push:
-    branches: [test-light]
+    branches: [light]
   pull_request:
-    branches: [test-light, light]
+    branches: [light]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: test-light-${{ github.ref }}
+  group: light-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
