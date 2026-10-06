@@ -176,19 +176,22 @@ test("service settings are staged, saved explicitly and survive background refre
   assert.match(manager, /install -m 0755 "\$\{PROJECT_DIR\}\/scripts\/vps-control\.sh" "\$\{COMMAND_PATH\}"/);
 });
 
-test("Light keeps production updates public and accepts test builds only from local archives", async () => {
-  const [api, page, manager, styles] = await Promise.all([
+test("Light keeps production updates public and gates the test-light channel behind service mode", async () => {
+  const [api, page, manager, styles, workflow, protocolIcon] = await Promise.all([
     read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"), read("app/globals.css"),
+    read(".github/workflows/release.yml"), read("app/protocol-icon.tsx"),
   ]);
   assert.match(manager, /PRODUCT_EDITION="light"/);
   assert.match(manager, /PRODUCTION_BRANCH="light"/);
   assert.match(manager, /PRODUCTION_RELEASE_TAG="light-latest"/);
   assert.doesNotMatch(manager, /SERVICE_BRANCH=/);
   assert.match(manager, /update_prebuilt_branch "\$\{PRODUCTION_BRANCH\}" "\$\{PRODUCTION_RELEASE_TAG\}"/);
+  assert.match(manager, /TEST_RELEASE_TAG="light-test-latest"/);
   assert.doesNotMatch(manager, /main-latest|APP_TEST_RELEASE_URL/);
   assert.match(manager, /for attempt in \$\(seq 1 48\)/);
   assert.match(manager, /подготовленный релиз не соответствует актуальной ревизии ветки \$\{branch\}/);
-  assert.match(manager, /test-update <архив>/);
+  assert.match(manager, /test-update \[архив\]/);
+  assert.match(manager, /update_prebuilt_branch "\$\{TEST_BRANCH\}" "\$\{TEST_RELEASE_TAG\}" test/);
   assert.match(api, /def installed_release_branch\(\)/);
   assert.match(api, /return "test-light" if values\.get\("channel"\) == "test" else "light"/);
   assert.match(manager, /install_prebuilt_release install-release "\$\{archive\}" yes test/);
@@ -197,19 +200,25 @@ test("Light keeps production updates public and accepts test builds only from lo
   assert.match(manager, /"ssh_socket_was_active": ssh_socket == "yes"/);
   assert.match(manager, /сервисный режим включён; версия приложения не изменена/);
   assert.match(manager, /переход на тестовую версию разрешён только в сервисном режиме/);
-  assert.match(api, /payload\.action == "test-rollback" and not SERVICE_MODE_FILE\.exists\(\)/);
+  assert.match(api, /payload\.action in \("test-update", "test-rollback"\) and not SERVICE_MODE_FILE\.exists\(\)/);
   assert.match(api, /branch = installed_release_branch\(\)/);
   assert.match(api, /expected_branch = installed_release_branch\(\)/);
   assert.match(api, /cached\.get\("current_commit"\) != installed_commit/);
-  assert.match(page, /applicationVersion\.branch \|\| "light"/);
+  assert.match(page, /releaseBranch = release\?\.branch \|\| "light"/);
   assert.match(page, /setAutoRefresh\(false\)/);
   assert.match(page, /if \(active\) autoRefreshBeforeServiceMode\.current = autoRefresh/);
   assert.match(page, /setAutoRefresh\(autoRefreshBeforeServiceMode\.current\)/);
-  assert.doesNotMatch(page, /runApplicationAction\("test-update"\)/);
+  assert.match(page, /runApplicationAction\("test-update"\)/);
   assert.match(page, /application\?\.service_mode\?\.rollback_available/);
+  assert.match(page, /disabled=\{busy \|\| testReleaseActive\}/);
+  assert.match(api, /installed_release_branch\(\) == "test-light"/);
+  assert.match(manager, /сначала вернитесь на light, затем выключите сервисный режим/);
   assert.match(styles, /\.loginPage \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(styles, /\.loginCard \{[^}]*max-width: 420px; min-width: 0/);
-  assert.match(page, /Вернуться к рабочей версии/);
+  assert.match(page, /Вернуться на light/);
+  assert.match(workflow, /branches: \[light, test-light\]/);
+  assert.match(workflow, /release_tag="light-test-latest"/);
+  assert.match(protocolIcon, /hysteria2: "HY2"/);
   assert.match(manager, /TEST_BACKUP_DIR="\$\{DATA_DIR\}\/test-app-backup"/);
   assert.match(manager, /restore_test_app\(\)/);
   assert.match(manager, /mv -- "\$\{rollback\}" "\$\{INSTALL_DIR\}"\s+PROJECT_DIR="\$\{INSTALL_DIR\}"\s+write_integrity_manifest/);
@@ -386,7 +395,7 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.doesNotMatch(manager.match(/install_prebuilt_release\(\) \{([\s\S]*?)\n\}/)?.[1] || "", /apt-get|npm |docker (build|compose)/);
   assert.doesNotMatch(api, /Application updates require a prepared release archive/);
   assert.match(page, /runApplicationAction\("update"\)/);
-  assert.match(page, /production-релиз Light/);
+  assert.match(page, /Текущий канал: light · production/);
   assert.match(builder, /schema=1/);
   assert.match(builder, /RELEASE_EDITION="\$\{RELEASE_EDITION:-light\}"/);
   assert.match(builder, /RELEASE_CHANNEL="\$\{RELEASE_CHANNEL:-production\}"/);
