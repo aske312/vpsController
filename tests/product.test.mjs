@@ -346,7 +346,7 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(manager, /set_protocol_client_update_state/);
   assert.match(manager, /"paused" "Обновление протокола запущено/);
   assert.match(manager, /"incompatible" "Новая версия не прошла проверку совместимости/);
-  assert.match(page, /Проверить обновления/);
+  assert.match(page, /checkingProtocolVersions \? "Проверка…" : "Проверить"/);
   assert.match(page, /Обновить до/);
   assert.match(manager, /prepare_package_manager\(\)/);
   assert.match(manager, /\n  prepare_package_manager\r?\n/);
@@ -373,7 +373,9 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.equal(JSON.parse(relayManifest).kind, "agent");
   assert.match(page, /Недоступно/);
   assert.match(page, /protocolImages\.map/);
-  assert.match(page, /disabled=\{busy \|\| !image\.update_available\}/);
+  assert.match(page, /image\.update_available\s*\?/);
+  assert.match(page, />Удалить<\/button>/);
+  assert.match(page, /checkingProtocolVersions \? "Проверка…"/);
   assert.match(page, /disabled=\{busy \|\| !activeProtocolImage\.update_available\}/);
   assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 1/);
 });

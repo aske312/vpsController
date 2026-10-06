@@ -1248,21 +1248,22 @@ export default function Home() {
           </article>
         </div>
         <article className="panel protocolSummary">
-          <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div><button className="miniButton" onClick={() => void checkProtocolVersions()} disabled={busy || checkingProtocolVersions}>{checkingProtocolVersions ? "Проверяем…" : "Проверить обновления"}</button></div>
+          <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div></div>
           <div className="protocolModuleGrid">
           {protocolImages.map((image) => {
             const protocol = image.id as Protocol;
             const isTunnel = image.kind === "tunnel" && lightModuleIds.includes(protocol);
             const state = isTunnel ? overview?.protocols[protocol] : undefined;
             const moduleState = image.installed ? state?.active ? "ACTIVE" : "STOPPED" : image.status === "planned" ? "PLANNED" : "AVAILABLE";
+            const version = image.installed ? image.installed_version || "UNKNOWN" : image.version;
             return <article className={`protocolModuleCard${image.installed ? " installed" : ""}${image.kind === "agent" ? " agent" : ""}`} key={image.id}>
-              <header><span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span><div><strong>{image.name}</strong><small>{image.kind === "agent" ? "NETWORK AGENT" : "TUNNEL MODULE"}</small></div><em className={moduleState.toLowerCase()}>{moduleState}</em></header>
-              <p>{image.description}</p>
-              <dl><div><dt>INSTALLED</dt><dd title={image.installed_version || "—"}>{image.installed_version || "—"}</dd></div><div><dt>AVAILABLE</dt><dd title={image.available_version || image.version}>{image.available_version || (image.installed ? "NOT CHECKED" : image.version)}</dd></div></dl>
-              {state && <small className="protocolModuleEndpoint">{state.interface}:{state.port}</small>}
+              <header><button className="protocolModuleOpen" onClick={() => image.installed && isTunnel && setTab(protocol)} disabled={!image.installed || !isTunnel}><span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span><span><strong>{image.name}</strong><small>{image.kind === "agent" ? "AGENT" : "TUNNEL"}</small></span></button><em className={moduleState.toLowerCase()}>{moduleState}</em></header>
+              <dl><div><dt>VERSION</dt><dd title={image.update_available ? `${version} → ${image.available_version}` : version}>{version}{image.update_available ? ` → ${image.available_version}` : ""}</dd></div><div><dt>PORT</dt><dd>{state?.port || "—"}</dd></div></dl>
               <footer>
-                {image.installed && isTunnel && <button onClick={() => setTab(protocol)}>Открыть</button>}
-                {image.installed && isTunnel && <button className={image.update_breaking ? "warning" : ""} onClick={() => void updateProtocol(image)} disabled={busy || !image.update_available}>{installingProtocol === `update-${image.id}` ? "Обновление…" : image.update_available ? "Обновить" : image.version_checked_at ? "Актуально" : "Не проверено"}</button>}
+                {image.installed && isTunnel && <button className="danger" onClick={() => void removeProtocol(image)} disabled={busy}>Удалить</button>}
+                {image.installed && isTunnel && (image.update_available
+                  ? <button className={image.update_breaking ? "warning" : ""} onClick={() => void updateProtocol(image)} disabled={busy}>{installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}</button>
+                  : <button onClick={() => void checkProtocolVersions()} disabled={busy || checkingProtocolVersions}>{checkingProtocolVersions ? "Проверка…" : "Проверить"}</button>)}
                 {!image.installed && <button onClick={() => image.installable && void installProtocol(image)} disabled={!image.installable || busy || Boolean(installingProtocol)}>{!image.installable ? "Недоступно" : installingProtocol === image.id ? "Установка…" : "Установить"}</button>}
               </footer>
             </article>;

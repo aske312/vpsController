@@ -1321,13 +1321,28 @@ input, select { height: 46px; font-size: 11px; }
   }
 }
 
-/* Final responsive placement for the compact module deck. */
-.overview { grid-template-columns: minmax(0, 1fr); }
-.overview > .metrics, .overview > .protocolSummary { grid-column: 1; }
-.overview > .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.protocolModuleGrid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+/* Keep the compact module controls beside the primary server statistics. */
+.overview { grid-template-columns: minmax(0, 1fr) 390px; gap: 12px; }
+.overview > .metrics { grid-column: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.overview > .protocolSummary { grid-column: 2; align-self: start; padding: 10px 12px; }
+.protocolModuleGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.protocolModuleCard { min-height: 100px; gap: 7px; padding: 9px; }
+.protocolModuleCard header { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.protocolModuleOpen { min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
+.protocolModuleOpen:disabled { cursor: default; opacity: 1; }
+.protocolModuleOpen:not(:disabled) { cursor: pointer; }
+.protocolModuleOpen .protocol { width: 28px; height: 28px; border-radius: 6px; }
+.protocolModuleOpen > span:last-child { min-width: 0; display: grid; gap: 2px; }
+.protocolModuleOpen strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.protocolModuleOpen small { margin: 0; color: #718896; font: 6px var(--font-mono); letter-spacing: .08em; }
+.protocolModuleCard header em { padding: 3px 4px; font-size: 6px; }
+.protocolModuleCard dl { gap: 5px; }
+.protocolModuleCard footer button { height: 25px; padding: 0 5px; font-size: 7px; }
+.protocolModuleCard footer button.danger { border-color: #6a3232; background: #241416; color: #ef8d8d; }
 
 @media (max-width: 1050px) {
+  .overview { grid-template-columns: minmax(0, 1fr); }
+  .overview > .metrics, .overview > .protocolSummary { grid-column: 1; }
   .overview > .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .protocolModuleGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
