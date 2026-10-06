@@ -103,6 +103,7 @@ esac
   cd "${ROOT_DIR}"
   export NEXT_PUBLIC_APP_VERSION="${app_version}"
   export NEXT_PUBLIC_BUILD_COMMIT="${commit}"
+  export NEXT_PUBLIC_RELEASE_CHANNEL="${RELEASE_CHANNEL}"
   # CI already installed and checked these dependencies in this same job.
   # Standalone release builds still install from the lockfile by default.
   if [[ "${RELEASE_SKIP_INSTALL:-0}" != "1" ]]; then

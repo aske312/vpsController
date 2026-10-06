@@ -186,6 +186,8 @@ test("PRO release metadata binds edition, channel, architecture and full commit"
   ]);
   assert.match(builder, /RELEASE_EDITION="\$\{RELEASE_EDITION:-pro\}"/);
   assert.match(builder, /RELEASE_CHANNEL="\$\{RELEASE_CHANNEL:-production\}"/);
+  assert.match(builder, /NEXT_PUBLIC_RELEASE_CHANNEL="\$\{RELEASE_CHANNEL\}"/);
+  assert.match(manager, /NEXT_PUBLIC_RELEASE_CHANNEL="\$\{RELEASE_CHANNEL\}"/);
   assert.match(builder, /schema=1/);
   assert.match(builder, /Release requires a full git commit SHA/);
   assert.match(manager, /release_schema.*release_edition.*release_channel.*release_architecture.*release_commit/s);

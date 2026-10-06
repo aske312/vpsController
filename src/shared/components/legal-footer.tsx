@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 type LegalFooterProps = {
   version: string;
+  channel: string;
   commit: string;
 };
 
@@ -129,9 +130,13 @@ const LICENSE_TEXT: LegalDocument = {
   ],
 };
 
-export function LegalFooter({ version, commit }: LegalFooterProps) {
+export function LegalFooter({ version, channel, commit }: LegalFooterProps) {
   const [panel, setPanel] = useState<LegalPanel>(null);
-  const buildId = useMemo(() => (commit && commit !== "unknown" ? commit.slice(0, 12) : "unknown"), [commit]);
+  const buildId = useMemo(() => (commit && commit !== "unknown" ? commit.slice(0, 18) : "unknown"), [commit]);
+  const displayChannel = useMemo(() => {
+    const normalized = String(channel || "").trim().toLowerCase();
+    return normalized === "test" || normalized === "test-pro" ? "test" : "production";
+  }, [channel]);
   const displayVersion = useMemo(() => {
     const normalized = String(version || "").trim().replace(/^v/i, "");
     return normalized ? `v${normalized}` : "unknown";
@@ -141,11 +146,8 @@ export function LegalFooter({ version, commit }: LegalFooterProps) {
   return (
     <>
       <footer className="versionFooter legalFooter" aria-label="Версия и правовая информация">
-        <div className="legalVersionLine" aria-label={`Версия ${displayVersion}, сборка ${buildId}`}>
-          <strong>{displayVersion}</strong>
-          <span aria-hidden="true"></span>
-          <small>build </small>
-          <code>{buildId}</code>
+        <div className="legalVersionLine" aria-label={`${displayChannel}, версия ${displayVersion}, сборка ${buildId}`}>
+          <span>{displayChannel} {displayVersion} build:{buildId}</span>
         </div>
         <div className="legalFooterLinks">
           <button type="button" className="legalLink" onClick={() => setPanel("privacy")}>

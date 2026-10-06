@@ -36,6 +36,7 @@ import type { AdoptionPlan, ComponentManagement, MetricsSettings } from "../shar
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
+const releaseChannel = process.env.NEXT_PUBLIC_RELEASE_CHANNEL || "production";
 
 type NewClientSettings = {
   mtu: number;
@@ -1600,6 +1601,7 @@ export function ControlPanel() {
       loginPasswordVisible={loginPasswordVisible}
       busy={busy}
       version={appVersion}
+      channel={releaseChannel}
       commit={buildCommit}
       setLoginUser={setLoginUser}
       setLoginPassword={setLoginPassword}
@@ -2047,5 +2049,5 @@ export function ControlPanel() {
 }
 
 function VersionFooter() {
-  return <LegalFooter version={appVersion} commit={buildCommit} />;
+  return <LegalFooter version={appVersion} channel={releaseChannel} commit={buildCommit} />;
 }
