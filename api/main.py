@@ -1228,10 +1228,11 @@ def latest_github_version(repository: str) -> str:
         f"https://api.github.com/repos/{repository}/releases/latest", timeout=12,
     )
     try:
-        tag = str(json.loads(output).get("tag_name", "")).lstrip("v")
+        tag = str(json.loads(output).get("tag_name", ""))
     except (ValueError, json.JSONDecodeError):
-        tag = ""
-    return tag if re.fullmatch(r"[0-9][0-9A-Za-z._+-]*", tag) else ""
+        return ""
+    match = re.search(r"(?:^|[/_-])v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$", tag)
+    return match.group(1) if match else ""
 
 
 def version_major(value: str) -> str:
