@@ -614,10 +614,10 @@ input, select { height: 46px; font-size: 11px; }
 .protocolHealth div { display: grid; gap: 5px; }
 .protocolHealth strong { font-size: 11px; }
 .protocolHealth small { color: var(--muted); font-size: 8px; }
-.protocolControlStack { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-.protocolControlStack .protocolHealth { min-width: 0; }
-.protocolActions { display: flex; align-items: center; flex-wrap: nowrap; gap: 7px; }
-.protocolActions button { flex: 0 0 auto; width: auto; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: #0e1b25; color: var(--muted); font-size: 8px; white-space: nowrap; }
+.protocolControlStack { min-width: 390px; align-self: stretch; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+.protocolControlStack .protocolHealth { min-width: 0; padding: 9px 12px; }
+.protocolActions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: nowrap; gap: 6px; margin-top: auto; }
+.protocolActions button { flex: 0 1 auto; width: auto; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: #0e1b25; color: var(--muted); font-size: 8px; white-space: nowrap; }
 .protocolActions button:hover { border-color: #3b5d54; color: var(--text); }
 .protocolActions .removeProtocolButton { border-color: #493033; color: #f28f8f; }
 .protocolActions .updateProtocolButton { border-color: #31505c; color: var(--accent); }
@@ -789,7 +789,7 @@ input, select { height: 46px; font-size: 11px; }
   .systemButtons { grid-template-columns: 1fr; width: 100%; }
   .protocolLiveHero { align-items: flex-start; flex-direction: column; }
   .protocolHealth { width: 100%; }
-  .protocolControlStack { width: 100%; min-width: 0; align-items: stretch; flex-direction: column; }
+  .protocolControlStack { width: 100%; min-width: 0; }
   .protocolActions { flex-wrap: wrap; }
   .protocolMonitorGrid { grid-template-columns: 1fr; }
   .protocolFlow { grid-column: 1; }

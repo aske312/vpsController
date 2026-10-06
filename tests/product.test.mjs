@@ -377,7 +377,7 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(page, /image\.update_available\s*\?/);
   assert.match(page, />Удалить<\/button>/);
   assert.match(page, /checkingProtocolVersion === image\.id \? "Проверка…"/);
-  assert.doesNotMatch(page, /Удалить протокол/);
+  assert.match(page, /className="removeProtocolButton".*removeProtocol\(activeProtocolImage\).*?>Удалить<\/button>/s);
   assert.match(page, /disabled=\{busy \|\| !activeProtocolImage\.update_available\}/);
   assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 1/);
 });

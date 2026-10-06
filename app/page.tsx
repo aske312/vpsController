@@ -1574,6 +1574,7 @@ export default function Home() {
               <button onClick={() => void restartProtocol(tab)} disabled={busy}>{activeProtocol.service_active ? "Перезапустить" : "Запустить"}</button>
               {activeProtocolImage && <button onClick={() => void checkProtocolVersion(activeProtocolImage)} disabled={busy || Boolean(checkingProtocolVersion)}>{checkingProtocolVersion === activeProtocolImage.id ? "Проверяем…" : "Проверить версию"}</button>}
               {activeProtocolImage && <button className={activeProtocolImage.update_breaking ? "updateProtocolButton warning" : "updateProtocolButton"} onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy || !activeProtocolImage.update_available}>{installingProtocol === `update-${activeProtocolImage.id}` ? "Обновление…" : activeProtocolImage.update_available ? `Обновить до ${activeProtocolImage.available_version}` : activeProtocolImage.version_checked_at ? "Обновлений нет" : "Версия не проверена"}</button>}
+              {activeProtocolImage?.removable && <button className="removeProtocolButton" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить</button>}
             </div>
           </div>
         </article>
