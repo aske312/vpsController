@@ -16,42 +16,57 @@
 - Debian 13 или Ubuntu Server 22.04/24.04 с systemd;
 - архитектура `amd64` или `arm64`;
 - от 1 ГБ оперативной памяти и 5 ГБ свободного места;
-- root-доступ или пользователь с `sudo`;
+- вход на сервер под `root`;
 - доступ сервера к GitHub и системным репозиториям.
 
 ## Установка
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
-  | sudo bash -s -- --edition light
+  | bash -s -- --edition light
 ```
 
-После завершения установки в терминале будут показаны адрес панели и данные для входа.
+Установщик автоматически синхронизирует приложение с последним стабильным релизом ветки `light`. После завершения в терминале будут показаны адрес панели, сгенерированный логин и пароль.
+
+Если DNS-запись домена уже указывает на сервер, можно сразу включить HTTPS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh \
+  | bash -s -- --edition light --domain panel.example.com
+```
+
+Если DNS ещё не обновился, панель останется доступна по IP. После распространения записи выполните `vps-control identity`: домен будет проверен повторно и HTTPS включится автоматически.
+
+Домен можно указать или заменить и после установки:
+
+```bash
+vps-control domain panel.example.com
+```
 
 ## Управление
 
 ```bash
-sudo vps-control status
-sudo vps-control restart
-sudo vps-control verify
-sudo vps-control credentials
-sudo vps-control update
+vps-control status
+vps-control restart
+vps-control verify
+vps-control credentials
+vps-control update
 ```
 
 ## Возможные ошибки установки
 
-- Если `dpkg` сообщает о незавершённой настройке, выполните `sudo dpkg --configure -a` и повторите установку.
-- Если занят порт панели, найдите конфликтующую службу командой `sudo ss -ltnp` и освободите порт.
+- Если `dpkg` сообщает о незавершённой настройке, выполните `dpkg --configure -a` и повторите установку.
+- Если занят порт панели, найдите конфликтующую службу командой `ss -ltnp` и освободите порт.
 - При ошибке доступа к репозиториям проверьте DNS, исходящее HTTPS-соединение и системное время.
 - Если установка прервалась из-за разрыва SSH, повторно запустите ту же команду.
-- Для проверки установленной панели выполните `sudo vps-control verify`.
+- Для проверки установленной панели выполните `vps-control verify`.
 
 ## Удаление
 
 Команда удаляет панель, её настройки и данные. Установленные системные пакеты сохраняются.
 
 ```bash
-sudo vps-control uninstall --yes
+vps-control uninstall --yes
 ```
 
 ## Документы

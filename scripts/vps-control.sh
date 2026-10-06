@@ -22,7 +22,8 @@ fi
 
 ACCESS_MODE="external"
 ADMIN_USER="admin"
-ADMIN_PASSWORD="VpsAdmin-2026-7Qm!rK2#"
+ADMIN_PASSWORD=""
+PUBLIC_DOMAIN=""
 LOCAL_ADDRESS=""
 LOCAL_CIDR=""
 HTTP_PORT="80"
@@ -217,6 +218,10 @@ ok() {
 warn() { printf '\033[1;33m!\033[0m %s\n' "$*" >&2; }
 die() { ACTION_FAILURE_MESSAGE="$*"; printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
 
+generate_admin_password() {
+  od -An -N18 -tx1 /dev/urandom | tr -d ' \n'
+}
+
 system_architecture() {
   case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
     amd64|x86_64) printf 'amd64\n' ;;
@@ -272,7 +277,7 @@ cleanup_update_dir() {
 }
 
 require_root() {
-  [[ ${EUID} -eq 0 ]] || die "запустите команду через sudo."
+  [[ ${EUID} -eq 0 ]] || die "запустите команду от root."
 }
 
 load_manager_config() {
@@ -304,14 +309,24 @@ load_manager_config() {
   fi
 }
 
+valid_public_domain() {
+  local domain="$1"
+  [[ ${#domain} -le 253 && "${domain}" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]
+}
+
 load_install_config() {
-  local config="${INSTALL_CONFIG}"
+  local config="${INSTALL_CONFIG}" domain_override="${VPS_CONTROL_PUBLIC_DOMAIN:-}"
   [[ -r "${config}" ]] || config="${PROJECT_DIR}/install.conf"
   if [[ -r "${config}" ]]; then
     # Конфиг принадлежит администратору и содержит только shell-переменные.
     # shellcheck source=/dev/null
     source "${config}"
   fi
+  if [[ -n "${domain_override}" ]]; then
+    PUBLIC_DOMAIN="${domain_override}"
+  fi
+  PUBLIC_DOMAIN="${PUBLIC_DOMAIN%.}"
+  PUBLIC_DOMAIN="${PUBLIC_DOMAIN,,}"
   # Обновления сохраняют старый /etc/vps-control-install.conf. Дополняем
   # прежний URL координатами в памяти, не перезаписывая настройки владельца.
   if [[ "${GEOLOCATION_FALLBACK_URL}" == "https://ipwho.is/?fields=success,ip,city,country,country_code" ]]; then
@@ -320,6 +335,10 @@ load_install_config() {
   [[ "${ACCESS_MODE}" == "external" || "${ACCESS_MODE}" == "local" || "${ACCESS_MODE}" == "vpn" ]] \
     || die "ACCESS_MODE должен быть external, local или vpn."
   [[ "${HTTP_PORT}" =~ ^[0-9]+$ ]] || die "HTTP_PORT должен быть числом."
+  if [[ -n "${PUBLIC_DOMAIN}" ]]; then
+    valid_public_domain "${PUBLIC_DOMAIN}" \
+      || die "PUBLIC_DOMAIN должен содержать корректное доменное имя без схемы и пути."
+  fi
 }
 
 detect_local_network() {
@@ -333,12 +352,33 @@ detect_local_network() {
   [[ -n "${LOCAL_CIDR}" ]] || die "не удалось определить локальную сеть; задайте LOCAL_CIDR в install.conf."
 }
 
+domain_points_to_public_ip() {
+  local domain="$1" public_ip="$2"
+  python3 - "${domain}" "${public_ip}" <<'PY'
+import ipaddress
+import socket
+import sys
+
+domain, expected = sys.argv[1:]
+try:
+    expected_ip = ipaddress.ip_address(expected)
+    addresses = {
+        ipaddress.ip_address(item[4][0])
+        for item in socket.getaddrinfo(domain, None, type=socket.SOCK_STREAM)
+    }
+except (OSError, ValueError):
+    raise SystemExit(1)
+raise SystemExit(0 if expected_ip in addresses else 1)
+PY
+}
+
 configure_access() {
-  local public_ip
+  local public_ip confirmed_domain=""
   public_ip="$(env_value PUBLIC_IP)"
   if [[ "${ACCESS_MODE}" == "local" ]]; then
     detect_local_network
     set_env_value "PANEL_HOST" "${LOCAL_ADDRESS}"
+    set_env_value "PUBLIC_DOMAIN" ""
     set_env_value "CORS_ORIGINS" "http://${LOCAL_ADDRESS}:${HTTP_PORT}"
     PANEL_URL="http://${LOCAL_ADDRESS}:${HTTP_PORT}"
   elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
@@ -353,6 +393,7 @@ configure_access() {
       vpn_origins+="http://${awg_address}:${HTTP_PORT}"
     fi
     set_env_value "PANEL_HOST" "0.0.0.0"
+    set_env_value "PUBLIC_DOMAIN" ""
     set_env_value "CORS_ORIGINS" "${vpn_origins}"
     PANEL_URL="${vpn_origins%%,*}"
   else
@@ -363,8 +404,21 @@ configure_access() {
     [[ -z "${wg_address}" ]] || origins+=",http://${wg_address}:${HTTP_PORT}"
     [[ -z "${awg_address}" ]] || origins+=",http://${awg_address}:${HTTP_PORT}"
     set_env_value "PANEL_HOST" "0.0.0.0"
+    if [[ -n "${PUBLIC_DOMAIN}" ]]; then
+      if domain_points_to_public_ip "${PUBLIC_DOMAIN}" "${public_ip}"; then
+        confirmed_domain="${PUBLIC_DOMAIN}"
+        origins="https://${confirmed_domain},${origins}"
+      else
+        warn "домен ${PUBLIC_DOMAIN} пока не указывает на ${public_ip}; панель продолжит работать по IP. После обновления DNS выполните vps-control identity."
+      fi
+    fi
+    set_env_value "PUBLIC_DOMAIN" "${confirmed_domain}"
     set_env_value "CORS_ORIGINS" "${origins}"
-    PANEL_URL="http://${public_ip}:${HTTP_PORT}"
+    if [[ -n "${confirmed_domain}" ]]; then
+      PANEL_URL="https://${confirmed_domain}"
+    else
+      PANEL_URL="http://${public_ip}:${HTTP_PORT}"
+    fi
   fi
   set_env_value "HTTP_PORT" "${HTTP_PORT}"
   set_env_value "ACCESS_MODE" "${ACCESS_MODE}"
@@ -805,6 +859,10 @@ configure_firewall() {
     ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
   else
     ufw allow "${HTTP_PORT}/tcp"
+    if [[ -n "${PUBLIC_DOMAIN}" ]]; then
+      ufw allow 80/tcp
+      ufw allow 443/tcp
+    fi
   fi
   ufw --force enable
 }
@@ -881,6 +939,7 @@ save_source_path() {
   } >"${MANAGER_CONFIG}"
   chmod 0600 "${MANAGER_CONFIG}"
   install -m 0600 "${PROJECT_DIR}/install.conf" "${INSTALL_CONFIG}"
+  set_config_value "${INSTALL_CONFIG}" "PUBLIC_DOMAIN" "${PUBLIC_DOMAIN}"
 }
 
 sync_release() {
@@ -941,6 +1000,7 @@ ensure_environment() {
   rm -f -- "${DATA_DIR}/personalization.json"
   if [[ ! -s "${ENV_FILE}" ]]; then
     install -m 0600 "${PROJECT_DIR}/.env.example" "${ENV_FILE}"
+    [[ -n "${ADMIN_PASSWORD}" ]] || ADMIN_PASSWORD="$(generate_admin_password)"
     set_env_value "ADMIN_USER" "${ADMIN_USER}"
     set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
     chmod 0600 "${ENV_FILE}"
@@ -948,7 +1008,10 @@ ensure_environment() {
   else
     ok "существующий ${ENV_FILE} сохранён."
     [[ -n "$(env_value ADMIN_USER)" ]] || set_env_value "ADMIN_USER" "${ADMIN_USER}"
-    [[ -n "$(env_value ADMIN_PASSWORD)" ]] || set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
+    if [[ -z "$(env_value ADMIN_PASSWORD)" ]]; then
+      [[ -n "${ADMIN_PASSWORD}" ]] || ADMIN_PASSWORD="$(generate_admin_password)"
+      set_env_value "ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
+    fi
   fi
   if [[ -z "$(env_value PUBLIC_IP)" ]]; then
     refresh_server_identity
@@ -1102,10 +1165,24 @@ ReadWritePaths=${DATA_DIR}/web
 WantedBy=multi-user.target
 EOF
   install -d -m 0755 /etc/caddy
-  sed "s/{\$HTTP_PORT}/${HTTP_PORT}/g" "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
+  write_caddy_config
   caddy validate --config "${CADDY_CONFIG}" >/dev/null
   systemctl daemon-reload
   systemctl enable "${APP_NAME}-web.service" caddy.service >>"${INSTALL_LOG}" 2>&1
+}
+
+write_caddy_config() {
+  local confirmed_domain site_address
+  confirmed_domain="$(env_value PUBLIC_DOMAIN)"
+  site_address=":${HTTP_PORT}"
+  if [[ "${ACCESS_MODE}" == "external" && -n "${confirmed_domain}" ]]; then
+    site_address="${confirmed_domain}"
+  fi
+  sed \
+    -e "s|:{\$HTTP_PORT}|${site_address}|g" \
+    -e "s|{\$SITE_ADDRESS}|${site_address}|g" \
+    -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
+    "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
 }
 
 stop_legacy_containers() {
@@ -1543,7 +1620,7 @@ change_access_mode() {
   set_config_value "${INSTALL_DIR}/install.conf" "ACCESS_MODE" "${ACCESS_MODE}"
   configure_access
   configure_firewall "panel-only"
-  sed "s/{\$HTTP_PORT}/${HTTP_PORT}/g" "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
+  write_caddy_config
   caddy validate --config "${CADDY_CONFIG}" >/dev/null
   systemctl restart caddy.service
   systemctl restart "${APP_NAME}-api.service"
@@ -2111,6 +2188,35 @@ integrity_check() {
 show_credentials() {
   [[ -r "${ENV_FILE}" ]] || die "${ENV_FILE} не найден."
   printf 'Логин: '; env_value ADMIN_USER
+  printf 'Пароль: '; env_value ADMIN_PASSWORD
+}
+
+change_public_domain() {
+  local requested="${2:-}" confirmed
+  [[ -n "${requested}" ]] || die "укажите домен без схемы и пути либо off."
+  requested="${requested%.}"
+  requested="${requested,,}"
+  if [[ "${requested}" == "off" ]]; then
+    PUBLIC_DOMAIN=""
+  else
+    valid_public_domain "${requested}" || die "укажите корректное доменное имя без схемы и пути."
+    PUBLIC_DOMAIN="${requested}"
+  fi
+  set_config_value "${INSTALL_CONFIG}" "PUBLIC_DOMAIN" "${PUBLIC_DOMAIN}"
+  set_config_value "${INSTALL_DIR}/install.conf" "PUBLIC_DOMAIN" "${PUBLIC_DOMAIN}"
+  configure_access
+  configure_firewall "panel-only"
+  write_caddy_config
+  caddy validate --config "${CADDY_CONFIG}" >/dev/null
+  systemctl restart caddy.service "${APP_NAME}-api.service"
+  confirmed="$(env_value PUBLIC_DOMAIN)"
+  if [[ -n "${confirmed}" ]]; then
+    ok "домен ${confirmed} подтверждён; панель доступна по https://${confirmed}."
+  elif [[ -n "${PUBLIC_DOMAIN}" ]]; then
+    ok "домен ${PUBLIC_DOMAIN} сохранён; до подтверждения DNS панель работает по IP."
+  else
+    ok "домен отключён; панель работает по IP."
+  fi
 }
 
 usage() {
@@ -2118,8 +2224,8 @@ usage() {
 312.net — управление инфраструктурой
 
 Использование:
-  sudo bash scripts/vps-control.sh install
-  sudo vps-control <команда>
+  bash scripts/vps-control.sh install
+  vps-control <команда>
 
 Команды:
   install          установить зависимости и развернуть панель
@@ -2153,6 +2259,7 @@ usage() {
   logs-clear       очистить системные, контейнерные и мониторинговые журналы
   access-mode <external|vpn>
                    изменить доступность панели
+  domain <имя|off> сохранить домен панели или отключить его
   service-mode <enable|disable>
                    включить или выключить сервисный режим
   reboot           перезагрузить сервер
@@ -2173,7 +2280,7 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
+    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|domain|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
       case "${1}" in
         protocol-install|protocol-remove|protocol-update) begin_operation "${1}:${2:-}" ;;
         *) begin_operation "${1}" ;;
@@ -2203,8 +2310,9 @@ main() {
       ensure_product_identity
       verify_app
       ui_done "локальная версия установлена"
-      ui_stage "Режим обновлений"
-      ui_done "последующие релизы устанавливаются вручную из готового архива"
+      ui_stage "Обновление до стабильной версии"
+      update_app
+      ui_done "установлен последний проверенный production-релиз Light"
       ui_stage "Проверка файлов и служб"
       verify_app
       integrity_check
@@ -2212,7 +2320,8 @@ main() {
       ui_stage "Завершение"
       ui_summary
       printf '\nОткройте: %s\n' "${PANEL_URL}"
-      printf 'Логин: %s\n' "${ADMIN_USER}"
+      show_credentials
+      printf 'Сохраните пароль: после завершения установки он не будет показан автоматически.\n'
       ui_done "установка завершена"
       ;;
     uninstall) uninstall_app "$@" ;;
@@ -2231,6 +2340,9 @@ main() {
     integrity-check) integrity_check ;;
     identity)
       refresh_server_identity
+      configure_firewall "panel-only"
+      write_caddy_config
+      caddy validate --config "${CADDY_CONFIG}" >/dev/null
       systemctl restart "${APP_NAME}-api.service"
       systemctl restart caddy.service
       verify_app
@@ -2244,6 +2356,7 @@ main() {
     logging-config) configure_logging "$@" ;;
     logs-clear) clear_managed_logs ;;
     access-mode) change_access_mode "$@" ;;
+    domain) change_public_domain "$@" ;;
     service-mode) change_service_mode "$@" ;;
     reboot) reboot_server ;;
     poweroff) poweroff_server ;;

@@ -38,6 +38,32 @@ test("поставка содержит установщик, образы и к
   await assert.rejects(read("protocol-images/wireguard/manifest.json"), { code: "ENOENT" });
 });
 
+test("fresh install generates credentials, supports a verified domain and finishes on stable Light", async () => {
+  const [bootstrap, manager, config, caddy, readme] = await Promise.all([
+    read("scripts/install-panel.sh"),
+    read("scripts/vps-control.sh"),
+    read("install.conf"),
+    read("Caddyfile"),
+    read("README.md"),
+  ]);
+  assert.match(manager, /generate_admin_password\(\)[\s\S]*?\/dev\/urandom/);
+  assert.match(manager, /printf 'Пароль: '; env_value ADMIN_PASSWORD/);
+  assert.doesNotMatch(manager, /^ADMIN_PASSWORD=".+"$/m);
+  assert.doesNotMatch(config, /^ADMIN_PASSWORD=".+"$/m);
+  assert.match(bootstrap, /--domain/);
+  assert.match(bootstrap, /VPS_CONTROL_PUBLIC_DOMAIN/);
+  assert.match(manager, /domain_points_to_public_ip/);
+  assert.match(manager, /domain\) change_public_domain/);
+  assert.match(manager, /PANEL_URL="https:\/\/\$\{confirmed_domain\}"/);
+  assert.match(manager, /s\|:\{\\\$HTTP_PORT\}\|\$\{site_address\}\|g/);
+  assert.match(caddy, /^\{\$SITE_ADDRESS\}/);
+  assert.match(manager, /ui_stage "Обновление до стабильной версии"\s+update_app/);
+  assert.match(manager, /update_prebuilt_branch "\$\{PRODUCTION_BRANCH\}" "\$\{PRODUCTION_RELEASE_TAG\}"/);
+  assert.match(readme, /--domain panel\.example\.com/);
+  assert.match(readme, /vps-control domain panel\.example\.com/);
+  assert.doesNotMatch(readme, /sudo/);
+});
+
 test("интерфейс использует фирменные метаданные и знак 312.net", async () => {
   const [layout, page, favicon, packageJson] = await Promise.all([
     read("app/layout.tsx"),
@@ -532,7 +558,7 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(builder, /RELEASE_BRANCH="\$\{RELEASE_BRANCH:-/);
   assert.match(builder, /branch=%s/);
   assert.match(manager, /NEXT_PUBLIC_RELEASE_BRANCH="\$\{RELEASE_BRANCH\}"/);
-  assert.match(readme, /sudo vps-control update/);
+  assert.match(readme, /vps-control update/);
   assert.match(manager, /TimeoutStopSec=15/);
   assert.match(manager, /KillMode=mixed/);
   assert.match(manager, /mv -- "\$\{INSTALL_DIR\}\/venv" "\$\{rollback\}\/venv"/);
