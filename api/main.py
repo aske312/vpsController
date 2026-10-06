@@ -83,6 +83,7 @@ ENV_FILE = Path(os.getenv("ENV_FILE", "/etc/vps-control.env"))
 CLIENTS_FILE = DATA_DIR / "clients.json"
 ACTION_FILE = DATA_DIR / "application-action.json"
 AUTOMATION_FILE = DATA_DIR / "automation.json"
+PROTOCOL_VERSIONS_FILE = DATA_DIR / "protocol-versions.json"
 SERVICE_MODE_FILE = DATA_DIR / "service-mode.json"
 UPDATES_FILE = DATA_DIR / "security-updates.json"
 APP_VERSION_FILE = DATA_DIR / "application-version.json"
@@ -1238,6 +1239,25 @@ def version_major(value: str) -> str:
     return match.group(0) if match else ""
 
 
+def load_protocol_version_cache() -> None:
+    if protocol_version_cache:
+        return
+    try:
+        stored = json.loads(PROTOCOL_VERSIONS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if isinstance(stored, dict):
+        protocol_version_cache.update({key: value for key, value in stored.items() if isinstance(value, dict)})
+
+
+def save_protocol_version_cache() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = PROTOCOL_VERSIONS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(protocol_version_cache, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    tmp.replace(PROTOCOL_VERSIONS_FILE)
+
+
 def refresh_protocol_version(image_id: str) -> dict:
     repositories = {
         "hysteria2": "apernet/hysteria",
@@ -1265,10 +1285,12 @@ def refresh_protocol_version(image_id: str) -> dict:
     except (KeyError, ValueError) as cause:
         value = {"available_version": "", "version_checked_at": checked_at, "version_error": str(cause)}
     protocol_version_cache[image_id] = value
+    save_protocol_version_cache()
     return value
 
 
 def protocol_image_manifests() -> dict[str, dict]:
+    load_protocol_version_cache()
     images: dict[str, dict] = {}
     if not PROTOCOL_IMAGES_DIR.exists():
         return images
@@ -1342,7 +1364,7 @@ def check_protocol_versions(_: None = Depends(require_token)) -> dict:
     try:
         images = protocol_image_manifests()
         for image_id, image in images.items():
-            if image.get("installed") and image_id in {"awg", "hysteria2", "tuic", "xray"}:
+            if image.get("installable") and image_id in {"awg", "hysteria2", "tuic", "xray"}:
                 refresh_protocol_version(image_id)
         items = list(protocol_image_manifests().values())
         items.sort(key=lambda item: (MODULE_ORDER.get(item["id"], 999), item["name"].casefold()))
@@ -1356,8 +1378,8 @@ def check_protocol_version(image_id: str, _: None = Depends(require_token)) -> d
     image = protocol_image_manifests().get(image_id)
     if not image:
         raise HTTPException(status_code=404, detail="Protocol image not found")
-    if not image.get("installed") or image_id not in {"awg", "hysteria2", "tuic", "xray"}:
-        raise HTTPException(status_code=409, detail="Protocol is not installed or does not support version checks")
+    if not image.get("installable") or image_id not in {"awg", "hysteria2", "tuic", "xray"}:
+        raise HTTPException(status_code=409, detail="Protocol does not support version checks")
     if not protocol_version_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="Проверка версии уже выполняется")
     try:
@@ -1800,7 +1822,7 @@ def default_automation() -> dict:
     return {
         "reboot": {"enabled": False, "cadence": "weekly", "weekday": "Sun", "hour": 4, "minute": 0},
         "cleanup": {"enabled": False, "cadence": "weekly", "weekday": "Sun", "hour": 3, "minute": 0},
-        "update": {"enabled": False, "cadence": "weekly", "weekday": "Sun", "hour": 2, "minute": 30},
+        "protocol_scan": {"enabled": False, "cadence": "daily", "weekday": "Sun", "hour": 2, "minute": 30},
     }
 
 
@@ -1869,7 +1891,7 @@ def services_status(_: None = Depends(require_token)) -> dict:
         "automation": read_automation(),
         "timers": {
             "reboot": timer_details("reboot"), "cleanup": timer_details("cleanup"),
-            "update": timer_details("update"),
+            "protocol_scan": timer_details("protocol-scan"),
         },
         "panel_access": {
             "mode": os.getenv("ACCESS_MODE", "external"),
@@ -2102,7 +2124,7 @@ class AutomationSchedule(BaseModel):
 class AutomationSettings(BaseModel):
     reboot: AutomationSchedule
     cleanup: AutomationSchedule
-    update: AutomationSchedule
+    protocol_scan: AutomationSchedule
 
 
 @app.put("/api/services/automation")
@@ -2132,7 +2154,7 @@ def update_automation(payload: AutomationSettings, _: None = Depends(require_tok
         "automation": read_automation(),
         "timers": {
             "reboot": timer_details("reboot"), "cleanup": timer_details("cleanup"),
-            "update": timer_details("update"),
+            "protocol_scan": timer_details("protocol-scan"),
         },
     }
 

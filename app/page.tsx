@@ -65,8 +65,8 @@ type ServicesStatus = {
   }>;
   failed_units: number;
   reboot_required: boolean;
-  automation: { reboot: AutomationSchedule; cleanup: AutomationSchedule; update: AutomationSchedule };
-  timers: Record<"reboot" | "cleanup" | "update", { installed: boolean; active: boolean; last_trigger: string; next_run: string }>;
+  automation: { reboot: AutomationSchedule; cleanup: AutomationSchedule; protocol_scan: AutomationSchedule };
+  timers: Record<"reboot" | "cleanup" | "protocol_scan", { installed: boolean; active: boolean; last_trigger: string; next_run: string }>;
   panel_access?: { mode: "external" | "vpn"; public: boolean; vpn_urls: string[] };
   service_mode?: { active: boolean };
   logging?: { persistent: boolean; retention_days: number; automatic_cleanup: boolean; disk_usage: string };
@@ -696,7 +696,7 @@ export default function Home() {
     finally { setBusy(false); }
   }
 
-  function updateAutomation(kind: "reboot" | "cleanup", patch: Partial<AutomationSchedule>) {
+  function updateAutomation(kind: "reboot" | "cleanup" | "protocol_scan", patch: Partial<AutomationSchedule>) {
     automationDirty.current = true;
     setAutomationDraft((current) => current ? {
       ...current, [kind]: { ...current[kind], ...patch },
@@ -1253,7 +1253,7 @@ export default function Home() {
             const isTunnel = image.kind === "tunnel" && lightModuleIds.includes(protocol);
             const state = isTunnel ? overview?.protocols[protocol] : undefined;
             const moduleState = image.installed ? state?.active ? "ACTIVE" : "STOPPED" : image.status === "planned" ? "PLANNED" : "AVAILABLE";
-            const version = image.installed ? image.installed_version || "UNKNOWN" : image.version;
+            const version = image.installed ? image.installed_version || "UNKNOWN" : image.installable ? image.available_version || "НЕ ПРОВЕРЕНО" : "—";
             return <article className={`protocolModuleCard${image.installed ? " installed" : ""}${image.kind === "agent" ? " agent" : ""}`} key={image.id}>
               <header><button className="protocolModuleOpen" onClick={() => image.installed && isTunnel && setTab(protocol)} disabled={!image.installed || !isTunnel}><span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span><span><strong>{image.name}</strong><small>{image.kind === "agent" ? "AGENT" : "TUNNEL"}</small></span></button><em className={moduleState.toLowerCase()}>{moduleState}</em></header>
               <dl><div><dt>VERSION</dt><dd title={image.update_available ? `${version} → ${image.available_version}` : version}>{version}{image.update_available ? ` → ${image.available_version}` : ""}</dd></div><div><dt>PORT</dt><dd>{state?.port || "—"}</dd></div></dl>
@@ -1262,6 +1262,7 @@ export default function Home() {
                 {image.installed && isTunnel && (image.update_available
                   ? <button className={image.update_breaking ? "warning" : ""} onClick={() => void updateProtocol(image)} disabled={busy}>{installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}</button>
                   : <button onClick={() => void checkProtocolVersion(image)} disabled={busy || Boolean(checkingProtocolVersion)}>{checkingProtocolVersion === image.id ? "Проверка…" : "Проверить"}</button>)}
+                {!image.installed && image.installable && <button onClick={() => void checkProtocolVersion(image)} disabled={busy || Boolean(checkingProtocolVersion)}>{checkingProtocolVersion === image.id ? "Проверка…" : "Проверить"}</button>}
                 {!image.installed && <button onClick={() => image.installable && void installProtocol(image)} disabled={!image.installable || busy || Boolean(installingProtocol)}>{!image.installable ? "Недоступно" : installingProtocol === image.id ? "Установка…" : "Установить"}</button>}
               </footer>
             </article>;
@@ -1533,7 +1534,7 @@ export default function Home() {
 
         <article className="panel automationCenter">
           <div className="automationCenterHead">
-            <div><p className="eyebrow">MAINTENANCE SCHEDULE</p><h2>Плановое обслуживание</h2><small>Перезагрузка и безопасная очистка по расписанию</small></div>
+            <div><p className="eyebrow">MAINTENANCE SCHEDULE</p><h2>Плановое обслуживание</h2><small>Перезагрузка, безопасная очистка и проверка версий по расписанию</small></div>
             <button onClick={() => void saveAutomation()} disabled={busy || !services}>Сохранить изменения</button>
           </div>
           <div className="automationRows"><AutomationEditor
@@ -1549,6 +1550,13 @@ export default function Home() {
             value={automationDraft?.cleanup}
             timer={services?.timers.cleanup}
             onChange={(patch) => updateAutomation("cleanup", patch)}
+          />
+          <AutomationEditor
+            title="Проверка версий протоколов"
+            description="Сканирует официальные источники модулей и отмечает доступные версии. Обновления не устанавливаются автоматически."
+            value={automationDraft?.protocol_scan}
+            timer={services?.timers.protocol_scan}
+            onChange={(patch) => updateAutomation("protocol_scan", patch)}
           />
           </div>
           <div className="automationNote">Persistent=true · пропущенная задача будет выполнена после следующего запуска сервера</div>

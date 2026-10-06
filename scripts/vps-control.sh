@@ -1569,7 +1569,7 @@ change_service_mode() {
     ssh_socket_active="$([[ "$(systemctl is-active ssh.socket)" == "active" ]] && printf yes || printf no)"
     ssh_public="$([[ "$(ufw status | grep -Ec '^OpenSSH[[:space:]]+ALLOW[[:space:]]+Anywhere([[:space:]]|$)')" -gt 0 ]] && printf yes || printf no)"
     active_timers=""
-    for timer in vpn-monitor.timer vps-control-auto-reboot.timer vps-control-auto-cleanup.timer vps-control-auto-update.timer apt-daily.timer apt-daily-upgrade.timer; do
+    for timer in vpn-monitor.timer vps-control-auto-reboot.timer vps-control-auto-cleanup.timer vps-control-auto-protocol-scan.timer vps-control-auto-update.timer apt-daily.timer apt-daily-upgrade.timer; do
       if systemctl is-active --quiet "${timer}"; then
         active_timers+="${timer},"
         systemctl stop "${timer}"
@@ -1708,34 +1708,76 @@ clear_managed_logs() {
   ok "управляемые журналы очищены."
 }
 
+check_protocol_versions() {
+  info "Проверка актуальных версий модулей протоколов"
+  python3 - "${ENV_FILE}" <<'PY'
+import base64
+import json
+import sys
+import urllib.request
+
+env_path = sys.argv[1]
+values = {}
+with open(env_path, encoding="utf-8") as stream:
+    for raw_line in stream:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key] = value.strip().strip('"')
+user = values.get("ADMIN_USER", "admin")
+password = values.get("ADMIN_PASSWORD", "")
+if not password:
+    raise SystemExit("administrator credentials are not configured")
+token = base64.b64encode(f"{user}:{password}".encode()).decode()
+request = urllib.request.Request(
+    "http://127.0.0.1:8000/api/protocol-images/versions/check",
+    data=b"{}",
+    method="POST",
+    headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"},
+)
+with urllib.request.urlopen(request, timeout=90) as response:
+    payload = json.load(response)
+items = payload.get("items", [])
+updates = [item.get("name", item.get("id", "module")) for item in items if item.get("update_available")]
+print("updates: " + ", ".join(updates) if updates else "updates: none")
+PY
+  ok "версии модулей протоколов проверены; установка обновлений не выполнялась."
+}
+
 apply_automation() {
   info "Применение расписаний обслуживания"
   [[ -r "${AUTOMATION_FILE}" ]] || die "не найден ${AUTOMATION_FILE}."
   local values reboot_enabled reboot_cadence reboot_weekday reboot_hour reboot_minute
   local cleanup_enabled cleanup_cadence cleanup_weekday cleanup_hour cleanup_minute
-  local update_enabled update_cadence update_weekday update_hour update_minute
+  local protocol_scan_enabled protocol_scan_cadence protocol_scan_weekday protocol_scan_hour protocol_scan_minute
   values="$(python3 - "${AUTOMATION_FILE}" <<'PY'
 import json
 import shlex
 import sys
 
 data = json.load(open(sys.argv[1], encoding="utf-8"))
-for section in ("reboot", "cleanup", "update"):
+defaults = {
+    "reboot": ("weekly", "Sun", 4, 0),
+    "cleanup": ("weekly", "Sun", 3, 0),
+    "protocol_scan": ("daily", "Sun", 2, 30),
+}
+for section in ("reboot", "cleanup", "protocol_scan"):
     item = data.get(section, {})
+    cadence, weekday, hour, minute = defaults[section]
     values = (
         "yes" if item.get("enabled") else "no",
-        str(item.get("cadence", "weekly")),
-        str(item.get("weekday", "Sun")),
-        str(int(item.get("hour", 4))),
-        str(int(item.get("minute", 0))),
+        str(item.get("cadence", cadence)),
+        str(item.get("weekday", weekday)),
+        str(int(item.get("hour", hour))),
+        str(int(item.get("minute", minute))),
     )
     print(" ".join(shlex.quote(value) for value in values))
 PY
 )"
   read -r reboot_enabled reboot_cadence reboot_weekday reboot_hour reboot_minute <<<"$(sed -n '1p' <<<"${values}")"
   read -r cleanup_enabled cleanup_cadence cleanup_weekday cleanup_hour cleanup_minute <<<"$(sed -n '2p' <<<"${values}")"
-  read -r update_enabled update_cadence update_weekday update_hour update_minute <<<"$(sed -n '3p' <<<"${values}")"
-  update_enabled="false"
+  read -r protocol_scan_enabled protocol_scan_cadence protocol_scan_weekday protocol_scan_hour protocol_scan_minute <<<"$(sed -n '3p' <<<"${values}")"
 
   automation_calendar() {
     local cadence="$1" weekday="$2" hour="$3" minute="$4"
@@ -1783,13 +1825,16 @@ EOF
     fi
   }
 
-  local reboot_calendar cleanup_calendar update_calendar
+  local reboot_calendar cleanup_calendar protocol_scan_calendar
   reboot_calendar="$(automation_calendar "${reboot_cadence}" "${reboot_weekday}" "${reboot_hour}" "${reboot_minute}")"
   cleanup_calendar="$(automation_calendar "${cleanup_cadence}" "${cleanup_weekday}" "${cleanup_hour}" "${cleanup_minute}")"
-  update_calendar="$(automation_calendar "${update_cadence}" "${update_weekday}" "${update_hour}" "${update_minute}")"
+  protocol_scan_calendar="$(automation_calendar "${protocol_scan_cadence}" "${protocol_scan_weekday}" "${protocol_scan_hour}" "${protocol_scan_minute}")"
   install_automation_timer "reboot" "Scheduled VPS reboot by 312.net" "reboot" "${reboot_enabled}" "${reboot_calendar}"
   install_automation_timer "cleanup" "Scheduled VPS cleanup by 312.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}"
-  install_automation_timer "update" "Scheduled 312.net application update" "update" "${update_enabled}" "${update_calendar}"
+  install_automation_timer "protocol-scan" "Scheduled protocol version scan by 312.net" "protocol-version-check" "${protocol_scan_enabled}" "${protocol_scan_calendar}"
+  systemctl disable --now vps-control-auto-update.timer >/dev/null 2>&1 || true
+  rm -f -- /etc/systemd/system/vps-control-auto-update.timer /etc/systemd/system/vps-control-auto-update.service
+  systemctl daemon-reload
   ok "расписания обслуживания применены."
 }
 
@@ -1962,6 +2007,8 @@ usage() {
   vpn-firewall     восстановить маршрутизацию и NAT установленных WG/AWG
   optimize         очистить безопасные кэши и старые журналы
   automation-apply применить сохранённые расписания обслуживания
+  protocol-version-check
+                   проверить новые версии модулей протоколов без установки
   logging-config <enable|disable> <0..365>
                    настроить постоянную запись и срок хранения журналов
   logs-clear       очистить системные, контейнерные и мониторинговые журналы
@@ -2054,6 +2101,7 @@ main() {
     vpn-firewall) configure_vpn_firewall_policy ;;
     optimize) optimize_resources ;;
     automation-apply) apply_automation ;;
+    protocol-version-check) check_protocol_versions ;;
     logging-config) configure_logging "$@" ;;
     logs-clear) clear_managed_logs ;;
     access-mode) change_access_mode "$@" ;;

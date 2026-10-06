@@ -178,9 +178,14 @@ test("service settings are staged, saved explicitly and survive background refre
     read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"),
   ]);
   assert.match(api, /"cleanup": \{"enabled": False/);
+  assert.match(api, /"protocol_scan": \{"enabled": False, "cadence": "daily"/);
   assert.match(api, /LOG_RETENTION_DAYS", "30"/);
   assert.match(api, /INSTALL_DIR \/ "scripts" \/ "vps-control\.sh"/);
   assert.match(page, /automationDraft/);
+  assert.match(page, /Проверка версий протоколов/);
+  assert.match(page, /updateAutomation\("protocol_scan", patch\)/);
+  assert.match(manager, /vps-control-auto-protocol-scan\.timer/);
+  assert.match(manager, /protocol-version-check/);
   assert.match(page, /loggingDraft/);
   assert.match(page, /loggingDirty\.current/);
   assert.match(page, /Настройки записи и хранения журналов сохранены/);
@@ -343,6 +348,7 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(api, /protocol-install/);
   assert.match(api, /protocol-images\/versions\/check/);
   assert.match(api, /protocol-images\/\{image_id\}\/version\/check/);
+  assert.match(api, /PROTOCOL_VERSIONS_FILE/);
   assert.match(api, /protocol-update/);
   assert.match(manager, /set_protocol_client_update_state/);
   assert.match(manager, /"paused" "Обновление протокола запущено/);
@@ -374,6 +380,7 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.equal(JSON.parse(relayManifest).kind, "agent");
   assert.match(page, /Недоступно/);
   assert.match(page, /protocolImages\.map/);
+  assert.match(page, /image\.available_version \|\| "НЕ ПРОВЕРЕНО"/);
   assert.match(page, /image\.update_available\s*\?/);
   assert.match(page, />Удалить<\/button>/);
   assert.match(page, /checkingProtocolVersion === image\.id \? "Проверка…"/);
