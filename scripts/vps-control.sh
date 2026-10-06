@@ -56,6 +56,7 @@ PRODUCT_EDITION="light"
 PRODUCTION_BRANCH="light"
 PRODUCTION_RELEASE_TAG="light-latest"
 TEST_BRANCH="test-light"
+TEST_RELEASE_TAG="light-test-latest"
 ACTION_FILE="${DATA_DIR}/application-action.json"
 AUTOMATION_FILE="${DATA_DIR}/automation.json"
 SERVICE_MODE_FILE="${DATA_DIR}/service-mode.json"
@@ -1251,7 +1252,7 @@ install_prebuilt_release() {
 }
 
 update_prebuilt_branch() {
-  local branch="$1" release_tag="$2"
+  local branch="$1" release_tag="$2" expected_channel="${3:-production}" preserve_previous="${4:-no}"
   local remote="${REMOTE_URL:-https://github.com/aske312/vpsController.git}"
   local latest current repository_path release_url archive release_commit release_revision ready attempt
 
@@ -1260,7 +1261,9 @@ update_prebuilt_branch() {
   elif [[ "${remote}" =~ ^ssh://git@github\.com/(.+)$ ]]; then
     remote="https://github.com/${BASH_REMATCH[1]}"
   fi
-  [[ "${branch}" == "${PRODUCTION_BRANCH}" ]] || die "готовые релизы публикуются только из ветки ${PRODUCTION_BRANCH}."
+  [[ "${branch}:${expected_channel}" == "${PRODUCTION_BRANCH}:production" \
+    || "${branch}:${expected_channel}" == "${TEST_BRANCH}:test" ]] \
+    || die "ветка ${branch} не соответствует каналу ${expected_channel}."
   latest="$(git ls-remote "${remote}" "refs/heads/${branch}" 2>/dev/null | awk 'NR == 1 {print $1}')"
   [[ "${latest}" =~ ^[0-9a-f]{40}$ ]] || die "не удалось получить актуальную ревизию ветки ${branch}."
   current="$(cat "${INSTALL_DIR}/.build-commit" 2>/dev/null || true)"
@@ -1287,7 +1290,11 @@ update_prebuilt_branch() {
   [[ "${ready}" == "yes" ]] \
     || die "релиз для актуальной версии ${branch} не опубликован; проверьте GitHub Actions."
 
-  release_url="${APP_RELEASE_URL:-}"
+  if [[ "${expected_channel}" == "test" ]]; then
+    release_url="${TEST_RELEASE_URL:-}"
+  else
+    release_url="${APP_RELEASE_URL:-}"
+  fi
   if [[ -z "${release_url}" && "${remote}" =~ ^https://github\.com/([^/]+/[^/]+)$ ]]; then
     repository_path="${BASH_REMATCH[1]%.git}"
     release_url="https://github.com/${repository_path}/releases/download/${release_tag}/vps-control-${PRODUCT_EDITION}-linux-$(system_architecture).tar.gz"
@@ -1305,7 +1312,7 @@ update_prebuilt_branch() {
   [[ "${release_commit}" =~ ^[0-9a-f]{40}$ && "${latest}" == "${release_commit}" ]] \
     || die "подготовленный релиз не соответствует актуальной ревизии ветки ${branch}."
 
-  install_prebuilt_release install-release "${archive}"
+  install_prebuilt_release install-release "${archive}" "${preserve_previous}" "${expected_channel}"
   ok "приложение обновлено до ${branch} ${release_commit}."
 }
 
@@ -1316,11 +1323,16 @@ update_app() {
 update_test_app() {
   local archive="${2:-}"
   [[ -r "${SERVICE_MODE_FILE}" ]] || die "переход на тестовую версию разрешён только в сервисном режиме."
-  [[ -n "${archive}" ]] || die "укажите путь к локальному test-архиву."
-  if [[ -d "${TEST_BACKUP_DIR}" ]]; then
-    install_prebuilt_release install-release "${archive}" no test
+  if [[ -n "${archive}" ]]; then
+    if [[ -d "${TEST_BACKUP_DIR}" ]]; then
+      install_prebuilt_release install-release "${archive}" no test
+    else
+      install_prebuilt_release install-release "${archive}" yes test
+    fi
+  elif [[ -d "${TEST_BACKUP_DIR}" ]]; then
+    update_prebuilt_branch "${TEST_BRANCH}" "${TEST_RELEASE_TAG}" test no
   else
-    install_prebuilt_release install-release "${archive}" yes test
+    update_prebuilt_branch "${TEST_BRANCH}" "${TEST_RELEASE_TAG}" test yes
   fi
 }
 
@@ -1387,6 +1399,10 @@ change_access_mode() {
 change_service_mode() {
   local requested="${2:-}" previous_access ssh_service_active ssh_socket_active ssh_public active_timers
   [[ "${requested}" == "enable" || "${requested}" == "disable" ]] || die "режим должен быть enable или disable."
+  if [[ "${requested}" == "disable" && -r "${INSTALL_DIR}/.prebuilt-release" \
+    && "$(release_metadata_value "${INSTALL_DIR}/.prebuilt-release" channel)" == "test" ]]; then
+    die "сначала вернитесь на light, затем выключите сервисный режим."
+  fi
   if [[ "${requested}" == "enable" ]]; then
     [[ ! -f "${SERVICE_MODE_FILE}" ]] || { warn "сервисный режим уже включён."; return; }
     previous_access="${ACCESS_MODE}"
@@ -1767,8 +1783,8 @@ usage() {
   stop             остановить панель
   restart          перезапустить панель
   update           обновить Light проверенным production-релизом ветки light
-  test-update <архив>
-                   установить локальную test-сборку Light (только сервисный режим)
+  test-update [архив]
+                   обновить из test-light или установить локальный test-архив (только сервисный режим)
   test-rollback    вернуться к production-версии, сохранённой перед test-сборкой
   install-release <архив>
                    вручную установить заранее собранный Linux-релиз без Docker, npm и apt

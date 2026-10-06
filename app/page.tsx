@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConnectionGuide } from "./connection-guide";
 import { LegalFooter } from "./legal";
+import { ProtocolIcon } from "./protocol-icon";
 
 type Protocol = "wg" | "awg" | "hysteria2" | "tuic" | "trojan";
 type Tab = "overview" | "security" | "application" | "services" | Protocol | "clients";
@@ -40,6 +41,7 @@ type ApplicationStatus = {
     progress?: number; message?: string;
   };
   service_mode?: { active: boolean; rollback_available?: boolean };
+  release?: { branch: "light" | "test-light"; current_commit: string; latest_commit?: string; outdated?: boolean | null; error?: string; refreshing?: boolean };
   runtime?: { mode: "systemd" | "legacy-docker" | "incomplete"; migration_required: boolean };
 };
 type ProtocolImage = {
@@ -122,7 +124,7 @@ const actionLabels: Record<string, string> = {
   restart: "Перезапуск приложения", update: "Обновление приложения", "test-update": "Переход на тестовую версию", "test-rollback": "Возврат к рабочей версии", "network-check": "Проверка сети и туннелей", identity: "Обновление данных сервера",
   "integrity-check": "Проверка целостности",
   secure: "Настройка защиты", "kernel-update": "Обновление ядра", "vpn-firewall": "Восстановление VPN firewall", optimize: "Оптимизация ресурсов",
-  "service-mode": "Переключение режима и ветки",
+  "service-mode": "Переключение сервисного режима",
   reboot: "Перезагрузка сервера", poweroff: "Выключение сервера",
   "protocol-install": "Установка протокола", "protocol-remove": "Удаление протокола",
 };
@@ -594,6 +596,7 @@ export default function Home() {
         containers: current?.containers || [],
         action: started,
         service_mode: current?.service_mode,
+        release: current?.release,
         runtime: current?.runtime,
       }));
       if (action === "reboot" || action === "poweroff") return;
@@ -701,7 +704,7 @@ export default function Home() {
     if (!await askConfirmation({
       title: active ? "Включить сервисный режим?" : "Завершить сервисный режим?",
       message: active
-        ? "Будет безопасно развёрнута ветка service. Панель станет публичной, SSH будет запущен, фоновые проверки и автоматические задачи будут приостановлены."
+        ? "Панель станет публичной, SSH будет запущен, а фоновые проверки и автоматические задачи будут приостановлены. После включения станет доступен переход на test-light."
         : "Будет восстановлена production-версия Light, сохранённая перед локальной test-сборкой. Только после успешной проверки восстановятся доступ, SSH и автоматические задачи.",
       confirmLabel: active ? "Включить режим" : "Завершить обслуживание",
       danger: active,
@@ -1094,6 +1097,9 @@ export default function Home() {
   const nodeDegraded = application?.api.active === false
     || Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
   const serviceModeActive = Boolean(services?.service_mode?.active || application?.service_mode?.active);
+  const release = application?.release || applicationVersion;
+  const releaseBranch = release?.branch || "light";
+  const testReleaseActive = releaseBranch === "test-light";
   const nodeState = nodeHasError ? "error" : operationActive || nodeDegraded || serviceModeActive ? "working" : "healthy";
   const nodeStateLabel = nodeState === "error" ? "УЗЕЛ С ОШИБКОЙ" : nodeState === "working" ? "ТРЕБУЕТ ВНИМАНИЯ" : "УЗЕЛ В СЕТИ";
   const applicationStateTitle = nodeState === "error"
@@ -1116,6 +1122,7 @@ export default function Home() {
           if (available.length === 1) {
             const image = available[0];
             return <button key={category.id} onClick={() => setTab(image.id as Protocol)} className={`navItem ${tab === image.id ? "active" : ""}`}>
+              <ProtocolIcon protocol={image.id} />
               <b>{image.name}</b>
             </button>;
           }
@@ -1130,7 +1137,7 @@ export default function Home() {
               {available.map((image) => <button key={image.id} onClick={() => {
                 setTab(image.id as Protocol);
                 setModuleMenuOpen("");
-              }} className={`navItem ${tab === image.id ? "active" : ""}`}><b>{image.name}</b></button>)}
+              }} className={`navItem ${tab === image.id ? "active" : ""}`}><ProtocolIcon protocol={image.id} /><b>{image.name}</b></button>)}
             </div>}
           </div>;
         })}
@@ -1200,21 +1207,21 @@ export default function Home() {
         </div>
         <article className="panel protocolSummary">
           <div className="panelHead"><div><p className="eyebrow">ADDITIONAL MODULES</p><h2>Дополнительные модули</h2></div></div>
-          {installedProtocols.filter((protocol) => overview?.protocols[protocol]?.active).map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
-            <span className={`protocol ${protocol}`}>{protocol === "hysteria2" ? "HY2" : protocol === "trojan" ? "TR" : protocol.toUpperCase()}</span>
+          {installedProtocols.map((protocol) => <button key={protocol} onClick={() => setTab(protocol)}>
+            <span className={`protocol ${protocol}`}><ProtocolIcon protocol={protocol} /></span>
             <p><strong>{labels[protocol]}</strong><small>{overview?.protocols[protocol]?.interface} · {overview?.protocols[protocol]?.port}</small></p>
-            <em className="onlinePill">Активен</em><b>›</b>
+            <em className={overview?.protocols[protocol]?.active ? "onlinePill" : "offlinePill"}>{overview?.protocols[protocol]?.active ? "Работает" : "Остановлен"}</em><b>›</b>
           </button>)}
           {protocolImages.filter((image) => !image.installed).map((image) =>
             <div className="protocolInstaller" key={image.id}>
-              <span className={`protocol ${image.id}`}>{image.id.toUpperCase()}</span>
+              <span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span>
               <p><strong>{image.name}</strong><small>{image.description} · образ {image.version}</small></p>
               <button onClick={() => void installProtocol(image)} disabled={busy || Boolean(installingProtocol)}>
                 {installingProtocol === image.id ? "Устанавливается…" : "Установить"}
               </button>
             </div>
           )}
-          {!installedProtocols.some((protocol) => overview?.protocols[protocol]?.active) && !protocolImages.length && <div className="protocolEmpty"><span>—</span><p><strong>Нет доступных образов</strong><small>Добавьте manifest.json в каталог protocol-images</small></p></div>}
+          {!protocolImages.length && <div className="protocolEmpty"><span>—</span><p><strong>Нет доступных образов</strong><small>Добавьте manifest.json в каталог protocol-images</small></p></div>}
         </article>
       </section>}
 
@@ -1328,9 +1335,10 @@ export default function Home() {
           <div className="panelHead"><div><p className="eyebrow">SUDO VPS-CONTROL</p><h2>Доступные действия</h2></div></div>
           <div className="actionButtons">
             <button onClick={() => void runApplicationAction("restart")} disabled={busy}><strong>Перезапустить приложение</strong><small>Перезапускает панель и API без перезагрузки VPS</small></button>
-            <button onClick={() => void runApplicationAction("update")} disabled={busy}><strong>Обновить приложение</strong><small>Устанавливает проверенный production-релиз Light</small></button>
-            {serviceModeActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={busy}><strong>Вернуться к рабочей версии</strong><small>Восстанавливает приложение, сохранённое перед переходом на main</small></button>}
-            <button onClick={() => void runApplicationAction("network-check")} disabled={busy}><strong>Проверить подключения</strong><small>Проверяет интернет, WG, AWG и доступность портов</small></button>
+            {!testReleaseActive && <button onClick={() => void runApplicationAction("update")} disabled={busy}><strong>{release?.outdated ? "Обновить light" : "Проверить обновление light"}</strong><small>{release?.outdated ? "Доступна новая production-версия" : "Текущий канал: light · production"}</small></button>}
+            {serviceModeActive && <button onClick={() => void runApplicationAction("test-update")} disabled={busy}><strong>{testReleaseActive ? "Обновить test-light" : "Перейти на test-light"}</strong><small>{testReleaseActive ? "Устанавливает актуальную тестовую сборку" : "Сохраняет light для безопасного возврата"}</small></button>}
+            {serviceModeActive && testReleaseActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={busy}><strong>Вернуться на light</strong><small>Восстанавливает production-версию, сохранённую перед тестированием</small></button>}
+            <button onClick={() => void runApplicationAction("network-check")} disabled={busy}><strong>Проверить подключения</strong><small>Проверяет интернет, установленные протоколы и доступность портов</small></button>
             <button onClick={() => void runApplicationAction("integrity-check")} disabled={busy}><strong>Проверить целостность</strong><small>Проверяет файлы, права доступа и настройки компонентов</small></button>
             <button onClick={() => void runApplicationAction("identity")} disabled={busy}><strong>Обновить данные сервера</strong><small>Повторно определяет публичный IP и географические данные VPS</small></button>
             <button onClick={() => void runApplicationAction("optimize")} disabled={busy}><strong>Освободить ресурсы</strong><small>Удаляет безопасные временные данные и освобождает место</small></button>
@@ -1352,8 +1360,8 @@ export default function Home() {
           </div>
           <div className="panelAccessActions">
             <label className="serviceModeSwitch">
-              <span><strong>Сервисный режим</strong><small>{serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
-              <input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy} /><i />
+              <span><strong>Сервисный режим</strong><small>{testReleaseActive ? "сначала вернитесь на light" : serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
+              <input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy || testReleaseActive} /><i />
             </label>
             <label className="serviceModeSwitch protectedAccessSwitch">
               <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? "публичный адрес открыт" : "только локальная сеть"}</small></span>
@@ -1505,7 +1513,7 @@ export default function Home() {
         <article className="panel protocolLiveHero">
           <div>
             <p className="eyebrow">LIVE TUNNEL</p>
-            <h2>{labels[tab]}</h2>
+            <div className="protocolTitle"><ProtocolIcon protocol={tab} /><h2>{labels[tab]}</h2></div>
             <p className="mono">{activeProtocol.interface} · {activeProtocol.address || "адрес не назначен"} · {activeProtocol.transport || "UDP"} {activeProtocol.listen_port || "—"}</p>
           </div>
           <div className="protocolControlStack">
@@ -1517,7 +1525,7 @@ export default function Home() {
               </div>
             </div>
             <div className="protocolActions">
-              <button onClick={() => void restartProtocol(tab)} disabled={busy}>Перезапустить</button>
+              <button onClick={() => void restartProtocol(tab)} disabled={busy}>{activeProtocol.service_active ? "Перезапустить" : "Запустить"}</button>
               {activeProtocolImage?.removable && <button className="removeProtocolButton" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить протокол</button>}
             </div>
           </div>
@@ -1627,7 +1635,7 @@ export default function Home() {
       {tab === "clients" && installedProtocols.length > 0 && <section className="clientsLayout">
         <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все клиенты" : labels[tab]}</h2></div><span>{protocolClients.length} подключений</span></div>
           <div className="clientTable">{protocolClients.length ? protocolClients.map((client) =>
-            <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><span className={`protocol ${client.protocol}`}>{client.protocol.toUpperCase()}</span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address} · {client.quality_reason || "состояние уточняется"}</small></p>
+            <div className={`clientRow quality-${client.quality || "offline"}`} key={client.id}><span className={`protocol ${client.protocol}`}><ProtocolIcon protocol={client.protocol} /></span><p><strong><i className={`clientQuality ${client.quality || "offline"}`} />{client.name}</strong><small>{client.address} · {client.quality_reason || "состояние уточняется"}</small></p>
               <span className="traffic"><small>ПОЛУЧЕНО <b>↓ {bytes(client.rx_bytes)}</b></small><small>ОТПРАВЛЕНО <b>↑ {bytes(client.tx_bytes)}</b></small></span><span className="handshake"><small>ПОСЛЕДНЯЯ СВЯЗЬ</small><strong>{duration(client.handshake_age_s)}</strong></span>
               <span className="clientLink"><small>LINK QUALITY</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} ms` : "—"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · loss ${client.packet_loss_percent}%` : ""}</strong></span>
               <button className="dangerButton" onClick={() => void removeClient(client.id)}>Отозвать</button></div>

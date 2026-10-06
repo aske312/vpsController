@@ -1376,6 +1376,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
             "active": SERVICE_MODE_FILE.exists(),
             "rollback_available": (DATA_DIR / "test-app-backup").is_dir(),
         },
+        "release": application_version_status(),
         "runtime": {
             "mode": "systemd" if web_unit_loaded and caddy_unit_loaded else "legacy-docker" if legacy_runtime else "incomplete",
             "migration_required": legacy_runtime,
@@ -1384,12 +1385,12 @@ def application_status(_: None = Depends(require_token)) -> dict:
 
 
 class ApplicationAction(BaseModel):
-    action: Literal["restart", "update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
+    action: Literal["restart", "update", "test-update", "test-rollback", "network-check", "integrity-check", "identity", "secure", "kernel-update", "vpn-firewall", "optimize", "reboot", "poweroff"]
 
 
 @app.post("/api/application/action")
 def application_action(payload: ApplicationAction, _: None = Depends(require_token)) -> dict:
-    if payload.action == "test-rollback" and not SERVICE_MODE_FILE.exists():
+    if payload.action in ("test-update", "test-rollback") and not SERVICE_MODE_FILE.exists():
         raise HTTPException(status_code=409, detail="Test version requires active service mode")
     if ACTION_FILE.exists():
         try:
@@ -1558,7 +1559,19 @@ def application_version_status() -> dict:
     if refreshing and not app_version_refresh_lock.locked():
         threading.Thread(target=refresh_application_version_cache, daemon=True).start()
     if cached:
-        return {**cached, "refreshing": refreshing}
+        cache_matches_install = (
+            cached.get("branch") == expected_branch
+            and cached.get("current_commit") == installed_commit
+        )
+        return {
+            **cached,
+            "branch": expected_branch,
+            "current_commit": installed_commit,
+            "latest_commit": cached.get("latest_commit", "") if cache_matches_install else "",
+            "outdated": cached.get("outdated") if cache_matches_install else None,
+            "error": cached.get("error", "") if cache_matches_install else "",
+            "refreshing": refreshing,
+        }
     return {
         "branch": expected_branch, "current_commit": installed_commit, "latest_commit": "",
         "outdated": None, "checked_at": None, "error": "", "refreshing": True,
@@ -1841,6 +1854,8 @@ class ServiceModeSettings(BaseModel):
 
 @app.put("/api/services/service-mode")
 def update_service_mode(payload: ServiceModeSettings, _: None = Depends(require_token)) -> dict:
+    if not payload.active and installed_release_branch() == "test-light":
+        raise HTTPException(status_code=409, detail="Return to light before disabling service mode")
     unit = f"vps-control-service-mode-{int(time.time())}"
     result = subprocess.run(
         [
