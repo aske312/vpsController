@@ -192,6 +192,35 @@ test("service settings are staged, saved explicitly and survive background refre
   assert.match(manager, /install -m 0755 "\$\{PROJECT_DIR\}\/scripts\/vps-control\.sh" "\$\{COMMAND_PATH\}"/);
 });
 
+test("SUDO VPS-CONTROL actions map to real manager commands", async () => {
+  const [api, page, manager] = await Promise.all([
+    read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"),
+  ]);
+  for (const [action, implementation] of [
+    ["restart", "restart_services"],
+    ["update", "update_app"],
+    ["test-update", "update_test_app"],
+    ["test-rollback", "restore_test_app"],
+    ["network-check", "network_check"],
+    ["integrity-check", "integrity_check"],
+    ["identity", "refresh_server_identity"],
+    ["optimize", "optimize_resources"],
+    ["kernel-update", "update_kernel"],
+    ["reboot", "reboot_server"],
+    ["poweroff", "poweroff_server"],
+  ]) {
+    assert.match(api, new RegExp(`class ApplicationAction[\\s\\S]*?"${action}"`), `API action ${action}`);
+    assert.match(page, new RegExp(`runApplicationAction\\("${action}"\\)`), `UI action ${action}`);
+    assert.match(manager, new RegExp(`${action}\\)[\\s\\S]{0,240}${implementation}`), `manager action ${action}`);
+  }
+  assert.match(page, /title="Обновление ядра"/);
+  assert.doesNotMatch(page, /Обновления Ubuntu|Обновить сервер/);
+  assert.match(manager, /apt-get -o DPkg::Lock::Timeout=300 autoremove --purge -y/);
+  assert.match(manager, /systemd-tmpfiles --clean/);
+  assert.match(manager, /journalctl --vacuum-size=500M/);
+  assert.doesNotMatch(manager.match(/update_kernel\(\) \{([\s\S]*?)\n\}/)?.[1] || "", /--only-upgrade/);
+});
+
 test("Light keeps production updates public and gates the test-light channel behind service mode", async () => {
   const [api, page, manager, styles, workflow, ciWorkflow, protocolIcon] = await Promise.all([
     read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"), read("app/globals.css"),
@@ -238,6 +267,7 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(workflow, /version="\$\{latest#light-\}"/);
   assert.match(workflow, /verify:\s+if: github\.ref_name == 'light'/);
   assert.match(workflow, /needs\.verify\.result == 'success' \|\| github\.ref_name == 'test-light'/);
+  assert.match(workflow, /release_flags=\(--prerelease\)/);
   assert.match(workflow, /publish:\s+needs: build\s+if: always\(\) && needs\.build\.result == 'success'/);
   assert.match(ciWorkflow, /push:\s+branches: \[light\]/);
   assert.match(ciWorkflow, /pull_request:\s+branches: \[light\]/);

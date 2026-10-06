@@ -178,10 +178,10 @@ finish_operation() {
       poweroff) write_action_status "powering-off" 100 "Сервер выключается" ;;
       kernel-update)
         if [[ "${REBOOT_AFTER_UPDATE}" == "yes" ]]; then
-          write_action_status "rebooting" 100 "Kernel updated; server is rebooting"
+          write_action_status "rebooting" 100 "Ядро обновлено; сервер перезагружается"
           systemctl --no-block --no-wall reboot
         else
-          write_action_status "succeeded" 100 "Kernel is already up to date"
+          write_action_status "succeeded" 100 "Установлена актуальная версия ядра"
         fi
         ;;
       *) write_action_status "succeeded" 100 "Операция завершена" ;;
@@ -1633,45 +1633,114 @@ installed_kernel_packages() {
     }'
 }
 
-update_kernel() {
-  info "Проверка обновления ядра"
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  local packages=()
-  mapfile -t packages < <(installed_kernel_packages)
-  ((${#packages[@]})) || die "не найден установленный метапакет ядра Debian/Ubuntu; обновление произвольного ядра автоматически не выполняется."
-  if apt-get -s install --only-upgrade "${packages[@]}" 2>/dev/null | grep -q '^Inst '; then
-    REBOOT_AFTER_UPDATE="yes"
+fallback_kernel_package() {
+  local os_id="" architecture kernel_release flavor
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck source=/dev/null
+    source /etc/os-release
+    os_id="${ID:-}"
   fi
-  apt-get install -y --only-upgrade "${packages[@]}"
-  ok "Пакеты ядра проверены и обновлены; при наличии нового ядра выполните reboot."
+  architecture="$(dpkg --print-architecture 2>/dev/null || true)"
+  kernel_release="$(uname -r)"
+  case "${os_id}" in
+    debian)
+      case "${kernel_release}" in
+        *-cloud-*) printf 'linux-image-cloud-%s\n' "${architecture}" ;;
+        *-rt-*) printf 'linux-image-rt-%s\n' "${architecture}" ;;
+        *) printf 'linux-image-%s\n' "${architecture}" ;;
+      esac
+      ;;
+    ubuntu)
+      flavor="${kernel_release##*-}"
+      case "${flavor}" in
+        generic|virtual|aws|azure|gcp|oracle|raspi|kvm) printf 'linux-%s\n' "${flavor}" ;;
+        *) printf 'linux-generic\n' ;;
+      esac
+      ;;
+    *)
+      die "автоматический выбор пакета ядра поддерживается только для Debian и Ubuntu."
+      ;;
+  esac
+}
+
+kernel_update_packages() {
+  local installed=()
+  mapfile -t installed < <(installed_kernel_packages)
+  if ((${#installed[@]})); then
+    printf '%s\n' "${installed[@]}"
+  else
+    fallback_kernel_package
+  fi
+}
+
+newest_installed_kernel() {
+  find /boot -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%f\n' 2>/dev/null \
+    | sed 's/^vmlinuz-//' | sort -V | tail -n 1
+}
+
+update_kernel() {
+  local running_kernel newest_kernel simulation package
+  local packages=()
+  info "Проверка репозиториев и пакета ядра"
+  export DEBIAN_FRONTEND=noninteractive
+  prepare_package_manager
+  apt-get -o DPkg::Lock::Timeout=300 update
+  mapfile -t packages < <(kernel_update_packages)
+  ((${#packages[@]})) || die "не удалось определить метапакет ядра."
+  for package in "${packages[@]}"; do
+    apt-cache show "${package}" >/dev/null 2>&1 \
+      || die "пакет ядра ${package} отсутствует в настроенных репозиториях."
+  done
+  simulation="$(apt-get -o DPkg::Lock::Timeout=300 -s install "${packages[@]}")"
+  if grep -q '^Inst ' <<<"${simulation}"; then
+    info "Доступно обновление пакета ядра"
+  else
+    info "Новых пакетов ядра в репозитории нет"
+  fi
+  apt-get -o DPkg::Lock::Timeout=300 install -y "${packages[@]}"
+  running_kernel="$(uname -r)"
+  newest_kernel="$(newest_installed_kernel)"
+  if [[ -n "${newest_kernel}" && "${newest_kernel}" != "${running_kernel}" ]]; then
+    REBOOT_AFTER_UPDATE="yes"
+    ok "Ядро ${newest_kernel} установлено; сервер будет перезагружен для его активации."
+  else
+    ok "Ядро ${running_kernel} уже актуально; перезагрузка не требуется."
+  fi
   if [[ "${REBOOT_AFTER_UPDATE}" == "yes" && -z "${CURRENT_ACTION}" ]]; then
     systemctl --no-block --no-wall reboot
   fi
 }
 
 optimize_resources() {
-  local disk_before disk_after mem_before mem_after log_retention_days=30
+  local disk_before disk_after disk_freed mem_before mem_after log_retention_days=30
   disk_before="$(df -B1 / | awk 'NR==2 {print $4}')"
   mem_before="$(awk '/MemAvailable/ {print $2 * 1024}' /proc/meminfo)"
-  info "Безопасная очистка кэшей и неиспользуемых данных"
-  apt-get clean
+  info "Удаление неиспользуемых пакетов и пакетных кэшей"
+  prepare_package_manager
+  apt-get -o DPkg::Lock::Timeout=300 autoremove --purge -y
+  apt-get -o DPkg::Lock::Timeout=300 clean
   if [[ -r /etc/vps-control-logging.conf ]]; then
     # shellcheck source=/dev/null
     source /etc/vps-control-logging.conf
     log_retention_days="${LOG_RETENTION_DAYS:-30}"
   fi
   if (( log_retention_days > 0 )); then
+    journalctl --rotate
     journalctl --vacuum-time="${log_retention_days}d"
+    journalctl --vacuum-size=500M
   fi
+  info "Очистка временных файлов по системным правилам"
+  systemd-tmpfiles --clean
   if [[ -d "${DATA_DIR}/tmp" ]]; then
     find "${DATA_DIR}/tmp" -mindepth 1 -maxdepth 1 -type d -name 'update.*' -mtime +1 -exec rm -rf -- {} +
+    find "${DATA_DIR}/tmp" -xdev -depth -mindepth 1 -mtime +7 -delete
   fi
   sync
   printf '3\n' >/proc/sys/vm/drop_caches
   disk_after="$(df -B1 / | awk 'NR==2 {print $4}')"
   mem_after="$(awk '/MemAvailable/ {print $2 * 1024}' /proc/meminfo)"
-  ok "освобождено на диске: $(((disk_after - disk_before) / 1024 / 1024)) МБ; доступная память: $((mem_before / 1024 / 1024)) → $((mem_after / 1024 / 1024)) МБ."
+  disk_freed=$((disk_after > disk_before ? (disk_after - disk_before) / 1024 / 1024 : 0))
+  ok "Освобождено на диске: ${disk_freed} МБ; доступная память: $((mem_before / 1024 / 1024)) → $((mem_after / 1024 / 1024)) МБ."
 }
 
 configure_logging() {

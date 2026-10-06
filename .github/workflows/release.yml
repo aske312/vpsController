@@ -124,18 +124,21 @@ jobs:
         run: |
           if [[ "$GITHUB_REF_NAME" == "test-light" ]]; then
             release_tag="light-test-latest"
-            release_title="Light test ${VERSION}"
-            release_notes="Light test release ${VERSION} for ${GITHUB_SHA}"
+            release_title="Test build ${VERSION} (test-light)"
+            release_notes="Rolling test build ${VERSION} for ${GITHUB_SHA}. Not a production release."
+            release_flags=(--prerelease)
           else
             release_tag="light-latest"
             release_title="Light ${VERSION}"
             release_notes="Light production release ${VERSION} for ${GITHUB_SHA}"
+            release_flags=()
           fi
           gh release delete "$release_tag" --cleanup-tag --yes || true
           gh release create "$release_tag" outputs/vps-control-light-linux-*.tar.gz \
             --target "$GITHUB_SHA" \
             --title "$release_title" \
             --notes "$release_notes" \
+            "${release_flags[@]}" \
             --latest=false
           [[ "$GITHUB_REF_NAME" == "light" ]] || exit 0
           version_tag="light-${VERSION}"
