@@ -1262,7 +1262,6 @@ export default function Home() {
                 {image.installed && isTunnel && (image.update_available
                   ? <button className={image.update_breaking ? "warning" : ""} onClick={() => void updateProtocol(image)} disabled={busy}>{installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}</button>
                   : <button onClick={() => void checkProtocolVersion(image)} disabled={busy || Boolean(checkingProtocolVersion)}>{checkingProtocolVersion === image.id ? "Проверка…" : "Проверить"}</button>)}
-                {!image.installed && image.installable && <button onClick={() => void checkProtocolVersion(image)} disabled={busy || Boolean(checkingProtocolVersion)}>{checkingProtocolVersion === image.id ? "Проверка…" : "Проверить"}</button>}
                 {!image.installed && <button onClick={() => image.installable && void installProtocol(image)} disabled={!image.installable || busy || Boolean(installingProtocol)}>{!image.installable ? "Недоступно" : installingProtocol === image.id ? "Установка…" : "Установить"}</button>}
               </footer>
             </article>;
