@@ -1326,18 +1326,22 @@ input, select { height: 46px; font-size: 11px; }
 .overview > .metrics { grid-column: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .overview > .protocolSummary { grid-column: 2; align-self: start; padding: 10px 12px; }
 .protocolModuleGrid { grid-template-columns: minmax(0, 1fr); gap: 7px; }
-.protocolModuleCard { min-height: 100px; gap: 7px; padding: 9px; }
+.protocolModuleCard { min-height: 108px; gap: 8px; padding: 10px; }
 .protocolModuleCard header { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
-.protocolModuleOpen { min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
+.protocolModuleOpen { min-width: 0; display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
 .protocolModuleOpen:disabled { cursor: default; opacity: 1; }
 .protocolModuleOpen:not(:disabled) { cursor: pointer; }
-.protocolModuleOpen .protocol { width: 28px; height: 28px; border-radius: 6px; }
+.protocolModuleOpen .protocol { width: 32px; height: 32px; border-radius: 6px; }
 .protocolModuleOpen > span:last-child { min-width: 0; display: grid; gap: 2px; }
-.protocolModuleOpen strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.protocolModuleOpen small { margin: 0; color: #718896; font: 6px var(--font-mono); letter-spacing: .08em; }
-.protocolModuleCard header em { padding: 3px 4px; font-size: 6px; }
+.protocolModuleOpen strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.protocolModuleOpen small { margin: 0; color: #718896; font: 8px var(--font-mono); letter-spacing: .08em; }
+.protocolModuleCard header em { padding: 4px 6px; font-size: 8px; }
 .protocolModuleCard dl { gap: 5px; }
-.protocolModuleCard footer button { height: 25px; padding: 0 5px; font-size: 7px; }
+.protocolModuleCard dt { font-size: 8px; }
+.protocolModuleCard dd { font-size: 10px; }
+.protocolModuleCard footer { display: flex; align-items: center; justify-content: flex-start; gap: 6px; }
+.protocolModuleCard footer button { width: auto; min-width: 82px; height: 28px; padding: 0 10px; font-size: 9px; }
+.protocolModuleCard footer button:only-child { grid-column: auto; }
 .protocolModuleCard footer button.danger { border-color: #6a3232; background: #241416; color: #ef8d8d; }
 
 @media (max-width: 1050px) {
