@@ -61,9 +61,6 @@ curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/ins
 обновился, Light сохранит домен и продолжит работать по IP; повторная проверка
 выполняется командой `vps-control identity`.
 
-> Поддержка `--domain` для Light сейчас проходит проверку в `test-light` и начнёт
-> действовать в обычной установке после её переноса в стабильную ветку `light`.
-
 ## Параметры установки
 
 Параметры указываются после `bash -s --` и могут объединяться в одной команде.
@@ -72,7 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/ins
 | --- | --- | --- |
 | `--edition light` | Light | установить Light без интерактивного выбора |
 | `--edition pro` | PRO | установить PRO без интерактивного выбора |
-| `--domain DOMAIN` | PRO, `test-light` | сохранить домен панели и настроить HTTPS после проверки DNS |
+| `--domain DOMAIN` | Light, PRO | сохранить домен панели и настроить HTTPS после проверки DNS |
 | `--location-city CITY` | PRO | явно указать физический город сервера |
 | `--location-country COUNTRY` | PRO | явно указать физическую страну сервера |
 | `--location-country-code CODE` | PRO | указать двухбуквенный код страны, например `NL` |
