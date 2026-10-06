@@ -1035,9 +1035,12 @@ print("v" + ".".join((version + ["0", "0"])[:3]))
 PY
 )"
   BUILD_COMMIT="$(git -C "${PROJECT_DIR}" rev-parse --short HEAD 2>/dev/null || printf unknown)"
+  RELEASE_BRANCH="$(git -C "${PROJECT_DIR}" branch --show-current 2>/dev/null || true)"
+  [[ "${RELEASE_BRANCH}" == "test-light" ]] || RELEASE_BRANCH="light"
   export APP_VERSION BUILD_COMMIT
   export NEXT_PUBLIC_APP_VERSION="${APP_VERSION}"
   export NEXT_PUBLIC_BUILD_COMMIT="${BUILD_COMMIT}"
+  export NEXT_PUBLIC_RELEASE_BRANCH="${RELEASE_BRANCH}"
   if [[ ! -r "${INSTALL_CONFIG}" ]]; then
     install -m 0600 "${PROJECT_DIR}/install.conf" "${INSTALL_CONFIG}"
   fi

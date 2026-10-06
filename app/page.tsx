@@ -80,6 +80,7 @@ type ConfirmationRequest = {
 };
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
+const buildBranch = process.env.NEXT_PUBLIC_RELEASE_BRANCH || "light";
 type ProtocolStatus = {
   protocol: Protocol; interface: string; active: boolean; service_active: boolean; service_enabled: boolean;
   active_since: string; address: string; listen_port: number; mtu: number; peers: number; online_peers: number;
@@ -1793,5 +1794,5 @@ function SecurityActionRow({ ok, title, text, onAction, actionLabel = "Испр�
   return <div><span className={ok ? "check" : "warning"}>{ok ? "✓" : "!"}</span><p><strong>{title}</strong><small>{text}</small></p>{ok && !alwaysAction ? <em className="onlinePill">Готово</em> : <button className="securityFixButton" onClick={onAction}>{actionLabel}</button>}</div>;
 }
 function VersionFooter() {
-  return <LegalFooter version={appVersion} commit={buildCommit} />;
+  return <LegalFooter version={appVersion} branch={buildBranch} commit={buildCommit} />;
 }

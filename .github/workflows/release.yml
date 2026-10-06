@@ -70,6 +70,7 @@ jobs:
           BUILD_COMMIT: ${{ github.sha }}
           RELEASE_EDITION: light
           RELEASE_CHANNEL: ${{ github.ref_name == 'test-light' && 'test' || 'production' }}
+          RELEASE_BRANCH: ${{ github.ref_name }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: bash scripts/build-release.sh "outputs/vps-control-light-linux-${{ matrix.architecture }}.tar.gz"
       - uses: actions/upload-artifact@v4

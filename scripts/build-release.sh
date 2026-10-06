@@ -23,9 +23,12 @@ rsync -a --delete \
 
 RELEASE_EDITION="${RELEASE_EDITION:-light}"
 RELEASE_CHANNEL="${RELEASE_CHANNEL:-production}"
+RELEASE_BRANCH="${RELEASE_BRANCH:-$([[ "${RELEASE_CHANNEL}" == "test" ]] && printf test-light || printf light)}"
 [[ "${RELEASE_EDITION}" == "light" ]] || { echo "Invalid release edition: ${RELEASE_EDITION}" >&2; exit 1; }
 [[ "${RELEASE_CHANNEL}" == "production" || "${RELEASE_CHANNEL}" == "test" ]] \
   || { echo "Invalid release channel: ${RELEASE_CHANNEL}" >&2; exit 1; }
+[[ "${RELEASE_BRANCH}" == "light" || "${RELEASE_BRANCH}" == "test-light" ]] \
+  || { echo "Invalid release branch: ${RELEASE_BRANCH}" >&2; exit 1; }
 commit="${BUILD_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || printf manual)}"
 [[ "${commit}" =~ ^[0-9a-f]{40}$ ]] || { echo "Release requires a full git commit SHA: ${commit}" >&2; exit 1; }
 app_version="${RELEASE_VERSION:-$(node -e 'const p=require(process.argv[1]); const v=String(p.version||"1.0.0").split("."); process.stdout.write("v"+[v[0]||"1",v[1]||"0",v[2]||"0"].join("."))' "${ROOT_DIR}/package.json")}"
@@ -40,6 +43,7 @@ esac
   cd "${ROOT_DIR}"
   export NEXT_PUBLIC_APP_VERSION="${app_version}"
   export NEXT_PUBLIC_BUILD_COMMIT="${commit}"
+  export NEXT_PUBLIC_RELEASE_BRANCH="${RELEASE_BRANCH}"
   npm ci --include=dev --include=optional --ignore-scripts
   npm run build
 )
@@ -68,8 +72,8 @@ NODE
   node --input-type=module -e "await import('rolldown')"
 )
 
-printf 'schema=1\nedition=%s\nchannel=%s\nversion=%s\ncommit=%s\nbuilt_at=%s\nplatform=linux\narchitecture=%s\n' \
-  "${RELEASE_EDITION}" "${RELEASE_CHANNEL}" "${app_version}" "${commit}" \
+printf 'schema=1\nedition=%s\nchannel=%s\nbranch=%s\nversion=%s\ncommit=%s\nbuilt_at=%s\nplatform=linux\narchitecture=%s\n' \
+  "${RELEASE_EDITION}" "${RELEASE_CHANNEL}" "${RELEASE_BRANCH}" "${app_version}" "${commit}" \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${release_architecture}" >"${STAGE}/.prebuilt-release"
 (
   cd "${STAGE}"

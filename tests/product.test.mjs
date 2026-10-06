@@ -48,6 +48,7 @@ test("интерфейс использует фирменные метадан�
   assert.equal(JSON.parse(packageJson).name, "312-net-control");
   assert.doesNotMatch(`${layout}\n${page}`, /ChatGPT|Starter Project|Codex/i);
   assert.match(page, /NEXT_PUBLIC_APP_VERSION \|\| "v1\.0\.0"/);
+  assert.match(page, /NEXT_PUBLIC_RELEASE_BRANCH \|\| "light"/);
   assert.equal(JSON.parse(packageJson).version, "1.0.0");
 });
 
@@ -71,6 +72,7 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(legalUi, /Уведомление о приватности/);
   assert.match(legalUi, /Privacy Notice/);
   assert.match(legalUi, /MIT LICENSE/);
+  assert.match(legalUi, /\{version\} · branch \{branch\} · build \{commit\}/);
   assert.doesNotMatch(legalUi, /EU \/ EEA|ЕС \/ ЕЭЗ|GDPR/);
   assert.match(guide, /Подключение с помощью WireGuard \(WG\) и AmneziaWG \(AWG\)/);
   assert.match(guide, /WireGuard \(WG\).*локальным подключением/s);
@@ -391,6 +393,7 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(builder, /npm install --include=optional/);
   assert.match(builder, /await import\('rolldown'\)/);
   assert.match(builder, /NEXT_PUBLIC_BUILD_COMMIT/);
+  assert.match(builder, /NEXT_PUBLIC_RELEASE_BRANCH/);
   assert.doesNotMatch(builder, /npm install --omit=optional/);
   assert.match(manager, /install_prebuilt_release\(\)/);
   assert.match(manager, /systemctl stop "\$\{APP_NAME\}-web\.service" "\$\{APP_NAME\}-api\.service" 2>\/dev\/null \|\| true/);
@@ -407,6 +410,9 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(builder, /schema=1/);
   assert.match(builder, /RELEASE_EDITION="\$\{RELEASE_EDITION:-light\}"/);
   assert.match(builder, /RELEASE_CHANNEL="\$\{RELEASE_CHANNEL:-production\}"/);
+  assert.match(builder, /RELEASE_BRANCH="\$\{RELEASE_BRANCH:-/);
+  assert.match(builder, /branch=%s/);
+  assert.match(manager, /NEXT_PUBLIC_RELEASE_BRANCH="\$\{RELEASE_BRANCH\}"/);
   assert.match(readme, /sudo vps-control update/);
   assert.match(manager, /TimeoutStopSec=15/);
   assert.match(manager, /KillMode=mixed/);
