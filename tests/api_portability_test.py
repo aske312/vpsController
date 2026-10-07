@@ -18,6 +18,96 @@ spec.loader.exec_module(api)
 
 
 class PortabilityTests(unittest.TestCase):
+    def test_tunnel_connection_requires_fresh_handshake_and_bidirectional_traffic(self):
+        with patch.object(api, 'interface_dump', return_value=[{
+            'handshake_age_s': 12, 'rx_bytes': 4096, 'tx_bytes': 2048,
+        }]):
+            confirmed = api.observed_tunnel_connection('awg')
+        self.assertEqual(confirmed['state'], 'confirmed')
+        self.assertEqual(confirmed['method'], 'observed-client-traffic')
+
+        with patch.object(api, 'interface_dump', return_value=[{
+            'handshake_age_s': 12, 'rx_bytes': 4096, 'tx_bytes': 0,
+        }]):
+            unverified = api.observed_tunnel_connection('awg')
+        self.assertEqual(unverified['state'], 'unverified')
+        self.assertIn('двусторонняя', unverified['detail'])
+
+    def test_direct_diagnostics_do_not_claim_healthy_without_data_plane_probe(self):
+        with patch.object(api, 'protocol_listener', return_value=('unit.service', 8443, 'udp', True)), \
+             patch.object(api, 'run', return_value='active'), \
+             patch.object(api, 'connection_probe_cache', {}):
+            diagnostics = api.direct_protocol_diagnostics('hysteria2')
+        self.assertEqual(diagnostics['status'], 'warning')
+        self.assertEqual(diagnostics['checks'][-1]['state'], 'unknown')
+        self.assertEqual(diagnostics['findings'][0]['code'], 'data_plane_unverified')
+
+    def test_direct_probe_configs_use_existing_accounts_without_mutating_server_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            hysteria = root / 'hysteria2'; hysteria.mkdir()
+            (hysteria / 'settings.json').write_text('{"port":8443}', encoding='utf-8')
+            (hysteria / 'users.json').write_text('{"probe-user":"probe-password"}', encoding='utf-8')
+            (hysteria / 'server.crt').write_text('certificate', encoding='utf-8')
+            tuic = root / 'tuic'; tuic.mkdir()
+            (tuic / 'settings.json').write_text('{"port":8444,"congestion_control":"bbr","heartbeat":"10s"}', encoding='utf-8')
+            (tuic / 'config.json').write_text(json.dumps({'inbounds': [{'type': 'tuic', 'users': [{'uuid': 'tuic-uuid', 'password': 'tuic-password'}]}]}), encoding='utf-8')
+            (tuic / 'server.crt').write_text('certificate', encoding='utf-8')
+            xray = root / 'xray'; xray.mkdir()
+            (xray / 'settings.json').write_text(json.dumps({'port': 8445, 'path': '/probe', 'server_name': 'example.com', 'password': 'public-key', 'short_id': '0123456789abcdef'}), encoding='utf-8')
+            (xray / 'config.json').write_text(json.dumps({'inbounds': [{'protocol': 'vless', 'settings': {'clients': [{'id': 'xray-uuid'}]}}]}), encoding='utf-8')
+            originals = {
+                path: path.read_bytes()
+                for path in (hysteria / 'settings.json', hysteria / 'users.json', tuic / 'config.json', xray / 'config.json')
+            }
+            with patch.multiple(
+                api,
+                HYSTERIA2_DIR=hysteria, HYSTERIA2_SETTINGS=hysteria / 'settings.json', HYSTERIA2_USERS=hysteria / 'users.json',
+                TUIC_DIR=tuic, TUIC_SETTINGS=tuic / 'settings.json', TUIC_CONFIG=tuic / 'config.json',
+                XRAY_DIR=xray, XRAY_SETTINGS=xray / 'settings.json', XRAY_CONFIG=xray / 'config.json',
+            ), patch.object(api, 'certificate_server_name', return_value='endpoint.internal'), \
+                 patch.object(api, 'run', return_value='SHA256 Fingerprint=AA:BB'):
+                commands = {protocol: api.direct_probe_client(protocol, 19080, root) for protocol in api.DIRECT_PROTOCOLS}
+
+            self.assertIn('pinSHA256: AA:BB', (root / 'hysteria2.yaml').read_text(encoding='utf-8'))
+            tuic_probe = json.loads((root / 'tuic.json').read_text(encoding='utf-8'))
+            self.assertEqual(tuic_probe['outbounds'][0]['uuid'], 'tuic-uuid')
+            xray_probe = json.loads((root / 'xray.json').read_text(encoding='utf-8'))
+            self.assertEqual(xray_probe['outbounds'][0]['settings']['address'], '127.0.0.1')
+            self.assertEqual(xray_probe['outbounds'][0]['streamSettings']['security'], 'reality')
+            self.assertTrue(all(commands.values()))
+            for path, content in originals.items():
+                self.assertEqual(path.read_bytes(), content)
+
+    def test_direct_roundtrip_reports_transferred_request_and_response_bytes(self):
+        class Process:
+            def poll(self): return None
+            def terminate(self): pass
+            def wait(self, timeout=None): return 0
+            def kill(self): pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / 'client'
+            binary.write_text('', encoding='utf-8')
+
+            def curl(command, **_kwargs):
+                output = Path(command[command.index('--output') + 1])
+                output.write_text('{"status":"ok"}', encoding='utf-8')
+                return type('Result', (), {'returncode': 0, 'stdout': '200 84 15', 'stderr': ''})()
+
+            with patch.object(api, 'protocol_listener', return_value=('unit.service', 8443, 'udp', True)), \
+                 patch.object(api, 'run', return_value='active'), \
+                 patch.object(api, 'direct_probe_client', return_value=[str(binary)]), \
+                 patch.object(api.subprocess, 'Popen', return_value=Process()), \
+                 patch.object(api.subprocess, 'run', side_effect=curl), \
+                 patch.object(api, 'wait_for_proxy', return_value=True), \
+                 patch.object(api, 'connection_probe_cache', {}):
+                result = api.check_protocol_connection('hysteria2')
+
+        self.assertEqual(result['state'], 'confirmed')
+        self.assertEqual(result['bytes_sent'], 84)
+        self.assertEqual(result['bytes_received'], 15)
+
     def test_application_task_is_published_before_systemd_starts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

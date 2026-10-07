@@ -4,10 +4,11 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { ConnectionGuide } from "./connection-guide";
 import { LegalFooter } from "./legal";
 import { ProtocolIcon } from "./protocol-icon";
+import { ProtocolWorkspace } from "./protocol-workspace";
 import { LightNavigation } from "../src/light-navigation";
 import { useNotifications } from "../src/notifications/notification-center";
 
-type Protocol = "wg" | "awg" | "hysteria2" | "tuic" | "xray";
+export type Protocol = "wg" | "awg" | "hysteria2" | "tuic" | "xray";
 type Tab = "overview" | "security" | "application" | "services" | Protocol | "clients";
 type MetricsPeriod = "live" | "day" | "week" | "quarter";
 type SecurityState = "inactive" | "active" | "warning" | "critical";
@@ -50,7 +51,7 @@ type ApplicationStatus = {
   runtime?: { mode: "systemd" | "legacy-docker" | "incomplete"; migration_required: boolean };
   checked_at?: string;
 };
-type ProtocolImage = {
+export type ProtocolImage = {
   id: string; name: string; version: string; description: string; category: string; category_name: string;
   kind: "tunnel" | "agent"; status: "available" | "planned"; installable: boolean;
   interface: string; installed: boolean; removable: boolean;
@@ -91,7 +92,7 @@ type ConfirmationRequest = {
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
 const buildBranch = process.env.NEXT_PUBLIC_RELEASE_BRANCH || "light";
-type ProtocolStatus = {
+export type ProtocolStatus = {
   protocol: Protocol; interface: string; active: boolean; service_active: boolean; service_enabled: boolean;
   active_since: string; address: string; listen_port: number; mtu: number; peers: number; online_peers: number;
   endpoints: number; last_handshake_age_s?: number; peer_rx_bytes: number; peer_tx_bytes: number;
@@ -115,8 +116,19 @@ type ProtocolStatus = {
     checked_at?: string; status: "healthy" | "warning" | "critical" | "pending"; score?: number;
     live?: { loss_percent?: number; latency_ms?: number; jitter_ms?: number; dns_ms?: number; https_connect_ms?: number; https_total_ms?: number };
     network?: { uplink?: string; gateway?: string; uplink_mtu?: number; tunnel_mtu?: number; conntrack_count?: number; conntrack_max?: number; conntrack_percent?: number };
-    checks: Array<{ id: string; name: string; ok: boolean; value: string }>;
+    checks: Array<{ id: string; name: string; state?: "passed" | "failed" | "unknown"; ok: boolean; value: string }>;
     findings: Array<{ severity: "warning" | "critical"; code: string; title: string; detail: string; action: string }>;
+  };
+  profile?: {
+    kind: "encrypted-tunnel" | "proxy"; summary: string; accounts?: number;
+    listener?: { unit: string; port: number; transport: string; listening: boolean };
+    facts: Array<{ label: string; value: string }>;
+  };
+  connection_test?: {
+    checked_at?: string | null; state: "confirmed" | "failed" | "unverified";
+    method: "observed-client-traffic" | "local-protocol-roundtrip";
+    title: string; detail: string; latency_ms?: number | null;
+    bytes_received: number; bytes_sent: number; scope: string;
   };
 };
 
@@ -208,10 +220,8 @@ export default function Home() {
   const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number; tx: number }>>>({});
   const [installingProtocol, setInstallingProtocol] = useState("");
   const [checkingProtocolVersion, setCheckingProtocolVersion] = useState("");
-  const [checkingResources, setCheckingResources] = useState<Protocol | null>(null);
   const [checkingDiagnostics, setCheckingDiagnostics] = useState<Protocol | null>(null);
-  const [resourcesOpen, setResourcesOpen] = useState<Partial<Record<Protocol, boolean>>>({});
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState<Partial<Record<Protocol, boolean>>>({});
+  const [checkingConnection, setCheckingConnection] = useState<Protocol | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -929,21 +939,6 @@ export default function Home() {
     finally { setBusy(false); }
   }
 
-  async function checkProtocolResources(protocol: Protocol) {
-    setCheckingResources(protocol); setError("");
-    try {
-      const resources = await request(`/protocols/${protocol}/resources/check`, { method: "POST" });
-      setProtocolStatuses((statuses) => {
-        const current = statuses[protocol];
-        return current ? { ...statuses, [protocol]: { ...current, resources } } : statuses;
-      });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось проверить доступность ресурсов");
-    } finally {
-      setCheckingResources(null);
-    }
-  }
-
   function updateLoggingDraft(patch: Partial<LoggingSettings>) {
     loggingDirty.current = true;
     setLoggingDraft((current) => ({ ...(current || { persistent: true, retention_days: 30 }), ...patch }));
@@ -1000,16 +995,20 @@ export default function Home() {
     }
   }
 
-  function toggleNetworkDiagnostics(protocol: Protocol) {
-    const opening = !diagnosticsOpen[protocol];
-    setDiagnosticsOpen((values) => ({ ...values, [protocol]: opening }));
-    if (opening) void checkNetworkDiagnostics(protocol);
-  }
-
-  function toggleProtocolResources(protocol: Protocol) {
-    const opening = !resourcesOpen[protocol];
-    setResourcesOpen((values) => ({ ...values, [protocol]: opening }));
-    if (opening) void checkProtocolResources(protocol);
+  async function checkProtocolConnection(protocol: Protocol) {
+    setCheckingConnection(protocol); setError("");
+    try {
+      const connection_test = await request(`/protocols/${protocol}/connection/check`, { method: "POST" });
+      setProtocolStatuses((statuses) => {
+        const current = statuses[protocol];
+        return current ? { ...statuses, [protocol]: { ...current, connection_test } } : statuses;
+      });
+      await loadProtocolStatus(protocol);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось проверить передачу данных через протокол");
+    } finally {
+      setCheckingConnection(null);
+    }
   }
 
   async function removeProtocol(image: ProtocolImage) {
@@ -1684,136 +1683,25 @@ export default function Home() {
         </article>
       </section>}
 
-      {isProtocolTab(tab) && activeProtocol && <section className="protocolMonitor">
-        {installedProtocols.length > 1 && <nav className="protocolPageRail" aria-label="Установленные протоколы">
-          <span>ПРОТОКОЛЫ</span>
-          {installedProtocols.map((protocol) => <button type="button" key={protocol} className={tab === protocol ? "active" : ""} onClick={() => setTab(protocol)}>
-            <i><ProtocolIcon protocol={protocol} /></i><strong>{labels[protocol]}</strong>
-          </button>)}
-        </nav>}
-        <article className="panel protocolLiveHero">
-          <div>
-            <p className="eyebrow">LIVE TUNNEL</p>
-            <div className="protocolTitle"><ProtocolIcon protocol={tab} /><h2>{labels[tab]}</h2></div>
-            <p className="mono">{activeProtocol.interface} · {activeProtocol.address || "адрес не назначен"} · {activeProtocol.transport || "UDP"} {activeProtocol.listen_port || "—"} · версия {activeProtocolImage?.installed_version || "не определена"}</p>
-          </div>
-          <div className="protocolControlStack">
-            <div className={activeProtocol.active && activeProtocol.service_active ? "protocolHealth online" : "protocolHealth"}>
-              <span className="pulse" />
-              <div>
-                <strong>{activeProtocol.active && activeProtocol.service_active ? "Туннель работает" : "Туннель остановлен"}</strong>
-                <small>{activeProtocol.service_enabled ? "Автозапуск включён" : "Автозапуск отключён"}</small>
-              </div>
-            </div>
-            <div className="protocolActions">
-              <button onClick={() => void restartProtocol(tab)} disabled={busy}>{activeProtocol.service_active ? "Перезапустить" : "Запустить"}</button>
-              {activeProtocolImage && <button onClick={() => void checkProtocolVersion(activeProtocolImage)} disabled={busy || Boolean(checkingProtocolVersion)}>{checkingProtocolVersion === activeProtocolImage.id ? "Проверяем…" : "Проверить версию"}</button>}
-              {activeProtocolImage && <button className={activeProtocolImage.update_breaking ? "updateProtocolButton warning" : "updateProtocolButton"} onClick={() => void updateProtocol(activeProtocolImage)} disabled={busy || !activeProtocolImage.update_available}>{installingProtocol === `update-${activeProtocolImage.id}` ? "Обновление…" : activeProtocolImage.update_available ? `Обновить до ${activeProtocolImage.available_version}` : activeProtocolImage.version_checked_at ? "Обновлений нет" : "Версия не проверена"}</button>}
-              {activeProtocolImage?.removable && <button className="removeProtocolButton" onClick={() => void removeProtocol(activeProtocolImage)} disabled={busy}>Удалить</button>}
-            </div>
-          </div>
-        </article>
-        <div className="protocolMonitorGrid">
-          <article className="panel protocolFlow">
-            <div className="panelHead"><div><p className="eyebrow">PROTOCOL TRAFFIC</p><h3>Текущий поток и статистика за 24 часа</h3></div><span>{activeProtocol.history.samples} замеров</span></div>
-            <div className="flowValues">
-              <div><small>↓ RX NOW</small><strong>{bytes(activeProtocolRate.rx)}<em>/s</em></strong><span>24H · {bytes(activeProtocol.history.received_bytes)} · MAX {bytes(activeProtocol.history.peak_rx_bps)}/s</span></div>
-              <div><small>↑ TX NOW</small><strong>{bytes(activeProtocolRate.tx)}<em>/s</em></strong><span>24H · {bytes(activeProtocol.history.transmitted_bytes)} · MAX {bytes(activeProtocol.history.peak_tx_bps)}/s</span></div>
-            </div>
-          </article>
-          <article className="panel protocolTelemetry protocolQuality">
-            <p className="eyebrow">AVAILABILITY · 24 HOURS</p>
-            <div className="telemetryMain"><strong>{activeProtocol.history.availability_percent != null ? `${activeProtocol.history.availability_percent}%` : "—"}</strong><span>служба протокола работала</span></div>
-            <dl>
-              <div><dt>Остановки службы</dt><dd>{activeProtocol.history.service_interruptions}</dd></div>
-              <div><dt>Разрывы мониторинга</dt><dd>{activeProtocol.history.monitoring_gaps}</dd></div>
-              <div><dt>Периоды без активных связей</dt><dd>{activeProtocol.history.inactive_connection_periods}</dd></div>
-            </dl>
-          </article>
-          <article className="panel protocolTelemetry">
-            <p className="eyebrow">VPS CONNECTIVITY · 24 HOURS</p>
-            <div className="telemetryMain"><strong>{activeProtocol.history.latency_avg_ms != null ? activeProtocol.history.latency_avg_ms.toFixed(1) : "—"}</strong><span>мс в среднем</span></div>
-            <dl>
-              <div><dt>Потери контрольных пакетов</dt><dd>{activeProtocol.history.external_loss_percent != null ? `${activeProtocol.history.external_loss_percent}%` : "—"}</dd></div>
-              <div><dt>Средний jitter</dt><dd>{activeProtocol.history.jitter_avg_ms != null ? `${activeProtocol.history.jitter_avg_ms.toFixed(1)} мс` : "—"}</dd></div>
-              <div><dt>Максимальная задержка</dt><dd>{activeProtocol.history.latency_max_ms != null ? `${activeProtocol.history.latency_max_ms.toFixed(1)} мс` : "—"}</dd></div>
-              <div><dt>Текущие соединения</dt><dd>{activeProtocol.online_peers} из {activeProtocol.peers} · {duration(activeProtocol.last_handshake_age_s)}</dd></div>
-            </dl>
-          </article>
-        </div>
-        <article className={`panel networkDiagnostics ${activeProtocol.diagnostics?.status || "pending"} ${diagnosticsOpen[tab] ? "open" : ""}`}>
-          <button className="resourceToggle diagnosticToggle" onClick={() => toggleNetworkDiagnostics(tab)} aria-expanded={Boolean(diagnosticsOpen[tab])}>
-            <div><p className="eyebrow">NETWORK DIAGNOSTICS</p><h3>Причины нестабильности сети и подключений</h3></div>
-            <span>{checkingDiagnostics === tab ? "Диагностика…" : diagnosticsOpen[tab] ? "Скрыть" : "Развернуть"}</span>
-          </button>
-          {diagnosticsOpen[tab] && <div className="diagnosticBody">
-            <div className="diagnosticHead">
-              <p>Проверка внешнего канала, DNS, HTTPS, UDP, маршрутизации, MTU, drops и conntrack.</p>
-              <div className="diagnosticScore">
-                <span>{activeProtocol.diagnostics?.score != null ? activeProtocol.diagnostics.score : "—"}</span>
-                <small>{activeProtocol.diagnostics?.status === "healthy" ? "СТАБИЛЬНО" : activeProtocol.diagnostics?.status === "critical" ? "КРИТИЧНО" : activeProtocol.diagnostics?.status === "warning" ? "ТРЕБУЕТ ВНИМАНИЯ" : "ПРОВЕРКА"}</small>
-              </div>
-              <button onClick={() => void checkNetworkDiagnostics(tab)} disabled={checkingDiagnostics === tab}>
-                {checkingDiagnostics === tab ? "Диагностика…" : "Проверить сейчас"}
-              </button>
-            </div>
-            <div className="diagnosticChecks">
-              {(activeProtocol.diagnostics?.checks || []).map((check) =>
-                <div className={check.ok ? "ok" : "failed"} key={check.id}><i /><span><strong>{check.name}</strong><small>{check.value}</small></span></div>
-              )}
-            </div>
-            <div className="diagnosticFindings">
-              {(activeProtocol.diagnostics?.findings || []).map((finding) =>
-                <div className={finding.severity} key={finding.code}>
-                  <span>{finding.severity === "critical" ? "!" : "i"}</span>
-                  <p><strong>{finding.title}</strong><small>{finding.detail}</small><em>{finding.action}</em></p>
-                </div>
-              )}
-              {activeProtocol.diagnostics?.status === "healthy" && <div className="diagnosticHealthy"><span>✓</span><p><strong>Критичных проблем не обнаружено</strong><small>Маршрут, DNS, внешний HTTPS, UDP, MTU и маршрутизация прошли проверку.</small></p></div>}
-              {!activeProtocol.diagnostics?.checks?.length && <div className="eventEmpty">Диагностика выполняется…</div>}
-            </div>
-            <div className="diagnosticFooter">
-              <span>Uplink: {activeProtocol.diagnostics?.network?.uplink || "—"} · MTU {activeProtocol.diagnostics?.network?.uplink_mtu || "—"}</span>
-              <span>Conntrack: {activeProtocol.diagnostics?.network?.conntrack_percent != null ? `${activeProtocol.diagnostics.network.conntrack_percent}%` : "—"}</span>
-              <span>Drops 24h: uplink {activeProtocol.history.uplink_dropped || 0} · tunnel {activeProtocol.history.interface_dropped || 0}</span>
-              <span>{activeProtocol.diagnostics?.checked_at ? `Проверено ${new Date(activeProtocol.diagnostics.checked_at).toLocaleString("ru-RU")}` : "Ожидание первого замера"}</span>
-            </div>
-          </div>}
-        </article>
-        <article className={`panel resourceAvailability ${resourcesOpen[tab] ? "open" : ""}`}>
-          <button className="resourceToggle" onClick={() => toggleProtocolResources(tab)} aria-expanded={Boolean(resourcesOpen[tab])}>
-            <div><p className="eyebrow">RESOURCE AVAILABILITY</p><h3>Проверка внешних сервисов с VPS</h3></div>
-            <span>{checkingResources === tab ? "Проверяем…" : resourcesOpen[tab] ? "Скрыть" : "Развернуть"}</span>
-          </button>
-          {resourcesOpen[tab] && <div className="resourceBody">
-            <div className="resourceTools">
-              <span>{activeProtocol.resources?.checked_at ? `проверено ${new Date(activeProtocol.resources.checked_at).toLocaleTimeString("ru-RU")}` : "выполняется первая проверка"}</span>
-              <button onClick={() => void checkProtocolResources(tab)} disabled={checkingResources === tab}>
-                {checkingResources === tab ? "Проверяем…" : "Обновить результат"}
-              </button>
-            </div>
-            <div className="resourceIndicators">
-              {(activeProtocol.resources?.items || []).map((resource) =>
-                <div className={resource.available ? "resourceItem online" : "resourceItem offline"} key={resource.name} title={resource.status_code ? `HTTP ${resource.status_code}` : undefined}>
-                  <i /><strong>{resource.name}</strong><span>{resource.available ? `${resource.latency_ms} мс` : "недоступен"}</span>
-                </div>
-              )}
-              {!activeProtocol.resources?.items?.length && <div className="eventEmpty">Проверка выполняется…</div>}
-            </div>
-          </div>}
-        </article>
-        <article className="panel protocolEvents">
-          <div className="panelHead"><div><p className="eyebrow">STABILITY LOG</p><h3>Последние события протокола</h3></div><span>агрегация за 24 часа</span></div>
-          <div className="eventRows">
-            {activeProtocol.history.events.length ? activeProtocol.history.events.map((event, index) =>
-              <div key={`${event.at}-${index}`}><i className={event.type === "service_down" ? "eventCritical" : "eventWarning"} />
-                <p><strong>{event.type === "service_down" ? "Служба протокола остановилась" : event.type === "monitor_gap" ? "Пропуск данных мониторинга" : "Не осталось активных соединений"}</strong>
-                <small>{event.at ? new Date(event.at).toLocaleString("ru-RU") : "—"}{event.seconds ? ` · ${event.seconds} сек` : ""}</small></p>
-              </div>
-            ) : <div className="eventEmpty">За выбранный период разрывов и остановок не зафиксировано</div>}
-          </div>
-        </article>
-      </section>}
+      {isProtocolTab(tab) && activeProtocol && <ProtocolWorkspace
+        protocol={tab}
+        status={activeProtocol}
+        image={activeProtocolImage}
+        rate={activeProtocolRate}
+        installed={installedProtocols}
+        busy={busy}
+        checkingConnection={checkingConnection === tab}
+        checkingDiagnostics={checkingDiagnostics === tab}
+        checkingVersion={checkingProtocolVersion === activeProtocolImage?.id}
+        updating={installingProtocol === `update-${activeProtocolImage?.id}`}
+        onNavigate={setTab}
+        onRestart={() => void restartProtocol(tab)}
+        onCheckVersion={() => activeProtocolImage && void checkProtocolVersion(activeProtocolImage)}
+        onUpdate={() => activeProtocolImage && void updateProtocol(activeProtocolImage)}
+        onRemove={() => activeProtocolImage && void removeProtocol(activeProtocolImage)}
+        onCheckConnection={() => void checkProtocolConnection(tab)}
+        onCheckDiagnostics={() => void checkNetworkDiagnostics(tab)}
+      />}
 
       {tab === "clients" && installedProtocols.length > 0 && <section className="clientsLayout">
         <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS</p><h2>{tab === "clients" ? "Все клиенты" : labels[tab]}</h2></div><span>{protocolClients.length} подключений</span></div>

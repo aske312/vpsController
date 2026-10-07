@@ -8,9 +8,11 @@ import csv
 import os
 import re
 import secrets
+import socket
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import platform
@@ -106,8 +108,10 @@ app_version_refresh_lock = threading.Lock()
 resource_check_lock = threading.Lock()
 action_start_lock = threading.Lock()
 network_diagnostic_lock = threading.Lock()
+connection_probe_lock = threading.Lock()
 resource_check_cache: dict[str, dict] = {}
 network_diagnostic_cache: dict[str, dict] = {}
+connection_probe_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
 client_mutation_lock = threading.Lock()
 protocol_version_lock = threading.Lock()
@@ -714,24 +718,370 @@ def cached_network_diagnostics(protocol: Literal["wg", "awg"]) -> dict:
     }
 
 
-def direct_protocol_diagnostics(protocol: str) -> dict:
+def protocol_listener(protocol: str) -> tuple[str, int, str, bool]:
     unit, port, transport = {
         "hysteria2": ("vps-control-hysteria2.service", 8443, "udp"),
         "tuic": ("vps-control-tuic.service", 8444, "udp"),
         "xray": ("vps-control-xray.service", 8445, "tcp"),
     }[protocol]
-    settings_path = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "xray": XRAY_SETTINGS}[protocol]
+    settings_path = {
+        "hysteria2": HYSTERIA2_SETTINGS,
+        "tuic": TUIC_SETTINGS,
+        "xray": XRAY_SETTINGS,
+    }[protocol]
     try:
         port = int(json.loads(settings_path.read_text(encoding="utf-8")).get("port", port))
     except (OSError, ValueError, json.JSONDecodeError):
         pass
-    active = run("systemctl", "is-active", unit) == "active"
     listeners = run("ss", "-H", "-ln" + ("u" if transport == "udp" else "t"))
     listening = any(re.search(rf"(?:^|[:.]){port}(?:\s|$)", line) for line in listeners.splitlines())
-    checks = [{"id": "service", "name": "Служба протокола", "ok": active, "value": "работает" if active else "остановлена"},
-              {"id": "listener", "name": f"{transport.upper()} listener", "ok": listening, "value": str(port) if listening else "не найден"}]
-    findings = [] if all(item["ok"] for item in checks) else [{"severity": "critical", "code": "protocol_path", "title": "Протокол недоступен", "detail": "Служба или listener не подтверждены", "action": "Проверьте службу и журнал модуля"}]
-    return {"checked_at": datetime.now(timezone.utc).isoformat(), "status": "healthy" if not findings else "critical", "score": 100 if not findings else 40, "checks": checks, "findings": findings, "network": {}}
+    return unit, port, transport, listening
+
+
+def protocol_runtime_profile(protocol: str) -> dict:
+    if protocol in ("wg", "awg"):
+        return {
+            "kind": "encrypted-tunnel",
+            "summary": "Сетевой L3-туннель AmneziaWG с обфускацией WireGuard-трафика." if protocol == "awg" else "Сетевой L3-туннель WireGuard.",
+            "facts": [
+                {"label": "Транспорт", "value": "AmneziaWG / UDP" if protocol == "awg" else "WireGuard / UDP"},
+                {"label": "Проверка клиента", "value": "Handshake + RX/TX"},
+                {"label": "MTU", "value": str(AWG_MTU if protocol == "awg" else 1380)},
+                {"label": "Обфускация", "value": f"Jc {AWG_PROFILE['Jc']} · Jmin/Jmax {AWG_PROFILE['Jmin']}/{AWG_PROFILE['Jmax']}" if protocol == "awg" else "нет"},
+            ],
+        }
+
+    unit, port, transport, listening = protocol_listener(protocol)
+    settings_path = {
+        "hysteria2": HYSTERIA2_SETTINGS,
+        "tuic": TUIC_SETTINGS,
+        "xray": XRAY_SETTINGS,
+    }[protocol]
+    config_path = {"tuic": TUIC_CONFIG, "xray": XRAY_CONFIG}.get(protocol)
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        settings = {}
+
+    accounts = 0
+    if protocol == "hysteria2":
+        try:
+            users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8"))
+            accounts = len(users) if isinstance(users, dict) else 0
+        except (OSError, json.JSONDecodeError):
+            pass
+        identity = str(settings.get("domain", "")).strip()
+        if not identity:
+            try:
+                identity = certificate_server_name(HYSTERIA2_DIR / "server.crt")
+            except HTTPException:
+                identity = "не определено"
+        facts = [
+            {"label": "Транспорт", "value": "Hysteria2 / QUIC / UDP"},
+            {"label": "TLS identity", "value": identity},
+            {"label": "Аутентификация", "value": "HTTP auth"},
+            {"label": "Учётные записи", "value": str(accounts)},
+        ]
+        summary = "QUIC-прокси с TLS и отдельной HTTP-аутентификацией клиентов."
+    else:
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8")) if config_path else {}
+        except (OSError, json.JSONDecodeError):
+            config = {}
+        if protocol == "tuic":
+            inbound = next((row for row in config.get("inbounds", []) if row.get("type") == "tuic"), {})
+            accounts = len(inbound.get("users", []))
+            tls = inbound.get("tls", {})
+            facts = [
+                {"label": "Транспорт", "value": "TUIC v5 / QUIC / UDP"},
+                {"label": "TLS identity", "value": str(tls.get("server_name", "endpoint.internal"))},
+                {"label": "Congestion control", "value": str(settings.get("congestion_control", "bbr"))},
+                {"label": "Heartbeat", "value": str(settings.get("heartbeat", "10s"))},
+                {"label": "Учётные записи", "value": str(accounts)},
+            ]
+            summary = "QUIC-прокси TUIC v5 с TLS и индивидуальной UUID/password-аутентификацией."
+        else:
+            inbound = next((row for row in config.get("inbounds", []) if row.get("protocol") == "vless"), {})
+            accounts = len(inbound.get("settings", {}).get("clients", []))
+            facts = [
+                {"label": "Протокол", "value": "VLESS"},
+                {"label": "Транспорт", "value": "XHTTP / TCP"},
+                {"label": "Защита", "value": "REALITY"},
+                {"label": "Server name", "value": str(settings.get("server_name", "не определено"))},
+                {"label": "Reality target", "value": str(settings.get("target", "не определено"))},
+                {"label": "Учётные записи", "value": str(accounts)},
+            ]
+            summary = "VLESS поверх XHTTP/TCP с транспортной защитой REALITY."
+    return {
+        "kind": "proxy",
+        "summary": summary,
+        "accounts": accounts,
+        "listener": {"unit": unit, "port": port, "transport": transport, "listening": listening},
+        "facts": facts,
+    }
+
+
+def observed_tunnel_connection(protocol: Literal["wg", "awg"]) -> dict:
+    peers = interface_dump(protocol, include_quality=False)
+    fresh = [peer for peer in peers if peer.get("handshake_age_s") is not None and peer["handshake_age_s"] < 180]
+    exchanged = [peer for peer in fresh if peer.get("rx_bytes", 0) > 0 and peer.get("tx_bytes", 0) > 0]
+    checked_at = datetime.now(timezone.utc).isoformat()
+    if exchanged:
+        newest = min(exchanged, key=lambda peer: peer["handshake_age_s"])
+        return {
+            "checked_at": checked_at,
+            "state": "confirmed",
+            "method": "observed-client-traffic",
+            "title": "Подключение подтверждено реальным клиентом",
+            "detail": f"Свежий handshake {newest['handshake_age_s']} сек назад; через туннель передавались данные в обе стороны.",
+            "latency_ms": None,
+            "bytes_received": newest.get("rx_bytes", 0),
+            "bytes_sent": newest.get("tx_bytes", 0),
+            "scope": "Подтверждает handshake и трафик зарегистрированного клиента; не создаёт тестовый peer и не использует ICMP.",
+        }
+    if fresh:
+        newest = min(fresh, key=lambda peer: peer["handshake_age_s"])
+        detail = f"Handshake свежий ({newest['handshake_age_s']} сек), но двусторонняя передача полезных данных не подтверждена."
+    elif peers:
+        detail = "Есть зарегистрированные peers, но свежего handshake нет. Подключите клиент и повторите проверку."
+    else:
+        detail = "Нет зарегистрированных клиентов, поэтому проверить реальный путь подключения невозможно."
+    return {
+        "checked_at": checked_at,
+        "state": "unverified",
+        "method": "observed-client-traffic",
+        "title": "Подключение не проверено",
+        "detail": detail,
+        "latency_ms": None,
+        "bytes_received": 0,
+        "bytes_sent": 0,
+        "scope": f"{protocol.upper()} подтверждается только свежим handshake и реальным двусторонним трафиком клиента.",
+    }
+
+
+def cached_connection_probe(protocol: str) -> dict:
+    if protocol in ("wg", "awg"):
+        return observed_tunnel_connection(protocol)
+    return connection_probe_cache.get(protocol, {
+        "checked_at": None,
+        "state": "unverified",
+        "method": "local-protocol-roundtrip",
+        "title": "Передача данных ещё не проверялась",
+        "detail": "Запустите проверку, чтобы выполнить настоящий handshake и запрос-ответ через протокол.",
+        "latency_ms": None,
+        "bytes_received": 0,
+        "bytes_sent": 0,
+        "scope": "Локальный loopback probe подтверждает протокол и передачу данных, но не внешний firewall и сеть устройства.",
+    })
+
+
+def free_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+def direct_probe_client(protocol: str, proxy_port: int, directory: Path) -> list[str] | None:
+    if protocol == "hysteria2":
+        try:
+            settings = json.loads(HYSTERIA2_SETTINGS.read_text(encoding="utf-8"))
+            users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8"))
+            client_id, password = next(iter(users.items()))
+            identity = str(settings.get("domain", "")).strip() or certificate_server_name(HYSTERIA2_DIR / "server.crt")
+            fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt"), check=True).partition("=")[2].strip()
+        except (AttributeError, OSError, ValueError, StopIteration, json.JSONDecodeError, HTTPException):
+            return None
+        config = directory / "hysteria2.yaml"
+        config.write_text(
+            "\n".join([
+                f"server: 127.0.0.1:{int(settings.get('port', 8443))}",
+                f"auth: {client_id}:{password}",
+                "tls:", f"  sni: {identity}", "  insecure: true", f"  pinSHA256: {fingerprint}",
+                "socks5:", f"  listen: 127.0.0.1:{proxy_port}", "  disableUDP: false", "",
+            ]),
+            encoding="utf-8",
+        )
+        os.chmod(config, 0o600)
+        return ["/usr/local/lib/vps-control-hysteria2/hysteria", "client", "-c", str(config)]
+
+    if protocol == "tuic":
+        try:
+            settings = json.loads(TUIC_SETTINGS.read_text(encoding="utf-8"))
+            server = json.loads(TUIC_CONFIG.read_text(encoding="utf-8"))
+            inbound = next(row for row in server.get("inbounds", []) if row.get("type") == "tuic")
+            user = next(iter(inbound.get("users", [])))
+            certificate = (TUIC_DIR / "server.crt").read_text(encoding="utf-8")
+            identity = certificate_server_name(TUIC_DIR / "server.crt")
+        except (OSError, StopIteration, json.JSONDecodeError, HTTPException):
+            return None
+        outbound = {
+            "type": "tuic", "tag": "probe-out", "server": "127.0.0.1",
+            "server_port": int(settings.get("port", 8444)), "uuid": user.get("uuid"),
+            "password": user.get("password"), "congestion_control": str(settings.get("congestion_control", "bbr")),
+            "udp_relay_mode": "native", "zero_rtt_handshake": False,
+            "heartbeat": str(settings.get("heartbeat", "10s")),
+            "tls": {"enabled": True, "server_name": identity, "certificate": certificate},
+        }
+        payload = {
+            "log": {"level": "warn"},
+            "inbounds": [{"type": "mixed", "tag": "probe-in", "listen": "127.0.0.1", "listen_port": proxy_port}],
+            "outbounds": [outbound], "route": {"final": "probe-out"},
+        }
+        config = directory / "tuic.json"
+        config.write_text(json.dumps(payload), encoding="utf-8")
+        os.chmod(config, 0o600)
+        return ["/usr/local/lib/vps-control-tuic/sing-box", "run", "-c", str(config)]
+
+    try:
+        settings = json.loads(XRAY_SETTINGS.read_text(encoding="utf-8"))
+        server = json.loads(XRAY_CONFIG.read_text(encoding="utf-8"))
+        inbound = next(row for row in server.get("inbounds", []) if row.get("protocol") == "vless")
+        user = next(iter(inbound.get("settings", {}).get("clients", [])))
+    except (OSError, StopIteration, json.JSONDecodeError):
+        return None
+    path = str(settings.get("path", "/xhttp"))
+    payload = {
+        "log": {"loglevel": "warning"},
+        "inbounds": [{"listen": "127.0.0.1", "port": proxy_port, "protocol": "socks", "settings": {"udp": True}}],
+        "outbounds": [{
+            "tag": "probe-out", "protocol": "vless",
+            "settings": {"address": "127.0.0.1", "port": int(settings.get("port", 8445)), "id": user.get("id"), "encryption": "none"},
+            "streamSettings": {
+                "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path},
+                "realitySettings": {
+                    "serverName": str(settings.get("server_name", "www.microsoft.com")),
+                    "fingerprint": "chrome", "password": str(settings.get("password", "")),
+                    "shortId": str(settings.get("short_id", "")), "spiderX": path,
+                },
+            },
+        }],
+    }
+    config = directory / "xray.json"
+    config.write_text(json.dumps(payload), encoding="utf-8")
+    os.chmod(config, 0o600)
+    return ["/usr/local/lib/vps-control-xray/xray", "run", "-config", str(config)]
+
+
+def wait_for_proxy(process: subprocess.Popen, port: int, timeout: float = 4.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return False
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                return True
+        except OSError:
+            time.sleep(0.1)
+    return False
+
+
+def check_protocol_connection(protocol: str) -> dict:
+    if protocol in ("wg", "awg"):
+        return observed_tunnel_connection(protocol)
+    if not connection_probe_lock.acquire(blocking=False):
+        current = cached_connection_probe(protocol).copy()
+        current.update(state="unverified", title="Проверка уже выполняется", detail="Дождитесь завершения текущего protocol probe.")
+        return current
+    checked_at = datetime.now(timezone.utc).isoformat()
+    result = {
+        "checked_at": checked_at,
+        "state": "unverified",
+        "method": "local-protocol-roundtrip",
+        "title": "Проверка не выполнена",
+        "detail": "Нет подходящей учётной записи или клиентского бинарника для безопасного probe.",
+        "latency_ms": None,
+        "bytes_received": 0,
+        "bytes_sent": 0,
+        "scope": "Локальный loopback probe подтверждает протокол и передачу данных, но не внешний firewall и сеть устройства.",
+    }
+    process = None
+    try:
+        unit, _, _, listening = protocol_listener(protocol)
+        if run("systemctl", "is-active", unit) != "active" or not listening:
+            result.update(state="failed", title="Протокол не принимает подключения", detail="Служба остановлена или listener не найден.")
+            connection_probe_cache[protocol] = result
+            return result
+        proxy_port = free_loopback_port()
+        with tempfile.TemporaryDirectory(prefix=f"vps-control-{protocol}-probe-") as temporary:
+            command = direct_probe_client(protocol, proxy_port, Path(temporary))
+            if not command or not Path(command[0]).exists():
+                connection_probe_cache[protocol] = result
+                return result
+            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if not wait_for_proxy(process, proxy_port):
+                result.update(state="failed", title="Протокольный handshake не выполнен", detail="Временный клиент не открыл локальный SOCKS после подключения к серверу.")
+                connection_probe_cache[protocol] = result
+                return result
+            response_file = Path(temporary) / "health-response.json"
+            started = time.monotonic()
+            response = subprocess.run(
+                [
+                    "curl", "--silent", "--show-error", "--output", str(response_file),
+                    "--write-out", "%{http_code} %{size_request} %{size_download}", "--socks5-hostname", f"127.0.0.1:{proxy_port}",
+                    "--connect-timeout", "3", "--max-time", "8", "http://127.0.0.1:8000/api/health",
+                ],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            latency_ms = round((time.monotonic() - started) * 1000)
+            body = response_file.read_bytes() if response_file.exists() else b""
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                payload = {}
+            response_metrics = response.stdout.strip().split()
+            status_code = response_metrics[0] if response_metrics else ""
+            try:
+                bytes_sent = round(float(response_metrics[1]))
+                bytes_received = round(float(response_metrics[2]))
+            except (IndexError, ValueError):
+                bytes_sent, bytes_received = 0, len(body)
+            if response.returncode == 0 and status_code == "200" and payload.get("status") == "ok":
+                result.update(
+                    state="confirmed", title="Handshake и передача данных подтверждены",
+                    detail="Временный клиент получил корректный ответ API через SOCKS и серверный outbound протокола.",
+                    latency_ms=latency_ms, bytes_received=bytes_received, bytes_sent=bytes_sent,
+                )
+            else:
+                result.update(
+                    state="failed", title="Сквозной ответ через протокол не получен",
+                    detail="Клиент запустился, но фиксированный health request не вернул корректный ответ через протокол.",
+                    latency_ms=latency_ms, bytes_received=bytes_received, bytes_sent=bytes_sent,
+                )
+            connection_probe_cache[protocol] = result
+            return result
+    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+        result.update(state="failed", title="Проверка передачи данных завершилась ошибкой", detail=type(exc).__name__)
+        connection_probe_cache[protocol] = result
+        return result
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+        connection_probe_lock.release()
+
+
+def direct_protocol_diagnostics(protocol: str) -> dict:
+    unit, port, transport, listening = protocol_listener(protocol)
+    active = run("systemctl", "is-active", unit) == "active"
+    connection = cached_connection_probe(protocol)
+    checks = [
+        {"id": "service", "name": "Служба протокола", "state": "passed" if active else "failed", "ok": active, "value": "работает" if active else "остановлена"},
+        {"id": "listener", "name": f"{transport.upper()} listener", "state": "passed" if listening else "failed", "ok": listening, "value": str(port) if listening else "не найден"},
+        {"id": "data-plane", "name": "Handshake и данные", "state": "passed" if connection["state"] == "confirmed" else "failed" if connection["state"] == "failed" else "unknown", "ok": connection["state"] == "confirmed", "value": connection["title"]},
+    ]
+    findings = []
+    if not active or not listening:
+        findings.append({"severity": "critical", "code": "protocol_path", "title": "Протокол недоступен", "detail": "Служба или listener не подтверждены", "action": "Проверьте службу и журнал модуля"})
+    elif connection["state"] == "failed":
+        findings.append({"severity": "critical", "code": "data_plane_failed", "title": "Передача данных не подтверждена", "detail": connection["detail"], "action": "Проверьте клиентскую конфигурацию и журнал протокола"})
+    elif connection["state"] != "confirmed":
+        findings.append({"severity": "warning", "code": "data_plane_unverified", "title": "Реальное подключение ещё не проверено", "detail": connection["detail"], "action": "Запустите проверку передачи данных"})
+    critical = any(item["severity"] == "critical" for item in findings)
+    return {"checked_at": datetime.now(timezone.utc).isoformat(), "status": "critical" if critical else "warning" if findings else "healthy", "score": 40 if critical else 75 if findings else 100, "checks": checks, "findings": findings, "network": {}}
 
 
 def memory_info() -> tuple[int, int]:
@@ -2415,7 +2765,8 @@ def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"],
                 "address": PUBLIC_IP, "listen_port": int(settings.get("port", default_port)), "mtu": 0, "peers": len(protocol_clients), "online_peers": 0, "endpoints": 0,
                 "last_handshake_age_s": None, "peer_rx_bytes": rx, "peer_tx_bytes": tx, "interface_rx_bytes": rx, "interface_tx_bytes": tx,
                 "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0, "transport": "VLESS / XHTTP / REALITY" if protocol == "xray" else "QUIC / UDP",
-                "resources": cached_resource_availability(protocol), "history": protocol_history(protocol), "diagnostics": direct_protocol_diagnostics(protocol)}
+                "resources": cached_resource_availability(protocol), "history": protocol_history(protocol), "diagnostics": direct_protocol_diagnostics(protocol),
+                "profile": protocol_runtime_profile(protocol), "connection_test": cached_connection_probe(protocol)}
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
     unit = f"{'wg-quick' if protocol == 'wg' else 'awg-quick'}@{interface}.service"
@@ -2483,6 +2834,8 @@ def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"],
         "resources": cached_resource_availability(protocol),
         "history": history,
         "diagnostics": cached_network_diagnostics(protocol),
+        "profile": protocol_runtime_profile(protocol),
+        "connection_test": cached_connection_probe(protocol),
       }
 
 
@@ -2494,6 +2847,11 @@ def check_protocol_resources(protocol: Literal["wg", "awg", "hysteria2", "tuic",
 @app.post("/api/protocols/{protocol}/diagnostics/check")
 def check_network_diagnostics(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
     return network_diagnostics(protocol, protocol_history(protocol), force=True) if protocol in ("wg", "awg") else direct_protocol_diagnostics(protocol)
+
+
+@app.post("/api/protocols/{protocol}/connection/check")
+def check_protocol_data_plane(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
+    return check_protocol_connection(protocol)
 
 
 @app.post("/api/protocols/{protocol}/restart")

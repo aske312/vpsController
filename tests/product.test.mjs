@@ -123,11 +123,12 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(page, /2–48 символов/);
 });
 
-test("network diagnostics measure loss, jitter, MTU and server path health", async () => {
-  const [api, monitor, page] = await Promise.all([
+test("protocol pages separate server health from real data-plane evidence", async () => {
+  const [api, monitor, page, workspace] = await Promise.all([
     read("api/main.py"),
     read("scripts/vpn-monitor-sample"),
     read("app/page.tsx"),
+    read("app/protocol-workspace.tsx"),
   ]);
   assert.match(monitor, /ping -n -q -c 5/);
   assert.match(monitor, /ping_1_1_1_jitter/);
@@ -136,10 +137,18 @@ test("network diagnostics measure loss, jitter, MTU and server path health", asy
   assert.match(api, /def network_diagnostics/);
   assert.match(api, /Path MTU/);
   assert.match(api, /diagnostics\/check/);
-  assert.match(page, /NETWORK DIAGNOSTICS/);
-  assert.match(page, /Причины нестабильности сети и подключений/);
-  assert.match(page, /toggleNetworkDiagnostics/);
-  assert.match(page, /diagnosticsOpen\[tab\]/);
+  assert.match(api, /connection\/check/);
+  assert.match(api, /def check_protocol_connection/);
+  assert.match(api, /local-protocol-roundtrip/);
+  assert.match(api, /http:\/\/127\.0\.0\.1:8000\/api\/health/);
+  assert.match(page, /<ProtocolWorkspace/);
+  assert.match(workspace, /DATA PLANE PROOF/);
+  assert.match(workspace, /HYSTERIA2 REQUEST PATH/);
+  assert.match(workspace, /TUIC V5 REQUEST PATH/);
+  assert.match(workspace, /REALITY IDENTITY/);
+  assert.match(workspace, /AMNEZIA PARAMETERS/);
+  assert.match(workspace, /Служба, listener и протокольный путь/);
+  assert.doesNotMatch(page, /Туннель работает/);
   assert.doesNotMatch(api, /threading\.Thread\(target=network_diagnostics/);
 });
 
@@ -480,9 +489,10 @@ test("SSH hardening remains reachable under unauthenticated scanner load", async
 });
 
 test("Light protocol modules install and uninstall independently", async () => {
-  const [api, manager, page, awgInstall, awgRemove, hysteriaInstall, hysteriaRemove, tuicInstall, tuicRemove, xrayInstall, xrayRemove, relayManifest] = await Promise.all([
+  const [api, manager, page, workspace, awgInstall, awgRemove, hysteriaInstall, hysteriaRemove, tuicInstall, tuicRemove, xrayInstall, xrayRemove, relayManifest] = await Promise.all([
     read("api/main.py"), read("scripts/vps-control.sh"),
     read("app/page.tsx"),
+    read("app/protocol-workspace.tsx"),
     read("protocol-images/amneziawg/install.sh"),
     read("protocol-images/amneziawg/uninstall.sh"),
     read("protocol-images/hysteria2/install.sh"), read("protocol-images/hysteria2/uninstall.sh"),
@@ -507,7 +517,7 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(manager, /"incompatible" "Новая версия не прошла проверку совместимости/);
   assert.match(page, /checkProtocolVersion\(image\)/);
   assert.match(page, /tab !== "overview" && !isProtocolTab\(tab\) && <div className="gateSectionIntro">/);
-  assert.match(page, /Обновить до/);
+  assert.match(workspace, /Обновить до/);
   assert.match(manager, /prepare_package_manager\(\)/);
   assert.match(manager, /\n  prepare_package_manager\r?\n/);
   assert.match(manager, /dpkg --audit/);
@@ -535,10 +545,10 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(page, /protocolImages\.map/);
   assert.match(page, /image\.available_version \|\| "НЕ ПРОВЕРЕНО"/);
   assert.match(page, /image\.update_available\s*\?/);
-  assert.match(page, />Удалить<\/button>/);
+  assert.match(workspace, />Удалить<\/button>/);
   assert.match(page, /checkingProtocolVersion === image\.id \? "Проверка…"/);
-  assert.match(page, /className="removeProtocolButton".*removeProtocol\(activeProtocolImage\).*?>Удалить<\/button>/s);
-  assert.match(page, /disabled=\{busy \|\| !activeProtocolImage\.update_available\}/);
+  assert.match(workspace, /onClick=\{props\.onRemove\}.*?>Удалить<\/button>/s);
+  assert.match(workspace, /disabled=\{props\.busy \|\| !image\?\.update_available\}/);
   assert.match(manager, /--retry 10 --retry-connrefused --retry-delay 1/);
 });
 
@@ -598,8 +608,8 @@ test("геолокация требует согласия независимы�
 });
 
 test("the interface uses one fixed visual design without personalization", async () => {
-  const [page, api, css, manager, navigation, notificationCenter, layout] = await Promise.all([
-    read("app/page.tsx"), read("api/main.py"), read("app/globals.css"), read("scripts/vps-control.sh"),
+  const [page, workspace, api, css, manager, navigation, notificationCenter, layout] = await Promise.all([
+    read("app/page.tsx"), read("app/protocol-workspace.tsx"), read("api/main.py"), read("app/globals.css"), read("scripts/vps-control.sh"),
     read("src/light-navigation.tsx"), read("src/notifications/notification-center.tsx"), read("app/layout.tsx"),
   ]);
   assert.doesNotMatch(page, /personalization|data-(?:style|palette|density|theme)/i);
@@ -615,7 +625,7 @@ test("the interface uses one fixed visual design without personalization", async
   assert.match(navigation, /label="TUNNELS"/);
   assert.match(navigation, /protocols\.length === 1/);
   assert.match(navigation, /label="Протоколы" badge=\{String\(protocols\.length\)\}/);
-  assert.match(page, /installedProtocols\.length > 1.*className="protocolPageRail"/s);
+  assert.match(workspace, /props\.installed\.length > 1.*className="protocolWorkspaceRail"/s);
   assert.match(navigation, /label="SYSTEM"/);
   assert.match(layout, /<NotificationProvider>\{children\}<\/NotificationProvider>/);
   assert.match(page, /notifications\.finishOperation\(input\)/);
