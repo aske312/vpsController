@@ -26,8 +26,8 @@
 }
 
 * { box-sizing: border-box; }
-html { background: var(--bg); scroll-behavior: smooth; }
-body { margin: 0; background: radial-gradient(circle at 78% -12%, rgba(97, 207, 216, .075), transparent 31%), radial-gradient(circle at 12% 88%, rgba(112, 183, 232, .055), transparent 34%), radial-gradient(circle at 50% 45%, rgba(155, 139, 216, .025), transparent 46%), var(--bg); color: var(--text); font-family: var(--font-sans), Arial, sans-serif; }
+html { max-width: 100%; overflow-x: clip; background: var(--bg); scroll-behavior: smooth; }
+body { max-width: 100%; overflow-x: clip; margin: 0; background: radial-gradient(circle at 78% -12%, rgba(97, 207, 216, .075), transparent 31%), radial-gradient(circle at 12% 88%, rgba(112, 183, 232, .055), transparent 34%), radial-gradient(circle at 50% 45%, rgba(155, 139, 216, .025), transparent 46%), var(--bg); color: var(--text); font-family: var(--font-sans), Arial, sans-serif; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 
