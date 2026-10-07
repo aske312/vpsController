@@ -118,6 +118,7 @@ class PortabilityTests(unittest.TestCase):
                 self.assertEqual(published['action'], 'integrity-check')
                 self.assertEqual(published['state'], 'activating')
                 self.assertIn(f"--unit={published['unit'].removesuffix('.service')}", command)
+                self.assertIn('--property=RuntimeMaxSec=1200', command)
                 return type('Result', (), {'returncode': 0, 'stderr': ''})()
 
             with patch.multiple(api, DATA_DIR=root, ACTION_FILE=action_file), \
@@ -125,7 +126,7 @@ class PortabilityTests(unittest.TestCase):
                  patch.object(api.subprocess, 'run', side_effect=launch):
                 action = api.start_application_task(
                     'vps-control-test', 'integrity-check', ['/bin/true'],
-                    'Starting', 'Unable to start',
+                    'Starting', 'Unable to start', runtime_max_seconds=1200,
                 )
 
             self.assertEqual(action['state'], 'activating')
@@ -150,6 +151,20 @@ class PortabilityTests(unittest.TestCase):
             self.assertEqual(recorded['state'], 'failed')
             self.assertEqual(recorded['result'], 'failed')
             self.assertEqual(recorded['message'], 'launcher failed')
+
+    def test_missing_transient_unit_is_not_reported_as_success(self):
+        action = {
+            'unit': 'vps-control-protocol-tuic-test.service',
+            'action': 'protocol-install:tuic',
+            'state': 'running',
+            'message': 'Installing',
+        }
+        with patch.object(api, 'run', side_effect=['inactive', 'unknown']):
+            resolved = api.resolve_application_action(action)
+
+        self.assertEqual(resolved['state'], 'failed')
+        self.assertEqual(resolved['result'], 'unknown')
+        self.assertIn('без подтверждённого результата', resolved['message'])
 
     def test_all_management_routes_require_authentication(self):
         client = TestClient(api.app)

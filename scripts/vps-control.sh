@@ -726,6 +726,43 @@ prepare_package_manager() {
     || die "dpkg остаётся в незавершённом состоянии; проверьте журнал пакетного менеджера."
 }
 
+run_protocol_installer() {
+  local image_id="$1" installer_path="$2"
+  local timeout_seconds="${PROTOCOL_INSTALL_TIMEOUT_SECONDS:-1200}"
+  [[ "${timeout_seconds}" =~ ^[0-9]+$ && "${timeout_seconds}" -ge 60 ]] || timeout_seconds=1200
+
+  timeout --signal=TERM --kill-after=30s "${timeout_seconds}s" \
+    env ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
+      AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+      HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
+      bash "${installer_path}" &
+  local installer_pid=$! elapsed=0 status=0 elapsed_label
+
+  while kill -0 "${installer_pid}" 2>/dev/null; do
+    sleep 1
+    elapsed=$((elapsed + 1))
+    if (( elapsed % 15 == 0 )) && kill -0 "${installer_pid}" 2>/dev/null; then
+      ACTION_PROGRESS=$((ACTION_PROGRESS < 88 ? ACTION_PROGRESS + 1 : 88))
+      printf -v elapsed_label '%d мин %02d с' "$((elapsed / 60))" "$((elapsed % 60))"
+      write_action_status "running" "${ACTION_PROGRESS}" "Установка ${image_id} выполняется · прошло ${elapsed_label}"
+    fi
+  done
+
+  if wait "${installer_pid}"; then
+    status=0
+  else
+    status=$?
+  fi
+  if (( status == 124 || status == 137 )); then
+    ACTION_FAILURE_MESSAGE="Установка ${image_id} остановлена: превышен лимит $((timeout_seconds / 60)) мин. Повторный запуск безопасно продолжит настройку."
+    return 1
+  fi
+  if (( status != 0 )); then
+    ACTION_FAILURE_MESSAGE="Установка ${image_id} завершилась с ошибкой (код ${status})."
+    return "${status}"
+  fi
+}
+
 install_protocol_image() {
   local image_id="${2:-}"
   [[ "${image_id}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "некорректный идентификатор образа."
@@ -745,10 +782,7 @@ install_protocol_image() {
     || die "образ ${image_id} содержит некорректный installer."
   info "Установка образа ${image_id}"
   prepare_package_manager
-  ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
-    AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
-    HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
-    bash "${image_root}/${installer}"
+  run_protocol_installer "${image_id}" "${image_root}/${installer}"
   install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
   systemctl restart "${APP_NAME}-api.service"

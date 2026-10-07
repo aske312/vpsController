@@ -827,8 +827,9 @@ export default function Home() {
     } finally { setBusy(false); }
   }
 
-  async function waitForProtocolState(image: ProtocolImage, installed: boolean) {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+  async function waitForProtocolState(image: ProtocolImage, installed: boolean, expectedUnit = "") {
+    const maxAttempts = installed ? 264 : 120;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 5000));
       try {
         const [imageData, status] = await Promise.all([
@@ -839,16 +840,19 @@ export default function Home() {
         setApplication(status);
         const current = imageData.items?.find((item) => item.id === image.id);
         const actionState = status.action?.state || "";
-        if (actionState === "failed" || status.action?.result === "failed") {
-          throw new Error(`${installed ? "Установка" : "Удаление"} ${image.name} завершилось с ошибкой`);
+        const actionMatches = !expectedUnit || status.action?.unit === expectedUnit;
+        if (actionMatches && (actionState === "failed" || status.action?.result === "failed" || status.action?.result === "unknown")) {
+          const detail = status.action?.message || "системная задача не вернула результат";
+          throw new Error(`Операция с ${image.name} завершилась с ошибкой: ${detail}`);
         }
-        if (Boolean(current?.installed) === installed && !["active", "activating", "running"].includes(actionState)) return;
+        const actionActive = actionMatches && ["active", "activating", "running"].includes(actionState);
+        if (Boolean(current?.installed) === installed && !actionActive) return;
       } catch (cause) {
         if (cause instanceof Error && cause.message.includes("завершилось с ошибкой")) throw cause;
         // API may restart briefly after installing or removing a module.
       }
     }
-    throw new Error(`Сервер не подтвердил ${installed ? "установку" : "удаление"} ${image.name} за 10 минут`);
+    throw new Error(`Сервер не подтвердил ${installed ? "установку" : "удаление"} ${image.name} за ${installed ? "22" : "10"} минут`);
   }
 
   async function installProtocol(image: ProtocolImage) {
@@ -859,13 +863,13 @@ export default function Home() {
     })) return;
     setBusy(true); setError(""); setInstallingProtocol(image.id);
     try {
-      const started = await request(`/protocol-images/${image.id}/install`, { method: "POST" });
+      const started = await request(`/protocol-images/${image.id}/install`, { method: "POST" }) as ApplicationStatus["action"];
       setApplication((current) => ({
         api: current?.api || { active: true, enabled: true },
         containers: current?.containers || [],
         action: started,
       }));
-      await waitForProtocolState(image, true);
+      await waitForProtocolState(image, true, started.unit || "");
       await Promise.all([loadOverview(), loadClients(), loadProtocolStatus(image.id as Protocol)]);
       setNotice(`${image.name} установлен и готов к работе`);
     } catch (cause) {
@@ -1019,14 +1023,14 @@ export default function Home() {
     })) return;
     setBusy(true); setError(""); setInstallingProtocol(`remove-${image.id}`);
     try {
-      const started = await request(`/protocol-images/${image.id}`, { method: "DELETE" });
+      const started = await request(`/protocol-images/${image.id}`, { method: "DELETE" }) as ApplicationStatus["action"];
       setApplication((current) => ({
         api: current?.api || { active: true, enabled: true },
         containers: current?.containers || [],
         action: started,
       }));
       setTab("overview");
-      await waitForProtocolState(image, false);
+      await waitForProtocolState(image, false, started.unit || "");
       await Promise.all([loadOverview(), loadClients(), loadServices()]);
       setNotice(`${image.name} удалён`);
     } catch (cause) {

@@ -522,6 +522,11 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(manager, /\n  prepare_package_manager\r?\n/);
   assert.match(manager, /dpkg --audit/);
   assert.match(manager, /DPkg::Lock::Timeout=300 -f install -y/);
+  assert.match(manager, /run_protocol_installer\(\)/);
+  assert.match(manager, /timeout --signal=TERM --kill-after=30s/);
+  assert.match(manager, /Установка \$\{image_id\} выполняется · прошло \$\{elapsed_label\}/);
+  assert.match(api, /RuntimeMaxSec=\{runtime_max_seconds\}/);
+  assert.match(api, /runtime_max_seconds=1260/);
   assert.match(awgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(awgInstall, /if ! command -v awg.*command -v awg-quick.*modinfo amneziawg/s);
   for (const installer of [hysteriaInstall, tuicInstall, xrayInstall]) {

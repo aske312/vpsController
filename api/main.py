@@ -195,6 +195,7 @@ def start_application_task(
     command: list[str],
     message: str,
     error_detail: str,
+    runtime_max_seconds: int | None = None,
 ) -> dict:
     """Reserve the shared action slot before systemd can start a fast task."""
     with action_start_lock:
@@ -216,9 +217,12 @@ def start_application_task(
             "message": message,
         }
         write_action_file(action)
+        systemd_command = ["systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec"]
+        if runtime_max_seconds:
+            systemd_command.append(f"--property=RuntimeMaxSec={runtime_max_seconds}")
         try:
             result = subprocess.run(
-                ["systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec", *command],
+                [*systemd_command, *command],
                 capture_output=True, text=True, timeout=10, check=False,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired) as cause:
@@ -1808,7 +1812,7 @@ def install_protocol_image(image_id: str, _: None = Depends(require_token)) -> d
     return start_application_task(
         f"vps-control-protocol-{image_id}", f"protocol-install:{image_id}",
         [CONTROL_COMMAND, "protocol-install", image_id], "Запуск установки протокола",
-        "Unable to install protocol image",
+        "Unable to install protocol image", runtime_max_seconds=1260,
     )
 
 
@@ -1855,14 +1859,9 @@ def remove_protocol_image(image_id: str, _: None = Depends(require_token)) -> di
     )
 
 
-@app.get("/api/application/status")
-def application_status(_: None = Depends(require_token)) -> dict:
-    action = {}
-    if ACTION_FILE.exists():
-        try:
-            action = json.loads(ACTION_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            action = {}
+def resolve_application_action(action: dict) -> dict:
+    """Resolve a persisted action without mistaking a lost unit for success."""
+    action = dict(action)
     unit = action.get("unit", "")
     if unit:
         recorded_state = action.get("state", "")
@@ -1890,11 +1889,25 @@ def application_status(_: None = Depends(require_token)) -> dict:
             elif active_state == "failed" or result == "failed":
                 resolved_state = "failed"
             else:
-                # A collected transient unit may disappear between the two
-                # systemctl calls. Treat that as a completed operation.
-                resolved_state = "finished"
+                # The manager writes a terminal state before a successful unit
+                # is collected. If both are missing, success cannot be proven.
+                resolved_state = "failed"
+                result = result if result not in ("", "unknown") else "unknown"
+                action["message"] = "Системная задача завершилась без подтверждённого результата"
         action["state"] = resolved_state
         action["result"] = result
+    return action
+
+
+@app.get("/api/application/status")
+def application_status(_: None = Depends(require_token)) -> dict:
+    action = {}
+    if ACTION_FILE.exists():
+        try:
+            action = json.loads(ACTION_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            action = {}
+    action = resolve_application_action(action)
     def component_details(service: str, unit: str, component_name: str, purpose: str, endpoint: str) -> dict:
         properties = {}
         for line in run(
