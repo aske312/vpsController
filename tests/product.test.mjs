@@ -155,12 +155,14 @@ test("primary resource metrics use CPU percent and readable RAM and disk units",
   assert.match(page, /aria-label="Период истории метрик"/);
 });
 
-test("security distinguishes public SSH from public panel access", async () => {
+test("security keeps panel access controls on the services page", async () => {
   const [api, page] = await Promise.all([read("api/main.py"), read("app/page.tsx")]);
   assert.match(api, /"panel_access": \{/);
   assert.match(api, /"publicly_accessible": panel_publicly_accessible/);
   assert.match(api, /panel_access_consistent/);
-  assert.match(page, /title="Доступ к панели"/);
+  assert.doesNotMatch(page, /title="Доступ к панели"/);
+  assert.match(page, /changePanelAccess\(event\.target\.checked \? "vpn" : "external"\)/);
+  assert.match(page, /className="serviceModeSwitch protectedAccessSwitch"/);
   assert.match(page, /SSH · административный доступ/);
   assert.match(page, /открыт по согласованной политике/);
   assert.match(page, /title="Дополнительные VPN-службы"/);
@@ -422,11 +424,10 @@ test("security posture exposes explicit states and keeps summary metrics compact
   assert.match(page, /className=\{`securityPostureStat state-\$\{listenerState\}`\}/);
   assert.match(page, /className=\{`securityPostureStat state-\$\{coreUpdatesState\}`\}/);
   assert.match(page, /status=\{sshTunnelsState\}/);
-  assert.match(page, /panelSecurity\.publicly_accessible \|\| panelSecurity\.vpn_only\s+\? "active"/);
+  assert.doesNotMatch(page, /panelAccessState|id: "panel-access"/);
   assert.doesNotMatch(page, /securityAttentionChecks|Что требует внимания|securityAttentionItem/);
   assert.match(page, /title="Системные пакеты"/);
   assert.match(page, /fixSecurity\(updates\?\.kernel_available \? "kernel-update" : "system-update"\)/);
-  assert.match(page, /title="Доступ к панели"[\s\S]*actionLabel=\{testReleaseActive \? "Вернуться на light" : "Настроить"\}/);
   assert.match(page, /title="Firewall"[\s\S]*fixSecurity\("vpn-firewall"\)/);
   assert.match(page, /title="SSH · административный доступ"[\s\S]*runServiceAction\("ssh", "SSH", "start"\)/);
   assert.match(page, /title="Версия приложения"[\s\S]*runApplicationAction\(testReleaseActive \? "test-update" : "update"\)/);

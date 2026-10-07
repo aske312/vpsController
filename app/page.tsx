@@ -1156,7 +1156,6 @@ export default function Home() {
     admin_password_strong?: boolean; cors_restricted?: boolean; secrets_protected?: boolean;
     secrets_mode?: string; api_local_only?: boolean; control_command_protected?: boolean; control_command_mode?: string;
   } | undefined;
-  const panelSecurity = firewall?.panel_access;
   const sshProtected = Boolean(
     ssh?.active
     && fail2ban?.active
@@ -1169,13 +1168,6 @@ export default function Home() {
   const testReleaseActive = releaseBranch === "test-light";
   const firewallState: SecurityState = !securityKnown ? "inactive" : firewall?.active ? "active" : "inactive";
   const vpnFirewallState: SecurityState = !securityKnown || !firewall?.active ? "inactive" : firewall?.vpn_policy_healthy ? "active" : "warning";
-  const panelAccessState: SecurityState = !securityKnown
-    ? "inactive"
-    : !panelSecurity?.consistent
-      ? "critical"
-      : panelSecurity.publicly_accessible || panelSecurity.vpn_only
-        ? "active"
-        : "inactive";
   const fail2banState: SecurityState = !securityKnown || !fail2ban?.active ? "inactive" : fail2ban.jail_active ? "active" : "warning";
   const sshState: SecurityState = !securityKnown || !ssh?.active ? "inactive" : sshProtected ? "active" : "warning";
   const sshTunnelsState: SecurityState = !securityKnown || !ssh?.active ? "inactive" : ssh.x11_forwarding === "no" ? "active" : "warning";
@@ -1211,7 +1203,6 @@ export default function Home() {
   const securityChecks: Array<{ id: string; title: string; state: SecurityState }> = [
     { id: "firewall", title: "Firewall", state: firewallState },
     { id: "vpn-firewall", title: "VPN firewall", state: vpnFirewallState },
-    { id: "panel-access", title: "Доступ к панели", state: panelAccessState },
     { id: "fail2ban", title: "Fail2ban · SSH", state: fail2banState },
     { id: "ssh", title: "SSH · административный доступ", state: sshState },
     { id: "ssh-tunnels", title: "SSH-туннели", state: sshTunnelsState },
@@ -1378,16 +1369,6 @@ export default function Home() {
             text={`Forwarding: ${firewall?.forwarding_enabled ? "ON" : "OFF"} · Stateful return: ${firewall?.stateful_return ? "ON" : "OFF"} · NAT/route: ${firewall?.vpn_policy_healthy ? "confirmed" : "invalid"}`}
             onAction={() => void fixSecurity("vpn-firewall")}
             actionLabel="Исправить"
-            disabled={busy}
-          />
-          <SecurityActionRow
-            status={panelAccessState}
-            title="Доступ к панели"
-            text={panelSecurity?.publicly_accessible
-              ? `Публичный TCP ${panelSecurity.port || 80} разрешён правилами UFW`
-              : `Из интернета закрыт · доступ только через ${(panelSecurity?.allowed_interfaces || []).join(" / ") || "WG / AWG"}`}
-            onAction={() => setTab(testReleaseActive ? "application" : "services")}
-            actionLabel={testReleaseActive ? "Вернуться на light" : "Настроить"}
             disabled={busy}
           />
           <SecurityActionRow status={fail2banState} title="Fail2ban · SSH" text={`В бане ${fail2ban?.currently_banned || 0} · всего ${fail2ban?.total_banned || 0}`} onAction={() => void fixSecurity("secure")} disabled={busy} />
