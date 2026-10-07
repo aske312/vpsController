@@ -506,6 +506,7 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(manager, /"paused" "Обновление протокола запущено/);
   assert.match(manager, /"incompatible" "Новая версия не прошла проверку совместимости/);
   assert.match(page, /checkProtocolVersion\(image\)/);
+  assert.match(page, /tab !== "overview" && !isProtocolTab\(tab\) && <div className="gateSectionIntro">/);
   assert.match(page, /Обновить до/);
   assert.match(manager, /prepare_package_manager\(\)/);
   assert.match(manager, /\n  prepare_package_manager\r?\n/);

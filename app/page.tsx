@@ -1302,7 +1302,7 @@ export default function Home() {
           <button className="ghostButton" onClick={() => { sessionStorage.removeItem("312-token"); setToken(""); }}>Выйти</button>
         </div>
       </header>
-      {tab !== "overview" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "страна не определена"} · управление инфраструктурой</p></div></div>}
+      {tab !== "overview" && !isProtocolTab(tab) && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "страна не определена"} · управление инфраструктурой</p></div></div>}
       {busy && <div className="loadingLine" />}
 
       {tab === "overview" && <section className="overview">
