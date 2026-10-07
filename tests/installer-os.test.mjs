@@ -77,6 +77,61 @@ test("Node runtime minimum matches the application requirement", () => {
   }
 });
 
+test("release download timeout scales with archive size", () => {
+  const body = manager.match(/release_download_timeout\(\) \{([\s\S]*?)\n\}/)[1];
+  const script = `set -Eeuo pipefail
+release_download_timeout() {${body}
+}
+for size in '' 1048576 170153316 1073741824; do release_download_timeout "$size"; done
+`;
+  const result = spawnSync(bash, ["-c", script], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split("\n"), ["3600", "900", "5493", "7200"]);
+});
+
+test("release size probe uses the final redirected content length", () => {
+  const body = manager.match(/release_download_size\(\) \{([\s\S]*?)\n\}/)[1];
+  const script = `set -Eeuo pipefail
+curl() { printf 'HTTP/1.1 302 Found\r\nContent-Length: 0\r\nHTTP/1.1 200 OK\r\ncontent-length: 170153316\r\n'; }
+release_download_size() {${body}
+}
+release_download_size https://example.test/release.tar.gz
+`;
+  const result = spawnSync(bash, ["-c", script], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "170153316");
+});
+
+test("release download retries resume the partial archive", () => {
+  const body = manager.match(/download_prebuilt_release\(\) \{([\s\S]*?)\n\}/)[1];
+  const script = `set -Eeuo pipefail
+calls=0
+curl() {
+  calls=$((calls + 1))
+  local output='' previous=''
+  for argument in "$@"; do
+    if [[ "$previous" == '--output' ]]; then output="$argument"; fi
+    previous="$argument"
+  done
+  [[ "$*" == *'--continue-at -'* ]] || return 98
+  if (( calls == 1 )); then printf 'partial' >"$output"; return 28; fi
+  [[ "$(<"$output")" == 'partial' ]] || return 97
+  printf '%s' '-complete' >>"$output"
+}
+warn() { :; }
+sleep() { :; }
+download_prebuilt_release() {${body}
+}
+archive=$(mktemp)
+trap 'rm -f "$archive"' EXIT
+download_prebuilt_release https://example.test/release.tar.gz "$archive" 900
+printf '%s\n' "$calls" "$(<"$archive")"
+`;
+  const result = spawnSync(bash, ["-c", script], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split("\n"), ["2", "partial-complete"]);
+});
+
 test("SSH management starts the service directly and stops an installed socket", () => {
   const body = manager.match(/ssh_units_action\(\) \{([\s\S]*?)\n\}/)[1];
   for (const state of ["loaded", "not-found", ""]) {

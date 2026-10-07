@@ -287,6 +287,9 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(manager, /TEST_RELEASE_TAG="light-test-latest"/);
   assert.doesNotMatch(manager, /main-latest|APP_TEST_RELEASE_URL/);
   assert.match(manager, /for attempt in \$\(seq 1 48\)/);
+  assert.match(manager, /release_download_timeout\(\)/);
+  assert.match(manager, /--continue-at -/);
+  assert.match(manager, /--speed-limit 1024 --speed-time 120/);
   assert.match(manager, /подготовленный релиз не соответствует актуальной ревизии ветки \$\{branch\}/);
   assert.match(manager, /test-update \[архив\]/);
   assert.match(manager, /update_prebuilt_branch "\$\{TEST_BRANCH\}" "\$\{TEST_RELEASE_TAG\}" test/);

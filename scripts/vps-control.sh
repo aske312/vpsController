@@ -1628,10 +1628,48 @@ install_prebuilt_release() {
   ok "подготовленный релиз установлен; WG/AWG и системные пакеты не изменялись."
 }
 
+release_download_size() {
+  local release_url="$1"
+  curl --fail --location --silent --show-error --head --retry 2 --retry-delay 2 \
+    --connect-timeout 15 --max-time 60 "${release_url}" \
+    | awk 'tolower($1) == "content-length:" {gsub(/\r/, "", $2); if ($2 ~ /^[0-9]+$/ && $2 > 0) size=$2} END {print size}'
+}
+
+release_download_timeout() {
+  local size_bytes="${1:-}" timeout_seconds=3600
+  if [[ "${size_bytes}" =~ ^[0-9]+$ && "${size_bytes}" -gt 0 ]]; then
+    # Allow five minutes of overhead plus transfer time at 32 KiB/s.
+    timeout_seconds=$(( (size_bytes + 32767) / 32768 + 300 ))
+    (( timeout_seconds < 900 )) && timeout_seconds=900
+    (( timeout_seconds > 7200 )) && timeout_seconds=7200
+  fi
+  printf '%s\n' "${timeout_seconds}"
+}
+
+download_prebuilt_release() {
+  local release_url="$1" archive="$2" timeout_seconds="$3"
+  local attempt status=1
+  : >"${archive}"
+  for attempt in $(seq 1 4); do
+    if curl --fail --location --silent --show-error --connect-timeout 15 \
+      --max-time "${timeout_seconds}" --speed-limit 1024 --speed-time 120 \
+      --continue-at - --output "${archive}" "${release_url}"; then
+      return 0
+    else
+      status=$?
+    fi
+    (( attempt < 4 )) || break
+    warn "Загрузка релиза прервалась; повтор ${attempt}/3 продолжится с сохранённого объёма."
+    sleep $((attempt * 2))
+  done
+  return "${status}"
+}
+
 update_prebuilt_branch() {
   local branch="$1" release_tag="$2" expected_channel="${3:-production}" preserve_previous="${4:-no}"
   local remote="${REMOTE_URL:-https://github.com/aske312/vpsController.git}"
   local latest current repository_path release_url archive release_commit release_revision ready attempt
+  local release_size download_timeout size_mb timeout_minutes
 
   if [[ "${remote}" =~ ^git@github\.com:(.+)$ ]]; then
     remote="https://github.com/${BASH_REMATCH[1]}"
@@ -1681,9 +1719,17 @@ update_prebuilt_branch() {
   install -d -m 0750 "${DATA_DIR}/tmp"
   UPDATE_TEMP_DIR="$(mktemp -d "${DATA_DIR}/tmp/update.XXXXXX")"
   archive="${UPDATE_TEMP_DIR}/vps-control-release.tar.gz"
-  info "Загрузка подготовленного релиза ветки ${branch}"
-  curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
-    --connect-timeout 15 --max-time 900 --output "${archive}" "${release_url}"
+  release_size="$(release_download_size "${release_url}" || true)"
+  download_timeout="$(release_download_timeout "${release_size}")"
+  timeout_minutes=$(( (download_timeout + 59) / 60 ))
+  if [[ "${release_size}" =~ ^[0-9]+$ && "${release_size}" -gt 0 ]]; then
+    size_mb=$(( (release_size + 1048575) / 1048576 ))
+    info "Загрузка подготовленного релиза ветки ${branch} · ${size_mb} МБ, лимит ${timeout_minutes} мин"
+  else
+    info "Загрузка подготовленного релиза ветки ${branch} · размер не определён, лимит ${timeout_minutes} мин"
+  fi
+  download_prebuilt_release "${release_url}" "${archive}" "${download_timeout}" \
+    || die "не удалось загрузить подготовленный релиз ${branch}; частичные повторы исчерпаны."
   release_commit="$(tar -xOf "${archive}" vps-control-release/.prebuilt-release 2>/dev/null \
     | awk -F= '$1 == "commit" {print $2}')"
   [[ "${release_commit}" =~ ^[0-9a-f]{40}$ && "${latest}" == "${release_commit}" ]] \
