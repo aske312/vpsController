@@ -1638,7 +1638,7 @@ export default function Home() {
             onChange={(patch) => updateAutomation("protocol_scan", patch)}
           />
           <AutomationEditor
-            title="Плановое обновление основной версии приложения (light)"
+            title="Плановое обновление основной версии приложения"
             description="Устанавливает последний подготовленный production-релиз ветки light. Тестовая ветка test-light не используется."
             value={automationDraft?.application_update}
             timer={services?.timers.application_update}

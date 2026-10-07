@@ -214,7 +214,8 @@ test("service settings are staged, saved explicitly and survive background refre
   assert.match(page, /automationDraft/);
   assert.match(page, /Проверка версий протоколов/);
   assert.match(page, /updateAutomation\("protocol_scan", patch\)/);
-  assert.match(page, /Плановое обновление основной версии приложения \(light\)/);
+  assert.match(page, /Плановое обновление основной версии приложения/);
+  assert.doesNotMatch(page, /Плановое обновление основной версии приложения \(light\)/);
   assert.match(page, /updateAutomation\("application_update", patch\)/);
   assert.match(page, /Плановое обновление ядра/);
   assert.match(page, /updateAutomation\("kernel_update", patch\)/);
