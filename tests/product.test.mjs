@@ -334,6 +334,9 @@ test("live system status refreshes below one second without overlapping heavy ch
   assert.match(api, /include_quality=False/);
   assert.match(page, /liveRequestInFlight/);
   assert.match(page, /setInterval\(\(\) => void loadLiveStatus\(\), 800\)/);
+  assert.match(page, /\["overview", "security", "application"\]\.includes\(tab\)/);
+  assert.match(page, /setInterval\(\(\) => void refreshCurrent\(false\), 15000\)/);
+  assert.match(page, /actionRunning \? 3000 : 15000/);
   assert.match(page, /"\<1"/);
   assert.match(page, /sessionStorage\.setItem\("312-notice"/);
   assert.match(page, /window\.location\.reload\(\)/);

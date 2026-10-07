@@ -397,21 +397,17 @@ export default function Home() {
   }, [loadApplication, loadClients, loadOverview, loadServices, token]);
 
   useEffect(() => {
-    if (!token || !autoRefresh) return;
-    // Security data is intentionally refreshed only when entering the tab;
-    // its checks are expensive and the page displays the last known snapshot.
-    if (tab === "security") return;
-    const actionRunning = ["active", "activating", "running"].includes(application?.action?.state || "");
-    const updateRunning = actionRunning && ["update", "test-update", "test-rollback", "kernel-update"].includes(application?.action?.action || "");
-    const delay = updateRunning ? 3000 : 5000;
-    const timer = window.setInterval(() => void refreshCurrent(false), delay);
+    if (!token || !autoRefresh || ["overview", "security", "application"].includes(tab)) return;
+    // Live telemetry owns the fast path. Full module snapshots are intentionally
+    // slower because services and protocol checks spawn multiple system commands.
+    const timer = window.setInterval(() => void refreshCurrent(false), 15000);
     return () => window.clearInterval(timer);
-  }, [application?.action?.action, application?.action?.state, autoRefresh, refreshCurrent, tab, token]);
+  }, [autoRefresh, refreshCurrent, tab, token]);
 
   useEffect(() => {
     const actionRunning = ["active", "activating", "running"].includes(application?.action?.state || "");
     if (!token || (!autoRefresh && !actionRunning)) return;
-    const timer = window.setInterval(() => void loadApplication(), 3000);
+    const timer = window.setInterval(() => void loadApplication(), actionRunning ? 3000 : 15000);
     return () => window.clearInterval(timer);
   }, [application?.action?.state, autoRefresh, loadApplication, token]);
 
