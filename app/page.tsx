@@ -135,6 +135,7 @@ export type ProtocolStatus = {
     checked_at?: string | null; state: "confirmed" | "failed" | "unverified";
     region: "RU"; title: string; detail: string;
     method: "external-regional-probe";
+    latency_ms?: number | null; bytes_received?: number; bytes_sent?: number;
   };
 };
 

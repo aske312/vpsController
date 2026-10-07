@@ -69,7 +69,7 @@ function RegionalReachability({ status }: { status: ProtocolStatus }) {
   const state = reachability?.state || "unverified";
   return <article className={`protocolRegion protocolState-${state}`} aria-label="Доступность протокола из России">
     <div className="protocolRegionMark">RU</div>
-    <div><small>ВНЕШНИЙ МАРШРУТ</small><strong>{reachability?.title || "Из РФ не проверено"}</strong><p>{reachability?.detail || "Для точного результата нужен внешний клиент или probe-агент в российской сети."}</p></div>
+    <div><small>ВНЕШНИЙ МАРШРУТ</small><strong>{reachability?.title || "Из РФ не проверено"}</strong><p>{reachability?.detail || "Для точного результата нужен внешний клиент или probe-агент в российской сети."}{reachability?.checked_at ? ` Проверено ${new Date(reachability.checked_at).toLocaleString("ru-RU")}${reachability.latency_ms != null ? ` · ${reachability.latency_ms} мс` : ""}.` : ""}</p></div>
     <span>{state === "confirmed" ? "ДОСТУПЕН" : state === "failed" ? "НЕДОСТУПЕН" : "НЕТ ДАННЫХ"}</span>
   </article>;
 }

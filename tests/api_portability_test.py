@@ -2,6 +2,7 @@
 import importlib.util
 import ipaddress
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import sys
@@ -169,13 +170,60 @@ class PortabilityTests(unittest.TestCase):
                 self.assertEqual(config.read_bytes(), original)
 
     def test_regional_reachability_does_not_mistake_server_probe_for_russia(self):
-        reachability = api.regional_reachability({
+        reachability = api.regional_reachability('hysteria2', {
             'state': 'confirmed',
             'method': 'local-protocol-roundtrip',
         })
         self.assertEqual(reachability['state'], 'unverified')
         self.assertEqual(reachability['region'], 'RU')
         self.assertIn('российскую сеть', reachability['detail'])
+
+    def test_fresh_external_ru_probe_is_reported_separately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            reports = Path(directory) / 'regional-probes.json'
+            reports.write_text(json.dumps({
+                'xray': {
+                    'region': 'RU', 'state': 'confirmed',
+                    'checked_at': datetime.now(timezone.utc).isoformat(),
+                    'latency_ms': 140, 'bytes_sent': 88, 'bytes_received': 87,
+                },
+            }), encoding='utf-8')
+            with patch.object(api, 'REGIONAL_PROBES_FILE', reports):
+                reachability = api.regional_reachability('xray', {})
+        self.assertEqual(reachability['state'], 'confirmed')
+        self.assertEqual(reachability['method'], 'external-regional-probe')
+        self.assertEqual(reachability['bytes_received'], 87)
+
+    def test_stale_external_ru_probe_does_not_remain_green(self):
+        with tempfile.TemporaryDirectory() as directory:
+            reports = Path(directory) / 'regional-probes.json'
+            reports.write_text(json.dumps({
+                'tuic': {
+                    'region': 'RU', 'state': 'confirmed',
+                    'checked_at': (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat(),
+                    'latency_ms': 100, 'bytes_sent': 88, 'bytes_received': 87,
+                },
+            }), encoding='utf-8')
+            with patch.object(api, 'REGIONAL_PROBES_FILE', reports):
+                reachability = api.regional_reachability('tuic', {})
+        self.assertEqual(reachability['state'], 'unverified')
+
+    def test_external_ru_probe_report_is_persisted_atomically(self):
+        with tempfile.TemporaryDirectory() as directory:
+            reports = Path(directory) / 'regional-probes.json'
+            with patch.object(api, 'REGIONAL_PROBES_FILE', reports):
+                reachability = api.report_protocol_reachability(
+                    'hysteria2',
+                    api.RegionalProbeReport(
+                        state='confirmed', latency_ms=90,
+                        bytes_sent=88, bytes_received=87,
+                    ),
+                    None,
+                )
+            stored = json.loads(reports.read_text(encoding='utf-8'))['hysteria2']
+        self.assertEqual(reachability['state'], 'confirmed')
+        self.assertEqual(stored['bytes_received'], 87)
+        self.assertIsNotNone(stored['checked_at'])
 
     def test_direct_roundtrip_reports_transferred_request_and_response_bytes(self):
         class Process:

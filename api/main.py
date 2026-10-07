@@ -18,7 +18,7 @@ import time
 import platform
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -89,6 +89,7 @@ PROTOCOL_VERSIONS_FILE = DATA_DIR / "protocol-versions.json"
 SERVICE_MODE_FILE = DATA_DIR / "service-mode.json"
 UPDATES_FILE = DATA_DIR / "security-updates.json"
 APP_VERSION_FILE = DATA_DIR / "application-version.json"
+REGIONAL_PROBES_FILE = DATA_DIR / "regional-probes.json"
 LOGGING_CONFIG_FILE = Path("/etc/vps-control-logging.conf")
 INSTALL_DIR = Path(os.getenv("INSTALL_DIR", "/opt/vps-control"))
 CONTROL_COMMAND = os.getenv("CONTROL_COMMAND", "/usr/local/sbin/vps-control")
@@ -115,6 +116,7 @@ connection_probe_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
 client_mutation_lock = threading.Lock()
 protocol_version_lock = threading.Lock()
+regional_probe_lock = threading.Lock()
 protocol_version_cache: dict[str, dict] = {}
 DIRECT_PROTOCOLS = ("hysteria2", "tuic", "xray")
 DIAGNOSTIC_CLIENT_PREFIX = "__vps_control_probe__"
@@ -922,7 +924,36 @@ def cached_connection_probe(protocol: str) -> dict:
     })
 
 
-def regional_reachability(connection: dict) -> dict:
+def read_regional_probe(protocol: str) -> dict | None:
+    try:
+        reports = json.loads(REGIONAL_PROBES_FILE.read_text(encoding="utf-8"))
+        report = reports.get(protocol)
+        checked_at = datetime.fromisoformat(str(report.get("checked_at", "")))
+        if checked_at.tzinfo is None:
+            checked_at = checked_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - checked_at > timedelta(hours=24):
+            return None
+        if report.get("state") not in ("confirmed", "failed") or report.get("region") != "RU":
+            return None
+        return report
+    except (AttributeError, OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def regional_reachability(protocol: str, connection: dict) -> dict:
+    report = read_regional_probe(protocol)
+    if report:
+        confirmed = report["state"] == "confirmed"
+        return {
+            **report,
+            "method": "external-regional-probe",
+            "title": "Доступность из РФ подтверждена" if confirmed else "Протокол недоступен из РФ",
+            "detail": (
+                "Внешний probe-агент в российской сети выполнил handshake и получил корректный ответ через протокол."
+                if confirmed else
+                "Внешний probe-агент в российской сети не смог получить корректный ответ через протокол."
+            ),
+        }
     if connection.get("method") == "observed-client-traffic" and connection.get("state") == "confirmed":
         detail = "Есть реальный handshake и двусторонний трафик, но приложение не определяет страну сети клиента. Результат нельзя честно приписать маршруту из РФ."
     else:
@@ -2957,7 +2988,7 @@ def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"],
                 "last_handshake_age_s": None, "peer_rx_bytes": rx, "peer_tx_bytes": tx, "interface_rx_bytes": rx, "interface_tx_bytes": tx,
                 "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0, "transport": "VLESS / XHTTP / REALITY" if protocol == "xray" else "QUIC / UDP",
                 "resources": cached_resource_availability(protocol), "history": protocol_history(protocol), "diagnostics": direct_protocol_diagnostics(protocol),
-                "profile": protocol_runtime_profile(protocol), "connection_test": connection, "regional_reachability": regional_reachability(connection)}
+                "profile": protocol_runtime_profile(protocol), "connection_test": connection, "regional_reachability": regional_reachability(protocol, connection)}
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
     unit = f"{'wg-quick' if protocol == 'wg' else 'awg-quick'}@{interface}.service"
@@ -3028,7 +3059,7 @@ def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"],
         "diagnostics": cached_network_diagnostics(protocol),
         "profile": protocol_runtime_profile(protocol),
         "connection_test": connection,
-        "regional_reachability": regional_reachability(connection),
+        "regional_reachability": regional_reachability(protocol, connection),
       }
 
 
@@ -3045,6 +3076,42 @@ def check_network_diagnostics(protocol: Literal["wg", "awg", "hysteria2", "tuic"
 @app.post("/api/protocols/{protocol}/connection/check")
 def check_protocol_data_plane(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
     return check_protocol_connection(protocol)
+
+
+class RegionalProbeReport(BaseModel):
+    region: Literal["RU"] = "RU"
+    state: Literal["confirmed", "failed"]
+    latency_ms: int | None = Field(default=None, ge=0, le=120_000)
+    bytes_sent: int = Field(default=0, ge=0, le=1_000_000_000)
+    bytes_received: int = Field(default=0, ge=0, le=1_000_000_000)
+
+
+@app.post("/api/protocols/{protocol}/regional-report")
+def report_protocol_reachability(
+    protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"],
+    payload: RegionalProbeReport,
+    _: None = Depends(require_token),
+) -> dict:
+    if payload.state == "confirmed" and (payload.bytes_sent <= 0 or payload.bytes_received <= 0):
+        raise HTTPException(status_code=422, detail="Confirmed report requires transferred request and response bytes")
+    report = {
+        **payload.model_dump(),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with regional_probe_lock:
+        try:
+            reports = json.loads(REGIONAL_PROBES_FILE.read_text(encoding="utf-8"))
+            if not isinstance(reports, dict):
+                reports = {}
+        except (OSError, json.JSONDecodeError):
+            reports = {}
+        reports[protocol] = report
+        REGIONAL_PROBES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = REGIONAL_PROBES_FILE.with_suffix(".tmp")
+        temporary.write_text(json.dumps(reports, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        temporary.replace(REGIONAL_PROBES_FILE)
+    return regional_reachability(protocol, {})
 
 
 @app.post("/api/protocols/{protocol}/restart")
