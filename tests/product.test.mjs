@@ -56,7 +56,7 @@ test("fresh install generates credentials, supports a verified domain and finish
   assert.match(manager, /domain\) change_public_domain/);
   assert.match(manager, /PANEL_URL="https:\/\/\$\{confirmed_domain\}"/);
   assert.match(manager, /s\|:\{\\\$HTTP_PORT\}\|\$\{site_address\}\|g/);
-  assert.match(caddy, /^\{\$SITE_ADDRESS\}/);
+  assert.match(caddy, /^:\{\$HTTP_PORT\}/);
   assert.match(manager, /ui_stage "Обновление до стабильной версии"\s+update_app/);
   assert.match(manager, /update_prebuilt_branch "\$\{PRODUCTION_BRANCH\}" "\$\{PRODUCTION_RELEASE_TAG\}"/);
   assert.match(readme, /--domain panel\.example\.com/);
@@ -374,7 +374,8 @@ test("web and gateway run as systemd services without Docker", async () => {
     read("scripts/vps-control.sh"), read("api/main.py"), read("app/page.tsx"),
   ]);
   assert.match(manager, /\$\{APP_NAME\}-web\.service/);
-  assert.match(manager, /systemctl restart "\$\{APP_NAME\}-api\.service" "\$\{APP_NAME\}-web\.service" caddy\.service/);
+  assert.match(manager, /systemctl restart "\$\{APP_NAME\}-api\.service" "\$\{APP_NAME\}-web\.service"/);
+  assert.match(manager, /restart_caddy_service/);
   assert.match(manager, /caddy validate --config/);
   assert.doesNotMatch(manager, /Установка Docker|compose_with_progress/);
   assert.match(manager, /cleanup_legacy_runtime\(\)/);
@@ -385,6 +386,21 @@ test("web and gateway run as systemd services without Docker", async () => {
   assert.match(api, /"vps-control-web\.service"/);
   assert.match(api, /"caddy\.service"/);
   assert.match(page, /службы<\/span>/);
+});
+
+test("Caddy updates remain compatible with old installers and roll back safely", async () => {
+  const [caddyfile, manager] = await Promise.all([
+    read("Caddyfile"), read("scripts/vps-control.sh"),
+  ]);
+  assert.match(caddyfile, /^:\{\$HTTP_PORT\} \{/);
+  assert.doesNotMatch(caddyfile, /\{\$SITE_ADDRESS\}/);
+  assert.match(caddyfile.replaceAll("{$HTTP_PORT}", "80"), /^:80 \{/);
+  assert.match(manager, /validate_caddy_template "\$\{payload\}\/Caddyfile"/);
+  assert.match(manager, /mktemp \/etc\/caddy\/\.Caddyfile\.XXXXXX/);
+  assert.match(manager, /caddy validate --adapter caddyfile --config "\$\{candidate\}"/);
+  assert.match(manager, /mv -f -- "\$\{candidate\}" "\$\{CADDY_CONFIG\}"/);
+  assert.match(manager, /restart_caddy_service\(\)[\s\S]*restore_caddy_config/);
+  assert.match(manager, /CADDY_CONFIG_BACKUP="\$\{CADDY_CONFIG\}\.vps-control-backup"/);
 });
 
 test("Light protocol modules install and uninstall independently", async () => {

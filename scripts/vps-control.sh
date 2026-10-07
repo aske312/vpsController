@@ -11,9 +11,12 @@ MANAGER_CONFIG="/etc/${APP_NAME}-manager.conf"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}-api.service"
 WEB_SERVICE_FILE="/etc/systemd/system/${APP_NAME}-web.service"
 CADDY_CONFIG="/etc/caddy/Caddyfile"
+CADDY_CONFIG_BACKUP="${CADDY_CONFIG}.vps-control-backup"
 COMMAND_PATH="/usr/local/sbin/${APP_NAME}"
 INSTALL_CONFIG="/etc/${APP_NAME}-install.conf"
 PANEL_URL=""
+CADDY_CONFIG_ROLLBACK_READY="no"
+CADDY_CONFIG_PREVIOUS_EXISTS="no"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 if [[ "${SCRIPT_DIR}" == "/usr/local/sbin" && -d "${INSTALL_DIR}" ]]; then
@@ -1166,13 +1169,12 @@ WantedBy=multi-user.target
 EOF
   install -d -m 0755 /etc/caddy
   write_caddy_config
-  caddy validate --config "${CADDY_CONFIG}" >/dev/null
   systemctl daemon-reload
   systemctl enable "${APP_NAME}-web.service" caddy.service >>"${INSTALL_LOG}" 2>&1
 }
 
-write_caddy_config() {
-  local confirmed_domain site_address
+render_caddy_config() {
+  local template="$1" destination="$2" confirmed_domain site_address
   confirmed_domain="$(env_value PUBLIC_DOMAIN)"
   site_address=":${HTTP_PORT}"
   if [[ "${ACCESS_MODE}" == "external" && -n "${confirmed_domain}" ]]; then
@@ -1182,7 +1184,75 @@ write_caddy_config() {
     -e "s|:{\$HTTP_PORT}|${site_address}|g" \
     -e "s|{\$SITE_ADDRESS}|${site_address}|g" \
     -e "s|{\$HTTP_PORT}|${HTTP_PORT}|g" \
-    "${INSTALL_DIR}/Caddyfile" >"${CADDY_CONFIG}"
+    "${template}" >"${destination}"
+}
+
+validate_caddy_template() {
+  local template="$1" candidate
+  candidate="$(mktemp /tmp/vps-control.Caddyfile.XXXXXX)"
+  if ! render_caddy_config "${template}" "${candidate}" \
+    || grep -Eq '\{\$[A-Za-z_][A-Za-z0-9_]*\}' "${candidate}" \
+    || ! caddy validate --adapter caddyfile --config "${candidate}" >/dev/null; then
+    rm -f -- "${candidate}"
+    return 1
+  fi
+  rm -f -- "${candidate}"
+}
+
+write_caddy_config() {
+  local candidate
+  candidate="$(mktemp /etc/caddy/.Caddyfile.XXXXXX)"
+  if ! render_caddy_config "${INSTALL_DIR}/Caddyfile" "${candidate}" \
+    || grep -Eq '\{\$[A-Za-z_][A-Za-z0-9_]*\}' "${candidate}" \
+    || ! caddy validate --adapter caddyfile --config "${candidate}" >/dev/null; then
+    rm -f -- "${candidate}"
+    warn "новая конфигурация Caddy отклонена; рабочая конфигурация не изменена."
+    return 1
+  fi
+  CADDY_CONFIG_PREVIOUS_EXISTS="no"
+  if [[ -f "${CADDY_CONFIG_BACKUP}" ]]; then
+    CADDY_CONFIG_PREVIOUS_EXISTS="yes"
+  elif [[ -f "${CADDY_CONFIG}" ]]; then
+    cp -a -- "${CADDY_CONFIG}" "${CADDY_CONFIG_BACKUP}"
+    CADDY_CONFIG_PREVIOUS_EXISTS="yes"
+  fi
+  chmod 0644 "${candidate}"
+  mv -f -- "${candidate}" "${CADDY_CONFIG}"
+  CADDY_CONFIG_ROLLBACK_READY="yes"
+}
+
+discard_caddy_config_backup() {
+  rm -f -- "${CADDY_CONFIG_BACKUP}"
+  CADDY_CONFIG_ROLLBACK_READY="no"
+  CADDY_CONFIG_PREVIOUS_EXISTS="no"
+}
+
+restore_caddy_config() {
+  [[ "${CADDY_CONFIG_ROLLBACK_READY}" == "yes" ]] || return 0
+  if [[ "${CADDY_CONFIG_PREVIOUS_EXISTS}" == "yes" && -f "${CADDY_CONFIG_BACKUP}" ]]; then
+    mv -f -- "${CADDY_CONFIG_BACKUP}" "${CADDY_CONFIG}"
+  elif [[ "${CADDY_CONFIG_PREVIOUS_EXISTS}" == "no" ]]; then
+    rm -f -- "${CADDY_CONFIG}"
+  else
+    return 1
+  fi
+  CADDY_CONFIG_ROLLBACK_READY="no"
+  CADDY_CONFIG_PREVIOUS_EXISTS="no"
+}
+
+restart_caddy_service() {
+  if systemctl restart caddy.service; then
+    discard_caddy_config_backup
+    return 0
+  fi
+  warn "Caddy не принял новую конфигурацию; восстанавливается предыдущая."
+  if restore_caddy_config; then
+    systemctl restart caddy.service 2>/dev/null \
+      || warn "предыдущая конфигурация Caddy восстановлена, но служба не запустилась."
+  else
+    warn "резервная конфигурация Caddy недоступна."
+  fi
+  return 1
 }
 
 stop_legacy_containers() {
@@ -1290,7 +1360,8 @@ PY
   install_protocol_monitor
   info "Запуск обновлённой версии 312.net"
   stop_legacy_containers
-  systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
+  systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service"
+  restart_caddy_service
   systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
   curl --fail --silent --retry 6 --retry-connrefused --retry-delay 2 \
     "http://127.0.0.1:${HTTP_PORT}/" >/dev/null
@@ -1423,6 +1494,8 @@ install_prebuilt_release() {
   ensure_product_identity || { rm -rf -- "${stage_root}"; die "идентичность установленной редакции не прошла проверку."; }
   [[ -x "${payload}/node_modules/.bin/vinext" && -f "${payload}/dist/server/index.js" && -f "${payload}/api/main.py" ]] \
     || { rm -rf -- "${stage_root}"; die "в архиве отсутствует готовая web/API-сборка."; }
+  validate_caddy_template "${payload}/Caddyfile" \
+    || { rm -rf -- "${stage_root}"; die "Caddyfile нового релиза не прошёл предварительную проверку; работающая версия не изменена."; }
 
   requirements_hash="$(sha256sum "${payload}/api/requirements.txt" | awk '{print $1}')"
   installed_requirements_hash="$(cat "${INSTALL_DIR}/venv/.requirements.sha256" 2>/dev/null || true)"
@@ -1448,11 +1521,13 @@ install_prebuilt_release() {
     || ! build_commit="$(awk -F= '$1 == "commit" {print $2}' "${INSTALL_DIR}/.prebuilt-release")" \
     || ! printf '%s\n' "${build_commit:-manual}" >"${INSTALL_DIR}/.build-commit" \
     || ! write_integrity_manifest \
-    || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
+    || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" \
+    || ! restart_caddy_service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 \
       "http://127.0.0.1:${HTTP_PORT}/" >/dev/null; then
     warn "новый релиз не прошёл проверку; выполняется откат."
+    restore_caddy_config || warn "не удалось восстановить предыдущую конфигурацию Caddy."
     systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
     if [[ -d "${INSTALL_DIR}/venv" && ! -e "${rollback}/venv" ]]; then
       mv -- "${INSTALL_DIR}/venv" "${rollback}/venv"
@@ -1586,10 +1661,12 @@ restore_test_app() {
   fi
   PROJECT_DIR="${INSTALL_DIR}"
   if ! install_api || ! install_web || ! ensure_api_write_access \
-    || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
+    || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" \
+    || ! restart_caddy_service \
     || ! systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
     || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:${HTTP_PORT}/" >/dev/null; then
     warn "сохранённая версия не запустилась; тестовая версия восстанавливается."
+    restore_caddy_config || warn "не удалось восстановить предыдущую конфигурацию Caddy."
     systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
     if [[ -d "${INSTALL_DIR}/venv" && ! -e "${failed_install}/venv" ]]; then
       mv -- "${INSTALL_DIR}/venv" "${failed_install}/venv"
@@ -1621,8 +1698,7 @@ change_access_mode() {
   configure_access
   configure_firewall "panel-only"
   write_caddy_config
-  caddy validate --config "${CADDY_CONFIG}" >/dev/null
-  systemctl restart caddy.service
+  restart_caddy_service
   systemctl restart "${APP_NAME}-api.service"
   curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 \
     "http://127.0.0.1:8000/api/health" >/dev/null
@@ -2207,8 +2283,8 @@ change_public_domain() {
   configure_access
   configure_firewall "panel-only"
   write_caddy_config
-  caddy validate --config "${CADDY_CONFIG}" >/dev/null
-  systemctl restart caddy.service "${APP_NAME}-api.service"
+  restart_caddy_service
+  systemctl restart "${APP_NAME}-api.service"
   confirmed="$(env_value PUBLIC_DOMAIN)"
   if [[ -n "${confirmed}" ]]; then
     ok "домен ${confirmed} подтверждён; панель доступна по https://${confirmed}."
@@ -2342,9 +2418,8 @@ main() {
       refresh_server_identity
       configure_firewall "panel-only"
       write_caddy_config
-      caddy validate --config "${CADDY_CONFIG}" >/dev/null
       systemctl restart "${APP_NAME}-api.service"
-      systemctl restart caddy.service
+      restart_caddy_service
       verify_app
       ;;
     secure) secure_server ;;
