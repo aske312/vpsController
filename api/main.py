@@ -117,6 +117,7 @@ client_mutation_lock = threading.Lock()
 protocol_version_lock = threading.Lock()
 protocol_version_cache: dict[str, dict] = {}
 DIRECT_PROTOCOLS = ("hysteria2", "tuic", "xray")
+DIAGNOSTIC_CLIENT_PREFIX = "__vps_control_probe__"
 MODULE_ORDER = {module_id: index for index, module_id in enumerate(("awg", "tuic", "hysteria2", "xray", "relay-agent"))}
 RESOURCE_TARGETS = (
     ("Google", "https://www.google.com/generate_204"),
@@ -315,13 +316,41 @@ def write_clients(items: list[dict]) -> None:
 def direct_client_rows() -> list[dict]:
     rows = []
     for item in read_clients():
-        if item.get("protocol") not in DIRECT_PROTOCOLS:
+        if item.get("protocol") not in DIRECT_PROTOCOLS or item.get("diagnostic"):
             continue
         rows.append({**item, "address": item.get("endpoint") or PUBLIC_IP,
                      "endpoint": item.get("endpoint") or PUBLIC_IP, "rx_bytes": 0, "tx_bytes": 0,
                      "handshake_age_s": None, "quality": "offline",
                      "quality_reason": "Учётная запись готова; активность определяется службой протокола"})
     return rows
+
+
+def diagnostic_client_id(protocol: str) -> str:
+    return f"{DIAGNOSTIC_CLIENT_PREFIX}-{protocol}"
+
+
+def is_diagnostic_identity(protocol: str, identity: dict | str) -> bool:
+    expected = diagnostic_client_id(protocol)
+    if isinstance(identity, str):
+        return identity == expected
+    return identity.get("name") == expected or identity.get("email") == f"{expected}@312.net"
+
+
+def record_diagnostic_client(protocol: str, public_key: str) -> None:
+    client_id = diagnostic_client_id(protocol)
+    items = read_clients()
+    if any(item.get("id") == client_id for item in items):
+        return
+    items.append({
+        "id": client_id,
+        "name": "Служебная проверка протокола",
+        "protocol": protocol,
+        "public_key": public_key,
+        "endpoint": "127.0.0.1",
+        "diagnostic": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    write_clients(items)
 
 
 def certificate_server_name(path: Path) -> str:
@@ -768,10 +797,13 @@ def protocol_runtime_profile(protocol: str) -> dict:
         settings = {}
 
     accounts = 0
+    diagnostic_ready = False
     if protocol == "hysteria2":
         try:
             users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8"))
-            accounts = len(users) if isinstance(users, dict) else 0
+            if isinstance(users, dict):
+                diagnostic_ready = any(is_diagnostic_identity(protocol, identity) for identity in users)
+                accounts = sum(not is_diagnostic_identity(protocol, identity) for identity in users)
         except (OSError, json.JSONDecodeError):
             pass
         identity = str(settings.get("domain", "")).strip()
@@ -785,6 +817,7 @@ def protocol_runtime_profile(protocol: str) -> dict:
             {"label": "TLS identity", "value": identity},
             {"label": "Аутентификация", "value": "HTTP auth"},
             {"label": "Учётные записи", "value": str(accounts)},
+            {"label": "Диагностический доступ", "value": "готов" if diagnostic_ready else "будет создан при проверке"},
         ]
         summary = "QUIC-прокси с TLS и отдельной HTTP-аутентификацией клиентов."
     else:
@@ -794,7 +827,9 @@ def protocol_runtime_profile(protocol: str) -> dict:
             config = {}
         if protocol == "tuic":
             inbound = next((row for row in config.get("inbounds", []) if row.get("type") == "tuic"), {})
-            accounts = len(inbound.get("users", []))
+            users = inbound.get("users", [])
+            diagnostic_ready = any(is_diagnostic_identity(protocol, identity) for identity in users)
+            accounts = sum(not is_diagnostic_identity(protocol, identity) for identity in users)
             tls = inbound.get("tls", {})
             facts = [
                 {"label": "Транспорт", "value": "TUIC v5 / QUIC / UDP"},
@@ -802,11 +837,14 @@ def protocol_runtime_profile(protocol: str) -> dict:
                 {"label": "Congestion control", "value": str(settings.get("congestion_control", "bbr"))},
                 {"label": "Heartbeat", "value": str(settings.get("heartbeat", "10s"))},
                 {"label": "Учётные записи", "value": str(accounts)},
+                {"label": "Диагностический доступ", "value": "готов" if diagnostic_ready else "будет создан при проверке"},
             ]
             summary = "QUIC-прокси TUIC v5 с TLS и индивидуальной UUID/password-аутентификацией."
         else:
             inbound = next((row for row in config.get("inbounds", []) if row.get("protocol") == "vless"), {})
-            accounts = len(inbound.get("settings", {}).get("clients", []))
+            users = inbound.get("settings", {}).get("clients", [])
+            diagnostic_ready = any(is_diagnostic_identity(protocol, identity) for identity in users)
+            accounts = sum(not is_diagnostic_identity(protocol, identity) for identity in users)
             facts = [
                 {"label": "Протокол", "value": "VLESS"},
                 {"label": "Транспорт", "value": "XHTTP / TCP"},
@@ -814,12 +852,14 @@ def protocol_runtime_profile(protocol: str) -> dict:
                 {"label": "Server name", "value": str(settings.get("server_name", "не определено"))},
                 {"label": "Reality target", "value": str(settings.get("target", "не определено"))},
                 {"label": "Учётные записи", "value": str(accounts)},
+                {"label": "Диагностический доступ", "value": "готов" if diagnostic_ready else "будет создан при проверке"},
             ]
             summary = "VLESS поверх XHTTP/TCP с транспортной защитой REALITY."
     return {
         "kind": "proxy",
         "summary": summary,
         "accounts": accounts,
+        "diagnostic_ready": diagnostic_ready,
         "listener": {"unit": unit, "port": port, "transport": transport, "listening": listening},
         "facts": facts,
     }
@@ -841,6 +881,7 @@ def observed_tunnel_connection(protocol: Literal["wg", "awg"]) -> dict:
             "latency_ms": None,
             "bytes_received": newest.get("rx_bytes", 0),
             "bytes_sent": newest.get("tx_bytes", 0),
+            "identity": "registered-client",
             "scope": "Подтверждает handshake и трафик зарегистрированного клиента; не создаёт тестовый peer и не использует ICMP.",
         }
     if fresh:
@@ -859,6 +900,7 @@ def observed_tunnel_connection(protocol: Literal["wg", "awg"]) -> dict:
         "latency_ms": None,
         "bytes_received": 0,
         "bytes_sent": 0,
+        "identity": "registered-client",
         "scope": f"{protocol.upper()} подтверждается только свежим handshake и реальным двусторонним трафиком клиента.",
     }
 
@@ -875,8 +917,24 @@ def cached_connection_probe(protocol: str) -> dict:
         "latency_ms": None,
         "bytes_received": 0,
         "bytes_sent": 0,
+        "identity": "managed-diagnostic",
         "scope": "Локальный loopback probe подтверждает протокол и передачу данных, но не внешний firewall и сеть устройства.",
     })
+
+
+def regional_reachability(connection: dict) -> dict:
+    if connection.get("method") == "observed-client-traffic" and connection.get("state") == "confirmed":
+        detail = "Есть реальный handshake и двусторонний трафик, но приложение не определяет страну сети клиента. Результат нельзя честно приписать маршруту из РФ."
+    else:
+        detail = "Серверная проверка не проходит через российскую сеть. Для точного результата нужен внешний probe-агент или реальный клиент в РФ."
+    return {
+        "checked_at": None,
+        "state": "unverified",
+        "region": "RU",
+        "method": "external-regional-probe",
+        "title": "Доступность из РФ не подтверждена",
+        "detail": detail,
+    }
 
 
 def free_loopback_port() -> int:
@@ -885,12 +943,115 @@ def free_loopback_port() -> int:
         return int(listener.getsockname()[1])
 
 
+def ensure_direct_probe_identity(protocol: str) -> bool:
+    """Create one reserved, non-user identity when a direct protocol needs a probe."""
+    client_id = diagnostic_client_id(protocol)
+    with client_mutation_lock:
+        if protocol == "hysteria2":
+            original = HYSTERIA2_USERS.read_bytes() if HYSTERIA2_USERS.exists() else None
+            users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8")) if HYSTERIA2_USERS.exists() else {}
+            if not isinstance(users, dict):
+                raise ValueError("Hysteria2 users file is invalid")
+            created = client_id not in users
+            temporary = HYSTERIA2_USERS.with_suffix(".probe.tmp")
+            try:
+                if created:
+                    users[client_id] = secrets.token_urlsafe(32)
+                    temporary.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
+                    os.chmod(temporary, 0o600)
+                    temporary.replace(HYSTERIA2_USERS)
+                record_diagnostic_client(protocol, client_id)
+                return created
+            except Exception:
+                if created:
+                    if original is None:
+                        HYSTERIA2_USERS.unlink(missing_ok=True)
+                    else:
+                        HYSTERIA2_USERS.write_bytes(original)
+                        os.chmod(HYSTERIA2_USERS, 0o600)
+                raise
+            finally:
+                temporary.unlink(missing_ok=True)
+
+        if protocol == "tuic":
+            binary = Path("/usr/local/lib/vps-control-tuic/sing-box")
+            unit = "vps-control-tuic.service"
+            config_path = TUIC_CONFIG
+            original = config_path.read_bytes()
+            config = json.loads(original)
+            inbound = next(row for row in config.get("inbounds", []) if row.get("type") == "tuic")
+            existing = next((user for user in inbound.get("users", []) if is_diagnostic_identity(protocol, user)), None)
+            if existing:
+                record_diagnostic_client(protocol, str(existing.get("uuid", client_id)))
+                return False
+            user = {"name": client_id, "password": secrets.token_urlsafe(32), "uuid": str(uuid.uuid4())}
+            inbound.setdefault("users", []).append(user)
+            temporary = config_path.with_suffix(".probe.tmp.json")
+            try:
+                temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(temporary, 0o600)
+                validation = subprocess.run(
+                    [str(binary), "check", "-c", str(temporary)],
+                    capture_output=True, text=True, timeout=15, check=False,
+                )
+                if validation.returncode:
+                    raise RuntimeError(validation.stderr.strip() or "sing-box rejected diagnostic identity")
+                temporary.replace(config_path)
+                run("systemctl", "restart", unit, timeout=20, check=True)
+                record_diagnostic_client(protocol, user["uuid"])
+                return True
+            except Exception:
+                config_path.write_bytes(original)
+                os.chmod(config_path, 0o600)
+                run("systemctl", "restart", unit, timeout=20)
+                raise
+            finally:
+                temporary.unlink(missing_ok=True)
+
+        binary = Path("/usr/local/lib/vps-control-xray/xray")
+        unit = "vps-control-xray.service"
+        original = XRAY_CONFIG.read_bytes()
+        config = json.loads(original)
+        inbound = next(row for row in config.get("inbounds", []) if row.get("protocol") == "vless")
+        users = inbound.setdefault("settings", {}).setdefault("clients", [])
+        existing = next((user for user in users if is_diagnostic_identity(protocol, user)), None)
+        if existing:
+            record_diagnostic_client(protocol, str(existing.get("id", client_id)))
+            return False
+        user_uuid = str(uuid.uuid4())
+        users.append({"id": user_uuid, "email": f"{client_id}@312.net"})
+        temporary = XRAY_CONFIG.with_suffix(".probe.tmp.json")
+        try:
+            temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.chmod(temporary, 0o600)
+            validation = subprocess.run(
+                [str(binary), "run", "-test", "-config", str(temporary)],
+                capture_output=True, text=True, timeout=15, check=False,
+            )
+            if validation.returncode:
+                raise RuntimeError(validation.stderr.strip() or "Xray rejected diagnostic identity")
+            temporary.replace(XRAY_CONFIG)
+            run("systemctl", "restart", unit, timeout=20, check=True)
+            record_diagnostic_client(protocol, user_uuid)
+            return True
+        except Exception:
+            XRAY_CONFIG.write_bytes(original)
+            os.chmod(XRAY_CONFIG, 0o600)
+            run("systemctl", "restart", unit, timeout=20)
+            raise
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
 def direct_probe_client(protocol: str, proxy_port: int, directory: Path) -> list[str] | None:
     if protocol == "hysteria2":
         try:
             settings = json.loads(HYSTERIA2_SETTINGS.read_text(encoding="utf-8"))
             users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8"))
-            client_id, password = next(iter(users.items()))
+            client_id, password = next(
+                ((key, value) for key, value in users.items() if is_diagnostic_identity(protocol, key)),
+                next(iter(users.items())),
+            )
             identity = str(settings.get("domain", "")).strip() or certificate_server_name(HYSTERIA2_DIR / "server.crt")
             fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt"), check=True).partition("=")[2].strip()
         except (AttributeError, OSError, ValueError, StopIteration, json.JSONDecodeError, HTTPException):
@@ -913,7 +1074,10 @@ def direct_probe_client(protocol: str, proxy_port: int, directory: Path) -> list
             settings = json.loads(TUIC_SETTINGS.read_text(encoding="utf-8"))
             server = json.loads(TUIC_CONFIG.read_text(encoding="utf-8"))
             inbound = next(row for row in server.get("inbounds", []) if row.get("type") == "tuic")
-            user = next(iter(inbound.get("users", [])))
+            user = next(
+                (row for row in inbound.get("users", []) if is_diagnostic_identity(protocol, row)),
+                next(iter(inbound.get("users", []))),
+            )
             certificate = (TUIC_DIR / "server.crt").read_text(encoding="utf-8")
             identity = certificate_server_name(TUIC_DIR / "server.crt")
         except (OSError, StopIteration, json.JSONDecodeError, HTTPException):
@@ -940,7 +1104,8 @@ def direct_probe_client(protocol: str, proxy_port: int, directory: Path) -> list
         settings = json.loads(XRAY_SETTINGS.read_text(encoding="utf-8"))
         server = json.loads(XRAY_CONFIG.read_text(encoding="utf-8"))
         inbound = next(row for row in server.get("inbounds", []) if row.get("protocol") == "vless")
-        user = next(iter(inbound.get("settings", {}).get("clients", [])))
+        users = inbound.get("settings", {}).get("clients", [])
+        user = next((row for row in users if is_diagnostic_identity(protocol, row)), next(iter(users)))
     except (OSError, StopIteration, json.JSONDecodeError):
         return None
     path = str(settings.get("path", "/xhttp"))
@@ -996,6 +1161,7 @@ def check_protocol_connection(protocol: str) -> dict:
         "latency_ms": None,
         "bytes_received": 0,
         "bytes_sent": 0,
+        "identity": "managed-diagnostic",
         "scope": "Локальный loopback probe подтверждает протокол и передачу данных, но не внешний firewall и сеть устройства.",
     }
     process = None
@@ -1003,6 +1169,16 @@ def check_protocol_connection(protocol: str) -> dict:
         unit, _, _, listening = protocol_listener(protocol)
         if run("systemctl", "is-active", unit) != "active" or not listening:
             result.update(state="failed", title="Протокол не принимает подключения", detail="Служба остановлена или listener не найден.")
+            connection_probe_cache[protocol] = result
+            return result
+        try:
+            ensure_direct_probe_identity(protocol)
+        except (OSError, ValueError, StopIteration, json.JSONDecodeError, RuntimeError, subprocess.TimeoutExpired, HTTPException) as exc:
+            result.update(
+                state="failed",
+                title="Диагностический доступ не подготовлен",
+                detail=f"Не удалось безопасно создать служебную identity: {type(exc).__name__}.",
+            )
             connection_probe_cache[protocol] = result
             return result
         proxy_port = free_loopback_port()
@@ -2772,14 +2948,15 @@ def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"],
         default_port = {"hysteria2": 8443, "tuic": 8444, "xray": 8445}[protocol]
         try: settings = json.loads(settings_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError): settings = {}
-        rx, tx = service_bytes(unit); active = run("systemctl", "is-active", unit) == "active"; protocol_clients = [item for item in read_clients() if item.get("protocol") == protocol]
+        rx, tx = service_bytes(unit); active = run("systemctl", "is-active", unit) == "active"; protocol_clients = [item for item in read_clients() if item.get("protocol") == protocol and not item.get("diagnostic")]
+        connection = cached_connection_probe(protocol)
         return {"protocol": protocol, "interface": "QUIC/UDP" if protocol != "xray" else "XHTTP/TCP", "active": active, "service_active": active,
                 "service_enabled": run("systemctl", "is-enabled", unit) == "enabled", "active_since": run("systemctl", "show", unit, "--property=ActiveEnterTimestamp", "--value"),
                 "address": PUBLIC_IP, "listen_port": int(settings.get("port", default_port)), "mtu": 0, "peers": len(protocol_clients), "online_peers": 0, "endpoints": 0,
                 "last_handshake_age_s": None, "peer_rx_bytes": rx, "peer_tx_bytes": tx, "interface_rx_bytes": rx, "interface_tx_bytes": tx,
                 "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0, "transport": "VLESS / XHTTP / REALITY" if protocol == "xray" else "QUIC / UDP",
                 "resources": cached_resource_availability(protocol), "history": protocol_history(protocol), "diagnostics": direct_protocol_diagnostics(protocol),
-                "profile": protocol_runtime_profile(protocol), "connection_test": cached_connection_probe(protocol)}
+                "profile": protocol_runtime_profile(protocol), "connection_test": connection, "regional_reachability": regional_reachability(connection)}
     command = "wg" if protocol == "wg" else "awg"
     interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
     unit = f"{'wg-quick' if protocol == 'wg' else 'awg-quick'}@{interface}.service"
@@ -2822,6 +2999,7 @@ def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"],
 
     listen_port = int(rows[0].split("\t")[2]) if rows and len(rows[0].split("\t")) >= 3 else 0
     history = protocol_history(protocol)
+    connection = cached_connection_probe(protocol)
     return {
         "protocol": protocol,
         "interface": interface,
@@ -2848,7 +3026,8 @@ def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"],
         "history": history,
         "diagnostics": cached_network_diagnostics(protocol),
         "profile": protocol_runtime_profile(protocol),
-        "connection_test": cached_connection_probe(protocol),
+        "connection_test": connection,
+        "regional_reachability": regional_reachability(connection),
       }
 
 

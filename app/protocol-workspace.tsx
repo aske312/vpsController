@@ -54,7 +54,7 @@ function EvidenceCard({ status, checking, onCheck }: { status: ProtocolStatus; c
     <header><span>DATA PLANE PROOF</span><b>{state === "confirmed" ? "ПОДТВЕРЖДЕНО" : state === "failed" ? "ОШИБКА" : "НЕ ПРОВЕРЕНО"}</b></header>
     <div className="protocolProofLead"><i>{state === "confirmed" ? "✓" : state === "failed" ? "!" : "?"}</i><div><h3>{evidence?.title || "Передача данных не проверялась"}</h3><p>{evidence?.detail || "Запустите проверку протокола."}</p></div></div>
     <dl className="protocolProofMetrics">
-      <div><dt>Метод</dt><dd>{evidence?.method === "observed-client-traffic" ? "реальный клиент" : "локальный protocol client"}</dd></div>
+      <div><dt>Метод</dt><dd>{evidence?.method === "observed-client-traffic" ? "реальный клиент" : evidence?.identity === "managed-diagnostic" ? "служебная probe-запись" : "локальный protocol client"}</dd></div>
       <div><dt>Request / response</dt><dd>{evidence?.latency_ms != null ? `${evidence.latency_ms} мс` : "—"}</dd></div>
       <div><dt>Передано</dt><dd>{state === "confirmed" ? `↑ ${formatBytes(evidence?.bytes_sent)} · ↓ ${formatBytes(evidence?.bytes_received)}` : "—"}</dd></div>
       <div><dt>Последняя проверка</dt><dd>{evidence?.checked_at ? new Date(evidence.checked_at).toLocaleString("ru-RU") : "никогда"}</dd></div>
@@ -64,14 +64,24 @@ function EvidenceCard({ status, checking, onCheck }: { status: ProtocolStatus; c
   </article>;
 }
 
+function RegionalReachability({ status }: { status: ProtocolStatus }) {
+  const reachability = status.regional_reachability;
+  const state = reachability?.state || "unverified";
+  return <article className={`protocolRegion protocolState-${state}`} aria-label="Доступность протокола из России">
+    <div className="protocolRegionMark">RU</div>
+    <div><small>ВНЕШНИЙ МАРШРУТ</small><strong>{reachability?.title || "Из РФ не проверено"}</strong><p>{reachability?.detail || "Для точного результата нужен внешний клиент или probe-агент в российской сети."}</p></div>
+    <span>{state === "confirmed" ? "ДОСТУПЕН" : state === "failed" ? "НЕДОСТУПЕН" : "НЕТ ДАННЫХ"}</span>
+  </article>;
+}
+
 function TruthChain({ status }: { status: ProtocolStatus }) {
   const listenerPassed = status.profile?.kind === "encrypted-tunnel" ? status.active : Boolean(status.profile?.listener?.listening);
-  const identityPassed = status.profile?.kind === "encrypted-tunnel" ? status.peers > 0 : (status.profile?.accounts || 0) > 0;
+  const identityPassed = status.profile?.kind === "encrypted-tunnel" ? status.peers > 0 : (status.profile?.accounts || 0) > 0 || Boolean(status.profile?.diagnostic_ready);
   const dataState = status.connection_test?.state || "unverified";
   const steps = [
     { label: "Служба", detail: status.service_active ? "active" : "inactive", state: status.service_active ? "passed" : "failed" },
     { label: status.profile?.kind === "encrypted-tunnel" ? "Интерфейс" : "Listener", detail: listenerPassed ? `${status.listen_port}` : "не найден", state: listenerPassed ? "passed" : "failed" },
-    { label: status.profile?.kind === "encrypted-tunnel" ? "Peer identity" : "Доступы", detail: identityPassed ? `${status.profile?.accounts ?? status.peers}` : "нет", state: identityPassed ? "passed" : "unknown" },
+    { label: status.profile?.kind === "encrypted-tunnel" ? "Peer identity" : "Доступы", detail: identityPassed ? status.profile?.diagnostic_ready && !(status.profile?.accounts || 0) ? "probe identity" : `${status.profile?.accounts ?? status.peers}` : "нет", state: identityPassed ? "passed" : "unknown" },
     { label: "Данные", detail: dataState === "confirmed" ? "request/response" : dataState === "failed" ? "ошибка" : "не проверено", state: dataState === "confirmed" ? "passed" : dataState },
   ];
   return <div className="protocolTruthChain" aria-label="Уровни подтверждения работы протокола">
@@ -166,6 +176,7 @@ export function ProtocolWorkspace(props: Props) {
       <div className="protocolWorkspaceActions"><button onClick={props.onRestart} disabled={props.busy}>{status.service_active ? "Перезапустить" : "Запустить"}</button><button onClick={props.onCheckVersion} disabled={props.busy || props.checkingVersion}>{props.checkingVersion ? "Проверяем…" : "Проверить версию"}</button><button onClick={props.onUpdate} disabled={props.busy || !image?.update_available}>{props.updating ? "Обновляем…" : image?.update_available ? `Обновить до ${image.available_version}` : "Обновлений нет"}</button>{image?.removable && <button className="danger" onClick={props.onRemove} disabled={props.busy}>Удалить</button>}</div>
     </header>
     <TruthChain status={status} />
+    <RegionalReachability status={status} />
     {(protocol === "awg" || protocol === "wg") && <AwgPage {...props} />}
     {protocol === "hysteria2" && <HysteriaPage {...props} />}
     {protocol === "tuic" && <TuicPage {...props} />}

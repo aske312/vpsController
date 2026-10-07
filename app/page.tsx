@@ -120,7 +120,7 @@ export type ProtocolStatus = {
     findings: Array<{ severity: "warning" | "critical"; code: string; title: string; detail: string; action: string }>;
   };
   profile?: {
-    kind: "encrypted-tunnel" | "proxy"; summary: string; accounts?: number;
+    kind: "encrypted-tunnel" | "proxy"; summary: string; accounts?: number; diagnostic_ready?: boolean;
     listener?: { unit: string; port: number; transport: string; listening: boolean };
     facts: Array<{ label: string; value: string }>;
   };
@@ -129,6 +129,12 @@ export type ProtocolStatus = {
     method: "observed-client-traffic" | "local-protocol-roundtrip";
     title: string; detail: string; latency_ms?: number | null;
     bytes_received: number; bytes_sent: number; scope: string;
+    identity?: "registered-client" | "managed-diagnostic";
+  };
+  regional_reachability?: {
+    checked_at?: string | null; state: "confirmed" | "failed" | "unverified";
+    region: "RU"; title: string; detail: string;
+    method: "external-regional-probe";
   };
 };
 

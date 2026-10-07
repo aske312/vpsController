@@ -47,15 +47,24 @@ class PortabilityTests(unittest.TestCase):
             root = Path(directory)
             hysteria = root / 'hysteria2'; hysteria.mkdir()
             (hysteria / 'settings.json').write_text('{"port":8443}', encoding='utf-8')
-            (hysteria / 'users.json').write_text('{"probe-user":"probe-password"}', encoding='utf-8')
+            hysteria_probe = api.diagnostic_client_id('hysteria2')
+            (hysteria / 'users.json').write_text(json.dumps({
+                'real-user': 'real-password', hysteria_probe: 'diagnostic-password',
+            }), encoding='utf-8')
             (hysteria / 'server.crt').write_text('certificate', encoding='utf-8')
             tuic = root / 'tuic'; tuic.mkdir()
             (tuic / 'settings.json').write_text('{"port":8444,"congestion_control":"bbr","heartbeat":"10s"}', encoding='utf-8')
-            (tuic / 'config.json').write_text(json.dumps({'inbounds': [{'type': 'tuic', 'users': [{'uuid': 'tuic-uuid', 'password': 'tuic-password'}]}]}), encoding='utf-8')
+            (tuic / 'config.json').write_text(json.dumps({'inbounds': [{'type': 'tuic', 'users': [
+                {'name': 'real-user', 'uuid': 'tuic-real', 'password': 'real-password'},
+                {'name': api.diagnostic_client_id('tuic'), 'uuid': 'tuic-diagnostic', 'password': 'diagnostic-password'},
+            ]}]}), encoding='utf-8')
             (tuic / 'server.crt').write_text('certificate', encoding='utf-8')
             xray = root / 'xray'; xray.mkdir()
             (xray / 'settings.json').write_text(json.dumps({'port': 8445, 'path': '/probe', 'server_name': 'example.com', 'password': 'public-key', 'short_id': '0123456789abcdef'}), encoding='utf-8')
-            (xray / 'config.json').write_text(json.dumps({'inbounds': [{'protocol': 'vless', 'settings': {'clients': [{'id': 'xray-uuid'}]}}]}), encoding='utf-8')
+            (xray / 'config.json').write_text(json.dumps({'inbounds': [{'protocol': 'vless', 'settings': {'clients': [
+                {'id': 'xray-real', 'email': 'real@312.net'},
+                {'id': 'xray-diagnostic', 'email': f"{api.diagnostic_client_id('xray')}@312.net"},
+            ]}}]}), encoding='utf-8')
             originals = {
                 path: path.read_bytes()
                 for path in (hysteria / 'settings.json', hysteria / 'users.json', tuic / 'config.json', xray / 'config.json')
@@ -69,15 +78,104 @@ class PortabilityTests(unittest.TestCase):
                  patch.object(api, 'run', return_value='SHA256 Fingerprint=AA:BB'):
                 commands = {protocol: api.direct_probe_client(protocol, 19080, root) for protocol in api.DIRECT_PROTOCOLS}
 
-            self.assertIn('pinSHA256: AA:BB', (root / 'hysteria2.yaml').read_text(encoding='utf-8'))
+            hysteria_config = (root / 'hysteria2.yaml').read_text(encoding='utf-8')
+            self.assertIn('pinSHA256: AA:BB', hysteria_config)
+            self.assertIn(f'auth: {hysteria_probe}:diagnostic-password', hysteria_config)
             tuic_probe = json.loads((root / 'tuic.json').read_text(encoding='utf-8'))
-            self.assertEqual(tuic_probe['outbounds'][0]['uuid'], 'tuic-uuid')
+            self.assertEqual(tuic_probe['outbounds'][0]['uuid'], 'tuic-diagnostic')
             xray_probe = json.loads((root / 'xray.json').read_text(encoding='utf-8'))
             self.assertEqual(xray_probe['outbounds'][0]['settings']['address'], '127.0.0.1')
+            self.assertEqual(xray_probe['outbounds'][0]['settings']['id'], 'xray-diagnostic')
             self.assertEqual(xray_probe['outbounds'][0]['streamSettings']['security'], 'reality')
             self.assertTrue(all(commands.values()))
             for path, content in originals.items():
                 self.assertEqual(path.read_bytes(), content)
+
+    def test_hysteria_probe_identity_is_managed_and_hidden_from_user_connections(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            hysteria = root / 'hysteria2'
+            hysteria.mkdir()
+            users = hysteria / 'users.json'
+            users.write_text('{}', encoding='utf-8')
+            clients = root / 'clients.json'
+            with patch.multiple(
+                api,
+                DATA_DIR=root,
+                CLIENTS_FILE=clients,
+                HYSTERIA2_DIR=hysteria,
+                HYSTERIA2_USERS=users,
+            ):
+                self.assertTrue(api.ensure_direct_probe_identity('hysteria2'))
+                self.assertFalse(api.ensure_direct_probe_identity('hysteria2'))
+                identity = api.diagnostic_client_id('hysteria2')
+                self.assertIn(identity, json.loads(users.read_text(encoding='utf-8')))
+                stored = api.read_clients()
+                self.assertEqual(len(stored), 1)
+                self.assertTrue(stored[0]['diagnostic'])
+                self.assertEqual(api.direct_client_rows(), [])
+
+    def test_tuic_and_xray_probe_identities_are_validated_once_and_persisted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tuic = root / 'tuic'; tuic.mkdir()
+            xray = root / 'xray'; xray.mkdir()
+            tuic_config = tuic / 'config.json'
+            xray_config = xray / 'config.json'
+            tuic_config.write_text(json.dumps({'inbounds': [{'type': 'tuic', 'users': []}]}), encoding='utf-8')
+            xray_config.write_text(json.dumps({'inbounds': [{'protocol': 'vless', 'settings': {'clients': []}}]}), encoding='utf-8')
+            validated = type('Result', (), {'returncode': 0, 'stderr': ''})()
+            with patch.multiple(
+                api,
+                DATA_DIR=root,
+                CLIENTS_FILE=root / 'clients.json',
+                TUIC_CONFIG=tuic_config,
+                XRAY_CONFIG=xray_config,
+            ), patch.object(api.subprocess, 'run', return_value=validated) as validate, \
+                 patch.object(api, 'run', return_value='active') as systemctl:
+                self.assertTrue(api.ensure_direct_probe_identity('tuic'))
+                self.assertTrue(api.ensure_direct_probe_identity('xray'))
+                self.assertFalse(api.ensure_direct_probe_identity('tuic'))
+                self.assertFalse(api.ensure_direct_probe_identity('xray'))
+                stored = api.read_clients()
+
+            tuic_users = json.loads(tuic_config.read_text(encoding='utf-8'))['inbounds'][0]['users']
+            xray_users = json.loads(xray_config.read_text(encoding='utf-8'))['inbounds'][0]['settings']['clients']
+            self.assertTrue(api.is_diagnostic_identity('tuic', tuic_users[0]))
+            self.assertTrue(api.is_diagnostic_identity('xray', xray_users[0]))
+            self.assertEqual(len([item for item in stored if item['diagnostic']]), 2)
+            self.assertEqual(validate.call_count, 2)
+            self.assertEqual(systemctl.call_count, 2)
+
+    def test_direct_probe_identity_rolls_back_rejected_server_config(self):
+        cases = {
+            'tuic': {'inbounds': [{'type': 'tuic', 'users': []}]},
+            'xray': {'inbounds': [{'protocol': 'vless', 'settings': {'clients': []}}]},
+        }
+        rejected = type('Result', (), {'returncode': 1, 'stderr': 'invalid config'})()
+        for protocol, payload in cases.items():
+            with self.subTest(protocol=protocol), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                config = root / f'{protocol}.json'
+                config.write_text(json.dumps(payload), encoding='utf-8')
+                original = config.read_bytes()
+                paths = {'TUIC_CONFIG': config} if protocol == 'tuic' else {'XRAY_CONFIG': config}
+                with patch.multiple(api, DATA_DIR=root, CLIENTS_FILE=root / 'clients.json', **paths), \
+                     patch.object(api.subprocess, 'run', return_value=rejected), \
+                     patch.object(api, 'run', return_value='active'):
+                    with self.assertRaises(RuntimeError):
+                        api.ensure_direct_probe_identity(protocol)
+                    self.assertEqual(api.read_clients(), [])
+                self.assertEqual(config.read_bytes(), original)
+
+    def test_regional_reachability_does_not_mistake_server_probe_for_russia(self):
+        reachability = api.regional_reachability({
+            'state': 'confirmed',
+            'method': 'local-protocol-roundtrip',
+        })
+        self.assertEqual(reachability['state'], 'unverified')
+        self.assertEqual(reachability['region'], 'RU')
+        self.assertIn('российскую сеть', reachability['detail'])
 
     def test_direct_roundtrip_reports_transferred_request_and_response_bytes(self):
         class Process:
@@ -97,6 +195,7 @@ class PortabilityTests(unittest.TestCase):
 
             with patch.object(api, 'protocol_listener', return_value=('unit.service', 8443, 'udp', True)), \
                  patch.object(api, 'run', return_value='active'), \
+                 patch.object(api, 'ensure_direct_probe_identity', return_value=False), \
                  patch.object(api, 'direct_probe_client', return_value=[str(binary)]), \
                  patch.object(api.subprocess, 'Popen', return_value=Process()), \
                  patch.object(api.subprocess, 'run', side_effect=curl), \
