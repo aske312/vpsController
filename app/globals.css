@@ -670,7 +670,7 @@ input, select { height: 46px; font-size: 11px; }
 .protocolState-confirmed .protocolProofLead > i { background: var(--green); }
 .protocolState-failed .protocolProofLead > i { background: #f07b7b; }
 .protocolProofLead h3 { margin: 0 0 5px; font-size: 11px; }
-.protocolProofLead p, .protocolProofScope { margin: 0; color: #8c9ba1; font-size: 8px; line-height: 1.5; }
+.protocolProofLead p, .protocolProofScope { margin: 0; color: #8c9ba1; font-size: 11px; line-height: 1.55; }
 .protocolProofMetrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 16px; margin: 14px 0 0; }
 .protocolProofMetrics > div { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid #213037; }
 .protocolProofMetrics dt { color: var(--muted); font-size: 7px; }
@@ -685,7 +685,7 @@ input, select { height: 46px; font-size: 11px; }
 .protocolRegion > div:nth-child(2) { min-width: 0; display: grid; gap: 3px; }
 .protocolRegion small { color: var(--blue); font: 700 7px var(--font-mono); letter-spacing: .12em; }
 .protocolRegion strong { font-size: 11px; }
-.protocolRegion p { margin: 0; color: var(--muted); font-size: 8px; line-height: 1.5; }
+.protocolRegion p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .protocolRegion > span { padding: 5px 7px; border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--line)); border-radius: 5px; color: var(--amber); font: 700 7px var(--font-mono); white-space: nowrap; }
 .protocolRegion.protocolState-confirmed > span { border-color: color-mix(in srgb, var(--green) 40%, var(--line)); color: var(--green); }
 .protocolRegion.protocolState-failed > span { border-color: color-mix(in srgb, var(--red) 40%, var(--line)); color: var(--red); }
@@ -1526,66 +1526,3 @@ input, select { height: 46px; font-size: 11px; }
   .securityStateSummary span { font-size: 8px; }
   .securityStatePill { font-size: 8px; }
 }
-
-/* Protocol screens prioritize readable operational data over dense packing. */
-.protocolWorkspaceRail button { min-width: 148px; height: 46px; font-size: 15px; }
-.protocolWorkspaceIdentity small,
-.protocolWorkspaceEndpoint small { font-size: 12px; line-height: 1.45; }
-.protocolWorkspaceIdentity p { font-size: 13px; line-height: 1.65; }
-.protocolWorkspaceEndpoint strong { font-size: 14px; }
-.protocolWorkspaceEndpoint span { font-size: 12px; line-height: 1.5; }
-.protocolWorkspaceVerdict strong { font-size: 13px; line-height: 1.35; white-space: normal; }
-.protocolWorkspaceVerdict small { font-size: 12px; line-height: 1.45; }
-.protocolWorkspaceActions button { min-height: 38px; padding-inline: 13px; font-size: 12px; }
-.protocolTruthStep strong { font-size: 13px; line-height: 1.35; }
-.protocolTruthStep small { overflow: visible; font-size: 12px; line-height: 1.45; text-overflow: clip; white-space: normal; }
-.protocolTruthStep > span { font-size: 10px; }
-.protocolNewCard > header span,
-.protocolNewCard > header b { font-size: 11px; line-height: 1.4; }
-.protocolPeerStrip small,
-.tuicTuning small { font-size: 11px; line-height: 1.4; }
-.protocolPeerStrip span,
-.tuicTuning span { font-size: 12px; line-height: 1.5; }
-.protocolTrafficNow small,
-.protocolTrafficNow span { font-size: 11px; line-height: 1.45; }
-.protocolTrafficNow em { font-size: 11px; }
-.protocolProofLead h3 { font-size: 15px; line-height: 1.35; }
-.protocolProofLead p,
-.protocolProofScope { font-size: 13px; line-height: 1.6; }
-.protocolProofMetrics dt,
-.protocolProofMetrics dd { font-size: 12px; line-height: 1.45; }
-.protocolProof > button,
-.protocolRuntimeCheck { min-height: 40px; font-size: 12px; }
-.protocolRegion small { font-size: 11px; line-height: 1.4; }
-.protocolRegion strong { font-size: 15px; line-height: 1.35; }
-.protocolRegion p { font-size: 13px; line-height: 1.6; }
-.protocolRegion > span { font-size: 11px; }
-.protocolRegionMark { font-size: 12px; }
-.awgParameters small { font-size: 11px; line-height: 1.4; }
-.awgParameters strong { font-size: 13px; line-height: 1.45; }
-.protocolRouteLine i { font-size: 11px; }
-.protocolRouteLine strong { font-size: 13px; line-height: 1.35; }
-.protocolRouteLine small { font-size: 12px; line-height: 1.5; }
-.hysteriaIdentity dt,
-.xrayReality dt { font-size: 11px; line-height: 1.4; }
-.hysteriaIdentity dd,
-.xrayReality dd { font-size: 12px; line-height: 1.5; }
-.xrayStack span { font-size: 11px; line-height: 1.4; }
-.xrayStack strong { font-size: 15px; line-height: 1.35; }
-.xrayStack small { overflow: visible; font-size: 12px; line-height: 1.45; text-overflow: clip; white-space: normal; }
-.protocolRuntimeToggle small { font-size: 11px; line-height: 1.4; }
-.protocolRuntimeToggle strong { font-size: 14px; line-height: 1.4; }
-.protocolRuntimeToggle > b { font-size: 12px; }
-.protocolRuntimeChecks strong { font-size: 12px; line-height: 1.4; }
-.protocolRuntimeChecks small { overflow: visible; font-size: 11px; line-height: 1.45; text-overflow: clip; white-space: normal; }
-.protocolRuntimeFindings strong { font-size: 13px; line-height: 1.4; }
-.protocolRuntimeFindings span,
-.protocolRuntimeFindings small { font-size: 12px; line-height: 1.55; }
-.protocolRuntimeClear { font-size: 12px; line-height: 1.5; }
-.protocolModuleOpen small,
-.protocolModuleCard header em,
-.protocolModuleCard dt { font-size: 11px; line-height: 1.4; }
-.protocolModuleCard p { min-height: 0; font-size: 12px; line-height: 1.55; }
-.protocolModuleEndpoint { font-size: 11px; line-height: 1.45; }
-.protocolModuleCard dd { font-size: 13px; line-height: 1.4; }
-.protocolModuleCard footer button { min-height: 36px; font-size: 12px; }
