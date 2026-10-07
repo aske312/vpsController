@@ -422,7 +422,7 @@ test("security posture exposes explicit states and keeps summary metrics compact
   assert.match(page, /className=\{`securityPostureStat state-\$\{listenerState\}`\}/);
   assert.match(page, /className=\{`securityPostureStat state-\$\{coreUpdatesState\}`\}/);
   assert.match(page, /status=\{sshTunnelsState\}/);
-  assert.match(page, /panelSecurity\.publicly_accessible\s+\? "warning"/);
+  assert.match(page, /panelSecurity\.publicly_accessible \|\| panelSecurity\.vpn_only\s+\? "active"/);
   assert.doesNotMatch(page, /securityAttentionChecks|Что требует внимания|securityAttentionItem/);
   assert.match(page, /title="Системные пакеты"/);
   assert.match(page, /fixSecurity\(updates\?\.kernel_available \? "kernel-update" : "system-update"\)/);

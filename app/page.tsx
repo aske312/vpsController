@@ -1173,11 +1173,9 @@ export default function Home() {
     ? "inactive"
     : !panelSecurity?.consistent
       ? "critical"
-      : panelSecurity.publicly_accessible
-        ? "warning"
-        : panelSecurity.vpn_only
-          ? "active"
-          : "inactive";
+      : panelSecurity.publicly_accessible || panelSecurity.vpn_only
+        ? "active"
+        : "inactive";
   const fail2banState: SecurityState = !securityKnown || !fail2ban?.active ? "inactive" : fail2ban.jail_active ? "active" : "warning";
   const sshState: SecurityState = !securityKnown || !ssh?.active ? "inactive" : sshProtected ? "active" : "warning";
   const sshTunnelsState: SecurityState = !securityKnown || !ssh?.active ? "inactive" : ssh.x11_forwarding === "no" ? "active" : "warning";
