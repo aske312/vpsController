@@ -1453,6 +1453,29 @@ input, select { height: 46px; font-size: 11px; }
 .securityPostureStat span,
 .securityPostureStat time { color: var(--muted); font-size: 9px; line-height: 1.4; }
 .securityPostureStat time { font-family: var(--font-mono); }
+.securityAttention { grid-column: 1 / -1; }
+.securityAttention .panelHead { margin-bottom: 10px; }
+.securityAttentionList { display: grid; gap: 7px; }
+.securityAttentionItem {
+  --state-color: var(--amber);
+  --state-bg: rgba(232, 183, 97, .11);
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--state-color) 26%, var(--line));
+  border-left: 2px solid var(--state-color);
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: color-mix(in srgb, var(--state-bg) 55%, #08131b);
+}
+.securityAttentionItem.state-critical { --state-color: var(--red); --state-bg: rgba(240, 123, 123, .11); }
+.securityAttentionItem .securityStateMark { background: var(--state-bg); color: var(--state-color); }
+.securityAttentionItem p { min-width: 0; margin: 0; display: grid; gap: 3px; }
+.securityAttentionItem p strong { font-size: 11px; }
+.securityAttentionItem p small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.securityAttentionItem.state-warning .securityFixButton { border-color: #72552a; background: #251d12; color: var(--amber); }
+.securityAttentionItem.state-critical .securityFixButton { border-color: #6a3232; background: #241416; color: var(--red); }
 .securityStateRow {
   --state-color: #7d8a91;
   --state-bg: rgba(125, 138, 145, .11);
@@ -1505,4 +1528,7 @@ input, select { height: 46px; font-size: 11px; }
   .securityPostureStat time { grid-column: 2; }
   .securityStateSummary span { font-size: 8px; }
   .securityStatePill { font-size: 8px; }
+  .securityAttentionItem { grid-template-columns: 28px minmax(0, 1fr) auto; }
+  .securityAttentionItem .securityStatePill { display: none; }
+  .securityAttentionItem .securityFixButton { grid-column: 2 / -1; justify-self: start; }
 }

@@ -69,6 +69,7 @@ TEST_RELEASE_TAG="light-test-latest"
 ACTION_FILE="${DATA_DIR}/application-action.json"
 AUTOMATION_FILE="${DATA_DIR}/automation.json"
 SERVICE_MODE_FILE="${DATA_DIR}/service-mode.json"
+UPDATES_FILE="${DATA_DIR}/security-updates.json"
 CURRENT_ACTION=""
 ACTION_STARTED_AT=""
 ACTION_PROGRESS=0
@@ -668,6 +669,10 @@ net.ipv4.conf.all.send_redirects = 0
 net.ipv4.conf.default.send_redirects = 0
 net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
+net.ipv4.tcp_syncookies = 1
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.default.rp_filter = 2
+kernel.dmesg_restrict = 1
 EOF
   sysctl --system >/dev/null 2>&1 || true
   local ssh_config="/etc/ssh/sshd_config.d/99-vps-control-tunnels.conf"
@@ -1977,6 +1982,30 @@ update_kernel() {
   fi
 }
 
+update_system_packages() {
+  local simulation
+  local active_protocol_units=()
+  info "Установка доступных обновлений системных пакетов"
+  export DEBIAN_FRONTEND=noninteractive
+  prepare_package_manager
+  run_with_status "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=300 update
+  simulation="$(apt-get -o DPkg::Lock::Timeout=300 -s upgrade)"
+  if ! grep -q '^Inst ' <<<"${simulation}"; then
+    rm -f "${UPDATES_FILE}"
+    ok "Системные пакеты уже актуальны."
+    return 0
+  fi
+  mapfile -t active_protocol_units < <(active_managed_protocol_units)
+  run_with_status "Установка системных обновлений" apt-get -o DPkg::Lock::Timeout=300 upgrade -y
+  verify_managed_protocol_units "${active_protocol_units[@]}"
+  rm -f "${UPDATES_FILE}"
+  if [[ -e /var/run/reboot-required ]]; then
+    warn "Обновления установлены; для их полной активации требуется перезагрузка."
+  else
+    ok "Системные обновления установлены; перезагрузка не требуется."
+  fi
+}
+
 scheduled_kernel_update() {
   if [[ -r "${SERVICE_MODE_FILE}" ]]; then
     warn "плановое обновление ядра пропущено: включён сервисный режим."
@@ -2389,6 +2418,7 @@ usage() {
   integrity-check  проверить файлы, права, конфигурацию и компоненты приложения
   identity         повторно определить IP и геолокацию сервера
   secure           установить и включить базовую защиту системы
+  system-update    установить доступные обновления системных пакетов
   kernel-update    обновить установленные метапакеты ядра Debian/Ubuntu
   vpn-firewall     восстановить маршрутизацию и NAT установленных WG/AWG
   optimize         очистить безопасные кэши и старые журналы
@@ -2421,7 +2451,7 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|scheduled-app-update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|scheduled-kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|domain|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
+    install|install-release|uninstall|doctor|start|stop|restart|update|scheduled-app-update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|system-update|kernel-update|scheduled-kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|domain|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
       case "${1}" in
         protocol-install|protocol-remove|protocol-update) begin_operation "${1}:${2:-}" ;;
         scheduled-app-update) begin_operation "update" ;;
@@ -2491,6 +2521,7 @@ main() {
       verify_app
       ;;
     secure) secure_server ;;
+    system-update) update_system_packages ;;
     kernel-update) update_kernel ;;
     scheduled-kernel-update) scheduled_kernel_update ;;
     vpn-firewall) configure_vpn_firewall_policy ;;
