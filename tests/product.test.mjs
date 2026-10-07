@@ -423,11 +423,15 @@ test("security posture exposes explicit states and keeps summary metrics compact
   assert.match(page, /className=\{`securityPostureStat state-\$\{coreUpdatesState\}`\}/);
   assert.match(page, /status=\{sshTunnelsState\}/);
   assert.match(page, /panelSecurity\.publicly_accessible\s+\? "warning"/);
-  assert.match(page, /securityAttentionChecks\.map/);
-  assert.match(page, /Что требует внимания/);
+  assert.doesNotMatch(page, /securityAttentionChecks|Что требует внимания|securityAttentionItem/);
   assert.match(page, /title="Системные пакеты"/);
   assert.match(page, /fixSecurity\(updates\?\.kernel_available \? "kernel-update" : "system-update"\)/);
   assert.match(page, /title="Доступ к панели"[\s\S]*actionLabel=\{testReleaseActive \? "Вернуться на light" : "Настроить"\}/);
+  assert.match(page, /title="Firewall"[\s\S]*fixSecurity\("vpn-firewall"\)/);
+  assert.match(page, /title="SSH · административный доступ"[\s\S]*runServiceAction\("ssh", "SSH", "start"\)/);
+  assert.match(page, /title="Версия приложения"[\s\S]*runApplicationAction\(testReleaseActive \? "test-update" : "update"\)/);
+  assert.match(page, /status=\{tcpProtectionState\}[\s\S]*fixSecurity\("secure"\)/);
+  assert.match(page, /status=\{kernelProtectionState\}[\s\S]*fixSecurity\("secure"\)/);
   assert.match(api, /"system-update"/);
   assert.match(manager, /update_system_packages\(\)/);
   assert.match(manager, /apt-get -o DPkg::Lock::Timeout=300 upgrade -y/);
@@ -435,7 +439,7 @@ test("security posture exposes explicit states and keeps summary metrics compact
   assert.match(manager, /system-update\) update_system_packages/);
   assert.match(css, /gray=inactive, green=active, yellow=attention, red=critical/);
   assert.match(css, /\.securityPostureStats \{[\s\S]*grid-template-columns: repeat\(3/);
-  assert.match(css, /\.securityAttention \{ grid-column: 1 \/ -1; \}/);
+  assert.doesNotMatch(css, /\.securityAttention/);
 });
 
 test("Caddy updates remain compatible with old installers and roll back safely", async () => {

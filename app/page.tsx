@@ -1234,7 +1234,6 @@ export default function Home() {
     { id: "cors", title: "Доверенные источники", state: corsState },
   ];
   const securityStates = securityChecks.map((check) => check.state);
-  const securityAttentionChecks = securityChecks.filter((check) => check.state === "warning" || check.state === "critical");
   const securityStateCounts = securityStates.reduce<Record<SecurityState, number>>((counts, state) => {
     counts[state] += 1;
     return counts;
@@ -1266,27 +1265,6 @@ export default function Home() {
     : "В сети";
   const navigationState = nodeState === "checking" ? "gray" : nodeState === "error" ? "red" : nodeState === "service" ? "blue" : nodeState === "working" ? "yellow" : "green";
   const countryCode = overview?.server.country_code?.toLowerCase() || "";
-
-  function securityAttentionAction(id: string): { label: string; run: () => void } | null {
-    if (id === "panel-access") return {
-      label: testReleaseActive ? "Вернуться на light" : "Настроить доступ",
-      run: () => setTab(testReleaseActive ? "application" : "services"),
-    };
-    if (id === "system-updates") return {
-      label: updates?.kernel_available ? "Обновить ядро" : "Установить обновления",
-      run: () => void fixSecurity(updates?.kernel_available ? "kernel-update" : "system-update"),
-    };
-    if (id === "vpn-firewall") return { label: "Исправить", run: () => void fixSecurity("vpn-firewall") };
-    if (["fail2ban", "ssh", "ssh-tunnels", "audit", "kernel-protection", "kernel-routing"].includes(id)) {
-      return { label: "Исправить", run: () => void fixSecurity("secure") };
-    }
-    if (id === "application-version") return {
-      label: testReleaseActive ? "Обновить test-light" : "Обновить light",
-      run: () => void runApplicationAction(testReleaseActive ? "test-update" : "update"),
-    };
-    if (id === "admin-password") return { label: "Изменить пароль", run: () => setPasswordDialog(true) };
-    return null;
-  }
 
   return <main className="shell gateShell">
     <LightNavigation
@@ -1386,24 +1364,6 @@ export default function Home() {
             <div className={`securityPostureStat state-${coreUpdatesState}`}><header><h3>CORE UPDATES</h3><i /></header><strong>{String(updates?.available ?? "—")}</strong><small>kernel &amp; packages</small><span>{updates?.security || 0} security updates</span><time>{updates?.refreshing ? "Проверяем…" : updates?.checked_at ? new Date(updates.checked_at).toLocaleString("ru-RU") : "Нет даты проверки"}</time></div>
           </div>
         </article>
-        {securityAttentionChecks.length > 0 && <article className="panel securityAttention">
-          <div className="panelHead"><div><p className="eyebrow">REQUIRES ACTION</p><h2>Что требует внимания</h2></div><span>{securityAttentionChecks.length} {securityAttentionChecks.length === 1 ? "пункт" : "пункта"}</span></div>
-          <div className="securityAttentionList">
-            {securityAttentionChecks.map((check) => {
-              const action = securityAttentionAction(check.id);
-              return <div className={`securityAttentionItem state-${check.state}`} key={check.id}>
-                <span className="securityStateMark">{securityStateMeta[check.state].symbol}</span>
-                <p><strong>{check.title}</strong><small>{check.id === "panel-access" && serviceModeActive
-                  ? "Публичный доступ включён сервисным режимом"
-                  : check.id === "system-updates"
-                    ? `Доступно пакетов: ${updates?.available ?? "—"} · security: ${updates?.security || 0}`
-                    : "Подробности и текущее состояние указаны ниже"}</small></p>
-                <em className="securityStatePill">{securityStateMeta[check.state].label}</em>
-                {action && <button className="securityFixButton" onClick={action.run} disabled={busy}>{action.label}</button>}
-              </div>;
-            })}
-          </div>
-        </article>}
         <article className="panel systemControls">
           <div><p className="eyebrow">SYSTEM POWER & KERNEL</p><h2>Системные действия</h2><span>Команды выполняются вне процесса панели через systemd</span></div>
           <div className="systemButtons">
@@ -1413,13 +1373,14 @@ export default function Home() {
           </div>
         </article>
         <article className="panel securityList compactSecurity">
-          <SecurityRow status={firewallState} title="Firewall" text={`UFW · ${firewall?.rules?.length || 0} правил`} />
+          <SecurityActionRow status={firewallState} title="Firewall" text={`UFW · ${firewall?.rules?.length || 0} правил`} onAction={() => void fixSecurity("vpn-firewall")} actionLabel="Включить" disabled={busy} />
           <SecurityActionRow
             status={vpnFirewallState}
             title="VPN FIREWALL POLICY"
             text={`Forwarding: ${firewall?.forwarding_enabled ? "ON" : "OFF"} · Stateful return: ${firewall?.stateful_return ? "ON" : "OFF"} · NAT/route: ${firewall?.vpn_policy_healthy ? "confirmed" : "invalid"}`}
             onAction={() => void fixSecurity("vpn-firewall")}
             actionLabel="Исправить"
+            disabled={busy}
           />
           <SecurityActionRow
             status={panelAccessState}
@@ -1429,14 +1390,18 @@ export default function Home() {
               : `Из интернета закрыт · доступ только через ${(panelSecurity?.allowed_interfaces || []).join(" / ") || "WG / AWG"}`}
             onAction={() => setTab(testReleaseActive ? "application" : "services")}
             actionLabel={testReleaseActive ? "Вернуться на light" : "Настроить"}
+            disabled={busy}
           />
-          <SecurityActionRow status={fail2banState} title="Fail2ban · SSH" text={`В бане ${fail2ban?.currently_banned || 0} · всего ${fail2ban?.total_banned || 0}`} onAction={() => void fixSecurity("secure")} />
-          <SecurityRow
+          <SecurityActionRow status={fail2banState} title="Fail2ban · SSH" text={`В бане ${fail2ban?.currently_banned || 0} · всего ${fail2ban?.total_banned || 0}`} onAction={() => void fixSecurity("secure")} disabled={busy} />
+          <SecurityActionRow
             status={sshState}
             title="SSH · административный доступ"
             text={ssh?.active === false
               ? "Служба остановлена · входящие SSH-подключения не принимаются"
               : `Из интернета: ${ssh?.publicly_allowed ? "открыт по согласованной политике" : "закрыт"} · Fail2ban: ${fail2ban?.active && fail2ban?.jail_active ? "защищает" : "не защищает"} · Password: ${String(ssh?.password_authentication || "unknown")} · Root: ${String(ssh?.permit_root_login || "unknown")}`}
+            onAction={() => ssh?.active === false ? void runServiceAction("ssh", "SSH", "start") : void fixSecurity("secure")}
+            actionLabel={ssh?.active === false ? "Включить" : "Исправить"}
+            disabled={busy}
           />
           <SecurityActionRow
             status={coreUpdatesState}
@@ -1444,10 +1409,11 @@ export default function Home() {
             text={`Доступно ${updates?.available ?? "—"} · security ${updates?.security || 0}${updates?.reboot_required ? " · требуется перезагрузка" : ""}`}
             onAction={() => void fixSecurity(updates?.kernel_available ? "kernel-update" : "system-update")}
             actionLabel={updates?.kernel_available ? "Обновить ядро" : "Установить"}
+            disabled={busy}
           />
-          <SecurityActionRow status={kernelUpdateState} title="Обновление ядра" text={updates?.reboot_required ? "Новое ядро установлено · требуется перезагрузка" : updates?.kernel_available ? "Доступна новая версия ядра" : "Установлена актуальная версия ядра"} onAction={() => void fixSecurity("kernel-update")} actionLabel="Обновить" />
-          <SecurityActionRow status={automaticUpdatesState} title="Автоматические обновления" text={serviceModeActive ? "Заблокированы сервисным режимом · настройки сохранены" : updates?.automatic ? "Unattended upgrades · ON" : "Unattended upgrades · OFF"} onAction={() => void fixSecurity("secure")} />
-          <SecurityRow
+          <SecurityActionRow status={kernelUpdateState} title="Обновление ядра" text={updates?.reboot_required ? "Новое ядро установлено · требуется перезагрузка" : updates?.kernel_available ? "Доступна новая версия ядра" : "Установлена актуальная версия ядра"} onAction={() => void fixSecurity("kernel-update")} actionLabel="Обновить" disabled={busy} />
+          <SecurityActionRow status={automaticUpdatesState} title="Автоматические обновления" text={serviceModeActive ? "Заблокированы сервисным режимом · настройки сохранены" : updates?.automatic ? "Unattended upgrades · ON" : "Unattended upgrades · OFF"} onAction={() => serviceModeActive ? setTab(testReleaseActive ? "application" : "services") : void fixSecurity("secure")} actionLabel={serviceModeActive ? "Открыть режим" : "Включить"} disabled={busy} />
+          <SecurityActionRow
             status={applicationVersionState}
             title="Версия приложения"
             text={applicationVersion?.refreshing && applicationVersion?.outdated == null
@@ -1457,22 +1423,27 @@ export default function Home() {
                 : applicationVersion?.outdated
                   ? `Устарела: ${applicationVersion.current_commit || "unknown"} · ${applicationVersion.branch || "light"}: ${applicationVersion.latest_commit || "unknown"}`
                   : `Актуальна: ${applicationVersion?.current_commit || "unknown"} · ветка ${applicationVersion?.branch || "main"}`}
+            onAction={() => void runApplicationAction(testReleaseActive ? "test-update" : "update")}
+            actionLabel={testReleaseActive ? "Обновить test-light" : "Обновить light"}
+            disabled={busy}
           />
           <SecurityRow status={appArmorState} title="AppArmor" text={`${securitySystem?.apparmor?.profiles || 0} профилей · ${securitySystem?.apparmor?.active ? "активен" : "выключен"}`} />
-          <SecurityActionRow status={auditState} title="Аудит действий" text={`auditd · ${securitySystem?.auditd_active ? "активен" : "остановлен"}`} onAction={() => void fixSecurity("secure")} />
-          <SecurityRow status={tcpProtectionState} title="Защита TCP" text={`SYN ${securitySystem?.syn_cookies ? "ON" : "OFF"} · Forwarding ${securitySystem?.ipv4_forwarding ? "ON" : "OFF"}`} />
-          <SecurityRow status={kernelProtectionState} title="Защита ядра" text={`RP ${securitySystem?.rp_filter_mode === 1 ? "strict" : securitySystem?.rp_filter_mode === 2 ? "loose" : securitySystem?.rp_filter_valid ? "VPN-safe" : "OFF"} · dmesg ${securitySystem?.dmesg_restricted ? "restricted" : "open"}`} />
+          <SecurityActionRow status={auditState} title="Аудит действий" text={`auditd · ${securitySystem?.auditd_active ? "активен" : "остановлен"}`} onAction={() => void fixSecurity("secure")} disabled={busy} />
+          <SecurityActionRow status={tcpProtectionState} title="Защита TCP" text={`SYN ${securitySystem?.syn_cookies ? "ON" : "OFF"} · Forwarding ${securitySystem?.ipv4_forwarding ? "ON" : "OFF"}`} onAction={() => void fixSecurity("secure")} disabled={busy} />
+          <SecurityActionRow status={kernelProtectionState} title="Защита ядра" text={`RP ${securitySystem?.rp_filter_mode === 1 ? "strict" : securitySystem?.rp_filter_mode === 2 ? "loose" : securitySystem?.rp_filter_valid ? "VPN-safe" : "OFF"} · dmesg ${securitySystem?.dmesg_restricted ? "restricted" : "open"}`} onAction={() => void fixSecurity("secure")} disabled={busy} />
           <SecurityActionRow
             status={kernelRoutingState}
             title="KERNEL ROUTING"
             text={`Redirects: ${securitySystem?.redirects_disabled ? "blocked" : "allowed"} · Source route: ${securitySystem?.source_route_disabled ? "blocked" : "allowed"}`}
             onAction={() => void fixSecurity("secure")}
+            disabled={busy}
           />
           <SecurityActionRow
             status={sshTunnelsState}
             title="SSH-туннели"
             text={ssh?.active === false ? "Служба остановлена · настройки туннелей не применяются" : `X11: ${ssh?.x11_forwarding || "unknown"} · TCP forwarding: ${ssh?.tcp_forwarding || "unknown"} (оставлен для административного контроля) · MaxAuthTries: ${ssh?.max_auth_tries || "unknown"}`}
             onAction={() => void fixSecurity("secure")}
+            disabled={busy}
           />
           <SecurityRow status={accountsState} title="Учётные записи" text={`sudo ${securitySystem?.sudo_users?.length || 0} · login ${securitySystem?.login_users?.length || 0}`} />
           <SecurityRow
@@ -1482,7 +1453,7 @@ export default function Home() {
               ? `Активно ${Object.values(legacy).filter((service) => service.active).length} · установлены отдельно и не управляются приложением`
               : "Не обнаружены"}
           />
-          <SecurityActionRow status={adminPasswordState} title="Пароль администратора" text={applicationSecurity?.admin_password_strong ? "Достаточная длина и стойкость пароля панели" : "Стандартный пароль считается небезопасным"} onAction={() => setPasswordDialog(true)} actionLabel="Изменить пароль" alwaysAction />
+          <SecurityActionRow status={adminPasswordState} title="Пароль администратора" text={applicationSecurity?.admin_password_strong ? "Достаточная длина и стойкость пароля панели" : "Стандартный пароль считается небезопасным"} onAction={() => setPasswordDialog(true)} actionLabel="Изменить пароль" alwaysAction disabled={busy} />
           <SecurityRow status={secretsState} title="Секреты приложения" text={`/etc/vps-control.env · права ${applicationSecurity?.secrets_mode || "не определены"} · владелец root`} />
           <SecurityRow status={apiState} title="Локальный API" text={applicationSecurity?.api_local_only ? "API слушает только 127.0.0.1:8000" : "API не найден локально или доступен на внешнем интерфейсе"} />
           <SecurityRow status={controlCommandState} title="Команда управления" text={`vps-control · права ${applicationSecurity?.control_command_mode || "не определены"} · запись ограничена`} />
@@ -1996,9 +1967,9 @@ function SecurityRow({ status, title, text }: { status: SecurityState; title: st
   const meta = securityStateMeta[status];
   return <div className={`securityStateRow state-${status}`}><span className="securityStateMark">{meta.symbol}</span><p><strong>{title}</strong><small>{text}</small></p><em className="securityStatePill">{meta.label}</em></div>;
 }
-function SecurityActionRow({ status, title, text, onAction, actionLabel = "Исправить", alwaysAction = false }: { status: SecurityState; title: string; text: string; onAction: () => void; actionLabel?: string; alwaysAction?: boolean }) {
+function SecurityActionRow({ status, title, text, onAction, actionLabel = "Исправить", alwaysAction = false, disabled = false }: { status: SecurityState; title: string; text: string; onAction: () => void; actionLabel?: string; alwaysAction?: boolean; disabled?: boolean }) {
   const meta = securityStateMeta[status];
-  return <div className={`securityStateRow state-${status}`}><span className="securityStateMark">{meta.symbol}</span><p><strong>{title}</strong><small>{text}</small></p>{status === "active" && !alwaysAction ? <em className="securityStatePill">{meta.label}</em> : <button className="securityFixButton" onClick={onAction}>{actionLabel}</button>}</div>;
+  return <div className={`securityStateRow state-${status}`}><span className="securityStateMark">{meta.symbol}</span><p><strong>{title}</strong><small>{text}</small></p>{status === "active" && !alwaysAction ? <em className="securityStatePill">{meta.label}</em> : <button className="securityFixButton" onClick={onAction} disabled={disabled}>{actionLabel}</button>}</div>;
 }
 function CountryFlag({ code, label }: { code: string; label: string }) {
   const normalized = code.trim().toLowerCase();
