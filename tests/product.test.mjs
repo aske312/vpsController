@@ -174,7 +174,7 @@ test("VPN firewall diagnostics accept module rules and offer a persistent repair
   assert.match(api, /"iptables", "-C", "FORWARD", "-i", interface, "-j", "ACCEPT"/);
   assert.match(api, /"iptables", "-C", "FORWARD", "-o", interface, "-m", "conntrack"/);
   assert.match(api, /"vpn-firewall"/);
-  assert.match(page, /<SecurityActionRow\s+ok=\{Boolean\(firewall\?\.vpn_policy_healthy\)\}/);
+  assert.match(page, /<SecurityActionRow\s+status=\{vpnFirewallState\}/);
   assert.match(page, /fixSecurity\("vpn-firewall"\)/);
   assert.match(manager, /configure_vpn_firewall_policy\(\)/);
   assert.match(manager, /net\.ipv4\.ip_forward=1/);
@@ -361,7 +361,7 @@ test("authentication and VPN controls preserve consistent UI states", async () =
   assert.match(page, /Текущий пароль/);
   assert.match(page, /Повторите новый пароль/);
   assert.match(page, /actionLabel="Изменить пароль" alwaysAction/);
-  assert.match(page, /ok && !alwaysAction/);
+  assert.match(page, /status === "active" && !alwaysAction/);
   assert.match(api, /hmac\.compare_digest\(payload\.current_password, ADMIN_PASSWORD\)/);
   assert.match(api, /payload\.new_password != payload\.confirm_password/);
   assert.match(api, /categories < 3/);
@@ -405,6 +405,20 @@ test("web and gateway run as systemd services without Docker", async () => {
   assert.match(api, /"vps-control-web\.service"/);
   assert.match(api, /"caddy\.service"/);
   assert.match(page, /службы<\/span>/);
+});
+
+test("security posture exposes explicit states and keeps summary metrics compact", async () => {
+  const [page, css] = await Promise.all([read("app/page.tsx"), read("app/globals.css")]);
+  assert.match(page, /type SecurityState = "inactive" \| "active" \| "warning" \| "critical"/);
+  assert.doesNotMatch(page, /securityScore/);
+  assert.match(page, /securityStateMeta\[securityPostureState\]\.label/);
+  assert.match(page, /className="securityPostureStats"/);
+  assert.match(page, /className=\{`securityPostureStat state-\$\{sshPostureState\}`\}/);
+  assert.match(page, /className=\{`securityPostureStat state-\$\{listenerState\}`\}/);
+  assert.match(page, /className=\{`securityPostureStat state-\$\{coreUpdatesState\}`\}/);
+  assert.match(page, /status=\{sshTunnelsState\}/);
+  assert.match(css, /gray=inactive, green=active, yellow=attention, red=critical/);
+  assert.match(css, /\.securityPostureStats \{[\s\S]*grid-template-columns: repeat\(3/);
 });
 
 test("Caddy updates remain compatible with old installers and roll back safely", async () => {

@@ -10,6 +10,7 @@ import { useNotifications } from "../src/notifications/notification-center";
 type Protocol = "wg" | "awg" | "hysteria2" | "tuic" | "xray";
 type Tab = "overview" | "security" | "application" | "services" | Protocol | "clients";
 type MetricsPeriod = "live" | "day" | "week" | "quarter";
+type SecurityState = "inactive" | "active" | "warning" | "critical";
 type ResourceHistory = { load: Array<number | null>; memory: Array<number | null>; disk: Array<number | null>; rx: Array<number | null>; tx: Array<number | null> };
 type MetricsHistory = {
   period: MetricsPeriod;
@@ -151,6 +152,18 @@ const duration = (seconds?: number) => {
 };
 const uptime = (seconds = 0) => `${Math.floor(seconds / 86400)}д ${Math.floor((seconds % 86400) / 3600)}ч`;
 const appendSample = (values: Array<number | null>, value: number) => [...values, Math.max(0, value)].slice(-48);
+const securityStateMeta: Record<SecurityState, { label: string; symbol: string }> = {
+  inactive: { label: "Выключено", symbol: "—" },
+  active: { label: "Активно", symbol: "✓" },
+  warning: { label: "Требует внимания", symbol: "!" },
+  critical: { label: "Критично", symbol: "×" },
+};
+const strongestSecurityState = (states: SecurityState[]): SecurityState => {
+  if (states.includes("critical")) return "critical";
+  if (states.includes("warning")) return "warning";
+  if (states.includes("active")) return "active";
+  return "inactive";
+};
 export default function Home() {
   const notifications = useNotifications();
   const [tab, setTab] = useState<Tab>("overview");
@@ -1115,31 +1128,53 @@ export default function Home() {
     && fail2ban?.active
     && fail2ban?.jail_active
   );
-  const securityChecks = [
-    Boolean(firewall?.active),
-    Boolean(firewall?.vpn_policy_healthy),
-    panelAccessHealthy,
-    Boolean(fail2ban?.active && fail2ban?.jail_active),
-    sshProtected,
-    ssh?.x11_forwarding === "no",
-    Boolean(security) && Number(updates?.available || 0) === 0,
-    Boolean(security) && !updates?.reboot_required,
-    Boolean(updates?.automatic),
-    applicationVersion?.outdated === false,
-    Boolean(securitySystem?.syn_cookies),
-    Boolean(securitySystem?.apparmor?.active),
-    Boolean(securitySystem?.auditd_active),
-    Boolean(securitySystem?.rp_filter_valid),
-    Boolean(securitySystem?.redirects_disabled),
-    Boolean(securitySystem?.source_route_disabled),
-    Boolean(securitySystem?.dmesg_restricted),
-    Boolean(applicationSecurity?.admin_password_strong),
-    Boolean(applicationSecurity?.cors_restricted),
-    Boolean(applicationSecurity?.secrets_protected),
-    Boolean(applicationSecurity?.api_local_only),
-    Boolean(applicationSecurity?.control_command_protected),
+  const securityKnown = Boolean(security) && !securityLoading;
+  const serviceModeActive = Boolean(services?.service_mode?.active || application?.service_mode?.active);
+  const firewallState: SecurityState = !securityKnown ? "inactive" : firewall?.active ? "active" : "inactive";
+  const vpnFirewallState: SecurityState = !securityKnown || !firewall?.active ? "inactive" : firewall?.vpn_policy_healthy ? "active" : "warning";
+  const panelAccessState: SecurityState = !securityKnown ? "inactive" : panelAccessHealthy ? "active" : "critical";
+  const fail2banState: SecurityState = !securityKnown || !fail2ban?.active ? "inactive" : fail2ban.jail_active ? "active" : "warning";
+  const sshState: SecurityState = !securityKnown || !ssh?.active ? "inactive" : sshProtected ? "active" : "warning";
+  const sshTunnelsState: SecurityState = !securityKnown || !ssh?.active ? "inactive" : ssh.x11_forwarding === "no" ? "active" : "warning";
+  const sshPostureState = strongestSecurityState([sshState, sshTunnelsState]);
+  const coreUpdatesState: SecurityState = !securityKnown || updates?.refreshing || updates?.available == null
+    ? "inactive"
+    : Number(updates.available) > 0 || updates.kernel_available || updates.reboot_required ? "warning" : "active";
+  const kernelUpdateState: SecurityState = !securityKnown || updates?.refreshing
+    ? "inactive"
+    : updates?.kernel_available || updates?.reboot_required ? "warning" : "active";
+  const automaticUpdatesState: SecurityState = !securityKnown || serviceModeActive ? "inactive" : updates?.automatic ? "active" : "inactive";
+  const applicationVersionState: SecurityState = !securityKnown || applicationVersion?.refreshing
+    ? "inactive"
+    : applicationVersion?.error ? "critical" : applicationVersion?.outdated == null ? "inactive" : applicationVersion.outdated ? "warning" : "active";
+  const appArmorState: SecurityState = !securityKnown || !securitySystem?.apparmor?.active ? "inactive" : "active";
+  const auditState: SecurityState = !securityKnown || !securitySystem?.auditd_active ? "inactive" : "active";
+  const tcpProtectionState: SecurityState = !securityKnown || !securitySystem?.syn_cookies ? "inactive" : "active";
+  const kernelProtectionState: SecurityState = !securityKnown || (!securitySystem?.rp_filter_valid && !securitySystem?.dmesg_restricted)
+    ? "inactive"
+    : securitySystem.rp_filter_valid && securitySystem.dmesg_restricted ? "active" : "warning";
+  const kernelRoutingState: SecurityState = !securityKnown || (!securitySystem?.redirects_disabled && !securitySystem?.source_route_disabled)
+    ? "inactive"
+    : securitySystem.redirects_disabled && securitySystem.source_route_disabled ? "active" : "warning";
+  const accountsState: SecurityState = !securityKnown ? "inactive" : (securitySystem?.login_users?.length || 0) <= 5 ? "active" : "warning";
+  const legacyServicesState: SecurityState = !securityKnown ? "inactive" : Object.values(legacy).some((service) => service.active) ? "active" : "inactive";
+  const adminPasswordState: SecurityState = !securityKnown ? "inactive" : applicationSecurity?.admin_password_strong ? "active" : "warning";
+  const secretsState: SecurityState = !securityKnown ? "inactive" : applicationSecurity?.secrets_protected ? "active" : "critical";
+  const apiState: SecurityState = !securityKnown ? "inactive" : applicationSecurity?.api_local_only ? "active" : "critical";
+  const controlCommandState: SecurityState = !securityKnown ? "inactive" : applicationSecurity?.control_command_protected ? "active" : "critical";
+  const corsState: SecurityState = !securityKnown ? "inactive" : applicationSecurity?.cors_restricted ? "active" : "critical";
+  const listenerState: SecurityState = !securityKnown ? "inactive" : firewall?.active ? "active" : listeners.length ? "warning" : "inactive";
+  const securityStates: SecurityState[] = [
+    firewallState, vpnFirewallState, panelAccessState, fail2banState, sshState, sshTunnelsState,
+    coreUpdatesState, kernelUpdateState, automaticUpdatesState, applicationVersionState, appArmorState,
+    auditState, tcpProtectionState, kernelProtectionState, kernelRoutingState, accountsState,
+    legacyServicesState, adminPasswordState, secretsState, apiState, controlCommandState, corsState,
   ];
-  const securityScore = Math.round(securityChecks.filter(Boolean).length / securityChecks.length * 100);
+  const securityStateCounts = securityStates.reduce<Record<SecurityState, number>>((counts, state) => {
+    counts[state] += 1;
+    return counts;
+  }, { inactive: 0, active: 0, warning: 0, critical: 0 });
+  const securityPostureState = strongestSecurityState(securityStates);
   const activeProtocol = isProtocolTab(tab) ? protocolStatuses[tab] : undefined;
   const activeProtocolRate = isProtocolTab(tab) ? protocolRates[tab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
   const activeProtocolImage = isProtocolTab(tab) ? protocolImages.find((image) => image.id === tab) : undefined;
@@ -1150,7 +1185,6 @@ export default function Home() {
   // node itself is unavailable. Only live health data may turn the node red.
   const nodeHasError = application?.api.active === false;
   const nodeDegraded = Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
-  const serviceModeActive = Boolean(services?.service_mode?.active || application?.service_mode?.active);
   const release = application?.release || applicationVersion;
   const releaseBranch = release?.branch || "light";
   const testReleaseActive = releaseBranch === "test-light";
@@ -1255,15 +1289,20 @@ export default function Home() {
       </section>}
 
       {tab === "security" && <section className="securityGrid">
-        <article className="panel securityHero">
-          <div className="scoreRing" style={{ "--score": `${securityScore * 3.6}deg` } as React.CSSProperties}><strong>{securityScore}%</strong></div>
-          <div><p className="eyebrow">SECURITY POSTURE</p><h2>{securityLoading ? "Обновляем информацию…" : securityScore >= 85 ? "Стабильно" : securityScore >= 60 ? "Требует внимания" : "Безопасность не гарантирована"}</h2><span>{securityLoading ? "Идёт проверка системы и служб" : `${securityChecks.filter(Boolean).length} из ${securityChecks.length} проверок пройдено`}</span></div>
+        <article className={`panel securityHero state-${securityPostureState}`}>
+          <div className="securityPostureSummary">
+            <div className={`securityPostureMark state-${securityPostureState}`} aria-label={securityStateMeta[securityPostureState].label}>{securityStateMeta[securityPostureState].symbol}</div>
+            <div><p className="eyebrow">SECURITY POSTURE</p><h2>{securityLoading ? "Обновляем информацию…" : securityStateMeta[securityPostureState].label}</h2><span>{securityLoading ? "Идёт проверка системы и служб" : "Состояния отражают фактическую работу каждой меры защиты"}</span></div>
+            <div className="securityStateSummary" aria-label="Сводка состояний безопасности">
+              {(["active", "inactive", "warning", "critical"] as SecurityState[]).map((state) => <span className={`state-${state}`} key={state}><i />{securityStateMeta[state].label}: {securityStateCounts[state]}</span>)}
+            </div>
+          </div>
+          <div className="securityPostureStats">
+            <div className={`securityPostureStat state-${sshPostureState}`}><header><h3>SSH</h3><i /></header><strong>{String(security?.failed_ssh_records_24h ?? "—")}</strong><small>отклонено за 24ч</small><span>{String(ssh?.active_connections ?? "—")} активных · {String(security?.accepted_ssh_24h ?? "—")} успешных</span></div>
+            <div className={`securityPostureStat state-${listenerState}`}><header><h3>NETWORK LISTENERS</h3><i /></header><strong>{listeners.length}</strong><small>активных сетевых служб</small><span>TCP {listenerSummary?.tcp ?? "—"} · UDP {listenerSummary?.udp ?? "—"} · local {listenerSummary?.local_only ?? "—"}<br />UFW · {firewall?.rules?.length || 0} правил</span></div>
+            <div className={`securityPostureStat state-${coreUpdatesState}`}><header><h3>CORE UPDATES</h3><i /></header><strong>{String(updates?.available ?? "—")}</strong><small>kernel &amp; packages</small><span>{updates?.security || 0} security updates</span><time>{updates?.refreshing ? "Проверяем…" : updates?.checked_at ? new Date(updates.checked_at).toLocaleString("ru-RU") : "Нет даты проверки"}</time></div>
+          </div>
         </article>
-        <div className="securityStats">
-          <article className="panel"><h3>SSH</h3><small>ОТКЛОНЕНО ЗА 24Ч</small><strong>{String(security?.failed_ssh_records_24h ?? "—")}</strong><span>{String(ssh?.active_connections ?? "—")} активных подключений · {String(security?.accepted_ssh_24h ?? "—")} успешных входов за 24ч</span></article>
-          <article className="panel"><h3>NETWORK LISTENERS</h3><small>АКТИВНЫЕ СЕТЕВЫЕ СЛУЖБЫ</small><strong>{listeners.length}</strong><span>TCP {listenerSummary?.tcp ?? "—"} · UDP {listenerSummary?.udp ?? "—"} · локально {listenerSummary?.local_only ?? "—"}<br />UFW контролирует {firewall?.rules?.length || 0} правил доступа</span></article>
-          <article className="panel"><h3>CORE UPDATES</h3><small>KERNEL &amp; PACKAGES</small><strong>{String(updates?.available ?? "—")}</strong><span>{updates?.security || 0} обновлений безопасности</span><time>{updates?.refreshing ? "Идёт точная проверка…" : updates?.checked_at ? `Проверено: ${new Date(updates.checked_at).toLocaleString("ru-RU")}` : "Дата проверки пока недоступна"}</time></article>
-        </div>
         <article className="panel systemControls">
           <div><p className="eyebrow">SYSTEM POWER & KERNEL</p><h2>Системные действия</h2><span>Команды выполняются вне процесса панели через systemd</span></div>
           <div className="systemButtons">
@@ -1273,33 +1312,33 @@ export default function Home() {
           </div>
         </article>
         <article className="panel securityList compactSecurity">
-          <SecurityRow ok={Boolean(firewall?.active)} title="Firewall" text={`UFW · ${firewall?.rules?.length || 0} правил`} />
+          <SecurityRow status={firewallState} title="Firewall" text={`UFW · ${firewall?.rules?.length || 0} правил`} />
           <SecurityActionRow
-            ok={Boolean(firewall?.vpn_policy_healthy)}
+            status={vpnFirewallState}
             title="VPN FIREWALL POLICY"
             text={`Forwarding: ${firewall?.forwarding_enabled ? "ON" : "OFF"} · Stateful return: ${firewall?.stateful_return ? "ON" : "OFF"} · NAT/route: ${firewall?.vpn_policy_healthy ? "confirmed" : "invalid"}`}
             onAction={() => void fixSecurity("vpn-firewall")}
             actionLabel="Исправить"
           />
           <SecurityRow
-            ok={panelAccessHealthy}
+            status={panelAccessState}
             title="Доступ к панели"
             text={panelSecurity?.publicly_accessible
               ? `Публичный TCP ${panelSecurity.port || 80} разрешён правилами UFW`
               : `Из интернета закрыт · доступ только через ${(panelSecurity?.allowed_interfaces || []).join(" / ") || "WG / AWG"}`}
           />
-          <SecurityActionRow ok={Boolean(fail2ban?.active && fail2ban?.jail_active)} title="Fail2ban · SSH" text={`В бане ${fail2ban?.currently_banned || 0} · всего ${fail2ban?.total_banned || 0}`} onAction={() => void fixSecurity("secure")} />
+          <SecurityActionRow status={fail2banState} title="Fail2ban · SSH" text={`В бане ${fail2ban?.currently_banned || 0} · всего ${fail2ban?.total_banned || 0}`} onAction={() => void fixSecurity("secure")} />
           <SecurityRow
-            ok={sshProtected}
+            status={sshState}
             title="SSH · административный доступ"
             text={ssh?.active === false
               ? "Служба остановлена · входящие SSH-подключения не принимаются"
               : `Из интернета: ${ssh?.publicly_allowed ? "открыт по согласованной политике" : "закрыт"} · Fail2ban: ${fail2ban?.active && fail2ban?.jail_active ? "защищает" : "не защищает"} · Password: ${String(ssh?.password_authentication || "unknown")} · Root: ${String(ssh?.permit_root_login || "unknown")}`}
           />
-          <SecurityActionRow ok={securityLoading || (!updates?.kernel_available && !updates?.reboot_required)} title="Обновление ядра" text={updates?.reboot_required ? "Новое ядро установлено · требуется перезагрузка" : updates?.kernel_available ? "Доступна новая версия ядра" : "Установлена актуальная версия ядра"} onAction={() => void fixSecurity("kernel-update")} actionLabel="Обновить" />
-          <SecurityActionRow ok={Boolean(updates?.automatic)} title="Автоматические обновления" text={updates?.automatic ? "Unattended upgrades · ON" : "Unattended upgrades · OFF"} onAction={() => void fixSecurity("secure")} />
+          <SecurityActionRow status={kernelUpdateState} title="Обновление ядра" text={updates?.reboot_required ? "Новое ядро установлено · требуется перезагрузка" : updates?.kernel_available ? "Доступна новая версия ядра" : "Установлена актуальная версия ядра"} onAction={() => void fixSecurity("kernel-update")} actionLabel="Обновить" />
+          <SecurityActionRow status={automaticUpdatesState} title="Автоматические обновления" text={serviceModeActive ? "Заблокированы сервисным режимом · настройки сохранены" : updates?.automatic ? "Unattended upgrades · ON" : "Unattended upgrades · OFF"} onAction={() => void fixSecurity("secure")} />
           <SecurityRow
-            ok={applicationVersion?.outdated === false}
+            status={applicationVersionState}
             title="Версия приложения"
             text={applicationVersion?.refreshing && applicationVersion?.outdated == null
               ? `Проверяется ветка ${applicationVersion?.branch || "main"}…`
@@ -1309,35 +1348,35 @@ export default function Home() {
                   ? `Устарела: ${applicationVersion.current_commit || "unknown"} · ${applicationVersion.branch || "light"}: ${applicationVersion.latest_commit || "unknown"}`
                   : `Актуальна: ${applicationVersion?.current_commit || "unknown"} · ветка ${applicationVersion?.branch || "main"}`}
           />
-          <SecurityRow ok={Boolean(securitySystem?.apparmor?.active)} title="AppArmor" text={`${securitySystem?.apparmor?.profiles || 0} профилей · ${securitySystem?.apparmor?.active ? "активен" : "выключен"}`} />
-          <SecurityActionRow ok={Boolean(securitySystem?.auditd_active)} title="Аудит действий" text={`auditd · ${securitySystem?.auditd_active ? "активен" : "остановлен"}`} onAction={() => void fixSecurity("secure")} />
-          <SecurityRow ok={Boolean(securitySystem?.syn_cookies)} title="Защита TCP" text={`SYN ${securitySystem?.syn_cookies ? "ON" : "OFF"} · Forwarding ${securitySystem?.ipv4_forwarding ? "ON" : "OFF"}`} />
-          <SecurityRow ok={Boolean(securitySystem?.rp_filter_valid && securitySystem?.dmesg_restricted)} title="Защита ядра" text={`RP ${securitySystem?.rp_filter_mode === 1 ? "strict" : securitySystem?.rp_filter_mode === 2 ? "loose" : securitySystem?.rp_filter_valid ? "VPN-safe" : "OFF"} · dmesg ${securitySystem?.dmesg_restricted ? "restricted" : "open"}`} />
+          <SecurityRow status={appArmorState} title="AppArmor" text={`${securitySystem?.apparmor?.profiles || 0} профилей · ${securitySystem?.apparmor?.active ? "активен" : "выключен"}`} />
+          <SecurityActionRow status={auditState} title="Аудит действий" text={`auditd · ${securitySystem?.auditd_active ? "активен" : "остановлен"}`} onAction={() => void fixSecurity("secure")} />
+          <SecurityRow status={tcpProtectionState} title="Защита TCP" text={`SYN ${securitySystem?.syn_cookies ? "ON" : "OFF"} · Forwarding ${securitySystem?.ipv4_forwarding ? "ON" : "OFF"}`} />
+          <SecurityRow status={kernelProtectionState} title="Защита ядра" text={`RP ${securitySystem?.rp_filter_mode === 1 ? "strict" : securitySystem?.rp_filter_mode === 2 ? "loose" : securitySystem?.rp_filter_valid ? "VPN-safe" : "OFF"} · dmesg ${securitySystem?.dmesg_restricted ? "restricted" : "open"}`} />
           <SecurityActionRow
-            ok={Boolean(securitySystem?.redirects_disabled && securitySystem?.source_route_disabled)}
+            status={kernelRoutingState}
             title="KERNEL ROUTING"
             text={`Redirects: ${securitySystem?.redirects_disabled ? "blocked" : "allowed"} · Source route: ${securitySystem?.source_route_disabled ? "blocked" : "allowed"}`}
             onAction={() => void fixSecurity("secure")}
           />
           <SecurityActionRow
-            ok={ssh?.active !== false}
+            status={sshTunnelsState}
             title="SSH-туннели"
             text={ssh?.active === false ? "Служба остановлена · настройки туннелей не применяются" : `X11: ${ssh?.x11_forwarding || "unknown"} · TCP forwarding: ${ssh?.tcp_forwarding || "unknown"} (оставлен для административного контроля) · MaxAuthTries: ${ssh?.max_auth_tries || "unknown"}`}
             onAction={() => void fixSecurity("secure")}
           />
-          <SecurityRow ok={Boolean(securitySystem) && (securitySystem?.login_users?.length || 0) <= 5} title="Учётные записи" text={`sudo ${securitySystem?.sudo_users?.length || 0} · login ${securitySystem?.login_users?.length || 0}`} />
+          <SecurityRow status={accountsState} title="Учётные записи" text={`sudo ${securitySystem?.sudo_users?.length || 0} · login ${securitySystem?.login_users?.length || 0}`} />
           <SecurityRow
-            ok
+            status={legacyServicesState}
             title="Дополнительные VPN-службы"
             text={Object.values(legacy).some((service) => service.active)
               ? `Активно ${Object.values(legacy).filter((service) => service.active).length} · установлены отдельно и не управляются приложением`
               : "Не обнаружены"}
           />
-          <SecurityActionRow ok={Boolean(applicationSecurity?.admin_password_strong)} title="Пароль администратора" text={applicationSecurity?.admin_password_strong ? "Достаточная длина и стойкость пароля панели" : "Стандартный пароль считается небезопасным"} onAction={() => setPasswordDialog(true)} actionLabel="Изменить пароль" alwaysAction />
-          <SecurityRow ok={Boolean(applicationSecurity?.secrets_protected)} title="Секреты приложения" text={`/etc/vps-control.env · права ${applicationSecurity?.secrets_mode || "не определены"} · владелец root`} />
-          <SecurityRow ok={Boolean(applicationSecurity?.api_local_only)} title="Локальный API" text={applicationSecurity?.api_local_only ? "API слушает только 127.0.0.1:8000" : "API не найден локально или доступен на внешнем интерфейсе"} />
-          <SecurityRow ok={Boolean(applicationSecurity?.control_command_protected)} title="Команда управления" text={`vps-control · права ${applicationSecurity?.control_command_mode || "не определены"} · запись ограничена`} />
-          <SecurityRow ok={Boolean(applicationSecurity?.cors_restricted)} title="Доверенные источники" text={applicationSecurity?.cors_restricted ? "CORS ограничен заданными адресами панели" : "CORS разрешает запросы с произвольных источников"} />
+          <SecurityActionRow status={adminPasswordState} title="Пароль администратора" text={applicationSecurity?.admin_password_strong ? "Достаточная длина и стойкость пароля панели" : "Стандартный пароль считается небезопасным"} onAction={() => setPasswordDialog(true)} actionLabel="Изменить пароль" alwaysAction />
+          <SecurityRow status={secretsState} title="Секреты приложения" text={`/etc/vps-control.env · права ${applicationSecurity?.secrets_mode || "не определены"} · владелец root`} />
+          <SecurityRow status={apiState} title="Локальный API" text={applicationSecurity?.api_local_only ? "API слушает только 127.0.0.1:8000" : "API не найден локально или доступен на внешнем интерфейсе"} />
+          <SecurityRow status={controlCommandState} title="Команда управления" text={`vps-control · права ${applicationSecurity?.control_command_mode || "не определены"} · запись ограничена`} />
+          <SecurityRow status={corsState} title="Доверенные источники" text={applicationSecurity?.cors_restricted ? "CORS ограничен заданными адресами панели" : "CORS разрешает запросы с произвольных источников"} />
         </article>
         <article className="panel listeners"><div className="panelHead"><div><p className="eyebrow">LIVE NETWORK</p><h2>Открытые порты</h2></div><span>{listeners.length} listeners · kernel {securitySystem?.kernel || "—"}</span></div><pre>{listeners.join("\n") || "Нет данных"}</pre></article>
         <article className={`panel logDrawer ${securityLogsOpen ? "open" : ""}`}>
@@ -1401,18 +1440,16 @@ export default function Home() {
         <article className="panel statusPanel">
           <div className="panelHead"><div><p className="eyebrow">RUNTIME</p><h2>Состояние компонентов</h2></div><span>{application?.containers.length || 0} службы</span></div>
           <div className="runtimeRows">
-            <SecurityRow ok={Boolean(application?.api.active)} title="API панели" text={application?.api.active ? `Принимает команды интерфейса · автозапуск ${application.api.enabled ? "включён" : "отключён"}` : "Не принимает команды интерфейса"} okLabel="Работает" badLabel="Остановлен" />
+            <SecurityRow status={!application ? "inactive" : application.api.active ? "active" : "critical"} title="API панели" text={application?.api.active ? `Принимает команды интерфейса · автозапуск ${application.api.enabled ? "включён" : "отключён"}` : "Не принимает команды интерфейса"} />
             {(application?.containers || []).map((container, index) =>
               <SecurityRow
                 key={`${container.Name || container.Service}-${index}`}
-                ok={Boolean(container.healthy)}
+                status={container.healthy ? "active" : (container.State || "").toLowerCase() === "running" ? "warning" : "critical"}
                 title={container.component_name || container.Service || `Компонент ${index + 1}`}
                 text={`${container.purpose || "Компонент приложения"} · ${container.status_text || container.Status || container.State || "состояние неизвестно"}`}
-                okLabel="Работает"
-                badLabel="Остановлен"
               />
             )}
-            {application?.action?.action && <SecurityRow ok={application.action.state !== "failed" && application.action.result !== "failed"} title={`Последняя команда: ${actionLabels[application.action.action.split(":")[0]] || application.action.action}`} text={application.action.state === "running" ? "Команда выполняется системной службой" : application.action.result === "success" ? "Команда завершена без ошибок" : application.action.message || "Результат выполнения уточняется"} okLabel={application.action.state === "running" ? "Выполняется" : "Выполнена"} badLabel="Ошибка" />}
+            {application?.action?.action && <SecurityRow status={application.action.state === "failed" || application.action.result === "failed" ? "critical" : operationActive || application.action.result === "success" ? "active" : "inactive"} title={`Последняя команда: ${actionLabels[application.action.action.split(":")[0]] || application.action.action}`} text={application.action.state === "running" ? "Команда выполняется системной службой" : application.action.result === "success" ? "Команда завершена без ошибок" : application.action.message || "Результат выполнения уточняется"} />}
           </div>
         </article>
         <article className="panel logPanel applicationLogs">
@@ -1845,11 +1882,13 @@ function Metric({ title, value, percent, detail, history, resolutionSeconds }: {
     <TrendGraph values={history} resolutionSeconds={resolutionSeconds} ariaLabel={`${title}: ${value}, ${Math.round(normalized)} процентов`} />
   </article>;
 }
-function SecurityRow({ ok, title, text, okLabel = "Confirmed", badLabel = "Attention" }: { ok: boolean; title: string; text: string; okLabel?: string; badLabel?: string }) {
-  return <div><span className={ok ? "check" : "warning"}>{ok ? "✓" : "!"}</span><p><strong>{title}</strong><small>{text}</small></p><em className={ok ? "onlinePill" : "offlinePill"}>{ok ? okLabel : badLabel}</em></div>;
+function SecurityRow({ status, title, text }: { status: SecurityState; title: string; text: string }) {
+  const meta = securityStateMeta[status];
+  return <div className={`securityStateRow state-${status}`}><span className="securityStateMark">{meta.symbol}</span><p><strong>{title}</strong><small>{text}</small></p><em className="securityStatePill">{meta.label}</em></div>;
 }
-function SecurityActionRow({ ok, title, text, onAction, actionLabel = "Исправить", alwaysAction = false }: { ok: boolean; title: string; text: string; onAction: () => void; actionLabel?: string; alwaysAction?: boolean }) {
-  return <div><span className={ok ? "check" : "warning"}>{ok ? "✓" : "!"}</span><p><strong>{title}</strong><small>{text}</small></p>{ok && !alwaysAction ? <em className="onlinePill">Готово</em> : <button className="securityFixButton" onClick={onAction}>{actionLabel}</button>}</div>;
+function SecurityActionRow({ status, title, text, onAction, actionLabel = "Исправить", alwaysAction = false }: { status: SecurityState; title: string; text: string; onAction: () => void; actionLabel?: string; alwaysAction?: boolean }) {
+  const meta = securityStateMeta[status];
+  return <div className={`securityStateRow state-${status}`}><span className="securityStateMark">{meta.symbol}</span><p><strong>{title}</strong><small>{text}</small></p>{status === "active" && !alwaysAction ? <em className="securityStatePill">{meta.label}</em> : <button className="securityFixButton" onClick={onAction}>{actionLabel}</button>}</div>;
 }
 function CountryFlag({ code, label }: { code: string; label: string }) {
   const normalized = code.trim().toLowerCase();
