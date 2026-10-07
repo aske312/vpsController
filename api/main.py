@@ -104,6 +104,7 @@ MONITOR_DIR = DATA_DIR / "monitor"
 updates_refresh_lock = threading.Lock()
 app_version_refresh_lock = threading.Lock()
 resource_check_lock = threading.Lock()
+action_start_lock = threading.Lock()
 network_diagnostic_lock = threading.Lock()
 resource_check_cache: dict[str, dict] = {}
 network_diagnostic_cache: dict[str, dict] = {}
@@ -173,6 +174,60 @@ def command_succeeds(*args: str, timeout: int = 8) -> bool:
         ).returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
+
+
+def write_action_file(action: dict) -> None:
+    """Atomically publish an action without exposing partial JSON to readers."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = ACTION_FILE.with_name(f".{ACTION_FILE.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(ACTION_FILE)
+
+
+def start_application_task(
+    unit_prefix: str,
+    action_name: str,
+    command: list[str],
+    message: str,
+    error_detail: str,
+) -> dict:
+    """Reserve the shared action slot before systemd can start a fast task."""
+    with action_start_lock:
+        if ACTION_FILE.exists():
+            try:
+                previous_unit = json.loads(ACTION_FILE.read_text(encoding="utf-8")).get("unit", "")
+                if previous_unit and run("systemctl", "is-active", previous_unit) in ("active", "activating"):
+                    raise HTTPException(status_code=409, detail="Another application action is already running")
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        unit = f"{unit_prefix}-{time.time_ns()}"
+        action = {
+            "unit": f"{unit}.service",
+            "action": action_name,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "state": "activating",
+            "progress": 3,
+            "message": message,
+        }
+        write_action_file(action)
+        try:
+            result = subprocess.run(
+                ["systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec", *command],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as cause:
+            action.update(state="failed", result="failed", message=error_detail)
+            write_action_file(action)
+            status_code = 504 if isinstance(cause, subprocess.TimeoutExpired) else 500
+            raise HTTPException(status_code=status_code, detail=error_detail) from cause
+        if result.returncode:
+            detail = result.stderr.strip() or error_detail
+            action.update(state="failed", result="failed", message=detail)
+            write_action_file(action)
+            raise HTTPException(status_code=500, detail=detail)
+        return action
 
 
 def run_with_input(args: list[str], value: str) -> str:
@@ -1400,35 +1455,11 @@ def install_protocol_image(image_id: str, _: None = Depends(require_token)) -> d
         raise HTTPException(status_code=404, detail="Protocol image not found")
     if not image.get("installable"):
         raise HTTPException(status_code=409, detail="Module is not available for installation yet")
-    if ACTION_FILE.exists():
-        try:
-            previous_unit = json.loads(ACTION_FILE.read_text(encoding="utf-8")).get("unit", "")
-            if previous_unit and run("systemctl", "is-active", previous_unit) in ("active", "activating"):
-                raise HTTPException(status_code=409, detail="Another application action is already running")
-        except (json.JSONDecodeError, OSError):
-            pass
-    unit = f"vps-control-protocol-{image_id}-{int(time.time())}"
-    result = subprocess.run(
-        [
-            "systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec",
-            CONTROL_COMMAND, "protocol-install", image_id,
-        ],
-        capture_output=True, text=True, timeout=10, check=False,
+    return start_application_task(
+        f"vps-control-protocol-{image_id}", f"protocol-install:{image_id}",
+        [CONTROL_COMMAND, "protocol-install", image_id], "Запуск установки протокола",
+        "Unable to install protocol image",
     )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to install protocol image")
-    action = {
-        "unit": f"{unit}.service",
-        "action": f"protocol-install:{image_id}",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "state": "activating",
-        "progress": 3,
-        "message": "Запуск установки протокола",
-    }
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
-    os.chmod(ACTION_FILE, 0o600)
-    return action
 
 
 @app.post("/api/protocol-images/{image_id}/update")
@@ -1440,29 +1471,11 @@ def update_protocol_image(image_id: str, _: None = Depends(require_token)) -> di
         raise HTTPException(status_code=409, detail="Protocol is not installed")
     if not image.get("update_available"):
         raise HTTPException(status_code=409, detail="Новая версия не найдена. Сначала выполните проверку обновлений")
-    if ACTION_FILE.exists():
-        try:
-            previous_unit = json.loads(ACTION_FILE.read_text(encoding="utf-8")).get("unit", "")
-            if previous_unit and run("systemctl", "is-active", previous_unit) in ("active", "activating"):
-                raise HTTPException(status_code=409, detail="Another application action is already running")
-        except (json.JSONDecodeError, OSError):
-            pass
-    unit = f"vps-control-protocol-update-{image_id}-{int(time.time())}"
-    result = subprocess.run(
-        ["systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec", CONTROL_COMMAND, "protocol-update", image_id],
-        capture_output=True, text=True, timeout=10, check=False,
+    return start_application_task(
+        f"vps-control-protocol-update-{image_id}", f"protocol-update:{image_id}",
+        [CONTROL_COMMAND, "protocol-update", image_id], "Запуск обновления протокола",
+        "Unable to update protocol",
     )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to update protocol")
-    action = {
-        "unit": f"{unit}.service", "action": f"protocol-update:{image_id}",
-        "started_at": datetime.now(timezone.utc).isoformat(), "state": "activating",
-        "progress": 3, "message": "Запуск обновления протокола",
-    }
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
-    os.chmod(ACTION_FILE, 0o600)
-    return action
 
 
 @app.delete("/api/protocol-images/{image_id}")
@@ -1485,29 +1498,11 @@ def remove_protocol_image(image_id: str, _: None = Depends(require_token)) -> di
                 status_code=409,
                 detail="The last active VPN module cannot be removed while panel access is VPN-only",
             )
-    if ACTION_FILE.exists():
-        try:
-            previous_unit = json.loads(ACTION_FILE.read_text(encoding="utf-8")).get("unit", "")
-            if previous_unit and run("systemctl", "is-active", previous_unit) in ("active", "activating"):
-                raise HTTPException(status_code=409, detail="Another application action is already running")
-        except (json.JSONDecodeError, OSError):
-            pass
-    unit = f"vps-control-protocol-remove-{image_id}-{int(time.time())}"
-    result = subprocess.run(
-        ["systemd-run", f"--unit={unit}", "--collect", "--property=Type=exec", CONTROL_COMMAND, "protocol-remove", image_id],
-        capture_output=True, text=True, timeout=10, check=False,
+    return start_application_task(
+        f"vps-control-protocol-remove-{image_id}", f"protocol-remove:{image_id}",
+        [CONTROL_COMMAND, "protocol-remove", image_id], "Запуск удаления протокола",
+        "Unable to remove protocol",
     )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to remove protocol")
-    action = {
-        "unit": f"{unit}.service", "action": f"protocol-remove:{image_id}",
-        "started_at": datetime.now(timezone.utc).isoformat(), "state": "activating",
-        "progress": 3, "message": "Запуск удаления протокола",
-    }
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
-    os.chmod(ACTION_FILE, 0o600)
-    return action
 
 
 @app.get("/api/application/status")
@@ -1550,11 +1545,6 @@ def application_status(_: None = Depends(require_token)) -> dict:
                 resolved_state = "finished"
         action["state"] = resolved_state
         action["result"] = result
-        try:
-            ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
-            os.chmod(ACTION_FILE, 0o600)
-        except OSError:
-            pass
     web_unit_loaded = run("systemctl", "show", "vps-control-web.service", "--property=LoadState", "--value") == "loaded"
     caddy_unit_loaded = run("systemctl", "show", "caddy.service", "--property=LoadState", "--value") == "loaded"
     legacy_container_names = run("docker", "ps", "--format", "{{.Names}}") if not (web_unit_loaded and caddy_unit_loaded) else ""
@@ -1597,42 +1587,16 @@ class ApplicationAction(BaseModel):
 def application_action(payload: ApplicationAction, _: None = Depends(require_token)) -> dict:
     if payload.action in ("test-update", "test-rollback") and not SERVICE_MODE_FILE.exists():
         raise HTTPException(status_code=409, detail="Test version requires active service mode")
-    if ACTION_FILE.exists():
-        try:
-            previous = json.loads(ACTION_FILE.read_text(encoding="utf-8"))
-            previous_unit = previous.get("unit", "")
-            if previous_unit and run("systemctl", "is-active", previous_unit) in ("active", "activating"):
-                raise HTTPException(status_code=409, detail="Another application action is already running")
-        except json.JSONDecodeError:
-            pass
-    unit = f"vps-control-action-{int(time.time())}"
     bundled_command = INSTALL_DIR / "scripts" / "vps-control.sh"
     command = (
         ["/bin/bash", str(bundled_command), payload.action]
         if bundled_command.exists()
         else [CONTROL_COMMAND, payload.action]
     )
-    result = subprocess.run(
-        [
-            "systemd-run", f"--unit={unit}", "--collect",
-            "--property=Type=exec", *command,
-        ],
-        capture_output=True, text=True, timeout=10, check=False,
+    return start_application_task(
+        "vps-control-action", payload.action, command,
+        "Команда передана серверу", "Unable to start application action",
     )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to start application action")
-    action = {
-        "unit": f"{unit}.service",
-        "action": payload.action,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "state": "activating",
-        "progress": 3,
-        "message": "Команда передана серверу",
-    }
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    ACTION_FILE.write_text(json.dumps(action, ensure_ascii=False), encoding="utf-8")
-    os.chmod(ACTION_FILE, 0o600)
-    return action
 
 
 @app.get("/api/application/logs")

@@ -1,6 +1,7 @@
 """Isolated API contracts; never uses a deployed panel or system service."""
 import importlib.util
 import ipaddress
+import json
 from pathlib import Path
 import tempfile
 import sys
@@ -17,6 +18,49 @@ spec.loader.exec_module(api)
 
 
 class PortabilityTests(unittest.TestCase):
+    def test_application_task_is_published_before_systemd_starts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            action_file = root / 'application-action.json'
+
+            def launch(command, **_kwargs):
+                published = json.loads(action_file.read_text(encoding='utf-8'))
+                self.assertEqual(published['action'], 'integrity-check')
+                self.assertEqual(published['state'], 'activating')
+                self.assertIn(f"--unit={published['unit'].removesuffix('.service')}", command)
+                return type('Result', (), {'returncode': 0, 'stderr': ''})()
+
+            with patch.multiple(api, DATA_DIR=root, ACTION_FILE=action_file), \
+                 patch.object(api, 'run', return_value='inactive'), \
+                 patch.object(api.subprocess, 'run', side_effect=launch):
+                action = api.start_application_task(
+                    'vps-control-test', 'integrity-check', ['/bin/true'],
+                    'Starting', 'Unable to start',
+                )
+
+            self.assertEqual(action['state'], 'activating')
+            self.assertEqual(json.loads(action_file.read_text(encoding='utf-8')), action)
+
+    def test_application_task_records_launcher_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            action_file = root / 'application-action.json'
+            failed = type('Result', (), {'returncode': 1, 'stderr': 'launcher failed'})()
+            with patch.multiple(api, DATA_DIR=root, ACTION_FILE=action_file), \
+                 patch.object(api, 'run', return_value='inactive'), \
+                 patch.object(api.subprocess, 'run', return_value=failed):
+                with self.assertRaises(api.HTTPException) as raised:
+                    api.start_application_task(
+                        'vps-control-test', 'integrity-check', ['/bin/false'],
+                        'Starting', 'Unable to start',
+                    )
+
+            self.assertEqual(raised.exception.status_code, 500)
+            recorded = json.loads(action_file.read_text(encoding='utf-8'))
+            self.assertEqual(recorded['state'], 'failed')
+            self.assertEqual(recorded['result'], 'failed')
+            self.assertEqual(recorded['message'], 'launcher failed')
+
     def test_all_management_routes_require_authentication(self):
         client = TestClient(api.app)
         count = 0

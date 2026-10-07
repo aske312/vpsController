@@ -767,11 +767,15 @@ export default function Home() {
   }
 
   async function changeServiceMode(active: boolean) {
+    if (!active && testReleaseActive) {
+      setError("Сначала вернитесь на light: отключить сервисный режим во время работы test-light нельзя.");
+      return;
+    }
     if (!await askConfirmation({
       title: active ? "Включить сервисный режим?" : "Завершить сервисный режим?",
       message: active
         ? "Панель станет публичной, SSH будет запущен, а выполнение всех сценариев планового обслуживания будет заблокировано. Расписания останутся доступны для настройки, метрики продолжат собираться. После включения станет доступен переход на test-light."
-        : "Будет восстановлена production-версия Light, сохранённая перед локальной test-сборкой. После успешной проверки снова разрешится выполнение плановых сценариев.",
+        : "Публичный доступ к панели будет закрыт, SSH вернётся к штатному режиму, а выполнение плановых сценариев снова будет разрешено.",
       confirmLabel: active ? "Включить режим" : "Завершить обслуживание",
       danger: active,
     })) return;
@@ -1153,7 +1157,6 @@ export default function Home() {
     secrets_mode?: string; api_local_only?: boolean; control_command_protected?: boolean; control_command_mode?: string;
   } | undefined;
   const panelSecurity = firewall?.panel_access;
-  const panelAccessHealthy = Boolean(panelSecurity?.consistent && (panelSecurity?.vpn_only || panelSecurity?.publicly_accessible));
   const sshProtected = Boolean(
     ssh?.active
     && fail2ban?.active
@@ -1163,7 +1166,15 @@ export default function Home() {
   const serviceModeActive = Boolean(services?.service_mode?.active || application?.service_mode?.active);
   const firewallState: SecurityState = !securityKnown ? "inactive" : firewall?.active ? "active" : "inactive";
   const vpnFirewallState: SecurityState = !securityKnown || !firewall?.active ? "inactive" : firewall?.vpn_policy_healthy ? "active" : "warning";
-  const panelAccessState: SecurityState = !securityKnown ? "inactive" : panelAccessHealthy ? "active" : "critical";
+  const panelAccessState: SecurityState = !securityKnown
+    ? "inactive"
+    : !panelSecurity?.consistent
+      ? "critical"
+      : panelSecurity.publicly_accessible
+        ? "warning"
+        : panelSecurity.vpn_only
+          ? "active"
+          : "inactive";
   const fail2banState: SecurityState = !securityKnown || !fail2ban?.active ? "inactive" : fail2ban.jail_active ? "active" : "warning";
   const sshState: SecurityState = !securityKnown || !ssh?.active ? "inactive" : sshProtected ? "active" : "warning";
   const sshTunnelsState: SecurityState = !securityKnown || !ssh?.active ? "inactive" : ssh.x11_forwarding === "no" ? "active" : "warning";
@@ -1508,8 +1519,8 @@ export default function Home() {
           </div>
           <div className="panelAccessActions">
             <label className="serviceModeSwitch">
-              <span><strong>Сервисный режим</strong><small>{serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
-              <input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy} />
+              <span><strong>Сервисный режим</strong><small>{testReleaseActive ? "сначала вернитесь на light" : serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
+              <input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy || testReleaseActive} />
               <i />
             </label>
             <label className="serviceModeSwitch protectedAccessSwitch">
@@ -1624,7 +1635,7 @@ export default function Home() {
           />
           </div>
           {serviceModeActive && <div className="automationNote">Сервисный режим · выполнение всех плановых сценариев заблокировано · настройки расписания доступны · метрики продолжают собираться</div>}
-          <div className="automationNote">Persistent=true · пропущенная задача будет выполнена после следующего запуска сервера</div>
+          <div className="automationNote">Persistent=true · пропуск из-за выключенного сервера выполняется после запуска; сервисный режим не создаёт отложенный запуск</div>
         </article>
       </section>}
 

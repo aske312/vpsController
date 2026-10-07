@@ -670,12 +670,35 @@ net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
 EOF
   sysctl --system >/dev/null 2>&1 || true
-  cat >/etc/ssh/sshd_config.d/99-vps-control-tunnels.conf <<'EOF'
+  local ssh_config="/etc/ssh/sshd_config.d/99-vps-control-tunnels.conf"
+  local ssh_backup
+  ssh_backup="$(mktemp)"
+  local ssh_config_existed=0
+  if [[ -f "${ssh_config}" ]]; then
+    cp -a "${ssh_config}" "${ssh_backup}"
+    ssh_config_existed=1
+  fi
+  cat >"${ssh_config}" <<'EOF'
 X11Forwarding no
 AllowTcpForwarding yes
 PermitTunnel yes
+LoginGraceTime 30
+MaxStartups 30:30:100
 EOF
-  sshd -t >/dev/null 2>&1 && systemctl reload ssh.service 2>/dev/null || true
+  if sshd -T 2>/dev/null | grep -q '^persourcemaxstartups '; then
+    printf 'PerSourceMaxStartups 3\n' >>"${ssh_config}"
+  fi
+  if ! sshd -t >/dev/null 2>&1; then
+    if (( ssh_config_existed )); then
+      cp -a "${ssh_backup}" "${ssh_config}"
+    else
+      rm -f "${ssh_config}"
+    fi
+    rm -f "${ssh_backup}"
+    die "Новые параметры SSH не прошли проверку; предыдущая конфигурация восстановлена."
+  fi
+  rm -f "${ssh_backup}"
+  systemctl reload ssh.service
   ok "Fail2ban, auditd и автоматические security-обновления включены."
 }
 

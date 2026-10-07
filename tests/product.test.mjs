@@ -301,6 +301,9 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(page, /runApplicationAction\("test-update"\)/);
   assert.match(page, /application\?\.service_mode\?\.rollback_available/);
   assert.match(page, /disabled=\{busy \|\| testReleaseActive\}/);
+  assert.equal([...page.matchAll(/disabled=\{busy \|\| testReleaseActive\}/g)].length, 2);
+  assert.match(page, /if \(!active && testReleaseActive\)/);
+  assert.match(page, /сервисный режим не создаёт отложенный запуск/);
   assert.match(api, /installed_release_branch\(\) == "test-light"/);
   assert.match(manager, /сначала вернитесь на light, затем выключите сервисный режим/);
   assert.match(styles, /\.loginPage \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
@@ -417,6 +420,7 @@ test("security posture exposes explicit states and keeps summary metrics compact
   assert.match(page, /className=\{`securityPostureStat state-\$\{listenerState\}`\}/);
   assert.match(page, /className=\{`securityPostureStat state-\$\{coreUpdatesState\}`\}/);
   assert.match(page, /status=\{sshTunnelsState\}/);
+  assert.match(page, /panelSecurity\.publicly_accessible\s+\? "warning"/);
   assert.match(css, /gray=inactive, green=active, yellow=attention, red=critical/);
   assert.match(css, /\.securityPostureStats \{[\s\S]*grid-template-columns: repeat\(3/);
 });
@@ -434,6 +438,17 @@ test("Caddy updates remain compatible with old installers and roll back safely",
   assert.match(manager, /mv -f -- "\$\{candidate\}" "\$\{CADDY_CONFIG\}"/);
   assert.match(manager, /restart_caddy_service\(\)[\s\S]*restore_caddy_config/);
   assert.match(manager, /CADDY_CONFIG_BACKUP="\$\{CADDY_CONFIG\}\.vps-control-backup"/);
+  assert.doesNotMatch(caddyfile, /^ {4}\S/m);
+});
+
+test("SSH hardening remains reachable under unauthenticated scanner load", async () => {
+  const manager = await read("scripts/vps-control.sh");
+  const secureBody = manager.match(/secure_server\(\) \{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(secureBody, /LoginGraceTime 30/);
+  assert.match(secureBody, /MaxStartups 30:30:100/);
+  assert.match(secureBody, /PerSourceMaxStartups 3/);
+  assert.match(secureBody, /sshd -t/);
+  assert.match(secureBody, /предыдущая конфигурация восстановлена/);
 });
 
 test("Light protocol modules install and uninstall independently", async () => {
