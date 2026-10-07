@@ -1545,25 +1545,55 @@ def application_status(_: None = Depends(require_token)) -> dict:
                 resolved_state = "finished"
         action["state"] = resolved_state
         action["result"] = result
-    web_unit_loaded = run("systemctl", "show", "vps-control-web.service", "--property=LoadState", "--value") == "loaded"
-    caddy_unit_loaded = run("systemctl", "show", "caddy.service", "--property=LoadState", "--value") == "loaded"
+    def component_details(service: str, unit: str, component_name: str, purpose: str, endpoint: str) -> dict:
+        properties = {}
+        for line in run(
+            "systemctl", "show", unit,
+            "--property=LoadState,ActiveState,SubState,UnitFileState,NRestarts,ActiveEnterTimestampMonotonic",
+        ).splitlines():
+            if "=" in line:
+                key_name, value = line.split("=", 1)
+                properties[key_name] = value
+        active = properties.get("ActiveState") == "active"
+        try:
+            active_since_monotonic = int(properties.get("ActiveEnterTimestampMonotonic") or 0)
+        except ValueError:
+            active_since_monotonic = 0
+        uptime_seconds = max(0, int(time.monotonic() - active_since_monotonic / 1_000_000)) if active and active_since_monotonic else 0
+        return {
+            "Service": service,
+            "service_id": service,
+            "unit": unit,
+            "State": "running" if active else properties.get("ActiveState", "unknown"),
+            "component_name": component_name,
+            "purpose": purpose,
+            "endpoint": endpoint,
+            "healthy": active,
+            "enabled": properties.get("UnitFileState") in ("enabled", "enabled-runtime", "static"),
+            "restarts": int(properties.get("NRestarts") or 0),
+            "uptime_seconds": uptime_seconds,
+            "installed": properties.get("LoadState") == "loaded",
+            "status_text": "systemd-служба запущена" if active else "systemd-служба остановлена или неисправна",
+        }
+
+    http_port = os.getenv("HTTP_PORT", "80")
+    api_component = component_details("api", "vps-control-api.service", "API панели", "Принимает команды интерфейса", "127.0.0.1:8000")
+    web_component = component_details("web", "vps-control-web.service", "Веб-интерфейс", "Отдаёт интерфейс управления сервером", "127.0.0.1:3000")
+    gateway_component = component_details("gateway", "caddy.service", "Сетевой шлюз", "Публикует панель и направляет запросы к API", f"0.0.0.0:{http_port}")
+    web_unit_loaded = web_component["installed"]
+    caddy_unit_loaded = gateway_component["installed"]
     legacy_container_names = run("docker", "ps", "--format", "{{.Names}}") if not (web_unit_loaded and caddy_unit_loaded) else ""
     legacy_runtime = any(name.startswith(("vps-control-web-", "vps-control-gateway-")) for name in legacy_container_names.splitlines())
-    containers = []
-    for service, unit, component_name, purpose in (
-        ("web", "vps-control-web.service", "Веб-интерфейс", "Отдаёт интерфейс управления сервером"),
-        ("gateway", "caddy.service", "Сетевой шлюз", "Публикует панель и направляет запросы к API"),
-    ):
-        active = run("systemctl", "is-active", unit) == "active"
-        containers.append({
-            "Service": service, "State": "running" if active else "stopped",
-            "component_name": component_name, "purpose": purpose, "healthy": active,
-            "status_text": "systemd-служба запущена" if active else "systemd-служба остановлена или неисправна",
-        })
+    containers = [web_component, gateway_component]
     return {
         "api": {
-            "active": run("systemctl", "is-active", "vps-control-api.service") == "active",
-            "enabled": run("systemctl", "is-enabled", "vps-control-api.service") == "enabled",
+            "active": api_component["healthy"],
+            "enabled": api_component["enabled"],
+            "service_id": api_component["service_id"],
+            "unit": api_component["unit"],
+            "endpoint": api_component["endpoint"],
+            "restarts": api_component["restarts"],
+            "uptime_seconds": api_component["uptime_seconds"],
         },
         "containers": containers,
         "action": action,
@@ -1576,6 +1606,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
             "mode": "systemd" if web_unit_loaded and caddy_unit_loaded else "legacy-docker" if legacy_runtime else "incomplete",
             "migration_required": legacy_runtime,
         },
+        "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 
 

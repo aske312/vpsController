@@ -410,7 +410,15 @@ test("web and gateway run as systemd services without Docker", async () => {
   assert.doesNotMatch(api, /docker", "compose|docker", "inspect/);
   assert.match(api, /"vps-control-web\.service"/);
   assert.match(api, /"caddy\.service"/);
-  assert.match(page, /службы<\/span>/);
+  assert.match(api, /ActiveEnterTimestampMonotonic/);
+  assert.match(api, /"uptime_seconds": uptime_seconds/);
+  assert.match(api, /"endpoint": endpoint/);
+  assert.match(api, /"restarts": int\(properties\.get\("NRestarts"\) or 0\)/);
+  assert.match(page, /application\.containers\.length \+ 1/);
+  assert.match(page, /healthyApplicationComponents/);
+  assert.match(page, /componentUptime/);
+  assert.match(page, /рестарты \$\{container\.restarts \?\? 0\}/);
+  assert.match(page, /runServiceAction\(container\.service_id/);
 });
 
 test("security posture exposes explicit states and keeps summary metrics compact", async () => {

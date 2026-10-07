@@ -35,10 +35,11 @@ type Overview = {
   protocols: Partial<Record<Protocol, { interface: string; port: number; active: boolean }>>;
 };
 type ApplicationStatus = {
-  api: { active: boolean; enabled: boolean };
+  api: { active: boolean; enabled: boolean; service_id?: string; unit?: string; endpoint?: string; restarts?: number; uptime_seconds?: number };
   containers: Array<{
     Name?: string; Service?: string; State?: string; Status?: string; Health?: string;
     component_name?: string; purpose?: string; healthy?: boolean; status_text?: string;
+    service_id?: string; unit?: string; endpoint?: string; enabled?: boolean; restarts?: number; uptime_seconds?: number; installed?: boolean;
   }>;
   action: {
     unit?: string; action?: string; state?: string; result?: string; started_at?: string; updated_at?: string;
@@ -47,6 +48,7 @@ type ApplicationStatus = {
   service_mode?: { active: boolean; rollback_available?: boolean };
   release?: { branch: "light" | "test-light"; current_commit: string; latest_commit?: string; outdated?: boolean | null; error?: string; refreshing?: boolean };
   runtime?: { mode: "systemd" | "legacy-docker" | "incomplete"; migration_required: boolean };
+  checked_at?: string;
 };
 type ProtocolImage = {
   id: string; name: string; version: string; description: string; category: string; category_name: string;
@@ -151,6 +153,13 @@ const duration = (seconds?: number) => {
   return `${Math.floor(seconds / 3600)} ч назад`;
 };
 const uptime = (seconds = 0) => `${Math.floor(seconds / 86400)}д ${Math.floor((seconds % 86400) / 3600)}ч`;
+const componentUptime = (seconds = 0) => seconds < 60
+  ? `${seconds}с`
+  : seconds < 3600
+    ? `${Math.floor(seconds / 60)}м`
+    : seconds < 86400
+      ? `${Math.floor(seconds / 3600)}ч ${Math.floor((seconds % 3600) / 60)}м`
+      : `${Math.floor(seconds / 86400)}д ${Math.floor((seconds % 86400) / 3600)}ч`;
 const appendSample = (values: Array<number | null>, value: number) => [...values, Math.max(0, value)].slice(-48);
 const securityStateMeta: Record<SecurityState, { label: string; symbol: string }> = {
   inactive: { label: "Выключено", symbol: "—" },
@@ -1238,6 +1247,10 @@ export default function Home() {
   // node itself is unavailable. Only live health data may turn the node red.
   const nodeHasError = application?.api.active === false;
   const nodeDegraded = Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
+  const applicationComponentCount = application ? application.containers.length + 1 : 0;
+  const healthyApplicationComponents = application
+    ? Number(application.api.active) + application.containers.filter((component) => component.healthy).length
+    : 0;
   const nodeState = !application ? "checking" : nodeHasError ? "error" : serviceModeActive ? "service" : operationActive || nodeDegraded ? "working" : "healthy";
   const nodeStateLabel = nodeState === "checking" ? "ПРОВЕРКА УЗЛА"
     : nodeState === "error" ? "УЗЕЛ С ОШИБКОЙ"
@@ -1498,15 +1511,29 @@ export default function Home() {
           </div>
         </article>
         <article className="panel statusPanel">
-          <div className="panelHead"><div><p className="eyebrow">RUNTIME</p><h2>Состояние компонентов</h2></div><span>{application?.containers.length || 0} службы</span></div>
+          <div className="panelHead"><div><p className="eyebrow">RUNTIME</p><h2>Состояние компонентов</h2></div><span>{application
+            ? `${healthyApplicationComponents}/${applicationComponentCount} · ${application.runtime?.mode || "unknown"}${application.checked_at ? ` · ${new Date(application.checked_at).toLocaleTimeString("ru-RU")}` : ""}`
+            : "проверка…"}</span></div>
           <div className="runtimeRows">
-            <SecurityRow status={!application ? "inactive" : application.api.active ? "active" : "critical"} title="API панели" text={application?.api.active ? `Принимает команды интерфейса · автозапуск ${application.api.enabled ? "включён" : "отключён"}` : "Не принимает команды интерфейса"} />
+            {!application
+              ? <SecurityRow status="inactive" title="API панели" text="Состояние проверяется" />
+              : <SecurityActionRow
+                  status={application.api.active ? "active" : "critical"}
+                  title="API панели"
+                  text={`${application.api.active ? `Работает ${componentUptime(application.api.uptime_seconds)}` : "Не принимает команды интерфейса"} · рестарты ${application.api.restarts ?? 0} · автозапуск ${application.api.enabled ? "включён" : "отключён"} · ${application.api.endpoint || "127.0.0.1:8000"}`}
+                  onAction={() => void runServiceAction("api", "API панели", "restart")}
+                  actionLabel="Перезапустить"
+                  disabled={busy}
+                />}
             {(application?.containers || []).map((container, index) =>
-              <SecurityRow
+              <SecurityActionRow
                 key={`${container.Name || container.Service}-${index}`}
                 status={container.healthy ? "active" : (container.State || "").toLowerCase() === "running" ? "warning" : "critical"}
                 title={container.component_name || container.Service || `Компонент ${index + 1}`}
-                text={`${container.purpose || "Компонент приложения"} · ${container.status_text || container.Status || container.State || "состояние неизвестно"}`}
+                text={`${container.purpose || "Компонент приложения"} · ${container.healthy ? `работает ${componentUptime(container.uptime_seconds)}` : container.status_text || container.Status || container.State || "состояние неизвестно"} · рестарты ${container.restarts ?? 0} · автозапуск ${container.enabled ? "включён" : "отключён"} · ${container.endpoint || "адрес не определён"}`}
+                onAction={() => void runServiceAction(container.service_id || container.Service || "web", container.component_name || container.Service || "Компонент", "restart")}
+                actionLabel="Перезапустить"
+                disabled={busy}
               />
             )}
             {application?.action?.action && <SecurityRow status={application.action.state === "failed" || application.action.result === "failed" ? "critical" : operationActive || application.action.result === "success" ? "active" : "inactive"} title={`Последняя команда: ${actionLabels[application.action.action.split(":")[0]] || application.action.action}`} text={application.action.state === "running" ? "Команда выполняется системной службой" : application.action.result === "success" ? "Команда завершена без ошибок" : application.action.message || "Результат выполнения уточняется"} />}
