@@ -158,6 +158,8 @@ const securityStateMeta: Record<SecurityState, { label: string; symbol: string }
   warning: { label: "Требует внимания", symbol: "!" },
   critical: { label: "Критично", symbol: "×" },
 };
+const connectionInterruptingActions = new Set<ApplicationAction>(["restart", "update", "test-update", "test-rollback", "reboot"]);
+const expectedDowntimeStorageKey = "312-expected-downtime-until";
 const strongestSecurityState = (states: SecurityState[]): SecurityState => {
   if (states.includes("critical")) return "critical";
   if (states.includes("warning")) return "warning";
@@ -221,11 +223,35 @@ export default function Home() {
   const trackedActionUnit = useRef("");
   const notifiedActionUnits = useRef(new Set<string>());
   const liveRequestInFlight = useRef(false);
+  const expectedDowntimeUntil = useRef(0);
+
+  const beginExpectedDowntime = useCallback((action: string) => {
+    if (!connectionInterruptingActions.has(action as ApplicationAction)) return;
+    const until = Date.now() + 120_000;
+    expectedDowntimeUntil.current = until;
+    sessionStorage.setItem(expectedDowntimeStorageKey, String(until));
+  }, []);
+
+  const clearExpectedDowntime = useCallback(() => {
+    expectedDowntimeUntil.current = 0;
+    sessionStorage.removeItem(expectedDowntimeStorageKey);
+  }, []);
+
+  const reportBackgroundError = useCallback((cause: unknown, fallback: string) => {
+    if (Date.now() < expectedDowntimeUntil.current) {
+      setError("");
+      return;
+    }
+    setError(cause instanceof Error ? cause.message : fallback);
+  }, []);
 
   useEffect(() => {
     // Restore browser-only credentials after hydration.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setToken(sessionStorage.getItem("312-token") || "");
+    const savedDowntime = Number(sessionStorage.getItem(expectedDowntimeStorageKey) || 0);
+    if (savedDowntime > Date.now()) expectedDowntimeUntil.current = savedDowntime;
+    else sessionStorage.removeItem(expectedDowntimeStorageKey);
     const savedNotice = sessionStorage.getItem("312-notice");
     if (savedNotice) {
       setNotice(savedNotice);
@@ -311,8 +337,8 @@ export default function Home() {
         setInstallingProtocol("");
       }
       setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Ошибка соединения"); }
-  }, [installingProtocol, request, token]);
+    } catch (cause) { reportBackgroundError(cause, "Ошибка соединения"); }
+  }, [installingProtocol, reportBackgroundError, request, token]);
 
   const loadMetricsHistory = useCallback(async () => {
     if (!token) return;
@@ -333,24 +359,28 @@ export default function Home() {
     try {
       const data = await request("/clients");
       setClients(data.items); setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить клиентов"); }
-  }, [request, token]);
+    } catch (cause) { reportBackgroundError(cause, "Не удалось обновить клиентов"); }
+  }, [reportBackgroundError, request, token]);
 
   const loadSecurity = useCallback(async () => {
     if (!token) return;
     setSecurityLoading(true);
     try {
       setSecurity(await request("/security")); setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить состояние безопасности"); }
+    } catch (cause) { reportBackgroundError(cause, "Не удалось обновить состояние безопасности"); }
     finally { setSecurityLoading(false); }
-  }, [request, token]);
+  }, [reportBackgroundError, request, token]);
 
   const loadApplication = useCallback(async () => {
     if (!token) return;
     try {
-      setApplication(await request("/application/status")); setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить приложение"); }
-  }, [request, token]);
+      const next = await request("/application/status") as ApplicationStatus;
+      const action = next.action?.action?.split(":")[0] || "";
+      if (["active", "activating", "running"].includes(next.action?.state || "")) beginExpectedDowntime(action);
+      else if (["succeeded", "finished", "failed"].includes(next.action?.state || "")) clearExpectedDowntime();
+      setApplication(next); setLastUpdated(new Date());
+    } catch (cause) { reportBackgroundError(cause, "Не удалось обновить приложение"); }
+  }, [beginExpectedDowntime, clearExpectedDowntime, reportBackgroundError, request, token]);
 
   const loadServices = useCallback(async () => {
     if (!token) return;
@@ -363,8 +393,8 @@ export default function Home() {
         retention_days: next.logging?.retention_days ?? 30,
       });
       setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить состояние служб"); }
-  }, [request, token]);
+    } catch (cause) { reportBackgroundError(cause, "Не удалось обновить состояние служб"); }
+  }, [reportBackgroundError, request, token]);
 
   const loadProtocolStatus = useCallback(async (protocol: Protocol) => {
     if (!token) return;
@@ -382,8 +412,8 @@ export default function Home() {
       protocolSamples.current[protocol] = { rx: next.interface_rx_bytes, tx: next.interface_tx_bytes, at: now };
       setProtocolStatuses((statuses) => ({ ...statuses, [protocol]: next }));
       setLastUpdated(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось обновить состояние протокола"); }
-  }, [request, token]);
+    } catch (cause) { reportBackgroundError(cause, "Не удалось обновить состояние протокола"); }
+  }, [reportBackgroundError, request, token]);
 
   const refreshCurrent = useCallback(async (showBusy = false) => {
     if (!token) return;
@@ -505,16 +535,16 @@ export default function Home() {
       securityLogHeads.current[securityLogSource] = nextLines[0] || "";
       setSecurityLogs(nextLines);
       setSecurityLogsUpdatedAt(new Date());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось загрузить журнал"); }
-  }, [request, securityLogSource, token]);
+    } catch (cause) { reportBackgroundError(cause, "Не удалось загрузить журнал"); }
+  }, [reportBackgroundError, request, securityLogSource, token]);
 
   const loadApplicationLogs = useCallback(async () => {
     if (!token) return;
     try {
       const data = await request("/application/logs?lines=180");
       setApplicationLogs(data.lines || []);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось загрузить журнал приложения"); }
-  }, [request, token]);
+    } catch (cause) { reportBackgroundError(cause, "Не удалось загрузить журнал приложения"); }
+  }, [reportBackgroundError, request, token]);
 
   const loadLiveStatus = useCallback(async () => {
     if (!token || liveRequestInFlight.current || document.visibilityState !== "visible") return;
@@ -626,6 +656,7 @@ export default function Home() {
     setBusy(true); setError("");
     try {
       const started = await request("/application/action", { method: "POST", body: JSON.stringify({ action }) });
+      beginExpectedDowntime(action);
       setApplication((current) => ({
         api: current?.api || { active: true, enabled: true },
         containers: current?.containers || [],

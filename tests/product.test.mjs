@@ -519,6 +519,15 @@ test("successful readiness retries do not print transient HTTP errors", async ()
   assert.match(verify, /--retry 10 --retry-connrefused --retry-delay 1/);
 });
 
+test("planned application downtime does not surface transient gateway errors", async () => {
+  const page = await read("app/page.tsx");
+  assert.match(page, /const connectionInterruptingActions = new Set<ApplicationAction>/);
+  assert.match(page, /const expectedDowntimeUntil = useRef\(0\)/);
+  assert.match(page, /if \(Date\.now\(\) < expectedDowntimeUntil\.current\) \{\s*setError\(""\);\s*return;/);
+  assert.match(page, /beginExpectedDowntime\(action\);/);
+  assert.match(page, /else if \(\["succeeded", "finished", "failed"\]\.includes/);
+});
+
 test("геолокация требует согласия независимых источников", async () => {
   const [manager, resolver, config] = await Promise.all([
     read("scripts/vps-control.sh"),
