@@ -57,6 +57,7 @@ type ProtocolImage = {
 type AutomationSchedule = {
   enabled: boolean; cadence: "daily" | "weekly" | "monthly"; weekday: string; hour: number; minute: number;
 };
+type AutomationKind = "reboot" | "cleanup" | "protocol_scan" | "application_update" | "kernel_update";
 type ServicesStatus = {
   items: Array<{
     id: string; name: string; unit: string; installed: boolean; active: boolean; state: string; substate: string;
@@ -65,8 +66,8 @@ type ServicesStatus = {
   }>;
   failed_units: number;
   reboot_required: boolean;
-  automation: { reboot: AutomationSchedule; cleanup: AutomationSchedule; protocol_scan: AutomationSchedule };
-  timers: Record<"reboot" | "cleanup" | "protocol_scan", { installed: boolean; active: boolean; last_trigger: string; next_run: string }>;
+  automation: Record<AutomationKind, AutomationSchedule>;
+  timers: Record<AutomationKind, { installed: boolean; active: boolean; last_trigger: string; next_run: string }>;
   panel_access?: { mode: "external" | "vpn"; public: boolean; vpn_urls: string[] };
   service_mode?: { active: boolean };
   logging?: { persistent: boolean; retention_days: number; automatic_cleanup: boolean; disk_usage: string };
@@ -201,7 +202,6 @@ export default function Home() {
   const [generatedName, setGeneratedName] = useState("client.conf");
   const networkSample = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
-  const autoRefreshBeforeServiceMode = useRef(true);
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
   const automationDirty = useRef(false);
   const loggingDirty = useRef(false);
@@ -469,14 +469,6 @@ export default function Home() {
   }, [notice]);
 
   useEffect(() => {
-    if (!autoRefresh || !(services?.service_mode?.active || application?.service_mode?.active)) return;
-    autoRefreshBeforeServiceMode.current = true;
-    // Service mode freezes telemetry so tests and maintenance do not race background requests.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAutoRefresh(false);
-  }, [application?.service_mode?.active, autoRefresh, services?.service_mode?.active]);
-
-  useEffect(() => {
     if (!token || tab === "overview") return;
     // Synchronize only the newly opened module.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -696,7 +688,7 @@ export default function Home() {
     finally { setBusy(false); }
   }
 
-  function updateAutomation(kind: "reboot" | "cleanup" | "protocol_scan", patch: Partial<AutomationSchedule>) {
+  function updateAutomation(kind: AutomationKind, patch: Partial<AutomationSchedule>) {
     automationDirty.current = true;
     setAutomationDraft((current) => current ? {
       ...current, [kind]: { ...current[kind], ...patch },
@@ -738,15 +730,13 @@ export default function Home() {
     if (!await askConfirmation({
       title: active ? "Включить сервисный режим?" : "Завершить сервисный режим?",
       message: active
-        ? "Панель станет публичной, SSH будет запущен, а фоновые проверки и автоматические задачи будут приостановлены. После включения станет доступен переход на test-light."
-        : "Будет восстановлена production-версия Light, сохранённая перед локальной test-сборкой. Только после успешной проверки восстановятся доступ, SSH и автоматические задачи.",
+        ? "Панель станет публичной, SSH будет запущен, а выполнение всех сценариев планового обслуживания будет заблокировано. Расписания останутся доступны для настройки, метрики продолжат собираться. После включения станет доступен переход на test-light."
+        : "Будет восстановлена production-версия Light, сохранённая перед локальной test-сборкой. После успешной проверки снова разрешится выполнение плановых сценариев.",
       confirmLabel: active ? "Включить режим" : "Завершить обслуживание",
       danger: active,
     })) return;
     setBusy(true); setError("");
     try {
-      if (active) autoRefreshBeforeServiceMode.current = autoRefresh;
-      setAutoRefresh(false);
       await request("/services/service-mode", { method: "PUT", body: JSON.stringify({ active }) });
       let confirmed = false;
       for (let attempt = 0; attempt < 36; attempt += 1) {
@@ -768,11 +758,8 @@ export default function Home() {
         }
       }
       if (!confirmed) throw new Error("Сервер не подтвердил завершение переключения режима");
-      if (!active) setAutoRefresh(autoRefreshBeforeServiceMode.current);
       await loadSecurity();
     } catch (cause) {
-      if (!active) setAutoRefresh(false);
-      else setAutoRefresh(autoRefreshBeforeServiceMode.current);
       setError(cause instanceof Error ? cause.message : "Не удалось изменить сервисный режим");
     } finally { setBusy(false); }
   }
@@ -1215,7 +1202,7 @@ export default function Home() {
         </div>
         <div className="gateMastActions">
           <div className={`refreshControl ${autoRefresh ? "active" : ""}`} data-refresh-interval="<1" aria-label="Управление обновлением данных">
-            <button className="autoButton" disabled={serviceModeActive} onClick={() => setAutoRefresh((value) => !value)} aria-label={autoRefresh ? "Остановить автообновление" : "Включить автообновление"}><i /></button>
+            <button className="autoButton" onClick={() => setAutoRefresh((value) => !value)} aria-label={autoRefresh ? "Остановить автообновление" : "Включить автообновление"}><i /></button>
             <button className="iconButton" onClick={() => void refreshCurrent(true)} aria-label="Обновить текущий модуль">↻</button>
           </div>
           {lastUpdated && <span className="updatedAt">{lastUpdated.toLocaleTimeString("ru-RU")}</span>}
@@ -1533,7 +1520,7 @@ export default function Home() {
 
         <article className="panel automationCenter">
           <div className="automationCenterHead">
-            <div><p className="eyebrow">MAINTENANCE SCHEDULE</p><h2>Плановое обслуживание</h2><small>Перезагрузка, безопасная очистка и проверка версий по расписанию</small></div>
+            <div><p className="eyebrow">MAINTENANCE SCHEDULE</p><h2>Плановое обслуживание</h2><small>Системные операции, обновления приложения и ядра по расписанию</small></div>
             <button onClick={() => void saveAutomation()} disabled={busy || !services}>Сохранить изменения</button>
           </div>
           <div className="automationRows"><AutomationEditor
@@ -1557,7 +1544,22 @@ export default function Home() {
             timer={services?.timers.protocol_scan}
             onChange={(patch) => updateAutomation("protocol_scan", patch)}
           />
+          <AutomationEditor
+            title="Плановое обновление основной версии приложения (light)"
+            description="Устанавливает последний подготовленный production-релиз ветки light. Тестовая ветка test-light не используется."
+            value={automationDraft?.application_update}
+            timer={services?.timers.application_update}
+            onChange={(patch) => updateAutomation("application_update", patch)}
+          />
+          <AutomationEditor
+            title="Плановое обновление ядра"
+            description="Обновляет ядро и headers, проверяет модули протоколов и при необходимости перезагружает VPS."
+            value={automationDraft?.kernel_update}
+            timer={services?.timers.kernel_update}
+            onChange={(patch) => updateAutomation("kernel_update", patch)}
+          />
           </div>
+          {serviceModeActive && <div className="automationNote">Сервисный режим · выполнение всех плановых сценариев заблокировано · настройки расписания доступны · метрики продолжают собираться</div>}
           <div className="automationNote">Persistent=true · пропущенная задача будет выполнена после следующего запуска сервера</div>
         </article>
       </section>}

@@ -1632,6 +1632,14 @@ update_app() {
   update_prebuilt_branch "${PRODUCTION_BRANCH}" "${PRODUCTION_RELEASE_TAG}"
 }
 
+scheduled_app_update() {
+  if [[ -r "${SERVICE_MODE_FILE}" ]]; then
+    warn "плановое обновление light пропущено: включён сервисный режим."
+    return 0
+  fi
+  update_app
+}
+
 update_test_app() {
   local archive="${2:-}"
   [[ -r "${SERVICE_MODE_FILE}" ]] || die "переход на тестовую версию разрешён только в сервисном режиме."
@@ -1723,12 +1731,18 @@ change_service_mode() {
     ssh_socket_active="$([[ "$(systemctl is-active ssh.socket)" == "active" ]] && printf yes || printf no)"
     ssh_public="$([[ "$(ufw status | grep -Ec '^OpenSSH[[:space:]]+ALLOW[[:space:]]+Anywhere([[:space:]]|$)')" -gt 0 ]] && printf yes || printf no)"
     active_timers=""
-    for timer in vpn-monitor.timer vps-control-auto-reboot.timer vps-control-auto-cleanup.timer vps-control-auto-protocol-scan.timer vps-control-auto-update.timer apt-daily.timer apt-daily-upgrade.timer; do
+    for timer in vps-control-auto-update.timer apt-daily.timer apt-daily-upgrade.timer; do
       if systemctl is-active --quiet "${timer}"; then
         active_timers+="${timer},"
         systemctl stop "${timer}"
       fi
     done
+    systemctl stop \
+      vps-control-auto-reboot.timer \
+      vps-control-auto-cleanup.timer \
+      vps-control-auto-protocol-scan.timer \
+      vps-control-auto-application-update.timer \
+      vps-control-auto-kernel-update.timer 2>/dev/null || true
     install -d -m 0750 "${DATA_DIR}"
     python3 - "${SERVICE_MODE_FILE}" "${previous_access}" "${ssh_service_active}" "${ssh_socket_active}" "${ssh_public}" "${active_timers%,}" <<'PY'
 import json, os, sys
@@ -1743,6 +1757,9 @@ with open(path, "w", encoding="utf-8") as stream:
                "enabled_at": datetime.now(timezone.utc).isoformat()}, stream)
 os.chmod(path, 0o600)
 PY
+    if [[ -r "${AUTOMATION_FILE}" ]]; then
+      apply_automation
+    fi
     ssh_units_action start
     ufw allow OpenSSH
     change_access_mode "$1" external
@@ -1934,6 +1951,14 @@ update_kernel() {
   fi
 }
 
+scheduled_kernel_update() {
+  if [[ -r "${SERVICE_MODE_FILE}" ]]; then
+    warn "плановое обновление ядра пропущено: включён сервисный режим."
+    return 0
+  fi
+  update_kernel
+}
+
 optimize_resources() {
   local disk_before disk_after disk_freed mem_before mem_after log_retention_days=30
   disk_before="$(df -B1 / | awk 'NR==2 {print $4}')"
@@ -2043,6 +2068,8 @@ apply_automation() {
   local values reboot_enabled reboot_cadence reboot_weekday reboot_hour reboot_minute
   local cleanup_enabled cleanup_cadence cleanup_weekday cleanup_hour cleanup_minute
   local protocol_scan_enabled protocol_scan_cadence protocol_scan_weekday protocol_scan_hour protocol_scan_minute
+  local application_update_enabled application_update_cadence application_update_weekday application_update_hour application_update_minute
+  local kernel_update_enabled kernel_update_cadence kernel_update_weekday kernel_update_hour kernel_update_minute
   values="$(python3 - "${AUTOMATION_FILE}" <<'PY'
 import json
 import shlex
@@ -2053,8 +2080,10 @@ defaults = {
     "reboot": ("weekly", "Sun", 4, 0),
     "cleanup": ("weekly", "Sun", 3, 0),
     "protocol_scan": ("daily", "Sun", 2, 30),
+    "application_update": ("daily", "Sun", 3, 30),
+    "kernel_update": ("weekly", "Sun", 4, 30),
 }
-for section in ("reboot", "cleanup", "protocol_scan"):
+for section in ("reboot", "cleanup", "protocol_scan", "application_update", "kernel_update"):
     item = data.get(section, {})
     cadence, weekday, hour, minute = defaults[section]
     values = (
@@ -2070,6 +2099,8 @@ PY
   read -r reboot_enabled reboot_cadence reboot_weekday reboot_hour reboot_minute <<<"$(sed -n '1p' <<<"${values}")"
   read -r cleanup_enabled cleanup_cadence cleanup_weekday cleanup_hour cleanup_minute <<<"$(sed -n '2p' <<<"${values}")"
   read -r protocol_scan_enabled protocol_scan_cadence protocol_scan_weekday protocol_scan_hour protocol_scan_minute <<<"$(sed -n '3p' <<<"${values}")"
+  read -r application_update_enabled application_update_cadence application_update_weekday application_update_hour application_update_minute <<<"$(sed -n '4p' <<<"${values}")"
+  read -r kernel_update_enabled kernel_update_cadence kernel_update_weekday kernel_update_hour kernel_update_minute <<<"$(sed -n '5p' <<<"${values}")"
 
   automation_calendar() {
     local cadence="$1" weekday="$2" hour="$3" minute="$4"
@@ -2087,11 +2118,15 @@ PY
   }
 
   install_automation_timer() {
-    local id="$1" description="$2" command="$3" enabled="$4" calendar="$5"
+    local id="$1" description="$2" command="$3" enabled="$4" calendar="$5" block_in_service_mode="${6:-no}" service_condition=""
+    if [[ "${block_in_service_mode}" == "yes" ]]; then
+      service_condition="ConditionPathExists=!${SERVICE_MODE_FILE}"
+    fi
     cat >"/etc/systemd/system/vps-control-auto-${id}.service" <<EOF
 [Unit]
 Description=${description}
 After=network-online.target
+${service_condition}
 
 [Service]
 Type=oneshot
@@ -2117,13 +2152,17 @@ EOF
     fi
   }
 
-  local reboot_calendar cleanup_calendar protocol_scan_calendar
+  local reboot_calendar cleanup_calendar protocol_scan_calendar application_update_calendar kernel_update_calendar
   reboot_calendar="$(automation_calendar "${reboot_cadence}" "${reboot_weekday}" "${reboot_hour}" "${reboot_minute}")"
   cleanup_calendar="$(automation_calendar "${cleanup_cadence}" "${cleanup_weekday}" "${cleanup_hour}" "${cleanup_minute}")"
   protocol_scan_calendar="$(automation_calendar "${protocol_scan_cadence}" "${protocol_scan_weekday}" "${protocol_scan_hour}" "${protocol_scan_minute}")"
-  install_automation_timer "reboot" "Scheduled VPS reboot by 312.net" "reboot" "${reboot_enabled}" "${reboot_calendar}"
-  install_automation_timer "cleanup" "Scheduled VPS cleanup by 312.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}"
-  install_automation_timer "protocol-scan" "Scheduled protocol version scan by 312.net" "protocol-version-check" "${protocol_scan_enabled}" "${protocol_scan_calendar}"
+  application_update_calendar="$(automation_calendar "${application_update_cadence}" "${application_update_weekday}" "${application_update_hour}" "${application_update_minute}")"
+  kernel_update_calendar="$(automation_calendar "${kernel_update_cadence}" "${kernel_update_weekday}" "${kernel_update_hour}" "${kernel_update_minute}")"
+  install_automation_timer "reboot" "Scheduled VPS reboot by 312.net" "reboot" "${reboot_enabled}" "${reboot_calendar}" yes
+  install_automation_timer "cleanup" "Scheduled VPS cleanup by 312.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}" yes
+  install_automation_timer "protocol-scan" "Scheduled protocol version scan by 312.net" "protocol-version-check" "${protocol_scan_enabled}" "${protocol_scan_calendar}" yes
+  install_automation_timer "application-update" "Scheduled light application update by 312.net" "scheduled-app-update" "${application_update_enabled}" "${application_update_calendar}" yes
+  install_automation_timer "kernel-update" "Scheduled kernel update by 312.net" "scheduled-kernel-update" "${kernel_update_enabled}" "${kernel_update_calendar}" yes
   systemctl disable --now vps-control-auto-update.timer >/dev/null 2>&1 || true
   rm -f -- /etc/systemd/system/vps-control-auto-update.timer /etc/systemd/system/vps-control-auto-update.service
   systemctl daemon-reload
@@ -2356,9 +2395,11 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|domain|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
+    install|install-release|uninstall|doctor|start|stop|restart|update|scheduled-app-update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|kernel-update|scheduled-kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|domain|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
       case "${1}" in
         protocol-install|protocol-remove|protocol-update) begin_operation "${1}:${2:-}" ;;
+        scheduled-app-update) begin_operation "update" ;;
+        scheduled-kernel-update) begin_operation "kernel-update" ;;
         *) begin_operation "${1}" ;;
       esac
       trap handle_exit EXIT
@@ -2407,6 +2448,7 @@ main() {
     stop) stop_services ;;
     restart) check_vpn; restart_services ;;
     update) update_app ;;
+    scheduled-app-update) scheduled_app_update ;;
     test-update) update_test_app "$@" ;;
     test-rollback) restore_test_app ;;
     status) status_app ;;
@@ -2424,6 +2466,7 @@ main() {
       ;;
     secure) secure_server ;;
     kernel-update) update_kernel ;;
+    scheduled-kernel-update) scheduled_kernel_update ;;
     vpn-firewall) configure_vpn_firewall_policy ;;
     optimize) optimize_resources ;;
     automation-apply) apply_automation ;;

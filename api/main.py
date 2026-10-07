@@ -1824,6 +1824,8 @@ def default_automation() -> dict:
         "reboot": {"enabled": False, "cadence": "weekly", "weekday": "Sun", "hour": 4, "minute": 0},
         "cleanup": {"enabled": False, "cadence": "weekly", "weekday": "Sun", "hour": 3, "minute": 0},
         "protocol_scan": {"enabled": False, "cadence": "daily", "weekday": "Sun", "hour": 2, "minute": 30},
+        "application_update": {"enabled": False, "cadence": "daily", "weekday": "Sun", "hour": 3, "minute": 30},
+        "kernel_update": {"enabled": False, "cadence": "weekly", "weekday": "Sun", "hour": 4, "minute": 30},
     }
 
 
@@ -1893,6 +1895,8 @@ def services_status(_: None = Depends(require_token)) -> dict:
         "timers": {
             "reboot": timer_details("reboot"), "cleanup": timer_details("cleanup"),
             "protocol_scan": timer_details("protocol-scan"),
+            "application_update": timer_details("application-update"),
+            "kernel_update": timer_details("kernel-update"),
         },
         "panel_access": {
             "mode": os.getenv("ACCESS_MODE", "external"),
@@ -2126,6 +2130,8 @@ class AutomationSettings(BaseModel):
     reboot: AutomationSchedule
     cleanup: AutomationSchedule
     protocol_scan: AutomationSchedule
+    application_update: AutomationSchedule
+    kernel_update: AutomationSchedule
 
 
 @app.put("/api/services/automation")
@@ -2156,6 +2162,8 @@ def update_automation(payload: AutomationSettings, _: None = Depends(require_tok
         "timers": {
             "reboot": timer_details("reboot"), "cleanup": timer_details("cleanup"),
             "protocol_scan": timer_details("protocol-scan"),
+            "application_update": timer_details("application-update"),
+            "kernel_update": timer_details("kernel-update"),
         },
     }
 
