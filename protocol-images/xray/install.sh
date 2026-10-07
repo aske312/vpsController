@@ -3,8 +3,8 @@ set -Eeuo pipefail
 ROOT=/etc/vps-control/xray
 BIN=/usr/local/lib/vps-control-xray/xray
 PORT="${XRAY_PORT:-8445}"
-TARGET="${XRAY_REALITY_TARGET:-www.microsoft.com:443}"
-SERVER_NAME="${XRAY_REALITY_SERVER_NAME:-www.microsoft.com}"
+TARGET="${XRAY_REALITY_TARGET:-www.yahoo.com:443}"
+SERVER_NAME="${XRAY_REALITY_SERVER_NAME:-www.yahoo.com}"
 case "$(dpkg --print-architecture)" in
   amd64) machine=64 ;;
   arm64) machine=arm64-v8a ;;

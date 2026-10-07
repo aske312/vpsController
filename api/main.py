@@ -1215,7 +1215,8 @@ def check_protocol_connection(protocol: str) -> dict:
                 bytes_received = round(float(response_metrics[2]))
             except (IndexError, ValueError):
                 bytes_sent, bytes_received = 0, len(body)
-            if response.returncode == 0 and status_code == "200" and payload.get("status") == "ok":
+            health_contract_valid = payload.get("ok") is True or payload.get("status") == "ok"
+            if response.returncode == 0 and status_code == "200" and health_contract_valid:
                 result.update(
                     state="confirmed", title="Handshake и передача данных подтверждены",
                     detail="Временный клиент получил корректный ответ API через SOCKS и серверный outbound протокола.",
@@ -1224,7 +1225,7 @@ def check_protocol_connection(protocol: str) -> dict:
             else:
                 result.update(
                     state="failed", title="Сквозной ответ через протокол не получен",
-                    detail="Клиент запустился, но фиксированный health request не вернул корректный ответ через протокол.",
+                    detail=f"Клиент запустился, но health request не вернул корректный ответ через протокол (HTTP {status_code or 'нет ответа'}, curl {response.returncode}).",
                     latency_ms=latency_ms, bytes_received=bytes_received, bytes_sent=bytes_sent,
                 )
             connection_probe_cache[protocol] = result

@@ -190,7 +190,7 @@ class PortabilityTests(unittest.TestCase):
 
             def curl(command, **_kwargs):
                 output = Path(command[command.index('--output') + 1])
-                output.write_text('{"status":"ok"}', encoding='utf-8')
+                output.write_text('{"ok":true}', encoding='utf-8')
                 return type('Result', (), {'returncode': 0, 'stdout': '200 84 15', 'stderr': ''})()
 
             with patch.object(api, 'protocol_listener', return_value=('unit.service', 8443, 'udp', True)), \
