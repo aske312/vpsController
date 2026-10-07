@@ -447,6 +447,7 @@ test("SSH hardening remains reachable under unauthenticated scanner load", async
   assert.match(secureBody, /LoginGraceTime 30/);
   assert.match(secureBody, /MaxStartups 30:30:100/);
   assert.match(secureBody, /PerSourceMaxStartups 3/);
+  assert.match(secureBody, /PerSourcePenalties no/);
   assert.match(secureBody, /sshd -t/);
   assert.match(secureBody, /предыдущая конфигурация восстановлена/);
 });

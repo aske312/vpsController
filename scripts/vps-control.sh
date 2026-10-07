@@ -688,6 +688,9 @@ EOF
   if sshd -T 2>/dev/null | grep -q '^persourcemaxstartups '; then
     printf 'PerSourceMaxStartups 3\n' >>"${ssh_config}"
   fi
+  if sshd -T 2>/dev/null | grep -q '^persourcepenalties '; then
+    printf 'PerSourcePenalties no\n' >>"${ssh_config}"
+  fi
   if ! sshd -t >/dev/null 2>&1; then
     if (( ssh_config_existed )); then
       cp -a "${ssh_backup}" "${ssh_config}"
