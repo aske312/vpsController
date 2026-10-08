@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import hmac
+import hashlib
 import ipaddress
 import json
 import csv
@@ -108,6 +109,15 @@ TUIC_CONFIG = TUIC_DIR / "config.json"
 XRAY_DIR = Path("/etc/vps-control/xray")
 XRAY_SETTINGS = XRAY_DIR / "settings.json"
 XRAY_CONFIG = XRAY_DIR / "config.json"
+XRAY_SNI_SUGGESTIONS = (
+    {"domain": "ya.ru", "label": "Яндекс"},
+    {"domain": "www.yandex.ru", "label": "Яндекс"},
+    {"domain": "vk.com", "label": "VK"},
+    {"domain": "mail.ru", "label": "Mail.ru"},
+    {"domain": "www.ozon.ru", "label": "Ozon"},
+    {"domain": "www.rbc.ru", "label": "РБК"},
+)
+XRAY_MANAGED_TAG_PREFIX = "vless-xhttp-reality-sni-"
 MONITOR_DIR = DATA_DIR / "monitor"
 updates_refresh_lock = threading.Lock()
 app_version_refresh_lock = threading.Lock()
@@ -2728,11 +2738,13 @@ def xray_server_names() -> list[str]:
     names: list[str] = []
     try:
         server = json.loads(XRAY_CONFIG.read_text(encoding="utf-8"))
-        inbound = next(row for row in server.get("inbounds", []) if row.get("protocol") == "vless")
-        configured = inbound.get("streamSettings", {}).get("realitySettings", {}).get("serverNames", [])
-        if isinstance(configured, list):
-            names.extend(str(name).strip() for name in configured if str(name).strip())
-    except (OSError, StopIteration, json.JSONDecodeError):
+        for inbound in server.get("inbounds", []):
+            if inbound.get("protocol") != "vless":
+                continue
+            configured = inbound.get("streamSettings", {}).get("realitySettings", {}).get("serverNames", [])
+            if isinstance(configured, list):
+                names.extend(str(name).strip() for name in configured if str(name).strip())
+    except (OSError, json.JSONDecodeError):
         pass
     try:
         settings = json.loads(XRAY_SETTINGS.read_text(encoding="utf-8"))
@@ -2759,7 +2771,12 @@ def client_options(_: None = Depends(require_token)) -> dict:
             "gecko_min_packet_size": int(hysteria.get("gecko_min_packet_size", 512)),
             "gecko_max_packet_size": int(hysteria.get("gecko_max_packet_size", 1200)),
         },
-        "xray": {"server_names": server_names, "default_sni": server_names[0] if server_names else ""},
+        "xray": {
+            "server_names": server_names,
+            "default_sni": server_names[0] if server_names else "",
+            "suggestions": list(XRAY_SNI_SUGGESTIONS),
+            "custom_allowed": True,
+        },
     }
 
 
@@ -2800,7 +2817,7 @@ class ClientSettings(BaseModel):
     initial_packet_size: int = Field(default=0, ge=0, le=1500)
     disable_path_mtu_discovery: bool = False
     fingerprint: Literal["chrome", "firefox", "edge", "safari", "ios", "android", "randomized"] = "chrome"
-    xray_sni: str = Field(default="", max_length=253, pattern=r"^[A-Za-z0-9.-]*$")
+    xray_sni: str = Field(default="", max_length=253)
     xray_xhttp_mode: Literal["auto", "packet-up", "stream-up"] = "auto"
     mux_enabled: bool = False
     mux_concurrency: int = Field(default=8, ge=1, le=128)
@@ -2908,6 +2925,94 @@ def uri_endpoint(host: str) -> str:
         return host
 
 
+def normalized_xray_sni(value: str) -> str:
+    """Return an ASCII DNS name suitable for REALITY, including IDN input."""
+    candidate = value.strip().rstrip(".").lower()
+    if not candidate:
+        return ""
+    try:
+        ascii_name = candidate.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise HTTPException(status_code=422, detail="Xray SNI contains an invalid domain name") from exc
+    if len(ascii_name) > 253 or "." not in ascii_name or not re.fullmatch(
+        r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",
+        ascii_name,
+    ):
+        raise HTTPException(status_code=422, detail="Xray SNI must be a valid domain name")
+    try:
+        ipaddress.ip_address(ascii_name)
+    except ValueError:
+        return ascii_name
+    raise HTTPException(status_code=422, detail="Xray SNI must be a domain name, not an IP address")
+
+
+def xray_profile_for_inbound(inbound: dict, settings: dict) -> dict:
+    tag = str(inbound.get("tag", ""))
+    profiles = settings.get("profiles", {})
+    if isinstance(profiles, dict):
+        for profile in profiles.values():
+            if isinstance(profile, dict) and profile.get("tag") == tag:
+                return profile
+    return {
+        "tag": tag,
+        "port": int(inbound.get("port", settings.get("port", 8445))),
+        "path": str(settings.get("path", "/xhttp")),
+        "password": str(settings.get("password", "")),
+        "short_id": str(settings.get("short_id", "")),
+        "server_name": str(settings.get("server_name", "")),
+    }
+
+
+def create_xray_sni_inbound(server: dict, settings: dict, server_name: str, binary: str) -> tuple[dict, dict]:
+    """Create an isolated REALITY listener so a new SNI cannot break existing profiles."""
+    probe = subprocess.run(
+        [binary, "tls", "ping", server_name], capture_output=True, text=True, timeout=20, check=False,
+    )
+    probe_output = f"{probe.stdout}\n{probe.stderr}"
+    if probe.returncode or probe_output.count("Handshake succeeded") < 2 or "TLS Version:" not in probe_output or "TLS 1.3" not in probe_output:
+        detail = (probe.stderr or probe.stdout).strip().splitlines()
+        reason = detail[-1] if detail else "TLS 1.3 / X25519 check failed"
+        raise HTTPException(status_code=422, detail=f"Domain is not compatible with Xray REALITY: {reason[:240]}")
+
+    keys = subprocess.run([binary, "x25519"], capture_output=True, text=True, timeout=10, check=False)
+    if keys.returncode:
+        raise RuntimeError(keys.stderr.strip() or "Unable to generate REALITY key pair")
+    private_match = re.search(r"^PrivateKey:\s*(\S+)", keys.stdout, re.M)
+    public_match = re.search(r"^(?:Password|PublicKey):\s*(\S+)", keys.stdout, re.M)
+    if not private_match or not public_match:
+        raise RuntimeError("Xray returned an invalid REALITY key pair")
+
+    used_ports = {int(row.get("port")) for row in server.get("inbounds", []) if str(row.get("port", "")).isdigit()}
+    start = int(settings.get("managed_port_start", int(settings.get("port", 8445)) + 1))
+    port = next((candidate for candidate in range(start, min(start + 64, 65536)) if candidate not in used_ports), None)
+    if port is None:
+        raise HTTPException(status_code=409, detail="No free ports remain for additional Xray SNI profiles")
+
+    short_id = secrets.token_hex(8)
+    path = f"/{secrets.token_hex(8)}"
+    tag = f"{XRAY_MANAGED_TAG_PREFIX}{hashlib.sha256(server_name.encode()).hexdigest()[:12]}"
+    profile = {
+        "tag": tag, "port": port, "target": f"{server_name}:443", "server_name": server_name,
+        "private_key": private_match.group(1), "password": public_match.group(1),
+        "short_id": short_id, "path": path,
+    }
+    inbound = {
+        "listen": "0.0.0.0", "port": port, "protocol": "vless", "tag": tag,
+        "settings": {"clients": [], "decryption": "none"},
+        "streamSettings": {
+            "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": "auto"},
+            "realitySettings": {
+                "show": False, "target": profile["target"], "xver": 0, "serverNames": [server_name],
+                "privateKey": profile["private_key"], "shortIds": [short_id],
+            },
+        },
+    }
+    server.setdefault("inbounds", []).append(inbound)
+    settings.setdefault("profiles", {})[server_name] = profile
+    settings.setdefault("managed_port_start", start)
+    return inbound, profile
+
+
 @app.post("/api/clients")
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
     if payload.protocol == "xray" and payload.settings.local_socks_port == payload.settings.local_http_port:
@@ -2923,9 +3028,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     if payload.protocol == "hysteria2" and payload.settings.hysteria_hop_min > payload.settings.hysteria_hop_max:
         raise HTTPException(status_code=422, detail="Hysteria2 minimum hop interval must not exceed maximum")
     if payload.protocol == "xray" and payload.settings.xray_sni:
-        allowed_server_names = xray_server_names()
-        if payload.settings.xray_sni not in allowed_server_names:
-            raise HTTPException(status_code=422, detail="Xray SNI is not allowed by the server REALITY configuration")
+        payload.settings.xray_sni = normalized_xray_sni(payload.settings.xray_sni)
     if payload.settings.route_mode == "custom":
         try:
             for network in payload.settings.allowed_ips.split(","):
@@ -3056,10 +3159,21 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             raise HTTPException(status_code=409, detail="Xray protocol is not installed")
         with client_mutation_lock:
             original = XRAY_CONFIG.read_bytes()
+            original_settings = XRAY_SETTINGS.read_bytes()
             temporary = XRAY_CONFIG.with_suffix(".tmp.json")
+            temporary_settings = XRAY_SETTINGS.with_suffix(".tmp.json")
             try:
                 server = json.loads(original)
-                inbound = next(row for row in server.get("inbounds", []) if row.get("protocol") == "vless")
+                settings = json.loads(original_settings)
+                server_name = payload.settings.xray_sni or normalized_xray_sni(str(settings.get("server_name", "www.yahoo.com")))
+                inbound = next((
+                    row for row in server.get("inbounds", [])
+                    if row.get("protocol") == "vless" and server_name in row.get("streamSettings", {}).get("realitySettings", {}).get("serverNames", [])
+                ), None)
+                if inbound is None:
+                    inbound, profile = create_xray_sni_inbound(server, settings, server_name, binary)
+                else:
+                    profile = xray_profile_for_inbound(inbound, settings)
                 user_uuid = str(uuid.uuid4())
                 inbound.setdefault("settings", {}).setdefault("clients", []).append({"id": user_uuid, "email": f"{client_id}@312.net"})
                 temporary.write_text(json.dumps(server, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -3067,13 +3181,13 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 result = subprocess.run([binary, "run", "-test", "-config", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
                 if result.returncode:
                     raise RuntimeError(result.stderr.strip() or "Xray rejected configuration")
+                temporary_settings.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(temporary_settings, 0o600)
+                temporary_settings.replace(XRAY_SETTINGS)
                 temporary.replace(XRAY_CONFIG)
                 run("systemctl", "restart", unit, timeout=20, check=True)
-                settings = json.loads(XRAY_SETTINGS.read_text(encoding="utf-8"))
                 endpoint = PUBLIC_IP
-                path = str(settings.get("path", "/xhttp"))
-                server_names = xray_server_names()
-                server_name = payload.settings.xray_sni or (server_names[0] if server_names else str(settings.get("server_name", "www.microsoft.com")))
+                path = str(profile.get("path", "/xhttp"))
                 listen_host = "0.0.0.0" if payload.settings.proxy_bind == "lan" else "127.0.0.1"
                 socks_settings = {"udp": not payload.settings.disable_udp, "auth": "password" if payload.settings.local_auth_enabled else "noauth"}
                 http_settings: dict = {}
@@ -3084,15 +3198,15 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 outbounds = [{
                     "tag": "xray-out", "protocol": "vless",
                     "settings": {"vnext": [{
-                        "address": endpoint, "port": int(settings.get("port", 8445)),
+                        "address": endpoint, "port": int(profile.get("port", 8445)),
                         "users": [{"id": user_uuid, "encryption": "none"}],
                     }]},
                     "streamSettings": {
                         "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": payload.settings.xray_xhttp_mode},
                         "realitySettings": {
                             "serverName": server_name,
-                            "fingerprint": payload.settings.fingerprint, "password": str(settings.get("password", "")),
-                            "shortId": str(settings.get("short_id", "")), "spiderX": "/",
+                            "fingerprint": payload.settings.fingerprint, "password": str(profile.get("password", "")),
+                            "shortId": str(profile.get("short_id", "")), "spiderX": "/",
                         },
                     },
                     "mux": {"enabled": payload.settings.mux_enabled, "concurrency": payload.settings.mux_concurrency, "xudpConcurrency": payload.settings.xudp_concurrency, "xudpProxyUDP443": payload.settings.xudp_proxy_udp443},
@@ -3113,10 +3227,14 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 if payload.settings.xray_dns:
                     client["dns"] = {"servers": [server.strip() for server in payload.settings.xray_dns.split(",") if server.strip()]}
                 items = read_clients()
-                items.append({"id": client_id, "name": payload.name, "protocol": "xray", "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()})
+                items.append({
+                    "id": client_id, "name": payload.name, "protocol": "xray", "public_key": user_uuid,
+                    "endpoint": endpoint, "xray_inbound_tag": str(inbound.get("tag", "")), "xray_sni": server_name,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
                 write_clients(items)
-                port = int(settings.get("port", 8445))
-                query = urlencode({"type": "xhttp", "security": "reality", "pbk": str(settings.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(settings.get("short_id", "")), "path": path, "mode": payload.settings.xray_xhttp_mode, "spx": "/"})
+                port = int(profile.get("port", 8445))
+                query = urlencode({"type": "xhttp", "security": "reality", "pbk": str(profile.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(profile.get("short_id", "")), "path": path, "mode": payload.settings.xray_xhttp_mode, "spx": "/"})
                 uri = f"vless://{quote(user_uuid, safe='')}@{uri_endpoint(endpoint)}:{port}?{query}#{quote(payload.name, safe='')}"
                 return {"id": client_id, **connection_profile(
                     protocol="xray", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-xray.json", config=json.dumps(client, ensure_ascii=False, indent=2),
@@ -3125,13 +3243,22 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     steps=["Отсканируйте QR или откройте VLESS-ссылку в клиенте.", "При ручном импорте используйте персональный JSON-файл.", "Сохраните профиль и включите системный VPN-режим клиента."],
                     uri=uri, qr_content=uri,
                 )}
+            except HTTPException:
+                XRAY_CONFIG.write_bytes(original)
+                os.chmod(XRAY_CONFIG, 0o600)
+                XRAY_SETTINGS.write_bytes(original_settings)
+                os.chmod(XRAY_SETTINGS, 0o600)
+                raise
             except Exception as exc:
                 XRAY_CONFIG.write_bytes(original)
                 os.chmod(XRAY_CONFIG, 0o600)
+                XRAY_SETTINGS.write_bytes(original_settings)
+                os.chmod(XRAY_SETTINGS, 0o600)
                 run("systemctl", "restart", unit, timeout=20)
                 raise HTTPException(status_code=500, detail="Unable to create Xray connection") from exc
             finally:
                 temporary.unlink(missing_ok=True)
+                temporary_settings.unlink(missing_ok=True)
     command = "awg"
     config_path = AWG_CONFIG
     if not config_path.exists():
@@ -3216,19 +3343,50 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
         if XRAY_CONFIG.exists() and Path(binary).exists():
             with client_mutation_lock:
                 original = XRAY_CONFIG.read_bytes()
+                original_settings = XRAY_SETTINGS.read_bytes()
                 config_data = json.loads(original)
-                inbound = next(row for row in config_data.get("inbounds", []) if row.get("protocol") == "vless")
-                users = inbound.setdefault("settings", {}).setdefault("clients", [])
-                inbound["settings"]["clients"] = [user for user in users if user.get("email") != f"{client_id}@312.net"]
+                settings_data = json.loads(original_settings)
+                retained_inbounds = []
+                removed_tags: set[str] = set()
+                for inbound in config_data.get("inbounds", []):
+                    if inbound.get("protocol") == "vless":
+                        users = inbound.setdefault("settings", {}).setdefault("clients", [])
+                        inbound["settings"]["clients"] = [user for user in users if user.get("email") != f"{client_id}@312.net"]
+                        tag = str(inbound.get("tag", ""))
+                        if tag.startswith(XRAY_MANAGED_TAG_PREFIX) and not inbound["settings"]["clients"]:
+                            removed_tags.add(tag)
+                            continue
+                    retained_inbounds.append(inbound)
+                config_data["inbounds"] = retained_inbounds
+                profiles = settings_data.get("profiles", {})
+                if isinstance(profiles, dict):
+                    settings_data["profiles"] = {
+                        name: profile for name, profile in profiles.items()
+                        if not isinstance(profile, dict) or profile.get("tag") not in removed_tags
+                    }
+                if removed_tags:
+                    run("/usr/local/lib/vps-control-xray/firewall.sh", "delete", timeout=10)
                 temporary = XRAY_CONFIG.with_suffix(".tmp.json")
+                temporary_settings = XRAY_SETTINGS.with_suffix(".tmp.json")
                 temporary.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
                 os.chmod(temporary, 0o600)
                 result = subprocess.run([binary, "run", "-test", "-config", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
                 if result.returncode:
                     temporary.unlink(missing_ok=True)
                     raise HTTPException(status_code=500, detail="Unable to remove Xray connection")
+                temporary_settings.write_text(json.dumps(settings_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.chmod(temporary_settings, 0o600)
+                temporary_settings.replace(XRAY_SETTINGS)
                 temporary.replace(XRAY_CONFIG)
-                run("systemctl", "restart", "vps-control-xray.service", timeout=20, check=True)
+                try:
+                    run("systemctl", "restart", "vps-control-xray.service", timeout=20, check=True)
+                except Exception:
+                    XRAY_CONFIG.write_bytes(original); os.chmod(XRAY_CONFIG, 0o600)
+                    XRAY_SETTINGS.write_bytes(original_settings); os.chmod(XRAY_SETTINGS, 0o600)
+                    run("systemctl", "restart", "vps-control-xray.service", timeout=20)
+                    raise
+                finally:
+                    temporary_settings.unlink(missing_ok=True)
         write_clients([entry for entry in items if entry["id"] != client_id])
         return {"deleted": client_id}
     command = "awg"

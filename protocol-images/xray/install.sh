@@ -44,7 +44,7 @@ if [[ ! -s "${ROOT}/settings.json" ]]; then
 import json, os, sys
 file, port, target, server_name, private_key, password, short_id, path = sys.argv[1:]
 with open(file, 'w', encoding='utf-8') as output:
-    json.dump({'port': int(port), 'target': target, 'server_name': server_name, 'private_key': private_key, 'password': password, 'short_id': short_id, 'path': path}, output, indent=2)
+    json.dump({'port': int(port), 'target': target, 'server_name': server_name, 'private_key': private_key, 'password': password, 'short_id': short_id, 'path': path, 'managed_port_start': int(port) + 1, 'profiles': {}}, output, indent=2)
 os.chmod(file, 0o600)
 PY
 fi
@@ -74,19 +74,27 @@ import json, os, sys
 config_path, settings_path = sys.argv[1:]
 config = json.load(open(config_path, encoding='utf-8'))
 settings = json.load(open(settings_path, encoding='utf-8'))
+settings.setdefault('managed_port_start', int(settings.get('port', 8445)) + 1)
+settings.setdefault('profiles', {})
 for inbound in config.get('inbounds', []):
     if inbound.get('protocol') != 'vless':
         continue
     stream = inbound.setdefault('streamSettings', {})
     if stream.get('network') == 'xhttp':
         xhttp = stream.setdefault('xhttpSettings', {})
-        xhttp['path'] = settings['path']
+        profile = next((value for value in settings['profiles'].values() if isinstance(value, dict) and value.get('tag') == inbound.get('tag')), None)
+        xhttp['path'] = str(profile.get('path')) if profile else settings['path']
         xhttp.setdefault('mode', 'auto')
 temporary = config_path + '.normalized'
 with open(temporary, 'w', encoding='utf-8') as output:
     json.dump(config, output, indent=2)
 os.chmod(temporary, 0o600)
 os.replace(temporary, config_path)
+temporary_settings = settings_path + '.normalized'
+with open(temporary_settings, 'w', encoding='utf-8') as output:
+    json.dump(settings, output, indent=2)
+os.chmod(temporary_settings, 0o600)
+os.replace(temporary_settings, settings_path)
 PY
 chmod 0600 "${ROOT}"/*.json
 install -m 0755 "$(dirname "$0")/firewall.sh" /usr/local/lib/vps-control-xray/firewall.sh

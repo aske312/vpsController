@@ -154,7 +154,7 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(dialog, /initial_packet_size/);
   assert.match(dialog, /block_bittorrent/);
   assert.match(dialog, /Общие настройки доступа для proxy-протоколов/);
-  assert.match(dialog, /SNI для REALITY/);
+  assert.match(dialog, /SNI \/ адрес маскировки REALITY/);
   assert.match(dialog, /Object\.entries\(serverOptions\.awg/);
   assert.match(dialog, /connectionMaskingStatus/);
   assert.match(dialog, /AmneziaWG · Jc/);

@@ -566,6 +566,94 @@ class PortabilityTests(unittest.TestCase):
             self.assertEqual(options['awg']['s1'], int(api.AWG_PROFILE['S1']))
             self.assertEqual(options['awg']['h4'], int(api.AWG_PROFILE['H4']))
 
+    def test_xray_custom_sni_creates_an_isolated_reality_listener(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            protocol = root / 'xray'
+            protocol.mkdir()
+            config_path = protocol / 'config.json'
+            settings_path = protocol / 'settings.json'
+            config_path.write_text(json.dumps({
+                'inbounds': [{
+                    'listen': '0.0.0.0', 'port': 8445, 'protocol': 'vless', 'tag': 'vless-xhttp-reality',
+                    'settings': {'clients': [], 'decryption': 'none'},
+                    'streamSettings': {'network': 'xhttp', 'security': 'reality', 'xhttpSettings': {'path': '/base', 'mode': 'auto'}, 'realitySettings': {'serverNames': ['example.com']}},
+                }],
+                'outbounds': [{'protocol': 'freedom', 'tag': 'direct'}],
+            }), encoding='utf-8')
+            settings_path.write_text(json.dumps({
+                'port': 8445, 'path': '/base', 'server_name': 'example.com', 'password': 'base-public',
+                'short_id': '0123456789abcdef', 'managed_port_start': 18445, 'profiles': {},
+            }), encoding='utf-8')
+
+            def command(*args, **_kwargs):
+                return 'enabled' if args[:2] == ('systemctl', 'is-enabled') else ''
+
+            def process(args, **_kwargs):
+                if args[1:3] == ['tls', 'ping']:
+                    return type('Result', (), {'returncode': 0, 'stdout': 'Handshake succeeded\nTLS Version: TLS 1.3\nHandshake succeeded', 'stderr': ''})()
+                if args[1:] == ['x25519']:
+                    return type('Result', (), {'returncode': 0, 'stdout': 'PrivateKey: private-key\nPassword: public-key\n', 'stderr': ''})()
+                return type('Result', (), {'returncode': 0, 'stdout': '', 'stderr': ''})()
+
+            settings = api.ClientSettings(xray_sni='я.рф')
+            with patch.multiple(
+                api,
+                DATA_DIR=root, CLIENTS_FILE=root / 'clients.json', PUBLIC_IP='192.0.2.1',
+                XRAY_DIR=protocol, XRAY_CONFIG=config_path, XRAY_SETTINGS=settings_path,
+            ), patch.object(api.Path, 'exists', return_value=True), patch.object(api, 'run', side_effect=command), \
+                 patch.object(api.subprocess, 'run', side_effect=process):
+                created = api.create_client(api.ClientCreate(name='Russian SNI', protocol='xray', settings=settings))
+
+            server = json.loads(config_path.read_text(encoding='utf-8'))
+            saved_settings = json.loads(settings_path.read_text(encoding='utf-8'))
+            managed = server['inbounds'][1]
+            self.assertEqual(managed['port'], 18445)
+            self.assertEqual(managed['streamSettings']['realitySettings']['target'], 'xn--41a.xn--p1ai:443')
+            self.assertEqual(managed['streamSettings']['realitySettings']['serverNames'], ['xn--41a.xn--p1ai'])
+            self.assertEqual(saved_settings['profiles']['xn--41a.xn--p1ai']['password'], 'public-key')
+            self.assertIn('@192.0.2.1:18445?', created['profile']['delivery']['link']['uri'])
+            self.assertIn('sni=xn--41a.xn--p1ai', created['profile']['delivery']['link']['uri'])
+
+    def test_xray_sni_validation_rejects_non_domain_values(self):
+        with self.assertRaises(api.HTTPException) as invalid:
+            api.normalized_xray_sni('127.0.0.1')
+        self.assertEqual(invalid.exception.status_code, 422)
+
+    def test_deleting_last_custom_xray_client_removes_listener_and_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            protocol = root / 'xray'
+            protocol.mkdir()
+            config_path = protocol / 'config.json'
+            settings_path = protocol / 'settings.json'
+            tag = f'{api.XRAY_MANAGED_TAG_PREFIX}test'
+            config_path.write_text(json.dumps({'inbounds': [
+                {'protocol': 'vless', 'tag': 'vless-xhttp-reality', 'settings': {'clients': []}},
+                {'protocol': 'vless', 'tag': tag, 'settings': {'clients': [{'id': 'uuid', 'email': 'client-id@312.net'}]}},
+            ]}), encoding='utf-8')
+            settings_path.write_text(json.dumps({
+                'port': 8445, 'profiles': {'ya.ru': {'tag': tag, 'port': 8446}},
+            }), encoding='utf-8')
+            clients_path = root / 'clients.json'
+            clients_path.write_text(json.dumps([{
+                'id': 'client-id', 'name': 'Client', 'protocol': 'xray', 'public_key': 'uuid',
+            }]), encoding='utf-8')
+            valid = type('Result', (), {'returncode': 0, 'stdout': '', 'stderr': ''})()
+
+            with patch.multiple(
+                api, DATA_DIR=root, CLIENTS_FILE=clients_path, XRAY_DIR=protocol,
+                XRAY_CONFIG=config_path, XRAY_SETTINGS=settings_path,
+            ), patch.object(api.Path, 'exists', return_value=True), patch.object(api, 'run', return_value=''), \
+                 patch.object(api.subprocess, 'run', return_value=valid):
+                api.delete_client('client-id')
+
+            server = json.loads(config_path.read_text(encoding='utf-8'))
+            saved_settings = json.loads(settings_path.read_text(encoding='utf-8'))
+            self.assertEqual([row['tag'] for row in server['inbounds']], ['vless-xhttp-reality'])
+            self.assertEqual(saved_settings['profiles'], {})
+            self.assertEqual(json.loads(clients_path.read_text(encoding='utf-8')), [])
+
 
 if __name__ == '__main__':
     unittest.main()
