@@ -373,9 +373,15 @@ class PortabilityTests(unittest.TestCase):
                  patch.object(api, 'run_with_input'):
                 for protocol in ('wg', 'awg'):
                     with self.subTest(protocol=protocol):
+                        settings = api.ClientSettings(
+                            dns='9.9.9.9', mtu=1420, keepalive=45, route_mode='all',
+                            awg_jc=9 if protocol == 'awg' else None,
+                            awg_jmin=12 if protocol == 'awg' else None,
+                            awg_jmax=96 if protocol == 'awg' else None,
+                        )
                         created = api.create_client(api.ClientCreate(
                             name='QA client', protocol=protocol,
-                            settings=api.ClientSettings(dns='9.9.9.9', mtu=1420, keepalive=45, route_mode='all'),
+                            settings=settings,
                         ))
                         self.assertIn('Endpoint = 192.0.2.1:', created['config'])
                         self.assertIn('DNS = 9.9.9.9', created['config'])
@@ -383,6 +389,10 @@ class PortabilityTests(unittest.TestCase):
                         self.assertIn('AllowedIPs = 0.0.0.0/0, ::/0', created['config'])
                         self.assertIn('PersistentKeepalive = 45', created['config'])
                         self.assertEqual('Jc = ' in created['config'], protocol == 'awg')
+                        if protocol == 'awg':
+                            self.assertIn('Jc = 9', created['config'])
+                            self.assertIn('Jmin = 12', created['config'])
+                            self.assertIn('Jmax = 96', created['config'])
                         self.assertEqual(created['profile']['protocol'], protocol)
                         self.assertEqual(created['profile']['name'], 'QA client')
                         self.assertEqual(created['profile']['delivery']['file']['content'], created['config'])
@@ -396,6 +406,47 @@ class PortabilityTests(unittest.TestCase):
                         api.delete_client(created['id'])
                         self.assertEqual(api.read_clients(), [])
                         self.assertNotIn('[Peer]', configs[protocol].read_text())
+
+    def test_hysteria_client_profile_applies_individual_advanced_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            protocol = root / 'hysteria2'
+            protocol.mkdir()
+            settings_path = protocol / 'settings.json'
+            users_path = protocol / 'users.json'
+            certificate = protocol / 'server.crt'
+            settings_path.write_text('{"port":8443,"domain":"vpn.example"}', encoding='utf-8')
+            users_path.write_text('{}', encoding='utf-8')
+            certificate.write_text('certificate', encoding='utf-8')
+
+            def command(*args, **_kwargs):
+                if args[:2] == ('systemctl', 'is-enabled'):
+                    return 'enabled'
+                if args and args[0] == 'openssl':
+                    return 'SHA256 Fingerprint=AA:BB'
+                return ''
+
+            client_settings = api.ClientSettings(
+                local_socks_port=1180, local_http_port=8180, http_proxy_enabled=True,
+                disable_udp=True, fast_open=True, lazy=True,
+                hysteria_congestion='bbr', bbr_profile='conservative', up_mbps=25, down_mbps=75,
+            )
+            with patch.multiple(
+                api,
+                DATA_DIR=root, CLIENTS_FILE=root / 'clients.json', PUBLIC_IP='192.0.2.1',
+                HYSTERIA2_DIR=protocol, HYSTERIA2_SETTINGS=settings_path, HYSTERIA2_USERS=users_path,
+            ), patch.object(api, 'run', side_effect=command), patch.object(api, 'certificate_server_name', return_value='vpn.example'):
+                created = api.create_client(api.ClientCreate(name='Advanced client', protocol='hysteria2', settings=client_settings))
+
+            config = created['config']
+            self.assertIn('listen: 127.0.0.1:1180', config)
+            self.assertIn('listen: 127.0.0.1:8180', config)
+            self.assertIn('disableUDP: true', config)
+            self.assertIn('fastOpen: true', config)
+            self.assertIn('lazy: true', config)
+            self.assertIn('bbrProfile: conservative', config)
+            self.assertIn('up: 25 mbps', config)
+            self.assertIn('down: 75 mbps', config)
 
 
 if __name__ == '__main__':

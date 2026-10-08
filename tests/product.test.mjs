@@ -148,6 +148,15 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(dialog, /route_mode/);
   assert.match(dialog, /congestion_control/);
   assert.match(dialog, /fingerprint/);
+  assert.match(dialog, /awg_jc/);
+  assert.match(dialog, /http_proxy_enabled/);
+  assert.match(dialog, /hysteria_congestion/);
+  assert.match(dialog, /udp_relay_mode/);
+  assert.match(dialog, /routing_domain_strategy/);
+  assert.match(dialog, /Расширенные настройки/);
+  assert.match(api, /payload\.settings\.fast_open/);
+  assert.match(api, /payload\.settings\.udp_relay_mode/);
+  assert.match(api, /payload\.settings\.routing_domain_strategy/);
   assert.match(inventory, /ACCESS INVENTORY/);
   assert.match(inventory, /Поиск подключений/);
   assert.doesNotMatch(inventory, /protocolClientGroups/);
