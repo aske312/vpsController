@@ -41,6 +41,9 @@ class ProtocolPortsTests(unittest.TestCase):
                 with manager.reserve(39761): pass
             with patch.object(ports.platform, 'system', return_value='Linux'), patch.object(ports, 'command', return_value=result):
                 self.assertEqual(manager.status(39761)['status'], 'protocol')
+                activating = type('Result', (), {'returncode': 3, 'stdout': 'activating\n'})()
+                with patch.object(ports, 'command', return_value=activating):
+                    self.assertEqual(manager.status(39761)['status'], 'protocol')
                 other = ports.ProtocolPorts('tuic', 9444, '192.0.2.1', directory)
                 self.assertEqual(other.status(39761)['status'], 'occupied')
                 with self.assertRaises(ports.PortError): other.release(39761)

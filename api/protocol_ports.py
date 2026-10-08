@@ -90,8 +90,10 @@ class ProtocolPorts:
         if not self.address: return {'port': port, 'status': 'unavailable', 'detail': 'Публичный IP сервера не настроен'}
         if port == self.primary: return {'port': port, 'status': 'protocol', 'detail': 'Основной порт выбранного профиля'}
         if platform.system() != 'Linux': return {'port': port, 'status': 'unavailable', 'detail': 'Дополнительные порты требуют Linux'}
-        if self.owned(port) and command('systemctl', 'is-active', self.unit(port), check=False).returncode == 0:
-            return {'port': port, 'status': 'protocol', 'detail': 'Уже используется для этого профиля'}
+        if self.owned(port):
+            state = command('systemctl', 'is-active', self.unit(port), check=False)
+            if state.returncode == 0 or state.stdout.strip() in ('activating', 'reloading'):
+                return {'port': port, 'status': 'protocol', 'detail': 'Закреплён за этим профилем'}
         if self.path(port).exists() and not self.owned(port):
             return {'port': port, 'status': 'occupied', 'detail': 'Порт закреплён за другим серверным профилем'}
         try:
