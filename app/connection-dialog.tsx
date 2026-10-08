@@ -160,6 +160,12 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
 
   const meta = protocolDelivery[protocol];
   const proxyProtocol = protocol === "hysteria2" || protocol === "tuic" || protocol === "xray";
+  const masking = {
+    awg: { state: "Включена", detail: `AmneziaWG · Jc ${settings.awg_jc} · S/H синхронизированы с сервером`, level: "active" },
+    hysteria2: { state: "HTTP/3", detail: "QUIC-маскировка сервера · TLS с закреплённым сертификатом", level: "active" },
+    tuic: { state: "Базовая", detail: "TLS поверх QUIC · отдельная обфускация протоколом не предусмотрена", level: "limited" },
+    xray: { state: "Включена", detail: `XHTTP + REALITY · отпечаток ${settings.fingerprint}`, level: "active" },
+  }[protocol];
   const localAccessInvalid = proxyProtocol && settings.local_auth_enabled && settings.local_password.length < 8;
   return <div className="confirmBackdrop connectionDialogBackdrop" role="presentation" onMouseDown={() => { if (!submitting && !profile) onClose(); }}>
     <form className={`connectionDialog${profile ? " generated" : ""}`} role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={submit}>
@@ -169,6 +175,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
           <label className="connectionNameField"><span>Пользователь или устройство</span><input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={name} onChange={(event) => setName(event.target.value)} placeholder="Например: Анна · iPhone" /><small>Имя используется в панели и в экспортируемом профиле.</small></label>
           <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{protocols.map((item) => { const itemMeta = protocolDelivery[item]; return <button type="button" key={item} className={protocol === item ? "active" : ""} onClick={() => selectProtocol(item)}><span className={`protocol ${item}`}><ProtocolIcon protocol={item} /></span><span><strong>{itemMeta.title}</strong><small>{itemMeta.summary}</small></span><i /></button>; })}</div></fieldset>
           <fieldset className="connectionSettings"><legend>Параметры профиля</legend><header><span className={`protocol ${protocol}`}><ProtocolIcon protocol={protocol} /></span><div><strong>{meta.title}</strong><small>{meta.transport} · {meta.methods.join(" · ")}</small></div></header>
+            <div className={`connectionMaskingStatus ${masking.level}`}><span>Маскирование</span><strong>{masking.state}</strong><small>{masking.detail}</small></div>
             <div className="connectionSettingsFields">
               {protocol === "awg" && <>
                 <label><span>MTU</span><input type="number" min={1280} max={1500} value={settings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label>

@@ -305,6 +305,12 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .connectionCheckbox > span { display: flex; flex-direction: column; gap: 4px; }
 .connectionCheckbox input { width: 18px; height: 18px; }
 .connectionSettingsNote { margin: 13px 0 0; color: #84928f; font-size: 8px; line-height: 1.55; }
+.connectionMaskingStatus { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 8px; margin: 10px 0 12px; padding: 8px 10px; border: 1px solid rgba(112,224,189,.22); border-radius: 8px; background: rgba(112,224,189,.055); }
+.connectionMaskingStatus > span { color: var(--muted); font: 7px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.connectionMaskingStatus > strong { padding: 3px 6px; border-radius: 999px; color: #70e0bd; background: rgba(112,224,189,.12); font: 7px var(--font-mono); text-transform: uppercase; }
+.connectionMaskingStatus > small { min-width: 0; color: #a7b5b2; font-size: 8px; line-height: 1.35; }
+.connectionMaskingStatus.limited { border-color: rgba(245,185,92,.2); background: rgba(245,185,92,.045); }
+.connectionMaskingStatus.limited > strong { color: #f5b95c; background: rgba(245,185,92,.1); }
 .connectionSettingsGroup { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); }
 .connectionSettingsGroup > header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .connectionSettingsGroup > header strong { font-size: 9px; }
@@ -383,6 +389,8 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
   .connectionDialogHead, .connectionDialogBody, .connectionDialogResult { padding-inline: 18px; }
   .connectionSettingsFields { grid-template-columns: 1fr; }
   .connectionServerValues dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .connectionMaskingStatus { grid-template-columns: auto 1fr; }
+  .connectionMaskingStatus > small { grid-column: 1 / -1; }
   .connectionDialogActions { padding-inline: 18px; }
   .connectionHandoff.withQr, .connectionSetup { grid-template-columns: 1fr; }
   .connectionQr { width: min(260px, 100%); justify-self: center; }

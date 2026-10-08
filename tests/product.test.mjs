@@ -156,6 +156,10 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(dialog, /Общие настройки доступа для proxy-протоколов/);
   assert.match(dialog, /SNI для REALITY/);
   assert.match(dialog, /serverOptions\.awg\?\.s1/);
+  assert.match(dialog, /connectionMaskingStatus/);
+  assert.match(dialog, /AmneziaWG · Jc/);
+  assert.match(dialog, /отдельная обфускация протоколом не предусмотрена/);
+  assert.match(dialog, /XHTTP \+ REALITY/);
   assert.match(dialog, /mux_enabled/);
   assert.match(dialog, /Расширенные настройки/);
   assert.match(page, /request\("\/clients\/options"\)/);
