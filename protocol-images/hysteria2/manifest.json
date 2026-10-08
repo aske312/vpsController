@@ -1,9 +1,9 @@
 {
   "id": "hysteria2",
   "name": "Hysteria2",
-  "version": "2.12.2",
+  "version": "2.13.0",
   "installable": true,
-  "description": "QUIC/UDP-прокси Hysteria 2 с TLS, HTTP-аутентификацией и учётом трафика",
+  "description": "QUIC/UDP-прокси Hysteria 2 с TLS, Salamander/Gecko, сменой портов и индивидуальной аутентификацией",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",
   "installer": "install.sh",

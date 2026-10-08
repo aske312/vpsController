@@ -1,7 +1,7 @@
 {
   "id": "tuic",
   "name": "TUIC v5",
-  "version": "1.14.0",
+  "version": "1.14.2",
   "installable": true,
   "description": "QUIC/UDP-прокси TUIC v5 с TLS и индивидуальной UUID-аутентификацией",
   "category": "secure-tunnels",

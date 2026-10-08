@@ -48,7 +48,7 @@ class PortabilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             hysteria = root / 'hysteria2'; hysteria.mkdir()
-            (hysteria / 'settings.json').write_text('{"port":8443}', encoding='utf-8')
+            (hysteria / 'settings.json').write_text('{"port":8443,"listen":"8443-8450","obfs":"gecko","obfs_password":"probe-obfs","gecko_min_packet_size":512,"gecko_max_packet_size":1200}', encoding='utf-8')
             hysteria_probe = api.diagnostic_client_id('hysteria2')
             (hysteria / 'users.json').write_text(json.dumps({
                 'real-user': 'real-password', hysteria_probe: 'diagnostic-password',
@@ -83,6 +83,9 @@ class PortabilityTests(unittest.TestCase):
             hysteria_config = (root / 'hysteria2.yaml').read_text(encoding='utf-8')
             self.assertIn('pinSHA256: AA:BB', hysteria_config)
             self.assertIn(f'auth: {hysteria_probe}:diagnostic-password', hysteria_config)
+            self.assertIn('server: 127.0.0.1:8443-8450', hysteria_config)
+            self.assertIn('type: gecko', hysteria_config)
+            self.assertIn('minHopInterval: 15s', hysteria_config)
             tuic_probe = json.loads((root / 'tuic.json').read_text(encoding='utf-8'))
             self.assertEqual(tuic_probe['outbounds'][0]['uuid'], 'tuic-diagnostic')
             xray_probe = json.loads((root / 'xray.json').read_text(encoding='utf-8'))
@@ -411,7 +414,7 @@ class PortabilityTests(unittest.TestCase):
             settings_path = protocol / 'settings.json'
             users_path = protocol / 'users.json'
             certificate = protocol / 'server.crt'
-            settings_path.write_text('{"port":8443,"domain":"vpn.example"}', encoding='utf-8')
+            settings_path.write_text('{"port":8443,"listen":"8443-8450","domain":"vpn.example","obfs":"gecko","obfs_password":"server-obfs","gecko_min_packet_size":512,"gecko_max_packet_size":1200}', encoding='utf-8')
             users_path.write_text('{}', encoding='utf-8')
             certificate.write_text('certificate', encoding='utf-8')
 
@@ -427,7 +430,7 @@ class PortabilityTests(unittest.TestCase):
                 proxy_bind='lan', local_auth_enabled=True, local_username='local-user', local_password='local-password',
                 disable_udp=True, fast_open=True, lazy=True,
                 hysteria_congestion='bbr', bbr_profile='conservative', up_mbps=25, down_mbps=75,
-                disable_loss_compensation=True,
+                disable_loss_compensation=True, hysteria_hop_min=20, hysteria_hop_max=50,
             )
             with patch.multiple(
                 api,
@@ -449,6 +452,12 @@ class PortabilityTests(unittest.TestCase):
             self.assertIn('up: 25 mbps', config)
             self.assertIn('down: 75 mbps', config)
             self.assertIn('disableLossCompensation: true', config)
+            self.assertIn('server: vpn.example:8443-8450', config)
+            self.assertEqual(parsed['congestion']['bbrProfile'], 'conservative')
+            self.assertEqual(parsed['obfs']['type'], 'gecko')
+            self.assertEqual(parsed['obfs']['gecko']['password'], 'server-obfs')
+            self.assertEqual(parsed['transport']['udp']['minHopInterval'], '20s')
+            self.assertIn('obfs=gecko', created['profile']['delivery']['link']['uri'])
             self.assertTrue(parsed['bandwidth']['disableLossCompensation'])
             self.assertTrue(any(field['label'] == 'Локальный пароль' for field in created['profile']['fields']))
 
@@ -512,7 +521,7 @@ class PortabilityTests(unittest.TestCase):
                 local_auth_enabled=True, local_username='xray-user', local_password='xray-password',
                 xray_dns='1.1.1.1, 8.8.8.8', block_bittorrent=True,
                 sniffing=True, route_only=True, routing_domain_strategy='IPIfNonMatch',
-                xray_sni='cdn.example.com', mux_enabled=True, mux_concurrency=12,
+                xray_sni='cdn.example.com', xray_xhttp_mode='packet-up', fingerprint='edge', mux_enabled=True, mux_concurrency=12,
                 xudp_concurrency=24, xudp_proxy_udp443='skip',
             )
             with patch.multiple(
@@ -534,12 +543,13 @@ class PortabilityTests(unittest.TestCase):
             target = client['outbounds'][0]['settings']['vnext'][0]
             self.assertEqual(target['address'], '192.0.2.1')
             self.assertEqual(target['users'][0]['id'], created['profile']['fields'][0]['value'])
-            self.assertEqual(client['outbounds'][0]['streamSettings']['xhttpSettings']['mode'], 'auto')
+            self.assertEqual(client['outbounds'][0]['streamSettings']['xhttpSettings']['mode'], 'packet-up')
+            self.assertEqual(client['outbounds'][0]['streamSettings']['realitySettings']['fingerprint'], 'edge')
             self.assertEqual(client['outbounds'][0]['streamSettings']['realitySettings']['password'], 'public-key')
             self.assertEqual(client['outbounds'][0]['streamSettings']['realitySettings']['serverName'], 'cdn.example.com')
             self.assertEqual(client['outbounds'][0]['mux'], {'enabled': True, 'concurrency': 12, 'xudpConcurrency': 24, 'xudpProxyUDP443': 'skip'})
             self.assertIn('sni=cdn.example.com', created['profile']['delivery']['link']['uri'])
-            self.assertIn('mode=auto', created['profile']['delivery']['link']['uri'])
+            self.assertIn('mode=packet-up', created['profile']['delivery']['link']['uri'])
 
     def test_connection_options_expose_server_bound_awg_and_xray_values(self):
         with tempfile.TemporaryDirectory() as directory:

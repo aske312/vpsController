@@ -28,6 +28,14 @@ AWG_H1="$(setting AWG_H1 150000000)"
 AWG_H2="$(setting AWG_H2 600000000)"
 AWG_H3="$(setting AWG_H3 1000000000)"
 AWG_H4="$(setting AWG_H4 1400000000)"
+AWG_S3="$(setting AWG_S3 '')"; AWG_S4="$(setting AWG_S4 '')"
+AWG_I1="$(setting AWG_I1 '')"; AWG_I2="$(setting AWG_I2 '')"; AWG_I3="$(setting AWG_I3 '')"; AWG_I4="$(setting AWG_I4 '')"; AWG_I5="$(setting AWG_I5 '')"
+AWG_HEADER_PROTECTION_KEY="$(setting AWG_HEADER_PROTECTION_KEY '')"
+AWG_CONTENT_PADDING_ADDITION="$(setting AWG_CONTENT_PADDING_ADDITION '')"
+AWG_REKEY_AFTER_TIME="$(setting AWG_REKEY_AFTER_TIME '')"; AWG_REKEY_TIMEOUT="$(setting AWG_REKEY_TIMEOUT '')"
+AWG_REJECT_AFTER_TIME="$(setting AWG_REJECT_AFTER_TIME '')"; AWG_KEEPALIVE_TIMEOUT="$(setting AWG_KEEPALIVE_TIMEOUT '')"
+AWG_MAX_HANDSHAKE_ATTEMPTS="$(setting AWG_MAX_HANDSHAKE_ATTEMPTS '')"
+AWG_RANDOM_TRAILERS="$(setting AWG_RANDOM_TRAILERS '')"; AWG_DISABLE_COOKIES="$(setting AWG_DISABLE_COOKIES '')"
 UPLINK_INTERFACE="$(ip -o -4 route show default | awk '{print $5; exit}')"
 WAS_ACTIVE=0
 systemctl is-active --quiet "awg-quick@${AWG_INTERFACE}.service" 2>/dev/null && WAS_ACTIVE=1
@@ -35,6 +43,21 @@ systemctl is-active --quiet "awg-quick@${AWG_INTERFACE}.service" 2>/dev/null && 
 [[ "${AWG_INTERFACE}" =~ ^[a-zA-Z0-9_.-]{1,15}$ ]] || { echo "Некорректное имя интерфейса" >&2; exit 1; }
 [[ "${AWG_PORT}" =~ ^[0-9]+$ && "${AWG_PORT}" -ge 1 && "${AWG_PORT}" -le 65535 ]] || { echo "Некорректный UDP-порт" >&2; exit 1; }
 [[ "${AWG_MTU}" =~ ^[0-9]+$ && "${AWG_MTU}" -ge 1280 && "${AWG_MTU}" -le 1420 ]] || { echo "AWG_MTU должен быть от 1280 до 1420" >&2; exit 1; }
+validate_range() {
+  local value="$1" maximum="$2" label="$3" first second
+  [[ -z "${value}" ]] && return 0
+  [[ "${value}" =~ ^[0-9]+(-[0-9]+)?$ ]] || { echo "${label} должен иметь формат N или N-M" >&2; exit 1; }
+  IFS=- read -r first second <<<"${value}"; second="${second:-${first}}"
+  (( 10#${first} <= 10#${second} && 10#${second} <= maximum )) || { echo "${label} содержит недопустимый или обратный диапазон" >&2; exit 1; }
+}
+for value in "${AWG_S3}" "${AWG_S4}"; do validate_range "${value}" 65535 "AWG S3/S4"; done
+for value in "${AWG_CONTENT_PADDING_ADDITION}" "${AWG_REKEY_AFTER_TIME}" "${AWG_REKEY_TIMEOUT}" "${AWG_REJECT_AFTER_TIME}" "${AWG_KEEPALIVE_TIMEOUT}" "${AWG_MAX_HANDSHAKE_ATTEMPTS}"; do validate_range "${value}" 65535 "Диапазон AWG 3.1"; done
+for value in "${AWG_RANDOM_TRAILERS}" "${AWG_DISABLE_COOKIES}"; do [[ -z "${value}" || "${value}" == on || "${value}" == off ]] || { echo "Переключатель AWG 3.1 должен быть on или off" >&2; exit 1; }; done
+[[ -z "${AWG_HEADER_PROTECTION_KEY}" || "${AWG_HEADER_PROTECTION_KEY}" =~ ^[A-Za-z0-9_+/=-]{43,44}$ ]] || { echo "AWG_HEADER_PROTECTION_KEY должен содержать 32-байтовый base64-ключ" >&2; exit 1; }
+if [[ -n "${AWG_HEADER_PROTECTION_KEY}" ]]; then
+  [[ -n "${AWG_S3}" && -n "${AWG_S4}" && "${AWG_S1}" -ge 12 && "${AWG_S2}" -ge 12 && "${AWG_S3}" -ge 12 && "${AWG_S4}" -ge 12 ]] || { echo "Header Protection требует S1-S4 не меньше 12" >&2; exit 1; }
+fi
+for value in "${AWG_I1}" "${AWG_I2}" "${AWG_I3}" "${AWG_I4}" "${AWG_I5}"; do [[ "${value}" != *$'\n'* && "${value}" != *$'\r'* ]] || { echo "AWG I1-I5 не должны содержать перевод строки" >&2; exit 1; }; done
 [[ -n "${UPLINK_INTERFACE}" ]] || { echo "Не найден внешний сетевой интерфейс" >&2; exit 1; }
 ID="" VERSION_ID=""
 [[ ! -r /etc/os-release ]] || source /etc/os-release
@@ -100,6 +123,27 @@ print(f"{next(network.hosts())}/{network.prefixlen}")
 PY
 )"
   SERVER_PRIVATE_KEY="$(awg genkey)"
+  advanced_profile=""
+  while IFS='|' read -r name value; do
+    [[ -n "${value}" ]] && advanced_profile+="${name} = ${value}"$'\n'
+  done <<EOF
+S3|${AWG_S3}
+S4|${AWG_S4}
+I1|${AWG_I1}
+I2|${AWG_I2}
+I3|${AWG_I3}
+I4|${AWG_I4}
+I5|${AWG_I5}
+HeaderProtectionKey|${AWG_HEADER_PROTECTION_KEY}
+ContentPaddingAddition|${AWG_CONTENT_PADDING_ADDITION}
+RekeyAfterTime|${AWG_REKEY_AFTER_TIME}
+RekeyTimeout|${AWG_REKEY_TIMEOUT}
+RejectAfterTime|${AWG_REJECT_AFTER_TIME}
+KeepaliveTimeout|${AWG_KEEPALIVE_TIMEOUT}
+MaxHandshakeAttempts|${AWG_MAX_HANDSHAKE_ATTEMPTS}
+RandomTrailers|${AWG_RANDOM_TRAILERS}
+DisableCookies|${AWG_DISABLE_COOKIES}
+EOF
   umask 077
   cat >"${AWG_CONFIG}" <<EOF
 [Interface]
@@ -116,7 +160,7 @@ H1 = ${AWG_H1}
 H2 = ${AWG_H2}
 H3 = ${AWG_H3}
 H4 = ${AWG_H4}
-PostUp = iptables -C FORWARD -i %i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %i -j ACCEPT; iptables -C FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -C POSTROUTING -s ${AWG_SUBNET} -o ${UPLINK_INTERFACE} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ${AWG_SUBNET} -o ${UPLINK_INTERFACE} -j MASQUERADE
+${advanced_profile}PostUp = iptables -C FORWARD -i %i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %i -j ACCEPT; iptables -C FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -C POSTROUTING -s ${AWG_SUBNET} -o ${UPLINK_INTERFACE} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ${AWG_SUBNET} -o ${UPLINK_INTERFACE} -j MASQUERADE
 PostDown = while iptables -C FORWARD -i %i -j ACCEPT 2>/dev/null; do iptables -D FORWARD -i %i -j ACCEPT; done; while iptables -C FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; do iptables -D FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; done; while iptables -t nat -C POSTROUTING -s ${AWG_SUBNET} -o ${UPLINK_INTERFACE} -j MASQUERADE 2>/dev/null; do iptables -t nat -D POSTROUTING -s ${AWG_SUBNET} -o ${UPLINK_INTERFACE} -j MASQUERADE; done
 EOF
   chmod 0600 "${AWG_CONFIG}"
@@ -126,6 +170,7 @@ fi
 if [[ "${CONFIGURED_AWG_CONFIG}" != "${AWG_CONFIG}" ]]; then
   ln -sfn -- "${AWG_CONFIG}" "${CONFIGURED_AWG_CONFIG}"
 fi
+awg-quick strip "${AWG_CONFIG}" >/dev/null || { echo "Установленная версия AmneziaWG не принимает выбранные параметры профиля" >&2; exit 1; }
 
 cat >/etc/sysctl.d/99-vps-control-amneziawg.conf <<'EOF'
 net.ipv4.ip_forward=1

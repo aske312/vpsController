@@ -155,11 +155,12 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(dialog, /block_bittorrent/);
   assert.match(dialog, /Общие настройки доступа для proxy-протоколов/);
   assert.match(dialog, /SNI для REALITY/);
-  assert.match(dialog, /serverOptions\.awg\?\.s1/);
+  assert.match(dialog, /Object\.entries\(serverOptions\.awg/);
   assert.match(dialog, /connectionMaskingStatus/);
   assert.match(dialog, /AmneziaWG · Jc/);
-  assert.match(dialog, /отдельная обфускация протоколом не предусмотрена/);
-  assert.match(dialog, /XHTTP \+ REALITY/);
+  assert.match(dialog, /отдельной обфускации в TUIC v5 нет/);
+  assert.match(dialog, /xray_xhttp_mode/);
+  assert.match(dialog, /hysteria_hop_min/);
   assert.match(clientApps, /Windows/);
   assert.match(clientApps, /iOS/);
   assert.match(clientApps, /Android/);
@@ -174,7 +175,8 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(api, /def client_options/);
   assert.match(api, /payload\.settings\.xray_sni/);
   assert.match(api, /"settings": \{"vnext": \[\{/);
-  assert.match(api, /"xhttpSettings": \{"path": path, "mode": "auto"\}/);
+  assert.match(api, /"xhttpSettings": \{"path": path, "mode": payload\.settings\.xray_xhttp_mode\}/);
+  assert.match(api, /obfs_password/);
   assert.match(api, /payload\.settings\.fast_open/);
   assert.match(api, /payload\.settings\.udp_relay_mode/);
   assert.match(api, /payload\.settings\.routing_domain_strategy/);
@@ -594,6 +596,14 @@ test("Light protocol modules install and uninstall independently", async () => {
   assert.match(api, /runtime_max_seconds=1260/);
   assert.match(awgInstall, /DPkg::Lock::Timeout=300/);
   assert.match(awgInstall, /if ! command -v awg.*command -v awg-quick.*modinfo amneziawg/s);
+  for (const parameter of ["S3", "S4", "I1", "I5", "HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime", "RandomTrailers", "DisableCookies"]) {
+    assert.match(awgInstall, new RegExp(parameter));
+  }
+  assert.match(awgInstall, /awg-quick strip/);
+  assert.match(hysteriaInstall, /salamander/);
+  assert.match(hysteriaInstall, /gecko/);
+  assert.match(hysteriaInstall, /HYSTERIA2_PORTS/);
+  assert.match(hysteriaInstall, /minPacketSize/);
   for (const installer of [hysteriaInstall, tuicInstall, xrayInstall]) {
     assert.match(installer, /DPkg::Lock::Timeout=300/);
     assert.match(installer, /sha256sum -c -/);

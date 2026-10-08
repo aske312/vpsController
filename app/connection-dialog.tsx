@@ -29,6 +29,8 @@ export type ConnectionSettings = {
   up_mbps: number;
   down_mbps: number;
   disable_loss_compensation: boolean;
+  hysteria_hop_min: number;
+  hysteria_hop_max: number;
   congestion_control: "bbr" | "cubic" | "new_reno";
   heartbeat: "5s" | "10s" | "15s" | "30s";
   udp_relay_mode: "native" | "quic";
@@ -39,8 +41,9 @@ export type ConnectionSettings = {
   udp_timeout: "1m" | "3m" | "5m" | "10m";
   initial_packet_size: number;
   disable_path_mtu_discovery: boolean;
-  fingerprint: "chrome" | "firefox" | "safari";
+  fingerprint: "chrome" | "firefox" | "edge" | "safari" | "ios" | "android" | "randomized";
   xray_sni: string;
+  xray_xhttp_mode: "auto" | "packet-up" | "stream-up";
   mux_enabled: boolean;
   mux_concurrency: number;
   xudp_concurrency: number;
@@ -54,7 +57,8 @@ export type ConnectionSettings = {
 };
 
 export type ConnectionServerOptions = {
-  awg?: { jc: number; jmin: number; jmax: number; s1: number; s2: number; h1: number; h2: number; h3: number; h4: number };
+  awg?: Record<string, string | number> & { jc: number; jmin: number; jmax: number; s1: number; s2: number; h1: number; h2: number; h3: number; h4: number };
+  hysteria2?: { obfs: "none" | "salamander" | "gecko"; port_hopping: string; gecko_min_packet_size: number; gecko_max_packet_size: number };
   xray?: { server_names: string[]; default_sni: string };
 };
 
@@ -82,6 +86,8 @@ const settingsFor = (protocol: Protocol, serverOptions: ConnectionServerOptions)
   up_mbps: 0,
   down_mbps: 0,
   disable_loss_compensation: false,
+  hysteria_hop_min: 15,
+  hysteria_hop_max: 45,
   congestion_control: "bbr",
   heartbeat: "10s",
   udp_relay_mode: "native",
@@ -94,6 +100,7 @@ const settingsFor = (protocol: Protocol, serverOptions: ConnectionServerOptions)
   disable_path_mtu_discovery: false,
   fingerprint: "chrome",
   xray_sni: serverOptions.xray?.default_sni ?? "",
+  xray_xhttp_mode: "auto",
   mux_enabled: false,
   mux_concurrency: 8,
   xudp_concurrency: 16,
@@ -162,9 +169,9 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
   const proxyProtocol = protocol === "hysteria2" || protocol === "tuic" || protocol === "xray";
   const masking = {
     awg: { state: "Включена", detail: `AmneziaWG · Jc ${settings.awg_jc} · S/H синхронизированы с сервером`, level: "active" },
-    hysteria2: { state: "HTTP/3", detail: "QUIC-маскировка сервера · TLS с закреплённым сертификатом", level: "active" },
-    tuic: { state: "Базовая", detail: "TLS поверх QUIC · отдельная обфускация протоколом не предусмотрена", level: "limited" },
-    xray: { state: "Включена", detail: `XHTTP + REALITY · отпечаток ${settings.fingerprint}`, level: "active" },
+    hysteria2: { state: serverOptions.hysteria2?.obfs === "gecko" ? "Gecko" : serverOptions.hysteria2?.obfs === "salamander" ? "Salamander" : "HTTP/3", detail: `QUIC + TLS · ${serverOptions.hysteria2?.port_hopping || "один UDP-порт"}`, level: "active" },
+    tuic: { state: "Базовая", detail: "TLS 1.3 поверх QUIC · 0-RTT отключён · отдельной обфускации в TUIC v5 нет", level: "limited" },
+    xray: { state: "Включена", detail: `XHTTP ${settings.xray_xhttp_mode} + REALITY · ${settings.fingerprint}`, level: "active" },
   }[protocol];
   const localAccessInvalid = proxyProtocol && settings.local_auth_enabled && settings.local_password.length < 8;
   return <div className="confirmBackdrop connectionDialogBackdrop" role="presentation" onMouseDown={() => { if (!submitting && !profile) onClose(); }}>
@@ -198,7 +205,8 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
                 <label><span>Локальный SOCKS-порт</span><input type="number" min={1024} max={65535} value={settings.local_socks_port} onChange={(event) => update({ local_socks_port: Number(event.target.value) })} /></label>
                 <label><span>Локальный HTTP-порт</span><input type="number" min={1024} max={65535} value={settings.local_http_port} onChange={(event) => update({ local_http_port: Number(event.target.value) })} /></label>
                 <label><span>SNI для REALITY</span><select value={settings.xray_sni} onChange={(event) => update({ xray_sni: event.target.value })}>{serverOptions.xray?.server_names.length ? serverOptions.xray.server_names.map((name) => <option key={name} value={name}>{name}</option>) : <option value="">Берётся из конфигурации сервера</option>}</select><small>Можно выбрать только имя, разрешённое сервером</small></label>
-                <label><span>TLS fingerprint</span><select value={settings.fingerprint} onChange={(event) => update({ fingerprint: event.target.value as ConnectionSettings["fingerprint"] })}><option value="chrome">Chrome — рекомендуется</option><option value="firefox">Firefox</option><option value="safari">Safari</option></select></label>
+                <label><span>TLS fingerprint</span><select value={settings.fingerprint} onChange={(event) => update({ fingerprint: event.target.value as ConnectionSettings["fingerprint"] })}><option value="chrome">Chrome — рекомендуется</option><option value="firefox">Firefox</option><option value="edge">Edge</option><option value="safari">Safari</option><option value="ios">iOS</option><option value="android">Android</option><option value="randomized">Случайный</option></select></label>
+                <label><span>Режим XHTTP</span><select value={settings.xray_xhttp_mode} onChange={(event) => update({ xray_xhttp_mode: event.target.value as ConnectionSettings["xray_xhttp_mode"] })}><option value="auto">Auto — рекомендуется</option><option value="packet-up">Packet up</option><option value="stream-up">Stream up</option></select><small>Сервер в режиме auto принимает все варианты</small></label>
                 <label className="connectionCheckbox"><span><strong>Отключить UDP</strong><small>Оставьте выключенным для обычной работы</small></span><input type="checkbox" checked={settings.disable_udp} onChange={(event) => update({ disable_udp: event.target.checked })} /></label>
               </>}
             </div>
@@ -210,9 +218,11 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
             <details className="connectionAdvanced"><summary>Расширенные настройки <span>⌄</span></summary><div className="connectionSettingsFields">
               {protocol === "awg" && <>
                 <label><span>DNS-серверы</span><input value={settings.dns} onChange={(event) => update({ dns: event.target.value })} placeholder="1.1.1.1, 1.0.0.1" /></label>
-                {protocol === "awg" && <><label><span>Jc · пакеты мусора</span><input type="number" min={0} max={128} value={settings.awg_jc} onChange={(event) => update({ awg_jc: Number(event.target.value) })} /></label><label><span>Jmin · минимум</span><input type="number" min={0} max={1280} value={settings.awg_jmin} onChange={(event) => update({ awg_jmin: Number(event.target.value) })} /></label><label><span>Jmax · максимум</span><input type="number" min={0} max={1280} value={settings.awg_jmax} onChange={(event) => update({ awg_jmax: Number(event.target.value) })} /></label><div className="connectionServerValues"><strong>Параметры сервера — подставляются автоматически</strong><dl><div><dt>S1</dt><dd>{serverOptions.awg?.s1 ?? "—"}</dd></div><div><dt>S2</dt><dd>{serverOptions.awg?.s2 ?? "—"}</dd></div><div><dt>H1</dt><dd>{serverOptions.awg?.h1 ?? "—"}</dd></div><div><dt>H2</dt><dd>{serverOptions.awg?.h2 ?? "—"}</dd></div><div><dt>H3</dt><dd>{serverOptions.awg?.h3 ?? "—"}</dd></div><div><dt>H4</dt><dd>{serverOptions.awg?.h4 ?? "—"}</dd></div></dl><small>S/H должны совпадать на клиенте и сервере. Индивидуально меняются только Jc, Jmin и Jmax.</small></div></>}
+                {protocol === "awg" && <><label><span>Jc · пакеты мусора</span><input type="number" min={0} max={128} value={settings.awg_jc} onChange={(event) => update({ awg_jc: Number(event.target.value) })} /></label><label><span>Jmin · минимум</span><input type="number" min={0} max={1280} value={settings.awg_jmin} onChange={(event) => update({ awg_jmin: Number(event.target.value) })} /></label><label><span>Jmax · максимум</span><input type="number" min={0} max={1280} value={settings.awg_jmax} onChange={(event) => update({ awg_jmax: Number(event.target.value) })} /></label><div className="connectionServerValues"><strong>Параметры сервера — подставляются автоматически</strong><dl>{Object.entries(serverOptions.awg || {}).filter(([key]) => !["jc", "jmin", "jmax"].includes(key)).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl><small>S/H и параметры AWG 3.1 должны совпадать на клиенте и сервере. Индивидуально меняются только Jc, Jmin и Jmax.</small></div></>}
               </>}
               {protocol === "hysteria2" && <>
+                <div className="connectionServerValues"><strong>Серверное маскирование</strong><dl><div><dt>OBFS</dt><dd>{serverOptions.hysteria2?.obfs || "none"}</dd></div><div><dt>UDP-порты</dt><dd>{serverOptions.hysteria2?.port_hopping || "8443"}</dd></div></dl><small>Salamander/Gecko и диапазон портов должны совпадать с сервером и добавляются в профиль автоматически.</small></div>
+                {(serverOptions.hysteria2?.port_hopping.includes("-") || serverOptions.hysteria2?.port_hopping.includes(",")) && <><label><span>Минимум между сменами порта, сек.</span><input type="number" min={5} max={300} value={settings.hysteria_hop_min} onChange={(event) => update({ hysteria_hop_min: Number(event.target.value) })} /></label><label><span>Максимум между сменами порта, сек.</span><input type="number" min={5} max={300} value={settings.hysteria_hop_max} onChange={(event) => update({ hysteria_hop_max: Number(event.target.value) })} /></label></>}
                 <label><span>Congestion control</span><select value={settings.hysteria_congestion} onChange={(event) => update({ hysteria_congestion: event.target.value as ConnectionSettings["hysteria_congestion"] })}><option value="bbr">BBR</option><option value="reno">New Reno</option></select></label>
                 {settings.hysteria_congestion === "bbr" && <label><span>Профиль BBR</span><select value={settings.bbr_profile} onChange={(event) => update({ bbr_profile: event.target.value as ConnectionSettings["bbr_profile"] })}><option value="standard">Стандартный</option><option value="conservative">Консервативный</option><option value="aggressive">Агрессивный</option></select></label>}
                 <label><span>Upload, Мбит/с</span><input type="number" min={0} max={10000} value={settings.up_mbps} onChange={(event) => update({ up_mbps: Number(event.target.value) })} /><small>0 — автоматический режим</small></label>

@@ -32,6 +32,10 @@ LOCAL_CIDR=""
 HTTP_PORT="80"
 AWG_PORT="51822"
 HYSTERIA2_PORT="8443"
+HYSTERIA2_PORTS=""
+HYSTERIA2_OBFS_MODE=""
+HYSTERIA2_GECKO_MIN_PACKET_SIZE="512"
+HYSTERIA2_GECKO_MAX_PACKET_SIZE="1200"
 TUIC_PORT="8444"
 XRAY_PORT="8445"
 AWG_INTERFACE="awg0"
@@ -45,6 +49,11 @@ AWG_H1="150000000"
 AWG_H2="600000000"
 AWG_H3="1000000000"
 AWG_H4="1400000000"
+AWG_S3=""; AWG_S4=""
+AWG_I1=""; AWG_I2=""; AWG_I3=""; AWG_I4=""; AWG_I5=""
+AWG_HEADER_PROTECTION_KEY=""; AWG_CONTENT_PADDING_ADDITION=""
+AWG_REKEY_AFTER_TIME=""; AWG_REKEY_TIMEOUT=""; AWG_REJECT_AFTER_TIME=""; AWG_KEEPALIVE_TIMEOUT=""
+AWG_MAX_HANDSHAKE_ATTEMPTS=""; AWG_RANDOM_TRAILERS=""; AWG_DISABLE_COOKIES=""
 ENABLE_UFW="yes"
 GEOLOCATION_PRIMARY_URL="https://api.2ip.io"
 GEOLOCATION_FALLBACK_URL="https://ipwho.is/?fields=success,ip,city,country,country_code,latitude,longitude"
@@ -418,6 +427,10 @@ configure_access() {
   set_env_value "ACCESS_MODE" "${ACCESS_MODE}"
   set_env_value "AWG_PORT" "${AWG_PORT}"
   set_env_value "HYSTERIA2_PORT" "${HYSTERIA2_PORT}"
+  set_env_value "HYSTERIA2_PORTS" "${HYSTERIA2_PORTS}"
+  set_env_value "HYSTERIA2_OBFS_MODE" "${HYSTERIA2_OBFS_MODE}"
+  set_env_value "HYSTERIA2_GECKO_MIN_PACKET_SIZE" "${HYSTERIA2_GECKO_MIN_PACKET_SIZE}"
+  set_env_value "HYSTERIA2_GECKO_MAX_PACKET_SIZE" "${HYSTERIA2_GECKO_MAX_PACKET_SIZE}"
   set_env_value "TUIC_PORT" "${TUIC_PORT}"
   set_env_value "XRAY_PORT" "${XRAY_PORT}"
   set_env_value "AWG_INTERFACE" "${AWG_INTERFACE}"
@@ -431,6 +444,9 @@ configure_access() {
   set_env_value "AWG_H2" "${AWG_H2}"
   set_env_value "AWG_H3" "${AWG_H3}"
   set_env_value "AWG_H4" "${AWG_H4}"
+  for name in AWG_S3 AWG_S4 AWG_I1 AWG_I2 AWG_I3 AWG_I4 AWG_I5 AWG_HEADER_PROTECTION_KEY AWG_CONTENT_PADDING_ADDITION AWG_REKEY_AFTER_TIME AWG_REKEY_TIMEOUT AWG_REJECT_AFTER_TIME AWG_KEEPALIVE_TIMEOUT AWG_MAX_HANDSHAKE_ATTEMPTS AWG_RANDOM_TRAILERS AWG_DISABLE_COOKIES; do
+    set_env_value "${name}" "${!name}"
+  done
 }
 
 env_value() {
@@ -721,7 +737,7 @@ run_protocol_installer() {
 
   timeout --signal=TERM --kill-after=30s "${timeout_seconds}s" \
     env ENV_FILE="${ENV_FILE}" AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
-      HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
+      HYSTERIA2_PORT="${HYSTERIA2_PORT}" HYSTERIA2_PORTS="${HYSTERIA2_PORTS}" HYSTERIA2_OBFS_MODE="${HYSTERIA2_OBFS_MODE}" HYSTERIA2_GECKO_MIN_PACKET_SIZE="${HYSTERIA2_GECKO_MIN_PACKET_SIZE}" HYSTERIA2_GECKO_MAX_PACKET_SIZE="${HYSTERIA2_GECKO_MAX_PACKET_SIZE}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
       bash "${installer_path}" &
   local installer_pid=$! elapsed=0 status=0 elapsed_label
 
@@ -866,7 +882,7 @@ update_protocol_image() {
   info "Обновление ${image_id}; существующие подключения помечены как приостановленные"
   if ! (prepare_package_manager && \
     ENV_FILE="${ENV_FILE}" AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
-      HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
+      HYSTERIA2_PORT="${HYSTERIA2_PORT}" HYSTERIA2_PORTS="${HYSTERIA2_PORTS}" HYSTERIA2_OBFS_MODE="${HYSTERIA2_OBFS_MODE}" HYSTERIA2_GECKO_MIN_PACKET_SIZE="${HYSTERIA2_GECKO_MIN_PACKET_SIZE}" HYSTERIA2_GECKO_MAX_PACKET_SIZE="${HYSTERIA2_GECKO_MAX_PACKET_SIZE}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
       bash "${image_root}/${installer}"); then
     if [[ -f "${backup_dir}/binary" && -n "${binary}" ]]; then
       install -m 0755 "${backup_dir}/binary" "${binary}"

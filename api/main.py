@@ -75,6 +75,14 @@ AWG_PROFILE = {
     "H1": os.getenv("AWG_H1", "150000000"), "H2": os.getenv("AWG_H2", "600000000"),
     "H3": os.getenv("AWG_H3", "1000000000"), "H4": os.getenv("AWG_H4", "1400000000"),
 }
+for awg_key in (
+    "S3", "S4", "I1", "I2", "I3", "I4", "I5", "HeaderProtectionKey", "ContentPaddingAddition",
+    "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout", "MaxHandshakeAttempts",
+    "RandomTrailers", "DisableCookies",
+):
+    value = os.getenv(f"AWG_{re.sub(r'(?<!^)(?=[A-Z])', '_', awg_key).upper()}", "").strip()
+    if value:
+        AWG_PROFILE[awg_key] = value
 DATA_DIR = Path(os.getenv("DATA_DIR", "/var/lib/vps-control"))
 metrics_history_store = MetricsHistory(DATA_DIR / "metrics" / "history.sqlite3")
 metrics_monitor: MetricsMonitor | None = None
@@ -1086,15 +1094,24 @@ def direct_probe_client(protocol: str, proxy_port: int, directory: Path) -> list
         except (AttributeError, OSError, ValueError, StopIteration, json.JSONDecodeError, HTTPException):
             return None
         config = directory / "hysteria2.yaml"
-        config.write_text(
-            "\n".join([
-                f"server: 127.0.0.1:{int(settings.get('port', 8443))}",
-                f"auth: {client_id}:{password}",
-                "tls:", f"  sni: {identity}", "  insecure: true", f"  pinSHA256: {fingerprint}",
-                "socks5:", f"  listen: 127.0.0.1:{proxy_port}", "  disableUDP: false", "",
-            ]),
-            encoding="utf-8",
-        )
+        listen = str(settings.get("listen", settings.get("port", 8443)))
+        lines = [
+            f"server: 127.0.0.1:{listen}", f"auth: {client_id}:{password}",
+            "tls:", f"  sni: {identity}", "  insecure: true", f"  pinSHA256: {fingerprint}",
+        ]
+        obfs = str(settings.get("obfs", "none"))
+        obfs_password = str(settings.get("obfs_password", ""))
+        if obfs in {"salamander", "gecko"} and obfs_password:
+            lines.extend(["obfs:", f"  type: {obfs}", f"  {obfs}:", f"    password: {json.dumps(obfs_password)}"])
+            if obfs == "gecko":
+                lines.extend([
+                    f"    minPacketSize: {int(settings.get('gecko_min_packet_size', 512))}",
+                    f"    maxPacketSize: {int(settings.get('gecko_max_packet_size', 1200))}",
+                ])
+        if "," in listen or "-" in listen:
+            lines.extend(["transport:", "  type: udp", "  udp:", "    minHopInterval: 15s", "    maxHopInterval: 45s"])
+        lines.extend(["socks5:", f"  listen: 127.0.0.1:{proxy_port}", "  disableUDP: false", ""])
+        config.write_text("\n".join(lines), encoding="utf-8")
         os.chmod(config, 0o600)
         return ["/usr/local/lib/vps-control-hysteria2/hysteria", "client", "-c", str(config)]
 
@@ -2730,8 +2747,18 @@ def xray_server_names() -> list[str]:
 @app.get("/api/clients/options")
 def client_options(_: None = Depends(require_token)) -> dict:
     server_names = xray_server_names()
+    try:
+        hysteria = json.loads(HYSTERIA2_SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        hysteria = {}
     return {
-        "awg": {key.lower(): int(value) for key, value in AWG_PROFILE.items()},
+        "awg": {key.lower(): int(value) if str(value).isdigit() else value for key, value in AWG_PROFILE.items()},
+        "hysteria2": {
+            "obfs": str(hysteria.get("obfs", "none")),
+            "port_hopping": str(hysteria.get("listen", hysteria.get("port", 8443))),
+            "gecko_min_packet_size": int(hysteria.get("gecko_min_packet_size", 512)),
+            "gecko_max_packet_size": int(hysteria.get("gecko_max_packet_size", 1200)),
+        },
         "xray": {"server_names": server_names, "default_sni": server_names[0] if server_names else ""},
     }
 
@@ -2760,6 +2787,8 @@ class ClientSettings(BaseModel):
     up_mbps: int = Field(default=0, ge=0, le=10000)
     down_mbps: int = Field(default=0, ge=0, le=10000)
     disable_loss_compensation: bool = False
+    hysteria_hop_min: int = Field(default=15, ge=5, le=300)
+    hysteria_hop_max: int = Field(default=45, ge=5, le=300)
     congestion_control: Literal["bbr", "cubic", "new_reno"] = "bbr"
     heartbeat: Literal["5s", "10s", "15s", "30s"] = "10s"
     udp_relay_mode: Literal["native", "quic"] = "native"
@@ -2770,8 +2799,9 @@ class ClientSettings(BaseModel):
     udp_timeout: Literal["1m", "3m", "5m", "10m"] = "5m"
     initial_packet_size: int = Field(default=0, ge=0, le=1500)
     disable_path_mtu_discovery: bool = False
-    fingerprint: Literal["chrome", "firefox", "safari"] = "chrome"
+    fingerprint: Literal["chrome", "firefox", "edge", "safari", "ios", "android", "randomized"] = "chrome"
     xray_sni: str = Field(default="", max_length=253, pattern=r"^[A-Za-z0-9.-]*$")
+    xray_xhttp_mode: Literal["auto", "packet-up", "stream-up"] = "auto"
     mux_enabled: bool = False
     mux_concurrency: int = Field(default=8, ge=1, le=128)
     xudp_concurrency: int = Field(default=16, ge=1, le=1024)
@@ -2890,6 +2920,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         raise HTTPException(status_code=422, detail="LAN proxy access requires local authentication")
     if payload.protocol == "tuic" and payload.settings.initial_packet_size not in range(1200, 1501) and payload.settings.initial_packet_size != 0:
         raise HTTPException(status_code=422, detail="Initial QUIC packet size must be 0 or between 1200 and 1500")
+    if payload.protocol == "hysteria2" and payload.settings.hysteria_hop_min > payload.settings.hysteria_hop_max:
+        raise HTTPException(status_code=422, detail="Hysteria2 minimum hop interval must not exceed maximum")
     if payload.protocol == "xray" and payload.settings.xray_sni:
         allowed_server_names = xray_server_names()
         if payload.settings.xray_sni not in allowed_server_names:
@@ -2915,12 +2947,15 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 endpoint = str(settings.get("domain", "")).strip() or PUBLIC_IP
                 identity = str(settings.get("domain", "")).strip() or certificate_server_name(HYSTERIA2_DIR / "server.crt")
                 fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt")).partition("=")[2].strip()
+                listen = str(settings.get("listen", settings.get("port", 8443)))
                 config_lines = [
-                    f"server: {endpoint}:{int(settings.get('port', 8443))}", f"auth: {client_id}:{password}",
+                    f"server: {endpoint}:{listen}", f"auth: {client_id}:{password}",
                     "tls:", f"  sni: {identity}", "  insecure: true", f"  pinSHA256: {fingerprint}",
                     f"fastOpen: {str(payload.settings.fast_open).lower()}", f"lazy: {str(payload.settings.lazy).lower()}",
                     "congestion:", f"  type: {payload.settings.hysteria_congestion}",
                 ]
+                obfs = str(settings.get("obfs", "none"))
+                obfs_password = str(settings.get("obfs_password", ""))
                 if payload.settings.hysteria_congestion == "bbr":
                     config_lines.append(f"  bbrProfile: {payload.settings.bbr_profile}")
                 if payload.settings.up_mbps or payload.settings.down_mbps:
@@ -2932,6 +2967,19 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 listen_host = "0.0.0.0" if payload.settings.proxy_bind == "lan" else "127.0.0.1"
                 if payload.settings.up_mbps or payload.settings.down_mbps:
                     config_lines.append(f"  disableLossCompensation: {str(payload.settings.disable_loss_compensation).lower()}")
+                if obfs in {"salamander", "gecko"} and obfs_password:
+                    config_lines.extend(["obfs:", f"  type: {obfs}", f"  {obfs}:", f"    password: {json.dumps(obfs_password)}"])
+                    if obfs == "gecko":
+                        config_lines.extend([
+                            f"    minPacketSize: {int(settings.get('gecko_min_packet_size', 512))}",
+                            f"    maxPacketSize: {int(settings.get('gecko_max_packet_size', 1200))}",
+                        ])
+                if "," in listen or "-" in listen:
+                    config_lines.extend([
+                        "transport:", "  type: udp", "  udp:",
+                        f"    minHopInterval: {payload.settings.hysteria_hop_min}s",
+                        f"    maxHopInterval: {payload.settings.hysteria_hop_max}s",
+                    ])
                 config_lines.extend(["socks5:", f"  listen: {listen_host}:{payload.settings.local_socks_port}"])
                 if payload.settings.local_auth_enabled:
                     config_lines.extend([f"  username: {json.dumps(payload.settings.local_username)}", f"  password: {json.dumps(payload.settings.local_password)}"])
@@ -2942,12 +2990,14 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                         config_lines.extend([f"  username: {json.dumps(payload.settings.local_username)}", f"  password: {json.dumps(payload.settings.local_password)}"])
                 config = "\n".join([*config_lines, ""])
                 items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
-                port = int(settings.get("port", 8443))
-                query = urlencode({"sni": identity, "insecure": "1", "pinSHA256": fingerprint})
-                uri = f"hysteria2://{quote(client_id, safe='')}:{quote(password, safe='')}@{uri_endpoint(endpoint)}:{port}/?{query}#{quote(payload.name, safe='')}"
+                query_values = {"sni": identity, "insecure": "1", "pinSHA256": fingerprint}
+                if obfs in {"salamander", "gecko"} and obfs_password:
+                    query_values.update({"obfs": obfs, "obfs-password": obfs_password})
+                query = urlencode(query_values)
+                uri = f"hysteria2://{quote(client_id, safe='')}:{quote(password, safe='')}@{uri_endpoint(endpoint)}:{listen}/?{query}#{quote(payload.name, safe='')}"
                 return {"id": client_id, **connection_profile(
-                    protocol="hysteria2", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-hysteria2.yaml", config=config,
-                    fields=[{"label": "Пользователь", "value": client_id}, {"label": "Пароль", "value": password, "secret": True}, {"label": "TLS SNI", "value": identity}, *local_proxy_fields(payload)],
+                    protocol="hysteria2", name=payload.name, endpoint=f"{endpoint}:{listen}", filename=f"{safe_name}-hysteria2.yaml", config=config,
+                    fields=[{"label": "Пользователь", "value": client_id}, {"label": "Пароль", "value": password, "secret": True}, {"label": "TLS SNI", "value": identity}, {"label": "Обфускация", "value": obfs}, *local_proxy_fields(payload)],
                     apps=["Hiddify", "NekoBox", "Hysteria 2"],
                     steps=["Откройте ссылку или отсканируйте QR в совместимом клиенте.", "Если импорт ссылки недоступен, загрузите YAML-файл.", "Включите созданный профиль и проверьте доступ в интернет."],
                     uri=uri, qr_content=uri,
@@ -3038,7 +3088,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                         "users": [{"id": user_uuid, "encryption": "none"}],
                     }]},
                     "streamSettings": {
-                        "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": "auto"},
+                        "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": payload.settings.xray_xhttp_mode},
                         "realitySettings": {
                             "serverName": server_name,
                             "fingerprint": payload.settings.fingerprint, "password": str(settings.get("password", "")),
@@ -3066,7 +3116,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 items.append({"id": client_id, "name": payload.name, "protocol": "xray", "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 port = int(settings.get("port", 8445))
-                query = urlencode({"type": "xhttp", "security": "reality", "pbk": str(settings.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(settings.get("short_id", "")), "path": path, "mode": "auto", "spx": "/"})
+                query = urlencode({"type": "xhttp", "security": "reality", "pbk": str(settings.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(settings.get("short_id", "")), "path": path, "mode": payload.settings.xray_xhttp_mode, "spx": "/"})
                 uri = f"vless://{quote(user_uuid, safe='')}@{uri_endpoint(endpoint)}:{port}?{query}#{quote(payload.name, safe='')}"
                 return {"id": client_id, **connection_profile(
                     protocol="xray", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-xray.json", config=json.dumps(client, ensure_ascii=False, indent=2),
