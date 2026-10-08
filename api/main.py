@@ -2749,6 +2749,10 @@ class ClientSettings(BaseModel):
     awg_jc: int | None = Field(default=None, ge=0, le=128)
     awg_jmin: int | None = Field(default=None, ge=0, le=128)
     awg_jmax: int | None = Field(default=None, ge=0, le=128)
+    proxy_bind: Literal["loopback", "lan"] = "loopback"
+    local_auth_enabled: bool = False
+    local_username: str = Field(default="proxy", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+    local_password: str = Field(default="", max_length=128)
     local_socks_port: int = Field(default=1080, ge=1024, le=65535)
     local_http_port: int = Field(default=10809, ge=1024, le=65535)
     http_proxy_enabled: bool = False
@@ -2759,23 +2763,46 @@ class ClientSettings(BaseModel):
     bbr_profile: Literal["standard", "conservative", "aggressive"] = "standard"
     up_mbps: int = Field(default=0, ge=0, le=10000)
     down_mbps: int = Field(default=0, ge=0, le=10000)
+    disable_loss_compensation: bool = False
     congestion_control: Literal["bbr", "cubic", "new_reno"] = "bbr"
     heartbeat: Literal["5s", "10s", "15s", "30s"] = "10s"
     udp_relay_mode: Literal["native", "quic"] = "native"
     network: Literal["all", "tcp", "udp"] = "all"
     tcp_fast_open: bool = False
     set_system_proxy: bool = False
+    udp_fragment: bool = False
+    udp_timeout: Literal["1m", "3m", "5m", "10m"] = "5m"
+    initial_packet_size: int = Field(default=0, ge=0, le=1500)
+    disable_path_mtu_discovery: bool = False
     fingerprint: Literal["chrome", "firefox", "safari"] = "chrome"
     sniffing: bool = True
     route_only: bool = False
     routing_domain_strategy: Literal["AsIs", "IPIfNonMatch", "IPOnDemand"] = "AsIs"
     log_level: Literal["none", "error", "warning", "info"] = "warning"
+    xray_dns: str = Field(default="", max_length=255, pattern=r"^[0-9A-Fa-f:., ]*$")
+    block_bittorrent: bool = False
 
 
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
     protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"]
     settings: ClientSettings = Field(default_factory=ClientSettings)
+
+
+def local_proxy_fields(payload: ClientCreate) -> list[dict]:
+    host = "LAN" if payload.settings.proxy_bind == "lan" else "127.0.0.1"
+    if payload.protocol == "tuic":
+        fields = [{"label": "Локальный mixed-прокси", "value": f"{host}:{payload.settings.local_socks_port}"}]
+    else:
+        fields = [{"label": "Локальный SOCKS", "value": f"{host}:{payload.settings.local_socks_port}"}]
+        if payload.protocol == "xray" or payload.settings.http_proxy_enabled:
+            fields.append({"label": "Локальный HTTP", "value": f"{host}:{payload.settings.local_http_port}"})
+    if payload.settings.local_auth_enabled:
+        fields.extend([
+            {"label": "Локальный логин", "value": payload.settings.local_username},
+            {"label": "Локальный пароль", "value": payload.settings.local_password, "secret": True},
+        ])
+    return fields
 
 
 def key(command: str) -> str:
@@ -2854,10 +2881,14 @@ def uri_endpoint(host: str) -> str:
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
     if payload.protocol == "xray" and payload.settings.local_socks_port == payload.settings.local_http_port:
         raise HTTPException(status_code=422, detail="SOCKS and HTTP ports must be different")
-    if payload.protocol == "hysteria2" and payload.settings.http_proxy_enabled and payload.settings.local_socks_port == payload.settings.local_http_port:
-        raise HTTPException(status_code=422, detail="SOCKS and HTTP ports must be different")
     if payload.protocol == "awg" and payload.settings.awg_jmin is not None and payload.settings.awg_jmax is not None and payload.settings.awg_jmin > payload.settings.awg_jmax:
         raise HTTPException(status_code=422, detail="AmneziaWG Jmin must not exceed Jmax")
+    if payload.protocol in DIRECT_PROTOCOLS and payload.settings.local_auth_enabled and len(payload.settings.local_password) < 8:
+        raise HTTPException(status_code=422, detail="Local proxy password must contain at least 8 characters")
+    if payload.protocol in DIRECT_PROTOCOLS and payload.settings.proxy_bind == "lan" and not payload.settings.local_auth_enabled:
+        raise HTTPException(status_code=422, detail="LAN proxy access requires local authentication")
+    if payload.protocol == "tuic" and payload.settings.initial_packet_size not in range(1200, 1501) and payload.settings.initial_packet_size != 0:
+        raise HTTPException(status_code=422, detail="Initial QUIC packet size must be 0 or between 1200 and 1500")
     if payload.settings.route_mode == "custom":
         try:
             for network in payload.settings.allowed_ips.split(","):
@@ -2893,9 +2924,17 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                         config_lines.append(f"  up: {payload.settings.up_mbps} mbps")
                     if payload.settings.down_mbps:
                         config_lines.append(f"  down: {payload.settings.down_mbps} mbps")
-                config_lines.extend(["socks5:", f"  listen: 127.0.0.1:{payload.settings.local_socks_port}", f"  disableUDP: {str(payload.settings.disable_udp).lower()}"])
+                listen_host = "0.0.0.0" if payload.settings.proxy_bind == "lan" else "127.0.0.1"
+                if payload.settings.up_mbps or payload.settings.down_mbps:
+                    config_lines.append(f"  disableLossCompensation: {str(payload.settings.disable_loss_compensation).lower()}")
+                config_lines.extend(["socks5:", f"  listen: {listen_host}:{payload.settings.local_socks_port}"])
+                if payload.settings.local_auth_enabled:
+                    config_lines.extend([f"  username: {json.dumps(payload.settings.local_username)}", f"  password: {json.dumps(payload.settings.local_password)}"])
+                config_lines.append(f"  disableUDP: {str(payload.settings.disable_udp).lower()}")
                 if payload.settings.http_proxy_enabled:
-                    config_lines.extend(["http:", f"  listen: 127.0.0.1:{payload.settings.local_http_port}"])
+                    config_lines.extend(["http:", f"  listen: {listen_host}:{payload.settings.local_http_port}"])
+                    if payload.settings.local_auth_enabled:
+                        config_lines.extend([f"  username: {json.dumps(payload.settings.local_username)}", f"  password: {json.dumps(payload.settings.local_password)}"])
                 config = "\n".join([*config_lines, ""])
                 items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 port = int(settings.get("port", 8443))
@@ -2903,7 +2942,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 uri = f"hysteria2://{quote(client_id, safe='')}:{quote(password, safe='')}@{uri_endpoint(endpoint)}:{port}/?{query}#{quote(payload.name, safe='')}"
                 return {"id": client_id, **connection_profile(
                     protocol="hysteria2", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-hysteria2.yaml", config=config,
-                    fields=[{"label": "Пользователь", "value": client_id}, {"label": "Пароль", "value": password, "secret": True}, {"label": "TLS SNI", "value": identity}],
+                    fields=[{"label": "Пользователь", "value": client_id}, {"label": "Пароль", "value": password, "secret": True}, {"label": "TLS SNI", "value": identity}, *local_proxy_fields(payload)],
                     apps=["Hiddify", "NekoBox", "Hysteria 2"],
                     steps=["Откройте ссылку или отсканируйте QR в совместимом клиенте.", "Если импорт ссылки недоступен, загрузите YAML-файл.", "Включите созданный профиль и проверьте доступ в интернет."],
                     uri=uri, qr_content=uri,
@@ -2933,13 +2972,20 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 outbound.update({"uuid": user_uuid, "congestion_control": payload.settings.congestion_control, "udp_relay_mode": payload.settings.udp_relay_mode, "zero_rtt_handshake": False, "heartbeat": payload.settings.heartbeat})
                 if payload.settings.network != "all":
                     outbound["network"] = payload.settings.network
-                client = {"log": {"level": "warn"}, "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": payload.settings.local_socks_port, "tcp_fast_open": payload.settings.tcp_fast_open, "set_system_proxy": payload.settings.set_system_proxy}], "outbounds": [outbound], "route": {"final": "connection-out"}}
+                if payload.settings.initial_packet_size:
+                    outbound["initial_packet_size"] = payload.settings.initial_packet_size
+                outbound["disable_path_mtu_discovery"] = payload.settings.disable_path_mtu_discovery
+                listen_host = "0.0.0.0" if payload.settings.proxy_bind == "lan" else "127.0.0.1"
+                mixed_inbound = {"type": "mixed", "tag": "mixed-in", "listen": listen_host, "listen_port": payload.settings.local_socks_port, "tcp_fast_open": payload.settings.tcp_fast_open, "set_system_proxy": payload.settings.set_system_proxy, "udp_fragment": payload.settings.udp_fragment, "udp_timeout": payload.settings.udp_timeout}
+                if payload.settings.local_auth_enabled:
+                    mixed_inbound["users"] = [{"username": payload.settings.local_username, "password": payload.settings.local_password}]
+                client = {"log": {"level": "warn"}, "inbounds": [mixed_inbound], "outbounds": [outbound], "route": {"final": "connection-out"}}
                 items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 port = int(settings.get("port", 8444))
                 server_name = certificate_server_name(config_path.parent / "server.crt")
                 return {"id": client_id, **connection_profile(
                     protocol="tuic", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-tuic.json", config=json.dumps(client, ensure_ascii=False, indent=2),
-                    fields=[{"label": "UUID", "value": user_uuid, "secret": True}, {"label": "Пароль", "value": password, "secret": True}, {"label": "TLS SNI", "value": server_name}],
+                    fields=[{"label": "UUID", "value": user_uuid, "secret": True}, {"label": "Пароль", "value": password, "secret": True}, {"label": "TLS SNI", "value": server_name}, *local_proxy_fields(payload)],
                     apps=["sing-box", "NekoBox"],
                     steps=["Скачайте персональный JSON-файл.", "Импортируйте файл в sing-box или совместимый клиент.", "Запустите профиль и используйте локальный mixed-прокси клиента."],
                 )}
@@ -2971,26 +3017,40 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 settings = json.loads(XRAY_SETTINGS.read_text(encoding="utf-8"))
                 endpoint = PUBLIC_IP
                 path = str(settings.get("path", "/xhttp"))
+                listen_host = "0.0.0.0" if payload.settings.proxy_bind == "lan" else "127.0.0.1"
+                socks_settings = {"udp": not payload.settings.disable_udp, "auth": "password" if payload.settings.local_auth_enabled else "noauth"}
+                http_settings: dict = {}
+                if payload.settings.local_auth_enabled:
+                    local_user = {"user": payload.settings.local_username, "pass": payload.settings.local_password}
+                    socks_settings["users"] = [local_user]
+                    http_settings["users"] = [local_user]
+                outbounds = [{
+                    "tag": "xray-out", "protocol": "vless",
+                    "settings": {"address": endpoint, "port": int(settings.get("port", 8445)), "id": user_uuid, "encryption": "none"},
+                    "streamSettings": {
+                        "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path},
+                        "realitySettings": {
+                            "serverName": str(settings.get("server_name", "www.microsoft.com")),
+                            "fingerprint": payload.settings.fingerprint, "password": str(settings.get("password", "")),
+                            "shortId": str(settings.get("short_id", "")), "spiderX": path,
+                        },
+                    },
+                }]
+                routing_rules = []
+                if payload.settings.block_bittorrent:
+                    outbounds.append({"tag": "blocked", "protocol": "blackhole"})
+                    routing_rules.append({"type": "field", "protocol": ["bittorrent"], "outboundTag": "blocked"})
                 client = {
                     "log": {"loglevel": payload.settings.log_level},
                     "inbounds": [
-                        {"listen": "127.0.0.1", "port": payload.settings.local_socks_port, "protocol": "socks", "settings": {"udp": not payload.settings.disable_udp}, "sniffing": {"enabled": payload.settings.sniffing, "destOverride": ["http", "tls", "quic"], "routeOnly": payload.settings.route_only}},
-                        {"listen": "127.0.0.1", "port": payload.settings.local_http_port, "protocol": "http", "sniffing": {"enabled": payload.settings.sniffing, "destOverride": ["http", "tls"], "routeOnly": payload.settings.route_only}},
+                        {"listen": listen_host, "port": payload.settings.local_socks_port, "protocol": "socks", "settings": socks_settings, "sniffing": {"enabled": payload.settings.sniffing, "destOverride": ["http", "tls", "quic"], "routeOnly": payload.settings.route_only}},
+                        {"listen": listen_host, "port": payload.settings.local_http_port, "protocol": "http", "settings": http_settings, "sniffing": {"enabled": payload.settings.sniffing, "destOverride": ["http", "tls"], "routeOnly": payload.settings.route_only}},
                     ],
-                    "outbounds": [{
-                        "tag": "xray-out", "protocol": "vless",
-                        "settings": {"address": endpoint, "port": int(settings.get("port", 8445)), "id": user_uuid, "encryption": "none"},
-                        "streamSettings": {
-                            "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path},
-                            "realitySettings": {
-                                "serverName": str(settings.get("server_name", "www.microsoft.com")),
-                                "fingerprint": payload.settings.fingerprint, "password": str(settings.get("password", "")),
-                                "shortId": str(settings.get("short_id", "")), "spiderX": path,
-                            },
-                        },
-                    }],
-                    "routing": {"domainStrategy": payload.settings.routing_domain_strategy, "rules": []},
+                    "outbounds": outbounds,
+                    "routing": {"domainStrategy": payload.settings.routing_domain_strategy, "rules": routing_rules},
                 }
+                if payload.settings.xray_dns:
+                    client["dns"] = {"servers": [server.strip() for server in payload.settings.xray_dns.split(",") if server.strip()]}
                 items = read_clients()
                 items.append({"id": client_id, "name": payload.name, "protocol": "xray", "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
@@ -3000,7 +3060,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 uri = f"vless://{quote(user_uuid, safe='')}@{uri_endpoint(endpoint)}:{port}?{query}#{quote(payload.name, safe='')}"
                 return {"id": client_id, **connection_profile(
                     protocol="xray", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-xray.json", config=json.dumps(client, ensure_ascii=False, indent=2),
-                    fields=[{"label": "VLESS UUID", "value": user_uuid, "secret": True}, {"label": "Транспорт", "value": "XHTTP + REALITY"}, {"label": "Server name", "value": server_name}],
+                    fields=[{"label": "VLESS UUID", "value": user_uuid, "secret": True}, {"label": "Транспорт", "value": "XHTTP + REALITY"}, {"label": "Server name", "value": server_name}, *local_proxy_fields(payload)],
                     apps=["Hiddify", "v2rayN", "NekoBox"],
                     steps=["Отсканируйте QR или откройте VLESS-ссылку в клиенте.", "При ручном импорте используйте персональный JSON-файл.", "Сохраните профиль и включите системный VPN-режим клиента."],
                     uri=uri, qr_content=uri,

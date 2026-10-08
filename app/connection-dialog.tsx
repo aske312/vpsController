@@ -14,6 +14,10 @@ export type ConnectionSettings = {
   awg_jc: number;
   awg_jmin: number;
   awg_jmax: number;
+  proxy_bind: "loopback" | "lan";
+  local_auth_enabled: boolean;
+  local_username: string;
+  local_password: string;
   local_socks_port: number;
   local_http_port: number;
   http_proxy_enabled: boolean;
@@ -24,17 +28,24 @@ export type ConnectionSettings = {
   bbr_profile: "standard" | "conservative" | "aggressive";
   up_mbps: number;
   down_mbps: number;
+  disable_loss_compensation: boolean;
   congestion_control: "bbr" | "cubic" | "new_reno";
   heartbeat: "5s" | "10s" | "15s" | "30s";
   udp_relay_mode: "native" | "quic";
   network: "all" | "tcp" | "udp";
   tcp_fast_open: boolean;
   set_system_proxy: boolean;
+  udp_fragment: boolean;
+  udp_timeout: "1m" | "3m" | "5m" | "10m";
+  initial_packet_size: number;
+  disable_path_mtu_discovery: boolean;
   fingerprint: "chrome" | "firefox" | "safari";
   sniffing: boolean;
   route_only: boolean;
   routing_domain_strategy: "AsIs" | "IPIfNonMatch" | "IPOnDemand";
   log_level: "none" | "error" | "warning" | "info";
+  xray_dns: string;
+  block_bittorrent: boolean;
 };
 
 const settingsFor = (protocol: Protocol): ConnectionSettings => ({
@@ -46,6 +57,10 @@ const settingsFor = (protocol: Protocol): ConnectionSettings => ({
   awg_jc: 6,
   awg_jmin: 8,
   awg_jmax: 80,
+  proxy_bind: "loopback",
+  local_auth_enabled: false,
+  local_username: "proxy",
+  local_password: "",
   local_socks_port: protocol === "tuic" ? 2080 : protocol === "xray" ? 10808 : 1080,
   local_http_port: protocol === "hysteria2" ? 8080 : 10809,
   http_proxy_enabled: false,
@@ -56,17 +71,24 @@ const settingsFor = (protocol: Protocol): ConnectionSettings => ({
   bbr_profile: "standard",
   up_mbps: 0,
   down_mbps: 0,
+  disable_loss_compensation: false,
   congestion_control: "bbr",
   heartbeat: "10s",
   udp_relay_mode: "native",
   network: "all",
   tcp_fast_open: false,
   set_system_proxy: false,
+  udp_fragment: false,
+  udp_timeout: "5m",
+  initial_packet_size: 0,
+  disable_path_mtu_discovery: false,
   fingerprint: "chrome",
   sniffing: true,
   route_only: false,
   routing_domain_strategy: "AsIs",
   log_level: "warning",
+  xray_dns: "",
+  block_bittorrent: false,
 });
 
 type Props = {
@@ -121,6 +143,8 @@ export function ConnectionDialog({ protocols, onClose, onCreate, onCreated, onEr
   }
 
   const meta = protocolDelivery[protocol];
+  const proxyProtocol = protocol === "hysteria2" || protocol === "tuic" || protocol === "xray";
+  const localAccessInvalid = proxyProtocol && settings.local_auth_enabled && settings.local_password.length < 8;
   return <div className="confirmBackdrop connectionDialogBackdrop" role="presentation" onMouseDown={() => { if (!submitting && !profile) onClose(); }}>
     <form className={`connectionDialog${profile ? " generated" : ""}`} role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={submit}>
       <header className="connectionDialogHead"><div><p className="eyebrow">PERSONAL ACCESS</p><h2 id="connection-dialog-title">{profile ? "Подключение создано" : "Новое подключение"}</h2><span>{profile ? "Передайте профиль владельцу устройства и сохраните его сейчас." : "Настройте отдельный профиль для конкретного пользователя или устройства."}</span></div><button type="button" aria-label="Закрыть" onClick={onClose} disabled={submitting}>×</button></header>
@@ -155,6 +179,11 @@ export function ConnectionDialog({ protocols, onClose, onCreate, onCreated, onEr
               </>}
             </div>
             <details className="connectionAdvanced"><summary>Расширенные настройки <span>⌄</span></summary><div className="connectionSettingsFields">
+              {proxyProtocol && <>
+                <label><span>Доступ к локальному прокси</span><select value={settings.proxy_bind} onChange={(event) => update({ proxy_bind: event.target.value as ConnectionSettings["proxy_bind"], ...(event.target.value === "lan" ? { local_auth_enabled: true } : {}) })}><option value="loopback">Только это устройство</option><option value="lan">Локальная сеть — с авторизацией</option></select></label>
+                <label className="connectionCheckbox"><span><strong>Логин и пароль</strong><small>Защищает локальный SOCKS/HTTP/mixed-порт</small></span><input type="checkbox" checked={settings.local_auth_enabled} disabled={settings.proxy_bind === "lan"} onChange={(event) => update({ local_auth_enabled: event.target.checked })} /></label>
+                {settings.local_auth_enabled && <><label><span>Локальный логин</span><input value={settings.local_username} maxLength={64} onChange={(event) => update({ local_username: event.target.value })} /></label><label><span>Локальный пароль</span><input type="password" minLength={8} maxLength={128} value={settings.local_password} onChange={(event) => update({ local_password: event.target.value })} placeholder="Минимум 8 символов" /><small>Хранится только в экспортируемом профиле</small></label></>}
+              </>}
               {(protocol === "wg" || protocol === "awg") && <>
                 <label><span>DNS-серверы</span><input value={settings.dns} onChange={(event) => update({ dns: event.target.value })} placeholder="1.1.1.1, 1.0.0.1" /></label>
                 {protocol === "awg" && <><label><span>Jc · пакеты мусора</span><input type="number" min={0} max={128} value={settings.awg_jc} onChange={(event) => update({ awg_jc: Number(event.target.value) })} /></label><label><span>Jmin · минимум</span><input type="number" min={0} max={128} value={settings.awg_jmin} onChange={(event) => update({ awg_jmin: Number(event.target.value) })} /></label><label><span>Jmax · максимум</span><input type="number" min={0} max={128} value={settings.awg_jmax} onChange={(event) => update({ awg_jmax: Number(event.target.value) })} /></label></>}
@@ -164,6 +193,7 @@ export function ConnectionDialog({ protocols, onClose, onCreate, onCreated, onEr
                 {settings.hysteria_congestion === "bbr" && <label><span>Профиль BBR</span><select value={settings.bbr_profile} onChange={(event) => update({ bbr_profile: event.target.value as ConnectionSettings["bbr_profile"] })}><option value="standard">Стандартный</option><option value="conservative">Консервативный</option><option value="aggressive">Агрессивный</option></select></label>}
                 <label><span>Upload, Мбит/с</span><input type="number" min={0} max={10000} value={settings.up_mbps} onChange={(event) => update({ up_mbps: Number(event.target.value) })} /><small>0 — автоматический режим</small></label>
                 <label><span>Download, Мбит/с</span><input type="number" min={0} max={10000} value={settings.down_mbps} onChange={(event) => update({ down_mbps: Number(event.target.value) })} /><small>0 — автоматический режим</small></label>
+                <label className="connectionCheckbox"><span><strong>Без компенсации потерь</strong><small>Не превышать заданный upload при потерях</small></span><input type="checkbox" disabled={!settings.up_mbps && !settings.down_mbps} checked={settings.disable_loss_compensation} onChange={(event) => update({ disable_loss_compensation: event.target.checked })} /></label>
                 <label className="connectionCheckbox"><span><strong>Fast Open</strong><small>Быстрее старт, менее строгая семантика прокси</small></span><input type="checkbox" checked={settings.fast_open} onChange={(event) => update({ fast_open: event.target.checked })} /></label>
                 <label className="connectionCheckbox"><span><strong>Lazy connect</strong><small>Подключаться только при первом запросе</small></span><input type="checkbox" checked={settings.lazy} onChange={(event) => update({ lazy: event.target.checked })} /></label>
               </>}
@@ -172,12 +202,18 @@ export function ConnectionDialog({ protocols, onClose, onCreate, onCreated, onEr
                 <label><span>Разрешённый трафик</span><select value={settings.network} onChange={(event) => update({ network: event.target.value as ConnectionSettings["network"] })}><option value="all">TCP + UDP</option><option value="tcp">Только TCP</option><option value="udp">Только UDP</option></select></label>
                 <label className="connectionCheckbox"><span><strong>TCP Fast Open</strong><small>Для локального mixed-прокси</small></span><input type="checkbox" checked={settings.tcp_fast_open} onChange={(event) => update({ tcp_fast_open: event.target.checked })} /></label>
                 <label className="connectionCheckbox"><span><strong>Системный прокси</strong><small>sing-box установит и очистит настройки ОС</small></span><input type="checkbox" checked={settings.set_system_proxy} onChange={(event) => update({ set_system_proxy: event.target.checked })} /></label>
+                <label><span>UDP timeout</span><select value={settings.udp_timeout} onChange={(event) => update({ udp_timeout: event.target.value as ConnectionSettings["udp_timeout"] })}><option value="1m">1 минута</option><option value="3m">3 минуты</option><option value="5m">5 минут</option><option value="10m">10 минут</option></select></label>
+                <label><span>Начальный QUIC-пакет</span><select value={settings.initial_packet_size} onChange={(event) => update({ initial_packet_size: Number(event.target.value) })}><option value={0}>Автоматически</option><option value={1200}>1200 B</option><option value={1300}>1300 B</option><option value={1400}>1400 B</option><option value={1500}>1500 B</option></select></label>
+                <label className="connectionCheckbox"><span><strong>UDP fragmentation</strong><small>Разрешить фрагментацию локального UDP</small></span><input type="checkbox" checked={settings.udp_fragment} onChange={(event) => update({ udp_fragment: event.target.checked })} /></label>
+                <label className="connectionCheckbox"><span><strong>Отключить Path MTU discovery</strong><small>Только для проблемных сетей</small></span><input type="checkbox" checked={settings.disable_path_mtu_discovery} onChange={(event) => update({ disable_path_mtu_discovery: event.target.checked })} /></label>
               </>}
               {protocol === "xray" && <>
                 <label><span>Маршрутизация доменов</span><select value={settings.routing_domain_strategy} onChange={(event) => update({ routing_domain_strategy: event.target.value as ConnectionSettings["routing_domain_strategy"] })}><option value="AsIs">AsIs — без доп. DNS</option><option value="IPIfNonMatch">IPIfNonMatch</option><option value="IPOnDemand">IPOnDemand</option></select></label>
                 <label><span>Уровень журнала</span><select value={settings.log_level} onChange={(event) => update({ log_level: event.target.value as ConnectionSettings["log_level"] })}><option value="none">Выключен</option><option value="error">Только ошибки</option><option value="warning">Предупреждения</option><option value="info">Информация</option></select></label>
+                <label><span>Встроенные DNS</span><input value={settings.xray_dns} onChange={(event) => update({ xray_dns: event.target.value })} placeholder="1.1.1.1, 8.8.8.8" /><small>Пусто — использовать DNS системы</small></label>
                 <label className="connectionCheckbox"><span><strong>Sniffing доменов</strong><small>Определять HTTP, TLS и QUIC назначения</small></span><input type="checkbox" checked={settings.sniffing} onChange={(event) => update({ sniffing: event.target.checked, ...(!event.target.checked ? { route_only: false } : {}) })} /></label>
                 <label className="connectionCheckbox"><span><strong>Только для маршрутизации</strong><small>Не подменять исходное назначение</small></span><input type="checkbox" disabled={!settings.sniffing} checked={settings.route_only} onChange={(event) => update({ route_only: event.target.checked })} /></label>
+                <label className="connectionCheckbox"><span><strong>Блокировать BitTorrent</strong><small>Локальное правило blackhole в профиле</small></span><input type="checkbox" checked={settings.block_bittorrent} onChange={(event) => update({ block_bittorrent: event.target.checked })} /></label>
               </>}
             </div></details>
             {(protocol === "hysteria2" || protocol === "xray") && <p className="connectionSettingsNote">Локальные расширенные параметры полностью сохраняются в файле. QR и ссылка используют стандартный переносимый URI протокола, поэтому приложение клиента может применить собственные локальные значения.</p>}
@@ -185,7 +221,7 @@ export function ConnectionDialog({ protocols, onClose, onCreate, onCreated, onEr
           </fieldset>
           {formError && <div className="connectionDialogError" role="alert">{formError}</div>}
         </div>
-        <footer className="connectionDialogActions"><button type="button" onClick={onClose} disabled={submitting}>Отмена</button><button className="primaryButton" disabled={submitting || name.trim().length < 2}>{submitting ? "Создаём…" : "Создать подключение"}</button></footer>
+        <footer className="connectionDialogActions"><button type="button" onClick={onClose} disabled={submitting}>Отмена</button><button className="primaryButton" disabled={submitting || name.trim().length < 2 || localAccessInvalid}>{submitting ? "Создаём…" : localAccessInvalid ? "Укажите пароль" : "Создать подключение"}</button></footer>
       </> : <>
         <div className="connectionDialogResult"><ConnectionProfileResult profile={profile} onDownload={onDownload} /></div>
         <footer className="connectionDialogActions"><button type="button" onClick={createAnother}>Создать ещё</button><button type="button" className="primaryButton" onClick={onClose}>Готово</button></footer>

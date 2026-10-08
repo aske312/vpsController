@@ -9,6 +9,7 @@ import sys
 import time
 import unittest
 from unittest.mock import patch
+import yaml
 
 from fastapi.testclient import TestClient
 
@@ -428,8 +429,10 @@ class PortabilityTests(unittest.TestCase):
 
             client_settings = api.ClientSettings(
                 local_socks_port=1180, local_http_port=8180, http_proxy_enabled=True,
+                proxy_bind='lan', local_auth_enabled=True, local_username='local-user', local_password='local-password',
                 disable_udp=True, fast_open=True, lazy=True,
                 hysteria_congestion='bbr', bbr_profile='conservative', up_mbps=25, down_mbps=75,
+                disable_loss_compensation=True,
             )
             with patch.multiple(
                 api,
@@ -439,14 +442,98 @@ class PortabilityTests(unittest.TestCase):
                 created = api.create_client(api.ClientCreate(name='Advanced client', protocol='hysteria2', settings=client_settings))
 
             config = created['config']
-            self.assertIn('listen: 127.0.0.1:1180', config)
-            self.assertIn('listen: 127.0.0.1:8180', config)
+            parsed = yaml.safe_load(config)
+            self.assertIn('listen: 0.0.0.0:1180', config)
+            self.assertIn('listen: 0.0.0.0:8180', config)
+            self.assertIn('username: "local-user"', config)
+            self.assertIn('password: "local-password"', config)
             self.assertIn('disableUDP: true', config)
             self.assertIn('fastOpen: true', config)
             self.assertIn('lazy: true', config)
             self.assertIn('bbrProfile: conservative', config)
             self.assertIn('up: 25 mbps', config)
             self.assertIn('down: 75 mbps', config)
+            self.assertIn('disableLossCompensation: true', config)
+            self.assertTrue(parsed['bandwidth']['disableLossCompensation'])
+            self.assertTrue(any(field['label'] == 'Локальный пароль' for field in created['profile']['fields']))
+
+    def test_tuic_client_profile_applies_quic_and_local_proxy_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            protocol = root / 'tuic'
+            protocol.mkdir()
+            config_path = protocol / 'config.json'
+            settings_path = protocol / 'settings.json'
+            config_path.write_text(json.dumps({'inbounds': [{'type': 'tuic', 'users': []}]}), encoding='utf-8')
+            settings_path.write_text('{"port":8444}', encoding='utf-8')
+            (protocol / 'server.crt').write_text('certificate', encoding='utf-8')
+            valid = type('Result', (), {'returncode': 0, 'stderr': ''})()
+
+            def command(*args, **_kwargs):
+                return 'enabled' if args[:2] == ('systemctl', 'is-enabled') else ''
+
+            settings = api.ClientSettings(
+                local_socks_port=2180, local_auth_enabled=True,
+                local_username='tuic-user', local_password='tuic-password',
+                congestion_control='cubic', heartbeat='30s', udp_relay_mode='quic', network='tcp',
+                tcp_fast_open=True, udp_fragment=True, udp_timeout='3m',
+                initial_packet_size=1300, disable_path_mtu_discovery=True,
+            )
+            with patch.multiple(
+                api,
+                DATA_DIR=root, CLIENTS_FILE=root / 'clients.json', PUBLIC_IP='192.0.2.1',
+                TUIC_DIR=protocol, TUIC_CONFIG=config_path, TUIC_SETTINGS=settings_path,
+            ), patch.object(api, 'run', side_effect=command), patch.object(api.subprocess, 'run', return_value=valid), \
+                 patch.object(api, 'certificate_server_name', return_value='endpoint.internal'):
+                created = api.create_client(api.ClientCreate(name='TUIC client', protocol='tuic', settings=settings))
+
+            client = json.loads(created['config'])
+            inbound = client['inbounds'][0]
+            outbound = client['outbounds'][0]
+            self.assertEqual(inbound['users'][0], {'username': 'tuic-user', 'password': 'tuic-password'})
+            self.assertTrue(inbound['tcp_fast_open'])
+            self.assertTrue(inbound['udp_fragment'])
+            self.assertEqual(inbound['udp_timeout'], '3m')
+            self.assertEqual(outbound['udp_relay_mode'], 'quic')
+            self.assertEqual(outbound['network'], 'tcp')
+            self.assertEqual(outbound['initial_packet_size'], 1300)
+            self.assertTrue(outbound['disable_path_mtu_discovery'])
+
+    def test_xray_client_profile_applies_dns_auth_and_filtering(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            protocol = root / 'xray'
+            protocol.mkdir()
+            config_path = protocol / 'config.json'
+            settings_path = protocol / 'settings.json'
+            config_path.write_text(json.dumps({'inbounds': [{'protocol': 'vless', 'settings': {'clients': []}}]}), encoding='utf-8')
+            settings_path.write_text(json.dumps({'port': 8445, 'path': '/xhttp', 'server_name': 'example.com', 'password': 'public-key', 'short_id': '0123456789abcdef'}), encoding='utf-8')
+            valid = type('Result', (), {'returncode': 0, 'stderr': ''})()
+
+            def command(*args, **_kwargs):
+                return 'enabled' if args[:2] == ('systemctl', 'is-enabled') else ''
+
+            settings = api.ClientSettings(
+                local_auth_enabled=True, local_username='xray-user', local_password='xray-password',
+                xray_dns='1.1.1.1, 8.8.8.8', block_bittorrent=True,
+                sniffing=True, route_only=True, routing_domain_strategy='IPIfNonMatch',
+            )
+            with patch.multiple(
+                api,
+                DATA_DIR=root, CLIENTS_FILE=root / 'clients.json', PUBLIC_IP='192.0.2.1',
+                XRAY_DIR=protocol, XRAY_CONFIG=config_path, XRAY_SETTINGS=settings_path,
+            ), patch.object(api.Path, 'exists', return_value=True), patch.object(api, 'run', side_effect=command), \
+                 patch.object(api.subprocess, 'run', return_value=valid):
+                created = api.create_client(api.ClientCreate(name='Xray client', protocol='xray', settings=settings))
+
+            client = json.loads(created['config'])
+            self.assertEqual(client['dns']['servers'], ['1.1.1.1', '8.8.8.8'])
+            self.assertEqual(client['inbounds'][0]['settings']['auth'], 'password')
+            self.assertEqual(client['inbounds'][0]['settings']['users'][0]['user'], 'xray-user')
+            self.assertTrue(client['inbounds'][0]['sniffing']['routeOnly'])
+            self.assertEqual(client['routing']['domainStrategy'], 'IPIfNonMatch')
+            self.assertEqual(client['routing']['rules'][0]['protocol'], ['bittorrent'])
+            self.assertEqual(client['outbounds'][1]['protocol'], 'blackhole')
 
 
 if __name__ == '__main__':
