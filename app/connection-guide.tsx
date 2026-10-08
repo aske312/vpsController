@@ -1,21 +1,34 @@
 "use client";
 
 import { useState } from "react";
+import type { Protocol } from "./page";
 
-export function ConnectionGuide() {
+const guides: Record<Protocol, {
+  app: string; href: string; importRu: string; importEn: string; checkRu: string; checkEn: string;
+}> = {
+  wg: { app: "WireGuard", href: "https://www.wireguard.com/install/", importRu: "Отсканируйте QR или импортируйте .conf. WireGuard (WG) подходит для обычного локального подключения.", importEn: "Scan the QR code or import the .conf file into WireGuard.", checkRu: "Сохраните профиль, включите туннель и проверьте внешний IP.", checkEn: "Save the profile, activate the tunnel, and verify the external IP." },
+  awg: { app: "AmneziaWG", href: "https://storage.googleapis.com/amnezia/amnezia.org", importRu: "Отсканируйте QR или импортируйте .conf в AmneziaWG. Для WG обязательно включите галочку «Обфускация»; AWG уже содержит параметры обфускации.", importEn: "Scan the QR code or import the .conf file into AmneziaWG; AWG obfuscation parameters are already included.", checkRu: "Включите профиль и проверьте работу через мобильную сеть и Wi‑Fi.", checkEn: "Activate the profile and test it on both mobile data and Wi-Fi." },
+  hysteria2: { app: "Hiddify или NekoBox", href: "https://github.com/hiddify/hiddify-app", importRu: "Откройте персональную Hysteria2-ссылку, отсканируйте QR или импортируйте YAML-файл.", importEn: "Open the personal Hysteria2 link, scan the QR code, or import the YAML file.", checkRu: "Проверьте SNI и отпечаток сертификата, затем включите профиль.", checkEn: "Confirm the SNI and certificate fingerprint, then activate the profile." },
+  tuic: { app: "sing-box или NekoBox", href: "https://sing-box.sagernet.org/clients/", importRu: "Скачайте персональный JSON с UUID, паролем и закреплённым сертификатом, затем импортируйте его в клиент.", importEn: "Download the personal JSON containing the UUID, password, and pinned certificate, then import it into the client.", checkRu: "Запустите профиль и при необходимости включите системный VPN-режим приложения.", checkEn: "Start the profile and enable the app's system VPN mode if needed." },
+  xray: { app: "Hiddify, v2rayN или NekoBox", href: "https://github.com/hiddify/hiddify-app", importRu: "Откройте VLESS-ссылку, отсканируйте QR или импортируйте JSON с XHTTP + REALITY.", importEn: "Open the VLESS link, scan the QR code, or import the XHTTP + REALITY JSON.", checkRu: "Убедитесь, что клиент сохранил REALITY server name и short ID, затем включите профиль.", checkEn: "Confirm the REALITY server name and short ID, then activate the profile." },
+};
+
+export function ConnectionGuide({ protocol }: { protocol: Protocol }) {
   const [language, setLanguage] = useState<"ru" | "en">("ru");
   const ru = language === "ru";
+  const guide = guides[protocol];
   return <article className="panel connectionGuide">
     <div className="panelHead">
-      <div><p className="eyebrow">CLIENT GUIDE</p><h2>{ru ? "Создание и подключение клиента" : "Create and connect a client"}</h2></div>
-      <div className="guideLanguage"><button className={ru ? "active" : ""} onClick={() => setLanguage("ru")}>RU</button><button className={!ru ? "active" : ""} onClick={() => setLanguage("en")}>EN</button></div>
+      <div><p className="eyebrow">PERSONAL SETUP · {protocol.toUpperCase()}</p><h2>{ru ? "Настройка подключения для пользователя" : "Create and connect a client"}</h2></div>
+      <div className="guideLanguage"><button type="button" className={ru ? "active" : ""} onClick={() => setLanguage("ru")}>RU</button><button type="button" className={!ru ? "active" : ""} onClick={() => setLanguage("en")}>EN</button></div>
     </div>
-    <div className="guideSteps">
-      <section><span>01</span><div><h3>{ru ? "Установите AmneziaWG" : "Install AmneziaWG"}</h3><p>{ru ? "Для подключений WG и AWG используйте одно приложение — AmneziaWG." : "Use the same AmneziaWG app for both WG and AWG connections."}</p><a href="https://storage.googleapis.com/amnezia/amnezia.org" target="_blank" rel="noreferrer">{ru ? "Скачать приложение ↗" : "Download the app ↗"}</a></div></section>
-      <section><span>02</span><div><h3>{ru ? "Создайте клиента" : "Create a client"}</h3><p>{ru ? "Введите понятное уникальное имя, выберите протокол и нажмите «Создать конфигурацию». Один клиент — одно устройство." : "Enter a clear unique name, select a protocol and click “Create configuration”. Use one client per device."}</p></div></section>
-      <section><span>03</span><div><h3>{ru ? "Сохраните конфигурацию" : "Save the configuration"}</h3><p>{ru ? "Скачайте .conf сразу: приватный ключ повторно не показывается. Передавайте файл только владельцу устройства по защищённому каналу." : "Download the .conf file immediately: the private key is not shown again. Send it only to the device owner over a secure channel."}</p></div></section>
-      <section><span>04</span><div><h3>{ru ? "Импортируйте и включите" : "Import and activate"}</h3><p>{ru ? "Импортируйте .conf в AmneziaWG. Для WG обязательно включите галочку «Обфускация», затем сохраните и включите подключение." : "Import the .conf file into AmneziaWG. For WG, enable the “Obfuscation” checkbox, then save and activate the connection."}</p></div></section>
-      <section><span>05</span><div><h3>{ru ? "Отзовите при утрате" : "Revoke if compromised"}</h3><p>{ru ? "Если устройство или файл потеряны, нажмите «Отозвать» и создайте нового клиента. Не используйте одну конфигурацию на нескольких устройствах." : "If a device or file is lost, click “Revoke” and create a new client. Never reuse one configuration on multiple devices."}</p></div></section>
+    <div className="guideSteps protocolAwareGuide">
+      <section><span>01</span><div><h3>{ru ? `Установите ${guide.app}` : `Install ${guide.app}`}</h3><p>{ru ? "Используйте приложение, которому доверяет владелец устройства, и обновите его до актуальной версии." : "Use an app trusted by the device owner and update it to a current version."}</p><a href={guide.href} target="_blank" rel="noreferrer">{ru ? "Открыть страницу клиента ↗" : "Open client page ↗"}</a></div></section>
+      <section><span>02</span><div><h3>{ru ? "Передайте профиль" : "Hand off the profile"}</h3><p>{ru ? "Создайте отдельное подключение для конкретного человека или устройства. Секреты передавайте только по защищённому каналу." : "Create a separate connection for each person or device. Share secrets only through a secure channel."}</p></div></section>
+      <section><span>03</span><div><h3>{ru ? "Импортируйте" : "Import"}</h3><p>{ru ? guide.importRu : guide.importEn}</p></div></section>
+      <section><span>04</span><div><h3>{ru ? "Проверьте соединение" : "Verify the connection"}</h3><p>{ru ? guide.checkRu : guide.checkEn}</p></div></section>
+      <section><span>05</span><div><h3>{ru ? "Отзовите при утрате" : "Revoke if compromised"}</h3><p>{ru ? "Если устройство или профиль потеряны, отзовите именно это подключение и создайте новое. Не используйте один профиль на нескольких устройствах." : "If the device or profile is lost, revoke this exact connection and create a new one. Never reuse one profile across devices."}</p></div></section>
+      {(protocol === "wg" || protocol === "awg") && <section><span>PDF</span><div><h3>{ru ? "Печатная инструкция" : "Printable guide"}</h3><p>{ru ? "Расширенная инструкция для WireGuard и AmneziaWG доступна в PDF." : "A detailed WireGuard and AmneziaWG guide is available as a PDF."}</p><a href="/connection-guide-wg-awg.pdf" download>{ru ? "Скачать PDF ↓" : "Download PDF ↓"}</a></div></section>}
     </div>
   </article>;
 }

@@ -117,10 +117,30 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(guideUi, /Create and connect a client/);
   assert.match(guideUi, /Для WG обязательно включите галочку «Обфускация»/);
   assert.match(guideUi, /storage\.googleapis\.com\/amnezia\/amnezia\.org/);
-  assert.match(page, /connection-guide-wg-awg\.pdf/);
-  assert.match(page, /installedProtocols\.length > 0/);
+  assert.match(guideUi, /connection-guide-wg-awg\.pdf/);
+  assert.match(page, /installedProtocols\.length/);
+  assert.match(page, /ConnectionProfileResult/);
   assert.match(page, /waitForProtocolState/);
   assert.match(page, /2–48 символов/);
+});
+
+test("connections return protocol-specific one-time handoff methods", async () => {
+  const [api, page, profile, packageJson] = await Promise.all([
+    read("api/main.py"), read("app/page.tsx"), read("app/connection-profile.tsx"), read("package.json"),
+  ]);
+  assert.match(api, /def connection_profile\(/);
+  assert.match(api, /hysteria2:\/\//);
+  assert.match(api, /vless:\/\//);
+  assert.match(api, /qr_content=client_config/);
+  assert.match(api, /filename=f"\{safe_name\}-tuic\.json"/);
+  assert.match(profile, /QRCode\.toDataURL/);
+  assert.match(profile, /ПРОФИЛЬ СОЗДАН · ПОКАЗЫВАЕТСЯ ОДИН РАЗ/);
+  assert.match(profile, /wg:.*methods: \["QR", "Файл"\]/s);
+  assert.match(profile, /hysteria2:.*methods: \["QR", "Ссылка", "Файл"\]/s);
+  assert.match(profile, /tuic:.*methods: \["Файл"\]/s);
+  assert.match(profile, /xray:.*methods: \["QR", "Ссылка", "Файл"\]/s);
+  assert.match(page, /ACCESS BY PROTOCOL/);
+  assert.equal(JSON.parse(packageJson).dependencies.qrcode, "^1.5.4");
 });
 
 test("protocol pages separate server health from real data-plane evidence", async () => {
@@ -299,7 +319,7 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(manager, /for timer in vps-control-auto-update\.timer apt-daily\.timer apt-daily-upgrade\.timer/);
   const serviceModeBody = manager.match(/change_service_mode\(\) \{([\s\S]*?)\n\}/)?.[1] || "";
   assert.doesNotMatch(serviceModeBody, /vpn-monitor\.timer/);
-  assert.match(serviceModeBody, /systemctl stop \\\n\s+vps-control-auto-reboot\.timer[\s\S]+vps-control-auto-kernel-update\.timer/);
+  assert.match(serviceModeBody, /systemctl stop \\\r?\n\s+vps-control-auto-reboot\.timer[\s\S]+vps-control-auto-kernel-update\.timer/);
   assert.match(serviceModeBody, /if \[\[ -r "\$\{AUTOMATION_FILE\}" \]\]; then\s+apply_automation/);
   assert.match(manager, /"ssh_service_was_active": ssh_service == "yes"/);
   assert.match(manager, /"ssh_socket_was_active": ssh_socket == "yes"/);

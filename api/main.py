@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote, urlencode
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -2772,6 +2773,50 @@ def append_peer(config: Path, client_id: str, public_key: str, psk: str, address
         handle.write(block)
 
 
+def connection_profile(
+    *,
+    protocol: str,
+    name: str,
+    endpoint: str,
+    filename: str,
+    config: str,
+    fields: list[dict],
+    apps: list[str],
+    steps: list[str],
+    uri: str = "",
+    qr_content: str = "",
+) -> dict:
+    """Build the one-time client handoff returned after creating an identity."""
+    mime_type = "application/json;charset=utf-8" if filename.endswith(".json") else "application/yaml;charset=utf-8" if filename.endswith((".yaml", ".yml")) else "text/plain;charset=utf-8"
+    delivery = {
+        "file": {"filename": filename, "content": config, "mime_type": mime_type},
+        "link": {"uri": uri, "label": "Скопировать ссылку подключения"} if uri else None,
+        "qr": {"content": qr_content, "label": "Сканировать в клиентском приложении"} if qr_content else None,
+    }
+    return {
+        # Keep the original fields for compatibility with older panel builds.
+        "filename": filename,
+        "config": config,
+        "profile": {
+            "protocol": protocol,
+            "name": name,
+            "endpoint": endpoint,
+            "fields": fields,
+            "apps": apps,
+            "steps": steps,
+            "delivery": delivery,
+            "one_time": True,
+        },
+    }
+
+
+def uri_endpoint(host: str) -> str:
+    try:
+        return f"[{host}]" if ipaddress.ip_address(host).version == 6 else host
+    except ValueError:
+        return host
+
+
 @app.post("/api/clients")
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
     client_id = secrets.token_hex(8)
@@ -2791,7 +2836,16 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt")).partition("=")[2].strip()
                 config = "\n".join([f"server: {endpoint}:{int(settings.get('port', 8443))}", f"auth: {client_id}:{password}", "tls:", f"  sni: {identity}", "  insecure: true", f"  pinSHA256: {fingerprint}", "socks5:", "  listen: 127.0.0.1:1080", "  disableUDP: false", ""])
                 items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
-                return {"id": client_id, "filename": f"{safe_name}.yaml", "config": config}
+                port = int(settings.get("port", 8443))
+                query = urlencode({"sni": identity, "insecure": "1", "pinSHA256": fingerprint})
+                uri = f"hysteria2://{quote(client_id, safe='')}:{quote(password, safe='')}@{uri_endpoint(endpoint)}:{port}/?{query}#{quote(payload.name, safe='')}"
+                return {"id": client_id, **connection_profile(
+                    protocol="hysteria2", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-hysteria2.yaml", config=config,
+                    fields=[{"label": "Пользователь", "value": client_id}, {"label": "Пароль", "value": password, "secret": True}, {"label": "TLS SNI", "value": identity}],
+                    apps=["Hiddify", "NekoBox", "Hysteria 2"],
+                    steps=["Откройте ссылку или отсканируйте QR в совместимом клиенте.", "Если импорт ссылки недоступен, загрузите YAML-файл.", "Включите созданный профиль и проверьте доступ в интернет."],
+                    uri=uri, qr_content=uri,
+                )}
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 raise HTTPException(status_code=500, detail="Unable to create Hysteria2 connection") from exc
     if payload.protocol == "tuic":
@@ -2817,7 +2871,14 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 outbound.update({"uuid": user_uuid, "congestion_control": str(settings.get("congestion_control", "bbr")), "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": str(settings.get("heartbeat", "10s"))})
                 client = {"log": {"level": "warn"}, "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080}], "outbounds": [outbound], "route": {"final": "connection-out"}}
                 items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
-                return {"id": client_id, "filename": f"{safe_name}.json", "config": json.dumps(client, ensure_ascii=False, indent=2)}
+                port = int(settings.get("port", 8444))
+                server_name = certificate_server_name(config_path.parent / "server.crt")
+                return {"id": client_id, **connection_profile(
+                    protocol="tuic", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-tuic.json", config=json.dumps(client, ensure_ascii=False, indent=2),
+                    fields=[{"label": "UUID", "value": user_uuid, "secret": True}, {"label": "Пароль", "value": password, "secret": True}, {"label": "TLS SNI", "value": server_name}],
+                    apps=["sing-box", "NekoBox"],
+                    steps=["Скачайте персональный JSON-файл.", "Импортируйте файл в sing-box или совместимый клиент.", "Запустите профиль и используйте локальный mixed-прокси клиента."],
+                )}
             except Exception as exc:
                 config_path.write_bytes(original); os.chmod(config_path, 0o600); run("systemctl", "restart", unit, timeout=20)
                 raise HTTPException(status_code=500, detail=f"Unable to create {payload.protocol} connection") from exc
@@ -2868,7 +2929,17 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 items = read_clients()
                 items.append({"id": client_id, "name": payload.name, "protocol": "xray", "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
-                return {"id": client_id, "filename": f"{safe_name}-xray.json", "config": json.dumps(client, ensure_ascii=False, indent=2)}
+                port = int(settings.get("port", 8445))
+                server_name = str(settings.get("server_name", "www.microsoft.com"))
+                query = urlencode({"type": "xhttp", "security": "reality", "pbk": str(settings.get("password", "")), "fp": "chrome", "sni": server_name, "sid": str(settings.get("short_id", "")), "path": path})
+                uri = f"vless://{quote(user_uuid, safe='')}@{uri_endpoint(endpoint)}:{port}?{query}#{quote(payload.name, safe='')}"
+                return {"id": client_id, **connection_profile(
+                    protocol="xray", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-xray.json", config=json.dumps(client, ensure_ascii=False, indent=2),
+                    fields=[{"label": "VLESS UUID", "value": user_uuid, "secret": True}, {"label": "Транспорт", "value": "XHTTP + REALITY"}, {"label": "Server name", "value": server_name}],
+                    apps=["Hiddify", "v2rayN", "NekoBox"],
+                    steps=["Отсканируйте QR или откройте VLESS-ссылку в клиенте.", "При ручном импорте используйте персональный JSON-файл.", "Сохраните профиль и включите системный VPN-режим клиента."],
+                    uri=uri, qr_content=uri,
+                )}
             except Exception as exc:
                 XRAY_CONFIG.write_bytes(original)
                 os.chmod(XRAY_CONFIG, 0o600)
@@ -2914,7 +2985,14 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         }
     )
     write_clients(items)
-    return {"id": client_id, "filename": f"{safe_name}-{payload.protocol}.conf", "config": client_config}
+    protocol_name = "WireGuard" if payload.protocol == "wg" else "AmneziaWG"
+    return {"id": client_id, **connection_profile(
+        protocol=payload.protocol, name=payload.name, endpoint=f"{PUBLIC_IP}:{port}", filename=f"{safe_name}-{payload.protocol}.conf", config=client_config,
+        fields=[{"label": "Адрес в туннеле", "value": f"{address}/32"}, {"label": "Сервер", "value": f"{PUBLIC_IP}:{port}"}, {"label": "Профиль", "value": protocol_name}],
+        apps=[protocol_name],
+        steps=[f"Скачайте файл или отсканируйте QR в приложении {protocol_name}.", "Сохраните импортированный профиль с именем устройства.", "Включите туннель и проверьте доступ в интернет."],
+        qr_content=client_config,
+    )}
 
 
 @app.delete("/api/clients/{client_id}")
