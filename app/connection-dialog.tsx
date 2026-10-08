@@ -125,6 +125,13 @@ type Props = {
 
 type FieldErrors = Partial<Record<keyof ConnectionSettings | "name", string>>;
 
+function validSniDomain(value: string) {
+  const candidate = value.trim().replace(/\.$/, "");
+  if (!candidate || candidate.length > 253 || /^\d+(?:\.\d+){3}$/.test(candidate)) return false;
+  const labels = candidate.split(".");
+  return labels.length > 1 && labels.every((label) => label.length > 0 && label.length <= 63 && /^[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?$/u.test(label));
+}
+
 function validateConnection(name: string, protocol: Protocol, settings: ConnectionSettings): FieldErrors {
   const errors: FieldErrors = {};
   if (name.trim().length < 2) errors.name = "Укажите имя пользователя или устройства — минимум 2 символа.";
@@ -142,7 +149,7 @@ function validateConnection(name: string, protocol: Protocol, settings: Connecti
   if (protocol === "tuic" && settings.initial_packet_size !== 0 && (settings.initial_packet_size < 1200 || settings.initial_packet_size > 1500)) errors.initial_packet_size = "Размер пакета должен быть от 1200 до 1500 байт.";
   if (protocol === "xray") {
     const sni = settings.xray_sni.trim();
-    if (!sni || !sni.includes(".") || /\s/.test(sni)) errors.xray_sni = "Выберите готовый домен или введите корректный адрес.";
+    if (!validSniDomain(sni)) errors.xray_sni = "Выберите готовый домен или введите корректный адрес.";
   }
   return errors;
 }
@@ -167,8 +174,8 @@ function XraySniPicker({ value, options, invalid, onChange }: { value: string; o
     .filter((item, index, items) => items.findIndex((candidate) => candidate.domain === item.domain) === index);
   return <div className={`xraySniField${invalid ? " fieldInvalid" : ""}`}>
     <span>SNI для REALITY</span>
-    <button type="button" className="xraySniTrigger" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((current) => !current)}><span><strong>{value || "Выберите адрес"}</strong><small>{configured.has(value) ? "Готов на сервере" : value ? "Новый профиль" : "Готовые российские домены или свой адрес"}</small></span><i>{open ? "−" : "+"}</i></button>
-    {open && <div className="xraySniMenu" role="listbox" aria-label="Адрес маскировки REALITY">
+    <button type="button" role="combobox" className="xraySniTrigger" aria-haspopup="listbox" aria-controls="xray-sni-options" aria-expanded={open} aria-invalid={Boolean(invalid)} onClick={() => setOpen((current) => !current)}><span><strong>{value || "Выберите адрес"}</strong><small>{configured.has(value) ? "Готов на сервере" : value ? "Новый профиль" : "Готовые российские домены или свой адрес"}</small></span><i>{open ? "−" : "+"}</i></button>
+    {open && <div id="xray-sni-options" className="xraySniMenu" role="listbox" aria-label="Адрес маскировки REALITY">
       <header><strong>Готовые варианты</strong><small>Для нового домена сервер проверит TLS и создаст отдельный профиль</small></header>
       <div>{choices.map((item) => <button type="button" role="option" aria-selected={value === item.domain} className={value === item.domain ? "active" : ""} key={item.domain} onClick={() => { onChange(item.domain); setOpen(false); }}><span><strong>{item.label}</strong><small>{item.domain}</small></span><i>{configured.has(item.domain) ? "ГОТОВ" : "СОЗДАТЬ"}</i></button>)}</div>
       <label><span>Свой домен</span><input value={choices.some((item) => item.domain === value) ? "" : value} placeholder="example.ru" autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={(event) => onChange(event.target.value)} /><small>Поддерживаются кириллические домены; проверка выполняется до изменения Xray.</small></label>
