@@ -39,16 +39,14 @@ export const clientApps: Record<Protocol, Record<ClientOS, ClientApp[]>> = {
   },
   xray: {
     windows: [
-      { name: "Hiddify", formats: "URI · QR · JSON", note: "Простой импорт и системный VPN-режим.", sources: [{ label: "GitHub Releases", href: "https://github.com/hiddify/hiddify-app/releases/latest", direct: true }] },
-      { name: "v2rayN", formats: "URI · QR", note: "Продвинутый клиент Windows 10+ с Xray-core.", sources: [{ label: "GitHub Releases", href: "https://github.com/2dust/v2rayN/releases/latest", direct: true }] },
+      { name: "v2rayN", formats: "URI · QR", note: "Основной вариант для XHTTP: использует Xray-core и сохраняет режим stream-one.", sources: [{ label: "GitHub Releases", href: "https://github.com/2dust/v2rayN/releases/latest", direct: true }] },
     ],
     ios: [
-      { name: "Hiddify", formats: "URI · QR", note: "Поддерживает VLESS, XHTTP и REALITY.", sources: [{ label: "App Store", href: "https://apps.apple.com/app/hiddify-proxy-vpn/id6596777532" }, { label: "GitHub IPA", href: "https://github.com/hiddify/hiddify-app/releases/latest", direct: true }] },
-      { name: "DefaultVPN", formats: "URI · QR", note: "Альтернатива для iOS 16 и новее.", sources: [{ label: "App Store", href: "https://apps.apple.com/app/defaultvpn/id6744725017" }] },
+      { name: "Streisand", formats: "URI · QR", note: "Поддерживает VLESS REALITY; доступность в российском App Store может быть ограничена.", sources: [{ label: "App Store", href: "https://apps.apple.com/app/streisand/id6450534064" }] },
+      { name: "DefaultVPN", formats: "URI · QR", note: "Доступная альтернатива для iOS 16 и новее; проверьте режим XHTTP после импорта.", sources: [{ label: "App Store", href: "https://apps.apple.com/app/defaultvpn/id6744725017" }] },
     ],
     android: [
-      { name: "Hiddify", formats: "URI · QR · JSON", note: "Рекомендуемый APK с прямой загрузкой.", sources: [{ label: "GitHub APK", href: "https://github.com/hiddify/hiddify-app/releases/latest", direct: true }] },
-      { name: "NekoBox", formats: "URI · QR", note: "Поддерживает VLESS/REALITY; не используйте одноимённую версию Google Play.", sources: [{ label: "GitHub APK", href: "https://github.com/MatsuriDayo/NekoBoxForAndroid/releases/latest", direct: true }] },
+      { name: "v2rayNG", formats: "URI · QR", note: "Основной Android-клиент на Xray-core с поддержкой VLESS XHTTP REALITY.", sources: [{ label: "GitHub APK", href: "https://github.com/2dust/v2rayNG/releases/latest", direct: true }] },
     ],
   },
 };

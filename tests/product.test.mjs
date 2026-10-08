@@ -154,7 +154,10 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(dialog, /initial_packet_size/);
   assert.match(dialog, /block_bittorrent/);
   assert.match(dialog, /Общие настройки доступа для proxy-протоколов/);
-  assert.match(dialog, /SNI \/ адрес маскировки REALITY/);
+  assert.match(dialog, /SNI для REALITY/);
+  assert.match(dialog, /xraySniMenu/);
+  assert.doesNotMatch(dialog, /<datalist/);
+  assert.match(dialog, /fieldInvalid/);
   assert.match(dialog, /Object\.entries\(serverOptions\.awg/);
   assert.match(dialog, /connectionMaskingStatus/);
   assert.match(dialog, /AmneziaWG · Jc/);
@@ -168,7 +171,8 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(clientApps, /amneziawg-windows-client\/releases\/latest/);
   assert.match(clientApps, /hiddify-app\/releases\/latest/);
   assert.match(clientApps, /2dust\/v2rayN\/releases\/latest/);
-  assert.match(clientApps, /не используйте одноимённую версию Google Play/);
+  assert.match(clientApps, /v2rayNG/);
+  assert.match(clientApps, /Xray-core/);
   assert.match(dialog, /mux_enabled/);
   assert.match(dialog, /Расширенные настройки/);
   assert.match(page, /request\("\/clients\/options"\)/);

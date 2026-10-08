@@ -614,11 +614,22 @@ class PortabilityTests(unittest.TestCase):
             self.assertEqual(saved_settings['profiles']['xn--41a.xn--p1ai']['password'], 'public-key')
             self.assertIn('@192.0.2.1:18445?', created['profile']['delivery']['link']['uri'])
             self.assertIn('sni=xn--41a.xn--p1ai', created['profile']['delivery']['link']['uri'])
+            self.assertIn('encryption=none', created['profile']['delivery']['link']['uri'])
+            self.assertIn('mode=stream-one', created['profile']['delivery']['link']['uri'])
 
     def test_xray_sni_validation_rejects_non_domain_values(self):
         with self.assertRaises(api.HTTPException) as invalid:
             api.normalized_xray_sni('127.0.0.1')
         self.assertEqual(invalid.exception.status_code, 422)
+
+    def test_awg_address_allocation_ignores_other_protocols_and_uses_existing_awg_peers(self):
+        rows = [
+            {'protocol': 'xray'},
+            {'protocol': 'awg', 'address': '10.73.0.2/32'},
+            {'protocol': 'tuic'},
+        ]
+        with patch.object(api, 'read_clients', return_value=rows), patch.object(api, 'AWG_SUBNET', api.ipaddress.ip_network('10.73.0.0/24')):
+            self.assertEqual(str(api.next_address()), '10.73.0.3')
 
     def test_deleting_last_custom_xray_client_removes_listener_and_profile(self):
         with tempfile.TemporaryDirectory() as directory:

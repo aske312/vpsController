@@ -113,7 +113,6 @@ XRAY_SNI_SUGGESTIONS = (
     {"domain": "ya.ru", "label": "Яндекс"},
     {"domain": "www.yandex.ru", "label": "Яндекс"},
     {"domain": "vk.com", "label": "VK"},
-    {"domain": "mail.ru", "label": "Mail.ru"},
     {"domain": "www.ozon.ru", "label": "Ozon"},
     {"domain": "www.rbc.ru", "label": "РБК"},
 )
@@ -2818,7 +2817,7 @@ class ClientSettings(BaseModel):
     disable_path_mtu_discovery: bool = False
     fingerprint: Literal["chrome", "firefox", "edge", "safari", "ios", "android", "randomized"] = "chrome"
     xray_sni: str = Field(default="", max_length=253)
-    xray_xhttp_mode: Literal["auto", "packet-up", "stream-up"] = "auto"
+    xray_xhttp_mode: Literal["stream-one", "packet-up", "stream-up", "auto"] = "stream-one"
     mux_enabled: bool = False
     mux_concurrency: int = Field(default=8, ge=1, le=128)
     xudp_concurrency: int = Field(default=16, ge=1, le=1024)
@@ -2862,7 +2861,7 @@ def next_address() -> ipaddress.IPv4Address:
     used = {
         ipaddress.ip_interface(item["address"]).ip
         for item in read_clients()
-        if item["protocol"] == protocol and item.get("address")
+        if item["protocol"] == "awg" and item.get("address")
     }
     for address in list(network.hosts())[1:]:
         if address not in used:
@@ -3234,13 +3233,13 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 })
                 write_clients(items)
                 port = int(profile.get("port", 8445))
-                query = urlencode({"type": "xhttp", "security": "reality", "pbk": str(profile.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(profile.get("short_id", "")), "path": path, "mode": payload.settings.xray_xhttp_mode, "spx": "/"})
+                query = urlencode({"type": "xhttp", "security": "reality", "encryption": "none", "pbk": str(profile.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(profile.get("short_id", "")), "path": path, "mode": payload.settings.xray_xhttp_mode, "spx": "/"})
                 uri = f"vless://{quote(user_uuid, safe='')}@{uri_endpoint(endpoint)}:{port}?{query}#{quote(payload.name, safe='')}"
                 return {"id": client_id, **connection_profile(
                     protocol="xray", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-xray.json", config=json.dumps(client, ensure_ascii=False, indent=2),
                     fields=[{"label": "VLESS UUID", "value": user_uuid, "secret": True}, {"label": "Транспорт", "value": "XHTTP + REALITY"}, {"label": "Server name", "value": server_name}, *local_proxy_fields(payload)],
-                    apps=["Hiddify", "v2rayN", "NekoBox"],
-                    steps=["Отсканируйте QR или откройте VLESS-ссылку в клиенте.", "При ручном импорте используйте персональный JSON-файл.", "Сохраните профиль и включите системный VPN-режим клиента."],
+                    apps=["v2rayN (Xray-core)", "v2rayNG (Xray-core)", "Streisand"],
+                    steps=["Импортируйте VLESS-ссылку или QR в клиент на базе Xray-core.", "Для настольного Xray можно использовать персональный JSON-файл.", "Не используйте Hiddify для XHTTP: его sing-box backend может потерять режим транспорта и остановить передачу данных."],
                     uri=uri, qr_content=uri,
                 )}
             except HTTPException:

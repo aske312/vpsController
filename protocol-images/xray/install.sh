@@ -63,7 +63,7 @@ config = {
             'realitySettings': {'show': False, 'target': settings['target'], 'xver': 0, 'serverNames': [settings['server_name']], 'privateKey': settings['private_key'], 'shortIds': [settings['short_id']]},
         },
     }],
-    'outbounds': [{'protocol': 'freedom', 'tag': 'direct'}],
+    'outbounds': [{'protocol': 'freedom', 'tag': 'direct', 'settings': {'domainStrategy': 'UseIPv4'}}],
 }
 with open(output_path, 'w', encoding='utf-8') as output: json.dump(config, output, indent=2)
 os.chmod(output_path, 0o600)
@@ -76,6 +76,9 @@ config = json.load(open(config_path, encoding='utf-8'))
 settings = json.load(open(settings_path, encoding='utf-8'))
 settings.setdefault('managed_port_start', int(settings.get('port', 8445)) + 1)
 settings.setdefault('profiles', {})
+for outbound in config.get('outbounds', []):
+    if outbound.get('protocol') == 'freedom':
+        outbound.setdefault('settings', {}).setdefault('domainStrategy', 'UseIPv4')
 for inbound in config.get('inbounds', []):
     if inbound.get('protocol') != 'vless':
         continue
