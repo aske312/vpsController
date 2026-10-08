@@ -373,8 +373,15 @@ class PortabilityTests(unittest.TestCase):
                  patch.object(api, 'run_with_input'):
                 for protocol in ('wg', 'awg'):
                     with self.subTest(protocol=protocol):
-                        created = api.create_client(api.ClientCreate(name='QA client', protocol=protocol))
+                        created = api.create_client(api.ClientCreate(
+                            name='QA client', protocol=protocol,
+                            settings=api.ClientSettings(dns='9.9.9.9', mtu=1420, keepalive=45, route_mode='all'),
+                        ))
                         self.assertIn('Endpoint = 192.0.2.1:', created['config'])
+                        self.assertIn('DNS = 9.9.9.9', created['config'])
+                        self.assertIn('MTU = 1420', created['config'])
+                        self.assertIn('AllowedIPs = 0.0.0.0/0, ::/0', created['config'])
+                        self.assertIn('PersistentKeepalive = 45', created['config'])
                         self.assertEqual('Jc = ' in created['config'], protocol == 'awg')
                         self.assertEqual(created['profile']['protocol'], protocol)
                         self.assertEqual(created['profile']['name'], 'QA client')

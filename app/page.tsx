@@ -1,8 +1,9 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ConnectionGuide } from "./connection-guide";
-import { ConnectionProfileResult, protocolDelivery, type ConnectionProfile } from "./connection-profile";
+import { ConnectionDialog, type ConnectionSettings } from "./connection-dialog";
+import type { ConnectionProfile } from "./connection-profile";
+import { ConnectionsView } from "./connections-view";
 import { LegalFooter } from "./legal";
 import { ProtocolIcon } from "./protocol-icon";
 import { ProtocolWorkspace } from "./protocol-workspace";
@@ -25,11 +26,12 @@ type MetricsHistory = {
   error?: string;
 };
 type ApplicationAction = "restart" | "update" | "test-update" | "test-rollback" | "network-check" | "integrity-check" | "identity" | "secure" | "system-update" | "kernel-update" | "vpn-firewall" | "optimize" | "reboot" | "poweroff";
-type Client = {
+export type Client = {
   id: string; name: string; protocol: Protocol; public_key: string; endpoint?: string;
   address: string; handshake_age_s?: number; rx_bytes: number; tx_bytes: number;
   quality?: "stable" | "warning" | "error" | "offline"; latency_ms?: number; jitter_ms?: number; packet_loss_percent?: number; quality_reason?: string;
   update_state?: "paused" | "attention" | "incompatible"; update_message?: string;
+  created_at?: string;
 };
 type Overview = {
   server: { name: string; public_ip: string; city: string; country: string; country_code: string; uptime_s: number };
@@ -166,12 +168,6 @@ const bytes = (value = 0) => {
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
   return `${(value / 1024 ** index).toFixed(index > 2 ? 1 : 0)} ${units[index]}`;
 };
-const duration = (seconds?: number) => {
-  if (seconds === undefined || seconds === null) return "никогда";
-  if (seconds < 60) return `${seconds} сек назад`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} мин назад`;
-  return `${Math.floor(seconds / 3600)} ч назад`;
-};
 const uptime = (seconds = 0) => `${Math.floor(seconds / 86400)}д ${Math.floor((seconds % 86400) / 3600)}ч`;
 const componentUptime = (seconds = 0) => seconds < 60
   ? `${seconds}с`
@@ -239,8 +235,7 @@ export default function Home() {
   const [confirmAdminPassword, setConfirmAdminPassword] = useState("");
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
   const [confirmationInput, setConfirmationInput] = useState("");
-  const [newClient, setNewClient] = useState({ name: "", protocol: "awg" as Protocol });
-  const [generatedProfile, setGeneratedProfile] = useState<ConnectionProfile | null>(null);
+  const [connectionDialog, setConnectionDialog] = useState(false);
   const networkSample = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
@@ -1050,22 +1045,11 @@ export default function Home() {
     () => protocolImages.filter((image) => image.installed && lightModuleIds.includes(image.id as Protocol)).map((image) => image.id as Protocol),
     [protocolImages],
   );
-  const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "awg";
-  const selectedDelivery = protocolDelivery[selectedClientProtocol];
-
-  async function addClient(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setGeneratedProfile(null); setError("");
-    if (!installedProtocols.includes(selectedClientProtocol)) {
-      setBusy(false); setError("Сначала установите выбранный протокол"); return;
-    }
-    try {
-      const payload = { ...newClient, protocol: selectedClientProtocol };
-      const result = await request("/clients", { method: "POST", body: JSON.stringify(payload) }) as { profile: ConnectionProfile };
-      setGeneratedProfile(result.profile);
-      setNewClient({ ...newClient, name: "" });
-      await loadClients();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось создать клиента"); }
-    finally { setBusy(false); }
+  async function createClient(payload: { name: string; protocol: Protocol; settings: ConnectionSettings }) {
+    setError("");
+    if (!installedProtocols.includes(payload.protocol)) throw new Error("Сначала установите выбранный протокол");
+    const result = await request("/clients", { method: "POST", body: JSON.stringify(payload) }) as { profile: ConnectionProfile };
+    return result.profile;
   }
 
   function downloadConfig(filename: string, config: string, mimeType = "text/plain;charset=utf-8") {
@@ -1710,35 +1694,8 @@ export default function Home() {
         onCheckDiagnostics={() => void checkNetworkDiagnostics(tab)}
       />}
 
-      {tab === "clients" && <section className="clientsLayout">
-        {installedProtocols.length ? <>
-          <div className="connectionProtocolTabs" role="tablist" aria-label="Протокол подключения">
-            {installedProtocols.map((protocol) => { const meta = protocolDelivery[protocol]; const count = clients.filter((client) => client.protocol === protocol).length; return <button type="button" role="tab" aria-selected={selectedClientProtocol === protocol} className={selectedClientProtocol === protocol ? "active" : ""} key={protocol} onClick={() => setNewClient((current) => ({ ...current, protocol }))}>
-              <span className={`protocol ${protocol}`}><ProtocolIcon protocol={protocol} /></span><span><strong>{meta.title}</strong><small>{meta.transport} · {count} подключений</small></span><em>{meta.methods.join(" · ")}</em>
-            </button>; })}
-          </div>
-
-          <article className="panel clientsPanel"><div className="panelHead"><div><p className="eyebrow">ACCESS BY PROTOCOL</p><h2>Выданные подключения</h2></div><span>{clients.length} всего</span></div>
-            <div className="protocolClientGroups">{installedProtocols.map((protocol) => { const meta = protocolDelivery[protocol]; const items = clients.filter((client) => client.protocol === protocol); return <section className="protocolClientGroup" key={protocol}>
-              <header><span className={`protocol ${protocol}`}><ProtocolIcon protocol={protocol} /></span><div><h3>{meta.title}</h3><p>{meta.summary}</p></div><strong>{items.length}</strong></header>
-              <div className="clientTable">{items.length ? items.map((client) => { const tunnel = client.protocol === "wg" || client.protocol === "awg"; return <div className={`clientRow quality-${client.quality || "offline"}${client.update_state ? ` update-${client.update_state}` : ""}`} key={client.id}><p><strong><i className={`clientQuality ${client.update_state === "incompatible" ? "error" : client.update_state ? "warning" : client.quality || "offline"}`} />{client.name}</strong><small>{client.update_message || (tunnel ? `${client.address} · ${client.quality_reason || "состояние уточняется"}` : `${client.endpoint || client.address} · персональная учётная запись`)}</small></p>
-                {tunnel ? <><span className="traffic"><small>ПОЛУЧЕНО <b>↓ {bytes(client.rx_bytes)}</b></small><small>ОТПРАВЛЕНО <b>↑ {bytes(client.tx_bytes)}</b></small></span><span className="handshake"><small>ПОСЛЕДНЯЯ СВЯЗЬ</small><strong>{duration(client.handshake_age_s)}</strong></span><span className="clientLink"><small>КАЧЕСТВО</small><strong>{client.latency_ms !== undefined && client.latency_ms !== null ? `${client.latency_ms} ms` : "—"}{client.packet_loss_percent !== undefined && client.packet_loss_percent !== null ? ` · loss ${client.packet_loss_percent}%` : ""}</strong></span></> : <><span className="clientAccount"><small>ИДЕНТИФИКАТОР</small><strong>{client.public_key.slice(0, 18)}{client.public_key.length > 18 ? "…" : ""}</strong></span><span className="clientAccount"><small>ПРОФИЛЬ</small><strong>{meta.transport}</strong></span><span className="clientAccount"><small>СТАТУС</small><strong>Выдан</strong></span></>}
-                <button className="dangerButton" onClick={() => void removeClient(client.id)}>Отозвать</button></div>; }) : <div className="emptyProtocolClients">Подключений этого протокола пока нет</div>}</div>
-            </section>; })}</div>
-          </article>
-
-          <article className="panel addClient"><div className="addClientHead"><div><p className="eyebrow">NEW PERSONAL ACCESS</p><h2>Новое подключение</h2></div><span className={`protocol ${selectedClientProtocol}`}><ProtocolIcon protocol={selectedClientProtocol} /></span></div>
-            <div className="selectedProtocolInfo"><strong>{selectedDelivery.title}</strong><p>{selectedDelivery.summary}</p><small>Клиенты: {selectedDelivery.apps}</small><div>{selectedDelivery.methods.map((method) => <span key={method}>{method}</span>)}</div></div>
-            <form onSubmit={addClient}>
-              <label>Пользователь или устройство<input required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: Анна · iPhone" /><small className="fieldHint">2–48 символов. Имя попадёт в персональный профиль и поможет отозвать нужный доступ.</small></label>
-              <label>Протокол<select value={selectedClientProtocol} onChange={(event) => setNewClient({ ...newClient, protocol: event.target.value as Protocol })}>{installedProtocols.map((protocol) => <option key={protocol} value={protocol}>{protocolDelivery[protocol].title}</option>)}</select></label>
-              <button className="primaryButton" disabled={busy}>{busy ? "Создаём персональный профиль…" : "Создать подключение"} <span>→</span></button>
-            </form>
-          </article>
-          {generatedProfile && <article className="panel generatedConnectionPanel"><ConnectionProfileResult profile={generatedProfile} onDownload={downloadConfig} /></article>}
-          <ConnectionGuide protocol={selectedClientProtocol} />
-        </> : <article className="panel noConnectionProtocols"><span>◎</span><h2>Нет установленных протоколов</h2><p>Установите хотя бы один сетевой модуль на странице «Обзор», после чего здесь появится создание персональных подключений.</p><button type="button" className="primaryButton" onClick={() => setTab("overview")}>Перейти к модулям <span>→</span></button></article>}
-      </section>}
+      {tab === "clients" && (installedProtocols.length ? <ConnectionsView clients={clients} protocols={installedProtocols} busy={busy} onNew={() => setConnectionDialog(true)} onRemove={(id) => void removeClient(id)} /> : <section className="clientsLayout"><article className="panel noConnectionProtocols"><span>◎</span><h2>Нет установленных протоколов</h2><p>Установите хотя бы один сетевой модуль на странице «Обзор», после чего здесь появится создание персональных подключений.</p><button type="button" className="primaryButton" onClick={() => setTab("overview")}>Перейти к модулям <span>→</span></button></article></section>)}
+      {connectionDialog && installedProtocols.length > 0 && <ConnectionDialog protocols={installedProtocols} onClose={() => setConnectionDialog(false)} onCreate={createClient} onCreated={loadClients} onError={setError} onDownload={downloadConfig} />}
       {passwordDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closePasswordDialog}>
         <form className="confirmDialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()} onSubmit={changeAdminPassword}>
           <p className="eyebrow">ADMINISTRATOR ACCESS</p><h2>Изменить пароль администратора</h2>

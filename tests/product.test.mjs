@@ -119,14 +119,15 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(guideUi, /storage\.googleapis\.com\/amnezia\/amnezia\.org/);
   assert.match(guideUi, /connection-guide-wg-awg\.pdf/);
   assert.match(page, /installedProtocols\.length/);
-  assert.match(page, /ConnectionProfileResult/);
+  assert.match(page, /ConnectionDialog/);
   assert.match(page, /waitForProtocolState/);
-  assert.match(page, /2–48 символов/);
+  assert.match(await read("app/connection-dialog.tsx"), /От 2 до 48 символов/);
 });
 
-test("connections return protocol-specific one-time handoff methods", async () => {
-  const [api, page, profile, packageJson] = await Promise.all([
-    read("api/main.py"), read("app/page.tsx"), read("app/connection-profile.tsx"), read("package.json"),
+test("connections use a modal editor and protocol-specific one-time handoff methods", async () => {
+  const [api, page, profile, dialog, inventory, packageJson] = await Promise.all([
+    read("api/main.py"), read("app/page.tsx"), read("app/connection-profile.tsx"),
+    read("app/connection-dialog.tsx"), read("app/connections-view.tsx"), read("package.json"),
   ]);
   assert.match(api, /def connection_profile\(/);
   assert.match(api, /hysteria2:\/\//);
@@ -139,7 +140,17 @@ test("connections return protocol-specific one-time handoff methods", async () =
   assert.match(profile, /hysteria2:.*methods: \["QR", "Ссылка", "Файл"\]/s);
   assert.match(profile, /tuic:.*methods: \["Файл"\]/s);
   assert.match(profile, /xray:.*methods: \["QR", "Ссылка", "Файл"\]/s);
-  assert.match(page, /ACCESS BY PROTOCOL/);
+  assert.match(api, /class ClientSettings\(BaseModel\)/);
+  assert.match(api, /payload\.settings\.fingerprint/);
+  assert.match(page, /<ConnectionsView/);
+  assert.match(page, /<ConnectionDialog/);
+  assert.match(dialog, /Параметры профиля/);
+  assert.match(dialog, /route_mode/);
+  assert.match(dialog, /congestion_control/);
+  assert.match(dialog, /fingerprint/);
+  assert.match(inventory, /ACCESS INVENTORY/);
+  assert.match(inventory, /Поиск подключений/);
+  assert.doesNotMatch(inventory, /protocolClientGroups/);
   assert.equal(JSON.parse(packageJson).dependencies.qrcode, "^1.5.4");
 });
 

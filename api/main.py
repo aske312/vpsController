@@ -2740,9 +2740,23 @@ def clients(_: None = Depends(require_token)) -> dict:
     return {"items": interface_dump("wg") + interface_dump("awg") + direct_client_rows()}
 
 
+class ClientSettings(BaseModel):
+    dns: str = Field(default="1.1.1.1, 1.0.0.1", min_length=1, max_length=255, pattern=r"^[0-9A-Fa-f:., ]+$")
+    mtu: int | None = Field(default=None, ge=576, le=1500)
+    keepalive: int = Field(default=25, ge=0, le=300)
+    route_mode: Literal["ipv4", "all"] = "ipv4"
+    local_socks_port: int = Field(default=1080, ge=1024, le=65535)
+    local_http_port: int = Field(default=10809, ge=1024, le=65535)
+    disable_udp: bool = False
+    congestion_control: Literal["bbr", "cubic", "new_reno"] = "bbr"
+    heartbeat: Literal["5s", "10s", "15s", "30s"] = "10s"
+    fingerprint: Literal["chrome", "firefox", "safari"] = "chrome"
+
+
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
     protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"]
+    settings: ClientSettings = Field(default_factory=ClientSettings)
 
 
 def key(command: str) -> str:
@@ -2819,6 +2833,8 @@ def uri_endpoint(host: str) -> str:
 
 @app.post("/api/clients")
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
+    if payload.protocol == "xray" and payload.settings.local_socks_port == payload.settings.local_http_port:
+        raise HTTPException(status_code=422, detail="SOCKS and HTTP ports must be different")
     client_id = secrets.token_hex(8)
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
     if payload.protocol == "hysteria2":
@@ -2834,7 +2850,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 endpoint = str(settings.get("domain", "")).strip() or PUBLIC_IP
                 identity = str(settings.get("domain", "")).strip() or certificate_server_name(HYSTERIA2_DIR / "server.crt")
                 fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt")).partition("=")[2].strip()
-                config = "\n".join([f"server: {endpoint}:{int(settings.get('port', 8443))}", f"auth: {client_id}:{password}", "tls:", f"  sni: {identity}", "  insecure: true", f"  pinSHA256: {fingerprint}", "socks5:", "  listen: 127.0.0.1:1080", "  disableUDP: false", ""])
+                config = "\n".join([f"server: {endpoint}:{int(settings.get('port', 8443))}", f"auth: {client_id}:{password}", "tls:", f"  sni: {identity}", "  insecure: true", f"  pinSHA256: {fingerprint}", "socks5:", f"  listen: 127.0.0.1:{payload.settings.local_socks_port}", f"  disableUDP: {str(payload.settings.disable_udp).lower()}", ""])
                 items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 port = int(settings.get("port", 8443))
                 query = urlencode({"sni": identity, "insecure": "1", "pinSHA256": fingerprint})
@@ -2868,8 +2884,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 settings = json.loads(settings_path.read_text(encoding="utf-8")); endpoint = PUBLIC_IP; certificate = (config_path.parent / "server.crt").read_text(encoding="utf-8")
                 outbound = {"type": payload.protocol, "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "password": password,
                             "tls": {"enabled": True, "server_name": certificate_server_name(config_path.parent / "server.crt"), "certificate": certificate}}
-                outbound.update({"uuid": user_uuid, "congestion_control": str(settings.get("congestion_control", "bbr")), "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": str(settings.get("heartbeat", "10s"))})
-                client = {"log": {"level": "warn"}, "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080}], "outbounds": [outbound], "route": {"final": "connection-out"}}
+                outbound.update({"uuid": user_uuid, "congestion_control": payload.settings.congestion_control, "udp_relay_mode": "native", "zero_rtt_handshake": False, "heartbeat": payload.settings.heartbeat})
+                client = {"log": {"level": "warn"}, "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": payload.settings.local_socks_port}], "outbounds": [outbound], "route": {"final": "connection-out"}}
                 items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 port = int(settings.get("port", 8444))
                 server_name = certificate_server_name(config_path.parent / "server.crt")
@@ -2910,8 +2926,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 client = {
                     "log": {"loglevel": "warning"},
                     "inbounds": [
-                        {"listen": "127.0.0.1", "port": 10808, "protocol": "socks", "settings": {"udp": True}},
-                        {"listen": "127.0.0.1", "port": 10809, "protocol": "http"},
+                        {"listen": "127.0.0.1", "port": payload.settings.local_socks_port, "protocol": "socks", "settings": {"udp": not payload.settings.disable_udp}},
+                        {"listen": "127.0.0.1", "port": payload.settings.local_http_port, "protocol": "http"},
                     ],
                     "outbounds": [{
                         "tag": "xray-out", "protocol": "vless",
@@ -2920,7 +2936,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                             "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path},
                             "realitySettings": {
                                 "serverName": str(settings.get("server_name", "www.microsoft.com")),
-                                "fingerprint": "chrome", "password": str(settings.get("password", "")),
+                                "fingerprint": payload.settings.fingerprint, "password": str(settings.get("password", "")),
                                 "shortId": str(settings.get("short_id", "")), "spiderX": path,
                             },
                         },
@@ -2931,7 +2947,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 write_clients(items)
                 port = int(settings.get("port", 8445))
                 server_name = str(settings.get("server_name", "www.microsoft.com"))
-                query = urlencode({"type": "xhttp", "security": "reality", "pbk": str(settings.get("password", "")), "fp": "chrome", "sni": server_name, "sid": str(settings.get("short_id", "")), "path": path})
+                query = urlencode({"type": "xhttp", "security": "reality", "pbk": str(settings.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(settings.get("short_id", "")), "path": path})
                 uri = f"vless://{quote(user_uuid, safe='')}@{uri_endpoint(endpoint)}:{port}?{query}#{quote(payload.name, safe='')}"
                 return {"id": client_id, **connection_profile(
                     protocol="xray", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-xray.json", config=json.dumps(client, ensure_ascii=False, indent=2),
@@ -2967,11 +2983,13 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     if payload.protocol == "awg":
         extra = "".join(f"{key} = {value}\n" for key, value in AWG_PROFILE.items())
     port = WG_PORT if payload.protocol == "wg" else AWG_PORT
+    allowed_ips = "0.0.0.0/0, ::/0" if payload.settings.route_mode == "all" else "0.0.0.0/0"
+    client_mtu = payload.settings.mtu if payload.settings.mtu is not None else (AWG_MTU if payload.protocol == "awg" else 1380)
     client_config = (
-        f"[Interface]\nAddress = {address}/32\nDNS = 1.1.1.1, 1.0.0.1\n"
-        f"PrivateKey = {private_key}\nMTU = {AWG_MTU if payload.protocol == 'awg' else 1380}\n{extra}\n[Peer]\n"
-        f"PublicKey = {server_public}\nPresharedKey = {psk}\nAllowedIPs = 0.0.0.0/0\n"
-        f"Endpoint = {PUBLIC_IP}:{port}\nPersistentKeepalive = 25\n"
+        f"[Interface]\nAddress = {address}/32\nDNS = {payload.settings.dns}\n"
+        f"PrivateKey = {private_key}\nMTU = {client_mtu}\n{extra}\n[Peer]\n"
+        f"PublicKey = {server_public}\nPresharedKey = {psk}\nAllowedIPs = {allowed_ips}\n"
+        f"Endpoint = {PUBLIC_IP}:{port}\nPersistentKeepalive = {payload.settings.keepalive}\n"
     )
     items = read_clients()
     items.append(

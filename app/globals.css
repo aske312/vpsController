@@ -232,32 +232,80 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 
 .clientsLayout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(290px, .55fr); gap: 14px; align-items: start; }
 .connectionGuide { grid-column: 1 / -1; }
-.connectionProtocolTabs { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
-.connectionProtocolTabs > button { min-width: 0; display: grid; grid-template-columns: 36px 1fr; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #0d171e; color: var(--text); text-align: left; transition: border-color .2s, background .2s, transform .2s; }
-.connectionProtocolTabs > button:hover { border-color: #31505c; transform: translateY(-1px); }
-.connectionProtocolTabs > button.active { border-color: rgba(97, 207, 216, .45); background: linear-gradient(145deg, rgba(32, 91, 104, .28), rgba(11, 27, 35, .95)); box-shadow: inset 0 0 0 1px rgba(97, 207, 216, .08); }
-.connectionProtocolTabs > button > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.connectionProtocolTabs strong { font-size: 10px; }
-.connectionProtocolTabs small { overflow: hidden; color: var(--muted); font: 7px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.connectionProtocolTabs em { grid-column: 2; color: var(--accent); font: normal 7px var(--font-mono); }
-.protocolClientGroups { display: grid; gap: 16px; }
-.protocolClientGroup { display: grid; gap: 8px; }
-.protocolClientGroup > header { display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center; padding-top: 8px; }
-.protocolClientGroup > header h3 { margin: 0; font-size: 12px; }
-.protocolClientGroup > header p { margin: 4px 0 0; color: var(--muted); font-size: 8px; line-height: 1.45; }
-.protocolClientGroup > header > strong { min-width: 25px; color: var(--accent); font: 10px var(--font-mono); text-align: right; }
-.protocolClientGroup .clientRow { grid-template-columns: minmax(180px, 1.35fr) minmax(135px, .8fr) 105px 120px auto; }
-.clientAccount { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.clientAccount small { color: #60716e; font: 7px var(--font-mono); letter-spacing: .7px; }
-.clientAccount strong { overflow: hidden; color: #b3c4cd; font: 500 8px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.emptyProtocolClients { padding: 18px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); font-size: 9px; text-align: center; }
-.selectedProtocolInfo { display: grid; gap: 7px; margin-bottom: 17px; padding: 13px; border: 1px solid #253d46; border-radius: 9px; background: #0a171e; }
-.selectedProtocolInfo > strong { font-size: 12px; }
-.selectedProtocolInfo p { margin: 0; color: #a1afad; font-size: 9px; line-height: 1.5; }
-.selectedProtocolInfo small { color: var(--muted); font: 8px var(--font-mono); line-height: 1.5; }
-.selectedProtocolInfo > div { display: flex; flex-wrap: wrap; gap: 5px; }
-.selectedProtocolInfo > div span { padding: 4px 7px; border: 1px solid rgba(97, 207, 216, .24); border-radius: 999px; background: var(--accent-dim); color: var(--accent); font: 7px var(--font-mono); }
-.generatedConnectionPanel { grid-column: 1 / -1; }
+.connectionsWorkspace { display: grid; gap: 18px; }
+.connectionsHero { display: grid; grid-template-columns: minmax(260px, 1fr) auto auto; gap: 28px; align-items: center; padding: 28px 30px; border: 1px solid #20343e; border-radius: 18px; background: radial-gradient(circle at 75% 0, rgba(63, 156, 171, .12), transparent 38%), linear-gradient(135deg, #0c1821, #091118); box-shadow: 0 18px 55px #0003; }
+.connectionsHeroCopy h2 { margin: 0; font-size: 30px; letter-spacing: -1.2px; }
+.connectionsHeroCopy > p:last-child { max-width: 600px; margin: 9px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.connectionsHeroStats { display: flex; gap: 7px; }
+.connectionsHeroStats button { min-width: 70px; display: grid; justify-items: start; gap: 4px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: #0a141b; color: var(--text); }
+.connectionsHeroStats button:hover, .connectionsHeroStats button.active { border-color: #31505c; background: #10222b; }
+.connectionsHeroStats strong { font: 600 17px var(--font-mono); }
+.connectionsHeroStats span { color: var(--muted); font-size: 8px; }
+.connectionsNewButton { min-width: 178px; }
+.connectionsInventory { padding: 0; overflow: hidden; }
+.connectionsInventoryHead { display: flex; justify-content: space-between; align-items: flex-end; padding: 25px 27px 18px; }
+.connectionsInventoryHead h2 { margin: 0; font-size: 20px; }
+.connectionsInventoryHead > span { color: var(--muted); font: 9px var(--font-mono); }
+.connectionsFilters { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(170px, 230px); gap: 10px; padding: 0 27px 20px; border-bottom: 1px solid var(--line); }
+.connectionsFilters > label { display: flex; align-items: center; gap: 8px; }
+.connectionsFilters > label > span { flex: 0 0 auto; color: var(--muted); font: 8px var(--font-mono); }
+.connectionSearch { position: relative; }
+.connectionSearch > span { position: absolute; left: 13px; z-index: 1; color: var(--muted); font-size: 16px !important; }
+.connectionSearch input { padding-left: 38px; }
+.connectionsRows { display: grid; }
+.connectionRowFlat { display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(125px, .55fr) minmax(185px, .8fr) minmax(180px, .8fr) auto; gap: 20px; align-items: center; min-height: 88px; padding: 15px 27px; border-bottom: 1px solid var(--line); transition: background .2s; }
+.connectionRowFlat:last-child { border-bottom: 0; }
+.connectionRowFlat:hover { background: #0e1921; }
+.connectionRowIdentity { min-width: 0; display: flex; align-items: center; gap: 13px; }
+.connectionRowIdentity > div, .connectionRowProtocol, .connectionRowData, .connectionRowState > div { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.connectionRowIdentity strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.connectionRowIdentity small, .connectionRowProtocol span, .connectionRowData span, .connectionRowState small { overflow: hidden; color: var(--muted); font-size: 8px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.connectionRowProtocol small, .connectionRowData small { color: #60716e; font: 7px var(--font-mono); letter-spacing: .7px; }
+.connectionRowProtocol strong, .connectionRowData strong { overflow: hidden; font: 500 9px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.connectionRowState { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.connectionRowState > i { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: #667682; }
+.connectionRowState > i.stable { background: var(--green); box-shadow: 0 0 9px color-mix(in srgb, var(--green) 65%, transparent); }
+.connectionRowState > i.attention { background: var(--amber); box-shadow: 0 0 9px #e8b76166; }
+.connectionRowState strong { font-size: 9px; }
+.connectionsEmpty { min-height: 300px; display: grid; place-items: center; align-content: center; gap: 8px; padding: 30px; text-align: center; }
+.connectionsEmpty > span { color: var(--accent); font-size: 26px; }
+.connectionsEmpty > strong { font-size: 14px; }
+.connectionsEmpty p { margin: 0 0 8px; color: var(--muted); font-size: 9px; }
+.connectionDialogBackdrop { z-index: 80; padding: 24px; overflow-y: auto; }
+.connectionDialog { width: min(820px, 100%); max-height: calc(100vh - 48px); overflow: auto; align-self: center; border: 1px solid #29424d; border-radius: 18px; background: #0b141c; box-shadow: 0 30px 100px #000b; }
+.connectionDialog.generated { width: min(900px, 100%); display: block; margin: 0; padding: 0; background: #0b141c; }
+.connectionDialogHead { position: sticky; z-index: 3; top: 0; display: flex; justify-content: space-between; gap: 20px; padding: 25px 28px 21px; border-bottom: 1px solid var(--line); background: #0b141cf2; backdrop-filter: blur(14px); }
+.connectionDialogHead h2 { margin: 0 0 6px; font-size: 23px; }
+.connectionDialogHead span { color: var(--muted); font-size: 9px; line-height: 1.5; }
+.connectionDialogHead > button { width: 34px; height: 34px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 9px; background: #111c24; color: var(--muted); font-size: 20px; }
+.connectionDialogBody { display: grid; gap: 22px; padding: 24px 28px 28px; }
+.connectionDialog label { display: grid; gap: 7px; color: #879490; font-size: 9px; }
+.connectionDialog label > small { color: var(--muted); font-size: 8px; line-height: 1.5; }
+.connectionProtocolPicker, .connectionSettings { margin: 0; padding: 0; border: 0; }
+.connectionProtocolPicker legend, .connectionSettings legend { margin-bottom: 10px; color: #879490; font-size: 9px; }
+.connectionProtocolPicker > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 8px; }
+.connectionProtocolPicker button { min-width: 0; display: grid; grid-template-columns: 38px 1fr 8px; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #0d1820; color: var(--text); text-align: left; }
+.connectionProtocolPicker button.active { border-color: rgba(97, 207, 216, .5); background: #10242d; }
+.connectionProtocolPicker button > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.connectionProtocolPicker button strong { font-size: 10px; }
+.connectionProtocolPicker button small { overflow: hidden; color: var(--muted); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.connectionProtocolPicker button i { width: 8px; height: 8px; border: 1px solid #3c4d55; border-radius: 50%; }
+.connectionProtocolPicker button.active i { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 8px #5ad7df88; }
+.connectionSettings { padding: 17px; border: 1px solid #223843; border-radius: 12px; background: #09151c; }
+.connectionSettings > header { display: flex; align-items: center; gap: 11px; margin-bottom: 16px; }
+.connectionSettings > header > div { display: flex; flex-direction: column; gap: 4px; }
+.connectionSettings > header strong { font-size: 11px; }
+.connectionSettings > header small { color: var(--muted); font: 7px var(--font-mono); }
+.connectionSettingsFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.connectionCheckbox { grid-template-columns: 1fr auto !important; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #0d1820; }
+.connectionCheckbox > span { display: flex; flex-direction: column; gap: 4px; }
+.connectionCheckbox input { width: 18px; height: 18px; }
+.connectionSettingsNote { margin: 13px 0 0; color: #84928f; font-size: 8px; line-height: 1.55; }
+.connectionDialogError { padding: 11px 13px; border: 1px solid #4b2a2a; border-radius: 9px; background: #211517; color: #ef8b7e; font-size: 9px; line-height: 1.5; }
+.connectionDialogActions { position: sticky; z-index: 3; bottom: 0; display: flex; justify-content: flex-end; gap: 9px; padding: 17px 28px; border-top: 1px solid var(--line); background: #0b141cf2; backdrop-filter: blur(14px); }
+.connectionDialogActions > button:not(.primaryButton) { min-height: 44px; padding: 0 18px; border: 1px solid var(--line); border-radius: 10px; background: #111c24; color: var(--text); }
+.connectionDialogActions .primaryButton { min-width: 190px; }
+.connectionDialogResult { padding: 24px 28px 28px; }
 .connectionResult { display: grid; gap: 16px; }
 .connectionResultHead { display: grid; grid-template-columns: 42px 1fr; gap: 12px; align-items: center; }
 .connectionResultHead > .protocol { width: 42px; height: 42px; }
@@ -295,21 +343,27 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .noConnectionProtocols p { max-width: 520px; color: var(--muted); font-size: 10px; line-height: 1.65; }
 
 @media (max-width: 1050px) {
-  .protocolClientGroup .clientRow { grid-template-columns: minmax(170px, 1fr) minmax(125px, .7fr) 100px auto; }
-  .protocolClientGroup .clientRow .clientLink,
-  .protocolClientGroup .clientRow .clientAccount:nth-last-of-type(1) { display: none; }
+  .connectionsHero { grid-template-columns: 1fr auto; }
+  .connectionsHeroStats { grid-row: 2; }
+  .connectionsNewButton { grid-column: 2; grid-row: 1 / 3; }
+  .connectionRowFlat { grid-template-columns: minmax(210px, 1fr) 130px minmax(170px, .8fr) auto; }
+  .connectionRowProtocol { display: none; }
 }
 
 @media (max-width: 700px) {
-  .connectionProtocolTabs { grid-template-columns: 1fr; }
-  .protocolClientGroup .clientRow { grid-template-columns: 1fr auto; gap: 10px; }
-  .protocolClientGroup .clientRow > p { grid-column: 1 / -1; }
-  .protocolClientGroup .clientRow .traffic,
-  .protocolClientGroup .clientRow .handshake,
-  .protocolClientGroup .clientRow .clientLink,
-  .protocolClientGroup .clientRow .clientAccount { display: flex; }
-  .protocolClientGroup .clientRow .traffic { grid-column: 1 / -1; }
-  .protocolClientGroup .clientRow .dangerButton { grid-column: 1 / -1; }
+  .connectionsHero { grid-template-columns: 1fr; padding: 22px; }
+  .connectionsHeroStats { grid-row: auto; display: grid; grid-template-columns: repeat(2, 1fr); }
+  .connectionsNewButton { grid-column: auto; grid-row: auto; width: 100%; }
+  .connectionsFilters { grid-template-columns: 1fr; padding-inline: 18px; }
+  .connectionsInventoryHead { padding-inline: 18px; }
+  .connectionRowFlat { grid-template-columns: 1fr auto; gap: 12px; padding: 16px 18px; }
+  .connectionRowData, .connectionRowState { grid-column: 1; }
+  .connectionRowFlat > .dangerButton { grid-column: 2; grid-row: 1 / 4; align-self: stretch; }
+  .connectionDialogBackdrop { padding: 0; align-items: stretch; }
+  .connectionDialog, .connectionDialog.generated { max-height: 100vh; min-height: 100vh; border-radius: 0; }
+  .connectionDialogHead, .connectionDialogBody, .connectionDialogResult { padding-inline: 18px; }
+  .connectionSettingsFields { grid-template-columns: 1fr; }
+  .connectionDialogActions { padding-inline: 18px; }
   .connectionHandoff.withQr, .connectionSetup { grid-template-columns: 1fr; }
   .connectionQr { width: min(260px, 100%); justify-self: center; }
   .connectionCredentials { grid-template-columns: 1fr; }
