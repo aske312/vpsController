@@ -586,14 +586,17 @@ class PortabilityTests(unittest.TestCase):
                 'short_id': '0123456789abcdef', 'managed_port_start': 18445, 'profiles': {},
             }), encoding='utf-8')
 
+            commands = []
+
             def command(*args, **_kwargs):
+                commands.append(args)
                 return 'enabled' if args[:2] == ('systemctl', 'is-enabled') else ''
 
             def process(args, **_kwargs):
                 if args[1:3] == ['tls', 'ping']:
                     return type('Result', (), {'returncode': 0, 'stdout': 'Handshake succeeded\nTLS Version: TLS 1.3\nHandshake succeeded', 'stderr': ''})()
                 if args[1:] == ['x25519']:
-                    return type('Result', (), {'returncode': 0, 'stdout': 'PrivateKey: private-key\nPassword: public-key\n', 'stderr': ''})()
+                    return type('Result', (), {'returncode': 0, 'stdout': 'PrivateKey: private-key\nPassword (PublicKey): public-key\nHash32: hash\n', 'stderr': ''})()
                 return type('Result', (), {'returncode': 0, 'stdout': '', 'stderr': ''})()
 
             settings = api.ClientSettings(xray_sni='я.рф')
@@ -616,6 +619,7 @@ class PortabilityTests(unittest.TestCase):
             self.assertIn('sni=xn--41a.xn--p1ai', created['profile']['delivery']['link']['uri'])
             self.assertIn('encryption=none', created['profile']['delivery']['link']['uri'])
             self.assertIn('mode=stream-one', created['profile']['delivery']['link']['uri'])
+            self.assertIn(('/usr/local/lib/vps-control-xray/firewall.sh', 'add'), commands)
 
     def test_xray_sni_validation_rejects_non_domain_values(self):
         with self.assertRaises(api.HTTPException) as invalid:
@@ -652,10 +656,16 @@ class PortabilityTests(unittest.TestCase):
             }]), encoding='utf-8')
             valid = type('Result', (), {'returncode': 0, 'stdout': '', 'stderr': ''})()
 
+            commands = []
+
+            def command(*args, **_kwargs):
+                commands.append(args)
+                return ''
+
             with patch.multiple(
                 api, DATA_DIR=root, CLIENTS_FILE=clients_path, XRAY_DIR=protocol,
                 XRAY_CONFIG=config_path, XRAY_SETTINGS=settings_path,
-            ), patch.object(api.Path, 'exists', return_value=True), patch.object(api, 'run', return_value=''), \
+            ), patch.object(api.Path, 'exists', return_value=True), patch.object(api, 'run', side_effect=command), \
                  patch.object(api.subprocess, 'run', return_value=valid):
                 api.delete_client('client-id')
 
@@ -664,6 +674,11 @@ class PortabilityTests(unittest.TestCase):
             self.assertEqual([row['tag'] for row in server['inbounds']], ['vless-xhttp-reality'])
             self.assertEqual(saved_settings['profiles'], {})
             self.assertEqual(json.loads(clients_path.read_text(encoding='utf-8')), [])
+            firewall_calls = [call for call in commands if call and call[0] == '/usr/local/lib/vps-control-xray/firewall.sh']
+            self.assertEqual(firewall_calls, [
+                ('/usr/local/lib/vps-control-xray/firewall.sh', 'delete'),
+                ('/usr/local/lib/vps-control-xray/firewall.sh', 'add'),
+            ])
 
 
 if __name__ == '__main__':

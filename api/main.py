@@ -2977,7 +2977,7 @@ def create_xray_sni_inbound(server: dict, settings: dict, server_name: str, bina
     if keys.returncode:
         raise RuntimeError(keys.stderr.strip() or "Unable to generate REALITY key pair")
     private_match = re.search(r"^PrivateKey:\s*(\S+)", keys.stdout, re.M)
-    public_match = re.search(r"^(?:Password|PublicKey):\s*(\S+)", keys.stdout, re.M)
+    public_match = re.search(r"^(?:Password(?: \(PublicKey\))?|PublicKey):\s*(\S+)", keys.stdout, re.M)
     if not private_match or not public_match:
         raise RuntimeError("Xray returned an invalid REALITY key pair")
 
@@ -3161,6 +3161,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             original_settings = XRAY_SETTINGS.read_bytes()
             temporary = XRAY_CONFIG.with_suffix(".tmp.json")
             temporary_settings = XRAY_SETTINGS.with_suffix(".tmp.json")
+            applied = False
             try:
                 server = json.loads(original)
                 settings = json.loads(original_settings)
@@ -3184,6 +3185,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 os.chmod(temporary_settings, 0o600)
                 temporary_settings.replace(XRAY_SETTINGS)
                 temporary.replace(XRAY_CONFIG)
+                applied = True
+                run("/usr/local/lib/vps-control-xray/firewall.sh", "add", timeout=10, check=True)
                 run("systemctl", "restart", unit, timeout=20, check=True)
                 endpoint = PUBLIC_IP
                 path = str(profile.get("path", "/xhttp"))
@@ -3243,16 +3246,24 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     uri=uri, qr_content=uri,
                 )}
             except HTTPException:
-                XRAY_CONFIG.write_bytes(original)
-                os.chmod(XRAY_CONFIG, 0o600)
-                XRAY_SETTINGS.write_bytes(original_settings)
-                os.chmod(XRAY_SETTINGS, 0o600)
+                if applied:
+                    run("/usr/local/lib/vps-control-xray/firewall.sh", "delete", timeout=10)
+                    XRAY_CONFIG.write_bytes(original)
+                    os.chmod(XRAY_CONFIG, 0o600)
+                    XRAY_SETTINGS.write_bytes(original_settings)
+                    os.chmod(XRAY_SETTINGS, 0o600)
+                    run("/usr/local/lib/vps-control-xray/firewall.sh", "add", timeout=10)
+                    run("systemctl", "restart", unit, timeout=20)
                 raise
             except Exception as exc:
+                if applied:
+                    run("/usr/local/lib/vps-control-xray/firewall.sh", "delete", timeout=10)
                 XRAY_CONFIG.write_bytes(original)
                 os.chmod(XRAY_CONFIG, 0o600)
                 XRAY_SETTINGS.write_bytes(original_settings)
                 os.chmod(XRAY_SETTINGS, 0o600)
+                if applied:
+                    run("/usr/local/lib/vps-control-xray/firewall.sh", "add", timeout=10)
                 run("systemctl", "restart", unit, timeout=20)
                 raise HTTPException(status_code=500, detail="Unable to create Xray connection") from exc
             finally:
@@ -3363,8 +3374,6 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
                         name: profile for name, profile in profiles.items()
                         if not isinstance(profile, dict) or profile.get("tag") not in removed_tags
                     }
-                if removed_tags:
-                    run("/usr/local/lib/vps-control-xray/firewall.sh", "delete", timeout=10)
                 temporary = XRAY_CONFIG.with_suffix(".tmp.json")
                 temporary_settings = XRAY_SETTINGS.with_suffix(".tmp.json")
                 temporary.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -3373,15 +3382,23 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
                 if result.returncode:
                     temporary.unlink(missing_ok=True)
                     raise HTTPException(status_code=500, detail="Unable to remove Xray connection")
-                temporary_settings.write_text(json.dumps(settings_data, ensure_ascii=False, indent=2), encoding="utf-8")
-                os.chmod(temporary_settings, 0o600)
-                temporary_settings.replace(XRAY_SETTINGS)
-                temporary.replace(XRAY_CONFIG)
                 try:
+                    if removed_tags:
+                        run("/usr/local/lib/vps-control-xray/firewall.sh", "delete", timeout=10, check=True)
+                    temporary_settings.write_text(json.dumps(settings_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    os.chmod(temporary_settings, 0o600)
+                    temporary_settings.replace(XRAY_SETTINGS)
+                    temporary.replace(XRAY_CONFIG)
+                    if removed_tags:
+                        run("/usr/local/lib/vps-control-xray/firewall.sh", "add", timeout=10, check=True)
                     run("systemctl", "restart", "vps-control-xray.service", timeout=20, check=True)
                 except Exception:
+                    if removed_tags:
+                        run("/usr/local/lib/vps-control-xray/firewall.sh", "delete", timeout=10)
                     XRAY_CONFIG.write_bytes(original); os.chmod(XRAY_CONFIG, 0o600)
                     XRAY_SETTINGS.write_bytes(original_settings); os.chmod(XRAY_SETTINGS, 0o600)
+                    if removed_tags:
+                        run("/usr/local/lib/vps-control-xray/firewall.sh", "add", timeout=10)
                     run("systemctl", "restart", "vps-control-xray.service", timeout=20)
                     raise
                 finally:
