@@ -240,6 +240,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
   const [protocol, setProtocol] = useState<Protocol>(initialProtocol);
   const [settings, setSettings] = useState<ConnectionSettings>(() => settingsFor(initialProtocol, serverOptions));
   const [tuning, setTuning] = useState("balanced");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [profile, setProfile] = useState<ConnectionProfile | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
@@ -334,9 +335,14 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
               {protocol === "hysteria2" && <label><span>Формат файла</span><select value={settings.hysteria_format} onChange={(event) => { update({ hysteria_format: event.target.value as ConnectionSettings["hysteria_format"], client_mode: event.target.value === "hysteria" ? "proxy" : "vpn", quic_streams: 0, quic_keepalive: 0, hysteria_congestion: "bbr", fast_open: false, lazy: false, disable_loss_compensation: false }); setTuning("custom"); }}><option value="sing-box">JSON · sing-box / Karing</option><option value="hysteria">YAML · Hysteria CLI</option></select></label>}
               {(protocol === "tuic" || (protocol === "hysteria2" && settings.hysteria_format === "sing-box")) && <><label><span>Режим клиента</span><select value={settings.client_mode} onChange={(event) => update({ client_mode: event.target.value as ConnectionSettings["client_mode"] })}><option value="vpn">VPN / TUN · iOS, Android, ПК</option><option value="proxy">Локальный прокси · CLI</option></select></label>{settings.client_mode === "vpn" && <><label><span>MTU туннеля</span><input type="number" min={576} max={1500} value={settings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label><label><span>DNS через туннель</span><input value={settings.dns} onChange={(event) => update({ dns: event.target.value })} /><small>Используется первый IP из списка.</small></label></>}</>}
               {proxyProtocol && Boolean(serverOptions.connection_tuning?.[protocol]?.length) && <label><span>Готовый вариант подключения</span><select aria-label="Готовый вариант подключения" value={tuning} onChange={(event) => {
+                if (event.target.value === "custom") {
+                  setTuning("custom");
+                  setAdvancedOpen(true);
+                  return;
+                }
                 const preset = serverOptions.connection_tuning?.[protocol]?.find((item) => item.id === event.target.value);
                 if (preset) { update(preset.settings); setTuning(preset.id); }
-              }}>{serverOptions.connection_tuning?.[protocol]?.filter((item) => protocol !== "hysteria2" || settings.hysteria_format === "hysteria" || !["reno", "responsive", "on-demand"].includes(item.id)).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}<option value="custom" disabled>Свои параметры</option></select><small>{serverOptions.connection_tuning?.[protocol]?.find((item) => item.id === tuning)?.description || "Параметры изменены вручную."}</small></label>}
+              }}>{serverOptions.connection_tuning?.[protocol]?.filter((item) => protocol !== "hysteria2" || settings.hysteria_format === "hysteria" || !["reno", "responsive", "on-demand"].includes(item.id)).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}<option value="custom">Свои параметры</option></select><small>{serverOptions.connection_tuning?.[protocol]?.find((item) => item.id === tuning)?.description || "Редактируйте параметры ниже и в расширенных настройках. Текущие значения сохранены."}</small></label>}
               {protocol === "awg" && <>
                 <label className={portError ? "fieldInvalid" : ""}>
                   <span>UDP-порт AWG</span>
@@ -381,7 +387,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
               <label className="connectionCheckbox"><span><strong>Логин и пароль</strong><small>Защищает локальный SOCKS/HTTP/mixed-порт</small></span><input type="checkbox" checked={settings.local_auth_enabled} disabled={settings.proxy_bind === "lan"} onChange={(event) => update({ local_auth_enabled: event.target.checked })} /></label>
               {settings.local_auth_enabled && <><label><span>Локальный логин</span><input value={settings.local_username} maxLength={64} onChange={(event) => update({ local_username: event.target.value })} /></label><label className={fieldErrors.local_password ? "fieldInvalid" : ""}><span>Локальный пароль</span><input aria-invalid={Boolean(fieldErrors.local_password)} type="password" minLength={8} maxLength={128} value={settings.local_password} onChange={(event) => update({ local_password: event.target.value })} placeholder="Минимум 8 символов" />{fieldErrors.local_password ? <small className="fieldError">{fieldErrors.local_password}</small> : <small>Хранится только в экспортируемом профиле</small>}</label></>}
             </div></section>}
-            <details className="connectionAdvanced"><summary>Расширенные настройки <span>⌄</span></summary><div className="connectionSettingsFields">
+            <details className="connectionAdvanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}><summary>Расширенные настройки <span>⌄</span></summary><div className="connectionSettingsFields">
               <TransportFields protocol={protocol} settings={settings} errors={fieldErrors} update={update} />
               {protocol === "awg" && <>
                 <label><span>DNS-серверы</span><input value={settings.dns} onChange={(event) => update({ dns: event.target.value })} placeholder="1.1.1.1, 1.0.0.1" /></label>
