@@ -808,6 +808,7 @@ remove_protocol_image() {
   [[ "${uninstaller}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${uninstaller}" ]] \
     || die "образ ${image_id} не поддерживает удаление."
   info "Удаление установленного протокола ${image_id}"
+  release_direct_ports "${image_id}"
   PRESERVE_COMPONENT_DATA=0 ENV_FILE="${ENV_FILE}" AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
     HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
     bash "${image_root}/${uninstaller}"
@@ -1145,6 +1146,7 @@ EOF
 
 ensure_api_write_access() {
   install_awg_ports_template
+  install_direct_ports_templates
   local expected="ReadWritePaths=-/etc/vps-control.env -/etc/amnezia -/etc/vps-control ${DATA_DIR}"
   if ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
     || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}"; then
@@ -1164,6 +1166,29 @@ install_awg_ports_template() {
     printf '%s\n' "${expected}" >"${unit_file}"
     systemctl daemon-reload
   fi
+}
+
+install_direct_ports_templates() {
+  [[ -f "${INSTALL_DIR}/api/protocol_ports.py" ]] || return 0
+  local protocol unit_file expected
+  for protocol in hysteria2 tuic xray; do
+    unit_file="/etc/systemd/system/vps-control-${protocol}-port@.service"
+    if [[ -f "${unit_file}" ]] && ! grep -Fxq '# vpsController direct protocol port alias' "${unit_file}"; then
+      die "конфликт чужого шаблона службы портов ${protocol}."
+    fi
+    expected="$("${INSTALL_DIR}/venv/bin/python" "${INSTALL_DIR}/api/protocol_ports.py" template --protocol "${protocol}" --install-dir "${INSTALL_DIR}" --state-dir "${DATA_DIR}/protocol-ports/${protocol}")"
+    if [[ ! -f "${unit_file}" || "$(<"${unit_file}")" != "${expected}" ]]; then
+      printf '%s\n' "${expected}" >"${unit_file}"
+      systemctl daemon-reload
+    fi
+  done
+}
+
+release_direct_ports() {
+  local protocol="$1"
+  case "${protocol}" in hysteria2|tuic|xray) ;; *) return 0 ;; esac
+  [[ -f "${INSTALL_DIR}/api/protocol_ports.py" ]] || return 0
+  "${INSTALL_DIR}/venv/bin/python" "${INSTALL_DIR}/api/protocol_ports.py" release-all --protocol "${protocol}" --state-dir "${DATA_DIR}/protocol-ports/${protocol}"
 }
 
 install_protocol_monitor() {
@@ -1475,6 +1500,8 @@ uninstall_app() {
   fi
   local protocol_id
   for protocol_id in hysteria2 tuic xray; do
+    release_direct_ports "${protocol_id}"
+    rm -f "/etc/systemd/system/vps-control-${protocol_id}-port@.service"
     if [[ -f "${INSTALL_DIR}/protocol-images/${protocol_id}/uninstall.sh" ]]; then
       PRESERVE_COMPONENT_DATA=0 bash "${INSTALL_DIR}/protocol-images/${protocol_id}/uninstall.sh"
     fi

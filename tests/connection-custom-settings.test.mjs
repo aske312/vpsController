@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import ts from "typescript";
 
 const require = createRequire(import.meta.url);
-function dialogHarness(protocol) {
+function dialogHarness(protocol, presets = [{ id: "balanced", label: "Balanced", settings: { quic_idle: 30 } }]) {
   const states = [];
   let cursor = 0;
   const react = {
@@ -30,10 +30,50 @@ function dialogHarness(protocol) {
   }, loaded, loaded.exports);
   const props = {
     protocols: [protocol],
-    serverOptions: { connection_tuning: { [protocol]: [{ id: "balanced", label: "Balanced", settings: { quic_idle: 30 } }] } },
+    serverOptions: { connection_tuning: { [protocol]: presets }, server_ports: { [protocol]: { default_port: 8443, suggestions: [39761, 443] } } },
   };
   return () => { cursor = 0; return loaded.exports.ConnectionDialog(props); };
 }
+
+test("preset synchronizes actual selects, numeric controls, toggles and transport values", () => {
+  const render = dialogHarness("tuic", [
+    { id: "balanced", settings: { heartbeat: "10s", congestion_control: "bbr", initial_packet_size: 0, disable_path_mtu_discovery: false } },
+    { id: "mobile", settings: { heartbeat: "5s", congestion_control: "cubic", initial_packet_size: 1200, disable_path_mtu_discovery: true } },
+  ]);
+  let nodes = elements(render());
+  nodes.find(node => node.props["aria-label"] === "Готовый вариант подключения").props.onChange({ target: { value: "mobile" } });
+  nodes = elements(render());
+  assert.equal(nodes.find(node => node.type === "details").props.open, true);
+  assert.ok(nodes.some(node => node.type === "select" && node.props.value === "cubic"));
+  assert.ok(nodes.some(node => node.type === "input" && node.props.type === "number" && node.props.value === 5));
+  assert.ok(nodes.some(node => node.type === "select" && node.props.value === 1200));
+  assert.ok(nodes.some(node => node.type === "input" && node.props.type === "checkbox" && node.props.checked));
+  nodes.find(node => node.props["aria-label"] === "Готовый вариант подключения").props.onChange({ target: { value: "balanced" } });
+  nodes = elements(render());
+  assert.ok(nodes.some(node => node.type === "input" && node.props.type === "number" && node.props.value === 10));
+  assert.ok(nodes.some(node => node.type === "select" && node.props.value === 0));
+});
+
+test("individual server port supports suggestions, manual input and random without changing tuning", () => {
+  const render = dialogHarness("tuic");
+  let nodes = elements(render());
+  const choice = () => nodes.find(node => node.props["aria-label"] === "Вариант входного порта");
+  choice().props.onChange({ target: { value: "39761" } });
+  nodes = elements(render());
+  assert.equal(nodes.find(node => node.props["aria-label"] === "Порт подключения").props.value, 39761);
+  assert.equal(nodes.find(node => node.props["aria-label"] === "Готовый вариант подключения").props.value, "balanced");
+  choice().props.onChange({ target: { value: "custom" } });
+  nodes = elements(render());
+  nodes.find(node => node.props["aria-label"] === "Порт подключения").props.onChange({ target: { value: "53123" } });
+  nodes = elements(render());
+  assert.equal(nodes.find(node => node.props["aria-label"] === "Порт подключения").props.value, 53123);
+  choice().props.onChange({ target: { value: "random" } });
+  nodes = elements(render());
+  const settings = nodes.find(node => node.props.settings && node.props.update).props.settings;
+  assert.equal(settings.server_port_random, true);
+  assert.equal(settings.server_port, null);
+  assert.ok(!nodes.some(node => node.props["aria-label"] === "Порт подключения"));
+});
 
 function elements(node) {
   if (Array.isArray(node)) return node.flatMap(elements);

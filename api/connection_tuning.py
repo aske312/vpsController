@@ -79,7 +79,7 @@ def tuning_catalog() -> dict:
     def row(base, ident, label, description, **values):
         return {"id": ident, "label": label, "description": description, "settings": {**base, **values}}
 
-    return {
+    catalog = {
         "hysteria2": [
             row(h, "balanced", "Сбалансированный", "BBR; автоматическая оценка скорости, keepalive 10 с."),
             row(h, "mobile", "Мобильная сеть / проблемный MTU", "Консервативный BBR, keepalive 5 с, без увеличения QUIC-пакетов.", bbr_profile="conservative", hysteria_keepalive=5, disable_path_mtu_discovery=True),
@@ -103,3 +103,13 @@ def tuning_catalog() -> dict:
             row(x, "rotate", "Короткое переиспользование", "XMUX 8–16 запросов; новые запросы меняют H2-соединение через 60–120 с.", xray_xmux_profile="rotate"),
         ],
     }
+    # Mirror the effective XMUX preset in editable fields, not only in export.
+    keys = {'xmux_concurrency': 'maxConcurrency', 'xmux_connections': 'maxConnections',
+            'xmux_reuse': 'cMaxReuseTimes', 'xmux_requests': 'hMaxRequestTimes',
+            'xmux_seconds': 'hMaxReusableSecs', 'xmux_keepalive': 'hKeepAlivePeriod'}
+    defaults = {'maxConcurrency': '1', 'maxConnections': '0', 'cMaxReuseTimes': '0',
+                'hMaxRequestTimes': '600-900', 'hMaxReusableSecs': '1800-3000', 'hKeepAlivePeriod': 0}
+    for preset in catalog['xray']:
+        values = XMUX[preset['settings']['xray_xmux_profile']] or defaults
+        preset['settings'].update({field: values[key] if field == 'xmux_keepalive' else str(values[key]) for field, key in keys.items()})
+    return catalog

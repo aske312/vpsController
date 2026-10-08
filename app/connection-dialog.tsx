@@ -8,6 +8,8 @@ import { awgDefaultDomain, awgDomainGroups, awgDomainPresets } from "./awg-domai
 import { TransportFields } from "./transport-fields";
 
 export type ConnectionSettings = {
+  server_port: number | null;
+  server_port_random: boolean;
   client_mode: "proxy" | "vpn";
   hysteria_format: "hysteria" | "sing-box";
   quic_idle: number;
@@ -81,8 +83,10 @@ export type ConnectionSettings = {
 };
 
 export type AwgPortStatus = { port: number; status: "available" | "awg" | "occupied" | "unavailable"; detail: string };
+export type ServerPortStatus = { port: number; status: "available" | "protocol" | "occupied" | "unavailable"; detail: string };
 
 export type ConnectionServerOptions = {
+  server_ports?: Partial<Record<Protocol, { default_port: number; transport: "tcp" | "udp"; suggestions: number[] }>>;
   connection_tuning?: Partial<Record<Protocol, { id: string; label: string; description: string; settings: Partial<ConnectionSettings> }[]>>;
   awg_ports?: { default_port: number; suggestions: AwgPortStatus[] };
   awg_obfuscation?: { id: string; label: string; description: string; requires_cps: boolean }[];
@@ -92,6 +96,7 @@ export type ConnectionServerOptions = {
 };
 
 const settingsFor = (protocol: Protocol, serverOptions: ConnectionServerOptions): ConnectionSettings => ({
+  server_port: null, server_port_random: false,
   client_mode: protocol === "tuic" || protocol === "hysteria2" ? "vpn" : "proxy",
   hysteria_format: "sing-box",
   quic_idle: 0, quic_keepalive: 0, quic_stream_window: 0, quic_conn_window: 0, quic_streams: 0,
@@ -160,6 +165,7 @@ type Props = {
   onClose(): void;
   onCreate(payload: { name: string; protocol: Protocol; settings: ConnectionSettings }): Promise<ConnectionProfile>;
   onCheckAwgPort(port: number): Promise<AwgPortStatus>;
+  onCheckServerPort(protocol: Protocol, port: number, sni: string): Promise<ServerPortStatus>;
   onCreated(): Promise<void> | void;
   onError(message: string): void;
   onDownload(filename: string, content: string, mimeType?: string): void;
@@ -178,6 +184,7 @@ function validateConnection(name: string, protocol: Protocol, settings: Connecti
   const errors: FieldErrors = {};
   if (name.trim().length < 2) errors.name = "Укажите имя пользователя или устройства — минимум 2 символа.";
   if (protocol !== "awg") {
+    if (!settings.server_port_random && settings.server_port !== null && (!Number.isInteger(settings.server_port) || settings.server_port < 1 || settings.server_port > 65535)) errors.server_port = "Порт должен быть целым числом от 1 до 65535.";
     if (settings.local_socks_port < 1024 || settings.local_socks_port > 65535) errors.local_socks_port = "Порт должен быть от 1024 до 65535.";
     if ((protocol === "xray" || settings.http_proxy_enabled) && (settings.local_http_port < 1024 || settings.local_http_port > 65535)) errors.local_http_port = "Порт должен быть от 1024 до 65535.";
     if ((protocol === "xray" || settings.http_proxy_enabled) && settings.local_socks_port === settings.local_http_port) errors.local_http_port = "HTTP и SOCKS не могут использовать один порт.";
@@ -201,6 +208,7 @@ function validateConnection(name: string, protocol: Protocol, settings: Connecti
 
 function serverErrorField(message: string): keyof ConnectionSettings | undefined {
   const value = message.toLowerCase();
+  if (value.includes("server_port")) return "server_port";
   for (const field of ["quic_idle", "quic_keepalive", "quic_stream_window", "quic_conn_window", "quic_streams", "xmux_concurrency", "xmux_connections", "xmux_reuse", "xmux_requests", "xmux_seconds", "xmux_keepalive", "xray_padding"] as const) if (value.includes(field)) return field;
   if (value.includes("awg udp port") || value.includes("awg_port")) return "awg_port";
   if (value.includes("awg signature")) return "awg_signature_domain";
@@ -234,7 +242,7 @@ function XraySniPicker({ value, options, invalid, onChange }: { value: string; o
   </div>;
 }
 
-export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, onCheckAwgPort, onCreated, onError, onDownload }: Props) {
+export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, onCheckAwgPort, onCheckServerPort, onCreated, onError, onDownload }: Props) {
   const initialProtocol = protocols[0] || "awg";
   const [name, setName] = useState("");
   const [protocol, setProtocol] = useState<Protocol>(initialProtocol);
@@ -246,6 +254,9 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
   const [formError, setFormError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [portResult, setPortResult] = useState<AwgPortStatus | null>(null);
+  const [serverPortResult, setServerPortResult] = useState<(ServerPortStatus & { protocol: Protocol; sni: string }) | null>(null);
+  const checkedServerPort = serverPortResult?.protocol === protocol && serverPortResult?.sni === settings.xray_sni && serverPortResult?.port === settings.server_port ? serverPortResult : null;
+  const serverPortError = settings.server_port_random ? undefined : fieldErrors.server_port || (checkedServerPort && !["available", "protocol"].includes(checkedServerPort.status) ? checkedServerPort.detail : undefined);
   const checkedPort = portResult?.port === settings.awg_port ? portResult : null;
   const portError = settings.awg_port_random ? undefined : fieldErrors.awg_port || (checkedPort && !["available", "awg"].includes(checkedPort.status) ? checkedPort.detail : undefined);
   const portChoices = serverOptions.awg_ports?.suggestions || [{ port: 51822, status: "awg", detail: "Основной порт AWG" }];
@@ -259,6 +270,17 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
     }, 350);
     return () => { active = false; window.clearTimeout(timer); };
   }, [protocol, settings.awg_port, settings.awg_port_random, onCheckAwgPort]);
+
+  useEffect(() => {
+    if (protocol === "awg" || settings.server_port_random || settings.server_port === null || settings.server_port < 1 || settings.server_port > 65535 || !Number.isInteger(settings.server_port)) return;
+    let active = true;
+    const port = settings.server_port;
+    const timer = window.setTimeout(() => {
+      void onCheckServerPort(protocol, port, settings.xray_sni).then(result => { if (active) setServerPortResult({ ...result, protocol, sni: settings.xray_sni }); })
+        .catch(cause => { if (active) setServerPortResult({ port, protocol, sni: settings.xray_sni, status: "unavailable", detail: cause instanceof Error ? cause.message : "Не удалось проверить порт" }); });
+    }, 350);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [protocol, settings.server_port, settings.server_port_random, settings.xray_sni, onCheckServerPort]);
 
   function selectProtocol(next: Protocol) {
     setTuning("balanced");
@@ -278,10 +300,17 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
     });
   }
 
+  function selectXmux(value: ConnectionSettings["xray_xmux_profile"]) {
+    const preset = serverOptions.connection_tuning?.xray?.find(item => item.settings.xray_xmux_profile === value);
+    const fields = Object.fromEntries(Object.entries(preset?.settings || {}).filter(([key]) => key.startsWith("xmux_")));
+    update({ ...fields, xray_xmux_profile: value });
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     const validation = validateConnection(name, protocol, settings);
     if (protocol === "awg" && portError) validation.awg_port = portError;
+    if (protocol !== "awg" && serverPortError) validation.server_port = serverPortError;
     if (Object.keys(validation).length) {
       setFieldErrors(validation);
       setFormError("Исправьте отмеченные поля перед созданием подключения.");
@@ -341,8 +370,12 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
                   return;
                 }
                 const preset = serverOptions.connection_tuning?.[protocol]?.find((item) => item.id === event.target.value);
-                if (preset) { update(preset.settings); setTuning(preset.id); }
+                if (preset) { update(preset.settings); setTuning(preset.id); setAdvancedOpen(true); }
               }}>{serverOptions.connection_tuning?.[protocol]?.filter((item) => protocol !== "hysteria2" || settings.hysteria_format === "hysteria" || !["reno", "responsive", "on-demand"].includes(item.id)).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}<option value="custom">Свои параметры</option></select><small>{serverOptions.connection_tuning?.[protocol]?.find((item) => item.id === tuning)?.description || "Редактируйте параметры ниже и в расширенных настройках. Текущие значения сохранены."}</small></label>}
+              {proxyProtocol && <>
+                <label><span>Входной порт сервера · {protocol === "xray" ? "TCP" : "UDP"}</span><select aria-label="Вариант входного порта" value={settings.server_port_random ? "random" : settings.server_port === null ? "default" : serverOptions.server_ports?.[protocol]?.suggestions.includes(settings.server_port) ? String(settings.server_port) : "custom"} onChange={event => update(event.target.value === "random" ? { server_port_random: true, server_port: null } : { server_port_random: false, server_port: event.target.value === "default" ? null : event.target.value === "custom" ? 0 : Number(event.target.value) })}><option value="default">Основной порт профиля{serverOptions.server_ports?.[protocol]?.default_port ? ` · ${serverOptions.server_ports[protocol]?.default_port}` : ""}</option>{serverOptions.server_ports?.[protocol]?.suggestions.map(port => <option key={port} value={port}>{port} · проверить доступность</option>)}<option value="random">Случайный свободный порт</option><option value="custom">Ручной ввод</option></select><small>Меняется только новое подключение. Старые порты и профили сохраняются.</small></label>
+                {!settings.server_port_random && settings.server_port !== null && <label className={serverPortError ? "fieldInvalid" : ""}><span>Порт подключения</span><input aria-label="Порт подключения" aria-invalid={Boolean(serverPortError)} type="number" min={1} max={65535} value={settings.server_port || ""} onChange={event => update({ server_port: Number(event.target.value) })} /><small className={serverPortError ? "fieldError" : ""}>{serverPortError || checkedServerPort?.detail || "Занятость проверяется на сервере."}</small></label>}
+              </>}
               {protocol === "awg" && <>
                 <label className={portError ? "fieldInvalid" : ""}>
                   <span>UDP-порт AWG</span>
@@ -388,7 +421,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
               {settings.local_auth_enabled && <><label><span>Локальный логин</span><input value={settings.local_username} maxLength={64} onChange={(event) => update({ local_username: event.target.value })} /></label><label className={fieldErrors.local_password ? "fieldInvalid" : ""}><span>Локальный пароль</span><input aria-invalid={Boolean(fieldErrors.local_password)} type="password" minLength={8} maxLength={128} value={settings.local_password} onChange={(event) => update({ local_password: event.target.value })} placeholder="Минимум 8 символов" />{fieldErrors.local_password ? <small className="fieldError">{fieldErrors.local_password}</small> : <small>Хранится только в экспортируемом профиле</small>}</label></>}
             </div></section>}
             <details className="connectionAdvanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}><summary>Расширенные настройки <span>⌄</span></summary><div className="connectionSettingsFields">
-              <TransportFields protocol={protocol} settings={settings} errors={fieldErrors} update={update} />
+              <TransportFields protocol={protocol} settings={settings} errors={fieldErrors} update={update} onSelectXmux={selectXmux} />
               {protocol === "awg" && <>
                 <label><span>DNS-серверы</span><input value={settings.dns} onChange={(event) => update({ dns: event.target.value })} placeholder="1.1.1.1, 1.0.0.1" /></label>
                 {protocol === "awg" && <><label><span>Jc · пакеты мусора</span><input type="number" min={0} max={128} value={settings.awg_jc} onChange={(event) => update({ awg_jc: Number(event.target.value) })} /></label><label><span>Jmin · минимум</span><input type="number" min={0} max={1280} value={settings.awg_jmin} onChange={(event) => update({ awg_jmin: Number(event.target.value) })} /></label><label className={fieldErrors.awg_jmax ? "fieldInvalid" : ""}><span>Jmax · максимум</span><input aria-invalid={Boolean(fieldErrors.awg_jmax)} type="number" min={0} max={1280} value={settings.awg_jmax} onChange={(event) => update({ awg_jmax: Number(event.target.value) })} />{fieldErrors.awg_jmax && <small className="fieldError">{fieldErrors.awg_jmax}</small>}</label><div className="connectionServerValues"><strong>Параметры сервера — подставляются автоматически</strong><dl>{Object.entries(serverOptions.awg || {}).filter(([key]) => !["jc", "jmin", "jmax", "i1", "i2", "i3", "i4", "i5"].includes(key)).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl><small>S/H и общие параметры защиты согласованы с сервером. Jc, Jmin, Jmax и выбранная CPS-сигнатура задаются для нового клиента.</small></div></>}
@@ -423,7 +456,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
                 <label className="connectionCheckbox"><span><strong>Sniffing доменов</strong><small>Определять HTTP, TLS и QUIC назначения</small></span><input type="checkbox" checked={settings.sniffing} onChange={(event) => update({ sniffing: event.target.checked, ...(!event.target.checked ? { route_only: false } : {}) })} /></label>
                 <label className="connectionCheckbox"><span><strong>Только для маршрутизации</strong><small>Не подменять исходное назначение</small></span><input type="checkbox" disabled={!settings.sniffing} checked={settings.route_only} onChange={(event) => update({ route_only: event.target.checked })} /></label>
                 <label className="connectionCheckbox"><span><strong>Блокировать BitTorrent</strong><small>Локальное правило blackhole в профиле</small></span><input type="checkbox" checked={settings.block_bittorrent} onChange={(event) => update({ block_bittorrent: event.target.checked })} /></label>
-                <label><span>Переиспользование соединений XMUX</span><select value={settings.xray_xmux_profile} onChange={(event) => update({ xray_xmux_profile: event.target.value as ConnectionSettings["xray_xmux_profile"] })}><option value="default">Штатные случайные диапазоны</option><option value="mobile">Мобильная сеть · keepalive 10 с</option><option value="parallel">Один запрос на соединение</option><option value="rotate">Короткое переиспользование · 60–120 с</option><option value="custom">Ручные параметры</option></select></label>
+                <label><span>Переиспользование соединений XMUX</span><select value={settings.xray_xmux_profile} onChange={(event) => selectXmux(event.target.value as ConnectionSettings["xray_xmux_profile"])}><option value="default">Штатные случайные диапазоны</option><option value="mobile">Мобильная сеть · keepalive 10 с</option><option value="parallel">Один запрос на соединение</option><option value="rotate">Короткое переиспользование · 60–120 с</option><option value="custom">Ручные параметры</option></select></label>
                 <label className="connectionCheckbox"><span><strong>XUDP для UDP-трафика</strong><small>TCP использует штатный XMUX; обычный Mux не включается</small></span><input type="checkbox" checked={settings.mux_enabled} onChange={(event) => update({ mux_enabled: event.target.checked })} /></label>
                 {settings.mux_enabled && <><label><span>XUDP concurrency</span><input type="number" min={1} max={1024} value={settings.xudp_concurrency} onChange={(event) => update({ xudp_concurrency: Number(event.target.value) })} /></label><label><span>UDP/443 через XUDP</span><select value={settings.xudp_proxy_udp443} onChange={(event) => update({ xudp_proxy_udp443: event.target.value as ConnectionSettings["xudp_proxy_udp443"] })}><option value="reject">Reject — рекомендуется</option><option value="allow">Allow</option><option value="skip">Skip Mux</option></select></label></>}
               </>}

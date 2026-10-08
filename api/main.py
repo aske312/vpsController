@@ -35,6 +35,8 @@ from system_metrics import CpuSampler, collect_resources
 from awg_obfuscation import client_profile as awg_client_profile, preset_catalog
 from awg_ports import AwgPorts, PORT_CHOICES, PortError
 from connection_tuning import tuning_catalog, xhttp_extra, number_range, quic_options, singbox_client
+from contextlib import ExitStack
+from protocol_ports import ProtocolPorts
 
 
 @asynccontextmanager
@@ -131,7 +133,7 @@ resource_check_cache: dict[str, dict] = {}
 network_diagnostic_cache: dict[str, dict] = {}
 connection_probe_cache: dict[str, dict] = {}
 client_quality_cache: dict[str, dict] = {}
-client_mutation_lock = threading.Lock()
+client_mutation_lock = threading.RLock()
 protocol_version_lock = threading.Lock()
 regional_probe_lock = threading.Lock()
 protocol_version_cache: dict[str, dict] = {}
@@ -337,8 +339,10 @@ def direct_client_rows() -> list[dict]:
     for item in read_clients():
         if item.get("protocol") not in DIRECT_PROTOCOLS or item.get("diagnostic"):
             continue
+        endpoint = item.get("endpoint") or PUBLIC_IP
+        if item.get("server_port"): endpoint = f"{uri_endpoint(str(endpoint))}:{item['server_port']}"
         rows.append({**item, "address": item.get("endpoint") or PUBLIC_IP,
-                     "endpoint": item.get("endpoint") or PUBLIC_IP, "rx_bytes": 0, "tx_bytes": 0,
+                     "endpoint": endpoint, "rx_bytes": 0, "tx_bytes": 0,
                      "handshake_age_s": None, "quality": "offline",
                      "quality_reason": "Учётная запись готова; активность определяется службой протокола"})
     return rows
@@ -2813,6 +2817,7 @@ def client_options(_: None = Depends(require_token)) -> dict:
         "awg": {key.lower(): int(value) if str(value).isdigit() else value for key, value in AWG_PROFILE.items()},
         "awg_obfuscation": preset_catalog(),
         "connection_tuning": tuning_catalog(),
+        "server_ports": {protocol: {"default_port": protocol_port_manager(protocol).primary, "transport": "tcp" if protocol == "xray" else "udp", "suggestions": list(dict.fromkeys((protocol_port_manager(protocol).primary, *PORT_CHOICES)))} for protocol in DIRECT_PROTOCOLS},
         "awg_ports": {"default_port": AWG_PORT, "suggestions": [awg_port_manager().status(port) for port in dict.fromkeys((AWG_PORT, *PORT_CHOICES))]},
         "hysteria2": {
             "obfs": str(hysteria.get("obfs", "none")),
@@ -2833,6 +2838,43 @@ def awg_port_manager() -> AwgPorts:
     return AwgPorts(AWG_PORT, AWG_INTERFACE, INSTALL_DIR, PUBLIC_IP, DATA_DIR / 'awg-ports')
 
 
+def protocol_port_manager(protocol: str, target: int | None = None, sni: str = "") -> ProtocolPorts:
+    if protocol not in DIRECT_PROTOCOLS: raise HTTPException(status_code=422, detail="Unknown protocol")
+    if target is None:
+        path = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "xray": XRAY_SETTINGS}[protocol]
+        try: settings = json.loads(path.read_text())
+        except (OSError, ValueError): settings = {}
+        target = int(settings.get('port', {'hysteria2': 8443, 'tuic': 8444, 'xray': 8445}[protocol]))
+        if protocol == 'xray' and sni:
+            try:
+                server = json.loads(XRAY_CONFIG.read_text())
+                inbound = next((row for row in server.get('inbounds', []) if row.get('protocol') == 'vless' and sni in row.get('streamSettings', {}).get('realitySettings', {}).get('serverNames', [])), None)
+                if inbound: target = int(inbound.get('port', target))
+            except (OSError, ValueError): pass
+    return ProtocolPorts(protocol, target, PUBLIC_IP, DATA_DIR / 'protocol-ports' / protocol)
+
+
+@app.get("/api/clients/server-port")
+def check_server_port(protocol: Literal['hysteria2', 'tuic', 'xray'], port: int = Query(ge=1, le=65535), sni: str = "", _: None = Depends(require_token)) -> dict:
+    return protocol_port_manager(protocol, sni=sni).status(port)
+
+
+def reserve_client_port(payload, target, scope):
+    manager = protocol_port_manager(payload.protocol, target)
+    try:
+        port = manager.random_port() if payload.settings.server_port_random else payload.settings.server_port or target
+        # Default ports do not require a guard and preserve older deployments.
+        if port != target: scope.enter_context(manager.reserve(port))
+        return port
+    except PortError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def release_client_port(item, remaining):
+    port, target = item.get('server_port'), item.get('server_target_port')
+    if port and target and port != target and not any(row.get('protocol') == item['protocol'] and row.get('server_port') == port for row in remaining):
+        protocol_port_manager(item['protocol'], target).release(port)
+
+
 @app.get("/api/clients/awg-port")
 def check_awg_port(port: int | None = Query(default=None, ge=1, le=65535), random: bool = False, _: None = Depends(require_token)) -> dict:
     manager = awg_port_manager()
@@ -2844,6 +2886,8 @@ def check_awg_port(port: int | None = Query(default=None, ge=1, le=65535), rando
 
 
 class ClientSettings(BaseModel):
+    server_port: int | None = Field(default=None, ge=1, le=65535)
+    server_port_random: bool = False
     client_mode: Literal["proxy", "vpn"] = "proxy"
     hysteria_format: Literal["hysteria", "sing-box"] = "hysteria"
     quic_idle: int = Field(default=0, ge=0, le=600)
@@ -3149,9 +3193,11 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     if payload.protocol == "hysteria2":
         if not HYSTERIA2_SETTINGS.exists() or run("systemctl", "is-enabled", "vps-control-hysteria2.service") != "enabled":
             raise HTTPException(status_code=409, detail="Hysteria2 protocol is not installed")
-        with client_mutation_lock:
+        with client_mutation_lock, ExitStack() as port_scope:
             try:
                 settings = json.loads(HYSTERIA2_SETTINGS.read_text(encoding="utf-8"))
+                target_port = int(settings.get("port", 8443))
+                selected_port = reserve_client_port(payload, target_port, port_scope)
                 users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8")) if HYSTERIA2_USERS.exists() else {}
                 password = secrets.token_urlsafe(32); users[client_id] = password
                 temporary = HYSTERIA2_USERS.with_suffix(".tmp")
@@ -3160,6 +3206,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 identity = str(settings.get("domain", "")).strip() or certificate_server_name(HYSTERIA2_DIR / "server.crt")
                 fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt")).partition("=")[2].strip()
                 listen = str(settings.get("listen", settings.get("port", 8443)))
+                if payload.settings.server_port is not None or payload.settings.server_port_random: listen = str(selected_port)
                 config_lines = [
                     f"server: {endpoint}:{listen}", f"auth: {client_id}:{password}",
                     "tls:", f"  sni: {identity}", "  insecure: true", f"  pinSHA256: {fingerprint}",
@@ -3213,7 +3260,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 filename = f"{safe_name}-hysteria2.yaml"
                 if payload.settings.hysteria_format == "sing-box":
                     outbound = {"type": "hysteria2", "tag": "connection-out", "server": PUBLIC_IP,
-                                "server_port": int(settings.get("port", 8443)), "password": f"{client_id}:{password}",
+                                "server_port": selected_port, "password": f"{client_id}:{password}",
                                 "tls": {"enabled": True, "server_name": identity, "certificate": (HYSTERIA2_DIR / 'server.crt').read_text(encoding='utf-8')}}
                     if ',' in listen or '-' in listen:
                         outbound.pop('server_port')
@@ -3233,7 +3280,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     if payload.settings.local_auth_enabled: mixed['users'] = [{"username": payload.settings.local_username, "password": payload.settings.local_password}]
                     config = json.dumps(singbox_client(outbound, mixed, payload.settings, PUBLIC_IP), ensure_ascii=False, indent=2)
                     filename = f"{safe_name}-hysteria2-sing-box.json"
-                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
+                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "endpoint": endpoint, "server_port": selected_port, "server_target_port": target_port, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 query_values = {"sni": identity, "insecure": "1", "pinSHA256": fingerprint}
                 if obfs in {"salamander", "gecko"} and obfs_password:
                     query_values.update({"obfs": obfs, "obfs-password": obfs_password})
@@ -3255,9 +3302,12 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         unit = "vps-control-tuic.service"
         if not config_path.exists() or run("systemctl", "is-enabled", unit) != "enabled":
             raise HTTPException(status_code=409, detail=f"{payload.protocol} protocol is not installed")
-        with client_mutation_lock:
+        with client_mutation_lock, ExitStack() as port_scope:
             original = config_path.read_bytes(); temporary = config_path.with_suffix(".tmp.json")
             try:
+                settings = json.loads(settings_path.read_text(encoding="utf-8"))
+                target_port = int(settings.get("port", 8444))
+                selected_port = reserve_client_port(payload, target_port, port_scope)
                 server = json.loads(original); inbound = next(row for row in server.get("inbounds", []) if row.get("type") == payload.protocol)
                 password = secrets.token_urlsafe(32); user_uuid = str(uuid.uuid4())
                 user = {"name": client_id, "password": password, "uuid": user_uuid}
@@ -3266,7 +3316,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 if result.returncode: raise RuntimeError(result.stderr.strip() or "sing-box rejected configuration")
                 temporary.replace(config_path); run("systemctl", "restart", unit, timeout=20, check=True)
                 settings = json.loads(settings_path.read_text(encoding="utf-8")); endpoint = PUBLIC_IP; certificate = (config_path.parent / "server.crt").read_text(encoding="utf-8")
-                outbound = {"type": payload.protocol, "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "password": password,
+                outbound = {"type": payload.protocol, "tag": "connection-out", "server": endpoint, "server_port": selected_port, "password": password,
                             "tls": {"enabled": True, "server_name": certificate_server_name(config_path.parent / "server.crt"), "certificate": certificate}}
                 outbound.update({"uuid": user_uuid, "congestion_control": payload.settings.congestion_control, "udp_relay_mode": payload.settings.udp_relay_mode, "zero_rtt_handshake": False, "heartbeat": payload.settings.heartbeat})
                 if payload.settings.tuic_udp_over_stream:
@@ -3286,8 +3336,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 if payload.settings.local_auth_enabled:
                     mixed_inbound["users"] = [{"username": payload.settings.local_username, "password": payload.settings.local_password}]
                 client = singbox_client(outbound, mixed_inbound, payload.settings, endpoint)
-                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
-                port = int(settings.get("port", 8444))
+                items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "endpoint": endpoint, "server_port": selected_port, "server_target_port": target_port, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
+                port = selected_port
                 server_name = certificate_server_name(config_path.parent / "server.crt")
                 return {"id": client_id, **connection_profile(
                     protocol="tuic", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-tuic.json", config=json.dumps(client, ensure_ascii=False, indent=2),
@@ -3295,6 +3345,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     apps=["sing-box MT", "Karing", "sing-box"],
                     steps=["Скачайте персональный JSON и импортируйте файл конфигурации в sing-box MT или Karing.", "Для iOS создайте профиль в режиме VPN / TUN и разрешите добавление VPN. Режим локального прокси предназначен для CLI/ПК.", "Откройте внешний сайт и проверьте IP выхода: он должен совпадать с VPS."],
                 )}
+            except HTTPException:
+                raise
             except Exception as exc:
                 config_path.write_bytes(original); os.chmod(config_path, 0o600); run("systemctl", "restart", unit, timeout=20)
                 raise HTTPException(status_code=500, detail=f"Unable to create {payload.protocol} connection") from exc
@@ -3305,7 +3357,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         unit = "vps-control-xray.service"
         if not XRAY_CONFIG.exists() or not Path(binary).exists() or run("systemctl", "is-enabled", unit) != "enabled":
             raise HTTPException(status_code=409, detail="Xray protocol is not installed")
-        with client_mutation_lock:
+        with client_mutation_lock, ExitStack() as port_scope:
             original = XRAY_CONFIG.read_bytes()
             original_settings = XRAY_SETTINGS.read_bytes()
             temporary = XRAY_CONFIG.with_suffix(".tmp.json")
@@ -3323,6 +3375,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     inbound, profile = create_xray_sni_inbound(server, settings, server_name, binary)
                 else:
                     profile = xray_profile_for_inbound(inbound, settings)
+                target_port = int(profile.get("port", 8445))
+                selected_port = reserve_client_port(payload, target_port, port_scope)
                 user_uuid = str(uuid.uuid4())
                 inbound.setdefault("settings", {}).setdefault("clients", []).append({"id": user_uuid, "email": f"{client_id}@312.net"})
                 temporary.write_text(json.dumps(server, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -3349,7 +3403,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 outbounds = [{
                     "tag": "xray-out", "protocol": "vless",
                     "settings": {"vnext": [{
-                        "address": endpoint, "port": int(profile.get("port", 8445)),
+                        "address": endpoint, "port": selected_port,
                         "users": [{"id": user_uuid, "encryption": "none"}],
                     }]},
                     "streamSettings": {
@@ -3383,10 +3437,11 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 items.append({
                     "id": client_id, "name": payload.name, "protocol": "xray", "public_key": user_uuid,
                     "endpoint": endpoint, "xray_inbound_tag": str(inbound.get("tag", "")), "xray_sni": server_name,
+                    "server_port": selected_port, "server_target_port": target_port,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 })
                 write_clients(items)
-                port = int(profile.get("port", 8445))
+                port = selected_port
                 query = urlencode({"type": "xhttp", "security": "reality", "encryption": "none", "pbk": str(profile.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(profile.get("short_id", "")), "path": path, "mode": payload.settings.xray_xhttp_mode, "extra": json.dumps(xhttp_extra(payload.settings), separators=(",", ":")), "spx": "/"})
                 uri = f"vless://{quote(user_uuid, safe='')}@{uri_endpoint(endpoint)}:{port}?{query}#{quote(payload.name, safe='')}"
                 return {"id": client_id, **connection_profile(
@@ -3499,6 +3554,11 @@ def provision_awg_client(payload: ClientCreate, client_id: str, safe_name: str, 
 
 @app.delete("/api/clients/{client_id}")
 def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
+    with client_mutation_lock:
+        return delete_client_locked(client_id)
+
+
+def delete_client_locked(client_id: str) -> dict:
     items = read_clients()
     item = next((entry for entry in items if entry["id"] == client_id), None)
     if not item:
@@ -3509,7 +3569,9 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
             with client_mutation_lock:
                 users = json.loads(HYSTERIA2_USERS.read_text(encoding="utf-8")); users.pop(client_id, None)
                 temporary = HYSTERIA2_USERS.with_suffix(".tmp"); temporary.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(temporary, 0o600); temporary.replace(HYSTERIA2_USERS)
-        write_clients([entry for entry in items if entry["id"] != client_id]); return {"deleted": client_id}
+        remaining = [entry for entry in items if entry["id"] != client_id]
+        release_client_port(item, remaining)
+        write_clients(remaining); return {"deleted": client_id}
     if protocol == "tuic":
         config_path = TUIC_CONFIG; binary = "/usr/local/lib/vps-control-tuic/sing-box"; unit = "vps-control-tuic.service"
         if config_path.exists() and Path(binary).exists():
@@ -3520,7 +3582,9 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
                 result = subprocess.run([binary, "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
                 if result.returncode: temporary.unlink(missing_ok=True); raise HTTPException(status_code=500, detail=f"Unable to remove {protocol} connection")
                 temporary.replace(config_path); run("systemctl", "restart", unit, timeout=20, check=True)
-        write_clients([entry for entry in items if entry["id"] != client_id]); return {"deleted": client_id}
+        remaining = [entry for entry in items if entry["id"] != client_id]
+        release_client_port(item, remaining)
+        write_clients(remaining); return {"deleted": client_id}
     if protocol == "xray":
         binary = "/usr/local/lib/vps-control-xray/xray"
         if XRAY_CONFIG.exists() and Path(binary).exists():
@@ -3576,7 +3640,9 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
                     raise
                 finally:
                     temporary_settings.unlink(missing_ok=True)
-        write_clients([entry for entry in items if entry["id"] != client_id])
+        remaining = [entry for entry in items if entry["id"] != client_id]
+        release_client_port(item, remaining)
+        write_clients(remaining)
         return {"deleted": client_id}
     command = "awg"
     interface = AWG_INTERFACE

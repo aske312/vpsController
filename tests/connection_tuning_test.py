@@ -103,6 +103,14 @@ class ConnectionTuningTests(unittest.TestCase):
         extra = xhttp_extra(api.ClientSettings(xray_xmux_profile='mobile'))
         extra['xmux']['maxConnections'] = 100
         self.assertEqual(xhttp_extra(api.ClientSettings(xray_xmux_profile='mobile'))['xmux']['maxConnections'], 0)
+        for preset in tuning_catalog()['xray']:
+            settings = api.ClientSettings(**preset['settings'])
+            effective = xhttp_extra(settings).get('xmux')
+            if effective:
+                self.assertEqual(str(effective['maxConcurrency']), settings.xmux_concurrency)
+                self.assertEqual(str(effective['maxConnections']), settings.xmux_connections)
+                self.assertEqual(str(effective['hMaxRequestTimes']), settings.xmux_requests)
+                self.assertEqual(effective['hKeepAlivePeriod'], settings.xmux_keepalive)
         client = TestClient(api.app)
         self.assertEqual(client.get('/api/clients/options').status_code, 401)
         with patch.object(api, 'ADMIN_USER', 'test'), patch.object(api, 'ADMIN_PASSWORD', 'secret'):
