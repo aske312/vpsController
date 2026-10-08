@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { ConnectionProfileResult, protocolDelivery, type ConnectionProfile } from "./connection-profile";
 import { ProtocolIcon } from "./protocol-icon";
 import type { Protocol } from "./page";
@@ -17,6 +17,8 @@ export type ConnectionSettings = {
   awg_jmax: number;
   awg_signature: string;
   awg_signature_domain: string;
+  awg_port: number;
+  awg_port_random: boolean;
   proxy_bind: "loopback" | "lan";
   local_auth_enabled: boolean;
   local_username: string;
@@ -59,7 +61,10 @@ export type ConnectionSettings = {
   block_bittorrent: boolean;
 };
 
+export type AwgPortStatus = { port: number; status: "available" | "awg" | "occupied" | "unavailable"; detail: string };
+
 export type ConnectionServerOptions = {
+  awg_ports?: { default_port: number; suggestions: AwgPortStatus[] };
   awg_obfuscation?: { id: string; label: string; description: string; requires_cps: boolean }[];
   awg?: Record<string, string | number> & { jc: number; jmin: number; jmax: number; s1: number; s2: number; h1: number; h2: number; h3: number; h4: number };
   hysteria2?: { obfs: "none" | "salamander" | "gecko"; port_hopping: string; gecko_min_packet_size: number; gecko_max_packet_size: number };
@@ -77,6 +82,8 @@ const settingsFor = (protocol: Protocol, serverOptions: ConnectionServerOptions)
   awg_jmax: serverOptions.awg?.jmax ?? 80,
   awg_signature: "server",
   awg_signature_domain: awgDefaultDomain,
+  awg_port: serverOptions.awg_ports?.default_port ?? 51822,
+  awg_port_random: false,
   proxy_bind: "loopback",
   local_auth_enabled: false,
   local_username: "proxy",
@@ -124,6 +131,7 @@ type Props = {
   serverOptions: ConnectionServerOptions;
   onClose(): void;
   onCreate(payload: { name: string; protocol: Protocol; settings: ConnectionSettings }): Promise<ConnectionProfile>;
+  onCheckAwgPort(port: number): Promise<AwgPortStatus>;
   onCreated(): Promise<void> | void;
   onError(message: string): void;
   onDownload(filename: string, content: string, mimeType?: string): void;
@@ -148,6 +156,7 @@ function validateConnection(name: string, protocol: Protocol, settings: Connecti
     if (settings.local_auth_enabled && settings.local_password.length < 8) errors.local_password = "Пароль должен содержать минимум 8 символов.";
   }
   if (protocol === "awg") {
+    if (!settings.awg_port_random && (!Number.isInteger(settings.awg_port) || settings.awg_port < 1 || settings.awg_port > 65535)) errors.awg_port = "UDP-порт должен быть целым числом от 1 до 65535.";
     if (!["server", "stun", "dtls"].includes(settings.awg_signature) && !validSniDomain(settings.awg_signature_domain)) errors.awg_signature_domain = "Введите домен без URL и IP-адреса.";
     if (settings.awg_jmin > settings.awg_jmax) errors.awg_jmax = "Jmax должен быть не меньше Jmin.";
     if (settings.route_mode === "custom" && !settings.allowed_ips.trim()) errors.allowed_ips = "Укажите хотя бы одну сеть.";
@@ -163,6 +172,7 @@ function validateConnection(name: string, protocol: Protocol, settings: Connecti
 
 function serverErrorField(message: string): keyof ConnectionSettings | undefined {
   const value = message.toLowerCase();
+  if (value.includes("awg udp port") || value.includes("awg_port")) return "awg_port";
   if (value.includes("awg signature")) return "awg_signature_domain";
   if (value.includes("sni") || value.includes("domain") || value.includes("reality")) return "xray_sni";
   if (value.includes("socks") || value.includes("mixed")) return "local_socks_port";
@@ -193,7 +203,7 @@ function XraySniPicker({ value, options, invalid, onChange }: { value: string; o
   </div>;
 }
 
-export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, onCreated, onError, onDownload }: Props) {
+export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, onCheckAwgPort, onCreated, onError, onDownload }: Props) {
   const initialProtocol = protocols[0] || "awg";
   const [name, setName] = useState("");
   const [protocol, setProtocol] = useState<Protocol>(initialProtocol);
@@ -202,6 +212,20 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [portResult, setPortResult] = useState<AwgPortStatus | null>(null);
+  const checkedPort = portResult?.port === settings.awg_port ? portResult : null;
+  const portError = settings.awg_port_random ? undefined : fieldErrors.awg_port || (checkedPort && !["available", "awg"].includes(checkedPort.status) ? checkedPort.detail : undefined);
+  const portChoices = serverOptions.awg_ports?.suggestions || [{ port: 51822, status: "awg", detail: "Основной порт AWG" }];
+
+  useEffect(() => {
+    if (protocol !== "awg" || settings.awg_port_random || !Number.isInteger(settings.awg_port) || settings.awg_port < 1 || settings.awg_port > 65535) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void onCheckAwgPort(settings.awg_port).then((result) => { if (active) setPortResult(result); })
+        .catch((cause) => { if (active) setPortResult({ port: settings.awg_port, status: "unavailable", detail: cause instanceof Error ? cause.message : "Не удалось проверить порт" }); });
+    }, 350);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [protocol, settings.awg_port, settings.awg_port_random, onCheckAwgPort]);
 
   function selectProtocol(next: Protocol) {
     setProtocol(next);
@@ -222,6 +246,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
   async function submit(event: FormEvent) {
     event.preventDefault();
     const validation = validateConnection(name, protocol, settings);
+    if (protocol === "awg" && portError) validation.awg_port = portError;
     if (Object.keys(validation).length) {
       setFieldErrors(validation);
       setFormError("Исправьте отмеченные поля перед созданием подключения.");
@@ -271,6 +296,15 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
             <div className={`connectionMaskingStatus ${masking.level}`}><span>Маскирование</span><strong>{masking.state}</strong><small>{masking.detail}</small></div>
             <div className="connectionSettingsFields">
               {protocol === "awg" && <>
+                <label className={portError ? "fieldInvalid" : ""}>
+                  <span>UDP-порт AWG</span>
+                  <select aria-label="Вариант порта AWG" value={settings.awg_port_random ? "random" : portChoices.some((item) => item.port === settings.awg_port) ? String(settings.awg_port) : "custom"} onChange={(event) => update(event.target.value === "random" ? { awg_port_random: true, awg_port: serverOptions.awg_ports?.default_port ?? 51822 } : { awg_port_random: false, awg_port: event.target.value === "custom" ? 0 : Number(event.target.value) })}>
+                    {portChoices.map((item) => <option key={item.port} value={item.port} disabled={["occupied", "unavailable"].includes(item.status)}>{item.port} · {item.detail}</option>)}
+                    <option value="random">Случайный свободный порт</option><option value="custom">Ручной ввод</option>
+                  </select>
+                  {!settings.awg_port_random && <input aria-label="Номер UDP-порта AWG" aria-invalid={Boolean(portError)} type="number" min={1} max={65535} step={1} value={settings.awg_port || ""} onChange={(event) => update({ awg_port: Number(event.target.value) })} />}
+                  {portError ? <small className="fieldError">{portError}</small> : <small>{settings.awg_port_random ? "Свободный порт будет выбран сервером при создании." : checkedPort?.detail || "Проверяем доступность UDP-порта…"}</small>}
+                </label>
                 <label><span>Сигнатура AWG</span><select value={settings.awg_signature} onChange={(event) => update({ awg_signature: event.target.value })}>{(serverOptions.awg_obfuscation || [{ id: "server", label: "Текущий профиль сервера" }]).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><small>{serverOptions.awg_obfuscation?.find((item) => item.id === settings.awg_signature)?.description}</small></label>
                 {settings.awg_signature !== "server" && <>
                   {!["stun", "dtls"].includes(settings.awg_signature) && <label className={fieldErrors.awg_signature_domain ? "fieldInvalid" : ""}><span>Домен в образце пакета</span><select aria-label="Готовые домены сигнатуры AWG" value={awgDomainPresets.some((item) => item.domain === settings.awg_signature_domain) ? settings.awg_signature_domain : "custom"} onChange={(event) => update({ awg_signature_domain: event.target.value === "custom" ? "" : event.target.value })}>{awgDomainGroups.map((group) => <optgroup key={group} label={group}>{awgDomainPresets.filter((item) => item.group === group).map((item) => <option key={item.domain} value={item.domain}>{item.label} · {item.domain}</option>)}</optgroup>)}<option value="custom">Свой домен</option></select><input aria-label="Домен сигнатуры AWG" aria-invalid={Boolean(fieldErrors.awg_signature_domain)} value={settings.awg_signature_domain} onChange={(event) => update({ awg_signature_domain: event.target.value })} autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="example.ru" /><small>Выберите готовый вариант или укажите свой домен.</small>{fieldErrors.awg_signature_domain && <small className="fieldError">{fieldErrors.awg_signature_domain}</small>}</label>}

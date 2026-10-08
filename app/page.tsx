@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ConnectionDialog, type ConnectionServerOptions, type ConnectionSettings } from "./connection-dialog";
+import { ConnectionDialog, type AwgPortStatus, type ConnectionServerOptions, type ConnectionSettings } from "./connection-dialog";
 import type { ConnectionProfile } from "./connection-profile";
 import { ConnectionsView } from "./connections-view";
 import { LegalFooter } from "./legal";
@@ -314,6 +314,8 @@ export default function Home() {
     }
     return response.json();
   }, [token]);
+
+  const checkAwgPort = useCallback((port: number): Promise<AwgPortStatus> => request(`/clients/awg-port?port=${port}`), [request]);
 
 
   function askConfirmation(options: Omit<ConfirmationRequest, "resolve">): Promise<boolean> {
@@ -1703,7 +1705,7 @@ export default function Home() {
       />}
 
       {tab === "clients" && (installedProtocols.length ? <ConnectionsView clients={clients} protocols={installedProtocols} busy={busy} onNew={() => setConnectionDialog(true)} onRemove={(id) => void removeClient(id)} /> : <section className="clientsLayout"><article className="panel noConnectionProtocols"><span>◎</span><h2>Нет установленных протоколов</h2><p>Установите хотя бы один сетевой модуль на странице «Обзор», после чего здесь появится создание персональных подключений.</p><button type="button" className="primaryButton" onClick={() => setTab("overview")}>Перейти к модулям <span>→</span></button></article></section>)}
-      {connectionDialog && installedProtocols.length > 0 && <ConnectionDialog protocols={installedProtocols} serverOptions={connectionOptions} onClose={() => setConnectionDialog(false)} onCreate={createClient} onCreated={loadClients} onError={setError} onDownload={downloadConfig} />}
+      {connectionDialog && installedProtocols.length > 0 && <ConnectionDialog protocols={installedProtocols} serverOptions={connectionOptions} onClose={() => setConnectionDialog(false)} onCreate={createClient} onCheckAwgPort={checkAwgPort} onCreated={loadClients} onError={setError} onDownload={downloadConfig} />}
       {passwordDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closePasswordDialog}>
         <form className="confirmDialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()} onSubmit={changeAdminPassword}>
           <p className="eyebrow">ADMINISTRATOR ACCESS</p><h2>Изменить пароль администратора</h2>

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import quote, urlencode
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from metrics_history import MetricsHistory, MetricsMonitor
 from system_metrics import CpuSampler, collect_resources
 from awg_obfuscation import client_profile as awg_client_profile, preset_catalog
+from awg_ports import AwgPorts, PORT_CHOICES, PortError
 
 
 @asynccontextmanager
@@ -2810,6 +2811,7 @@ def client_options(_: None = Depends(require_token)) -> dict:
     return {
         "awg": {key.lower(): int(value) if str(value).isdigit() else value for key, value in AWG_PROFILE.items()},
         "awg_obfuscation": preset_catalog(),
+        "awg_ports": {"default_port": AWG_PORT, "suggestions": [awg_port_manager().status(port) for port in dict.fromkeys((AWG_PORT, *PORT_CHOICES))]},
         "hysteria2": {
             "obfs": str(hysteria.get("obfs", "none")),
             "port_hopping": str(hysteria.get("listen", hysteria.get("port", 8443))),
@@ -2825,6 +2827,20 @@ def client_options(_: None = Depends(require_token)) -> dict:
     }
 
 
+def awg_port_manager() -> AwgPorts:
+    return AwgPorts(AWG_PORT, AWG_INTERFACE, INSTALL_DIR, PUBLIC_IP, DATA_DIR / 'awg-ports')
+
+
+@app.get("/api/clients/awg-port")
+def check_awg_port(port: int | None = Query(default=None, ge=1, le=65535), random: bool = False, _: None = Depends(require_token)) -> dict:
+    manager = awg_port_manager()
+    try:
+        selected = manager.random_port() if random else port if port is not None else AWG_PORT
+        return manager.status(selected)
+    except PortError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 class ClientSettings(BaseModel):
     dns: str = Field(default="1.1.1.1, 1.0.0.1", min_length=1, max_length=255, pattern=r"^[0-9A-Fa-f:., ]+$")
     mtu: int | None = Field(default=None, ge=576, le=1500)
@@ -2836,6 +2852,8 @@ class ClientSettings(BaseModel):
     awg_jmax: int | None = Field(default=None, ge=0, le=1280)
     awg_signature: str = Field(default="server", max_length=32)
     awg_signature_domain: str = Field(default="example.com", max_length=253)
+    awg_port: int | None = Field(default=None, ge=1, le=65535)
+    awg_port_random: bool = False
     proxy_bind: Literal["loopback", "lan"] = "loopback"
     local_auth_enabled: bool = False
     local_username: str = Field(default="proxy", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
@@ -3317,7 +3335,11 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             finally:
                 temporary.unlink(missing_ok=True)
                 temporary_settings.unlink(missing_ok=True)
-    command = "awg"
+    with client_mutation_lock:
+        return create_awg_client(payload, client_id, safe_name)
+
+
+def create_awg_client(payload: ClientCreate, client_id: str, safe_name: str) -> dict:
     config_path = AWG_CONFIG
     if not config_path.exists():
         raise HTTPException(status_code=409, detail=f"{payload.protocol} protocol is not installed")
@@ -3325,17 +3347,21 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         awg_profile = awg_client_profile(AWG_PROFILE, payload.settings.awg_signature, payload.settings.awg_signature_domain)
     except (ValueError, UnicodeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    manager = awg_port_manager()
+    try:
+        port = manager.random_port() if payload.settings.awg_port_random else payload.settings.awg_port or AWG_PORT
+        with manager.reserve(port):
+            return provision_awg_client(payload, client_id, safe_name, awg_profile, port)
+    except PortError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def provision_awg_client(payload: ClientCreate, client_id: str, safe_name: str, awg_profile: dict, port: int) -> dict:
+    command, config_path, interface = "awg", AWG_CONFIG, AWG_INTERFACE
     private_key = key(f"{command} genkey")
     public_key = key(f"printf '%s' '{private_key}' | {command} pubkey")
     psk = key(f"{command} genpsk")
     address = next_address()
-    interface = AWG_INTERFACE
-    append_peer(config_path, client_id, public_key, psk, str(address))
-    run_with_input(
-        [command, "set", interface, "peer", public_key, "preshared-key", "/dev/stdin", "allowed-ips", f"{address}/32"],
-        psk,
-    )
-
     server_public = run(command, "show", interface, "public-key", check=True)
     if payload.settings.awg_jc is not None:
         awg_profile["Jc"] = str(payload.settings.awg_jc)
@@ -3344,7 +3370,6 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     if payload.settings.awg_jmax is not None:
         awg_profile["Jmax"] = str(payload.settings.awg_jmax)
     extra = "".join(f"{key} = {value}\n" for key, value in awg_profile.items())
-    port = AWG_PORT
     allowed_ips = payload.settings.allowed_ips if payload.settings.route_mode == "custom" else "0.0.0.0/0, ::/0" if payload.settings.route_mode == "all" else "0.0.0.0/0"
     client_mtu = payload.settings.mtu if payload.settings.mtu is not None else AWG_MTU
     client_config = (
@@ -3362,10 +3387,21 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             "public_key": public_key,
             "address": f"{address}/32",
             "awg_signature": payload.settings.awg_signature,
+            "awg_port": port,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
     )
-    write_clients(items)
+    original_config = config_path.read_bytes()
+    try:
+        append_peer(config_path, client_id, public_key, psk, str(address))
+        run_with_input(
+            [command, "set", interface, "peer", public_key, "preshared-key", "/dev/stdin", "allowed-ips", f"{address}/32"], psk,
+        )
+        write_clients(items)
+    except Exception:
+        config_path.write_bytes(original_config)
+        run(command, "set", interface, "peer", public_key, "remove", check=True)
+        raise
     protocol_name = "AmneziaWG"
     return {"id": client_id, **connection_profile(
         protocol=payload.protocol, name=payload.name, endpoint=f"{PUBLIC_IP}:{port}", filename=f"{safe_name}-{payload.protocol}.conf", config=client_config,
@@ -3460,11 +3496,27 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
     command = "awg"
     interface = AWG_INTERFACE
     config = AWG_CONFIG
-    run(command, "set", interface, "peer", item["public_key"], "remove", check=True)
-    text = config.read_text(encoding="utf-8")
-    pattern = rf"\n?# vps-control:{re.escape(client_id)}:begin.*?# vps-control:{re.escape(client_id)}:end\n?"
-    config.write_text(re.sub(pattern, "\n", text, flags=re.S), encoding="utf-8")
-    write_clients([entry for entry in items if entry["id"] != client_id])
+    with client_mutation_lock:
+        items = read_clients()
+        item = next((entry for entry in items if entry['id'] == client_id), None)
+        if not item: raise HTTPException(status_code=404, detail="Client not found")
+        retained = [entry for entry in items if entry['id'] != client_id]
+        port = item.get('awg_port', AWG_PORT)
+        unused = port != AWG_PORT and not any(entry.get('protocol') == 'awg' and entry.get('awg_port', AWG_PORT) == port for entry in retained)
+        manager = awg_port_manager()
+        if unused:
+            try: manager.release(port)
+            except PortError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
+        try:
+            run(command, "set", interface, "peer", item["public_key"], "remove", check=True)
+            text = config.read_text(encoding="utf-8")
+            pattern = rf"\n?# vps-control:{re.escape(client_id)}:begin.*?# vps-control:{re.escape(client_id)}:end\n?"
+            config.write_text(re.sub(pattern, "\n", text, flags=re.S), encoding="utf-8")
+            write_clients(retained)
+        except Exception:
+            if unused:
+                with manager.reserve(port): pass
+            raise
     return {"deleted": client_id}
 
 

@@ -11,6 +11,12 @@ CONFIGURED_AWG_CONFIG="$(sed -n 's/^AWG_CONFIG=//p' "${ENV_FILE}" 2>/dev/null | 
 CONFIGURED_AWG_CONFIG="${CONFIGURED_AWG_CONFIG:-/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf}"
 PACKAGE_CONFIG="/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf"
 
+while read -r alias_unit; do
+  [[ "${alias_unit}" =~ ^vps-control-awg-port@([0-9]+)\.service$ ]] || continue
+  alias_port="${BASH_REMATCH[1]}"
+  systemctl disable --now "${alias_unit}"
+  rm -f -- "/var/lib/vps-control/awg-ports/${alias_port}.json"
+done < <(systemctl list-unit-files 'vps-control-awg-port@*.service' --no-legend | awk '{print $1}')
 systemctl disable --now "awg-quick@${AWG_INTERFACE}.service" 2>/dev/null || true
 if command -v ufw >/dev/null 2>&1; then
   ufw --force delete allow "${AWG_PORT}/udp" >/dev/null 2>&1 || true

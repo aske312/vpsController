@@ -1144,10 +1144,24 @@ EOF
 }
 
 ensure_api_write_access() {
+  install_awg_ports_template
   local expected="ReadWritePaths=-/etc/vps-control.env -/etc/amnezia -/etc/vps-control ${DATA_DIR}"
   if ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
     || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
+    systemctl daemon-reload
+  fi
+}
+
+install_awg_ports_template() {
+  local unit_file="/etc/systemd/system/vps-control-awg-port@.service" expected
+  [[ -f "${INSTALL_DIR}/api/awg_ports.py" ]] || return 0
+  if [[ -f "${unit_file}" ]] && ! grep -Fxq '# vpsController AWG UDP alias' "${unit_file}"; then
+    die "конфликт чужого шаблона службы портов AWG."
+  fi
+  expected="$("${INSTALL_DIR}/venv/bin/python" "${INSTALL_DIR}/api/awg_ports.py" template --install-dir "${INSTALL_DIR}" --state-dir "${DATA_DIR}/awg-ports" --interface "${AWG_INTERFACE}")"
+  if [[ ! -f "${unit_file}" || "$(<"${unit_file}")" != "${expected}" ]]; then
+    printf '%s\n' "${expected}" >"${unit_file}"
     systemctl daemon-reload
   fi
 }
@@ -1465,7 +1479,7 @@ uninstall_app() {
       PRESERVE_COMPONENT_DATA=0 bash "${INSTALL_DIR}/protocol-images/${protocol_id}/uninstall.sh"
     fi
   done
-  rm -f "${SERVICE_FILE}" "${WEB_SERVICE_FILE}" /etc/systemd/system/vpn-monitor.service /etc/systemd/system/vpn-monitor.timer \
+  rm -f "${SERVICE_FILE}" "${WEB_SERVICE_FILE}" /etc/systemd/system/vps-control-awg-port@.service /etc/systemd/system/vpn-monitor.service /etc/systemd/system/vpn-monitor.timer \
     /etc/logrotate.d/vps-control-monitor "${COMMAND_PATH}" /usr/local/sbin/vpn-monitor-sample
   systemctl daemon-reload
   rm -rf -- "${INSTALL_DIR}" "${DATA_DIR}"
