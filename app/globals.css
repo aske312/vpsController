@@ -358,6 +358,25 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .connectionSetup small { color: var(--muted); font: 7px var(--font-mono); }
 .connectionSetup strong { font-size: 10px; line-height: 1.5; }
 .connectionSetup ol { display: grid; gap: 6px; margin: 0; padding-left: 20px; color: #aebbb9; font-size: 9px; line-height: 1.5; }
+.clientAppCatalog { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.clientAppCatalog > header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 10px; }
+.clientAppCatalog > header > div:first-child { display: grid; gap: 4px; }
+.clientAppCatalog > header strong { font-size: 10px; }
+.clientAppCatalog > header small { color: var(--muted); font: 7px var(--font-mono); }
+.clientOsPicker { display: flex; gap: 4px; }
+.clientOsPicker button { padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: #0d1820; color: var(--muted); font: 7px var(--font-mono); }
+.clientOsPicker button.active { border-color: #31505c; background: var(--accent-dim); color: var(--accent); }
+.clientAppRows { display: grid; gap: 7px; }
+.clientAppRows article { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 10px 11px; border: 1px solid var(--line); border-radius: 8px; background: #0b161d; }
+.clientAppRows article > div { min-width: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; align-items: baseline; }
+.clientAppRows article strong { font-size: 9px; }
+.clientAppRows article small { color: var(--accent); font: 7px var(--font-mono); }
+.clientAppRows article p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 8px; line-height: 1.4; }
+.clientAppRows nav { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 5px; }
+.clientAppRows a { padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; color: #aab8b5; font: 7px var(--font-mono); white-space: nowrap; }
+.clientAppRows a.direct { border-color: rgba(112,224,189,.3); color: #70e0bd; }
+.clientRegionNote { margin: 9px 0 0; color: #83928f; font-size: 8px; line-height: 1.45; }
+.clientAppCatalog.compact { margin-top: 0; padding: 13px; border: 1px solid var(--line); border-radius: 9px; background: #09151c; }
 .connectionResult details { border: 1px solid var(--line); border-radius: 7px; background: #091216; overflow: hidden; }
 .connectionResult summary { display: flex; justify-content: space-between; padding: 11px; color: #879592; font-size: 9px; cursor: pointer; list-style: none; }
 .connectionResult textarea { height: 210px; padding: 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0; resize: vertical; font: 8px/1.6 var(--font-mono); }
@@ -395,6 +414,10 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
   .connectionHandoff.withQr, .connectionSetup { grid-template-columns: 1fr; }
   .connectionQr { width: min(260px, 100%); justify-self: center; }
   .connectionCredentials { grid-template-columns: 1fr; }
+  .clientAppCatalog > header, .clientAppRows article { align-items: stretch; grid-template-columns: 1fr; }
+  .clientAppCatalog > header { display: grid; }
+  .clientOsPicker { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .clientAppRows nav { justify-content: flex-start; }
 }
 .guideLanguage, .legalLanguage { display: flex; gap: 5px; }
 .guideLanguage button, .legalLanguage button { border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; background: #0e1b25; color: var(--muted); font: 8px var(--font-mono); }

@@ -113,7 +113,7 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(guide, /Один файл следует использовать только на одном устройстве/);
   assert.match(guideUi, /Create and connect a client/);
   assert.match(guideUi, /Параметры обфускации уже включены в профиль/);
-  assert.match(guideUi, /storage\.googleapis\.com\/amnezia\/amnezia\.org/);
+  assert.match(guideUi, /ClientAppCatalog/);
   assert.match(page, /installedProtocols\.length/);
   assert.match(page, /ConnectionDialog/);
   assert.match(page, /waitForProtocolState/);
@@ -121,9 +121,9 @@ test("MIT license, privacy notice and connection guide are included and exposed 
 });
 
 test("connections use a modal editor and protocol-specific one-time handoff methods", async () => {
-  const [api, page, profile, dialog, inventory, packageJson] = await Promise.all([
+  const [api, page, profile, dialog, inventory, packageJson, clientApps] = await Promise.all([
     read("api/main.py"), read("app/page.tsx"), read("app/connection-profile.tsx"),
-    read("app/connection-dialog.tsx"), read("app/connections-view.tsx"), read("package.json"),
+    read("app/connection-dialog.tsx"), read("app/connections-view.tsx"), read("package.json"), read("app/client-apps.tsx"),
   ]);
   assert.match(api, /def connection_profile\(/);
   assert.match(api, /hysteria2:\/\//);
@@ -160,11 +160,21 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(dialog, /AmneziaWG · Jc/);
   assert.match(dialog, /отдельная обфускация протоколом не предусмотрена/);
   assert.match(dialog, /XHTTP \+ REALITY/);
+  assert.match(clientApps, /Windows/);
+  assert.match(clientApps, /iOS/);
+  assert.match(clientApps, /Android/);
+  assert.match(clientApps, /GitHub APK/);
+  assert.match(clientApps, /amneziawg-windows-client\/releases\/latest/);
+  assert.match(clientApps, /hiddify-app\/releases\/latest/);
+  assert.match(clientApps, /2dust\/v2rayN\/releases\/latest/);
+  assert.match(clientApps, /не используйте одноимённую версию Google Play/);
   assert.match(dialog, /mux_enabled/);
   assert.match(dialog, /Расширенные настройки/);
   assert.match(page, /request\("\/clients\/options"\)/);
   assert.match(api, /def client_options/);
   assert.match(api, /payload\.settings\.xray_sni/);
+  assert.match(api, /"settings": \{"vnext": \[\{/);
+  assert.match(api, /"xhttpSettings": \{"path": path, "mode": "auto"\}/);
   assert.match(api, /payload\.settings\.fast_open/);
   assert.match(api, /payload\.settings\.udp_relay_mode/);
   assert.match(api, /payload\.settings\.routing_domain_strategy/);

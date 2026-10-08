@@ -86,8 +86,11 @@ class PortabilityTests(unittest.TestCase):
             tuic_probe = json.loads((root / 'tuic.json').read_text(encoding='utf-8'))
             self.assertEqual(tuic_probe['outbounds'][0]['uuid'], 'tuic-diagnostic')
             xray_probe = json.loads((root / 'xray.json').read_text(encoding='utf-8'))
-            self.assertEqual(xray_probe['outbounds'][0]['settings']['address'], '127.0.0.1')
-            self.assertEqual(xray_probe['outbounds'][0]['settings']['id'], 'xray-diagnostic')
+            xray_target = xray_probe['outbounds'][0]['settings']['vnext'][0]
+            self.assertEqual(xray_target['address'], '127.0.0.1')
+            self.assertEqual(xray_target['users'][0]['id'], 'xray-diagnostic')
+            self.assertEqual(xray_probe['outbounds'][0]['streamSettings']['xhttpSettings']['mode'], 'auto')
+            self.assertEqual(xray_probe['outbounds'][0]['streamSettings']['realitySettings']['password'], 'public-key')
             self.assertEqual(xray_probe['outbounds'][0]['streamSettings']['security'], 'reality')
             self.assertTrue(all(commands.values()))
             for path, content in originals.items():
@@ -528,9 +531,15 @@ class PortabilityTests(unittest.TestCase):
             self.assertEqual(client['routing']['domainStrategy'], 'IPIfNonMatch')
             self.assertEqual(client['routing']['rules'][0]['protocol'], ['bittorrent'])
             self.assertEqual(client['outbounds'][1]['protocol'], 'blackhole')
+            target = client['outbounds'][0]['settings']['vnext'][0]
+            self.assertEqual(target['address'], '192.0.2.1')
+            self.assertEqual(target['users'][0]['id'], created['profile']['fields'][0]['value'])
+            self.assertEqual(client['outbounds'][0]['streamSettings']['xhttpSettings']['mode'], 'auto')
+            self.assertEqual(client['outbounds'][0]['streamSettings']['realitySettings']['password'], 'public-key')
             self.assertEqual(client['outbounds'][0]['streamSettings']['realitySettings']['serverName'], 'cdn.example.com')
             self.assertEqual(client['outbounds'][0]['mux'], {'enabled': True, 'concurrency': 12, 'xudpConcurrency': 24, 'xudpProxyUDP443': 'skip'})
             self.assertIn('sni=cdn.example.com', created['profile']['delivery']['link']['uri'])
+            self.assertIn('mode=auto', created['profile']['delivery']['link']['uri'])
 
     def test_connection_options_expose_server_bound_awg_and_xray_values(self):
         with tempfile.TemporaryDirectory() as directory:

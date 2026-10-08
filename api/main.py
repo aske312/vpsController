@@ -1143,13 +1143,16 @@ def direct_probe_client(protocol: str, proxy_port: int, directory: Path) -> list
         "inbounds": [{"listen": "127.0.0.1", "port": proxy_port, "protocol": "socks", "settings": {"udp": True}}],
         "outbounds": [{
             "tag": "probe-out", "protocol": "vless",
-            "settings": {"address": "127.0.0.1", "port": int(settings.get("port", 8445)), "id": user.get("id"), "encryption": "none"},
+            "settings": {"vnext": [{
+                "address": "127.0.0.1", "port": int(settings.get("port", 8445)),
+                "users": [{"id": user.get("id"), "encryption": "none"}],
+            }]},
             "streamSettings": {
-                "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path},
+                "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": "auto"},
                 "realitySettings": {
                     "serverName": str(settings.get("server_name", "www.microsoft.com")),
                     "fingerprint": "chrome", "password": str(settings.get("password", "")),
-                    "shortId": str(settings.get("short_id", "")), "spiderX": path,
+                    "shortId": str(settings.get("short_id", "")), "spiderX": "/",
                 },
             },
         }],
@@ -3030,13 +3033,16 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     http_settings["users"] = [local_user]
                 outbounds = [{
                     "tag": "xray-out", "protocol": "vless",
-                    "settings": {"address": endpoint, "port": int(settings.get("port", 8445)), "id": user_uuid, "encryption": "none"},
+                    "settings": {"vnext": [{
+                        "address": endpoint, "port": int(settings.get("port", 8445)),
+                        "users": [{"id": user_uuid, "encryption": "none"}],
+                    }]},
                     "streamSettings": {
-                        "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path},
+                        "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": "auto"},
                         "realitySettings": {
                             "serverName": server_name,
                             "fingerprint": payload.settings.fingerprint, "password": str(settings.get("password", "")),
-                            "shortId": str(settings.get("short_id", "")), "spiderX": path,
+                            "shortId": str(settings.get("short_id", "")), "spiderX": "/",
                         },
                     },
                     "mux": {"enabled": payload.settings.mux_enabled, "concurrency": payload.settings.mux_concurrency, "xudpConcurrency": payload.settings.xudp_concurrency, "xudpProxyUDP443": payload.settings.xudp_proxy_udp443},
@@ -3060,7 +3066,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 items.append({"id": client_id, "name": payload.name, "protocol": "xray", "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 port = int(settings.get("port", 8445))
-                query = urlencode({"type": "xhttp", "security": "reality", "pbk": str(settings.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(settings.get("short_id", "")), "path": path})
+                query = urlencode({"type": "xhttp", "security": "reality", "pbk": str(settings.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(settings.get("short_id", "")), "path": path, "mode": "auto", "spx": "/"})
                 uri = f"vless://{quote(user_uuid, safe='')}@{uri_endpoint(endpoint)}:{port}?{query}#{quote(payload.name, safe='')}"
                 return {"id": client_id, **connection_profile(
                     protocol="xray", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-xray.json", config=json.dumps(client, ensure_ascii=False, indent=2),

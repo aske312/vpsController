@@ -59,7 +59,7 @@ config = {
         'listen': '0.0.0.0', 'port': settings['port'], 'protocol': 'vless', 'tag': 'vless-xhttp-reality',
         'settings': {'clients': [], 'decryption': 'none'},
         'streamSettings': {
-            'network': 'xhttp', 'security': 'reality', 'xhttpSettings': {'path': settings['path']},
+            'network': 'xhttp', 'security': 'reality', 'xhttpSettings': {'path': settings['path'], 'mode': 'auto'},
             'realitySettings': {'show': False, 'target': settings['target'], 'xver': 0, 'serverNames': [settings['server_name']], 'privateKey': settings['private_key'], 'shortIds': [settings['short_id']]},
         },
     }],
@@ -69,6 +69,25 @@ with open(output_path, 'w', encoding='utf-8') as output: json.dump(config, outpu
 os.chmod(output_path, 0o600)
 PY
 fi
+python3 - "${ROOT}/config.json" "${ROOT}/settings.json" <<'PY'
+import json, os, sys
+config_path, settings_path = sys.argv[1:]
+config = json.load(open(config_path, encoding='utf-8'))
+settings = json.load(open(settings_path, encoding='utf-8'))
+for inbound in config.get('inbounds', []):
+    if inbound.get('protocol') != 'vless':
+        continue
+    stream = inbound.setdefault('streamSettings', {})
+    if stream.get('network') == 'xhttp':
+        xhttp = stream.setdefault('xhttpSettings', {})
+        xhttp['path'] = settings['path']
+        xhttp.setdefault('mode', 'auto')
+temporary = config_path + '.normalized'
+with open(temporary, 'w', encoding='utf-8') as output:
+    json.dump(config, output, indent=2)
+os.chmod(temporary, 0o600)
+os.replace(temporary, config_path)
+PY
 chmod 0600 "${ROOT}"/*.json
 install -m 0755 "$(dirname "$0")/firewall.sh" /usr/local/lib/vps-control-xray/firewall.sh
 cat >/etc/systemd/system/vps-control-xray.service <<EOF

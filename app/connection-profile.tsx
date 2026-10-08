@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 import { useEffect, useState } from "react";
 import type { Protocol } from "./page";
 import { ProtocolIcon } from "./protocol-icon";
+import { ClientAppCatalog } from "./client-apps";
 
 export type ConnectionProfile = {
   protocol: Protocol;
@@ -99,6 +100,7 @@ export function ConnectionProfileResult({ profile, onDownload }: Props) {
       <div><small>РЕКОМЕНДУЕМЫЕ КЛИЕНТЫ</small><strong>{profile.apps.join(" · ")}</strong></div>
       <ol>{profile.steps.map((step) => <li key={step}>{step}</li>)}</ol>
     </div>
+    <ClientAppCatalog protocol={profile.protocol} compact />
 
     <details><summary>Техническое содержимое профиля <span>⌄</span></summary><textarea readOnly value={profile.delivery.file.content} /></details>
     <p className="connectionSecretNote">После закрытия этого блока секреты нельзя будет показать повторно. При утрате профиля отзовите подключение и создайте новое.</p>
