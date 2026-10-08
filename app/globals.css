@@ -306,6 +306,17 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .connectionCheckbox > span { display: flex; flex-direction: column; gap: 4px; }
 .connectionCheckbox input { width: 18px; height: 18px; }
 .connectionSettingsNote { margin: 13px 0 0; color: #84928f; font-size: 8px; line-height: 1.55; }
+.connectionSettingsGroup { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); }
+.connectionSettingsGroup > header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.connectionSettingsGroup > header strong { font-size: 9px; }
+.connectionSettingsGroup > header small { color: var(--muted); font: 7px var(--font-mono); }
+.connectionServerValues { grid-column: 1 / -1; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #0d1820; }
+.connectionServerValues > strong { display: block; margin-bottom: 8px; font-size: 9px; }
+.connectionServerValues dl { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin: 0 0 8px; }
+.connectionServerValues dl div { padding: 6px; border-radius: 6px; background: #09151c; text-align: center; }
+.connectionServerValues dt { color: var(--muted); font: 7px var(--font-mono); }
+.connectionServerValues dd { margin: 3px 0 0; overflow: hidden; font: 8px var(--font-mono); text-overflow: ellipsis; }
+.connectionServerValues > small { color: var(--muted); font-size: 8px; line-height: 1.45; }
 .connectionAdvanced { margin-top: 11px; border-top: 1px solid var(--line); }
 .connectionAdvanced > summary { display: flex; justify-content: space-between; padding: 11px 2px 0; color: var(--accent); font: 8px var(--font-mono); cursor: pointer; list-style: none; }
 .connectionAdvanced[open] > summary { padding-bottom: 11px; }
@@ -372,6 +383,7 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
   .connectionDialog, .connectionDialog.generated { max-height: 100vh; min-height: 100vh; border-radius: 0; }
   .connectionDialogHead, .connectionDialogBody, .connectionDialogResult { padding-inline: 18px; }
   .connectionSettingsFields { grid-template-columns: 1fr; }
+  .connectionServerValues dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .connectionDialogActions { padding-inline: 18px; }
   .connectionHandoff.withQr, .connectionSetup { grid-template-columns: 1fr; }
   .connectionQr { width: min(260px, 100%); justify-self: center; }

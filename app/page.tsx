@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ConnectionDialog, type ConnectionSettings } from "./connection-dialog";
+import { ConnectionDialog, type ConnectionServerOptions, type ConnectionSettings } from "./connection-dialog";
 import type { ConnectionProfile } from "./connection-profile";
 import { ConnectionsView } from "./connections-view";
 import { LegalFooter } from "./legal";
@@ -199,6 +199,7 @@ export default function Home() {
   const [loginPassword, setLoginPassword] = useState("");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
+  const [connectionOptions, setConnectionOptions] = useState<ConnectionServerOptions>({});
   const [security, setSecurity] = useState<Record<string, unknown> | null>(null);
   const [securityLoading, setSecurityLoading] = useState(false);
   const [securityLogSource, setSecurityLogSource] = useState<"ssh" | "firewall" | "system">("ssh");
@@ -378,8 +379,11 @@ export default function Home() {
   const loadClients = useCallback(async () => {
     if (!token) return;
     try {
-      const data = await request("/clients");
-      setClients(data.items); setLastUpdated(new Date());
+      const [data, options] = await Promise.all([
+        request("/clients"),
+        request("/clients/options") as Promise<ConnectionServerOptions>,
+      ]);
+      setClients(data.items); setConnectionOptions(options); setLastUpdated(new Date());
     } catch (cause) { reportBackgroundError(cause, "Не удалось обновить клиентов"); }
   }, [reportBackgroundError, request, token]);
 
@@ -1695,7 +1699,7 @@ export default function Home() {
       />}
 
       {tab === "clients" && (installedProtocols.length ? <ConnectionsView clients={clients} protocols={installedProtocols} busy={busy} onNew={() => setConnectionDialog(true)} onRemove={(id) => void removeClient(id)} /> : <section className="clientsLayout"><article className="panel noConnectionProtocols"><span>◎</span><h2>Нет установленных протоколов</h2><p>Установите хотя бы один сетевой модуль на странице «Обзор», после чего здесь появится создание персональных подключений.</p><button type="button" className="primaryButton" onClick={() => setTab("overview")}>Перейти к модулям <span>→</span></button></article></section>)}
-      {connectionDialog && installedProtocols.length > 0 && <ConnectionDialog protocols={installedProtocols} onClose={() => setConnectionDialog(false)} onCreate={createClient} onCreated={loadClients} onError={setError} onDownload={downloadConfig} />}
+      {connectionDialog && installedProtocols.length > 0 && <ConnectionDialog protocols={installedProtocols} serverOptions={connectionOptions} onClose={() => setConnectionDialog(false)} onCreate={createClient} onCreated={loadClients} onError={setError} onDownload={downloadConfig} />}
       {passwordDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closePasswordDialog}>
         <form className="confirmDialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()} onSubmit={changeAdminPassword}>
           <p className="eyebrow">ADMINISTRATOR ACCESS</p><h2>Изменить пароль администратора</h2>

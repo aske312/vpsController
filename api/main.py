@@ -2740,6 +2740,35 @@ def clients(_: None = Depends(require_token)) -> dict:
     return {"items": interface_dump("wg") + interface_dump("awg") + direct_client_rows()}
 
 
+def xray_server_names() -> list[str]:
+    names: list[str] = []
+    try:
+        server = json.loads(XRAY_CONFIG.read_text(encoding="utf-8"))
+        inbound = next(row for row in server.get("inbounds", []) if row.get("protocol") == "vless")
+        configured = inbound.get("streamSettings", {}).get("realitySettings", {}).get("serverNames", [])
+        if isinstance(configured, list):
+            names.extend(str(name).strip() for name in configured if str(name).strip())
+    except (OSError, StopIteration, json.JSONDecodeError):
+        pass
+    try:
+        settings = json.loads(XRAY_SETTINGS.read_text(encoding="utf-8"))
+        fallback = str(settings.get("server_name", "")).strip()
+        if fallback:
+            names.append(fallback)
+    except (OSError, json.JSONDecodeError):
+        pass
+    return list(dict.fromkeys(names))
+
+
+@app.get("/api/clients/options")
+def client_options(_: None = Depends(require_token)) -> dict:
+    server_names = xray_server_names()
+    return {
+        "awg": {key.lower(): int(value) for key, value in AWG_PROFILE.items()},
+        "xray": {"server_names": server_names, "default_sni": server_names[0] if server_names else ""},
+    }
+
+
 class ClientSettings(BaseModel):
     dns: str = Field(default="1.1.1.1, 1.0.0.1", min_length=1, max_length=255, pattern=r"^[0-9A-Fa-f:., ]+$")
     mtu: int | None = Field(default=None, ge=576, le=1500)
@@ -2747,8 +2776,8 @@ class ClientSettings(BaseModel):
     route_mode: Literal["ipv4", "all", "custom"] = "ipv4"
     allowed_ips: str = Field(default="0.0.0.0/0", min_length=3, max_length=255, pattern=r"^[0-9A-Fa-f:.,/ ]+$")
     awg_jc: int | None = Field(default=None, ge=0, le=128)
-    awg_jmin: int | None = Field(default=None, ge=0, le=128)
-    awg_jmax: int | None = Field(default=None, ge=0, le=128)
+    awg_jmin: int | None = Field(default=None, ge=0, le=1280)
+    awg_jmax: int | None = Field(default=None, ge=0, le=1280)
     proxy_bind: Literal["loopback", "lan"] = "loopback"
     local_auth_enabled: bool = False
     local_username: str = Field(default="proxy", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
@@ -2775,6 +2804,11 @@ class ClientSettings(BaseModel):
     initial_packet_size: int = Field(default=0, ge=0, le=1500)
     disable_path_mtu_discovery: bool = False
     fingerprint: Literal["chrome", "firefox", "safari"] = "chrome"
+    xray_sni: str = Field(default="", max_length=253, pattern=r"^[A-Za-z0-9.-]*$")
+    mux_enabled: bool = False
+    mux_concurrency: int = Field(default=8, ge=1, le=128)
+    xudp_concurrency: int = Field(default=16, ge=1, le=1024)
+    xudp_proxy_udp443: Literal["reject", "allow", "skip"] = "reject"
     sniffing: bool = True
     route_only: bool = False
     routing_domain_strategy: Literal["AsIs", "IPIfNonMatch", "IPOnDemand"] = "AsIs"
@@ -2889,6 +2923,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         raise HTTPException(status_code=422, detail="LAN proxy access requires local authentication")
     if payload.protocol == "tuic" and payload.settings.initial_packet_size not in range(1200, 1501) and payload.settings.initial_packet_size != 0:
         raise HTTPException(status_code=422, detail="Initial QUIC packet size must be 0 or between 1200 and 1500")
+    if payload.protocol == "xray" and payload.settings.xray_sni:
+        allowed_server_names = xray_server_names()
+        if payload.settings.xray_sni not in allowed_server_names:
+            raise HTTPException(status_code=422, detail="Xray SNI is not allowed by the server REALITY configuration")
     if payload.settings.route_mode == "custom":
         try:
             for network in payload.settings.allowed_ips.split(","):
@@ -3017,6 +3055,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 settings = json.loads(XRAY_SETTINGS.read_text(encoding="utf-8"))
                 endpoint = PUBLIC_IP
                 path = str(settings.get("path", "/xhttp"))
+                server_names = xray_server_names()
+                server_name = payload.settings.xray_sni or (server_names[0] if server_names else str(settings.get("server_name", "www.microsoft.com")))
                 listen_host = "0.0.0.0" if payload.settings.proxy_bind == "lan" else "127.0.0.1"
                 socks_settings = {"udp": not payload.settings.disable_udp, "auth": "password" if payload.settings.local_auth_enabled else "noauth"}
                 http_settings: dict = {}
@@ -3030,11 +3070,12 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     "streamSettings": {
                         "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path},
                         "realitySettings": {
-                            "serverName": str(settings.get("server_name", "www.microsoft.com")),
+                            "serverName": server_name,
                             "fingerprint": payload.settings.fingerprint, "password": str(settings.get("password", "")),
                             "shortId": str(settings.get("short_id", "")), "spiderX": path,
                         },
                     },
+                    "mux": {"enabled": payload.settings.mux_enabled, "concurrency": payload.settings.mux_concurrency, "xudpConcurrency": payload.settings.xudp_concurrency, "xudpProxyUDP443": payload.settings.xudp_proxy_udp443},
                 }]
                 routing_rules = []
                 if payload.settings.block_bittorrent:
@@ -3055,7 +3096,6 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 items.append({"id": client_id, "name": payload.name, "protocol": "xray", "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()})
                 write_clients(items)
                 port = int(settings.get("port", 8445))
-                server_name = str(settings.get("server_name", "www.microsoft.com"))
                 query = urlencode({"type": "xhttp", "security": "reality", "pbk": str(settings.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(settings.get("short_id", "")), "path": path})
                 uri = f"vless://{quote(user_uuid, safe='')}@{uri_endpoint(endpoint)}:{port}?{query}#{quote(payload.name, safe='')}"
                 return {"id": client_id, **connection_profile(

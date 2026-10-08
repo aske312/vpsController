@@ -157,7 +157,14 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(dialog, /disable_loss_compensation/);
   assert.match(dialog, /initial_packet_size/);
   assert.match(dialog, /block_bittorrent/);
+  assert.match(dialog, /Общие настройки доступа для proxy-протоколов/);
+  assert.match(dialog, /SNI для REALITY/);
+  assert.match(dialog, /serverOptions\.awg\?\.s1/);
+  assert.match(dialog, /mux_enabled/);
   assert.match(dialog, /Расширенные настройки/);
+  assert.match(page, /request\("\/clients\/options"\)/);
+  assert.match(api, /def client_options/);
+  assert.match(api, /payload\.settings\.xray_sni/);
   assert.match(api, /payload\.settings\.fast_open/);
   assert.match(api, /payload\.settings\.udp_relay_mode/);
   assert.match(api, /payload\.settings\.routing_domain_strategy/);

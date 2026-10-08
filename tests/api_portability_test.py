@@ -506,7 +506,7 @@ class PortabilityTests(unittest.TestCase):
             protocol.mkdir()
             config_path = protocol / 'config.json'
             settings_path = protocol / 'settings.json'
-            config_path.write_text(json.dumps({'inbounds': [{'protocol': 'vless', 'settings': {'clients': []}}]}), encoding='utf-8')
+            config_path.write_text(json.dumps({'inbounds': [{'protocol': 'vless', 'settings': {'clients': []}, 'streamSettings': {'realitySettings': {'serverNames': ['example.com', 'cdn.example.com']}}}]}), encoding='utf-8')
             settings_path.write_text(json.dumps({'port': 8445, 'path': '/xhttp', 'server_name': 'example.com', 'password': 'public-key', 'short_id': '0123456789abcdef'}), encoding='utf-8')
             valid = type('Result', (), {'returncode': 0, 'stderr': ''})()
 
@@ -517,6 +517,8 @@ class PortabilityTests(unittest.TestCase):
                 local_auth_enabled=True, local_username='xray-user', local_password='xray-password',
                 xray_dns='1.1.1.1, 8.8.8.8', block_bittorrent=True,
                 sniffing=True, route_only=True, routing_domain_strategy='IPIfNonMatch',
+                xray_sni='cdn.example.com', mux_enabled=True, mux_concurrency=12,
+                xudp_concurrency=24, xudp_proxy_udp443='skip',
             )
             with patch.multiple(
                 api,
@@ -534,6 +536,24 @@ class PortabilityTests(unittest.TestCase):
             self.assertEqual(client['routing']['domainStrategy'], 'IPIfNonMatch')
             self.assertEqual(client['routing']['rules'][0]['protocol'], ['bittorrent'])
             self.assertEqual(client['outbounds'][1]['protocol'], 'blackhole')
+            self.assertEqual(client['outbounds'][0]['streamSettings']['realitySettings']['serverName'], 'cdn.example.com')
+            self.assertEqual(client['outbounds'][0]['mux'], {'enabled': True, 'concurrency': 12, 'xudpConcurrency': 24, 'xudpProxyUDP443': 'skip'})
+            self.assertIn('sni=cdn.example.com', created['profile']['delivery']['link']['uri'])
+
+    def test_connection_options_expose_server_bound_awg_and_xray_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_path = root / 'config.json'
+            settings_path = root / 'settings.json'
+            config_path.write_text(json.dumps({'inbounds': [{'protocol': 'vless', 'streamSettings': {'realitySettings': {'serverNames': ['one.example', 'two.example']}}}]}), encoding='utf-8')
+            settings_path.write_text(json.dumps({'server_name': 'one.example'}), encoding='utf-8')
+            with patch.multiple(api, XRAY_CONFIG=config_path, XRAY_SETTINGS=settings_path):
+                options = api.client_options(None)
+
+            self.assertEqual(options['xray']['server_names'], ['one.example', 'two.example'])
+            self.assertEqual(options['xray']['default_sni'], 'one.example')
+            self.assertEqual(options['awg']['s1'], int(api.AWG_PROFILE['S1']))
+            self.assertEqual(options['awg']['h4'], int(api.AWG_PROFILE['H4']))
 
 
 if __name__ == '__main__':
