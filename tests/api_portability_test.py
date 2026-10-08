@@ -612,7 +612,7 @@ class PortabilityTests(unittest.TestCase):
             self.assertEqual(client['outbounds'][0]['streamSettings']['realitySettings']['fingerprint'], 'edge')
             self.assertEqual(client['outbounds'][0]['streamSettings']['realitySettings']['password'], 'public-key')
             self.assertEqual(client['outbounds'][0]['streamSettings']['realitySettings']['serverName'], 'cdn.example.com')
-            self.assertEqual(client['outbounds'][0]['mux'], {'enabled': True, 'concurrency': 12, 'xudpConcurrency': 24, 'xudpProxyUDP443': 'skip'})
+            self.assertEqual(client['outbounds'][0]['mux'], {'enabled': True, 'concurrency': -1, 'xudpConcurrency': 24, 'xudpProxyUDP443': 'skip'})
             self.assertIn('sni=cdn.example.com', created['profile']['delivery']['link']['uri'])
             self.assertIn('mode=packet-up', created['profile']['delivery']['link']['uri'])
 

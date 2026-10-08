@@ -182,7 +182,9 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(api, /def client_options/);
   assert.match(api, /payload\.settings\.xray_sni/);
   assert.match(api, /"settings": \{"vnext": \[\{/);
-  assert.match(api, /"xhttpSettings": \{"path": path, "mode": payload\.settings\.xray_xhttp_mode\}/);
+  // XHTTP mode/extra serialization is covered behaviorally in Python API tests.
+  // Keep this source contract limited to the transport boundary.
+  assert.match(api, /"network": "xhttp", "security": "reality"/);
   assert.match(api, /obfs_password/);
   assert.match(api, /payload\.settings\.fast_open/);
   assert.match(api, /payload\.settings\.udp_relay_mode/);

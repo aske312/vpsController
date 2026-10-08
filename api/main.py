@@ -34,6 +34,7 @@ from metrics_history import MetricsHistory, MetricsMonitor
 from system_metrics import CpuSampler, collect_resources
 from awg_obfuscation import client_profile as awg_client_profile, preset_catalog
 from awg_ports import AwgPorts, PORT_CHOICES, PortError
+from connection_tuning import tuning_catalog, xhttp_extra
 
 
 @asynccontextmanager
@@ -2811,6 +2812,7 @@ def client_options(_: None = Depends(require_token)) -> dict:
     return {
         "awg": {key.lower(): int(value) if str(value).isdigit() else value for key, value in AWG_PROFILE.items()},
         "awg_obfuscation": preset_catalog(),
+        "connection_tuning": tuning_catalog(),
         "awg_ports": {"default_port": AWG_PORT, "suggestions": [awg_port_manager().status(port) for port in dict.fromkeys((AWG_PORT, *PORT_CHOICES))]},
         "hysteria2": {
             "obfs": str(hysteria.get("obfs", "none")),
@@ -2871,6 +2873,7 @@ class ClientSettings(BaseModel):
     disable_loss_compensation: bool = False
     hysteria_hop_min: int = Field(default=15, ge=5, le=300)
     hysteria_hop_max: int = Field(default=45, ge=5, le=300)
+    hysteria_keepalive: int = Field(default=10, ge=1, le=30)
     congestion_control: Literal["bbr", "cubic", "new_reno"] = "bbr"
     heartbeat: Literal["5s", "10s", "15s", "30s"] = "10s"
     udp_relay_mode: Literal["native", "quic"] = "native"
@@ -2884,6 +2887,7 @@ class ClientSettings(BaseModel):
     fingerprint: Literal["chrome", "firefox", "edge", "safari", "ios", "android", "randomized"] = "chrome"
     xray_sni: str = Field(default="", max_length=253)
     xray_xhttp_mode: Literal["stream-one", "packet-up", "stream-up", "auto"] = "stream-one"
+    xray_xmux_profile: Literal["default", "mobile", "parallel", "rotate"] = "default"
     mux_enabled: bool = False
     mux_concurrency: int = Field(default=8, ge=1, le=128)
     xudp_concurrency: int = Field(default=16, ge=1, le=1024)
@@ -3126,6 +3130,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 obfs_password = str(settings.get("obfs_password", ""))
                 if payload.settings.hysteria_congestion == "bbr":
                     config_lines.append(f"  bbrProfile: {payload.settings.bbr_profile}")
+                config_lines.extend([
+                    "quic:", f"  keepAlivePeriod: {payload.settings.hysteria_keepalive}s",
+                    f"  disablePathMTUDiscovery: {str(payload.settings.disable_path_mtu_discovery).lower()}",
+                ])
                 if payload.settings.up_mbps or payload.settings.down_mbps:
                     config_lines.append("bandwidth:")
                     if payload.settings.up_mbps:
@@ -3197,7 +3205,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     outbound["network"] = payload.settings.network
                 if payload.settings.initial_packet_size:
                     outbound["initial_packet_size"] = payload.settings.initial_packet_size
-                outbound["disable_path_mtu_discovery"] = payload.settings.disable_path_mtu_discovery
+                # QUIC overrides require sing-box 1.14; default exports remain
+                # usable on clients that predate these optional fields.
+                if payload.settings.disable_path_mtu_discovery:
+                    outbound["disable_path_mtu_discovery"] = True
                 listen_host = "0.0.0.0" if payload.settings.proxy_bind == "lan" else "127.0.0.1"
                 mixed_inbound = {"type": "mixed", "tag": "mixed-in", "listen": listen_host, "listen_port": payload.settings.local_socks_port, "tcp_fast_open": payload.settings.tcp_fast_open, "set_system_proxy": payload.settings.set_system_proxy, "udp_fragment": payload.settings.udp_fragment, "udp_timeout": payload.settings.udp_timeout}
                 if payload.settings.local_auth_enabled:
@@ -3270,14 +3281,16 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                         "users": [{"id": user_uuid, "encryption": "none"}],
                     }]},
                     "streamSettings": {
-                        "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": payload.settings.xray_xhttp_mode},
+                        "network": "xhttp", "security": "reality", "xhttpSettings": {"path": path, "mode": payload.settings.xray_xhttp_mode, "extra": xhttp_extra(payload.settings)},
                         "realitySettings": {
                             "serverName": server_name,
                             "fingerprint": payload.settings.fingerprint, "password": str(profile.get("password", "")),
                             "shortId": str(profile.get("short_id", "")), "spiderX": "/",
                         },
                     },
-                    "mux": {"enabled": payload.settings.mux_enabled, "concurrency": payload.settings.mux_concurrency, "xudpConcurrency": payload.settings.xudp_concurrency, "xudpProxyUDP443": payload.settings.xudp_proxy_udp443},
+                    # XHTTP handles TCP multiplexing itself. -1 permits pure XUDP
+                    # without wrapping TCP in unsupported mux.cool sessions.
+                    "mux": {"enabled": payload.settings.mux_enabled, "concurrency": -1, "xudpConcurrency": payload.settings.xudp_concurrency, "xudpProxyUDP443": payload.settings.xudp_proxy_udp443},
                 }]
                 routing_rules = []
                 if payload.settings.block_bittorrent:
@@ -3302,7 +3315,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 })
                 write_clients(items)
                 port = int(profile.get("port", 8445))
-                query = urlencode({"type": "xhttp", "security": "reality", "encryption": "none", "pbk": str(profile.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(profile.get("short_id", "")), "path": path, "mode": payload.settings.xray_xhttp_mode, "spx": "/"})
+                query = urlencode({"type": "xhttp", "security": "reality", "encryption": "none", "pbk": str(profile.get("password", "")), "fp": payload.settings.fingerprint, "sni": server_name, "sid": str(profile.get("short_id", "")), "path": path, "mode": payload.settings.xray_xhttp_mode, "extra": json.dumps(xhttp_extra(payload.settings), separators=(",", ":")), "spx": "/"})
                 uri = f"vless://{quote(user_uuid, safe='')}@{uri_endpoint(endpoint)}:{port}?{query}#{quote(payload.name, safe='')}"
                 return {"id": client_id, **connection_profile(
                     protocol="xray", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-xray.json", config=json.dumps(client, ensure_ascii=False, indent=2),
