@@ -5,8 +5,18 @@ import { ConnectionProfileResult, protocolDelivery, type ConnectionProfile } fro
 import { ProtocolIcon } from "./protocol-icon";
 import type { Protocol } from "./page";
 import { awgDefaultDomain, awgDomainGroups, awgDomainPresets } from "./awg-domain-presets";
+import { TransportFields } from "./transport-fields";
 
 export type ConnectionSettings = {
+  client_mode: "proxy" | "vpn";
+  hysteria_format: "hysteria" | "sing-box";
+  quic_idle: number;
+  quic_keepalive: number;
+  quic_stream_window: number;
+  quic_conn_window: number;
+  quic_streams: number;
+  hysteria_chrome_parrot: boolean;
+  tuic_udp_over_stream: boolean;
   dns: string;
   mtu: number;
   keepalive: number;
@@ -38,7 +48,7 @@ export type ConnectionSettings = {
   hysteria_hop_max: number;
   hysteria_keepalive: number;
   congestion_control: "bbr" | "cubic" | "new_reno";
-  heartbeat: "5s" | "10s" | "15s" | "30s";
+  heartbeat: string;
   udp_relay_mode: "native" | "quic";
   network: "all" | "tcp" | "udp";
   tcp_fast_open: boolean;
@@ -50,7 +60,14 @@ export type ConnectionSettings = {
   fingerprint: "chrome" | "firefox" | "edge" | "safari" | "ios" | "android" | "randomized";
   xray_sni: string;
   xray_xhttp_mode: "stream-one" | "auto" | "packet-up" | "stream-up";
-  xray_xmux_profile: "default" | "mobile" | "parallel" | "rotate";
+  xray_xmux_profile: "default" | "mobile" | "parallel" | "rotate" | "custom";
+  xray_padding: string;
+  xmux_concurrency: string;
+  xmux_connections: string;
+  xmux_reuse: string;
+  xmux_requests: string;
+  xmux_seconds: string;
+  xmux_keepalive: number;
   mux_enabled: boolean;
   mux_concurrency: number;
   xudp_concurrency: number;
@@ -75,6 +92,12 @@ export type ConnectionServerOptions = {
 };
 
 const settingsFor = (protocol: Protocol, serverOptions: ConnectionServerOptions): ConnectionSettings => ({
+  client_mode: protocol === "tuic" || protocol === "hysteria2" ? "vpn" : "proxy",
+  hysteria_format: "sing-box",
+  quic_idle: 0, quic_keepalive: 0, quic_stream_window: 0, quic_conn_window: 0, quic_streams: 0,
+  hysteria_chrome_parrot: true, tuic_udp_over_stream: false,
+  xray_padding: "100-1000", xmux_concurrency: "1", xmux_connections: "0", xmux_reuse: "0",
+  xmux_requests: "600-900", xmux_seconds: "1800-3000", xmux_keepalive: 0,
   dns: "1.1.1.1, 1.0.0.1",
   mtu: 1280,
   keepalive: 25,
@@ -178,6 +201,7 @@ function validateConnection(name: string, protocol: Protocol, settings: Connecti
 
 function serverErrorField(message: string): keyof ConnectionSettings | undefined {
   const value = message.toLowerCase();
+  for (const field of ["quic_idle", "quic_keepalive", "quic_stream_window", "quic_conn_window", "quic_streams", "xmux_concurrency", "xmux_connections", "xmux_reuse", "xmux_requests", "xmux_seconds", "xmux_keepalive", "xray_padding"] as const) if (value.includes(field)) return field;
   if (value.includes("awg udp port") || value.includes("awg_port")) return "awg_port";
   if (value.includes("awg signature")) return "awg_signature_domain";
   if (value.includes("sni") || value.includes("domain") || value.includes("reality")) return "xray_sni";
@@ -289,13 +313,14 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
 
   const meta = protocolDelivery[protocol];
   const proxyProtocol = protocol === "hysteria2" || protocol === "tuic" || protocol === "xray";
+  const localProxy = proxyProtocol && !(settings.client_mode === "vpn" && (protocol === "tuic" || (protocol === "hysteria2" && settings.hysteria_format === "sing-box")));
   const masking = {
     awg: { state: "Включена", detail: `AmneziaWG · Jc ${settings.awg_jc} · S/H синхронизированы с сервером`, level: "active" },
     hysteria2: { state: serverOptions.hysteria2?.obfs === "gecko" ? "Gecko" : serverOptions.hysteria2?.obfs === "salamander" ? "Salamander" : "HTTP/3", detail: `QUIC + TLS · ${serverOptions.hysteria2?.port_hopping || "один UDP-порт"}`, level: "active" },
     tuic: { state: "Базовая", detail: "TLS 1.3 поверх QUIC · 0-RTT отключён · отдельной обфускации в TUIC v5 нет", level: "limited" },
     xray: { state: "Включена", detail: `XHTTP ${settings.xray_xhttp_mode} + REALITY · ${settings.fingerprint}`, level: "active" },
   }[protocol];
-  const localAccessInvalid = proxyProtocol && settings.local_auth_enabled && settings.local_password.length < 8;
+  const localAccessInvalid = localProxy && settings.local_auth_enabled && settings.local_password.length < 8;
   return <div className="confirmBackdrop connectionDialogBackdrop" role="presentation" onMouseDown={() => { if (!submitting && !profile) onClose(); }}>
     <form noValidate className={`connectionDialog${profile ? " generated" : ""}`} role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={submit}>
       <header className="connectionDialogHead"><div><p className="eyebrow">PERSONAL ACCESS</p><h2 id="connection-dialog-title">{profile ? "Подключение создано" : "Новое подключение"}</h2><span>{profile ? "Передайте профиль владельцу устройства и сохраните его сейчас." : "Настройте отдельный профиль для конкретного пользователя или устройства."}</span></div><button type="button" aria-label="Закрыть" onClick={onClose} disabled={submitting}>×</button></header>
@@ -306,10 +331,12 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
           <fieldset className="connectionSettings"><legend>Параметры профиля</legend><header><span className={`protocol ${protocol}`}><ProtocolIcon protocol={protocol} /></span><div><strong>{meta.title}</strong><small>{meta.transport} · {meta.methods.join(" · ")}</small></div></header>
             <div className={`connectionMaskingStatus ${masking.level}`}><span>Маскирование</span><strong>{masking.state}</strong><small>{masking.detail}</small></div>
             <div className="connectionSettingsFields">
+              {protocol === "hysteria2" && <label><span>Формат файла</span><select value={settings.hysteria_format} onChange={(event) => { update({ hysteria_format: event.target.value as ConnectionSettings["hysteria_format"], client_mode: event.target.value === "hysteria" ? "proxy" : "vpn", quic_streams: 0, quic_keepalive: 0, hysteria_congestion: "bbr", fast_open: false, lazy: false, disable_loss_compensation: false }); setTuning("custom"); }}><option value="sing-box">JSON · sing-box / Karing</option><option value="hysteria">YAML · Hysteria CLI</option></select></label>}
+              {(protocol === "tuic" || (protocol === "hysteria2" && settings.hysteria_format === "sing-box")) && <><label><span>Режим клиента</span><select value={settings.client_mode} onChange={(event) => update({ client_mode: event.target.value as ConnectionSettings["client_mode"] })}><option value="vpn">VPN / TUN · iOS, Android, ПК</option><option value="proxy">Локальный прокси · CLI</option></select></label>{settings.client_mode === "vpn" && <><label><span>MTU туннеля</span><input type="number" min={576} max={1500} value={settings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label><label><span>DNS через туннель</span><input value={settings.dns} onChange={(event) => update({ dns: event.target.value })} /><small>Используется первый IP из списка.</small></label></>}</>}
               {proxyProtocol && Boolean(serverOptions.connection_tuning?.[protocol]?.length) && <label><span>Готовый вариант подключения</span><select aria-label="Готовый вариант подключения" value={tuning} onChange={(event) => {
                 const preset = serverOptions.connection_tuning?.[protocol]?.find((item) => item.id === event.target.value);
                 if (preset) { update(preset.settings); setTuning(preset.id); }
-              }}>{serverOptions.connection_tuning?.[protocol]?.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}<option value="custom" disabled>Свои параметры</option></select><small>{serverOptions.connection_tuning?.[protocol]?.find((item) => item.id === tuning)?.description || "Параметры изменены вручную."}</small></label>}
+              }}>{serverOptions.connection_tuning?.[protocol]?.filter((item) => protocol !== "hysteria2" || settings.hysteria_format === "hysteria" || !["reno", "responsive", "on-demand"].includes(item.id)).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}<option value="custom" disabled>Свои параметры</option></select><small>{serverOptions.connection_tuning?.[protocol]?.find((item) => item.id === tuning)?.description || "Параметры изменены вручную."}</small></label>}
               {protocol === "awg" && <>
                 <label className={portError ? "fieldInvalid" : ""}>
                   <span>UDP-порт AWG</span>
@@ -329,16 +356,16 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
                 <label><span>Маршрутизация</span><select value={settings.route_mode} onChange={(event) => update({ route_mode: event.target.value as ConnectionSettings["route_mode"] })}><option value="ipv4">Весь IPv4-трафик</option><option value="all">IPv4 + IPv6</option><option value="custom">Собственные сети</option></select></label>
                 {settings.route_mode === "custom" && <label className={fieldErrors.allowed_ips ? "fieldInvalid" : ""}><span>Allowed IPs</span><input aria-invalid={Boolean(fieldErrors.allowed_ips)} value={settings.allowed_ips} onChange={(event) => update({ allowed_ips: event.target.value })} placeholder="10.0.0.0/8, 192.168.0.0/16" />{fieldErrors.allowed_ips && <small className="fieldError">{fieldErrors.allowed_ips}</small>}</label>}
               </>}
-              {protocol === "hysteria2" && <>
+              {protocol === "hysteria2" && localProxy && <>
                 <label className={fieldErrors.local_socks_port ? "fieldInvalid" : ""}><span>Локальный SOCKS5-порт</span><input aria-invalid={Boolean(fieldErrors.local_socks_port)} type="number" min={1024} max={65535} value={settings.local_socks_port} onChange={(event) => update({ local_socks_port: Number(event.target.value) })} />{fieldErrors.local_socks_port && <small className="fieldError">{fieldErrors.local_socks_port}</small>}</label>
                 <label className="connectionCheckbox"><span><strong>Отключить UDP в SOCKS5</strong><small>Используйте только при ограничениях клиента</small></span><input type="checkbox" checked={settings.disable_udp} onChange={(event) => update({ disable_udp: event.target.checked })} /></label>
                 <label className="connectionCheckbox"><span><strong>HTTP-прокси</strong><small>Дополнительный локальный порт</small></span><input type="checkbox" checked={settings.http_proxy_enabled} onChange={(event) => update({ http_proxy_enabled: event.target.checked })} /></label>
                 {settings.http_proxy_enabled && <label><span>Локальный HTTP-порт</span><input type="number" min={1024} max={65535} value={settings.local_http_port} onChange={(event) => update({ local_http_port: Number(event.target.value) })} /></label>}
               </>}
               {protocol === "tuic" && <>
-                <label className={fieldErrors.local_socks_port ? "fieldInvalid" : ""}><span>Локальный mixed-порт</span><input aria-invalid={Boolean(fieldErrors.local_socks_port)} type="number" min={1024} max={65535} value={settings.local_socks_port} onChange={(event) => update({ local_socks_port: Number(event.target.value) })} />{fieldErrors.local_socks_port && <small className="fieldError">{fieldErrors.local_socks_port}</small>}</label>
+                {localProxy && <label className={fieldErrors.local_socks_port ? "fieldInvalid" : ""}><span>Локальный mixed-порт</span><input aria-invalid={Boolean(fieldErrors.local_socks_port)} type="number" min={1024} max={65535} value={settings.local_socks_port} onChange={(event) => update({ local_socks_port: Number(event.target.value) })} />{fieldErrors.local_socks_port && <small className="fieldError">{fieldErrors.local_socks_port}</small>}</label>}
                 <label><span>Congestion control</span><select value={settings.congestion_control} onChange={(event) => update({ congestion_control: event.target.value as ConnectionSettings["congestion_control"] })}><option value="bbr">BBR</option><option value="cubic">CUBIC</option><option value="new_reno">New Reno</option></select></label>
-                <label><span>Heartbeat</span><select value={settings.heartbeat} onChange={(event) => update({ heartbeat: event.target.value as ConnectionSettings["heartbeat"] })}><option value="5s">5 секунд</option><option value="10s">10 секунд</option><option value="15s">15 секунд</option><option value="30s">30 секунд</option></select></label>
+                <label><span>Heartbeat, сек.</span><input type="number" min={1} max={300} value={parseInt(settings.heartbeat) || ""} onChange={(event) => update({ heartbeat: `${event.target.value}s` })} /></label>
               </>}
               {protocol === "xray" && <>
                 <label className={fieldErrors.local_socks_port ? "fieldInvalid" : ""}><span>Локальный SOCKS-порт</span><input aria-invalid={Boolean(fieldErrors.local_socks_port)} type="number" min={1024} max={65535} value={settings.local_socks_port} onChange={(event) => update({ local_socks_port: Number(event.target.value) })} />{fieldErrors.local_socks_port && <small className="fieldError">{fieldErrors.local_socks_port}</small>}</label>
@@ -349,12 +376,13 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
                 <label className="connectionCheckbox"><span><strong>Отключить UDP</strong><small>Оставьте выключенным для обычной работы</small></span><input type="checkbox" checked={settings.disable_udp} onChange={(event) => update({ disable_udp: event.target.checked })} /></label>
               </>}
             </div>
-            {proxyProtocol && <section className="connectionSettingsGroup"><header><strong>Локальный прокси</strong><small>Общие настройки доступа для proxy-протоколов</small></header><div className="connectionSettingsFields">
+            {localProxy && <section className="connectionSettingsGroup"><header><strong>Локальный прокси</strong><small>Общие настройки доступа для proxy-протоколов</small></header><div className="connectionSettingsFields">
               <label><span>Доступ к локальному прокси</span><select value={settings.proxy_bind} onChange={(event) => update({ proxy_bind: event.target.value as ConnectionSettings["proxy_bind"], ...(event.target.value === "lan" ? { local_auth_enabled: true } : {}) })}><option value="loopback">Только это устройство</option><option value="lan">Локальная сеть — с авторизацией</option></select></label>
               <label className="connectionCheckbox"><span><strong>Логин и пароль</strong><small>Защищает локальный SOCKS/HTTP/mixed-порт</small></span><input type="checkbox" checked={settings.local_auth_enabled} disabled={settings.proxy_bind === "lan"} onChange={(event) => update({ local_auth_enabled: event.target.checked })} /></label>
               {settings.local_auth_enabled && <><label><span>Локальный логин</span><input value={settings.local_username} maxLength={64} onChange={(event) => update({ local_username: event.target.value })} /></label><label className={fieldErrors.local_password ? "fieldInvalid" : ""}><span>Локальный пароль</span><input aria-invalid={Boolean(fieldErrors.local_password)} type="password" minLength={8} maxLength={128} value={settings.local_password} onChange={(event) => update({ local_password: event.target.value })} placeholder="Минимум 8 символов" />{fieldErrors.local_password ? <small className="fieldError">{fieldErrors.local_password}</small> : <small>Хранится только в экспортируемом профиле</small>}</label></>}
             </div></section>}
             <details className="connectionAdvanced"><summary>Расширенные настройки <span>⌄</span></summary><div className="connectionSettingsFields">
+              <TransportFields protocol={protocol} settings={settings} errors={fieldErrors} update={update} />
               {protocol === "awg" && <>
                 <label><span>DNS-серверы</span><input value={settings.dns} onChange={(event) => update({ dns: event.target.value })} placeholder="1.1.1.1, 1.0.0.1" /></label>
                 {protocol === "awg" && <><label><span>Jc · пакеты мусора</span><input type="number" min={0} max={128} value={settings.awg_jc} onChange={(event) => update({ awg_jc: Number(event.target.value) })} /></label><label><span>Jmin · минимум</span><input type="number" min={0} max={1280} value={settings.awg_jmin} onChange={(event) => update({ awg_jmin: Number(event.target.value) })} /></label><label className={fieldErrors.awg_jmax ? "fieldInvalid" : ""}><span>Jmax · максимум</span><input aria-invalid={Boolean(fieldErrors.awg_jmax)} type="number" min={0} max={1280} value={settings.awg_jmax} onChange={(event) => update({ awg_jmax: Number(event.target.value) })} />{fieldErrors.awg_jmax && <small className="fieldError">{fieldErrors.awg_jmax}</small>}</label><div className="connectionServerValues"><strong>Параметры сервера — подставляются автоматически</strong><dl>{Object.entries(serverOptions.awg || {}).filter(([key]) => !["jc", "jmin", "jmax", "i1", "i2", "i3", "i4", "i5"].includes(key)).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl><small>S/H и общие параметры защиты согласованы с сервером. Jc, Jmin, Jmax и выбранная CPS-сигнатура задаются для нового клиента.</small></div></>}
@@ -364,16 +392,16 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
                 <label className={fieldErrors.hysteria_keepalive ? "fieldInvalid" : ""}><span>QUIC keepalive, сек.</span><input aria-invalid={Boolean(fieldErrors.hysteria_keepalive)} type="number" min={1} max={30} value={settings.hysteria_keepalive} onChange={(event) => update({ hysteria_keepalive: Number(event.target.value) })} />{fieldErrors.hysteria_keepalive && <small className="fieldError">{fieldErrors.hysteria_keepalive}</small>}</label>
                 <label className="connectionCheckbox"><span><strong>Отключить Path MTU discovery</strong><small>Не увеличивать QUIC-пакеты в проблемной сети</small></span><input type="checkbox" checked={settings.disable_path_mtu_discovery} onChange={(event) => update({ disable_path_mtu_discovery: event.target.checked })} /></label>
                 {(serverOptions.hysteria2?.port_hopping.includes("-") || serverOptions.hysteria2?.port_hopping.includes(",")) && <><label><span>Минимум между сменами порта, сек.</span><input type="number" min={5} max={300} value={settings.hysteria_hop_min} onChange={(event) => update({ hysteria_hop_min: Number(event.target.value) })} /></label><label className={fieldErrors.hysteria_hop_max ? "fieldInvalid" : ""}><span>Максимум между сменами порта, сек.</span><input aria-invalid={Boolean(fieldErrors.hysteria_hop_max)} type="number" min={5} max={300} value={settings.hysteria_hop_max} onChange={(event) => update({ hysteria_hop_max: Number(event.target.value) })} />{fieldErrors.hysteria_hop_max && <small className="fieldError">{fieldErrors.hysteria_hop_max}</small>}</label></>}
-                <label><span>Congestion control</span><select value={settings.hysteria_congestion} onChange={(event) => update({ hysteria_congestion: event.target.value as ConnectionSettings["hysteria_congestion"] })}><option value="bbr">BBR</option><option value="reno">New Reno</option></select></label>
+                <label><span>Congestion control</span><select value={settings.hysteria_congestion} onChange={(event) => update({ hysteria_congestion: event.target.value as ConnectionSettings["hysteria_congestion"] })}><option value="bbr">BBR</option>{settings.hysteria_format === "hysteria" && <option value="reno">New Reno</option>}</select></label>
                 {settings.hysteria_congestion === "bbr" && <label><span>Профиль BBR</span><select value={settings.bbr_profile} onChange={(event) => update({ bbr_profile: event.target.value as ConnectionSettings["bbr_profile"] })}><option value="standard">Стандартный</option><option value="conservative">Консервативный</option><option value="aggressive">Агрессивный</option></select></label>}
                 <label><span>Upload, Мбит/с</span><input type="number" min={0} max={10000} value={settings.up_mbps} onChange={(event) => update({ up_mbps: Number(event.target.value) })} /><small>0 — автоматический режим</small></label>
                 <label><span>Download, Мбит/с</span><input type="number" min={0} max={10000} value={settings.down_mbps} onChange={(event) => update({ down_mbps: Number(event.target.value) })} /><small>0 — автоматический режим</small></label>
-                <label className="connectionCheckbox"><span><strong>Без компенсации потерь</strong><small>Не превышать заданный upload при потерях</small></span><input type="checkbox" disabled={!settings.up_mbps && !settings.down_mbps} checked={settings.disable_loss_compensation} onChange={(event) => update({ disable_loss_compensation: event.target.checked })} /></label>
-                <label className="connectionCheckbox"><span><strong>Fast Open</strong><small>Быстрее старт, менее строгая семантика прокси</small></span><input type="checkbox" checked={settings.fast_open} onChange={(event) => update({ fast_open: event.target.checked })} /></label>
-                <label className="connectionCheckbox"><span><strong>Lazy connect</strong><small>Подключаться только при первом запросе</small></span><input type="checkbox" checked={settings.lazy} onChange={(event) => update({ lazy: event.target.checked })} /></label>
+                {settings.hysteria_format === "hysteria" && <label className="connectionCheckbox"><span><strong>Без компенсации потерь</strong><small>Не превышать заданный upload при потерях</small></span><input type="checkbox" disabled={!settings.up_mbps && !settings.down_mbps} checked={settings.disable_loss_compensation} onChange={(event) => update({ disable_loss_compensation: event.target.checked })} /></label>}
+                {settings.hysteria_format === "hysteria" && <><label className="connectionCheckbox"><span><strong>Fast Open</strong><small>Быстрее старт, менее строгая семантика прокси</small></span><input type="checkbox" checked={settings.fast_open} onChange={(event) => update({ fast_open: event.target.checked })} /></label>
+                <label className="connectionCheckbox"><span><strong>Lazy connect</strong><small>Подключаться только при первом запросе</small></span><input type="checkbox" checked={settings.lazy} onChange={(event) => update({ lazy: event.target.checked })} /></label></>}
               </>}
               {protocol === "tuic" && <>
-                <label><span>UDP relay</span><select value={settings.udp_relay_mode} onChange={(event) => update({ udp_relay_mode: event.target.value as ConnectionSettings["udp_relay_mode"] })}><option value="native">Native — рекомендуется</option><option value="quic">QUIC stream — без потерь</option></select></label>
+                <label><span>UDP relay</span><select disabled={settings.tuic_udp_over_stream} value={settings.udp_relay_mode} onChange={(event) => update({ udp_relay_mode: event.target.value as ConnectionSettings["udp_relay_mode"] })}><option value="native">Native — рекомендуется</option><option value="quic">QUIC stream — без потерь</option></select>{settings.tuic_udp_over_stream && <small>Вместо этого режима используется UDP over stream.</small>}</label>
                 <label><span>Разрешённый трафик</span><select value={settings.network} onChange={(event) => update({ network: event.target.value as ConnectionSettings["network"] })}><option value="all">TCP + UDP</option><option value="tcp">Только TCP</option><option value="udp">Только UDP</option></select></label>
                 <label className="connectionCheckbox"><span><strong>TCP Fast Open</strong><small>Для локального mixed-прокси</small></span><input type="checkbox" checked={settings.tcp_fast_open} onChange={(event) => update({ tcp_fast_open: event.target.checked })} /></label>
                 <label className="connectionCheckbox"><span><strong>Системный прокси</strong><small>sing-box установит и очистит настройки ОС</small></span><input type="checkbox" checked={settings.set_system_proxy} onChange={(event) => update({ set_system_proxy: event.target.checked })} /></label>
@@ -389,7 +417,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
                 <label className="connectionCheckbox"><span><strong>Sniffing доменов</strong><small>Определять HTTP, TLS и QUIC назначения</small></span><input type="checkbox" checked={settings.sniffing} onChange={(event) => update({ sniffing: event.target.checked, ...(!event.target.checked ? { route_only: false } : {}) })} /></label>
                 <label className="connectionCheckbox"><span><strong>Только для маршрутизации</strong><small>Не подменять исходное назначение</small></span><input type="checkbox" disabled={!settings.sniffing} checked={settings.route_only} onChange={(event) => update({ route_only: event.target.checked })} /></label>
                 <label className="connectionCheckbox"><span><strong>Блокировать BitTorrent</strong><small>Локальное правило blackhole в профиле</small></span><input type="checkbox" checked={settings.block_bittorrent} onChange={(event) => update({ block_bittorrent: event.target.checked })} /></label>
-                <label><span>Переиспользование соединений XMUX</span><select value={settings.xray_xmux_profile} onChange={(event) => update({ xray_xmux_profile: event.target.value as ConnectionSettings["xray_xmux_profile"] })}><option value="default">Штатные случайные диапазоны</option><option value="mobile">Мобильная сеть · keepalive 10 с</option><option value="parallel">Один запрос на соединение</option><option value="rotate">Короткое переиспользование · 60–120 с</option></select></label>
+                <label><span>Переиспользование соединений XMUX</span><select value={settings.xray_xmux_profile} onChange={(event) => update({ xray_xmux_profile: event.target.value as ConnectionSettings["xray_xmux_profile"] })}><option value="default">Штатные случайные диапазоны</option><option value="mobile">Мобильная сеть · keepalive 10 с</option><option value="parallel">Один запрос на соединение</option><option value="rotate">Короткое переиспользование · 60–120 с</option><option value="custom">Ручные параметры</option></select></label>
                 <label className="connectionCheckbox"><span><strong>XUDP для UDP-трафика</strong><small>TCP использует штатный XMUX; обычный Mux не включается</small></span><input type="checkbox" checked={settings.mux_enabled} onChange={(event) => update({ mux_enabled: event.target.checked })} /></label>
                 {settings.mux_enabled && <><label><span>XUDP concurrency</span><input type="number" min={1} max={1024} value={settings.xudp_concurrency} onChange={(event) => update({ xudp_concurrency: Number(event.target.value) })} /></label><label><span>UDP/443 через XUDP</span><select value={settings.xudp_proxy_udp443} onChange={(event) => update({ xudp_proxy_udp443: event.target.value as ConnectionSettings["xudp_proxy_udp443"] })}><option value="reject">Reject — рекомендуется</option><option value="allow">Allow</option><option value="skip">Skip Mux</option></select></label></>}
               </>}

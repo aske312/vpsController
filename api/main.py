@@ -27,14 +27,14 @@ from urllib.parse import quote, urlencode
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from metrics_history import MetricsHistory, MetricsMonitor
 from system_metrics import CpuSampler, collect_resources
 from awg_obfuscation import client_profile as awg_client_profile, preset_catalog
 from awg_ports import AwgPorts, PORT_CHOICES, PortError
-from connection_tuning import tuning_catalog, xhttp_extra
+from connection_tuning import tuning_catalog, xhttp_extra, number_range, quic_options, singbox_client
 
 
 @asynccontextmanager
@@ -2844,6 +2844,15 @@ def check_awg_port(port: int | None = Query(default=None, ge=1, le=65535), rando
 
 
 class ClientSettings(BaseModel):
+    client_mode: Literal["proxy", "vpn"] = "proxy"
+    hysteria_format: Literal["hysteria", "sing-box"] = "hysteria"
+    quic_idle: int = Field(default=0, ge=0, le=600)
+    quic_keepalive: int = Field(default=0, ge=0, le=300)
+    quic_stream_window: int = Field(default=0, ge=0, le=64)
+    quic_conn_window: int = Field(default=0, ge=0, le=160)
+    quic_streams: int = Field(default=0, ge=0, le=4096)
+    hysteria_chrome_parrot: bool = True
+    tuic_udp_over_stream: bool = False
     dns: str = Field(default="1.1.1.1, 1.0.0.1", min_length=1, max_length=255, pattern=r"^[0-9A-Fa-f:., ]+$")
     mtu: int | None = Field(default=None, ge=576, le=1500)
     keepalive: int = Field(default=25, ge=0, le=300)
@@ -2875,7 +2884,7 @@ class ClientSettings(BaseModel):
     hysteria_hop_max: int = Field(default=45, ge=5, le=300)
     hysteria_keepalive: int = Field(default=10, ge=1, le=30)
     congestion_control: Literal["bbr", "cubic", "new_reno"] = "bbr"
-    heartbeat: Literal["5s", "10s", "15s", "30s"] = "10s"
+    heartbeat: str = Field(default="10s", pattern=r"^(?:[1-9]\d?|[12]\d{2}|300)s$")
     udp_relay_mode: Literal["native", "quic"] = "native"
     network: Literal["all", "tcp", "udp"] = "all"
     tcp_fast_open: bool = False
@@ -2887,7 +2896,14 @@ class ClientSettings(BaseModel):
     fingerprint: Literal["chrome", "firefox", "edge", "safari", "ios", "android", "randomized"] = "chrome"
     xray_sni: str = Field(default="", max_length=253)
     xray_xhttp_mode: Literal["stream-one", "packet-up", "stream-up", "auto"] = "stream-one"
-    xray_xmux_profile: Literal["default", "mobile", "parallel", "rotate"] = "default"
+    xray_xmux_profile: Literal["default", "mobile", "parallel", "rotate", "custom"] = "default"
+    xray_padding: str = Field(default="100-1000", max_length=16)
+    xmux_concurrency: str = Field(default="1", max_length=16)
+    xmux_connections: str = Field(default="0", max_length=16)
+    xmux_reuse: str = Field(default="0", max_length=16)
+    xmux_requests: str = Field(default="600-900", max_length=16)
+    xmux_seconds: str = Field(default="1800-3000", max_length=16)
+    xmux_keepalive: int = Field(default=0, ge=0, le=300)
     mux_enabled: bool = False
     mux_concurrency: int = Field(default=8, ge=1, le=128)
     xudp_concurrency: int = Field(default=16, ge=1, le=1024)
@@ -2899,6 +2915,21 @@ class ClientSettings(BaseModel):
     xray_dns: str = Field(default="", max_length=255, pattern=r"^[0-9A-Fa-f:., ]*$")
     block_bittorrent: bool = False
 
+    @model_validator(mode="after")
+    def validate_transport_tuning(self):
+        for name, lo, hi in (("xray_padding", 100, 1000), ("xmux_concurrency", 0, 1024),
+                             ("xmux_connections", 0, 1024), ("xmux_reuse", 0, 1000000),
+                             ("xmux_requests", 0, 1000000), ("xmux_seconds", 0, 86400)):
+            try: number_range(getattr(self, name), lo, hi)
+            except ValueError as exc: raise ValueError(f"{name}: {exc}") from exc
+        if self.xray_xmux_profile == "custom" and number_range(self.xmux_concurrency, 0, 1024)[1] and number_range(self.xmux_connections, 0, 1024)[1]:
+            raise ValueError("xmux_connections conflicts with xmux_concurrency; set one to 0")
+        if bool(self.quic_stream_window) != bool(self.quic_conn_window) or self.quic_stream_window > self.quic_conn_window:
+            raise ValueError("quic_conn_window must be set with and not smaller than quic_stream_window")
+        if self.quic_idle and self.quic_keepalive >= self.quic_idle:
+            raise ValueError("quic_keepalive must be smaller than quic_idle")
+        return self
+
 
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
@@ -2907,6 +2938,8 @@ class ClientCreate(BaseModel):
 
 
 def local_proxy_fields(payload: ClientCreate) -> list[dict]:
+    if payload.settings.client_mode == "vpn" and (payload.protocol == "tuic" or (payload.protocol == "hysteria2" and payload.settings.hysteria_format == "sing-box")):
+        return [{"label": "Режим", "value": "VPN / TUN"}, {"label": "DNS в туннеле", "value": payload.settings.dns.split(',')[0].strip()}, {"label": "MTU", "value": str(payload.settings.mtu or 1280)}]
     host = "LAN" if payload.settings.proxy_bind == "lan" else "127.0.0.1"
     if payload.protocol == "tuic":
         fields = [{"label": "Локальный mixed-прокси", "value": f"{host}:{payload.settings.local_socks_port}"}]
@@ -3096,6 +3129,13 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         raise HTTPException(status_code=422, detail="Initial QUIC packet size must be 0 or between 1200 and 1500")
     if payload.protocol == "hysteria2" and payload.settings.hysteria_hop_min > payload.settings.hysteria_hop_max:
         raise HTTPException(status_code=422, detail="Hysteria2 minimum hop interval must not exceed maximum")
+    if payload.protocol == "hysteria2" and payload.settings.hysteria_format == "sing-box" and (payload.settings.hysteria_congestion != "bbr" or payload.settings.fast_open or payload.settings.lazy or payload.settings.disable_loss_compensation):
+        raise HTTPException(status_code=422, detail="Hysteria CLI Reno/Fast Open/Lazy/loss compensation overrides are not supported by sing-box export")
+    if payload.protocol == "hysteria2" and payload.settings.hysteria_format == "hysteria" and (payload.settings.client_mode == "vpn" or payload.settings.quic_streams):
+        raise HTTPException(status_code=422, detail="Use sing-box export for VPN/TUN or quic_streams overrides")
+    if payload.settings.client_mode == "vpn":
+        try: ipaddress.ip_address(payload.settings.dns.split(',')[0].strip())
+        except ValueError as exc: raise HTTPException(status_code=422, detail="VPN DNS must be an IP address") from exc
     if payload.protocol == "xray" and payload.settings.xray_sni:
         payload.settings.xray_sni = normalized_xray_sni(payload.settings.xray_sni)
     if payload.settings.route_mode == "custom":
@@ -3131,9 +3171,14 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 if payload.settings.hysteria_congestion == "bbr":
                     config_lines.append(f"  bbrProfile: {payload.settings.bbr_profile}")
                 config_lines.extend([
-                    "quic:", f"  keepAlivePeriod: {payload.settings.hysteria_keepalive}s",
+                    "quic:", f"  keepAlivePeriod: {payload.settings.quic_keepalive or payload.settings.hysteria_keepalive}s",
                     f"  disablePathMTUDiscovery: {str(payload.settings.disable_path_mtu_discovery).lower()}",
+                    f"  disableChromeParrot: {str(not payload.settings.hysteria_chrome_parrot).lower()}",
                 ])
+                if payload.settings.quic_idle: config_lines.append(f"  maxIdleTimeout: {payload.settings.quic_idle}s")
+                if payload.settings.quic_stream_window:
+                    for prefix, mb in (("Stream", payload.settings.quic_stream_window), ("Conn", payload.settings.quic_conn_window)):
+                        config_lines.extend([f"  init{prefix}ReceiveWindow: {mb * 1048576}", f"  max{prefix}ReceiveWindow: {mb * 1048576}"])
                 if payload.settings.up_mbps or payload.settings.down_mbps:
                     config_lines.append("bandwidth:")
                     if payload.settings.up_mbps:
@@ -3165,6 +3210,29 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     if payload.settings.local_auth_enabled:
                         config_lines.extend([f"  username: {json.dumps(payload.settings.local_username)}", f"  password: {json.dumps(payload.settings.local_password)}"])
                 config = "\n".join([*config_lines, ""])
+                filename = f"{safe_name}-hysteria2.yaml"
+                if payload.settings.hysteria_format == "sing-box":
+                    outbound = {"type": "hysteria2", "tag": "connection-out", "server": PUBLIC_IP,
+                                "server_port": int(settings.get("port", 8443)), "password": f"{client_id}:{password}",
+                                "tls": {"enabled": True, "server_name": identity, "certificate": (HYSTERIA2_DIR / 'server.crt').read_text(encoding='utf-8')}}
+                    if ',' in listen or '-' in listen:
+                        outbound.pop('server_port')
+                        outbound.update({"server_ports": [p.replace('-', ':') for p in listen.split(',')], "hop_interval": f"{payload.settings.hysteria_hop_min}s", "hop_interval_max": f"{payload.settings.hysteria_hop_max}s"})
+                    if obfs in {"salamander", "gecko"} and obfs_password:
+                        outbound['obfs'] = {"type": obfs, "password": obfs_password}
+                        if obfs == 'gecko': outbound['obfs'].update({"min_packet_size": int(settings.get('gecko_min_packet_size', 512)), "max_packet_size": int(settings.get('gecko_max_packet_size', 1200))})
+                    for name in ('up_mbps', 'down_mbps'):
+                        if getattr(payload.settings, name): outbound[name] = getattr(payload.settings, name)
+                    outbound.update(quic_options(payload.settings))
+                    if payload.settings.bbr_profile != 'standard': outbound['bbr_profile'] = payload.settings.bbr_profile
+                    if payload.settings.disable_path_mtu_discovery: outbound['disable_path_mtu_discovery'] = True
+                    if not payload.settings.hysteria_chrome_parrot: outbound['disable_chrome_parrot'] = True
+                    if payload.settings.quic_keepalive: outbound['keep_alive_period'] = f"{payload.settings.quic_keepalive}s"
+                    elif payload.settings.hysteria_keepalive != 10: outbound['keep_alive_period'] = f"{payload.settings.hysteria_keepalive}s"
+                    mixed = {"type": "mixed", "listen": listen_host, "listen_port": payload.settings.local_socks_port}
+                    if payload.settings.local_auth_enabled: mixed['users'] = [{"username": payload.settings.local_username, "password": payload.settings.local_password}]
+                    config = json.dumps(singbox_client(outbound, mixed, payload.settings, PUBLIC_IP), ensure_ascii=False, indent=2)
+                    filename = f"{safe_name}-hysteria2-sing-box.json"
                 items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 query_values = {"sni": identity, "insecure": "1", "pinSHA256": fingerprint}
                 if obfs in {"salamander", "gecko"} and obfs_password:
@@ -3172,10 +3240,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 query = urlencode(query_values)
                 uri = f"hysteria2://{quote(client_id, safe='')}:{quote(password, safe='')}@{uri_endpoint(endpoint)}:{listen}/?{query}#{quote(payload.name, safe='')}"
                 return {"id": client_id, **connection_profile(
-                    protocol="hysteria2", name=payload.name, endpoint=f"{endpoint}:{listen}", filename=f"{safe_name}-hysteria2.yaml", config=config,
+                    protocol="hysteria2", name=payload.name, endpoint=f"{endpoint}:{listen}", filename=filename, config=config,
                     fields=[{"label": "Пользователь", "value": client_id}, {"label": "Пароль", "value": password, "secret": True}, {"label": "TLS SNI", "value": identity}, {"label": "Обфускация", "value": obfs}, *local_proxy_fields(payload)],
-                    apps=["Hiddify", "NekoBox", "Hysteria 2"],
-                    steps=["Откройте ссылку или QR в совместимом приложении; YAML предназначен для Hysteria CLI.", "В приложении включите VPN/TUN. Для Hysteria CLI настройте браузер на SOCKS из профиля.", "Откройте внешний сайт и проверьте IP выхода: он должен совпадать с VPS."],
+                    apps=["Karing", "sing-box MT", "Hysteria 2"],
+                    steps=["В Karing импортируйте ссылку/QR; полный JSON импортируйте как конфигурацию в sing-box MT. YAML предназначен только для Hysteria CLI.", "Для iOS выберите JSON и режим VPN / TUN. Локальный прокси сам по себе не направляет трафик iPhone в туннель.", "Откройте внешний сайт и проверьте IP выхода: он должен совпадать с VPS."],
                     uri=uri, qr_content=uri,
                 )}
             except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -3201,6 +3269,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 outbound = {"type": payload.protocol, "tag": "connection-out", "server": endpoint, "server_port": int(settings.get("port", 8444)), "password": password,
                             "tls": {"enabled": True, "server_name": certificate_server_name(config_path.parent / "server.crt"), "certificate": certificate}}
                 outbound.update({"uuid": user_uuid, "congestion_control": payload.settings.congestion_control, "udp_relay_mode": payload.settings.udp_relay_mode, "zero_rtt_handshake": False, "heartbeat": payload.settings.heartbeat})
+                if payload.settings.tuic_udp_over_stream:
+                    outbound.pop('udp_relay_mode')
+                    outbound['udp_over_stream'] = True
+                outbound.update(quic_options(payload.settings))
                 if payload.settings.network != "all":
                     outbound["network"] = payload.settings.network
                 if payload.settings.initial_packet_size:
@@ -3213,15 +3285,15 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 mixed_inbound = {"type": "mixed", "tag": "mixed-in", "listen": listen_host, "listen_port": payload.settings.local_socks_port, "tcp_fast_open": payload.settings.tcp_fast_open, "set_system_proxy": payload.settings.set_system_proxy, "udp_fragment": payload.settings.udp_fragment, "udp_timeout": payload.settings.udp_timeout}
                 if payload.settings.local_auth_enabled:
                     mixed_inbound["users"] = [{"username": payload.settings.local_username, "password": payload.settings.local_password}]
-                client = {"log": {"level": "warn"}, "inbounds": [mixed_inbound], "outbounds": [outbound], "route": {"final": "connection-out"}}
+                client = singbox_client(outbound, mixed_inbound, payload.settings, endpoint)
                 items = read_clients(); items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": user_uuid, "endpoint": endpoint, "created_at": datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 port = int(settings.get("port", 8444))
                 server_name = certificate_server_name(config_path.parent / "server.crt")
                 return {"id": client_id, **connection_profile(
                     protocol="tuic", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-tuic.json", config=json.dumps(client, ensure_ascii=False, indent=2),
                     fields=[{"label": "UUID", "value": user_uuid, "secret": True}, {"label": "Пароль", "value": password, "secret": True}, {"label": "TLS SNI", "value": server_name}, *local_proxy_fields(payload)],
-                    apps=["sing-box", "NekoBox"],
-                    steps=["Скачайте персональный JSON для sing-box или приложения, принимающего полный sing-box профиль.", "Профиль открывает mixed-прокси: настройте браузер на этот прокси либо включите VPN/TUN в приложении.", "Откройте внешний сайт и проверьте IP выхода: он должен совпадать с VPS."],
+                    apps=["sing-box MT", "Karing", "sing-box"],
+                    steps=["Скачайте персональный JSON и импортируйте файл конфигурации в sing-box MT или Karing.", "Для iOS создайте профиль в режиме VPN / TUN и разрешите добавление VPN. Режим локального прокси предназначен для CLI/ПК.", "Откройте внешний сайт и проверьте IP выхода: он должен совпадать с VPS."],
                 )}
             except Exception as exc:
                 config_path.write_bytes(original); os.chmod(config_path, 0o600); run("systemctl", "restart", unit, timeout=20)

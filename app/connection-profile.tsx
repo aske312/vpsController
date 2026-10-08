@@ -30,7 +30,7 @@ export const protocolDelivery: Record<Protocol, {
   methods: string[];
 }> = {
   awg: { title: "AmneziaWG", summary: "Обфусцированный WireGuard-профиль с параметрами сервера.", transport: "UDP · .conf", apps: "AmneziaWG", methods: ["QR", "Файл"] },
-  hysteria2: { title: "Hysteria2", summary: "Персональная учётная запись с закреплённым TLS-сертификатом.", transport: "QUIC · YAML", apps: "Hiddify, NekoBox, Hysteria 2", methods: ["QR", "Ссылка", "Файл"] },
+  hysteria2: { title: "Hysteria2", summary: "Персональная учётная запись с закреплённым TLS-сертификатом.", transport: "QUIC · JSON / YAML", apps: "Karing, sing-box MT, Hysteria 2", methods: ["QR", "Ссылка", "Файл"] },
   tuic: { title: "TUIC v5", summary: "Индивидуальные UUID и пароль в готовом профиле sing-box.", transport: "QUIC · JSON", apps: "sing-box, NekoBox", methods: ["Файл"] },
   xray: { title: "Xray VLESS", summary: "Персональный VLESS UUID с транспортом XHTTP + REALITY.", transport: "TCP · XHTTP", apps: "Hiddify, v2rayN, NekoBox", methods: ["QR", "Ссылка", "Файл"] },
 };
