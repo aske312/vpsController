@@ -53,6 +53,14 @@ class ProtocolPortsTests(unittest.TestCase):
             with patch.object(ports, 'command', return_value=result):
                 self.assertEqual(ports.nat_conflict(protocol, 39761, '192.0.2.1'), conflict)
 
+    def test_nat_rule_listing_does_not_use_incompatible_numeric_flag(self):
+        result = type('Result', (), {'stdout': ''})()
+        import awg_ports
+        for module, args in [(ports, ('tuic', 39761, '192.0.2.1')), (awg_ports, (39761, '192.0.2.1'))]:
+            with patch.object(module, 'command', return_value=result) as command:
+                self.assertFalse(module.nat_conflict(*args))
+                command.assert_called_once_with('iptables', '-w', '5', '-t', 'nat', '-S')
+
     def test_auth_bounds_and_refcounts(self):
         client = TestClient(api.app)
         self.assertEqual(client.get('/api/clients/server-port?protocol=xray&port=443').status_code, 401)

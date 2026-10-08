@@ -70,7 +70,7 @@ def rule_args(port, target, address):
 
 def nat_conflict(port, address):
     binary = 'ip6tables' if ':' in address else 'iptables'
-    result = command(binary, '-w', '5', '-n', '-t', 'nat', '-S')
+    result = command(binary, '-w', '5', '-t', 'nat', '-S')
     for line in result.stdout.splitlines():
         tokens = shlex.split(line)
         if '-p' in tokens and tokens[tokens.index('-p') + 1] not in ('udp', 'all'): continue

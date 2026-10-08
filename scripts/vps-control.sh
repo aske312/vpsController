@@ -2623,6 +2623,7 @@ main() {
     update) update_app ;;
     scheduled-app-update) scheduled_app_update ;;
     test-update) update_test_app "$@" ;;
+    ports-prepare) install_direct_ports_templates ;;
     test-rollback) restore_test_app ;;
     status) status_app ;;
     logs) logs_app "$@" ;;

@@ -48,7 +48,7 @@ def rule_args(protocol, port, target, address):
 def nat_conflict(protocol, port, address):
     binary = 'ip6tables' if ':' in address else 'iptables'
     own = f'vps-control-{protocol}-port-{port}'
-    for line in command(binary, '-w', '5', '-n', '-t', 'nat', '-S').stdout.splitlines():
+    for line in command(binary, '-w', '5', '-t', 'nat', '-S').stdout.splitlines():
         tokens = shlex.split(line)
         if '-p' in tokens and tokens[tokens.index('-p') + 1] not in (PROTOCOLS[protocol], 'all'): continue
         if '--comment' in tokens and tokens[tokens.index('--comment') + 1] == own: continue
@@ -116,6 +116,14 @@ class ProtocolPorts:
         if status['status'] not in ('available', 'protocol'): raise PortError(f'server_port {port}: {status["detail"]}')
         created = False
         if port != self.primary:
+            template = Path(f'/etc/systemd/system/vps-control-{self.protocol}-port@.service')
+            if not template.exists():
+                # An update runs the previous manager in memory. Prepare new
+                # runtime templates through the freshly installed manager.
+                command('systemd-run', '--wait', '--collect', '--quiet', '/bin/bash',
+                        str(Path(__file__).resolve().parents[1]/'scripts/vps-control.sh'), 'ports-prepare')
+            elif MARKER not in template.read_text().splitlines():
+                raise PortError('server_port: конфликт чужого шаблона службы')
             self.state_dir.mkdir(parents=True, exist_ok=True)
             if not self.path(port).exists():
                 with self.path(port).open('x') as stream: stream.write(self.content(port))
