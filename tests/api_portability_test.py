@@ -244,6 +244,7 @@ class PortabilityTests(unittest.TestCase):
             binary.write_text('', encoding='utf-8')
 
             def curl(command, **_kwargs):
+                self.assertEqual(command[command.index('--noproxy') + 1], '')
                 output = Path(command[command.index('--output') + 1])
                 output.write_text('{"ok":true}', encoding='utf-8')
                 return type('Result', (), {'returncode': 0, 'stdout': '200 84 15', 'stderr': ''})()
@@ -251,16 +252,59 @@ class PortabilityTests(unittest.TestCase):
             with patch.object(api, 'protocol_listener', return_value=('unit.service', 8443, 'udp', True)), \
                  patch.object(api, 'run', return_value='active'), \
                  patch.object(api, 'ensure_direct_probe_identity', return_value=False), \
+                 patch.object(api, 'check_proxy_internet', return_value={'state': 'confirmed', 'items': [], 'scope': 'External HTTPS'}), \
                  patch.object(api, 'direct_probe_client', return_value=[str(binary)]), \
                  patch.object(api.subprocess, 'Popen', return_value=Process()), \
                  patch.object(api.subprocess, 'run', side_effect=curl), \
                  patch.object(api, 'wait_for_proxy', return_value=True), \
                  patch.object(api, 'connection_probe_cache', {}):
                 result = api.check_protocol_connection('hysteria2')
+                with patch.object(api, 'check_proxy_internet', return_value={
+                    'state': 'failed', 'items': [], 'scope': 'External HTTPS',
+                }):
+                    internet_failed = api.check_protocol_connection('hysteria2')
 
         self.assertEqual(result['state'], 'confirmed')
         self.assertEqual(result['bytes_sent'], 84)
         self.assertEqual(result['bytes_received'], 15)
+        self.assertEqual(result['internet']['state'], 'confirmed')
+        self.assertEqual(internet_failed['state'], 'failed')
+        self.assertEqual(internet_failed['internet']['state'], 'failed')
+        self.assertEqual(internet_failed['bytes_received'], 15)
+
+    def test_proxy_internet_requires_tls_http_success_and_response_bytes(self):
+        cases = [
+            ((0, '200', b'page'), (0, '200', b'ip=198.51.100.1\n'), 'confirmed'),
+            ((28, '000', b''), (0, '200', b'ip=198.51.100.1\n'), 'confirmed'),
+            ((0, '200', b''), (0, '503', b'error'), 'failed'),
+            ((60, '200', b'page'), (28, '000', b''), 'failed'),
+        ]
+        for first, second, expected in cases:
+            with self.subTest(expected=expected, first=first), tempfile.TemporaryDirectory() as directory:
+                responses = iter((first, second))
+
+                def curl(command, **kwargs):
+                    self.assertEqual(command[command.index('--noproxy') + 1], '')
+                    self.assertIn('--socks5-hostname', command)
+                    self.assertNotIn('--insecure', command)
+                    code, status, body = next(responses)
+                    Path(command[command.index('--output') + 1]).write_bytes(body)
+                    return type('Result', (), {'returncode': code, 'stdout': status})()
+
+                with patch.object(api.subprocess, 'run', side_effect=curl):
+                    result = api.check_proxy_internet(1080, Path(directory))
+                self.assertEqual(result['state'], expected)
+                self.assertEqual(len(result['items']), 2)
+                if second[0] == 0 and second[1] == '200':
+                    self.assertEqual(result['items'][1]['exit_ip'], '198.51.100.1')
+
+    def test_proxy_internet_timeout_reports_failure_without_raising(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            api.subprocess, 'run', side_effect=api.subprocess.TimeoutExpired('curl', 10),
+        ):
+            result = api.check_proxy_internet(1080, Path(directory))
+        self.assertEqual(result['state'], 'failed')
+        self.assertEqual(len(result['items']), 2)
 
     def test_application_task_is_published_before_systemd_starts(self):
         with tempfile.TemporaryDirectory() as directory:

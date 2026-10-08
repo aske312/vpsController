@@ -133,6 +133,10 @@ export type ProtocolStatus = {
     title: string; detail: string; latency_ms?: number | null;
     bytes_received: number; bytes_sent: number; scope: string;
     identity?: "registered-client" | "managed-diagnostic";
+    internet?: {
+      state: "confirmed" | "failed"; scope: string;
+      items: Array<{ url: string; state: "confirmed" | "failed"; bytes_received: number; latency_ms: number; exit_ip?: string }>;
+    };
   };
   regional_reachability?: {
     checked_at?: string | null; state: "confirmed" | "failed" | "unverified";

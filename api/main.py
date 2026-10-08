@@ -1202,6 +1202,41 @@ def wait_for_proxy(process: subprocess.Popen, port: int, timeout: float = 4.0) -
     return False
 
 
+def check_proxy_internet(proxy_port: int, directory: Path) -> dict:
+    """Check external DNS/TLS/response through the same protocol client."""
+    items = []
+    for index, url in enumerate(("https://example.com", "https://www.cloudflare.com/cdn-cgi/trace")):
+        output = directory / f"internet-{index}.txt"
+        started = time.monotonic()
+        try:
+            response = subprocess.run(
+                ["curl", "--silent", "--show-error", "--noproxy", "",
+                 "--socks5-hostname", f"127.0.0.1:{proxy_port}",
+                 "--connect-timeout", "3", "--max-time", "8",
+                 "--output", str(output), "--write-out", "%{http_code}", url],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            body = output.read_bytes() if output.exists() else b""
+            confirmed = response.returncode == 0 and response.stdout.strip() == "200" and bool(body)
+            item = {"url": url, "state": "confirmed" if confirmed else "failed",
+                    "http_status": response.stdout.strip(), "curl_code": response.returncode,
+                    "bytes_received": len(body), "latency_ms": round((time.monotonic() - started) * 1000)}
+            if confirmed and index == 1:
+                for line in body.decode("utf-8", errors="replace").splitlines():
+                    if line.startswith("ip="):
+                        try:
+                            item["exit_ip"] = str(ipaddress.ip_address(line[3:]))
+                        except ValueError:
+                            pass
+        except (OSError, subprocess.TimeoutExpired):
+            item = {"url": url, "state": "failed", "bytes_received": 0,
+                    "latency_ms": round((time.monotonic() - started) * 1000)}
+        items.append(item)
+    confirmed = any(item["state"] == "confirmed" for item in items)
+    return {"state": "confirmed" if confirmed else "failed", "items": items,
+            "scope": "Внешний HTTPS через клиент протокола на VPS: DNS, TLS и ответ сайта. Сеть устройства и его VPN/TUN-режим проверяются отдельно."}
+
+
 def check_protocol_connection(protocol: str) -> dict:
     if protocol == "awg":
         return observed_tunnel_connection(protocol)
@@ -1254,7 +1289,7 @@ def check_protocol_connection(protocol: str) -> dict:
             started = time.monotonic()
             response = subprocess.run(
                 [
-                    "curl", "--silent", "--show-error", "--output", str(response_file),
+                    "curl", "--silent", "--show-error", "--noproxy", "", "--output", str(response_file),
                     "--write-out", "%{http_code} %{size_request} %{size_download}", "--socks5-hostname", f"127.0.0.1:{proxy_port}",
                     "--connect-timeout", "3", "--max-time", "8", "http://127.0.0.1:8000/api/health",
                 ],
@@ -1280,6 +1315,15 @@ def check_protocol_connection(protocol: str) -> dict:
                     detail="Временный клиент получил корректный ответ API через SOCKS и серверный outbound протокола.",
                     latency_ms=latency_ms, bytes_received=bytes_received, bytes_sent=bytes_sent,
                 )
+                internet = check_proxy_internet(proxy_port, Path(temporary))
+                result["internet"] = internet
+                result["scope"] = internet["scope"]
+                if internet["state"] == "confirmed":
+                    result.update(title="Протокол и выход в интернет подтверждены",
+                                  detail="Получены локальный ответ API и внешний HTTPS-ответ через один клиент протокола.")
+                else:
+                    result.update(state="failed", title="Протокол работает, выход в интернет не подтверждён",
+                                  detail="Локальный запрос через протокол успешен, но оба внешних HTTPS-запроса не прошли. Проверьте DNS и исходящий доступ VPS; ошибка сайта также возможна.")
             else:
                 result.update(
                     state="failed", title="Сквозной ответ через протокол не получен",
@@ -3101,7 +3145,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     protocol="hysteria2", name=payload.name, endpoint=f"{endpoint}:{listen}", filename=f"{safe_name}-hysteria2.yaml", config=config,
                     fields=[{"label": "Пользователь", "value": client_id}, {"label": "Пароль", "value": password, "secret": True}, {"label": "TLS SNI", "value": identity}, {"label": "Обфускация", "value": obfs}, *local_proxy_fields(payload)],
                     apps=["Hiddify", "NekoBox", "Hysteria 2"],
-                    steps=["Откройте ссылку или отсканируйте QR в совместимом клиенте.", "Если импорт ссылки недоступен, загрузите YAML-файл.", "Включите созданный профиль и проверьте доступ в интернет."],
+                    steps=["Откройте ссылку или QR в совместимом приложении; YAML предназначен для Hysteria CLI.", "В приложении включите VPN/TUN. Для Hysteria CLI настройте браузер на SOCKS из профиля.", "Откройте внешний сайт и проверьте IP выхода: он должен совпадать с VPS."],
                     uri=uri, qr_content=uri,
                 )}
             except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -3144,7 +3188,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     protocol="tuic", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-tuic.json", config=json.dumps(client, ensure_ascii=False, indent=2),
                     fields=[{"label": "UUID", "value": user_uuid, "secret": True}, {"label": "Пароль", "value": password, "secret": True}, {"label": "TLS SNI", "value": server_name}, *local_proxy_fields(payload)],
                     apps=["sing-box", "NekoBox"],
-                    steps=["Скачайте персональный JSON-файл.", "Импортируйте файл в sing-box или совместимый клиент.", "Запустите профиль и используйте локальный mixed-прокси клиента."],
+                    steps=["Скачайте персональный JSON для sing-box или приложения, принимающего полный sing-box профиль.", "Профиль открывает mixed-прокси: настройте браузер на этот прокси либо включите VPN/TUN в приложении.", "Откройте внешний сайт и проверьте IP выхода: он должен совпадать с VPS."],
                 )}
             except Exception as exc:
                 config_path.write_bytes(original); os.chmod(config_path, 0o600); run("systemctl", "restart", unit, timeout=20)
@@ -3242,7 +3286,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     protocol="xray", name=payload.name, endpoint=f"{endpoint}:{port}", filename=f"{safe_name}-xray.json", config=json.dumps(client, ensure_ascii=False, indent=2),
                     fields=[{"label": "VLESS UUID", "value": user_uuid, "secret": True}, {"label": "Транспорт", "value": "XHTTP + REALITY"}, {"label": "Server name", "value": server_name}, *local_proxy_fields(payload)],
                     apps=["v2rayN (Xray-core)", "v2rayNG (Xray-core)", "Streisand"],
-                    steps=["Импортируйте VLESS-ссылку или QR в клиент на базе Xray-core.", "Для настольного Xray можно использовать персональный JSON-файл.", "Не используйте Hiddify для XHTTP: его sing-box backend может потерять режим транспорта и остановить передачу данных."],
+                    steps=["Импортируйте VLESS-ссылку или QR в клиент на базе Xray-core с поддержкой XHTTP + REALITY.", "Включите системный прокси для браузера либо TUN для устройства. При запуске Xray-core с JSON настройте браузер на SOCKS/HTTP из профиля.", "Проверьте внешний сайт и IP выхода. Клиент должен сохранять XHTTP mode и параметры REALITY; совместимость сторонних приложений проверяется отдельно."],
                     uri=uri, qr_content=uri,
                 )}
             except HTTPException:

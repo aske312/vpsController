@@ -58,6 +58,8 @@ function EvidenceCard({ status, checking, onCheck }: { status: ProtocolStatus; c
       <div><dt>Request / response</dt><dd>{evidence?.latency_ms != null ? `${evidence.latency_ms} мс` : "—"}</dd></div>
       <div><dt>Передано</dt><dd>{state === "confirmed" ? `↑ ${formatBytes(evidence?.bytes_sent)} · ↓ ${formatBytes(evidence?.bytes_received)}` : "—"}</dd></div>
       <div><dt>Последняя проверка</dt><dd>{evidence?.checked_at ? new Date(evidence.checked_at).toLocaleString("ru-RU") : "никогда"}</dd></div>
+      <div><dt>Внешний HTTPS</dt><dd>{evidence?.internet ? `${evidence.internet.items.filter((item) => item.state === "confirmed").length} / ${evidence.internet.items.length} ресурсов` : "не проверен"}</dd></div>
+      <div><dt>Адрес выхода</dt><dd>{evidence?.internet?.items.find((item) => item.exit_ip)?.exit_ip || "не определён"}</dd></div>
     </dl>
     <p className="protocolProofScope">{evidence?.scope}</p>
     <button onClick={onCheck} disabled={checking || !status.service_active}>{checking ? "Выполняется handshake и запрос…" : evidence?.method === "observed-client-traffic" ? "Сверить активность клиентов" : "Запустить protocol roundtrip"}</button>
