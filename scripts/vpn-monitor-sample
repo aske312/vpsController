@@ -92,7 +92,6 @@ sample_protocol() {
   fi
 }
 
-sample_protocol wg wg "${WG_INTERFACE:-wg0}" "wg-quick@${WG_INTERFACE:-wg0}.service"
 if command -v awg >/dev/null 2>&1; then
   sample_protocol awg awg "${AWG_INTERFACE:-awg0}" "awg-quick@${AWG_INTERFACE:-awg0}.service"
 fi

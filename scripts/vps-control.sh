@@ -30,12 +30,10 @@ PUBLIC_DOMAIN=""
 LOCAL_ADDRESS=""
 LOCAL_CIDR=""
 HTTP_PORT="80"
-WG_PORT="51820"
 AWG_PORT="51822"
 HYSTERIA2_PORT="8443"
 TUIC_PORT="8444"
 XRAY_PORT="8445"
-WG_INTERFACE="wg0"
 AWG_INTERFACE="awg0"
 AWG_MTU="1280"
 AWG_JC="6"
@@ -386,26 +384,18 @@ configure_access() {
     set_env_value "CORS_ORIGINS" "http://${LOCAL_ADDRESS}:${HTTP_PORT}"
     PANEL_URL="http://${LOCAL_ADDRESS}:${HTTP_PORT}"
   elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
-    local wg_address awg_address
-    wg_address="$({ ip -o -4 addr show dev "${WG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
+    local awg_address
     awg_address="$({ ip -o -4 addr show dev "${AWG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
-    [[ -n "${wg_address}" || -n "${awg_address}" ]] || die "у WG/AWG нет IPv4-адресов для доступа к панели."
-    local vpn_origins=""
-    [[ -z "${wg_address}" ]] || vpn_origins="http://${wg_address}:${HTTP_PORT}"
-    if [[ -n "${awg_address}" ]]; then
-      [[ -z "${vpn_origins}" ]] || vpn_origins+=","
-      vpn_origins+="http://${awg_address}:${HTTP_PORT}"
-    fi
+    [[ -n "${awg_address}" ]] || die "у AmneziaWG нет IPv4-адреса для доступа к панели."
+    local vpn_origins="http://${awg_address}:${HTTP_PORT}"
     set_env_value "PANEL_HOST" "0.0.0.0"
     set_env_value "PUBLIC_DOMAIN" ""
     set_env_value "CORS_ORIGINS" "${vpn_origins}"
     PANEL_URL="${vpn_origins%%,*}"
   else
-    local wg_address awg_address origins
-    wg_address="$({ ip -o -4 addr show dev "${WG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
+    local awg_address origins
     awg_address="$({ ip -o -4 addr show dev "${AWG_INTERFACE}" 2>/dev/null || true; } | awk 'NR==1 {split($4,a,"/"); print a[1]}')"
     origins="http://${public_ip}:${HTTP_PORT}"
-    [[ -z "${wg_address}" ]] || origins+=",http://${wg_address}:${HTTP_PORT}"
     [[ -z "${awg_address}" ]] || origins+=",http://${awg_address}:${HTTP_PORT}"
     set_env_value "PANEL_HOST" "0.0.0.0"
     if [[ -n "${PUBLIC_DOMAIN}" ]]; then
@@ -426,12 +416,10 @@ configure_access() {
   fi
   set_env_value "HTTP_PORT" "${HTTP_PORT}"
   set_env_value "ACCESS_MODE" "${ACCESS_MODE}"
-  set_env_value "WG_PORT" "${WG_PORT}"
   set_env_value "AWG_PORT" "${AWG_PORT}"
   set_env_value "HYSTERIA2_PORT" "${HYSTERIA2_PORT}"
   set_env_value "TUIC_PORT" "${TUIC_PORT}"
   set_env_value "XRAY_PORT" "${XRAY_PORT}"
-  set_env_value "WG_INTERFACE" "${WG_INTERFACE}"
   set_env_value "AWG_INTERFACE" "${AWG_INTERFACE}"
   set_env_value "AWG_MTU" "${AWG_MTU}"
   set_env_value "AWG_JC" "${AWG_JC}"
@@ -732,8 +720,7 @@ run_protocol_installer() {
   [[ "${timeout_seconds}" =~ ^[0-9]+$ && "${timeout_seconds}" -ge 60 ]] || timeout_seconds=1200
 
   timeout --signal=TERM --kill-after=30s "${timeout_seconds}s" \
-    env ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
-      AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+    env ENV_FILE="${ENV_FILE}" AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
       HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
       bash "${installer_path}" &
   local installer_pid=$! elapsed=0 status=0 elapsed_label
@@ -783,7 +770,7 @@ install_protocol_image() {
   info "Установка образа ${image_id}"
   prepare_package_manager
   run_protocol_installer "${image_id}" "${image_root}/${installer}"
-  install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
+  install -d -m 0700 /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
   systemctl restart "${APP_NAME}-api.service"
   curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 \
@@ -805,11 +792,10 @@ remove_protocol_image() {
   [[ "${uninstaller}" =~ ^[a-zA-Z0-9._-]+$ && -f "${image_root}/${uninstaller}" ]] \
     || die "образ ${image_id} не поддерживает удаление."
   info "Удаление установленного протокола ${image_id}"
-  PRESERVE_COMPONENT_DATA=0 ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
-    AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+  PRESERVE_COMPONENT_DATA=0 ENV_FILE="${ENV_FILE}" AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
     HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
     bash "${image_root}/${uninstaller}"
-  install -d -m 0700 /etc/wireguard /etc/amnezia /etc/amnezia/amneziawg
+  install -d -m 0700 /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
   systemctl restart "${APP_NAME}-api.service"
   curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 \
@@ -879,8 +865,7 @@ update_protocol_image() {
   set_protocol_client_update_state "${image_id}" "paused" "Обновление протокола запущено: подключение временно приостановлено"
   info "Обновление ${image_id}; существующие подключения помечены как приостановленные"
   if ! (prepare_package_manager && \
-    ENV_FILE="${ENV_FILE}" WG_INTERFACE="${WG_INTERFACE}" WG_PORT="${WG_PORT}" \
-      AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
+    ENV_FILE="${ENV_FILE}" AWG_INTERFACE="${AWG_INTERFACE}" AWG_PORT="${AWG_PORT}" \
       HYSTERIA2_PORT="${HYSTERIA2_PORT}" TUIC_PORT="${TUIC_PORT}" XRAY_PORT="${XRAY_PORT}" \
       bash "${image_root}/${installer}"); then
     if [[ -f "${backup_dir}/binary" && -n "${binary}" ]]; then
@@ -915,15 +900,11 @@ configure_firewall() {
     ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
   elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
     local vpn_interface_available="no"
-    if ip link show "${WG_INTERFACE}" >/dev/null 2>&1; then
-      ufw allow in on "${WG_INTERFACE}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via WG'
-      vpn_interface_available="yes"
-    fi
     if ip link show "${AWG_INTERFACE}" >/dev/null 2>&1; then
       ufw allow in on "${AWG_INTERFACE}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via AWG'
       vpn_interface_available="yes"
     fi
-    [[ "${vpn_interface_available}" == "yes" ]] || die "нет доступного интерфейса WG/AWG для панели."
+    [[ "${vpn_interface_available}" == "yes" ]] || die "нет доступного интерфейса AmneziaWG для панели."
     ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
   else
     ufw allow "${HTTP_PORT}/tcp"
@@ -949,7 +930,7 @@ configure_vpn_firewall_policy() {
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -Eeuo pipefail'
     printf 'uplink=%q\n' "${uplink}"
-    for interface in "${WG_INTERFACE}" "${AWG_INTERFACE}"; do
+    for interface in "${AWG_INTERFACE}"; do
       [[ -e "/sys/class/net/${interface}" ]] || continue
       subnet="$(ip -4 route show dev "${interface}" proto kernel scope link | awk 'NR == 1 {print $1}')"
       [[ -n "${subnet}" ]] || continue
@@ -959,7 +940,7 @@ configure_vpn_firewall_policy() {
       printf 'iptables -t nat -C POSTROUTING -s %q -o "$uplink" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s %q -o "$uplink" -j MASQUERADE\n' "${subnet}" "${subnet}"
     done
   } >"${policy_script}"
-  (( installed > 0 )) || { rm -f "${policy_script}"; die "нет активных интерфейсов WG/AWG для настройки."; }
+  (( installed > 0 )) || { rm -f "${policy_script}"; die "нет активного интерфейса AmneziaWG для настройки."; }
   chmod 0755 "${policy_script}"
 
   cat >"${policy_service}" <<EOF
@@ -980,7 +961,7 @@ EOF
   systemctl enable "$(basename "${policy_service}")" >/dev/null
   "${policy_script}"
   systemctl restart "${APP_NAME}-api.service"
-  ok "маршрутизация, stateful return и NAT для WG/AWG восстановлены."
+  ok "маршрутизация, stateful return и NAT для AmneziaWG восстановлены."
 }
 
 check_source() {
@@ -1064,7 +1045,7 @@ write_integrity_manifest() {
 }
 
 ensure_environment() {
-  install -d -m 0750 "${DATA_DIR}" "${DATA_DIR}/tmp" "${DATA_DIR}/logs" /etc/wireguard /etc/amnezia
+  install -d -m 0750 "${DATA_DIR}" "${DATA_DIR}/tmp" "${DATA_DIR}/logs" /etc/amnezia
   rm -f -- "${DATA_DIR}/personalization.json"
   if [[ ! -s "${ENV_FILE}" ]]; then
     install -m 0600 "${PROJECT_DIR}/.env.example" "${ENV_FILE}"
@@ -1137,7 +1118,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=-/etc/vps-control.env -/etc/wireguard -/etc/amnezia -/etc/vps-control ${DATA_DIR}
+ReadWritePaths=-/etc/vps-control.env -/etc/amnezia -/etc/vps-control ${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -1147,7 +1128,7 @@ EOF
 }
 
 ensure_api_write_access() {
-  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/wireguard -/etc/amnezia -/etc/vps-control ${DATA_DIR}"
+  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/amnezia -/etc/vps-control ${DATA_DIR}"
   if ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
     || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
@@ -1156,7 +1137,7 @@ ensure_api_write_access() {
 }
 
 install_protocol_monitor() {
-  if [[ ! -s "/etc/wireguard/${WG_INTERFACE}.conf" && ! -s "/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf" && ! -s "/etc/amnezia/${AWG_INTERFACE}.conf" ]]; then
+  if [[ ! -s "/etc/amnezia/amneziawg/${AWG_INTERFACE}.conf" && ! -s "/etc/amnezia/${AWG_INTERFACE}.conf" ]]; then
     systemctl disable --now vpn-monitor.timer vpn-monitor.service >/dev/null 2>&1 || true
     rm -f /etc/systemd/system/vpn-monitor.service /etc/systemd/system/vpn-monitor.timer /etc/logrotate.d/vps-control-monitor
     systemctl daemon-reload
@@ -1473,7 +1454,7 @@ uninstall_app() {
   systemctl daemon-reload
   rm -rf -- "${INSTALL_DIR}" "${DATA_DIR}"
   rm -f -- "${ENV_FILE}" "${INSTALL_CONFIG}" "${MANAGER_CONFIG}" "${CADDY_CONFIG}"
-  rmdir --ignore-fail-on-non-empty /etc/wireguard /etc/amnezia/amneziawg /etc/amnezia 2>/dev/null || true
+  rmdir --ignore-fail-on-non-empty /etc/amnezia/amneziawg /etc/amnezia 2>/dev/null || true
   ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
   CURRENT_ACTION=""
   ok "панель полностью удалена; общие системные пакеты сохранены."
@@ -1625,7 +1606,7 @@ install_prebuilt_release() {
   rm -rf -- "${stage_root}"
   cleanup_legacy_runtime
   install -m 0755 "${INSTALL_DIR}/scripts/vps-control.sh" "${COMMAND_PATH}"
-  ok "подготовленный релиз установлен; WG/AWG и системные пакеты не изменялись."
+  ok "подготовленный релиз установлен; AmneziaWG и системные пакеты не изменялись."
 }
 
 release_download_size() {
@@ -1805,7 +1786,7 @@ restore_test_app() {
   write_integrity_manifest
   install -m 0755 "${INSTALL_DIR}/scripts/vps-control.sh" "${COMMAND_PATH}"
   rm -f "${DATA_DIR}/application-version.json"
-  ok "рабочая версия приложения восстановлена; WG/AWG, клиенты и модули не изменялись."
+  ok "рабочая версия приложения восстановлена; AmneziaWG, клиенты и модули не изменялись."
 }
 
 change_access_mode() {
@@ -1822,7 +1803,7 @@ change_access_mode() {
   curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 \
     "http://127.0.0.1:8000/api/health" >/dev/null
   if [[ "${ACCESS_MODE}" == "vpn" ]]; then
-    ok "панель доступна только через WG/AWG."
+    ok "панель доступна только через AmneziaWG."
   else
     ok "публичный доступ к панели открыт."
   fi
@@ -2005,7 +1986,6 @@ prepare_dkms_for_kernel() {
 active_managed_protocol_units() {
   local unit
   for unit in \
-    "wg-quick@${WG_INTERFACE}.service" \
     "awg-quick@${AWG_INTERFACE}.service" \
     vps-control-hysteria2.service \
     vps-control-tuic.service \
@@ -2385,7 +2365,7 @@ network_check() {
   done
   verify_app
   local found="no" interface service tool port
-  for tuple in "wg:${WG_INTERFACE}:wg-quick:${WG_PORT}" "awg:${AWG_INTERFACE}:awg-quick:${AWG_PORT}"; do
+  for tuple in "awg:${AWG_INTERFACE}:awg-quick:${AWG_PORT}"; do
     IFS=':' read -r tool interface service port <<<"${tuple}"
     ip link show "${interface}" >/dev/null 2>&1 || continue
     found="yes"
@@ -2494,13 +2474,13 @@ usage() {
   logs [api|web|gateway]
                    показать журналы (для выбранного сервиса — в реальном времени)
   verify           проверить API, веб-панель и привязку порта
-  network-check    проверить интернет, панель и установленные WG/AWG-туннели
+  network-check    проверить интернет, панель и установленный туннель AmneziaWG
   integrity-check  проверить файлы, права, конфигурацию и компоненты приложения
   identity         повторно определить IP и геолокацию сервера
   secure           установить и включить базовую защиту системы
   system-update    установить доступные обновления системных пакетов
   kernel-update    обновить установленные метапакеты ядра Debian/Ubuntu
-  vpn-firewall     восстановить маршрутизацию и NAT установленных WG/AWG
+  vpn-firewall     восстановить маршрутизацию и NAT AmneziaWG
   optimize         очистить безопасные кэши и старые журналы
   automation-apply применить сохранённые расписания обслуживания
   protocol-version-check

@@ -1,6 +1,6 @@
 """Opt-in root/Linux test: two temporary netns, encrypted ping, automatic cleanup.
 
-Usage: python3 tests/linux_tunnel_smoke.py awg  (or wg)
+Usage: python3 tests/linux_tunnel_smoke.py
 Does not modify the panel, its peers, firewall, or existing interfaces.
 """
 import os
@@ -18,8 +18,8 @@ def run(*args, data=None):
 
 
 def main():
-    tool = sys.argv[1]
-    assert tool in ('wg', 'awg') and sys.platform == 'linux' and os.geteuid() == 0
+    tool = 'awg'
+    assert sys.platform == 'linux' and os.geteuid() == 0
     assert shutil.which(tool) and shutil.which('ping')
     prefix = 'vpqa' + uuid.uuid4().hex[:6]
     names = [prefix + 's', prefix + 'c']
@@ -31,13 +31,13 @@ def main():
         run('ip', '-n', names[0], 'link', 'add', 'underlay', 'type', 'veth', 'peer', 'name', 'underlay', 'netns', names[1])
         private = [run(tool, 'genkey') for _ in names]
         public = [run(tool, 'pubkey', data=key + '\n') for key in private]
-        extra = 'Jc = 6\nJmin = 8\nJmax = 80\nS1 = 64\nS2 = 112\nH1 = 150000000\nH2 = 600000000\nH3 = 1000000000\nH4 = 1400000000\n' if tool == 'awg' else ''
+        extra = 'Jc = 6\nJmin = 8\nJmax = 80\nS1 = 64\nS2 = 112\nH1 = 150000000\nH2 = 600000000\nH3 = 1000000000\nH4 = 1400000000\n'
         for index, name in enumerate(names):
             peer = 1 - index
             run('ip', '-n', name, 'link', 'set', 'lo', 'up')
             run('ip', '-n', name, 'address', 'add', f'192.0.2.{index + 1}/30', 'dev', 'underlay')
             run('ip', '-n', name, 'link', 'set', 'underlay', 'up')
-            run('ip', '-n', name, 'link', 'add', 'tunnel', 'type', 'amneziawg' if tool == 'awg' else 'wireguard')
+            run('ip', '-n', name, 'link', 'add', 'tunnel', 'type', 'amneziawg')
             config = f'[Interface]\nPrivateKey = {private[index]}\nListenPort = 51999\n{extra}[Peer]\nPublicKey = {public[peer]}\nAllowedIPs = 198.18.0.{peer + 1}/32\nEndpoint = 192.0.2.{peer + 1}:51999\n'
             run('ip', 'netns', 'exec', name, tool, 'setconf', 'tunnel', '/dev/stdin', data=config)
             run('ip', '-n', name, 'address', 'add', f'198.18.0.{index + 1}/30', 'dev', 'tunnel')

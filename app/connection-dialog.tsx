@@ -60,7 +60,7 @@ export type ConnectionServerOptions = {
 
 const settingsFor = (protocol: Protocol, serverOptions: ConnectionServerOptions): ConnectionSettings => ({
   dns: "1.1.1.1, 1.0.0.1",
-  mtu: protocol === "wg" ? 1380 : 1280,
+  mtu: 1280,
   keepalive: 25,
   route_mode: "ipv4",
   allowed_ips: "0.0.0.0/0",
@@ -170,8 +170,8 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
           <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{protocols.map((item) => { const itemMeta = protocolDelivery[item]; return <button type="button" key={item} className={protocol === item ? "active" : ""} onClick={() => selectProtocol(item)}><span className={`protocol ${item}`}><ProtocolIcon protocol={item} /></span><span><strong>{itemMeta.title}</strong><small>{itemMeta.summary}</small></span><i /></button>; })}</div></fieldset>
           <fieldset className="connectionSettings"><legend>Параметры профиля</legend><header><span className={`protocol ${protocol}`}><ProtocolIcon protocol={protocol} /></span><div><strong>{meta.title}</strong><small>{meta.transport} · {meta.methods.join(" · ")}</small></div></header>
             <div className="connectionSettingsFields">
-              {(protocol === "wg" || protocol === "awg") && <>
-                <label><span>MTU</span><input type="number" min={protocol === "awg" ? 1280 : 576} max={1500} value={settings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label>
+              {protocol === "awg" && <>
+                <label><span>MTU</span><input type="number" min={1280} max={1500} value={settings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label>
                 <label><span>Keepalive, сек.</span><input type="number" min={0} max={300} value={settings.keepalive} onChange={(event) => update({ keepalive: Number(event.target.value) })} /></label>
                 <label><span>Маршрутизация</span><select value={settings.route_mode} onChange={(event) => update({ route_mode: event.target.value as ConnectionSettings["route_mode"] })}><option value="ipv4">Весь IPv4-трафик</option><option value="all">IPv4 + IPv6</option><option value="custom">Собственные сети</option></select></label>
                 {settings.route_mode === "custom" && <label><span>Allowed IPs</span><input value={settings.allowed_ips} onChange={(event) => update({ allowed_ips: event.target.value })} placeholder="10.0.0.0/8, 192.168.0.0/16" /></label>}
@@ -201,7 +201,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
               {settings.local_auth_enabled && <><label><span>Локальный логин</span><input value={settings.local_username} maxLength={64} onChange={(event) => update({ local_username: event.target.value })} /></label><label><span>Локальный пароль</span><input type="password" minLength={8} maxLength={128} value={settings.local_password} onChange={(event) => update({ local_password: event.target.value })} placeholder="Минимум 8 символов" /><small>Хранится только в экспортируемом профиле</small></label></>}
             </div></section>}
             <details className="connectionAdvanced"><summary>Расширенные настройки <span>⌄</span></summary><div className="connectionSettingsFields">
-              {(protocol === "wg" || protocol === "awg") && <>
+              {protocol === "awg" && <>
                 <label><span>DNS-серверы</span><input value={settings.dns} onChange={(event) => update({ dns: event.target.value })} placeholder="1.1.1.1, 1.0.0.1" /></label>
                 {protocol === "awg" && <><label><span>Jc · пакеты мусора</span><input type="number" min={0} max={128} value={settings.awg_jc} onChange={(event) => update({ awg_jc: Number(event.target.value) })} /></label><label><span>Jmin · минимум</span><input type="number" min={0} max={1280} value={settings.awg_jmin} onChange={(event) => update({ awg_jmin: Number(event.target.value) })} /></label><label><span>Jmax · максимум</span><input type="number" min={0} max={1280} value={settings.awg_jmax} onChange={(event) => update({ awg_jmax: Number(event.target.value) })} /></label><div className="connectionServerValues"><strong>Параметры сервера — подставляются автоматически</strong><dl><div><dt>S1</dt><dd>{serverOptions.awg?.s1 ?? "—"}</dd></div><div><dt>S2</dt><dd>{serverOptions.awg?.s2 ?? "—"}</dd></div><div><dt>H1</dt><dd>{serverOptions.awg?.h1 ?? "—"}</dd></div><div><dt>H2</dt><dd>{serverOptions.awg?.h2 ?? "—"}</dd></div><div><dt>H3</dt><dd>{serverOptions.awg?.h3 ?? "—"}</dd></div><div><dt>H4</dt><dd>{serverOptions.awg?.h4 ?? "—"}</dd></div></dl><small>S/H должны совпадать на клиенте и сервере. Индивидуально меняются только Jc, Jmin и Jmax.</small></div></>}
               </>}

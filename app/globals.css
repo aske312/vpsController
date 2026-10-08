@@ -156,7 +156,6 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); line-height: 1; letter-spacin
 .protocolSummary > button > b { color: #526073; font-size: 18px; }
 .protocol { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; font: 750 9px var(--font-geist-mono); }
 .protocol .protocolIcon { width: 100%; height: 100%; border-radius: inherit; }
-.protocol.wg { color: #70b7e8; background: #11212c; }
 .protocol.awg { color: #bc9cff; background: #251d38; }
 .onlinePill, .offlinePill { display: inline-flex; align-items: center; border-radius: 20px; padding: 6px 9px; white-space: nowrap; font-size: 8px; font-weight: 650; }
 .onlinePill { color: var(--green); background: var(--green-dim); }
@@ -756,7 +755,7 @@ input, select { height: 46px; font-size: 11px; }
 .dangerButton, input, select, textarea, .primaryButton { border-radius: 6px; }
 
 .protocolWorkspace { --protocol-color: var(--accent); display: grid; gap: 12px; margin-bottom: 12px; }
-.protocolWorkspace.protocol-awg, .protocolWorkspace.protocol-wg { --protocol-color: #70e0bd; }
+.protocolWorkspace.protocol-awg { --protocol-color: #70e0bd; }
 .protocolWorkspace.protocol-hysteria2 { --protocol-color: #74c7ff; }
 .protocolWorkspace.protocol-tuic { --protocol-color: #b5a4ff; }
 .protocolWorkspace.protocol-xray { --protocol-color: #ffb770; }

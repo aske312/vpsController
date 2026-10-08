@@ -64,13 +64,9 @@ PUBLIC_IP = os.getenv("PUBLIC_IP", "")
 SERVER_CITY = os.getenv("SERVER_CITY", "Unknown")
 SERVER_COUNTRY = os.getenv("SERVER_COUNTRY", "Unknown")
 SERVER_COUNTRY_CODE = os.getenv("SERVER_COUNTRY_CODE", "")
-WG_INTERFACE = os.getenv("WG_INTERFACE", "wg0")
 AWG_INTERFACE = os.getenv("AWG_INTERFACE", "awg0")
-WG_PORT = int(os.getenv("WG_PORT", "51820"))
 AWG_PORT = int(os.getenv("AWG_PORT", "51822"))
-WG_SUBNET = ipaddress.ip_network(os.getenv("WG_SUBNET", "10.72.0.0/24"))
 AWG_SUBNET = ipaddress.ip_network(os.getenv("AWG_SUBNET", "10.73.0.0/24"))
-WG_CONFIG = Path(os.getenv("WG_CONFIG", f"/etc/wireguard/{WG_INTERFACE}.conf"))
 AWG_CONFIG = Path(os.getenv("AWG_CONFIG", f"/etc/amnezia/amneziawg/{AWG_INTERFACE}.conf"))
 AWG_MTU = int(os.getenv("AWG_MTU", "1280"))
 AWG_PROFILE = {
@@ -252,12 +248,12 @@ def run_with_input(args: list[str], value: str) -> str:
     return result.stdout.strip()
 
 
-def cached_resource_availability(protocol: Literal["wg", "awg"]) -> dict:
+def cached_resource_availability(protocol: str) -> dict:
     cached = resource_check_cache.get(protocol)
     return {key: value for key, value in (cached or {}).items() if not key.startswith("_")}
 
 
-def check_resource_availability(protocol: Literal["wg", "awg"]) -> dict:
+def check_resource_availability(protocol: str) -> dict:
     cached = resource_check_cache.get(protocol)
     if not resource_check_lock.acquire(blocking=False):
         return cached_resource_availability(protocol)
@@ -373,9 +369,10 @@ def service_bytes(unit: str) -> tuple[int, int]:
     return value("IPIngressBytes"), value("IPEgressBytes")
 
 
-def interface_dump(protocol: Literal["wg", "awg"], include_quality: bool = True) -> list[dict]:
-    command = "wg" if protocol == "wg" else "awg"
-    interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
+def interface_dump(include_quality: bool = True) -> list[dict]:
+    protocol = "awg"
+    command = "awg"
+    interface = AWG_INTERFACE
     output = run(command, "show", interface, "dump")
     rows = output.splitlines()
     if len(rows) < 2:
@@ -430,7 +427,7 @@ def client_connection_quality(peer: dict) -> dict:
     latency = round(float(latency_match.group(1)), 1) if latency_match else None
     jitter = round(float(latency_match.group(2)), 1) if latency_match else None
     if latency is None:
-        # A fresh WireGuard handshake proves the tunnel is active. Some clients
+        # A fresh AmneziaWG handshake proves the tunnel is active. Some clients
         # reject ICMP completely, which must not be reported as packet loss.
         loss = None
     if (loss is not None and loss >= 20) or (latency is not None and latency >= 500) or (jitter is not None and jitter >= 80):
@@ -449,7 +446,7 @@ def client_connection_quality(peer: dict) -> dict:
     return {key: value for key, value in result.items() if key != "_cached_at"}
 
 
-def protocol_history(protocol: Literal["wg", "awg"], period_hours: int = 24) -> dict:
+def protocol_history(protocol: str, period_hours: int = 24) -> dict:
     path = MONITOR_DIR / f"{protocol}.csv"
     cutoff = int(time.time()) - period_hours * 3600
     rows: list[dict] = []
@@ -587,7 +584,7 @@ def read_kernel_number(path: str) -> int:
         return 0
 
 
-def network_diagnostics(protocol: Literal["wg", "awg"], history: dict, force: bool = False) -> dict:
+def network_diagnostics(protocol: str, history: dict, force: bool = False) -> dict:
     cached = network_diagnostic_cache.get(protocol)
     if cached and not force and time.time() - cached["_cached_at"] < 45:
         return {key: value for key, value in cached.items() if key != "_cached_at"}
@@ -598,8 +595,8 @@ def network_diagnostics(protocol: Literal["wg", "awg"], history: dict, force: bo
             }).items() if key != "_cached_at"
         }
     try:
-        interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
-        port = WG_PORT if protocol == "wg" else AWG_PORT
+        interface = AWG_INTERFACE
+        port = AWG_PORT
         route_rows: list[dict] = []
         try:
             route_rows = json.loads(run("ip", "-j", "-4", "route", "show", "default") or "[]")
@@ -648,7 +645,7 @@ def network_diagnostics(protocol: Literal["wg", "awg"], history: dict, force: bo
         udp_listening = any(
             re.search(rf"(?:^|[:.]){port}(?:\s|$)", line) for line in listener_output.splitlines()
         )
-        unit = f"{'wg-quick' if protocol == 'wg' else 'awg-quick'}@{interface}.service"
+        unit = f"awg-quick@{interface}.service"
         protocol_service_active = run("systemctl", "is-active", unit) == "active"
         forwarding = read_kernel_number("/proc/sys/net/ipv4/ip_forward") == 1
         conntrack_count = read_kernel_number("/proc/sys/net/netfilter/nf_conntrack_count")
@@ -666,7 +663,7 @@ def network_diagnostics(protocol: Literal["wg", "awg"], history: dict, force: bo
             "ping", "-n", "-c", "1", "-W", "2", "-M", "do", "-s", str(safe_payload), "1.1.1.1",
             timeout=4,
         )
-        tunnel_budget = max(0, (uplink_mtu or 1500) - (80 if protocol == "awg" else 60))
+        tunnel_budget = max(0, (uplink_mtu or 1500) - 80)
         mtu_safe = bool(tunnel_mtu and tunnel_mtu <= tunnel_budget)
 
         uplink_errors = sum(link_stat(uplink, key) for key in ("rx_errors", "tx_errors"))
@@ -745,7 +742,7 @@ def network_diagnostics(protocol: Literal["wg", "awg"], history: dict, force: bo
         network_diagnostic_lock.release()
 
 
-def cached_network_diagnostics(protocol: Literal["wg", "awg"]) -> dict:
+def cached_network_diagnostics(protocol: str) -> dict:
     cached = network_diagnostic_cache.get(protocol)
     return {
         key: value for key, value in (cached or {
@@ -775,15 +772,15 @@ def protocol_listener(protocol: str) -> tuple[str, int, str, bool]:
 
 
 def protocol_runtime_profile(protocol: str) -> dict:
-    if protocol in ("wg", "awg"):
+    if protocol == "awg":
         return {
             "kind": "encrypted-tunnel",
-            "summary": "Сетевой L3-туннель AmneziaWG с обфускацией WireGuard-трафика." if protocol == "awg" else "Сетевой L3-туннель WireGuard.",
+            "summary": "Сетевой L3-туннель AmneziaWG с обфускацией WireGuard-трафика.",
             "facts": [
-                {"label": "Транспорт", "value": "AmneziaWG / UDP" if protocol == "awg" else "WireGuard / UDP"},
+                {"label": "Транспорт", "value": "AmneziaWG / UDP"},
                 {"label": "Проверка клиента", "value": "Handshake + RX/TX"},
-                {"label": "MTU", "value": str(AWG_MTU if protocol == "awg" else 1380)},
-                {"label": "Обфускация", "value": f"Jc {AWG_PROFILE['Jc']} · Jmin/Jmax {AWG_PROFILE['Jmin']}/{AWG_PROFILE['Jmax']}" if protocol == "awg" else "нет"},
+                {"label": "MTU", "value": str(AWG_MTU)},
+                {"label": "Обфускация", "value": f"Jc {AWG_PROFILE['Jc']} · Jmin/Jmax {AWG_PROFILE['Jmin']}/{AWG_PROFILE['Jmax']}"},
             ],
         }
 
@@ -868,8 +865,8 @@ def protocol_runtime_profile(protocol: str) -> dict:
     }
 
 
-def observed_tunnel_connection(protocol: Literal["wg", "awg"]) -> dict:
-    peers = interface_dump(protocol, include_quality=False)
+def observed_tunnel_connection(protocol: Literal["awg"]) -> dict:
+    peers = interface_dump(include_quality=False)
     fresh = [peer for peer in peers if peer.get("handshake_age_s") is not None and peer["handshake_age_s"] < 180]
     exchanged = [peer for peer in fresh if peer.get("rx_bytes", 0) > 0 and peer.get("tx_bytes", 0) > 0]
     checked_at = datetime.now(timezone.utc).isoformat()
@@ -909,7 +906,7 @@ def observed_tunnel_connection(protocol: Literal["wg", "awg"]) -> dict:
 
 
 def cached_connection_probe(protocol: str) -> dict:
-    if protocol in ("wg", "awg"):
+    if protocol == "awg":
         return observed_tunnel_connection(protocol)
     return connection_probe_cache.get(protocol, {
         "checked_at": None,
@@ -1177,7 +1174,7 @@ def wait_for_proxy(process: subprocess.Popen, port: int, timeout: float = 4.0) -
 
 
 def check_protocol_connection(protocol: str) -> dict:
-    if protocol in ("wg", "awg"):
+    if protocol == "awg":
         return observed_tunnel_connection(protocol)
     if not connection_probe_lock.acquire(blocking=False):
         current = cached_connection_probe(protocol).copy()
@@ -1488,7 +1485,6 @@ def overview(_: None = Depends(require_token)) -> dict:
         },
         "resources": resources,
         "protocols": {
-            "wg": {"interface": WG_INTERFACE, "port": WG_PORT, "active": bool(run("wg", "show", WG_INTERFACE))},
             "awg": {"interface": AWG_INTERFACE, "port": AWG_PORT, "active": bool(run("awg", "show", AWG_INTERFACE))},
             **direct_protocols,
         },
@@ -1576,7 +1572,7 @@ def security(_: None = Depends(require_token)) -> dict:
             for part in parts
             if part.startswith("in_")
         }
-        vpn_interfaces = interface_tokens.intersection({WG_INTERFACE, AWG_INTERFACE})
+        vpn_interfaces = interface_tokens.intersection({AWG_INTERFACE})
         panel_vpn_interfaces.update(vpn_interfaces)
         if parts[5] in ("0.0.0.0/0", "::/0") and not vpn_interfaces:
             panel_public_rule = True
@@ -1587,7 +1583,7 @@ def security(_: None = Depends(require_token)) -> dict:
         panel_publicly_accessible
         if access_mode == "external"
         else not panel_publicly_accessible
-        and {WG_INTERFACE, AWG_INTERFACE}.issubset(panel_vpn_interfaces)
+        and AWG_INTERFACE in panel_vpn_interfaces
     )
     legacy_services = {}
     for name in ("openvpn.service", "strongswan-starter.service", "xl2tpd.service"):
@@ -1613,10 +1609,7 @@ def security(_: None = Depends(require_token)) -> dict:
         "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT",
     )
     protocol_policies = {}
-    for protocol, interface, subnet in (
-        ("wg", WG_INTERFACE, WG_SUBNET),
-        ("awg", AWG_INTERFACE, AWG_SUBNET),
-    ):
+    for protocol, interface, subnet in (("awg", AWG_INTERFACE, AWG_SUBNET),):
         installed = Path(f"/sys/class/net/{interface}").exists()
         direct_route_allowed = installed and bool(uplink_interface) and command_succeeds(
             "iptables", "-C", "FORWARD", "-i", interface, "-o", uplink_interface,
@@ -1746,7 +1739,7 @@ def security(_: None = Depends(require_token)) -> dict:
                 run("sysctl", "-n", "net.ipv4.conf.all.rp_filter") in ("1", "2")
                 or (
                     Path("/proc/sys/net/ipv4/ip_forward").read_text().strip() == "1"
-                    and any(Path(f"/sys/class/net/{interface}").exists() for interface in (WG_INTERFACE, AWG_INTERFACE))
+                    and Path(f"/sys/class/net/{AWG_INTERFACE}").exists()
                 )
             ),
             "redirects_disabled": all(
@@ -2048,19 +2041,11 @@ def remove_protocol_image(image_id: str, _: None = Depends(require_token)) -> di
         raise HTTPException(status_code=404, detail="Protocol image not found")
     if not image.get("removable"):
         raise HTTPException(status_code=409, detail="Protocol does not support removal")
-    if os.getenv("ACCESS_MODE", "external") == "vpn" and image_id in ("wg", "awg"):
-        alternate_id = "awg" if image_id == "wg" else "wg"
-        alternate_interface = AWG_INTERFACE if alternate_id == "awg" else WG_INTERFACE
-        alternate_tool = "awg" if alternate_id == "awg" else "wg"
-        alternate_unit = f"{alternate_tool}-quick@{alternate_interface}.service"
-        if not (
-            Path(f"/sys/class/net/{alternate_interface}").exists()
-            and run("systemctl", "is-active", alternate_unit) == "active"
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="The last active VPN module cannot be removed while panel access is VPN-only",
-            )
+    if os.getenv("ACCESS_MODE", "external") == "vpn" and image_id == "awg":
+        raise HTTPException(
+            status_code=409,
+            detail="AmneziaWG cannot be removed while panel access is VPN-only",
+        )
     return start_application_task(
         f"vps-control-protocol-remove-{image_id}", f"protocol-remove:{image_id}",
         [CONTROL_COMMAND, "protocol-remove", image_id], "Запуск удаления протокола",
@@ -2228,7 +2213,6 @@ def managed_services() -> dict[str, dict]:
         },
         "web": {"name": "Web 312.net", "unit": "vps-control-web.service", "controls": ["restart"], "disabled_controls": ["stop"]},
         "gateway": {"name": "Caddy", "unit": "caddy.service", "controls": ["restart"], "disabled_controls": ["stop"]},
-        "wg": {"name": "WireGuard", "unit": f"wg-quick@{WG_INTERFACE}.service", "controls": ["start", "stop", "restart"]},
         "awg": {"name": "AmneziaWG", "unit": f"awg-quick@{AWG_INTERFACE}.service", "controls": ["start", "stop", "restart"]},
         "hysteria2": {"name": "Hysteria2", "unit": "vps-control-hysteria2.service", "controls": ["start", "stop", "restart"]},
         "tuic": {"name": "TUIC v5", "unit": "vps-control-tuic.service", "controls": ["start", "stop", "restart"]},
@@ -2430,20 +2414,18 @@ def services_status(_: None = Depends(require_token)) -> dict:
     items = []
     for service_id, definition in managed_services().items():
         details = service_details(service_id, definition)
-        # Optional modules (WG/AWG, monitoring, fail2ban, etc.) are
+        # Optional modules (AWG, monitoring, fail2ban, etc.) are
         # not shown until their systemd unit is actually installed.
         module_configured = {
-            "wg": WG_CONFIG.exists(),
             "awg": AWG_CONFIG.exists(),
-            "monitor": WG_CONFIG.exists() or AWG_CONFIG.exists(),
+            "monitor": AWG_CONFIG.exists(),
         }.get(service_id, True)
         if details["installed"] and module_configured:
             items.append(details)
     vpn_urls = []
-    for interface in (WG_INTERFACE, AWG_INTERFACE):
-        address = run("bash", "-lc", f"ip -o -4 addr show dev {interface} 2>/dev/null | awk 'NR==1 {{split($4,a,\"/\"); print a[1]}}'")
-        if address:
-            vpn_urls.append(f"http://{address}:{os.getenv('HTTP_PORT', '80')}")
+    address = run("bash", "-lc", f"ip -o -4 addr show dev {AWG_INTERFACE} 2>/dev/null | awk 'NR==1 {{split($4,a,\"/\"); print a[1]}}'")
+    if address:
+        vpn_urls.append(f"http://{address}:{os.getenv('HTTP_PORT', '80')}")
     logging_values = {}
     if LOGGING_CONFIG_FILE.exists():
         for line in LOGGING_CONFIG_FILE.read_text(encoding="utf-8").splitlines():
@@ -2493,7 +2475,7 @@ def live_status(_: None = Depends(require_token)) -> dict:
     """Cheap sub-second telemetry without diagnostics, package checks or ICMP."""
     resources = system_resources()
     ufw_config = Path("/etc/ufw/ufw.conf")
-    live_clients = interface_dump("wg", include_quality=False) + interface_dump("awg", include_quality=False) + direct_client_rows()
+    live_clients = interface_dump(include_quality=False) + direct_client_rows()
 
     def protocol_live(protocol: str, interface: str) -> dict:
         protocol_clients = [client for client in live_clients if client["protocol"] == protocol]
@@ -2530,7 +2512,6 @@ def live_status(_: None = Depends(require_token)) -> dict:
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "resources": resources,
         "protocols": {
-            "wg": protocol_live("wg", WG_INTERFACE),
             "awg": protocol_live("awg", AWG_INTERFACE),
             **{protocol: direct_protocol_live(protocol) for protocol in DIRECT_PROTOCOLS},
         },
@@ -2560,24 +2541,10 @@ def manage_service(service_id: str, payload: ServiceAction, _: None = Depends(re
         raise HTTPException(status_code=404, detail="Unknown managed service")
     if payload.action not in definition["controls"]:
         raise HTTPException(status_code=409, detail="Action is not allowed for this service")
-    if service_id in ("wg", "awg") and payload.action == "stop" and os.getenv("ACCESS_MODE", "external") == "vpn":
-        alternate_id = "awg" if service_id == "wg" else "wg"
-        alternate_definition = managed_services()[alternate_id]
-        alternate_ready = (
-            service_details(alternate_id, alternate_definition)["active"]
-            and Path(f"/sys/class/net/{AWG_INTERFACE if alternate_id == 'awg' else WG_INTERFACE}").exists()
-        )
-        if not alternate_ready:
-            raise HTTPException(
-                status_code=409,
-                detail="The last active VPN cannot be stopped while panel access is VPN-only",
-            )
+    if service_id == "awg" and payload.action == "stop" and os.getenv("ACCESS_MODE", "external") == "vpn":
+        raise HTTPException(status_code=409, detail="AmneziaWG cannot be stopped while panel access is VPN-only")
     if service_id == "ssh" and payload.action == "stop":
-        vpn_ready = any(
-            Path(f"/sys/class/net/{interface}").exists()
-            and run("systemctl", "is-active", f"{tool}-quick@{interface}.service") == "active"
-            for interface, tool in ((WG_INTERFACE, "wg"), (AWG_INTERFACE, "awg"))
-        )
+        vpn_ready = Path(f"/sys/class/net/{AWG_INTERFACE}").exists() and run("systemctl", "is-active", f"awg-quick@{AWG_INTERFACE}.service") == "active"
         panel_ready = (
             run("systemctl", "is-active", "vps-control-api.service") == "active"
             and run("systemctl", "is-active", "vps-control-web.service") == "active"
@@ -2605,10 +2572,7 @@ class PanelAccessSettings(BaseModel):
 @app.put("/api/services/panel-access")
 def update_panel_access(payload: PanelAccessSettings, _: None = Depends(require_token)) -> dict:
     if payload.mode == "vpn":
-        available_interfaces = [
-            interface for interface in (WG_INTERFACE, AWG_INTERFACE)
-            if Path(f"/sys/class/net/{interface}").exists()
-        ]
+        available_interfaces = [AWG_INTERFACE] if Path(f"/sys/class/net/{AWG_INTERFACE}").exists() else []
         if not available_interfaces:
             raise HTTPException(status_code=409, detail="No active VPN interface is available")
     unit = f"vps-control-access-{int(time.time())}"
@@ -2737,7 +2701,7 @@ def update_automation(payload: AutomationSettings, _: None = Depends(require_tok
 
 @app.get("/api/clients")
 def clients(_: None = Depends(require_token)) -> dict:
-    return {"items": interface_dump("wg") + interface_dump("awg") + direct_client_rows()}
+    return {"items": interface_dump() + direct_client_rows()}
 
 
 def xray_server_names() -> list[str]:
@@ -2819,7 +2783,7 @@ class ClientSettings(BaseModel):
 
 class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
-    protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"]
+    protocol: Literal["awg", "hysteria2", "tuic", "xray"]
     settings: ClientSettings = Field(default_factory=ClientSettings)
 
 
@@ -2843,8 +2807,8 @@ def key(command: str) -> str:
     return run("bash", "-lc", command, check=True)
 
 
-def next_address(protocol: Literal["wg", "awg"]) -> ipaddress.IPv4Address:
-    network = WG_SUBNET if protocol == "wg" else AWG_SUBNET
+def next_address() -> ipaddress.IPv4Address:
+    network = AWG_SUBNET
     used = {
         ipaddress.ip_interface(item["address"]).ip
         for item in read_clients()
@@ -3112,15 +3076,15 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 raise HTTPException(status_code=500, detail="Unable to create Xray connection") from exc
             finally:
                 temporary.unlink(missing_ok=True)
-    command = "wg" if payload.protocol == "wg" else "awg"
-    config_path = WG_CONFIG if payload.protocol == "wg" else AWG_CONFIG
+    command = "awg"
+    config_path = AWG_CONFIG
     if not config_path.exists():
         raise HTTPException(status_code=409, detail=f"{payload.protocol} protocol is not installed")
     private_key = key(f"{command} genkey")
     public_key = key(f"printf '%s' '{private_key}' | {command} pubkey")
     psk = key(f"{command} genpsk")
-    address = next_address(payload.protocol)
-    interface = WG_INTERFACE if payload.protocol == "wg" else AWG_INTERFACE
+    address = next_address()
+    interface = AWG_INTERFACE
     append_peer(config_path, client_id, public_key, psk, str(address))
     run_with_input(
         [command, "set", interface, "peer", public_key, "preshared-key", "/dev/stdin", "allowed-ips", f"{address}/32"],
@@ -3128,19 +3092,17 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     )
 
     server_public = run(command, "show", interface, "public-key", check=True)
-    extra = ""
-    if payload.protocol == "awg":
-        awg_profile = dict(AWG_PROFILE)
-        if payload.settings.awg_jc is not None:
-            awg_profile["Jc"] = str(payload.settings.awg_jc)
-        if payload.settings.awg_jmin is not None:
-            awg_profile["Jmin"] = str(payload.settings.awg_jmin)
-        if payload.settings.awg_jmax is not None:
-            awg_profile["Jmax"] = str(payload.settings.awg_jmax)
-        extra = "".join(f"{key} = {value}\n" for key, value in awg_profile.items())
-    port = WG_PORT if payload.protocol == "wg" else AWG_PORT
+    awg_profile = dict(AWG_PROFILE)
+    if payload.settings.awg_jc is not None:
+        awg_profile["Jc"] = str(payload.settings.awg_jc)
+    if payload.settings.awg_jmin is not None:
+        awg_profile["Jmin"] = str(payload.settings.awg_jmin)
+    if payload.settings.awg_jmax is not None:
+        awg_profile["Jmax"] = str(payload.settings.awg_jmax)
+    extra = "".join(f"{key} = {value}\n" for key, value in awg_profile.items())
+    port = AWG_PORT
     allowed_ips = payload.settings.allowed_ips if payload.settings.route_mode == "custom" else "0.0.0.0/0, ::/0" if payload.settings.route_mode == "all" else "0.0.0.0/0"
-    client_mtu = payload.settings.mtu if payload.settings.mtu is not None else (AWG_MTU if payload.protocol == "awg" else 1380)
+    client_mtu = payload.settings.mtu if payload.settings.mtu is not None else AWG_MTU
     client_config = (
         f"[Interface]\nAddress = {address}/32\nDNS = {payload.settings.dns}\n"
         f"PrivateKey = {private_key}\nMTU = {client_mtu}\n{extra}\n[Peer]\n"
@@ -3159,7 +3121,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
         }
     )
     write_clients(items)
-    protocol_name = "WireGuard" if payload.protocol == "wg" else "AmneziaWG"
+    protocol_name = "AmneziaWG"
     return {"id": client_id, **connection_profile(
         protocol=payload.protocol, name=payload.name, endpoint=f"{PUBLIC_IP}:{port}", filename=f"{safe_name}-{payload.protocol}.conf", config=client_config,
         fields=[{"label": "Адрес в туннеле", "value": f"{address}/32"}, {"label": "Сервер", "value": f"{PUBLIC_IP}:{port}"}, {"label": "Профиль", "value": protocol_name}],
@@ -3213,9 +3175,9 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
                 run("systemctl", "restart", "vps-control-xray.service", timeout=20, check=True)
         write_clients([entry for entry in items if entry["id"] != client_id])
         return {"deleted": client_id}
-    command = "wg" if protocol == "wg" else "awg"
-    interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
-    config = WG_CONFIG if protocol == "wg" else AWG_CONFIG
+    command = "awg"
+    interface = AWG_INTERFACE
+    config = AWG_CONFIG
     run(command, "set", interface, "peer", item["public_key"], "remove", check=True)
     text = config.read_text(encoding="utf-8")
     pattern = rf"\n?# vps-control:{re.escape(client_id)}:begin.*?# vps-control:{re.escape(client_id)}:end\n?"
@@ -3225,7 +3187,7 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
 
 
 @app.get("/api/protocols/{protocol}/status")
-def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
+def protocol_status(protocol: Literal["awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
     if protocol in DIRECT_PROTOCOLS:
         unit = f"vps-control-{protocol}.service"
         settings_path = {"hysteria2": HYSTERIA2_SETTINGS, "tuic": TUIC_SETTINGS, "xray": XRAY_SETTINGS}[protocol]
@@ -3241,9 +3203,9 @@ def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"],
                 "rx_errors": 0, "tx_errors": 0, "rx_dropped": 0, "tx_dropped": 0, "transport": "VLESS / XHTTP / REALITY" if protocol == "xray" else "QUIC / UDP",
                 "resources": cached_resource_availability(protocol), "history": protocol_history(protocol), "diagnostics": direct_protocol_diagnostics(protocol),
                 "profile": protocol_runtime_profile(protocol), "connection_test": connection, "regional_reachability": regional_reachability(protocol, connection)}
-    command = "wg" if protocol == "wg" else "awg"
-    interface = WG_INTERFACE if protocol == "wg" else AWG_INTERFACE
-    unit = f"{'wg-quick' if protocol == 'wg' else 'awg-quick'}@{interface}.service"
+    command = "awg"
+    interface = AWG_INTERFACE
+    unit = f"awg-quick@{interface}.service"
     dump = run(command, "show", interface, "dump")
     rows = dump.splitlines()
     now = int(time.time())
@@ -3316,17 +3278,17 @@ def protocol_status(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"],
 
 
 @app.post("/api/protocols/{protocol}/resources/check")
-def check_protocol_resources(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
+def check_protocol_resources(protocol: Literal["awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
     return check_resource_availability(protocol)
 
 
 @app.post("/api/protocols/{protocol}/diagnostics/check")
-def check_network_diagnostics(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
-    return network_diagnostics(protocol, protocol_history(protocol), force=True) if protocol in ("wg", "awg") else direct_protocol_diagnostics(protocol)
+def check_network_diagnostics(protocol: Literal["awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
+    return network_diagnostics(protocol, protocol_history(protocol), force=True) if protocol == "awg" else direct_protocol_diagnostics(protocol)
 
 
 @app.post("/api/protocols/{protocol}/connection/check")
-def check_protocol_data_plane(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
+def check_protocol_data_plane(protocol: Literal["awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
     return check_protocol_connection(protocol)
 
 
@@ -3340,7 +3302,7 @@ class RegionalProbeReport(BaseModel):
 
 @app.post("/api/protocols/{protocol}/regional-report")
 def report_protocol_reachability(
-    protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"],
+    protocol: Literal["awg", "hysteria2", "tuic", "xray"],
     payload: RegionalProbeReport,
     _: None = Depends(require_token),
 ) -> dict:
@@ -3367,7 +3329,7 @@ def report_protocol_reachability(
 
 
 @app.post("/api/protocols/{protocol}/restart")
-def restart_protocol(protocol: Literal["wg", "awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
-    unit = f"wg-quick@{WG_INTERFACE}.service" if protocol == "wg" else f"awg-quick@{AWG_INTERFACE}.service" if protocol == "awg" else f"vps-control-{protocol}.service"
+def restart_protocol(protocol: Literal["awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
+    unit = f"awg-quick@{AWG_INTERFACE}.service" if protocol == "awg" else f"vps-control-{protocol}.service"
     run("systemctl", "restart", unit, timeout=20, check=True)
     return {"protocol": protocol, "active": run("systemctl", "is-active", unit) == "active"}

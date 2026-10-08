@@ -10,7 +10,7 @@ import { ProtocolWorkspace } from "./protocol-workspace";
 import { LightNavigation } from "../src/light-navigation";
 import { useNotifications } from "../src/notifications/notification-center";
 
-export type Protocol = "wg" | "awg" | "hysteria2" | "tuic" | "xray";
+export type Protocol = "awg" | "hysteria2" | "tuic" | "xray";
 type Tab = "overview" | "security" | "application" | "services" | Protocol | "clients";
 type MetricsPeriod = "live" | "day" | "week" | "quarter";
 type SecurityState = "inactive" | "active" | "warning" | "critical";
@@ -143,13 +143,13 @@ export type ProtocolStatus = {
 };
 
 const labels: Record<Tab, string> = {
-  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", wg: "WireGuard", awg: "AmneziaWG", hysteria2: "Hysteria2", tuic: "TUIC v5", xray: "Xray", clients: "Подключения",
+  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", awg: "AmneziaWG", hysteria2: "Hysteria2", tuic: "TUIC v5", xray: "Xray", clients: "Подключения",
 };
 const navigationLabels: Record<Tab, string> = {
   overview: "OVERVIEW", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
-  wg: "WIREGUARD", awg: "AMNEZIAWG", hysteria2: "HYSTERIA2", tuic: "TUIC V5", xray: "XRAY", clients: "CONNECTIONS",
+  awg: "AMNEZIAWG", hysteria2: "HYSTERIA2", tuic: "TUIC V5", xray: "XRAY", clients: "CONNECTIONS",
 };
-const protocolIds: Protocol[] = ["wg", "awg", "hysteria2", "tuic", "xray"];
+const protocolIds: Protocol[] = ["awg", "hysteria2", "tuic", "xray"];
 const lightModuleIds: Protocol[] = ["awg", "hysteria2", "tuic", "xray"];
 const isProtocolTab = (value: Tab): value is Protocol => protocolIds.includes(value as Protocol);
 const actionLabels: Record<string, string> = {
@@ -977,7 +977,7 @@ export default function Home() {
   async function clearManagedLogs() {
     if (!await askConfirmation({
       title: "Очистить все управляемые журналы?",
-      message: "Будут удалены системные журналы, логи контейнеров и история мониторинга WG/AWG. Действие нельзя отменить.",
+      message: "Будут удалены системные журналы, логи контейнеров и история мониторинга AmneziaWG. Действие нельзя отменить.",
       confirmLabel: "Очистить журналы", phrase: "ОЧИСТИТЬ ЛОГИ", danger: true,
     })) return;
     setBusy(true); setError("");

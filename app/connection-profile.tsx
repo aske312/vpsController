@@ -28,7 +28,6 @@ export const protocolDelivery: Record<Protocol, {
   apps: string;
   methods: string[];
 }> = {
-  wg: { title: "WireGuard", summary: "Классический VPN-туннель для одного устройства.", transport: "UDP · .conf", apps: "WireGuard", methods: ["QR", "Файл"] },
   awg: { title: "AmneziaWG", summary: "Обфусцированный WireGuard-профиль с параметрами сервера.", transport: "UDP · .conf", apps: "AmneziaWG", methods: ["QR", "Файл"] },
   hysteria2: { title: "Hysteria2", summary: "Персональная учётная запись с закреплённым TLS-сертификатом.", transport: "QUIC · YAML", apps: "Hiddify, NekoBox, Hysteria 2", methods: ["QR", "Ссылка", "Файл"] },
   tuic: { title: "TUIC v5", summary: "Индивидуальные UUID и пароль в готовом профиле sing-box.", transport: "QUIC · JSON", apps: "sing-box, NekoBox", methods: ["Файл"] },

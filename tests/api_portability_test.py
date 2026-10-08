@@ -362,51 +362,43 @@ class PortabilityTests(unittest.TestCase):
             self.assertEqual(response.json()['resolution_s'], 3)
             self.assertTrue(any(point['cpu_percent'] == 37 for point in response.json()['points']))
 
-    def test_client_create_delete_isolated_for_both_protocols(self):
+    def test_awg_client_create_delete_isolated(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            configs = {protocol: root / (protocol + '.conf') for protocol in ('wg', 'awg')}
-            for config in configs.values():
-                config.write_text('[Interface]\nPrivateKey = server-key\n', encoding='utf-8')
-            with patch.multiple(api, DATA_DIR=root, CLIENTS_FILE=root / 'clients.json', WG_CONFIG=configs['wg'], AWG_CONFIG=configs['awg'], PUBLIC_IP='192.0.2.1'), \
+            config = root / 'awg.conf'
+            config.write_text('[Interface]\nPrivateKey = server-key\n', encoding='utf-8')
+            with patch.multiple(api, DATA_DIR=root, CLIENTS_FILE=root / 'clients.json', AWG_CONFIG=config, PUBLIC_IP='192.0.2.1'), \
                  patch.object(api, 'key', return_value='test-key'), \
                  patch.object(api, 'run', return_value='server-public-key'), \
                  patch.object(api, 'run_with_input'):
-                for protocol in ('wg', 'awg'):
-                    with self.subTest(protocol=protocol):
-                        settings = api.ClientSettings(
-                            dns='9.9.9.9', mtu=1420, keepalive=45, route_mode='all',
-                            awg_jc=9 if protocol == 'awg' else None,
-                            awg_jmin=12 if protocol == 'awg' else None,
-                            awg_jmax=96 if protocol == 'awg' else None,
-                        )
-                        created = api.create_client(api.ClientCreate(
-                            name='QA client', protocol=protocol,
-                            settings=settings,
-                        ))
-                        self.assertIn('Endpoint = 192.0.2.1:', created['config'])
-                        self.assertIn('DNS = 9.9.9.9', created['config'])
-                        self.assertIn('MTU = 1420', created['config'])
-                        self.assertIn('AllowedIPs = 0.0.0.0/0, ::/0', created['config'])
-                        self.assertIn('PersistentKeepalive = 45', created['config'])
-                        self.assertEqual('Jc = ' in created['config'], protocol == 'awg')
-                        if protocol == 'awg':
-                            self.assertIn('Jc = 9', created['config'])
-                            self.assertIn('Jmin = 12', created['config'])
-                            self.assertIn('Jmax = 96', created['config'])
-                        self.assertEqual(created['profile']['protocol'], protocol)
-                        self.assertEqual(created['profile']['name'], 'QA client')
-                        self.assertEqual(created['profile']['delivery']['file']['content'], created['config'])
-                        self.assertEqual(created['profile']['delivery']['qr']['content'], created['config'])
-                        self.assertIsNone(created['profile']['delivery']['link'])
-                        self.assertTrue(created['profile']['one_time'])
-                        clients = api.read_clients()
-                        self.assertEqual(len(clients), 1)
-                        self.assertIn(ipaddress.ip_interface(clients[0]['address']).ip, api.WG_SUBNET if protocol == 'wg' else api.AWG_SUBNET)
-                        self.assertIn(created['id'], configs[protocol].read_text())
-                        api.delete_client(created['id'])
-                        self.assertEqual(api.read_clients(), [])
-                        self.assertNotIn('[Peer]', configs[protocol].read_text())
+                settings = api.ClientSettings(
+                    dns='9.9.9.9', mtu=1420, keepalive=45, route_mode='all',
+                    awg_jc=9, awg_jmin=12, awg_jmax=96,
+                )
+                created = api.create_client(api.ClientCreate(
+                    name='QA client', protocol='awg', settings=settings,
+                ))
+                self.assertIn('Endpoint = 192.0.2.1:', created['config'])
+                self.assertIn('DNS = 9.9.9.9', created['config'])
+                self.assertIn('MTU = 1420', created['config'])
+                self.assertIn('AllowedIPs = 0.0.0.0/0, ::/0', created['config'])
+                self.assertIn('PersistentKeepalive = 45', created['config'])
+                self.assertIn('Jc = 9', created['config'])
+                self.assertIn('Jmin = 12', created['config'])
+                self.assertIn('Jmax = 96', created['config'])
+                self.assertEqual(created['profile']['protocol'], 'awg')
+                self.assertEqual(created['profile']['name'], 'QA client')
+                self.assertEqual(created['profile']['delivery']['file']['content'], created['config'])
+                self.assertEqual(created['profile']['delivery']['qr']['content'], created['config'])
+                self.assertIsNone(created['profile']['delivery']['link'])
+                self.assertTrue(created['profile']['one_time'])
+                clients = api.read_clients()
+                self.assertEqual(len(clients), 1)
+                self.assertIn(ipaddress.ip_interface(clients[0]['address']).ip, api.AWG_SUBNET)
+                self.assertIn(created['id'], config.read_text())
+                api.delete_client(created['id'])
+                self.assertEqual(api.read_clients(), [])
+                self.assertNotIn('[Peer]', config.read_text())
 
     def test_hysteria_client_profile_applies_individual_advanced_settings(self):
         with tempfile.TemporaryDirectory() as directory:

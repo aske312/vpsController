@@ -1,6 +1,5 @@
 /* eslint-disable @next/next/no-img-element */
 const protocolAssets: Record<string, string> = {
-  wg: "WG",
   awg: "AWG",
   hysteria2: "HY2",
   tuic: "TUIC",

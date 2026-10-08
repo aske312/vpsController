@@ -27,7 +27,7 @@ type Props = {
 };
 
 const protocolNames: Record<Protocol, string> = {
-  wg: "WireGuard", awg: "AmneziaWG", hysteria2: "Hysteria2", tuic: "TUIC v5", xray: "Xray",
+  awg: "AmneziaWG", hysteria2: "Hysteria2", tuic: "TUIC v5", xray: "Xray",
 };
 
 const formatBytes = (value = 0) => {
@@ -177,7 +177,7 @@ export function ProtocolWorkspace(props: Props) {
     </header>
     <TruthChain status={status} />
     <RegionalReachability status={status} />
-    {(protocol === "awg" || protocol === "wg") && <AwgPage {...props} />}
+    {protocol === "awg" && <AwgPage {...props} />}
     {protocol === "hysteria2" && <HysteriaPage {...props} />}
     {protocol === "tuic" && <TuicPage {...props} />}
     {protocol === "xray" && <XrayPage {...props} />}

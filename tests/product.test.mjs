@@ -35,7 +35,6 @@ test("поставка содержит установщик, образы и к
   assert.equal(JSON.parse(relay).id, "relay-agent");
   assert.equal(JSON.parse(relay).installable, false);
   await assert.rejects(read("protocol-images/trojan/manifest.json"), { code: "ENOENT" });
-  await assert.rejects(read("protocol-images/wireguard/manifest.json"), { code: "ENOENT" });
 });
 
 test("fresh install generates credentials, supports a verified domain and finishes on stable Light", async () => {
@@ -109,15 +108,12 @@ test("MIT license, privacy notice and connection guide are included and exposed 
   assert.match(legalUi, /MIT LICENSE/);
   assert.match(legalUi, /\{branch\} \{version\} build:\{commit\.slice\(0, 18\)\}/);
   assert.doesNotMatch(legalUi, /EU \/ EEA|ЕС \/ ЕЭЗ|GDPR/);
-  assert.match(guide, /Подключение с помощью WireGuard \(WG\) и AmneziaWG \(AWG\)/);
-  assert.match(guide, /WireGuard \(WG\).*локальным подключением/s);
-  assert.match(guide, /AmneziaWG \(AWG\).*мобильную сеть/s);
-  assert.match(guide, /одно приложение — \*\*AmneziaWG\*\*/);
-  assert.match(guide, /Обязательно включите галочку «Обфускация»/);
+  assert.match(guide, /Подключение с помощью AmneziaWG/);
+  assert.match(guide, /Профиль уже содержит необходимые параметры обфускации/);
+  assert.match(guide, /Один файл следует использовать только на одном устройстве/);
   assert.match(guideUi, /Create and connect a client/);
-  assert.match(guideUi, /Для WG обязательно включите галочку «Обфускация»/);
+  assert.match(guideUi, /Параметры обфускации уже включены в профиль/);
   assert.match(guideUi, /storage\.googleapis\.com\/amnezia\/amnezia\.org/);
-  assert.match(guideUi, /connection-guide-wg-awg\.pdf/);
   assert.match(page, /installedProtocols\.length/);
   assert.match(page, /ConnectionDialog/);
   assert.match(page, /waitForProtocolState/);
@@ -136,7 +132,7 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(api, /filename=f"\{safe_name\}-tuic\.json"/);
   assert.match(profile, /QRCode\.toDataURL/);
   assert.match(profile, /ПРОФИЛЬ СОЗДАН · ПОКАЗЫВАЕТСЯ ОДИН РАЗ/);
-  assert.match(profile, /wg:.*methods: \["QR", "Файл"\]/s);
+  assert.match(profile, /awg:.*methods: \["QR", "Файл"\]/s);
   assert.match(profile, /hysteria2:.*methods: \["QR", "Ссылка", "Файл"\]/s);
   assert.match(profile, /tuic:.*methods: \["Файл"\]/s);
   assert.match(profile, /xray:.*methods: \["QR", "Ссылка", "Файл"\]/s);
@@ -440,12 +436,12 @@ test("authentication and VPN controls preserve consistent UI states", async () =
   assert.match(page, /runApplicationAction\("identity"\)/);
   assert.match(api, /installed = bool\(service and run\("systemctl", "show", service, "--property=LoadState", "--value"\) == "loaded"\)/);
   assert.match(api, /if not available_interfaces:/);
-  assert.doesNotMatch(api, /for interface in \(WG_INTERFACE, AWG_INTERFACE\):\s+if not Path\(f"\/sys\/class\/net/);
+  assert.doesNotMatch(api, /\bWG_INTERFACE\b|\bWG_CONFIG\b|["']wg["']/);
   assert.match(api, /"web": \{"name": "Web 312\.net"/);
-  assert.match(api, /The last active VPN cannot be stopped while panel access is VPN-only/);
+  assert.match(api, /AmneziaWG cannot be stopped while panel access is VPN-only/);
   assert.match(manager, /vpn_interface_available="no"/);
   assert.match(manager, /set_env_value "CORS_ORIGINS" "\$\{vpn_origins\}"/);
-  assert.doesNotMatch(manager, /ip link show "\$\{WG_INTERFACE\}"[^\n]+\|\| die[^\n]+\n\s*ip link show "\$\{AWG_INTERFACE\}"[^\n]+\|\| die/);
+  assert.doesNotMatch(manager, /\bWG_INTERFACE\b|\bWG_PORT\b/);
   assert.match(eslint, /"\.runtime\/\*\*"/);
 });
 
@@ -557,9 +553,7 @@ test("Light protocol modules install and uninstall independently", async () => {
     read("protocol-images/xray/install.sh"), read("protocol-images/xray/uninstall.sh"),
     read("protocol-images/relay-agent/manifest.json"),
   ]);
-  const baseDependencies = manager.match(/Установка системных зависимостей" apt-get install -y ([^\n]+)/)?.[1] || "";
-  assert.doesNotMatch(baseDependencies, /wireguard-tools/);
-  assert.match(api, /The last active VPN module cannot be removed while panel access is VPN-only/);
+  assert.match(api, /AmneziaWG cannot be removed while panel access is VPN-only/);
   assert.match(awgRemove, /route delete allow in on "\$\{AWG_INTERFACE\}" out on "\$\{UPLINK_INTERFACE\}" from "\$\{AWG_SUBNET\}"/);
   assert.match(awgRemove, /ufw status \| grep -Fq "\$\{AWG_SUBNET\} on \$\{AWG_INTERFACE\}"/);
   assert.match(awgRemove, /99-vps-control-amneziawg\.conf/);
@@ -594,7 +588,6 @@ test("Light protocol modules install and uninstall independently", async () => {
   for (const uninstaller of [hysteriaRemove, tuicRemove, xrayRemove]) {
     assert.match(uninstaller, /PRESERVE_COMPONENT_DATA/);
   }
-  await assert.rejects(read("protocol-images/wireguard/install.sh"), { code: "ENOENT" });
   await assert.rejects(read("protocol-images/trojan/install.sh"), { code: "ENOENT" });
   assert.match(xrayInstall, /'protocol': 'vless'/);
   assert.match(xrayInstall, /'network': 'xhttp'/);

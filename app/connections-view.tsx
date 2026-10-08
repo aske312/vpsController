@@ -72,7 +72,7 @@ export function ConnectionsView({ clients, protocols, busy, onNew, onRemove }: P
       </div>
 
       <div className="connectionsRows">
-        {visible.map((client) => { const meta = protocolDelivery[client.protocol]; const tunnel = client.protocol === "wg" || client.protocol === "awg"; const state = clientState(client); return <div className={`connectionRowFlat state-${state}`} key={client.id}>
+        {visible.map((client) => { const meta = protocolDelivery[client.protocol]; const tunnel = client.protocol === "awg"; const state = clientState(client); return <div className={`connectionRowFlat state-${state}`} key={client.id}>
           <div className="connectionRowIdentity"><span className={`protocol ${client.protocol}`}><ProtocolIcon protocol={client.protocol} /></span><div><strong>{client.name}</strong><small>{client.endpoint || client.address || "Персональный профиль"}</small></div></div>
           <div className="connectionRowProtocol"><small>ПРОТОКОЛ</small><strong>{meta.title}</strong><span>{meta.transport}</span></div>
           <div className="connectionRowData"><small>{tunnel ? "ТРАФИК" : "ИДЕНТИФИКАТОР"}</small><strong>{tunnel ? `↓ ${bytes(client.rx_bytes)} · ↑ ${bytes(client.tx_bytes)}` : `${client.public_key.slice(0, 18)}${client.public_key.length > 18 ? "…" : ""}`}</strong><span>{tunnel ? activity(client.handshake_age_s) : "профиль выдан"}</span></div>
