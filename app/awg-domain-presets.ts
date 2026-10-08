@@ -1,0 +1,38 @@
+// Domains used only as packet contents, not verified bypass/allowlist targets.
+export const awgDomainPresets = [
+  { domain: "yandex.ru", label: "Яндекс", group: "Российские сервисы" },
+  { domain: "ya.ru", label: "Яндекс · поиск", group: "Российские сервисы" },
+  { domain: "vk.com", label: "VK", group: "Российские сервисы" },
+  { domain: "mail.ru", label: "Mail", group: "Российские сервисы" },
+  { domain: "ok.ru", label: "Одноклассники", group: "Российские сервисы" },
+  { domain: "dzen.ru", label: "Дзен", group: "Российские сервисы" },
+  { domain: "rutube.ru", label: "Rutube", group: "Российские сервисы" },
+  { domain: "kinopoisk.ru", label: "Кинопоиск", group: "Российские сервисы" },
+  { domain: "ozon.ru", label: "Ozon", group: "Российские сервисы" },
+  { domain: "wildberries.ru", label: "Wildberries", group: "Российские сервисы" },
+  { domain: "avito.ru", label: "Авито", group: "Российские сервисы" },
+  { domain: "hh.ru", label: "HeadHunter", group: "Российские сервисы" },
+  { domain: "2gis.ru", label: "2ГИС", group: "Российские сервисы" },
+  { domain: "tbank.ru", label: "Т-Банк", group: "Российские сервисы" },
+  { domain: "sberbank.ru", label: "Сбер", group: "Российские сервисы" },
+  { domain: "gosuslugi.ru", label: "Госуслуги", group: "Российские сервисы" },
+  { domain: "www.google.com", label: "Google", group: "Международные сервисы" },
+  { domain: "www.youtube.com", label: "YouTube", group: "Международные сервисы" },
+  { domain: "www.gstatic.com", label: "Google · статика", group: "Международные сервисы" },
+  { domain: "www.apple.com", label: "Apple", group: "Международные сервисы" },
+  { domain: "icloud.com", label: "iCloud", group: "Международные сервисы" },
+  { domain: "www.microsoft.com", label: "Microsoft", group: "Международные сервисы" },
+  { domain: "www.bing.com", label: "Bing", group: "Международные сервисы" },
+  { domain: "github.com", label: "GitHub", group: "Международные сервисы" },
+  { domain: "www.wikipedia.org", label: "Wikipedia", group: "Международные сервисы" },
+  { domain: "www.mozilla.org", label: "Mozilla", group: "Международные сервисы" },
+  { domain: "www.amazon.com", label: "Amazon", group: "Международные сервисы" },
+  { domain: "www.cloudflare.com", label: "Cloudflare", group: "CDN и инфраструктура" },
+  { domain: "cloudflare-dns.com", label: "Cloudflare DNS", group: "CDN и инфраструктура" },
+  { domain: "www.fastly.com", label: "Fastly", group: "CDN и инфраструктура" },
+  { domain: "cdn.jsdelivr.net", label: "jsDelivr", group: "CDN и инфраструктура" },
+  { domain: "cdnjs.cloudflare.com", label: "cdnjs", group: "CDN и инфраструктура" },
+];
+
+export const awgDefaultDomain = awgDomainPresets[0].domain;
+export const awgDomainGroups = [...new Set(awgDomainPresets.map((item) => item.group))];

@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import { ConnectionProfileResult, protocolDelivery, type ConnectionProfile } from "./connection-profile";
 import { ProtocolIcon } from "./protocol-icon";
 import type { Protocol } from "./page";
+import { awgDefaultDomain, awgDomainGroups, awgDomainPresets } from "./awg-domain-presets";
 
 export type ConnectionSettings = {
   dns: string;
@@ -75,7 +76,7 @@ const settingsFor = (protocol: Protocol, serverOptions: ConnectionServerOptions)
   awg_jmin: serverOptions.awg?.jmin ?? 8,
   awg_jmax: serverOptions.awg?.jmax ?? 80,
   awg_signature: "server",
-  awg_signature_domain: "example.com",
+  awg_signature_domain: awgDefaultDomain,
   proxy_bind: "loopback",
   local_auth_enabled: false,
   local_username: "proxy",
@@ -272,8 +273,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
               {protocol === "awg" && <>
                 <label><span>Сигнатура AWG</span><select value={settings.awg_signature} onChange={(event) => update({ awg_signature: event.target.value })}>{(serverOptions.awg_obfuscation || [{ id: "server", label: "Текущий профиль сервера" }]).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><small>{serverOptions.awg_obfuscation?.find((item) => item.id === settings.awg_signature)?.description}</small></label>
                 {settings.awg_signature !== "server" && <>
-                  {!["stun", "dtls"].includes(settings.awg_signature) && <label className={fieldErrors.awg_signature_domain ? "fieldInvalid" : ""}><span>Домен в образце пакета</span><input aria-invalid={Boolean(fieldErrors.awg_signature_domain)} value={settings.awg_signature_domain} onChange={(event) => update({ awg_signature_domain: event.target.value })} /><small>Только содержимое сигнатуры, не адрес VPN и не разрешение в белом списке.</small>{fieldErrors.awg_signature_domain && <small className="fieldError">{fieldErrors.awg_signature_domain}</small>}</label>}
-                  <p className="connectionHint">Нужен клиент с CPS (I1–I5), AmneziaWG 2.0+. Начальные UDP-пакеты не превращают AWG в полноценный HTTP/HTTPS-сеанс. Эффективность зависит от сети; QUIC-профиль может потребовать импорт файла вместо QR. Серверные S/H и существующие подключения не меняются.</p>
+                  {!["stun", "dtls"].includes(settings.awg_signature) && <label className={fieldErrors.awg_signature_domain ? "fieldInvalid" : ""}><span>Домен в образце пакета</span><select aria-label="Готовые домены сигнатуры AWG" value={awgDomainPresets.some((item) => item.domain === settings.awg_signature_domain) ? settings.awg_signature_domain : "custom"} onChange={(event) => update({ awg_signature_domain: event.target.value === "custom" ? "" : event.target.value })}>{awgDomainGroups.map((group) => <optgroup key={group} label={group}>{awgDomainPresets.filter((item) => item.group === group).map((item) => <option key={item.domain} value={item.domain}>{item.label} · {item.domain}</option>)}</optgroup>)}<option value="custom">Свой домен</option></select><input aria-label="Домен сигнатуры AWG" aria-invalid={Boolean(fieldErrors.awg_signature_domain)} value={settings.awg_signature_domain} onChange={(event) => update({ awg_signature_domain: event.target.value })} autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="example.ru" /><small>Выберите готовый вариант или укажите свой домен.</small>{fieldErrors.awg_signature_domain && <small className="fieldError">{fieldErrors.awg_signature_domain}</small>}</label>}
                 </>}
                 <label><span>MTU</span><input type="number" min={1280} max={1500} value={settings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label>
                 <label><span>Keepalive, сек.</span><input type="number" min={0} max={300} value={settings.keepalive} onChange={(event) => update({ keepalive: Number(event.target.value) })} /></label>
