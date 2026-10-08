@@ -160,6 +160,7 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(dialog, /fieldInvalid/);
   assert.match(dialog, /validSniDomain/);
   assert.match(dialog, /aria-invalid=\{Boolean\(invalid\)\}/);
+  assert.match(await read("app/globals.css"), /\.xraySniMenu \{ position: static;[^}]*overflow-y: auto/);
   assert.match(dialog, /Object\.entries\(serverOptions\.awg/);
   assert.match(dialog, /connectionMaskingStatus/);
   assert.match(dialog, /AmneziaWG · Jc/);
