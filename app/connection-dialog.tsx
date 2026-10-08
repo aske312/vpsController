@@ -14,6 +14,8 @@ export type ConnectionSettings = {
   awg_jc: number;
   awg_jmin: number;
   awg_jmax: number;
+  awg_signature: string;
+  awg_signature_domain: string;
   proxy_bind: "loopback" | "lan";
   local_auth_enabled: boolean;
   local_username: string;
@@ -57,6 +59,7 @@ export type ConnectionSettings = {
 };
 
 export type ConnectionServerOptions = {
+  awg_obfuscation?: { id: string; label: string; description: string; requires_cps: boolean }[];
   awg?: Record<string, string | number> & { jc: number; jmin: number; jmax: number; s1: number; s2: number; h1: number; h2: number; h3: number; h4: number };
   hysteria2?: { obfs: "none" | "salamander" | "gecko"; port_hopping: string; gecko_min_packet_size: number; gecko_max_packet_size: number };
   xray?: { server_names: string[]; default_sni: string; suggestions?: { domain: string; label: string }[]; custom_allowed?: boolean };
@@ -71,6 +74,8 @@ const settingsFor = (protocol: Protocol, serverOptions: ConnectionServerOptions)
   awg_jc: serverOptions.awg?.jc ?? 6,
   awg_jmin: serverOptions.awg?.jmin ?? 8,
   awg_jmax: serverOptions.awg?.jmax ?? 80,
+  awg_signature: "server",
+  awg_signature_domain: "example.com",
   proxy_bind: "loopback",
   local_auth_enabled: false,
   local_username: "proxy",
@@ -142,6 +147,7 @@ function validateConnection(name: string, protocol: Protocol, settings: Connecti
     if (settings.local_auth_enabled && settings.local_password.length < 8) errors.local_password = "Пароль должен содержать минимум 8 символов.";
   }
   if (protocol === "awg") {
+    if (!["server", "stun", "dtls"].includes(settings.awg_signature) && !validSniDomain(settings.awg_signature_domain)) errors.awg_signature_domain = "Введите домен без URL и IP-адреса.";
     if (settings.awg_jmin > settings.awg_jmax) errors.awg_jmax = "Jmax должен быть не меньше Jmin.";
     if (settings.route_mode === "custom" && !settings.allowed_ips.trim()) errors.allowed_ips = "Укажите хотя бы одну сеть.";
   }
@@ -156,6 +162,7 @@ function validateConnection(name: string, protocol: Protocol, settings: Connecti
 
 function serverErrorField(message: string): keyof ConnectionSettings | undefined {
   const value = message.toLowerCase();
+  if (value.includes("awg signature")) return "awg_signature_domain";
   if (value.includes("sni") || value.includes("domain") || value.includes("reality")) return "xray_sni";
   if (value.includes("socks") || value.includes("mixed")) return "local_socks_port";
   if (value.includes("http port")) return "local_http_port";
@@ -263,6 +270,11 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
             <div className={`connectionMaskingStatus ${masking.level}`}><span>Маскирование</span><strong>{masking.state}</strong><small>{masking.detail}</small></div>
             <div className="connectionSettingsFields">
               {protocol === "awg" && <>
+                <label><span>Сигнатура AWG</span><select value={settings.awg_signature} onChange={(event) => update({ awg_signature: event.target.value })}>{(serverOptions.awg_obfuscation || [{ id: "server", label: "Текущий профиль сервера" }]).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><small>{serverOptions.awg_obfuscation?.find((item) => item.id === settings.awg_signature)?.description}</small></label>
+                {settings.awg_signature !== "server" && <>
+                  {!["stun", "dtls"].includes(settings.awg_signature) && <label className={fieldErrors.awg_signature_domain ? "fieldInvalid" : ""}><span>Домен в образце пакета</span><input aria-invalid={Boolean(fieldErrors.awg_signature_domain)} value={settings.awg_signature_domain} onChange={(event) => update({ awg_signature_domain: event.target.value })} /><small>Только содержимое сигнатуры, не адрес VPN и не разрешение в белом списке.</small>{fieldErrors.awg_signature_domain && <small className="fieldError">{fieldErrors.awg_signature_domain}</small>}</label>}
+                  <p className="connectionHint">Нужен клиент с CPS (I1–I5), AmneziaWG 2.0+. Начальные UDP-пакеты не превращают AWG в полноценный HTTP/HTTPS-сеанс. Эффективность зависит от сети; QUIC-профиль может потребовать импорт файла вместо QR. Серверные S/H и существующие подключения не меняются.</p>
+                </>}
                 <label><span>MTU</span><input type="number" min={1280} max={1500} value={settings.mtu} onChange={(event) => update({ mtu: Number(event.target.value) })} /></label>
                 <label><span>Keepalive, сек.</span><input type="number" min={0} max={300} value={settings.keepalive} onChange={(event) => update({ keepalive: Number(event.target.value) })} /></label>
                 <label><span>Маршрутизация</span><select value={settings.route_mode} onChange={(event) => update({ route_mode: event.target.value as ConnectionSettings["route_mode"] })}><option value="ipv4">Весь IPv4-трафик</option><option value="all">IPv4 + IPv6</option><option value="custom">Собственные сети</option></select></label>
@@ -296,7 +308,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
             <details className="connectionAdvanced"><summary>Расширенные настройки <span>⌄</span></summary><div className="connectionSettingsFields">
               {protocol === "awg" && <>
                 <label><span>DNS-серверы</span><input value={settings.dns} onChange={(event) => update({ dns: event.target.value })} placeholder="1.1.1.1, 1.0.0.1" /></label>
-                {protocol === "awg" && <><label><span>Jc · пакеты мусора</span><input type="number" min={0} max={128} value={settings.awg_jc} onChange={(event) => update({ awg_jc: Number(event.target.value) })} /></label><label><span>Jmin · минимум</span><input type="number" min={0} max={1280} value={settings.awg_jmin} onChange={(event) => update({ awg_jmin: Number(event.target.value) })} /></label><label className={fieldErrors.awg_jmax ? "fieldInvalid" : ""}><span>Jmax · максимум</span><input aria-invalid={Boolean(fieldErrors.awg_jmax)} type="number" min={0} max={1280} value={settings.awg_jmax} onChange={(event) => update({ awg_jmax: Number(event.target.value) })} />{fieldErrors.awg_jmax && <small className="fieldError">{fieldErrors.awg_jmax}</small>}</label><div className="connectionServerValues"><strong>Параметры сервера — подставляются автоматически</strong><dl>{Object.entries(serverOptions.awg || {}).filter(([key]) => !["jc", "jmin", "jmax"].includes(key)).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl><small>S/H и параметры AWG 3.1 должны совпадать на клиенте и сервере. Индивидуально меняются только Jc, Jmin и Jmax.</small></div></>}
+                {protocol === "awg" && <><label><span>Jc · пакеты мусора</span><input type="number" min={0} max={128} value={settings.awg_jc} onChange={(event) => update({ awg_jc: Number(event.target.value) })} /></label><label><span>Jmin · минимум</span><input type="number" min={0} max={1280} value={settings.awg_jmin} onChange={(event) => update({ awg_jmin: Number(event.target.value) })} /></label><label className={fieldErrors.awg_jmax ? "fieldInvalid" : ""}><span>Jmax · максимум</span><input aria-invalid={Boolean(fieldErrors.awg_jmax)} type="number" min={0} max={1280} value={settings.awg_jmax} onChange={(event) => update({ awg_jmax: Number(event.target.value) })} />{fieldErrors.awg_jmax && <small className="fieldError">{fieldErrors.awg_jmax}</small>}</label><div className="connectionServerValues"><strong>Параметры сервера — подставляются автоматически</strong><dl>{Object.entries(serverOptions.awg || {}).filter(([key]) => !["jc", "jmin", "jmax", "i1", "i2", "i3", "i4", "i5"].includes(key)).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl><small>S/H и общие параметры защиты согласованы с сервером. Jc, Jmin, Jmax и выбранная CPS-сигнатура задаются для нового клиента.</small></div></>}
               </>}
               {protocol === "hysteria2" && <>
                 <div className="connectionServerValues"><strong>Серверное маскирование</strong><dl><div><dt>OBFS</dt><dd>{serverOptions.hysteria2?.obfs || "none"}</dd></div><div><dt>UDP-порты</dt><dd>{serverOptions.hysteria2?.port_hopping || "8443"}</dd></div></dl><small>Salamander/Gecko и диапазон портов должны совпадать с сервером и добавляются в профиль автоматически.</small></div>

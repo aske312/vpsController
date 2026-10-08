@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from metrics_history import MetricsHistory, MetricsMonitor
 from system_metrics import CpuSampler, collect_resources
+from awg_obfuscation import client_profile as awg_client_profile, preset_catalog
 
 
 @asynccontextmanager
@@ -2808,6 +2809,7 @@ def client_options(_: None = Depends(require_token)) -> dict:
         hysteria = {}
     return {
         "awg": {key.lower(): int(value) if str(value).isdigit() else value for key, value in AWG_PROFILE.items()},
+        "awg_obfuscation": preset_catalog(),
         "hysteria2": {
             "obfs": str(hysteria.get("obfs", "none")),
             "port_hopping": str(hysteria.get("listen", hysteria.get("port", 8443))),
@@ -2832,6 +2834,8 @@ class ClientSettings(BaseModel):
     awg_jc: int | None = Field(default=None, ge=0, le=128)
     awg_jmin: int | None = Field(default=None, ge=0, le=1280)
     awg_jmax: int | None = Field(default=None, ge=0, le=1280)
+    awg_signature: str = Field(default="server", max_length=32)
+    awg_signature_domain: str = Field(default="example.com", max_length=253)
     proxy_bind: Literal["loopback", "lan"] = "loopback"
     local_auth_enabled: bool = False
     local_username: str = Field(default="proxy", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
@@ -3317,6 +3321,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     config_path = AWG_CONFIG
     if not config_path.exists():
         raise HTTPException(status_code=409, detail=f"{payload.protocol} protocol is not installed")
+    try:
+        awg_profile = awg_client_profile(AWG_PROFILE, payload.settings.awg_signature, payload.settings.awg_signature_domain)
+    except (ValueError, UnicodeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     private_key = key(f"{command} genkey")
     public_key = key(f"printf '%s' '{private_key}' | {command} pubkey")
     psk = key(f"{command} genpsk")
@@ -3329,7 +3337,6 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     )
 
     server_public = run(command, "show", interface, "public-key", check=True)
-    awg_profile = dict(AWG_PROFILE)
     if payload.settings.awg_jc is not None:
         awg_profile["Jc"] = str(payload.settings.awg_jc)
     if payload.settings.awg_jmin is not None:
@@ -3354,6 +3361,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             "protocol": payload.protocol,
             "public_key": public_key,
             "address": f"{address}/32",
+            "awg_signature": payload.settings.awg_signature,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
     )
@@ -3361,9 +3369,9 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     protocol_name = "AmneziaWG"
     return {"id": client_id, **connection_profile(
         protocol=payload.protocol, name=payload.name, endpoint=f"{PUBLIC_IP}:{port}", filename=f"{safe_name}-{payload.protocol}.conf", config=client_config,
-        fields=[{"label": "Адрес в туннеле", "value": f"{address}/32"}, {"label": "Сервер", "value": f"{PUBLIC_IP}:{port}"}, {"label": "Профиль", "value": protocol_name}],
+        fields=[{"label": "Адрес в туннеле", "value": f"{address}/32"}, {"label": "Сервер", "value": f"{PUBLIC_IP}:{port}"}, {"label": "Профиль", "value": protocol_name}, {"label": "Сигнатура", "value": next(row["label"] for row in preset_catalog() if row["id"] == payload.settings.awg_signature)}],
         apps=[protocol_name],
-        steps=[f"Скачайте файл или отсканируйте QR в приложении {protocol_name}.", "Сохраните импортированный профиль с именем устройства.", "Включите туннель и проверьте доступ в интернет."],
+        steps=[f"Скачайте файл и импортируйте его в {protocol_name}; QR доступен, если размер профиля позволяет.", *( ["Для выбранной сигнатуры нужен клиент с поддержкой CPS (I1–I5), AmneziaWG 2.0 или новее. Это начальные UDP-пакеты, а не полноценное соединение выбранного типа."] if payload.settings.awg_signature != "server" else []), "Сохраните импортированный профиль с именем устройства.", "Включите туннель и проверьте доступ в интернет."],
         qr_content=client_config,
     )}
 

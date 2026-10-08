@@ -450,6 +450,27 @@ class PortabilityTests(unittest.TestCase):
                 self.assertEqual(api.read_clients(), [])
                 self.assertNotIn('[Peer]', config.read_text())
 
+    def test_awg_signature_is_client_only_and_invalid_input_has_no_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / 'awg.conf'
+            config.write_text('[Interface]\nPrivateKey = server-key\n', encoding='utf-8')
+            with patch.multiple(api, DATA_DIR=root, CLIENTS_FILE=root / 'clients.json', AWG_CONFIG=config), patch.object(api, 'key', return_value='test-key') as keys, patch.object(api, 'run', return_value='server-public-key'), patch.object(api, 'run_with_input'):
+                for settings in ({'awg_signature': 'invalid'}, {'awg_signature': 'quic', 'awg_signature_domain': 'https://bad.example'}):
+                    with self.assertRaises(api.HTTPException) as error:
+                        api.create_client(api.ClientCreate(name='QA invalid', protocol='awg', settings=api.ClientSettings(**settings)))
+                    self.assertEqual(error.exception.status_code, 422)
+                keys.assert_not_called()
+                self.assertEqual(api.read_clients(), [])
+                self.assertNotIn('[Peer]', config.read_text())
+                created = api.create_client(api.ClientCreate(name='QA decoy', protocol='awg', settings=api.ClientSettings(awg_signature='stun')))
+                self.assertIn('I1 = <b 0x000100002112a442><r 12>', created['config'])
+                self.assertNotIn('I1 =', config.read_text())
+                for name in ('S1', 'S2', 'H1', 'H2', 'H3', 'H4'):
+                    self.assertIn(f'{name} = {api.AWG_PROFILE[name]}', created['config'])
+                self.assertEqual(api.read_clients()[0]['awg_signature'], 'stun')
+                api.delete_client(created['id'])
+
     def test_hysteria_client_profile_applies_individual_advanced_settings(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -41,7 +41,7 @@ type Props = {
 };
 
 export function ConnectionProfileResult({ profile, onDownload }: Props) {
-  const [qrResult, setQrResult] = useState({ content: "", url: "" });
+  const [qrResult, setQrResult] = useState({ content: "", url: "", error: false });
   const [copied, setCopied] = useState("");
   const meta = protocolDelivery[profile.protocol];
   const qrContent = profile.delivery.qr?.content || "";
@@ -55,7 +55,8 @@ export function ConnectionProfileResult({ profile, onDownload }: Props) {
         margin: 2,
         errorCorrectionLevel: "M",
         color: { dark: "#081216", light: "#ffffff" },
-      }).then((value) => { if (active) setQrResult({ content: qrContent, url: value }); });
+      }).then((value) => { if (active) setQrResult({ content: qrContent, url: value, error: false }); })
+        .catch(() => { if (active) setQrResult({ content: qrContent, url: "", error: true }); });
     }
     return () => { active = false; };
   }, [qrContent]);
@@ -92,6 +93,7 @@ export function ConnectionProfileResult({ profile, onDownload }: Props) {
       </div>
     </div>
 
+    {qrResult.content === qrContent && qrResult.error && <p className="connectionSecretNote">Не удалось создать QR-код: профиль может быть слишком большим. Скачайте файл и импортируйте его в клиент.</p>}
     <div className="connectionCredentials">
       {profile.fields.map((field) => <div key={field.label}><small>{field.label}</small><strong>{field.value}</strong>{field.secret && <button type="button" onClick={() => void copy(field.value, field.label)}>{copied === field.label ? "готово" : "копировать"}</button>}</div>)}
     </div>
