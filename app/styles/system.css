@@ -8,7 +8,12 @@
 .servicesGrid { grid-template-columns: minmax(0, 1fr); }
 .securityHero, .compactSecurity, .securityGrid > .systemControls, .securityGrid > .logDrawer, .securityGrid > .listeners, .applicationHero { grid-column: 1 / -1; }
 .applicationOperations, .applicationRuntime { min-width: 0; display: grid; gap: 10px; align-items: start; }
-.applicationOperations .systemControls { grid-template-columns: 1fr; }
+.commandGroup + .commandGroup { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.commandGroup h3 { margin: 0 0 8px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.commandButtons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.commandButtons button { min-width: 0; min-height: 36px; padding: 8px 10px; text-align: left; font-size: 12px; line-height: 1.4; }
+.commandButtons > button:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.commandButtons .poweroffButton { color: var(--red); background: var(--danger-dim); border-color: var(--danger-line); }
 .applicationMode { flex-basis: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .applicationMode > div:first-child { min-width: 0; }
 .applicationMode h3 { font-size: 12px; }
@@ -87,16 +92,19 @@
 .serviceOnline { background: var(--green); box-shadow: 0 0 0 4px var(--green-dim); }
 .serviceOffline { background: var(--subtle); }
 .serviceActions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.loggingControl { display: grid; grid-template-columns: minmax(180px, .75fr) minmax(0, 2fr); gap: 14px; align-items: center; }
+.loggingControl { display: grid; gap: 10px; }
 .loggingControl > div { min-width: 0; }
-.loggingControl > div > small { display: block; margin-top: 7px; color: var(--muted); }
-.loggingSettings { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.loggingSettings .serviceModeSwitch { padding: 8px 10px; gap: 10px; }
+.loggingHead { margin-bottom: 0; }
+.loggingUsage { flex-shrink: 0; padding: 5px 8px; border-radius: var(--radius-sm); background: var(--accent-dim); color: var(--accent); }
+.loggingSettings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto; align-items: stretch; gap: 10px; }
+.loggingSettings .serviceModeSwitch { justify-content: space-between; padding: 10px; gap: 10px; }
 .loggingSettings .serviceModeSwitch small { font-size: 11px; }
-.loggingRetention { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; flex: 1; }
+.loggingRetention { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field); }
 .loggingRetention > span { display: grid; gap: 3px; }
 .loggingRetention strong { color: var(--text); }
-.loggingRetention select { width: auto; max-width: 240px; }
+.loggingRetention select { width: auto; max-width: 210px; min-width: 0; }
+.loggingActions { display: flex; align-items: center; gap: 7px; }
+.loggingActions button { white-space: nowrap; }
 .automationCenter { padding: 0; overflow: hidden; }
 .automationCenterHead { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px; }
 .automationCenterHead small { display: block; margin-top: 6px; color: var(--muted); }
@@ -124,9 +132,10 @@
   .serviceModeSwitch > span { flex: 1; }
   .serviceRow { grid-template-columns: 8px minmax(0, 1fr); gap: 12px; }
   .serviceActions { grid-column: 2; grid-row: 3; justify-content: flex-start; }
-  .loggingSettings { align-items: stretch; flex-direction: column; }
-  .loggingRetention { justify-content: space-between; }
-  .loggingRetention select { width: 100%; max-width: 240px; }
+  .loggingSettings { grid-template-columns: 1fr; }
+  .loggingRetention { flex-wrap: wrap; }
+  .loggingRetention select { flex: 1; max-width: 100%; }
+  .loggingActions button { flex: 1; }
   .automationCenterHead { align-items: flex-start; flex-direction: column; padding: 18px; }
   .automationRow { grid-template-columns: minmax(0, 1fr) auto; padding: 18px; gap: 16px; }
   .automationFields { grid-column: 1 / -1; }
@@ -136,6 +145,6 @@
   .logDrawerBody { padding: 0 18px 18px; }
 }
 
-@container workspace (max-width: 1100px) { .securityList { grid-template-columns: repeat(2, minmax(0, 1fr)); } .applicationMode { align-items: flex-start; flex-direction: column; } .loggingControl { grid-template-columns: 1fr; gap: 10px; } }
+@container workspace (max-width: 1100px) { .securityList { grid-template-columns: repeat(2, minmax(0, 1fr)); } .applicationMode { align-items: flex-start; flex-direction: column; } .loggingSettings { grid-template-columns: repeat(2, minmax(0, 1fr)); } .loggingActions { grid-column: 1 / -1; justify-content: flex-end; } }
 @container workspace (max-width: 760px) { .applicationGrid { grid-template-columns: 1fr; } .securityList { grid-template-columns: 1fr; } .systemButtons { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@container workspace (max-width: 560px) { .applicationMode .panelAccessActions { flex-wrap: wrap; width: 100%; } .applicationMode .serviceModeSwitch { flex: 1 1 180px; } .actionButtons, .systemButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); } .securityPostureStats { grid-template-columns: 1fr; } .loggingSettings { flex-direction: row; align-items: center; } .loggingRetention { flex-basis: 100%; } .loggingRetention select { width: auto; max-width: 100%; } .securityGrid .systemControls { grid-template-columns: 1fr; } }
+@container workspace (max-width: 560px) { .applicationMode .panelAccessActions { flex-wrap: wrap; width: 100%; } .applicationMode .serviceModeSwitch { flex: 1 1 180px; } .actionButtons, .systemButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); } .securityPostureStats { grid-template-columns: 1fr; } .loggingSettings { grid-template-columns: 1fr; } .loggingHead { align-items: flex-start; } .securityGrid .systemControls { grid-template-columns: 1fr; } }

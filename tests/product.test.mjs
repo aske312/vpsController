@@ -396,7 +396,6 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(page, /сервисный режим не создаёт отложенный запуск/);
   assert.match(api, /installed_release_branch\(\) == "test-light"/);
   assert.match(manager, /сначала вернитесь на light, затем выключите сервисный режим/);
-  assert.match(page, /Вернуться на light/);
   assert.match(workflow, /branches: \[light, test-light\]/);
   assert.match(workflow, /release_tag="light-test-latest"/);
   assert.match(workflow, /GITHUB_REF_NAME" == "test-light"/);
@@ -742,7 +741,6 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.doesNotMatch(manager.match(/install_prebuilt_release\(\) \{([\s\S]*?)\n\}/)?.[1] || "", /apt-get|npm |docker (build|compose)/);
   assert.doesNotMatch(api, /Application updates require a prepared release archive/);
   assert.match(page, /runApplicationAction\("update"\)/);
-  assert.match(page, /Текущий канал: light · production/);
   assert.match(builder, /schema=1/);
   assert.match(builder, /RELEASE_EDITION="\$\{RELEASE_EDITION:-light\}"/);
   assert.match(builder, /RELEASE_CHANNEL="\$\{RELEASE_CHANNEL:-production\}"/);

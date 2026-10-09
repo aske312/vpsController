@@ -1477,7 +1477,7 @@ export default function Home() {
           </div>
           <div className="panelAccessActions">
             <label className="serviceModeSwitch">
-              <span><strong>Сервисный режим</strong><small>{testReleaseActive ? "сначала вернитесь на light" : serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
+              <span><strong>Сервисный режим</strong><small>{testReleaseActive ? "сначала вернитесь к стабильной версии" : serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
               <input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy || testReleaseActive} /><i />
             </label>
             <label className="serviceModeSwitch protectedAccessSwitch">
@@ -1488,26 +1488,34 @@ export default function Home() {
         </div>
         </article>
         <div className="applicationOperations">
-        <article className="panel actionPanel">
-          <div className="panelHead"><div><p className="eyebrow">SUDO VPS-CONTROL</p><h2>Доступные действия</h2></div></div>
-          <div className="actionButtons">
-            <button onClick={() => void runApplicationAction("restart")} disabled={busy}><strong>Перезапустить приложение</strong><small>Перезапускает панель и API без перезагрузки VPS</small></button>
-            {!testReleaseActive && <button onClick={() => void runApplicationAction("update")} disabled={busy}><strong>{release?.outdated ? "Обновить light" : "Проверить обновление light"}</strong><small>{release?.outdated ? "Доступна новая production-версия" : "Текущий канал: light · production"}</small></button>}
-            {serviceModeActive && <button onClick={() => void runApplicationAction("test-update")} disabled={busy}><strong>{testReleaseActive ? "Обновить test-light" : "Перейти на test-light"}</strong><small>{testReleaseActive ? "Устанавливает актуальную тестовую сборку" : "Сохраняет light для безопасного возврата"}</small></button>}
-            {serviceModeActive && testReleaseActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={busy}><strong>Вернуться на light</strong><small>Восстанавливает production-версию, сохранённую перед тестированием</small></button>}
-            <button onClick={() => void runApplicationAction("network-check")} disabled={busy}><strong>Проверить подключения</strong><small>Проверяет интернет, установленные протоколы и доступность портов</small></button>
-            <button onClick={() => void runApplicationAction("integrity-check")} disabled={busy}><strong>Проверить целостность</strong><small>Проверяет файлы, права доступа и настройки компонентов</small></button>
-            <button onClick={() => void runApplicationAction("identity")} disabled={busy}><strong>Обновить данные сервера</strong><small>Повторно определяет публичный IP и географические данные VPS</small></button>
-            <button onClick={() => void runApplicationAction("optimize")} disabled={busy}><strong>Освободить ресурсы</strong><small>Удаляет неиспользуемые пакеты, кэши, временные файлы и старые журналы</small></button>
-          </div>
-        </article>
-        <article className="panel systemControls">
-          <div><p className="eyebrow">SYSTEM POWER &amp; KERNEL</p><h2>Системные действия</h2><span>Команды выполняются через systemd и не блокируют интерфейс панели.</span></div>
-          <div className="systemButtons">
-            <button onClick={() => void runApplicationAction("kernel-update")} disabled={busy}><strong>Обновить ядро</strong><small>{updates?.kernel_available ? "Проверит модули протоколов и перезагрузит VPS" : "Проверит ядро, headers и модули протоколов"}</small></button>
-            <button onClick={() => void runApplicationAction("reboot")} disabled={busy}><strong>Перезагрузить сервер</strong><small>Корректно завершает службы и запускает VPS заново</small></button>
-            <button className="poweroffButton" onClick={() => void runApplicationAction("poweroff")} disabled={busy}><strong>Выключить сервер</strong><small>Потребуется запуск у провайдера</small></button>
-          </div>
+        <article className="panel commandPanel">
+          <div className="panelHead"><div><p className="eyebrow">VPS MANAGEMENT</p><h2>Управление и обслуживание</h2></div></div>
+          <section className="commandGroup" aria-labelledby="applicationCommands">
+            <h3 id="applicationCommands">Приложение</h3>
+            <div className="commandButtons">
+              <button onClick={() => void runApplicationAction("restart")} disabled={busy}>Перезапустить приложение</button>
+              {!testReleaseActive && <button onClick={() => void runApplicationAction("update")} disabled={busy}>{release?.outdated ? "Обновить приложение" : "Проверить обновления"}</button>}
+              {serviceModeActive && <button onClick={() => void runApplicationAction("test-update")} disabled={busy}>{testReleaseActive ? "Обновить тестовую версию" : "Перейти на тестовую версию"}</button>}
+              {serviceModeActive && testReleaseActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={busy}>Вернуться к стабильной версии</button>}
+            </div>
+          </section>
+          <section className="commandGroup" aria-labelledby="maintenanceCommands">
+            <h3 id="maintenanceCommands">Диагностика и обслуживание</h3>
+            <div className="commandButtons">
+              <button onClick={() => void runApplicationAction("network-check")} disabled={busy}>Проверить подключения</button>
+              <button onClick={() => void runApplicationAction("integrity-check")} disabled={busy}>Проверить целостность</button>
+              <button onClick={() => void runApplicationAction("identity")} disabled={busy}>Обновить данные сервера</button>
+              <button onClick={() => void runApplicationAction("optimize")} disabled={busy}>Освободить ресурсы</button>
+            </div>
+          </section>
+          <section className="commandGroup" aria-labelledby="serverCommands">
+            <h3 id="serverCommands">Система и питание</h3>
+            <div className="commandButtons">
+              <button onClick={() => void runApplicationAction("kernel-update")} disabled={busy}>Обновить ядро</button>
+              <button onClick={() => void runApplicationAction("reboot")} disabled={busy}>Перезагрузить сервер</button>
+              <button className="poweroffButton" onClick={() => void runApplicationAction("poweroff")} disabled={busy}>Выключить сервер</button>
+            </div>
+          </section>
         </article>
         </div>
         <div className="applicationRuntime">
@@ -1556,15 +1564,34 @@ export default function Home() {
           </div>
         </article>
 
+        <article className="panel servicesPanel">
+          <div className="panelHead"><div><p className="eyebrow">MANAGED SERVICES</p><h2>Системные службы</h2></div><span>{services?.items.filter((item) => item.active).length || 0} активных</span></div>
+          <div className="serviceRows">
+            {(services?.items || []).map((service) => <div className="serviceRow" key={service.id}>
+              <i className={service.active ? "serviceOnline" : "serviceOffline"} />
+              <div><strong>{service.name}</strong><small>{service.unit} · {service.substate} · автозапуск: {service.enabled ? "да" : "нет"}</small></div>
+              <dl><div><dt>Перезапуски</dt><dd>{service.restarts}</dd></div><div><dt>Активна с</dt><dd>{service.active_since || "—"}</dd></div></dl>
+              <div className="serviceActions">
+                {service.controls.includes(service.active ? "restart" : "start") && <button onClick={() => void runServiceAction(service.id, service.name, service.active ? "restart" : "start")} disabled={busy}>{service.active ? "Перезапустить" : "Запустить"}</button>}
+                {service.active && (service.controls.includes("stop") || service.disabled_controls?.includes("stop")) && <button
+                  className="serviceStop"
+                  onClick={() => void runServiceAction(service.id, service.name, "stop")}
+                  disabled={busy || service.disabled_controls?.includes("stop")}
+                  title={service.disabled_controls?.includes("stop") ? "Остановка отключит панель управления и доступ к восстановлению" : undefined}
+                >Остановить</button>}
+              </div>
+            </div>)}
+          </div>
+        </article>
+
         <article className="panel loggingControl">
-          <div>
-            <p className="eyebrow">LOG MANAGEMENT</p>
-            <h2>Запись и хранение журналов</h2>
-            <small>Системные службы, приложение, контейнеры и история мониторинга · {services?.logging?.disk_usage || "объём уточняется"}</small>
+          <div className="panelHead loggingHead">
+            <div><p className="eyebrow">LOG MANAGEMENT</p><h2>Запись и хранение журналов</h2></div>
+            <span className="loggingUsage">{services?.logging?.disk_usage || "Объём уточняется"}</span>
           </div>
           <div className="loggingSettings">
             <label className="serviceModeSwitch protectedAccessSwitch">
-              <span><strong>Запись логов</strong><small>{loggingDraft?.persistent ? "сохраняются после перезагрузки" : "только временно, до перезагрузки"}</small></span>
+              <span><strong>Постоянное хранение</strong><small>{loggingDraft?.persistent ? "сохраняются после перезагрузки" : "только временно, до перезагрузки"}</small></span>
               <input
                 type="checkbox"
                 checked={loggingDraft?.persistent ?? true}
@@ -1588,28 +1615,10 @@ export default function Home() {
                 <option value={0}>Не очищать автоматически</option>
               </select>
             </label>
-            <button className="primaryButton logSaveButton" onClick={() => void saveLoggingSettings()} disabled={busy || !loggingDraft}>Сохранить</button>
-            <button className="dangerButton" onClick={() => void clearManagedLogs()} disabled={busy}>Очистить журналы</button>
-          </div>
-        </article>
-
-        <article className="panel servicesPanel">
-          <div className="panelHead"><div><p className="eyebrow">MANAGED SERVICES</p><h2>Системные службы</h2></div><span>{services?.items.filter((item) => item.active).length || 0} активных</span></div>
-          <div className="serviceRows">
-            {(services?.items || []).map((service) => <div className="serviceRow" key={service.id}>
-              <i className={service.active ? "serviceOnline" : "serviceOffline"} />
-              <div><strong>{service.name}</strong><small>{service.unit} · {service.substate} · автозапуск: {service.enabled ? "да" : "нет"}</small></div>
-              <dl><div><dt>Перезапуски</dt><dd>{service.restarts}</dd></div><div><dt>Активна с</dt><dd>{service.active_since || "—"}</dd></div></dl>
-              <div className="serviceActions">
-                {service.controls.includes(service.active ? "restart" : "start") && <button onClick={() => void runServiceAction(service.id, service.name, service.active ? "restart" : "start")} disabled={busy}>{service.active ? "Перезапустить" : "Запустить"}</button>}
-                {service.active && (service.controls.includes("stop") || service.disabled_controls?.includes("stop")) && <button
-                  className="serviceStop"
-                  onClick={() => void runServiceAction(service.id, service.name, "stop")}
-                  disabled={busy || service.disabled_controls?.includes("stop")}
-                  title={service.disabled_controls?.includes("stop") ? "Остановка отключит панель управления и доступ к восстановлению" : undefined}
-                >Остановить</button>}
-              </div>
-            </div>)}
+            <div className="loggingActions">
+              <button className="primaryButton logSaveButton" onClick={() => void saveLoggingSettings()} disabled={busy || !loggingDraft}>Сохранить</button>
+              <button className="dangerButton" onClick={() => void clearManagedLogs()} disabled={busy}>Очистить журналы</button>
+            </div>
           </div>
         </article>
 
