@@ -12,7 +12,7 @@ const documents: Record<Language, Record<LegalDocument, LocalizedDocument>> = {
     privacy: {
       label: "Уведомление о приватности",
       eyebrow: "SELF-HOSTED · 02.08.2026",
-      notice: <>312.net — свободное self-hosted ПО. Проект не предоставляет централизованный облачный сервис и не получает встроенный административный доступ к установленному экземпляру.</>,
+      notice: <>312node.net — свободное self-hosted ПО. Проект не предоставляет централизованный облачный сервис и не получает встроенный административный доступ к установленному экземпляру.</>,
       sections: [
         ["Где находятся данные", <>Конфигурации, ключи, журналы, сведения о сервере, модулях и соединениях обрабатываются на VPS, которым управляет пользователь. Данные сессии панели могут временно храниться в sessionStorage браузера администратора. Встроенной отправки содержимого экземпляра участникам проекта нет.</>],
         ["Внешние соединения", <>Установка, обновления, пакетные репозитории, GeoIP и сетевая диагностика могут обращаться к GitHub и другим сторонним ресурсам. Такие ресурсы получают IP-адрес и технические метаданные запроса и применяют собственные политики.</>],
@@ -23,12 +23,12 @@ const documents: Record<Language, Record<LegalDocument, LocalizedDocument>> = {
     terms: {
       label: "Свободная лицензия",
       eyebrow: "MIT LICENSE · 02.08.2026",
-      notice: <>312.net распространяется по лицензии MIT. Юридически определяющим является полный текст файла LICENSE в составе проекта.</>,
+      notice: <>312node.net распространяется по лицензии MIT. Юридически определяющим является полный текст файла LICENSE в составе проекта.</>,
       sections: [
         ["Разрешения", <>Разрешается безвозмездно использовать, копировать, изменять, объединять, публиковать, распространять, сублицензировать и продавать копии ПО, а также разрешать это другим лицам при сохранении уведомления об авторских правах и текста лицензии MIT.</>],
         ["Независимый экземпляр", <>ПО является инструментом управления собственным VPS. Участники проекта не становятся хостинг-провайдером, VPN-оператором, оператором связи или администратором установленного пользователем экземпляра и не управляют его трафиком, ключами и соединениями.</>],
         ["Действия пользователя", <>Лицензия на ПО не предоставляет разрешения на доступ к чужим системам и не отменяет требования закона, договора с хостинг-провайдером или права третьих лиц. Пользователь самостоятельно отвечает за выбранные серверы, команды, конфигурации и способы применения ПО.</>],
-        ["Сторонние компоненты", <>Операционная система, библиотеки, модули, GitHub, пакетные репозитории, GeoIP и другие сторонние ресурсы могут иметь собственные лицензии и условия. MIT применяется к 312.net и не заменяет условия таких компонентов.</>],
+        ["Сторонние компоненты", <>Операционная система, библиотеки, модули, GitHub, пакетные репозитории, GeoIP и другие сторонние ресурсы могут иметь собственные лицензии и условия. MIT применяется к 312node.net и не заменяет условия таких компонентов.</>],
         ["Отсутствие гарантий", <>ПО предоставляется «как есть», без каких-либо гарантий. В пределах, допускаемых применимым правом, авторы и правообладатели не несут ответственности по искам, за ущерб или иные требования, возникшие из ПО, его использования или иных действий с ним. Обязательные нормы применимого права сохраняют силу.</>],
       ],
     },
@@ -37,7 +37,7 @@ const documents: Record<Language, Record<LegalDocument, LocalizedDocument>> = {
     privacy: {
       label: "Privacy Notice",
       eyebrow: "SELF-HOSTED · 2 AUG 2026",
-      notice: <>312.net is free self-hosted software. The project does not provide a central cloud service or receive built-in administrative access to an installed instance.</>,
+      notice: <>312node.net is free self-hosted software. The project does not provide a central cloud service or receive built-in administrative access to an installed instance.</>,
       sections: [
         ["Where data resides", <>Configurations, keys, logs and server, module and connection details are processed on the VPS controlled by the user. Panel session data may be stored temporarily in the administrator browser&apos;s sessionStorage. Instance content is not transmitted to project contributors by default.</>],
         ["External connections", <>Installation, updates, package repositories, GeoIP and network diagnostics may contact GitHub and other third-party resources. Those resources receive the IP address and technical request metadata and apply their own policies.</>],
@@ -48,12 +48,12 @@ const documents: Record<Language, Record<LegalDocument, LocalizedDocument>> = {
     terms: {
       label: "Free Software License",
       eyebrow: "MIT LICENSE · 2 AUG 2026",
-      notice: <>312.net is distributed under the MIT License. The complete LICENSE file included with the project is the legally controlling text.</>,
+      notice: <>312node.net is distributed under the MIT License. The complete LICENSE file included with the project is the legally controlling text.</>,
       sections: [
         ["Permission", <>Any person may, free of charge, use, copy, modify, merge, publish, distribute, sublicense and sell copies of the Software, and permit others to do so, provided that the copyright notice and MIT permission notice are included.</>],
         ["Independent instance", <>The Software is a tool for administering a user-controlled VPS. Project contributors do not thereby become a hosting provider, VPN operator, communications provider or administrator of the installed instance and do not control its traffic, keys or connections.</>],
         ["User actions", <>The software license does not authorise access to third-party systems or override law, hosting agreements or third-party rights. Users remain responsible for the servers, commands, configurations and uses they choose.</>],
-        ["Third-party components", <>The operating system, libraries, modules, GitHub, package repositories, GeoIP and other third-party resources may have their own licences and terms. MIT applies to 312.net and does not replace those terms.</>],
+        ["Third-party components", <>The operating system, libraries, modules, GitHub, package repositories, GeoIP and other third-party resources may have their own licences and terms. MIT applies to 312node.net and does not replace those terms.</>],
         ["No warranty", <>The Software is provided “as is”, without warranty of any kind. To the extent permitted by applicable law, authors and copyright holders are not liable for claims, damages or other liability arising from the Software, its use or other dealings in it. Mandatory applicable law remains unaffected.</>],
       ],
     },

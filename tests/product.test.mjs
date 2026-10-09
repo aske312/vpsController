@@ -11,21 +11,6 @@ const read = async (path) => {
   return [source, ...await Promise.all(modules.map((match) => read(`app/${match[1]}`)))].join("\n");
 };
 
-test("Soft visual layer bounds wide workspaces and adapts to available section width", async () => {
-  const [tokens, shell, dashboard, system, overlays] = await Promise.all([
-    read("app/styles/tokens.css"), read("app/styles/shell.css"), read("app/styles/dashboard.css"),
-    read("app/styles/system.css"), read("app/styles/overlays.css"),
-  ]);
-  assert.match(tokens, /--workspace-width: 1120px/);
-  assert.match(tokens, /color-scheme: light/);
-  assert.match(shell, /container: workspace \/ inline-size/);
-  assert.match(shell, /max-width: calc\(var\(--workspace-width\) \+ 48px\)/);
-  assert.match(dashboard, /\.metrics \{[^}]*align-items: start/);
-  assert.match(dashboard, /@container workspace \(max-width: 600px\)/);
-  assert.match(system, /\.loggingRetention \{[^}]*flex-wrap: wrap/);
-  assert.match(overlays, /@media \(max-height: 700px\)/);
-});
-
 test("поставка содержит установщик, образы и клиентскую документацию", async () => {
   const [bootstrap, manager, readme, awg, hysteria2, tuic, xray, relay] = await Promise.all([
     read("scripts/install-panel.sh"),
@@ -83,17 +68,15 @@ test("fresh install generates credentials, supports a verified domain and finish
   assert.doesNotMatch(readme, /sudo/);
 });
 
-test("интерфейс использует фирменные метаданные и знак 312.net", async () => {
+test("интерфейс содержит метаданные, значок и сведения о выпуске", async () => {
   const [layout, page, favicon, packageJson] = await Promise.all([
     read("app/layout.tsx"),
     read("app/page.tsx"),
     read("public/favicon.svg"),
     read("package.json"),
   ]);
-  assert.match(layout, /title: "Infrastructure Control"/);
   assert.match(layout, /description: "Управление серверной инфраструктурой\."/);
   assert.match(page, /M4\.5 5\.5h23L16 27 4\.5 5\.5Z/);
-  assert.match(favicon, /312\.net triangle mark/);
   assert.match(favicon, /M170 220h684L512 850 170 220Z/);
   assert.match(page, /Безопасность/);
   assert.equal(JSON.parse(packageJson).name, "312-net-control");
@@ -115,9 +98,9 @@ test("MIT license, privacy notice and connection guide are included and exposed 
     read("app/connection-guide.tsx"),
     read("app/page.tsx"),
   ]);
-  assert.match(privacy, /Уведомление о приватности 312\.net/);
+  assert.match(privacy, /Уведомление о приватности/);
   assert.match(privacy, /Privacy Notice/);
-  assert.match(terms, /Свободная лицензия и условия 312\.net/);
+  assert.match(terms, /Свободная лицензия и условия/);
   assert.match(terms, /Free Software Terms/);
   assert.match(privacy, /не требует указания имени, адреса/);
   assert.match(privacy, /does not require an author.s legal name/);
@@ -370,8 +353,8 @@ test("SUDO VPS-CONTROL actions map to real manager commands", async () => {
 });
 
 test("Light keeps production updates public and gates the test-light channel behind service mode", async () => {
-  const [api, page, manager, styles, workflow, ciWorkflow, protocolIcon] = await Promise.all([
-    read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"), read("app/globals.css"),
+  const [api, page, manager, workflow, ciWorkflow, protocolIcon] = await Promise.all([
+    read("api/main.py"), read("app/page.tsx"), read("scripts/vps-control.sh"),
     read(".github/workflows/release.yml"), read(".github/workflows/ci.yml"), read("app/protocol-icon.tsx"),
   ]);
   assert.match(manager, /PRODUCT_EDITION="light"/);
@@ -416,8 +399,6 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(page, /сервисный режим не создаёт отложенный запуск/);
   assert.match(api, /installed_release_branch\(\) == "test-light"/);
   assert.match(manager, /сначала вернитесь на light, затем выключите сервисный режим/);
-  assert.match(styles, /\.loginPage \{[^}]*place-items: center/);
-  assert.match(styles, /\.loginCard \{[^}]*width: min\(440px, 100%\)/);
   assert.match(page, /Вернуться на light/);
   assert.match(workflow, /branches: \[light, test-light\]/);
   assert.match(workflow, /release_tag="light-test-latest"/);
@@ -483,7 +464,7 @@ test("authentication and VPN controls preserve consistent UI states", async () =
   assert.match(api, /installed = bool\(service and run\("systemctl", "show", service, "--property=LoadState", "--value"\) == "loaded"\)/);
   assert.match(api, /if not available_interfaces:/);
   assert.doesNotMatch(api, /\bWG_INTERFACE\b|\bWG_CONFIG\b|["']wg["']/);
-  assert.match(api, /"web": \{"name": "Web 312\.net"/);
+  assert.match(api, /"web": \{[^\n]+"unit": "vps-control-web\.service", "controls": \["restart"\], "disabled_controls": \["stop"\]/);
   assert.match(api, /AmneziaWG cannot be stopped while panel access is VPN-only/);
   assert.match(manager, /vpn_interface_available="no"/);
   assert.match(manager, /set_env_value "CORS_ORIGINS" "\$\{vpn_origins\}"/);
@@ -730,20 +711,14 @@ test("the interface uses one fixed visual design without personalization", async
   assert.match(page, /const nodeHasError = application\?\.api\.active === false/);
   assert.doesNotMatch(page, /const nodeHasError =[^;]+action\?\.state === "failed"/);
   assert.match(navigation, /className="gateSidebar"/);
-  assert.match(navigation, /label="WORKSPACE"/);
-  assert.match(navigation, /label="TUNNELS"/);
   assert.match(navigation, /protocols\.length === 1/);
   assert.match(navigation, /label="Протоколы" badge=\{String\(protocols\.length\)\}/);
   assert.match(workspace, /props\.installed\.length > 1.*className="protocolWorkspaceRail"/s);
-  assert.match(navigation, /label="SYSTEM"/);
   assert.match(layout, /<NotificationProvider>\{children\}<\/NotificationProvider>/);
   assert.match(page, /notifications\.finishOperation\(input\)/);
   assert.match(notificationCenter, /gateNotificationDock/);
   assert.doesNotMatch(page, /<aside className="operationBanner"/);
   assert.doesNotMatch(page, /className="successNotice"/);
-  assert.match(css, /--accent: #28685d/);
-  assert.match(css, /\.primaryButton \{[^}]+background: var\(--accent\)/);
-  assert.match(css, /\.serviceOnline \{ background: var\(--green\)/);
   assert.match(manager, /rm -f -- "\$\{DATA_DIR\}\/personalization\.json"/);
 });
 

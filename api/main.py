@@ -53,7 +53,7 @@ async def lifespan(_: FastAPI):
             metrics_monitor = None
 
 
-app = FastAPI(title="312.net Infrastructure API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="312node.net Infrastructure API", version="0.1.0", lifespan=lifespan)
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -2288,10 +2288,10 @@ def application_logs(lines: int = 160, _: None = Depends(require_token)) -> dict
 def managed_services() -> dict[str, dict]:
     return {
         "api": {
-            "name": "API 312.net", "unit": "vps-control-api.service",
+            "name": "API 312node.net", "unit": "vps-control-api.service",
             "controls": ["restart"], "disabled_controls": ["stop"],
         },
-        "web": {"name": "Web 312.net", "unit": "vps-control-web.service", "controls": ["restart"], "disabled_controls": ["stop"]},
+        "web": {"name": "Web 312node.net", "unit": "vps-control-web.service", "controls": ["restart"], "disabled_controls": ["stop"]},
         "gateway": {"name": "Caddy", "unit": "caddy.service", "controls": ["restart"], "disabled_controls": ["stop"]},
         "awg": {"name": "AmneziaWG", "unit": f"awg-quick@{AWG_INTERFACE}.service", "controls": ["start", "stop", "restart"]},
         "hysteria2": {"name": "Hysteria2", "unit": "vps-control-hysteria2.service", "controls": ["start", "stop", "restart"]},

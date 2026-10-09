@@ -1,25 +1,25 @@
-.connectionsWorkspace { display: grid; gap: 20px; }
-.connectionsHero { position: relative; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.connectionsWorkspace { display: grid; gap: 14px; }
+.connectionsHero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 13px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 .connectionsHeroCopy { flex: 1; }
-.connectionsHeroCopy h2 { font-size: 26px; }
-.connectionsHeroCopy > p:last-child { max-width: 600px; margin-top: 8px; color: var(--muted); font-size: 13px; }
-.connectionsHeroStats { display: flex; gap: 8px; }
-.connectionsHeroStats button { display: grid; gap: 4px; min-width: 70px; padding: 10px 12px; text-align: left; background: var(--field); }
-.connectionsHeroStats button.active { border-color: var(--accent); }
-.connectionsHeroStats strong { font-size: 20px; font-variant-numeric: tabular-nums; }
-.connectionsHeroStats span { color: var(--muted); font-size: 11px; }
-.connectionsNewButton { min-height: 44px; flex: 0 0 auto; }
+.connectionsHeroCopy h2 { font-size: 22px; }
+.connectionsHeroCopy > p:last-child { max-width: 650px; margin-top: 4px; color: var(--muted); font-size: 13px; }
+.connectionsHeroStats { grid-column: 1 / -1; grid-row: 2; display: flex; gap: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
+.connectionsHeroStats button { display: flex; gap: 8px; min-width: 0; padding: 6px 12px; text-align: left; background: transparent; border-color: transparent; }
+.connectionsHeroStats button.active { border-color: var(--accent-line); background: var(--accent-dim); color: var(--accent); }
+.connectionsHeroStats strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.connectionsHeroStats span { color: var(--muted); font-size: 12px; }
+.connectionsNewButton { min-height: 40px; grid-column: 2; grid-row: 1; }
 .connectionsInventory { padding: 0; overflow: hidden; }
-.connectionsInventoryHead { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 24px 24px 18px; }
+.connectionsInventoryHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px; }
 .connectionsInventoryHead > span { color: var(--muted); font-size: 12px; }
-.connectionsFilters { display: grid; grid-template-columns: minmax(0, 480px) minmax(180px, 240px); gap: 14px; padding: 0 24px 20px; border-bottom: 1px solid var(--line); }
+.connectionsFilters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 240px); gap: 14px; padding: 0 13px 12px; border-bottom: 1px solid var(--line); }
 .connectionsFilters > label { display: flex; align-items: center; gap: 10px; }
 .connectionsFilters > label > span { color: var(--muted); font-size: 12px; }
 .connectionSearch { position: relative; }
 .connectionSearch > span { position: absolute; left: 13px; font-size: 18px !important; }
 .connectionSearch input { padding-left: 38px; }
 .connectionsRows { display: grid; }
-.connectionRowFlat { display: grid; grid-template-columns: minmax(160px, 1.2fr) minmax(110px, .6fr) minmax(160px, 1fr) minmax(140px, .8fr) auto; gap: 18px; align-items: center; padding: 18px 24px; border-bottom: 1px solid var(--line); }
+.connectionRowFlat { display: grid; grid-template-columns: minmax(160px, 1.2fr) minmax(110px, .6fr) minmax(160px, 1fr) minmax(140px, .8fr) auto; gap: 14px; align-items: center; padding: 10px 13px; border-bottom: 1px solid var(--line); }
 .connectionRowFlat:last-child { border-bottom: 0; }
 .connectionRowFlat:hover { background: var(--panel-2); }
 .connectionRowIdentity { min-width: 0; display: flex; align-items: center; gap: 12px; }
@@ -33,7 +33,7 @@
 .connectionRowState > i.stable { background: var(--green); }
 .connectionRowState > i.attention { background: var(--amber); }
 .connectionRowState strong { font-size: 12px; }
-.connectionsEmpty, .noConnectionProtocols { display: grid; justify-items: center; align-content: center; gap: 12px; padding: 40px 24px; min-height: 280px; text-align: center; }
+.connectionsEmpty, .noConnectionProtocols { display: grid; justify-items: center; align-content: center; gap: 12px; padding: 28px 20px; min-height: 180px; text-align: center; }
 .connectionsEmpty > span, .noConnectionProtocols > span { color: var(--accent); font-size: 32px; }
 .connectionsEmpty p, .noConnectionProtocols p { max-width: 550px; color: var(--muted); font-size: 13px; }
 .connectionGuide { margin-top: 20px; }
@@ -61,6 +61,6 @@
 .clientAppRows a { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 5px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); color: var(--accent); font-size: 12px; }
 .clientAppRows a.direct { color: var(--green); border-color: var(--green-line); }
 .clientRegionNote { margin-top: 12px; color: var(--subtle); font-size: 12px; }
-.clientAppCatalog.compact { margin: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
-@container workspace (max-width: 1020px) { .connectionsHeroCopy { flex-basis: 100%; } .connectionRowFlat { grid-template-columns: minmax(140px, 1fr) minmax(130px, 1fr) minmax(120px, 1fr) auto; } .connectionRowProtocol { display: none; } }
-@container workspace (max-width: 640px) { .connectionsHero { padding: 18px; gap: 14px; } .connectionsHeroStats { flex-wrap: wrap; } .connectionsHeroStats button { min-width: 65px; } .connectionsNewButton { flex-basis: 100%; max-width: 300px; } .connectionsFilters { grid-template-columns: 1fr; padding: 0 18px 18px; } .connectionsInventoryHead { padding: 18px; flex-wrap: wrap; } .connectionRowFlat { grid-template-columns: minmax(0, 1fr) auto; padding: 18px; gap: 12px; } .connectionRowProtocol { display: grid; grid-column: 1; } .connectionRowData, .connectionRowState { grid-column: 1; } .connectionRowFlat > button { grid-column: 2; grid-row: 1; } .clientAppCatalog > header { flex-direction: column; align-items: flex-start; } .clientAppRows article { grid-template-columns: 1fr; } .clientAppRows nav { justify-content: flex-start; } }
+.clientAppCatalog.compact { margin: 0; padding: 13px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
+@container workspace (max-width: 1020px) { .connectionsHeroCopy { min-width: 0; } .connectionRowFlat { grid-template-columns: minmax(140px, 1fr) minmax(130px, 1fr) minmax(120px, 1fr) auto; } .connectionRowProtocol { display: none; } }
+@container workspace (max-width: 640px) { .connectionsHero { padding: 14px; gap: 12px; grid-template-columns: 1fr; } .connectionsHeroStats { flex-wrap: wrap; grid-row: 3; } .connectionsHeroStats button { padding: 6px 8px; } .connectionsNewButton { grid-column: 1; grid-row: 2; justify-self: start; } .connectionsFilters { grid-template-columns: 1fr; padding: 0 18px 18px; } .connectionsInventoryHead { padding: 18px; flex-wrap: wrap; } .connectionRowFlat { grid-template-columns: minmax(0, 1fr) auto; padding: 18px; gap: 12px; } .connectionRowProtocol { display: grid; grid-column: 1; } .connectionRowData, .connectionRowState { grid-column: 1; } .connectionRowFlat > button { grid-column: 2; grid-row: 1; } .clientAppCatalog > header { flex-direction: column; align-items: flex-start; } .clientAppRows article { grid-template-columns: 1fr; } .clientAppRows nav { justify-content: flex-start; } }

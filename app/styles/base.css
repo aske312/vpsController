@@ -1,21 +1,21 @@
 * { box-sizing: border-box; }
 html { background: var(--bg); scrollbar-color: var(--line-strong) var(--bg); }
-body { margin: 0; min-width: 320px; color: var(--text); background: var(--bg); font: 400 14px/1.6 var(--ui-font); -webkit-font-smoothing: antialiased; }
+body { margin: 0; min-width: 320px; color: var(--text); background: var(--bg); font: 400 13px/1.5 var(--ui-font); -webkit-font-smoothing: antialiased; }
 h1, h2, h3, p { margin: 0; }
-h1 { font-size: clamp(26px, 3vw, 34px); font-weight: 650; line-height: 1.2; letter-spacing: -.035em; }
-h2 { font-size: 20px; font-weight: 600; line-height: 1.35; letter-spacing: -.025em; }
+h1 { font-size: clamp(24px, 2vw, 30px); font-weight: 650; line-height: 1.2; letter-spacing: -.035em; }
+h2 { font-size: 18px; font-weight: 600; line-height: 1.35; letter-spacing: -.025em; }
 h3 { font-size: 15px; font-weight: 600; line-height: 1.4; }
 small { font-size: 12px; line-height: 1.55; }
 strong, b { font-weight: 600; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; text-underline-offset: 4px; }
 button, input, select, textarea { font: inherit; color: inherit; }
-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 8px 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-2); color: var(--text); font-size: 13px; font-weight: 500; line-height: 1.4; cursor: pointer; transition: background .16s, border-color .16s, color .16s; }
+button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 34px; padding: 7px 11px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-2); color: var(--text); font-size: 13px; font-weight: 500; line-height: 1.4; cursor: pointer; transition: background .16s, border-color .16s, color .16s; }
 button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--hover); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 input, select, textarea { width: 100%; min-width: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--field); outline: none; font-size: 14px; }
-input, select { min-height: 44px; padding: 9px 12px; }
+input, select { min-height: 36px; padding: 7px 10px; }
 textarea { padding: 14px; line-height: 1.7; }
 input::placeholder, textarea::placeholder { color: var(--subtle); }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
@@ -29,8 +29,8 @@ dd { margin: 5px 0 0; overflow-wrap: anywhere; }
 fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 legend { padding: 0 0 10px; color: var(--muted); font-size: 13px; font-weight: 500; }
 summary { cursor: pointer; }
-.panel { min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); }
-.panelHead { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.panel { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); }
+.panelHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .panelHead > span, .panelHead small { color: var(--muted); font-size: 12px; }
 .eyebrow { margin-bottom: 6px; color: var(--subtle); font: 600 10px/1.5 var(--ui-font); letter-spacing: .07em; text-transform: uppercase; }
 .primaryButton { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 650; }
@@ -42,7 +42,7 @@ summary { cursor: pointer; }
 .onlinePill { color: var(--green); border-color: var(--green-line); background: var(--green-dim); }
 .offlinePill { color: var(--red); border-color: var(--danger-line); background: var(--danger-dim); }
 .warningPill { color: var(--amber); border-color: var(--warning-line); background: var(--warning-dim); }
-.protocol { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
+.protocol { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
 .protocolIcon { width: 30px; height: 30px; object-fit: contain; flex: 0 0 auto; }
 .protocolIconVector { display: grid; place-items: center; color: var(--accent); }
 .protocolIconVector.awg { color: var(--green); }
@@ -54,4 +54,4 @@ summary { cursor: pointer; }
 .errorBox { padding: 12px 16px; border: 1px solid var(--danger-line); border-radius: var(--radius-sm); color: var(--red); background: var(--danger-dim); }
 @keyframes loading-sweep { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
-@media (max-width: 700px) { .panel { padding: 18px; } input, select, textarea { font-size: 16px; } .panelHead { flex-wrap: wrap; } }
+@media (max-width: 700px) { .panel { padding: 14px; } input, select, textarea { font-size: 16px; } .panelHead { flex-wrap: wrap; } button { min-height: 42px; } }

@@ -157,7 +157,7 @@ const protocolIds: Protocol[] = ["awg", "hysteria2", "tuic", "xray"];
 const lightModuleIds: Protocol[] = ["awg", "hysteria2", "tuic", "xray"];
 const isProtocolTab = (value: Tab): value is Protocol => protocolIds.includes(value as Protocol);
 const actionLabels: Record<string, string> = {
-  install: "Установка 312.net", start: "Запуск приложения", stop: "Остановка приложения",
+  install: "Установка 312node.net", start: "Запуск приложения", stop: "Остановка приложения",
   restart: "Перезапуск приложения", update: "Обновление приложения", "test-update": "Переход на тестовую версию", "test-rollback": "Возврат к рабочей версии", "network-check": "Проверка сети и туннелей", identity: "Обновление данных сервера",
   "integrity-check": "Проверка целостности",
   secure: "Настройка защиты", "system-update": "Обновление системных пакетов", "kernel-update": "Обновление ядра", "vpn-firewall": "Восстановление VPN firewall", optimize: "Оптимизация ресурсов",
@@ -1278,21 +1278,12 @@ export default function Home() {
       nodeStateLabel={nodeStateLabel}
       server={overview?.server}
       onNavigate={(next) => setTab(next as Tab)}
-    />
-
-    <section className="content">
+    >
       <header className="gateMasthead" aria-label="Состояние сервера">
-        <div className="gateMastNode">
+        <div className="gateMastNode" title={`${overview?.server.city || "VPS"} · ${overview?.server.country || "—"} · ${overview?.server.public_ip || "—"}`}>
           <CountryFlag code={countryCode} label={overview?.server.country || "Страна не определена"} />
           <div className="gateMastIdentity"><span>PRIMARY NODE</span><h2>{overview?.server.city || overview?.server.name || "VPS"}</h2><p><span>{overview?.server.country || "—"}</span><span className="mono">{overview?.server.public_ip || "—"}</span></p></div>
-          <div className={`gateMastState ${navigationState}`}>{applicationStateTitle}</div>
-        </div>
-        <div className="gateMastFacts" aria-label="Метрики сервера">
-          <div><span>UPTIME</span><strong>{uptime(overview?.server.uptime_s)}</strong></div>
-          <div><span>LOAD</span><strong>{overview?.resources.load1.toFixed(2) || "—"}</strong></div>
-          <div><span>CPU</span><strong>{(overview?.resources.cpu_percent || 0).toFixed(0)}%</strong></div>
-          <div><span>RAM</span><strong>{memUsed.toFixed(0)}%</strong></div>
-          <div><span>NETWORK</span><strong>↓ {bytes(networkRate.rx)}/с</strong></div>
+          <div className={`gateMastState ${navigationState}`} role="status" aria-label={applicationStateTitle} title={applicationStateTitle}>{applicationStateTitle}</div>
         </div>
         <div className="gateMastActions">
           <div className={`refreshControl ${autoRefresh ? "active" : ""}`} data-refresh-interval="<1" aria-label="Управление обновлением данных">
@@ -1303,13 +1294,17 @@ export default function Home() {
           <button className="ghostButton" onClick={() => { sessionStorage.removeItem("312-token"); setToken(""); }}>Выйти</button>
         </div>
       </header>
-      {tab !== "overview" && !isProtocolTab(tab) && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "страна не определена"} · управление инфраструктурой</p></div></div>}
+    </LightNavigation>
+
+    <section className="content">
+
+      {tab !== "overview" && !isProtocolTab(tab) && <div className="gateSectionIntro"><div><p className="eyebrow">312NODE.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "страна не определена"} · управление инфраструктурой</p></div></div>}
       {busy && <div className="loadingLine" />}
 
       {tab === "overview" && <section className="overview">
         <div className="metrics">
           <header className="metricsHeader">
-            <div><p className="eyebrow">SERVER MONITORING</p><h2>Ресурсы VPS</h2><small>{metricsStatus}</small></div>
+            <div><p className="eyebrow">SERVER MONITORING</p><h2>Ресурсы VPS</h2><small>Uptime {uptime(overview?.server.uptime_s)} · {metricsStatus}</small></div>
             <label>Период<select value={metricsPeriod} onChange={(event) => setMetricsPeriod(event.target.value as MetricsPeriod)} aria-label="Период истории метрик">
               <option value="live">5 минут</option><option value="day">24 часа</option><option value="week">7 дней</option><option value="quarter">90 дней</option>
             </select></label>
@@ -1741,7 +1736,7 @@ export default function Home() {
 }
 
 function Logo() {
-  return <div className="brand"><span className="brandMark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4.5 5.5h23L16 27 4.5 5.5Z" /><path d="m16 10 6 11H10l6-11Z" /></svg></span><div><strong>312<span>.net</span></strong><small>INFRASTRUCTURE</small></div></div>;
+  return <div className="brand"><span className="brandMark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4.5 5.5h23L16 27 4.5 5.5Z" /><path d="m16 10 6 11H10l6-11Z" /></svg></span><div><strong>312node<span>.net</span></strong><small>INFRASTRUCTURE</small></div></div>;
 }
 function AutomationEditor({
   title, description, value, timer, onChange,

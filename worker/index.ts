@@ -1,4 +1,4 @@
-/** Web runtime entry point for the 312.net control panel. */
+/** Web runtime entry point for the 312node.net control panel. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 

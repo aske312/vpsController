@@ -103,7 +103,7 @@ chmod 0600 "${ROOT}"/*.json
 install -m 0755 "$(dirname "$0")/firewall.sh" /usr/local/lib/vps-control-xray/firewall.sh
 cat >/etc/systemd/system/vps-control-xray.service <<EOF
 [Unit]
-Description=312.net Xray VLESS XHTTP REALITY server
+Description=312node.net Xray VLESS XHTTP REALITY server
 After=network-online.target
 Wants=network-online.target
 [Service]

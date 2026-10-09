@@ -94,7 +94,7 @@ ui_rule() {
 ui_header() {
   clear 2>/dev/null || true
   ui_rule
-  printf '\033[1;36m│\033[0m  \033[1m%-58s\033[0m \033[1;36m│\033[0m\n' "312.net — установка панели управления сервером"
+  printf '\033[1;36m│\033[0m  \033[1m%-58s\033[0m \033[1;36m│\033[0m\n' "312node.net — установка панели управления сервером"
   printf '\033[1;36m│\033[0m  %-58s \033[1;36m│\033[0m\n' "Безопасное развёртывание и проверка компонентов"
   printf '\033[1;36m%s\033[0m\n' '└──────────────────────────────────────────────────────────────┘'
 }
@@ -627,7 +627,7 @@ doctor() {
     || { warn "не удаётся разрешить github.com"; failed=1; }
   check_source
   (( failed == 0 )) || die "сервер не прошёл предварительную проверку."
-  ok "сервер совместим с установкой 312.net."
+  ok "сервер совместим с установкой 312node.net."
 }
 
 node_runtime_supported() {
@@ -918,7 +918,7 @@ configure_firewall() {
   elif [[ "${ACCESS_MODE}" == "vpn" ]]; then
     local vpn_interface_available="no"
     if ip link show "${AWG_INTERFACE}" >/dev/null 2>&1; then
-      ufw allow in on "${AWG_INTERFACE}" to any port "${HTTP_PORT}" proto tcp comment '312.net panel via AWG'
+      ufw allow in on "${AWG_INTERFACE}" to any port "${HTTP_PORT}" proto tcp comment '312node.net panel via AWG'
       vpn_interface_available="yes"
     fi
     [[ "${vpn_interface_available}" == "yes" ]] || die "нет доступного интерфейса AmneziaWG для панели."
@@ -962,7 +962,7 @@ configure_vpn_firewall_policy() {
 
   cat >"${policy_service}" <<EOF
 [Unit]
-Description=312.net VPN firewall policy
+Description=312node.net VPN firewall policy
 After=network-online.target
 Wants=network-online.target
 
@@ -1118,7 +1118,7 @@ install_api() {
 
   cat >"${SERVICE_FILE}" <<EOF
 [Unit]
-Description=312.net Infrastructure API
+Description=312node.net Infrastructure API
 After=network-online.target
 Wants=network-online.target
 
@@ -1202,7 +1202,7 @@ install_protocol_monitor() {
   install -m 0755 "${INSTALL_DIR}/scripts/vpn-monitor-sample" /usr/local/sbin/vpn-monitor-sample
   cat >/etc/systemd/system/vpn-monitor.service <<'EOF'
 [Unit]
-Description=Collect 312.net VPN protocol metrics
+Description=Collect 312node.net VPN protocol metrics
 After=network-online.target
 Wants=network-online.target
 
@@ -1214,7 +1214,7 @@ IOSchedulingClass=idle
 EOF
   cat >/etc/systemd/system/vpn-monitor.timer <<'EOF'
 [Unit]
-Description=Collect 312.net VPN metrics every minute
+Description=Collect 312node.net VPN metrics every minute
 
 [Timer]
 OnBootSec=1min
@@ -1246,7 +1246,7 @@ install_web() {
   install -d -m 0750 "${DATA_DIR}/web"
   cat >"${WEB_SERVICE_FILE}" <<EOF
 [Unit]
-Description=312.net Web Interface
+Description=312node.net Web Interface
 After=network-online.target ${APP_NAME}-api.service
 Wants=network-online.target
 
@@ -1392,7 +1392,7 @@ cleanup_legacy_runtime() {
     apt-get -o DPkg::Lock::Timeout=300 purge -y "${docker_packages[@]}"
     apt-get -o DPkg::Lock::Timeout=300 autoremove --purge -y
   fi
-  ok "устаревшие Docker-компоненты 312.net удалены."
+  ok "устаревшие Docker-компоненты 312node.net удалены."
 }
 
 sync_protocol_monitor() {
@@ -1459,7 +1459,7 @@ PY
   install_web
   ensure_api_write_access
   install_protocol_monitor
-  info "Запуск обновлённой версии 312.net"
+  info "Запуск обновлённой версии 312node.net"
   stop_legacy_containers
   systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service"
   restart_caddy_service
@@ -1476,13 +1476,13 @@ start_services() {
     BUILD_COMMIT="$(<"${INSTALL_DIR}/.build-commit")"
   fi
   export APP_VERSION BUILD_COMMIT
-  info "Запуск 312.net"
+  info "Запуск 312node.net"
   systemctl start "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
   ok "панель запущена: ${PANEL_URL}"
 }
 
 stop_services() {
-  info "Остановка 312.net"
+  info "Остановка 312node.net"
   systemctl stop caddy.service "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
   ok "панель остановлена."
 }
@@ -1571,7 +1571,7 @@ install_prebuilt_release() {
   [[ -f "${archive_path}" ]] || die "архив релиза не найден: ${archive}."
   archive_listing="$(tar -tzf "${archive_path}")"
   grep -Eq '^vps-control-release/(\.prebuilt-release|release\.sha256)$' <<<"${archive_listing}" \
-    || die "архив не является подготовленным релизом 312.net."
+    || die "архив не является подготовленным релизом 312node.net."
   if grep -Eq '(^|/)\.\.(/|$)|^/' <<<"${archive_listing}"; then
     die "архив содержит небезопасные пути."
   fi
@@ -2330,11 +2330,11 @@ EOF
   protocol_scan_calendar="$(automation_calendar "${protocol_scan_cadence}" "${protocol_scan_weekday}" "${protocol_scan_hour}" "${protocol_scan_minute}")"
   application_update_calendar="$(automation_calendar "${application_update_cadence}" "${application_update_weekday}" "${application_update_hour}" "${application_update_minute}")"
   kernel_update_calendar="$(automation_calendar "${kernel_update_cadence}" "${kernel_update_weekday}" "${kernel_update_hour}" "${kernel_update_minute}")"
-  install_automation_timer "reboot" "Scheduled VPS reboot by 312.net" "reboot" "${reboot_enabled}" "${reboot_calendar}" yes
-  install_automation_timer "cleanup" "Scheduled VPS cleanup by 312.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}" yes
-  install_automation_timer "protocol-scan" "Scheduled protocol version scan by 312.net" "protocol-version-check" "${protocol_scan_enabled}" "${protocol_scan_calendar}" yes
-  install_automation_timer "application-update" "Scheduled light application update by 312.net" "scheduled-app-update" "${application_update_enabled}" "${application_update_calendar}" yes
-  install_automation_timer "kernel-update" "Scheduled kernel update by 312.net" "scheduled-kernel-update" "${kernel_update_enabled}" "${kernel_update_calendar}" yes
+  install_automation_timer "reboot" "Scheduled VPS reboot by 312node.net" "reboot" "${reboot_enabled}" "${reboot_calendar}" yes
+  install_automation_timer "cleanup" "Scheduled VPS cleanup by 312node.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}" yes
+  install_automation_timer "protocol-scan" "Scheduled protocol version scan by 312node.net" "protocol-version-check" "${protocol_scan_enabled}" "${protocol_scan_calendar}" yes
+  install_automation_timer "application-update" "Scheduled light application update by 312node.net" "scheduled-app-update" "${application_update_enabled}" "${application_update_calendar}" yes
+  install_automation_timer "kernel-update" "Scheduled kernel update by 312node.net" "scheduled-kernel-update" "${kernel_update_enabled}" "${kernel_update_calendar}" yes
   systemctl disable --now vps-control-auto-update.timer >/dev/null 2>&1 || true
   rm -f -- /etc/systemd/system/vps-control-auto-update.timer /etc/systemd/system/vps-control-auto-update.service
   systemctl daemon-reload
@@ -2508,7 +2508,7 @@ change_public_domain() {
 
 usage() {
   cat <<'EOF'
-312.net — управление инфраструктурой
+312node.net — управление инфраструктурой
 
 Использование:
   bash scripts/vps-control.sh install

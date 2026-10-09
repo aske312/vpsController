@@ -1,14 +1,14 @@
-# Уведомление о приватности 312.net / Privacy Notice
+# Уведомление о приватности 312node.net / Privacy Notice
 
 Редакция / Effective date: 02.08.2026
 
-312.net — свободное self-hosted программное обеспечение под лицензией MIT. Проект не предоставляет централизованный облачный сервис и не требует указания имени, адреса или иных юридических реквизитов автора в экземпляре приложения.
+312node.net — свободное self-hosted программное обеспечение под лицензией MIT. Проект не предоставляет централизованный облачный сервис и не требует указания имени, адреса или иных юридических реквизитов автора в экземпляре приложения.
 
 ## RU
 
 ### 1. Self-hosted модель
 
-Приложение устанавливается на VPS пользователя и работает под его управлением. Проект 312.net не имеет встроенного административного доступа к экземпляру, не получает его команды, конфигурации, ключи, список клиентов, журналы или трафик.
+Приложение устанавливается на VPS пользователя и работает под его управлением. Проект 312node.net не имеет встроенного административного доступа к экземпляру, не получает его команды, конфигурации, ключи, список клиентов, журналы или трафик.
 
 ### 2. Данные внутри экземпляра
 
@@ -40,9 +40,9 @@
 
 ### 1. Self-hosted model
 
-312.net is free self-hosted software licensed under the MIT License. It does not provide a central cloud service and does not require an author’s legal name, address or other legal particulars to be displayed in an instance.
+312node.net is free self-hosted software licensed under the MIT License. It does not provide a central cloud service and does not require an author’s legal name, address or other legal particulars to be displayed in an instance.
 
-The application is installed on and controlled by the user’s VPS. The 312.net project has no built-in administrative access and does not receive instance commands, configurations, keys, client lists, logs or traffic.
+The application is installed on and controlled by the user’s VPS. The 312node.net project has no built-in administrative access and does not receive instance commands, configurations, keys, client lists, logs or traffic.
 
 ### 2. Data inside an instance
 

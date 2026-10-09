@@ -1,4 +1,4 @@
-.gateNotificationDock { position: fixed; z-index: var(--z-notification); top: 116px; right: 24px; display: grid; gap: 10px; width: 380px; max-width: calc(100dvw - 48px); pointer-events: none; }
+.gateNotificationDock { position: fixed; z-index: var(--z-notification); top: 82px; right: 20px; display: grid; gap: 10px; width: 380px; max-width: calc(100dvw - 48px); pointer-events: none; }
 .gateNotificationHeader { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); pointer-events: auto; }
 .gateNotificationHeader strong { font-size: 13px; }
 .gateNotificationHeader strong span { color: var(--muted); margin-left: 6px; }
@@ -11,7 +11,7 @@
 .gateOperationCard.error { --notification-color: var(--red); }
 .gateOperationCard.success { --notification-color: var(--green); }
 .gateOperationCard.info { --notification-color: var(--blue); }
-.gateOperationContent { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 16px; }
+.gateOperationContent { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 12px; }
 .gateOperationCard.collapsed .gateOperationContent { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 .gateOperationIcon { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid color-mix(in srgb, var(--notification-color) 35%, var(--line)); border-radius: var(--radius); color: var(--notification-color); background: color-mix(in srgb, var(--notification-color) 10%, var(--panel)); font-size: 15px; }
 .gateOperationText { display: grid; gap: 5px; min-width: 0; overflow-wrap: anywhere; }

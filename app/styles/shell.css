@@ -1,97 +1,103 @@
-.shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100dvh; background: var(--bg); }
-.gateSidebar { position: sticky; top: 0; z-index: var(--z-navigation); height: 100dvh; display: flex; flex-direction: column; padding: 28px 16px 20px; border-right: 1px solid var(--line); background: var(--sidebar); }
-.gateBrand, .brand { display: flex; align-items: center; justify-content: flex-start; gap: 12px; border: 0; padding: 0; background: transparent; }
-.gateBrand { margin: 0 8px 32px; }
+/* A single compact app bar leaves the full workspace to the active screen. */
+.shell { display: block; min-height: 100dvh; background: var(--bg); }
+.gateSidebar { position: sticky; top: 0; z-index: var(--z-navigation); display: flex; align-items: center; gap: 20px; min-height: 56px; padding: 8px 20px; border-bottom: 1px solid var(--line); background: var(--sidebar); }
+.gateBrand, .brand { display: flex; align-items: center; justify-content: flex-start; gap: 9px; border: 0; padding: 0; background: transparent; flex: 0 0 auto; }
 .gateBrand:hover:not(:disabled) { background: transparent; border-color: transparent; }
-.gateBrandMark, .brandMark { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-2); }
-.gateBrandMark svg, .brandMark svg { width: 28px; height: 28px; fill: none; stroke: var(--accent); stroke-width: 1.5; }
-.gateBrand strong, .brand strong { display: block; font-size: 24px; line-height: 1.1; letter-spacing: -.05em; }
+.gateBrandMark, .brandMark { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--accent-line); border-radius: 7px; background: var(--accent-dim); }
+.gateBrandMark svg, .brandMark svg { width: 21px; height: 21px; fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.gateBrand strong, .brand strong { display: block; font-size: 21px; line-height: 1.1; letter-spacing: -.05em; }
 .gateBrand strong span, .brand strong span { color: var(--accent); }
-.gateBrand small, .brand small { display: block; margin-top: 5px; color: var(--subtle); font-size: 10px; letter-spacing: .1em; }
-.gateNav { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
-.gateNavGroup { margin-bottom: 26px; }
-.gateNavGroup > p { margin: 0 12px 10px; color: var(--subtle); font-size: 11px; font-weight: 600; letter-spacing: .1em; }
-.gateNavGroup > div { display: grid; gap: 5px; }
-.gateNavButton { position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; width: 100%; min-height: 46px; padding: 10px 12px; border-color: transparent; background: transparent; color: var(--muted); text-align: left; }
-.gateNavButton.hasBadge { grid-template-columns: 24px minmax(0, 1fr) auto; }
-.gateNavButton b { font-size: 14px; font-weight: 500; }
-.gateNavButton.active { color: var(--accent); background: var(--accent-dim); border-color: transparent; }
-.gateNavGlyph { display: grid; place-items: center; color: var(--subtle); }
-.gateNavGlyph svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.gateBrand small { display: none; }
+.brand small { display: block; margin-top: 5px; color: var(--subtle); font-size: 10px; letter-spacing: .1em; }
+.gateNav { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.gateNavGroup, .gateNavGroup > div { display: contents; }
+.gateNavGroup > p { display: none; }
+.gateNavButton { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 7px 10px; border-color: transparent; background: transparent; color: var(--muted); white-space: nowrap; }
+.gateNavButton b { font-size: 12px; font-weight: 500; }
+.gateNavButton.active { color: var(--text); background: var(--accent-dim); border-color: var(--accent-line); }
+.gateNavGlyph { display: grid; place-items: center; color: var(--subtle); flex: 0 0 auto; }
+.gateNavGlyph svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .gateNavButton.active .gateNavGlyph { color: var(--accent); }
-.gateNavGlyph .protocolIcon { width: 24px; height: 24px; }
-.gateNavBeta { display: grid; place-items: center; min-width: 22px; height: 22px; border: 1px solid var(--accent-line); border-radius: 8px; background: var(--field); color: var(--accent); font: 500 11px var(--technical-font); }
-.gateSidebarNode { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 12px; margin-top: auto; padding: 20px 10px 0; border-top: 1px solid var(--line); }
-.gateSidebarNode > div { display: grid; gap: 3px; }
-.gateSidebarNode small { color: var(--subtle); font-size: 11px; }
-.gateSidebarNode strong { font-size: 14px; }
-.gateNodeLocation, .gateNodeAddress { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-.gateNodeAddress { font-family: var(--technical-font); }
-.gateNodePulse { width: 7px; height: 7px; margin-top: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px var(--green-dim); }
-.gateSidebarNode.gray .gateNodePulse { background: var(--subtle); box-shadow: none; }
+.gateNavGlyph .protocolIcon { width: 20px; height: 20px; }
+.gateNavBeta { display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 3px; border-radius: 4px; background: var(--panel-2); color: var(--subtle); font: 500 10px var(--technical-font); }
+.gateSidebarNode { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.gateSidebarNode > div { display: flex; gap: 7px; align-items: center; }
+.gateSidebarNode small, .gateNodeLocation, .gateNodeAddress { color: var(--muted); font-size: 11px; }
+.gateSidebarNode strong { font-size: 12px; }
+.gateNodePulse { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--green); }
+.gateSidebarNode.gray .gateNodePulse { background: var(--subtle); }
 .gateSidebarNode.yellow .gateNodePulse { background: var(--amber); }
 .gateSidebarNode.red .gateNodePulse { background: var(--red); }
 .gateSidebarNode.blue .gateNodePulse { background: var(--blue); }
-.content { container: workspace / inline-size; min-width: 0; width: 100%; max-width: calc(var(--workspace-width) + 48px); margin-inline: auto; padding: 20px 24px 28px; }
-.gateMasthead { position: sticky; top: 12px; z-index: var(--z-header); display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; min-height: 70px; margin-bottom: 22px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); }
-.gateMastNode { display: flex; align-items: center; gap: 12px; min-width: 210px; }
+.content { container: workspace / inline-size; min-width: 0; width: 100%; max-width: calc(var(--workspace-width) + 32px); margin-inline: auto; padding: 18px 16px 24px; }
+.gateMasthead { display: flex; align-items: center; gap: 12px; min-width: 0; margin-left: auto; }
+.gateMastNode { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .gateMastIdentity { min-width: 0; }
-.gateMastIdentity > span { color: var(--subtle); font-size: 10px; letter-spacing: .1em; }
-.gateMastIdentity h2 { font-size: 15px; }
-.gateMastIdentity p { color: var(--muted); font-size: 12px; }
-.gateMastIdentity p > span { display: block; }
-.gateMastIdentity .mono { font-size: 11px; }
-.gateCountryFlag { width: 32px; height: 22px; flex: 0 0 auto; overflow: hidden; display: inline-grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel-2); }
+.gateMastIdentity > span { display: none; }
+.gateMastIdentity h2 { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; letter-spacing: 0; }
+.gateMastIdentity p { color: var(--muted); font-size: 10px; }
+.gateMastIdentity p > span:first-child { display: none; }
+.gateMastIdentity .mono { font-size: 10px; }
+.gateCountryFlag { width: 24px; height: 17px; flex: 0 0 auto; overflow: hidden; display: inline-grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--panel-2); }
 .gateCountryFlag svg { display: block; width: 100%; height: 100%; }
 .gateCountryFlag.unknown { color: var(--subtle); }
-.gateMastState { padding: 5px 8px; border-radius: 6px; background: var(--green-dim); color: var(--green); font-size: 11px; font-weight: 600; white-space: nowrap; }
-.gateMastState.gray { color: var(--muted); background: var(--panel-2); }
-.gateMastState.yellow { color: var(--amber); background: var(--warning-dim); }
-.gateMastState.red { color: var(--red); background: var(--danger-dim); }
-.gateMastState.blue { color: var(--blue); background: var(--accent-dim); }
-.gateMastFacts { display: grid; grid-template-columns: repeat(5, minmax(66px, 1fr)); flex: 1; border-left: 1px solid var(--line); }
-.gateMastFacts > div { min-width: 0; padding: 0 12px; }
-.gateMastFacts span { display: block; margin-bottom: 4px; color: var(--subtle); font-size: 10px; letter-spacing: .08em; }
-.gateMastFacts strong { display: block; font: 500 12px var(--technical-font); white-space: nowrap; }
-.gateMastActions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.gateMastState { width: 6px; height: 6px; overflow: hidden; flex: 0 0 auto; border-radius: 50%; background: var(--green); color: transparent; font-size: 0; }
+.gateMastState.gray { background: var(--subtle); }
+.gateMastState.yellow { background: var(--amber); }
+.gateMastState.red { background: var(--red); }
+.gateMastState.blue { background: var(--blue); }
+.gateMastActions { display: flex; align-items: center; gap: 6px; }
 .gateMastActions .updatedAt { display: none; }
+.gateMastActions .ghostButton { min-height: 32px; padding: 6px 9px; font-size: 11px; }
 .refreshControl { display: flex; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-sm); }
-.refreshControl button { min-height: 36px; border: 0; border-radius: 0; background: var(--field); }
-.refreshControl .autoButton { padding: 0 10px; }
+.refreshControl button { min-height: 32px; border: 0; border-radius: 0; background: var(--field); }
+.refreshControl .autoButton { padding: 0 8px; }
 .autoButton i { width: 6px; height: 6px; border-radius: 50%; background: var(--subtle); }
 .refreshControl.active i { background: var(--green); box-shadow: 0 0 0 3px var(--green-dim); }
-.refreshControl .iconButton { border-left: 1px solid var(--line); font-size: 20px; padding: 0 10px; }
-.gateSectionIntro { margin: 0 0 24px; }
-.gateSectionIntro p:last-child { margin-top: 8px; color: var(--muted); font-size: 13px; }
-.versionFooter { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px 20px; margin-top: 30px; color: var(--subtle); font-size: 11px; }
+.refreshControl .iconButton { border-left: 1px solid var(--line); font-size: 19px; padding: 0 9px; }
+.gateSectionIntro { margin-bottom: 14px; }
+.gateSectionIntro .eyebrow { display: none; }
+.gateSectionIntro h1 { font-size: 24px; }
+.gateSectionIntro p:last-child { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.versionFooter { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 18px; margin-top: 20px; color: var(--subtle); font-size: 11px; }
 .versionFooter > span { font-family: var(--technical-font); }
 .versionFooter nav { display: flex; gap: 14px; }
 .versionFooter button { min-height: 30px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 12px; }
 .versionFooter button:hover:not(:disabled) { background: transparent; color: var(--accent); }
-@container workspace (max-width: 1040px) { .gateMastFacts { order: 4; flex-basis: 100%; border-left: 0; border-top: 1px solid var(--line); padding-top: 10px; } .gateMastFacts > div { padding: 0 6px; } }
-@container workspace (max-width: 480px) { .gateMastFacts { display: none; } }
-@media (max-width: 1100px) {
-  .shell { grid-template-columns: 80px minmax(0, 1fr); }
-  .gateSidebar { padding: 24px 10px; }
-  .gateBrand { justify-content: center; margin-inline: 0; }
-  .gateBrand > span:last-child, .gateNavGroup > p, .gateNavButton b, .gateNavBeta, .gateSidebarNode > div { display: none; }
-  .gateNavButton, .gateNavButton.hasBadge { grid-template-columns: 1fr; justify-items: center; }
-  .gateSidebarNode { grid-template-columns: 1fr; justify-items: center; }
+@media (min-width: 701px) and (max-width: 1200px) {
+  .gateSidebar { gap: 12px; padding-inline: 12px; }
+  .gateNavButton { padding-inline: 7px; }
+  .gateNavGlyph, .gateNavBeta { display: none; }
+  .gateCountryFlag { display: none; }
+}
+@media (min-width: 701px) and (max-width: 950px) {
+  .gateBrandMark { display: none; }
+  .gateNavButton { gap: 7px; padding-inline: 8px; }
+  .gateNavGlyph { display: grid; }
+  .gateNavButton b { display: none; font-size: 11px; }
+  .gateNavButton.active b { display: block; }
+  .gateMastIdentity p { display: none; }
+  .gateMastIdentity h2 { max-width: 72px; }
+  .gateMasthead { gap: 8px; }
 }
 @media (max-width: 700px) {
-  .shell { display: block; padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
-  .content { padding: 12px 12px 24px; }
-  .gateSidebar { position: fixed; inset: auto 0 0; height: auto; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border-right: 0; border-top: 1px solid var(--line); }
-  .gateBrand, .gateSidebarNode { display: none; }
-  .gateNav { display: flex; justify-content: center; gap: 4px; overflow-x: auto; }
-  .gateNavGroup, .gateNavGroup > div { display: contents; }
-  .gateNavButton, .gateNavButton.hasBadge { flex: 1; width: 64px; min-width: 56px; min-height: 54px; padding: 6px 2px; gap: 5px; }
+  .shell { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .content { padding: 14px 12px 20px; }
+  .gateSidebar { min-height: 52px; gap: 10px; padding: 8px 12px; }
+  .gateBrand { gap: 7px; min-height: 34px; }
+  .gateBrand strong { font-size: 19px; }
+  .gateBrandMark { width: 24px; height: 24px; }
+  .gateNav { position: fixed; inset: auto 0 0; display: flex; justify-content: space-around; gap: 3px; height: calc(64px + env(safe-area-inset-bottom)); padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); overflow-x: auto; border-top: 1px solid var(--line); background: var(--sidebar); }
+  .gateNavButton { flex: 1; flex-direction: column; width: 60px; min-width: 48px; min-height: 50px; padding: 5px 2px; gap: 4px; }
   .gateNavButton b { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: 10px; }
-  .gateMasthead { top: 8px; min-height: 76px; padding: 12px; margin-bottom: 20px; gap: 10px; }
-  .gateMastNode { min-width: 0; flex: 1; }
-  .gateMastState, .gateMastActions .ghostButton { display: none; }
-  .gateMastIdentity p { font-size: 11px; }
-  .gateMastIdentity .mono { font-size: 10px; }
-  .gateMastActions { margin-left: 0; }
-  .gateSectionIntro { margin-bottom: 20px; }
+  .gateNavGlyph { display: grid; }
+  .gateNavGlyph svg { width: 19px; height: 19px; }
+  .gateNavBeta, .gateCountryFlag, .gateMastIdentity p, .gateMastState { display: none; }
+  .gateMasthead { gap: 10px; }
+  .gateMastIdentity h2 { max-width: 80px; font-size: 11px; }
+  .gateMastActions .autoButton { display: none; }
+  .gateMastActions .iconButton { border-left: 0; min-height: 34px; }
+  .gateMastActions .ghostButton { min-height: 34px; }
+  .gateSidebarNode { display: none; }
 }
+@media (max-width: 370px) { .gateBrandMark { display: none; } .gateBrand strong { font-size: 17px; } .gateMastIdentity h2 { max-width: 40px; } }

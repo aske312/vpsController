@@ -1,58 +1,64 @@
 /* All floating screens use the same surface, backdrop and stacking context. */
-.confirmBackdrop, .legalBackdrop { position: fixed; inset: 0; z-index: var(--z-dialog); display: grid; place-items: center; padding: 20px; overflow-y: auto; overscroll-behavior: contain; background: var(--overlay); }
-.confirmDialog, .connectionDialog, .legalScreen { min-width: 0; max-height: calc(100dvh - 40px); border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); color: var(--text); box-shadow: var(--shadow-float); }
-.confirmDialog { width: min(500px, 100%); padding: 30px; overflow-y: auto; }
+.confirmBackdrop, .legalBackdrop { position: fixed; inset: 0; z-index: var(--z-dialog); display: grid; place-items: center; padding: 24px; overflow-y: auto; overscroll-behavior: contain; background: var(--overlay); }
+.confirmDialog, .connectionDialog, .legalScreen { min-width: 0; max-height: calc(100dvh - 48px); border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); color: var(--text); box-shadow: var(--shadow-float); }
+.confirmDialog { width: min(460px, 100%); padding: 24px; overflow-y: auto; }
 .confirmDialog h2 { margin-bottom: 12px; font-size: 24px; }
 .confirmDialog > p:not(.eyebrow) { color: var(--muted); font-size: 14px; line-height: 1.75; }
 .confirmDialog > label { display: grid; gap: 8px; margin-top: 18px; }
 .confirmDialog label strong { color: var(--text); }
 .confirmDialog input { font-family: var(--ui-font); }
-.confirmMark { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 22px; border: 1px solid var(--accent-line); border-radius: var(--radius); background: var(--accent-dim); color: var(--accent); font-size: 20px; }
+.confirmMark { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 16px; border: 1px solid var(--accent-line); border-radius: var(--radius); background: var(--accent-dim); color: var(--accent); font-size: 20px; }
 .confirmDialog.danger { border-color: var(--danger-line); }
 .confirmDialog.danger .confirmMark { color: var(--red); background: var(--danger-dim); border-color: var(--danger-line); }
-.confirmActions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 26px; }
-.confirmActions button { min-height: 44px; }
+.confirmActions { display: grid; grid-template-columns: auto auto; justify-content: end; gap: 8px; margin-top: 20px; }
+.confirmActions button { min-height: 38px; }
 .confirmPrimary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.confirmPrimary:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); }
 .confirmDialog.danger .confirmPrimary { background: var(--danger-dim); border-color: var(--danger-line); color: var(--red); }
-.connectionDialog { width: min(760px, 100%); overflow-y: auto; scrollbar-width: thin; }
+.confirmDialog.danger .confirmPrimary:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 18%, var(--panel)); border-color: var(--red); }
+.connectionDialog { width: min(980px, 100%); display: flex; flex-direction: column; overflow: hidden; }
+.connectionDialog > .connectionDialogBody, .connectionDialog > .connectionDialogResult { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .connectionDialog.generated { width: min(860px, 100%); }
-.connectionDialogHead { position: sticky; top: 0; z-index: 3; display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; padding: 24px 28px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.connectionDialogHead { flex: 0 0 auto; position: sticky; top: 0; z-index: 3; display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .connectionDialogHead h2 { font-size: 24px; margin-bottom: 7px; }
 .connectionDialogHead span { display: block; color: var(--muted); font-size: 13px; }
 .connectionDialogHead > button { width: 38px; height: 38px; min-height: 38px; padding: 0; flex: 0 0 auto; font-size: 24px; }
-.connectionDialogBody { display: grid; gap: 24px; padding: 24px 28px; }
-.connectionDialog label { display: grid; gap: 8px; color: var(--text); font-size: 13px; }
+.connectionDialogBody { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: start; gap: 16px; padding: 14px 16px; }
+.connectionDialog label { display: grid; gap: 6px; color: var(--text); font-size: 13px; }
 .connectionDialog label > small { color: var(--muted); font-size: 12px; line-height: 1.6; }
 .fieldInvalid input, .fieldInvalid select, input[aria-invalid="true"], select[aria-invalid="true"], .fieldInvalid .xraySniTrigger { border-color: var(--red); }
 .connectionDialog .fieldError { color: var(--red); }
-.connectionProtocolPicker > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.connectionProtocolPicker button { display: grid; grid-template-columns: 36px minmax(0, 1fr) 8px; align-items: center; gap: 12px; padding: 14px; background: var(--field); text-align: left; }
+.connectionIdentity { position: sticky; top: 0; display: grid; gap: 16px; min-width: 0; }
+.connectionProtocolPicker > div { display: grid; grid-template-columns: 1fr; gap: 6px; }
+.connectionProtocolPicker button { display: grid; grid-template-columns: 36px minmax(0, 1fr) 8px; align-items: center; gap: 8px; padding: 9px; background: var(--field); text-align: left; }
 .connectionProtocolPicker button.active { border-color: var(--accent); background: var(--accent-dim); }
 .connectionProtocolPicker .protocol { width: 36px; height: 36px; }
 .connectionProtocolPicker button > span:nth-child(2) { display: grid; gap: 4px; }
 .connectionProtocolPicker strong { font-size: 14px; }
-.connectionProtocolPicker small { color: var(--muted); font-size: 12px; font-weight: 400; white-space: normal; }
+.connectionProtocolPicker small { color: var(--muted); font-size: 11px; line-height: 1.45; font-weight: 400; white-space: normal; }
 .connectionProtocolPicker i { width: 8px; height: 8px; border: 1px solid var(--line-strong); border-radius: 50%; }
 .connectionProtocolPicker .active i { border-color: var(--accent); background: var(--accent); }
-.connectionSettings { padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
-.connectionSettings > header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.connectionSettings { padding: 0 0 0 16px; border: 0; border-left: 1px solid var(--line); border-radius: 0; background: transparent; }
+.connectionSettings > legend { float: left; width: 100%; padding-bottom: 12px; }
+.connectionSettings > header { clear: both; }
+.connectionSettings > header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .connectionSettings > header > div { display: grid; gap: 4px; }
 .connectionSettings > header small { color: var(--muted); font-size: 12px; }
-.connectionSettingsFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 16px; }
-.connectionCheckbox { display: flex !important; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.connectionSettingsFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 10px; }
+.connectionCheckbox { display: flex !important; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 .connectionCheckbox > span { display: grid; gap: 5px; font-size: 13px; }
 .connectionCheckbox > span::after { content: "Выключено"; color: var(--muted); font-size: 12px; }
 .connectionCheckbox:has(input:checked) { border-color: var(--accent-line); }
 .connectionCheckbox:has(input:checked) > span::after { content: "Включено"; color: var(--accent); }
 .connectionSettingsNote { margin-top: 16px; color: var(--muted); font-size: 12px; line-height: 1.7; }
-.connectionMaskingStatus { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 20px; padding: 12px 14px; border: 1px solid var(--green-line); border-radius: var(--radius); background: var(--green-dim); }
+.connectionMaskingStatus { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; padding: 10px 12px; border: 1px solid var(--green-line); border-radius: var(--radius); background: var(--green-dim); }
 .connectionMaskingStatus > span { color: var(--muted); font-size: 12px; }
 .connectionMaskingStatus strong { color: var(--green); font-size: 12px; }
 .connectionMaskingStatus small { flex-basis: 100%; color: var(--muted); }
 .connectionMaskingStatus.limited { border-color: var(--warning-line); background: var(--warning-dim); }
 .connectionMaskingStatus.limited strong { color: var(--amber); }
-.connectionSettingsGroup { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
-.connectionSettingsGroup > header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-bottom: 18px; }
+.connectionSettingsGroup { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.connectionSettingsGroup > header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 .connectionSettingsGroup > header small { color: var(--muted); }
 .connectionServerValues { grid-column: 1 / -1; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 .connectionServerValues > strong { display: block; margin-bottom: 12px; }
@@ -63,10 +69,10 @@
 .connectionAdvanced { margin-top: 20px; border-top: 1px solid var(--line); }
 .connectionAdvanced > summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 16px 0; color: var(--accent); font-size: 13px; list-style: none; }
 .connectionAdvanced > summary::-webkit-details-marker { display: none; }
-.connectionDialogActions { position: sticky; bottom: 0; z-index: 2; display: flex; justify-content: flex-end; gap: 12px; padding: 18px 28px; border-top: 1px solid var(--line); background: var(--panel); }
-.connectionDialogActions button { min-height: 44px; }
+.connectionDialogActions { flex: 0 0 auto; position: sticky; bottom: 0; z-index: 2; display: flex; justify-content: flex-end; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--panel); }
+.connectionDialogActions button { min-height: 38px; }
 .xraySniField { position: relative; display: grid; gap: 8px; }
-.xraySniTrigger { justify-content: space-between; align-items: center; min-height: 58px; padding: 10px 12px; background: var(--field); border-color: var(--line-strong); text-align: left; }
+.xraySniTrigger { justify-content: space-between; align-items: center; min-height: 50px; padding: 10px 12px; background: var(--field); border-color: var(--line-strong); text-align: left; }
 .xraySniTrigger > span { display: grid; gap: 4px; min-width: 0; }
 .xraySniTrigger strong { font: 500 13px var(--technical-font); overflow-wrap: anywhere; }
 .xraySniTrigger small { color: var(--muted); font-weight: 400; }
@@ -81,12 +87,12 @@
 .xraySniMenu button i { color: var(--accent); font-size: 11px; font-style: normal; }
 .xraySniMenu > label { padding: 12px 16px; border-top: 1px solid var(--line); }
 .xraySniMenu > footer { display: flex; justify-content: flex-end; padding: 0 16px 14px; }
-.connectionDialogResult { padding: 24px 28px; }
-.connectionResult { display: grid; gap: 22px; }
+.connectionDialogResult { padding: 14px 16px; }
+.connectionResult { display: grid; gap: 16px; }
 .connectionResultHead { display: flex; align-items: center; gap: 14px; }
 .connectionResultHead h3 { font-size: 22px; overflow-wrap: anywhere; }
 .connectionResultHead small { color: var(--muted); overflow-wrap: anywhere; }
-.connectionHandoff { display: grid; gap: 22px; }
+.connectionHandoff { display: grid; gap: 16px; }
 .connectionHandoff.withQr { grid-template-columns: 240px minmax(0, 1fr); }
 .connectionQr { padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
 .connectionQr img { display: block; width: 100%; height: auto; }
@@ -125,23 +131,35 @@
 .legalScreen > footer { padding: 18px 30px; border-top: 1px solid var(--line); text-align: right; }
 .loginPage { position: relative; min-height: 100dvh; display: grid; place-items: center; padding: 60px 24px 100px; overflow: hidden; background: var(--bg); }
 .loginGlow { display: none; }
-.loginCard { position: relative; display: grid; gap: 24px; width: min(440px, 100%); padding: 30px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-float); }
+.loginCard { position: relative; display: grid; gap: 20px; width: min(420px, 100%); padding: 26px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-float); }
 .loginCard h1 { font-size: 28px; }
 .loginCopy { color: var(--muted); font-size: 14px; }
 .loginCard label { display: grid; gap: 8px; }
 .loginCard .primaryButton { width: 100%; min-height: 46px; }
 .loginPage .versionFooter { position: absolute; inset: auto 24px 24px; }
+@media (max-width: 760px) {
+  .connectionDialogBody { grid-template-columns: 1fr; gap: 16px; }
+  .connectionIdentity { position: static; gap: 16px; }
+  .connectionProtocolPicker > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .connectionProtocolPicker button { grid-template-columns: 28px minmax(0, 1fr); }
+  .connectionProtocolPicker i { display: none; }
+  .connectionProtocolPicker .protocol { width: 28px; height: 28px; }
+  .connectionSettings { border-left: 0; border-top: 1px solid var(--line); padding: 16px 0 0; }
+}
 @media (max-width: 600px) {
   .confirmBackdrop, .legalBackdrop { padding: 12px; }
   .confirmDialog, .connectionDialog, .legalScreen { max-height: calc(100dvh - 24px); border-radius: var(--radius); }
   .confirmDialog { padding: 22px; }
   .connectionDialogHead, .connectionDialogBody, .connectionDialogResult { padding: 20px 18px; }
   .connectionDialogHead h2 { font-size: 21px; }
-  .connectionProtocolPicker > div, .connectionSettingsFields, .connectionCredentials, .connectionSetup { grid-template-columns: 1fr; }
-  .connectionSettings { padding: 14px; }
+  .connectionDialogHead .eyebrow, .connectionDialogHead > div > span { display: none; }
+  .connectionDialogHead h2 { margin: 5px 0; }
+  .connectionProtocolPicker small { display: none; }
+  .connectionSettingsFields, .connectionCredentials, .connectionSetup { grid-template-columns: 1fr; }
+  .connectionSettings { padding: 14px 0 0; }
   .connectionProtocolPicker button { padding: 12px; }
   .connectionDialogActions { padding: 14px 18px; }
-  .connectionDialogActions button { flex: 1; }
+  .connectionDialogActions button { flex: 1; min-height: 42px; font-size: 12px; }
   .connectionHandoff.withQr { grid-template-columns: 1fr; }
   .connectionQr { width: 240px; max-width: 100%; justify-self: center; }
   .connectionServerValues dl { grid-template-columns: 1fr 1fr; }
