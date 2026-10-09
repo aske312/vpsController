@@ -1,0 +1,45 @@
+/* Shared by the workspace, login, dialogs and notification portal. */
+:root {
+  color-scheme: light;
+  --bg: #f1f4ef;
+  --sidebar: #fafcf9;
+  --panel: #ffffff;
+  --panel-2: #f4f7f2;
+  --field: #f8faf6;
+  --line: #dce4db;
+  --line-strong: #a4b5aa;
+  --text: #243b34;
+  --muted: #53675e;
+  --subtle: #63736b;
+  --blue: #42668a;
+  --cyan: #256e70;
+  --violet: #7650a5;
+  --green: #2f7259;
+  --amber: #86621d;
+  --red: #ad4756;
+  --accent: #28685d;
+  --accent-strong: #1d5149;
+  --accent-dim: #e0eee6;
+  --green-dim: #e6f2e8;
+  --danger-dim: #fae9ec;
+  --warning-dim: #f9efd9;
+  --accent-line: #b8d5c9;
+  --green-line: #badac3;
+  --danger-line: #e9bfca;
+  --warning-line: #e3d0a3;
+  --on-accent: #ffffff;
+  --hover: #eaf0e8;
+  --ui-font: var(--font-sans), "Segoe UI", Arial, sans-serif;
+  --technical-font: var(--font-mono), Consolas, monospace;
+  --display-font: var(--ui-font);
+  --radius: 22px;
+  --radius-sm: 12px;
+  --workspace-width: 1120px;
+  --shadow: 0 4px 18px #28493706;
+  --shadow-float: 0 24px 80px #203d3430;
+  --overlay: #2442375c;
+  --z-header: 40;
+  --z-navigation: 60;
+  --z-dialog: 1000;
+  --z-notification: 1100;
+}

@@ -7,9 +7,9 @@ import ts from "typescript";
 test("every protocol and supported OS offers at least two distinct client choices with official HTTPS sources", () => {
   const source = readFileSync(new URL("../app/client-apps.tsx", import.meta.url), "utf8");
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-  const module = { exports: {} };
-  new Function("require", "module", "exports", compiled)(createRequire(import.meta.url), module, module.exports);
-  const { clientApps } = module.exports;
+  const compiledModule = { exports: {} };
+  new Function("require", "module", "exports", compiled)(createRequire(import.meta.url), compiledModule, compiledModule.exports);
+  const { clientApps } = compiledModule.exports;
   for (const protocol of ["awg", "hysteria2", "tuic", "xray"]) {
     for (const os of ["windows", "ios", "android"]) {
       const apps = clientApps[protocol][os];

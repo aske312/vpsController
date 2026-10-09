@@ -31,7 +31,7 @@ export function LightNavigation({ activeTab, protocolImages, clientsCount, nodeS
       </NavGroup>
       {protocols.length > 0 && <NavGroup label="TUNNELS">
         {protocols.length === 1
-          ? <button type="button" className={`gateNavButton cyan compact ${activeTab === protocols[0].id ? "active" : ""}`} onClick={() => onNavigate(protocols[0].id)}>
+          ? <button type="button" aria-label={protocols[0].name} title={protocols[0].name} className={`gateNavButton cyan compact ${activeTab === protocols[0].id ? "active" : ""}`} onClick={() => onNavigate(protocols[0].id)}>
               <span className="gateNavGlyph protocolGlyph"><ProtocolIcon protocol={protocols[0].id} /></span><b>{protocols[0].name}</b>
             </button>
           : <NavButton active={protocols.some((protocol) => activeTab === protocol.id)} icon="transport" label="Протоколы" badge={String(protocols.length)} onClick={() => selectedProtocol && onNavigate(selectedProtocol.id)} />}
@@ -55,7 +55,7 @@ function NavGroup({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function NavButton({ active, icon, label, badge, onClick }: { active: boolean; icon: string; label: string; badge?: string; onClick: () => void }) {
-  return <button type="button" className={`gateNavButton ${active ? "active" : ""} ${badge ? "hasBadge" : ""}`} onClick={onClick}><span className="gateNavGlyph"><NavGlyph name={icon} /></span><b>{label}</b>{badge && <span className="gateNavBeta">{badge}</span>}</button>;
+  return <button type="button" aria-label={label} title={label} className={`gateNavButton ${active ? "active" : ""} ${badge ? "hasBadge" : ""}`} onClick={onClick}><span className="gateNavGlyph"><NavGlyph name={icon} /></span><b>{label}</b>{badge && <span className="gateNavBeta">{badge}</span>}</button>;
 }
 
 function NavGlyph({ name }: { name: string }) {

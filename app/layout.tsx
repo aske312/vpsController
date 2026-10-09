@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { Manrope, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { NotificationProvider } from "../src/notifications/notification-center";
 
-const sans = Manrope({ variable: "--font-sans", subsets: ["latin", "cyrillic"] });
-const mono = JetBrains_Mono({ variable: "--font-mono", subsets: ["latin", "cyrillic"] });
+const sans = Inter({ variable: "--font-sans", subsets: ["latin", "cyrillic"], display: "swap" });
+const mono = JetBrains_Mono({ variable: "--font-mono", subsets: ["latin", "cyrillic"], display: "swap" });
 
 export const metadata: Metadata = {
   title: "Infrastructure Control",
@@ -18,5 +18,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="ru"><body className={`${sans.variable} ${mono.variable}`}><NotificationProvider>{children}</NotificationProvider></body></html>;
+  return <html lang="ru" className={`${sans.variable} ${mono.variable}`}><body><NotificationProvider>{children}</NotificationProvider></body></html>;
 }

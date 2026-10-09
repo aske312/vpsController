@@ -4,7 +4,27 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const read = async (path) => {
+  const source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
+  if (path !== "app/globals.css") return source;
+  const modules = [...source.matchAll(/@import "\.\/([^\"]+)";/g)];
+  return [source, ...await Promise.all(modules.map((match) => read(`app/${match[1]}`)))].join("\n");
+};
+
+test("Soft visual layer bounds wide workspaces and adapts to available section width", async () => {
+  const [tokens, shell, dashboard, system, overlays] = await Promise.all([
+    read("app/styles/tokens.css"), read("app/styles/shell.css"), read("app/styles/dashboard.css"),
+    read("app/styles/system.css"), read("app/styles/overlays.css"),
+  ]);
+  assert.match(tokens, /--workspace-width: 1120px/);
+  assert.match(tokens, /color-scheme: light/);
+  assert.match(shell, /container: workspace \/ inline-size/);
+  assert.match(shell, /max-width: calc\(var\(--workspace-width\) \+ 48px\)/);
+  assert.match(dashboard, /\.metrics \{[^}]*align-items: start/);
+  assert.match(dashboard, /@container workspace \(max-width: 600px\)/);
+  assert.match(system, /\.loggingRetention \{[^}]*flex-wrap: wrap/);
+  assert.match(overlays, /@media \(max-height: 700px\)/);
+});
 
 test("поставка содержит установщик, образы и клиентскую документацию", async () => {
   const [bootstrap, manager, readme, awg, hysteria2, tuic, xray, relay] = await Promise.all([
@@ -396,8 +416,8 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(page, /сервисный режим не создаёт отложенный запуск/);
   assert.match(api, /installed_release_branch\(\) == "test-light"/);
   assert.match(manager, /сначала вернитесь на light, затем выключите сервисный режим/);
-  assert.match(styles, /\.loginPage \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
-  assert.match(styles, /\.loginCard \{[^}]*max-width: 420px; min-width: 0/);
+  assert.match(styles, /\.loginPage \{[^}]*place-items: center/);
+  assert.match(styles, /\.loginCard \{[^}]*width: min\(440px, 100%\)/);
   assert.match(page, /Вернуться на light/);
   assert.match(workflow, /branches: \[light, test-light\]/);
   assert.match(workflow, /release_tag="light-test-latest"/);
@@ -410,7 +430,8 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(ciWorkflow, /push:\s+branches: \[light\]/);
   assert.match(ciWorkflow, /pull_request:\s+branches: \[light\]/);
   assert.doesNotMatch(ciWorkflow, /branches: \[[^\]]*test-light/);
-  assert.match(protocolIcon, /hysteria2: "HY2"/);
+  assert.match(protocolIcon, /hysteria2: <><path/);
+  assert.match(protocolIcon, /<svg viewBox="0 0 32 32">/);
   assert.match(manager, /TEST_BACKUP_DIR="\$\{DATA_DIR\}\/test-app-backup"/);
   assert.match(manager, /restore_test_app\(\)/);
   assert.match(manager, /mv -- "\$\{rollback\}" "\$\{INSTALL_DIR\}"\s+PROJECT_DIR="\$\{INSTALL_DIR\}"\s+write_integrity_manifest/);
@@ -720,11 +741,9 @@ test("the interface uses one fixed visual design without personalization", async
   assert.match(notificationCenter, /gateNotificationDock/);
   assert.doesNotMatch(page, /<aside className="operationBanner"/);
   assert.doesNotMatch(page, /className="successNotice"/);
-  assert.match(css, /--accent: var\(--cyan\)/);
-  assert.match(css, /\.shell \.metricCard \{ border-left: 2px solid var\(--accent\)/);
-  assert.match(css, /\.primaryButton \{[^}]+background: linear-gradient\(100deg, rgba\(39, 124, 137, \.28\)/);
-  assert.match(css, /\.nodeStatus\.healthy \.pulse \{ background: var\(--accent\)/);
-  assert.match(css, /\.serviceOnline \{ background: var\(--accent\)/);
+  assert.match(css, /--accent: #28685d/);
+  assert.match(css, /\.primaryButton \{[^}]+background: var\(--accent\)/);
+  assert.match(css, /\.serviceOnline \{ background: var\(--green\)/);
   assert.match(manager, /rm -f -- "\$\{DATA_DIR\}\/personalization\.json"/);
 });
 

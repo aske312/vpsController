@@ -1,0 +1,67 @@
+.overview { display: grid; gap: 20px; align-items: start; }
+.metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.metricsHeader { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; grid-column: 1 / -1; padding: 2px 0 8px; }
+.metricsHeader h2 { font-size: 27px; }
+.metricsHeader small { display: block; margin-top: 5px; color: var(--muted); }
+.metricsHeader label { display: grid; gap: 5px; width: 132px; font-size: 12px; }
+.metricCard { min-width: 0; display: grid; gap: 12px; padding: 18px 20px; overflow: hidden; }
+.metricCopy { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px 12px; min-width: 0; }
+.metricCopy h2 { grid-column: 2; grid-row: 1 / 3; }
+.metricCopy > small { grid-column: 1; }
+.metricCard .eyebrow { margin: 0; color: var(--muted); font-size: 11px; }
+.metricCard h2 { font: 600 28px/1.25 var(--ui-font); letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.metricCard h2 small { margin-left: 4px; font-size: 13px; color: var(--muted); }
+.metricCopy > small { color: var(--muted); font-size: 12px; }
+.trendGraph { position: relative; display: grid; min-width: 0; }
+.trendGraph svg { display: block; width: 100%; height: 56px; overflow: visible; background-image: linear-gradient(var(--line) 1px, transparent 1px); background-size: 100% 28px; border-bottom: 1px solid var(--line); }
+.trendGraph .primaryArea { fill: color-mix(in srgb, var(--accent) 9%, transparent); }
+.trendGraph .primaryTrend, .trendGraph .secondaryTrend { fill: none; stroke: var(--accent); stroke-width: 1.8; vector-effect: non-scaling-stroke; }
+.trendGraph .secondaryTrend { stroke: var(--violet); }
+.trendGraph .primaryPoint { fill: var(--accent); }
+.trendGraph .secondaryPoint { fill: var(--violet); }
+.trendYAxis { position: absolute; top: 0; right: 0; height: 56px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; color: var(--subtle); font-size: 10px; }
+.trendYAxis b { padding: 0 3px; background: var(--panel); font-weight: 400; }
+.trendXAxis { display: flex; justify-content: space-between; margin: 4px 0 6px; color: var(--subtle); font-size: 10px; }
+.trendXAxis b { font-weight: 400; }
+.trendSummary { display: flex; flex-wrap: wrap; gap: 2px 10px; color: var(--muted); font-size: 11px; }
+.trendSummary b { font-weight: 400; }
+.trendGraph > small { display: none; }
+.trendLegend { display: flex; align-items: center; gap: 5px; margin-top: 5px; color: var(--muted); font-size: 11px; }
+.trendLegend i { width: 12px; height: 3px; border-radius: 4px; background: var(--accent); }
+.trendLegend i:last-of-type { margin-left: 8px; background: var(--violet); }
+.networkMetric { grid-column: 1 / -1; grid-template-columns: minmax(100px, .65fr) minmax(0, 1.5fr) minmax(200px, 1fr); gap: 24px; align-items: center; }
+.networkMetric > div:first-child { display: grid; gap: 5px; }
+.networkMetric .trendSummary { display: none; }
+.networkDirections { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-width: 0; }
+.networkDirections > span { display: grid; gap: 4px; color: var(--muted); font-size: 11px; }
+.networkDirections strong { color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.networkDirections i { height: 4px; border-radius: 8px; background: var(--line); }
+.networkDirections b { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.networkDirections > span:last-child b { background: var(--violet); }
+.protocolSummary { padding: 0; border: 0; background: transparent; box-shadow: none; }
+.protocolSummary .panelHead { margin-bottom: 14px; }
+.protocolSummary h2 { font-size: 19px; }
+.protocolModuleGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 12px; align-items: start; }
+.protocolModuleCard { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: var(--shadow); }
+.protocolModuleCard.installed { border-color: var(--line); }
+.protocolModuleCard header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.protocolModuleOpen { display: flex; align-items: center; justify-content: flex-start; min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; gap: 8px; }
+.protocolModuleOpen:disabled { opacity: 1; cursor: default; }
+.protocolModuleOpen:hover:not(:disabled) { background: transparent; color: var(--accent); }
+.protocolModuleOpen .protocol { width: 32px; height: 32px; border-radius: 10px; }
+.protocolModuleOpen .protocolIcon { width: 24px; height: 24px; }
+.protocolModuleOpen > span:last-child { display: grid; gap: 1px; }
+.protocolModuleOpen strong { font-size: 13px; }
+.protocolModuleOpen small { color: var(--subtle); font-size: 10px; }
+.protocolModuleCard header em { color: var(--subtle); font-size: 10px; font-weight: 600; font-style: normal; }
+.protocolModuleCard header em.active { color: var(--green); }
+.protocolModuleCard header em.stopped { color: var(--amber); }
+.protocolModuleCard dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin: 10px 0; }
+.protocolModuleCard dt { font-size: 10px; }
+.protocolModuleCard dd { margin-top: 2px; font: 500 11px/1.5 var(--technical-font); }
+.protocolModuleCard footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.protocolModuleCard footer button { min-height: 30px; padding: 5px 9px; font-size: 12px; }
+.protocolEmpty { display: flex; gap: 12px; color: var(--muted); }
+.protocolEmpty p { display: grid; gap: 8px; }
+@container workspace (max-width: 880px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .networkMetric { grid-column: auto; grid-template-columns: 1fr; gap: 10px; } .networkDirections { gap: 12px; } .networkDirections > span { grid-template-columns: 1fr auto; gap: 3px 8px; } .networkDirections i { grid-column: 1 / -1; } .networkMetric .trendLegend { display: none; } }
+@container workspace (max-width: 600px) { .metrics { grid-template-columns: 1fr; } .metricsHeader h2 { font-size: 24px; } .metricCard { grid-template-columns: minmax(0, .9fr) minmax(0, 1fr); gap: 12px; padding: 16px; } .metricCard h2 { font-size: 25px; } .metricCopy { grid-template-columns: 1fr; } .metricCopy h2 { grid-column: 1; grid-row: auto; } .metricCopy > small { font-size: 11px; } .networkMetric { grid-template-columns: 1fr; } .networkMetric > div:first-child { grid-template-columns: 1fr auto; align-items: center; } .networkDirections > span { grid-template-columns: 1fr; } }

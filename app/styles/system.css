@@ -1,0 +1,119 @@
+/* gray=inactive, green=active, yellow=attention, red=critical */
+.state-inactive { --state-color: var(--subtle); --state-bg: var(--panel-2); }
+.state-active { --state-color: var(--green); --state-bg: var(--green-dim); }
+.state-warning { --state-color: var(--amber); --state-bg: var(--warning-dim); }
+.state-critical { --state-color: var(--red); --state-bg: var(--danger-dim); }
+.securityGrid, .applicationGrid, .servicesGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.securityGrid > *, .servicesGrid > *, .applicationHero, .applicationGrid > .systemControls, .applicationGrid > .panelAccess, .applicationLogs { grid-column: 1 / -1; }
+.securityPostureSummary { display: flex; align-items: center; gap: 18px; margin-bottom: 24px; }
+.securityPostureSummary > div:nth-child(2) { flex: 1; }
+.securityPostureSummary > div > span { color: var(--muted); font-size: 13px; }
+.securityPostureMark { display: grid; place-items: center; width: 48px; height: 48px; flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--state-color) 40%, var(--line)); border-radius: 16px; background: var(--state-bg); color: var(--state-color); font-size: 24px; }
+.securityStateSummary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; }
+.securityStateSummary span { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.securityStateSummary i, .securityPostureStat header i { width: 6px; height: 6px; border-radius: 50%; background: var(--state-color); }
+.securityPostureStats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.securityPostureStat { display: grid; gap: 8px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
+.securityPostureStat header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.securityPostureStat h3 { color: var(--muted); font-size: 12px; }
+.securityPostureStat strong { color: var(--state-color); font-size: 32px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.securityPostureStat small, .securityPostureStat > span, .securityPostureStat time { color: var(--muted); font-size: 12px; }
+.securityList, .runtimeRows { display: grid; gap: 10px; }
+.securityList { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.securityStateRow { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 15px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
+.securityStateRow p { display: grid; gap: 4px; }
+.securityStateRow strong { font-size: 14px; }
+.securityStateRow small { color: var(--muted); overflow-wrap: anywhere; }
+.securityStateMark { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid color-mix(in srgb, var(--state-color) 35%, var(--line)); border-radius: var(--radius); color: var(--state-color); background: var(--state-bg); }
+.securityStatePill { color: var(--state-color); font-size: 12px; font-style: normal; }
+.securityFixButton { min-height: 34px; color: var(--accent); background: var(--accent-dim); border-color: var(--accent-line); font-size: 12px; }
+.systemControls { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.5fr); gap: 24px; align-items: center; }
+.systemControls > div > span { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.systemButtons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.systemButtons button, .actionButtons button { flex-direction: column; align-items: flex-start; justify-content: flex-start; padding: 14px; text-align: left; gap: 7px; min-height: 78px; }
+.systemButtons small, .actionButtons small { color: var(--muted); font-weight: 400; }
+.listeners pre { max-height: 420px; }
+.logDrawer { padding: 0; overflow: hidden; }
+.logDrawerToggle { width: 100%; justify-content: space-between; padding: 22px 24px; border: 0; border-radius: 0; background: transparent; text-align: left; }
+.logDrawerToggle span { display: grid; gap: 5px; }
+.logDrawerToggle small, .logDrawerToggle em { color: var(--muted); font-size: 12px; font-style: normal; }
+.logDrawerBody { padding: 0 24px 24px; }
+.logTools, .logActions, .logTabs { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.logTools { justify-content: space-between; margin-bottom: 16px; }
+.logActions span { color: var(--subtle); font-size: 12px; }
+.logTabs button { min-height: 32px; font-size: 12px; }
+.logTabs button.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-line); }
+.logDrawerBody pre, .applicationLogs pre { min-height: 180px; max-height: 460px; }
+.applicationHero, .servicesHero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; background: var(--panel); }
+.applicationHero p:not(.eyebrow) { max-width: 760px; margin-top: 10px; color: var(--muted); }
+.actionButtons { display: grid; gap: 10px; }
+.serviceSummary { display: flex; flex-wrap: wrap; gap: 10px; }
+.panelAccess { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.panelAccess small { display: block; margin-top: 5px; color: var(--muted); }
+.panelAccessActions { display: flex; gap: 12px; flex-wrap: wrap; }
+.serviceModeSwitch { position: relative; display: flex; align-items: center; gap: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field); cursor: pointer; }
+.serviceModeSwitch > span { display: grid; gap: 3px; }
+.serviceModeSwitch strong { color: var(--text); font-size: 13px; }
+.serviceModeSwitch small { margin: 0; font-size: 12px; }
+.serviceModeSwitch input, .automationSwitch input { position: absolute; width: 1px; height: 1px; min-height: 0; opacity: 0; }
+.serviceModeSwitch > i, .automationSwitch > span { position: relative; display: block; width: 36px; height: 20px; flex: 0 0 auto; border: 1px solid var(--line-strong); border-radius: 20px; background: var(--panel-2); }
+.serviceModeSwitch > i::after, .automationSwitch > span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--subtle); transition: transform .16s; }
+.serviceModeSwitch input:checked + i, .automationSwitch input:checked + span { background: var(--accent-dim); border-color: var(--accent); }
+.serviceModeSwitch input:checked + i::after, .automationSwitch input:checked + span::after { transform: translateX(16px); background: var(--accent); }
+.serviceModeSwitch input:focus-visible + i, .automationSwitch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 4px; }
+.serviceModeSwitch:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+.serviceRows { display: grid; }
+.serviceRow { display: grid; grid-template-columns: 8px minmax(0, 1fr) minmax(180px, .7fr) auto; align-items: center; gap: 18px; padding: 20px 0; border-top: 1px solid var(--line); }
+.serviceRow small { display: block; margin-top: 5px; color: var(--muted); overflow-wrap: anywhere; }
+.serviceRow dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; }
+.serviceRow dd { font-size: 12px; color: var(--muted); }
+.serviceOnline, .serviceOffline { display: block; width: 7px; height: 7px; border-radius: 50%; }
+.serviceOnline { background: var(--green); box-shadow: 0 0 0 4px var(--green-dim); }
+.serviceOffline { background: var(--subtle); }
+.serviceActions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.loggingControl { display: grid; gap: 20px; }
+.loggingControl > div { min-width: 0; }
+.loggingControl > div > small { display: block; margin-top: 7px; color: var(--muted); }
+.loggingSettings { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.loggingRetention { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; }
+.loggingRetention > span { display: grid; gap: 3px; }
+.loggingRetention strong { color: var(--text); }
+.loggingRetention select { width: auto; max-width: 240px; }
+.automationCenter { padding: 0; overflow: hidden; }
+.automationCenterHead { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 24px; }
+.automationCenterHead small { display: block; margin-top: 6px; color: var(--muted); }
+.automationCenterHead button { color: var(--accent); background: var(--accent-dim); border-color: var(--accent-line); }
+.automationRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, .8fr) minmax(120px, .5fr) auto; gap: 22px; align-items: center; padding: 22px 24px; border-top: 1px solid var(--line); }
+.automationIdentity small { display: block; margin-top: 6px; color: var(--muted); }
+.automationFields { display: flex; flex-wrap: wrap; gap: 10px; }
+.automationFields label { display: grid; gap: 6px; flex: 1 1 120px; font-size: 12px; }
+.automationFields input, .automationFields select { padding-inline: 9px; font-size: 13px; }
+.automationRun { display: grid; gap: 5px; font-size: 12px; overflow-wrap: anywhere; }
+.automationRun small, .automationRun span { color: var(--subtle); font-size: 11px; }
+.automationSwitch { position: relative; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.automationSwitch em { color: var(--muted); font-size: 12px; font-style: normal; }
+.automationNote { padding: 14px 24px; border-top: 1px solid var(--line); background: var(--field); color: var(--muted); font-size: 12px; }
+@container workspace (max-width: 960px) { .systemControls { grid-template-columns: 1fr; } .serviceRow { grid-template-columns: 8px minmax(0, 1fr) auto; } .serviceRow dl { grid-column: 2; grid-row: 2; } .serviceActions { grid-column: 3; grid-row: 1 / 3; } .automationRow { grid-template-columns: minmax(0, 1fr) minmax(220px, 1fr) auto; } .automationRun { grid-column: 1 / 3; } .automationSwitch { grid-column: 3; grid-row: 1; } .panelAccess { align-items: flex-start; flex-direction: column; } }
+@container workspace (max-width: 760px) { .securityList { grid-template-columns: 1fr; } .securityPostureSummary { flex-wrap: wrap; } .securityStateSummary { width: 100%; } .applicationGrid { grid-template-columns: 1fr; } .actionPanel, .statusPanel { grid-column: 1; } }
+@container workspace (max-width: 560px) {
+  .securityPostureStats, .systemButtons { grid-template-columns: 1fr; }
+  .securityPostureStat { grid-template-columns: 1fr auto; }
+  .securityPostureStat strong { grid-column: 2; grid-row: 1 / 4; align-self: center; }
+  .securityStateRow { grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 12px; }
+  .securityStateRow > button, .securityStatePill { grid-column: 2; justify-self: start; }
+  .applicationHero, .servicesHero { align-items: flex-start; flex-direction: column; }
+  .panelAccessActions, .panelAccessActions > label { width: 100%; }
+  .serviceModeSwitch > span { flex: 1; }
+  .serviceRow { grid-template-columns: 8px minmax(0, 1fr); gap: 12px; }
+  .serviceActions { grid-column: 2; grid-row: 3; justify-content: flex-start; }
+  .loggingSettings { align-items: stretch; flex-direction: column; }
+  .loggingRetention { justify-content: space-between; }
+  .loggingRetention select { width: 100%; max-width: 240px; }
+  .automationCenterHead { align-items: flex-start; flex-direction: column; padding: 18px; }
+  .automationRow { grid-template-columns: minmax(0, 1fr) auto; padding: 18px; gap: 16px; }
+  .automationFields { grid-column: 1 / -1; }
+  .automationRun { grid-column: 1 / -1; }
+  .automationSwitch { grid-column: 2; }
+  .logDrawerToggle { padding: 18px; }
+  .logDrawerBody { padding: 0 18px 18px; }
+}
