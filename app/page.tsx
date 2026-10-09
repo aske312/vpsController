@@ -9,7 +9,7 @@ import { Metric, TrendGraph } from "./resource-metrics";
 import { ProtocolIcon } from "./protocol-icon";
 import { ProtocolWorkspace } from "./protocol-workspace";
 import { LightNavigation } from "../src/light-navigation";
-import { OperationNavigation, useNotifications } from "../src/notifications/notification-center";
+import { useNotifications } from "../src/notifications/notification-center";
 
 export type Protocol = "awg" | "hysteria2" | "tuic" | "xray";
 type Tab = "overview" | "security" | "application" | "services" | Protocol | "clients";
@@ -1299,14 +1299,6 @@ export default function Home() {
     </LightNavigation>
 
     <section className="content">
-      <OperationNavigation onOpenJournal={() => {
-        setTab("application");
-        window.setTimeout(() => {
-          const journal = document.getElementById("application-journal");
-          journal?.focus({ preventScroll: true });
-          journal?.scrollIntoView({ block: "start" });
-        }, 0);
-      }} />
       {tab !== "overview" && !isProtocolTab(tab) && <div className="gateSectionIntro"><div><p className="eyebrow">312NODE.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "страна не определена"} · управление инфраструктурой</p></div></div>}
       {busy && <div className="loadingLine" />}
 

@@ -29,20 +29,20 @@ export function LightNavigation({ activeTab, protocolImages, clientsCount, nodeS
     </button>
     <nav className="gateNav" aria-label="Основная навигация">
       <NavGroup label="РАБОЧАЯ ОБЛАСТЬ">
-        <NavButton active={activeTab === "overview"} icon="overview" label="Обзор" onClick={() => onNavigate("overview")} />
-        <NavButton active={activeTab === "clients"} icon="connections" label="Подключения" badge={String(clientsCount)} onClick={() => onNavigate("clients")} />
+        <NavButton active={activeTab === "overview"} icon="overview" label="Обзор" detail="Ресурсы VPS" onClick={() => onNavigate("overview")} />
+        <NavButton active={activeTab === "clients"} icon="connections" label="Подключения" detail="Профили доступа" badge={String(clientsCount)} onClick={() => onNavigate("clients")} />
       </NavGroup>
       {protocols.length > 0 && <NavGroup label="ПРОТОКОЛЫ">
         {protocols.length === 1
           ? <button type="button" aria-current={activeTab === protocols[0].id ? "page" : undefined} aria-label={protocols[0].name} title={protocols[0].name} className={`gateNavButton cyan compact ${activeTab === protocols[0].id ? "active" : ""}`} onClick={() => onNavigate(protocols[0].id)}>
               <span className="gateNavGlyph protocolGlyph"><ProtocolIcon protocol={protocols[0].id} /></span><b>{protocols[0].name}</b>
             </button>
-          : <NavButton active={protocols.some((protocol) => activeTab === protocol.id)} icon="transport" label="Протоколы" badge={String(protocols.length)} onClick={() => selectedProtocol && onNavigate(selectedProtocol.id)} />}
+          : <NavButton active={protocols.some((protocol) => activeTab === protocol.id)} icon="transport" label="Протоколы" detail="Сетевые модули" badge={String(protocols.length)} onClick={() => selectedProtocol && onNavigate(selectedProtocol.id)} />}
       </NavGroup>}
       <NavGroup label="СИСТЕМА">
-        <NavButton active={activeTab === "security"} icon="security" label="Безопасность" onClick={() => onNavigate("security")} />
-        <NavButton active={activeTab === "application"} icon="application" label="Приложение" badge={operationsCount ? String(operationsCount) : undefined} hint={operationsCount ? `Приложение · процессов в работе: ${operationsCount}` : "Приложение · управление и журнал"} onClick={() => onNavigate("application")} />
-        <NavButton active={activeTab === "services"} icon="services" label="Службы" onClick={() => onNavigate("services")} />
+        <NavButton active={activeTab === "security"} icon="security" label="Безопасность" detail="Защита и доступ" onClick={() => onNavigate("security")} />
+        <NavButton active={activeTab === "application"} icon="application" label="Приложение" detail={operationsCount ? `В работе: ${operationsCount}` : "Команды и журнал"} badge={operationsCount ? String(operationsCount) : undefined} onClick={() => onNavigate("application")} />
+        <NavButton active={activeTab === "services"} icon="services" label="Службы" detail="Система и логи" onClick={() => onNavigate("services")} />
       </NavGroup>
     </nav>
     {children || <div className={`gateSidebarNode ${nodeState}`}><span className="gateNodePulse" /><div><small>{nodeStateLabel}</small><strong>{server?.city || "VPS"}</strong><span className="gateNodeLocation">{server?.country || "—"}</span><span className="gateNodeAddress">{server?.public_ip || "—"}</span></div></div>}
@@ -57,8 +57,8 @@ function NavGroup({ label, children }: { label: string; children: ReactNode }) {
   return <section className="gateNavGroup"><p>{label}</p><div>{children}</div></section>;
 }
 
-function NavButton({ active, icon, label, badge, hint, onClick }: { active: boolean; icon: string; label: string; badge?: string; hint?: string; onClick: () => void }) {
-  return <button type="button" aria-current={active ? "page" : undefined} aria-label={label} title={hint || label} className={`gateNavButton ${active ? "active" : ""} ${badge ? "hasBadge" : ""} ${icon === "application" && badge ? "hasOperations" : ""}`} onClick={onClick}><span className="gateNavGlyph"><NavGlyph name={icon} /></span><b>{label}</b>{badge && <span className="gateNavBeta">{badge}</span>}</button>;
+function NavButton({ active, icon, label, detail, badge, onClick }: { active: boolean; icon: string; label: string; detail: string; badge?: string; onClick: () => void }) {
+  return <button type="button" aria-current={active ? "page" : undefined} aria-label={label} title={`${label} · ${detail}`} className={`gateNavButton nav-${icon} ${active ? "active" : ""} ${badge ? "hasBadge" : ""} ${icon === "application" && badge ? "hasOperations" : ""}`} onClick={onClick}><span className="gateNavGlyph"><NavGlyph name={icon} /></span><span className="gateNavText"><b>{label}</b><small>{detail}</small></span>{badge && <span className="gateNavBeta">{badge}</span>}</button>;
 }
 
 function NavGlyph({ name }: { name: string }) {

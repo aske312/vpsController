@@ -708,7 +708,7 @@ test("the interface uses one fixed visual design without personalization", async
   assert.doesNotMatch(page, /const nodeHasError =[^;]+action\?\.state === "failed"/);
   assert.match(navigation, /className="gateSidebar"/);
   assert.match(navigation, /protocols\.length === 1/);
-  assert.match(navigation, /label="Протоколы" badge=\{String\(protocols\.length\)\}/);
+  assert.match(navigation, /badge=\{String\(protocols\.length\)\}/);
   assert.match(workspace, /props\.installed\.length > 1.*className="protocolWorkspaceRail"/s);
   assert.match(layout, /<NotificationProvider>\{children\}<\/NotificationProvider>/);
   assert.match(page, /notifications\.finishOperation\(input\)/);
