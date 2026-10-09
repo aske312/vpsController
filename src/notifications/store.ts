@@ -8,6 +8,7 @@ export type NotificationInput = {
   state: NotificationState;
   kind?: "message" | "operation";
   progress?: number;
+  startedAt?: number;
 };
 
 export type Notification = NotificationInput & {
@@ -47,7 +48,7 @@ export function createNotificationStore(now = Date.now) {
         success: "Готово.",
         info: "Ожидает выполнения.",
       };
-      input = { ...input, message: summaries[input.state] };
+      input = { ...input, message: input.message.trim() || summaries[input.state] };
     }
     const previous = items.find((item) => item.id === input.id);
     const signature = fingerprint(input);

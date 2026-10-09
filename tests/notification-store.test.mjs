@@ -28,6 +28,7 @@ test("operation notifications keep one card and finish it in place", () => {
 
   assert.equal(store.getSnapshot().length, 1);
   assert.equal(store.getSnapshot()[0].progress, 64);
+  assert.equal(store.getSnapshot()[0].message, "Установка");
 
   store.finishOperation({
     id: "operation:system:update-1",
@@ -39,11 +40,23 @@ test("operation notifications keep one card and finish it in place", () => {
   });
 
   assert.equal(store.getSnapshot()[0].state, "success");
-  assert.equal(store.getSnapshot()[0].message, "Готово.");
+  assert.equal(store.getSnapshot()[0].message, "Готово");
 
   now += 8_001;
   store.tick();
   assert.deepEqual(store.getSnapshot(), []);
+});
+
+test("operation stage changes remain visible even when progress has not advanced", () => {
+  const store = createNotificationStore();
+  const operation = { id: "download", source: "system", title: "Обновление", state: "running", kind: "operation", progress: 12 };
+  store.upsert({ ...operation, message: "Загрузка релиза" });
+  store.upsert({ ...operation, message: "Проверка контрольных сумм" });
+  assert.equal(store.getSnapshot().length, 1);
+  assert.equal(store.getSnapshot()[0].message, "Проверка контрольных сумм");
+  assert.equal(store.getSnapshot()[0].progress, 12);
+  store.upsert({ ...operation, message: "", state: "unknown" });
+  assert.equal(store.getSnapshot()[0].message, "Ожидаем подтверждения результата.");
 });
 
 test("an active operation cannot be dismissed, but a completed one can", () => {

@@ -28,8 +28,28 @@ function useNotificationList() {
   return useSyncExternalStore(store.subscribe, store.getSnapshot, serverSnapshot);
 }
 
+export function useOperationCount() {
+  return useNotificationList().filter((item) => item.kind === "operation" && isPending(item)).length;
+}
+
+export function OperationNavigation({ onOpenJournal }: { onOpenJournal: () => void }) {
+  const items = useNotificationList().filter((item) => item.kind === "operation");
+  const [expanded, setExpanded] = useState(true);
+  const pending = items.filter(isPending);
+  if (!items.length) return null;
+  const latest = pending[pending.length - 1] || items[items.length - 1];
+  return <section className="operationNavigation" aria-label="Процессы сервера">
+    <header>
+      <div><strong>Процессы сервера</strong><span>{pending.length ? `В работе: ${pending.length}` : latest.state === "error" ? "Требует внимания" : "Завершено"}</span></div>
+      <div><button type="button" className="miniButton" onClick={onOpenJournal}>Открыть журнал</button><button type="button" className="miniButton" aria-expanded={expanded} aria-controls="server-operation-list" onClick={() => setExpanded((value) => !value)}>{expanded ? "Свернуть" : "Подробнее"}</button></div>
+    </header>
+    {expanded ? <div id="server-operation-list" className="operationNavigationList">{[...items].reverse().map((item) => <NotificationCard key={item.id} item={item} inline />)}</div>
+      : <div id="server-operation-list" className="operationSummary"><strong>{latest.title}</strong><span>{latest.message}</span>{pending.length > 0 && <small>Операция продолжается на сервере</small>}</div>}
+  </section>;
+}
+
 function NotificationCenter() {
-  const items = useNotificationList();
+  const items = useNotificationList().filter((item) => item.kind !== "operation");
   const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
   if (!mounted || !items.length) return null;
   return <NotificationViewport items={items} />;
@@ -53,24 +73,32 @@ function NotificationViewport({ items }: { items: Notification[] }) {
   );
 }
 
-function NotificationCard({ item }: { item: Notification }) {
+function NotificationCard({ item, inline = false }: { item: Notification; inline?: boolean }) {
   const store = useNotifications();
   const [hidden, setHidden] = useState(false);
   const pending = isPending(item);
-  const progress = Number.isFinite(item.progress) ? Math.max(0, Math.min(100, item.progress!)) : undefined;
+  const progress = item.state !== "unknown" && Number.isFinite(item.progress) ? Math.max(0, Math.min(100, item.progress!)) : undefined;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!pending) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [pending]);
+  const elapsed = Math.max(0, Math.floor((now - (item.startedAt ?? item.createdAt)) / 1000));
+  const message = item.message.replace(/ветки test-light/g, "тестовой версии").replace(/ветки light/g, "стабильной версии");
   if (hidden && pending) return <section className={`gateOperationCard collapsed ${item.state}`} aria-label={item.title}>
     <div className="gateOperationContent"><div className="gateOperationText"><strong>{item.title}</strong><small>Операция продолжается</small></div><button type="button" className="gateOperationButton" onClick={() => setHidden(false)}>Показать</button></div>
   </section>;
   return <section className={`gateOperationCard ${item.state}`} role={item.state === "error" ? "alert" : "status"} aria-atomic="true" aria-label={item.title}>
     <div className="gateOperationContent">
       <span className="gateOperationIcon" aria-hidden="true">{item.state === "error" ? "!" : item.state === "success" ? "✓" : pending ? "…" : "i"}</span>
-      <div className="gateOperationText"><span>{item.kind === "operation" ? "ВЫПОЛНЕНИЕ КОМАНДЫ" : "УВЕДОМЛЕНИЕ"}{item.count > 1 ? ` · ×${item.count}` : ""}</span><strong>{item.title}</strong><small>{item.message}</small></div>
+      <div className="gateOperationText"><span>{item.kind === "operation" ? item.state === "error" ? "ОШИБКА" : item.state === "success" ? "УСПЕШНО ЗАВЕРШЕНО" : item.state === "unknown" ? "ПРОВЕРЯЕМ РЕЗУЛЬТАТ" : "ВЫПОЛНЯЕТСЯ НА СЕРВЕРЕ" : "УВЕДОМЛЕНИЕ"}{item.count > 1 ? ` · ×${item.count}` : ""}</span><strong>{item.title}</strong><small>{message}</small>{pending && inline && <span>Прошло {elapsed < 60 ? `${elapsed} с` : `${Math.floor(elapsed / 60)} мин ${elapsed % 60} с`} · можно переходить между разделами</span>}</div>
       <div className="gateOperationActions">
-        {pending && <b className="gateOperationPercent">{progress === undefined || item.state === "unknown" ? "…" : `${progress}%`}</b>}
-        {pending && <button type="button" className="gateOperationButton" onClick={() => setHidden(true)}>Скрыть</button>}
+        {pending && <b className="gateOperationPercent" title="Общий прогресс операции">{progress === undefined ? "Ожидание" : `${progress}%`}</b>}
+        {pending && !inline && <button type="button" className="gateOperationButton" onClick={() => setHidden(true)}>Скрыть</button>}
         {!pending && <button type="button" className="gateNotificationClose" onClick={() => store.dismiss(item.id)} aria-label={`Закрыть: ${item.title}`}>×</button>}
       </div>
     </div>
-    {item.kind === "operation" && <div className={`gateOperationTrack ${pending && progress === undefined ? "indeterminate" : ""}`} aria-hidden="true"><i style={{ width: `${pending ? progress ?? 34 : 100}%` }} /></div>}
+    {item.kind === "operation" && <div className={`gateOperationTrack ${pending && progress === undefined ? "indeterminate" : ""}`} role="progressbar" aria-label={`Общий прогресс: ${item.title}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pending ? progress : item.state === "success" ? 100 : progress} aria-valuetext={message}><i style={{ width: `${pending ? progress ?? 34 : item.state === "error" ? progress ?? 0 : 100}%` }} /></div>}
   </section>;
 }

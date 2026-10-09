@@ -23,6 +23,25 @@
 .gateNotificationClose { display: grid; place-items: center; width: 28px; height: 28px; min-height: 28px; padding: 0; border: 0; background: var(--panel-2); color: var(--muted); font-size: 20px; }
 .gateOperationButton { min-height: 30px; padding: 5px 9px; color: var(--notification-color); font-size: 12px; background: transparent; border-color: color-mix(in srgb, var(--notification-color) 30%, var(--line)); }
 .gateOperationTrack { height: 3px; background: var(--line); overflow: hidden; }
+.operationNavigation { margin-bottom: 14px; padding: 10px; border: 1px solid var(--accent-line); border-radius: var(--radius); background: var(--panel); }
+.operationNavigation > header, .operationNavigation > header > div { display: flex; align-items: center; gap: 10px; }
+.operationNavigation > header { justify-content: space-between; margin-bottom: 8px; }
+.operationNavigation > header span { color: var(--muted); font-size: 11px; }
+.operationNavigationList { display: grid; gap: 8px; }
+.operationNavigation .gateOperationCard { box-shadow: none; background: var(--field); }
+.operationNavigation .gateOperationTrack { height: 5px; }
+.operationNavigation .gateOperationPercent { font-size: 19px; color: var(--accent); }
+.operationSummary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; }
+.operationSummary span, .operationSummary small { color: var(--muted); font-size: 11px; }
+@media (max-width: 700px) {
+  .operationNavigation > header { align-items: flex-start; }
+  .operationNavigation > header > div { flex-wrap: wrap; gap: 5px; }
+  .operationNavigation > header > div:last-child { justify-content: flex-end; }
+  .operationNavigation .gateOperationContent { grid-template-columns: 26px minmax(0, 1fr); padding: 10px; }
+  .operationNavigation .gateOperationIcon { width: 26px; height: 26px; }
+  .operationNavigation .gateOperationActions { grid-column: 2; justify-content: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) { .gateOperationTrack.indeterminate > i { animation: none; } }
 .gateOperationTrack > i, .gateOperationTrack > b { display: block; height: 100%; max-width: 100%; background: var(--notification-color); transition: width .3s; }
 .gateOperationTrack.indeterminate > i { width: 35%; animation: notification-progress 1.8s ease-in-out infinite; }
 @keyframes notification-progress { from { transform: translateX(-100%); } to { transform: translateX(400%); } }

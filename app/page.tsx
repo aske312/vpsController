@@ -9,7 +9,7 @@ import { Metric, TrendGraph } from "./resource-metrics";
 import { ProtocolIcon } from "./protocol-icon";
 import { ProtocolWorkspace } from "./protocol-workspace";
 import { LightNavigation } from "../src/light-navigation";
-import { useNotifications } from "../src/notifications/notification-center";
+import { OperationNavigation, useNotifications } from "../src/notifications/notification-center";
 
 export type Protocol = "awg" | "hysteria2" | "tuic" | "xray";
 type Tab = "overview" | "security" | "application" | "services" | Protocol | "clients";
@@ -503,7 +503,8 @@ export default function Home() {
       message: failed ? action.message || "Команда завершилась с ошибкой." : action.message || "",
       state: failed ? "error" as const : succeeded ? "success" as const : active ? "running" as const : "unknown" as const,
       kind: "operation" as const,
-      progress: active ? action.progress : undefined,
+      progress: active || failed ? action.progress : undefined,
+      startedAt: action.started_at && Number.isFinite(Date.parse(action.started_at)) ? Date.parse(action.started_at) : undefined,
     };
     if (failed || succeeded) notifications.finishOperation(input);
     else notifications.upsert(input);
@@ -1298,7 +1299,14 @@ export default function Home() {
     </LightNavigation>
 
     <section className="content">
-
+      <OperationNavigation onOpenJournal={() => {
+        setTab("application");
+        window.setTimeout(() => {
+          const journal = document.getElementById("application-journal");
+          journal?.focus({ preventScroll: true });
+          journal?.scrollIntoView({ block: "start" });
+        }, 0);
+      }} />
       {tab !== "overview" && !isProtocolTab(tab) && <div className="gateSectionIntro"><div><p className="eyebrow">312NODE.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "страна не определена"} · управление инфраструктурой</p></div></div>}
       {busy && <div className="loadingLine" />}
 
@@ -1517,10 +1525,6 @@ export default function Home() {
             </div>
           </section>
         </article>
-        <article className="panel logPanel applicationLogs">
-          <div className="panelHead"><div><p className="eyebrow">SYSTEMD JOURNAL · СВЕЖИЕ СНАЧАЛА</p><h2>Журнал приложения</h2></div><div className="logActions"><button className="miniButton" onClick={() => void loadApplicationLogs()}>Обновить</button><button className="miniButton" disabled={!applicationLogs.length} onClick={() => downloadLogs(`application-${new Date().toISOString().slice(0, 10)}.log`, applicationLogs)}>Выгрузить</button></div></div>
-          <pre>{applicationLogs.join("\n") || "В журнале нет записей"}</pre>
-        </article>
         </div>
         <div className="applicationRuntime">
         <article className="panel statusPanel">
@@ -1553,6 +1557,10 @@ export default function Home() {
           </div>
         </article>
         </div>
+        <article className="panel logPanel applicationLogs" id="application-journal" tabIndex={-1}>
+          <div className="panelHead"><div><p className="eyebrow">SYSTEMD JOURNAL · СВЕЖИЕ СНАЧАЛА</p><h2>Журнал приложения</h2></div><div className="logActions"><button className="miniButton" onClick={() => void loadApplicationLogs()}>Обновить</button><button className="miniButton" disabled={!applicationLogs.length} onClick={() => downloadLogs(`application-${new Date().toISOString().slice(0, 10)}.log`, applicationLogs)}>Выгрузить</button></div></div>
+          <pre>{applicationLogs.join("\n") || "В журнале нет записей"}</pre>
+        </article>
       </section>}
 
       {tab === "services" && <section className="servicesGrid">

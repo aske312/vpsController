@@ -8,6 +8,7 @@
 .servicesGrid { grid-template-columns: minmax(0, 1fr); }
 .securityHero, .compactSecurity, .securityGrid > .systemControls, .securityGrid > .logDrawer, .securityGrid > .listeners, .applicationHero { grid-column: 1 / -1; }
 .applicationOperations, .applicationRuntime { min-width: 0; display: grid; gap: 10px; align-items: start; }
+.applicationGrid > .applicationLogs { grid-column: 1 / -1; scroll-margin-top: 76px; }
 .commandGroup + .commandGroup { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .commandGroup h3 { margin: 0 0 8px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .commandButtons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
