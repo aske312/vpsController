@@ -1111,7 +1111,7 @@ install_api() {
   fi
   if [[ ! -x "${INSTALL_DIR}/venv/bin/pip" || ! -r "${requirements_marker}" || "$(<"${requirements_marker}")" != "${requirements_hash}" ]]; then
     run_with_status "Установка Python-зависимостей" \
-      "${INSTALL_DIR}/venv/bin/pip" install --disable-pip-version-check \
+      "${INSTALL_DIR}/venv/bin/python" -m pip install --disable-pip-version-check \
         -r "${INSTALL_DIR}/api/requirements.txt"
     printf '%s\n' "${requirements_hash}" >"${requirements_marker}"
   else
@@ -1128,7 +1128,7 @@ Wants=network-online.target
 Type=simple
 EnvironmentFile=${ENV_FILE}
 WorkingDirectory=${INSTALL_DIR}/api
-ExecStart=${INSTALL_DIR}/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+ExecStart=${INSTALL_DIR}/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=15
@@ -1565,9 +1565,19 @@ restore_update_ssh() {
   fi
 }
 
+prepare_release_python() {
+  local payload="$1" destination="$2" requirements_hash="$3"
+  run_with_status "Подготовка изолированного Python API" python3 -m venv "${destination}" \
+    && run_with_status "Установка Python-зависимостей нового релиза" \
+      "${destination}/bin/python" -m pip install --disable-pip-version-check -r "${payload}/api/requirements.txt" \
+    && PYTHONPATH="${payload}/api" "${destination}/bin/python" -c 'import main, uvicorn, pydantic_settings' \
+    && printf '%s\n' "${requirements_hash}" >"${destination}/.requirements.sha256"
+}
+
 install_prebuilt_release() {
   local archive="${2:-}" preserve_previous="${3:-no}" expected_channel="${4:-production}" archive_path archive_listing stage_root payload rollback requirements_hash installed_requirements_hash build_commit legacy_runtime="no"
   local metadata release_schema release_edition release_channel release_architecture release_commit
+  local prepared_venv=""
   [[ -n "${archive}" ]] || die "укажите путь к подготовленному vps-control-release.tar.gz."
   archive_path="$(readlink -f -- "${archive}")"
   [[ -f "${archive_path}" ]] || die "архив релиза не найден: ${archive}."
@@ -1604,8 +1614,13 @@ install_prebuilt_release() {
 
   requirements_hash="$(sha256sum "${payload}/api/requirements.txt" | awk '{print $1}')"
   installed_requirements_hash="$(cat "${INSTALL_DIR}/venv/.requirements.sha256" 2>/dev/null || true)"
-  [[ -n "${installed_requirements_hash}" && "${requirements_hash}" == "${installed_requirements_hash}" ]] \
-    || { rm -rf -- "${stage_root}"; die "Python-зависимости изменились; подготовьте полный системный релиз."; }
+  if [[ -z "${installed_requirements_hash}" || "${requirements_hash}" != "${installed_requirements_hash}" ]]; then
+    prepared_venv="$(mktemp -d "${INSTALL_DIR}.venv.XXXXXX")"
+    if ! prepare_release_python "${payload}" "${prepared_venv}" "${requirements_hash}"; then
+      rm -rf -- "${prepared_venv}" "${stage_root}"
+      die "Python API нового релиза не подготовлен; работающая версия не изменена."
+    fi
+  fi
 
   rollback="${INSTALL_DIR}.rollback.$(date -u +%Y%m%dT%H%M%SZ)"
   info "Установка заранее собранного релиза без Docker и сборки на VPS"
@@ -1616,7 +1631,11 @@ install_prebuilt_release() {
   systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
   mv -- "${INSTALL_DIR}" "${rollback}"
   mv -- "${payload}" "${INSTALL_DIR}"
-  mv -- "${rollback}/venv" "${INSTALL_DIR}/venv"
+  if [[ -n "${prepared_venv}" ]]; then
+    mv -- "${prepared_venv}" "${INSTALL_DIR}/venv"
+  else
+    mv -- "${rollback}/venv" "${INSTALL_DIR}/venv"
+  fi
   chmod 0755 "${INSTALL_DIR}" "${INSTALL_DIR}/scripts/vps-control.sh"
   PROJECT_DIR="${INSTALL_DIR}"
 
@@ -1660,6 +1679,13 @@ install_prebuilt_release() {
     rm -rf -- "${TEST_BACKUP_DIR}"
     mv -- "${rollback}" "${TEST_BACKUP_DIR}"
   else
+    # A pre-existing test backup may share the old environment. Preserve it
+    # when its requirements match, so test rollback restores code and Python.
+    if [[ -n "${prepared_venv}" && -d "${TEST_BACKUP_DIR}" && ! -e "${TEST_BACKUP_DIR}/venv" \
+      && -r "${TEST_BACKUP_DIR}/api/requirements.txt" \
+      && "$(sha256sum "${TEST_BACKUP_DIR}/api/requirements.txt" | awk '{print $1}')" == "${installed_requirements_hash}" ]]; then
+      mv -- "${rollback}/venv" "${TEST_BACKUP_DIR}/venv"
+    fi
     rm -rf -- "${rollback}"
   fi
   rm -rf -- "${stage_root}"

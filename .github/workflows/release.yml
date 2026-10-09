@@ -34,6 +34,7 @@ jobs:
           .runtime/ci-api/bin/pip install --disable-pip-version-check -r api/requirements.txt httpx PyYAML
           .runtime/ci-api/bin/python -m unittest discover -s tests -p '*_test.py'
           python tests/linux_packaging_smoke.py
+          python tests/linux_python_upgrade_smoke.py
           bash -n scripts/build-release.sh scripts/vps-control.sh
 
   build:
