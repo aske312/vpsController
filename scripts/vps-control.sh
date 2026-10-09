@@ -1570,7 +1570,7 @@ prepare_release_python() {
   run_with_status "Подготовка изолированного Python API" python3 -m venv "${destination}" \
     && run_with_status "Установка Python-зависимостей нового релиза" \
       "${destination}/bin/python" -m pip install --disable-pip-version-check -r "${payload}/api/requirements.txt" \
-    && PYTHONPATH="${payload}/api" "${destination}/bin/python" -c 'import main, uvicorn, pydantic_settings' \
+    && (cd "${payload}/api" && "${destination}/bin/python" -c 'import main, uvicorn, pydantic_settings') \
     && printf '%s\n' "${requirements_hash}" >"${destination}/.requirements.sha256"
 }
 

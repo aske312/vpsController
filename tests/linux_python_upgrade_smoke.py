@@ -20,7 +20,7 @@ ensure_product_identity() { return 0; }
 validate_caddy_template() { return 0; }
 docker() { return 1; }
 systemctl() { echo "$*" >>"${FIXTURE_ROOT}/service-actions"; }
-curl() { return 0; }
+curl() { [[ "$FAIL_READINESS" == 0 || ! -f "${INSTALL_DIR}/new-release" ]]; }
 install_api() {
   if [[ -f "${INSTALL_DIR}/new-release" ]]; then
     [[ "$(cat "${INSTALL_DIR}/venv/kind")" == "$EXPECTED_KIND" ]] || return 1
@@ -41,13 +41,14 @@ python3() {
   cat >"$destination/bin/python" <<'PYTHON'
 #!/bin/bash
 if [[ "$1" == -m && "$2" == pip && "$FAIL_PREPARE" == 1 ]]; then exit 17; fi
+if [[ "$1" == -c && "$FAIL_IMPORT" == 1 ]]; then exit 18; fi
 exit 0
 PYTHON
   chmod +x "$destination/bin/python"
 }
 '''
 
-for scenario in ('unchanged', 'changed', 'prepare-fails', 'activation-fails'):
+for scenario in ('unchanged', 'changed', 'prepare-fails', 'import-fails', 'activation-fails', 'readiness-fails'):
     with tempfile.TemporaryDirectory(prefix='312node-release-swap-') as directory:
         root = Path(directory)
         installed = root/'app'; old_venv = installed/'venv'
@@ -75,14 +76,15 @@ for scenario in ('unchanged', 'changed', 'prepare-fails', 'activation-fails'):
         env = dict(os.environ, FIXTURE_ROOT=str(root), INSTALL_DIR=str(installed), DATA_DIR=str(root/'data'),
                    TEST_BACKUP_DIR=str(backup), PRODUCT_EDITION='light', APP_NAME='fixture', HTTP_PORT='80', COMMAND_PATH=str(root/'control-command'),
                    EXPECTED_KIND='old' if scenario=='unchanged' else 'new',
-                   FAIL_PREPARE='1' if scenario=='prepare-fails' else '0', FAIL_APPLY='1' if scenario=='activation-fails' else '0')
+                   FAIL_PREPARE='1' if scenario=='prepare-fails' else '0', FAIL_APPLY='1' if scenario=='activation-fails' else '0',
+                   FAIL_IMPORT='1' if scenario=='import-fails' else '0', FAIL_READINESS='1' if scenario=='readiness-fails' else '0')
         command = stubs+'\n'+functions+'\ninstall_prebuilt_release install-release "$1" no test\n'
         result = subprocess.run(['bash', '-euc', command, 'fixture', str(archive)], env=env, capture_output=True, text=True)
-        if scenario in ('prepare-fails', 'activation-fails'):
+        if scenario.endswith('-fails'):
             assert result.returncode != 0, (scenario, result.stdout, result.stderr)
             assert (installed/'original-release').exists()
             assert (installed/'venv/kind').read_text().strip() == 'old'
-            if scenario=='prepare-fails': assert not (root/'service-actions').exists(), 'stopped services before preparing Python'
+            if scenario in ('prepare-fails', 'import-fails'): assert not (root/'service-actions').exists(), 'stopped services before preparing Python'
         else:
             assert result.returncode == 0, (scenario, result.stdout, result.stderr)
             assert (installed/'new-release').exists()
