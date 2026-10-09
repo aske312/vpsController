@@ -1517,6 +1517,10 @@ export default function Home() {
             </div>
           </section>
         </article>
+        <article className="panel logPanel applicationLogs">
+          <div className="panelHead"><div><p className="eyebrow">SYSTEMD JOURNAL · СВЕЖИЕ СНАЧАЛА</p><h2>Журнал приложения</h2></div><div className="logActions"><button className="miniButton" onClick={() => void loadApplicationLogs()}>Обновить</button><button className="miniButton" disabled={!applicationLogs.length} onClick={() => downloadLogs(`application-${new Date().toISOString().slice(0, 10)}.log`, applicationLogs)}>Выгрузить</button></div></div>
+          <pre>{applicationLogs.join("\n") || "В журнале нет записей"}</pre>
+        </article>
         </div>
         <div className="applicationRuntime">
         <article className="panel statusPanel">
@@ -1547,10 +1551,6 @@ export default function Home() {
             )}
             {application?.action?.action && <SecurityRow status={application.action.state === "failed" || application.action.result === "failed" ? "critical" : operationActive || application.action.result === "success" ? "active" : "inactive"} title={`Последняя команда: ${actionLabels[application.action.action.split(":")[0]] || application.action.action}`} text={application.action.state === "running" ? "Команда выполняется системной службой" : application.action.result === "success" ? "Команда завершена без ошибок" : application.action.message || "Результат выполнения уточняется"} />}
           </div>
-        </article>
-        <article className="panel logPanel applicationLogs">
-          <div className="panelHead"><div><p className="eyebrow">SYSTEMD JOURNAL · СВЕЖИЕ СНАЧАЛА</p><h2>Журнал приложения</h2></div><div className="logActions"><button className="miniButton" onClick={() => void loadApplicationLogs()}>Обновить</button><button className="miniButton" disabled={!applicationLogs.length} onClick={() => downloadLogs(`application-${new Date().toISOString().slice(0, 10)}.log`, applicationLogs)}>Выгрузить</button></div></div>
-          <pre>{applicationLogs.join("\n") || "В журнале нет записей"}</pre>
         </article>
         </div>
       </section>}
