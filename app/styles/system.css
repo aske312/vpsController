@@ -3,41 +3,46 @@
 .state-active { --state-color: var(--green); --state-bg: var(--green-dim); }
 .state-warning { --state-color: var(--amber); --state-bg: var(--warning-dim); }
 .state-critical { --state-color: var(--red); --state-bg: var(--danger-dim); }
-.securityGrid, .applicationGrid, .servicesGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
-.securityHero, .compactSecurity, .securityGrid > .systemControls, .securityGrid > .logDrawer, .servicesHero, .servicesPanel, .automationCenter, .applicationHero, .applicationGrid > .systemControls, .applicationGrid > .panelAccess, .applicationLogs { grid-column: 1 / -1; }
-.securityGrid > .listeners { grid-column: 1 / -1; }
-.servicesGrid > .panelAccess { align-self: stretch; }
-.applicationGrid > .actionPanel { grid-column: 1; grid-row: 2 / 5; }
-.applicationGrid > .statusPanel { grid-column: 2; grid-row: 2; }
-.applicationGrid > .systemControls, .applicationGrid > .panelAccess { grid-column: 2; }
-.applicationGrid > .systemControls { grid-template-columns: 1fr; }
-.servicesGrid > .loggingControl { align-self: start; }
-.securityPostureSummary { display: flex; align-items: center; gap: 18px; margin-bottom: 16px; }
+.securityGrid, .applicationGrid, .servicesGrid { display: grid; gap: 10px; align-items: start; }
+.securityGrid, .applicationGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.servicesGrid { grid-template-columns: minmax(0, 1fr); }
+.securityHero, .compactSecurity, .securityGrid > .systemControls, .securityGrid > .logDrawer, .securityGrid > .listeners, .applicationHero { grid-column: 1 / -1; }
+.applicationOperations, .applicationRuntime { min-width: 0; display: grid; gap: 10px; align-items: start; }
+.applicationOperations .systemControls { grid-template-columns: 1fr; }
+.applicationMode { flex-basis: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.applicationMode > div:first-child { min-width: 0; }
+.applicationMode h3 { font-size: 12px; }
+.applicationMode small { color: var(--muted); font-size: 11px; }
+.applicationMode .panelAccessActions { gap: 8px; flex-wrap: nowrap; }
+.applicationMode .serviceModeSwitch { padding: 8px 10px; gap: 10px; }
+.applicationMode .eyebrow { margin-bottom: 3px; }
+.securityPostureSummary { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .securityPostureSummary > div:nth-child(2) { flex: 1; }
-.securityPostureSummary > div > span { color: var(--muted); font-size: 13px; }
-.securityPostureMark { display: grid; place-items: center; width: 48px; height: 48px; flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--state-color) 40%, var(--line)); border-radius: 16px; background: var(--state-bg); color: var(--state-color); font-size: 24px; }
+.securityPostureSummary > div > span { color: var(--muted); font-size: 12px; }
+.securityPostureMark { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--state-color) 40%, var(--line)); border-radius: 8px; background: var(--state-bg); color: var(--state-color); font-size: 22px; }
 .securityStateSummary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; }
 .securityStateSummary span { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .securityStateSummary i, .securityPostureStat header i { width: 6px; height: 6px; border-radius: 50%; background: var(--state-color); }
 .securityPostureStats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.securityPostureStat { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
+.securityPostureStat { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
 .securityPostureStat header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .securityPostureStat h3 { color: var(--muted); font-size: 12px; }
-.securityPostureStat strong { color: var(--state-color); font-size: 28px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.securityPostureStat strong { grid-column: 2; grid-row: 1 / 4; align-self: center; color: var(--state-color); font-size: 22px; line-height: 1.3; font-variant-numeric: tabular-nums; }
 .securityPostureStat small, .securityPostureStat > span, .securityPostureStat time { color: var(--muted); font-size: 12px; }
 .securityList, .runtimeRows { display: grid; gap: 10px; }
-.securityList { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
-.securityStateRow { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
-.securityStateRow p { display: grid; gap: 4px; }
-.securityStateRow strong { font-size: 14px; }
+.securityList { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; gap: 8px; }
+.securityStateRow { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 8px; padding: 9px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
+.securityStateRow p { display: grid; gap: 3px; }
+.securityStateRow small { font-size: 11px; line-height: 1.5; }
+.securityStateRow strong { font-size: 12px; }
 .securityStateRow small { color: var(--muted); overflow-wrap: anywhere; }
-.securityStateMark { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid color-mix(in srgb, var(--state-color) 35%, var(--line)); border-radius: var(--radius); color: var(--state-color); background: var(--state-bg); }
+.securityStateMark { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid color-mix(in srgb, var(--state-color) 35%, var(--line)); border-radius: var(--radius); color: var(--state-color); background: var(--state-bg); }
 .securityStatePill { color: var(--state-color); font-size: 12px; font-style: normal; }
-.securityFixButton { min-height: 34px; color: var(--accent); background: var(--accent-dim); border-color: var(--accent-line); font-size: 12px; }
+.securityFixButton { min-height: 28px; padding: 5px 7px; color: var(--accent); background: var(--accent-dim); border-color: var(--accent-line); font-size: 12px; }
 .systemControls { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.5fr); gap: 16px; align-items: center; }
 .systemControls > div > span { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; }
 .systemButtons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.systemButtons button, .actionButtons button { flex-direction: column; align-items: flex-start; justify-content: flex-start; padding: 14px; text-align: left; gap: 5px; min-height: 58px; }
+.systemButtons button, .actionButtons button { flex-direction: column; align-items: flex-start; justify-content: flex-start; padding: 9px 10px; text-align: left; gap: 3px; min-height: 48px; }
 .systemButtons small, .actionButtons small { color: var(--muted); font-weight: 400; }
 .listeners pre { max-height: 420px; }
 .logDrawer { padding: 0; overflow: hidden; }
@@ -53,14 +58,18 @@
 .logDrawerBody pre, .applicationLogs pre { min-height: 100px; max-height: 340px; }
 .applicationHero, .servicesHero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; background: var(--panel); }
 .applicationHero p:not(.eyebrow) { max-width: 760px; margin-top: 10px; color: var(--muted); }
-.actionButtons { display: grid; gap: 10px; }
+.actionButtons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.actionButtons small, .systemButtons small { font-size: 11px; line-height: 1.45; }
+.runtimeRows { gap: 0; }
+.runtimeRows .securityStateRow { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; padding: 8px 0; }
+.runtimeRows .securityStateRow:last-child { border-bottom: 0; }
 .serviceSummary { display: flex; flex-wrap: wrap; gap: 10px; }
 .panelAccess { display: flex; align-items: flex-start; flex-direction: column; justify-content: space-between; gap: 16px; }
 .panelAccess small { display: block; margin-top: 5px; color: var(--muted); }
 .panelAccessActions { display: flex; gap: 12px; flex-wrap: wrap; }
 .serviceModeSwitch { position: relative; display: flex; align-items: center; gap: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field); cursor: pointer; }
 .serviceModeSwitch > span { display: grid; gap: 3px; }
-.serviceModeSwitch strong { color: var(--text); font-size: 13px; }
+.serviceModeSwitch strong { color: var(--text); font-size: 12px; }
 .serviceModeSwitch small { margin: 0; font-size: 12px; }
 .serviceModeSwitch input, .automationSwitch input { position: absolute; width: 1px; height: 1px; min-height: 0; opacity: 0; }
 .serviceModeSwitch > i, .automationSwitch > span { position: relative; display: block; width: 36px; height: 20px; flex: 0 0 auto; border: 1px solid var(--line-strong); border-radius: 20px; background: var(--panel-2); }
@@ -78,11 +87,13 @@
 .serviceOnline { background: var(--green); box-shadow: 0 0 0 4px var(--green-dim); }
 .serviceOffline { background: var(--subtle); }
 .serviceActions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.loggingControl { display: grid; gap: 14px; }
+.loggingControl { display: grid; grid-template-columns: minmax(180px, .75fr) minmax(0, 2fr); gap: 14px; align-items: center; }
 .loggingControl > div { min-width: 0; }
 .loggingControl > div > small { display: block; margin-top: 7px; color: var(--muted); }
-.loggingSettings { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
-.loggingRetention { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; }
+.loggingSettings { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.loggingSettings .serviceModeSwitch { padding: 8px 10px; gap: 10px; }
+.loggingSettings .serviceModeSwitch small { font-size: 11px; }
+.loggingRetention { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; flex: 1; }
 .loggingRetention > span { display: grid; gap: 3px; }
 .loggingRetention strong { color: var(--text); }
 .loggingRetention select { width: auto; max-width: 240px; }
@@ -94,7 +105,7 @@
 .automationIdentity small { display: block; margin-top: 6px; color: var(--muted); }
 .automationFields { display: flex; flex-wrap: wrap; gap: 10px; }
 .automationFields label { display: grid; gap: 6px; flex: 1 1 120px; font-size: 12px; }
-.automationFields input, .automationFields select { padding-inline: 9px; font-size: 13px; }
+.automationFields input, .automationFields select { padding-inline: 9px; font-size: 12px; }
 .automationRun { display: grid; gap: 5px; font-size: 12px; overflow-wrap: anywhere; }
 .automationRun small, .automationRun span { color: var(--subtle); font-size: 11px; }
 .automationSwitch { position: relative; display: flex; align-items: center; gap: 8px; cursor: pointer; }
@@ -124,3 +135,7 @@
   .logDrawerToggle { padding: 18px; }
   .logDrawerBody { padding: 0 18px 18px; }
 }
+
+@container workspace (max-width: 1100px) { .securityList { grid-template-columns: repeat(2, minmax(0, 1fr)); } .applicationMode { align-items: flex-start; flex-direction: column; } .loggingControl { grid-template-columns: 1fr; gap: 10px; } }
+@container workspace (max-width: 760px) { .applicationGrid { grid-template-columns: 1fr; } .securityList { grid-template-columns: 1fr; } .systemButtons { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container workspace (max-width: 560px) { .applicationMode .panelAccessActions { flex-wrap: wrap; width: 100%; } .applicationMode .serviceModeSwitch { flex: 1 1 180px; } .actionButtons, .systemButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); } .securityPostureStats { grid-template-columns: 1fr; } .loggingSettings { flex-direction: row; align-items: center; } .loggingRetention { flex-basis: 100%; } .loggingRetention select { width: auto; max-width: 100%; } .securityGrid .systemControls { grid-template-columns: 1fr; } }

@@ -12,7 +12,7 @@
 .protocolWorkspaceIdentity > .protocolIcon { width: 44px; height: 44px; }
 .protocolWorkspaceIdentity small, .protocolWorkspaceEndpoint small { color: var(--protocol-color); font-size: 11px; font-weight: 500; letter-spacing: .08em; }
 .protocolWorkspaceIdentity h1 { margin: 3px 0 6px; }
-.protocolWorkspaceIdentity p { color: var(--muted); font-size: 13px; }
+.protocolWorkspaceIdentity p { color: var(--muted); font-size: 12px; }
 .protocolWorkspaceEndpoint { display: grid; gap: 6px; padding-left: 24px; border-left: 1px solid var(--line); }
 .protocolWorkspaceEndpoint strong { font: 500 14px var(--technical-font); overflow-wrap: anywhere; }
 .protocolWorkspaceEndpoint span { color: var(--muted); font-size: 12px; }
@@ -35,7 +35,7 @@
 .protocolTruthStep p { display: grid; gap: 3px; min-width: 0; }
 .protocolTruthStep small { color: var(--muted); overflow-wrap: anywhere; }
 .protocolRegion { display: flex; align-items: center; gap: 10px; padding: 10px 13px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
-.protocolRegionMark { display: grid; place-items: center; flex: 0 0 auto; width: 42px; height: 42px; border: 1px solid var(--line-strong); border-radius: var(--radius); color: var(--muted); font-size: 13px; }
+.protocolRegionMark { display: grid; place-items: center; flex: 0 0 auto; width: 42px; height: 42px; border: 1px solid var(--line-strong); border-radius: var(--radius); color: var(--muted); font-size: 12px; }
 .protocolRegion > div:nth-child(2) { flex: 1; }
 .protocolRegion small { display: block; color: var(--subtle); font-size: 11px; }
 .protocolRegion strong { display: block; margin: 4px 0; }
@@ -53,26 +53,26 @@
 .protocolProofLead > i { display: grid; place-items: center; flex: 0 0 auto; width: 38px; height: 38px; border-radius: var(--radius); color: var(--amber); background: var(--warning-dim); font-style: normal; }
 .protocolState-confirmed .protocolProofLead > i { color: var(--green); background: var(--green-dim); }
 .protocolState-failed .protocolProofLead > i { color: var(--red); background: var(--danger-dim); }
-.protocolProofLead p { margin-top: 7px; color: var(--muted); font-size: 13px; }
+.protocolProofLead p { margin-top: 7px; color: var(--muted); font-size: 12px; }
 .protocolProofMetrics, .hysteriaIdentity dl, .xrayReality dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
-.protocolProofMetrics dd, .hysteriaIdentity dd, .xrayReality dd { font-size: 13px; }
+.protocolProofMetrics dd, .hysteriaIdentity dd, .xrayReality dd { font-size: 12px; }
 .protocolProofScope { margin: 12px 0; color: var(--subtle); font-size: 12px; }
 .protocolProof > button { width: 100%; color: var(--protocol-color); background: color-mix(in srgb, var(--protocol-color) 10%, var(--panel)); }
 .protocolTrafficNow { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .protocolTrafficNow > div { display: grid; gap: 10px; }
 .protocolTrafficNow small { color: var(--subtle); font-size: 11px; }
-.protocolTrafficNow strong { color: var(--protocol-color); font-size: 23px; font-variant-numeric: tabular-nums; }
-.protocolTrafficNow em { color: var(--muted); font-size: 14px; font-style: normal; }
+.protocolTrafficNow strong { color: var(--protocol-color); font-size: 21px; font-variant-numeric: tabular-nums; }
+.protocolTrafficNow em { color: var(--muted); font-size: 12px; font-style: normal; }
 .protocolTrafficNow span { color: var(--muted); font-size: 12px; }
 .protocolPeerStrip, .tuicTuning { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .protocolPeerStrip article, .tuicTuning article { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 .protocolPeerStrip small, .tuicTuning small { color: var(--subtle); font-size: 11px; }
-.protocolPeerStrip strong, .tuicTuning strong { font-size: 20px; overflow-wrap: anywhere; }
+.protocolPeerStrip strong, .tuicTuning strong { font-size: 18px; overflow-wrap: anywhere; }
 .protocolPeerStrip span, .tuicTuning span { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .awgParameters > div { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
 .awgParameters p { display: grid; gap: 6px; }
 .awgParameters small { color: var(--subtle); }
-.awgParameters strong { font-size: 13px; overflow-wrap: anywhere; }
+.awgParameters strong { font-size: 12px; overflow-wrap: anywhere; }
 .protocolRouteLine { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
 .protocolRouteLine p { position: relative; display: grid; gap: 8px; min-width: 0; }
 .protocolRouteLine i { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--line-strong); border-radius: var(--radius); color: var(--protocol-color); font: normal 11px var(--technical-font); }
@@ -98,6 +98,6 @@
 .protocolRuntimeFindings > div { display: flex; gap: 10px; padding: 14px; border: 1px solid var(--warning-line); border-radius: var(--radius); background: var(--warning-dim); }
 .protocolRuntimeFindings .critical { border-color: var(--danger-line); background: var(--danger-dim); }
 .protocolRuntimeFindings p { display: grid; gap: 6px; }
-.protocolRuntimeFindings span, .protocolRuntimeFindings small, .protocolRuntimeClear { color: var(--muted); font-size: 13px; }
+.protocolRuntimeFindings span, .protocolRuntimeFindings small, .protocolRuntimeClear { color: var(--muted); font-size: 12px; }
 @container workspace (max-width: 820px) { .protocolWorkspaceHero, .protocolEditionGrid { grid-template-columns: 1fr; } .protocolWorkspaceEndpoint { padding: 18px 0 0; border-left: 0; border-top: 1px solid var(--line); } .protocolWorkspaceActions { justify-content: flex-start; } .protocolPeerStrip, .tuicTuning { grid-template-columns: 1fr 1fr; } .xrayStack { grid-template-columns: 1fr 1fr; } .xrayStack > b { display: none; } .protocolRegion { flex-wrap: wrap; } .protocolTruthChain { grid-template-columns: 1fr 1fr; } .protocolTruthStep:nth-child(3) { border-left: 0; } .protocolTruthStep:nth-child(n+3) { border-top: 1px solid var(--line); } }
-@container workspace (max-width: 560px) { .protocolWorkspaceHero, .protocolNewCard { padding: 10px 12px; } .protocolTruthStep { padding: 14px; } .protocolRouteLine, .awgParameters > div, .protocolRuntimeChecks { grid-template-columns: 1fr 1fr; } .protocolRouteLine p::after { display: none; } .protocolRuntime { padding: 0; } .protocolTrafficNow strong { font-size: 22px; } }
+@container workspace (max-width: 560px) { .protocolWorkspaceHero, .protocolNewCard { padding: 10px 12px; } .protocolTruthStep { padding: 14px; } .protocolRouteLine, .awgParameters > div, .protocolRuntimeChecks { grid-template-columns: 1fr 1fr; } .protocolRouteLine p::after { display: none; } .protocolRuntime { padding: 0; } .protocolTrafficNow strong { font-size: 20px; } }

@@ -57,7 +57,7 @@
 .refreshControl .iconButton { border-left: 1px solid var(--line); font-size: 19px; padding: 0 9px; }
 .gateSectionIntro { margin-bottom: 14px; }
 .gateSectionIntro .eyebrow { display: none; }
-.gateSectionIntro h1 { font-size: 24px; }
+.gateSectionIntro h1 { font-size: 22px; }
 .gateSectionIntro p:last-child { margin-top: 4px; color: var(--muted); font-size: 12px; }
 .versionFooter { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 18px; margin-top: 20px; color: var(--subtle); font-size: 11px; }
 .versionFooter > span { font-family: var(--technical-font); }

@@ -1,12 +1,12 @@
 .connectionsWorkspace { display: grid; gap: 14px; }
 .connectionsHero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 13px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 .connectionsHeroCopy { flex: 1; }
-.connectionsHeroCopy h2 { font-size: 22px; }
-.connectionsHeroCopy > p:last-child { max-width: 650px; margin-top: 4px; color: var(--muted); font-size: 13px; }
+.connectionsHeroCopy h2 { font-size: 20px; }
+.connectionsHeroCopy > p:last-child { max-width: 650px; margin-top: 4px; color: var(--muted); font-size: 12px; }
 .connectionsHeroStats { grid-column: 1 / -1; grid-row: 2; display: flex; gap: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
 .connectionsHeroStats button { display: flex; gap: 8px; min-width: 0; padding: 6px 12px; text-align: left; background: transparent; border-color: transparent; }
 .connectionsHeroStats button.active { border-color: var(--accent-line); background: var(--accent-dim); color: var(--accent); }
-.connectionsHeroStats strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.connectionsHeroStats strong { font-size: 14px; font-variant-numeric: tabular-nums; }
 .connectionsHeroStats span { color: var(--muted); font-size: 12px; }
 .connectionsNewButton { min-height: 40px; grid-column: 2; grid-row: 1; }
 .connectionsInventory { padding: 0; overflow: hidden; }
@@ -16,7 +16,7 @@
 .connectionsFilters > label { display: flex; align-items: center; gap: 10px; }
 .connectionsFilters > label > span { color: var(--muted); font-size: 12px; }
 .connectionSearch { position: relative; }
-.connectionSearch > span { position: absolute; left: 13px; font-size: 18px !important; }
+.connectionSearch > span { position: absolute; left: 13px; font-size: 16px !important; }
 .connectionSearch input { padding-left: 38px; }
 .connectionsRows { display: grid; }
 .connectionRowFlat { display: grid; grid-template-columns: minmax(160px, 1.2fr) minmax(110px, .6fr) minmax(160px, 1fr) minmax(140px, .8fr) auto; gap: 14px; align-items: center; padding: 10px 13px; border-bottom: 1px solid var(--line); }
@@ -24,7 +24,7 @@
 .connectionRowFlat:hover { background: var(--panel-2); }
 .connectionRowIdentity { min-width: 0; display: flex; align-items: center; gap: 12px; }
 .connectionRowIdentity > div, .connectionRowProtocol, .connectionRowData, .connectionRowState > div { display: grid; gap: 4px; min-width: 0; }
-.connectionRowIdentity strong { overflow-wrap: anywhere; font-size: 14px; }
+.connectionRowIdentity strong { overflow-wrap: anywhere; font-size: 12px; }
 .connectionRowIdentity small, .connectionRowProtocol span, .connectionRowData span, .connectionRowState small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .connectionRowProtocol small, .connectionRowData small { color: var(--subtle); font-size: 11px; }
 .connectionRowProtocol strong, .connectionRowData strong { font: 500 12px/1.6 var(--technical-font); overflow-wrap: anywhere; }
@@ -34,8 +34,8 @@
 .connectionRowState > i.attention { background: var(--amber); }
 .connectionRowState strong { font-size: 12px; }
 .connectionsEmpty, .noConnectionProtocols { display: grid; justify-items: center; align-content: center; gap: 12px; padding: 28px 20px; min-height: 180px; text-align: center; }
-.connectionsEmpty > span, .noConnectionProtocols > span { color: var(--accent); font-size: 32px; }
-.connectionsEmpty p, .noConnectionProtocols p { max-width: 550px; color: var(--muted); font-size: 13px; }
+.connectionsEmpty > span, .noConnectionProtocols > span { color: var(--accent); font-size: 30px; }
+.connectionsEmpty p, .noConnectionProtocols p { max-width: 550px; color: var(--muted); font-size: 12px; }
 .connectionGuide { margin-top: 20px; }
 .guideLanguage, .legalLanguage { display: flex; gap: 6px; }
 .guideLanguage button, .legalLanguage button { min-height: 32px; font-size: 12px; }
@@ -43,18 +43,18 @@
 .guideSteps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; align-items: start; }
 .guideSteps section { display: flex; align-items: flex-start; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
 .guideSteps section > span { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 auto; border: 1px solid var(--accent-line); border-radius: var(--radius); color: var(--accent); font: 500 11px var(--technical-font); }
-.guideSteps p { margin-top: 8px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.guideSteps p { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.7; }
 .clientAppCatalog { margin-top: 24px; min-width: 0; }
 .clientAppCatalog > header { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
 .clientAppCatalog > header small { display: block; color: var(--subtle); font-size: 11px; }
-.clientAppCatalog > header strong { display: block; margin-top: 4px; font-size: 14px; }
+.clientAppCatalog > header strong { display: block; margin-top: 4px; font-size: 12px; }
 .clientOsPicker { display: flex; flex-wrap: wrap; gap: 5px; }
 .clientOsPicker button { min-height: 32px; padding: 6px 10px; font-size: 12px; }
 .clientOsPicker button.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
 .clientAppRows { display: grid; gap: 10px; }
 .clientAppRows article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
 .clientAppRows article > div { display: grid; gap: 5px; }
-.clientAppRows strong { color: var(--text); font-size: 14px; }
+.clientAppRows strong { color: var(--text); font-size: 12px; }
 .clientAppRows small { color: var(--muted); overflow-wrap: anywhere; }
 .clientAppRows p { color: var(--muted); font-size: 12px; line-height: 1.7; }
 .clientAppRows nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }

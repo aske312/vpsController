@@ -1,33 +1,33 @@
 * { box-sizing: border-box; }
 html { background: var(--bg); scrollbar-color: var(--line-strong) var(--bg); }
-body { margin: 0; min-width: 320px; color: var(--text); background: var(--bg); font: 400 13px/1.5 var(--ui-font); -webkit-font-smoothing: antialiased; }
+body { margin: 0; min-width: 320px; color: var(--text); background: var(--bg); font: 400 12px/1.5 var(--ui-font); -webkit-font-smoothing: antialiased; }
 h1, h2, h3, p { margin: 0; }
-h1 { font-size: clamp(24px, 2vw, 30px); font-weight: 650; line-height: 1.2; letter-spacing: -.035em; }
-h2 { font-size: 18px; font-weight: 600; line-height: 1.35; letter-spacing: -.025em; }
-h3 { font-size: 15px; font-weight: 600; line-height: 1.4; }
+h1 { font-size: clamp(22px, 2vw, 28px); font-weight: 650; line-height: 1.2; letter-spacing: -.035em; }
+h2 { font-size: 16px; font-weight: 600; line-height: 1.35; letter-spacing: -.025em; }
+h3 { font-size: 13px; font-weight: 600; line-height: 1.4; }
 small { font-size: 12px; line-height: 1.55; }
 strong, b { font-weight: 600; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; text-underline-offset: 4px; }
 button, input, select, textarea { font: inherit; color: inherit; }
-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 34px; padding: 7px 11px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-2); color: var(--text); font-size: 13px; font-weight: 500; line-height: 1.4; cursor: pointer; transition: background .16s, border-color .16s, color .16s; }
+button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 34px; padding: 7px 11px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-2); color: var(--text); font-size: 12px; font-weight: 500; line-height: 1.4; cursor: pointer; transition: background .16s, border-color .16s, color .16s; }
 button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--hover); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-input, select, textarea { width: 100%; min-width: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--field); outline: none; font-size: 14px; }
+input, select, textarea { width: 100%; min-width: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--field); outline: none; font-size: 12px; }
 input, select { min-height: 36px; padding: 7px 10px; }
 textarea { padding: 14px; line-height: 1.7; }
 input::placeholder, textarea::placeholder { color: var(--subtle); }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
 input[type="checkbox"] { width: 20px; min-height: 20px; height: 20px; flex: 0 0 auto; accent-color: var(--accent); }
-label { color: var(--muted); font-size: 13px; }
+label { color: var(--muted); font-size: 12px; }
 pre, code, .mono { font-family: var(--technical-font); font-size: 12px; }
 pre { margin: 0; padding: 18px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--field); line-height: 1.8; tab-size: 2; white-space: pre-wrap; overflow-wrap: anywhere; }
 dl { margin: 0; }
 dt { color: var(--subtle); font-size: 12px; }
 dd { margin: 5px 0 0; overflow-wrap: anywhere; }
 fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
-legend { padding: 0 0 10px; color: var(--muted); font-size: 13px; font-weight: 500; }
+legend { padding: 0 0 10px; color: var(--muted); font-size: 12px; font-weight: 500; }
 summary { cursor: pointer; }
 .panel { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); }
 .panelHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }

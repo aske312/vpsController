@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
-type LegalDocument = "privacy" | "terms";
-type Language = "ru" | "en";
+export type LegalDocument = "privacy" | "terms";
+export type Language = "ru" | "en";
 type LegalSection = [title: string, content: ReactNode];
 type LocalizedDocument = { label: string; eyebrow: string; notice: ReactNode; sections: LegalSection[] };
 
@@ -63,15 +64,8 @@ const documents: Record<Language, Record<LegalDocument, LocalizedDocument>> = {
 export function LegalFooter({ version, branch, commit }: { version: string; branch: string; commit: string }) {
   const [openDocument, setOpenDocument] = useState<LegalDocument | null>(null);
   const [language, setLanguage] = useState<Language>("ru");
+  const closeDocument = useCallback(() => setOpenDocument(null), []);
 
-  useEffect(() => {
-    if (!openDocument) return;
-    const close = (event: KeyboardEvent) => event.key === "Escape" && setOpenDocument(null);
-    document.addEventListener("keydown", close);
-    return () => document.removeEventListener("keydown", close);
-  }, [openDocument]);
-
-  const current = openDocument ? documents[language][openDocument] : null;
   return <>
     <footer className="versionFooter">
       <span>{branch} {version} build:{commit.slice(0, 18)}</span>
@@ -80,26 +74,47 @@ export function LegalFooter({ version, branch, commit }: { version: string; bran
         <button type="button" onClick={() => setOpenDocument("terms")}>Лицензия / License</button>
       </nav>
     </footer>
-    {current && <div className="legalBackdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) setOpenDocument(null);
-    }}>
-      <section className="legalScreen" role="dialog" aria-modal="true" aria-labelledby="legal-title">
-        <header>
-          <div><p className="eyebrow">{current.eyebrow}</p><h2 id="legal-title">{current.label}</h2></div>
-          <button type="button" onClick={() => setOpenDocument(null)} aria-label="Закрыть / Close">×</button>
-        </header>
-        <div className="legalLanguage" role="group" aria-label="Language">
-          <button className={language === "ru" ? "active" : ""} onClick={() => setLanguage("ru")}>RU</button>
-          <button className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>EN</button>
-        </div>
-        <article>
-          <p className="legalNotice">{current.notice}</p>
-          {current.sections.map(([title, content], index) => <section key={title}>
-            <h3>{index + 1}. {title}</h3><div>{content}</div>
-          </section>)}
-        </article>
-        <footer><button type="button" onClick={() => setOpenDocument(null)}>{language === "ru" ? "Закрыть" : "Close"}</button></footer>
-      </section>
-    </div>}
+    {openDocument && typeof document !== "undefined" && createPortal(<LegalDialog document={openDocument} language={language} onDocument={setOpenDocument} onLanguage={setLanguage} onClose={closeDocument} />, document.body)}
   </>;
+}
+
+export function LegalDialog({ document: selectedDocument, language, onDocument, onLanguage, onClose }: { document: LegalDocument; language: Language; onDocument(value: LegalDocument): void; onLanguage(value: Language): void; onClose(): void }) {
+  const current = documents[language][selectedDocument];
+  const dialog = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    dialog.current?.focus();
+    const keyboard = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); onClose(); }
+      if (event.key !== "Tab") return;
+      const controls = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex="0"]') || []);
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog.current)) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener("keydown", keyboard);
+    return () => { document.removeEventListener("keydown", keyboard); document.body.style.overflow = overflow; if (previous?.isConnected) previous.focus(); };
+  }, [onClose]);
+  return <div className="legalBackdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section ref={dialog} tabIndex={-1} className="legalScreen" role="dialog" aria-modal="true" aria-labelledby="legal-title">
+      <header><div><p className="eyebrow">{current.eyebrow}</p><h2 id="legal-title">{current.label}</h2></div><button type="button" onClick={onClose} aria-label="Закрыть / Close">×</button></header>
+      <div className="legalToolbar">
+        <nav aria-label={language === "ru" ? "Правовые документы" : "Legal documents"}>
+          <button type="button" className={selectedDocument === "privacy" ? "active" : ""} aria-current={selectedDocument === "privacy" ? "page" : undefined} onClick={() => onDocument("privacy")}>{language === "ru" ? "Приватность" : "Privacy"}</button>
+          <button type="button" className={selectedDocument === "terms" ? "active" : ""} aria-current={selectedDocument === "terms" ? "page" : undefined} onClick={() => onDocument("terms")}>{language === "ru" ? "Лицензия MIT" : "MIT License"}</button>
+        </nav>
+        <div className="legalLanguage" role="group" aria-label="Language">
+          <button type="button" aria-pressed={language === "ru"} className={language === "ru" ? "active" : ""} onClick={() => onLanguage("ru")}>RU</button>
+          <button type="button" aria-pressed={language === "en"} className={language === "en" ? "active" : ""} onClick={() => onLanguage("en")}>EN</button>
+        </div>
+      </div>
+      <article key={`${selectedDocument}-${language}`} tabIndex={0} aria-label={current.label}>
+        <p className="legalNotice">{current.notice}</p>
+        {current.sections.map(([title, content], index) => <section key={title}><h3><span>{String(index + 1).padStart(2, "0")}</span>{title}</h3><div>{content}</div></section>)}
+      </article>
+      <footer><small>312node.net · {language === "ru" ? "Собственный VPS" : "Self-hosted"}</small><button type="button" onClick={onClose}>{language === "ru" ? "Закрыть" : "Close"}</button></footer>
+    </section>
+  </div>;
 }

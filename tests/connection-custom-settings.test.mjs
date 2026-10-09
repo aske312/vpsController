@@ -30,10 +30,36 @@ function dialogHarness(protocol, presets = [{ id: "balanced", label: "Balanced",
   }, loaded, loaded.exports);
   const props = {
     protocols: [protocol],
-    serverOptions: { connection_tuning: { [protocol]: presets }, server_ports: { [protocol]: { default_port: 8443, suggestions: [39761, 443] } } },
+    serverOptions: { connection_tuning: { [protocol]: presets }, server_ports: { [protocol]: { default_port: 8443, suggestions: [39761, 443] } }, xray: { server_names: ["example.ru"], suggestions: [{ domain: "example.ru", label: "Duplicate" }, { domain: "new.example.ru", label: "Новый профиль" }] } },
   };
-  return () => { cursor = 0; return loaded.exports.ConnectionDialog(props); };
+  const render = () => { cursor = 0; return loaded.exports.ConnectionDialog(props); };
+  render.sni = () => {
+    const picker = elements(render()).find(node => node.type?.name === "XraySniPicker");
+    return picker.type(picker.props);
+  };
+  return render;
 }
+
+test("REALITY domain selection deduplicates presets and keeps custom input separate", () => {
+  const render = dialogHarness("xray");
+  let nodes = elements(render.sni());
+  const select = () => nodes.find(node => node.props["aria-label"] === "SNI для REALITY");
+  assert.equal(select().type, "select");
+  assert.equal(nodes.filter(node => node.type === "option" && node.props.value === "example.ru").length, 1);
+  select().props.onChange({ target: { value: "new.example.ru" } });
+  nodes = elements(render.sni());
+  assert.equal(select().props.value, "new.example.ru");
+  assert.ok(!nodes.some(node => node.props["aria-label"] === "Свой домен REALITY"));
+  select().props.onChange({ target: { value: "custom" } });
+  nodes = elements(render.sni());
+  nodes.find(node => node.props["aria-label"] === "Свой домен REALITY").props.onChange({ target: { value: "пример.рф" } });
+  nodes = elements(render.sni());
+  assert.equal(nodes.find(node => node.props["aria-label"] === "Свой домен REALITY").props.value, "пример.рф");
+  select().props.onChange({ target: { value: "example.ru" } });
+  nodes = elements(render.sni());
+  assert.equal(select().props.value, "example.ru");
+  assert.ok(!nodes.some(node => node.props["aria-label"] === "Свой домен REALITY"));
+});
 
 test("preset synchronizes actual selects, numeric controls, toggles and transport values", () => {
   const render = dialogHarness("tuic", [

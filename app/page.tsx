@@ -5,6 +5,7 @@ import { ConnectionDialog, type AwgPortStatus, type ServerPortStatus, type Conne
 import type { ConnectionProfile } from "./connection-profile";
 import { ConnectionsView } from "./connections-view";
 import { LegalFooter } from "./legal";
+import { Metric, TrendGraph } from "./resource-metrics";
 import { ProtocolIcon } from "./protocol-icon";
 import { ProtocolWorkspace } from "./protocol-workspace";
 import { LightNavigation } from "../src/light-navigation";
@@ -1309,16 +1310,17 @@ export default function Home() {
               <option value="live">5 минут</option><option value="day">24 часа</option><option value="week">7 дней</option><option value="quarter">90 дней</option>
             </select></label>
           </header>
-          <Metric title="CPU" value={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%`} percent={overview?.resources.cpu_percent || 0} detail={`Load ${overview?.resources.load1.toFixed(2) || "—"} · ${overview?.resources.cpu_count || "—"} vCPU`} history={chartHistory.load} resolutionSeconds={metricsResolution} />
-          <Metric title="RAM" value={bytes(memoryUsedBytes)} percent={memUsed} detail={`${memUsed.toFixed(0)}% · всего ${bytes(overview?.resources.memory_total)}`} history={chartHistory.memory} resolutionSeconds={metricsResolution} />
-          <Metric title="Disk" value={bytes(diskUsedBytes)} percent={diskUsed} detail={`${diskUsed.toFixed(0)}% · всего ${bytes(overview?.resources.disk_total)}`} history={chartHistory.disk} resolutionSeconds={metricsResolution} />
+          <Metric title="CPU" value={`${(overview?.resources.cpu_percent || 0).toFixed(0)}%`} percent={overview?.resources.cpu_percent || 0} detail="Загрузка процессора" history={chartHistory.load} resolutionSeconds={metricsResolution} facts={[["Виртуальных ядер", String(overview?.resources.cpu_count || "—")], ["Load average · 1 мин", overview?.resources.load1.toFixed(2) || "—"]]} />
+          <Metric title="RAM" value={`${memUsed.toFixed(0)}%`} percent={memUsed} detail="Использование памяти" history={chartHistory.memory} resolutionSeconds={metricsResolution} facts={[["Занято / всего", `${bytes(memoryUsedBytes)} / ${bytes(overview?.resources.memory_total)}`], ["Доступно", bytes(overview?.resources.memory_available)]]} />
+          <Metric title="Disk" value={`${diskUsed.toFixed(0)}%`} percent={diskUsed} detail="Занятое пространство" history={chartHistory.disk} resolutionSeconds={metricsResolution} facts={[["Занято / всего", `${bytes(diskUsedBytes)} / ${bytes(overview?.resources.disk_total)}`], ["Свободно", bytes(overview?.resources.disk_available)]]} />
           <article className="panel metricCard networkMetric">
-            <div><p className="eyebrow">NETWORK</p><h2>{bytes(networkRate.rx)}<small>/с</small></h2></div>
+            <div className="metricCopy"><p className="eyebrow">NETWORK</p><h2>{bytes(networkRate.rx + networkRate.tx)}<small>/с</small></h2><small>Суммарная скорость сети</small></div>
             <TrendGraph values={chartHistory.rx} secondary={chartHistory.tx} relative resolutionSeconds={metricsResolution} formatValue={(value) => `${bytes(value)}/с`} ariaLabel="История сетевой нагрузки" />
             <div className="networkDirections">
               <span>↓ Входящая <strong>{bytes(networkRate.rx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.rx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
               <span>↑ Исходящая <strong>{bytes(networkRate.tx)}/с</strong><i><b style={{ width: `${networkRate.rx || networkRate.tx ? Math.max(4, networkRate.tx / Math.max(networkRate.rx, networkRate.tx) * 100) : 4}%` }} /></i></span>
             </div>
+            <dl className="metricFacts"><div><dt>Всего получено</dt><dd>{bytes(overview?.resources.network_rx)}</dd></div><div><dt>Всего отправлено</dt><dd>{bytes(overview?.resources.network_tx)}</dd></div></dl>
           </article>
         </div>
         <article className="panel protocolSummary">
@@ -1400,7 +1402,7 @@ export default function Home() {
             disabled={busy}
           />
           <SecurityActionRow status={kernelUpdateState} title="Обновление ядра" text={updates?.reboot_required ? "Новое ядро установлено · требуется перезагрузка" : updates?.kernel_available ? "Доступна новая версия ядра" : "Установлена актуальная версия ядра"} onAction={() => void fixSecurity("kernel-update")} actionLabel="Обновить" disabled={busy} />
-          <SecurityActionRow status={automaticUpdatesState} title="Автоматические обновления" text={serviceModeActive ? "Заблокированы сервисным режимом · настройки сохранены" : updates?.automatic ? "Unattended upgrades · ON" : "Unattended upgrades · OFF"} onAction={() => serviceModeActive ? setTab(testReleaseActive ? "application" : "services") : void fixSecurity("secure")} actionLabel={serviceModeActive ? "Открыть режим" : "Включить"} disabled={busy} />
+          <SecurityActionRow status={automaticUpdatesState} title="Автоматические обновления" text={serviceModeActive ? "Заблокированы сервисным режимом · настройки сохранены" : updates?.automatic ? "Unattended upgrades · ON" : "Unattended upgrades · OFF"} onAction={() => serviceModeActive ? setTab("application") : void fixSecurity("secure")} actionLabel={serviceModeActive ? "Открыть режим" : "Включить"} disabled={busy} />
           <SecurityActionRow
             status={applicationVersionState}
             title="Версия приложения"
@@ -1467,7 +1469,25 @@ export default function Home() {
         <article className="panel applicationHero">
           <div><p className="eyebrow">VPS-CONTROL</p><h2>Управление приложением</h2><p>Команды запускаются на сервере как отдельные системные задачи. Вы не потеряете интерфейс во время обновления или перезапуска.</p></div>
           <span className={application?.api.active ? "onlinePill" : "offlinePill"}>{application?.api.active ? "API работает" : "API остановлен"}</span>
+        <div className="applicationMode">
+          <div>
+            <p className="eyebrow">APPLICATION MODE</p>
+            <h3>{services?.panel_access?.public ? "Публичный доступ открыт" : "Доступ через защищённую сеть"}</h3>
+            <small>{services?.panel_access?.public ? "Панель доступна по публичному адресу сервера." : `Локальные адреса: ${services?.panel_access?.vpn_urls.join(" · ") || "недоступны"}`}</small>
+          </div>
+          <div className="panelAccessActions">
+            <label className="serviceModeSwitch">
+              <span><strong>Сервисный режим</strong><small>{testReleaseActive ? "сначала вернитесь на light" : serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
+              <input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy || testReleaseActive} /><i />
+            </label>
+            <label className="serviceModeSwitch protectedAccessSwitch">
+              <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? "публичный адрес открыт" : "только локальная сеть"}</small></span>
+              <input type="checkbox" checked={!services?.panel_access?.public} onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")} disabled={busy || !services || serviceModeActive} /><i />
+            </label>
+          </div>
+        </div>
         </article>
+        <div className="applicationOperations">
         <article className="panel actionPanel">
           <div className="panelHead"><div><p className="eyebrow">SUDO VPS-CONTROL</p><h2>Доступные действия</h2></div></div>
           <div className="actionButtons">
@@ -1489,23 +1509,8 @@ export default function Home() {
             <button className="poweroffButton" onClick={() => void runApplicationAction("poweroff")} disabled={busy}><strong>Выключить сервер</strong><small>Потребуется запуск у провайдера</small></button>
           </div>
         </article>
-        <article className="panel panelAccess">
-          <div>
-            <p className="eyebrow">APPLICATION MODE</p>
-            <h3>{services?.panel_access?.public ? "Публичный доступ открыт" : "Доступ через защищённую сеть"}</h3>
-            <small>{services?.panel_access?.public ? "Панель доступна по публичному адресу сервера." : `Локальные адреса: ${services?.panel_access?.vpn_urls.join(" · ") || "недоступны"}`}</small>
-          </div>
-          <div className="panelAccessActions">
-            <label className="serviceModeSwitch">
-              <span><strong>Сервисный режим</strong><small>{testReleaseActive ? "сначала вернитесь на light" : serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
-              <input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy || testReleaseActive} /><i />
-            </label>
-            <label className="serviceModeSwitch protectedAccessSwitch">
-              <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? "публичный адрес открыт" : "только локальная сеть"}</small></span>
-              <input type="checkbox" checked={!services?.panel_access?.public} onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")} disabled={busy || !services || serviceModeActive} /><i />
-            </label>
-          </div>
-        </article>
+        </div>
+        <div className="applicationRuntime">
         <article className="panel statusPanel">
           <div className="panelHead"><div><p className="eyebrow">RUNTIME</p><h2>Состояние компонентов</h2></div><span>{application
             ? `${healthyApplicationComponents}/${applicationComponentCount} · ${application.runtime?.mode || "unknown"}${application.checked_at ? ` · ${new Date(application.checked_at).toLocaleTimeString("ru-RU")}` : ""}`
@@ -1539,6 +1544,7 @@ export default function Home() {
           <div className="panelHead"><div><p className="eyebrow">SYSTEMD JOURNAL · СВЕЖИЕ СНАЧАЛА</p><h2>Журнал приложения</h2></div><div className="logActions"><button className="miniButton" onClick={() => void loadApplicationLogs()}>Обновить</button><button className="miniButton" disabled={!applicationLogs.length} onClick={() => downloadLogs(`application-${new Date().toISOString().slice(0, 10)}.log`, applicationLogs)}>Выгрузить</button></div></div>
           <pre>{applicationLogs.join("\n") || "В журнале нет записей"}</pre>
         </article>
+        </div>
       </section>}
 
       {tab === "services" && <section className="servicesGrid">
@@ -1547,53 +1553,6 @@ export default function Home() {
           <div className="serviceSummary">
             <span className={services?.failed_units ? "offlinePill" : "onlinePill"}>{services?.failed_units || 0} аварийных служб</span>
             {services?.reboot_required && <span className="warningPill">Требуется перезагрузка</span>}
-          </div>
-        </article>
-
-        <article className="panel panelAccess">
-          <div>
-            <p className="eyebrow">APPLICATION MODE</p>
-            <h3>{services?.panel_access?.public ? "Публичный доступ открыт" : "Доступ через защищённый туннель"}</h3>
-            <small>{services?.panel_access?.public
-              ? "Панель доступна по публичному IP сервера."
-              : `Локальные адреса: ${services?.panel_access?.vpn_urls.join(" · ") || "недоступны"}`}</small>
-          </div>
-          <div className="panelAccessActions">
-            <label className="serviceModeSwitch">
-              <span><strong>Сервисный режим</strong><small>{testReleaseActive ? "сначала вернитесь на light" : serviceModeActive ? "обслуживание выполняется" : "обычная работа"}</small></span>
-              <input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy || testReleaseActive} />
-              <i />
-            </label>
-            <label className="serviceModeSwitch protectedAccessSwitch">
-              <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? "публичный адрес открыт" : "только локальная сеть"}</small></span>
-              <input
-                type="checkbox"
-                checked={!services?.panel_access?.public}
-                onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")}
-                disabled={busy || !services || serviceModeActive}
-              />
-              <i />
-            </label>
-          </div>
-        </article>
-
-        <article className="panel servicesPanel">
-          <div className="panelHead"><div><p className="eyebrow">MANAGED SERVICES</p><h2>Системные службы</h2></div><span>{services?.items.filter((item) => item.active).length || 0} активных</span></div>
-          <div className="serviceRows">
-            {(services?.items || []).map((service) => <div className="serviceRow" key={service.id}>
-              <i className={service.active ? "serviceOnline" : "serviceOffline"} />
-              <div><strong>{service.name}</strong><small>{service.unit} · {service.substate} · автозапуск: {service.enabled ? "да" : "нет"}</small></div>
-              <dl><div><dt>Перезапуски</dt><dd>{service.restarts}</dd></div><div><dt>Активна с</dt><dd>{service.active_since || "—"}</dd></div></dl>
-              <div className="serviceActions">
-                {service.controls.includes(service.active ? "restart" : "start") && <button onClick={() => void runServiceAction(service.id, service.name, service.active ? "restart" : "start")} disabled={busy}>{service.active ? "Перезапустить" : "Запустить"}</button>}
-                {service.active && (service.controls.includes("stop") || service.disabled_controls?.includes("stop")) && <button
-                  className="serviceStop"
-                  onClick={() => void runServiceAction(service.id, service.name, "stop")}
-                  disabled={busy || service.disabled_controls?.includes("stop")}
-                  title={service.disabled_controls?.includes("stop") ? "Остановка отключит панель управления и доступ к восстановлению" : undefined}
-                >Остановить</button>}
-              </div>
-            </div>)}
           </div>
         </article>
 
@@ -1631,6 +1590,26 @@ export default function Home() {
             </label>
             <button className="primaryButton logSaveButton" onClick={() => void saveLoggingSettings()} disabled={busy || !loggingDraft}>Сохранить</button>
             <button className="dangerButton" onClick={() => void clearManagedLogs()} disabled={busy}>Очистить журналы</button>
+          </div>
+        </article>
+
+        <article className="panel servicesPanel">
+          <div className="panelHead"><div><p className="eyebrow">MANAGED SERVICES</p><h2>Системные службы</h2></div><span>{services?.items.filter((item) => item.active).length || 0} активных</span></div>
+          <div className="serviceRows">
+            {(services?.items || []).map((service) => <div className="serviceRow" key={service.id}>
+              <i className={service.active ? "serviceOnline" : "serviceOffline"} />
+              <div><strong>{service.name}</strong><small>{service.unit} · {service.substate} · автозапуск: {service.enabled ? "да" : "нет"}</small></div>
+              <dl><div><dt>Перезапуски</dt><dd>{service.restarts}</dd></div><div><dt>Активна с</dt><dd>{service.active_since || "—"}</dd></div></dl>
+              <div className="serviceActions">
+                {service.controls.includes(service.active ? "restart" : "start") && <button onClick={() => void runServiceAction(service.id, service.name, service.active ? "restart" : "start")} disabled={busy}>{service.active ? "Перезапустить" : "Запустить"}</button>}
+                {service.active && (service.controls.includes("stop") || service.disabled_controls?.includes("stop")) && <button
+                  className="serviceStop"
+                  onClick={() => void runServiceAction(service.id, service.name, "stop")}
+                  disabled={busy || service.disabled_controls?.includes("stop")}
+                  title={service.disabled_controls?.includes("stop") ? "Остановка отключит панель управления и доступ к восстановлению" : undefined}
+                >Остановить</button>}
+              </div>
+            </div>)}
           </div>
         </article>
 
@@ -1770,70 +1749,6 @@ function AutomationEditor({
     <div className="automationRun"><small>Следующий запуск</small><strong>{timer?.next_run || "—"}</strong><span>{timer?.last_trigger ? `последний: ${timer.last_trigger}` : "ещё не запускалось"}</span></div>
     <label className="automationSwitch"><input type="checkbox" checked={value.enabled} onChange={(event) => onChange({ enabled: event.target.checked })} /><span /><em>{value.enabled ? "Вкл" : "Выкл"}</em></label>
   </div>;
-}
-function TrendGraph({ values, secondary, relative = false, resolutionSeconds = 1, formatValue = (value) => `${Math.round(value)}%`, ariaLabel }: {
-  values: Array<number | null>; secondary?: Array<number | null>; relative?: boolean; resolutionSeconds?: number; formatValue?: (value: number) => string; ariaLabel: string;
-}) {
-  const width = 240;
-  const height = 72;
-  const known = (value: number | null): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
-  const all = (secondary ? [...values, ...secondary] : values).filter(known);
-  const ceiling = relative ? Math.max(1, ...all) : 100;
-  const coordinates = (series: Array<number | null>) => {
-    const segments: Array<Array<{ x: number; y: number }>> = [];
-    let segment: Array<{ x: number; y: number }> = [];
-    series.forEach((value, index) => {
-      if (!known(value)) {
-        if (segment.length) segments.push(segment);
-        segment = [];
-        return;
-      }
-      const x = series.length > 1 ? index / (series.length - 1) * width : width;
-      segment.push({ x, y: height - Math.min(value / ceiling, 1) * height });
-    });
-    if (segment.length) segments.push(segment);
-    return segments;
-  };
-  const primarySegments = coordinates(values);
-  const secondarySegments = secondary ? coordinates(secondary) : [];
-  const stepPath = (coordinatesList: Array<{ x: number; y: number }>) => coordinatesList.reduce((path, point, index) => {
-    if (!index) return `M ${point.x.toFixed(1)} ${point.y.toFixed(1)}`;
-    return `${path} H ${point.x.toFixed(1)} V ${point.y.toFixed(1)}`;
-  }, "");
-  const primaryValues = values.filter(known);
-  const secondaryValues = secondary?.filter(known) || [];
-  const primaryLast = primarySegments.at(-1)?.at(-1);
-  const secondaryLast = secondarySegments.at(-1)?.at(-1);
-  const primaryPeak = primaryValues.length ? Math.max(...primaryValues) : 0;
-  const secondaryPeak = secondaryValues.length ? Math.max(...secondaryValues) : 0;
-  const elapsedSeconds = Math.max(0, (values.length - 1) * resolutionSeconds);
-  const elapsedLabel = elapsedSeconds >= 86400 ? `${Math.round(elapsedSeconds / 86400)} д` : elapsedSeconds >= 3600 ? `${Math.round(elapsedSeconds / 3600)} ч` : elapsedSeconds >= 60 ? `${Math.round(elapsedSeconds / 60)} мин` : `${elapsedSeconds} сек`;
-  const intervalLabel = resolutionSeconds >= 3600 ? `${Math.round(resolutionSeconds / 3600)} ч` : resolutionSeconds >= 60 ? `${Math.round(resolutionSeconds / 60)} мин` : `${resolutionSeconds} сек`;
-  return <div className={`trendGraph ${secondary ? "dual" : ""}`} role="img" aria-label={ariaLabel}>
-    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-      {primarySegments.map((segment, index) => segment.length > 1 && <path key={`area-${index}`} className="primaryArea" d={`${stepPath(segment)} V ${height} H ${segment[0].x.toFixed(1)} Z`} />)}
-      {primarySegments.map((segment, index) => segment.length > 1 && <path key={`primary-${index}`} className="primaryTrend" d={stepPath(segment)} />)}
-      {secondarySegments.map((segment, index) => segment.length > 1 && <path key={`secondary-${index}`} className="secondaryTrend" d={stepPath(segment)} />)}
-      {primaryLast && primaryValues.length > 1 && <circle className="primaryPoint" cx={primaryLast.x} cy={primaryLast.y} r="2.8" />}
-      {secondaryLast && secondaryValues.length > 1 && <circle className="secondaryPoint" cx={secondaryLast.x} cy={secondaryLast.y} r="2.4" />}
-    </svg>
-    <span className="trendYAxis"><b>{formatValue(ceiling)}</b><b>{formatValue(0)}</b></span>
-    <span className="trendXAxis"><b>−{elapsedLabel}</b><b>сейчас</b></span>
-    <span className="trendSummary">
-      <b>Сейчас {formatValue(primaryValues.at(-1) || 0)}</b>
-      <b>Пик {formatValue(primaryPeak)}</b>
-      {secondary && <b>TX пик {formatValue(secondaryPeak)}</b>}
-    </span>
-    {secondary && <span className="trendLegend"><i /> RX <i /> TX</span>}
-    <small>{primaryValues.length < 2 ? "Сбор данных…" : `${primaryValues.length} замеров · интервал ${intervalLabel}`}</small>
-  </div>;
-}
-function Metric({ title, value, percent, detail, history, resolutionSeconds }: { title: string; value: string; percent: number; detail: string; history: Array<number | null>; resolutionSeconds: number }) {
-  const normalized = Math.max(0, Math.min(100, percent));
-  return <article className="panel metricCard">
-    <div className="metricCopy"><p className="eyebrow">{title.toUpperCase()}</p><h2>{value}</h2><small>{detail}</small></div>
-    <TrendGraph values={history} resolutionSeconds={resolutionSeconds} ariaLabel={`${title}: ${value}, ${Math.round(normalized)} процентов`} />
-  </article>;
 }
 function SecurityRow({ status, title, text }: { status: SecurityState; title: string; text: string }) {
   const meta = securityStateMeta[status];

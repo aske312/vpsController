@@ -158,12 +158,10 @@ test("connections use a modal editor and protocol-specific one-time handoff meth
   assert.match(dialog, /block_bittorrent/);
   assert.match(dialog, /Общие настройки доступа для proxy-протоколов/);
   assert.match(dialog, /SNI для REALITY/);
-  assert.match(dialog, /xraySniMenu/);
   assert.doesNotMatch(dialog, /<datalist/);
   assert.match(dialog, /fieldInvalid/);
   assert.match(dialog, /validSniDomain/);
   assert.match(dialog, /aria-invalid=\{Boolean\(invalid\)\}/);
-  assert.match(await read("app/globals.css"), /\.xraySniMenu \{ position: static;[^}]*overflow-y: auto/);
   assert.match(dialog, /Object\.entries\(serverOptions\.awg/);
   assert.match(dialog, /connectionMaskingStatus/);
   assert.match(dialog, /AmneziaWG · Jc/);
@@ -237,12 +235,12 @@ test("primary resource metrics use CPU percent and readable RAM and disk units",
   assert.match(api, /@app\.get\("\/api\/metrics\/history"\)/);
   assert.match(history, /"live": \(300, 3\).*"day": \(86400, 60\).*"week": \(604800, 3600\).*"quarter": \(7776000, 3600\)/s);
   assert.match(page, /title="CPU".*cpu_percent/s);
-  assert.match(page, /title="RAM" value=\{bytes\(memoryUsedBytes\)\}/);
-  assert.match(page, /title="Disk" value=\{bytes\(diskUsedBytes\)\}/);
+  assert.match(page, /bytes\(memoryUsedBytes\)/);
+  assert.match(page, /bytes\(diskUsedBytes\)/);
   assert.match(page, /aria-label="Период истории метрик"/);
 });
 
-test("security keeps panel access controls on the services page", async () => {
+test("panel access controls preserve protected access and SSH policy", async () => {
   const [api, page] = await Promise.all([read("api/main.py"), read("app/page.tsx")]);
   assert.match(api, /"panel_access": \{/);
   assert.match(api, /"publicly_accessible": panel_publicly_accessible/);
@@ -394,7 +392,6 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(page, /runApplicationAction\("test-update"\)/);
   assert.match(page, /application\?\.service_mode\?\.rollback_available/);
   assert.match(page, /disabled=\{busy \|\| testReleaseActive\}/);
-  assert.equal([...page.matchAll(/disabled=\{busy \|\| testReleaseActive\}/g)].length, 2);
   assert.match(page, /if \(!active && testReleaseActive\)/);
   assert.match(page, /сервисный режим не создаёт отложенный запуск/);
   assert.match(api, /installed_release_branch\(\) == "test-light"/);
