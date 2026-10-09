@@ -1019,6 +1019,8 @@ sync_release() {
     --exclude '.servers/' \
     --exclude 'docs/audit/' \
     --exclude 'docs/backlog/' \
+    --exclude 'docs/.audit/' \
+    --exclude 'docs/.backlog/' \
     --exclude 'AGENTS.md' \
     --exclude 'tmp/' \
     --exclude 'output/' \

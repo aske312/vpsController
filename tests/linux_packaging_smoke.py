@@ -17,7 +17,7 @@ for script in ('scripts/build-release.sh', 'scripts/vps-control.sh'):
         stage = Path(directory) / 'stage'
         root.mkdir()
         stage.mkdir()
-        private = ['.servers/test.txt', 'docs/audit/test.md', 'docs/backlog/test.md', '.env', '.env.local', '.runtime/test.txt', 'AGENTS.md', 'tmp/test.txt', 'work/test.txt', 'output/test.txt']
+        private = ['.servers/test.txt', 'docs/audit/test.md', 'docs/backlog/test.md', 'docs/.audit/test.md', 'docs/.backlog/test.md', '.env', '.env.local', '.runtime/test.txt', 'AGENTS.md', 'tmp/test.txt', 'work/test.txt', 'output/test.txt']
         for name in private + ['README.md', 'api/main.py', 'public/test.txt']:
             file = root / name
             file.parent.mkdir(parents=True, exist_ok=True)

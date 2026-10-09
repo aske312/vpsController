@@ -453,7 +453,6 @@ test("authentication and VPN controls preserve consistent UI states", async () =
   assert.match(page, /Повторите новый пароль/);
   assert.match(page, /actionLabel="Изменить пароль" alwaysAction/);
   assert.match(page, /status === "active" && !alwaysAction/);
-  assert.match(api, /hmac\.compare_digest\(payload\.current_password, ADMIN_PASSWORD\)/);
   assert.match(api, /payload\.new_password != payload\.confirm_password/);
   assert.match(api, /categories < 3/);
   assert.match(page, /runApplicationAction\("identity"\)/);

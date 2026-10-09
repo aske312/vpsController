@@ -127,6 +127,7 @@ updates_refresh_lock = threading.Lock()
 app_version_refresh_lock = threading.Lock()
 resource_check_lock = threading.Lock()
 action_start_lock = threading.Lock()
+automation_apply_lock = threading.Lock()
 network_diagnostic_lock = threading.Lock()
 connection_probe_lock = threading.Lock()
 resource_check_cache: dict[str, dict] = {}
@@ -1498,15 +1499,15 @@ def auth_status() -> dict:
 @app.put("/api/security/admin-password")
 def change_admin_password(payload: AdminPasswordChange, _: None = Depends(require_token)) -> dict:
     global ADMIN_PASSWORD
-    if not hmac.compare_digest(payload.current_password, ADMIN_PASSWORD):
+    if not hmac.compare_digest(payload.current_password.encode("utf-8"), ADMIN_PASSWORD.encode("utf-8")):
         raise HTTPException(status_code=400, detail="Текущий пароль указан неверно")
     if payload.new_password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="Новые пароли не совпадают")
     password = payload.new_password
-    if hmac.compare_digest(password, ADMIN_PASSWORD):
-        raise HTTPException(status_code=400, detail="Новый пароль должен отличаться от текущего")
     if any(ord(character) < 33 or ord(character) > 126 for character in password):
         raise HTTPException(status_code=400, detail="Используйте печатные латинские символы без пробелов")
+    if hmac.compare_digest(password.encode("utf-8"), ADMIN_PASSWORD.encode("utf-8")):
+        raise HTTPException(status_code=400, detail="Новый пароль должен отличаться от текущего")
     categories = sum((
         any(character.islower() for character in password),
         any(character.isupper() for character in password),
@@ -2747,27 +2748,58 @@ class AutomationSettings(BaseModel):
 
 @app.put("/api/services/automation")
 def update_automation(payload: AutomationSettings, _: None = Depends(require_token)) -> dict:
+    if not automation_apply_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Настройки автоматизации уже применяются")
+    try:
+        return apply_automation_settings(payload)
+    finally:
+        automation_apply_lock.release()
+
+
+def apply_automation_settings(payload: AutomationSettings) -> dict:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    original = AUTOMATION_FILE.read_bytes() if AUTOMATION_FILE.exists() else None
     tmp = AUTOMATION_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
     os.chmod(tmp, 0o600)
     tmp.replace(AUTOMATION_FILE)
-    unit = f"vps-control-automation-apply-{int(time.time())}"
+    unit = f"vps-control-automation-apply-{uuid.uuid4().hex}"
     bundled_command = INSTALL_DIR / "scripts" / "vps-control.sh"
     command = (
         ["/bin/bash", str(bundled_command), "automation-apply"]
         if bundled_command.exists()
         else [CONTROL_COMMAND, "automation-apply"]
     )
-    result = subprocess.run(
-        [
-            "systemd-run", f"--unit={unit}", "--wait", "--collect", "--property=Type=exec",
-            *command,
-        ],
-        capture_output=True, text=True, timeout=30, check=False,
-    )
-    if result.returncode:
-        raise HTTPException(status_code=500, detail=result.stderr.strip() or "Unable to apply automation settings")
+    def apply(unit_name: str):
+        return subprocess.run(
+            ["systemd-run", f"--unit={unit_name}", "--wait", "--collect",
+             "--property=Type=exec", "--property=RuntimeMaxSec=25s", *command],
+            capture_output=True, text=True, timeout=35, check=False,
+        )
+    try:
+        result = apply(unit)
+        if result.returncode:
+            raise HTTPException(status_code=500, detail="Не удалось применить настройки автоматизации")
+    except (HTTPException, OSError, subprocess.TimeoutExpired) as exc:
+        if isinstance(exc, subprocess.TimeoutExpired):
+            # A timed out systemd-run client does not prove its unit stopped.
+            stopped = subprocess.run(["systemctl", "stop", f"{unit}.service"],
+                                     capture_output=True, text=True, timeout=15, check=False)
+            if stopped.returncode:
+                raise HTTPException(status_code=500, detail="Результат применения неизвестен; проверьте системную задачу") from exc
+        if original is None:
+            AUTOMATION_FILE.unlink(missing_ok=True)
+        else:
+            tmp.write_bytes(original)
+            os.chmod(tmp, 0o600)
+            tmp.replace(AUTOMATION_FILE)
+        try:
+            restored = apply(f"{unit}-restore")
+            if restored.returncode:
+                raise RuntimeError("restore failed")
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as restore_error:
+            raise HTTPException(status_code=500, detail="Настройки сохранены обратно; восстановление таймеров не подтверждено") from restore_error
+        raise HTTPException(status_code=500, detail="Не удалось применить настройки; предыдущее расписание восстановлено") from exc
     return {
         "automation": read_automation(),
         "timers": {
@@ -3576,12 +3608,20 @@ def delete_client_locked(client_id: str) -> dict:
         config_path = TUIC_CONFIG; binary = "/usr/local/lib/vps-control-tuic/sing-box"; unit = "vps-control-tuic.service"
         if config_path.exists() and Path(binary).exists():
             with client_mutation_lock:
-                config_data = json.loads(config_path.read_text(encoding="utf-8")); inbound = next(row for row in config_data.get("inbounds", []) if row.get("type") == protocol)
+                original = config_path.read_bytes()
+                config_data = json.loads(original); inbound = next(row for row in config_data.get("inbounds", []) if row.get("type") == protocol)
                 inbound["users"] = [user for user in inbound.get("users", []) if user.get("name") != client_id]
                 temporary = config_path.with_suffix(".tmp.json"); temporary.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(temporary, 0o600)
                 result = subprocess.run([binary, "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
                 if result.returncode: temporary.unlink(missing_ok=True); raise HTTPException(status_code=500, detail=f"Unable to remove {protocol} connection")
-                temporary.replace(config_path); run("systemctl", "restart", unit, timeout=20, check=True)
+                temporary.replace(config_path)
+                try:
+                    run("systemctl", "restart", unit, timeout=20, check=True)
+                except Exception:
+                    config_path.write_bytes(original)
+                    os.chmod(config_path, 0o600)
+                    run("systemctl", "restart", unit, timeout=20)
+                    raise
         remaining = [entry for entry in items if entry["id"] != client_id]
         release_client_port(item, remaining)
         write_clients(remaining); return {"deleted": client_id}

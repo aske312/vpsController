@@ -20,6 +20,70 @@ spec.loader.exec_module(api)
 
 
 class PortabilityTests(unittest.TestCase):
+    def test_tuic_delete_restores_config_when_service_restart_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / 'config.json'
+            original = json.dumps({'inbounds': [{'type': 'tuic', 'users': [{'name': 'client-a', 'uuid': 'uuid-a'}]}]})
+            config.write_text(original, encoding='utf-8')
+            def restart(*args, **kwargs):
+                if kwargs.get('check'):
+                    raise api.HTTPException(status_code=500, detail='restart failed')
+                return ''
+            with patch.object(api, 'TUIC_CONFIG', config), \
+                 patch.object(api, 'read_clients', return_value=[{'id': 'client-a', 'protocol': 'tuic'}]), \
+                 patch.object(api.Path, 'exists', return_value=True), \
+                 patch.object(api.subprocess, 'run', return_value=type('Result', (), {'returncode': 0})()), \
+                 patch.object(api, 'run', side_effect=restart), patch.object(api, 'write_clients') as persist:
+                with self.assertRaises(api.HTTPException):
+                    api.delete_client('client-a')
+            self.assertEqual(config.read_text(encoding='utf-8'), original)
+            persist.assert_not_called()
+
+    def test_failed_automation_apply_restores_saved_schedule(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / 'automation.json'
+            original = json.dumps({'cleanup': {'enabled': False}})
+            config.write_text(original, encoding='utf-8')
+            schedule = {'enabled': False, 'cadence': 'daily', 'hour': 3, 'minute': 0}
+            settings = api.AutomationSettings(**{key: schedule for key in (
+                'reboot', 'cleanup', 'protocol_scan', 'application_update', 'kernel_update')})
+            with patch.object(api, 'DATA_DIR', root), patch.object(api, 'AUTOMATION_FILE', config), \
+                 patch.object(api, 'INSTALL_DIR', root), \
+                 patch.object(api.subprocess, 'run', side_effect=[
+                     type('Result', (), {'returncode': 1, 'stderr': 'apply failed'})(),
+                     type('Result', (), {'returncode': 0, 'stderr': ''})(),
+                 ]) as apply:
+                with self.assertRaises(api.HTTPException) as error:
+                    api.update_automation(settings)
+                self.assertIn('предыдущее расписание восстановлено', error.exception.detail)
+                self.assertEqual(apply.call_count, 2)
+            self.assertEqual(config.read_text(encoding='utf-8'), original)
+
+    def test_concurrent_automation_apply_is_rejected_before_saving(self):
+        schedule = {'enabled': False, 'cadence': 'daily', 'hour': 3, 'minute': 0}
+        settings = api.AutomationSettings(**{key: schedule for key in (
+            'reboot', 'cleanup', 'protocol_scan', 'application_update', 'kernel_update')})
+        with patch.object(api, 'automation_apply_lock') as lock, \
+             patch.object(api, 'apply_automation_settings') as apply:
+            lock.acquire.return_value = False
+            with self.assertRaises(api.HTTPException) as error:
+                api.update_automation(settings)
+            self.assertEqual(error.exception.status_code, 409)
+            apply.assert_not_called()
+
+    def test_password_change_rejects_unicode_without_server_error_or_persistence(self):
+        with patch.object(api, 'ADMIN_PASSWORD', 'OriginalPassword123!'), \
+             patch.object(api, 'ENV_FILE') as env_file:
+            for current, new in [('НеверныйПароль123!', 'NewPassword123456!'),
+                                 ('OriginalPassword123!', 'НовыйПароль123456!')]:
+                with self.subTest(current=current, new=new):
+                    with self.assertRaises(api.HTTPException) as error:
+                        api.change_admin_password(api.AdminPasswordChange(
+                            current_password=current, new_password=new, confirm_password=new))
+                    self.assertEqual(error.exception.status_code, 400)
+            env_file.write_text.assert_not_called()
+
     def test_tunnel_connection_requires_fresh_handshake_and_bidirectional_traffic(self):
         with patch.object(api, 'interface_dump', return_value=[{
             'handshake_age_s': 12, 'rx_bytes': 4096, 'tx_bytes': 2048,

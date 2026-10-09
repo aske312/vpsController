@@ -18,6 +18,7 @@ rsync -a --delete \
   --exclude '.wrangler/' --exclude 'node_modules/' --exclude 'dist/' --exclude 'outputs/' \
   --exclude '.env*' --exclude 'venv/' \
   --exclude '.servers/' --exclude 'docs/audit/' --exclude 'docs/backlog/' \
+  --exclude 'docs/.audit/' --exclude 'docs/.backlog/' \
   --exclude 'AGENTS.md' --exclude 'tmp/' --exclude 'output/' --exclude 'work/' \
   "${ROOT_DIR}/" "${STAGE}/"
 

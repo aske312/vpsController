@@ -9,6 +9,7 @@ import { Metric, TrendGraph } from "./resource-metrics";
 import { ProtocolIcon } from "./protocol-icon";
 import { ProtocolWorkspace } from "./protocol-workspace";
 import { LightNavigation } from "../src/light-navigation";
+import { basicCredentials } from "../src/auth-credentials";
 import { useNotifications } from "../src/notifications/notification-center";
 
 export type Protocol = "awg" | "hysteria2" | "tuic" | "xray";
@@ -1092,8 +1093,8 @@ export default function Home() {
   async function login(event: FormEvent) {
     event.preventDefault();
     setBusy(true); setError("");
-    const candidateToken = btoa(`${loginUser}:${loginPassword}`);
     try {
+      const candidateToken = basicCredentials(loginUser, loginPassword);
       const response = await fetch("/api/overview", {
         headers: { Authorization: `Basic ${candidateToken}` },
       });
