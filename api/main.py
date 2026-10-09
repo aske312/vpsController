@@ -3141,6 +3141,60 @@ def xray_profile_for_inbound(inbound: dict, settings: dict) -> dict:
     }
 
 
+def validate_xray_reality_connection(profile: dict, user_uuid: str, binary: str) -> None:
+    """Verify the new listener with its own identity before publishing a profile."""
+    proxy_port = free_loopback_port()
+    config = {
+        "log": {"loglevel": "warning"},
+        "inbounds": [{"listen": "127.0.0.1", "port": proxy_port, "protocol": "socks", "settings": {"udp": False}}],
+        "outbounds": [{
+            "protocol": "vless",
+            "settings": {"vnext": [{"address": "127.0.0.1", "port": profile["port"],
+                "users": [{"id": user_uuid, "encryption": "none"}]}]},
+            "streamSettings": {
+                "network": "xhttp", "security": "reality",
+                "xhttpSettings": {"path": profile["path"], "mode": "auto"},
+                "realitySettings": {"serverName": profile["server_name"], "fingerprint": "chrome",
+                    "password": profile["password"], "shortId": profile["short_id"], "spiderX": "/"},
+            },
+        }],
+    }
+    with tempfile.TemporaryDirectory(prefix="vps-control-xray-sni-") as directory:
+        root = Path(directory)
+        config_path = root / "client.json"
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        os.chmod(config_path, 0o600)
+        process = subprocess.Popen([binary, "run", "-config", str(config_path)],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            if wait_for_proxy(process, int(profile["port"]), timeout=5) and wait_for_proxy(process, proxy_port):
+                # Only read-only probes are retried; never repeat a mutation.
+                for _attempt in range(2):
+                    output = root / "response.json"
+                    try:
+                        result = subprocess.run([
+                            "curl", "--silent", "--noproxy", "", "--socks5-hostname", f"127.0.0.1:{proxy_port}",
+                            "--connect-timeout", "10", "--max-time", "15", "--output", str(output),
+                            "--write-out", "%{http_code}", "http://127.0.0.1:8000/api/health",
+                        ], capture_output=True, text=True, timeout=17, check=False)
+                        response = json.loads(output.read_text(encoding="utf-8")) if output.exists() else {}
+                        if result.returncode == 0 and result.stdout.strip() == "200" and (
+                            response.get("ok") is True or response.get("status") == "ok"
+                        ):
+                            return
+                    except (OSError, ValueError, subprocess.TimeoutExpired):
+                        pass
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+    raise HTTPException(status_code=422, detail="SNI не подтвердил соединение REALITY; выберите другой домен")
+
+
 def create_xray_sni_inbound(server: dict, settings: dict, server_name: str, binary: str) -> tuple[dict, dict]:
     """Create an isolated REALITY listener so a new SNI cannot break existing profiles."""
     probe = subprocess.run(
@@ -3403,7 +3457,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     row for row in server.get("inbounds", [])
                     if row.get("protocol") == "vless" and server_name in row.get("streamSettings", {}).get("realitySettings", {}).get("serverNames", [])
                 ), None)
-                if inbound is None:
+                new_listener = inbound is None
+                if new_listener:
                     inbound, profile = create_xray_sni_inbound(server, settings, server_name, binary)
                 else:
                     profile = xray_profile_for_inbound(inbound, settings)
@@ -3423,6 +3478,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 applied = True
                 run("/usr/local/lib/vps-control-xray/firewall.sh", "add", timeout=10, check=True)
                 run("systemctl", "restart", unit, timeout=20, check=True)
+                if new_listener:
+                    validate_xray_reality_connection(profile, user_uuid, binary)
                 endpoint = PUBLIC_IP
                 path = str(profile.get("path", "/xhttp"))
                 listen_host = "0.0.0.0" if payload.settings.proxy_bind == "lan" else "127.0.0.1"

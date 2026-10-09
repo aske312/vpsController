@@ -20,6 +20,45 @@ spec.loader.exec_module(api)
 
 
 class PortabilityTests(unittest.TestCase):
+    def test_new_reality_listener_requires_a_valid_roundtrip_and_cleans_up_probe(self):
+        profile = {'port': 18445, 'path': '/isolated', 'server_name': 'sni.example',
+                   'password': 'public-key', 'short_id': '0123456789abcdef'}
+        valid = type('Result', (), {'returncode': 0, 'stdout': '200'})()
+        def curl(command, **_kwargs):
+            Path(command[command.index('--output') + 1]).write_text('{"ok":true}', encoding='utf-8')
+            return valid
+        with patch.object(api.subprocess, 'Popen') as launch, \
+             patch.object(api.subprocess, 'run', side_effect=curl), \
+             patch.object(api, 'wait_for_proxy', return_value=True):
+            process = launch.return_value
+            process.poll.return_value = None
+            def inspect(command, **_kwargs):
+                client = json.loads(Path(command[-1]).read_text(encoding='utf-8'))
+                target = client['outbounds'][0]['settings']['vnext'][0]
+                self.assertEqual(target['port'], 18445)
+                self.assertEqual(target['users'][0]['id'], 'new-client-uuid')
+                return process
+            launch.side_effect = inspect
+            api.validate_xray_reality_connection(profile, 'new-client-uuid', '/fake/xray')
+            process.terminate.assert_called_once()
+            process.wait.assert_called_once()
+
+    def test_reality_probe_rejects_http_success_without_health_contract(self):
+        profile = {'port': 18445, 'path': '/isolated', 'server_name': 'sni.example',
+                   'password': 'public-key', 'short_id': '0123456789abcdef'}
+        def curl(command, **_kwargs):
+            Path(command[command.index('--output') + 1]).write_text('{"ok":false}', encoding='utf-8')
+            return type('Result', (), {'returncode': 0, 'stdout': '200'})()
+        with patch.object(api.subprocess, 'Popen') as launch, \
+             patch.object(api.subprocess, 'run', side_effect=curl) as probe, \
+             patch.object(api, 'wait_for_proxy', return_value=True):
+            launch.return_value.poll.return_value = None
+            with self.assertRaises(api.HTTPException) as error:
+                api.validate_xray_reality_connection(profile, 'new-client-uuid', '/fake/xray')
+            self.assertEqual(error.exception.status_code, 422)
+            self.assertEqual(probe.call_count, 2)
+            launch.return_value.terminate.assert_called_once()
+
     def test_tuic_delete_restores_config_when_service_restart_fails(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / 'config.json'
@@ -734,8 +773,22 @@ class PortabilityTests(unittest.TestCase):
                 DATA_DIR=root, CLIENTS_FILE=root / 'clients.json', PUBLIC_IP='192.0.2.1',
                 XRAY_DIR=protocol, XRAY_CONFIG=config_path, XRAY_SETTINGS=settings_path,
             ), patch.object(api.Path, 'exists', return_value=True), patch.object(api, 'run', side_effect=command), \
-                 patch.object(api.subprocess, 'run', side_effect=process):
+                 patch.object(api.subprocess, 'run', side_effect=process), \
+                 patch.object(api, 'validate_xray_reality_connection') as verify:
                 created = api.create_client(api.ClientCreate(name='Russian SNI', protocol='xray', settings=settings))
+                verify.assert_called_once()
+                self.assertEqual(verify.call_args.args[0]['server_name'], 'xn--41a.xn--p1ai')
+                original_config = config_path.read_bytes()
+                original_settings = settings_path.read_bytes()
+                original_clients = api.read_clients()
+                verify.side_effect = api.HTTPException(status_code=422, detail='REALITY handshake failed')
+                with self.assertRaises(api.HTTPException) as error:
+                    api.create_client(api.ClientCreate(name='Rejected SNI', protocol='xray',
+                        settings=api.ClientSettings(xray_sni='second.example.com')))
+                self.assertEqual(error.exception.status_code, 422)
+                self.assertEqual(config_path.read_bytes(), original_config)
+                self.assertEqual(settings_path.read_bytes(), original_settings)
+                self.assertEqual(api.read_clients(), original_clients)
 
             server = json.loads(config_path.read_text(encoding='utf-8'))
             saved_settings = json.loads(settings_path.read_text(encoding='utf-8'))

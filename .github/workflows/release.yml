@@ -14,7 +14,6 @@ concurrency:
 
 jobs:
   verify:
-    if: github.ref_name == 'light'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -22,13 +21,24 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
       - run: npm ci --include=dev --include=optional --ignore-scripts
       - run: npm run lint
+      - run: npx tsc --noEmit
       - run: npm test
+      - name: Check API and packaging contracts
+        run: |
+          python -m venv .runtime/ci-api
+          .runtime/ci-api/bin/pip install --disable-pip-version-check -r api/requirements.txt httpx PyYAML
+          .runtime/ci-api/bin/python -m unittest discover -s tests -p '*_test.py'
+          python tests/linux_packaging_smoke.py
+          bash -n scripts/build-release.sh scripts/vps-control.sh
 
   build:
     needs: verify
-    if: always() && (needs.verify.result == 'success' || github.ref_name == 'test-light')
+    if: always() && needs.verify.result == 'success'
     strategy:
       fail-fast: false
       matrix:
