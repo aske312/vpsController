@@ -33,8 +33,8 @@ summary { cursor: pointer; }
 .panelHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .panelHead > span, .panelHead small { color: var(--muted); font-size: 12px; }
 .eyebrow { margin-bottom: 6px; color: var(--subtle); font: 600 10px/1.5 var(--ui-font); letter-spacing: .07em; text-transform: uppercase; }
-.primaryButton { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 650; }
-.primaryButton:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); }
+.primaryButton { background: var(--accent-dim); border-color: var(--accent-line); color: #c7f4f5; font-weight: 650; }
+.primaryButton:hover:not(:disabled) { background: color-mix(in srgb, var(--cyan) 20%, var(--panel)); border-color: var(--cyan); }
 .ghostButton { background: transparent; color: var(--muted); }
 .dangerButton, button.danger, .serviceStop, .poweroffButton { color: var(--red); border-color: var(--danger-line); background: var(--danger-dim); }
 .miniButton { min-height: 32px; padding: 6px 10px; font-size: 12px; }
