@@ -58,7 +58,7 @@ function NavGroup({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function NavButton({ active, icon, label, detail, badge, onClick }: { active: boolean; icon: string; label: string; detail: string; badge?: string; onClick: () => void }) {
-  return <button type="button" aria-current={active ? "page" : undefined} aria-label={label} title={`${label} · ${detail}`} className={`gateNavButton nav-${icon} ${active ? "active" : ""} ${badge ? "hasBadge" : ""} ${icon === "application" && badge ? "hasOperations" : ""}`} onClick={onClick}><span className="gateNavGlyph"><NavGlyph name={icon} /></span><span className="gateNavText"><b>{label}</b><small>{detail}</small></span>{badge && <span className="gateNavBeta">{badge}</span>}</button>;
+  return <button type="button" aria-current={active ? "page" : undefined} aria-label={label} title={`${label} · ${detail}`} className={`gateNavButton nav-${icon} ${active ? "active" : ""} ${badge ? "hasBadge" : ""} ${icon === "application" && badge ? "hasOperations" : ""}`} onClick={onClick}><span className="gateNavGlyph"><NavGlyph name={icon} /></span><span className="gateNavText"><b>{label}</b></span>{badge && <span className="gateNavBeta">{badge}</span>}</button>;
 }
 
 function NavGlyph({ name }: { name: string }) {

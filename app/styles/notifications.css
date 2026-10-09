@@ -1,27 +1,30 @@
 .gateNotificationDock { position: fixed; z-index: var(--z-notification); top: 68px; right: 20px; display: grid; gap: 10px; width: 400px; max-width: calc(100dvw - 48px); pointer-events: none; }
-.gateNotificationHeader { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); pointer-events: auto; }
-.gateNotificationHeader strong { font-size: 13px; }
+.gateNotificationHeader { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); pointer-events: auto; }
+.gateNotificationHeader strong { font-size: 12px; }
 .gateNotificationHeader strong span { color: var(--muted); margin-left: 6px; }
 .gateNotificationHeader strong small { display: block; color: var(--muted); font-size: 11px; font-weight: 400; margin-top: 4px; }
 .gateNotificationHeader > div { display: flex; gap: 12px; }
-.gateNotificationHeader button { min-height: 28px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 12px; }
+.gateNotificationHeader button { min-height: 28px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 11px; }
 .gateNotificationList { display: flex; flex-direction: column; gap: 8px; max-height: min(60dvh, 580px); padding: 2px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; pointer-events: auto; }
 .gateNotificationDock:not(.is-expanded) .gateOperationCard:nth-child(n+4) { display: none; }
 .gateOperationCard { --notification-color: var(--amber); min-width: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--notification-color) 35%, var(--line)); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-float); pointer-events: auto; }
 .gateOperationCard.error { --notification-color: var(--red); }
 .gateOperationCard.success { --notification-color: var(--green); }
 .gateOperationCard.info { --notification-color: var(--blue); }
-.gateOperationContent { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 12px; }
+.gateOperationContent { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: start; gap: 8px; padding: 10px; }
 .gateOperationCard.collapsed .gateOperationContent { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
-.gateOperationIcon { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid color-mix(in srgb, var(--notification-color) 35%, var(--line)); border-radius: var(--radius); color: var(--notification-color); background: color-mix(in srgb, var(--notification-color) 10%, var(--panel)); font-size: 15px; }
-.gateOperationText { display: grid; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
-.gateOperationText > span { color: var(--subtle); font-size: 11px; }
-.gateOperationText strong { color: var(--text); font-size: 14px; line-height: 1.45; }
-.gateOperationText small { color: var(--muted); font-size: 12px; line-height: 1.7; white-space: pre-wrap; }
+.gateOperationIcon { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid color-mix(in srgb, var(--notification-color) 35%, var(--line)); border-radius: var(--radius); color: var(--notification-color); background: color-mix(in srgb, var(--notification-color) 10%, var(--panel)); font-size: 13px; }
+.gateOperationText { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.gateOperationText > span { color: var(--subtle); font-size: 10px; }
+.gateOperationText strong { color: var(--text); font-size: 12px; line-height: 1.4; }
+.gateOperationText small { color: var(--muted); font-size: 11px; line-height: 1.45; white-space: pre-wrap; }
+.gateOperationDetails { color: var(--muted); font-size: 10px; }
+.gateOperationDetails summary { color: var(--subtle); }
+.gateOperationDetails p { margin-top: 5px; line-height: 1.5; white-space: pre-wrap; }
 .gateOperationActions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-.gateOperationPercent { color: var(--text); font: 500 17px var(--technical-font); }
+.gateOperationPercent { color: var(--text); font: 500 14px var(--technical-font); }
 .gateNotificationClose { display: grid; place-items: center; width: 28px; height: 28px; min-height: 28px; padding: 0; border: 0; background: var(--panel-2); color: var(--muted); font-size: 20px; }
-.gateOperationButton { min-height: 30px; padding: 5px 9px; color: var(--notification-color); font-size: 12px; background: transparent; border-color: color-mix(in srgb, var(--notification-color) 30%, var(--line)); }
+.gateOperationButton { min-height: 28px; padding: 4px 7px; color: var(--notification-color); font-size: 11px; background: transparent; border-color: color-mix(in srgb, var(--notification-color) 30%, var(--line)); }
 .gateOperationTrack { height: 5px; background: var(--line); overflow: hidden; }
 .gateOperationTrack > i, .gateOperationTrack > b { display: block; height: 100%; max-width: 100%; background: var(--notification-color); transition: width .3s; }
 .gateOperationTrack.indeterminate > i { width: 35%; animation: notification-progress 1.8s ease-in-out infinite; }
