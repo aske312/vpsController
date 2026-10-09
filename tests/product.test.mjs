@@ -400,8 +400,11 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(workflow, /release_tag="light-test-latest"/);
   assert.match(workflow, /GITHUB_REF_NAME" == "test-light"/);
   assert.match(workflow, /version="\$\{latest#light-\}"/);
-  assert.match(workflow, /verify:\s+if: github\.ref_name == 'light'/);
-  assert.match(workflow, /needs\.verify\.result == 'success' \|\| github\.ref_name == 'test-light'/);
+  assert.match(workflow, /verify:\s+runs-on:/);
+  assert.match(workflow, /if: always\(\) && needs\.verify\.result == 'success'\s/);
+  assert.doesNotMatch(workflow, /needs\.verify\.result == 'success' \|\|/);
+  assert.match(workflow, /python -m unittest discover -s tests/);
+  assert.match(workflow, /python tests\/linux_packaging_smoke\.py/);
   assert.match(workflow, /release_flags=\(--prerelease\)/);
   assert.match(workflow, /publish:\s+needs: build\s+if: always\(\) && needs\.build\.result == 'success'/);
   assert.match(ciWorkflow, /push:\s+branches: \[light\]/);
