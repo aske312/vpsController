@@ -97,6 +97,7 @@ trap 'rm -rf -- "${backup}"' EXIT
 [[ ! -f "${LIB}/agent.py" ]] || cp "${LIB}/agent.py" "${backup}/agent.py"
 install -m 0755 "${SOURCE}/agent.py" "${LIB}/agent.py"
 install -m 0700 "${SOURCE}/credentials.py" "${LIB}/credentials.py"
+install -m 0644 "${SOURCE}/manifest.json" "${LIB}/manifest.json"
 cat >/etc/systemd/system/vps-control-relay-agent.service <<'EOF'
 [Unit]
 Description=VPS Control Relay Agent

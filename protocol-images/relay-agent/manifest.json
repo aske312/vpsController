@@ -1,5 +1,6 @@
 {
   "id": "relay-agent",
+  "source_branch": "agent",
   "name": "Relay Agent",
   "version": "1.0.0",
   "installable": true,

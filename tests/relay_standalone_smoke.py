@@ -138,11 +138,13 @@ if sys.argv[1] in ('restart', 'disable'):
     assert state.read_bytes() == saved_routes
     with urlopen(request, context=context, timeout=5) as response: assert json.load(response)['routes'] == 1
     if Path('/qa/light').exists():
+        Path('/etc/vps-control.env').write_text('PUBLIC_IP=8.8.8.8\n')
         result = run('bash', '/qa/light/protocol-images/relay-agent/install.sh')
         assert connection['token'] not in result.stdout + result.stderr
         assert all((config_root / name).read_bytes() == value for name, value in before.items())
         assert state.read_bytes() == saved_routes
         with urlopen(request, context=context, timeout=5) as response: assert json.load(response)['routes'] == 1
+        Path('/etc/vps-control.env').unlink()
     assert not Path('/opt/vps-control').exists()
     assert list(Path('/etc/systemd/system').glob('*.service')) == [Path('/etc/systemd/system/vps-control-relay-agent.service')]
     import pwd
