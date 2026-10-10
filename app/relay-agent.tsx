@@ -51,7 +51,7 @@ export function RelayAgent({ image, request, busy, confirmRotation, onServiceAct
     try {
       const value = await request(rotate ? "/relay-agent/token/rotate" : "/relay-agent/credentials", { method: "POST" }) as Connection;
       setCredentials(value);
-      if (rotate) setNotice("Токен заменён. Обновите параметры узла в PRO; маршруты продолжают работать.");
+      if (rotate) setNotice("Токен заменён. Обновите параметры узла в управляющей панели; маршруты продолжают работать.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Результат не подтверждён. Проверьте параметры агента перед повтором.");
     } finally { setWorking(false); }
@@ -67,7 +67,7 @@ export function RelayAgent({ image, request, busy, confirmRotation, onServiceAct
 
   return <section className="protocolWorkspace agentWorkspace">
     <header className="protocolWorkspaceHero">
-      <div className="protocolWorkspaceIdentity"><ProtocolIcon protocol="relay-agent" /><div><small>RELAY AGENT</small><h1>Agent</h1><p>Управление relay текущего VPS и подключение к PRO</p></div></div>
+      <div className="protocolWorkspaceIdentity"><ProtocolIcon protocol="relay-agent" /><div><small>RELAY AGENT</small><h1>Agent</h1><p>Добавление текущего VPS в изолированную сеть</p></div></div>
       <div className="protocolWorkspaceEndpoint"><small>API ENDPOINT</small><strong>{status?.agent_url || "Проверяем…"}</strong><span>HTTPS · {image.installed_version || image.version}</span></div>
       <div className="agentServiceState"><strong>{image.service_active ? "Служба работает" : "Служба остановлена"}</strong><small>{status?.active ? "API доступен" : "API не подтверждён"}</small></div>
       <div className="protocolWorkspaceActions">
@@ -78,17 +78,17 @@ export function RelayAgent({ image, request, busy, confirmRotation, onServiceAct
       </div>
     </header>
     <article className="panel relayAgentDetails">
-    <div className="panelHead"><div><p className="eyebrow">PRO CONNECTION</p><h2>Подключение к PRO</h2></div></div>
-    <p>Подключите этот VPS в PRO по защищённому API. TCP/UDP-маршруты создаются из PRO; действующие VPN-подключения независимы.</p>
+    <div className="panelHead"><div><p className="eyebrow">ISOLATED NETWORK</p><h2>Добавление в изолированную сеть</h2></div></div>
+    <p>Добавьте этот VPS в изолированную сеть по защищённому API. Управляющая панель задаёт TCP/UDP-маршруты узла; действующие VPN-подключения независимы.</p>
     <dl>
       <div><dt>API</dt><dd>{status?.agent_url || "Загрузка…"}</dd></div>
       <div><dt>Состояние</dt><dd>{status ? status.active ? "API доступен" : "API недоступен" : "Проверяем…"}</dd></div>
       <div><dt>SHA-256 сертификата</dt><dd className="relayFingerprint">{status?.certificate_sha256 || "—"}</dd></div>
       <div><dt>Порты маршрутов</dt><dd>20000–20999 · TCP / UDP · IPv4</dd></div>
     </dl>
-    <p>В PRO проверяйте сертификат по указанному отпечатку. Токен даёт право управлять маршрутами этого узла.</p>
+    <p>При добавлении узла проверяйте сертификат по указанному отпечатку. Токен даёт право управлять маршрутами этого узла.</p>
     <div className="relayAgentActions">
-      <button disabled={busy || working} onClick={() => credentials ? setCredentials(null) : void reveal()}>{working ? "Выполняется…" : credentials ? "Скрыть токен" : "Показать параметры PRO"}</button>
+      <button disabled={busy || working} onClick={() => credentials ? setCredentials(null) : void reveal()}>{working ? "Выполняется…" : credentials ? "Скрыть токен" : "Показать параметры подключения"}</button>
       <button disabled={busy || working} onClick={() => void reveal(true)}>Заменить токен</button>
     </div>
     {credentials && <div className="relayCredentials"><label>Параметры подключения · содержат секрет<textarea readOnly value={JSON.stringify(credentials, null, 2)} rows={8} spellCheck={false} /></label><button onClick={() => void copy()}>Скопировать параметры</button></div>}
@@ -98,7 +98,7 @@ export function RelayAgent({ image, request, busy, confirmRotation, onServiceAct
     <article className="panel relayAgentRoutes">
       <div className="panelHead"><div><p className="eyebrow">RELAY ROUTES</p><h2>Маршруты · {status?.items.length ?? "—"}</h2></div><button disabled={busy || working} onClick={() => setRefreshKey((value) => value + 1)}>Обновить состояние</button></div>
       {!!status?.items.length && <div className="relayRouteList">{status.items.map((route) => <div key={route.id}><strong>{route.id}</strong><span>{route.transport.toUpperCase()} · {route.listen_port} → {route.target_ip}:{route.target_port}</span><small>{route.state === "listening" ? "Слушает порт · передача данных отдельно не проверена" : "Ошибка listener"}</small></div>)}</div>}
-      {status?.active && !status.items.length && <p>Маршрутов пока нет. Добавьте узел и назначьте сервер назначения в PRO.</p>}
+      {status?.active && !status.items.length && <p>Маршрутов пока нет. Добавьте узел в изолированную сеть и назначьте сервер назначения.</p>}
       {(pollError || status?.error) && <p role="status">{pollError || status?.error}</p>}
       {!status && !pollError && <p>Получаем состояние агента…</p>}
     </article>

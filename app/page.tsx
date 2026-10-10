@@ -1371,7 +1371,7 @@ export default function Home() {
       {tab === "agent" && (relayImage ? <RelayAgent image={relayImage} request={request} busy={busy}
         onServiceAction={(action) => runServiceAction("relay-agent", "Relay Agent", action)}
         onUpdate={() => void installProtocol(relayImage)} onRemove={() => void removeProtocol(relayImage)}
-        confirmRotation={() => askConfirmation({ title: "Заменить токен Relay Agent?", message: "Старый токен перестанет работать. Обновите параметры узла в PRO. Действующие маршруты сохранятся.", confirmLabel: "Заменить токен" })}
+        confirmRotation={() => askConfirmation({ title: "Заменить токен Relay Agent?", message: "Старый токен перестанет работать. Обновите параметры узла в управляющей панели. Действующие маршруты сохранятся.", confirmLabel: "Заменить токен" })}
       /> : <section className="panel"><h1>Agent</h1><p>Relay Agent не установлен.</p><button onClick={() => setTab("overview")}>Перейти к модулям</button></section>)}
 
       {tab === "security" && <section className="securityGrid">

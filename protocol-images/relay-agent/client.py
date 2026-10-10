@@ -1,4 +1,4 @@
-"""Portable server-side PRO client: pin TLS before transmitting the token."""
+"""Portable server-side relay client: pin TLS before transmitting the token."""
 import hashlib
 import hmac
 import http.client

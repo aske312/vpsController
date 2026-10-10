@@ -5,7 +5,7 @@
   "installable": true,
   "status": "available",
   "kind": "agent",
-  "description": "Relay текущего VPS: защищённый API для управления TCP/UDP-маршрутами из PRO",
+  "description": "Добавление VPS в изолированную сеть: защищённый API и TCP/UDP-маршруты",
   "category": "network-agents",
   "category_name": "Сетевые агенты",
   "installer": "install.sh",
