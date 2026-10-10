@@ -46,6 +46,7 @@ summary { cursor: pointer; }
 .protocolIcon { width: 30px; height: 30px; object-fit: contain; flex: 0 0 auto; }
 .protocolIconVector { display: grid; place-items: center; color: var(--accent); }
 .protocolIconVector.awg { color: var(--green); }
+.protocolIconVector.hysteria2 { color: var(--blue); }
 .protocolIconVector.tuic { color: var(--violet); }
 .protocolIconVector.xray { color: var(--amber); }
 .protocolIconVector.relay-agent { color: var(--subtle); }

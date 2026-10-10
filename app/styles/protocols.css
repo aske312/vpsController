@@ -1,5 +1,6 @@
 .protocolWorkspace { --protocol-color: var(--blue); display: grid; gap: 10px; }
 .protocol-awg { --protocol-color: var(--green); }
+.protocol-hysteria2 { --protocol-color: var(--blue); }
 .protocol-tuic { --protocol-color: var(--violet); }
 .protocol-xray { --protocol-color: var(--amber); }
 .protocolWorkspaceRail { display: flex; gap: 8px; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow-x: auto; }
