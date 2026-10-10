@@ -1065,7 +1065,7 @@ write_integrity_manifest() {
   chmod 0600 "${manifest}"
 }
 
-ensure_environment() {
+ensure_environment_layout() {
   install -d -m 0750 /etc/vps-control
   local canonical_env="/etc/vps-control/controller.env"
   if [[ "${ENV_FILE}" == "${LEGACY_ENV_FILE}" ]]; then
@@ -1076,6 +1076,10 @@ ensure_environment() {
     ln -s -- "${ENV_FILE}" "${LEGACY_ENV_FILE}.migrate"
     mv -Tf -- "${LEGACY_ENV_FILE}.migrate" "${LEGACY_ENV_FILE}"
   fi
+}
+
+ensure_environment() {
+  ensure_environment_layout
   install -d -m 0750 "${DATA_DIR}" "${DATA_DIR}/tmp" "${DATA_DIR}/logs" /etc/amnezia
   rm -f -- "${DATA_DIR}/personalization.json"
   if [[ ! -s "${ENV_FILE}" ]]; then
@@ -1159,6 +1163,7 @@ EOF
 }
 
 ensure_api_write_access() {
+  ensure_environment_layout
   install_awg_ports_template
   install_direct_ports_templates
   local expected="ReadWritePaths=-/etc/amnezia -/etc/vps-control ${DATA_DIR}"
@@ -2608,7 +2613,7 @@ main() {
   load_manager_config
   load_install_config
   case "${1:-help}" in
-    install|install-release|uninstall|doctor|start|stop|restart|update|scheduled-app-update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|system-update|kernel-update|scheduled-kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|domain|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update)
+    install|install-release|uninstall|doctor|start|stop|restart|update|scheduled-app-update|test-update|test-rollback|verify|network-check|integrity-check|identity|secure|system-update|kernel-update|scheduled-kernel-update|vpn-firewall|optimize|automation-apply|logging-config|logs-clear|access-mode|domain|service-mode|reboot|poweroff|protocol-install|protocol-remove|protocol-update|environment-migrate)
       case "${1}" in
         protocol-install|protocol-remove|protocol-update) begin_operation "${1}:${2:-}" ;;
         scheduled-app-update) begin_operation "update" ;;
@@ -2663,6 +2668,11 @@ main() {
     update) update_app ;;
     scheduled-app-update) scheduled_app_update ;;
     test-update) update_test_app "$@" ;;
+    environment-migrate)
+      ensure_environment_layout
+      ensure_api_write_access
+      systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service"
+      ;;
     ports-prepare) install_direct_ports_templates ;;
     test-rollback) restore_test_app ;;
     status) status_app ;;
