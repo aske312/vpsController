@@ -97,6 +97,9 @@ class RelayRoute(asyncio.DatagramProtocol):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM if self.config['transport'] == 'tcp' else socket.SOCK_DGRAM)
         if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        elif self.config['transport'] == 'tcp':
+            # Rebind after restart despite TIME_WAIT; no SO_REUSEPORT or shared listener.
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((self.listen_host, self.config['listen_port']))
             sock.setblocking(False)

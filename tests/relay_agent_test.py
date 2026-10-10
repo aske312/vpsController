@@ -153,6 +153,11 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(route.received, 16)
         finally:
             await route.close(); origin.close(); await origin.wait_closed()
+        # POSIX restarts must restore a TCP listener after real traffic/TIME_WAIT.
+        if sys.platform != 'win32':
+            replacement = relay.RelayRoute(route.config, '127.0.0.1')
+            await replacement.start()
+            await replacement.close()
 
     async def test_udp_clients_keep_independent_reply_paths_and_first_packet_bursts(self):
         class Echo(asyncio.DatagramProtocol):
