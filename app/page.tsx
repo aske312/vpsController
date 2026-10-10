@@ -10,6 +10,8 @@ import { ProtocolIcon } from "./protocol-icon";
 import { ProtocolWorkspace } from "./protocol-workspace";
 import { LightNavigation } from "../src/light-navigation";
 import { basicCredentials } from "../src/auth-credentials";
+import { authorizedRequest, SessionExpiredError } from "../src/api-request";
+import { operationCompleted, OperationFailedError } from "../src/operation-result";
 import { useNotifications } from "../src/notifications/notification-center";
 
 export type Protocol = "awg" | "hysteria2" | "tuic" | "xray";
@@ -251,7 +253,30 @@ export default function Home() {
   const trackedActionUnit = useRef("");
   const notifiedActionUnits = useRef(new Set<string>());
   const liveRequestInFlight = useRef(false);
+  const sessionToken = useRef("");
   const expectedDowntimeUntil = useRef(0);
+
+  const endSession = useCallback((message = "") => {
+    sessionToken.current = "";
+    sessionStorage.removeItem("312-token");
+    sessionStorage.removeItem(expectedDowntimeStorageKey);
+    expectedDowntimeUntil.current = 0;
+    setToken("");
+    setBusy(false); setInstallingProtocol("");
+    setLoginPassword("");
+    setCurrentAdminPassword(""); setNewAdminPassword(""); setConfirmAdminPassword("");
+    setPasswordDialog(false); setConnectionDialog(false);
+    setConfirmation((current) => { current?.resolve(false); return null; });
+    setConfirmationInput("");
+    setNotice(""); setError(message);
+    setClients([]); setOverview(null); setSecurity(null); setServices(null); setApplication(null);
+    setProtocolStatuses({}); setConnectionOptions({});
+    automationDirty.current = false; loggingDirty.current = false;
+    setAutomationDraft(null); setLoggingDraft(null);
+    networkSample.current = null; protocolSamples.current = {};
+    setSecurityLogs([]); setApplicationLogs([]);
+    notifications.reset();
+  }, [notifications]);
 
   const beginExpectedDowntime = useCallback((action: string) => {
     if (!connectionInterruptingActions.has(action as ApplicationAction)) return;
@@ -275,8 +300,8 @@ export default function Home() {
 
   useEffect(() => {
     // Restore browser-only credentials after hydration.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setToken(sessionStorage.getItem("312-token") || "");
+    sessionToken.current = sessionStorage.getItem("312-token") || "";
+    setToken(sessionToken.current);
     const savedDowntime = Number(sessionStorage.getItem(expectedDowntimeStorageKey) || 0);
     if (savedDowntime > Date.now()) expectedDowntimeUntil.current = savedDowntime;
     else sessionStorage.removeItem(expectedDowntimeStorageKey);
@@ -304,18 +329,11 @@ export default function Home() {
   }, [notice, notifications, token]);
 
   const request = useCallback(async (path: string, init?: RequestInit) => {
-    const response = await fetch(`/api${path}`, {
-      ...init,
-      headers: { "Content-Type": "application/json", Authorization: `Basic ${token}`, ...(init?.headers || {}) },
+    return authorizedRequest<Awaited<ReturnType<Response["json"]>>>(path, token, init, {
+      isCurrent: (candidate) => candidate === sessionToken.current,
+      expire: () => endSession("Сессия завершена. Войдите в панель заново."),
     });
-    if (!response.ok) {
-      const raw = await response.text();
-      let detail = raw;
-      try { detail = (JSON.parse(raw) as { detail?: string }).detail || raw; } catch { /* Plain-text API error. */ }
-      throw new Error(response.status === 401 ? "Неверный токен администратора" : detail || `Ошибка ${response.status}`);
-    }
-    return response.json();
-  }, [token]);
+  }, [endSession, token]);
 
   const checkAwgPort = useCallback((port: number): Promise<AwgPortStatus> => request(`/clients/awg-port?port=${port}`), [request]);
   const checkServerPort = useCallback((protocol: Protocol, port: number, sni: string): Promise<ServerPortStatus> => request(`/clients/server-port?protocol=${protocol}&port=${port}&sni=${encodeURIComponent(sni)}`), [request]);
@@ -756,9 +774,7 @@ export default function Home() {
     setBusy(true); setError("");
     try {
       await request("/security/admin-password", { method: "PUT", body: JSON.stringify({ current_password: currentAdminPassword, new_password: newAdminPassword, confirm_password: confirmAdminPassword }) });
-      sessionStorage.removeItem("312-token");
-      closePasswordDialog(); setToken(""); setLoginPassword("");
-      setNotice("Пароль изменён. Войдите заново с новым паролем.");
+      endSession("Пароль изменён. Войдите заново с новым паролем.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось изменить пароль"); }
     finally { setBusy(false); }
   }
@@ -827,12 +843,13 @@ export default function Home() {
           setServices(nextServices);
           setApplication(nextApplication);
           const modeActionFinished = nextApplication?.action?.action === "service-mode"
-            && ["succeeded", "finished"].includes(nextApplication?.action?.state || "");
+            && operationCompleted(nextApplication.action, "");
           if (Boolean(nextServices?.service_mode?.active) === active && modeActionFinished) {
             confirmed = true;
             break;
           }
-        } catch {
+        } catch (cause) {
+          if (cause instanceof SessionExpiredError || cause instanceof OperationFailedError) throw cause;
           // API and gateway may briefly restart while the selected branch is deployed.
         }
       }
@@ -857,14 +874,11 @@ export default function Home() {
         const current = imageData.items?.find((item) => item.id === image.id);
         const actionState = status.action?.state || "";
         const actionMatches = !expectedUnit || status.action?.unit === expectedUnit;
-        if (actionMatches && (actionState === "failed" || status.action?.result === "failed" || status.action?.result === "unknown")) {
-          const detail = status.action?.message || "системная задача не вернула результат";
-          throw new Error(`Операция с ${image.name} завершилась с ошибкой: ${detail}`);
-        }
+        const actionFinished = operationCompleted(status.action, expectedUnit);
         const actionActive = actionMatches && ["active", "activating", "running"].includes(actionState);
-        if (Boolean(current?.installed) === installed && !actionActive) return;
+        if (current && Boolean(current.installed) === installed && !actionActive && actionFinished) return;
       } catch (cause) {
-        if (cause instanceof Error && cause.message.includes("завершилось с ошибкой")) throw cause;
+        if (cause instanceof SessionExpiredError || cause instanceof OperationFailedError) throw cause;
         // API may restart briefly after installing or removing a module.
       }
     }
@@ -906,17 +920,15 @@ export default function Home() {
     } finally { setCheckingProtocolVersion(""); }
   }
 
-  async function waitForProtocolUpdate(image: ProtocolImage) {
+  async function waitForProtocolUpdate(image: ProtocolImage, expectedUnit: string) {
     for (let attempt = 0; attempt < 120; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 5000));
       try {
         const status = await request("/application/status") as ApplicationStatus;
         setApplication(status);
-        const state = status.action?.state || "";
-        if (state === "failed" || status.action?.result === "failed") throw new Error(`Обновление ${image.name} завершилось с ошибкой совместимости`);
-        if (state === "succeeded" || status.action?.result === "success") return;
+        if (operationCompleted(status.action, expectedUnit)) return;
       } catch (cause) {
-        if (cause instanceof Error && cause.message.includes("ошибкой совместимости")) throw cause;
+        if (cause instanceof SessionExpiredError || cause instanceof OperationFailedError) throw cause;
       }
     }
     throw new Error(`Сервер не подтвердил обновление ${image.name} за 10 минут`);
@@ -936,7 +948,7 @@ export default function Home() {
     try {
       const started = await request(`/protocol-images/${image.id}/update`, { method: "POST" });
       setApplication((current) => ({ api: current?.api || { active: true, enabled: true }, containers: current?.containers || [], action: started }));
-      await waitForProtocolUpdate(image);
+      await waitForProtocolUpdate(image, started.unit || "");
       await Promise.all([loadOverview(), loadClients(), loadProtocolStatus(image.id as Protocol)]);
       setNotice(`${image.name} обновлён. Проверьте предупреждения у подключений.`);
     } catch (cause) {
@@ -1104,6 +1116,7 @@ export default function Home() {
           : `Не удалось проверить учётные данные (ошибка ${response.status})`);
       }
       setToken(candidateToken);
+      sessionToken.current = candidateToken;
       setLoginPassword("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось войти в панель");
@@ -1294,7 +1307,7 @@ export default function Home() {
             <button className="iconButton" onClick={() => void refreshCurrent(true)} aria-label="Обновить текущий модуль">↻</button>
           </div>
           {lastUpdated && <span className="updatedAt">{lastUpdated.toLocaleTimeString("ru-RU")}</span>}
-          <button className="ghostButton" onClick={() => { sessionStorage.removeItem("312-token"); setToken(""); }}>Выйти</button>
+          <button className="ghostButton" onClick={() => endSession()}>Выйти</button>
         </div>
       </header>
     </LightNavigation>

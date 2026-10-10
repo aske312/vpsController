@@ -256,7 +256,7 @@ class PortabilityTests(unittest.TestCase):
             self.assertTrue(api.is_diagnostic_identity('xray', xray_users[0]))
             self.assertEqual(len([item for item in stored if item['diagnostic']]), 2)
             self.assertEqual(validate.call_count, 2)
-            self.assertEqual(systemctl.call_count, 2)
+            self.assertEqual(sum(call.args[:2] == ('systemctl', 'restart') for call in systemctl.call_args_list), 2)
 
     def test_direct_probe_identity_rolls_back_rejected_server_config(self):
         cases = {

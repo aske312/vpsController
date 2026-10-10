@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { UnknownMutationError } from "../src/api-request";
 import { ConnectionProfileResult, protocolDelivery, type ConnectionProfile } from "./connection-profile";
 import { ProtocolIcon } from "./protocol-icon";
 import type { Protocol } from "./page";
@@ -209,6 +210,8 @@ function validateConnection(name: string, protocol: Protocol, settings: Connecti
 function serverErrorField(message: string): keyof ConnectionSettings | undefined {
   const value = message.toLowerCase();
   if (value.includes("server_port")) return "server_port";
+  if (value.includes("xray_dns")) return "xray_dns";
+  if (value.includes("dns")) return "dns";
   for (const field of ["quic_idle", "quic_keepalive", "quic_stream_window", "quic_conn_window", "quic_streams", "xmux_concurrency", "xmux_connections", "xmux_reuse", "xmux_requests", "xmux_seconds", "xmux_keepalive", "xray_padding"] as const) if (value.includes(field)) return field;
   if (value.includes("awg udp port") || value.includes("awg_port")) return "awg_port";
   if (value.includes("awg signature")) return "awg_signature_domain";
@@ -249,6 +252,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [profile, setProfile] = useState<ConnectionProfile | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [mutationUnknown, setMutationUnknown] = useState(false);
   const [formError, setFormError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [portResult, setPortResult] = useState<AwgPortStatus | null>(null);
@@ -306,6 +310,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submitting || profile || mutationUnknown) return;
     const validation = validateConnection(name, protocol, settings);
     if (protocol === "awg" && portError) validation.awg_port = portError;
     if (protocol !== "awg" && serverPortError) validation.server_port = serverPortError;
@@ -322,6 +327,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
       setName("");
       await onCreated();
     } catch (cause) {
+      if (cause instanceof UnknownMutationError) setMutationUnknown(true);
       const message = cause instanceof Error ? cause.message : "Не удалось создать подключение";
       setFormError(message);
       const field = serverErrorField(message);
@@ -337,6 +343,8 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
     setProfile(null);
     setSettings(settingsFor(protocol, serverOptions));
     setFieldErrors({});
+    setFormError("");
+    setPortResult(null); setServerPortResult(null);
   }
 
   const meta = protocolDelivery[protocol];
@@ -474,7 +482,7 @@ export function ConnectionDialog({ protocols, serverOptions, onClose, onCreate, 
           </fieldset>
           {formError && <div className="connectionDialogError" role="alert">{formError}</div>}
         </div>
-        <footer className="connectionDialogActions"><button type="button" onClick={onClose} disabled={submitting}>Отмена</button><button className="primaryButton" disabled={submitting || name.trim().length < 2 || localAccessInvalid}>{submitting ? "Создаём…" : localAccessInvalid ? "Укажите пароль" : "Создать подключение"}</button></footer>
+        <footer className="connectionDialogActions"><button type="button" onClick={onClose} disabled={submitting}>Отмена</button><button className="primaryButton" disabled={submitting || mutationUnknown || name.trim().length < 2 || localAccessInvalid}>{submitting ? "Создаём…" : mutationUnknown ? "Проверьте результат" : localAccessInvalid ? "Укажите пароль" : "Создать подключение"}</button></footer>
       </> : <>
         <div className="connectionDialogResult"><ConnectionProfileResult profile={profile} onDownload={onDownload} /></div>
         <footer className="connectionDialogActions"><button type="button" onClick={createAnother}>Создать ещё</button><button type="button" className="primaryButton" onClick={onClose}>Готово</button></footer>

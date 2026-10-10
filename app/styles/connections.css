@@ -32,6 +32,7 @@
 .connectionRowState > i { display: block; width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--subtle); }
 .connectionRowState > i.stable { background: var(--green); }
 .connectionRowState > i.attention { background: var(--amber); }
+.connectionRowState > i.issued { background: var(--blue); }
 .connectionRowState strong { font-size: 12px; }
 .connectionsEmpty, .noConnectionProtocols { display: grid; justify-items: center; align-content: center; gap: 12px; padding: 28px 20px; min-height: 180px; text-align: center; }
 .connectionsEmpty > span, .noConnectionProtocols > span { color: var(--accent); font-size: 30px; }

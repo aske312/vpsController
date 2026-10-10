@@ -43,6 +43,8 @@ type Props = {
 export function ConnectionProfileResult({ profile, onDownload }: Props) {
   const [qrResult, setQrResult] = useState({ content: "", url: "", error: false });
   const [copied, setCopied] = useState("");
+  const [copyError, setCopyError] = useState("");
+  const [revealed, setRevealed] = useState<string[]>([]);
   const meta = protocolDelivery[profile.protocol];
   const qrContent = profile.delivery.qr?.content || "";
   const qr = qrResult.content === qrContent ? qrResult.url : "";
@@ -62,6 +64,8 @@ export function ConnectionProfileResult({ profile, onDownload }: Props) {
   }, [qrContent]);
 
   async function copy(value: string, key: string) {
+    setCopyError("");
+    try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(value);
     } else {
@@ -70,12 +74,17 @@ export function ConnectionProfileResult({ profile, onDownload }: Props) {
       field.style.position = "fixed";
       field.style.opacity = "0";
       document.body.appendChild(field);
-      field.select();
-      document.execCommand("copy");
-      field.remove();
+      try {
+        field.select();
+        if (!document.execCommand("copy")) throw new Error("Копирование недоступно");
+      } finally { field.remove(); }
     }
     setCopied(key);
     window.setTimeout(() => setCopied((current) => current === key ? "" : current), 1600);
+    } catch {
+      setCopied("");
+      setCopyError("Браузер не разрешил копирование. Скачайте профиль или скопируйте раскрытое значение вручную.");
+    }
   }
 
   return <div className="connectionResult">
@@ -94,8 +103,9 @@ export function ConnectionProfileResult({ profile, onDownload }: Props) {
     </div>
 
     {qrResult.content === qrContent && qrResult.error && <p className="connectionSecretNote">Не удалось создать QR-код: профиль может быть слишком большим. Скачайте файл и импортируйте его в клиент.</p>}
+    {copyError && <p className="connectionSecretNote" role="alert">{copyError}</p>}
     <div className="connectionCredentials">
-      {profile.fields.map((field) => <div key={field.label}><small>{field.label}</small><strong>{field.value}</strong>{field.secret && <button type="button" onClick={() => void copy(field.value, field.label)}>{copied === field.label ? "готово" : "копировать"}</button>}</div>)}
+      {profile.fields.map((field) => <div key={field.label}><small>{field.label}</small><strong>{field.secret && !revealed.includes(field.label) ? "••••••••" : field.value}</strong>{field.secret && <><button type="button" aria-label={`${revealed.includes(field.label) ? "Скрыть" : "Показать"} ${field.label}`} onClick={() => setRevealed((current) => current.includes(field.label) ? current.filter((label) => label !== field.label) : [...current, field.label])}>{revealed.includes(field.label) ? "скрыть" : "показать"}</button><button type="button" onClick={() => void copy(field.value, field.label)}>{copied === field.label ? "готово" : "копировать"}</button></>}</div>)}
     </div>
 
     <div className="connectionSetup">

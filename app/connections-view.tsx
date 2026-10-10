@@ -3,9 +3,10 @@
 import { useMemo, useState } from "react";
 import { protocolDelivery } from "./connection-profile";
 import { ProtocolIcon } from "./protocol-icon";
+import { connectionState as clientState, type ConnectionState } from "../src/connection-state";
 import type { Client, Protocol } from "./page";
 
-type Filter = "all" | "stable" | "attention" | "offline";
+type Filter = "all" | ConnectionState;
 
 type Props = {
   clients: Client[];
@@ -30,12 +31,6 @@ const activity = (seconds?: number) => {
   return `${Math.floor(seconds / 86400)} дн. назад`;
 };
 
-function clientState(client: Client): Exclude<Filter, "all"> {
-  if (client.update_state || client.quality === "warning" || client.quality === "error") return "attention";
-  if (client.quality === "stable") return "stable";
-  return "offline";
-}
-
 export function ConnectionsView({ clients, protocols, busy, onNew, onRemove }: Props) {
   const [query, setQuery] = useState("");
   const [protocol, setProtocol] = useState<"all" | Protocol>("all");
@@ -45,6 +40,7 @@ export function ConnectionsView({ clients, protocols, busy, onNew, onRemove }: P
     stable: clients.filter((client) => clientState(client) === "stable").length,
     attention: clients.filter((client) => clientState(client) === "attention").length,
     offline: clients.filter((client) => clientState(client) === "offline").length,
+    issued: clients.filter((client) => clientState(client) === "issued").length,
   }), [clients]);
   const visible = useMemo(() => clients.filter((client) => {
     const matchesText = !normalized || [client.name, client.address, client.endpoint, client.public_key, protocolDelivery[client.protocol].title]
@@ -60,6 +56,7 @@ export function ConnectionsView({ clients, protocols, busy, onNew, onRemove }: P
         <button type="button" className={filter === "stable" ? "active" : ""} onClick={() => setFilter("stable")}><strong>{counts.stable}</strong><span>активны</span></button>
         <button type="button" className={filter === "attention" ? "active" : ""} onClick={() => setFilter("attention")}><strong>{counts.attention}</strong><span>внимание</span></button>
         <button type="button" className={filter === "offline" ? "active" : ""} onClick={() => setFilter("offline")}><strong>{counts.offline}</strong><span>без связи</span></button>
+        <button type="button" className={filter === "issued" ? "active" : ""} onClick={() => setFilter("issued")}><strong>{counts.issued}</strong><span>выданы</span></button>
       </div>
       <button type="button" className="primaryButton connectionsNewButton" onClick={onNew} disabled={busy}>Новое подключение <span>＋</span></button>
     </article>

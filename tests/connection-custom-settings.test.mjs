@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import ts from "typescript";
+import { UnknownMutationError } from "../src/api-request.ts";
 
 const require = createRequire(import.meta.url);
 function dialogHarness(protocol, presets = [{ id: "balanced", label: "Balanced", settings: { quic_idle: 30 } }]) {
@@ -22,6 +23,7 @@ function dialogHarness(protocol, presets = [{ id: "balanced", label: "Balanced",
   const delivery = Object.fromEntries(["awg", "hysteria2", "tuic", "xray"].map(key => [key, { title: key, methods: [] }]));
   new Function("require", "module", "exports", compiled)(name => {
     if (name === "react") return react;
+    if (name === "../src/api-request") return { UnknownMutationError };
     if (name === "./connection-profile") return { protocolDelivery: delivery, ConnectionProfileResult() {} };
     if (name === "./protocol-icon") return { ProtocolIcon() {} };
     if (name === "./awg-domain-presets") return { awgDefaultDomain: "example.ru", awgDomainGroups: [], awgDomainPresets: [] };

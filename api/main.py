@@ -9,6 +9,7 @@ import csv
 import os
 import re
 import secrets
+import shlex
 import socket
 import sqlite3
 import subprocess
@@ -137,6 +138,7 @@ client_quality_cache: dict[str, dict] = {}
 client_mutation_lock = threading.RLock()
 protocol_version_lock = threading.Lock()
 regional_probe_lock = threading.Lock()
+admin_password_lock = threading.Lock()
 protocol_version_cache: dict[str, dict] = {}
 DIRECT_PROTOCOLS = ("hysteria2", "tuic", "xray")
 DIAGNOSTIC_CLIENT_PREFIX = "__vps_control_probe__"
@@ -201,6 +203,13 @@ def command_succeeds(*args: str, timeout: int = 8) -> bool:
         ).returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
+
+
+def restart_protocol_unit(unit: str, *, check: bool = True) -> None:
+    # An explicit configuration change must not exhaust systemd's automatic
+    # crash-loop budget. Keep rate limiting for unattended automatic restarts.
+    run("systemctl", "reset-failed", unit)
+    run("systemctl", "restart", unit, timeout=20, check=check)
 
 
 def write_action_file(action: dict) -> None:
@@ -319,12 +328,15 @@ def check_resource_availability(protocol: str) -> dict:
 
 
 def read_clients() -> list[dict]:
-    if not CLIENTS_FILE.exists():
-        return []
     try:
-        return json.loads(CLIENTS_FILE.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        items = json.loads(CLIENTS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(items, list) or any(not isinstance(item, dict) or not isinstance(item.get("id"), str) or item.get("protocol") not in ("awg", "hysteria2", "tuic", "xray") for item in items):
+            raise ValueError("Invalid client inventory")
+        return items
+    except FileNotFoundError:
         return []
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=503, detail="Список подключений недоступен. Восстановите данные из резервной копии; создание и удаление приостановлены.") from exc
 
 
 def write_clients(items: list[dict]) -> None:
@@ -1051,13 +1063,13 @@ def ensure_direct_probe_identity(protocol: str) -> bool:
                 if validation.returncode:
                     raise RuntimeError(validation.stderr.strip() or "sing-box rejected diagnostic identity")
                 temporary.replace(config_path)
-                run("systemctl", "restart", unit, timeout=20, check=True)
+                restart_protocol_unit(unit)
                 record_diagnostic_client(protocol, user["uuid"])
                 return True
             except Exception:
                 config_path.write_bytes(original)
                 os.chmod(config_path, 0o600)
-                run("systemctl", "restart", unit, timeout=20)
+                restart_protocol_unit(unit, check=False)
                 raise
             finally:
                 temporary.unlink(missing_ok=True)
@@ -1085,13 +1097,13 @@ def ensure_direct_probe_identity(protocol: str) -> bool:
             if validation.returncode:
                 raise RuntimeError(validation.stderr.strip() or "Xray rejected diagnostic identity")
             temporary.replace(XRAY_CONFIG)
-            run("systemctl", "restart", unit, timeout=20, check=True)
+            restart_protocol_unit(unit)
             record_diagnostic_client(protocol, user_uuid)
             return True
         except Exception:
             XRAY_CONFIG.write_bytes(original)
             os.chmod(XRAY_CONFIG, 0o600)
-            run("systemctl", "restart", unit, timeout=20)
+            restart_protocol_unit(unit, check=False)
             raise
         finally:
             temporary.unlink(missing_ok=True)
@@ -1245,6 +1257,18 @@ def check_proxy_internet(proxy_port: int, directory: Path) -> dict:
             "scope": "Внешний HTTPS через клиент протокола на VPS: DNS, TLS и ответ сайта. Сеть устройства и его VPN/TUN-режим проверяются отдельно."}
 
 
+def wait_protocol_listener(protocol: str) -> tuple:
+    listener = protocol_listener(protocol)
+    unit = listener[0]
+    if not listener[3] and run("systemctl", "is-active", unit) in ("active", "activating"):
+        for _ in range(15):
+            time.sleep(0.2)
+            listener = protocol_listener(protocol)
+            if listener[3]:
+                break
+    return listener
+
+
 def check_protocol_connection(protocol: str) -> dict:
     if protocol == "awg":
         return observed_tunnel_connection(protocol)
@@ -1267,13 +1291,15 @@ def check_protocol_connection(protocol: str) -> dict:
     }
     process = None
     try:
-        unit, _, _, listening = protocol_listener(protocol)
+        unit, _, _, listening = wait_protocol_listener(protocol)
         if run("systemctl", "is-active", unit) != "active" or not listening:
             result.update(state="failed", title="Протокол не принимает подключения", detail="Служба остановлена или listener не найден.")
             connection_probe_cache[protocol] = result
             return result
         try:
-            ensure_direct_probe_identity(protocol)
+            created_identity = ensure_direct_probe_identity(protocol)
+            if created_identity and not wait_protocol_listener(protocol)[3]:
+                raise RuntimeError("Protocol listener did not become ready after diagnostic identity restart")
         except (OSError, ValueError, StopIteration, json.JSONDecodeError, RuntimeError, subprocess.TimeoutExpired, HTTPException) as exc:
             result.update(
                 state="failed",
@@ -1498,6 +1524,11 @@ def auth_status() -> dict:
 
 @app.put("/api/security/admin-password")
 def change_admin_password(payload: AdminPasswordChange, _: None = Depends(require_token)) -> dict:
+    with admin_password_lock:
+        return apply_admin_password(payload)
+
+
+def apply_admin_password(payload: AdminPasswordChange) -> dict:
     global ADMIN_PASSWORD
     if not hmac.compare_digest(payload.current_password.encode("utf-8"), ADMIN_PASSWORD.encode("utf-8")):
         raise HTTPException(status_code=400, detail="Текущий пароль указан неверно")
@@ -1519,9 +1550,10 @@ def change_admin_password(payload: AdminPasswordChange, _: None = Depends(requir
     if password.lower() in {"password", "changeme", "change-me", "vpscontrol.312", "vpsadmin-2026-7qm!rk2#"}:
         raise HTTPException(status_code=400, detail="Choose a non-default administrator password")
     ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = ENV_FILE.with_name(f".{ENV_FILE.name}.{uuid.uuid4().hex}.tmp")
     try:
         lines = ENV_FILE.read_text(encoding="utf-8").splitlines() if ENV_FILE.exists() else []
-        encoded = json.dumps(password, ensure_ascii=False)
+        encoded = shlex.quote(password)
         replaced = False
         for index, line in enumerate(lines):
             if line.startswith("ADMIN_PASSWORD="):
@@ -1530,10 +1562,16 @@ def change_admin_password(payload: AdminPasswordChange, _: None = Depends(requir
                 break
         if not replaced:
             lines.append(f"ADMIN_PASSWORD={encoded}")
-        ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        os.chmod(ENV_FILE, 0o600)
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write("\n".join(lines) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.replace(ENV_FILE)
     except OSError as exc:
         raise HTTPException(status_code=500, detail="Unable to persist administrator password") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
     ADMIN_PASSWORD = password
     os.environ["ADMIN_PASSWORD"] = password
     return {"changed": True, "reauthenticate": True}
@@ -2642,7 +2680,10 @@ def manage_service(service_id: str, payload: ServiceAction, _: None = Depends(re
             units.insert(0, "ssh.socket")
         run("systemctl", payload.action, *units, timeout=30, check=True)
     else:
-        run("systemctl", payload.action, definition["unit"], timeout=30, check=True)
+        if payload.action == "restart" and service_id in ("awg", "hysteria2", "tuic", "xray"):
+            restart_protocol_unit(definition["unit"])
+        else:
+            run("systemctl", payload.action, definition["unit"], timeout=30, check=True)
     return service_details(service_id, definition)
 
 
@@ -2993,6 +3034,15 @@ class ClientSettings(BaseModel):
 
     @model_validator(mode="after")
     def validate_transport_tuning(self):
+        for field in ("dns", "xray_dns"):
+            value = getattr(self, field)
+            if field == "xray_dns" and not value.strip():
+                continue
+            try:
+                for address in value.split(","):
+                    ipaddress.ip_address(address.strip())
+            except ValueError as exc:
+                raise ValueError(f"{field}: укажите корректные IP-адреса DNS через запятую") from exc
         for name, lo, hi in (("xray_padding", 100, 1000), ("xmux_concurrency", 0, 1024),
                              ("xmux_connections", 0, 1024), ("xmux_reuse", 0, 1000000),
                              ("xmux_requests", 0, 1000000), ("xmux_seconds", 0, 86400)):
@@ -3011,6 +3061,13 @@ class ClientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=48, pattern=r"^[\w .-]+$")
     protocol: Literal["awg", "hysteria2", "tuic", "xray"]
     settings: ClientSettings = Field(default_factory=ClientSettings)
+
+    @model_validator(mode="after")
+    def validate_name(self):
+        self.name = self.name.strip()
+        if len(self.name) < 2:
+            raise ValueError("Имя подключения должно содержать минимум два символа")
+        return self
 
 
 def local_proxy_fields(payload: ClientCreate) -> list[dict]:
@@ -3247,6 +3304,8 @@ def create_xray_sni_inbound(server: dict, settings: dict, server_name: str, bina
 
 @app.post("/api/clients")
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
+    # Fail before touching protocol users/configuration if the inventory is damaged.
+    read_clients()
     if payload.protocol == "xray" and payload.settings.local_socks_port == payload.settings.local_http_port:
         raise HTTPException(status_code=422, detail="SOCKS and HTTP ports must be different")
     if payload.protocol == "awg" and payload.settings.awg_jmin is not None and payload.settings.awg_jmax is not None and payload.settings.awg_jmin > payload.settings.awg_jmax:
@@ -3400,7 +3459,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 inbound.setdefault("users", []).append(user); temporary.write_text(json.dumps(server, ensure_ascii=False, indent=2), encoding="utf-8"); os.chmod(temporary, 0o600)
                 result = subprocess.run([binary, "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
                 if result.returncode: raise RuntimeError(result.stderr.strip() or "sing-box rejected configuration")
-                temporary.replace(config_path); run("systemctl", "restart", unit, timeout=20, check=True)
+                temporary.replace(config_path); restart_protocol_unit(unit)
                 settings = json.loads(settings_path.read_text(encoding="utf-8")); endpoint = PUBLIC_IP; certificate = (config_path.parent / "server.crt").read_text(encoding="utf-8")
                 outbound = {"type": payload.protocol, "tag": "connection-out", "server": endpoint, "server_port": selected_port, "password": password,
                             "tls": {"enabled": True, "server_name": certificate_server_name(config_path.parent / "server.crt"), "certificate": certificate}}
@@ -3434,7 +3493,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
             except HTTPException:
                 raise
             except Exception as exc:
-                config_path.write_bytes(original); os.chmod(config_path, 0o600); run("systemctl", "restart", unit, timeout=20)
+                config_path.write_bytes(original); os.chmod(config_path, 0o600); restart_protocol_unit(unit, check=False)
                 raise HTTPException(status_code=500, detail=f"Unable to create {payload.protocol} connection") from exc
             finally:
                 temporary.unlink(missing_ok=True)
@@ -3477,7 +3536,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 temporary.replace(XRAY_CONFIG)
                 applied = True
                 run("/usr/local/lib/vps-control-xray/firewall.sh", "add", timeout=10, check=True)
-                run("systemctl", "restart", unit, timeout=20, check=True)
+                restart_protocol_unit(unit)
                 if new_listener:
                     validate_xray_reality_connection(profile, user_uuid, binary)
                 endpoint = PUBLIC_IP
@@ -3548,7 +3607,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     XRAY_SETTINGS.write_bytes(original_settings)
                     os.chmod(XRAY_SETTINGS, 0o600)
                     run("/usr/local/lib/vps-control-xray/firewall.sh", "add", timeout=10)
-                    run("systemctl", "restart", unit, timeout=20)
+                    restart_protocol_unit(unit, check=False)
                 raise
             except Exception as exc:
                 if applied:
@@ -3559,7 +3618,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                 os.chmod(XRAY_SETTINGS, 0o600)
                 if applied:
                     run("/usr/local/lib/vps-control-xray/firewall.sh", "add", timeout=10)
-                run("systemctl", "restart", unit, timeout=20)
+                restart_protocol_unit(unit, check=False)
                 raise HTTPException(status_code=500, detail="Unable to create Xray connection") from exc
             finally:
                 temporary.unlink(missing_ok=True)
@@ -3673,11 +3732,11 @@ def delete_client_locked(client_id: str) -> dict:
                 if result.returncode: temporary.unlink(missing_ok=True); raise HTTPException(status_code=500, detail=f"Unable to remove {protocol} connection")
                 temporary.replace(config_path)
                 try:
-                    run("systemctl", "restart", unit, timeout=20, check=True)
+                    restart_protocol_unit(unit)
                 except Exception:
                     config_path.write_bytes(original)
                     os.chmod(config_path, 0o600)
-                    run("systemctl", "restart", unit, timeout=20)
+                    restart_protocol_unit(unit, check=False)
                     raise
         remaining = [entry for entry in items if entry["id"] != client_id]
         release_client_port(item, remaining)
@@ -3725,7 +3784,7 @@ def delete_client_locked(client_id: str) -> dict:
                     temporary.replace(XRAY_CONFIG)
                     if removed_tags:
                         run("/usr/local/lib/vps-control-xray/firewall.sh", "add", timeout=10, check=True)
-                    run("systemctl", "restart", "vps-control-xray.service", timeout=20, check=True)
+                    restart_protocol_unit("vps-control-xray.service")
                 except Exception:
                     if removed_tags:
                         run("/usr/local/lib/vps-control-xray/firewall.sh", "delete", timeout=10)
@@ -3733,7 +3792,7 @@ def delete_client_locked(client_id: str) -> dict:
                     XRAY_SETTINGS.write_bytes(original_settings); os.chmod(XRAY_SETTINGS, 0o600)
                     if removed_tags:
                         run("/usr/local/lib/vps-control-xray/firewall.sh", "add", timeout=10)
-                    run("systemctl", "restart", "vps-control-xray.service", timeout=20)
+                    restart_protocol_unit("vps-control-xray.service", check=False)
                     raise
                 finally:
                     temporary_settings.unlink(missing_ok=True)
@@ -3913,5 +3972,5 @@ def report_protocol_reachability(
 @app.post("/api/protocols/{protocol}/restart")
 def restart_protocol(protocol: Literal["awg", "hysteria2", "tuic", "xray"], _: None = Depends(require_token)) -> dict:
     unit = f"awg-quick@{AWG_INTERFACE}.service" if protocol == "awg" else f"vps-control-{protocol}.service"
-    run("systemctl", "restart", unit, timeout=20, check=True)
+    restart_protocol_unit(unit)
     return {"protocol": protocol, "active": run("systemctl", "is-active", unit) == "active"}
