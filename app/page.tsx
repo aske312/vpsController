@@ -1365,14 +1365,6 @@ export default function Home() {
             <div className={`securityPostureStat state-${coreUpdatesState}`}><header><h3>CORE UPDATES</h3><i /></header><strong>{String(updates?.available ?? "—")}</strong><small>kernel &amp; packages</small><span>{updates?.security || 0} security updates</span><time>{updates?.refreshing ? "Проверяем…" : updates?.checked_at ? new Date(updates.checked_at).toLocaleString("ru-RU") : "Нет даты проверки"}</time></div>
           </div>
         </article>
-        <article className="panel systemControls">
-          <div><p className="eyebrow">SYSTEM POWER & KERNEL</p><h2>Системные действия</h2><span>Команды выполняются вне процесса панели через systemd</span></div>
-          <div className="systemButtons">
-            <button onClick={() => void runApplicationAction("kernel-update")} disabled={busy}><strong>Обновить ядро</strong><small>{updates?.kernel_available ? "проверит модули протоколов и перезагрузит VPS" : "проверит ядро, headers и модули протоколов"}</small></button>
-            <button onClick={() => void runApplicationAction("reboot")} disabled={busy}><strong>Перезагрузить сервер</strong><small>Корректно завершает службы и запускает VPS заново</small></button>
-            <button className="poweroffButton" onClick={() => void runApplicationAction("poweroff")} disabled={busy}><strong>Выключить сервер</strong><small>потребуется запуск у провайдера</small></button>
-          </div>
-        </article>
         <article className="panel securityList compactSecurity">
           <SecurityActionRow status={firewallState} title="Firewall" text={`UFW · ${firewall?.rules?.length || 0} правил`} onAction={() => void fixSecurity("vpn-firewall")} actionLabel="Включить" disabled={busy} />
           <SecurityActionRow
