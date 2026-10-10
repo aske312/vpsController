@@ -81,12 +81,11 @@ test("интерфейс содержит метаданные, значок и 
   assert.match(page, /Безопасность/);
   assert.equal(JSON.parse(packageJson).name, "312-net-control");
   assert.doesNotMatch(`${layout}\n${page}`, /ChatGPT|Starter Project|Codex/i);
-  assert.match(page, /NEXT_PUBLIC_APP_VERSION \|\| "v1\.0\.0"/);
   assert.match(page, /NEXT_PUBLIC_RELEASE_BRANCH \|\| "light"/);
   for (const countryCode of ["de", "fi", "sg", "kz", "jp", "by", "es", "se", "us"]) {
     assert.match(page, new RegExp(`normalized === \\"${countryCode}\\"|${countryCode}: \\["`));
   }
-  assert.equal(JSON.parse(packageJson).version, "1.0.0");
+  assert.match(JSON.parse(packageJson).version, /^\d+\.\d+\.\d+$/);
 });
 
 test("MIT license, privacy notice and connection guide are included and exposed in RU and EN", async () => {
@@ -399,7 +398,6 @@ test("Light keeps production updates public and gates the test-light channel beh
   assert.match(workflow, /branches: \[light, test-light\]/);
   assert.match(workflow, /release_tag="light-test-latest"/);
   assert.match(workflow, /GITHUB_REF_NAME" == "test-light"/);
-  assert.match(workflow, /version="\$\{latest#light-\}"/);
   assert.match(workflow, /verify:\s+runs-on:/);
   assert.match(workflow, /if: always\(\) && needs\.verify\.result == 'success'\s/);
   assert.doesNotMatch(workflow, /needs\.verify\.result == 'success' \|\|/);

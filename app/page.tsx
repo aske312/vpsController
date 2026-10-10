@@ -14,6 +14,7 @@ import { basicCredentials } from "../src/auth-credentials";
 import { authorizedRequest, SessionExpiredError } from "../src/api-request";
 import { operationCompleted, OperationFailedError } from "../src/operation-result";
 import { useNotifications } from "../src/notifications/notification-center";
+import { version as packageVersion } from "../package.json";
 
 export type Protocol = "awg" | "hysteria2" | "tuic" | "xray";
 type Tab = "overview" | "security" | "application" | "services" | "agent" | Protocol | "clients";
@@ -97,7 +98,7 @@ type ConfirmationRequest = {
   title: string; message: string; confirmLabel: string; phrase?: string; danger?: boolean;
   resolve: (confirmed: boolean) => void;
 };
-const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
+const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || `v${packageVersion}`;
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
 const buildBranch = process.env.NEXT_PUBLIC_RELEASE_BRANCH || "light";
 export type ProtocolStatus = {

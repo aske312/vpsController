@@ -61,20 +61,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          base="$(node -p 'require("./package.json").version')"
-          major_minor="${base%.*}"
-          latest="$(git tag --list "light-v${major_minor}.*" --sort=-v:refname | head -n 1)"
-          if [[ "$GITHUB_REF_NAME" == "test-light" ]]; then
-            [[ -n "$latest" ]] || { echo "Production Light version tag is missing" >&2; exit 1; }
-            version="${latest#light-}"
-          elif [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
-            version="${latest#light-}"
-          elif [[ -z "$latest" ]]; then
-            version="v${base}"
-          else
-            patch="${latest##*.}"
-            version="v${major_minor}.$((patch + 1))"
-          fi
+          version="$(node scripts/release-version.mjs)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Build Light archive
         env:
@@ -113,20 +100,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          base="$(node -p 'require("./package.json").version')"
-          major_minor="${base%.*}"
-          latest="$(git tag --list "light-v${major_minor}.*" --sort=-v:refname | head -n 1)"
-          if [[ "$GITHUB_REF_NAME" == "test-light" ]]; then
-            [[ -n "$latest" ]] || { echo "Production Light version tag is missing" >&2; exit 1; }
-            version="${latest#light-}"
-          elif [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
-            version="${latest#light-}"
-          elif [[ -z "$latest" ]]; then
-            version="v${base}"
-          else
-            patch="${latest##*.}"
-            version="v${major_minor}.$((patch + 1))"
-          fi
+          version="$(node scripts/release-version.mjs)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Publish Light release
         env:
