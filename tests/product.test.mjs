@@ -38,7 +38,7 @@ test("поставка содержит установщик, образы и к
   assert.equal(JSON.parse(tuic).id, "tuic");
   assert.equal(JSON.parse(xray).id, "xray");
   assert.equal(JSON.parse(relay).id, "relay-agent");
-  assert.equal(JSON.parse(relay).installable, false);
+  assert.equal(JSON.parse(relay).installable, true);
   await assert.rejects(read("protocol-images/trojan/manifest.json"), { code: "ENOENT" });
 });
 

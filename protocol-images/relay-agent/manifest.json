@@ -1,15 +1,15 @@
 {
   "id": "relay-agent",
   "name": "Relay Agent",
-  "version": "preview",
-  "installable": false,
-  "status": "planned",
+  "version": "1.0.0",
+  "installable": true,
+  "status": "available",
   "kind": "agent",
-  "description": "Сетевой агент интеграции с управляющим контуром PRO; туннель не создаёт",
+  "description": "Relay текущего VPS: защищённый API для управления TCP/UDP-маршрутами из PRO",
   "category": "network-agents",
   "category_name": "Сетевые агенты",
-  "installer": "",
-  "uninstaller": "",
+  "installer": "install.sh",
+  "uninstaller": "uninstall.sh",
   "supported_os": ["ubuntu", "debian"],
-  "service": ""
+  "service": "vps-control-relay-agent.service"
 }

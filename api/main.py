@@ -38,6 +38,8 @@ from awg_ports import AwgPorts, PORT_CHOICES, PortError
 from connection_tuning import tuning_catalog, xhttp_extra, number_range, quic_options, singbox_client
 from contextlib import ExitStack
 from protocol_ports import ProtocolPorts
+import relay_agent
+from fastapi.responses import JSONResponse
 
 
 @asynccontextmanager
@@ -1940,6 +1942,8 @@ def apt_package_versions(package: str) -> tuple[str, str]:
 def protocol_installed_version(image_id: str, installed: bool) -> str:
     if not installed:
         return ""
+    if image_id == "relay-agent":
+        return run("python3", "/usr/local/lib/vps-control-relay-agent/agent.py", "--version", timeout=5).strip()
     if image_id == "awg":
         output = run("modinfo", "-F", "version", "amneziawg", timeout=5) or run("awg", "--version", timeout=5)
         match = re.search(r"\bv?(\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?)\b", output)
@@ -2072,6 +2076,7 @@ def protocol_image_manifests() -> dict[str, dict]:
             # Installed and running are different states. A stopped tunnel must
             # remain manageable instead of being offered for installation again.
             "installed": installed,
+            "service_active": bool(installed and run("systemctl", "is-active", service) == "active"),
             "removable": bool(uninstaller),
             "installed_version": installed_version,
             "available_version": available_version,
@@ -2089,6 +2094,40 @@ def protocol_images(_: None = Depends(require_token)) -> dict:
     items = list(protocol_image_manifests().values())
     items.sort(key=lambda item: (MODULE_ORDER.get(item["id"], 999), item["name"].casefold()))
     return {"items": items}
+
+
+@app.get("/api/relay-agent")
+def relay_agent_status(_: None = Depends(require_token)) -> dict:
+    if not (relay_agent.CONFIG_DIR / 'config.json').is_file():
+        raise HTTPException(status_code=409, detail="Relay Agent не установлен")
+    try:
+        result = relay_agent.connection()
+        result.update({'active': False, 'items': [], 'error': ''})
+        try:
+            result.update(relay_agent.local_request('/v1/status'))
+            result.update(relay_agent.local_request('/v1/routes'))
+            result['active'] = True
+        except (OSError, ValueError):
+            result['error'] = 'API агента недоступен; проверьте службу Relay Agent'
+        return result
+    except (OSError, ValueError):
+        raise HTTPException(status_code=503, detail="Конфигурация Relay Agent недоступна")
+
+
+@app.post("/api/relay-agent/credentials")
+def relay_agent_credentials(_: None = Depends(require_token)):
+    try:
+        return JSONResponse(relay_agent.connection(reveal=True), headers={'Cache-Control': 'no-store'})
+    except (OSError, ValueError):
+        raise HTTPException(status_code=409, detail="Relay Agent не установлен или его конфигурация недоступна")
+
+
+@app.post("/api/relay-agent/token/rotate")
+def relay_agent_rotate_token(_: None = Depends(require_token)):
+    try:
+        return JSONResponse(relay_agent.rotate_token(), headers={'Cache-Control': 'no-store'})
+    except (OSError, ValueError):
+        raise HTTPException(status_code=503, detail="Не удалось заменить токен Relay Agent; проверьте конфигурацию")
 
 
 @app.post("/api/protocol-images/versions/check")
@@ -2339,6 +2378,7 @@ def managed_services() -> dict[str, dict]:
         "hysteria2": {"name": "Hysteria2", "unit": "vps-control-hysteria2.service", "controls": ["start", "stop", "restart"]},
         "tuic": {"name": "TUIC v5", "unit": "vps-control-tuic.service", "controls": ["start", "stop", "restart"]},
         "xray": {"name": "Xray", "unit": "vps-control-xray.service", "controls": ["start", "stop", "restart"]},
+        "relay-agent": {"name": "Relay Agent", "unit": "vps-control-relay-agent.service", "controls": ["start", "stop", "restart"]},
         "monitor": {"name": "Мониторинг VPN", "unit": "vpn-monitor.timer", "controls": ["start", "stop", "restart"]},
         "fail2ban": {"name": "Fail2ban", "unit": "fail2ban.service", "controls": ["start", "stop", "restart"]},
         "updates": {

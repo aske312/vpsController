@@ -29,6 +29,10 @@ class PortError(ValueError):
     pass
 
 
+def relay_reserved_port(port):
+    return (port == 9443 or 20000 <= port <= 20999) and Path('/etc/systemd/system/vps-control-relay-agent.service').is_file()
+
+
 def command(*args, check=True):
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=35)
@@ -119,6 +123,8 @@ class AwgPorts:
             return {'port': port, 'status': 'awg', 'detail': 'Основной порт AWG'}
         if platform.system() != 'Linux':
             return {'port': port, 'status': 'unavailable', 'detail': 'Дополнительные порты требуют Linux'}
+        if relay_reserved_port(port):
+            return {'port': port, 'status': 'occupied', 'detail': 'Порт зарезервирован Relay Agent'}
         if self.owned(port) and command('systemctl', 'is-active', self.unit(port), check=False).returncode == 0:
             return {'port': port, 'status': 'awg', 'detail': 'Уже используется для AWG'}
         try:

@@ -8,6 +8,7 @@ import { LegalFooter } from "./legal";
 import { Metric, TrendGraph } from "./resource-metrics";
 import { ProtocolIcon } from "./protocol-icon";
 import { ProtocolWorkspace } from "./protocol-workspace";
+import { RelayAgent } from "./relay-agent";
 import { LightNavigation } from "../src/light-navigation";
 import { basicCredentials } from "../src/auth-credentials";
 import { authorizedRequest, SessionExpiredError } from "../src/api-request";
@@ -61,7 +62,7 @@ type ApplicationStatus = {
 export type ProtocolImage = {
   id: string; name: string; version: string; description: string; category: string; category_name: string;
   kind: "tunnel" | "agent"; status: "available" | "planned"; installable: boolean;
-  interface: string; installed: boolean; removable: boolean;
+  interface: string; installed: boolean; removable: boolean; service_active?: boolean;
   installed_version?: string; available_version?: string; update_available?: boolean; update_breaking?: boolean;
   version_checked_at?: string; version_error?: string; version_channel?: "release" | "package";
 };
@@ -887,9 +888,9 @@ export default function Home() {
 
   async function installProtocol(image: ProtocolImage) {
     if (!await askConfirmation({
-      title: `Установить ${image.name}?`,
-      message: `На сервер будет установлен модуль ${image.name} ${image.version}.`,
-      confirmLabel: "Установить",
+      title: `${image.installed ? "Обновить" : "Установить"} ${image.name}?`,
+      message: image.installed ? "Будет установлена версия агента из текущего выпуска Light. Токен и маршруты сохранятся; соединения relay прервутся на время перезапуска службы." : `На сервер будет установлен модуль ${image.name} ${image.version}.`,
+      confirmLabel: image.installed ? "Обновить агент" : "Установить",
     })) return;
     setBusy(true); setError(""); setInstallingProtocol(image.id);
     try {
@@ -900,7 +901,7 @@ export default function Home() {
         action: started,
       }));
       await waitForProtocolState(image, true, started.unit || "");
-      await Promise.all([loadOverview(), loadClients(), loadProtocolStatus(image.id as Protocol)]);
+      await Promise.all([loadOverview(), loadClients(), ...(image.kind === "tunnel" ? [loadProtocolStatus(image.id as Protocol)] : [loadServices()])]);
       setNotice(`${image.name} установлен и готов к работе`);
     } catch (cause) {
       setInstallingProtocol("");
@@ -1344,18 +1345,20 @@ export default function Home() {
             const protocol = image.id as Protocol;
             const isTunnel = image.kind === "tunnel" && lightModuleIds.includes(protocol);
             const state = isTunnel ? overview?.protocols[protocol] : undefined;
-            const moduleState = image.installed ? state?.active ? "ACTIVE" : "STOPPED" : image.status === "planned" ? "PLANNED" : "AVAILABLE";
+            const moduleState = image.installed ? (isTunnel ? state?.active : image.service_active) ? "ACTIVE" : "STOPPED" : image.status === "planned" ? "PLANNED" : "AVAILABLE";
             const version = image.installed ? image.installed_version || "UNKNOWN" : image.installable ? image.available_version || "НЕ ПРОВЕРЕНО" : "—";
             return <article className={`protocolModuleCard${image.installed ? " installed" : ""}${image.kind === "agent" ? " agent" : ""}`} key={image.id}>
               <header><button className="protocolModuleOpen" onClick={() => image.installed && isTunnel && setTab(protocol)} disabled={!image.installed || !isTunnel}><span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span><span><strong>{image.name}</strong><small>{image.kind === "agent" ? "AGENT" : "TUNNEL"}</small></span></button><em className={moduleState.toLowerCase()}>{moduleState}</em></header>
-              <dl><div><dt>VERSION</dt><dd title={image.update_available ? `${version} → ${image.available_version}` : version}>{version}{image.update_available ? ` → ${image.available_version}` : ""}</dd></div><div><dt>PORT</dt><dd>{state?.port || "—"}</dd></div></dl>
+              <dl><div><dt>VERSION</dt><dd title={image.update_available ? `${version} → ${image.available_version}` : version}>{version}{image.update_available ? ` → ${image.available_version}` : ""}</dd></div><div><dt>PORT</dt><dd>{image.id === "relay-agent" && image.installed ? 9443 : state?.port || "—"}</dd></div></dl>
               <footer>
-                {image.installed && isTunnel && <button className="danger" onClick={() => void removeProtocol(image)} disabled={busy}>Удалить</button>}
+                {image.installed && image.removable && <button className="danger" onClick={() => void removeProtocol(image)} disabled={busy}>Удалить</button>}
+                {image.installed && image.id === "relay-agent" && <button onClick={() => void installProtocol(image)} disabled={busy || Boolean(installingProtocol)}>Обновить агент</button>}
                 {image.installed && isTunnel && (image.update_available
                   ? <button className={image.update_breaking ? "warning" : ""} onClick={() => void updateProtocol(image)} disabled={busy}>{installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}</button>
                   : <button onClick={() => void checkProtocolVersion(image)} disabled={busy || Boolean(checkingProtocolVersion)}>{checkingProtocolVersion === image.id ? "Проверка…" : "Проверить"}</button>)}
                 {!image.installed && <button onClick={() => image.installable && void installProtocol(image)} disabled={!image.installable || busy || Boolean(installingProtocol)}>{!image.installable ? "Недоступно" : installingProtocol === image.id ? "Установка…" : "Установить"}</button>}
               </footer>
+              {image.id === "relay-agent" && image.installed && <RelayAgent request={request} busy={busy} confirmRotation={() => askConfirmation({ title: "Заменить токен Relay Agent?", message: "Старый токен перестанет работать. Обновите параметры узла в PRO. Действующие маршруты сохранятся.", confirmLabel: "Заменить токен" })} />}
             </article>;
           })}
           </div>

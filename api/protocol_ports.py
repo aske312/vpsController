@@ -13,7 +13,7 @@ import shlex
 import signal
 import socket
 
-from awg_ports import PortError, command
+from awg_ports import PortError, command, relay_reserved_port
 
 PROTOCOLS = {'hysteria2': 'udp', 'tuic': 'udp', 'xray': 'tcp'}
 MARKER = '# vpsController direct protocol port alias'
@@ -87,6 +87,8 @@ class ProtocolPorts:
     def owned(self, port): return self.path(port).exists() and self.path(port).read_text() == self.content(port)
 
     def status(self, port):
+        if relay_reserved_port(port):
+            return {'port': port, 'status': 'occupied', 'detail': 'Порт зарезервирован Relay Agent'}
         if not self.address: return {'port': port, 'status': 'unavailable', 'detail': 'Публичный IP сервера не настроен'}
         if port == self.primary: return {'port': port, 'status': 'protocol', 'detail': 'Основной порт выбранного профиля'}
         if platform.system() != 'Linux': return {'port': port, 'status': 'unavailable', 'detail': 'Дополнительные порты требуют Linux'}

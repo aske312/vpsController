@@ -788,6 +788,7 @@ install_protocol_image() {
   info "Установка образа ${image_id}"
   prepare_package_manager
   run_protocol_installer "${image_id}" "${image_root}/${installer}"
+  ensure_api_write_access
   install -d -m 0700 /etc/amnezia /etc/amnezia/amneziawg
   sync_protocol_monitor
   systemctl restart "${APP_NAME}-api.service"
@@ -1153,7 +1154,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=-/etc/amnezia -/etc/vps-control ${DATA_DIR}
+ReadWritePaths=-/etc/amnezia -/etc/vps-control -/etc/vps-control-relay-agent ${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -1166,9 +1167,10 @@ ensure_api_write_access() {
   ensure_environment_layout
   install_awg_ports_template
   install_direct_ports_templates
-  local expected="ReadWritePaths=-/etc/amnezia -/etc/vps-control ${DATA_DIR}"
+  local expected="ReadWritePaths=-/etc/amnezia -/etc/vps-control -/etc/vps-control-relay-agent ${DATA_DIR}"
   if grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
-    || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}"; then
+    || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
+    || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control-relay-agent([[:space:]]|$)' "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
     systemctl daemon-reload
   fi
@@ -1525,6 +1527,9 @@ uninstall_app() {
       PRESERVE_COMPONENT_DATA=0 bash "${INSTALL_DIR}/protocol-images/${protocol_id}/uninstall.sh"
     fi
   done
+  if [[ -f "${INSTALL_DIR}/protocol-images/relay-agent/uninstall.sh" ]]; then
+    PRESERVE_COMPONENT_DATA=0 bash "${INSTALL_DIR}/protocol-images/relay-agent/uninstall.sh"
+  fi
   rm -f "${SERVICE_FILE}" "${WEB_SERVICE_FILE}" /etc/systemd/system/vps-control-awg-port@.service /etc/systemd/system/vpn-monitor.service /etc/systemd/system/vpn-monitor.timer \
     /etc/logrotate.d/vps-control-monitor "${COMMAND_PATH}" /usr/local/sbin/vpn-monitor-sample
   systemctl daemon-reload
