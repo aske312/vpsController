@@ -5,24 +5,29 @@ STATE=/var/lib/vps-control-relay-agent
 LIB=/usr/local/lib/vps-control-relay-agent
 SOURCE="$(cd -- "$(dirname -- "$0")" && pwd)"
 export DEBIAN_FRONTEND=noninteractive
-if ! command -v openssl >/dev/null || ! command -v python3 >/dev/null; then
+[[ ${EUID} -eq 0 ]] || { echo 'Relay Agent необходимо устанавливать от root.' >&2; exit 1; }
+if ! command -v openssl >/dev/null || ! command -v python3 >/dev/null || ! command -v curl >/dev/null; then
   apt-get -o DPkg::Lock::Timeout=300 update
-  apt-get -o DPkg::Lock::Timeout=300 install -y openssl python3
+  apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl openssl python3
 fi
 # Validate before changing services or firewall. Reinstall preserves identity and routes.
 python3 - "${ENV_FILE:-/etc/vps-control.env}" <<'PY'
 import ipaddress, json, os, shlex, socket, sys
 from pathlib import Path
 values = {}
-for line in Path(sys.argv[1]).read_text().splitlines():
+env_path = Path(sys.argv[1])
+for line in (env_path.read_text().splitlines() if env_path.exists() else []):
     if '=' in line and not line.lstrip().startswith('#'):
         key, value = line.split('=', 1)
         parsed = shlex.split(value)
         values[key] = parsed[0] if parsed else ''
-ip = values.get('PUBLIC_IP', '')
+ip = os.environ.get('RELAY_PUBLIC_IP') or values.get('PUBLIC_IP', '')
 address = ipaddress.ip_address(ip)
 if address.version != 4 or not address.is_global:
     raise SystemExit('Relay Agent requires a public IPv4 address')
+config_path = Path('/etc/vps-control-relay-agent/config.json')
+if config_path.exists() and json.loads(config_path.read_text())['public_ip'] != str(address):
+    raise SystemExit('Relay Agent public IP differs from its existing identity; refusing to reuse the certificate')
 for name in ('AWG_PORT', 'HYSTERIA2_PORT', 'TUIC_PORT', 'XRAY_PORT', 'HTTP_PORT'):
     port = int(values.get(name, '0') or '0')
     if port == 9443 or 20000 <= port <= 20999:
@@ -56,12 +61,13 @@ import grp, hashlib, ipaddress, json, os, secrets, shlex, socket, subprocess, sy
 from pathlib import Path
 root = Path(sys.argv[1])
 values = {}
-for line in Path(sys.argv[2]).read_text().splitlines():
+env_path = Path(sys.argv[2])
+for line in (env_path.read_text().splitlines() if env_path.exists() else []):
     if '=' in line and not line.lstrip().startswith('#'):
         key, value = line.split('=', 1)
         parsed = shlex.split(value)
         values[key] = parsed[0] if parsed else ''
-ip = str(ipaddress.ip_address(values['PUBLIC_IP']))
+ip = str(ipaddress.ip_address(os.environ.get('RELAY_PUBLIC_IP') or values['PUBLIC_IP']))
 token_path = root / 'token'
 if not token_path.exists():
     fd = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -90,6 +96,7 @@ backup="$(mktemp -d)"
 trap 'rm -rf -- "${backup}"' EXIT
 [[ ! -f "${LIB}/agent.py" ]] || cp "${LIB}/agent.py" "${backup}/agent.py"
 install -m 0755 "${SOURCE}/agent.py" "${LIB}/agent.py"
+install -m 0700 "${SOURCE}/credentials.py" "${LIB}/credentials.py"
 cat >/etc/systemd/system/vps-control-relay-agent.service <<'EOF'
 [Unit]
 Description=VPS Control Relay Agent
@@ -132,7 +139,7 @@ for attempt in {1..20}; do
       ufw allow 20000:20999/tcp comment 'vps-control relay TCP'
       ufw allow 20000:20999/udp comment 'vps-control relay UDP'
     fi
-    echo 'Relay Agent установлен; параметры подключения доступны в Light.'
+    echo 'Relay Agent установлен и готов к подключению.'
     exit 0
   fi
   sleep 1
