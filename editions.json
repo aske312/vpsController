@@ -8,6 +8,11 @@
       "release_tag": "light-latest",
       "installer": "scripts/install-panel.sh"
     },
+    "agent": {
+      "name": "Relay Agent",
+      "branch": "installer",
+      "installer": "scripts/install-agent.sh"
+    },
     "pro": {
       "name": "PRO",
       "branch": "pro",

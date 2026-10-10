@@ -1,0 +1,19 @@
+name: Verify standalone Agent installer
+on:
+  push:
+    branches: [installer]
+  pull_request:
+    branches: [installer]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check shell syntax and credentials export
+        run: |
+          bash -n install.sh scripts/install-agent.sh protocol-images/relay-agent/install.sh protocol-images/relay-agent/uninstall.sh
+          python3 tests/relay_standalone_test.py
+      - name: Install twice in isolated namespaces without a panel
+        run: sudo python3 tests/relay_standalone_smoke.py .

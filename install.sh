@@ -24,9 +24,10 @@ Usage:
   sudo bash install.sh
   sudo bash install.sh --edition light
   sudo bash install.sh --edition pro
+  bash install.sh --edition agent
 
 Options:
-  --edition <light|pro>  install without an interactive prompt
+  --edition <light|pro|agent>  install without an interactive prompt
   -h, --help             show this help
 EOF
 }
@@ -34,7 +35,7 @@ EOF
 while (($#)); do
   case "$1" in
     --edition)
-      [[ $# -ge 2 ]] || { printf 'Ошибка: после --edition укажите light или pro.\n' >&2; exit 2; }
+      [[ $# -ge 2 ]] || { printf 'Ошибка: после --edition укажите light, pro или agent.\n' >&2; exit 2; }
       EDITION="${2,,}"
       shift 2
       ;;
@@ -66,18 +67,19 @@ case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
 esac
 
 if [[ -z "${EDITION}" ]]; then
-  [[ -r /dev/tty ]] || { printf 'Ошибка: без терминала укажите --edition light или --edition pro.\n' >&2; exit 2; }
-  printf '\n312.net — выберите редакцию:\n  1) Light — WireGuard и AmneziaWG\n  2) PRO   — Mihomo, DNS, relay и расширенное управление\n\nВыбор [1/2]: ' >/dev/tty
+  [[ -r /dev/tty ]] || { printf 'Ошибка: без терминала укажите --edition light, pro или agent.\n' >&2; exit 2; }
+  printf '\n312.net — выберите вариант установки:\n  1) Light — WireGuard и AmneziaWG\n  2) PRO   — Mihomo, DNS, relay и расширенное управление\n  3) Agent — Relay для изолированной сети без панели\n\nВыбор [1/2/3]: ' >/dev/tty
   IFS= read -r choice </dev/tty
   case "${choice}" in
     1|light|Light) EDITION="light" ;;
     2|pro|PRO|Pro) EDITION="pro" ;;
+    3|agent|Agent|AGENT) EDITION="agent" ;;
     *) printf 'Ошибка: неизвестная редакция.\n' >&2; exit 2 ;;
   esac
 fi
 
-[[ "${EDITION}" == "light" || "${EDITION}" == "pro" ]] \
-  || { printf 'Ошибка: редакция должна быть light или pro.\n' >&2; exit 2; }
+[[ "${EDITION}" == "light" || "${EDITION}" == "pro" || "${EDITION}" == "agent" ]] \
+  || { printf 'Ошибка: вариант установки должен быть light, pro или agent.\n' >&2; exit 2; }
 
 WORK_DIR="$(mktemp -d /tmp/vps-controller-installer.XXXXXX)"
 if [[ -n "${SCRIPT_DIR}" && -r "${SCRIPT_DIR}/editions.json" ]]; then
@@ -108,9 +110,11 @@ PY
 else
   BRANCH="${EDITION}"
   INSTALLER_PATH="scripts/install-panel.sh"
+  if [[ "${EDITION}" == "agent" ]]; then BRANCH="${INSTALLER_BRANCH}"; INSTALLER_PATH="scripts/install-agent.sh"; fi
 fi
 
-[[ "${BRANCH}" == "${EDITION}" && "${INSTALLER_PATH}" == "scripts/install-panel.sh" ]] \
+[[ ( "${EDITION}" == "agent" && "${BRANCH}" == "${INSTALLER_BRANCH}" && "${INSTALLER_PATH}" == "scripts/install-agent.sh" ) ||
+   ( "${EDITION}" != "agent" && "${BRANCH}" == "${EDITION}" && "${INSTALLER_PATH}" == "scripts/install-panel.sh" ) ]] \
   || { printf 'Ошибка: editions.json содержит недопустимый маршрут установки.\n' >&2; exit 1; }
 
 edition_installer="${WORK_DIR}/install-panel.sh"
