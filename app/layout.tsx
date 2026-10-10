@@ -7,11 +7,11 @@ const sans = Inter({ variable: "--font-sans", subsets: ["latin", "cyrillic"], di
 const mono = JetBrains_Mono({ variable: "--font-mono", subsets: ["latin", "cyrillic"], display: "swap" });
 
 export const metadata: Metadata = {
-  title: "312node.net Light",
+  title: "Control panel",
   description: "Управление серверной инфраструктурой.",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
   openGraph: {
-    title: "312node.net Light",
+    title: "Control panel",
     description: "Управление серверной инфраструктурой.",
   },
   twitter: { card: "summary" },
