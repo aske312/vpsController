@@ -22,6 +22,7 @@ export function LightNavigation({ activeTab, protocolImages, clientsCount, nodeS
   const operationsCount = useOperationCount();
   const protocols = protocolImages.filter((item) => item.installed && item.kind !== "agent");
   const selectedProtocol = protocols.find((item) => item.id === activeTab) || protocols[0];
+  const agentInstalled = protocolImages.some((item) => item.id === "relay-agent" && item.installed);
   return <aside className="gateSidebar">
     <button className="gateBrand" type="button" onClick={() => onNavigate("overview")} aria-label="Открыть обзор">
       <span className="gateBrandMark"><BrandGlyph /></span>
@@ -39,6 +40,7 @@ export function LightNavigation({ activeTab, protocolImages, clientsCount, nodeS
             </button>
           : <NavButton active={protocols.some((protocol) => activeTab === protocol.id)} icon="transport" label="Протоколы" detail="Сетевые модули" badge={String(protocols.length)} onClick={() => selectedProtocol && onNavigate(selectedProtocol.id)} />}
       </NavGroup>}
+      {agentInstalled && <NavGroup label="AGENT"><NavButton active={activeTab === "agent"} icon="agent" label="Agent" detail="Relay Agent" onClick={() => onNavigate("agent")} /></NavGroup>}
       <NavGroup label="СИСТЕМА">
         <NavButton active={activeTab === "security"} icon="security" label="Безопасность" detail="Защита и доступ" onClick={() => onNavigate("security")} />
         <NavButton active={activeTab === "application"} icon="application" label="Приложение" detail={operationsCount ? `В работе: ${operationsCount}` : "Команды и журнал"} badge={operationsCount ? String(operationsCount) : undefined} onClick={() => onNavigate("application")} />
@@ -62,6 +64,7 @@ function NavButton({ active, icon, label, detail, badge, onClick }: { active: bo
 }
 
 function NavGlyph({ name }: { name: string }) {
+  if (name === "agent") return <ProtocolIcon protocol="relay-agent" />;
   if (name === "overview") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-8.5Z" /></svg>;
   if (name === "connections") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="7" r="2.5"/><circle cx="18" cy="17" r="2.5"/><path d="m8.3 10.9 7.4-3M8.3 13.1l7.4 3"/></svg>;
   if (name === "transport") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h11M12 4l3 3-3 3M20 17H9M12 14l-3 3 3 3"/></svg>;

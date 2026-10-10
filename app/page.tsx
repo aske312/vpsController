@@ -16,7 +16,7 @@ import { operationCompleted, OperationFailedError } from "../src/operation-resul
 import { useNotifications } from "../src/notifications/notification-center";
 
 export type Protocol = "awg" | "hysteria2" | "tuic" | "xray";
-type Tab = "overview" | "security" | "application" | "services" | Protocol | "clients";
+type Tab = "overview" | "security" | "application" | "services" | "agent" | Protocol | "clients";
 type MetricsPeriod = "live" | "day" | "week" | "quarter";
 type SecurityState = "inactive" | "active" | "warning" | "critical";
 type ResourceHistory = { load: Array<number | null>; memory: Array<number | null>; disk: Array<number | null>; rx: Array<number | null>; tx: Array<number | null> };
@@ -152,11 +152,11 @@ export type ProtocolStatus = {
 };
 
 const labels: Record<Tab, string> = {
-  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", awg: "AmneziaWG", hysteria2: "Hysteria2", tuic: "TUIC v5", xray: "Xray", clients: "Подключения",
+  overview: "Обзор", security: "Безопасность", application: "Приложение", services: "Службы", agent: "Agent", awg: "AmneziaWG", hysteria2: "Hysteria2", tuic: "TUIC v5", xray: "Xray", clients: "Подключения",
 };
 const navigationLabels: Record<Tab, string> = {
   overview: "OVERVIEW", security: "SECURITY", application: "APPLICATION", services: "SERVICES",
-  awg: "AMNEZIAWG", hysteria2: "HYSTERIA2", tuic: "TUIC V5", xray: "XRAY", clients: "CONNECTIONS",
+  awg: "AMNEZIAWG", hysteria2: "HYSTERIA2", tuic: "TUIC V5", xray: "XRAY", clients: "CONNECTIONS", agent: "AGENT",
 };
 const protocolIds: Protocol[] = ["awg", "hysteria2", "tuic", "xray"];
 const lightModuleIds: Protocol[] = ["awg", "hysteria2", "tuic", "xray"];
@@ -477,6 +477,7 @@ export default function Home() {
       else if (tab === "security") await Promise.all([loadSecurity(), loadServices()]);
       else if (tab === "application") await loadApplication();
       else if (tab === "services") await loadServices();
+      else if (tab === "agent") await Promise.all([loadOverview(), loadServices()]);
       else if (isProtocolTab(tab)) await Promise.all([loadClients(), loadProtocolStatus(tab)]);
       else await loadClients();
     } finally {
@@ -746,7 +747,7 @@ export default function Home() {
     setBusy(true); setError("");
     try {
       await request(`/services/${serviceId}/action`, { method: "POST", body: JSON.stringify({ action }) });
-      await Promise.all([loadServices(), loadSecurity()]);
+      await Promise.all([loadServices(), loadSecurity(), ...(serviceId === "relay-agent" ? [loadOverview()] : [])]);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось выполнить действие со службой"); }
     finally { setBusy(false); }
   }
@@ -902,6 +903,7 @@ export default function Home() {
       }));
       await waitForProtocolState(image, true, started.unit || "");
       await Promise.all([loadOverview(), loadClients(), ...(image.kind === "tunnel" ? [loadProtocolStatus(image.id as Protocol)] : [loadServices()])]);
+      if (image.id === "relay-agent") setTab("agent");
       setNotice(`${image.name} установлен и готов к работе`);
     } catch (cause) {
       setInstallingProtocol("");
@@ -1258,6 +1260,7 @@ export default function Home() {
   const activeProtocol = isProtocolTab(tab) ? protocolStatuses[tab] : undefined;
   const activeProtocolRate = isProtocolTab(tab) ? protocolRates[tab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
   const activeProtocolImage = isProtocolTab(tab) ? protocolImages.find((image) => image.id === tab) : undefined;
+  const relayImage = protocolImages.find((image) => image.id === "relay-agent" && image.installed);
   const operationActive = ["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(application?.action?.state || "");
   const operationName = application?.action?.action || "";
   const operationLabel = actionLabels[operationName.split(":")[0]] || operationName;
@@ -1314,7 +1317,7 @@ export default function Home() {
     </LightNavigation>
 
     <section className="content">
-      {tab !== "overview" && !isProtocolTab(tab) && <div className="gateSectionIntro"><div><p className="eyebrow">312NODE.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "страна не определена"} · управление инфраструктурой</p></div></div>}
+      {tab !== "overview" && tab !== "agent" && !isProtocolTab(tab) && <div className="gateSectionIntro"><div><p className="eyebrow">312NODE.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "страна не определена"} · управление инфраструктурой</p></div></div>}
       {busy && <div className="loadingLine" />}
 
       {tab === "overview" && <section className="overview">
@@ -1347,24 +1350,29 @@ export default function Home() {
             const state = isTunnel ? overview?.protocols[protocol] : undefined;
             const moduleState = image.installed ? (isTunnel ? state?.active : image.service_active) ? "ACTIVE" : "STOPPED" : image.status === "planned" ? "PLANNED" : "AVAILABLE";
             const version = image.installed ? image.installed_version || "UNKNOWN" : image.installable ? image.available_version || "НЕ ПРОВЕРЕНО" : "—";
-            return <article className={`protocolModuleCard${image.installed ? " installed" : ""}${image.kind === "agent" ? " agent" : ""}`} key={image.id}>
-              <header><button className="protocolModuleOpen" onClick={() => image.installed && isTunnel && setTab(protocol)} disabled={!image.installed || !isTunnel}><span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span><span><strong>{image.name}</strong><small>{image.kind === "agent" ? "AGENT" : "TUNNEL"}</small></span></button><em className={moduleState.toLowerCase()}>{moduleState}</em></header>
+            return <article className={`protocolModuleCard${image.installed ? " installed" : ""}`} key={image.id}>
+              <header><button className="protocolModuleOpen" onClick={() => image.installed && setTab(isTunnel ? protocol : "agent")} disabled={!image.installed || (!isTunnel && image.id !== "relay-agent")}><span className={`protocol ${image.id}`}><ProtocolIcon protocol={image.id} /></span><span><strong>{image.name}</strong><small>{image.kind === "agent" ? "AGENT" : "TUNNEL"}</small></span></button><em className={moduleState.toLowerCase()}>{moduleState}</em></header>
               <dl><div><dt>VERSION</dt><dd title={image.update_available ? `${version} → ${image.available_version}` : version}>{version}{image.update_available ? ` → ${image.available_version}` : ""}</dd></div><div><dt>PORT</dt><dd>{image.id === "relay-agent" && image.installed ? 9443 : state?.port || "—"}</dd></div></dl>
               <footer>
-                {image.installed && image.removable && <button className="danger" onClick={() => void removeProtocol(image)} disabled={busy}>Удалить</button>}
-                {image.installed && image.id === "relay-agent" && <button onClick={() => void installProtocol(image)} disabled={busy || Boolean(installingProtocol)}>Обновить агент</button>}
+                {image.installed && isTunnel && image.removable && <button className="danger" onClick={() => void removeProtocol(image)} disabled={busy}>Удалить</button>}
+                {image.installed && image.id === "relay-agent" && <button onClick={() => setTab("agent")}>Открыть Agent</button>}
                 {image.installed && isTunnel && (image.update_available
                   ? <button className={image.update_breaking ? "warning" : ""} onClick={() => void updateProtocol(image)} disabled={busy}>{installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}</button>
                   : <button onClick={() => void checkProtocolVersion(image)} disabled={busy || Boolean(checkingProtocolVersion)}>{checkingProtocolVersion === image.id ? "Проверка…" : "Проверить"}</button>)}
                 {!image.installed && <button onClick={() => image.installable && void installProtocol(image)} disabled={!image.installable || busy || Boolean(installingProtocol)}>{!image.installable ? "Недоступно" : installingProtocol === image.id ? "Установка…" : "Установить"}</button>}
               </footer>
-              {image.id === "relay-agent" && image.installed && <RelayAgent request={request} busy={busy} confirmRotation={() => askConfirmation({ title: "Заменить токен Relay Agent?", message: "Старый токен перестанет работать. Обновите параметры узла в PRO. Действующие маршруты сохранятся.", confirmLabel: "Заменить токен" })} />}
             </article>;
           })}
           </div>
           {!protocolImages.length && <div className="protocolEmpty"><span>—</span><p><strong>Нет доступных образов</strong><small>Добавьте manifest.json в каталог protocol-images</small></p></div>}
         </article>
       </section>}
+
+      {tab === "agent" && (relayImage ? <RelayAgent image={relayImage} request={request} busy={busy}
+        onServiceAction={(action) => runServiceAction("relay-agent", "Relay Agent", action)}
+        onUpdate={() => void installProtocol(relayImage)} onRemove={() => void removeProtocol(relayImage)}
+        confirmRotation={() => askConfirmation({ title: "Заменить токен Relay Agent?", message: "Старый токен перестанет работать. Обновите параметры узла в PRO. Действующие маршруты сохранятся.", confirmLabel: "Заменить токен" })}
+      /> : <section className="panel"><h1>Agent</h1><p>Relay Agent не установлен.</p><button onClick={() => setTab("overview")}>Перейти к модулям</button></section>)}
 
       {tab === "security" && <section className="securityGrid">
         <article className={`panel securityHero state-${securityPostureState}`}>
