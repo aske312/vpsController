@@ -44,12 +44,17 @@ def inside(source, sandbox):
                         'shadow': 'root:*:20000:0:99999:7:::\n', 'gshadow': 'root:*::\n'}.items():
         (sandbox / 'etc' / name).write_text(value)
     staged = sandbox / 'qa/source'
-    for name in ('install.sh', 'editions.json', 'scripts/install-agent.sh',
+    for name in ('install.sh', 'scripts/install-agent.sh',
                  'protocol-images/relay-agent/install.sh', 'protocol-images/relay-agent/agent.py',
                  'protocol-images/relay-agent/credentials.py', 'protocol-images/relay-agent/uninstall.sh'):
         target = staged / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / name, target)
+    selector = (source / 'editions.json').exists()
+    if selector: shutil.copyfile(source / 'editions.json', staged / 'editions.json')
+    shutil.copyfile(source / 'protocol-images/relay-agent/manifest.json', staged / 'protocol-images/relay-agent/manifest.json')
+    light = source / 'light'
+    if light.exists(): shutil.copytree(light, sandbox / 'qa/light')
     with tarfile.open(sandbox / 'qa/source.tar.gz', 'w:gz') as archive:
         archive.add(staged, arcname='vpsController-installer')
     # Bootstrap downloads are deterministic fixtures; HTTPS health probes use real curl.
@@ -95,13 +100,14 @@ if sys.argv[1] in ('restart', 'disable'):
     os.chdir('/')
     os.environ['PATH'] = '/qa/bin:/usr/sbin:/usr/bin:/sbin:/bin'
     bootstrap = '/qa/source/install.sh'
-    for edition in ('light', 'pro'):
+    for edition in (('light', 'pro') if selector else ()):
         run('bash', bootstrap, '--edition', edition, '--domain', 'panel.example.com')
         assert Path('/qa/panel-route').read_text().strip() == edition + '|--domain panel.example.com'
-    bad = subprocess.run(['bash', bootstrap, '--edition', 'agent', '--public-ip', '127.0.0.1'],
+    arguments = ['--edition', 'agent'] if selector else []
+    bad = subprocess.run(['bash', bootstrap, *arguments, '--public-ip', '127.0.0.1'],
                          capture_output=True, text=True)
     assert bad.returncode != 0 and not Path('/etc/vps-control-relay-agent').exists()
-    result = run('bash', bootstrap, '--edition', 'agent')
+    result = run('bash', bootstrap, *arguments)
     config_root = Path('/etc/vps-control-relay-agent')
     config = json.loads((config_root / 'config.json').read_text())
     connection = json.loads(run('python3', '/usr/local/lib/vps-control-relay-agent/credentials.py').stdout)
@@ -127,10 +133,16 @@ if sys.argv[1] in ('restart', 'disable'):
     before = {name: (config_root / name).read_bytes() for name in ('token', 'server.crt', 'server.key')}
     state = Path('/var/lib/vps-control-relay-agent/routes.json')
     saved_routes = state.read_bytes()
-    run('bash', bootstrap, '--edition', 'agent', '--public-ip', '8.8.8.8')
+    run('bash', bootstrap, *arguments, '--public-ip', '8.8.8.8')
     assert all((config_root / name).read_bytes() == value for name, value in before.items())
     assert state.read_bytes() == saved_routes
     with urlopen(request, context=context, timeout=5) as response: assert json.load(response)['routes'] == 1
+    if Path('/qa/light').exists():
+        result = run('bash', '/qa/light/protocol-images/relay-agent/install.sh')
+        assert connection['token'] not in result.stdout + result.stderr
+        assert all((config_root / name).read_bytes() == value for name, value in before.items())
+        assert state.read_bytes() == saved_routes
+        with urlopen(request, context=context, timeout=5) as response: assert json.load(response)['routes'] == 1
     assert not Path('/opt/vps-control').exists()
     assert list(Path('/etc/systemd/system').glob('*.service')) == [Path('/etc/systemd/system/vps-control-relay-agent.service')]
     import pwd
@@ -138,7 +150,7 @@ if sys.argv[1] in ('restart', 'disable'):
     denied = subprocess.run(['python3', '/usr/local/lib/vps-control-relay-agent/credentials.py'],
         capture_output=True, text=True, user=user.pw_uid, group=user.pw_gid, extra_groups=[])
     assert denied.returncode != 0 and connection['token'] not in denied.stdout + denied.stderr
-    changed = subprocess.run(['bash', bootstrap, '--edition', 'agent', '--public-ip', '1.1.1.1'], capture_output=True, text=True)
+    changed = subprocess.run(['bash', bootstrap, *arguments, '--public-ip', '1.1.1.1'], capture_output=True, text=True)
     assert changed.returncode != 0 and all((config_root / name).read_bytes() == value for name, value in before.items())
     run('systemctl', 'disable', 'vps-control-relay-agent.service')
     print(json.dumps({'standalone_bootstrap': True, 'no_panel': True, 'tls_authenticated': True,

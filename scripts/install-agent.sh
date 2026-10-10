@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 REPOSITORY="${VPS_CONTROL_REPOSITORY:-https://github.com/aske312/vpsController}"
-BRANCH="${VPS_CONTROL_BRANCH:-installer}"
+BRANCH="${VPS_CONTROL_BRANCH:-agent}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR=""
 PUBLIC_IP=""
@@ -43,7 +43,8 @@ try:
 except ValueError:
     raise SystemExit('Требуется публичный IPv4. Укажите его через --public-ip IPv4.')
 PY
-SOURCE="${SCRIPT_DIR}/../protocol-images/relay-agent"
+SOURCE="${SCRIPT_DIR}/protocol-images/relay-agent"
+[[ -d "${SOURCE}" ]] || SOURCE="${SCRIPT_DIR}/../protocol-images/relay-agent"
 if [[ ! -f "${SOURCE}/install.sh" || ! -f "${SOURCE}/agent.py" || ! -f "${SOURCE}/credentials.py" ]]; then
   WORK_DIR="$(mktemp -d /tmp/vps-relay-installer.XXXXXX)"
   curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \

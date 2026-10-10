@@ -1,9 +1,9 @@
 name: Verify standalone Agent installer
 on:
   push:
-    branches: [installer]
+    branches: [agent]
   pull_request:
-    branches: [installer]
+    branches: [agent]
 permissions:
   contents: read
 jobs:
@@ -15,5 +15,6 @@ jobs:
         run: |
           bash -n install.sh scripts/install-agent.sh protocol-images/relay-agent/install.sh protocol-images/relay-agent/uninstall.sh
           python3 tests/relay_standalone_test.py
+          python3 tests/relay_agent_test.py
       - name: Install twice in isolated namespaces without a panel
         run: sudo python3 tests/relay_standalone_smoke.py .

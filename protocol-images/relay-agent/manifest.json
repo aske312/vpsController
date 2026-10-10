@@ -1,0 +1,15 @@
+{
+  "id": "relay-agent",
+  "name": "Relay Agent",
+  "version": "1.0.0",
+  "installable": true,
+  "status": "available",
+  "kind": "agent",
+  "description": "Добавление VPS в изолированную сеть: защищённый API и TCP/UDP-маршруты",
+  "category": "network-agents",
+  "category_name": "Сетевые агенты",
+  "installer": "install.sh",
+  "uninstaller": "uninstall.sh",
+  "supported_os": ["ubuntu", "debian"],
+  "service": "vps-control-relay-agent.service"
+}

@@ -13,6 +13,7 @@
 /tests/*
 !/tests/relay_standalone_test.py
 !/tests/relay_standalone_smoke.py
+!/tests/relay_agent_test.py
 __pycache__/
 *.pyc
 /tmp/
