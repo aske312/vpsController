@@ -93,7 +93,7 @@ for awg_key in (
 DATA_DIR = Path(os.getenv("DATA_DIR", "/var/lib/vps-control"))
 metrics_history_store = MetricsHistory(DATA_DIR / "metrics" / "history.sqlite3")
 metrics_monitor: MetricsMonitor | None = None
-ENV_FILE = Path(os.getenv("ENV_FILE", "/etc/vps-control.env"))
+ENV_FILE = Path(os.getenv("ENV_FILE", "/etc/vps-control.env")).resolve()
 CLIENTS_FILE = DATA_DIR / "clients.json"
 ACTION_FILE = DATA_DIR / "application-action.json"
 AUTOMATION_FILE = DATA_DIR / "automation.json"
@@ -1571,7 +1571,10 @@ def apply_admin_password(payload: AdminPasswordChange) -> dict:
     except OSError as exc:
         raise HTTPException(status_code=500, detail="Unable to persist administrator password") from exc
     finally:
-        temporary.unlink(missing_ok=True)
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
     ADMIN_PASSWORD = password
     os.environ["ADMIN_PASSWORD"] = password
     return {"changed": True, "reauthenticate": True}

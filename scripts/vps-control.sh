@@ -7,6 +7,8 @@ DATA_DIR="/var/lib/${APP_NAME}"
 PRODUCT_FILE="${DATA_DIR}/product.json"
 TEST_BACKUP_DIR="${DATA_DIR}/test-app-backup"
 ENV_FILE="/etc/${APP_NAME}.env"
+LEGACY_ENV_FILE="${ENV_FILE}"
+[[ ! -L "${ENV_FILE}" ]] || ENV_FILE="$(readlink -f -- "${ENV_FILE}")"
 MANAGER_CONFIG="/etc/${APP_NAME}-manager.conf"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}-api.service"
 WEB_SERVICE_FILE="/etc/systemd/system/${APP_NAME}-web.service"
@@ -1064,6 +1066,16 @@ write_integrity_manifest() {
 }
 
 ensure_environment() {
+  install -d -m 0750 /etc/vps-control
+  local canonical_env="/etc/vps-control/controller.env"
+  if [[ "${ENV_FILE}" == "${LEGACY_ENV_FILE}" ]]; then
+    if [[ -f "${ENV_FILE}" ]]; then
+      install -m 0600 "${ENV_FILE}" "${canonical_env}"
+    fi
+    ENV_FILE="${canonical_env}"
+    ln -s -- "${ENV_FILE}" "${LEGACY_ENV_FILE}.migrate"
+    mv -Tf -- "${LEGACY_ENV_FILE}.migrate" "${LEGACY_ENV_FILE}"
+  fi
   install -d -m 0750 "${DATA_DIR}" "${DATA_DIR}/tmp" "${DATA_DIR}/logs" /etc/amnezia
   rm -f -- "${DATA_DIR}/personalization.json"
   if [[ ! -s "${ENV_FILE}" ]]; then
@@ -1137,7 +1149,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=-/etc/vps-control.env -/etc/amnezia -/etc/vps-control ${DATA_DIR}
+ReadWritePaths=-/etc/amnezia -/etc/vps-control ${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -1149,8 +1161,8 @@ EOF
 ensure_api_write_access() {
   install_awg_ports_template
   install_direct_ports_templates
-  local expected="ReadWritePaths=-/etc/vps-control.env -/etc/amnezia -/etc/vps-control ${DATA_DIR}"
-  if ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
+  local expected="ReadWritePaths=-/etc/amnezia -/etc/vps-control ${DATA_DIR}"
+  if grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
     || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}"; then
     sed -i "s|^ReadWritePaths=.*|${expected}|" "${SERVICE_FILE}"
     systemctl daemon-reload
@@ -1512,7 +1524,7 @@ uninstall_app() {
     /etc/logrotate.d/vps-control-monitor "${COMMAND_PATH}" /usr/local/sbin/vpn-monitor-sample
   systemctl daemon-reload
   rm -rf -- "${INSTALL_DIR}" "${DATA_DIR}"
-  rm -f -- "${ENV_FILE}" "${INSTALL_CONFIG}" "${MANAGER_CONFIG}" "${CADDY_CONFIG}"
+  rm -f -- "${ENV_FILE}" "${LEGACY_ENV_FILE}" "${INSTALL_CONFIG}" "${MANAGER_CONFIG}" "${CADDY_CONFIG}"
   rmdir --ignore-fail-on-non-empty /etc/amnezia/amneziawg /etc/amnezia 2>/dev/null || true
   ufw delete allow "${HTTP_PORT}/tcp" >/dev/null 2>&1 || true
   CURRENT_ACTION=""
@@ -2478,7 +2490,7 @@ integrity_check() {
     || die "${ENV_FILE} должен принадлежать root и иметь права 0600."
   [[ -r "${SERVICE_FILE}" ]] \
     || die "не найден systemd-профиль API ${SERVICE_FILE}."
-  grep -Eq '^ReadWritePaths=.*-?/etc/vps-control\.env([[:space:]]|$)' "${SERVICE_FILE}" \
+  grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
     || die "systemd-профиль API не разрешает сохранять административный токен в ${ENV_FILE}."
   [[ "$(stat -c '%U' "${COMMAND_PATH}")" == "root" ]] \
     || die "${COMMAND_PATH} должен принадлежать root."

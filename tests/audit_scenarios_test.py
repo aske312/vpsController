@@ -8,6 +8,16 @@ from tests.api_portability_test import api
 
 
 class AuditScenariosTests(unittest.TestCase):
+    def test_password_readonly_failure_returns_structured_error(self):
+        original='OriginalPassword123!'
+        with tempfile.TemporaryDirectory() as directory:
+            file=Path(directory)/'panel.env';file.write_text('ADMIN_PASSWORD='+original+'\n')
+            with patch.object(api,'ENV_FILE',file),patch.object(api,'ADMIN_PASSWORD',original),patch.object(api.os,'open',side_effect=OSError('readonly')),patch.object(api.Path,'unlink',side_effect=OSError('readonly')):
+                with self.assertRaises(api.HTTPException) as error:
+                    api.change_admin_password(api.AdminPasswordChange(current_password=original,new_password='NewPassword123456!',confirm_password='NewPassword123456!'))
+                self.assertEqual(error.exception.status_code,500)
+                self.assertEqual(api.ADMIN_PASSWORD,original)
+
     def test_password_special_characters_survive_env_parsing(self):
         original='OriginalPassword123!'
         with tempfile.TemporaryDirectory() as directory:
