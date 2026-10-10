@@ -10,7 +10,7 @@
     },
     "agent": {
       "name": "Relay Agent",
-      "branch": "installer",
+      "branch": "agent",
       "installer": "scripts/install-agent.sh"
     },
     "pro": {

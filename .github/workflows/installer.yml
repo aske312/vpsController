@@ -1,0 +1,15 @@
+name: Verify installer routing
+on:
+  push:
+    branches: [installer]
+  pull_request:
+    branches: [installer]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash -n install.sh
+      - run: sudo python3 tests/installer_routing_test.py

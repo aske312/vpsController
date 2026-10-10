@@ -110,10 +110,10 @@ PY
 else
   BRANCH="${EDITION}"
   INSTALLER_PATH="scripts/install-panel.sh"
-  if [[ "${EDITION}" == "agent" ]]; then BRANCH="${INSTALLER_BRANCH}"; INSTALLER_PATH="scripts/install-agent.sh"; fi
+  if [[ "${EDITION}" == "agent" ]]; then BRANCH="agent"; INSTALLER_PATH="scripts/install-agent.sh"; fi
 fi
 
-[[ ( "${EDITION}" == "agent" && "${BRANCH}" == "${INSTALLER_BRANCH}" && "${INSTALLER_PATH}" == "scripts/install-agent.sh" ) ||
+[[ ( "${EDITION}" == "agent" && "${BRANCH}" == "agent" && "${INSTALLER_PATH}" == "scripts/install-agent.sh" ) ||
    ( "${EDITION}" != "agent" && "${BRANCH}" == "${EDITION}" && "${INSTALLER_PATH}" == "scripts/install-panel.sh" ) ]] \
   || { printf 'Ошибка: editions.json содержит недопустимый маршрут установки.\n' >&2; exit 1; }
 
