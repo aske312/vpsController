@@ -28,6 +28,8 @@ export class ProfileResultUnknown extends Error {
   }
 }
 
+export class ProfileMutationFailed extends Error {}
+
 function interrupted(cause: unknown) {
   return cause instanceof Error && "kind" in cause && (cause.kind === "network" || cause.kind === "response");
 }
@@ -50,7 +52,7 @@ export async function checkProfileMutation(request: Request, mutation: ProfileMu
         if (options.systemOperationId) {
           const operation = await request<SystemAction>(`/application/operations/${options.systemOperationId}`, { signal: controller.signal });
           options.onOperation?.(operation);
-          if (operation.state === "failed" || operation.state === "cancelled") throw new Error(operation.message || "Изменение профиля не завершено успешно");
+          if (operation.state === "failed" || operation.state === "cancelled") throw new ProfileMutationFailed(operation.message || "Изменение профиля не завершено успешно");
           if (operation.state !== "succeeded") {
             await new Promise((resolve) => setTimeout(resolve, options.pollDelayMs ?? 1500));
             continue;

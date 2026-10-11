@@ -12,6 +12,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type Disp
 import Image from "next/image";
 import QRCode from "qrcode";
 import { AccessReveal } from "../shared/components/access-reveal";
+import { endpointCheckReady, endpointSelectable } from "../shared/lib/network-readiness";
 import { ConfirmationDialog } from "../shared/components/confirmation-dialog";
 import { LegalFooter } from "../shared/components/legal-footer";
 import { ProtocolIcon } from "../shared/components/protocol-icon";
@@ -87,7 +88,7 @@ function ClientConnectionSettings({
   setNewClientSettings,
 }: {
   selectedConnectionType: ClientConnectionType;
-  selectedVlessRoute?: { transport?: string; confirmed_domains?: string[]; path?: string; xhttp_mode?: string; server_name?: string };
+  selectedVlessRoute?: { transport?: string; confirmed_domains?: string[]; available_domains?: string[]; path?: string; xhttp_mode?: string; server_name?: string };
   newClientSettings: NewClientSettings;
   setNewClientSettings: Dispatch<SetStateAction<NewClientSettings>>;
 }) {
@@ -100,7 +101,8 @@ function ClientConnectionSettings({
       <label><span>Транспорт listener</span><input value={vlessTransport.toUpperCase()} readOnly /><small>Меняется в настройках модуля, а не для отдельного подключения</small></label>
       {selectedConnectionType.routeId === "direct" && vlessTransport !== "raw" && <label><span>Путь listener</span><input value={newClientSettings.transport_path} readOnly /></label>}
       {(vlessTransport === "xhttp") && <label><span>Режим XHTTP listener</span><input value={selectedConnectionType.routeId === "cdn" ? newClientSettings.cdn_xhttp_mode : selectedConnectionType.routeId === "tls" ? newClientSettings.tls_xhttp_mode : newClientSettings.xhttp_mode} readOnly /></label>}
-      {selectedConnectionType.routeId === "cdn" && <label><span>Подтверждённый CDN-домен</span><select value={newClientSettings.cdn_domain || selectedVlessRoute?.confirmed_domains?.[0] || ""} onChange={(event) => update({ cdn_domain: event.target.value })}>{(selectedVlessRoute?.confirmed_domains || []).map((domain) => <option value={domain} key={domain}>{domain}</option>)}</select><small>Домен подтверждён на странице «Сеть»</small></label>}
+      {selectedConnectionType.routeId === "cdn" && <label><span>CDN-домен</span><select value={newClientSettings.cdn_domain || selectedVlessRoute?.available_domains?.[0] || ""} onChange={(event) => update({ cdn_domain: event.target.value })}>{(selectedVlessRoute?.available_domains || []).map((domain) => <option value={domain} key={domain}>{domain}</option>)}</select></label>}
+      {selectedConnectionType.routeId !== "direct" && <small>После создания проверьте это подключение в разделе «Сеть». Доступность из вашей сети проверяется отдельно.</small>}
       <label><span>Отпечаток TLS</span><select value={newClientSettings.fingerprint} onChange={(event) => update({ fingerprint: event.target.value as NewClientSettings["fingerprint"] })}><option value="chrome">Chrome — рекомендуется</option><option value="firefox">Firefox</option><option value="safari">Safari</option></select></label>
       {selectedConnectionType.routeId === "direct" && <><label><span>SNI маскировки</span><input value={newClientSettings.sni} readOnly /></label>{vlessTransport === "xhttp" && <><label><span>XHTTP padding</span><input value={newClientSettings.xpadding} onChange={(event) => update({ xpadding: event.target.value })} placeholder="100-1000" /></label><label><span>Параллелизм XHTTP</span><input type="number" min={1} max={64} value={newClientSettings.xmux_concurrency} onChange={(event) => update({ xmux_concurrency: Number(event.target.value) })} /></label></>}</>}
     </> : protocol === "shadowsocks" ? <>
@@ -1450,7 +1452,7 @@ export function ControlPanel() {
   }, [token, tab, clientDialog, installedProtocols, loadProtocolStatus]);
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
   const vlessRouteStatus = protocolStatuses["vless-reality-xhttp"]?.routes || {};
-  const hasNetworkRoute = (kind: "cdn" | "tls_relay" | "udp_relay") => Object.values(networkStatus?.transport_endpoint_checks_by_domain || {}).some((check) => check.kind === kind && check.ready);
+  const hasNetworkRoute = (kind: "cdn" | "tls_relay" | "udp_relay", protocol: Protocol) => Object.values(networkStatus?.transport_endpoint_checks_by_domain || {}).some((check) => check.kind === kind && (["tuic", "hysteria2"].includes(protocol) && kind === "udp_relay" ? endpointSelectable(check) : endpointCheckReady(check) && check.verified_connection?.protocol === protocol));
   const connectionTypeOptions = installedProtocols.flatMap<ClientConnectionType>((protocol) => {
     const badge = protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : protocol.toUpperCase();
     if (protocol !== "vless-reality-xhttp") {
@@ -1460,8 +1462,8 @@ export function ControlPanel() {
       }];
       const supportsTlsRelay = ["shadowsocks", "trojan", "openvpn"].includes(protocol);
       const supportsUdpRelay = ["wg", "awg", "shadowsocks", "hysteria2", "tuic", "openvpn", "ikev2"].includes(protocol);
-      if (supportsTlsRelay && hasNetworkRoute("tls_relay")) options.push({ id: `${protocol}-tls-relay`, protocol, channelMode: "tls_relay", name: `${labels[protocol]} · TLS relay`, badge, description: "Через подтверждённый TLS relay-домен" });
-      if (supportsUdpRelay && hasNetworkRoute("udp_relay")) options.push({ id: `${protocol}-udp-relay`, protocol, channelMode: "udp_relay", name: `${labels[protocol]} · UDP relay`, badge, description: "Через подтверждённый UDP relay-домен" });
+      if (supportsTlsRelay && hasNetworkRoute("tls_relay", protocol)) options.push({ id: `${protocol}-tls-relay`, protocol, channelMode: "tls_relay", name: `${labels[protocol]} · TLS relay`, badge, description: "Через подтверждённый TLS relay-домен" });
+      if (supportsUdpRelay && hasNetworkRoute("udp_relay", protocol)) options.push({ id: `${protocol}-udp-relay`, protocol, channelMode: "udp_relay", name: `${labels[protocol]} · UDP relay`, badge, description: "Через подтверждённый UDP relay-домен" });
       return options;
     }
     return ([
@@ -1470,9 +1472,7 @@ export function ControlPanel() {
       ["cdn", "VLESS CDN", "CDN", "Маршрут через настроенный CDN-домен"],
     ] as const).filter(([id]) => id === "direct"
       ? vlessRouteStatus[id]?.enabled !== false
-      : id === "cdn"
-        ? Boolean(vlessRouteStatus[id]?.confirmed_domains?.length)
-        : Boolean(vlessRouteStatus[id]?.enabled)
+      : Boolean(vlessRouteStatus[id]?.enabled && vlessRouteStatus[id]?.available_domains?.length)
     ).map(([routeId, name, routeBadge, description]) => ({ id: `vless-${routeId}`, protocol, routeId, name, badge: routeBadge, description }));
   });
   const selectedConnectionType = connectionTypeOptions.find((option) => option.protocol === selectedClientProtocol && (option.routeId ? option.routeId === newClientVlessRoutes[0] : option.channelMode === newClientSettings.channel_mode)) || connectionTypeOptions[0];
@@ -1527,7 +1527,7 @@ export function ControlPanel() {
       const settings = {
         ...commonSettings,
         channel_mode: selectedConnectionType.routeId ? "direct" as ClientChannelMode : selectedConnectionType.channelMode || "direct",
-        ...(selectedConnectionType.routeId === "cdn" ? { cdn_domain: selectedCdnDomain || selectedVlessRoute?.confirmed_domains?.[0] || "" } : {}),
+        ...(selectedConnectionType.routeId === "cdn" ? { cdn_domain: selectedCdnDomain || selectedVlessRoute?.available_domains?.[0] || "" } : {}),
       };
       const payload = { ...newClient, protocol: selectedConnectionType.protocol, settings, ...(selectedConnectionType.routeId ? { vless_routes: [selectedConnectionType.routeId] } : {}) };
       const result = await request("/clients", { method: "POST", body: JSON.stringify(payload) }) as { config: string; filename?: string; profiles?: GeneratedProfile[] };

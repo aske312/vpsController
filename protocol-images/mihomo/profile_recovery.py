@@ -27,8 +27,34 @@ def runtime(api, unit, *, restoring=False):
     return state
 
 
-def allowed_files(api, modules):
+def enablement(api, unit):
+    observed = api.observe_service(unit)
+    if observed.get("unit_present") is False:
+        return "absent"
+    value = observed.get("unit_file_state")
+    if value not in {"enabled", "enabled-runtime", "disabled"}:
+        raise RuntimeError("Не подтверждено состояние автозапуска службы Mihomo")
+    return value
+
+
+def restore_enablement(api, unit, saved):
+    current = enablement(api, unit)
+    if current == saved:
+        return
+    if "absent" in {current, saved}:
+        raise RuntimeError("Изменилось наличие службы Mihomo при восстановлении")
+    api.run("systemctl", "disable", unit, check=True)
+    api.run("systemctl", "disable", "--runtime", unit, check=True)
+    if saved != "disabled":
+        api.run("systemctl", "enable", *(["--runtime"] if saved == "enabled-runtime" else []), unit, check=True)
+    if enablement(api, unit) != saved:
+        raise RuntimeError("Автозапуск службы Mihomo не восстановлен")
+
+
+def allowed_files(api, modules, *, include_personal_rules=False, settings_modules=()):
     return {"profiles": api.PROFILE_FILE, "routing": api.ROUTING_SETTINGS_FILE,
+            **({"personal-rules": api.PERSONAL_RULES_FILE} if include_personal_rules else {}),
+            **{f"settings-{module}": api.SETTINGS_ROOT / f"{module}.json" for module in settings_modules},
             **{f"external-{module}": path for module, path in api.WG_CONFIG_BY_MODULE.items() if module in modules}}
 
 
@@ -54,17 +80,22 @@ def config_files(root):
     return result
 
 
-def prepare(api, modules):
+def prepare(api, modules, *, include_personal_rules=False, settings_modules=()):
     if marker(api).exists():
         raise RuntimeError("Сначала восстановите прерванное изменение профилей Mihomo")
-    if not modules.issubset(api.TRANSPORTS):
+    settings_modules = set(settings_modules)
+    if not modules.issubset(api.TRANSPORTS) or not settings_modules.issubset(modules):
         raise ValueError("Unknown recovery modules")
     instances = api.ss_runtime.snapshot(api.run, api.CONFIG_ROOT) if "transport-shadowsocks" in modules else None
     states = {module: runtime(api, service) for module in modules if (service := api.SERVICE_BY_MODULE.get(module))}
+    enabled = {module: enablement(api, api.SERVICE_BY_MODULE[module]) for module in settings_modules if module in states}
+    allowed = allowed_files(api, modules, include_personal_rules=include_personal_rules, settings_modules=settings_modules)
     value = {"schema": 1, "modules": sorted(modules), "operation_id": os.getenv("VPS_CONTROL_MIHOMO_OPERATION_ID") or api.get_action_payload().get("id"),
              "config_root": str(api.CONFIG_ROOT.resolve()), "states": states,
-             "files": {key: capture(path) for key, path in allowed_files(api, modules).items()},
-             "targets": {key: str(path.resolve()) for key, path in allowed_files(api, modules).items()},
+             "settings_modules": sorted(settings_modules),
+             "enablement": enabled,
+             "files": {key: capture(path) for key, path in allowed.items()},
+             "targets": {key: str(path.resolve()) for key, path in allowed.items()},
              "config": {name: capture(path) for name, path in config_files(api.CONFIG_ROOT).items()},
              "instances": {unit: [active, enabled, base64.b64encode(content).decode("ascii") if content is not None else None]
                            for unit, (active, enabled, content) in instances.items()} if instances is not None else None}
@@ -113,13 +144,20 @@ def recover(api):
     if not isinstance(value, dict) or value.get("schema") != 1 or not isinstance(value.get("modules"), list):
         raise ValueError("Invalid profile recovery snapshot")
     modules = set(value["modules"])
-    allowed = allowed_files(api, modules)
+    settings_modules = value.get("settings_modules", [])
+    if not isinstance(settings_modules, list) or any(not isinstance(module, str) for module in settings_modules) or not set(settings_modules).issubset(modules):
+        raise ValueError("Invalid module settings recovery snapshot")
+    allowed = allowed_files(api, modules, include_personal_rules="personal-rules" in value.get("files", {}), settings_modules=settings_modules)
     if not modules.issubset(api.TRANSPORTS) or value.get("config_root") != str(api.CONFIG_ROOT.resolve()) or set(value.get("files", {})) != set(allowed) or value.get("targets") != {key: str(target.resolve()) for key, target in allowed.items()}:
         raise ValueError("Recovery snapshot does not match this installation")
     expected_states = {module for module in modules if api.SERVICE_BY_MODULE.get(module)}
     states = value.get("states", {})
     if set(states) != expected_states or any(state not in {"running", "stopped", "absent"} for state in states.values()):
         raise ValueError("Invalid profile runtime snapshot")
+    enabled = value.get("enablement", {})
+    expected_enabled = set(settings_modules) & expected_states if "enablement" in value else set()
+    if not isinstance(enabled, dict) or set(enabled) != expected_enabled or any(state not in {"enabled", "enabled-runtime", "disabled", "absent"} for state in enabled.values()):
+        raise ValueError("Invalid module enablement snapshot")
     files = {allowed[key]: decode(saved) for key, saved in value["files"].items()}
     config = {}
     for name, saved in value["config"].items():
@@ -151,6 +189,20 @@ def recover(api):
         except Exception as error:
             failures.append(str(error))
     before_files = len(failures)
+    # Stop candidate tunnels before restoring files so their PostDown uses the
+    # candidate port/subnet. Starting the saved config then recreates old rules.
+    for module in settings_modules:
+        if module in api.WG_CONFIG_BY_MODULE and module in states:
+            def stop_tunnel(module=module):
+                unit = api.SERVICE_BY_MODULE[module]
+                observed = runtime(api, unit, restoring=True)
+                if observed not in {"absent", "stopped"}:
+                    api.run("systemctl", "stop", unit, check=True)
+                    if runtime(api, unit) != "stopped":
+                        raise RuntimeError("Остановка WG/AWG для восстановления не подтверждена")
+            attempt(stop_tunnel)
+    if len(failures) != before_files:
+        raise RuntimeError("; ".join(failures))
     for target, saved in {**files, **config}.items():
         attempt(lambda target=target, saved=saved: restore_file(target, saved))
     for target in current_config.values():
@@ -160,6 +212,8 @@ def recover(api):
         for module, state in states.items():
             unit = api.SERVICE_BY_MODULE[module]
             def restore_runtime(module=module, unit=unit, state=state):
+                if module in enabled:
+                    restore_enablement(api, unit, enabled[module])
                 observed = runtime(api, unit, restoring=True)
                 if state == "absent":
                     if observed != "absent":
@@ -188,8 +242,8 @@ def recover(api):
 
 
 @contextmanager
-def transaction(api, modules):
-    prepare(api, modules)
+def transaction(api, modules, *, include_personal_rules=False, settings_modules=()):
+    prepare(api, modules, include_personal_rules=include_personal_rules, settings_modules=settings_modules)
     try:
         yield
     except Exception as original:

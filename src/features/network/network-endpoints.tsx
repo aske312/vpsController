@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ConfirmationDialog } from "../../shared/components/confirmation-dialog";
 import { useDialogFocus } from "../../shared/components/use-dialog-focus";
 import type {
@@ -8,6 +8,7 @@ import type {
   NetworkEndpointSettings,
 } from "../../shared/types/control-plane";
 import { checkNetworkEndpoint, type NetworkRequest } from "./network-api";
+import { endpointCheckForConsumer } from "../../shared/lib/network-readiness";
 
 export function NetworkEndpoints({
   request,
@@ -33,6 +34,9 @@ export function NetworkEndpoints({
   onReset: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const generation = useRef(0);
+  const inFlight = useRef(false);
+  useEffect(() => () => { generation.current++; }, []);
   const [discard, setDiscard] = useState(false);
   const [extra, setExtra] = useState<Record<string, string>>({});
   const pendingAddress = Object.values(extra).some((value) => value.trim());
@@ -43,9 +47,10 @@ export function NetworkEndpoints({
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [open, hasChanges]);
-  const close = () => { if (hasChanges) setDiscard(true); else setOpen(false); };
+  const close = () => { if (hasChanges) setDiscard(true); else { generation.current++; setOpen(false); } };
   const dialogRef = useDialogFocus(open, close);
   const [checking, setChecking] = useState<string | null>(null);
+  const [consumerIds, setConsumerIds] = useState<Record<string, string>>({});
   const [checks, setChecks] = useState<
     Partial<Record<keyof NetworkEndpointSettings, NetworkEndpointCheck>>
   >(initialChecks || {});
@@ -89,26 +94,37 @@ export function NetworkEndpoints({
   };
   async function check(field: (typeof fields)[number]) {
     const domain = String(draft[field.key] || "").trim();
-    if (!domain) return;
+    if (!domain || busy || inFlight.current) return;
+    const requestGeneration = generation.current;
+    const consumerId = consumerIds[field.key];
+    inFlight.current = true;
     setChecking(field.key);
     try {
-      const result = await checkNetworkEndpoint(request, field.kind, domain);
-      setChecks((current) => ({ ...current, [field.key]: result }));
+      const result = await checkNetworkEndpoint(request, field.kind, domain, consumerId);
+      if (generation.current !== requestGeneration) return;
+      setChecks((current) => ({ ...current, [field.key]: { ...result, consumers: result.consumers || current[field.key]?.consumers } }));
     } catch {
+      if (generation.current !== requestGeneration) return;
       setChecks((current) => ({
         ...current,
         [field.key]: {
+          ...current[field.key],
           kind: field.kind,
           domain,
-          resolved: [],
-          matches_origin: false,
-          route: "unresolved",
-          status: "unresolved",
+          consumer_id: consumerId,
+          resolved: current[field.key]?.resolved || [],
+          matches_origin: current[field.key]?.matches_origin || false,
+          route: current[field.key]?.route || "unresolved",
+          status: "unchecked",
           ready: false,
-          message: "Не удалось выполнить проверку адреса",
+          verification: "dns_only",
+          checked_at: null, check_id: null, checked_revision: null, failed_checks: 0,
+          verified_connection: undefined,
+          message: "Не удалось получить результат проверки. Обновите сведения о маршруте перед новой проверкой",
         },
       }));
     } finally {
+      inFlight.current = false;
       setChecking(null);
     }
   }
@@ -117,7 +133,7 @@ export function NetworkEndpoints({
       <button
         type="button"
         className="networkAddRouteButton"
-        onClick={() => setOpen(true)}
+        onClick={() => { generation.current++; setChecks(initialChecks || {}); setConsumerIds({}); setOpen(true); }}
       >
         Добавить маршрут
       </button>
@@ -158,7 +174,7 @@ export function NetworkEndpoints({
             <div className="networkEndpointGrid">
               {fields.map((field) => {
                 const checked = checks[field.key];
-                const result = checked?.domain.toLowerCase() === String(draft[field.key] || "").trim().toLowerCase() ? checked : undefined;
+                const result = endpointCheckForConsumer(checked?.domain.toLowerCase() === String(draft[field.key] || "").trim().toLowerCase() ? checked : undefined, consumerIds[field.key] || "");
                 const value = String(draft[field.key] || "").trim();
                 const values = routeValues(field.key);
                 return (
@@ -191,6 +207,8 @@ export function NetworkEndpoints({
                         type="text"
                         value={draft[field.key]}
                         onChange={(event) => {
+                          generation.current++;
+                          setConsumerIds((current) => ({ ...current, [field.key]: "" }));
                           setChecks((current) => {
                             const next = { ...current };
                             delete next[field.key];
@@ -204,11 +222,12 @@ export function NetworkEndpoints({
                       <button
                         type="button"
                         onClick={() => void check(field)}
-                        disabled={busy || checking === field.key || !value}
+                        disabled={busy || Boolean(checking) || !value}
                       >
                         {checking === field.key ? "Проверяем…" : "Проверить"}
                       </button>
                     </div>
+                    {!!result?.consumers?.length && <label><span>Подключение для проверки</span><select aria-label={`Подключение ${field.label}`} value={consumerIds[field.key] || ""} disabled={Boolean(checking)} onChange={(event) => setConsumerIds((current) => ({ ...current, [field.key]: event.target.value }))}><option value="">Первое совместимое подключение</option>{result.consumers.map((consumer) => <option key={consumer.id} value={consumer.id}>{consumer.label} · {consumer.id}</option>)}</select></label>}
                     <small>{field.help}</small>
                     <small className="networkEndpointDnsHint">DNS: {field.kind === "cdn" ? "A/AAAA на origin VPS; для CDN включите proxy у DNS-провайдера." : field.kind === "tls_relay" ? "A/AAAA на внешний TLS relay; порт протокола должен быть проброшен на relay." : "A/AAAA на внешний UDP relay; нужный UDP-порт должен быть проброшен на relay."}</small>
                     {result && (
@@ -285,7 +304,7 @@ export function NetworkEndpoints({
       )}
       {discard && <ConfirmationDialog request={{ title: "Закрыть без сохранения?", message: "Изменения внешних адресов будут потеряны. Настройки на сервере не изменятся.", cancelLabel: "Остаться", confirmLabel: "Уйти без сохранения" }} onClose={(confirmed) => {
         setDiscard(false);
-        if (confirmed) { onReset(); setExtra({}); setOpen(false); }
+        if (confirmed) { generation.current++; onReset(); setExtra({}); setOpen(false); }
       }} />}
     </>
   );

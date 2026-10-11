@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, submitProfileMutation } from "../../src/features/mihomo/profile-operation.ts";
+import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, ProfileMutationFailed, submitProfileMutation } from "../../src/features/mihomo/profile-operation.ts";
 
 const mutation = { profileId: "profile-1", payload: { operation_id: "operation-1", name: "Test" } };
 const confirmed = { id: "profile-1", last_operation_id: "operation-1" };
@@ -137,4 +137,16 @@ test("temporary operation lookup failures are retried without repeating the muta
   assert.equal(writes, 1);
   assert.equal(polls, 3);
   assert.equal(updates.length, 1);
+});
+
+test("manual readback distinguishes terminal failure from an unavailable result", async () => {
+  const pending = { profileId: "profile-1", payload: { operation_id: "d".repeat(32) } };
+  for (const state of ["failed", "cancelled"]) {
+    await assert.rejects(checkProfileMutation(async (_path, init) => {
+      assert.equal(init.method, undefined);
+      return { state, message: "Operation stopped" };
+    }, pending, () => {}, options), ProfileMutationFailed);
+  }
+  const unavailable = Object.assign(new Error("Session expired"), { kind: "http", status: 401 });
+  await assert.rejects(checkProfileMutation(async () => { throw unavailable; }, pending, () => {}, options), cause => cause === unavailable && !(cause instanceof ProfileMutationFailed));
 });

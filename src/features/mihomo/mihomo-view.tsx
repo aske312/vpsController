@@ -2,15 +2,17 @@
 
 import type { View, ReadyDevice, ConfirmOptions, Status, Module, Profile, ProfileConnection, ProfileDevice, PolicySettings, ProfilePreset, ProfileStats, RuleIconGroup, PersonalRule } from "./types";
 import { presetConnectionOptions, presetOptionGroups, channelShort, dnsProviderMeta, gameRoutingCatalog, defaultTunnelGameIds, defaultDirectGameIds, udpExclusionCatalog, p2pClientCatalog, profileDirectRules, ruleIconGroups, profileStrategies } from "./catalog";
-import { clientUuid, deviceClientShortName, clientConfigFormat, clientImportUrl, devicePlatformMeta, deviceSystemLabel, registeredProfileDevices, selectedGameIds } from "./profile-utils";
+import { clientUuid, deviceClientShortName, clientConfigFormat, devicePlatformMeta, deviceSystemLabel, registeredProfileDevices, selectedGameIds } from "./profile-utils";
 import { Tab, HeroFact, ModuleCatalog, Empty } from "./components";
 import { clientCapabilities, compatibleClientRouting, clientConnectionSupported } from "./client-capabilities";
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
 import { AccessReveal } from "../../shared/components/access-reveal";
+import { useDialogFocus } from "../../shared/components/use-dialog-focus";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
-import { profileTransitionMessage, ProfileResultUnknown, submitProfileMutation, type ProfileMutation } from "./profile-operation";
+import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, ProfileMutationFailed, submitProfileMutation, type ProfileMutation } from "./profile-operation";
 import type { NetworkStatus } from "../../shared/types/control-plane";
+import { confirmedRouteAddresses } from "../../shared/lib/network-readiness";
 
 import { useNotifier, useFailureNotifications } from "../../shared/notifications/notification-center";
 import { notificationFailure as refreshFailure, type NotificationFailure } from "../../shared/notifications/store";
@@ -107,8 +109,19 @@ export function MihomoPage({
   const refreshRun = useRef(0);
   const [editing, setEditing] = useState<Module | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number | boolean>>({});
+  const settingsSession = useRef(0);
+  const settingsClosePending = useRef(false);
+  const settingsSignature = JSON.stringify(settingsDraft);
+  const settingsSignatureRef = useRef(settingsSignature);
+  settingsSignatureRef.current = settingsSignature;
+  const settingsDirty = Boolean(editing && settingsSignature !== JSON.stringify(editing.settings_values));
+  const settingsDialogRef = useDialogFocus<HTMLFormElement>(Boolean(editing), () => { void closeSettings(); });
   const [profileDialog, setProfileDialog] = useState<Profile | "new" | null>(null);
   const profileMutationId = useRef(clientUuid());
+  const profileSession = useRef(0);
+  const profileClosePending = useRef(false);
+  const [profileInitialDraft, setProfileInitialDraft] = useState("");
+  const [pendingProfileSave, setPendingProfileSave] = useState<{ mutation: ProfileMutation; session: number; draft: string } | null>(null);
   const [profileStep, setProfileStep] = useState(1);
   const profileCanvasRef = useRef<HTMLElement>(null);
   const [profileName, setProfileName] = useState("");
@@ -116,6 +129,11 @@ export function MihomoPage({
   const [profileRouting, setProfileRouting] = useState<Record<string, string | number | boolean>>({});
   const [profileStrategyTouched, setProfileStrategyTouched] = useState(false);
   const [profileDevices, setProfileDevices] = useState<ProfileDevice[]>([{ id: "profile-common", name: "Общие настройки профиля", scope: "common" }]);
+  const profileDraft = JSON.stringify([profileName, profileConnections, profileRouting, profileDevices]);
+  const profileDraftRef = useRef(profileDraft);
+  profileDraftRef.current = profileDraft;
+  const profileDirty = Boolean(profileDialog && profileDraft !== profileInitialDraft);
+  const profileDialogRef = useDialogFocus<HTMLFormElement>(Boolean(profileDialog), () => { void closeProfile(); });
   const [activeDeviceId, setActiveDeviceId] = useState("profile-common");
   const [selectedConnectionId, setSelectedConnectionId] = useState("");
   const deviceConnections = profileConnections.filter((connection) => connection.device_id === activeDeviceId);
@@ -134,11 +152,15 @@ export function MihomoPage({
   // Poll live delivery/cleanup status without replacing unsaved form fields.
   const liveDialogProfile = profileDialog && profileDialog !== "new"
     ? profiles.find((profile) => profile.id === profileDialog.id) || profileDialog : null;
+  const latestEditProfile = profileDialog && profileDialog !== "new" ? profiles.find((profile) => profile.id === profileDialog.id) : undefined;
+  const profileRevisionConflict = Boolean(profileDialog && profileDialog !== "new" && profileDialog.revision
+    && latestEditProfile?.revision !== profileDialog.revision);
   const transitionMessage = liveDialogProfile ? profileTransitionMessage(liveDialogProfile, activeDeviceId) : "";
   const [profileStats, setProfileStats] = useState<Record<string, ProfileStats>>({});
   const [expandedDeviceLists, setExpandedDeviceLists] = useState<Set<string>>(() => new Set());
   const [expandedProtocolLists, setExpandedProtocolLists] = useState<Set<string>>(() => new Set());
   const [createdProfile, setCreatedProfile] = useState<Profile | null>(null);
+  const latestCreatedProfile = createdProfile ? profiles.find((profile) => profile.id === createdProfile.id) : undefined;
   const [readyDevices, setReadyDevices] = useState<ReadyDevice[]>([]);
   const [readyFailed, setReadyFailed] = useState(false);
   const [presetDialog, setPresetDialog] = useState(false);
@@ -271,10 +293,8 @@ export function MihomoPage({
       for (const device of devices) {
         const result = await request(`/mihomo/profiles/${createdProfile.id}/subscription${device.manual ? `?device_id=${encodeURIComponent(device.id)}` : ""}`) as { path: string; url?: string };
         const url = new URL(result.url || result.path, window.location.origin);
-        const format = clientConfigFormat(createdProfile, device);
         const subscription = url.toString();
-        const importUrl = clientImportUrl(subscription, `${createdProfile.name} · ${device.name}`, device.scope === "common" ? "mihomo" : format, device.scope === "common" ? "" : `${device.client_name || ""} ${device.user_agent || ""}`);
-        const qr = await QRCode.toDataURL(importUrl, { errorCorrectionLevel: "M", margin: 2, width: 360 });
+        const qr = await QRCode.toDataURL(subscription, { errorCorrectionLevel: "M", margin: 2, width: 360 });
         items.push({ ...device, subscription, qr });
       }
       return items;
@@ -287,7 +307,7 @@ export function MihomoPage({
     return () => { cancelled = true; };
   }, [createdProfile, request, notifyError]);
 
-  useEffect(() => { onDirtyChange?.(dnsDirty || routingDirty); }, [dnsDirty, routingDirty, onDirtyChange]);
+  useEffect(() => { onDirtyChange?.(dnsDirty || routingDirty || profileDirty || settingsDirty); }, [dnsDirty, routingDirty, profileDirty, settingsDirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   function updateRoutingDraft(key: string, value: string | number | boolean) {
@@ -460,21 +480,26 @@ export function MihomoPage({
   }
 
   const refreshedModuleOperation = useRef<string | undefined>(undefined);
-  const pendingSettingsOperation = useRef<string | undefined>(undefined);
+  const pendingSettingsOperation = useRef<{ id: string; session: number; draft: string } | undefined>(undefined);
   useEffect(() => {
     if (!systemOperation?.action?.startsWith("mihomo-") || !systemOperation.id || refreshedModuleOperation.current === systemOperation.id) return;
     if (systemOperation.state === "succeeded" || systemOperation.state === "failed") {
       refreshedModuleOperation.current = systemOperation.id;
-      const closeSettings = pendingSettingsOperation.current === systemOperation.id && systemOperation.state === "succeeded";
-      if (pendingSettingsOperation.current === systemOperation.id) {
+      const pending = pendingSettingsOperation.current?.id === systemOperation.id ? pendingSettingsOperation.current : undefined;
+      if (pending) {
         pendingSettingsOperation.current = undefined;
       }
-      void refresh().then(() => { if (closeSettings) setEditing(null); });
+      void refresh().then(() => {
+        if (pending && systemOperation.state === "succeeded" && settingsSession.current === pending.session && settingsSignatureRef.current === pending.draft) {
+          settingsSession.current += 1;
+          setEditing(null);
+        }
+      });
     }
   }, [systemOperation, refresh]);
 
   async function recoverProfiles() {
-    if (!await confirmAction({ title: "Восстановить профили Mihomo?", message: "Конфигурация и состояние служб будут восстановлены из снимка перед прерванным изменением. Подключения могут кратковременно прерваться.", confirmLabel: "Восстановить", danger: true })) return;
+    if (!await confirmAction({ title: "Восстановить Mihomo?", message: "Настройки, конфигурация и состояние служб будут восстановлены из снимка перед прерванным изменением. Подключения могут кратковременно прерваться.", confirmLabel: "Восстановить", danger: true })) return;
     setBusy("recovery");
     try { onSystemOperation(await submitSystemOperation(request, "/mihomo/recovery", { method: "POST" })); }
     catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось начать восстановление"); }
@@ -524,20 +549,35 @@ export function MihomoPage({
   }
 
   function openSettings(module: Module) {
+    settingsSession.current += 1;
     setEditing(module);
     setSettingsDraft({ ...module.settings_values });
   }
 
+  async function closeSettings() {
+    if (settingsClosePending.current) return;
+    const session = settingsSession.current;
+    settingsClosePending.current = true;
+    try {
+      if (settingsDirty && !await confirmAction({ title: "Закрыть настройки без сохранения?", message: "Несохранённые правки будут потеряны. Уже запущенная операция продолжит работу.", confirmLabel: "Закрыть без сохранения" })) return;
+      if (settingsSession.current !== session) return;
+      settingsSession.current += 1;
+      setEditing(null);
+    } finally { settingsClosePending.current = false; }
+  }
+
   async function saveSettings(event: FormEvent) {
     event.preventDefault();
-    if (!editing) return;
+    if (!editing || busy) return;
+    const session = settingsSession.current;
+    const submittedDraft = settingsSignature;
     if (editing.category !== "dns" && editing.category !== "routing") {
       setBusy(`settings:${editing.id}`);
       try {
         const started = await submitSystemOperation(request, `/mihomo/modules/${editing.id}/settings`, {
           method: "PATCH", body: JSON.stringify({ values: settingsDraft }),
         });
-        pendingSettingsOperation.current = started.id;
+        pendingSettingsOperation.current = started.id ? { id: started.id, session, draft: submittedDraft } : undefined;
         onSystemOperation(started);
       } catch (cause) {
         notifyError(cause instanceof Error ? cause.message : "Не удалось начать применение настроек");
@@ -559,7 +599,10 @@ export function MihomoPage({
         method: "PATCH",
         body: JSON.stringify({ values: settingsDraft }),
       });
-      setEditing(null);
+      if (settingsSession.current === session && settingsSignatureRef.current === submittedDraft) {
+        settingsSession.current += 1;
+        setEditing(null);
+      }
       await refresh();
       notifyOperation(operationId, operationLabel, "success", "Настройки сохранены");
     } catch (cause) {
@@ -571,6 +614,8 @@ export function MihomoPage({
   }
 
   function newProfile() {
+    profileSession.current += 1;
+    setProfileInitialDraft(JSON.stringify(["", [], {}, [{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: {} }]]));
     profileMutationId.current = clientUuid();
     setProfileStep(1);
     setProfileStrategyTouched(false);
@@ -583,44 +628,52 @@ export function MihomoPage({
   }
 
   function editProfile(profile: Profile) {
+    profileSession.current += 1;
     profileMutationId.current = clientUuid();
     setProfileStep(1);
     setProfileStrategyTouched(true);
     setProfileDialog(profile);
     setProfileName(profile.name);
-    setProfileConnections((profile.connections || []).map((connection) => ({
+    const connections = (profile.connections || []).map((connection) => ({
       ...connection,
       settings: connection.component === "transport-reality"
         ? { ...connection.settings, route_mode: connection.settings.route_mode || (connection.settings.cdn_enabled ? "both" : "direct") }
         : { ...connection.settings },
-    })));
+    }));
+    setProfileConnections(connections);
     setProfileRouting({ ...(profile.routing || {}) });
     const devices = (profile.devices?.length ? profile.devices : [{ id: "profile-common", name: "Общие настройки профиля", scope: "common" as const }]).map((device) => ({ ...device, routing: device.scope === "common" ? { ...(device.routing || profile.routing || {}) } : compatibleClientRouting(device.routing || {}, String(device.routing?.client_config_format || "mihomo"), device.os || "unknown", device.manual ? undefined : device.client_name) }));
     setProfileDevices(devices);
+    setProfileInitialDraft(JSON.stringify([profile.name, connections, { ...(profile.routing || {}) }, devices]));
     setActiveDeviceId(profile.common_device_id || devices.find((device) => device.scope === "common")?.id || devices[0].id);
   }
 
-  function confirmedNetworkRoute(kind: "cdn" | "tls" | "udp") {
-    const routes = networkStatus?.domains || [];
-    const route = routes.find((item) => {
-      const role = item.role.toLowerCase();
-      if (!item.resolved.length) return false;
-      if (kind === "cdn") return role.includes("cdn") && item.route === "proxy_or_cdn";
-      if (kind === "tls") return (role.includes("panel") || role.includes("tls")) && item.route === "direct";
-      return role.includes("udp") && item.route !== "unresolved";
-    });
-    return route?.value || "";
+  async function closeProfile(afterClose?: () => void) {
+    if (profileClosePending.current) return;
+    const session = profileSession.current;
+    profileClosePending.current = true;
+    try {
+      if (profileDirty && !await confirmAction({ title: "Закрыть профиль без сохранения?", message: "Введённые изменения будут потеряны. Настройки на сервере не изменятся.", confirmLabel: "Закрыть без сохранения" })) return;
+      if (profileSession.current !== session) return;
+      profileSession.current += 1;
+      setProfileDialog(null);
+      afterClose?.();
+    } finally { profileClosePending.current = false; }
   }
 
-  function confirmedNetworkRoutes(kind: "cdn" | "tls" | "udp") {
-    const routes = networkStatus?.domains || [];
-    return [...new Set(routes.filter((item) => {
-      const role = item.role.toLowerCase();
-      if (!item.resolved.length || item.route === "unresolved") return false;
-      if (kind === "cdn") return role.includes("cdn") && item.route === "proxy_or_cdn";
-      if (kind === "tls") return (role.includes("panel") || role.includes("tls")) && item.route === "direct";
-      return role.includes("udp");
-    }).map((item) => item.value))];
+  async function reloadEditProfile() {
+    if (!latestEditProfile) return;
+    const session = profileSession.current;
+    if (!await confirmAction({ title: "Загрузить актуальный профиль?", message: "Несохранённые правки этой формы будут потеряны. Настройки на сервере не изменятся.", confirmLabel: "Загрузить" })) return;
+    if (profileSession.current === session) editProfile(latestEditProfile);
+  }
+
+  function availableNetworkRoute(kind: "cdn" | "tls" | "udp") {
+    return confirmedRouteAddresses(networkStatus, kind, true)[0] || "";
+  }
+
+  function availableNetworkRoutes(kind: "cdn" | "tls" | "udp") {
+    return confirmedRouteAddresses(networkStatus, kind, true);
   }
 
   function unusedRealityTarget(connections: ProfileConnection[]) {
@@ -640,8 +693,8 @@ export function MihomoPage({
       settings.route_mode = vlessRoute;
       if (vlessRoute === "direct") settings.target = unusedRealityTarget(deviceConnections);
       settings.cdn_enabled = vlessRoute === "cdn";
-      if (vlessRoute === "cdn") settings.cdn_domain = confirmedNetworkRoute("cdn");
-      if (vlessRoute === "tls") settings.tls_domain = confirmedNetworkRoute("tls");
+      if (vlessRoute === "cdn") settings.cdn_domain = availableNetworkRoute("cdn");
+      if (vlessRoute === "tls") settings.tls_domain = availableNetworkRoute("tls");
     }
     const id = `connection-${clientUuid()}`;
     setSelectedConnectionId(id);
@@ -659,8 +712,8 @@ export function MihomoPage({
   }
 
   function applyProfilePreset(preset: ProfilePreset) {
-    const cdnDomain = confirmedNetworkRoute("cdn");
-    const tlsDomain = confirmedNetworkRoute("tls");
+    const cdnDomain = availableNetworkRoute("cdn");
+    const tlsDomain = availableNetworkRoute("tls");
     const usedSingletons = new Set<string>();
     const connections: ProfileConnection[] = [];
     for (const definition of preset.components) {
@@ -701,17 +754,25 @@ export function MihomoPage({
   async function saveProfile(event: FormEvent) {
     event.preventDefault();
     if (!profileDialog) return;
+    if (profileRevisionConflict) { notifyError("Профиль изменился на сервере. Загрузите актуальные данные перед сохранением"); return; }
+    if (busy || pendingProfileSave) return;
+    const session = profileSession.current;
+    const submittedDraft = profileDraft;
     const mutation: ProfileMutation = {
       profileId: profileDialog === "new" ? undefined : profileDialog.id,
-      payload: { name: profileName, devices: profileDevices, connections: profileConnections, routing: profileDevices.find((device) => device.scope === "common")?.routing || profileRouting, operation_id: profileMutationId.current },
+      payload: { name: profileName, devices: profileDevices, connections: profileConnections, routing: profileDevices.find((device) => device.scope === "common")?.routing || profileRouting, operation_id: profileMutationId.current, ...(profileDialog !== "new" ? { expected_revision: profileDialog.revision } : {}) },
     };
     const report = () => {};
     const finish = async () => {
-      setProfileDialog(null);
+      if (profileSession.current === session && profileDraftRef.current === submittedDraft) {
+        profileSession.current += 1;
+        setProfileDialog(null);
+      }
       await refresh();
     };
     const fail = (cause: unknown) => {
-      if (!(cause instanceof ProfileResultUnknown)) profileMutationId.current = clientUuid();
+      if (cause instanceof ProfileResultUnknown) setPendingProfileSave({ mutation, session, draft: submittedDraft });
+      if (profileSession.current === session && !(cause instanceof ProfileResultUnknown)) profileMutationId.current = clientUuid();
       notifyError(cause instanceof Error ? cause.message : "Профиль не сохранён");
       void refresh();
     };
@@ -725,6 +786,30 @@ export function MihomoPage({
     } finally {
       setBusy("");
     }
+  }
+
+  async function recheckProfileSave() {
+    if (!pendingProfileSave || requestBusy === "profile") return;
+    const pending = pendingProfileSave;
+    setBusy("profile");
+    try {
+      await checkProfileMutation(request, pending.mutation, () => {}, { onOperation: onSystemOperation });
+      setPendingProfileSave(null);
+      if (profileSession.current === pending.session) {
+        profileMutationId.current = clientUuid();
+        if (profileDraftRef.current === pending.draft) {
+          profileSession.current += 1;
+          setProfileDialog(null);
+        }
+      }
+      await refresh();
+    } catch (cause) {
+      if (cause instanceof ProfileMutationFailed) {
+        setPendingProfileSave(null);
+        if (profileSession.current === pending.session) profileMutationId.current = clientUuid();
+      }
+      notifyError(cause instanceof Error ? cause.message : "Не удалось проверить сохранение профиля");
+    } finally { setBusy(""); }
   }
 
   async function removeProfile(profile: Profile) {
@@ -971,7 +1056,8 @@ export function MihomoPage({
   return (
     <section className="mihomoPage mihomoWorkspace" aria-label="Mihomo Manager">
       {readOnly && <p role="status">Только просмотр и диагностика. Для изменения Mihomo примите его под управление в разделе «Обзор».</p>}
-      {status?.recovery_required && <p role="alert">Изменение профилей прервано. Снимок сохранён; новые изменения заблокированы. <button type="button" disabled={Boolean(busy) || readOnly} onClick={() => void recoverProfiles()}>Восстановить профили</button></p>}
+      {status?.recovery_required && <p role="alert">Изменение настроек или профилей прервано. Снимок сохранён; новые изменения заблокированы. <button type="button" disabled={Boolean(busy) || readOnly} onClick={() => void recoverProfiles()}>Восстановить Mihomo</button></p>}
+      {pendingProfileSave && <p role="status">Результат сохранения профиля пока неизвестен. Перед следующей записью проверьте прежнюю операцию. <button type="button" disabled={requestBusy === "profile"} onClick={() => void recheckProfileSave()}>Проверить сохранение профиля</button></p>}
       <article className="mihomoCommandHero">
         <div className="mihomoHeroContent">
           <div className="mihomoHeroIntro">
@@ -1241,12 +1327,12 @@ export function MihomoPage({
 
       {editing && createPortal(
         <div className="mihomoDialogBackdrop" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setEditing(null);
+          if (event.target === event.currentTarget) void closeSettings();
         }}>
-          <form className="mihomoDialog" onSubmit={saveSettings}>
+          <form ref={settingsDialogRef} role="dialog" aria-modal="true" aria-label={`Настройки ${editing.name}`} tabIndex={-1} className="mihomoDialog" onSubmit={saveSettings}>
             <header>
               <div><p className="eyebrow">MODULE SETTINGS</p><h2>{editing.name}</h2></div>
-              <button type="button" className="iconButton" onClick={() => setEditing(null)}>x</button>
+              <button type="button" className="iconButton" aria-label="Закрыть настройки" onClick={() => void closeSettings()}>x</button>
             </header>
             <p>{editing.description}</p>{editing.category === "transport" && <p>Здесь находятся общие параметры сервера. Параметры отдельного подключения доступны в профиле → Подключения.</p>}
             <div className="mihomoFields">
@@ -1273,7 +1359,7 @@ export function MihomoPage({
               ))}
             </div>
             <aside>{editing.installed ? "Сохранение настроек перезапустит только этот Mihomo sub-module. Одноимённый Direct-модуль не затрагивается." : "Настройки сохранятся заранее и будут применены при установке sub-module."}</aside>
-            <footer><button type="button" className="ghostButton" onClick={() => setEditing(null)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === `settings:${editing.id}`}>Сохранить</button></footer>
+            <footer><button type="button" className="ghostButton" onClick={() => void closeSettings()}>Отмена</button><button type="submit" className="primaryButton" disabled={Boolean(busy)}>Сохранить</button></footer>
           </form>
         </div>,
         document.body,
@@ -1281,13 +1367,14 @@ export function MihomoPage({
 
       {profileDialog && (
         <div className="mihomoDialogBackdrop mihomoProfileBackdrop" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setProfileDialog(null);
+          if (event.target === event.currentTarget) void closeProfile();
         }}>
-          <form className={`mihomoDialog mihomoProfileDialog is-step-${profileStep}`} onSubmit={saveProfile}>
+          <form ref={profileDialogRef} role="dialog" aria-modal="true" aria-label={profileDialog === "new" ? "Новый профиль" : "Настройка профиля"} tabIndex={-1} className={`mihomoDialog mihomoProfileDialog is-step-${profileStep}`} onSubmit={saveProfile}>
             <header>
               <div className="mihomoProfileHeading"><div><p className="eyebrow">MIHOMO PROFILE</p><h2>{profileDialog === "new" ? "Новый профиль" : "Настройка профиля"}</h2></div></div>
-              <button type="button" className="iconButton" onClick={() => setProfileDialog(null)}>x</button>
+              <button type="button" className="iconButton" aria-label="Закрыть профиль" onClick={() => void closeProfile()}>x</button>
             </header>
+            {profileRevisionConflict && <p className="mihomoMessage is-error" role="alert">{latestEditProfile ? "Профиль изменился на сервере. Ваши правки сохранены в форме, сохранение заблокировано до загрузки актуальных данных." : "Профиль удалён на сервере. Ваши правки остались в форме."} {latestEditProfile && <button type="button" disabled={Boolean(busy)} onClick={() => void reloadEditProfile()}>Загрузить актуальные данные</button>}</p>}
             <div className="mihomoProfileWorkspace">
               <aside className="mihomoProfileRail">
                 <header><small>КОНФИГУРАЦИЯ</small><b>Параметры профиля</b></header>
@@ -1311,15 +1398,15 @@ export function MihomoPage({
               </>}
             </section>
             {visibleProfileStrategies.length > 0 && <section className="mihomoProfileStrategy"><header><div><b>Стратегия устройства</b><small>Отдельная группа подключений для выбранного устройства.</small></div><span>{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header><div>{visibleProfileStrategies.map((strategy) => { const selected = String(activeProfileRouting.strategy || "") === strategy.value; return <button key={strategy.value || "inherit"} type="button" className={selected ? "is-selected" : ""} onClick={() => setProfileStrategy(strategy.value)}><i>{strategy.code}</i><span><b>{strategy.title}</b><small>{strategy.text}</small></span></button>; })}</div></section>}
-            {activeProfileDevice?.scope !== "common" && <section className="mihomoProfileName mihomoProfileGeneral"><header><div><b>Формат при следующей загрузке</b><small>{activeProfileDevice?.manual ? "Общий sing-box JSON, без HWID." : "Формат сохраняется для сочетания HWID и приложения."}</small></div></header>
-              {activeProfileDevice?.scope === "hwid" && (activeProfileDevice.supported_formats?.length || 0) > 1 ? <label><span>Файл для клиента</span><select value={String(activeProfileRouting.client_config_format || "mihomo")} onChange={(event) => setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: compatibleClientRouting(device.routing || {}, event.target.value, device.os || "unknown", device.manual ? undefined : device.client_name) } : device))}>{activeProfileDevice.supported_formats?.map((format) => <option key={format} value={format}>{clientCapabilities(format).label}</option>)}</select><small>После сохранения обновите подписку. Если клиент не принимает новый формат — удалите подписку и добавьте ту же ссылку заново. Устройство сохранится, если приложение и HWID не изменятся.</small></label> : <p>{activeCapabilities.label}</p>}
+            {activeProfileDevice?.scope !== "common" && <section className="mihomoProfileName mihomoProfileGeneral"><header><div><b>Формат скачиваемого файла</b><small>{activeProfileDevice?.manual ? "Общий sing-box JSON, без HWID." : "Выбор экспорта сохранён для устройства. Формат подписки определяется проверенной совместимостью."}</small></div></header>
+              {activeProfileDevice?.scope === "hwid" && (activeProfileDevice.supported_formats?.length || 0) > 1 ? <label><span>Формат экспорта</span><select value={String(activeProfileRouting.client_config_format || "mihomo")} onChange={(event) => setProfileDevices((current) => current.map((device) => device.id === activeDeviceId ? { ...device, routing: compatibleClientRouting(device.routing || {}, event.target.value, device.os || "unknown", device.manual ? undefined : device.client_name) } : device))}>{activeProfileDevice.supported_formats?.map((format) => <option key={format} value={format}>{clientCapabilities(format).label}</option>)}</select><small>Этот выбор определяет скачиваемый файл. Подписка выбирает формат по проверенной совместимости; непроверенный клиент получает стандартный YAML. После изменения настроек обновите подписку.</small></label> : <p>{activeCapabilities.label}</p>}
             </section>}
-            {profileStep === 2 && <ProfileProtection common={commonDevice} client={activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name} routing={activeProfileRouting} connections={profileConnections.filter((connection) => connection.device_id === activeDeviceId)} modules={modules} echAvailable={Boolean(confirmedNetworkRoute("cdn"))} onChange={setProfileRoutingValue} />}
+            {profileStep === 2 && <ProfileProtection common={commonDevice} client={activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name} routing={activeProfileRouting} connections={profileConnections.filter((connection) => connection.device_id === activeDeviceId)} modules={modules} echAvailable={Boolean(confirmedRouteAddresses(networkStatus, "cdn").length)} onChange={setProfileRoutingValue} />}
             {liveDialogProfile?.protection_status?.[activeDeviceId]?.encryption_pending && <p className="mihomoMessage is-error" role="status">Сохранённая настройка шифрования ещё не применена к подключениям. Сохраните профиль, затем обновите подписку в клиенте.</p>}
             {transitionMessage && <p className="mihomoMessage" role="status">{transitionMessage}{activeDeviceId === liveDialogProfile?.common_device_id && " Для клиентов без HWID переход общий: выдача подписки не подтверждает обновление всех клиентов общего пула."}</p>}
             <section className="mihomoProfileRules"><header><div><b>Правила устройства</b><small>Включаются только в конфигурации выбранного устройства.</small></div><span>{visibleProfileRules.filter((rule) => Boolean(activeProfileRouting[rule.key])).length + profilePersonalRules.filter((rule) => (activeProfileDevice?.personal_rule_ids || []).includes(rule.id)).length} из {visibleProfileRules.length + profilePersonalRules.length}</span></header><div>{visibleProfileRules.map((rule) => { const selected = Boolean(activeProfileRouting[rule.key]); return <button type="button" key={rule.key} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => toggleProfileRule(rule.key, !selected)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.text}</small></span></button>; })}</div>{profilePersonalRules.length > 0 && <div className="mihomoPersonalProfileRules"><h4>Персональные</h4>{profilePersonalRules.map((rule) => { const selected = (activeProfileDevice?.personal_rule_ids || []).includes(rule.id); return <button type="button" key={rule.id} aria-pressed={selected} className={`mihomoProfileRuleButton${selected ? " is-enabled" : ""}`} onClick={() => togglePersonalRule(rule.id)}><i>{rule.code}</i><span><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></span></button>; })}</div>}</section>
             <section className="mihomoPresetPicker">
-              <header><div><b>Создать подключения из пресета</b><small>Готовый набор заменит подключения выбранной конфигурации.</small></div><button type="button" onClick={() => { setProfileDialog(null); setView("routing"); }}>Настроить пресеты</button></header>
+              <header><div><b>Создать подключения из пресета</b><small>Готовый набор заменит подключения выбранной конфигурации.</small></div><button type="button" onClick={() => void closeProfile(() => setView("routing"))}>Настроить пресеты</button></header>
               <div>{profilePresets.filter((preset) => commonDevice || preset.components.every((item) => {
                 const id = item.id === "$primary" ? String(routingPolicy?.values.preset_primary || "transport-reality") : item.id === "$fallback" ? String(routingPolicy?.values.preset_fallback || "transport-awg") : item.id;
                 const protocolModule = modules.find((entry) => entry.id === id);
@@ -1330,15 +1417,15 @@ export function MihomoPage({
               })).map((preset) => {
                 const needsCdn = preset.components.some((item) => item.cdn);
                 const needsTls = preset.components.some((item) => item.tls);
-                const missingCdn = needsCdn && !confirmedNetworkRoute("cdn");
-                const missingTls = needsTls && !confirmedNetworkRoute("tls");
+                const missingCdn = needsCdn && !availableNetworkRoute("cdn");
+                const missingTls = needsTls && !availableNetworkRoute("tls");
                 const missingModules = preset.components.filter((definition) => !modules.some((item) => item.id === definition.id && item.installed));
                 const unavailable = missingCdn || missingTls || missingModules.length > 0;
                 return <button key={preset.id} type="button" disabled={unavailable} onClick={() => applyProfilePreset(preset)}><i>+</i><span><b>{preset.name}</b><small>{missingModules.length ? `Сначала установите: ${missingModules.map((item) => item.id.replace("transport-", "")).join(", ")}` : missingCdn && missingTls ? "Укажите CDN- и TLS-домены в Настройках" : missingCdn ? "Укажите CDN-домен в Настройках" : missingTls ? "Укажите TLS-домен в Настройках" : "Создать готовый набор"}</small></span></button>;
               })}</div>
             </section>
             <section className="mihomoConnectionBuilder">
-              <header><div><b>Подключения устройства</b><small>Каналы попадут только в подписку выбранного устройства.</small></div><span className="mihomoStrategyBadge">{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.code} · {profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header>
+              <header><div><b>Подключения устройства</b><small>Каналы попадут только в подписку выбранного устройства. После создания проверьте TLS/CDN-подключения в разделе «Сеть».</small></div><span className="mihomoStrategyBadge">{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.code} · {profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header>
               <div className="mihomoConnectionAdd">
                 {installedChannels.filter((module) => commonDevice || activeCapabilities.components.includes(module.id)).flatMap((module) => {
                   if (module.id === "transport-reality") {
@@ -1346,8 +1433,8 @@ export function MihomoPage({
                     const limit = Number(routingPolicy?.values.vless_max_connections_per_device || 5);
                     return [
                       <button key="vless-direct" type="button" disabled={vlessRouteCount(deviceVless, "reality") >= limit} onClick={() => addProfileConnection(module, "direct")}>+ VLESS</button>,
-                      <button key="vless-tls" type="button" disabled={!confirmedNetworkRoute("tls") || vlessRouteCount(deviceVless, "tls") >= limit} title={!confirmedNetworkRoute("tls") ? "Сначала подтвердите прямой TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
-                      <button key="vless-cdn" type="button" disabled={!confirmedNetworkRoute("cdn") || vlessRouteCount(deviceVless, "cdn") >= limit} title={!confirmedNetworkRoute("cdn") ? "Сначала подтвердите CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
+                      <button key="vless-tls" type="button" disabled={!availableNetworkRoute("tls") || vlessRouteCount(deviceVless, "tls") >= limit} title={!availableNetworkRoute("tls") ? "Сначала добавьте прямой TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
+                      <button key="vless-cdn" type="button" disabled={!availableNetworkRoute("cdn") || vlessRouteCount(deviceVless, "cdn") >= limit} title={!availableNetworkRoute("cdn") ? "Сначала добавьте CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
                     ];
                   }
                   const singletonUsed = profileConnections.some((item) => item.device_id === activeDeviceId && item.component === module.id);
@@ -1386,7 +1473,7 @@ export function MihomoPage({
                         return true;
                       }).map((field) => <label key={field.key} className={field.type === "boolean" ? "is-toggle" : ""}>
                         <span>{field.label}</span>
-                        {((field.key === "cdn_domain" && vlessRoute === "cdn") || (field.key === "tls_domain" && vlessRoute === "tls")) ? (() => { const kind = field.key === "cdn_domain" ? "cdn" : "tls"; const routes = confirmedNetworkRoutes(kind); return routes.length > 0 ? <select value={routes.includes(String(connection.settings[field.key] || "")) ? String(connection.settings[field.key]) : routes[0]} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>{routes.map((domain) => <option key={domain} value={domain}>{domain}</option>)}</select> : <span className="mihomoUnavailableField">Нет подтвержденных доменов на странице «Сеть»</span>; })() : ["target", "sni"].includes(field.key) ? <>
+                        {((field.key === "cdn_domain" && vlessRoute === "cdn") || (field.key === "tls_domain" && vlessRoute === "tls")) ? (() => { const kind = field.key === "cdn_domain" ? "cdn" : "tls"; const routes = availableNetworkRoutes(kind); return routes.length > 0 ? <select value={routes.includes(String(connection.settings[field.key] || "")) ? String(connection.settings[field.key]) : routes[0]} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>{routes.map((domain) => <option key={domain} value={domain}>{domain}</option>)}</select> : <span className="mihomoUnavailableField">Нет активных доменов</span>; })() : ["target", "sni"].includes(field.key) ? <>
                           <select aria-label={`${field.label}: список адресов`} value="" onChange={(event) => { if (event.target.value) updateConnectionSetting(connection.id, field.key, event.target.value); }}>
                             <option value="">Выбрать SNI из полного списка…</option>
                             {realityTargets.map((host) => <option key={host} value={field.key === "target" ? `${host}:443` : host}>{host}</option>)}
@@ -1408,25 +1495,27 @@ export function MihomoPage({
                 <aside className="mihomoProfileTechnicalNote">Настройки применяются к выбранному подключению. Порты общих серверов, подсети и серверная обфускация задаются в Компонентах. После сохранения обновите подписку на устройстве.</aside>
               </main>
             </div>
-            <footer><button type="button" className="ghostButton" onClick={() => setProfileDialog(null)}>Отмена</button><span>{profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id)) ? "Для каждого уровня нужно хотя бы одно подключение" : "Изменения применятся после сохранения"}</span><button type="submit" className="primaryButton" disabled={busy === "profile" || !profileName.trim() || profileDevices.some((device) => !device.name.trim() || !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить изменения"}</button></footer>
+            <footer><button type="button" className="ghostButton" onClick={() => void closeProfile()}>Отмена</button><span>{profileDevices.some((device) => !profileConnections.some((connection) => connection.device_id === device.id)) ? "Для каждого уровня нужно хотя бы одно подключение" : "Изменения применятся после сохранения"}</span><button type="submit" className="primaryButton" disabled={Boolean(busy) || Boolean(pendingProfileSave) || profileRevisionConflict || !profileName.trim() || profileDevices.some((device) => !device.name.trim() || !profileConnections.some((connection) => connection.device_id === device.id))}>{profileDialog === "new" ? "Создать профиль" : "Сохранить изменения"}</button></footer>
           </form>
         </div>
       )}
       {createdProfile && <div className="mihomoDialogBackdrop"><div className="mihomoDialog mihomoCreatedProfile">
         <header><div><p className="eyebrow">PROFILE READY</p><h2>Профиль «{createdProfile.name}» готов</h2></div><button className="iconButton" onClick={() => setCreatedProfile(null)}>x</button></header>
         <div className="mihomoReadyDevices">{readyDevices.map((device) => {
-          const format = clientConfigFormat(createdProfile, device);
+          const latestDevice = latestCreatedProfile?.devices?.find((item) => item.id === device.id);
+          const verifiedClients = latestDevice?.verified_clients || [];
+          const format = clientConfigFormat(latestCreatedProfile || createdProfile, latestDevice || device);
           const singbox = format === "singbox";
           const happ = format === "xray";
-          const karing = device.scope !== "common" && /karing/i.test(`${device.client_name || ""} ${device.user_agent || ""}`);
-          const hiddify = device.scope !== "common" && /hiddify/i.test(`${device.client_name || ""} ${device.user_agent || ""}`);
           return <article key={device.id}>
             <AccessReveal key={device.subscription}><Image src={device.qr} alt={`QR импорта ${device.name}`} width={240} height={240} unoptimized /></AccessReveal>
             <div><b>{device.name} · {device.scope === "common" ? "Универсальная подписка" : clientCapabilities(format).label}</b>
               {device.scope !== "common" && <small>{device.manual ? "Общий JSON для всех устройств профиля, без привязки к HWID." : "Устройство привязано к HWID."}</small>}
-              <small>{device.scope === "common" ? "Сканируйте QR в клиенте: новые устройства зарегистрируются, существующие сохранят свои настройки. Формат файла определяется по приложению." : happ ? "Добавьте ссылку подписки в Happ или скачайте Xray JSON." : singbox ? "Отсканируйте QR камерой iPhone или откройте в sing-box. Для импорта из файла скачайте JSON." : "Отсканируйте QR-код в приложении Mihomo или скачайте YAML."}</small>
-              <nav>{(singbox || karing || hiddify) && <a className="primaryButton" href={clientImportUrl(device.subscription, `${createdProfile.name} · ${device.name}`, singbox ? "singbox" : "mihomo", karing ? "Karing" : hiddify ? "Hiddify" : "")}>{karing ? "Открыть в Karing" : hiddify ? "Открыть в Hiddify" : "Открыть в sing-box"}</a>}
-                <button className="primaryButton" disabled={busy === `download:${createdProfile.id}`} onClick={() => void downloadConfig(createdProfile, device)}>{format === "uri" ? "Скачать TXT" : singbox || happ ? "Скачать JSON" : "Скачать YAML"}</button>
+              <small>Добавьте ссылку как подписку или отсканируйте QR в приложении. {device.manual ? "Подписка сохранённого общего устройства использует выбранный формат экспорта." : "Непроверенный клиент получает стандартный Mihomo YAML; это не подтверждает его совместимость. Проверенному клиенту формат выбирается по версии приложения, ядра, ОС и настройкам подключения."} После изменения настроек обновите подписку.</small>
+              <small>Скачивание файла использует выбранный формат экспорта: {clientCapabilities(format).label}.</small>
+              {verifiedClients.length ? <div><b>Проверенные приложения для этих подключений</b>{verifiedClients.map((client) => <p key={client.id}><a href={client.app_url} target="_blank" rel="noreferrer">{client.client_name} {client.client_version}</a> · {client.os} {client.os_version} · {client.core_name} {client.core_version}</p>)}</div> : <small>Для этих подключений пока нет проверенных приложений.</small>}
+              <nav>
+                <button className="primaryButton" disabled={busy === `download:${createdProfile.id}`} onClick={() => void downloadConfig(latestCreatedProfile || createdProfile, latestDevice || device)}>{format === "uri" ? "Скачать TXT" : singbox || happ ? "Скачать JSON" : "Скачать YAML"}</button>
                 <button onClick={() => void copyText(device.subscription)}>Скопировать ссылку на файл</button>
               </nav>
             </div>

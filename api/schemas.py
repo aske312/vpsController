@@ -137,6 +137,7 @@ class NetworkEndpointSettings(BaseModel):
 class NetworkEndpointCheck(BaseModel):
     kind: Literal["cdn", "tls_relay", "udp_relay"]
     domain: str = Field(min_length=1, max_length=253)
+    consumer_id: str | None = Field(default=None, min_length=1, max_length=300)
 
 
 class ClientConnectionSettings(BaseModel):

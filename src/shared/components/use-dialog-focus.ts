@@ -5,8 +5,8 @@ import { useEffect, useRef } from "react";
 const dialogs: Array<{ element: HTMLElement; previous: HTMLElement | null }> = [];
 
 /** Only the topmost dialog owns Escape and keyboard focus. */
-export function useDialogFocus(open: boolean, onClose: () => void) {
-  const ref = useRef<HTMLElement>(null);
+export function useDialogFocus<T extends HTMLElement = HTMLElement>(open: boolean, onClose: () => void) {
+  const ref = useRef<T>(null);
   const close = useRef(onClose);
   useEffect(() => { close.current = onClose; }, [onClose]);
   useEffect(() => {

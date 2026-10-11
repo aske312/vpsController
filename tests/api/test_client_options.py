@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import yaml
 from unittest.mock import patch
 
 from tests.api.support import manager, managed_mihomo_fixture
@@ -128,16 +129,16 @@ class ClientOptionsTests(unittest.TestCase):
             request = manager.Request({"type": "http", "method": "GET", "path": link,
                                        "query_string": b"device_id=common", "headers": [(b"x-hwid", b"unexpected-device")]})
             response = manager.public_profile_subscription(link.rsplit("/", 1)[-1], request)
-            config = json.loads(response.body)
-            self.assertEqual(response.media_type, "application/json")
-            self.assertIn('.json', response.headers["content-disposition"])
-            self.assertEqual(len([entry for entry in config["outbounds"] if entry["type"] == "vless"]), 1)
+            config = yaml.safe_load(response.body)
+            self.assertIn('.yaml', response.headers["content-disposition"])
+            self.assertEqual(len([entry for entry in config["proxies"] if entry["type"] == "vless"]), 1)
             register.assert_not_called()
             self.assertEqual(len(self.profile["devices"]), 2)
             saved = save.call_args.args[0]
             self.assertTrue(saved["devices"][1]["hwid_hash"])
             self.assertEqual(saved["devices"][1]["scope"], "hwid")
             self.assertEqual(saved["devices"][1]["name"], "phone")
+            self.assertEqual(saved["devices"][1]["routing"]["client_config_format"], "singbox")
 
     def test_device_binding_allows_same_hwid_and_rejects_other_or_missing(self):
         self.profile["subscription_token"] = "test-profile-token"

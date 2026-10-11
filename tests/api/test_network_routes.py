@@ -26,10 +26,11 @@ class NetworkRouteTests(unittest.TestCase):
             path.write_text(json.dumps({"route_registry": registry}))
             with patch.object(manager, "NETWORK_ENDPOINTS_FILE", path):
                 self.assertFalse(manager.mihomo_route_endpoint_ready("cdn", "cdn.example"))
-                registry["bindings"][0]["check"] = {
-                    "state": "ready", "ready": True, "verification": "end_to_end",
-                    "reason": "Listener, forwarding and data exchange confirmed",
-                }
+                routes.record_check(registry, "cdn", "cdn.example", {
+                    "status": "ready", "ready": True, "verification": "end_to_end",
+                    "binding_id": registry["bindings"][0]["id"], "checked_revision": 1,
+                    "check_id": "cdn-checked", "checked_at": "2026-10-11T12:00:00+00:00",
+                })
                 path.write_text(json.dumps({"route_registry": registry}))
                 self.assertTrue(manager.mihomo_route_endpoint_ready("cdn", "cdn.example"))
 
@@ -145,7 +146,7 @@ class NetworkRouteTests(unittest.TestCase):
         routes.record_check(registry, "tls_relay", "relay.example", {"status": "ready", "ready": True, "verification": "end_to_end",
                              "route": "proxy_or_cdn", "resolved": ["203.0.113.10"], "matches_origin": False,
                              "message": "Адрес подтверждён", "binding_id": registry["bindings"][0]["id"],
-                             "checked_revision": 1, "check_id": "check-ready"})
+                             "checked_revision": 1, "check_id": "check-ready", "checked_at": "2026-10-11T12:00:00+00:00"})
         self.assertEqual(registry["bindings"][0]["check"]["state"], "ready")
         self.assertEqual(registry["bindings"][0]["check"]["failed_checks"], 0)
         registry["bindings"][0]["desired_revision"] = 2
@@ -219,3 +220,122 @@ class NetworkRouteTests(unittest.TestCase):
         self.assertEqual(migrated["bindings"][0]["check"]["state"], "unknown")
         self.assertFalse(migrated["bindings"][0]["check"]["ready"])
         self.assertEqual(migrated["bindings"][0]["check"]["verification"], "dns_only")
+
+    def test_api_and_mihomo_use_same_current_binding_evidence(self):
+        import copy
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "network.json"
+            registry = routes.migrate({"cdn_domains": ["route.example"], "tls_relay_domains": ["route.example"],
+                                       "udp_relay_domains": ["route.example"]})
+            probe = {"domain": "route.example", "resolved": ["203.0.113.10"], "matches_origin": True, "route": "direct"}
+            for kind, alias in (("cdn", "cdn"), ("tls_relay", "tls"), ("udp_relay", "udp")):
+                binding = routes.active_binding(registry, kind, "route.example")
+                routes.record_check(registry, kind, "route.example", {
+                    "status": "ready", "ready": True, "verification": "end_to_end",
+                    "binding_id": binding["id"], "checked_revision": 1, "check_id": f"check-{kind}",
+                    "checked_at": "2026-10-11T12:00:00+00:00",
+                })
+                patches = ({}, {"checked_revision": 2}, {"checked_revision": True}, {"binding_id": "other"},
+                           {"check_id": ""}, {"checked_at": None}, {"verification": "dns_only"}, {"ready": False})
+                for fields in patches:
+                    with self.subTest(kind=kind, fields=fields):
+                        snapshot = copy.deepcopy(registry)
+                        routes.active_binding(snapshot, kind, "route.example")["check"].update(fields)
+                        path.write_text(json.dumps({"route_registry": snapshot}))
+                        with patch.object(api, "NETWORK_ENDPOINTS_FILE", path), patch.object(manager, "NETWORK_ENDPOINTS_FILE", path), \
+                             patch.object(api, "network_domain_probe", return_value=probe), \
+                             patch.object(manager, "direct_tls_domain_ready", side_effect=AssertionError("DNS must not grant admission")):
+                            result = api.network_endpoint_check(kind, "route.example")
+                            self.assertEqual(result["ready"], not fields)
+                            self.assertEqual(manager.mihomo_route_endpoint_ready(alias, "route.example"), not fields)
+                            self.assertEqual(result["binding_id"], binding["id"])
+                            self.assertEqual(result["desired_revision"], 1)
+                            # Origin privacy is independent of valid route evidence.
+                            if not fields:
+                                self.assertTrue(result["matches_origin"])
+                                self.assertEqual(result["status"], "ready")
+
+    def test_probe_file_evidence_is_invalidated_in_both_api_and_mihomo(self):
+        import network_probe
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, env, clients = root / "config.json", root / "reality.env", root / "clients.json"
+            for file in (config, env, clients):
+                file.write_text("original")
+            registry = routes.migrate({"tls_relay_domains": ["route.example"]})
+            binding = registry["bindings"][0]
+            routes.record_check(registry, "tls_relay", "route.example", {
+                "status": "ready", "ready": True, "verification": "end_to_end",
+                "binding_id": binding["id"], "checked_revision": 1, "check_id": "verified",
+                "checked_at": "2026-10-11T12:00:00+00:00", "proof": {
+                    "method": "direct_vless_nonce_v1", "source_revision": network_probe.source_revision({"config": config, "environment": env, "clients": clients})}})
+            path = root / "network.json"
+            path.write_text(json.dumps({"route_registry": registry}), encoding="utf-8")
+            observation = {"domain": "route.example", "resolved": ["203.0.113.1"], "matches_origin": False, "route": "proxy_or_cdn"}
+            with patch.object(api, "NETWORK_ENDPOINTS_FILE", path), patch.object(api, "VLESS_CONFIG", config), patch.object(api, "VLESS_ENV", env), patch.object(api, "CLIENTS_FILE", clients), patch.object(api, "network_domain_probe", return_value=observation), patch.object(manager, "NETWORK_ENDPOINTS_FILE", path), patch.object(manager, "DIRECT_VLESS_ENV", env):
+                self.assertTrue(api.network_endpoint_check("tls_relay", "route.example")["ready"])
+                self.assertTrue(manager.mihomo_route_endpoint_ready("tls", "route.example"))
+                clients.write_text("rotated credential")
+                self.assertFalse(api.network_endpoint_check("tls_relay", "route.example")["ready"])
+                self.assertFalse(manager.mihomo_route_endpoint_ready("tls", "route.example"))
+
+    def test_changed_binding_revision_invalidates_ready_without_deleting_consumers(self):
+        registry = routes.migrate({"cdn_domains": ["route.example"]})
+        binding = registry["bindings"][0]
+        binding["consumers"] = [{"id": "direct:existing"}]
+        routes.record_check(registry, "cdn", "route.example", {
+            "status": "ready", "ready": True, "verification": "end_to_end",
+            "binding_id": binding["id"], "checked_revision": 1, "check_id": "old",
+            "checked_at": "2026-10-11T12:00:00+00:00",
+        })
+        self.assertTrue(routes.binding_ready(binding))
+        binding["desired_revision"] = 2
+        self.assertFalse(routes.binding_ready(binding))
+        self.assertEqual(binding["consumers"], [{"id": "direct:existing"}])
+
+    def test_tls_dns_only_is_not_mihomo_admission(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "network.json"
+            path.write_text(json.dumps({"tls_relay_domains": ["tls.example"]}))
+            with patch.object(manager, "NETWORK_ENDPOINTS_FILE", path), \
+                 patch.object(manager, "direct_tls_domain_ready", return_value=True) as dns:
+                self.assertFalse(manager.mihomo_route_endpoint_ready("tls", "tls.example"))
+                dns.assert_not_called()
+
+    def test_existing_tls_connection_is_preserved_but_new_tls_needs_evidence(self):
+        requested = manager.ProfileConnectionInput(id="existing", device_id="common", component="transport-reality",
+                                                  settings={"route_mode": "tls", "tls_domain": "tls.example"})
+        with patch.object(manager, "SUBMODULE_ROOT", ROOT / "protocol-images/mihomo/modules"), \
+             patch.object(manager, "validate_channels"), patch.object(manager, "module_is_installed", return_value=True), \
+             patch.object(manager, "module_is_ready", return_value=True), \
+             patch.object(manager, "mihomo_route_endpoint_ready", return_value=False), \
+             patch.object(manager, "direct_tls_domain_ready", return_value=True):
+            existing = [{"id": "existing", "device_id": "common", "component": "transport-reality",
+                         "settings": {**manager.connection_defaults("transport-reality"), **requested.settings}}]
+            self.assertEqual(manager.validate_connection_inputs([requested], existing)[0]["settings"]["tls_domain"], "tls.example")
+            with self.assertRaises(manager.HTTPException):
+                manager.validate_connection_inputs([requested])
+            changed = requested.model_copy(update={"settings": {"route_mode": "tls", "tls_domain": "other.example"}})
+            with self.assertRaises(manager.HTTPException):
+                manager.validate_connection_inputs([changed], existing)
+
+    def test_direct_tls_creation_rejects_absent_route_before_any_live_change(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "config.json"
+            config.write_text(json.dumps({"inbounds": [{"tag": "vless-tls", "protocol": "vless", "port": 18080,
+                "settings": {"clients": []}, "streamSettings": {"network": "xhttp", "xhttpSettings": {"path": "/tls", "mode": "auto"}}}]}))
+            env = root / "reality.env"
+            env.write_text("TLS_ENABLED=yes\nTLS_DOMAIN=tls.example\n")
+            path = root / "network.json"
+            path.write_text(json.dumps({"tls_relay_domains": []}))
+            before = (config.read_bytes(), env.read_bytes(), path.read_bytes())
+            with patch.object(api, "VLESS_CONFIG_DIR", root), patch.object(api, "VLESS_CONFIG", config), \
+                 patch.object(api, "VLESS_ENV", env), patch.object(api, "NETWORK_ENDPOINTS_FILE", path), \
+                 patch.object(api, "network_domain_probe", return_value={"domain": "tls.example", "resolved": ["203.0.113.10"], "matches_origin": True, "route": "direct"}), \
+                 patch.object(api, "run", side_effect=AssertionError("No runtime mutation")), \
+                 patch.object(api, "write_clients", side_effect=AssertionError("No new client")):
+                with self.assertRaises(api.HTTPException) as error:
+                    api.create_client(api.ClientCreate(name="Phone", protocol="vless-reality-xhttp", vless_routes=["tls"]))
+                self.assertEqual(error.exception.status_code, 409)
+            self.assertEqual(before, (config.read_bytes(), env.read_bytes(), path.read_bytes()))

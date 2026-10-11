@@ -47,45 +47,39 @@ class SubscriptionFormatTests(unittest.TestCase):
         before = deepcopy(self.store)
         result = self.fetch("Mozilla/5.0", hwid=None, extra_headers=[(b"accept", b"text/html"), (b"host", b"example.com")])
         body = result.body.decode()
-        self.assertIn("happ://add/", body)
-        self.assertIn("sing-box://import-remote-profile", body)
-        self.assertIn("client=v2rage", body)
+        self.assertNotIn("happ://add/", body)
+        self.assertNotIn("sing-box://import-remote-profile", body)
+        self.assertNotIn("client=v2rage", body)
+        self.assertIn("стандартный Mihomo YAML", body)
         self.assertEqual(self.store, before)
         self.provision.assert_not_called()
 
     def test_happ_import_handoff_works_with_generic_user_agent(self):
         result = self.fetch("CFNetwork/3860 Darwin/25", hwid=None, query=b"client=happ")
-        self.assertIsInstance(json.loads(result.body), list)
+        self.assertIn(".yaml", result.headers["content-disposition"])
         self.assertEqual(self.store[0]["common_access"]["user_agent"], "CFNetwork/3860 Darwin/25")
         self.assertEqual(self.store[0]["common_access"]["client_name"], "Happ")
 
     def test_explicit_import_client_wins_over_user_agent_and_survives_save(self):
         response = self.fetch("RocketVPN/582994", query=b"client=happ")
-        self.assertIsInstance(json.loads(response.body), list)
+        self.assertIn(".yaml", response.headers["content-disposition"])
         device = self.store[0]["devices"][1]
-        self.assertEqual(device["routing"]["client_config_format"], "xray")
+        self.assertEqual(device["routing"]["client_config_format"], "mihomo")
         self.assertEqual(manager.client_formats(device), ("xray",))
         self.assertEqual(device["user_agent"], "RocketVPN/582994")
         manager.update_profile("profile", manager.ProfileUpdate(devices=[manager.ProfileDeviceInput(**entry) for entry in self.store[0]["devices"]]))
         self.assertEqual(manager.client_formats(self.store[0]["devices"][1]), ("xray",))
-        self.assertIsInstance(json.loads(self.fetch("RocketVPN/582995", query=b"client=happ").body), list)
+        self.assertIn(".yaml", self.fetch("RocketVPN/582995", query=b"client=happ").headers["content-disposition"])
         self.assertEqual(len(self.store[0]["devices"]), 2)
 
-    def test_rocketvpn_and_v2rage_get_vless_links_instead_of_yaml(self):
-        from urllib.parse import urlsplit, parse_qs
+    def test_unverified_rocketvpn_and_v2rage_get_yaml_without_promising_compatibility(self):
         self.store[0]["connections"] = [{"id": "ws", "device_id": "common", "component": "transport-reality",
             "settings": {"route_mode": "cdn"}, "credential": {"uuid": "00000000-0000-4000-8000-000000000001",
             "cdn_enabled": True, "cdn_domain": "example.com", "cdn_transport": "websocket", "cdn_path": "/vpn?a=1&b=2"}}]
         for agent in ("RocketVPN/582994 CFNetwork/3860 Darwin/25", "v2RAGE/1.9"):
             response = self.fetch(agent, hwid=None)
-            self.assertIn("text/plain", response.headers["content-type"])
-            link = urlsplit(response.body.decode().strip())
-            self.assertEqual(link.scheme, "vless")
-            self.assertEqual(link.hostname, "example.com")
-            self.assertEqual(parse_qs(link.query)["path"], ["/vpn?a=1&b=2"])
-            self.assertEqual(parse_qs(link.query)["type"], ["ws"])
-            from urllib.parse import unquote
-            self.assertIn("VLESS · WebSocket · TLS · CDN", unquote(link.fragment))
+            self.assertIn(".yaml", response.headers["content-disposition"])
+            self.assertIn("/vpn?a=1&b=2", response.body.decode())
         self.provision.assert_not_called()
 
     def test_remove_registered_device_preserves_other_devices(self):
@@ -151,14 +145,14 @@ class SubscriptionFormatTests(unittest.TestCase):
         self.assertEqual(self.store[0]["connections"], previous)
         self.assertEqual(self.store[0]["devices"][1]["client_identity_key"], "karing")
 
-    def test_common_singbox_excludes_encrypted_credentials_without_changing_profile(self):
+    def test_unverified_singbox_uses_yaml_without_removing_encrypted_connections(self):
         encrypted = {"id": "encrypted", "device_id": "common", "component": "transport-reality",
                      "settings": {"transport": "tcp"}, "credential": {"encryption": "test-encryption"}}
         self.store[0]["connections"].append(encrypted)
-        response = self.fetch("sing-box MT/1.0", hwid=None)
-        config = json.loads(response.body)
-        self.assertEqual(config["outbounds"][0]["password"], "test-only")
-        self.assertFalse(any(entry["type"] == "vless" for entry in config["outbounds"]))
+        with patch.object(manager, "render_profile", return_value="proxies: []\n") as render:
+            response = self.fetch("sing-box MT/1.0", hwid=None)
+        self.assertIn(".yaml", response.headers["content-disposition"])
+        self.assertEqual(render.call_args.args[0]["connections"][1], encrypted)
         self.assertEqual(self.store[0]["connections"][1], encrypted)
         self.provision.assert_not_called()
 
@@ -169,6 +163,7 @@ class SubscriptionFormatTests(unittest.TestCase):
             "transport-wg": root / "wg.conf", "transport-awg": root / "awg.conf",
         }))
         self.enterContext(patch.object(manager, "CONFIG_ROOT", root))
+        self.enterContext(patch.object(manager, "SUBMODULE_ROOT", ROOT / "protocol-images/mihomo/modules"))
         self.initial = {"id": "profile", "name": "Test", "common_device_id": "common", "subscription_token": "test-token",
                         "devices": [{"id": "common", "name": "Common", "routing": {}}],
                         "connections": [{"id": "common-ss", "device_id": "common", "component": "transport-shadowsocks", "settings": {},
@@ -197,7 +192,7 @@ class SubscriptionFormatTests(unittest.TestCase):
 
     def test_first_request_detects_format_and_repeat_keeps_device_credentials(self):
         for agent, extension, supported in [("ClashMeta/1.0", "yaml", ["mihomo"]), ("ClashMi/1.0", "yaml", ["mihomo"]),
-                                            ("sing-box MT (sing-box 1.14.4)", "json", ["singbox"]), ("SFI/1.0", "json", ["singbox"]),
+                                            ("sing-box MT (sing-box 1.14.4)", "yaml", ["singbox"]), ("SFI/1.0", "yaml", ["singbox"]),
                                             ("Karing/1.2", "yaml", ["mihomo", "singbox"]), ("UnrecognizedClient/1.0", "yaml", [])]:
             with self.subTest(agent=agent):
                 self.store = [deepcopy(self.initial)]
@@ -302,54 +297,53 @@ class SubscriptionFormatTests(unittest.TestCase):
         first = self.fetch("HiddifyNext/2.5 (ios) like ClashMeta v2ray sing-box", "hiddify-phone")
         second = self.fetch("SFA/1.0", "android-phone")
         self.assertIn(".yaml", first.headers["content-disposition"])
-        self.assertIn(".json", second.headers["content-disposition"])
+        self.assertIn(".yaml", second.headers["content-disposition"])
         self.assertEqual(len(self.store[0]["devices"]), 3)
         first_device, second_device = self.store[0]["devices"][1:]
         self.assertNotEqual(first_device["id"], second_device["id"])
         self.assertEqual(first_device["client_name"], "Hiddify")
         self.assertEqual(second_device["client_name"], "sing-box for Android")
         self.assertEqual(manager.profile_response(self.store[0])["devices"][1]["supported_formats"], ["mihomo", "singbox"])
-        self.assertEqual(json.loads(second.body)["outbounds"][0]["password"], second_device["id"])
+        self.assertIn(second_device["id"].encode(), second.body)
 
-    def test_happ_receives_xray_and_only_compatible_connections_are_provisioned(self):
+    def test_unverified_happ_keeps_all_template_connections_and_protection_settings(self):
         self.store[0]["connections"].append({"id": "awg", "device_id": "common", "component": "transport-awg", "settings": {}})
         self.store[0]["devices"][0]["routing"] = {"tunnel_ech": True, "tunnel_fragment": True, "direct_games_enabled": True}
-        first = self.fetch("Happ/3.13.0", "desktop")
+        with patch.object(manager, "render_profile", return_value="proxies: []\n"):
+            first = self.fetch("Happ/3.13.0", "desktop")
+            self.assertEqual(self.fetch("Happ/3.13.0", "desktop").body, first.body)
         device = self.store[0]["devices"][1]
-        self.assertEqual(device["routing"]["client_config_format"], "xray")
-        self.assertFalse(device["routing"]["tunnel_ech"])
-        self.assertFalse(device["routing"]["tunnel_fragment"])
-        config = json.loads(first.body)
-        self.assertEqual(config[0]["outbounds"][0]["protocol"], "shadowsocks")
-        self.assertEqual(config[0]["outbounds"][0]["settings"]["servers"][0]["password"], device["id"])
-        self.assertEqual(first.media_type, "application/json")
-        self.assertEqual(len(self.provision.call_args.args[1]), 1)
-        self.assertEqual(self.fetch("Happ/3.13.0", "desktop").body, first.body)
+        self.assertEqual(device["routing"]["client_config_format"], "mihomo")
+        self.assertTrue(device["routing"]["tunnel_ech"])
+        self.assertTrue(device["routing"]["tunnel_fragment"])
+        self.assertTrue(device["routing"]["direct_games_enabled"])
+        self.assertIn(".yaml", first.headers["content-disposition"])
+        self.assertEqual(len(self.provision.call_args.args[1]), 2)
         self.assertEqual(len(self.store[0]["devices"]), 2)
 
     def test_happ_without_hwid_does_not_use_shared_singbox(self):
         result = self.fetch("Happ/3.13.0", hwid=None)
-        self.assertIsInstance(json.loads(result.body), list)
+        self.assertIn(".yaml", result.headers["content-disposition"])
         self.assertEqual(len(self.store[0]["devices"]), 1)
         self.provision.assert_not_called()
 
-    def test_v2rayn_receives_xray_json_from_universal_subscription(self):
+    def test_unverified_v2rayn_receives_standard_yaml_from_universal_subscription(self):
         result = self.fetch("v2rayN/7.0", hwid=None)
-        self.assertIsInstance(json.loads(result.body), list)
-        self.assertEqual(json.loads(result.body)[0]["outbounds"][0]["protocol"], "shadowsocks")
+        self.assertIn(".yaml", result.headers["content-disposition"])
+        self.assertIn(b'password: "test-only"', result.body)
         self.assertEqual(manager.client_identity({"user_agent": "v2rayN/7.0"}), ("v2rayN", ("xray",)))
         self.provision.assert_not_called()
 
     def test_launcher_registration_keeps_supported_extensions(self):
         self.store[0]["devices"][0]["routing"] = {"tunnel_privacy": True, "tunnel_ech": True}
         self.store[0]["connections"].append({"id": "awg", "device_id": "common", "component": "transport-awg", "settings": {}})
-        awg = {"port": 51820, "private_key": "A" * 43 + "=", "server_public_key": "A" * 43 + "=", "ip": "10.0.0.2/32", "mtu": 1420, "amnezia": {"jc": 4}}
+        awg = {"port": 51820, "private_key": "A" * 43 + "=", "server_public_key": "A" * 43 + "=", "ip": "10.0.0.2/32", "mtu": 1420, "amnezia": {"jc": 4, "jmin": 10, "jmax": 50, "s1": 0, "s2": 0, "h1": 1, "h2": 2, "h3": 3, "h4": 4}}
         self.provision.side_effect = lambda pid, definitions, **kw: [
             {**entry, "credential": awg if entry["component"] == "transport-awg" else {"port": 12001, "method": "aes-128-gcm", "password": entry["device_id"]}}
             for entry in definitions]
         response = self.fetch("singbox-launcher/1.0", "desktop")
-        config = json.loads(response.body)
-        self.assertEqual(config["endpoints"][0]["jc"], 4)
+        self.assertIn(".yaml", response.headers["content-disposition"])
+        self.assertIn(b"jc: 4", response.body)
         device = self.store[0]["devices"][1]
         self.assertEqual(device["client_name"], "Sing-Box Launcher")
         self.assertTrue(device["routing"]["tunnel_privacy"])
@@ -358,16 +352,18 @@ class SubscriptionFormatTests(unittest.TestCase):
         manager.validate_client_capabilities(self.store[0])
         self.assertEqual(self.fetch("singbox-launcher/1.0", "desktop").body, response.body)
 
-    def test_incompatible_template_does_not_create_empty_happ_device(self):
+    def test_unverified_happ_keeps_awg_in_standard_yaml_instead_of_empty_registration(self):
         self.store[0]["connections"][0]["component"] = "transport-awg"
-        with self.assertRaises(manager.HTTPException) as error:
+        with patch.object(manager, "render_profile", return_value="proxies: []\n"):
             self.fetch("Happ/3.13.0")
-        self.assertEqual(error.exception.status_code, 409)
-        self.assertEqual(len(self.store[0]["devices"]), 1)
-        self.provision.assert_not_called()
+        self.assertEqual(len(self.store[0]["devices"]), 2)
+        self.assertEqual(self.provision.call_args.args[1][0]["component"], "transport-awg")
 
     def test_api_rejects_unsupported_happ_features_and_connections_before_provisioning(self):
         self.fetch("Happ/3.13.0")
+        # Explicit legacy Xray export stays supported and keeps its validation;
+        # automatic standard YAML is a separate selection policy.
+        self.store[0]["devices"][1]["routing"]["client_config_format"] = "xray"
         self.provision.reset_mock()
         for routing in ({"tunnel_ech": True}, {"tunnel_fragment": True}, {"direct_games_enabled": True}, {"strategy": "fallback"}, {"client_config_format": "singbox"}):
             devices = deepcopy(self.store[0]["devices"])
@@ -381,7 +377,7 @@ class SubscriptionFormatTests(unittest.TestCase):
             manager.validate_client_capabilities(candidate)
         self.provision.assert_not_called()
 
-    def test_karing_switches_format_on_same_link_without_reprovisioning(self):
+    def test_karing_explicit_export_changes_without_changing_unverified_subscription(self):
         self.fetch("Karing/1.2")
         credentials = deepcopy(self.store[0]["connections"])
         original_id = self.store[0]["devices"][1]["id"]
@@ -393,16 +389,18 @@ class SubscriptionFormatTests(unittest.TestCase):
             devices[1]["user_agent"] = "stale"
             manager.update_profile("profile", manager.ProfileUpdate(devices=[manager.ProfileDeviceInput(**item) for item in devices]))
             response = self.fetch("Karing/1.2", query=b"format=wrong")
-            self.assertIn(f".{extension}", response.headers["content-disposition"])
+            self.assertIn(".yaml", response.headers["content-disposition"])
             self.assertEqual(self.store[0]["connections"], credentials)
             self.assertEqual(self.store[0]["devices"][1]["id"], original_id)
             self.assertEqual(len(self.store[0]["devices"]), 2)
             if format == "singbox":
-                self.assertEqual(json.loads(response.body)["outbounds"][0]["password"], original_id)
+                exported, actual_extension = manager.render_client_profile(self.store[0], original_id)
+                self.assertEqual(actual_extension, extension)
+                self.assertEqual(json.loads(exported)["outbounds"][0]["password"], original_id)
         self.provision.assert_not_called()
 
     def test_single_format_and_unknown_clients_cannot_switch_in_settings(self):
-        for agent, target in [("ClashMi/1.0", "singbox"), ("SFI/1.0", "mihomo"), ("Unknown/1.0", "singbox")]:
+        for agent, target in [("ClashMi/1.0", "singbox"), ("SFI/1.0", "xray"), ("Unknown/1.0", "singbox")]:
             with self.subTest(agent=agent):
                 self.store = [deepcopy(self.initial)]
                 self.fetch(agent)
@@ -412,14 +410,14 @@ class SubscriptionFormatTests(unittest.TestCase):
                     manager.update_profile("profile", manager.ProfileUpdate(devices=[manager.ProfileDeviceInput(**item) for item in devices]))
                 self.assertEqual(error.exception.status_code, 422)
 
-    def test_without_hwid_uses_common_json_even_when_legacy_shared_exists(self):
+    def test_without_hwid_uses_standard_yaml_even_when_legacy_shared_exists(self):
         self.store[0]["devices"].append({"id": "shared", "name": "Shared", "manual": True, "routing": {"client_config_format": "singbox"}})
         connection = deepcopy(self.initial["connections"][0])
         connection.update(id="shared-ss", device_id="shared")
         connection["credential"]["password"] = "shared-password"
         self.store[0]["connections"].append(connection)
         response = self.fetch("sing-box MT/1.14", hwid=None)
-        self.assertEqual(json.loads(response.body)["outbounds"][0]["password"], "test-only")
+        self.assertIn(b'password: "test-only"', response.body)
         yaml = self.fetch("ClashMi/1.0", hwid=None)
         self.assertIn('.yaml', yaml.headers["content-disposition"])
         self.assertEqual(len(self.store[0]["devices"]), 2)

@@ -44,6 +44,8 @@ import cdn_operation
 import application_operation
 import operation_policy
 import network_routes
+import network_probe
+import yaml
 import ech_settings
 from protocol_health import TrafficSampler, protocol_health
 from service_state import observe_service, ssh_observation, failed_unit_count
@@ -672,7 +674,7 @@ def channel_mode_endpoint(protocol: str, fallback: str, requested_mode: str | No
     values = settings.get(f"{key}_domains", [])
     domains = list(dict.fromkeys([primary, *(values if isinstance(values, list) else [])]))
     kind = "tls_relay" if key == "tls_relay" else "udp_relay"
-    domain = next((value for value in domains if value and network_endpoint_check(kind, str(value))["ready"]), "")
+    domain = next((value for value in domains if value and network_route_admission(protocol, kind, str(value))), "")
     if not domain:
         raise HTTPException(status_code=409, detail=f"Для режима {CHANNEL_MODE_LABELS[mode]} сначала настройте соответствующий домен на странице «Сеть»")
     return domain, mode
@@ -690,7 +692,7 @@ def save_channel_mode(protocol: str, mode: str) -> None:
         values = settings.get(endpoint_key.replace("_domain", "_domains"), [])
         domains = [primary, *(values if isinstance(values, list) else [])]
         kind = "tls_relay" if mode == "tls_relay" else "udp_relay"
-        if not any(value and network_endpoint_check(kind, str(value))["ready"] for value in domains):
+        if not any(value and network_route_admission(protocol, kind, str(value)) for value in domains):
             raise HTTPException(status_code=409, detail="Сначала настройте домен relay на странице «Сеть»")
     modes = read_protected_channel_modes()
     modes[protocol] = mode
@@ -2221,7 +2223,82 @@ def network_capabilities(ipv6: dict[str, bool | str] | None = None) -> dict:
     return {"uplink": uplink, "checks": checks}
 
 
-def network_endpoint_check(kind: str, domain: str, *, include_saved: bool = True) -> dict:
+def direct_probe_sources() -> dict[str, Path]:
+    return {"config": VLESS_CONFIG, "environment": VLESS_ENV, "clients": CLIENTS_FILE}
+
+
+def network_route_admission(protocol: str, kind: str, domain: str) -> bool:
+    check = network_endpoint_check(kind, domain)
+    if protocol in {"tuic", "hysteria2"} and kind == "udp_relay":
+        return bool(check.get("selectable"))
+    scope = check.get("verified_connection", {})
+    return bool(check["ready"] and scope.get("protocol") == protocol)
+
+
+def network_probe_sources(producer: str, kind: str, consumer_id: str) -> dict[str, Path]:
+    return network_probe.scoped_source_paths(producer, kind, consumer_id,
+        direct_paths=direct_probe_sources(), mihomo_root=MIHOMO_VLESS_CDN_ROUTES.parent.parent, data_root=DATA_DIR,
+        quic_roots={"hysteria2": HYSTERIA2_DIR, "tuic": TUIC_DIR})
+
+
+def prepare_network_probe(binding: dict, consumer_id: str | None = None):
+    if not binding or binding.get("state") != "active":
+        raise network_probe.ProbeUnavailable("Маршрут больше не активен")
+    consumers = network_consumers()
+    if consumer_id:
+        consumers = [item for item in consumers if item.get("id") == consumer_id]
+    if binding["kind"] in {"cdn", "tls_relay"}:
+        try:
+            paths = direct_probe_sources()
+            sources = network_probe.source_revision(paths)
+            config = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
+            environment = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
+            plan = network_probe.prepare_direct_vless(binding, consumers, read_clients(), config, environment)
+            if sources != network_probe.source_revision(paths): raise network_probe.ProbeUnavailable("Конфигурация изменилась")
+            return plan, sources
+        except (OSError, ValueError, TypeError, KeyError):
+            pass
+        for consumer in consumers:
+            if consumer.get("owner") != "mihomo" or consumer.get("kind") != binding["kind"] or consumer.get("address") != binding["address"]:
+                continue
+            try:
+                paths = network_probe_sources("mihomo_vless", binding["kind"], consumer["id"])
+                sources = network_probe.source_revision(paths)
+                profiles = json.loads(paths["profiles"].read_text(encoding="utf-8"))
+                config = json.loads(paths["config"].read_text(encoding="utf-8"))
+                descriptor = json.loads(paths["gateway_route"].read_text(encoding="utf-8"))
+                plan = network_probe.prepare_mihomo_vless(binding, [consumer], profiles, config, {paths["gateway_route"].stem: descriptor})
+                if sources != network_probe.source_revision(paths): raise network_probe.ProbeUnavailable("Конфигурация изменилась")
+                return plan, sources
+            except (OSError, ValueError, TypeError, KeyError):
+                continue
+    elif binding["kind"] == "udp_relay":
+        for protocol in ("tuic", "hysteria2"):
+            try:
+                paths = network_probe_sources(f"direct_{protocol}", binding["kind"], consumer_id or "")
+                sources = network_probe.source_revision(paths)
+                config_text = paths["config"].read_text(encoding="utf-8")
+                config = json.loads(config_text) if protocol == "tuic" else yaml.safe_load(config_text)
+                settings = json.loads(paths["settings"].read_text(encoding="utf-8"))
+                users = json.loads(paths["users"].read_text(encoding="utf-8")) if protocol == "hysteria2" else None
+                plan = network_probe.prepare_direct_quic(binding, consumers, read_clients(), protocol, config, settings,
+                    paths["certificate"].read_text(encoding="utf-8"), certificate_server_name(paths["certificate"]), users)
+                if sources != network_probe.source_revision(paths): raise network_probe.ProbeUnavailable("Конфигурация изменилась")
+                return plan, sources
+            except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError, HTTPException):
+                continue
+    raise network_probe.ProbeUnavailable("Нет существующего совместимого consumer с live credentials, listener и маршрутом")
+
+
+def execute_network_probe(plan):
+    if plan.engine == "singbox":
+        binary = next((path for path in (Path("/usr/local/bin/sing-box"), TUIC_BIN) if path.is_file()), TUIC_BIN)
+        return network_probe.execute_quic(plan, str(binary), PUBLIC_IPV4 or PUBLIC_IP)
+    binary = "/usr/local/lib/vps-control-mihomo-reality/xray" if plan.producer == "mihomo_vless" else XRAY_BIN
+    return network_probe.execute_direct_vless(plan, str(binary), PUBLIC_IPV4 or PUBLIC_IP)
+
+
+def network_endpoint_check(kind: str, domain: str, *, include_saved: bool = True, consumer_id: str | None = None) -> dict:
     labels = {"cdn": "CDN", "tls_relay": "TLS", "udp_relay": "UDP"}
     label = labels.get(kind, kind.upper())
     probe = network_domain_probe(domain, f"{label} route")
@@ -2241,21 +2318,33 @@ def network_endpoint_check(kind: str, domain: str, *, include_saved: bool = True
         if not include_saved:
             return result
         registry = network_routes.migrate(json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8"))) if NETWORK_ENDPOINTS_FILE.exists() else {}
-        binding = next((item for item in registry.get("bindings", [])
-                        if item.get("kind") == kind and item.get("address") == domain
-                        and item.get("state") == "active"), None)
+        binding = network_routes.active_binding(registry, kind, domain)
+        if binding and consumer_id:
+            binding = {**binding, "check": binding.get("consumer_checks", {}).get(consumer_id, {})}
         saved = binding.get("check", {}) if binding else {}
-        if saved.get("state") == "ready" and saved.get("verification") == "end_to_end":
+        if binding:
+            result.update(binding_id=binding["id"], desired_revision=binding["desired_revision"],
+                          selectable=bool(probe["resolved"]))
+        proof = saved.get("proof") or {}
+        paths = network_probe_sources(proof.get("producer", "direct_vless"), kind, proof.get("consumer_id", "")) if proof else direct_probe_sources()
+        if network_routes.binding_ready(binding) and network_probe.evidence_current(saved, paths, binding=binding, key_root=NETWORK_ENDPOINTS_FILE.parent):
             result.update(status="ready", ready=True,
                           verification="end_to_end",
                           message=saved.get("reason") or "Маршрут проверен до целевого listener")
-        elif saved.get("state") in {"warning", "error", "stale"}:
-            result.update(status=saved["state"], ready=bool(saved.get("ready")),
+        elif network_routes.check_is_current(binding) and saved.get("state") in {"warning", "error", "stale"}:
+            result.update(status=saved["state"], ready=False,
                           message=saved.get("reason") or result["message"])
+        elif saved.get("state") == "ready":
+            result.update(status="unchecked", ready=False,
+                          message="Маршрут или конфигурация проверенного подключения изменились; выполните новую проверку")
         if saved:
             result.update(check_id=saved.get("check_id"), checked_at=saved.get("checked_at"),
                           checked_revision=saved.get("checked_revision"),
-                          failed_checks=int(saved.get("failed_checks", 0)))
+                          failed_checks=int(saved.get("failed_checks", 0)) if network_routes.check_is_current(binding) else 0)
+        if proof:
+            result["verified_connection"] = {key: proof[key] for key in ("consumer_id", "producer", "protocol", "transport", "vantage_point") if key in proof}
+        result["consumers"] = [{"id": item["id"], "label": item.get("label", item["id"])} for item in network_consumers()
+                               if item.get("kind") == kind and item.get("address") == domain]
     except (OSError, ValueError, json.JSONDecodeError, TypeError):
         pass
     return result
@@ -2540,13 +2629,52 @@ def check_network_endpoint(payload: NetworkEndpointCheck, _: None = Depends(requ
         raise HTTPException(status_code=503, detail="Не удалось подготовить проверку маршрута") from exc
     result = network_endpoint_check(payload.kind, domain, include_saved=False)
     result.update(check_id=check_id, checked_at=datetime.now(timezone.utc).isoformat())
+    result["consumers"] = [{"id": item["id"], "label": item.get("label", item["id"])} for item in network_consumers()
+                           if item.get("kind") == payload.kind and item.get("address") == domain]
+    if payload.consumer_id:
+        result["consumer_id"] = payload.consumer_id
+    plan = None
+    sources = None
     if target:
-        result.update(checked_revision=target["desired_revision"])
+        result.update(binding_id=target["id"], desired_revision=target["desired_revision"],
+                      checked_revision=target["desired_revision"])
+        try:
+            with application_operation.locked(DATA_DIR):
+                plan, sources = prepare_network_probe(target, payload.consumer_id)
+            execution = execute_network_probe(plan)
+            result["probe"] = {**plan.summary(), **execution}
+            result["consumer_id"] = plan.consumer_id
+            if execution["state"] == "verified":
+                label = next((item["label"] for item in result["consumers"] if item["id"] == plan.consumer_id), plan.consumer_id)
+                result.update(status="ready", ready=True, verification="end_to_end",
+                              message=f"Подключение «{label}» ({plan.transport}) проверено с VPS; доступность из сети пользователя требует отдельной проверки",
+                              proof={**execution, **plan.evidence(network_probe.evidence_key(NETWORK_ENDPOINTS_FILE.parent, create=True))})
+            else:
+                result.update(status="warning" if execution["state"] == "failed" else "unchecked",
+                              ready=False, message=execution["message"])
+        except network_probe.ProbeUnavailable as exc:
+            result["probe"] = {"state": "unavailable", "message": str(exc)}
+            result.update(status="unresolved" if not result["resolved"] else "unchecked", ready=False)
+            result["message"] = "Сначала создайте подключение к настроенному маршруту, затем проверьте его в разделе «Сеть»" if not payload.consumer_id else str(exc)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            result["probe"] = {"state": "unavailable", "message": "Конфигурация существующего подключения недоступна для проверки"}
     else:
         return result
     try:
         with application_operation.locked(DATA_DIR):
             settings = json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8")) if NETWORK_ENDPOINTS_FILE.exists() else read_network_endpoint_settings()
+            if result["ready"]:
+                try:
+                    current_binding = network_routes.active_binding(network_routes.migrate(settings), payload.kind, domain)
+                    current_plan, current_sources = prepare_network_probe(current_binding, plan.consumer_id)
+                    current = sources == current_sources and network_probe.same_plan(plan, current_plan)
+                except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                    current = False
+                if not current:
+                    result.update(status="stale", ready=False, verification="dns_only",
+                                  message="Маршрут, listener или credentials изменились во время проверки; повторите проверку")
+                    result["probe"]["state"] = "stale"
+                    result.pop("proof", None)
             recorded_result = {**result, "binding_id": target["id"]}
             registry = network_routes.record_check(network_routes.migrate(settings), payload.kind, domain, recorded_result)
             settings["route_registry"] = registry
@@ -5299,10 +5427,10 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
                     allowed_cdn_domains = {str(value).strip().lower() for value in configured if isinstance(configured, list) and str(value).strip()}
                     if reality.get("CDN_DOMAIN"):
                         allowed_cdn_domains.add(str(reality["CDN_DOMAIN"]).strip().lower())
-                    if selected_cdn_domain not in allowed_cdn_domains or not network_endpoint_check("cdn", selected_cdn_domain)["ready"]:
-                        raise HTTPException(status_code=409, detail="Выбранный CDN-домен не подтверждён на странице «Сеть»")
-                if "tls" in requested_routes and network_routes.retired(read_route_registry(), "tls_relay", reality.get("TLS_DOMAIN", "")):
-                    raise HTTPException(status_code=409, detail="TLS-маршрут удалён из Network; выберите актуальный маршрут")
+                    if selected_cdn_domain not in allowed_cdn_domains or not network_endpoint_check("cdn", selected_cdn_domain).get("selectable"):
+                        raise HTTPException(status_code=409, detail="Выбранный CDN-домен отсутствует в активных маршрутах Network или не разрешается через DNS")
+                if "tls" in requested_routes and not network_endpoint_check("tls_relay", reality.get("TLS_DOMAIN", "")).get("selectable"):
+                    raise HTTPException(status_code=409, detail="TLS-маршрут отсутствует в активных маршрутах Network или не разрешается через DNS")
                 selected_inbounds = [inbound for route in requested_routes for inbound in route_inbounds[route]]
                 for inbound in selected_inbounds:
                     inbound.setdefault("settings", {}).setdefault("clients", []).append({"id": client_uuid, "email": f"{client_id}@312.net"})
@@ -6309,6 +6437,13 @@ def protocol_status_data(protocol: str) -> dict:
                     str(value).strip().lower() for value in cdn_domain_candidates
                     if value and network_endpoint_check("cdn", str(value))["ready"]
                 ]
+                tls_domain = reality.get("TLS_DOMAIN", "").strip().lower()
+                confirmed_tls_domains = [tls_domain] if (tls_inbound and reality.get("TLS_ENABLED") == "yes"
+                    and tls_domain and network_endpoint_check("tls_relay", tls_domain)["ready"]) else []
+                available_tls_domains = [tls_domain] if (tls_inbound and reality.get("TLS_ENABLED") == "yes"
+                    and tls_domain and network_endpoint_check("tls_relay", tls_domain).get("selectable")) else []
+                available_cdn_domains = [str(value).strip().lower() for value in cdn_domain_candidates
+                    if value and network_endpoint_check("cdn", str(value)).get("selectable")]
                 routes = {
                     "direct": {
                         "enabled": True, "security": "REALITY", "transport": direct_profile["transport"],
@@ -6316,8 +6451,9 @@ def protocol_status_data(protocol: str) -> dict:
                         "server_name": direct_server_name,
                         "path": direct_profile["path"], "xhttp_mode": direct_profile["xhttp_mode"],
                     },
-                    "tls": {"enabled": tls_inbound is not None and reality.get("TLS_ENABLED", "no") == "yes", "security": "TLS", "transport": tls_profile["transport"], "endpoint": f"{reality.get('TLS_DOMAIN', '')}:443" if tls_inbound else "", "server_name": reality.get("TLS_DOMAIN", "") if tls_inbound else "", "path": tls_profile["path"], "xhttp_mode": tls_profile["xhttp_mode"]},
+                    "tls": {"enabled": tls_inbound is not None and reality.get("TLS_ENABLED", "no") == "yes", "security": "TLS", "transport": tls_profile["transport"], "endpoint": f"{tls_domain}:443" if tls_inbound else "", "server_name": tls_domain if tls_inbound else "", "path": tls_profile["path"], "xhttp_mode": tls_profile["xhttp_mode"], "confirmed_domains": confirmed_tls_domains, "available_domains": available_tls_domains},
                     "cdn": {
+                        "available_domains": available_cdn_domains,
                         "enabled": cdn_enabled, "security": "TLS",
                         "transport": cdn_profile["transport"],
                         "endpoint": f"{reality.get('CDN_DOMAIN', VLESS_CDN_DOMAIN)}:443" if cdn_enabled else "",

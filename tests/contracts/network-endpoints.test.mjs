@@ -37,7 +37,8 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(page, /label: "UNCHECKED"/);
   assert.match(endpoint, /result\.status === "unchecked"/);
   assert.match(api, /"verification": "dns_only"/);
-  assert.match(api, /saved\.get\("verification"\) == "end_to_end"/);
+  // Binding identity/revision and DNS-only admission are verified behaviorally
+  // by test_network_routes.py and network-readiness.test.mjs.
   assert.match(api, /check_id = uuid\.uuid4\(\)\.hex/);
   assert.match(types, /failed_checks\?: number/);
   assert.match(endpoint, /неудач подряд/);

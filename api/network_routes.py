@@ -124,6 +124,40 @@ def retired(registry: dict, kind: str, address: str) -> bool:
     return bool(matches) and not any(item["state"] == "active" for item in matches)
 
 
+def active_binding(registry: dict, kind: str, address: str) -> dict | None:
+    address = address.strip().lower()
+    return next((item for item in registry.get("bindings", [])
+                 if item.get("state") == "active" and item.get("kind") == kind
+                 and item.get("address") == address), None)
+
+
+def admission_allowed(binding: dict | None) -> bool:
+    """Provision an active route without claiming a successful traffic check."""
+    return bool(binding and binding.get("state") == "active")
+
+
+def check_is_current(binding: dict | None) -> bool:
+    if not binding or binding.get("state") != "active":
+        return False
+    check = binding.get("check", {})
+    revision = binding.get("desired_revision")
+    return (type(revision) is int and revision > 0
+            and type(check.get("checked_revision")) is int
+            and check["checked_revision"] == revision
+            and check.get("binding_id") == binding.get("id")
+            and isinstance(check.get("check_id"), str) and bool(check["check_id"])
+            and isinstance(check.get("checked_at"), str) and bool(check["checked_at"]))
+
+
+def binding_ready(binding: dict | None) -> bool:
+    """A completed traffic check; provisioning an unchecked route is separate."""
+    if not check_is_current(binding):
+        return False
+    check = binding["check"]
+    return (check.get("state") == "ready" and check.get("ready") is True
+            and check.get("verification") == "end_to_end")
+
+
 def record_check(registry: dict, kind: str, address: str, result: dict) -> dict:
     """Commit one explicit probe result without counting polling or duplicates."""
     address = address.strip().lower()
@@ -139,7 +173,8 @@ def record_check(registry: dict, kind: str, address: str, result: dict) -> dict:
         binding["check"] = {**binding.get("check", {}), "state": "stale", "ready": False,
                              "reason": "Маршрут удалён; внешнее forwarding сохранено"}
         return registry
-    check = dict(binding.get("check") or {})
+    consumer_id = result.get("consumer_id")
+    check = copy.deepcopy(binding.get("consumer_checks", {}).get(consumer_id, {})) if consumer_id else dict(binding.get("check") or {})
     revision = binding.get("desired_revision", 1)
     check_id = str(result.get("check_id") or "")
     checked_revision = result.get("checked_revision")
@@ -152,7 +187,8 @@ def record_check(registry: dict, kind: str, address: str, result: dict) -> dict:
     same_revision = check.get("checked_revision") == revision
     duplicate = same_revision and check.get("check_id") == check_id
     verification = str(result.get("verification") or "dns_only")
-    ready = bool(result.get("ready")) and verification == "end_to_end"
+    ready = (result.get("ready") is True and verification == "end_to_end"
+             and isinstance(result.get("checked_at"), str) and bool(result["checked_at"]))
     if not duplicate:
         if ready:
             failed_checks = 0
@@ -164,10 +200,16 @@ def record_check(registry: dict, kind: str, address: str, result: dict) -> dict:
             failed_checks = int(check.get("failed_checks", 0)) + 1 if same_revision else 1
             state = "error" if failed_checks >= 10 else "warning"
         check.update({"state": state, "ready": ready, "failed_checks": failed_checks,
-                      "checked_revision": revision, "check_id": check_id,
+                      "binding_id": binding["id"], "checked_revision": revision, "check_id": check_id,
                       "checked_at": result.get("checked_at"),
                       "verification": verification,
                       "reason": str(result.get("message") or "Проверка маршрута не подтверждена"),
                       "last_error": None if ready or state == "unknown" else str(result.get("message") or "Проверка не пройдена")})
+        if ready and result.get("proof"):
+            check["proof"] = copy.deepcopy(result["proof"])
+        else:
+            check.pop("proof", None)
     binding["check"] = check
+    if consumer_id:
+        binding.setdefault("consumer_checks", {})[consumer_id] = copy.deepcopy(check)
     return registry

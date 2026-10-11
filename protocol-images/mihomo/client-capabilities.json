@@ -24,7 +24,7 @@
     "rules": []
   },
   "xray": {
-    "label": "Happ · Xray JSON",
+    "label": "Xray JSON",
     "components": ["transport-reality", "transport-shadowsocks"],
     "transports": ["raw", "tcp", "xhttp", "grpc", "websocket", "httpupgrade"],
     "features": ["tunnel_privacy"],

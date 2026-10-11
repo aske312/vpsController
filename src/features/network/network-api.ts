@@ -21,8 +21,8 @@ export function saveNetworkEndpoints(request: NetworkRequest, settings: NetworkE
   return submitSystemOperation(request, "/network/endpoints", { method: "PUT", body: JSON.stringify({ ...settings, expected_revision: settings.revision }) });
 }
 
-export function checkNetworkEndpoint(request: NetworkRequest, kind: NetworkEndpointCheck["kind"], domain: string) {
-  return request<NetworkEndpointCheck>("/network/endpoints/check", { method: "POST", body: JSON.stringify({ kind, domain }) });
+export function checkNetworkEndpoint(request: NetworkRequest, kind: NetworkEndpointCheck["kind"], domain: string, consumerId?: string) {
+  return request<NetworkEndpointCheck>("/network/endpoints/check", { method: "POST", body: JSON.stringify({ kind, domain, ...(consumerId ? { consumer_id: consumerId } : {}) }) });
 }
 
 export function deleteNetworkEndpoint(request: NetworkRequest, kind: NetworkEndpointCheck["kind"], domain: string, revision?: string) {

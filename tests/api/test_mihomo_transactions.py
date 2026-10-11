@@ -11,6 +11,99 @@ manager = load_module("mihomo_manager_under_test", "protocol-images/mihomo/manag
 
 
 class MihomoTransactionTests(unittest.TestCase):
+    def legacy_channel_fixture(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.profile_file = root / "profiles.json"
+        self.external = root / "wg.conf"
+        self.profile_file.write_text(json.dumps([{"id": "legacy", "name": "Legacy", "devices": [{"id": "common"}],
+                                                "common_device_id": "common", "connections": [], "channels": [], "credentials": {}}]))
+        self.external.write_text("original peers")
+        self.original_profile = self.profile_file.read_bytes()
+        self.service_state = "running"
+        for name, value in {"PROFILE_FILE": self.profile_file, "CONFIG_ROOT": root / "config",
+                            "ROUTING_SETTINGS_FILE": root / "routing.json",
+                            "WG_CONFIG_BY_MODULE": {"transport-wg": self.external},
+                            "SERVICE_BY_MODULE": {"transport-wg": "fixture.service"}}.items():
+            self.enterContext(patch.object(manager, name, value))
+        self.enterContext(patch.object(manager, "profiles", side_effect=lambda: json.loads(self.profile_file.read_text())))
+        self.enterContext(patch.object(manager, "module_is_installed", return_value=True))
+        self.enterContext(patch.object(manager, "module_is_ready", return_value=True))
+        self.enterContext(patch.object(manager, "get_action_payload", return_value={}))
+        self.enterContext(patch.object(manager, "write_action"))
+        self.enterContext(patch.object(manager, "reconcile_profile_encryption"))
+        self.enterContext(patch.object(manager, "normalize_profile", side_effect=lambda item: dict(item)))
+        self.enterContext(patch.object(manager, "manifest", side_effect=lambda module: {"name": module}))
+        self.enterContext(patch.object(manager, "observe_service", side_effect=lambda _: {"unit_present": True, "runtime": {"state": self.service_state}}))
+
+    def test_legacy_new_channel_rollback_restores_external_config_and_runtime(self):
+        self.legacy_channel_fixture()
+        def provision(*args, **kwargs):
+            self.external.write_text("new peer")
+            self.service_state = "stopped"
+            return {"public_key": "fixture"}
+        def run(*args, **kwargs):
+            if args[:2] == ("systemctl", "restart"):
+                self.assertEqual(self.external.read_text(), "original peers")
+                self.service_state = "running"
+        with (patch.object(manager, "provision", side_effect=provision),
+              patch.object(manager, "run", side_effect=run) as command,
+              patch.object(manager, "save_profiles", side_effect=OSError("profile write failed")),
+              self.assertRaisesRegex(OSError, "profile write failed")):
+            manager.update_profile("legacy", manager.ProfileUpdate(channels=["transport-wg"]))
+        self.assertEqual(self.external.read_text(), "original peers")
+        self.assertEqual(self.profile_file.read_bytes(), self.original_profile)
+        self.assertEqual(self.service_state, "running")
+        command.assert_any_call("systemctl", "restart", "fixture.service", check=True)
+        self.assertFalse((self.profile_file.parent / "profile-recovery/manifest.json").exists())
+
+    def test_legacy_new_channel_unknown_runtime_prevents_provision(self):
+        self.legacy_channel_fixture()
+        self.service_state = "unknown"
+        with patch.object(manager, "provision") as provision, self.assertRaisesRegex(RuntimeError, "Неизвестно состояние"):
+            manager.update_profile("legacy", manager.ProfileUpdate(channels=["transport-wg"]))
+        provision.assert_not_called()
+        self.assertEqual(self.external.read_text(), "original peers")
+        self.assertEqual(self.profile_file.read_bytes(), self.original_profile)
+
+    def test_invalid_legacy_channel_is_rejected_before_snapshot_or_provision(self):
+        self.legacy_channel_fixture()
+        with patch.object(manager, "provision") as provision, self.assertRaises(manager.HTTPException) as invalid:
+            manager.update_profile("legacy", manager.ProfileUpdate(channels=["not-a-transport"]))
+        self.assertEqual(invalid.exception.status_code, 422)
+        provision.assert_not_called()
+        self.assertFalse((self.profile_file.parent / "profile-recovery/manifest.json").exists())
+
+    def test_legacy_channel_edit_preserves_all_retained_connection_instances(self):
+        self.legacy_channel_fixture()
+        connections = [{"id": f"wg-{index}", "component": "transport-wg", "device_id": device,
+                        "settings": {"mtu": 1400 + index}, "credential": {"public_key": f"key-{index}"}}
+                       for index, device in enumerate(("common", "phone"))]
+        saved = json.loads(self.profile_file.read_text())
+        saved[0].update(connections=connections, channels=["transport-wg"], credentials={"transport-wg": connections[0]["credential"]})
+        saved[0]["devices"].append({"id": "phone"})
+        self.profile_file.write_text(json.dumps(saved))
+        with patch.object(manager, "provision") as provision, patch.object(manager, "deprovision") as deprovision, patch.object(manager, "profile_response", side_effect=lambda item: item):
+            manager.update_profile("legacy", manager.ProfileUpdate(channels=["transport-wg"]))
+        self.assertEqual(json.loads(self.profile_file.read_text())[0]["connections"], connections)
+        provision.assert_not_called()
+        deprovision.assert_not_called()
+
+    def test_legacy_channel_removal_revokes_every_instance_including_retiring(self):
+        self.legacy_channel_fixture()
+        connections = [{"id": f"wg-{index}", "component": "transport-wg", "device_id": "common",
+                        "settings": {}, "credential": {"public_key": f"key-{index}"}} for index in range(2)]
+        saved = json.loads(self.profile_file.read_text())
+        saved[0].update(connections=connections, channels=["transport-wg"], credentials={"transport-wg": connections[0]["credential"]},
+                        retiring_connections=[{**connections[0], "credential": {"public_key": "retiring-key"}}])
+        self.profile_file.write_text(json.dumps(saved))
+        with patch.object(manager, "deprovision") as deprovision, patch.object(manager, "profile_response", side_effect=lambda item: item):
+            manager.update_profile("legacy", manager.ProfileUpdate(channels=[]))
+        self.assertEqual([call.args[2]["public_key"] for call in deprovision.call_args_list], ["retiring-key", "key-0", "key-1"])
+        result = json.loads(self.profile_file.read_text())[0]
+        self.assertEqual(result["connections"], [])
+        self.assertEqual(result.get("retiring_connections", []), [])
+        self.assertEqual(result["credentials"], {})
+
     def test_shadowsocks_rollback_restores_instances_and_removes_new_ones(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
