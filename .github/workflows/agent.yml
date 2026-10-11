@@ -1,5 +1,6 @@
 name: Verify standalone Agent installer
 on:
+  workflow_dispatch:
   push:
     branches: [agent]
   pull_request:
@@ -11,6 +12,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          ref: installer
+          path: .runtime/installer
+      - name: Check installer routing to Agent
+        run: |
+          bash -n .runtime/installer/install.sh
+          sudo python3 tests/installer_routing_test.py
       - name: Check shell syntax and credentials export
         run: |
           bash -n install.sh scripts/install-agent.sh protocol-images/relay-agent/install.sh protocol-images/relay-agent/uninstall.sh
