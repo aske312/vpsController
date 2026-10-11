@@ -135,7 +135,7 @@ test("authentication and VPN controls preserve consistent UI states", async () =
   assert.match(api, /channels = configured_panel_channels\(\)/);
   assert.match(api, /if not channels:/);
   assert.doesNotMatch(api, /for interface in \(WG_INTERFACE, AWG_INTERFACE\):\s+if not Path\(f"\/sys\/class\/net/);
-  assert.match(api, /"web": \{"name": "Web 312\.net"/);
+  assert.match(api, /"web": \{"name": "Web 312node\.net"/);
   assert.match(api, /The last active VPN cannot be stopped while panel access is VPN-only/);
   assert.match(manager, /vpn_interface_available="no"/);
   assert.match(manager, /set_env_value "CORS_ORIGINS" "\$\{vpn_origins\}"/);
