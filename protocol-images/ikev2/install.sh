@@ -73,7 +73,7 @@ printf 'net.ipv4.ip_forward=1\n' >/etc/sysctl.d/90-vps-control-ikev2.conf; sysct
 install -m 0755 "$(dirname "$0")/firewall.sh" /usr/local/lib/vps-control-ikev2/firewall.sh
 cat >/etc/systemd/system/vps-control-ikev2.service <<EOF
 [Unit]
-Description=312.net IKEv2 server
+Description=312node.net IKEv2 server
 After=network-online.target
 [Service]
 Type=notify

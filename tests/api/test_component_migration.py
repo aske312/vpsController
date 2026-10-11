@@ -48,6 +48,21 @@ class ComponentMigrationTests(unittest.TestCase):
                 self.assertEqual(migration.provenance_paths("mihomo", "", Path("/opt/vps-control"), root=self.root,
                     run=lambda *a, **kw: result), [])
 
+    def test_protocol_branding_preserves_provenance_for_both_names(self):
+        for image_id in ("shadowsocks", "tuic", "trojan", "openvpn", "ikev2", "hysteria2", "vless-reality-xhttp"):
+            unit, contract = migration.service_contract(image_id, Path("/opt/vps-control"))
+            self.unit_path = self.root / "etc/systemd/system" / unit
+            original = "\n".join(f"{key}={value}" for key, value in contract.items())
+            for name in ("312.net", "312node.net", "External"):
+                with self.subTest(image_id=image_id, name=name):
+                    self.unit_path.write_text(original.replace("312.net", name))
+                    expected = [] if name == "External" else [self.unit_path]
+                    self.assertEqual(migration.provenance_paths(image_id, "", Path("/opt/vps-control"),
+                        root=self.root, run=self.observe), expected)
+            self.unit_path.write_text(original.replace("312.net", "312node.net") + "\nExecStart=/usr/bin/other")
+            self.assertEqual(migration.provenance_paths(image_id, "", Path("/opt/vps-control"),
+                root=self.root, run=self.observe), [])
+
     def test_wg_file_and_panel_marker_alone_do_not_claim_external_interface(self):
         config = self.root / "etc/wireguard/wg0.conf"
         config.parent.mkdir(parents=True)

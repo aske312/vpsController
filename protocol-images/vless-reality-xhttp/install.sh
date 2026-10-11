@@ -321,7 +321,7 @@ fi
 
 cat >/etc/systemd/system/vps-control-vless-reality-xhttp.service <<EOF
 [Unit]
-Description=312.net VLESS REALITY XHTTP
+Description=312node.net VLESS REALITY XHTTP
 After=network-online.target
 Wants=network-online.target
 

@@ -3740,10 +3740,10 @@ def protocol_managed_services() -> dict[str, dict]:
 def managed_services() -> dict[str, dict]:
     return {
         "api": {
-            "name": "API 312.net", "unit": "vps-control-api.service",
+            "name": "API 312node.net", "unit": "vps-control-api.service",
             "controls": ["restart"], "disabled_controls": ["stop"],
         },
-        "web": {"name": "Web 312.net", "unit": "vps-control-web.service", "controls": ["restart"], "disabled_controls": ["stop"]},
+        "web": {"name": "Web 312node.net", "unit": "vps-control-web.service", "controls": ["restart"], "disabled_controls": ["stop"]},
         "gateway": {"name": "Caddy", "unit": "caddy.service", "controls": ["restart"], "disabled_controls": ["stop"]},
         "monitor": {"name": "Мониторинг VPN", "unit": "vpn-monitor.timer", "controls": ["start", "stop", "restart"]},
         "fail2ban": {"name": "Fail2ban", "unit": "fail2ban.service", "controls": ["start", "stop", "restart"]},
@@ -4867,7 +4867,7 @@ def apply_system_dns(addresses: list[str]) -> None:
         return
     if SYSTEM_RESOLV_CONF.is_symlink():
         raise HTTPException(status_code=409, detail="На VPS не найден активный systemd-resolved для управления DNS")
-    SYSTEM_RESOLV_CONF.write_text("# Managed by 312.net\n" + "\n".join(f"nameserver {address}" for address in addresses) + "\n", encoding="utf-8")
+    SYSTEM_RESOLV_CONF.write_text("# Managed by 312node.net\n" + "\n".join(f"nameserver {address}" for address in addresses) + "\n", encoding="utf-8")
 
 
 def dns_provider_list(settings: dict | None = None) -> list[dict]:

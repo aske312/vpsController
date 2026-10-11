@@ -45,7 +45,7 @@ export function GateNavigation({
     <aside className="gateSidebar">
       <button className="gateBrand" type="button" onClick={() => onNavigate("overview")} aria-label="Открыть обзор">
         <span className="gateBrandMark"><BrandGlyph /></span>
-        <span><strong>312<span>.net</span></strong><small>INFRASTRUCTURE</small></span>
+        <span><strong>312node<span>.net</span></strong><small>INFRASTRUCTURE</small></span>
       </button>
 
       <nav className="gateNav" aria-label="Основная навигация">

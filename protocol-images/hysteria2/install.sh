@@ -80,7 +80,7 @@ install -m 0755 "$(dirname "$0")/user-api.py" /usr/local/lib/vps-control-hysteri
 install -m 0755 "$(dirname "$0")/firewall.sh" /usr/local/lib/vps-control-hysteria2/firewall.sh
 cat >/etc/systemd/system/vps-control-hysteria2-auth.service <<'EOF'
 [Unit]
-Description=312.net Hysteria2 authentication
+Description=312node.net Hysteria2 authentication
 After=network.target
 [Service]
 ExecStart=/usr/bin/python3 /usr/local/lib/vps-control-hysteria2/user-api.py
@@ -95,7 +95,7 @@ WantedBy=multi-user.target
 EOF
 cat >/etc/systemd/system/vps-control-hysteria2.service <<EOF
 [Unit]
-Description=312.net Hysteria2 server
+Description=312node.net Hysteria2 server
 After=network-online.target vps-control-hysteria2-auth.service
 Wants=network-online.target
 Requires=vps-control-hysteria2-auth.service

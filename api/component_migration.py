@@ -96,6 +96,8 @@ def provenance_paths(image_id: str, interface: str, install_dir: Path, *, root=P
                 entries.setdefault(key.strip(), []).append(value.strip())
         for key, value in expected.items():
             allowed = [value]
+            if key == "Description" and value.startswith("312.net "):
+                allowed.append(value.replace("312.net ", "312node.net ", 1))
             if image_id == "mihomo" and key == "ExecStart":
                 allowed.append(value.removesuffix(" --no-server-header"))
             if entries.get(key) not in [[option] for option in allowed]:

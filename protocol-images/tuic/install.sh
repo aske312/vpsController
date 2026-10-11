@@ -36,7 +36,7 @@ chmod 0600 "${ROOT}/settings.json" "${ROOT}/config.json"
 install -m 0755 "$(dirname "$0")/firewall.sh" /usr/local/lib/vps-control-tuic/firewall.sh
 cat >/etc/systemd/system/vps-control-tuic.service <<EOF
 [Unit]
-Description=312.net TUIC v5 server
+Description=312node.net TUIC v5 server
 After=network-online.target
 Wants=network-online.target
 [Service]

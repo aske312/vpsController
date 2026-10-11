@@ -96,7 +96,7 @@ for path in sorted(glob.glob("/etc/vps-control/shadowsocks/clients/*.json")):
 PY
 cat >/etc/systemd/system/vps-control-shadowsocks.target <<'EOF'
 [Unit]
-Description=312.net managed Shadowsocks instances
+Description=312node.net managed Shadowsocks instances
 Wants=network-online.target
 After=network-online.target
 
@@ -106,7 +106,7 @@ EOF
 
 cat >/etc/systemd/system/vps-control-shadowsocks@.service <<'EOF'
 [Unit]
-Description=312.net Shadowsocks connection %i
+Description=312node.net Shadowsocks connection %i
 PartOf=vps-control-shadowsocks.target
 After=network-online.target
 

@@ -123,7 +123,7 @@ ui_rule() {
 ui_header() {
   clear 2>/dev/null || true
   ui_rule
-  printf '\033[1;36m│\033[0m  \033[1m%-58s\033[0m \033[1;36m│\033[0m\n' "312.net — установка панели управления сервером"
+  printf '\033[1;36m│\033[0m  \033[1m%-58s\033[0m \033[1;36m│\033[0m\n' "312node.net — установка панели управления сервером"
   printf '\033[1;36m│\033[0m  %-58s \033[1;36m│\033[0m\n' "Безопасное развёртывание и проверка компонентов"
   printf '\033[1;36m%s\033[0m\n' '└──────────────────────────────────────────────────────────────┘'
 }
@@ -305,7 +305,7 @@ auto_safe_update_server() {
   : >"${SAFE_UPDATE_REPORT}"
   chmod 0600 "${SAFE_UPDATE_REPORT}"
   exec > >(tee -a "${SAFE_UPDATE_REPORT}") 2>&1
-  printf '312.net safe update\nStarted: %s\nPolicy: no kernel, bootloader, libc, systemd, SSH, major or package removal\n\n' "$(date --iso-8601=seconds)"
+  printf '312node.net safe update\nStarted: %s\nPolicy: no kernel, bootloader, libc, systemd, SSH, major or package removal\n\n' "$(date --iso-8601=seconds)"
   info "Создание и проверка зашифрованной точки восстановления"
   archive="$(create_recovery_point)"
   info "Обновление индекса пакетов"
@@ -338,7 +338,7 @@ safe_update_server() {
   : >"${SAFE_UPDATE_REPORT}"
   chmod 0600 "${SAFE_UPDATE_REPORT}"
   exec > >(tee -a "${SAFE_UPDATE_REPORT}") 2>&1
-  printf '312.net full server update\nStarted: %s\nPolicy: all available Debian packages; package removals are prohibited\nRecovery scope: application, personal data and configuration; not a VPS disk snapshot or package downgrade\n\n' "$(date --iso-8601=seconds)"
+  printf '312node.net full server update\nStarted: %s\nPolicy: all available Debian packages; package removals are prohibited\nRecovery scope: application, personal data and configuration; not a VPS disk snapshot or package downgrade\n\n' "$(date --iso-8601=seconds)"
   info "Creating and verifying the encrypted recovery point"
   archive="$(create_recovery_point)"
   before_packages="${RECOVERY_DIR}/packages-before-update.txt"
@@ -1132,7 +1132,7 @@ doctor() {
     || { warn "не удаётся разрешить github.com"; failed=1; }
   check_source
   (( failed == 0 )) || die "сервер не прошёл предварительную проверку."
-  ok "сервер совместим с установкой 312.net."
+  ok "сервер совместим с установкой 312node.net."
 }
 
 check_manual_dependencies() {
@@ -2140,7 +2140,7 @@ configure_vpn_firewall_policy() {
 
   cat >"${policy_service}" <<EOF
 [Unit]
-Description=312.net VPN firewall policy
+Description=312node.net VPN firewall policy
 After=network-online.target
 Wants=network-online.target
 
@@ -2337,7 +2337,7 @@ install_api() {
 
   cat >"${SERVICE_FILE}" <<EOF
 [Unit]
-Description=312.net Infrastructure API
+Description=312node.net Infrastructure API
 After=network-online.target
 Wants=network-online.target
 
@@ -2411,7 +2411,7 @@ install_protocol_monitor() {
   install -m 0755 "${INSTALL_DIR}/scripts/vpn-monitor-sample" /usr/local/sbin/vpn-monitor-sample
   cat >/etc/systemd/system/vpn-monitor.service <<'EOF'
 [Unit]
-Description=Collect 312.net VPN protocol metrics
+Description=Collect 312node.net VPN protocol metrics
 After=network-online.target
 Wants=network-online.target
 
@@ -2423,7 +2423,7 @@ IOSchedulingClass=idle
 EOF
   cat >/etc/systemd/system/vpn-monitor.timer <<'EOF'
 [Unit]
-Description=Collect 312.net VPN metrics every minute
+Description=Collect 312node.net VPN metrics every minute
 
 [Timer]
 OnBootSec=1min
@@ -2455,7 +2455,7 @@ install_web() {
   install -d -m 0750 "${DATA_DIR}/web"
   cat >"${WEB_SERVICE_FILE}" <<EOF
 [Unit]
-Description=312.net Web Interface
+Description=312node.net Web Interface
 After=network-online.target ${APP_NAME}-api.service
 Wants=network-online.target
 
@@ -2520,7 +2520,7 @@ cleanup_legacy_runtime() {
     apt-get -o DPkg::Lock::Timeout=300 purge -y "${docker_packages[@]}"
     apt-get -o DPkg::Lock::Timeout=300 autoremove --purge -y
   fi
-  ok "устаревшие Docker-компоненты 312.net удалены."
+  ok "устаревшие Docker-компоненты 312node.net удалены."
 }
 
 sync_protocol_monitor() {
@@ -2633,7 +2633,7 @@ PY
   ensure_api_write_access
   install_protocol_monitor
   ensure_mihomo_profile_runtimes
-  info "Запуск обновлённой версии 312.net"
+  info "Запуск обновлённой версии 312node.net"
   stop_legacy_containers
   systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
   systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
@@ -2651,13 +2651,13 @@ start_services() {
     BUILD_COMMIT="$(<"${INSTALL_DIR}/.build-commit")"
   fi
   export APP_VERSION BUILD_COMMIT
-  info "Запуск 312.net"
+  info "Запуск 312node.net"
   systemctl start "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
   ok "панель запущена: ${PANEL_URL}"
 }
 
 stop_services() {
-  info "Остановка 312.net"
+  info "Остановка 312node.net"
   systemctl stop caddy.service "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
   ok "панель остановлена."
 }
@@ -2772,7 +2772,7 @@ install_prebuilt_release() {
   [[ -f "${archive_path}" ]] || die "архив релиза не найден: ${archive}."
   archive_listing="$(tar -tzf "${archive_path}")"
   grep -Eq '^vps-control-release/(\.prebuilt-release|release\.sha256)$' <<<"${archive_listing}" \
-    || die "архив не является подготовленным релизом 312.net."
+    || die "архив не является подготовленным релизом 312node.net."
   if grep -Eq '(^|/)\.\.(/|$)|^/' <<<"${archive_listing}"; then
     die "архив содержит небезопасные пути."
   fi
@@ -3301,9 +3301,9 @@ EOF
   reboot_calendar="$(automation_calendar "${reboot_cadence}" "${reboot_weekday}" "${reboot_hour}" "${reboot_minute}")"
   cleanup_calendar="$(automation_calendar "${cleanup_cadence}" "${cleanup_weekday}" "${cleanup_hour}" "${cleanup_minute}")"
   update_calendar="$(automation_calendar "${update_cadence}" "${update_weekday}" "${update_hour}" "${update_minute}")"
-  install_automation_timer "reboot" "Scheduled VPS reboot by 312.net" "reboot" "${reboot_enabled}" "${reboot_calendar}"
-  install_automation_timer "cleanup" "Scheduled VPS cleanup by 312.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}"
-  install_automation_timer "update" "Scheduled conservative server update by 312.net" "auto-safe-update" "${update_enabled}" "${update_calendar}"
+  install_automation_timer "reboot" "Scheduled VPS reboot by 312node.net" "reboot" "${reboot_enabled}" "${reboot_calendar}"
+  install_automation_timer "cleanup" "Scheduled VPS cleanup by 312node.net" "optimize" "${cleanup_enabled}" "${cleanup_calendar}"
+  install_automation_timer "update" "Scheduled conservative server update by 312node.net" "auto-safe-update" "${update_enabled}" "${update_calendar}"
   ok "расписания обслуживания применены."
 }
 
@@ -3540,7 +3540,7 @@ show_credentials() {
 
 usage() {
   cat <<'EOF'
-312.net — управление инфраструктурой
+312node.net — управление инфраструктурой
 
 Использование:
   sudo bash scripts/vps-control.sh install

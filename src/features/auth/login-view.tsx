@@ -39,7 +39,7 @@ export function LoginView({ loginUser, loginPassword, loginPasswordVisible, busy
   );
 }
 
-function Logo() { return <div className="loginBrand"><span><BrandGlyph /></span><div><strong>312<em>.net</em></strong><small>INFRASTRUCTURE</small></div></div>; }
+function Logo() { return <div className="loginBrand"><span><BrandGlyph /></span><div><strong>312node<em>.net</em></strong><small>INFRASTRUCTURE</small></div></div>; }
 function LockIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="3" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v2" /></svg>; }
 function UserIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5.5 19c.8-3.4 3-5.1 6.5-5.1s5.7 1.7 6.5 5.1" /></svg>; }
 function KeyIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="12" r="3.5" /><path d="M11.5 12H20m-3 0v3m-3-3v2" /></svg>; }

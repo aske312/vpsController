@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileText, read, readUiSources, readApiSources, readStyles } from "./support.mjs";
 
-test("интерфейс относится к 312.net, публичные метаданные нейтральны", async () => {
+test("интерфейс относится к 312node.net, публичные метаданные нейтральны", async () => {
   const [layout, page, packageJson] = await Promise.all([
     read("app/layout.tsx"),
     readUiSources(),
@@ -45,9 +45,9 @@ test("MIT license, privacy notice and connection guide are included in Russian",
     read("src/features/connections/connection-guide.tsx"),
     readUiSources(),
   ]);
-  assert.match(privacy, /Уведомление о приватности 312\.net/);
+  assert.match(privacy, /Уведомление о приватности 312node\.net/);
   assert.match(privacy, /Privacy Notice/);
-  assert.match(terms, /Свободная лицензия и условия 312\.net/);
+  assert.match(terms, /Свободная лицензия и условия 312node\.net/);
   assert.match(terms, /Free Software Terms/);
   assert.match(privacy, /не требует указания имени, адреса/);
   assert.match(privacy, /does not require an author.s legal name/);

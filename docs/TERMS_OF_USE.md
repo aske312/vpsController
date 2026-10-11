@@ -1,4 +1,4 @@
-# Свободная лицензия и условия 312.net / Free Software Terms
+# Свободная лицензия и условия 312node.net / Free Software Terms
 
 Редакция / Effective date: 02.08.2026
 
@@ -6,7 +6,7 @@
 
 ### 1. Свободная лицензия
 
-312.net распространяется по лицензии MIT. Любое лицо вправе бесплатно использовать, копировать, изменять, объединять, публиковать, распространять, сублицензировать и продавать копии программного обеспечения, а также разрешать это другим лицам при условии сохранения уведомления об авторских правах и текста лицензии MIT в копиях или существенных частях продукта.
+312node.net распространяется по лицензии MIT. Любое лицо вправе бесплатно использовать, копировать, изменять, объединять, публиковать, распространять, сублицензировать и продавать копии программного обеспечения, а также разрешать это другим лицам при условии сохранения уведомления об авторских правах и текста лицензии MIT в копиях или существенных частях продукта.
 
 Полный юридически значимый текст находится в файле [`LICENSE`](../LICENSE). При расхождении между этим пояснением и `LICENSE` применяется `LICENSE`.
 
@@ -38,7 +38,7 @@
 
 ### 1. Free software licence
 
-312.net is distributed under the MIT License. Any person may, free of charge, use, copy, modify, merge, publish, distribute, sublicense and sell copies of the Software, and permit others to do so, provided that the copyright notice and MIT permission notice are included in copies or substantial portions.
+312node.net is distributed under the MIT License. Any person may, free of charge, use, copy, modify, merge, publish, distribute, sublicense and sell copies of the Software, and permit others to do so, provided that the copyright notice and MIT permission notice are included in copies or substantial portions.
 
 The complete legally operative text is in [`LICENSE`](../LICENSE). If this explanation conflicts with `LICENSE`, `LICENSE` controls.
 

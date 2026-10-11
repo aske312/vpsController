@@ -13,7 +13,7 @@ OS_UPDATE="${VPS_CONTROL_OS_UPDATE:-yes}"
 
 usage() {
   cat <<'EOF'
-312.net — установщик стабильной версии
+312node.net — установщик стабильной версии
 
 Использование:
   sudo bash install-panel.sh [параметры]
@@ -112,7 +112,7 @@ reset='\033[0m'
 
 banner() {
   printf "${cyan}╭──────────────────────────────────────────────────────────╮${reset}\n"
-  printf "${cyan}│${reset}  ${magenta}◆ 312.net${reset}  ${yellow}УСТАНОВКА НА НОВЫЙ СЕРВЕР${reset}               ${cyan}│${reset}\n"
+  printf "${cyan}│${reset}  ${magenta}◆ 312node.net${reset}  ${yellow}УСТАНОВКА НА НОВЫЙ СЕРВЕР${reset}               ${cyan}│${reset}\n"
   printf "${cyan}│${reset}  Подготовим систему и запустим панель управления   ${cyan}│${reset}\n"
   printf "${cyan}╰──────────────────────────────────────────────────────────╯${reset}\n"
 }
@@ -204,13 +204,13 @@ fi
 
 BOOTSTRAP_DIR="$(mktemp -d /tmp/vps-control-bootstrap.XXXXXX)"
 archive="${BOOTSTRAP_DIR}/source.tar.gz"
-run_stage "${cyan}" "Загружаем 312.net · ${BRANCH}" curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+run_stage "${cyan}" "Загружаем 312node.net · ${BRANCH}" curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
   --connect-timeout 15 --max-time 300 \
   --output "${archive}" "${REPOSITORY}/archive/refs/heads/${BRANCH}.tar.gz"
 run_stage "${yellow}" "Распаковываем приложение" tar -xzf "${archive}" -C "${BOOTSTRAP_DIR}"
 source_dir="$(find "${BOOTSTRAP_DIR}" -mindepth 1 -maxdepth 1 -type d -name 'vpsController-*' -print -quit)"
 [[ -n "${source_dir}" && -x "${source_dir}/scripts/install-panel.sh" ]] \
-  || { printf 'Ошибка: загруженный архив не содержит установщик 312.net.\n' >&2; exit 1; }
+  || { printf 'Ошибка: загруженный архив не содержит установщик 312node.net.\n' >&2; exit 1; }
 
 printf "\n${green}◆ Базовая подготовка завершена.${reset} Запускаем мастер приложения.\n\n"
 "${source_dir}/scripts/install-panel.sh" "$@"

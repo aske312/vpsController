@@ -23,7 +23,7 @@ PY
 chmod 0600 "$ROOT"/*.json; install -m 0755 "$(dirname "$0")/firewall.sh" /usr/local/lib/vps-control-trojan/firewall.sh
 cat >/etc/systemd/system/vps-control-trojan.service <<EOF
 [Unit]
-Description=312.net Trojan server
+Description=312node.net Trojan server
 After=network-online.target
 [Service]
 ExecStartPre=/usr/local/lib/vps-control-trojan/firewall.sh add

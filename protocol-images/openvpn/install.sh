@@ -49,7 +49,7 @@ printf 'net.ipv4.ip_forward=1\n' >/etc/sysctl.d/90-vps-control-openvpn.conf; sys
 install -m 0755 "$(dirname "$0")/firewall.sh" /usr/local/lib/vps-control-openvpn/firewall.sh
 cat >/etc/systemd/system/vps-control-openvpn.service <<EOF
 [Unit]
-Description=312.net OpenVPN server
+Description=312node.net OpenVPN server
 After=network-online.target
 [Service]
 ExecStartPre=/usr/local/lib/vps-control-openvpn/firewall.sh add
