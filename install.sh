@@ -18,7 +18,7 @@ trap cleanup EXIT
 
 usage() {
   cat <<'EOF'
-312.net installer
+312node.net installer
 
 Usage:
   sudo bash install.sh
@@ -68,7 +68,7 @@ esac
 
 if [[ -z "${EDITION}" ]]; then
   [[ -r /dev/tty ]] || { printf 'Ошибка: без терминала укажите --edition light, pro или agent.\n' >&2; exit 2; }
-  printf '\n312.net — выберите вариант установки:\n  1) Light — WireGuard и AmneziaWG\n  2) PRO   — Mihomo, DNS, relay и расширенное управление\n  3) Agent — Relay для изолированной сети без панели\n\nВыбор [1/2/3]: ' >/dev/tty
+  printf '\n312node.net — выберите вариант установки:\n  1) Light — WireGuard и AmneziaWG\n  2) PRO   — Mihomo, DNS, relay и расширенное управление\n  3) Agent — Relay для изолированной сети без панели\n\nВыбор [1/2/3]: ' >/dev/tty
   IFS= read -r choice </dev/tty
   case "${choice}" in
     1|light|Light) EDITION="light" ;;
@@ -118,7 +118,7 @@ fi
   || { printf 'Ошибка: editions.json содержит недопустимый маршрут установки.\n' >&2; exit 1; }
 
 edition_installer="${WORK_DIR}/install-panel.sh"
-printf '312.net: редакция %s, архитектура %s. Загружаем установщик...\n' "${EDITION^^}" "${ARCHITECTURE}"
+printf '312node.net: редакция %s, архитектура %s. Загружаем установщик...\n' "${EDITION^^}" "${ARCHITECTURE}"
 curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
   --connect-timeout 15 --max-time 120 \
   --output "${edition_installer}" \
