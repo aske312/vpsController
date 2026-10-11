@@ -100,7 +100,7 @@ install -m 0700 "${SOURCE}/credentials.py" "${LIB}/credentials.py"
 install -m 0644 "${SOURCE}/manifest.json" "${LIB}/manifest.json"
 cat >/etc/systemd/system/vps-control-relay-agent.service <<'EOF'
 [Unit]
-Description=VPS Control Relay Agent
+Description=312node.net Relay Agent
 After=network-online.target
 Wants=network-online.target
 [Service]

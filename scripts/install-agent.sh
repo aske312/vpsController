@@ -9,7 +9,7 @@ PUBLIC_IP=""
 cleanup() { [[ -z "${WORK_DIR}" ]] || rm -rf -- "${WORK_DIR}"; }
 trap cleanup EXIT
 usage() {
-  printf 'Установка Relay Agent без панели: bash install-agent.sh [--public-ip IPv4]\n'
+  printf 'Установка 312node.net Relay Agent без панели: bash install-agent.sh [--public-ip IPv4]\n'
 }
 while (($#)); do
   case "$1" in
@@ -56,7 +56,7 @@ if [[ ! -f "${SOURCE}/install.sh" || ! -f "${SOURCE}/agent.py" || ! -f "${SOURCE
     || { printf 'Архив не содержит Relay Agent.\n' >&2; exit 1; }
   SOURCE="${candidates[0]}"
 fi
-printf 'Устанавливаем Relay Agent для %s…\n' "${PUBLIC_IP}"
+printf 'Устанавливаем 312node.net Relay Agent для %s…\n' "${PUBLIC_IP}"
 RELAY_PUBLIC_IP="${PUBLIC_IP}" bash "${SOURCE}/install.sh"
 printf '\nДанные для добавления в изолированную сеть (сохраните токен):\n'
 python3 /usr/local/lib/vps-control-relay-agent/credentials.py
