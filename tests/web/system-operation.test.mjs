@@ -226,7 +226,7 @@ test("failures and read-only diagnostics do not trigger a page reload", () => {
   for (const action of ["protocol-install:mihomo", "protocol-remove:wireguard", "protocol-update:mihomo", "restart", "update", "test-update", "test-rollback", "safe-update", "kernel-update", "reboot"]) {
     assert.equal(systemActionNeedsReload({ action }), true, action);
   }
-  for (const action of ["network-check", "integrity-check", "poweroff", "logging-config", "logs-clear", "service-action:wg:restart", ""]) {
+  for (const action of ["relay-host-save", "relay-host-delete", "relay-route-create", "relay-route-delete", "relay-route-check", "relay-reconcile", "network-check", "integrity-check", "poweroff", "logging-config", "logs-clear", "service-action:wg:restart", ""]) {
     assert.equal(systemActionNeedsReload({ action }), false, action);
   }
 });

@@ -122,6 +122,7 @@ export function createSystemActionCompletionTracker() {
 }
 
 export function systemActionNeedsReload(action: SystemAction) {
+  if (action.action?.startsWith("relay-")) return false;
   if (action.action === "mihomo-profile-personal-delete") return false;
   return Boolean(action.action) && !["mihomo-profile-module-settings", "mihomo-profile-create", "mihomo-profile-update", "mihomo-profile-delete", "mihomo-profile-device-delete", "mihomo-profile-reconcile", "mihomo-module-recover", "mihomo-module-install", "mihomo-module-update", "mihomo-module-remove", "network-check", "integrity-check", "poweroff", "logging-config", "logs-clear", "service-action", "automation-config", "automation-recover", "dns-settings", "dns-recover", "network-settings", "network-delete", "ssh-key-add", "ssh-key-reset", "ssh-key-delete", "ssh-access-begin", "ssh-access-confirm", "ssh-access-rollback", "ssh-access-disable"].includes(action.action!.split(":")[0]);
 }
