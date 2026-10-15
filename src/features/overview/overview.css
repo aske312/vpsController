@@ -215,12 +215,13 @@
 
 .overviewTelemetry { padding:14px; }
 
-.overviewTelemetry > header { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:10px; }
+.overviewTelemetry > header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px 16px; }
+.overviewTelemetry > header > label { display:flex; align-items:center; gap:9px; color:#9bb0bc; font:500 11px/1.4 var(--font-sans); }
+.overviewTelemetry > header select { width:146px; min-height:34px; padding:6px 10px; font-size:11px; }
+.overviewTelemetryNote { margin:8px 0 12px; color:#8198a6; font:500 10px/1.45 var(--font-sans); overflow-wrap:anywhere; }
 
 .overviewTelemetry h2,
 .overviewComponents h2 { margin:2px 0 0; color:#dfeaf0; font:680 14px/1.2 var(--font-sans); }
-
-.overviewTelemetry > header > small { color:#5d7281; font:500 8px/1 var(--font-sans); }
 
 .overviewFactCard { position:relative; min-width:0; min-height:66px; display:grid; align-content:start; gap:4px; padding:9px 10px; overflow:hidden; border:1px solid rgba(105,135,160,.13); border-radius:10px; background:rgba(4,11,17,.26); }
 
@@ -265,14 +266,26 @@
 .overviewComponentVersion small,
 .overviewComponentAction small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#758b99; font:500 8px/1.3 var(--font-sans); }
 
-.overviewComponentState { justify-self:start; padding:5px 7px; border:1px solid currentColor; border-radius:999px; font:700 7px/1 var(--font-mono); letter-spacing:.06em; }
-
+details.overviewComponentState { min-width:0; justify-self:stretch; padding:0; border:0; border-radius:6px; background:transparent; color:#8fa4b1; font:500 11px/1.4 var(--font-sans); }
 .overviewComponentState.online { color:var(--green); }
-.overviewComponentState.stopped,
-.overviewComponentState.unavailable { color:var(--red); }
-.overviewComponentState.checking { color:var(--amber); }
-.overviewComponentState.available { color:var(--cyan); }
-.overviewComponentState:has(> span) { display:flex; flex-direction:column; gap:5px; border:0; border-radius:3px; line-height:1.3; color:var(--muted); }
+.overviewComponentState.running,.overviewComponentState.available { color:var(--cyan); }
+.overviewComponentState.warning,.overviewComponentState.progress { color:var(--amber); }
+.overviewComponentState.error { color:var(--red); }
+.overviewComponentState > summary { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; padding:5px 0; cursor:pointer; list-style:none; }
+.overviewComponentState > summary::-webkit-details-marker { display:none; }
+.overviewComponentState > summary:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; border-radius:4px; }
+.overviewComponentState > summary > span:first-child { min-width:0; }
+.overviewComponentState > summary b { display:flex; align-items:center; gap:6px; font-weight:650; }
+.overviewComponentState > summary i { flex:none; width:6px; height:6px; border-radius:50%; background:currentColor; }
+.overviewComponentState > summary small { display:block; margin-top:3px; color:#8fa4b1; font-size:10px; line-height:1.4; }
+.overviewComponentDisclosure { flex:none; color:#8fa4b1; transition:transform .15s; }
+.overviewComponentState[open] .overviewComponentDisclosure { transform:rotate(180deg); }
+.overviewComponentState dl { display:grid; gap:8px; margin:6px 0 0; padding:10px 0 3px; border-top:1px solid rgba(106,137,160,.15); }
+.overviewComponentState dl > div { display:grid; grid-template-columns:66px minmax(0,1fr); gap:8px; }
+.overviewComponentState dt { color:#839aa8; font-size:10px; }
+.overviewComponentState dd { min-width:0; margin:0; color:#c4d5df; }
+.overviewComponentState dd b { font-size:10px; font-weight:550; }
+.overviewComponentState dd small { display:block; margin-top:2px; color:#839aa8; font-size:10px; line-height:1.4; overflow-wrap:anywhere; }
 
 .overviewComponentAction { display:flex; justify-content:flex-end; }
 
@@ -325,7 +338,6 @@
 .overviewDirectList > div { grid-template-columns:31px minmax(0,1fr) auto; }
 .overviewDirectTraffic,.overviewDirectLatency { display:none; }
 .overviewTelemetry { padding:11px; }
-.overviewTelemetry > header > small { display:none; }
 .overviewComponents { padding:11px; }
 .overviewComponents > header { align-items:flex-start; }
 .overviewComponentCounters { display:none; }
@@ -461,8 +473,6 @@
 
 .overviewInlineWarning { font-size: 9.5px; line-height: 1.4; }
 .overviewInlineWarning button { margin-left:6px; padding:2px 5px; border:1px solid currentColor; border-radius:4px; background:transparent; color:inherit; font:inherit; cursor:pointer; }
-
-.overviewTelemetry > header > small { font-size: 9.5px; line-height: 1.3; }
 
 .overviewFactCard > span { font-size: 8.5px; line-height: 1.15; color: #708796; }
 

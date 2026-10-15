@@ -414,11 +414,11 @@ export function OverviewDashboard({
           <label>Период <select value={metricsPeriod} onChange={(event) => setMetricsPeriod(event.target.value as MetricsPeriod)} aria-label="Период истории метрик">
             <option value="live">5 минут</option><option value="day">24 часа</option><option value="week">7 дней</option><option value="quarter">90 дней</option>
           </select></label>
-          <small>{overview?.resources.stale || metricsHistory.stale ? "Stale — данные временно не обновляются" : missingMetrics.length ? `Данные недоступны: ${missingMetrics.join(", ")}` : metricsHistory.pending ? "Загрузка серверной истории…" : "История хранится на VPS · пропуски показаны разрывами"}
-            {metricsHistory.data?.settings.enabled === false && " · запись истории выключена в Службах"}
-            {metricsHistory.data?.settings.trimmed_at && " · старые данные сокращены по лимиту места"}
-          </small>
         </header>
+        <p className="overviewTelemetryNote">{overview?.resources.stale || metricsHistory.stale ? "Данные временно не обновляются" : missingMetrics.length ? `Данные недоступны: ${missingMetrics.join(", ")}` : metricsHistory.pending ? "Загрузка серверной истории…" : "История хранится на VPS · пропуски показаны разрывами"}
+          {metricsHistory.data?.settings.enabled === false && " · запись истории выключена в Службах"}
+          {metricsHistory.data?.settings.trimmed_at && " · старые данные сокращены по лимиту места"}
+        </p>
 
         <div className="overviewTaskGraphs">
           <TaskGraph
@@ -470,7 +470,7 @@ export function OverviewDashboard({
       <section className="overviewComponents">
         <header>
           <div><p className="eyebrow">NODE COMPONENTS</p><h2>Компоненты</h2><small>Версия берётся из фактического каталога установки; для Mihomo после запуска показывается версия core.</small></div>
-          <div className="overviewComponentCounters"><span><b>{installedServerModules.length}</b> installed</span><span><b>{installableModules.length}</b> available</span></div>
+          <div className="overviewComponentCounters"><span><b>{installedServerModules.length}</b> установлено</span><span><b>{installableModules.length}</b> доступно</span></div>
         </header>
 
         <section className="overviewComponentRegistry" aria-label="Управление модулями узла">
@@ -482,7 +482,11 @@ export function OverviewDashboard({
           </header>
           <div>
             {componentImages.map((image) => {
-              const state = componentPresentation(image);
+              const observation = directChannelStates.find((item) => item.image.id === image.id);
+              const healthState = observation?.status?.health?.base_state;
+              const matchingHealth = image.component_state?.health.state === "possible_issues" && healthState === "WARN"
+                || image.component_state?.health.state === "error" && healthState === "ERROR";
+              const state = componentPresentation(image, matchingHealth && !observation?.statusFailed ? observation?.status?.health?.reason : undefined);
               const installedVersion = image.id === "mihomo" && mihomoStatus?.core_version
                 ? formatModuleVersion(mihomoStatus.core_version)
                 : image.installed_version
@@ -505,12 +509,19 @@ export function OverviewDashboard({
                     <b>{displayedVersion}</b>
                     <small>{image.installed ? image.update_available || image.update_via_release ? `новая: ${availableVersion}` : "фактическая версия" : image.installable ? "версия для установки" : "образ не готов"}</small>
                   </div>
-                  <div className="overviewComponentState checking" aria-label="Component state">
-                    <span title={image.component_state?.installation.reason}>Installation: {state.installation}</span>
-                    <span title={image.component_state?.runtime.reason}>Runtime: {state.runtime}</span>
-                    <span title={image.component_state?.health.reason}>Health: {state.health}</span>
-                    {state.operation && <span>Operation: {state.operation}</span>}
-                  </div>
+                  <details className={`overviewComponentState ${state.summary.tone}`}>
+                    <summary aria-label={`Состояние ${image.name}: ${state.summary.label}. Подробнее`}>
+                      <span><b><i aria-hidden="true" />{state.summary.label}</b><small>{state.summary.description}</small></span>
+                      <span className="overviewComponentDisclosure" aria-hidden="true">⌄</span>
+                    </summary>
+                    <dl>
+                      {[
+                        ["Установка", state.installation, image.component_state?.installation.reason],
+                        ["Служба", state.runtime, image.component_state?.runtime.reason],
+                        ["Проверка", state.health, image.component_state?.health.reason],
+                      ].map(([label, value, reason]) => <div key={label}><dt>{label}</dt><dd><b>{value}</b><small>{reason || "Наблюдение от VPS не получено"}</small></dd></div>)}
+                    </dl>
+                  </details>
                   <div className="overviewComponentAction">
                     {image.management?.retained && <div><small>Настройки и подключения сохранены</small><button type="button" disabled={busy || Boolean(installingProtocol) || Boolean(image.component_state?.operation)} onClick={() => onPurgeProtocol(image)}>Очистить данные</button></div>}
                     {image.installed && image.management && image.management.state !== "managed" ? (
@@ -526,7 +537,7 @@ export function OverviewDashboard({
                         {installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}
                       </button>
                     ) : (
-                      <small>Актуальная версия</small>
+                      <div><small>Актуальная версия</small>{image.id !== "mihomo" && ["warning", "error"].includes(state.summary.tone) && <button type="button" onClick={() => onOpenProtocol(image)}>Диагностика</button>}</div>
                     )}
                   </div>
                 </div>

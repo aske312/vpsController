@@ -30,3 +30,39 @@ jobs:
       - run: python -m unittest discover -s tests/api -t . -p 'test_*.py'
       - run: npm ci --include=dev --include=optional --ignore-scripts
       - run: npm run check
+
+  package:
+    name: package (${{ matrix.architecture }}, ${{ matrix.runner }})
+    needs: verify
+    if: needs.verify.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-24.04
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Select test package version
+        shell: bash
+        run: |
+          base="$(node -p 'require("./package.json").version')"
+          latest="$(git tag --list "pro-v${base%.*}.*" --sort=-v:refname | head -n 1)"
+          [[ -n "$latest" ]] || { echo "Production PRO version tag is missing" >&2; exit 1; }
+          echo "RELEASE_VERSION=${latest#pro-}" >> "$GITHUB_ENV"
+      - name: Verify PRO packaging
+        env:
+          BUILD_COMMIT: ${{ github.sha }}
+          RELEASE_EDITION: pro
+          RELEASE_CHANNEL: test
+          RELEASE_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: bash scripts/build-release.sh "outputs/vps-control-pro-linux-${{ matrix.architecture }}.tar.gz"

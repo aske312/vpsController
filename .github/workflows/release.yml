@@ -31,7 +31,8 @@ jobs:
       - run: npm ci --include=dev --include=optional --ignore-scripts
       - run: npm run check
 
-  build:
+  package:
+    name: package (${{ matrix.architecture }}, ${{ matrix.runner }})
     needs: verify
     if: needs.verify.result == 'success'
     strategy:
@@ -86,8 +87,8 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: build
-    if: always() && needs.build.result == 'success'
+    needs: package
+    if: always() && needs.package.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write

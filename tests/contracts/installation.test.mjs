@@ -160,12 +160,21 @@ test("PRO publishes rolling pre-releases from test-pro and keeps production upda
   assert.match(releaseWorkflow, /github\.ref_name == 'test-pro' && 'test' \|\| 'production'/);
   assert.match(releaseWorkflow, /ubuntu-24\.04-arm/);
   assert.doesNotMatch(releaseWorkflow, /verify:\s*\n\s+if:/);
-  assert.match(releaseWorkflow, /build:\s*\n\s+needs: verify\s*\n\s+if: needs\.verify\.result == 'success'/);
+  assert.match(releaseWorkflow, /publish:\s*\n\s+needs: package\s*\n\s+if: always\(\) && needs\.package\.result == 'success'/);
   assert.doesNotMatch(releaseWorkflow, /main-latest/);
   assert.match(testWorkflow, /pull_request:[\s\S]*branches: \[test-pro, pro\]/);
   assert.match(testWorkflow, /python -m unittest discover/);
   assert.match(testWorkflow, /npm run check/);
-  assert.doesNotMatch(testWorkflow, /\n  package:|RELEASE_CHANNEL|upload-artifact|ubuntu-24\.04-arm|gh release|contents: write/);
+  // These context names are required by the existing protected pro branch.
+  for (const workflow of [testWorkflow, releaseWorkflow]) {
+    assert.match(workflow, /name: package \(\$\{\{ matrix\.architecture \}\}, \$\{\{ matrix\.runner \}\}\)/);
+    assert.match(workflow, /needs: verify\s*\n\s+if: needs\.verify\.result == 'success'/);
+    assert.match(workflow, /architecture: amd64\s*\n\s+runner: ubuntu-24\.04\s/);
+    assert.match(workflow, /architecture: arm64\s*\n\s+runner: ubuntu-24\.04-arm\s/);
+    assert.match(workflow, /run: bash scripts\/build-release\.sh/);
+  }
+  assert.match(testWorkflow, /RELEASE_CHANNEL: test/);
+  assert.doesNotMatch(testWorkflow, /upload-artifact|gh release|contents: write/);
 });
 
 test("full uninstall removes owned panel state without recreating action data", async () => {

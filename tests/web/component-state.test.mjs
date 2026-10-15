@@ -7,15 +7,43 @@ const image = { installed: true, installable: true, update_available: true, mana
 
 test("installation, runtime, health and ongoing action remain independent", () => {
   const state = componentPresentation({...image, component_state: {...image.component_state, operation: {kind: "updating"}}});
-  assert.equal(state.installation, "Installed");
-  assert.equal(state.runtime, "Stopped");
-  assert.equal(state.health, "Unchecked");
-  assert.equal(state.operation, "Updating");
+  assert.equal(state.installation, "Установлен");
+  assert.equal(state.runtime, "Остановлена");
+  assert.equal(state.health, "Не выполнялась");
+  assert.equal(state.operation, "Обновление");
+  assert.equal(state.summary.tone, "progress");
   assert.equal(state.canUpdate, false);
   const unknown = componentPresentation({...image, component_state: undefined});
-  assert.equal(unknown.installation, "Unknown");
-  assert.equal(unknown.runtime, "Unknown");
+  assert.equal(unknown.installation, "Нет данных");
+  assert.equal(unknown.runtime, "Нет данных");
+  assert.equal(unknown.summary.tone, "unknown");
   assert.equal(unknown.canInstall, false);
+});
+
+test("a running service is distinct from verified health and adverse observations take priority", () => {
+  const cases = [
+    ["installed", "running", "unchecked", "running"],
+    ["installed", "running", "unknown", "running"],
+    ["installed", "running", "healthy", "online"],
+    ["installed", "running", "possible_issues", "warning"],
+    ["installed", "running", "error", "error"],
+    ["installed", "stopped", "healthy", "warning"],
+    ["installed", "error", "healthy", "error"],
+    ["installed", "unknown", "healthy", "unknown"],
+    ["incomplete", "running", "healthy", "error"],
+    [null, "running", "healthy", "unknown"],
+    ["not_installed", "running", "healthy", "available"],
+  ];
+  for (const [installation, runtime, health, tone] of cases) {
+    const value = { ...image, component_state: { installation: { state: installation }, runtime: { state: runtime }, health: { state: health, reason: "Причина проверки" } } };
+    const presentation = componentPresentation(value);
+    assert.equal(presentation.summary.tone, tone, `${installation}/${runtime}/${health}`);
+    assert.ok(presentation.summary.label);
+    assert.ok(presentation.summary.description);
+    if (health === "possible_issues" && runtime === "running") assert.equal(presentation.summary.description, "Причина проверки");
+  }
+  const failing = { ...image, component_state: { ...image.component_state, runtime: { state: "running" }, health: { state: "possible_issues" } } };
+  assert.equal(componentPresentation(failing, "Нет успешных проверок внешней сети").summary.description, "Нет успешных проверок внешней сети");
 });
 
 test("legacy installs require adoption and retained configuration can only be reinstalled", () => {

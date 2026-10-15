@@ -136,15 +136,13 @@
 .overviewTopologyStats > span { background:rgba(4,12,19,.64) !important; backdrop-filter:blur(8px); }
 .overviewFlow { width:72%; max-width:1000px !important; grid-template-columns:130px minmax(420px,1fr) 95px !important; }
 .overviewRouteCore,.overviewAccessGlyph,.overviewExitGlyph { backdrop-filter:blur(10px); }
-.overviewNodeWorkspace { grid-template-columns:minmax(0,8fr) minmax(260px,2fr) !important; gap:10px !important; }
-.overviewNodeWorkspace { height:clamp(620px,74vh,720px); align-items:stretch; }
+.overviewNodeWorkspace { grid-template-columns:minmax(0,7fr) minmax(310px,3fr) !important; gap:10px !important; align-items:stretch; }
 .overviewTelemetry,.overviewComponents { min-height:0; border-color:var(--cc-line) !important; border-radius:15px !important; background:var(--cc-surface) !important; }
-.overviewTelemetry { overflow:hidden; }
 .overviewComponents { align-self:stretch; display:grid; grid-template-rows:auto minmax(0,1fr); overflow:hidden; }
 .overviewComponents > header { min-height:58px; padding:2px 3px 11px; border-bottom:1px solid rgba(106,137,160,.10); }
 .overviewComponentCounters { display:flex !important; align-items:center; gap:5px !important; }
 .overviewComponentCounters span { padding:6px 7px; border-radius:8px; background:var(--cc-inset); }
-.overviewComponentRegistry { min-height:0; margin-top:8px; overflow:hidden; border:0; background:transparent; }
+.overviewComponentRegistry { min-height:0; margin-top:8px; overflow:hidden; border:0; background:transparent; contain:size; }
 .overviewComponentRegistry > div { height:100%; display:grid; grid-auto-rows:max-content; align-content:start; gap:6px !important; overflow-y:auto; padding:0 3px 3px 0; scrollbar-width:thin; scrollbar-color:rgba(100,184,255,.28) transparent; }
 .overviewComponentRow { grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important; grid-template-areas:'identity version' 'state state' 'action action'; min-height:78px !important; padding:9px !important; border:1px solid rgba(106,137,160,.11) !important; border-radius:10px; background:var(--cc-inset); }
 .overviewComponentRow:last-child { border-bottom:1px solid rgba(106,137,160,.11) !important; }
@@ -153,8 +151,7 @@
 .overviewComponentVersion { grid-area:version !important; align-self:end; text-align:left; }
 .overviewComponentVersion b { color:#a9bfcb; font:700 9px var(--font-mono); }
 .overviewComponentVersion small { display:block; color:#5f7888; font-size:7.5px; }
-.overviewComponentState { grid-area:state !important; align-self:start; justify-self:end; padding:4px 6px; border:0; background:rgba(100,184,255,.07); }
-.overviewComponentState.unavailable { background:rgba(110,73,73,.10); color:#8b7478; }
+.overviewComponentState { grid-area:state !important; align-self:start; }
 .overviewComponentAction { grid-area:action !important; align-self:end; justify-self:stretch; min-width:0; flex-wrap:wrap; gap:6px; }
 .overviewComponentAction > div { display:flex; flex-direction:column; align-items:flex-end; gap:6px; min-width:0; max-width:100%; }
 .overviewComponentAction small { white-space:normal; overflow-wrap:anywhere; }
@@ -245,6 +242,9 @@
 .mihomoStatusBoard,.mihomoChannelBoard,.mihomoQuickState,.mihomoProfiles,.mihomoPolicyPanel,.mihomoModulesPanel { border-color:var(--cc-line) !important; border-radius:15px !important; background:var(--cc-surface) !important; }
 
 @media (max-width:1180px) {
+  .overviewNodeWorkspace { grid-template-columns:minmax(0,1fr) !important; }
+  .overviewComponentRegistry { contain:none; }
+  .overviewComponentRegistry > div { height:auto; grid-template-columns:repeat(2,minmax(0,1fr)); overflow:visible; padding:0; }
   .gateMasthead { grid-template-columns:minmax(220px,1fr) auto !important; }
   .gateMastFacts { display:none !important; }
   .overviewTopologyHead,.overviewFlow { width:82%; max-width:82% !important; }
@@ -254,8 +254,6 @@
 }
 @media (max-width:900px) {
   .overviewNodeWorkspace,.dnsWorkbench,.dnsLowerGrid { grid-template-columns:1fr !important; }
-  .overviewNodeWorkspace { height:auto; }
-  .overviewComponents { height:min(620px,72vh); }
   .overviewTopologyHead,.overviewFlow { width:100%; max-width:100% !important; }
   .overviewFlow { grid-template-columns:105px minmax(0,1fr) !important; }
   .overviewExit { display:none !important; }
@@ -264,6 +262,7 @@
   .applicationControlContent,.mihomoHeroContent { width:82% !important; }
 }
 @media (max-width:680px) {
+  .overviewComponentRegistry > div { grid-template-columns:minmax(0,1fr); }
   .gateMasthead { grid-template-columns:minmax(0,1fr) auto !important; }
   .gateMastNode { grid-template-columns:auto minmax(0,1fr) !important; }
   .gateMastState,.gateMastNode p,.gateMastActions .updatedAt { display:none !important; }
