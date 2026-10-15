@@ -48,6 +48,8 @@ import cdn_security
 import application_operation
 import network_routes
 import network_probe
+import relay_connections
+from relay_manager import RelayManager
 from service_state import observe_service
 import port_allocation
 from component_registry import ComponentRegistry, RegistryError
@@ -2929,6 +2931,12 @@ def validate_connection(component: str, values: dict[str, Any], *, allow_unverif
     if not module_is_ready(component):
         raise HTTPException(status_code=409, detail=f"Компонент {manifest(component)['name']} установлен, но его служба не работает. Сначала восстановите службу.")
     result = {**connection_defaults(component), **values}
+    try:
+        selected_relay = relay_connections.host_id(result)
+        if selected_relay:
+            relay_connection_control().host(relay_connection_control().read(), selected_relay)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail='Подключите выбранный Relay на странице Сеть → ROUTES') from exc
     if result.get("fingerprint", "chrome") not in {"chrome", "firefox", "safari", "ios", "android", "edge", "random"}:
         raise HTTPException(status_code=422, detail="Неизвестный TLS fingerprint")
     if "sni" in result:
@@ -3926,6 +3934,7 @@ def provision_connections(profile_id: str, definitions: list[dict[str, Any]], pr
             completed.append({**definition, "credential": credential})
         if batch_reality:
             apply_batched_reality_runtime()
+        prepare_profile_relays({'connections': completed}, os.getenv('VPS_CONTROL_OPERATION_ID'))
     except Exception:
         for connection in reversed(completed):
             try:
@@ -4311,6 +4320,7 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
 @transactional_profile_mutation
 def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     data = profiles()
+    previous_connections = deepcopy(next((item.get('connections', []) for item in data if item.get('id') == profile_id), []))
     item = next((entry for entry in data if entry.get("id") == profile_id), None)
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -4409,6 +4419,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
         # when an older API client edits the legacy channel selection.
         item["connections"] = next_connections
         sync_legacy_profile_fields(item)
+    prepare_profile_relays(item, payload.operation_id, previous_connections)
     reconcile_profile_encryption(item)
     item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     item["last_operation_id"] = payload.operation_id or ""
@@ -4491,7 +4502,7 @@ def q(value: Any) -> str:
 
 def client_connection_keys(component: str) -> set[str]:
     advanced = {field["key"] for field in MIHOMO_CLIENT_FIELDS.get(component, ())}
-    return advanced | {
+    return advanced | {"relay_host_id"} | {
         "transport-wg": {"mtu", "keepalive"}, "transport-awg": {"mtu", "keepalive", "jc", "jmin", "jmax"},
         "transport-reality": {"fingerprint"},
         "transport-hysteria2": {"up_mbps", "down_mbps", "sni", "skip_cert_verify"},
@@ -4553,6 +4564,31 @@ def mihomo_client_options(component: str, credential: dict[str, Any]) -> list[st
 
 def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) -> list[str]:
     return _render_proxy(module_id, credential, proxy_name) + mihomo_client_options(module_id, credential)
+
+
+def relay_connection_control():
+    return RelayManager(DATA_ROOT.parent, public_endpoint())
+
+
+def prepare_profile_relays(item, identity=None, previous=()):
+    if not any(relay_connections.host_id(connection.get('settings', {})) for connection in item.get('connections', [])):
+        return
+    try:
+        relay_connections.prepare_mihomo(relay_connection_control(), effective_client_connections(item['connections']),
+                                        (identity or uuid.uuid4().hex).replace('-', ''), reality_connection_settings, previous)
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail='Не удалось подтвердить пересылку Relay. Проверьте узел и результат операции в ROUTES перед повтором') from exc
+
+
+def relay_client_nodes(connection, nodes, endpoints=()):
+    if relay_connections.host_id(connection.get('settings', {})):
+        relay_connections.redirect_nodes(relay_connection_control(), connection, nodes, endpoints)
+
+
+def relay_client_lines(connection, lines):
+    if not relay_connections.host_id(connection.get('settings', {})):
+        return lines
+    return relay_connections.redirect_mihomo_lines(relay_connection_control(), connection['component'], connection['settings'], lines)
 
 
 def _render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) -> list[str]:
@@ -4833,12 +4869,12 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     lines.append("proxies:")
     for connection, name, cdn_name, tls_name in rendered:
         if name:
-            lines.extend(render_proxy(str(connection["component"]), connection.get("credential", {}), name))
+            lines.extend(relay_client_lines(connection, render_proxy(str(connection["component"]), connection.get("credential", {}), name)))
         if cdn_name:
             credential = connection.get("credential", {})
-            lines.extend(render_vless_cdn({**credential, "cdn_ech": ech_enabled}, cdn_name))
+            lines.extend(relay_client_lines(connection, render_vless_cdn({**credential, "cdn_ech": ech_enabled}, cdn_name)))
         if tls_name:
-            lines.extend(render_vless_tls(connection.get("credential", {}), tls_name))
+            lines.extend(relay_client_lines(connection, render_vless_tls(connection.get("credential", {}), tls_name)))
     group_type = str(routing.get("strategy", "fallback"))
     lines += [
         "proxy-groups:",
@@ -4978,11 +5014,11 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
         routing[key] = bool(device_values.get(key, False))
     try:
         if export_format in {"xray", "uri"}:
-            config = build_xray_configs(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings)
+            config = build_xray_configs(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings, relay_client_nodes)
             if export_format == "uri":
                 return vless_subscription(config), "txt"
         else:
-            config = build_singbox_config(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings, fragment, device_capabilities(export_format, client=client_name))
+            config = build_singbox_config(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings, fragment, device_capabilities(export_format, client=client_name), relay_client_nodes)
     except UnsupportedClientConfig as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return json.dumps(config, ensure_ascii=False, indent=2) + "\n", "json"

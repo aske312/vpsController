@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { relayConnection, relaySnapshot } from '../../src/features/network/relay-state.ts';
+import { relayConnection, relaySnapshot, relayClientResult } from '../../src/features/network/relay-state.ts';
 
 const connection = { api_version: 1, agent_url: 'https://85.209.155.229:9443', token: 's'.repeat(48), certificate_sha256: 'a'.repeat(64) };
 const host = { id: 'b'.repeat(32), name: 'Relay', agent_url: connection.agent_url, certificate_sha256: connection.certificate_sha256, api_version: 1, token_configured: true, state: 'connected', version: '1.0.0', agent_revision: 0, foreign_routes: 0, routes: [] };
@@ -16,4 +16,14 @@ test('relay state rejects secrets, malformed counters and false readiness', () =
   assert.equal(relaySnapshot({ ...status, hosts: [{ ...host, routes: [route] }] }).hosts[0].routes[0].target_verified, false);
   for (const changed of [{ target_verified: true }, { sent_bytes: -1 }, { listen_port: 443 }]) assert.throws(() => relaySnapshot({ ...status, hosts: [{ ...host, routes: [{ ...route, ...changed }] }] }));
   assert.throws(() => relaySnapshot({ ...status, hosts: [{ ...host, state: 'unknown', routes: [route] }] }));
+});
+test('automatic client delivery requires a complete native result and valid variants', () => {
+  const result = { config: 'native config', filename: 'phone.conf' };
+  assert.equal(relayClientResult(result), result);
+  const variant = { id: 'direct', name: 'VLESS', filename: 'phone.txt', config: 'vless://native' };
+  assert.equal(relayClientResult({ ...result, profiles: [variant] }).profiles[0], variant);
+  for (const value of [null, {}, { config: '' }, { ...result, filename: '../secret' }, { ...result, profiles: {} },
+    { ...result, profiles: [variant, variant] }, { ...result, profiles: [{ ...variant, config: {} }] }]) assert.throws(() => relayClientResult(value));
+  for (const client_address of [null, {}, '', 'a'.repeat(254)]) assert.throws(() => relaySnapshot({ ...status, hosts: [{ ...host, client_address }] }));
+  assert.equal(relaySnapshot({ ...status, hosts: [{ ...host, client_address: 'relay.example' }] }).hosts[0].client_address, 'relay.example');
 });

@@ -14,6 +14,7 @@ class BootstrapRequest(BaseModel):
 class RelayHostSettings(BaseModel):
     id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
     name: str = Field(min_length=1, max_length=64)
+    client_address: str | None = Field(default=None, max_length=253)
     agent_url: str = Field(max_length=80)
     token: str = Field(default="", max_length=128)
     certificate_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
@@ -170,6 +171,7 @@ class ClientConnectionSettings(BaseModel):
     keepalive: int | None = Field(default=None, ge=0, le=300)
     route_mode: Literal["all", "ipv4"] = "ipv4"
     channel_mode: Literal["direct", "tls_relay", "udp_relay"] = "direct"
+    relay_host_id: str = Field(default='', pattern=r'^(?:[0-9a-f]{32})?$')
     shadowsocks_mode: Literal["tcp_only", "tcp_and_udp"] = "tcp_and_udp"
     timeout: int | None = Field(default=None, ge=30, le=3600)
     no_delay: bool = True
@@ -209,6 +211,14 @@ class ClientCreate(BaseModel):
     protocol: Literal["wg", "awg", "shadowsocks", "vless-reality-xhttp", "hysteria2", "tuic", "trojan", "openvpn", "ikev2"]
     vless_routes: list[Literal["direct", "tls", "cdn"]] | None = None
     settings: ClientConnectionSettings = Field(default_factory=ClientConnectionSettings)
+
+
+class RelayClientCreate(ClientCreate):
+    expected_revision: str = Field(pattern=r'^[0-9a-f]{32}$')
+
+
+class RelayClientResume(BaseModel):
+    expected_revision: str = Field(pattern=r'^[0-9a-f]{32}$')
 
 
 class ProtocolSettingsUpdate(BaseModel):

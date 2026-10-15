@@ -28,7 +28,7 @@ def xray_rules(rules):
     return result
 
 
-def build_xray_configs(connections, routing, dns, rules, endpoint, direct_settings):
+def build_xray_configs(connections, routing, dns, rules, endpoint, direct_settings, redirect=None):
     nodes = []
     names = []
     for index, connection in enumerate(connections, 1):
@@ -36,6 +36,8 @@ def build_xray_configs(connections, routing, dns, rules, endpoint, direct_settin
         if connection["component"] == "transport-shadowsocks":
             names.append(connection_label(connection, index))
             nodes.append({"protocol": "shadowsocks", "settings": {"servers": [{"address": endpoint, "port": int(credential["port"]), "method": credential["method"], "password": credential["password"]}]}})
+            if redirect:
+                redirect(connection, [nodes[-1]])
             continue
         if connection["component"] != "transport-reality":
             raise UnsupportedClientConfig(f"Модуль {connection['component']} не поддерживается экспортом Happ")
@@ -70,6 +72,8 @@ def build_xray_configs(connections, routing, dns, rules, endpoint, direct_settin
             elif kind not in {"raw", "tcp"}:
                 raise UnsupportedClientConfig(f"Транспорт {kind} не поддерживается экспортом Happ")
             nodes.append({"protocol": "vless", "settings": {"vnext": [{"address": address, "port": port, "users": [{"id": credential["uuid"], "encryption": credential.get("encryption") or "none"}]}]}, "streamSettings": stream})
+            if redirect:
+                redirect(connection, [nodes[-1]])
     if not nodes:
         raise UnsupportedClientConfig("В профиле нет совместимых подключений для Happ")
     configs = []

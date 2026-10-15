@@ -8,11 +8,16 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
 from tests.api.support import api
+from tests.api.support import manager
 from relay_manager import RelayManager, route_snapshot, status_snapshot
 from relay_client import RelayClient, AgentAPIError
 from application_operation import OperationConflict, require_recovery_clear
 from network_probe import ProbePlan
 import relay_export
+import relay_connections
+import relay_client_creation
+import port_allocation
+from types import SimpleNamespace
 
 ORIGIN = '195.14.118.112'
 AGENT = '85.209.155.229'
@@ -66,6 +71,155 @@ class RelayManagementTests(unittest.TestCase):
     def payload(self, port=20001):
         return {'host_id': self.host_id, 'transport': 'tcp', 'listen_port': port, 'target_port': 443,
                 'expected_revision': self.control.read()['revision'], 'agent_revision': self.agent.revision}
+
+    def test_protocol_preparation_reuses_owned_rule_without_mutation(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        self.control.ensure(self.host_id, [[('tcp', 443)], [('tcp', 443)]], 'c'*32)
+        self.assertEqual(sum(method == 'PUT' for method, _ in self.agent.calls), 1)
+        self.assertEqual(self.control.endpoint(self.host_id, 'tcp', 443), (AGENT, 20001))
+
+    def test_tcp_udp_pair_uses_one_free_port_without_touching_foreign_rules(self):
+        foreign = {'id': 'foreign', 'transport': 'udp', 'listen_port': 20000, 'target_ip': ORIGIN, 'target_port': 31337, 'state': 'listening', 'target_verified': False}
+        self.agent.items.append(foreign)
+        self.control.ensure(self.host_id, [[('tcp', 31000), ('udp', 31000)]], 'c'*32)
+        self.assertIn(foreign, self.agent.items)
+        self.assertEqual(self.control.endpoint(self.host_id, 'tcp', 31000, paired=True), (AGENT, 20001))
+        self.assertEqual(self.control.endpoint(self.host_id, 'udp', 31000, paired=True), (AGENT, 20001))
+        self.control.ensure(self.host_id, [[('tcp', 31000), ('udp', 31000)]], 'd'*32)
+        self.assertEqual(sum(method == 'PUT' for method, _ in self.agent.calls), 2)
+
+    def test_protocol_preparation_recovers_uncertain_pair_by_read_without_replay(self):
+        self.agent.offline_after_write = True
+        with self.assertRaises(OSError):
+            self.control.ensure(self.host_id, [[('tcp', 31000), ('udp', 31000)]], 'c'*32)
+        with self.assertRaises(OperationConflict):
+            self.control.ensure(self.host_id, [[('tcp', 31000), ('udp', 31000)]], 'd'*32)
+        self.assertEqual(sum(method == 'PUT' for method, _ in self.agent.calls), 1)
+        self.agent.offline = self.agent.offline_after_write = False
+        self.control.reconcile()
+        self.control.ensure(self.host_id, [[('tcp', 31000), ('udp', 31000)]], 'e'*32)
+        self.assertEqual(sum(method == 'PUT' for method, _ in self.agent.calls), 2)
+
+    def test_missing_binding_never_falls_back_to_direct_and_restricted_ports_are_rejected(self):
+        with self.assertRaises(OperationConflict):
+            self.control.endpoint(self.host_id, 'tcp', 443)
+        for port in (22, 80, 8000, 9443, 0, True):
+            with self.subTest(port=port), self.assertRaises(ValueError):
+                self.control.ensure(self.host_id, [[('tcp', port)]], 'c'*32)
+        self.assertFalse(any(method == 'PUT' for method, _ in self.agent.calls))
+
+    def test_edit_can_preserve_domain_or_explicitly_return_to_agent_ip(self):
+        host = self.control.read()['hosts'][0]
+        payload = {**host, 'client_address': 'relay.example', 'expected_revision': self.control.read()['revision']}
+        with patch('relay_manager.socket.getaddrinfo', return_value=[(2, 1, 6, '', (AGENT, 0))]):
+            self.control.save_host(payload)
+            self.control.save_host({**host, 'client_address': None, 'expected_revision': self.control.read()['revision']})
+        self.assertEqual(self.control.read()['hosts'][0]['client_address'], 'relay.example')
+        self.control.save_host({**host, 'client_address': '', 'expected_revision': self.control.read()['revision']})
+        self.assertEqual(self.control.read()['hosts'][0]['client_address'], AGENT)
+
+    def test_client_domain_requires_exact_agent_dns_and_does_not_expose_token(self):
+        host = self.control.read()['hosts'][0]
+        with patch('relay_manager.socket.getaddrinfo', return_value=[(2, 1, 6, '', (AGENT, 0))]):
+            self.control.save_host({**host, 'client_address': 'Relay.Example', 'expected_revision': self.control.read()['revision']})
+        self.assertEqual(self.control.public()['hosts'][0]['client_address'], 'relay.example')
+        self.assertNotIn(TOKEN, json.dumps(self.control.public()))
+        with patch('relay_manager.socket.getaddrinfo', return_value=[(2, 1, 6, '', ('1.1.1.1', 0))]), self.assertRaises(ValueError):
+            self.control.ensure(self.host_id, [[('tcp', 443)]], 'c'*32)
+        self.assertFalse(any(method == 'PUT' for method, _ in self.agent.calls))
+
+    def test_orphan_origin_port_is_reserved_but_current_owner_can_keep_it(self):
+        self.control.ensure(self.host_id, [[('tcp', 31000)]], 'c'*32)
+        with patch.object(port_allocation, 'DATA_ROOT', self.root), patch.object(port_allocation, 'CONFIG_ROOT', self.root/'etc'), patch.object(port_allocation, 'ENV_FILE', self.root/'environment'):
+            self.assertIn(31000, port_allocation.reserved_ports({'tcp'}))
+            self.assertEqual(port_allocation.allocate('new-client', 31000, {'tcp'}, count=2, snapshot=lambda: set()), 31001)
+            port_allocation.save_claim('original-client', 31000, {'tcp'})
+            self.assertEqual(port_allocation.allocate('original-client', 31000, {'tcp'}, fixed=True, snapshot=lambda: set()), 31000)
+
+    def test_automatic_direct_exports_keep_keys_and_tls_identity_for_native_protocols(self):
+        cases = [
+            ('wg', '[Interface]\nPrivateKey = key-value\n[Peer]\nEndpoint = '+ORIGIN+':51820\n', 'key-value'),
+            ('awg', '[Interface]\nPrivateKey = key-value\nJc = 6\n[Peer]\nEndpoint = '+ORIGIN+':51822\n', 'Jc = 6'),
+            ('openvpn', 'client\nproto tcp-client\nremote '+ORIGIN+' 1194\n<key>key-value</key>\n', '<key>key-value</key>'),
+            ('vless-reality-xhttp', 'vless://key-value@origin.example:443?security=tls&sni=origin.example&type=ws&host=origin.example', 'sni=origin.example'),
+            ('shadowsocks', 'ss://key-value@'+ORIGIN+':31000#name', 'key-value'),
+            ('hysteria2', 'proxies:\n- name: test\n  type: hysteria2\n  server: '+ORIGIN+'\n  port: 8443\n  password: key-value\n  sni: origin.example\n', 'origin.example'),
+            ('tuic', json.dumps({'outbounds': [{'type': 'tuic', 'server': ORIGIN, 'server_port': 8444, 'password': 'key-value', 'tls': {'enabled': True, 'server_name': 'origin.example'}}]}), 'origin.example'),
+            ('trojan', json.dumps({'outbounds': [{'type': 'trojan', 'server': ORIGIN, 'server_port': 8445, 'password': 'key-value', 'tls': {'enabled': True, 'server_name': 'origin.example'}}]}), 'origin.example'),
+        ]
+        settings = {'relay_host_id': self.host_id, 'shadowsocks_mode': 'tcp_and_udp'}
+        for protocol, config, retained in cases:
+            with self.subTest(protocol=protocol):
+                source = {'id': 'client', 'config': config, 'filename': 'client.conf'}
+                self.control.ensure(self.host_id, relay_connections.direct_groups(protocol, settings, source), 'c'*32)
+                result = relay_connections.direct_result(self.control, protocol, settings, source)
+                self.assertIn(AGENT, result['config'])
+                self.assertIn(retained, result['config'])
+                self.assertEqual(source['config'], config)
+        with self.assertRaises(ValueError):
+            relay_connections.direct_groups('ikev2', settings, {'config': ''})
+
+    def test_mihomo_native_formats_redirect_only_selected_socket_preserving_host_and_sni(self):
+        connection = {'id': 'cdn', 'name': 'CDN', 'component': 'transport-reality', 'settings': {'relay_host_id': self.host_id, 'route_mode': 'cdn'}, 'credential': {'uuid': 'key-value', 'cdn_enabled': True, 'cdn_domain': 'origin.example', 'cdn_path': '/private', 'cdn_transport': 'websocket'}}
+        relay_connections.prepare_mihomo(self.control, [connection], 'c'*32)
+        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
+        configs = manager.build_xray_configs([connection], {}, {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}, [], ORIGIN, lambda: {}, redirect)
+        node = configs[0]['outbounds'][0]
+        self.assertEqual(node['settings']['vnext'][0]['address'], AGENT)
+        self.assertEqual(node['streamSettings']['tlsSettings']['serverName'], 'origin.example')
+        self.assertEqual(node['streamSettings']['wsSettings']['headers']['Host'], 'origin.example')
+        lines = manager.render_vless_cdn(connection['credential'], 'CDN')
+        changed = relay_connections.redirect_mihomo_lines(self.control, connection['component'], connection['settings'], lines)
+        self.assertIn('    server: "'+AGENT+'"', changed)
+        self.assertIn('    servername: "origin.example"', changed)
+        self.assertIn('        Host: "origin.example"', changed)
+        singbox = manager.build_singbox_config([connection], {}, {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}, [], ORIGIN, lambda: {}, False, redirect=redirect)
+        node = next(item for item in singbox['outbounds'] if item['type'] == 'vless')
+        self.assertEqual((node['server'], node['server_port']), (AGENT, 20000))
+        self.assertEqual(node['tls']['server_name'], 'origin.example')
+        self.assertEqual(node['transport']['headers']['Host'], 'origin.example')
+        before = sum(method == 'PUT' for method, _ in self.agent.calls)
+        self.agent.offline = True
+        relay_connections.prepare_mihomo(self.control, [{**connection, 'name': 'Renamed'}], 'd'*32, previous=[connection])
+        self.assertEqual(sum(method == 'PUT' for method, _ in self.agent.calls), before)
+
+    def test_direct_worker_retains_native_result_and_resume_never_creates_another_client(self):
+        identity = 'c'*32
+        settings = {'relay_host_id': self.host_id}
+        clients = []
+        def native(payload, *, client_identity):
+            clients.append({'id': client_identity, 'protocol': 'wg', 'settings': settings})
+            return {'id': client_identity, 'filename': 'phone.conf', 'config': '[Interface]\nPrivateKey = key-value\n[Peer]\nEndpoint = '+ORIGIN+':51820\n'}
+        native = Mock(side_effect=native)
+        adapter = SimpleNamespace(DATA_DIR=self.root, relay_control=lambda: self.control, ClientCreate=api.ClientCreate, create_client_native=native, ComponentRegistry=lambda *_: Mock(), read_clients=lambda: clients)
+        self.agent.offline_after_write = True
+        payload = {'client': {'name': 'Phone', 'protocol': 'wg', 'settings': settings}, 'expected_revision': self.control.read()['revision']}
+        with self.assertRaises(OSError):
+            relay_client_creation.perform(adapter, payload, identity)
+        pending = relay_client_creation.read_result(adapter, identity)
+        self.assertTrue(pending['can_resume'])
+        self.assertNotIn('key-value', json.dumps(pending))
+        self.agent.offline = self.agent.offline_after_write = False
+        self.control.reconcile()
+        relay_client_creation.perform(adapter, {'expected_revision': self.control.read()['revision']}, 'd'*32, resume_id=identity)
+        result = relay_client_creation.read_result(adapter, identity)
+        self.assertEqual(result['state'], 'ready')
+        self.assertIn(AGENT+':20000', result['result']['config'])
+        self.assertIn('key-value', result['result']['config'])
+        self.assertEqual(native.call_count, 1)
+        self.assertEqual(sum(method == 'PUT' for method, _ in self.agent.calls), 1)
+        clients.clear()
+        path = relay_client_creation.result_path(adapter, identity)
+        stored = json.loads(path.read_text()); stored['stage'] = 'native-created'; path.write_text(json.dumps(stored))
+        with self.assertRaises(OperationConflict):
+            relay_client_creation.perform(adapter, {'expected_revision': self.control.read()['revision']}, 'e'*32, resume_id=identity)
+
+    def test_direct_worker_never_repeats_an_interrupted_native_creation(self):
+        adapter = SimpleNamespace(DATA_DIR=self.root, relay_control=lambda: self.control)
+        path = relay_client_creation.result_path(adapter, 'c'*32)
+        path.parent.mkdir(parents=True); path.write_text(json.dumps({'stage': 'creating-native'}))
+        with self.assertRaises(OperationConflict):
+            relay_client_creation.perform(adapter, {'expected_revision': self.control.read()['revision']}, 'd'*32, resume_id='c'*32)
 
     def test_create_readback_delete_and_foreign_inventory(self):
         self.agent.items.append({'id': 'foreign', 'transport': 'udp', 'listen_port': 20001, 'target_ip': ORIGIN,
@@ -232,6 +386,7 @@ class RelayAPITests(unittest.TestCase):
 
     def test_every_endpoint_requires_auth_before_access_or_validation(self):
         endpoints = [('GET', '/network/relays'), ('PUT', '/network/relays'), ('PUT', '/network/relays/reconnect'), ('DELETE', '/network/relays/id'),
+                     ('POST', '/clients/relay'), ('GET', '/clients/relay/id'), ('POST', '/clients/relay/id/resume'),
                      ('POST', '/network/relays/id/routes'), ('DELETE', '/network/relays/id/routes/route?agent_revision=0'),
                      ('POST', '/network/relays/reconcile'), ('POST', '/network/relays/id/routes/route/export'),
                      ('POST', '/network/relays/id/routes/route/check?consumer_id=direct:client')]

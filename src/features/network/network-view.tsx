@@ -709,7 +709,7 @@ function DiagnosticsV2({
             </label>
             {endpointDraft && (
                 <NetworkEndpoints
-                  onAddRelay={() => relay.openRoute()}
+                  onAddRelay={() => relay.openHost()}
                   request={request}
                   draft={endpointDraft}
                   knownCdnDomains={[...new Set(status.domains.filter((domain) => domain.role.toLowerCase().includes("cdn")).map((domain) => domain.value))]}

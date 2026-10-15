@@ -131,6 +131,16 @@ def reservations() -> dict[str, set[tuple[str, int]]]:
     claims = read_json(DATA_ROOT / "port-reservations.json")
     result = {owner: {(protocol, int(value["port"])) for protocol in value["protocols"]}
               for owner, value in claims.items()}
+    # An orphan after local rollback must never forward to a later, unrelated
+    # listener allocated on the same origin port. Only explicit route removal
+    # releases this claim; relay data itself stays private.
+    relay = read_json(DATA_ROOT / 'relay/registry.json')
+    if relay and (relay.get('schema') != 1 or not isinstance(relay.get('routes'), list)):
+        raise PortConflict('Реестр Relay недоступен; занятость портов не подтверждена')
+    for route in relay.get('routes', []):
+        if not isinstance(route, dict) or route.get('transport') not in ('tcp', 'udp') or type(route.get('target_port')) is not int or not 1 <= route['target_port'] <= 65535:
+            raise PortConflict('Некорректная ссылка Relay на порт origin')
+        result.setdefault('relay-origin:'+str(route.get('id')), set()).add((route['transport'], route['target_port']))
     for module in LISTENERS:
         for key, protocol, port, configured in module_ports(module):
             owner = f"panel:{module}:{key}"
@@ -196,8 +206,11 @@ def reservations() -> dict[str, set[tuple[str, int]]]:
 
 
 def reserved_ports(protocols: set[str], exclude: str | None = None) -> set[int]:
-    return {port for owner, entries in reservations().items() if owner != exclude
-            for protocol, port in entries if protocol in protocols}
+    entries = reservations()
+    owned = entries.get(exclude, set())
+    return {port for owner, values in entries.items() if owner != exclude
+            for protocol, port in values if protocol in protocols
+            and not (owner.startswith('relay-origin:') and (protocol, port) in owned)}
 
 
 @contextmanager

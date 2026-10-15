@@ -13,6 +13,7 @@ import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, ProfileMutationFailed, ProfileMutationSuperseded, submitProfileMutation, type ProfileMutation } from "./profile-operation";
 import type { NetworkStatus } from "../../shared/types/control-plane";
 import { confirmedRouteAddresses } from "../../shared/lib/network-readiness";
+import { RelayEndpointSelect } from "../network/relay-endpoint-select";
 
 import { useNotifier, useFailureNotifications, useNotifications } from "../../shared/notifications/notification-center";
 import { notificationFailure as refreshFailure, type NotificationFailure } from "../../shared/notifications/store";
@@ -1747,7 +1748,7 @@ export function MihomoPage({
                 })}
               </div>
               <div className="mihomoConnectionWorkspace">
-                {deviceConnections.length > 0 && <nav className="mihomoConnectionNav" aria-label="Подключения выбранного устройства">{deviceConnections.map((connection) => <button key={connection.id} type="button" className={selectedConnection?.id === connection.id ? "is-active" : ""} aria-pressed={selectedConnection?.id === connection.id} onClick={() => setSelectedConnectionId(connection.id)}><span className={`protocol-${connection.component}`}><ProtocolIcon protocol={connection.component} /></span><span><b>{connection.name}</b>{connection.route_state?.state === "stale" && <small title={connection.route_state.reason}>Stale · {connection.route_state.addresses.join(", ")}</small>}<small>{modules.find((module) => module.id === connection.component)?.name} · {connection.settings.route_mode === "cdn" ? "CDN" : connection.settings.route_mode === "tls" ? "TLS" : "Прямое"}</small></span></button>)}</nav>}
+                {deviceConnections.length > 0 && <nav className="mihomoConnectionNav" aria-label="Подключения выбранного устройства">{deviceConnections.map((connection) => <button key={connection.id} type="button" className={selectedConnection?.id === connection.id ? "is-active" : ""} aria-pressed={selectedConnection?.id === connection.id} onClick={() => setSelectedConnectionId(connection.id)}><span className={`protocol-${connection.component}`}><ProtocolIcon protocol={connection.component} /></span><span><b>{connection.name}</b>{connection.route_state?.state === "stale" && <small title={connection.route_state.reason}>Stale · {connection.route_state.addresses.join(", ")}</small>}<small>{modules.find((module) => module.id === connection.component)?.name} · {connection.settings.relay_host_id ? "Relay" : connection.settings.route_mode === "cdn" ? "CDN" : connection.settings.route_mode === "tls" ? "TLS" : "Прямое"}</small></span></button>)}</nav>}
                 <div className="mihomoConnectionList">
                 {(selectedConnection ? [selectedConnection] : []).map((connection, index) => {
                   const protocolModule = modules.find((item) => item.id === connection.component);
@@ -1761,6 +1762,7 @@ export function MihomoPage({
                       <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}><span aria-hidden="true">×</span></button>
                     </header>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
+                    <RelayEndpointSelect request={request} value={String(connection.settings.relay_host_id || "")} onChange={value => updateConnectionSetting(connection.id, "relay_host_id", value)} disabled={Boolean(busy) || Boolean(pendingProfileSave)} transport={["transport-wg", "transport-awg", "transport-hysteria2", "transport-tuic"].includes(connection.component) ? "UDP" : connection.component === "transport-shadowsocks" ? "TCP + UDP" : "TCP"} />
                     {!supported && <p>Подключение несовместимо с форматом клиента. Удалите его или выберите поддерживаемый формат.</p>}
                     <div className="mihomoConnectionFields">
                       {schema.filter((field) => {

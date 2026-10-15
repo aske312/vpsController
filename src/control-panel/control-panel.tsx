@@ -43,6 +43,8 @@ import { applicationMetadataSnapshot, applicationMetadataUnavailable } from "./a
 import { applicationVersionState } from "../features/application/version-state";
 import { appendResources, networkSample as sampleNetwork, usedBytes, usedPercent } from "../shared/lib/resource-metrics";
 import type { AdoptionPlan, ComponentManagement, MetricsSettings } from "../shared/types/control-plane";
+import { RelayEndpointSelect } from "../features/network/relay-endpoint-select";
+import { useRelayClient, type RelayClientResult } from "../features/network/use-relay-client";
 
 const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0";
 const buildCommit = process.env.NEXT_PUBLIC_BUILD_COMMIT || "unknown";
@@ -53,6 +55,7 @@ type NewClientSettings = {
   keepalive: number;
   route_mode: "all" | "ipv4";
   channel_mode: ClientChannelMode;
+  relay_host_id?: string;
   shadowsocks_mode: "tcp_only" | "tcp_and_udp";
   timeout: number;
   no_delay: boolean;
@@ -330,6 +333,7 @@ export function ControlPanel() {
   const { pending: admissionPending, submit: submitSystemOperation, retain: retainAdmission, recheck: recheckAdmission, cancel: cancelSystemOperation } = useSystemAdmission(request, token, acceptSystemOperation);
   const busy = localBusy || admissionPending || systemActionNeedsPolling(application?.action);
   const admitNetworkOperation = useCallback((path: string, options: RequestInit) => submitSystemOperation(request, path, options), [request, submitSystemOperation]);
+  const relayClient = useRelayClient({ request, admit: admitNetworkOperation, onOperation: acceptSystemOperation, onResult: acceptRelayClientResult });
 
   const operationHistoryPolicy = useOperationHistorySettings(request, Boolean(token));
 
@@ -1602,6 +1606,11 @@ export function ControlPanel() {
         ...(selectedConnectionType.routeId === "cdn" ? { cdn_domain: selectedCdnDomain || selectedVlessRoute?.available_domains?.[0] || "" } : {}),
       };
       const payload = { ...newClient, protocol: selectedConnectionType.protocol, settings, ...(selectedConnectionType.routeId ? { vless_routes: [selectedConnectionType.routeId] } : {}) };
+      if (settings.relay_host_id) {
+        if (relayClient.pending || relayClient.sending) return;
+        await relayClient.start(payload);
+        return;
+      }
       const result = await request("/clients", { method: "POST", body: JSON.stringify(payload) }) as { config: string; filename?: string; profiles?: GeneratedProfile[] };
       const profiles = result.profiles?.filter((profile) => profile.config && profile.filename) || [];
       const preferred = profiles.find((profile) => profile.id === "cdn") || profiles[0];
@@ -1623,6 +1632,16 @@ export function ControlPanel() {
     const anchor = document.createElement("a");
     anchor.href = url; anchor.download = filename; anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function acceptRelayClientResult(result: RelayClientResult) {
+    const profiles = result.profiles?.filter(profile => profile.config && profile.filename) || [];
+    const preferred = profiles.find(profile => profile.id === "cdn") || profiles[0];
+    setGeneratedProfiles(profiles); setGenerated(preferred?.config || result.config);
+    setGeneratedName(preferred?.filename || result.filename || "relay-client.conf");
+    setGeneratedQr(""); setGeneratedQrError(""); setClientDialog(true);
+    downloadConfig(preferred?.filename || result.filename || "relay-client.conf", preferred?.config || result.config);
+    setNewClient(current => ({ ...current, name: "" })); void loadClients();
   }
 
   function downloadLogs(filename: string, lines: string[]) {
@@ -2050,11 +2069,15 @@ export function ControlPanel() {
               <div className="connectionForm">
                 <label>Название устройства<input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов</small></label>
               </div>
-              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} aria-pressed={selectedConnectionType?.id === option.id} disabled={Boolean(option.unavailable)} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, channel_mode: option.channelMode || "direct", cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name} <ProtocolHealthBadge health={protocolStatuses[option.protocol]?.health} /></strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
+              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} aria-pressed={selectedConnectionType?.id === option.id} disabled={Boolean(option.unavailable)} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, channel_mode: option.channelMode || "direct", relay_host_id: option.protocol === "ikev2" || option.channelMode && option.channelMode !== "direct" ? "" : current.relay_host_id, cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name} <ProtocolHealthBadge health={protocolStatuses[option.protocol]?.health} /></strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
               {selectedConnectionType?.unavailable && <p role="status">{selectedConnectionType.unavailable} <button type="button" onClick={() => { void loadNetworkStatus(); if (selectedClientProtocol === "vless-reality-xhttp") void loadProtocolStatus(selectedClientProtocol); }}>Проверить маршруты</button></p>}
-              {selectedConnectionType && <ClientConnectionSettings selectedConnectionType={selectedConnectionType} selectedVlessRoute={selectedVlessRoute} newClientSettings={newClientSettings} setNewClientSettings={setNewClientSettings} />}
+              {selectedConnectionType && <>
+                <div className="connectionForm"><RelayEndpointSelect request={request} value={newClientSettings.relay_host_id || ""} onChange={relay_host_id => setNewClientSettings(current => ({ ...current, relay_host_id }))} disabled={busy || relayClient.pending || relayClient.sending} unavailable={selectedClientProtocol === "ikev2" ? "IKEv2 требует стандартные порты 500/4500 и несовместим с Relay Agent v1." : newClientSettings.channel_mode !== "direct" ? "Для автоматического Relay выберите основной тип протокола." : undefined} transport={["wg", "awg", "hysteria2", "tuic"].includes(selectedClientProtocol) ? "UDP" : selectedClientProtocol === "shadowsocks" && newClientSettings.shadowsocks_mode === "tcp_and_udp" ? "TCP + UDP" : selectedClientProtocol === "openvpn" ? newClientSettings.vpn_transport.toUpperCase() : "TCP"} /></div>
+                <ClientConnectionSettings selectedConnectionType={selectedConnectionType} selectedVlessRoute={selectedVlessRoute} newClientSettings={newClientSettings} setNewClientSettings={setNewClientSettings} />
+              </>}
+              {relayClient.pending && <div role="status" className="networkNotice"><strong>{relayClient.failed ? "Результат настройки Relay требует проверки" : "Создаём подключение и настраиваем Relay…"}</strong><p>Создание клиента не будет отправлено повторно. При прерванной пересылке сначала проверьте результат операции в ROUTES.</p><button type="button" onClick={() => void relayClient.check()}>Проверить результат подключения</button>{relayClient.canResume && <button type="button" disabled={busy || relayClient.sending} onClick={() => void relayClient.resume()}>Продолжить настройку Relay</button>}{relayClient.terminalFailure && <button type="button" onClick={relayClient.dismiss}>Закрыть результат</button>}</div>}
             </div>
-            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy || !selectedConnectionType || Boolean(selectedConnectionType.unavailable)}>{localBusy ? "Создаём…" : "Создать подключение"}</button></div>
+            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy || relayClient.pending || relayClient.sending || !selectedConnectionType || Boolean(selectedConnectionType.unavailable)}>{localBusy || relayClient.pending || relayClient.sending ? "Создаём…" : "Создать подключение"}</button></div>
           </> : <>
             <div className="connectionGenerated">
               <div className="connectionGeneratedSummary">

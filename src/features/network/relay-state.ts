@@ -5,7 +5,7 @@ export type RelayRoute = {
   check?: { state: "ready" | "failed" | "unknown"; consumer_id: string; checked_at: string; vantage_point: "server" };
 };
 export type RelayHost = {
-  id: string; name: string; agent_url: string; certificate_sha256: string; api_version: 1;
+  id: string; name: string; agent_url: string; client_address?: string; certificate_sha256: string; api_version: 1;
   token_configured: boolean; state: "connected" | "unknown"; version?: string; agent_revision?: number;
   foreign_routes: number; routes: RelayRoute[]; error?: string;
 };
@@ -14,8 +14,17 @@ export type RelayStatus = {
   targets: { transport: "tcp" | "udp"; port: number }[];
   consumers?: { id: string; label: string }[];
 };
+export type RelayClientResult = { config: string; filename?: string; profiles?: { id: string; name: string; filename: string; config: string }[] };
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 const integer = (value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
+export function relayClientResult(value: unknown): RelayClientResult {
+  const config = (item: unknown) => typeof item === "string" && item.length > 0 && item.length <= 262144;
+  const filename = (item: unknown) => typeof item === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(item) && item !== "." && item !== "..";
+  if (!object(value) || !config(value.config) || value.filename !== undefined && !filename(value.filename)
+    || value.profiles !== undefined && (!Array.isArray(value.profiles) || value.profiles.length > 3 || value.profiles.some(item => !object(item) || typeof item.id !== "string" || !item.id || typeof item.name !== "string" || !filename(item.filename) || !config(item.config))
+      || new Set(value.profiles.map(item => item.id)).size !== value.profiles.length)) throw new Error("Некорректный результат подключения через Relay");
+  return value as RelayClientResult;
+}
 export function relaySnapshot(value: unknown): RelayStatus {
   const invalid = () => { throw new Error("Не удалось подтвердить сведения о relay"); };
   if (!object(value) || typeof value.revision !== "string" || !/^[0-9a-f]{32}$/.test(value.revision) || !Array.isArray(value.hosts)
@@ -25,6 +34,7 @@ export function relaySnapshot(value: unknown): RelayStatus {
   for (const host of value.hosts) {
     if (!object(host) || typeof host.id !== "string" || !/^[0-9a-f]{32}$/.test(host.id) || ids.has(host.id) || typeof host.name !== "string"
       || typeof host.agent_url !== "string" || !/^https:\/\/[\d.]+:9443\/?$/.test(host.agent_url) || typeof host.certificate_sha256 !== "string" || !/^[0-9a-fA-F]{64}$/.test(host.certificate_sha256)
+      || host.client_address !== undefined && (typeof host.client_address !== "string" || !host.client_address || host.client_address.length > 253)
       || host.api_version !== 1 || host.token_configured !== true || "token" in host || !["connected", "unknown"].includes(String(host.state))
       || !integer(host.foreign_routes) || !Array.isArray(host.routes) || host.error !== undefined && typeof host.error !== "string"
       || host.state === "connected" && (!integer(host.agent_revision) || typeof host.version !== "string")) return invalid();

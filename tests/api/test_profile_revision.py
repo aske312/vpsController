@@ -15,6 +15,30 @@ def profile():
 
 
 class ProfileRevisionTests(unittest.TestCase):
+    def test_relay_switch_preserves_native_credentials_without_reprovision(self):
+        item = profile()
+        connection = item['connections'][0]
+        connection['device_id'] = 'common'
+        definition = {key: deepcopy(value) for key, value in connection.items() if key != 'credential'}
+        definition['settings']['relay_host_id'] = 'a'*32
+        with (patch.object(manager, 'profiles', return_value=[item]),
+              patch.object(manager, 'profile_runtime_transaction', return_value=nullcontext()),
+              patch.object(manager, 'preflight_client_export_update'),
+              patch.object(manager, 'validate_connection_inputs', return_value=[definition]),
+              patch.object(manager, 'validate_vless_connection_limit'),
+              patch.object(manager, 'prepare_profile_relays') as prepare,
+              patch.object(manager, 'provision') as provision,
+              patch.object(manager, 'deprovision') as deprovision,
+              patch.object(manager, 'reconcile_profile_encryption'),
+              patch.object(manager, 'save_profiles'), patch.object(manager, 'write_action'),
+              patch.object(manager, 'verified_profile_clients', return_value=[])):
+            manager.update_profile('one', manager.ProfileUpdate(connections=[definition]))
+        self.assertEqual(item['connections'][0]['credential'], {'private_key': 'secret-value'})
+        self.assertEqual(item['connections'][0]['settings']['relay_host_id'], 'a'*32)
+        provision.assert_not_called()
+        deprovision.assert_not_called()
+        prepare.assert_called_once()
+
     def test_public_receipt_is_invalidated_by_another_edit_but_not_telemetry(self):
         item = profile()
         item.update(last_operation_id="saved-op", last_operation_revision=manager.profile_revision(item))

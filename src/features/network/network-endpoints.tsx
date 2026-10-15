@@ -177,12 +177,12 @@ export function NetworkEndpoints({
               </button>
             </header>
             {!addresses && <div className="networkRouteChoices">
-              <button type="button" disabled={busy} onClick={() => { setOpen(false); onAddRelay(); }}><strong>Relay Agent · TCP / UDP</strong><span>Подключить VPS с агентом или добавить порт на существующем узле.</span></button>
-              <button type="button" onClick={() => setAddresses(true)}><strong>Адрес CDN / внешнего relay</strong><span>Указать домен или IP уже настроенного сервера.</span></button>
+              <button type="button" disabled={busy} onClick={() => { setOpen(false); onAddRelay(); }}><strong>Подключить Relay Agent</strong><span>Сохранить узел и IP/домен для выбора в протоколах. Пересылка настраивается автоматически.</span></button>
+              <button type="button" onClick={() => setAddresses(true)}><strong>CDN / ECH</strong><span>Настроить домен CDN для защищённых подключений.</span></button>
             </div>}
             {addresses && <>
             <div className="networkEndpointGrid">
-              {fields.map((field) => {
+              {fields.filter((field) => field.kind === "cdn").map((field) => {
                 const checked = checks[field.key];
                 const result = endpointCheckForConsumer(checked?.domain.toLowerCase() === String(draft[field.key] || "").trim().toLowerCase() ? checked : undefined, consumerIds[field.key] || "");
                 const value = String(draft[field.key] || "").trim();
@@ -275,8 +275,8 @@ export function NetworkEndpoints({
               <div>
                 <b>1 · Внешний сервер</b>
                 <span>
-                  Настройте reverse proxy/L4 TCP или UDP forwarding на IP
-                  панели. Для relay укажите IP или домен relay, не origin VPS.
+                  Укажите домен CDN. Его DNS-запись должна указывать на origin VPS,
+                  с включённым proxy у CDN-провайдера.
                 </span>
               </div>
               <div>
@@ -297,8 +297,8 @@ export function NetworkEndpoints({
             {pendingAddress && <p role="status">Нажмите «Добавить адрес» для заполненного дополнительного поля или очистите его перед сохранением.</p>}
             <div className="networkEndpointFooter">
               <p>
-                CDN/ECH требует домен. Для relay укажите домен или IP без порта,
-                но порт самого протокола должен быть открыт на relay.
+                CDN/ECH требует домен. Relay подключается отдельно через Agent;
+                его адрес выбирается в настройках протокола.
               </p>
               <button
                 type="button"

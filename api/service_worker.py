@@ -82,6 +82,8 @@ def apply_relay_request(api, name, path, digest, identity):
         control.reconcile()
     elif name == 'relay-route-check':
         api.perform_relay_probe(payload)
+    elif name in ('relay-client-create', 'relay-client-resume'):
+        api.relay_client_creation.perform(api, payload, identity, resume_id=payload.get('result_id'))
     else:
         raise ValueError('Unknown relay operation')
 

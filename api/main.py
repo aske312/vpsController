@@ -47,6 +47,7 @@ import operation_policy
 import network_routes
 import network_probe
 import relay_manager
+import relay_client_creation
 import yaml
 import ech_settings
 from protocol_health import TrafficSampler, protocol_health
@@ -84,6 +85,8 @@ from schemas import (
     RelayHostSettings,
     RelayRouteSettings,
     RelayExportRequest,
+    RelayClientCreate,
+    RelayClientResume,
 )
 
 @asynccontextmanager
@@ -2707,6 +2710,35 @@ def delete_relay_route(host_id: str, route_id: str, agent_revision: int, _: None
 @app.post('/api/network/relays/reconcile', status_code=202)
 def reconcile_relay(_: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
     return start_relay_mutation('relay-reconcile', {}, operation_id)
+
+
+@app.post('/api/clients/relay', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def create_relay_client(payload: RelayClientCreate, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
+    if payload.protocol == 'ikev2' or not payload.settings.relay_host_id or payload.settings.channel_mode != 'direct':
+        raise HTTPException(status_code=422, detail='Протокол несовместим с выбранным Relay')
+    try:
+        ComponentRegistry(DATA_DIR).require_managed(payload.protocol)
+    except RegistryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return start_relay_mutation('relay-client-create', {'client': payload.model_dump(exclude={'expected_revision'}), 'expected_revision': payload.expected_revision}, operation_id)
+
+
+@app.get('/api/clients/relay/{result_id}')
+def relay_client_result(result_id: str, _: None = Depends(require_token)):
+    try:
+        return JSONResponse(relay_client_creation.read_result(sys.modules[__name__], result_id), headers={'Cache-Control': 'no-store'})
+    except (ValueError, OSError):
+        raise HTTPException(status_code=404, detail='Результат подключения недоступен') from None
+
+
+@app.post('/api/clients/relay/{result_id}/resume', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def resume_relay_client(result_id: str, payload: RelayClientResume, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
+    try:
+        if not relay_client_creation.read_result(sys.modules[__name__], result_id).get('can_resume'):
+            raise ValueError('Создание клиента нельзя повторять')
+    except (ValueError, OSError):
+        raise HTTPException(status_code=409, detail='Нет подтверждённого результата создания клиента для продолжения') from None
+    return start_relay_mutation('relay-client-resume', {'result_id': result_id, 'expected_revision': payload.expected_revision}, operation_id)
 
 
 def prepare_relay_probe(route, host, consumer_id):
@@ -5632,7 +5664,13 @@ def create_shadowsocks_client(payload: ClientCreate, client_id: str, safe_name: 
 
 @app.post("/api/clients", dependencies=[Depends(require_component_management)])
 def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> dict:
-    client_id = secrets.token_hex(8)
+    if payload.settings.relay_host_id:
+        raise HTTPException(status_code=409, detail='Для Relay используйте управляемое создание подключения')
+    return create_client_native(payload)
+
+
+def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict:
+    client_id = client_identity or secrets.token_hex(8)
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
     if payload.protocol == "ikev2":
         if not IKEV2_CONFIG.exists() or run("systemctl", "is-enabled", "vps-control-ikev2.service") != "enabled":

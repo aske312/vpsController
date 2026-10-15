@@ -11,6 +11,7 @@ import ipaddress
 import json
 from pathlib import Path
 import re
+import socket
 import uuid
 
 from application_operation import atomic_json, OperationConflict
@@ -90,6 +91,9 @@ class RelayManager:
             self.client(host)
             if not re.fullmatch(r'[0-9a-f]{32}', str(host.get('id', ''))) or host['id'] in ids or host['agent_url'] in origins or not isinstance(host.get('name'), str):
                 raise ValueError('Повреждён узел relay')
+            address = host.get('client_address')
+            if address is not None and (not isinstance(address, str) or not address or len(address) > 253 or any(character in address for character in '/:@\r\n ')):
+                raise ValueError('Повреждён клиентский адрес Relay')
             ids.add(host['id']); origins.add(host['agent_url'])
         route_ids = set()
         for route in value['routes']:
@@ -142,6 +146,10 @@ class RelayManager:
         host['certificate_sha256'] = host['certificate_sha256'].lower()
         if client.host == public_ipv4(self.origin):
             raise ValueError('Узел relay должен отличаться от текущего VPS')
+        address = payload.get('client_address')
+        if address is None:
+            address = previous.get('client_address')
+        host['client_address'] = self.validate_address(address or client.host, client.host)
         if previous and previous['agent_url'] != host['agent_url']:
             raise ValueError('Адрес существующего узла неизменяем; добавьте новый узел')
         if any(item['agent_url'] == host['agent_url'] and item['id'] != host_id for item in registry['hosts']):
@@ -164,6 +172,73 @@ class RelayManager:
         if intent:
             self.reconcile()
 
+    @staticmethod
+    def validate_address(value, agent_ip):
+        value = str(value).strip().lower().rstrip('.')
+        if value == agent_ip:
+            return value
+        if len(value) > 253 or not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?', value):
+            raise ValueError('Адрес клиента должен быть IP агента или доменом этого узла без порта')
+        resolved = {item[4][0] for item in socket.getaddrinfo(value, None, type=socket.SOCK_STREAM)}
+        if resolved != {agent_ip}:
+            raise ValueError('Домен Relay должен разрешаться только в IPv4 выбранного агента, без CDN proxy')
+        return value
+
+    def ensure(self, host_id, groups, identity):
+        """Prepare protocol-derived sockets, reusing owned rules and never replaying intent.
+
+        Each group needs the same external port (e.g. Shadowsocks TCP + UDP).
+        Unused rules are retained; their origin ports remain reserved separately.
+        """
+        self.require_clear()
+        registry = self.read()
+        host = self.host(registry, host_id)
+        client = self.client(host)
+        self.validate_address(host.get('client_address') or client.host, client.host)
+        status_snapshot(client.request('GET', '/v1/status'))
+        for group in groups:
+            sockets = list(dict.fromkeys((transport, port) for transport, port in group))
+            if not sockets or any(transport not in ('tcp', 'udp') or type(port) is not int or not 1 <= port <= 65535 or port in (22, 80, 8000, 9443) for transport, port in sockets):
+                raise ValueError('Нельзя публиковать этот listener через Relay')
+            registry = self.read()
+            remote = route_snapshot(client.request('GET', '/v1/routes'))
+            owned = [route for route in registry['routes'] if route['host_id'] == host_id]
+            candidates = sorted({route['listen_port'] for route in owned if (route['transport'], route['target_port']) in sockets})
+            candidates.extend(port for port in range(20000, 21000) if port not in candidates)
+            def compatible(port):
+                for transport, target in sockets:
+                    found = next((route for route in remote['items'] if route['transport'] == transport and route['listen_port'] == port), None)
+                    if found and not any(route['id'] == found['id'] and same_route(route, found) and route['target_ip'] == self.origin and route['target_port'] == target and found['state'] == 'listening' for route in owned):
+                        return False
+                return True
+            selected = next((port for port in candidates if compatible(port)), None)
+            if selected is None:
+                raise OperationConflict('Нет свободного порта Relay для этого протокола')
+            for transport, target in sockets:
+                registry = self.read()
+                remote = route_snapshot(client.request('GET', '/v1/routes'))
+                found = next((route for route in remote['items'] if route['transport'] == transport and route['listen_port'] == selected), None)
+                if found:
+                    if not any(route['id'] == found['id'] and same_route(route, found) and route['target_ip'] == self.origin and route['target_port'] == target and found['state'] == 'listening' for route in registry['routes'] if route['host_id'] == host_id):
+                        raise OperationConflict('Маршруты агента изменились во время настройки')
+                    continue
+                route_identity = uuid.uuid5(uuid.NAMESPACE_URL, f'{host_id}:{self.origin}:{transport}:{target}:{selected}').hex
+                self.mutate_route({'host_id': host_id, 'transport': transport, 'target_port': target, 'listen_port': selected,
+                                   'expected_revision': registry['revision'], 'agent_revision': remote['revision']}, identity, route_identity=route_identity)
+        return self.read()
+
+    def endpoint(self, host_id, transport, target_port, *, paired=False):
+        """Resolve a saved binding without a network request during subscription refresh."""
+        registry = self.read()
+        host = self.host(registry, host_id)
+        routes = [route for route in registry['routes'] if route['host_id'] == host_id and route['target_ip'] == self.origin and route['transport'] == transport and route['target_port'] == target_port]
+        if paired:
+            routes = [route for route in routes if any(other['host_id'] == host_id and other['target_ip'] == self.origin and other['target_port'] == target_port and other['listen_port'] == route['listen_port'] and other['transport'] != transport for other in registry['routes'])]
+        if not routes:
+            raise OperationConflict('Пересылка Relay для подключения не подготовлена. Сохраните настройки подключения после восстановления агента')
+        route = min(routes, key=lambda route: route['listen_port'])
+        return host.get('client_address') or self.client(host).host, route['listen_port']
+
     def delete_host(self, payload):
         self.require_clear()
         registry = self.checked(payload['expected_revision'])
@@ -173,7 +248,7 @@ class RelayManager:
         registry['hosts'] = [item for item in registry['hosts'] if item['id'] != payload['host_id']]
         self.write(registry)
 
-    def mutate_route(self, payload, identity, *, delete=False):
+    def mutate_route(self, payload, identity, *, delete=False, route_identity=None):
         self.require_clear()
         registry = self.checked(payload['expected_revision'])
         host = self.host(registry, payload['host_id'])
@@ -189,7 +264,7 @@ class RelayManager:
             if found and not same_route(found, route):
                 raise OperationConflict('Конфигурация маршрута на агенте изменена; чужой маршрут не удалён')
         else:
-            route = {'id': 'pro-'+identity, 'host_id': host['id'], **validate_config({**payload, 'target_ip': public_ipv4(self.origin)})}
+            route = {'id': 'pro-'+(route_identity or identity), 'host_id': host['id'], **validate_config({**payload, 'target_ip': public_ipv4(self.origin)})}
             if route['target_ip'] == client.host or route['target_port'] in (22, 80, 8000, 9443):
                 raise ValueError('Этот порт назначения нельзя публиковать через relay')
             if len(remote['items']) >= 64 or any(item['transport'] == route['transport'] and item['listen_port'] == route['listen_port'] for item in remote['items']):
@@ -246,6 +321,7 @@ class RelayManager:
 
         def observe(host):
             public = {key: host[key] for key in ('id', 'name', 'agent_url', 'certificate_sha256', 'api_version')}
+            public['client_address'] = host.get('client_address') or self.client(host).host
             public.update(token_configured=True, state='unknown', routes=[], foreign_routes=0)
             owned = [item for item in registry['routes'] if item['host_id'] == host['id']]
             try:

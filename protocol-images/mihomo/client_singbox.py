@@ -74,7 +74,7 @@ def _vless(tag, credential, endpoint, variant, routing, fragment, capabilities=N
     return value
 
 
-def build_singbox_config(connections, routing, dns, rules, endpoint, direct_settings, fragment, capabilities=None):
+def build_singbox_config(connections, routing, dns, rules, endpoint, direct_settings, fragment, capabilities=None, redirect=None):
     outbounds = []
     endpoints = []
     tags = []
@@ -122,6 +122,8 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
                               "tls": {"enabled": True, "server_name": credential.get("sni", "gate.312"), "insecure": bool(credential.get("skip_cert_verify", True)), "alpn": ["h3"]}})
         else:
             raise UnsupportedClientConfig(f"Модуль {module} не поддерживается sing-box")
+        if redirect:
+            redirect(connection, outbounds[previous_outbounds:], endpoints[previous_endpoints:])
         tags.extend(item["tag"] for item in outbounds[previous_outbounds:] + endpoints[previous_endpoints:])
     if not outbounds and not endpoints:
         raise UnsupportedClientConfig("У устройства нет подключений для экспорта")
