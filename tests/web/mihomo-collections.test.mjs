@@ -31,6 +31,27 @@ test("broken nested profile records cannot crash the editor or look deleted", ()
     {devices:[{id:"common",routing:"bad"}]}]) assert.throws(()=>profileSnapshots({items:[{...profile,...change}]}),Error);
 });
 
+test("profiles with absent manager device metadata remain editable without changing the response", () => {
+  const metadata = ["hwid_hash", "created_at", "last_seen_at", "os", "os_version", "client_name", "client_version", "core_name", "core_version", "user_agent"];
+  const common = { id: "common", name: "Common", scope: "common", routing: {}, ...Object.fromEntries(metadata.map(key => [key, null])) };
+  const hwid = { id: "hwid-one", name: "Laptop", scope: "hwid", os: "windows", client_name: "Clash", client_version: null, supported_formats: ["mihomo"] };
+  const response = { items: [{ ...profile, common_device_id: "common", devices: [common, hwid] }] };
+  const before = structuredClone(response);
+  const [accepted] = profileSnapshots(response);
+  assert.deepEqual(accepted.devices[0], { id: "common", name: "Common", scope: "common", routing: {} });
+  assert.equal(accepted.devices[1].os, "windows");
+  assert.equal(accepted.devices[1].client_name, "Clash");
+  assert.equal(accepted.devices[1].client_version, undefined);
+  assert.deepEqual(accepted.connections, profile.connections);
+  assert.deepEqual(response, before);
+  for (const key of metadata) for (const invalid of [false, 12, [], {}]) {
+    assert.throws(() => profileSnapshots({ items: [{ ...profile, devices: [{ ...common, [key]: invalid }] }] }));
+  }
+  for (const change of [{ name: null }, { scope: null }, { routing: null }, { supported_formats: null }, { personal_rule_ids: null }]) {
+    assert.throws(() => profileSnapshots({ items: [{ ...profile, devices: [{ ...common, ...change }] }] }));
+  }
+});
+
 test("rendered module fields and setting choices reject objects and duplicate identities", () => {
   for (const change of [{description:{}},{active:"true"},{settings_values:{mtu:[]}},
     {settings:[{key:"mtu",label:{}}]},{settings:[{key:"mtu",options:[{}]}]},

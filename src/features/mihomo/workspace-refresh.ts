@@ -98,7 +98,18 @@ export function profileSnapshots(value: unknown): Profile[] {
       throw new Error("Некорректные данные профиля Mihomo");
     }
   }
-  return items as Profile[];
+  // The manager's ProfileDeviceInput serializes absent client metadata as null.
+  // Keep the UI's optional-string contract without changing the server snapshot.
+  return items.map((item) => {
+    if (!Array.isArray(item.devices)) return item;
+    let changed = false;
+    const devices = item.devices.map((device) => {
+      if (!deviceMetadata.some((key) => device[key] === null)) return device;
+      changed = true;
+      return Object.fromEntries(Object.entries(device).filter(([key, value]) => value !== null || !deviceMetadata.includes(key)));
+    });
+    return changed ? { ...item, devices } : item;
+  }) as Profile[];
 }
 
 function stringList(value: unknown): value is string[] {
@@ -148,9 +159,11 @@ function protectionStatus(value: unknown) {
   });
 }
 
+const deviceMetadata = ["hwid_hash", "created_at", "last_seen_at", "os", "os_version", "client_name", "client_version", "core_name", "core_version", "user_agent"];
+
 function deviceRow(value: unknown) {
   if (!record(value) || typeof value.name !== "string"
-    || !optionalStrings(value, ["hwid_hash", "created_at", "last_seen_at", "os", "os_version", "client_name", "client_version", "core_name", "core_version", "user_agent"])
+    || !deviceMetadata.every((key) => value[key] == null || typeof value[key] === "string")
     || (value.scope !== undefined && !["common", "hwid", "manual", "legacy"].includes(String(value.scope)))
     || (value.manual !== undefined && typeof value.manual !== "boolean")
     || (value.routing !== undefined && !scalarRecord(value.routing))
