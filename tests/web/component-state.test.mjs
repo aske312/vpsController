@@ -18,6 +18,10 @@ test("installation, runtime, health and ongoing action remain independent", () =
   assert.equal(unknown.runtime, "Нет данных");
   assert.equal(unknown.summary.tone, "unknown");
   assert.equal(unknown.canInstall, false);
+  const uncertain = componentPresentation({ ...image, component_state: { ...image.component_state, operation: { kind: null, state: "unknown" } } });
+  assert.equal(uncertain.summary.tone, "unknown");
+  assert.equal(uncertain.canUpdate, false);
+  assert.equal(uncertain.canInstall, false);
 });
 
 test("a running service is distinct from verified health and adverse observations take priority", () => {

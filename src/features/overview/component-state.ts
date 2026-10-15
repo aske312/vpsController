@@ -16,6 +16,7 @@ export function componentPresentation(image: ProtocolImage, healthReason?: strin
   const canInstall = installation === "not_installed" && image.installable && image.management?.state !== "unknown" && !observed?.operation;
   const readOnly = image.management?.state !== "managed" || Boolean(image.management?.retained);
   const status = (() => {
+    if (observed?.operation?.state === "unknown") return summary("Результат операции неизвестен", "unknown", "Проверьте её результат в центре операций.");
     if (observed?.operation) return summary(observed.operation.kind ? labels[observed.operation.kind] : "Выполняется операция", "progress", "Дождитесь завершения операции.");
     if (!installation) return summary("Состояние неизвестно", "unknown", observed?.installation.reason || "Не удалось подтвердить установку компонента.");
     if (installation === "not_installed") return summary("Не установлен", "available", image.management?.retained ? "Настройки и подключения сохранены." : canInstall ? "Доступен для установки." : image.management?.reason || "Установка сейчас недоступна.");
