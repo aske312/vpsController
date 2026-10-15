@@ -22,6 +22,7 @@ export function NetworkEndpoints({
   onRouteListChange,
   onSave,
   onReset,
+  onAddRelay,
 }: {
   request: NetworkRequest;
   draft: NetworkEndpointSettings;
@@ -34,8 +35,10 @@ export function NetworkEndpoints({
   onRouteListChange: (key: keyof NetworkEndpointSettings, values: string[]) => void;
   onSave: () => void;
   onReset: () => void;
+  onAddRelay: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [addresses, setAddresses] = useState(false);
   const generation = useRef(0);
   const inFlight = useRef(false);
   useEffect(() => () => { generation.current++; }, []);
@@ -135,7 +138,7 @@ export function NetworkEndpoints({
       <button
         type="button"
         className="networkAddRouteButton"
-        onClick={() => { generation.current++; setChecks(initialChecks || {}); setConsumerIds({}); setOpen(true); }}
+        onClick={() => { generation.current++; setChecks(initialChecks || {}); setConsumerIds({}); setAddresses(hasChanges); setOpen(true); }}
       >
         Добавить маршрут
       </button>
@@ -158,11 +161,11 @@ export function NetworkEndpoints({
             <header className="networkSectionHeading networkModalHeader">
               <div>
                 <p className="eyebrow networkSectionEyebrow">ROUTES</p>
-                <h2 id="network-endpoints-title">Настройка внешних адресов</h2>
+                <h2 id="network-endpoints-title">{addresses ? "Настройка внешних адресов" : "Добавить маршрут"}</h2>
                 <p>
-                  Адреса попадут в новые конфигурации клиентов после сохранения. Удаление маршрутов доступно прямо в таблице ROUTES.
+                  {addresses ? "Адреса попадут в новые конфигурации клиентов после сохранения. Удаление маршрутов доступно прямо в таблице ROUTES." : "Выберите способ подключения внешнего адреса."}
                 </p>
-                {knownCdnDomains.length > 0 && <div className="networkKnownRoutes"><span>Обнаруженные CDN адреса</span><div>{knownCdnDomains.map((domain) => <code key={domain}>{domain}</code>)}</div><small>Активным общим адресом для новых конфигураций остаётся значение в поле CDN / ECH.</small></div>}
+                {addresses && knownCdnDomains.length > 0 && <div className="networkKnownRoutes"><span>Обнаруженные CDN адреса</span><div>{knownCdnDomains.map((domain) => <code key={domain}>{domain}</code>)}</div><small>Активным общим адресом для новых конфигураций остаётся значение в поле CDN / ECH.</small></div>}
               </div>
               <button
                 type="button"
@@ -173,6 +176,11 @@ export function NetworkEndpoints({
                 ×
               </button>
             </header>
+            {!addresses && <div className="networkRouteChoices">
+              <button type="button" disabled={busy} onClick={() => { setOpen(false); onAddRelay(); }}><strong>Relay Agent · TCP / UDP</strong><span>Подключить VPS с агентом или добавить порт на существующем узле.</span></button>
+              <button type="button" onClick={() => setAddresses(true)}><strong>Адрес CDN / внешнего relay</strong><span>Указать домен или IP уже настроенного сервера.</span></button>
+            </div>}
+            {addresses && <>
             <div className="networkEndpointGrid">
               {fields.map((field) => {
                 const checked = checks[field.key];
@@ -301,6 +309,7 @@ export function NetworkEndpoints({
                 Сохранить адреса
               </button>
             </div>
+            </>}
           </section>
         </div>
       )}

@@ -27,7 +27,7 @@ import {
 import { DnsView } from "./network-dns";
 import { NetworkEch } from "./network-ech";
 import { NetworkEndpoints } from "./network-endpoints";
-import { NetworkRelays } from "./network-relays";
+import { NetworkRelayDialogs, NetworkRelayNotice, NetworkRelayRows, relayMatches, useNetworkRelays } from "./network-relays";
 import { dnsComponents } from "./system-dns-control";
 
 export type NetworkListState = { query: string; expanded: string[] };
@@ -43,7 +43,7 @@ type Props = {
   refreshKey?: number;
   onLoadingChange?: (loading: boolean, run?: number) => void;
 };
-type Section = "diagnostics" | "dns" | "relay";
+type Section = "diagnostics" | "dns";
 
 function NetworkIcon() {
   return (
@@ -76,6 +76,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
   const [section, setSection] = useState<Section>("diagnostics");
   const [loadFailed, setLoadFailed] = useState(false);
   const [relayDirty, setRelayDirty] = useState(false);
+  const relay = useNetworkRelays({ request, admit: admitOperation, operation, onOperation, busy, onDirtyChange: setRelayDirty, refreshKey });
   const loadingRef = useRef(false);
   const loadingRun = useRef(0);
   const savingRef = useRef(false);
@@ -283,7 +284,6 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
                 [
                   ["diagnostics", "Состояние сети"],
                   ["dns", "Настройки DNS"],
-                  ["relay", "Relay"],
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -316,15 +316,14 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
             </span>
             <button
               type="button"
-              onClick={() => void load()}
+              onClick={() => { void load(); void relay.load(); }}
               disabled={loading || busy}
             >
               Обновить
             </button>
           </div>
         </header>
-        <div hidden={section !== "relay"}><NetworkRelays request={request} admit={admitOperation} operation={operation} onOperation={onOperation} busy={busy} onDirtyChange={setRelayDirty} /></div>
-        <div hidden={section === "relay"}>
+        <NetworkRelayDialogs relay={relay} />
         {!status ? (
           <section className="networkEmpty" role="status">
             <NetworkIcon />
@@ -364,6 +363,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
             </div>
             <div hidden={section !== "diagnostics"}>
               <DiagnosticsV2
+                relay={relay}
                 listState={listState}
                 onListStateChange={onListStateChange}
                 status={status}
@@ -373,14 +373,13 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
                 busy={busy}
                 readFailed={loadFailed}
                 onRemoveRoute={removeEndpoint}
-                onRefresh={() => void load()}
+                onRefresh={() => { void load(); void relay.load(); }}
                 setEndpointDraft={setEndpointDraft}
                 saveEndpoints={saveEndpoints}
               />
             </div>
           </>
         )}
-        </div>
       </main>
     </div>
   );
@@ -587,6 +586,7 @@ function NetworkCapabilityCard({ check }: { check: NetworkCapabilityCheck }) {
   );
 }
 function DiagnosticsV2({
+  relay,
   listState,
   onListStateChange,
   status,
@@ -600,6 +600,7 @@ function DiagnosticsV2({
   saveEndpoints,
   onRefresh,
 }: {
+  relay: ReturnType<typeof useNetworkRelays>;
   listState: NetworkListState;
   onListStateChange: (state: NetworkListState) => void;
   status: NetworkStatus;
@@ -708,6 +709,7 @@ function DiagnosticsV2({
             </label>
             {endpointDraft && (
                 <NetworkEndpoints
+                  onAddRelay={() => relay.openRoute()}
                   request={request}
                   draft={endpointDraft}
                   knownCdnDomains={[...new Set(status.domains.filter((domain) => domain.role.toLowerCase().includes("cdn")).map((domain) => domain.value))]}
@@ -736,6 +738,7 @@ function DiagnosticsV2({
             )}
           </div>
         </header>
+        <NetworkRelayNotice relay={relay} />
         <div className="networkTableWrap">
           <table>
             <thead>
@@ -748,6 +751,7 @@ function DiagnosticsV2({
               </tr>
             </thead>
             <tbody>
+              <NetworkRelayRows relay={relay} query={query} expanded={listState.expanded} onToggle={toggleDomain} />
               {domains.map((domain) => {
                 const rowKey = `${domain.role}-${domain.value}`;
                 const expanded = expandedDomains.has(rowKey);
@@ -883,7 +887,7 @@ function DiagnosticsV2({
             </tbody>
           </table>
         </div>
-        {!domains.length && (
+        {!domains.length && !relay.status?.hosts.some(host => relayMatches(host, query)) && (
           <p className="networkEmpty">
             {query ? "Совпадений нет." : "Маршруты ещё не настроены."}
           </p>
