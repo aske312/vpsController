@@ -18,7 +18,7 @@ const checkLabels: Record<string, string> = {
 type ProtocolViewProps = {
   protocolTab: Protocol;
   activeProtocol: ProtocolStatus;
-  activeProtocolRate: { rx: number; tx: number };
+  activeProtocolRate: { rx: number | null; tx: number | null };
   activeProtocolImage?: ProtocolImage;
   protocolCode: string;
   protocolIsTunnel: boolean;
@@ -168,7 +168,7 @@ export function ProtocolView(props: ProtocolViewProps) {
   const availability = Number.isFinite(Number(protocolAvailability)) ? Math.max(0, Math.min(100, Number(protocolAvailability))) : 0;
   const version = formatModuleVersion(activeProtocolImage?.installed_version, "version n/a");
   const endpoint = activeProtocol.listen_port ? `${activeProtocol.address || "—"}:${activeProtocol.listen_port}` : activeProtocol.address || "—";
-  const health = protocolOperational ? (activeProtocol.diagnostics?.status || "healthy") : "critical";
+  const health = activeProtocol.observation_failed ? "pending" : protocolOperational ? (activeProtocol.diagnostics?.status || "healthy") : "critical";
   const updateBusy = activeProtocolImage ? installingProtocol === `update-${activeProtocolImage.id}` : false;
 
   return (
@@ -201,6 +201,7 @@ export function ProtocolView(props: ProtocolViewProps) {
             <ProtocolHealthBadge health={activeProtocol.health} />
           </div>
           <p className="tunnelLead">{profile.description}</p>
+          {activeProtocol.observation_failed && <p role="status">Состояние протокола не подтверждено. Показаны последние полученные данные.</p>}
           <div className="tunnelHeroMeta">
             <span>{version}</span>
             <span>{activeProtocol.service_enabled ? "AUTOSTART" : "MANUAL START"}</span>
@@ -219,7 +220,7 @@ export function ProtocolView(props: ProtocolViewProps) {
       <div className="tunnelCommandBar">
         <div>
           <span className={`healthDot ${health}`} />
-          <p><small>RUNTIME</small><strong>{protocolOperational ? "ACTIVE" : "STOPPED"}</strong><span>{activeProtocol.unit || activeProtocol.interface || profile.title}</span></p>
+          <p><small>RUNTIME</small><strong>{activeProtocol.observation_failed ? "UNKNOWN" : protocolOperational ? "ACTIVE" : "STOPPED"}</strong><span>{activeProtocol.unit || activeProtocol.interface || profile.title}</span></p>
         </div>
         <div className="tunnelCommandActions">
           <button type="button" onClick={() => setTab("services")}>Управление службой</button>
@@ -245,8 +246,8 @@ export function ProtocolView(props: ProtocolViewProps) {
         <article className="tunnelPanel telemetryPanel">
           <PanelTitle eyebrow="TELEMETRY" title="Трафик и доступность" note={`${activeProtocol.history.samples} замеров / ${activeProtocol.history.period_hours || 24}ч`} />
           <div className="telemetryGrid">
-            <Metric label="RX NOW" value={`${bytes(activeProtocolRate.rx)}/с`} detail={`${bytes(activeProtocol.history.received_bytes)} за период`} />
-            <Metric label="TX NOW" value={`${bytes(activeProtocolRate.tx)}/с`} detail={`${bytes(activeProtocol.history.transmitted_bytes)} за период`} />
+            <Metric label="RX NOW" value={activeProtocol.observation_failed || activeProtocolRate.rx == null ? "—" : `${bytes(activeProtocolRate.rx)}/с`} detail={`${bytes(activeProtocol.history.received_bytes)} за период`} />
+            <Metric label="TX NOW" value={activeProtocol.observation_failed || activeProtocolRate.tx == null ? "—" : `${bytes(activeProtocolRate.tx)}/с`} detail={`${bytes(activeProtocol.history.transmitted_bytes)} за период`} />
             <Metric label="AVAILABILITY" value={`${availability}%`} detail={`${activeProtocol.history.service_interruptions} остановок`} />
             <Metric label="LATENCY" value={activeProtocol.history.latency_avg_ms != null ? `${activeProtocol.history.latency_avg_ms.toFixed(1)} мс` : "—"} detail={`last ${duration(activeProtocol.last_handshake_age_s)}`} />
           </div>

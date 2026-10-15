@@ -61,12 +61,38 @@ def apply_network_request(api, name: str, path: Path, digest: str, identity: str
         raise ValueError("Unknown network operation")
 
 
+def apply_relay_request(api, name, path, digest, identity):
+    payload = operations.load_payload(api.DATA_DIR, identity, path, digest)
+    operations.require_recovery_clear(api.DATA_DIR, name)
+    control = api.relay_control()
+    if name == 'relay-host-save':
+        control.save_host(api.RelayHostSettings.model_validate(payload).model_dump())
+    elif name == 'relay-host-delete':
+        control.delete_host(payload)
+    elif name == 'relay-route-create':
+        settings = api.RelayRouteSettings.model_validate(payload)
+        if {'transport': settings.transport, 'port': settings.target_port} not in api.relay_targets():
+            raise ValueError('Публичный listener протокола не подтверждён')
+        control.mutate_route(payload, identity)
+    elif name == 'relay-route-delete':
+        control.mutate_route(payload, identity, delete=True)
+    elif name == 'relay-reconcile':
+        control.reconcile()
+    elif name == 'relay-route-check':
+        api.perform_relay_probe(payload)
+    else:
+        raise ValueError('Unknown relay operation')
+
+
 if __name__ == "__main__":
     import main as api
 
     identity = os.environ["VPS_CONTROL_OPERATION_ID"]
     unit = os.environ["VPS_CONTROL_OPERATION_UNIT"]
-    if sys.argv[1] == "--network":
+    if sys.argv[1] == '--relay':
+        name, path, digest = sys.argv[2:5]
+        success = execute_operation(api, name, lambda: apply_relay_request(api, name, Path(path), digest, identity), identity, unit)
+    elif sys.argv[1] == "--network":
         name, path, digest = sys.argv[2:5]
         success = execute_operation(api, name, lambda: apply_network_request(api, name, Path(path), digest, identity), identity, unit)
     elif sys.argv[1] == "--automation-recover":

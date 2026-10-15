@@ -1,5 +1,20 @@
 /* Network workspace: one compact visual system shared with Application, Security and Services. */
 
+[data-network-page] .relayWorkspace { display: grid; gap: 18px; }
+[data-network-page] .relayGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+[data-network-page] .relayForm, [data-network-page] .relayHost { padding: 20px; display: grid; gap: 14px; min-width: 0; }
+[data-network-page] .relayForm label { display: grid; gap: 8px; }
+[data-network-page] .relayForm input, [data-network-page] .relayForm select { width: 100%; min-width: 0; padding: 10px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+[data-network-page] .relayActions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+[data-network-page] .relayFingerprint, [data-network-page] .relayRoute code { overflow-wrap: anywhere; font-size: 12px; color: var(--muted); }
+[data-network-page] .relayRoute { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 16px 0; border-top: 1px solid var(--line); }
+[data-network-page] .relayRoute p { margin: 7px 0; }
+[data-network-page] .relayFileButton { display: grid; gap: 6px; font-size: 12px; max-width: 230px; }
+[data-network-page] .relayFileButton input { max-width: 100%; }
+@media (max-width: 700px) {
+  [data-network-page] .relayGrid, [data-network-page] .relayRoute { grid-template-columns: minmax(0, 1fr); }
+}
+
 [data-network-page] {
   --network-bg: var(--bg);
   --network-panel: var(--panel);

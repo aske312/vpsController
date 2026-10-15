@@ -2,7 +2,7 @@
 
 import { useMemo, type ReactNode } from "react";
 
-import type { AutomationSchedule, LoggingSettings, MetricsSettings, ServiceItem, ServicesStatus } from "../../shared/types/control-plane";
+import type { AutomationSchedule, LoggingSettings, MetricsSettings, ServiceItem, ServiceTimer, ServicesStatus } from "../../shared/types/control-plane";
 import { runtimeState, servicesSummary } from "./service-state";
 
 type Props = {
@@ -103,6 +103,7 @@ export function ServicesDashboard({
 }: Props) {
   const items = useMemo(() => services?.items || [], [services?.items]);
   const summary = servicesSummary(services);
+  const serviceBusy = busy || !services || services.observation_failed === true;
   const schedulesActive = [automationDraft?.reboot?.enabled, automationDraft?.cleanup?.enabled, automationDraft?.update?.enabled].filter(Boolean).length;
 
   const orderedItems = useMemo(() => {
@@ -182,13 +183,13 @@ export function ServicesDashboard({
             <label className="opsField toggle">
               <span>Persistent</span>
               <span className="serviceToggle compact">
-                <input type="checkbox" checked={loggingDraft?.persistent ?? true} onChange={(event) => onLoggingChange({ persistent: event.target.checked })} disabled={busy || !services} />
+                <input type="checkbox" checked={loggingDraft?.persistent ?? true} onChange={(event) => onLoggingChange({ persistent: event.target.checked })} disabled={serviceBusy} />
                 <span /><em>{loggingDraft?.persistent ? "ON" : "OFF"}</em>
               </span>
             </label>
             <label className="opsField retention">
               <span>Retention</span>
-              <select value={loggingDraft?.retention_days ?? 30} onChange={(event) => onLoggingChange({ retention_days: Number(event.target.value) })} disabled={busy || !services}>
+              <select value={loggingDraft?.retention_days ?? 30} onChange={(event) => onLoggingChange({ retention_days: Number(event.target.value) })} disabled={serviceBusy}>
                 <option value={1}>1 день</option>
                 <option value={7}>7 дней</option>
                 <option value={14}>14 дней</option>
@@ -199,8 +200,8 @@ export function ServicesDashboard({
               <small>{formatRetention(loggingDraft?.retention_days)}</small>
             </label>
             <div className="servicesLogActions">
-              <button type="button" className="servicePrimary" onClick={onSaveLogging} disabled={busy || !loggingDraft}>Сохранить</button>
-              <button type="button" className="serviceDanger" onClick={onClearLogs} disabled={busy}>Очистить</button>
+              <button type="button" className="servicePrimary" onClick={onSaveLogging} disabled={serviceBusy || !loggingDraft}>Сохранить</button>
+              <button type="button" className="serviceDanger" onClick={onClearLogs} disabled={serviceBusy}>Очистить</button>
             </div>
           </div>
         </section>
@@ -234,13 +235,13 @@ export function ServicesDashboard({
               <h3>Плановые задачи</h3>
               <small>Перезагрузка, очистка и консервативные обновления в заданное окно.</small>
             </div>
-            <button type="button" className="servicePrimary ghost" onClick={onSaveAutomation} disabled={busy || !services || services.automation_recovery_required}>Сохранить расписание</button>
+            <button type="button" className="servicePrimary ghost" onClick={onSaveAutomation} disabled={serviceBusy || services?.automation_recovery_required}>Сохранить расписание</button>
           </header>
-          {services?.automation_recovery_required && <p role="alert">Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Отображаемые настройки могут отличаться от состояния служб. <button type="button" disabled={busy} onClick={onRecoverAutomation}>Восстановить расписания</button></p>}
+          {services?.automation_recovery_required && <p role="alert">Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Отображаемые настройки могут отличаться от состояния служб. <button type="button" disabled={serviceBusy} onClick={onRecoverAutomation}>Восстановить расписания</button></p>}
           <div className="maintenanceRows">
-            <ScheduleRow title="Перезагрузка" value={automationDraft?.reboot} timer={services?.timers.reboot} busy={busy} onChange={(patch) => onAutomationChange("reboot", patch)} />
-            <ScheduleRow title="Очистка" value={automationDraft?.cleanup} timer={services?.timers.cleanup} busy={busy} onChange={(patch) => onAutomationChange("cleanup", patch)} />
-            <ScheduleRow title="Безопасные автообновления" value={automationDraft?.update} timer={services?.timers.update} busy={busy} onChange={(patch) => onAutomationChange("update", patch)} />
+            <ScheduleRow title="Перезагрузка" value={automationDraft?.reboot} timer={services?.timers.reboot} busy={serviceBusy} onChange={(patch) => onAutomationChange("reboot", patch)} />
+            <ScheduleRow title="Очистка" value={automationDraft?.cleanup} timer={services?.timers.cleanup} busy={serviceBusy} onChange={(patch) => onAutomationChange("cleanup", patch)} />
+            <ScheduleRow title="Безопасные автообновления" value={automationDraft?.update} timer={services?.timers.update} busy={serviceBusy} onChange={(patch) => onAutomationChange("update", patch)} />
           </div>
         </section>
         </div>
@@ -285,7 +286,7 @@ function ServiceRow({ service, groupId, busy, onAction }: { service: ServiceItem
 function ScheduleRow({ title, value, timer, busy, onChange }: {
   title: string;
   value?: AutomationSchedule;
-  timer?: { installed: boolean; active: boolean; last_trigger: string; next_run: string };
+  timer?: ServiceTimer;
   busy: boolean;
   onChange: (patch: Partial<AutomationSchedule>) => void;
 }) {
@@ -333,7 +334,7 @@ function ScheduleRow({ title, value, timer, busy, onChange }: {
 
       <div className="maintenanceRuntime">
         <span><small>NEXT</small><strong>{timer?.next_run || "—"}</strong></span>
-        <span><small>LAST</small><strong>{timer?.last_trigger || "ещё не запускалось"}</strong></span>
+        <span><small>LAST</small><strong>{timer?.installed === false ? "Таймер не установлен" : timer?.last_trigger == null ? "Unknown" : timer.last_trigger || "ещё не запускалось"}</strong></span>
       </div>
     </div>
   );

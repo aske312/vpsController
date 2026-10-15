@@ -16,4 +16,8 @@ test("only confirmed terminal operations display DONE", () => {
   assert.equal(applicationActionState({ state: "finished", result: "interrupted" }), "FAILED");
   assert.equal(applicationActionState({ state: "succeeded", result: "success" }), "DONE");
   assert.equal(applicationActionState({}), "UNKNOWN");
+  assert.equal(applicationActionState({ state: "cancelled", result: "interrupted" }), "CANCELLED");
+  assert.equal(applicationActionState({ state: "finished", result: "unknown" }), "UNKNOWN");
+  assert.equal(applicationActionState({ state: "succeeded", result: "unknown" }), "UNKNOWN");
+  assert.equal(applicationActionState({ state: "finished", result: "exit-code" }), "FAILED");
 });

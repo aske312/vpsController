@@ -1,4 +1,4 @@
-export type NotificationState = "running" | "unknown" | "success" | "error" | "info";
+export type NotificationState = "running" | "unknown" | "success" | "error" | "info" | "cancelled";
 export type NotificationAction = { label: string; run: () => void | Promise<void> };
 export type NotificationInput = {
   id: string;
@@ -44,7 +44,7 @@ export function createNotificationStore(now = Date.now) {
   function upsert(input: NotificationInput) {
     if (finishedOperations.has(input.id)) return input.id;
     if (input.kind === "operation" && input.state !== "error") {
-      const summaries = { running: "Выполняется…", unknown: "Ожидаем подтверждения результата.", success: "Готово.", info: "Ожидает выполнения." };
+      const summaries = { running: "Выполняется…", unknown: "Ожидаем подтверждения результата.", success: "Готово.", info: "Ожидает выполнения.", cancelled: "Команда отменена." };
       input = { ...input, message: summaries[input.state] };
     }
     const previous = items.find((item) => item.id === input.id);
@@ -58,7 +58,7 @@ export function createNotificationStore(now = Date.now) {
       return input.id;
     }
     dismissed.delete(input.id);
-    const ttl = input.state === "success" ? 8000 : input.state === "info" ? 10000 : 0;
+    const ttl = input.state === "success" || input.state === "cancelled" ? 8000 : input.state === "info" ? 10000 : 0;
     const item: Notification = { ...input, count: previous?.count ?? 1, createdAt: previous?.createdAt ?? now(), expiresAt: ttl ? (pausedAt ?? now()) + ttl : undefined };
     items = previous ? items.map((entry) => entry.id === item.id ? item : entry) : [...items, item];
     emit();

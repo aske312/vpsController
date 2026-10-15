@@ -11,6 +11,28 @@ class BootstrapRequest(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class RelayHostSettings(BaseModel):
+    id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    name: str = Field(min_length=1, max_length=64)
+    agent_url: str = Field(max_length=80)
+    token: str = Field(default="", max_length=128)
+    certificate_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+    api_version: Literal[1] = 1
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{32}$")
+
+
+class RelayRouteSettings(BaseModel):
+    transport: Literal["tcp", "udp"]
+    listen_port: int = Field(strict=True, ge=20000, le=20999)
+    target_port: int = Field(strict=True, ge=1, le=65535)
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{32}$")
+    agent_revision: int = Field(strict=True, ge=0)
+
+
+class RelayExportRequest(BaseModel):
+    config: str = Field(min_length=1, max_length=262144)
+
+
 class AdminPasswordChange(BaseModel):
     current_password: str = Field(min_length=1, max_length=256)
     new_password: str = Field(min_length=16, max_length=128)

@@ -96,7 +96,7 @@ function NotificationCard({ item }: { item: Notification }) {
   </section>;
   return <section className={`gateOperationCard ${item.state}`} role={item.state === "error" ? "alert" : "status"} aria-atomic="true" aria-label={item.title}>
     <div className="gateOperationContent">
-      <span className="gateOperationIcon" aria-hidden="true">{item.state === "error" ? "!" : item.state === "success" ? "✓" : pending ? "…" : "i"}</span>
+      <span className="gateOperationIcon" aria-hidden="true">{item.state === "error" ? "!" : item.state === "success" ? "✓" : item.state === "cancelled" ? "−" : pending ? "…" : "i"}</span>
       <div className="gateOperationText"><span>{item.kind === "operation" ? "ВЫПОЛНЕНИЕ КОМАНДЫ" : "УВЕДОМЛЕНИЕ"}{item.count > 1 ? ` · ×${item.count}` : ""}</span><strong>{item.title}</strong><small>{item.message}</small></div>
       <div className="gateOperationActions">
         {pending && <b className="gateOperationPercent">{progress === undefined || item.state === "unknown" ? "…" : `${progress}%`}</b>}

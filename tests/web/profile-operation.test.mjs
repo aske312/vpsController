@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, ProfileMutationFailed, submitProfileMutation } from "../../src/features/mihomo/profile-operation.ts";
+import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, ProfileMutationFailed, ProfileMutationSuperseded, submitProfileMutation } from "../../src/features/mihomo/profile-operation.ts";
+import { profileSnapshots } from "../../src/features/mihomo/workspace-refresh.ts";
+import { systemActionSnapshot } from "../../src/control-panel/system-operation.ts";
 
 const mutation = { profileId: "profile-1", payload: { operation_id: "operation-1", name: "Test" } };
 const confirmed = { id: "profile-1", last_operation_id: "operation-1" };
@@ -70,7 +72,7 @@ test("matching settings or another profile's operation never prove this save suc
 });
 
 test("validation and authentication errors are not converted into successful or pending saves", async () => {
-  for (const status of [401, 403, 409, 422, 500]) {
+  for (const status of [401, 403, 409, 422]) {
     const error = Object.assign(new Error("rejected"), { kind: "http", status });
     let calls = 0;
     await assert.rejects(submitProfileMutation(async () => { calls++; throw error; }, mutation, () => {}, options), (cause) => cause === error);
@@ -98,10 +100,10 @@ test("accepted profile mutation waits for worker success before returning persis
     if (init?.method === "PATCH") {
       writes++;
       assert.equal(init.headers["X-Operation-ID"], id);
-      return { id, action: "mihomo-profile-update", state: "queued" };
+      return { id, action: "mihomo-profile-update", unit: "worker.service", state: "queued" };
     }
     if (path.startsWith("/application/operations/")) {
-      return { id, action: "mihomo-profile-update", state: ++polls === 1 ? "running" : "succeeded" };
+      return { id, action: "mihomo-profile-update", unit: "worker.service", state: ++polls === 1 ? "running" : "succeeded" };
     }
     profileReads++;
     assert.equal(polls, 2);
@@ -115,9 +117,9 @@ test("accepted profile mutation waits for worker success before returning persis
 test("failed durable worker cannot be mistaken for saved profile", async () => {
   const id = "b".repeat(32);
   await assert.rejects(submitProfileMutation(async (path, init) => {
-    if (init?.method === "PATCH") return { id, action: "mihomo-profile-update", state: "queued" };
+    if (init?.method === "PATCH") return { id, action: "mihomo-profile-update", unit: "worker.service", state: "queued" };
     assert.ok(path.startsWith("/application/operations/"));
-    return { id, state: "failed", message: "Rollback required" };
+    return { id, action: "mihomo-profile-update", unit: "worker.service", state: "failed", message: "Rollback required" };
   }, { profileId: "profile-1", payload: { operation_id: id } }, () => {}, options), /Rollback required/);
 });
 
@@ -129,7 +131,7 @@ test("temporary operation lookup failures are retried without repeating the muta
     if (init?.method === "PATCH") { writes++; throw interrupted(); }
     if (path.startsWith("/application/operations/")) {
       if (++polls <= 2) throw Object.assign(new Error("temporarily unavailable"), { kind: "http", status: polls === 1 ? 404 : 503 });
-      return { id, state: "succeeded" };
+      return { id, action: "mihomo-profile-update", unit: "worker.service", state: "succeeded" };
     }
     return { items: [{ id: "profile-1", last_operation_id: id }] };
   }, { profileId: "profile-1", payload: { operation_id: id } }, () => {}, { ...options, onOperation: (value) => updates.push(value) });
@@ -144,9 +146,101 @@ test("manual readback distinguishes terminal failure from an unavailable result"
   for (const state of ["failed", "cancelled"]) {
     await assert.rejects(checkProfileMutation(async (_path, init) => {
       assert.equal(init.method, undefined);
-      return { state, message: "Operation stopped" };
+      return { id: pending.payload.operation_id, action: "mihomo-profile-update", unit: "worker.service", state, message: "Operation stopped" };
     }, pending, () => {}, options), ProfileMutationFailed);
   }
   const unavailable = Object.assign(new Error("Session expired"), { kind: "http", status: 401 });
-  await assert.rejects(checkProfileMutation(async () => { throw unavailable; }, pending, () => {}, options), cause => cause === unavailable && !(cause instanceof ProfileMutationFailed));
+  await assert.rejects(checkProfileMutation(async () => { throw unavailable; }, pending, () => {}, options), ProfileResultUnknown);
+});
+
+test("server errors after admission reconcile the same operation without another write", async () => {
+  const id = "e".repeat(32);
+  let writes = 0;
+  const result = await submitProfileMutation(async (path, init) => {
+    if (init?.method === "PATCH") { writes++; throw Object.assign(new Error("response failed"), { kind: "http", status: 503 }); }
+    if (path.startsWith("/application/operations/")) return { id, action: "mihomo-profile-update", unit: "worker.service", state: "succeeded" };
+    assert.equal(init.cache, "no-store");
+    return { items: [{ id: "profile-1", last_operation_id: id }] };
+  }, { profileId: "profile-1", payload: { operation_id: id } }, () => {}, options);
+  assert.equal(result.last_operation_id, id);
+  assert.equal(writes, 1);
+});
+
+test("foreign or malformed admission never changes the operation being checked", async () => {
+  const id = "f".repeat(32);
+  for (const change of [{ id: "other" }, { action: "mihomo-profile-delete" }, { unit: undefined }, { state: "invented" }]) {
+    let writes = 0;
+    const updates = [];
+    await assert.rejects(submitProfileMutation(async (path, init) => {
+      if (init?.method === "PATCH") writes++;
+      else assert.equal(path, `/application/operations/${id}`);
+      return { id, action: "mihomo-profile-update", unit: "worker.service", state: "succeeded", ...change };
+    }, { profileId: "profile-1", payload: { operation_id: id } }, () => {}, { ...options, timeoutMs: 12, onOperation: value => updates.push(value) }), ProfileResultUnknown);
+    assert.equal(writes, 1);
+    assert.equal(updates.length, 0);
+  }
+});
+
+test("worker unit cannot change after confirmed admission", async () => {
+  const id = "1".repeat(32);
+  await assert.rejects(submitProfileMutation(async (_path, init) => ({ id, action: "mihomo-profile-update", unit: init?.method ? "first.service" : "other.service", state: init?.method ? "queued" : "succeeded" }),
+    { profileId: "profile-1", payload: { operation_id: id } }, () => {}, { ...options, timeoutMs: 12 }), ProfileResultUnknown);
+});
+
+test("known successful worker with a superseded or deleted profile does not stay pending forever", async () => {
+  const id = "2".repeat(32);
+  for (const items of [[], [{id:"profile-1",last_operation_id:"later-writer"}]]) {
+    let writes = 0;
+    await assert.rejects(submitProfileMutation(async (path, init) => {
+      if (init?.method === "PATCH") { writes++; throw interrupted(); }
+      if (path.startsWith("/application/operations/")) return { id, action:"mihomo-profile-update", unit:"worker.service", state:"succeeded" };
+      assert.equal(init.cache,"no-store");
+      return { items };
+    }, { profileId:"profile-1", payload:{operation_id:id} }, () => {}, options), ProfileMutationSuperseded);
+    assert.equal(writes,1);
+  }
+});
+
+test("a matching receipt in a malformed profile reply requires a valid readback without replay", async () => {
+  const valid = { ...confirmed, name: "Test", connections: [], devices: [] };
+  let writes = 0, reads = 0;
+  const result = await submitProfileMutation(async (_path, init) => {
+    if (init?.method) { writes++; return { ...valid, devices: [{ id: "device", name: {} }] }; }
+    reads++; return { items: [valid] };
+  }, mutation, () => {}, { ...options, validateProfiles: profileSnapshots });
+  assert.equal(result, valid);
+  assert.equal(writes, 1);
+  assert.equal(reads, 1);
+});
+
+test("successful worker with a malformed collection stays unknown rather than superseded", async () => {
+  const id = "3".repeat(32);
+  let writes = 0;
+  await assert.rejects(submitProfileMutation(async (path, init) => {
+    if (init?.method) { writes++; throw interrupted(); }
+    if (path.startsWith("/application/operations/")) return { id, action: "mihomo-profile-update", unit: "worker.service", state: "succeeded" };
+    return { items: [{ id: "profile-1", name: "Test", last_operation_id: id, connections: null }] };
+  }, { profileId: "profile-1", payload: { operation_id: id } }, () => {}, { ...options, validateProfiles: profileSnapshots }), ProfileResultUnknown);
+  assert.equal(writes, 1);
+});
+
+test("malformed operation messages are withheld from UI and valid admission is confirmed by GET", async () => {
+  const id="4".repeat(32),updates=[];
+  const operation={id,unit:"worker.service",action:"mihomo-profile-update",state:"succeeded"};
+  const profile={id:"profile-1",name:"Test",connections:[],last_operation_id:id};
+  let writes=0;
+  const result=await submitProfileMutation(async(path,init)=>{
+    if(init?.method){writes++;return {...operation,message:{}};}
+    return path.startsWith("/application/operations/")?operation:{items:[profile]};
+  },{profileId:"profile-1",payload:{operation_id:id}},()=>{},
+  {...options,validateOperation:systemActionSnapshot,validateProfiles:profileSnapshots,onOperation:value=>updates.push(value)});
+  assert.equal(result,profile);assert.equal(writes,1);assert.deepEqual(updates,[operation]);
+});
+
+test("malformed operation read retains unknown state without publishing an invalid failure", async () => {
+  const id="5".repeat(32),updates=[];
+  await assert.rejects(checkProfileMutation(async()=>({id,unit:"worker.service",action:"mihomo-profile-update",state:"failed",message:{}}),
+    {profileId:"profile-1",payload:{operation_id:id}},()=>{},
+    {...options,validateOperation:systemActionSnapshot,onOperation:value=>updates.push(value)}),ProfileResultUnknown);
+  assert.equal(updates.length,0);
 });

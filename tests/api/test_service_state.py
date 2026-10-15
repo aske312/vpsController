@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from tests.api.support import api
-from service_state import observe_service, ssh_observation, failed_unit_count
+from service_state import observe_service, ssh_observation, observed_enabled, failed_unit_count
 
 
 def output(active="active", enabled="disabled", load="loaded", **extra):
@@ -13,6 +13,35 @@ def output(active="active", enabled="disabled", load="loaded", **extra):
 
 
 class ServiceObservationTests(unittest.TestCase):
+    def test_autostart_observation_distinguishes_unknown_static_and_enabled(self):
+        for state, expected in (("enabled", True), ("enabled-runtime", True), ("disabled", False),
+                                 ("static", False), ("unknown", None), ("unexpected", None)):
+            with self.subTest(state=state):
+                self.assertIs(observed_enabled(self.observe(output(enabled=state))), expected)
+        self.assertIs(observed_enabled(self.observe(output(load="not-found"))), False)
+        self.assertIsNone(observed_enabled(self.observe("ActiveState=active\nUnitFileState=enabled")))
+    def test_timer_failure_is_unknown_and_distinct_from_never_triggered(self):
+        cases = [
+            (1, "", None, None, None),
+            (0, "LoadState=loaded", True, None, None),
+            (4, "LoadState=not-found\nActiveState=inactive", False, False, None),
+            (0, "LoadState=loaded\nActiveState=active\nLastTriggerUSec=\nNextElapseUSecRealtime=tomorrow", True, True, ""),
+            (0, "LoadState=loaded\nActiveState=inactive\nLastTriggerUSec=yesterday", True, False, "yesterday"),
+        ]
+        for code, text, installed, active, last in cases:
+            with self.subTest(code=code, text=text), patch("service_state.subprocess.run", return_value=subprocess.CompletedProcess([], code, text, "")) as run:
+                result = api.timer_details("reboot")
+            self.assertIs(result["installed"], installed)
+            self.assertIs(result["active"], active)
+            self.assertEqual(result["last_trigger"], last)
+            self.assertIn("LastTriggerUSec", run.call_args.args[0][-1])
+            self.assertEqual(run.call_count, 1)
+        with patch("service_state.subprocess.run", side_effect=OSError("systemctl unavailable")):
+            result = api.timer_details("reboot")
+        self.assertIsNone(result["installed"])
+        self.assertIsNone(result["active"])
+        self.assertIsNone(result["last_trigger"])
+
     def test_missing_unit_exit_code_requires_explicit_not_found_property(self):
         for text, present in (("LoadState=not-found\nActiveState=inactive", False), ("", None)):
             with patch("service_state.subprocess.run", return_value=subprocess.CompletedProcess([], 4, text, "")):
@@ -88,7 +117,7 @@ class ServiceObservationTests(unittest.TestCase):
                     "stopped.service": self.observe(output("inactive"))}
         definitions = {key: {"unit": key, "name": key, "controls": []} for key in observed}
         with patch.object(api, "managed_services", return_value=definitions), \
-             patch.object(api, "observe_service", side_effect=lambda unit: observed[unit]), \
+             patch.object(api, "observe_service", side_effect=lambda unit, **_: observed.get(unit, observed["unknown.service"])), \
              patch.object(api, "failed_unit_count", return_value=None), \
              patch.object(api, "run", return_value=""), \
              patch.object(api, "configured_panel_channels", return_value=[]), \

@@ -217,6 +217,18 @@ begin_operation() {
   install -d -m 0750 "${DATA_DIR}"
   exec 9>"${DATA_DIR}/application-worker.lock"
   flock -w 5 9 || die "другая операция уже выполняется; дождитесь её завершения."
+  if [[ -f "${DATA_DIR}/relay/pending.json" ]]; then
+    case "$1" in
+      network-check|integrity-check|doctor) ;;
+      *) die "Сначала проверьте результат прерванного изменения relay в разделе Сеть → Relay." ;;
+    esac
+  fi
+  if [[ -e "${DATA_DIR}/recovery/application-update" || -L "${DATA_DIR}/recovery/application-update" ]]; then
+    case "$1" in
+      network-check|integrity-check|doctor) ;;
+      *) die "Сначала завершите восстановление приложения: sudo python3 ${DATA_DIR}/recovery/application-update/recover.py rollback --data-dir ${DATA_DIR}" ;;
+    esac
+  fi
   if [[ -f "${DATA_DIR}/dns-recovery.json" || -f "${DATA_DIR}/automation-recovery.json" || -f "${DATA_DIR}/mihomo/profile-recovery/manifest.json" || -f "${SECURITY_RECOVERY_MARKER}" ]]; then
     case "$1" in
       network-check|integrity-check|doctor|ssh-access-rollback|ssh-access-disable) ;;
@@ -250,8 +262,10 @@ finish_operation() {
       *) write_action_status "succeeded" 100 "Операция завершена" ;;
     esac
   else
-    if [[ "${CURRENT_ACTION}" == "test-update" ]]; then
-      write_action_status "failed" "${ACTION_PROGRESS}" "Тестовая сборка main ещё не опубликована; установка не выполнялась, рабочая версия не изменена"
+    if [[ -e "${DATA_DIR}/recovery/application-update" ]]; then
+      write_action_status "failed" "${ACTION_PROGRESS}" "Восстановление приложения не завершено; новые изменения заблокированы, требуется ручное восстановление"
+    elif [[ "${CURRENT_ACTION}" == "test-update" ]]; then
+      write_action_status "failed" "${ACTION_PROGRESS}" "Установка тестового релиза завершилась с ошибкой; проверьте результат операции"
     elif [[ "${CURRENT_ACTION}" == "update" ]]; then
       write_action_status "failed" "${ACTION_PROGRESS}" "Обновление приложения остановлено по ошибке или таймауту; рабочая версия сохранена"
     elif [[ "${CURRENT_ACTION}" == "safe-update" ]]; then
@@ -1724,36 +1738,46 @@ restore_update_gateway() {
 
 rollback_interrupted_update() {
   [[ "${UPDATE_SWAP_ACTIVE}" == "yes" ]] || return 0
-  local rollback target failed
-  rollback="$(realpath -m -- "${UPDATE_ROLLBACK_DIR}")"
-  target="$(realpath -m -- "${INSTALL_DIR}")"
+  if [[ -f "${DATA_DIR}/recovery/application-update/recover.py" ]]; then
+    python3 "${DATA_DIR}/recovery/application-update/recover.py" rollback --data-dir "${DATA_DIR}" --worker-lock-fd 9 || return
+    UPDATE_SWAP_ACTIVE="no"
+    UPDATE_ROLLBACK_DIR=""
+    return 0
+  fi
+  local rollback target failed failed_path data_root
+  rollback="$(realpath -m -- "${UPDATE_ROLLBACK_DIR}")" || return 1
+  target="$(realpath -m -- "${INSTALL_DIR}")" || return 1
   [[ "${rollback}" == "${target}.rollback."* ]] || {
     warn "Emergency rollback rejected an unexpected path: ${rollback}"
-    return 0
+    return 1
   }
-  [[ -d "${rollback}" ]] || return 0
+  [[ -d "${rollback}" ]] || { warn "Emergency rollback source is unavailable."; return 1; }
+  data_root="$(realpath -m -- "${DATA_DIR}")" || return 1
+  failed_path="${DATA_DIR}/tmp/interrupted-update.$(date -u +%Y%m%dT%H%M%SZ)"
+  failed="$(realpath -m -- "${failed_path}")" || return 1
+  [[ "${failed}" == "${data_root}/tmp/interrupted-update."* && ! -L "${failed_path}" ]] || { warn "Emergency rollback rejected an unexpected staging path."; return 1; }
+  [[ ! -e "${failed}" ]] || { warn "Emergency rollback staging path already exists: ${failed}"; return 1; }
+  install -d -m 0750 "${data_root}/tmp" || { warn "Emergency rollback staging directory is unavailable."; return 1; }
 
   warn "Update was interrupted after the application swap; restoring the previous release."
-  systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
+  systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || { warn "Emergency rollback could not stop panel services."; return 1; }
   if [[ -d "${INSTALL_DIR}/venv" && ! -e "${rollback}/venv" ]]; then
-    mv -- "${INSTALL_DIR}/venv" "${rollback}/venv"
+    mv -- "${INSTALL_DIR}/venv" "${rollback}/venv" || { warn "Emergency rollback could not preserve the application runtime."; return 1; }
   fi
-  failed="${DATA_DIR}/tmp/interrupted-update.$(date -u +%Y%m%dT%H%M%SZ)"
-  install -d -m 0750 "${DATA_DIR}/tmp"
-  [[ ! -e "${failed}" ]] || { warn "Emergency rollback staging path already exists: ${failed}"; return 0; }
-  [[ ! -e "${INSTALL_DIR}" ]] || mv -- "${INSTALL_DIR}" "${failed}"
-  mv -- "${rollback}" "${INSTALL_DIR}"
+  [[ ! -e "${INSTALL_DIR}" ]] || mv -- "${INSTALL_DIR}" "${failed}" || { warn "Emergency rollback could not retain the interrupted release."; return 1; }
+  mv -- "${rollback}" "${INSTALL_DIR}" || { warn "Emergency rollback could not restore the previous release."; return 1; }
   PROJECT_DIR="${INSTALL_DIR}"
-  restore_update_gateway || return
-  systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" 2>/dev/null || true
-  systemctl reload-or-restart caddy.service 2>/dev/null || true
-  restart_mihomo_manager_if_present || true
+  restore_update_gateway || { warn "Emergency rollback could not restore the gateway configuration."; return 1; }
+  systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" 2>/dev/null || { warn "Emergency rollback could not restart panel services."; return 1; }
+  systemctl reload-or-restart caddy.service 2>/dev/null || { warn "Emergency rollback could not restart the gateway."; return 1; }
+  restart_mihomo_manager_if_present || { warn "Emergency rollback could not restart the profile manager."; return 1; }
   if systemctl is-active --quiet "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service; then
-    [[ ! -d "${failed}" ]] || rm -rf -- "${failed}"
+    [[ ! -d "${failed}" ]] || rm -rf -- "${failed}" || { warn "Emergency rollback could not clear the interrupted release."; return 1; }
     UPDATE_SWAP_ACTIVE="no"
     UPDATE_ROLLBACK_DIR=""
   else
     warn "Previous release was restored on disk but one or more panel services require attention."
+    return 1
   fi
 }
 
@@ -2851,13 +2875,20 @@ install_prebuilt_release() {
 
   rollback="${INSTALL_DIR}.rollback.$(date -u +%Y%m%dT%H%M%SZ)"
   UPDATE_ROLLBACK_DIR="${rollback}"
-  UPDATE_SWAP_ACTIVE="yes"
   info "Установка заранее собранного релиза без Docker и сборки на VPS"
   if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -Eq '^vps-control-(web|gateway)-1$'; then
     legacy_runtime="yes"
-    stop_legacy_containers
   fi
-  systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
+  local recovery_args=()
+  [[ "${legacy_runtime}" != "yes" ]] || recovery_args+=(--legacy)
+  UPDATE_SWAP_ACTIVE="yes"
+  python3 "${INSTALL_DIR}/api/application_recovery.py" prepare --data-dir "${DATA_DIR}" --worker-lock-fd 9 \
+    --installed "${INSTALL_DIR}" --previous "${rollback}" --snippets "${CADDY_SNIPPET_DIR}" \
+    --file "${CADDY_CONFIG}" --file "${SERVICE_FILE}" --file "${WEB_SERVICE_FILE}" \
+    --file /etc/systemd/system/vpn-monitor.service --file /etc/systemd/system/vpn-monitor.timer \
+    "${recovery_args[@]}" || die "Не удалось сохранить состояние восстановления; замена приложения не начиналась."
+  [[ "${legacy_runtime}" != "yes" ]] || stop_legacy_containers
+  systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null
   mv -- "${INSTALL_DIR}" "${rollback}"
   mv -- "${payload}" "${INSTALL_DIR}"
   if [[ "${requirements_changed}" == "no" ]]; then
@@ -2886,33 +2917,15 @@ install_prebuilt_release() {
     || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 \
       "http://127.0.0.1:3000/" >/dev/null; then
     warn "новый релиз не прошёл проверку; выполняется откат."
-    systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
-    if [[ -d "${INSTALL_DIR}/venv" && ! -e "${rollback}/venv" ]]; then
-      mv -- "${INSTALL_DIR}/venv" "${rollback}/venv"
-    fi
-    rm -rf -- "${INSTALL_DIR}"
-    mv -- "${rollback}" "${INSTALL_DIR}"
-    PROJECT_DIR="${INSTALL_DIR}"
-    restore_update_gateway
-    write_integrity_manifest
-    if [[ "${legacy_runtime}" == "yes" ]]; then
-      systemctl stop "${APP_NAME}-web.service" caddy.service 2>/dev/null || true
-      start_legacy_containers
-      systemctl restart "${APP_NAME}-api.service"
-    else
-      systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service"
-      systemctl reload-or-restart caddy.service
-    fi
-    restart_mihomo_manager_if_present
-    if ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:8000/api/health" >/dev/null \
-      || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:3000/" >/dev/null; then
-      rm -rf -- "${stage_root}"
-      die "автоматический откат выполнен, но восстановленная версия не запустилась."
-    fi
+    rollback_interrupted_update || die "Автоматическое восстановление не завершено; используйте сохранённый recovery/application-update/recover.py."
     rm -rf -- "${stage_root}"
     die "подготовленный релиз отклонён; предыдущая версия восстановлена."
   fi
 
+  python3 "${DATA_DIR}/recovery/application-update/recover.py" commit --data-dir "${DATA_DIR}" --worker-lock-fd 9 \
+    || die "Не удалось подтвердить готовность приложения; состояние восстановления сохранено."
+  UPDATE_SWAP_ACTIVE="no"
+  UPDATE_ROLLBACK_DIR=""
   if [[ "${preserve_previous}" == "yes" ]]; then
     [[ "${TEST_BACKUP_DIR}" == "${DATA_DIR}/test-app-backup" ]] || die "небезопасный путь резервной версии."
     rm -rf -- "${TEST_BACKUP_DIR}"
@@ -2920,8 +2933,6 @@ install_prebuilt_release() {
   else
     rm -rf -- "${rollback}"
   fi
-  UPDATE_SWAP_ACTIVE="no"
-  UPDATE_ROLLBACK_DIR=""
   UPDATE_GATEWAY_BACKUP_DIR=""
   rm -rf -- "${stage_root}"
   cleanup_legacy_runtime
@@ -3009,7 +3020,14 @@ restore_test_app() {
   local failed_install
   [[ -r "${SERVICE_MODE_FILE}" ]] || die "возврат с тестовой версии разрешён только в сервисном режиме."
   [[ -d "${TEST_BACKUP_DIR}" ]] || die "сохранённая рабочая версия приложения не найдена."
-  failed_install="${INSTALL_DIR}.failed-test.$(date -u +%Y%m%dT%H%M%SZ)"
+  failed_install="${INSTALL_DIR}.rollback.$(date -u +%Y%m%dT%H%M%SZ)"
+  UPDATE_ROLLBACK_DIR="${failed_install}"
+  UPDATE_SWAP_ACTIVE="yes"
+  python3 "${INSTALL_DIR}/api/application_recovery.py" prepare --data-dir "${DATA_DIR}" --worker-lock-fd 9 \
+    --installed "${INSTALL_DIR}" --previous "${failed_install}" --candidate-backup "${TEST_BACKUP_DIR}" \
+    --snippets "${CADDY_SNIPPET_DIR}" --file "${CADDY_CONFIG}" --file "${SERVICE_FILE}" --file "${WEB_SERVICE_FILE}" \
+    --file /etc/systemd/system/vpn-monitor.service --file /etc/systemd/system/vpn-monitor.timer \
+    || die "Не удалось сохранить состояние возврата; версия приложения не заменялась."
   systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service"
   mv -- "${INSTALL_DIR}" "${failed_install}"
   mv -- "${TEST_BACKUP_DIR}" "${INSTALL_DIR}"
@@ -3035,18 +3053,14 @@ restore_test_app() {
     || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:8000/api/health" >/dev/null \
     || ! curl --fail --silent --retry 10 --retry-connrefused --retry-delay 2 "http://127.0.0.1:3000/" >/dev/null; then
     warn "сохранённая версия не запустилась; тестовая версия восстанавливается."
-    systemctl stop "${APP_NAME}-web.service" "${APP_NAME}-api.service" 2>/dev/null || true
-    if [[ -d "${INSTALL_DIR}/venv" && ! -e "${failed_install}/venv" ]]; then
-      mv -- "${INSTALL_DIR}/venv" "${failed_install}/venv"
-    fi
-    mv -- "${INSTALL_DIR}" "${TEST_BACKUP_DIR}"
-    mv -- "${failed_install}" "${INSTALL_DIR}"
-    systemctl daemon-reload
-    systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
-    restart_mihomo_manager_if_present
+    rollback_interrupted_update || die "Возврат прерван; новые изменения заблокированы до ручного восстановления."
     die "возврат отклонён; тестовая версия продолжает работать."
   fi
-  [[ "${failed_install}" == "${INSTALL_DIR}.failed-test."* ]] || die "небезопасный путь очистки тестовой версии."
+  python3 "${DATA_DIR}/recovery/application-update/recover.py" commit --data-dir "${DATA_DIR}" --worker-lock-fd 9 \
+    || die "Не удалось подтвердить готовность восстановленной production-версии."
+  UPDATE_SWAP_ACTIVE="no"
+  UPDATE_ROLLBACK_DIR=""
+  [[ "${failed_install}" == "${INSTALL_DIR}.rollback."* ]] || die "небезопасный путь очистки тестовой версии."
   rm -rf -- "${failed_install}"
   install -m 0755 "${INSTALL_DIR}/scripts/vps-control.sh" "${COMMAND_PATH}"
   rm -f "${DATA_DIR}/application-version.json"

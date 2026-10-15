@@ -16,6 +16,7 @@ export function NetworkEndpoints({
   initialChecks,
   knownCdnDomains = [],
   busy,
+  readFailed,
   dirty,
   onChange,
   onRouteListChange,
@@ -27,6 +28,7 @@ export function NetworkEndpoints({
   initialChecks?: Partial<Record<keyof NetworkEndpointSettings, NetworkEndpointCheck>>;
   knownCdnDomains?: string[];
   busy: boolean;
+  readFailed: boolean;
   dirty: boolean;
   onChange: (key: keyof NetworkEndpointSettings, value: string) => void;
   onRouteListChange: (key: keyof NetworkEndpointSettings, values: string[]) => void;
@@ -94,7 +96,7 @@ export function NetworkEndpoints({
   };
   async function check(field: (typeof fields)[number]) {
     const domain = String(draft[field.key] || "").trim();
-    if (!domain || busy || inFlight.current) return;
+    if (!domain || busy || readFailed || inFlight.current) return;
     const requestGeneration = generation.current;
     const consumerId = consumerIds[field.key];
     inFlight.current = true;
@@ -222,7 +224,7 @@ export function NetworkEndpoints({
                       <button
                         type="button"
                         onClick={() => void check(field)}
-                        disabled={busy || Boolean(checking) || !value}
+                        disabled={busy || readFailed || Boolean(checking) || !value}
                       >
                         {checking === field.key ? "Проверяем…" : "Проверить"}
                       </button>
@@ -294,9 +296,9 @@ export function NetworkEndpoints({
                 type="button"
                 className="networkPrimaryButton"
                 onClick={onSave}
-                disabled={busy || !dirty || pendingAddress}
+                disabled={busy || readFailed || !dirty || pendingAddress}
               >
-                {busy ? "Сохраняем…" : "Сохранить адреса"}
+                Сохранить адреса
               </button>
             </div>
           </section>

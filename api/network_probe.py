@@ -428,7 +428,7 @@ def prepare_mihomo_vless(binding: dict, consumers: list[dict], profiles: list[di
 
 def prepare_direct_quic(binding: dict, consumers: list[dict], clients: list[dict], protocol: str,
                         config: dict, settings: dict, certificate: str, server_name: str,
-                        users: dict | None = None) -> ProbePlan:
+                        users: dict | None = None, *, managed_origin: bool = False) -> ProbePlan:
     if binding.get("state") != "active" or binding.get("kind") != "udp_relay" or protocol not in {"tuic", "hysteria2"}:
         raise ProbeUnavailable("UDP probe поддерживает существующие Hysteria2/TUIC consumers")
     address = binding["address"]
@@ -438,7 +438,9 @@ def prepare_direct_quic(binding: dict, consumers: list[dict], clients: list[dict
         raise ProbeUnavailable("TLS identity UDP listener недоступна")
     for client in clients:
         consumer_id = f"direct:{client.get('id', '')}"
-        if consumer_id not in references or client.get("protocol") != protocol or client.get("channel_mode") != "udp_relay" or client.get("route_endpoint") != address:
+        if consumer_id not in references or client.get("protocol") != protocol:
+            continue
+        if not managed_origin and (client.get("channel_mode") != "udp_relay" or client.get("route_endpoint") != address):
             continue
         port = client.get("port")
         if type(port) is not int or not 1 <= port <= 65535 or settings.get("port") != port or binding.get("listen_port") not in {None, port}:

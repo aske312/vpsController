@@ -36,7 +36,7 @@
 }
 .gateOperationCard.error { --notification-color:var(--red, #f07b7b); }
 .gateOperationCard.success { --notification-color:var(--green, #62d7b4); }
-.gateOperationCard.info { --notification-color:#97b9dc; }
+.gateOperationCard.info, .gateOperationCard.cancelled { --notification-color:#97b9dc; }
 .gateOperationContent { display:grid; grid-template-columns:27px minmax(0,1fr) auto; align-items:start; gap:9px; padding:10px 11px 9px; }
 .gateOperationIcon {
   width:27px; height:27px; display:grid; place-items:center; border-radius:8px;

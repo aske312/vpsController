@@ -10,6 +10,7 @@ from tests.api.support import manager
 from tests.api import test_subscription_formats as subscription_tests
 
 policy = manager.client_compatibility
+profile_rules = manager.profile_rules
 
 
 def check(scenario, **changes):
@@ -66,7 +67,13 @@ class VerificationMatrixTests(unittest.TestCase):
 
 
 class VerifiedSubscriptionTests(unittest.TestCase):
-    setUp = subscription_tests.SubscriptionFormatTests.setUp
+    def setUp(self):
+        subscription_tests.SubscriptionFormatTests.setUp(self)
+        # Xray exports independent configs, without a proxy-group strategy.
+        values = {**manager.routing_settings(), "strategy": ""}
+        self.enterContext(patch.object(manager, "routing_settings", return_value=values))
+        self.enterContext(patch.object(manager, "profile_rules", side_effect=profile_rules))
+
     fetch = subscription_tests.SubscriptionFormatTests.fetch
 
     def matrix(self, **changes):
@@ -139,6 +146,57 @@ class VerifiedSubscriptionTests(unittest.TestCase):
         self.assertEqual(manager.verified_profile_clients(self.store[0], "common"), [])
         response = self.fetch("Happ/3.0", hwid=None, extra_headers=self.headers())
         self.assertIn(".yaml", response.headers["content-disposition"])
+
+    def test_inherited_strategy_is_checked_before_recommending_an_exporter(self):
+        self.store[0]["routing"] = {}
+        global_values = {**manager.routing_settings(), "strategy": "fallback"}
+        with patch.object(manager, "routing_settings", return_value=global_values):
+            scenario = manager.client_verification_scenario(self.store[0], "common")
+            self.assertEqual(scenario["strategy"], "fallback")
+            record = check(scenario)
+            with patch.object(policy, "verified_records", return_value=[record]):
+                self.assertEqual(manager.verified_profile_clients(self.store[0], "common"), [])
+                self.assertIn(".yaml", self.fetch("Happ/3.0", hwid=None, extra_headers=self.headers()).headers["content-disposition"])
+
+    def test_rule_and_resolver_content_changes_invalidate_a_matching_check(self):
+        self.store[0]["devices"][0]["routing"] = {"rules": "DOMAIN-SUFFIX,private.example,DIRECT"}
+        self.matrix()
+        self.assertEqual(len(manager.verified_profile_clients(self.store[0], "common")), 1)
+        self.store[0]["devices"][0]["routing"]["rules"] = "DOMAIN-SUFFIX,other.example,DIRECT"
+        self.assertEqual(manager.verified_profile_clients(self.store[0], "common"), [])
+        self.matrix()
+        dns = {**manager.dns_settings(), "nameserver": "https://private.example/dns-query?token=secret"}
+        with patch.object(manager, "dns_settings", return_value=dns):
+            self.assertEqual(manager.verified_profile_clients(self.store[0], "common"), [])
+            scenario = json.dumps(manager.client_verification_scenario(self.store[0], "common"))
+            self.assertNotIn("private.example", scenario)
+            self.assertNotIn("other.example", scenario)
+            self.assertNotIn("secret", scenario)
+
+    def test_global_bypass_and_protection_switches_do_not_become_device_requirements(self):
+        before = manager.client_verification_scenario(self.store[0], "common")
+        global_values = {**manager.routing_settings(), "direct_games_enabled": True,
+                         "direct_local_network": True, "tunnel_ech": True, "tunnel_privacy": True}
+        with patch.object(manager, "routing_settings", return_value=global_values):
+            self.assertEqual(manager.client_verification_scenario(self.store[0], "common"), before)
+
+    def test_inherited_rules_change_invalidates_yaml_application_evidence(self):
+        values = {**manager.routing_settings(), "rules": "DOMAIN-SUFFIX,private.example,DIRECT"}
+        with patch.object(manager, "routing_settings", return_value=values):
+            self.matrix(format="mihomo")
+            self.assertEqual(len(manager.verified_profile_clients(self.store[0], "common")), 1)
+            values["rules"] = "DOMAIN-SUFFIX,private.example,GATE.312"
+            self.assertEqual(manager.verified_profile_clients(self.store[0], "common"), [])
+
+    def test_personal_rule_edits_change_scenario_without_exposing_entries(self):
+        self.store[0]["devices"][0]["personal_rule_ids"] = ["personal"]
+        rules = [{"id": "personal", "kind": "domain", "target": "DIRECT", "entries": ["private.example"]}]
+        with patch.object(manager, "personal_rules", return_value=rules):
+            self.matrix(format="mihomo")
+            self.assertEqual(len(manager.verified_profile_clients(self.store[0], "common")), 1)
+            rules[0]["target"] = "GATE.312"
+            self.assertEqual(manager.verified_profile_clients(self.store[0], "common"), [])
+            self.assertNotIn("private.example", json.dumps(manager.client_verification_scenario(self.store[0], "common")))
 
     def test_record_cannot_hide_unsupported_connections_or_features(self):
         for routing in ({"tunnel_ech": True}, {"strategy": "fallback"}, {"direct_games_enabled": True}):

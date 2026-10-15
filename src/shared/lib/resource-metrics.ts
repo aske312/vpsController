@@ -10,7 +10,7 @@ export function usedPercent(total: number | null | undefined, available: number 
 }
 
 export type NetworkSample = {rx: number; tx: number; at: number};
-export function networkSample(resources: ResourceMetrics, previous: NetworkSample | null, now: number) {
+export function networkSample(resources: Pick<ResourceMetrics, "network_rx" | "network_tx">, previous: NetworkSample | null, now: number) {
   const {network_rx: rx, network_tx: tx} = resources;
   const sample = knownMetric(rx) && knownMetric(tx) ? {rx, tx, at: now} : null;
   const seconds = previous ? (now - previous.at) / 1000 : 0;

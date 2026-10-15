@@ -2,10 +2,11 @@
 
 import type { ApplicationAction, ApplicationDependency, ApplicationStatus, ServicesStatus } from "../../shared/types/control-plane";
 import { applicationRuntime } from "./runtime-state";
+import { applicationVersionState } from "./version-state";
 import { actionLabels, applicationActionState } from "../../shared/lib/control-plane-ui";
 
-type ApplicationVersion = { branch?: string; current_commit?: string; latest_commit?: string; outdated?: boolean | null; checked_at?: string; error?: string; refreshing?: boolean };
-type UpdateStatus = { available?: number; security?: number; kernel_available?: boolean; reboot_required?: boolean; automatic?: boolean; source?: string; checked_at?: string; refreshing?: boolean };
+type ApplicationVersion = { branch?: string; current_commit?: string; latest_commit?: string; outdated?: boolean | null; checked_at?: string | null; error?: string; refreshing?: boolean };
+type UpdateStatus = { available?: number | null; security?: number | null; kernel_available?: boolean | null; reboot_required?: boolean; automatic?: boolean | null; source?: string; checked_at?: string | null; refreshing?: boolean };
 
 type ApplicationViewProps = {
   application: ApplicationStatus | null; services: ServicesStatus | null; applicationVersion?: ApplicationVersion; updates?: UpdateStatus;
@@ -21,6 +22,9 @@ type ApplicationViewProps = {
 
 export function ApplicationView({ application, services, applicationVersion, applicationDependencies, updates, serviceModeActive, busy, applicationLogs, runApplicationAction, changeServiceMode, changePanelAccess, changeCdnSecurity, loadApplicationLogs, downloadLogs, downloadUpdateReport }: ApplicationViewProps) {
   const actionState = applicationActionState(application?.action);
+  const versionState = applicationVersionState(applicationVersion);
+  const recoveryRequired = application?.recovery?.application_required === true;
+  const mutationBlocked = busy || recoveryRequired;
   const apiRuntime = applicationRuntime(application?.api);
   const runtimeItems = (application?.containers || []).map((item) => ({ ...item, presentation: applicationRuntime(item) }));
   const runningCount = application && runtimeItems.every((item) => item.presentation.state !== "unknown")
@@ -40,6 +44,10 @@ export function ApplicationView({ application, services, applicationVersion, app
             <span className={serviceModeActive ? "warn" : ""}><small>MODE</small><strong>{serviceModeActive ? "SERVICE" : "NORMAL"}</strong><em>{services?.panel_access?.public ? "public access" : "protected access"}</em></span>
           </div>
         </article>
+
+        {recoveryRequired && <div className="applicationRecoveryState" role="alert">
+          <span><strong>Восстановление приложения не завершено</strong><small>Новые изменения заблокированы. Подключитесь по SSH и запустите сохранённую команду восстановления:</small><code>sudo python3 /var/lib/vps-control/recovery/application-update/recover.py {application?.recovery?.application_command || "rollback"}</code><small>{application?.recovery?.application_command === "commit" ? "Команда проверит уже принятую версию и завершит сохранение результата." : "Команда продолжит откат прежней операции."} Диагностика и журналы доступны.</small></span>
+        </div>}
 
         <article className="applicationControlPlane">
           <div className="applicationControlShade" />
@@ -75,16 +83,16 @@ export function ApplicationView({ application, services, applicationVersion, app
             </div>
 
             <div className="applicationPrimaryActions">
-              <button onClick={() => void runApplicationAction("restart")} disabled={busy}><span>RESTART</span><strong>Перезапустить</strong><small>Панель и API без reboot VPS</small></button>
-              <button onClick={() => void runApplicationAction("update")} disabled={busy}><span>UPDATE</span><strong>Обновить</strong><small>Установить проверенный релиз</small></button>
+              <button onClick={() => void runApplicationAction("restart")} disabled={mutationBlocked}><span>RESTART</span><strong>Перезапустить</strong><small>Панель и API без reboot VPS</small></button>
+              <button onClick={() => void runApplicationAction("update")} disabled={mutationBlocked}><span>UPDATE</span><strong>Обновить</strong><small>Установить проверенный релиз</small></button>
               <button onClick={() => void runApplicationAction("network-check")} disabled={busy}><span>NETWORK</span><strong>Проверить сеть</strong><small>Internet и все установленные протоколы</small></button>
               <button onClick={() => void runApplicationAction("integrity-check")} disabled={busy}><span>VERIFY</span><strong>Целостность</strong><small>Файлы, права и конфигурация</small></button>
             </div>
 
             <div className="applicationSecondaryActions">
-              <button onClick={() => void runApplicationAction("identity")} disabled={busy}>Обновить данные VPS</button>
-              <button onClick={() => void runApplicationAction("optimize")} disabled={busy}>Освободить ресурсы</button>
-              {serviceModeActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={busy}>Rollback</button>}
+              <button onClick={() => void runApplicationAction("identity")} disabled={mutationBlocked}>Обновить данные VPS</button>
+              <button onClick={() => void runApplicationAction("optimize")} disabled={mutationBlocked}>Освободить ресурсы</button>
+              {serviceModeActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={mutationBlocked}>Rollback</button>}
             </div>
           </div>
         </article>
@@ -103,30 +111,30 @@ export function ApplicationView({ application, services, applicationVersion, app
             <div className="applicationEnvironmentRows">
               <label>
                 <span><strong>Сервисный режим</strong><small>{serviceModeActive ? "Разрешены локальная test-сборка, rollback и операции обслуживания" : "Обычная production-работа"}</small></span>
-                <span className="applicationSwitch"><input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={busy} /><i /></span>
+                <span className="applicationSwitch"><input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={mutationBlocked} /><i /></span>
               </label>
               <label>
                 <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? `Выключен · адрес после включения ${services?.panel_access?.internal_url || "http://admin.312.net"}` : `Доступ через ${services?.panel_access?.internal_url || (services?.panel_access?.vpn_urls || []).join("  ") || "защищённое подключение"}`}</small></span>
-                <span className="applicationSwitch"><input type="checkbox" checked={!services?.panel_access?.public} onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")} disabled={busy || !services || (services.panel_access?.public !== false && services.panel_access?.can_enable === false)} /><i /></span>
+                <span className="applicationSwitch"><input type="checkbox" checked={!services?.panel_access?.public} onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")} disabled={mutationBlocked || !services || services.observation_failed || (services.panel_access?.public !== false && services.panel_access?.can_enable === false)} /><i /></span>
               </label>
               <label>
                 <span><strong>Проверка сертификата Cloudflare</strong><small>Только CDN-каналы. Сначала включите Full (strict) и Authenticated Origin Pulls в CF. При ошибке проверки настройка откатится; возможен краткий разрыв CDN.</small><small>Подтверждает сеть CF, а не принадлежность вашему аккаунту.</small></span>
-                <span className="applicationSwitch"><input type="checkbox" checked={Boolean(application?.cdn_security?.authenticated_origin_pulls)} onChange={(event) => void changeCdnSecurity(event.target.checked)} disabled={busy || !application?.cdn_security} /><i /></span>
+                <span className="applicationSwitch"><input type="checkbox" checked={Boolean(application?.cdn_security?.authenticated_origin_pulls)} onChange={(event) => void changeCdnSecurity(event.target.checked)} disabled={mutationBlocked || !application?.cdn_security} /><i /></span>
               </label>
             </div>
             <div className="applicationRelease">
               <span><small>CURRENT</small><strong>{applicationVersion?.current_commit?.slice(0, 12) || "unknown"}</strong></span>
               <span><small>LATEST</small><strong>{applicationVersion?.latest_commit?.slice(0, 12) || "unknown"}</strong></span>
-              <span className={applicationVersion?.outdated ? "bad" : "ok"}><small>STATUS</small><strong>{applicationVersion?.refreshing ? "CHECKING" : applicationVersion?.outdated ? "UPDATE" : "CURRENT"}</strong></span>
+              <span className={versionState === "current" ? "ok" : versionState === "outdated" ? "bad" : ""}><small>STATUS</small><strong>{versionState === "checking" ? "CHECKING" : versionState === "outdated" ? "UPDATE" : versionState.toUpperCase()}</strong></span>
             </div>
           </section>
 
           <section className="applicationLifecycle">
             <header><div><p className="eyebrow">SYSTEM LIFECYCLE</p><h2>VPS и системные пакеты</h2></div></header>
             <div className="applicationLifecycleActions">
-              <button onClick={() => void runApplicationAction("safe-update")} disabled={busy}><strong>Обновить сервер</strong><small>{updates?.available ? `${updates.available} доступных обновлений · полный Debian upgrade` : "Все пакеты Debian · точка восстановления · проверка"}</small></button>
-              <button onClick={() => void runApplicationAction("reboot")} disabled={busy}><strong>Перезагрузить VPS</strong><small>Корректно завершить службы и reboot</small></button>
-              <button className="danger" onClick={() => void runApplicationAction("poweroff")} disabled={busy}><strong>Выключить VPS</strong><small>Повторный запуск потребуется у провайдера</small></button>
+              <button onClick={() => void runApplicationAction("safe-update")} disabled={mutationBlocked}><strong>Обновить сервер</strong><small>{updates?.available ? `${updates.available} доступных обновлений · полный Debian upgrade` : "Все пакеты Debian · точка восстановления · проверка"}</small></button>
+              <button onClick={() => void runApplicationAction("reboot")} disabled={mutationBlocked}><strong>Перезагрузить VPS</strong><small>Корректно завершить службы и reboot</small></button>
+              <button className="danger" onClick={() => void runApplicationAction("poweroff")} disabled={mutationBlocked}><strong>Выключить VPS</strong><small>Повторный запуск потребуется у провайдера</small></button>
             </div>
             <div className="applicationRecoveryState">
               <span><strong>{application?.recovery?.available ? "Точка восстановления готова" : "Точка будет создана автоматически"}</strong><small>Хранятся три зашифрованные копии приложения, личных данных и конфигурации. Это не снимок диска и не откат пакетов Debian.</small></span>

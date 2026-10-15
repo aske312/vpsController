@@ -52,6 +52,8 @@ export type Module = {
   settings?: SettingField[];
   connection_settings?: SettingField[];
   settings_values: Record<string, string | number | boolean>;
+  settings_revision?: string;
+  last_settings_operation_id?: string;
   installed_version?: string;
   available_version?: string;
   update_available?: boolean;
@@ -62,6 +64,7 @@ export type Profile = {
   id: string;
   revision?: string;
   create_operation_id?: string;
+  create_revision?: string;
   last_operation_id?: string;
   export_filename: string;
   name: string;
@@ -85,12 +88,16 @@ export type ProfileConnection = {
   settings: Record<string, string | number | boolean>;
 };
 
-export type PersonalRule = { id: string; code: string; title: string; description: string; kind: "domain" | "process"; entries: string[]; target: "GATE.312" | "DIRECT" | "REJECT" };
+export type PersonalRule = { id: string; revision?: string; last_operation_id?: string; code: string; title: string; description: string; kind: "domain" | "process"; entries: string[]; target: "GATE.312" | "DIRECT" | "REJECT" };
 
 export type VerifiedClient = { id: string; client_name: string; client_version: string; core_name: string; core_version: string; os: string; os_version: string; format: "mihomo" | "singbox" | "xray" | "uri"; app_url: string };
 export type ProfileDevice = { id: string; name: string; scope?: "common" | "hwid" | "manual" | "legacy"; manual?: boolean; subscription_format?: "mihomo" | "singbox" | "xray" | "uri"; verified_clients?: VerifiedClient[]; supported_formats?: ("mihomo" | "singbox" | "xray" | "uri")[]; hwid_hash?: string; created_at?: string; last_seen_at?: string; os?: string; os_version?: string; client_name?: string; client_version?: string; core_name?: string; core_version?: string; user_agent?: string; personal_rule_ids?: string[]; routing?: Record<string, string | number | boolean> };
 
 export type PolicySettings = {
+  last_operation_id?: string;
+  presets_last_operation_id?: string;
+  revision?: string;
+  presets_revision?: string;
   schema: SettingField[];
   values: Record<string, string | number | boolean>;
   presets?: ProfilePreset[];

@@ -157,6 +157,11 @@ def mutation_lock(data_dir: Path):
 
 
 def require_recovery_clear(data_dir: Path, action: str | None = None) -> None:
+    if (data_dir / 'relay/pending.json').exists() and action not in {'relay-reconcile', 'network-check', 'integrity-check', 'doctor'}:
+        raise OperationConflict('Сначала проверьте результат прерванного изменения relay в разделе Сеть → Relay')
+    if (data_dir / "recovery/application-update").exists() or (data_dir / "recovery/application-update").is_symlink():
+        if action not in {"network-check", "integrity-check", "doctor"}:
+            raise OperationConflict("Сначала завершите восстановление приложения; новые изменения заблокированы. Используйте сохранённый recovery/application-update/recover.py")
     if action in {"mihomo-module-recover:profiles", "dns-recover", "automation-recover", "network-check", "integrity-check", "doctor", "ssh-access-rollback", "ssh-access-disable"}:
         return
     pending = [name for name in ("dns-recovery.json", "automation-recovery.json", "mihomo/profile-recovery/manifest.json", "recovery/security-recovery.txt") if (data_dir / name).exists()]
@@ -168,6 +173,7 @@ def require_recovery_clear(data_dir: Path, action: str | None = None) -> None:
 def short_mutation(data_dir: Path):
     require_recovery_clear(data_dir)
     with mutation_lock(data_dir):
+        require_recovery_clear(data_dir)
         with locked(data_dir):
             current = read(data_dir / "application-action.json")
             if current and current.get("state") not in TERMINAL:
@@ -291,7 +297,7 @@ def prune(data_dir: Path, protected: str | None, *, retention_days=None, byte_bu
     byte_budget = policy["disk_limit_mb"] * 1024 * 1024 if byte_budget is None else byte_budget
     protected_ids = {protected}
     recovery_root = data_dir.parent if data_dir.name == "mihomo" else data_dir
-    for recovery in (recovery_root / "dns-recovery.json", recovery_root / "automation-recovery.json", recovery_root / "mihomo/profile-recovery/manifest.json", recovery_root / "recovery/security-recovery.txt"):
+    for recovery in (recovery_root / "dns-recovery.json", recovery_root / "automation-recovery.json", recovery_root / "mihomo/profile-recovery/manifest.json", recovery_root / "recovery/security-recovery.txt", recovery_root / "recovery/application-update/manifest.json"):
         if recovery.exists():
             try:
                 protected_ids.add(read(recovery).get("operation_id"))

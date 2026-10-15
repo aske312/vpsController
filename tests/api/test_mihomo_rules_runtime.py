@@ -145,7 +145,7 @@ class RuleExportTests(unittest.TestCase):
                 config["hosts"] = {name: "127.0.0.1" for name in ("sberbank.ru", "ads.audit.test", "allowed.ads.audit.test", "unmatched.audit.test")}
                 config["dns"]["enable"] = False
                 config["log-level"] = "debug"
-                config["mixed-port"] = port = free_port()
+                config["mixed-port"] = port = free_port(udp=True)
                 # Isolate routing from the transport layer already covered by
                 # the encrypted and QUIC traffic tests.
                 proxy_name = config["proxies"][0]["name"]

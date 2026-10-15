@@ -42,13 +42,15 @@ import port_allocation
 from dns_policy import build_xray_dns, probe_xray_dns, successful_dns_response
 import cdn_operation
 import application_operation
+import application_recovery
 import operation_policy
 import network_routes
 import network_probe
+import relay_manager
 import yaml
 import ech_settings
 from protocol_health import TrafficSampler, protocol_health
-from service_state import observe_service, ssh_observation, failed_unit_count
+from service_state import observe_service, ssh_observation, observed_active, observed_enabled, failed_unit_count
 from component_state import image_files, component_state
 from component_registry import ComponentRegistry, RegistryError, paths_from_manifest, inventory, fingerprint
 from system_metrics import CpuSampler, collect_resources
@@ -79,6 +81,9 @@ from schemas import (
     ClientConnectionSettings,
     ClientCreate,
     ProtocolSettingsUpdate,
+    RelayHostSettings,
+    RelayRouteSettings,
+    RelayExportRequest,
 )
 
 @asynccontextmanager
@@ -1639,22 +1644,32 @@ def refresh_updates_cache() -> None:
     if not updates_refresh_lock.acquire(blocking=False):
         return
     try:
+        status = {
+            "available": None, "security": None, "kernel_available": None,
+            "checked_at": None, "error": "Не удалось проверить обновления пакетов",
+        }
         try:
             result = subprocess.run(
-                ["bash", "-lc", "apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst ' || true"],
+                ["apt-get", "-s", "-o", "Debug::NoLocking=1", "upgrade"],
                 capture_output=True, text=True, timeout=150, check=False,
+                env={**os.environ, "LC_ALL": "C"},
             )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return
-        output = result.stdout.strip()
-        lines = output.splitlines()
-        status = {
-            "available": len(lines),
-            "security": sum(1 for line in lines if "security" in line.lower() or "-security" in line.lower()),
-            "kernel_available": any(re.search(r"^Inst linux-(image|headers|generic|virtual)", line) for line in lines),
-            "checked_at": datetime.now(timezone.utc).isoformat(),
-        }
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
+            summary = re.search(r"(?m)^(\d+) upgraded, (\d+) newly installed, (\d+) to remove and (\d+) not upgraded\.$", result.stdout)
+            lines = [line for line in result.stdout.splitlines() if line.startswith("Inst ")]
+            if result.returncode != 0 or not summary or int(summary[3]) or int(summary[4]) \
+                    or len(lines) != int(summary[1]) + int(summary[2]) \
+                    or any(not re.match(r"^Inst \S+ (?:\[[^\]]+\] )?\(.+\)", line) for line in lines):
+                raise ValueError("Unconfirmed apt simulation")
+            status = {
+                "available": len(lines),
+                "security": sum(1 for line in lines if "security" in line.lower()),
+                "kernel_available": any(re.search(r"^Inst linux-(image|headers|generic|virtual)", line) for line in lines),
+                "checked_at": datetime.now(timezone.utc).isoformat(), "error": "",
+            }
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            pass
+        status["_observation_version"] = 1
+        UPDATES_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = UPDATES_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(status), encoding="utf-8")
         os.chmod(tmp, 0o600)
@@ -1666,21 +1681,28 @@ def refresh_updates_cache() -> None:
 def update_status() -> dict:
     cached: dict = {}
     try:
-        cached = json.loads(UPDATES_FILE.read_text(encoding="utf-8"))
+        candidate = json.loads(UPDATES_FILE.read_text(encoding="utf-8"))
+        if isinstance(candidate, dict) and candidate.get("_observation_version") == 1:
+            counts = (candidate.get("available"), candidate.get("security"))
+            if candidate.get("error") and all(value is None for value in counts) and candidate.get("kernel_available") is None:
+                cached = candidate
+            elif all(type(value) is int and value >= 0 for value in counts) \
+                    and counts[1] <= counts[0] and type(candidate.get("kernel_available")) is bool \
+                    and isinstance(candidate.get("checked_at"), str) and candidate["checked_at"]:
+                cached = candidate
+        age = max(0, time.time() - UPDATES_FILE.stat().st_mtime) if cached else float("inf")
     except (OSError, json.JSONDecodeError):
-        pass
-    age = time.time() - UPDATES_FILE.stat().st_mtime if UPDATES_FILE.exists() else float("inf")
-    if age > 900 and not updates_refresh_lock.locked():
+        age = float("inf")
+    refresh_due = age > (60 if cached.get("error") else 900)
+    if refresh_due and not updates_refresh_lock.locked():
         threading.Thread(target=refresh_updates_cache, daemon=True).start()
     if cached:
-        return {**cached, "source": "apt-get simulation", "refreshing": age > 900}
-    fallback = run("bash", "-lc", "apt list --upgradable 2>/dev/null | tail -n +2", timeout=10).splitlines()
+        return {**{key: value for key, value in cached.items() if not key.startswith("_")},
+                "source": "apt-get simulation", "refreshing": refresh_due or updates_refresh_lock.locked()}
     return {
-        "available": len(fallback),
-        "security": sum(1 for line in fallback if "security" in line.lower() or "-security" in line.lower()),
-        "kernel_available": any(line.startswith(("linux-image", "linux-headers", "linux-generic", "linux-virtual")) for line in fallback),
+        "available": None, "security": None, "kernel_available": None,
         "checked_at": None,
-        "source": "apt cache (предварительно)",
+        "source": "apt-get simulation",
         "refreshing": True,
     }
 
@@ -2547,6 +2569,225 @@ def start_network_mutation(name: str, payload: dict, identity: str | None) -> di
         raise HTTPException(status_code=503, detail="Не удалось сохранить запрос операции; проверьте историю перед повтором") from None
 
 
+def relay_control():
+    return relay_manager.RelayManager(DATA_DIR, PUBLIC_IPV4)
+
+
+def relay_targets():
+    """Only public protocol ports; never expose API, auth, metrics or local inbounds."""
+    allowed = set()
+    images = protocol_image_manifests()
+    for protocol in ('wg', 'awg', 'vless-reality-xhttp', 'hysteria2', 'tuic', 'trojan', 'openvpn'):
+        if not images.get(protocol, {}).get('installed'):
+            continue
+        ports = port_allocation.module_ports(protocol)
+        if ports:
+            _, transport, port, _ = ports[0]
+            allowed.add((transport, port))
+    # Public TLS gateway; backend/auth ports are deliberately excluded.
+    if MIHOMO_VLESS_CDN_ROUTES.exists() and any(MIHOMO_VLESS_CDN_ROUTES.glob('*.json')) or images.get('vless-reality-xhttp', {}).get('installed'):
+        allowed.add(('tcp', 443))
+    for path in SHADOWSOCKS_CONFIG_DIR.glob('*.json'):
+        value = json.loads(path.read_text(encoding='utf-8'))
+        if type(value.get('server_port')) is int:
+            allowed.update((transport, value['server_port']) for transport in ('tcp', 'udp'))
+    # Mihomo's public transport listeners are declared by installed modules.
+    for module_id in ('transport-wg', 'transport-awg', 'transport-reality', 'transport-hysteria2', 'transport-tuic'):
+        settings_file = DATA_DIR / 'mihomo' / 'settings' / f'{module_id}.json'
+        if settings_file.is_file():
+            value = json.loads(settings_file.read_text(encoding='utf-8'))
+            port = value.get('port')
+            if type(port) is int and 1 <= port <= 65535:
+                allowed.add(('tcp' if module_id == 'transport-reality' else 'udp', port))
+    output = run('ss', '-H', '-lntu', check=True)
+    listening = set()
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) < 5 or parts[0] not in ('tcp', 'udp'):
+            continue
+        address, _, port = parts[4].rpartition(':')
+        if not port.isdigit():
+            continue
+        address = address.strip('[]')
+        if address not in ('*', '0.0.0.0', '::', PUBLIC_IPV4):
+            continue
+        listening.add((parts[0], int(port)))
+    return [{'transport': transport, 'port': port} for transport, port in sorted(allowed & listening)]
+
+
+@app.get('/api/network/relays')
+def get_relays(_: None = Depends(require_token)):
+    try:
+        result = relay_control().public()
+        result['targets'] = relay_targets()
+        result['origin_hosts'] = list(dict.fromkeys(value for value in (PUBLIC_IPV4, PUBLIC_DOMAIN, PUBLIC_ENDPOINT) if value))
+        candidates = [{'id': item['id'], 'label': item['label']} for item in network_consumers()]
+        candidates.extend({'id': f"direct:{item['id']}", 'label': str(item.get('name') or item['id'])} for item in read_clients() if item.get('id') and item.get('protocol') in ('tuic', 'hysteria2'))
+        result['consumers'] = list({item['id']: item for item in candidates}.values())
+        for host in result['hosts']:
+            for route in host['routes']:
+                check = route.get('check')
+                if not isinstance(check, dict):
+                    continue
+                try:
+                    plan = prepare_relay_probe(route, host, check['consumer_id'])
+                    current = network_probe.plan_seal(plan, network_probe.evidence_key(DATA_DIR))
+                    valid = host['state'] == 'connected' and route['state'] == 'listening' and current == check.get('plan_seal')
+                except (OSError, ValueError, KeyError, TypeError, HTTPException):
+                    valid = False
+                route['check'] = {key: check[key] for key in ('state', 'consumer_id', 'checked_at', 'vantage_point') if key in check}
+                if not valid:
+                    route['check']['state'] = 'unknown'
+        return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+    except (OSError, ValueError):
+        raise HTTPException(status_code=503, detail='Реестр relay недоступен') from None
+
+
+def start_relay_mutation(name, payload, identity):
+    try:
+        identity = application_operation.operation_id(identity)
+        with application_operation.locked(DATA_DIR):
+            if not application_operation.read(DATA_DIR / 'operations' / f'{identity}.json'):
+                if name != 'relay-reconcile':
+                    relay_control().require_clear()
+                    relay_control().checked(payload['expected_revision'])
+            path, digest = application_operation.persist_payload(DATA_DIR, identity, payload)
+        return start_application_operation(name,
+            [sys.executable, str(Path(__file__).with_name('service_worker.py')), '--relay', name, str(path), digest],
+            operation_id=identity, properties=(f'--property=EnvironmentFile={ENV_FILE}',))
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except (ValueError, OSError):
+        raise HTTPException(status_code=503, detail='Не удалось подготовить операцию relay; проверьте историю перед повтором') from None
+
+
+@app.put('/api/network/relays', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def save_relay_host(payload: RelayHostSettings, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
+    return start_relay_mutation('relay-host-save', payload.model_dump(), operation_id)
+
+
+@app.delete('/api/network/relays/{host_id}', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def delete_relay_host(host_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match')):
+    return start_relay_mutation('relay-host-delete', {'host_id': host_id, 'expected_revision': expected_revision}, operation_id)
+
+
+@app.post('/api/network/relays/{host_id}/routes', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def add_relay_route(host_id: str, payload: RelayRouteSettings, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
+    return start_relay_mutation('relay-route-create', {**payload.model_dump(), 'host_id': host_id}, operation_id)
+
+
+@app.delete('/api/network/relays/{host_id}/routes/{route_id}', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def delete_relay_route(host_id: str, route_id: str, agent_revision: int, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match')):
+    return start_relay_mutation('relay-route-delete', {'host_id': host_id, 'route_id': route_id, 'agent_revision': agent_revision, 'expected_revision': expected_revision}, operation_id)
+
+
+@app.post('/api/network/relays/reconcile', status_code=202)
+def reconcile_relay(_: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
+    return start_relay_mutation('relay-reconcile', {}, operation_id)
+
+
+def prepare_relay_probe(route, host, consumer_id):
+    from dataclasses import replace
+    import copy
+    if route['target_ip'] != PUBLIC_IPV4 or not consumer_id:
+        raise network_probe.ProbeUnavailable('Origin или consumer маршрута не совпадает с текущим VPS')
+    def plans():
+        registry = read_route_registry()
+        for binding in registry['bindings']:
+            if binding.get('state') != 'active':
+                continue
+            try:
+                plan, _ = prepare_network_probe(binding, consumer_id)
+                yield plan
+            except (ValueError, OSError, HTTPException):
+                continue
+        # Managed relay copies may use a current Direct origin credential even
+        # when its original file uses the direct address instead of legacy UDP relay.
+        clients = [item for item in read_clients() if f"direct:{item.get('id')}" == consumer_id and item.get('protocol') in ('tuic', 'hysteria2')]
+        if not clients or route['transport'] != 'udp':
+            return
+        protocol = clients[0]['protocol']
+        try:
+            paths = network_probe_sources(f'direct_{protocol}', 'udp_relay', consumer_id)
+            sources = network_probe.source_revision(paths)
+            text = paths['config'].read_text(encoding='utf-8')
+            config = json.loads(text) if protocol == 'tuic' else yaml.safe_load(text)
+            settings = json.loads(paths['settings'].read_text(encoding='utf-8'))
+            users = json.loads(paths['users'].read_text(encoding='utf-8')) if protocol == 'hysteria2' else None
+            binding = {'id': route['id'], 'desired_revision': 1, 'state': 'active', 'kind': 'udp_relay', 'address': PUBLIC_IPV4}
+            consumer = {'id': consumer_id, 'owner': 'direct', 'kind': 'udp_relay', 'address': PUBLIC_IPV4, 'reference': 'snapshot'}
+            plan = network_probe.prepare_direct_quic(binding, [consumer], clients, protocol, config, settings,
+                paths['certificate'].read_text(encoding='utf-8'), certificate_server_name(paths['certificate']), users, managed_origin=True)
+            if sources == network_probe.source_revision(paths):
+                yield plan
+        except (OSError, ValueError, KeyError, TypeError, HTTPException, yaml.YAMLError):
+            return
+    for plan in plans():
+        if plan.consumer_id != consumer_id or plan.port != route['target_port'] or route['transport'] != ('udp' if plan.engine == 'singbox' else 'tcp'):
+            continue
+        address = relay_control().client(host).host
+        client = copy.deepcopy(plan.client)
+        if plan.engine == 'xray':
+            client['settings']['vnext'][0].update(address=address, port=route['listen_port'])
+        else:
+            client.update(server=address, server_port=route['listen_port'])
+        fingerprint = hashlib.sha256(json.dumps([plan.fingerprint, route['id'], address, route['listen_port'], route['target_ip'], host['certificate_sha256']], sort_keys=True).encode()).hexdigest()
+        return replace(plan, binding_id=route['id'], address=address, port=route['listen_port'], client=client, fingerprint=fingerprint)
+    raise network_probe.ProbeUnavailable('Для этого маршрута и consumer пока нет поддержанной нативной проверки')
+
+
+def perform_relay_probe(payload):
+    control = relay_control()
+    control.require_clear()
+    registry = control.checked(payload['expected_revision'])
+    host = control.host(registry, payload['host_id'])
+    route = next(item for item in registry['routes'] if item['id'] == payload['route_id'] and item['host_id'] == host['id'])
+    def remote_current():
+        observed = relay_manager.route_snapshot(control.client(host).request('GET', '/v1/routes'))
+        actual = next((item for item in observed['items'] if item['id'] == route['id']), None)
+        return actual and actual['state'] == 'listening' and relay_manager.same_route(actual, route)
+    if not remote_current():
+        raise ValueError('Listener relay не подтверждён')
+    check = {'state': 'unknown', 'consumer_id': payload['consumer_id'], 'checked_at': datetime.now(timezone.utc).isoformat(), 'vantage_point': 'server'}
+    try:
+        plan = prepare_relay_probe(route, host, payload['consumer_id'])
+        key = network_probe.evidence_key(DATA_DIR, create=True)
+        check['plan_seal'] = network_probe.plan_seal(plan, key)
+        result = execute_network_probe(plan)
+        after = prepare_relay_probe(route, host, payload['consumer_id'])
+        if network_probe.plan_seal(after, key) == check['plan_seal'] and remote_current():
+            check['state'] = 'ready' if result.get('state') == 'verified' else 'failed' if result.get('state') == 'failed' else 'unknown'
+    except (OSError, ValueError, HTTPException, relay_manager.AgentAPIError):
+        pass
+    route['check'] = check
+    control.write(registry)
+
+
+@app.post('/api/network/relays/{host_id}/routes/{route_id}/check', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def check_relay_route(host_id: str, route_id: str, consumer_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match')):
+    return start_relay_mutation('relay-route-check', {'host_id': host_id, 'route_id': route_id, 'consumer_id': consumer_id, 'expected_revision': expected_revision}, operation_id)
+
+
+@app.post('/api/network/relays/{host_id}/routes/{route_id}/export')
+def export_relay_config(host_id: str, route_id: str, payload: RelayExportRequest, _: None = Depends(require_token)):
+    import relay_export
+    try:
+        control = relay_control()
+        control.require_clear()
+        registry = control.read()
+        host = control.host(registry, host_id)
+        route = next(item for item in registry['routes'] if item['id'] == route_id and item['host_id'] == host_id)
+        remote = relay_manager.route_snapshot(control.client(host).request('GET', '/v1/routes'))
+        actual = next((item for item in remote['items'] if item['id'] == route_id), None)
+        if not actual or actual['state'] != 'listening' or not relay_manager.same_route(actual, route):
+            raise ValueError('Listener relay не подтверждён; сначала обновите состояние')
+        config, count = relay_export.rewrite(payload.config, route, control.client(host).host,
+                                            (route['target_ip'], PUBLIC_DOMAIN, PUBLIC_ENDPOINT))
+        return JSONResponse({'config': config, 'replaced': count}, headers={'Cache-Control': 'no-store'})
+    except (ValueError, StopIteration, OSError, relay_manager.AgentAPIError):
+        raise HTTPException(status_code=422, detail='Не удалось подготовить relay-копию. Нужен нативный файл одного подключения с адресом и портом текущего origin и совместимым TCP/UDP транспортом') from None
+
+
 @app.put("/api/network/endpoints", status_code=202, dependencies=[Depends(require_mutation_admission)])
 def submit_network_settings(payload: NetworkEndpointSettings, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
     return start_network_mutation("network-settings", payload.model_dump(), operation_id)
@@ -2723,21 +2964,180 @@ def delete_network_endpoint(kind: Literal["cdn", "tls_relay", "udp_relay"], doma
     return network_status()
 
 
+def security_route_interface(destination: str) -> str:
+    lines = run("ip", "-o", "-4", "route", "show", destination, check=True).splitlines()
+    if not lines:
+        return ""
+    parts = lines[0].split()
+    if parts and parts[0] in {"blackhole", "unreachable", "prohibit", "throw"}:
+        return ""
+    if "dev" not in parts or parts.index("dev") + 1 >= len(parts):
+        raise HTTPException(status_code=503, detail="Incomplete route security observation")
+    interface = parts[parts.index("dev") + 1]
+    if not re.fullmatch(r"[A-Za-z0-9_.:@-]+", interface):
+        raise HTTPException(status_code=503, detail="Invalid route interface observation")
+    return interface
+
+
+def security_iptables_rule(*arguments: str) -> bool:
+    try:
+        result = subprocess.run(arguments, capture_output=True, text=True, timeout=8, check=False)
+        if result.returncode == 0:
+            return True
+        if result.returncode == 1 and "Bad rule (does a matching rule exist in that chain?)" in result.stderr:
+            return False
+        if result.returncode == 1 and re.search(r"No chain/target/match by that name|chain.*does not exist", result.stderr, re.IGNORECASE):
+            # A -C error can refer to a chain, target or match. Confirm the chain
+            # itself is absent with a read having no target/match arguments.
+            prefix = [arguments[0]]
+            if "-t" in arguments:
+                index = arguments.index("-t")
+                prefix.extend(arguments[index:index + 2])
+            chain = arguments[arguments.index("-C") + 1]
+            missing = subprocess.run([*prefix, "-S", chain], capture_output=True, text=True, timeout=8, check=False)
+            if missing.returncode == 1 and re.search(r"No chain/target/match by that name|chain.*does not exist", missing.stderr, re.IGNORECASE):
+                return False
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    raise HTTPException(status_code=503, detail="Firewall rule observation unavailable")
+
+
+def security_user_accounts() -> tuple[list[str], list[str]]:
+    accounts = [line.split(":") for line in run("getent", "passwd", check=True).splitlines()]
+    groups = [line.split(":") for line in run("getent", "group", check=True).splitlines()]
+    if not accounts or not groups or any(len(row) != 7 or not row[0] or not row[2].isdecimal() or not row[3].isdecimal() for row in accounts) \
+            or any(len(row) != 4 or not row[0] or not row[2].isdecimal() for row in groups):
+        raise HTTPException(status_code=503, detail="Invalid account security observation")
+    sudo_groups = [row for row in groups if row[0] == "sudo"]
+    if len(sudo_groups) > 1:
+        raise HTTPException(status_code=503, detail="Conflicting administrator group observation")
+    sudo_users = []
+    if sudo_groups:
+        group = sudo_groups[0]
+        sudo_users = group[3].split(",") if group[3] else []
+        if any(not name or name != name.strip() for name in sudo_users):
+            raise HTTPException(status_code=503, detail="Invalid administrator group observation")
+        sudo_users.extend(row[0] for row in accounts if row[3] == group[2])
+    login_users = [row[0] for row in accounts if not re.search(r"(nologin|false)$", row[6])]
+    return list(dict.fromkeys(sudo_users)), list(dict.fromkeys(login_users))
+
+
+def security_apparmor() -> dict:
+    if not Path("/sys/module").is_dir():
+        raise HTTPException(status_code=503, detail="Kernel module security observation unavailable")
+    enabled_file = Path("/sys/module/apparmor/parameters/enabled")
+    try:
+        enabled_file.stat()
+        enabled = enabled_file.read_text().strip().lower()
+    except FileNotFoundError:
+        return {"active": False, "profiles": 0}
+    except OSError:
+        raise HTTPException(status_code=503, detail="AppArmor module observation unavailable") from None
+    if enabled not in ("y", "n"):
+        raise HTTPException(status_code=503, detail="Invalid AppArmor module observation")
+    if enabled == "n":
+        return {"active": False, "profiles": 0}
+    try:
+        result = subprocess.run(["aa-status", "--profiled"], capture_output=True, text=True, timeout=8, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        raise HTTPException(status_code=503, detail="AppArmor profile observation unavailable") from None
+    profiles = result.stdout.strip()
+    # aa-status uses exit 2 for enabled AppArmor with no loaded policy.
+    if result.returncode not in (0, 2) or not profiles.isascii() or not profiles.isdecimal() \
+            or (result.returncode == 2 and profiles != "0"):
+        raise HTTPException(status_code=503, detail="Incomplete AppArmor profile observation")
+    return {"active": True, "profiles": int(profiles)}
+
+
+def ssh_listener_state(listeners: list[str]) -> tuple[bool, bool]:
+    listening = False
+    non_loopback = False
+    for line in listeners:
+        parts = line.split()
+        if parts and parts[0].upper() == "LISTEN":
+            parts.insert(0, "tcp")  # ss selecting only TCP omits the Netid column.
+        if not parts or parts[0].lower() not in ("tcp", "tcp6"):
+            continue
+        if len(parts) < 6 or parts[1].upper() != "LISTEN":
+            raise HTTPException(status_code=503, detail="Invalid TCP listener observation")
+        host, separator, port = parts[4].rpartition(":")
+        if not separator or not port.isdecimal() or not 0 <= int(port) <= 65535:
+            raise HTTPException(status_code=503, detail="Invalid TCP listener address observation")
+        if port != "22":
+            continue
+        listening = True
+        host = host.strip("[]")
+        if host == "*":
+            non_loopback = True
+        else:
+            try:
+                address = ipaddress.ip_address(host)
+            except ValueError:
+                raise HTTPException(status_code=503, detail="Invalid SSH listener address observation") from None
+            mapped = getattr(address, "ipv4_mapped", None)
+            non_loopback = non_loopback or not (mapped or address).is_loopback
+    return listening, non_loopback
+
+
+def security_kernel_settings() -> dict[str, int]:
+    limits = {
+        "net.ipv4.ip_forward": 1,
+        "net.ipv4.tcp_syncookies": 2,
+        "net.ipv4.conf.all.rp_filter": 2,
+        "net.ipv4.conf.all.accept_redirects": 1,
+        "net.ipv4.conf.default.accept_redirects": 1,
+        "net.ipv4.conf.all.send_redirects": 1,
+        "net.ipv4.conf.default.send_redirects": 1,
+        "net.ipv4.conf.all.accept_source_route": 1,
+        "net.ipv4.conf.default.accept_source_route": 1,
+        "kernel.dmesg_restrict": 1,
+    }
+    lines = run("sysctl", "-n", *limits, check=True).splitlines()
+    if len(lines) != len(limits):
+        raise HTTPException(status_code=503, detail="Incomplete kernel security observation")
+    values = {}
+    for (key, maximum), line in zip(limits.items(), lines):
+        value = line.strip()
+        if value not in {str(number) for number in range(maximum + 1)}:
+            raise HTTPException(status_code=503, detail="Invalid kernel security observation")
+        values[key] = int(value)
+    return values
+
+
+def security_ssh_settings() -> tuple[dict[str, str], list[str]]:
+    values = {}
+    listen_addresses = []
+    expected = {
+        "passwordauthentication": {"yes", "no"},
+        "permitrootlogin": {"yes", "no", "prohibit-password", "without-password", "forced-commands-only"},
+        "x11forwarding": {"yes", "no"},
+        "allowtcpforwarding": {"yes", "no", "all", "local", "remote"},
+    }
+    for line in run("/usr/sbin/sshd", "-T", check=True).splitlines():
+        parts = line.split(maxsplit=1)
+        if len(parts) != 2:
+            raise HTTPException(status_code=503, detail="Invalid SSH security observation")
+        key, value = parts
+        if key == "listenaddress":
+            listen_addresses.append(value)
+        elif (key in expected or key == "maxauthtries") and key in values and values[key] != value:
+            raise HTTPException(status_code=503, detail="Conflicting SSH security observation")
+        else:
+            values[key] = value
+    if any(values.get(key) not in allowed for key, allowed in expected.items()):
+        raise HTTPException(status_code=503, detail="Incomplete SSH security observation")
+    max_auth_tries = values.get("maxauthtries", "")
+    if not max_auth_tries.isascii() or not max_auth_tries.isdecimal():
+        raise HTTPException(status_code=503, detail="Invalid SSH authentication limit observation")
+    return values, listen_addresses
+
+
 @app.get("/api/security")
 def security(_: None = Depends(require_token)) -> dict:
-    failed = run(
-        "bash",
-        "-lc",
-        "journalctl --since '24 hours ago' -u ssh -u sshd --no-pager 2>/dev/null "
-        "| grep -Ec 'Failed password|Invalid user|authentication failure' || true",
-    )
-    accepted = run(
-        "bash",
-        "-lc",
-        "journalctl --since '24 hours ago' -u ssh -u sshd --no-pager 2>/dev/null "
-        "| grep -c 'Accepted ' || true",
-    )
-    listeners = run("ss", "-Hlntup").splitlines()
+    ssh_journal = run("journalctl", "--since", "24 hours ago", "-u", "ssh", "-u", "sshd", "--no-pager", check=True).splitlines()
+    failed = sum(bool(re.search(r"Failed password|Invalid user|authentication failure", line)) for line in ssh_journal)
+    accepted = sum("Accepted " in line for line in ssh_journal)
+    listeners = run("ss", "-Hlntup", check=True).splitlines()
     ufw_config = Path("/etc/ufw/ufw.conf")
     ufw_rules_file = Path("/etc/ufw/user.rules")
     ufw_enabled = (
@@ -2750,43 +3150,38 @@ def security(_: None = Depends(require_token)) -> dict:
         if ufw_rules_file.exists()
         else []
     )
-    ssh_config = run("/usr/sbin/sshd", "-T")
-    ssh_values = {
-        parts[0]: parts[1]
-        for line in ssh_config.splitlines()
-        if len(parts := line.split(maxsplit=1)) == 2
-    }
+    ssh_values, ssh_listen_addresses = security_ssh_settings()
     updates_state = update_status()
-    sudo_users = run(
-        "bash", "-lc",
-        "getent group sudo | cut -d: -f4 | tr ',' '\\n' | sed '/^$/d'",
-    ).splitlines()
-    login_users = run(
-        "bash", "-lc",
-        "getent passwd | awk -F: '$7 !~ /(nologin|false)$/ {print $1}'",
-    ).splitlines()
-    fail2ban_output = run("fail2ban-client", "status", "sshd")
+    sudo_users, login_users = security_user_accounts()
+    fail2ban_active = observed_active(observe_service("fail2ban.service"))
+    fail2ban_output = ""
+    if fail2ban_active is True:
+        try:
+            fail2ban_output = run("fail2ban-client", "status", "sshd", check=True)
+        except HTTPException:
+            pass  # Missing jail observation remains unknown, not a count of zero.
     currently_banned = re.search(r"Currently banned:\s*(\d+)", fail2ban_output)
     total_banned = re.search(r"Total banned:\s*(\d+)", fail2ban_output)
-    apparmor_output = run("aa-status")
-    apparmor_profiles = re.search(r"(\d+) profiles are loaded", apparmor_output)
-    ssh_active = (
-        run("systemctl", "is-active", "ssh") == "active"
-        or run("systemctl", "is-active", "ssh.socket") == "active"
-    )
-    ssh_listening = any(re.search(r"(^|[\[\]:.])22\s", line) for line in listeners)
+    apparmor = security_apparmor()
+    ssh_active = observed_active(ssh_observation(observe_service("ssh.service"), observe_service("ssh.socket")))
+    ufw_active = observed_active(observe_service("ufw.service"))
+    ssh_listening, ssh_non_loopback = ssh_listener_state(listeners)
     ssh_active_connections = len(run(
-        "bash", "-lc",
-        "ss -Htn state established '( sport = :22 )' 2>/dev/null | sed '/^$/d'",
+        "ss", "-Htn", "state", "established", "( sport = :22 )", check=True,
     ).splitlines())
     ssh_public_rule = False
     for rule in ufw_rules:
         parts = rule.split()
-        if len(parts) >= 6 and parts[2] == "22":
-            source = parts[5]
-            if source in ("0.0.0.0/0", "::/0"):
+        if len(parts) >= 6 and parts[0] == "allow" and parts[1] in ("tcp", "any") and parts[2] == "22":
+            if parts[3] in ("0.0.0.0/0", "::/0") and parts[5] in ("0.0.0.0/0", "::/0") \
+                    and not any(part.startswith("in_") for part in parts):
                 ssh_public_rule = True
                 break
+    # A positive public allow is risk evidence. Its absence cannot prove that
+    # every filtering layer denies access, especially while UFW is disabled.
+    ssh_publicly_allowed = False if not ssh_listening or not ssh_non_loopback else (
+        True if ssh_active is True and ufw_enabled and ufw_active is True and ssh_public_rule else None
+    )
     access_mode = os.getenv("ACCESS_MODE", "external")
     http_port = str(os.getenv("HTTP_PORT", "80"))
     # With a public domain Caddy terminates the panel connection on HTTPS/443
@@ -2802,7 +3197,7 @@ def security(_: None = Depends(require_token)) -> dict:
     panel_allowed_channels = set()
     if access_mode == "vpn":
         panel_allowed_channels.update(configured_panel_channels())
-    openvpn_interface = run("bash", "-lc", "ip -o -4 route show 10.74.0.0/24 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i==\"dev\") {print $(i+1); exit}}'")
+    openvpn_interface = security_route_interface("10.74.0.0/24")
     try:
         ikev2_pool = str(json.loads(IKEV2_SETTINGS.read_text(encoding="utf-8")).get("pool", ""))
     except (OSError, json.JSONDecodeError):
@@ -2842,9 +3237,18 @@ def security(_: None = Depends(require_token)) -> dict:
     )
     legacy_services = {}
     for name in ("openvpn.service", "strongswan-starter.service", "xl2tpd.service"):
-        enabled = run("systemctl", "is-enabled", name)
-        active = run("systemctl", "is-active", name)
-        legacy_services[name] = {"enabled": enabled or "not-found", "active": active == "active"}
+        observation = observe_service(name)
+        legacy_services[name] = {
+            "enabled": "not-found" if observation["unit_present"] is False else observation["unit_file_state"],
+            "active": observed_active(observation),
+        }
+    auditd_active = observed_active(observe_service("auditd.service"))
+    upgrades_observation = observe_service("unattended-upgrades.service")
+    upgrades_active = observed_active(upgrades_observation)
+    upgrades_enabled = observed_enabled(upgrades_observation)
+    automatic_updates = True if upgrades_active is True or upgrades_enabled is True else (
+        False if upgrades_active is False and upgrades_enabled is False else None
+    )
     env_file = ENV_FILE
     control_file = Path(CONTROL_COMMAND)
     env_mode = env_file.stat().st_mode & 0o777 if env_file.exists() else None
@@ -2855,11 +3259,10 @@ def security(_: None = Depends(require_token)) -> dict:
         for line in listeners
     )
     weak_tokens = {"", "changeme", "change-me", "secret", "admin", "password"}
-    forwarding_enabled = Path("/proc/sys/net/ipv4/ip_forward").read_text().strip() == "1"
-    uplink_interface = run(
-        "bash", "-lc", "ip -4 route show default | awk 'NR==1 {print $5}'"
-    )
-    global_stateful_return = command_succeeds(
+    kernel_settings = security_kernel_settings()
+    forwarding_enabled = kernel_settings["net.ipv4.ip_forward"] == 1
+    uplink_interface = security_route_interface("default")
+    global_stateful_return = security_iptables_rule(
         "iptables", "-C", "ufw-before-forward", "-m", "conntrack",
         "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT",
     )
@@ -2869,7 +3272,7 @@ def security(_: None = Depends(require_token)) -> dict:
         ("awg", AWG_INTERFACE, AWG_SUBNET),
     ):
         installed = Path(f"/sys/class/net/{interface}").exists()
-        direct_route_allowed = installed and bool(uplink_interface) and command_succeeds(
+        direct_route_allowed = installed and bool(uplink_interface) and security_iptables_rule(
             "iptables", "-C", "FORWARD", "-i", interface, "-o", uplink_interface,
             "-s", str(subnet), "-j", "ACCEPT",
         )
@@ -2877,25 +3280,25 @@ def security(_: None = Depends(require_token)) -> dict:
             not installed
             or bool(uplink_interface)
             and (
-                command_succeeds(
+                security_iptables_rule(
                     "iptables", "-C", "ufw-user-forward",
                     "-i", interface, "-o", uplink_interface,
                     "-s", str(subnet), "-j", "ACCEPT",
                 )
                 or direct_route_allowed
-                or command_succeeds(
+                or security_iptables_rule(
                     "iptables", "-C", "FORWARD", "-i", interface, "-j", "ACCEPT",
                 )
             )
         )
-        return_allowed = not installed or global_stateful_return or command_succeeds(
+        return_allowed = not installed or global_stateful_return or security_iptables_rule(
             "iptables", "-C", "FORWARD", "-o", interface, "-m", "conntrack",
             "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT",
         )
         nat_enabled = (
             not installed
             or bool(uplink_interface)
-            and command_succeeds(
+            and security_iptables_rule(
                 "iptables", "-t", "nat", "-C", "POSTROUTING",
                 "-s", str(subnet), "-o", uplink_interface, "-j", "MASQUERADE",
             )
@@ -2916,15 +3319,15 @@ def security(_: None = Depends(require_token)) -> dict:
     return {
         "failed_ssh_records_24h": int(failed or 0),
         "accepted_ssh_24h": int(accepted or 0),
-        "fail2ban_active": run("systemctl", "is-active", "fail2ban") == "active",
+        "fail2ban_active": fail2ban_active,
         "fail2ban": {
-            "active": run("systemctl", "is-active", "fail2ban") == "active",
-            "jail_active": bool(fail2ban_output),
-            "currently_banned": int(currently_banned.group(1)) if currently_banned else 0,
-            "total_banned": int(total_banned.group(1)) if total_banned else 0,
+            "active": fail2ban_active,
+            "jail_active": False if fail2ban_active is False else True if currently_banned and total_banned else None,
+            "currently_banned": int(currently_banned.group(1)) if currently_banned else None,
+            "total_banned": int(total_banned.group(1)) if total_banned else None,
         },
         "firewall": {
-            "active": ufw_enabled and run("systemctl", "is-active", "ufw") == "active",
+            "active": ufw_active if ufw_enabled else False,
             "backend": "ufw",
             "rules": ufw_rules,
             "forwarding_enabled": forwarding_enabled,
@@ -2954,11 +3357,9 @@ def security(_: None = Depends(require_token)) -> dict:
             "active": ssh_active,
             "password_authentication": ssh_values.get("passwordauthentication", "unknown"),
             "permit_root_login": ssh_values.get("permitrootlogin", "unknown"),
-            "publicly_allowed": ssh_active and ssh_listening and ssh_public_rule,
+            "publicly_allowed": ssh_publicly_allowed,
             "active_connections": ssh_active_connections,
-            "listen_addresses": [
-                value for key, value in ssh_values.items() if key == "listenaddress"
-            ],
+            "listen_addresses": ssh_listen_addresses,
             "max_auth_tries": ssh_values.get("maxauthtries", "unknown"),
             "x11_forwarding": ssh_values.get("x11forwarding", "unknown"),
             "tcp_forwarding": ssh_values.get("allowtcpforwarding", "unknown"),
@@ -2966,10 +3367,7 @@ def security(_: None = Depends(require_token)) -> dict:
         "updates": {
             **updates_state,
             "reboot_required": Path("/var/run/reboot-required").exists(),
-            "automatic": (
-                run("systemctl", "is-enabled", "unattended-upgrades") == "enabled"
-                or run("systemctl", "is-active", "unattended-upgrades") == "active"
-            ),
+            "automatic": automatic_updates,
         },
         "application_version": application_version_status(),
         "application_security": {
@@ -2992,18 +3390,18 @@ def security(_: None = Depends(require_token)) -> dict:
         "system": {
             "kernel": platform.release(),
             "ipv4_forwarding": forwarding_enabled,
-            "syn_cookies": Path("/proc/sys/net/ipv4/tcp_syncookies").read_text().strip() == "1",
-            "rp_filter": run("sysctl", "-n", "net.ipv4.conf.all.rp_filter") == "1",
-            "rp_filter_mode": int(run("sysctl", "-n", "net.ipv4.conf.all.rp_filter") or 0),
+            "syn_cookies": kernel_settings["net.ipv4.tcp_syncookies"] in (1, 2),
+            "rp_filter": kernel_settings["net.ipv4.conf.all.rp_filter"] == 1,
+            "rp_filter_mode": kernel_settings["net.ipv4.conf.all.rp_filter"],
             "rp_filter_valid": (
-                run("sysctl", "-n", "net.ipv4.conf.all.rp_filter") in ("1", "2")
+                kernel_settings["net.ipv4.conf.all.rp_filter"] in (1, 2)
                 or (
-                    Path("/proc/sys/net/ipv4/ip_forward").read_text().strip() == "1"
+                    forwarding_enabled
                     and any(Path(f"/sys/class/net/{interface}").exists() for interface in (WG_INTERFACE, AWG_INTERFACE))
                 )
             ),
             "redirects_disabled": all(
-                run("sysctl", "-n", key) == "0"
+                kernel_settings[key] == 0
                 for key in (
                     "net.ipv4.conf.all.accept_redirects",
                     "net.ipv4.conf.default.accept_redirects",
@@ -3012,23 +3410,17 @@ def security(_: None = Depends(require_token)) -> dict:
                 )
             ),
             "source_route_disabled": all(
-                run("sysctl", "-n", key) == "0"
+                kernel_settings[key] == 0
                 for key in (
                     "net.ipv4.conf.all.accept_source_route",
                     "net.ipv4.conf.default.accept_source_route",
                 )
             ),
-            "dmesg_restricted": run("sysctl", "-n", "kernel.dmesg_restrict") == "1",
-            "auditd_active": run("systemctl", "is-active", "auditd") == "active",
+            "dmesg_restricted": kernel_settings["kernel.dmesg_restrict"] == 1,
+            "auditd_active": auditd_active,
             "sudo_users": sudo_users,
             "login_users": login_users,
-            "apparmor": {
-                "active": (
-                    Path("/sys/module/apparmor/parameters/enabled").exists()
-                    and Path("/sys/module/apparmor/parameters/enabled").read_text().strip().lower() == "y"
-                ),
-                "profiles": int(apparmor_profiles.group(1)) if apparmor_profiles else 0,
-            },
+            "apparmor": apparmor,
         },
         "listeners": listeners,
         "listener_summary": {
@@ -3676,7 +4068,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
             if boot_time and started_time and boot_time > started_time:
                 action["state"] = "failed"
                 action["result"] = "interrupted"
-                action["message"] = "Операция прервана перезагрузкой; рабочая версия сохранена"
+                action["message"] = "Операция прервана перезагрузкой; проверьте фактическое состояние"
                 resolved_state = "failed"
                 result = "interrupted"
             else:
@@ -3705,7 +4097,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
                 else:
                     resolved_state = "failed"
                     result = "interrupted"
-                    action["message"] = "Операция завершилась без подтверждения; рабочая версия сохранена"
+                    action["message"] = "Операция завершилась без подтверждения; проверьте фактическое состояние"
         action["state"] = resolved_state
         action["result"] = result
         # Status reads must not overwrite the command's final marker (or a newer
@@ -3744,6 +4136,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
         "recovery": {
             "available": any((DATA_DIR / "recovery").glob("recovery-*.tar.gz.enc")),
             "report_available": (DATA_DIR / "recovery" / "safe-update-report.txt").is_file(),
+            **application_recovery.status(DATA_DIR),
         },
         "runtime": {
             "mode": "systemd" if web_unit_loaded and caddy_unit_loaded else "legacy-docker" if legacy_runtime else "unknown" if web_unit_loaded is None or caddy_unit_loaded is None else "incomplete",
@@ -3764,29 +4157,48 @@ def application_action(payload: ApplicationAction, _: None = Depends(require_tok
 
 
 @app.delete("/api/application/action")
-def cancel_application_action(_: None = Depends(require_token)) -> dict:
+def cancel_application_action(_: None = Depends(require_token), expected_operation_id: str | None = Header(default=None, alias="X-Expected-Operation-ID")) -> dict:
+    if not isinstance(expected_operation_id, str) or not re.fullmatch(r"[a-f0-9]{32}", expected_operation_id):
+        raise HTTPException(status_code=409, detail="Обновите состояние выбранной операции перед остановкой: её идентификатор не подтверждён")
     if not ACTION_FILE.exists():
         raise HTTPException(status_code=404, detail="No application action is running")
     try:
-        action = json.loads(ACTION_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=409, detail="Application action state is unavailable") from exc
-    unit = str(action.get("unit", ""))
-    state = str(action.get("state", ""))
-    if action.get("action") not in {"update", "test-rollback", "safe-update", "kernel-update"}:
-        raise HTTPException(status_code=409, detail="Эта операция не поддерживает безопасную остановку из панели")
-    if not re.fullmatch(r"vps-control-action-[0-9]+\.service", unit):
-        raise HTTPException(status_code=409, detail="This operation cannot be rolled back from the panel")
-    if state not in {"queued", "active", "activating", "running"}:
-        raise HTTPException(status_code=409, detail="No active application action is available to roll back")
-    result = subprocess.run(
-        ["systemctl", "stop", "--no-block", unit],
-        capture_output=True, text=True, timeout=10, check=False,
-    )
-    if result.returncode:
-        print(result.stderr, file=sys.stderr)
-        raise HTTPException(status_code=500, detail="Не удалось остановить операцию; подробности в журнале")
-    return {"unit": unit, "action": action.get("action"), "state": "stopping", "message": "Остановка команды и откат изменений запущены"}
+        with application_operation.locked(DATA_DIR):
+            action = application_operation.read(ACTION_FILE)
+            if action.get("id") != expected_operation_id:
+                raise HTTPException(status_code=409, detail="Выбранная операция уже сменилась; другая команда не будет остановлена")
+            durable = application_operation.read(DATA_DIR / "operations" / f"{expected_operation_id}.json")
+            if durable:
+                if durable.get("id") != expected_operation_id or durable.get("unit") != action.get("unit") or durable.get("action") != action.get("action"):
+                    raise HTTPException(status_code=409, detail="Данные выбранной операции не подтверждены; остановка не запускалась")
+                action = durable  # History remains authoritative after a partial pointer write.
+            unit = str(action.get("unit", ""))
+            if not isinstance(action.get("action"), str) or action["action"] not in {"update", "test-rollback", "safe-update", "kernel-update"}:
+                raise HTTPException(status_code=409, detail="Эта операция не поддерживает безопасную остановку из панели")
+            if not re.fullmatch(r"vps-control-action-[0-9]+\.service", unit):
+                raise HTTPException(status_code=409, detail="This operation cannot be rolled back from the panel")
+            if "cancel_requested" in action and not isinstance(action["cancel_requested"], bool):
+                raise HTTPException(status_code=409, detail="Состояние остановки повреждено; команда не отправлялась")
+            if action.get("cancel_requested") is True:
+                return action  # The stop may already have been accepted; never send it again.
+            if not isinstance(action.get("state"), str) or action["state"] not in {"queued", "active", "activating", "running"}:
+                raise HTTPException(status_code=409, detail="No active application action is available to roll back")
+            pending = {**action, "cancel_requested": True}
+            # Persist intent before the external call so a lost reply cannot replay stop.
+            application_operation.save(DATA_DIR, ACTION_FILE, pending)
+            try:
+                result = subprocess.run(["systemctl", "stop", "--no-block", unit],
+                    capture_output=True, text=True, timeout=10, check=False)
+            except (OSError, subprocess.TimeoutExpired):
+                raise HTTPException(status_code=503, detail="Приём остановки не подтверждён. Проверьте прежний идентификатор без повторной команды") from None
+            if result.returncode:
+                application_operation.save(DATA_DIR, ACTION_FILE, action)
+                raise HTTPException(status_code=409, detail="Сервер отклонил остановку выбранной операции")
+            return pending
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except OSError:
+        raise HTTPException(status_code=503, detail="Состояние остановки недоступно. Проверьте выбранную операцию без повторной команды") from None
 
 
 @app.get("/api/application/logs")
@@ -4048,20 +4460,14 @@ def read_automation() -> dict:
 
 def timer_details(timer_id: str) -> dict:
     unit = f"vps-control-auto-{timer_id}.timer"
-    values = {}
-    for line in run(
-        "systemctl", "show", unit,
-        "--property=LoadState,ActiveState,LastTriggerUSec,NextElapseUSecRealtime",
-    ).splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            values[key] = value
+    observation = observe_service(unit, timer=True)
     return {
         "unit": unit,
-        "installed": values.get("LoadState") == "loaded",
-        "active": values.get("ActiveState") == "active",
-        "last_trigger": values.get("LastTriggerUSec", ""),
-        "next_run": values.get("NextElapseUSecRealtime", ""),
+        "installed": observation["unit_present"],
+        "active": observed_active(observation),
+        "last_trigger": observation.get("last_trigger"),
+        "next_run": observation.get("next_run"),
+        "runtime": observation["runtime"],
     }
 
 
@@ -4208,10 +4614,7 @@ def live_status(_: None = Depends(require_token)) -> dict:
                 and "ENABLED=yes" in ufw_config.read_text(encoding="utf-8")
             ),
             "fail2ban_active": Path("/run/fail2ban/fail2ban.sock").exists(),
-            "ssh_listening": any(
-                re.search(r"(^|[\[\]:.])22\s", line)
-                for line in run("ss", "-Hlnt").splitlines()
-            ),
+            "ssh_listening": ssh_listener_state(run("ss", "-Hlnt", check=True).splitlines())[0],
         }),
         "unavailable": unavailable,
     }

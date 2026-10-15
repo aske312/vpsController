@@ -3,7 +3,7 @@
 import { useNotifications, useNotifier, useNotificationList } from "../shared/notifications/notification-center";
 import { createApiClient, invalidateApiSession, onApiSessionExpired } from "../shared/lib/api-request";
 import { useCdnSecurity } from "../features/application/use-cdn-security";
-import type { CdnSecurityStatus } from "../shared/lib/cdn-security-operation";
+import { cdnSecuritySnapshot, type CdnSecurityStatus } from "../shared/lib/cdn-security-operation";
 import { RefreshNotices, refreshFailure } from "./components/refresh-notices";
 import type { RefreshFailure } from "./components/refresh-notices";
 import type { ApplicationMetadata } from "../shared/types/control-plane";
@@ -29,9 +29,18 @@ import { ProtocolHealthBadge } from "../shared/components/protocol-health-badge"
 import { ConnectionsView } from "../features/connections/connections-view";
 import { ProtocolView } from "../features/protocols/protocol-view";
 import { LoginView } from "../features/auth/login-view";
-import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, LiveStatus, LoggingSettings, NetworkStatus, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab, TunnelProtocol } from "../shared/types/control-plane";
+import type { ApplicationAction, ApplicationStatus, AutomationSchedule, Client, ConfirmationRequest, DeviceProbe, LoggingSettings, NetworkStatus, Overview, Protocol, ProtocolImage, ProtocolStatus, ResourceHistory, ServicesStatus, Tab } from "../shared/types/control-plane";
 import { actionLabels, bytes, CLIENTS_PER_PAGE, directProtocolOrder, HISTORY_SAMPLES, labels, LIVE_SAMPLE_SECONDS, navigationLabels, uptime } from "../shared/lib/control-plane-ui";
-import { submitSystemOperation, systemActionSucceeded, createSystemActionCompletionTracker, protocolOperationOutcome, systemActionNeedsReload, systemActionNeedsPolling, systemOperationNotification, type SystemAction } from "./system-operation";
+import { systemActionSnapshot, systemAdmissionSnapshot, systemActionSucceeded, createSystemActionCompletionTracker, protocolOperationOutcome, systemActionNeedsReload, systemActionNeedsPolling, systemOperationNotification, type SystemAction } from "./system-operation";
+import { useSystemAdmission } from "./use-system-admission";
+import { networkRoutesSnapshot } from "../features/mihomo/workspace-refresh";
+import { directProtocolSnapshot, directProtocolUnavailable, tunnelLiveObservation } from "./protocol-snapshot";
+import { clientSnapshot, clientsUnavailable, liveStatusSnapshot, overviewSnapshot, overviewUnavailable, securityLiveObservation } from "./live-snapshot";
+import { applicationStatusSnapshot, applicationStatusUnavailable, observedApplicationRequest } from "./application-snapshot";
+import { observedServicesRequest, servicesUnavailable } from "./services-snapshot";
+import { securitySnapshot, securityUnavailable } from "./security-snapshot";
+import { applicationMetadataSnapshot, applicationMetadataUnavailable } from "./application-metadata-snapshot";
+import { applicationVersionState } from "../features/application/version-state";
 import { appendResources, networkSample as sampleNetwork, usedBytes, usedPercent } from "../shared/lib/resource-metrics";
 import type { AdoptionPlan, ComponentManagement, MetricsSettings } from "../shared/types/control-plane";
 
@@ -79,7 +88,7 @@ type NewClientSettings = {
 };
 
 type ClientChannelMode = "direct" | "tls_relay" | "udp_relay";
-type ClientConnectionType = { id: string; protocol: Protocol; routeId?: "direct" | "tls" | "cdn"; channelMode?: ClientChannelMode; name: string; badge: string; description: string };
+type ClientConnectionType = { id: string; protocol: Protocol; routeId?: "direct" | "tls" | "cdn"; channelMode?: ClientChannelMode; name: string; badge: string; description: string; unavailable?: string };
 
 function ClientConnectionSettings({
   selectedConnectionType,
@@ -180,7 +189,7 @@ export function ControlPanel() {
   const [resourceHistory, setResourceHistory] = useState<ResourceHistory>({ load: [], memory: [], disk: [], rx: [], tx: [] });
   const [protocolImages, setProtocolImages] = useState<ProtocolImage[]>([]);
   const [protocolStatuses, setProtocolStatuses] = useState<Partial<Record<Protocol, ProtocolStatus>>>({});
-  const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number; tx: number }>>>({});
+  const [protocolRates, setProtocolRates] = useState<Partial<Record<Protocol, { rx: number | null; tx: number | null }>>>({});
   const [networkStatus, setNetworkStatus] = useState<NetworkStatus | null>(null);
   const [installingProtocol, setInstallingProtocol] = useState("");
   const [checkingResources, setCheckingResources] = useState<Protocol | null>(null);
@@ -189,10 +198,12 @@ export function ControlPanel() {
   const [diagnosticsOpen, setDiagnosticsOpen] = useState<Partial<Record<Protocol, boolean>>>({});
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [refreshErrors, setRefreshErrors] = useState<Record<string, RefreshFailure>>({});
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
   const [reloadRequested, setReloadRequested] = useState(false);
   const requestCommandReload = useCallback(() => setReloadRequested(true), []);
   const [trackActionCompletion] = useState(createSystemActionCompletionTracker);
+  const applicationObservationVersion = useRef(0);
+  const acceptedOperation = useRef<{ id?: string; state?: string } | null>(null);
   const [passwordDialog, setPasswordDialog] = useState(false);
   const [sshAdminDialog, setSshAdminDialog] = useState(false);
   const [sshPublicKey, setSshPublicKey] = useState("");
@@ -217,6 +228,14 @@ export function ControlPanel() {
   const [generatedQrError, setGeneratedQrError] = useState("");
   const settingsRef = useRef<HTMLDivElement>(null);
   const networkSample = useRef<{ rx: number; tx: number; at: number } | null>(null);
+  const networkStatusLoading = useRef(false);
+  const servicesLoading = useRef(false);
+  const applicationMetadataLoading = useRef(false);
+  const securityStatusLoading = useRef(false);
+  const securityObservationVersion = useRef(0);
+  const metricsObservationVersion = useRef(0);
+  const protocolStatusLoading = useRef<Partial<Record<Protocol, boolean>>>({});
+  const protocolObservationVersion = useRef<Partial<Record<Protocol, number>>>({});
   const protocolSamples = useRef<Partial<Record<Protocol, { rx: number; tx: number; at: number }>>>({});
   const securityLogHeads = useRef<Partial<Record<"ssh" | "firewall" | "system", string>>>({});
   const sshAccessLoading = useRef(false);
@@ -227,9 +246,11 @@ export function ControlPanel() {
   const pendingLogging = useRef<{ id?: string; draft: LoggingSettings } | null>(null);
   const metricsDirty = useRef(false);
   const liveRequestInFlight = useRef(false);
+  const clientObservationVersion = useRef(0);
   const pendingConfirmation = useRef<ConfirmationRequest | null>(null);
   useEffect(() => { pendingConfirmation.current = confirmation; }, [confirmation]);
   const clearSession = useCallback(() => {
+    applicationObservationVersion.current += 1;
     sessionStorage.removeItem("312-token");
     pendingConfirmation.current?.resolve(false);
     pendingConfirmation.current = null;
@@ -283,13 +304,31 @@ export function ControlPanel() {
     return () => document.removeEventListener("pointerdown", closeSettings);
   }, [moduleMenuOpen, settingsOpen]);
 
-  const request = useMemo(() => createApiClient(token, {
+  const request = useMemo(() => observedServicesRequest(observedApplicationRequest(createApiClient(token, {
     formatHttpError: (detail, status) => status === 401 ? "Сессия панели завершена. Войдите заново." : publicError(detail, status),
-  }), [token]);
+  }), (value) => applicationStatusSnapshot(value, systemActionSnapshot, cdnSecuritySnapshot))), [token]);
 
   const acceptSystemOperation = useCallback((operation: SystemAction) => {
+    if (acceptedOperation.current?.id !== operation.id || acceptedOperation.current?.state !== operation.state) {
+      applicationObservationVersion.current += 1;
+      setNetworkStatus(null);
+      setOverview(overviewUnavailable);
+      setClients(clientsUnavailable);
+      setServices(servicesUnavailable);
+      setSecurity(securityUnavailable);
+      setApplicationMetadata(applicationMetadataUnavailable);
+      networkSample.current = null;
+      setNetworkRate({ rx: null, tx: null });
+      setProtocolStatuses((current) => Object.fromEntries(Object.entries(current).map(([protocol, status]) => [protocol, directProtocolUnavailable(status)])));
+      protocolSamples.current = {};
+      setProtocolRates({});
+    }
+    acceptedOperation.current = { id: operation.id, state: operation.state };
     setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: operation }));
   }, []);
+  const { pending: admissionPending, submit: submitSystemOperation, retain: retainAdmission, recheck: recheckAdmission, cancel: cancelSystemOperation } = useSystemAdmission(request, token, acceptSystemOperation);
+  const busy = localBusy || admissionPending || systemActionNeedsPolling(application?.action);
+  const admitNetworkOperation = useCallback((path: string, options: RequestInit) => submitSystemOperation(request, path, options), [request, submitSystemOperation]);
 
   const operationHistoryPolicy = useOperationHistorySettings(request, Boolean(token));
 
@@ -334,13 +373,15 @@ export function ControlPanel() {
 
   const loadOverview = useCallback(async (force = false) => {
     if (!token) return;
+    const observationVersion = applicationObservationVersion.current;
     try {
       const [next, imageData] = await Promise.allSettled([
-        request("/overview", force ? { cache: "no-store" } : undefined) as Promise<Overview>,
+        request("/overview", { cache: "no-store" }).then(overviewSnapshot),
         request("/protocol-images", force ? { cache: "no-store" } : undefined) as Promise<{ items: ProtocolImage[] }>,
       ]);
+      if (observationVersion !== applicationObservationVersion.current) return;
       if (next.status === "fulfilled") setOverview(next.value);
-      else setOverview((current) => current ? { ...current, resources: { ...current.resources, stale: true } } : current);
+      else setOverview(overviewUnavailable);
       if (imageData.status === "fulfilled") {
         setProtocolImages(imageData.value.items || []);
         if (installingProtocol && imageData.value.items.some((image) => image.id === installingProtocol && image.installed)) {
@@ -365,148 +406,154 @@ export function ControlPanel() {
     if (token && !overview) void loadOverview();
   }, [loadOverview, overview, token]);
 
-  const loadClients = useCallback(async (force = false) => {
+  const loadClients = useCallback(async () => {
     if (!token) return;
+    const observationVersion = applicationObservationVersion.current;
+    const clientVersion = ++clientObservationVersion.current;
     try {
-      const data = await request("/clients", force ? { cache: "no-store" } : undefined);
-      setClients(data.items); setLastUpdated(new Date());
+      const data = clientSnapshot((await request("/clients", { cache: "no-store" })).items);
+      if (observationVersion !== applicationObservationVersion.current || clientVersion !== clientObservationVersion.current) return;
+      setClients(data); setLastUpdated(new Date());
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadClients; return next; });
-    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadClients: refreshFailure(cause, "Не удалось обновить клиентов") })); }
-  }, [request, token]);
-
-  const loadNetworkStatus = useCallback(async (force = false) => {
-    if (!token) return;
-    try {
-      setNetworkStatus(await request<NetworkStatus>("/network", force ? { cache: "no-store" } : undefined));
-      setRefreshErrors((current) => { const next = { ...current }; delete next.loadNetworkStatus; return next; });
     } catch (cause) {
-      setRefreshErrors((current) => ({ ...current, loadNetworkStatus: refreshFailure(cause, "Не удалось проверить сетевые маршруты") }));
+      if (observationVersion !== applicationObservationVersion.current || clientVersion !== clientObservationVersion.current) return;
+      setClients(clientsUnavailable);
+      setRefreshErrors((current) => ({ ...current, loadClients: refreshFailure(cause, "Не удалось обновить клиентов") }));
     }
   }, [request, token]);
 
+  const loadNetworkStatus = useCallback(async () => {
+    if (!token || networkStatusLoading.current) return;
+    networkStatusLoading.current = true;
+    const observationVersion = applicationObservationVersion.current;
+    try {
+      const snapshot = networkRoutesSnapshot(await request("/network", { cache: "no-store" }));
+      if (observationVersion !== applicationObservationVersion.current) return;
+      setNetworkStatus(snapshot);
+      setRefreshErrors((current) => { const next = { ...current }; delete next.loadNetworkStatus; return next; });
+    } catch (cause) {
+      if (observationVersion !== applicationObservationVersion.current) return;
+      setNetworkStatus(null);
+      setRefreshErrors((current) => ({ ...current, loadNetworkStatus: refreshFailure(cause, "Не удалось проверить сетевые маршруты") }));
+    } finally { networkStatusLoading.current = false; }
+  }, [request, token]);
+
   const loadSecurity = useCallback(async (force = false) => {
-    if (!token) return;
+    if (!token || securityStatusLoading.current) return;
+    securityStatusLoading.current = true;
+    const observationVersion = applicationObservationVersion.current;
+    const securityVersion = ++securityObservationVersion.current;
+    void force;
     setSecurityLoading(true);
     try {
-      setSecurity(await request("/security", force ? { cache: "no-store" } : undefined)); setLastUpdated(new Date());
+      const snapshot = securitySnapshot(await request("/security", { cache: "no-store" }));
+      if (observationVersion !== applicationObservationVersion.current || securityVersion !== securityObservationVersion.current) return;
+      securityObservationVersion.current += 1;
+      setSecurity(snapshot); setLastUpdated(new Date());
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadSecurity; return next; });
-    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadSecurity: refreshFailure(cause, "Не удалось обновить состояние безопасности") })); }
-    finally { setSecurityLoading(false); }
+    } catch (cause) {
+      if (observationVersion !== applicationObservationVersion.current || securityVersion !== securityObservationVersion.current) return;
+      securityObservationVersion.current += 1;
+      setSecurity(securityUnavailable);
+      setRefreshErrors((current) => ({ ...current, loadSecurity: refreshFailure(cause, "Не удалось обновить состояние безопасности") }));
+    }
+    finally { securityStatusLoading.current = false; setSecurityLoading(false); }
   }, [request, token]);
 
   const loadApplication = useCallback(async (force = false) => {
     if (!token) return;
+    const observationVersion = applicationObservationVersion.current;
     try {
-      setApplication(await request("/application/status", force ? { cache: "no-store" } : undefined)); setLastUpdated(new Date());
+      const snapshot = await request<ApplicationStatus>("/application/status", force ? { cache: "no-store" } : undefined);
+      if (observationVersion !== applicationObservationVersion.current) return;
+      setApplication(retainAdmission(snapshot)); setLastUpdated(new Date());
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadApplication; return next; });
-    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadApplication: refreshFailure(cause, "Не удалось обновить приложение") })); }
-  }, [request, token]);
+    } catch (cause) {
+      if (observationVersion !== applicationObservationVersion.current) return;
+      setApplication((current) => applicationStatusUnavailable(current, systemActionNeedsPolling(current?.action)));
+      setRefreshErrors((current) => ({ ...current, loadApplication: refreshFailure(cause, "Не удалось обновить приложение") }));
+    }
+  }, [request, retainAdmission, token]);
 
   const loadServices = useCallback(async (force = false) => {
-    if (!token) return;
-    const [serviceResult, metricsResult] = await Promise.allSettled([
-      request<ServicesStatus>("/services", force ? { cache: "no-store" } : undefined),
-      request<MetricsSettings>("/services/metrics", force ? { cache: "no-store" } : undefined),
-    ]);
-    if (serviceResult.status === "fulfilled") {
-      const next = serviceResult.value;
-      setServices(next);
-      if (!automationDirty.current) setAutomationDraft(next.automation);
-      if (!loggingDirty.current) setLoggingDraft({
-        persistent: next.logging?.persistent ?? true,
-        retention_days: next.logging?.retention_days ?? 30,
+    if (!token || servicesLoading.current) return;
+    servicesLoading.current = true;
+    const observationVersion = applicationObservationVersion.current;
+    const metricVersion = ++metricsObservationVersion.current;
+    try {
+      const [serviceResult, metricsResult] = await Promise.allSettled([
+        request<ServicesStatus>("/services", force ? { cache: "no-store" } : undefined),
+        request<MetricsSettings>("/services/metrics", force ? { cache: "no-store" } : undefined),
+      ]);
+      if (observationVersion !== applicationObservationVersion.current) return;
+      if (serviceResult.status === "fulfilled") {
+        const next = serviceResult.value;
+        setServices(next);
+        if (!automationDirty.current) setAutomationDraft(next.automation);
+        if (!loggingDirty.current) setLoggingDraft({
+          persistent: next.logging?.persistent ?? true,
+          retention_days: next.logging?.retention_days ?? 30,
+        });
+        setLastUpdated(new Date());
+      } else setServices(servicesUnavailable);
+      if (metricVersion === metricsObservationVersion.current && metricsResult.status === "fulfilled") {
+        setMetricsSettings(metricsResult.value);
+        if (!metricsDirty.current) setMetricsDraft(metricsResult.value);
+      } else if (metricVersion === metricsObservationVersion.current) setMetricsSettings(null);
+      setRefreshErrors((current) => {
+        const errors = { ...current };
+        if (serviceResult.status === "fulfilled") delete errors.loadServices;
+        else errors.loadServices = refreshFailure(serviceResult.reason, "Не удалось обновить состояние служб");
+        if (metricVersion === metricsObservationVersion.current) {
+          if (metricsResult.status === "fulfilled") delete errors.loadMetricsSettings;
+          else errors.loadMetricsSettings = refreshFailure(metricsResult.reason, "Не удалось обновить настройки хранения метрик");
+        }
+        return errors;
       });
-      setLastUpdated(new Date());
-    }
-    if (metricsResult.status === "fulfilled") {
-      setMetricsSettings(metricsResult.value);
-      if (!metricsDirty.current) setMetricsDraft(metricsResult.value);
-    }
-    setRefreshErrors((current) => {
-      const errors = { ...current };
-      if (serviceResult.status === "fulfilled") delete errors.loadServices;
-      else errors.loadServices = refreshFailure(serviceResult.reason, "Не удалось обновить состояние служб");
-      if (metricsResult.status === "fulfilled") delete errors.loadMetricsSettings;
-      else errors.loadMetricsSettings = refreshFailure(metricsResult.reason, "Не удалось обновить настройки хранения метрик");
-      return errors;
-    });
+    } finally { servicesLoading.current = false; }
   }, [request, token]);
 
   const loadApplicationMetadata = useCallback(async (force = false) => {
-    if (!token) return;
+    if (!token || applicationMetadataLoading.current) return;
+    applicationMetadataLoading.current = true;
+    const observationVersion = applicationObservationVersion.current;
+    void force;
     try {
-      setApplicationMetadata(await request<ApplicationMetadata>("/application/metadata", force ? { cache: "no-store" } : undefined));
+      const snapshot = applicationMetadataSnapshot(await request("/application/metadata", { cache: "no-store" }));
+      if (observationVersion !== applicationObservationVersion.current) return;
+      setApplicationMetadata(snapshot);
       setRefreshErrors((current) => { const next = { ...current }; delete next.loadApplicationMetadata; return next; });
-    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadApplicationMetadata: refreshFailure(cause, "Не удалось обновить сведения о версии") })); }
+    } catch (cause) {
+      if (observationVersion !== applicationObservationVersion.current) return;
+      setApplicationMetadata(applicationMetadataUnavailable);
+      setRefreshErrors((current) => ({ ...current, loadApplicationMetadata: refreshFailure(cause, "Не удалось обновить сведения о версии") }));
+    } finally { applicationMetadataLoading.current = false; }
   }, [request, token]);
 
-  const loadProtocolStatus = useCallback(async (protocol: Protocol, force = false) => {
-    if (!token) return;
+  const loadProtocolStatus = useCallback(async (protocol: Protocol) => {
+    if (!token || protocolStatusLoading.current[protocol]) return;
+    protocolStatusLoading.current[protocol] = true;
+    protocolObservationVersion.current[protocol] = (protocolObservationVersion.current[protocol] || 0) + 1;
+    const observationVersion = applicationObservationVersion.current;
     try {
-      const raw = await request(`/protocols/${protocol}/status`, force ? { cache: "no-store" } : undefined) as Omit<ProtocolStatus, "resources" | "history" | "diagnostics"> & {
-        resources?: Partial<ProtocolStatus["resources"]>;
-        history?: Partial<ProtocolStatus["history"]>;
-        diagnostics?: Partial<ProtocolStatus["diagnostics"]>;
-      };
-      // WG/AWG already return full monitoring data. Stream protocols (VRX/SS)
-      // may omit history/resources/diagnostics, so normalize the response before
-      // rendering the shared Protocol Workspace. This keeps one UI contract for
-      // every installed protocol and prevents a blank page on VRX/SS.
-      const next: ProtocolStatus = {
-        ...raw,
-        resources: {
-          checked_at: raw.resources?.checked_at,
-          items: raw.resources?.items || [],
-        },
-        history: {
-          period_hours: 24,
-          samples: 0,
-          availability_percent: raw.service_active ? 100 : 0,
-          monitoring_gaps: 0,
-          service_interruptions: 0,
-          inactive_connection_periods: 0,
-          external_loss_percent: undefined,
-          latency_avg_ms: undefined,
-          latency_max_ms: undefined,
-          jitter_avg_ms: undefined,
-          interface_errors: 0,
-          interface_dropped: 0,
-          uplink_errors: 0,
-          uplink_dropped: 0,
-          conntrack_peak_percent: undefined,
-          received_bytes: raw.peer_rx_bytes || raw.interface_rx_bytes || 0,
-          transmitted_bytes: raw.peer_tx_bytes || raw.interface_tx_bytes || 0,
-          average_rx_bps: 0,
-          average_tx_bps: 0,
-          peak_rx_bps: 0,
-          peak_tx_bps: 0,
-          ...(raw.history || {}),
-          events: raw.history?.events || [],
-        },
-        diagnostics: {
-          checked_at: raw.diagnostics?.checked_at,
-          status: raw.diagnostics?.status || "pending",
-          score: raw.diagnostics?.score,
-          live: raw.diagnostics?.live,
-          network: raw.diagnostics?.network,
-          checks: raw.diagnostics?.checks || [],
-          findings: raw.diagnostics?.findings || [],
-        },
-      };
+      const next = directProtocolSnapshot(await request(`/protocols/${protocol}/status`, { cache: "no-store" }), protocol);
+      if (observationVersion !== applicationObservationVersion.current) return;
+      protocolObservationVersion.current[protocol] = (protocolObservationVersion.current[protocol] || 0) + 1;
       const now = Date.now();
-      const previous = protocolSamples.current[protocol];
-      if (previous) {
-        const seconds = Math.max((now - previous.at) / 1000, 0.1);
-        setProtocolRates((rates) => ({ ...rates, [protocol]: {
-          rx: Math.max(0, (next.interface_rx_bytes - previous.rx) / seconds),
-          tx: Math.max(0, (next.interface_tx_bytes - previous.tx) / seconds),
-        } }));
-      }
-      protocolSamples.current[protocol] = { rx: next.interface_rx_bytes, tx: next.interface_tx_bytes, at: now };
+      const sampled = sampleNetwork({ network_rx: next.interface_rx_bytes, network_tx: next.interface_tx_bytes }, protocolSamples.current[protocol] || null, now);
+      setProtocolRates((rates) => ({ ...rates, [protocol]: sampled.rate }));
+      if (sampled.sample) protocolSamples.current[protocol] = sampled.sample;
       setProtocolStatuses((statuses) => ({ ...statuses, [protocol]: next }));
       setLastUpdated(new Date());
-      setRefreshErrors((current) => { const next = { ...current }; delete next.loadProtocolStatus; return next; });
-    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadProtocolStatus: refreshFailure(cause, "Не удалось обновить состояние протокола") })); }
+      setRefreshErrors((current) => { const next = { ...current }; delete next[`loadProtocolStatus:${protocol}`]; return next; });
+    } catch (cause) {
+      if (observationVersion !== applicationObservationVersion.current) return;
+      protocolObservationVersion.current[protocol] = (protocolObservationVersion.current[protocol] || 0) + 1;
+      setProtocolStatuses((current) => ({ ...current, [protocol]: directProtocolUnavailable(current[protocol]) }));
+      delete protocolSamples.current[protocol];
+      setProtocolRates((current) => ({ ...current, [protocol]: { rx: null, tx: null } }));
+      setRefreshErrors((current) => ({ ...current, [`loadProtocolStatus:${protocol}`]: refreshFailure(cause, "Не удалось обновить состояние протокола") }));
+    } finally { protocolStatusLoading.current[protocol] = false; }
   }, [request, token]);
 
   const measureDeviceRoute = useCallback(async (force = false) => {
@@ -580,18 +627,18 @@ export function ControlPanel() {
     const transitionRun = showTransition ? beginViewLoading() : undefined;
     if (showBusy) { setBusy(true); }
     try {
-      if (tab === "overview") await Promise.all([loadOverview(showBusy), loadClients(showBusy), loadApplication(showBusy), loadServices(showBusy)]);
+      if (tab === "overview") await Promise.all([loadOverview(showBusy), loadClients(), loadApplication(showBusy), loadServices(showBusy)]);
       else if (tab === "security") await Promise.all([loadSecurity(showBusy), loadServices(showBusy)]);
       else if (tab === "application") await Promise.all([loadApplication(showBusy), loadApplicationMetadata(showBusy), loadServices(showBusy)]);
       else if (tab === "services") await loadServices(showBusy);
       else if (tab === "dns") { setTab("network"); setNetworkRefreshKey((value) => value + 1); }
       else if (tab === "network") setNetworkRefreshKey((value) => value + 1);
       else if (tab === "mihomo") await loadOverview();
-      else if (tab === "channels") await Promise.all([loadClients(showBusy), loadProtocolStatus(selectedChannel, showBusy)]);
-      else if (directProtocolOrder.includes(tab as Protocol)) await Promise.all([loadClients(showBusy), loadProtocolStatus(tab as Protocol, showBusy)]);
+      else if (tab === "channels") await Promise.all([loadClients(), loadProtocolStatus(selectedChannel)]);
+      else if (directProtocolOrder.includes(tab as Protocol)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
       else {
         if (tab === "clients") void measureDeviceRoute(showBusy);
-        await loadClients(showBusy);
+        await loadClients();
       }
     } finally {
       if (showTransition) endViewLoading(transitionRun);
@@ -715,8 +762,16 @@ export function ControlPanel() {
   const loadLiveStatus = useCallback(async () => {
     if (!token || liveRequestInFlight.current || document.visibilityState !== "visible") return;
     liveRequestInFlight.current = true;
+    const observationVersion = applicationObservationVersion.current;
+    const clientVersion = ++clientObservationVersion.current;
+    const protocolReads = { ...protocolStatusLoading.current };
+    const protocolVersions = { ...protocolObservationVersion.current };
+    const securityVersion = securityObservationVersion.current;
+    const liveProtocol = (protocol: "wg" | "awg") => !protocolReads[protocol] && !protocolStatusLoading.current[protocol]
+      && protocolVersions[protocol] === protocolObservationVersion.current[protocol];
     try {
-      const next = await request("/live-status") as LiveStatus;
+      const next = liveStatusSnapshot(await request("/live-status", { cache: "no-store" }));
+      if (observationVersion !== applicationObservationVersion.current) return;
       const now = Date.now();
       const sampled = sampleNetwork(next.resources, networkSample.current, now);
       setNetworkRate(sampled.rate);
@@ -727,52 +782,42 @@ export function ControlPanel() {
         server: { ...current.server, uptime_s: next.resources.uptime_s === undefined ? current.server.uptime_s : next.resources.uptime_s },
         resources: next.resources,
         protocols: {
-          wg: { ...current.protocols.wg, active: next.protocols.wg?.active ?? current.protocols.wg.active },
-          awg: { ...current.protocols.awg, active: next.protocols.awg?.active ?? current.protocols.awg.active },
+          wg: { ...current.protocols.wg, active: next.protocols.wg?.active ?? null },
+          awg: { ...current.protocols.awg, active: next.protocols.awg?.active ?? null },
         },
       } : current);
       const liveClients = next.clients;
-      if (liveClients && (tab === "overview" || tab === "clients")) {
-        setClients((current) => liveClients.map((client) => ({
-          ...current.find((existing) => existing.id === client.id && existing.protocol === client.protocol),
-          ...client,
-        })));
-      }
-      if (tab === "wg" || tab === "awg") {
-        setProtocolStatuses((current) => {
-          const updated = { ...current };
-          (["wg", "awg"] as TunnelProtocol[]).forEach((protocol) => {
-            if (updated[protocol] && next.protocols[protocol]) updated[protocol] = { ...updated[protocol]!, ...next.protocols[protocol] };
-          });
-          return updated;
-        });
-      }
-      const liveSecurity = next.security;
-      if (tab === "security" && liveSecurity) {
-        setSecurity((current) => current ? {
-          ...current,
-          firewall: { ...((current.firewall as Record<string, unknown> | undefined) || {}), active: liveSecurity.firewall_active },
-          fail2ban: { ...((current.fail2ban as Record<string, unknown> | undefined) || {}), active: liveSecurity.fail2ban_active },
-          ssh: { ...((current.ssh as Record<string, unknown> | undefined) || {}), active: liveSecurity.ssh_listening },
-        } : current);
-      }
+      if (clientVersion === clientObservationVersion.current) setClients(liveClients ?? clientsUnavailable);
+      setProtocolStatuses((current) => ({ ...current,
+        wg: liveProtocol("wg") ? tunnelLiveObservation(current.wg, next.protocols.wg) : current.wg,
+        awg: liveProtocol("awg") ? tunnelLiveObservation(current.awg, next.protocols.awg) : current.awg,
+      }));
+      if (securityVersion === securityObservationVersion.current) setSecurity((current) => securityLiveObservation(current, next.security));
       setRefreshErrors((current) => {
         const errors = { ...current };
-        if (next.unavailable?.length) errors.liveSources = { message: `Stale — не обновились: ${next.unavailable.join(", ")}`, network: false };
+        const unavailable = [...(next.unavailable || []), ...(next.resources.stale ? ["resources"] : [])];
+        if (unavailable.length) errors.liveSources = { message: `Stale — не обновились: ${unavailable.join(", ")}`, network: false };
         else delete errors.liveSources;
         return errors;
       });
       setLastUpdated(new Date());
-    } catch {
-      // Full module refresh reports persistent errors; live telemetry stays silent.
+    } catch (cause) {
+      if (observationVersion !== applicationObservationVersion.current) return;
       networkSample.current = null;
       setNetworkRate({ rx: null, tx: null });
-      setOverview((current) => current ? { ...current, resources: { ...current.resources, stale: true } } : current);
+      setOverview(overviewUnavailable);
+      if (clientVersion === clientObservationVersion.current) setClients(clientsUnavailable);
+      if (securityVersion === securityObservationVersion.current) setSecurity((current) => securityLiveObservation(current, null));
+      setProtocolStatuses((current) => ({ ...current,
+        wg: liveProtocol("wg") ? directProtocolUnavailable(current.wg) : current.wg,
+        awg: liveProtocol("awg") ? directProtocolUnavailable(current.awg) : current.awg,
+      }));
       setResourceHistory((history) => Object.fromEntries(Object.entries(history).map(([key, values]) => [key, [...values, null].slice(-HISTORY_SAMPLES)])) as ResourceHistory);
+      setRefreshErrors((current) => ({ ...current, liveSources: refreshFailure(cause, "Не удалось обновить live-телеметрию") }));
     } finally {
       liveRequestInFlight.current = false;
     }
-  }, [request, tab, token]);
+  }, [request, token]);
 
   useEffect(() => {
     if (!token || !autoRefresh || !["overview", "clients", "wg", "awg", "security"].includes(tab)) return;
@@ -842,9 +887,21 @@ export function ControlPanel() {
   }
 
   async function cancelApplicationAction() {
-    await request("/application/action", { method: "DELETE" });
-    await loadApplication();
+    const initial = application?.action;
+    if (!initial) return;
+    await cancelSystemOperation(initial);
     await loadApplicationLogs();
+  }
+
+  async function recheckApplicationAction() {
+    if (admissionPending) { await recheckAdmission(); return; }
+    const initial = application?.action;
+    if (!initial?.id || !/^[a-f0-9]{32}$/.test(initial.id)) { await loadApplication(true); return; }
+    try {
+      acceptSystemOperation(systemAdmissionSnapshot(await request(`/application/operations/${initial.id}`, { cache: "no-store" }), initial.id, initial));
+    } catch {
+      acceptSystemOperation({ ...initial, state: "unknown", progress: undefined, message: "Результат команды не подтверждён. Проверяем без повторной отправки." });
+    }
   }
 
   async function runServiceAction(serviceId: string, serviceName: string, action: "start" | "stop" | "restart") {
@@ -1309,10 +1366,12 @@ export function ControlPanel() {
     if (metricsSettings && (["raw_hours", "minute_days", "hour_days", "disk_limit_mb"] as const).some((key) => metricsDraft[key] < metricsSettings[key]) && !await askConfirmation({
       title: "Сократить историю метрик?", message: "При следующей очистке данные за пределами новых сроков и лимита места будут удалены. Восстановить удалённые измерения нельзя.", confirmLabel: "Сохранить и сократить", danger: true,
     })) return;
+    metricsObservationVersion.current += 1;
     setBusy(true);
     try {
       const { enabled, raw_hours, minute_days, hour_days, disk_limit_mb, revision } = metricsDraft;
       const saved = await request<MetricsSettings>("/services/metrics", { method: "PUT", body: JSON.stringify({ enabled, raw_hours, minute_days, hour_days, disk_limit_mb, expected_revision: revision }) });
+      metricsObservationVersion.current += 1;
       setMetricsSettings(saved);
       setMetricsDraft(saved);
       metricsDirty.current = false;
@@ -1422,8 +1481,8 @@ export function ControlPanel() {
     if (clientProtocolFilter !== "all" && client.protocol !== clientProtocolFilter) return false;
     const stateMatches = clientStateFilter === "all"
       || (clientStateFilter === "online" && client.quality === "stable")
-      || (clientStateFilter === "attention" && (client.quality === "warning" || client.quality === "error"))
-      || (clientStateFilter === "offline" && (!client.quality || client.quality === "offline"));
+      || (clientStateFilter === "attention" && (!client.quality || ["warning", "error", "unknown"].includes(client.quality)))
+      || (clientStateFilter === "offline" && client.quality === "offline");
     if (!stateMatches) return false;
     const query = clientSearch.trim().toLocaleLowerCase("ru-RU");
     return !query || `${client.name} ${client.address || ""} ${client.protocol}`.toLocaleLowerCase("ru-RU").includes(query);
@@ -1431,8 +1490,8 @@ export function ControlPanel() {
   const clientSummary = useMemo(() => ({
     total: clients.length,
     online: clients.filter((client) => client.quality === "stable").length,
-    attention: clients.filter((client) => client.quality === "warning" || client.quality === "error").length,
-    offline: clients.filter((client) => !client.quality || client.quality === "offline").length,
+    attention: clients.filter((client) => !client.quality || ["warning", "error", "unknown"].includes(client.quality)).length,
+    offline: clients.filter((client) => client.quality === "offline").length,
   }), [clients]);
   const clientPageCount = Math.max(1, Math.ceil(protocolClients.length / CLIENTS_PER_PAGE));
   const currentClientPage = Math.min(clientPage, clientPageCount);
@@ -1445,13 +1504,13 @@ export function ControlPanel() {
   );
   useEffect(() => {
     if (!token || (tab !== "clients" && !clientDialog)) return;
-    const refresh = () => { for (const protocol of installedProtocols) void loadProtocolStatus(protocol).catch(() => undefined); };
+    const refresh = () => { for (const protocol of installedProtocols) void loadProtocolStatus(protocol).catch(() => undefined); void loadNetworkStatus(); };
     refresh();
     const timer = window.setInterval(refresh, 6000);
     return () => window.clearInterval(timer);
-  }, [token, tab, clientDialog, installedProtocols, loadProtocolStatus]);
+  }, [token, tab, clientDialog, installedProtocols, loadProtocolStatus, loadNetworkStatus]);
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
-  const vlessRouteStatus = protocolStatuses["vless-reality-xhttp"]?.routes || {};
+  const vlessRouteStatus = protocolStatuses["vless-reality-xhttp"]?.observation_failed ? {} : protocolStatuses["vless-reality-xhttp"]?.routes || {};
   const hasNetworkRoute = (kind: "cdn" | "tls_relay" | "udp_relay", protocol: Protocol) => Object.values(networkStatus?.transport_endpoint_checks_by_domain || {}).some((check) => check.kind === kind && (["tuic", "hysteria2"].includes(protocol) && kind === "udp_relay" ? endpointSelectable(check) : endpointCheckReady(check) && check.verified_connection?.protocol === protocol));
   const connectionTypeOptions = installedProtocols.flatMap<ClientConnectionType>((protocol) => {
     const badge = protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : protocol.toUpperCase();
@@ -1475,7 +1534,15 @@ export function ControlPanel() {
       : Boolean(vlessRouteStatus[id]?.enabled && vlessRouteStatus[id]?.available_domains?.length)
     ).map(([routeId, name, routeBadge, description]) => ({ id: `vless-${routeId}`, protocol, routeId, name, badge: routeBadge, description }));
   });
-  const selectedConnectionType = connectionTypeOptions.find((option) => option.protocol === selectedClientProtocol && (option.routeId ? option.routeId === newClientVlessRoutes[0] : option.channelMode === newClientSettings.channel_mode)) || connectionTypeOptions[0];
+  const desiredConnectionTypeId = selectedClientProtocol === "vless-reality-xhttp" ? `vless-${newClientVlessRoutes[0]}` : newClientSettings.channel_mode === "direct" ? selectedClientProtocol : `${selectedClientProtocol}-${newClientSettings.channel_mode.replaceAll("_", "-")}`;
+  if (clientDialog && !connectionTypeOptions.some((option) => option.id === desiredConnectionTypeId)
+    && (selectedClientProtocol === "vless-reality-xhttp" ? newClientVlessRoutes[0] !== "direct" : newClientSettings.channel_mode !== "direct")) {
+    const routeId = selectedClientProtocol === "vless-reality-xhttp" ? newClientVlessRoutes[0] : undefined;
+    const routeName = routeId ? `VLESS ${routeId.toUpperCase()}` : `${labels[selectedClientProtocol]} · ${newClientSettings.channel_mode === "udp_relay" ? "UDP relay" : "TLS relay"}`;
+    const reason = "Доступность выбранного маршрута не подтверждена. Обновите данные или выберите другой маршрут.";
+    connectionTypeOptions.push({ id: desiredConnectionTypeId, protocol: selectedClientProtocol, ...(routeId ? { routeId } : { channelMode: newClientSettings.channel_mode }), name: routeName, badge: selectedClientProtocol.toUpperCase(), description: reason, unavailable: reason });
+  }
+  const selectedConnectionType = connectionTypeOptions.find((option) => option.id === desiredConnectionTypeId) || connectionTypeOptions[0];
   const selectedVlessRoute = selectedConnectionType?.routeId ? vlessRouteStatus[selectedConnectionType.routeId] : undefined;
 
   useEffect(() => {
@@ -1523,6 +1590,7 @@ export function ControlPanel() {
     }
     try {
       if (!selectedConnectionType) throw new Error("Нет доступного маршрута для подключения");
+      if (selectedConnectionType.unavailable) throw new Error(selectedConnectionType.unavailable);
       const { cdn_domain: selectedCdnDomain, ...commonSettings } = newClientSettings;
       const settings = {
         ...commonSettings,
@@ -1615,7 +1683,7 @@ export function ControlPanel() {
   const memoryUsedBytes = usedBytes(overview?.resources.memory_total, overview?.resources.memory_available);
   const diskUsedBytes = usedBytes(overview?.resources.disk_total, overview?.resources.disk_available);
   const firewall = security?.firewall as {
-    active?: boolean; rules?: string[]; forwarding_enabled?: boolean; stateful_return?: boolean;
+    active?: boolean | null; rules?: string[]; forwarding_enabled?: boolean; stateful_return?: boolean;
     uplink_interface?: string; vpn_policy_healthy?: boolean;
     panel_access?: {
       mode?: "external" | "vpn"; port?: number; listening?: boolean; public_rule?: boolean; internal_url?: string;
@@ -1623,14 +1691,14 @@ export function ControlPanel() {
     };
     protocol_policies?: Record<string, { installed?: boolean; route_allowed?: boolean; nat_enabled?: boolean; healthy?: boolean }>;
   } | undefined;
-  const ssh = security?.ssh as { active?: boolean; password_authentication?: string; permit_root_login?: string; publicly_allowed?: boolean; active_connections?: number; max_auth_tries?: string; x11_forwarding?: string; tcp_forwarding?: string } | undefined;
+  const ssh = security?.ssh as { active?: boolean | null; password_authentication?: string; permit_root_login?: string; publicly_allowed?: boolean | null; active_connections?: number; max_auth_tries?: string; x11_forwarding?: string; tcp_forwarding?: string } | undefined;
   const updates = (tab === "application" ? applicationMetadata?.updates : security?.updates) as ApplicationMetadata["updates"] | undefined;
   const applicationVersion = (tab === "application" ? applicationMetadata?.application_version : security?.application_version) as ApplicationMetadata["application_version"] | undefined;
-  const securitySystem = security?.system as { kernel?: string; ipv4_forwarding?: boolean; syn_cookies?: boolean; rp_filter?: boolean; rp_filter_mode?: number; rp_filter_valid?: boolean; redirects_disabled?: boolean; source_route_disabled?: boolean; dmesg_restricted?: boolean; auditd_active?: boolean; sudo_users?: string[]; login_users?: string[]; apparmor?: { active?: boolean; profiles?: number } } | undefined;
-  const fail2ban = security?.fail2ban as { active?: boolean; jail_active?: boolean; currently_banned?: number; total_banned?: number } | undefined;
+  const securitySystem = security?.system as { kernel?: string; ipv4_forwarding?: boolean; syn_cookies?: boolean; rp_filter?: boolean; rp_filter_mode?: number; rp_filter_valid?: boolean; redirects_disabled?: boolean; source_route_disabled?: boolean; dmesg_restricted?: boolean; auditd_active?: boolean | null; sudo_users?: string[]; login_users?: string[]; apparmor?: { active?: boolean; profiles?: number } } | undefined;
+  const fail2ban = security?.fail2ban as { active?: boolean | null; jail_active?: boolean | null; currently_banned?: number | null; total_banned?: number | null } | undefined;
   const listeners = (security?.listeners as string[]) || [];
   const listenerSummary = security?.listener_summary as { tcp?: number; udp?: number; local_only?: number } | undefined;
-  const legacy = (security?.legacy_services as Record<string, { active?: boolean; enabled?: string }>) || {};
+  const legacy = (security?.legacy_services as Record<string, { active?: boolean | null; enabled?: string }>) || {};
   const applicationSecurity = security?.application_security as {
     admin_password_strong?: boolean; cors_restricted?: boolean; secrets_protected?: boolean;
     secrets_mode?: string; api_local_only?: boolean; control_command_protected?: boolean; control_command_mode?: string;
@@ -1638,11 +1706,12 @@ export function ControlPanel() {
   const panelSecurity = firewall?.panel_access;
   const panelAccessHealthy = Boolean(panelSecurity?.consistent && (panelSecurity?.vpn_only || panelSecurity?.publicly_accessible));
   const sshPublicAccessOpen = Boolean(ssh?.publicly_allowed && ssh?.password_authentication === "yes" && ssh?.permit_root_login === "yes");
+  const sshExposureUnknown = ssh?.publicly_allowed === null;
   const sshKeyOnlyActive = Boolean(ssh?.active && ssh?.password_authentication === "no" && ssh?.permit_root_login !== "yes");
   const sshKeyOnlyState = Boolean(sshAccessState?.phase !== "awaiting-confirmation" && (sshKeyOnlyActive || sshAccessState?.phase === "hardened"));
   const sshProtected = Boolean(
     ssh?.active === false
-    || (ssh?.active && !ssh?.publicly_allowed)
+    || (ssh?.active && ssh?.publicly_allowed === false)
     || (
       ssh?.active
       && fail2ban?.active
@@ -1658,12 +1727,12 @@ export function ControlPanel() {
     Boolean(fail2ban?.active && fail2ban?.jail_active),
     sshProtected,
     ssh?.active === false || ssh?.x11_forwarding === "no",
-    Boolean(security) && Number(updates?.available || 0) === 0,
-    Boolean(security) && !updates?.reboot_required,
+    Boolean(security) && updates?.available === 0 && updates.refreshing !== true && !updates.error,
+    Boolean(security) && updates?.reboot_required === false,
     Boolean(updates?.automatic),
-    applicationVersion?.outdated === false,
+    applicationVersionState(applicationVersion) === "current",
     Boolean(securitySystem?.syn_cookies),
-    Boolean(securitySystem?.apparmor?.active),
+    Boolean(securitySystem?.apparmor?.active && (securitySystem.apparmor.profiles ?? 0) > 0),
     Boolean(securitySystem?.auditd_active),
     Boolean(securitySystem?.rp_filter_valid),
     Boolean(securitySystem?.redirects_disabled),
@@ -1685,16 +1754,16 @@ export function ControlPanel() {
     ssh?.active === false || ssh?.x11_forwarding === "no",
   ];
   const securitySystemChecks = [
-    Boolean(security) && Number(updates?.available || 0) === 0 && !updates?.reboot_required,
+    Boolean(security) && updates?.available === 0 && updates.refreshing !== true && !updates.error && updates.reboot_required === false,
     Boolean(updates?.automatic),
-    Boolean(securitySystem?.apparmor?.active),
+    Boolean(securitySystem?.apparmor?.active && (securitySystem.apparmor.profiles ?? 0) > 0),
     Boolean(securitySystem?.auditd_active),
     Boolean(securitySystem?.syn_cookies),
     Boolean(securitySystem?.rp_filter_valid && securitySystem?.dmesg_restricted),
     Boolean(securitySystem?.redirects_disabled && securitySystem?.source_route_disabled),
   ];
   const securityApplicationChecks = [
-    applicationVersion?.outdated === false,
+    applicationVersionState(applicationVersion) === "current",
     true,
     true,
     Boolean(applicationSecurity?.admin_password_strong),
@@ -1707,7 +1776,7 @@ export function ControlPanel() {
     ? (installedProtocols.includes(selectedChannel) ? selectedChannel : installedProtocols[0])
     : (["wg", "awg", "shadowsocks", "vless-reality-xhttp"] as string[]).includes(tab) ? tab as Protocol : undefined;
   const activeProtocol = protocolTab ? protocolStatuses[protocolTab] : undefined;
-  const activeProtocolRate = protocolTab ? protocolRates[protocolTab] || { rx: 0, tx: 0 } : { rx: 0, tx: 0 };
+  const activeProtocolRate = protocolTab ? protocolRates[protocolTab] || { rx: null, tx: null } : { rx: null, tx: null };
   const activeProtocolImage = protocolTab ? protocolImages.find((image) => image.id === protocolTab) : undefined;
   const protocolCode = protocolTab === "wg" ? "WG" : protocolTab === "awg" ? "AWG" : protocolTab === "shadowsocks" ? "SS" : protocolTab === "vless-reality-xhttp" ? "VLESS" : "";
   const protocolIsTunnel = protocolTab === "wg" || protocolTab === "awg" || protocolTab === "openvpn" || protocolTab === "ikev2";
@@ -1716,7 +1785,7 @@ export function ControlPanel() {
   const protocolDiagnosticsLabel = activeProtocol?.diagnostics?.status === "healthy" ? "Стабильно" : activeProtocol?.diagnostics?.status === "critical" ? "Критично" : activeProtocol?.diagnostics?.status === "warning" ? "Требует внимания" : "Не проверено";
   const protocolResourceAvailable = activeProtocol?.resources?.items?.filter((item) => item.available).length || 0;
   const protocolResourceTotal = activeProtocol?.resources?.items?.length || 0;
-  const operationActive = ["queued", "running", "active", "activating", "rebooting", "powering-off"].includes(application?.action?.state || "");
+  const operationActive = systemActionNeedsPolling(application?.action);
   const operationName = application?.action?.action || "";
   const operationLabel = actionLabels[operationName.split(":")[0]] || operationName;
   const nodeHasError = notificationItems.some((item) => item.state === "error") || application?.api.active === false || application?.action?.state === "failed" || application?.action?.result === "failed";
@@ -1765,6 +1834,7 @@ export function ControlPanel() {
     onRecheckCommand={cdnCommand.recheck}
     onDismissCommand={cdnCommand.dismiss}
     onCancelOperation={cancelApplicationAction}
+    onRecheckOperation={recheckApplicationAction}
     operationAction={application?.action}
     operationLabel={operationLabel}
     operationActive={operationActive}
@@ -1788,6 +1858,7 @@ export function ControlPanel() {
       {tab === "overview" && (
         <OverviewDashboard
           token={token}
+          observationVersion={applicationObservationVersion.current}
           overview={overview}
           memUsed={memUsed}
           diskUsed={diskUsed}
@@ -1826,10 +1897,12 @@ export function ControlPanel() {
         />
       )}
 
-      {tab === "network" && <NetworkView operation={application?.action} onOperation={acceptSystemOperation} listState={networkListState} onListStateChange={setNetworkListState} onDirtyChange={setSectionDirty} request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} />}
+      {tab === "network" && <NetworkView operation={application?.action} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} listState={networkListState} onListStateChange={setNetworkListState} onDirtyChange={setSectionDirty} request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} />}
 
       {tab === "security" && <SecurityView
         securityLoading={securityLoading}
+        telemetryUnknown={security?.live_observation_failed === true || security?.full_observation_failed === true || !security}
+        fullObservationUnknown={security?.full_observation_failed === true || !security}
         securityScore={securityScore}
         securityChecks={securityChecks}
         securityPerimeterChecks={securityPerimeterChecks}
@@ -1972,10 +2045,11 @@ export function ControlPanel() {
               <div className="connectionForm">
                 <label>Название устройства<input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов</small></label>
               </div>
-              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} aria-pressed={selectedConnectionType?.id === option.id} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, channel_mode: option.channelMode || "direct", cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name} <ProtocolHealthBadge health={protocolStatuses[option.protocol]?.health} /></strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
+              <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} aria-pressed={selectedConnectionType?.id === option.id} disabled={Boolean(option.unavailable)} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, channel_mode: option.channelMode || "direct", cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name} <ProtocolHealthBadge health={protocolStatuses[option.protocol]?.health} /></strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
+              {selectedConnectionType?.unavailable && <p role="status">{selectedConnectionType.unavailable} <button type="button" onClick={() => { void loadNetworkStatus(); if (selectedClientProtocol === "vless-reality-xhttp") void loadProtocolStatus(selectedClientProtocol); }}>Проверить маршруты</button></p>}
               {selectedConnectionType && <ClientConnectionSettings selectedConnectionType={selectedConnectionType} selectedVlessRoute={selectedVlessRoute} newClientSettings={newClientSettings} setNewClientSettings={setNewClientSettings} />}
             </div>
-            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy || !selectedConnectionType}>{busy ? "Создаём…" : "Создать подключение"}</button></div>
+            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy || !selectedConnectionType || Boolean(selectedConnectionType.unavailable)}>{localBusy ? "Создаём…" : "Создать подключение"}</button></div>
           </> : <>
             <div className="connectionGenerated">
               <div className="connectionGeneratedSummary">
@@ -2014,8 +2088,8 @@ export function ControlPanel() {
           <div className="sshAdminBody">
             <section className="sshAdminStatus">
               <span className="sshAdminStatusMark">!</span>
-              <div><strong>{sshKeyOnlyState ? "Доступ по ключу подтверждён" : sshAccessState?.phase === "awaiting-confirmation" ? "Работает страховочный таймер" : sshPublicAccessOpen || sshAccessState?.phase === "open" ? "SSH/22 и root открыты" : sshAccessState?.phase === "key-installed" ? "Публичный ключ установлен" : "Парольный вход остаётся активным"}</strong><p>{sshAccessState?.message || "Панель ничего не закроет автоматически. Сначала создайте ключ и подтвердите вход в новой сессии."}</p></div>
-              <em>{sshKeyOnlyState ? "HARDENED" : sshAccessState?.phase === "awaiting-confirmation" ? "ROLLBACK ON" : sshPublicAccessOpen || sshAccessState?.phase === "open" ? "SSH OPEN" : "SAFE MODE"}</em>
+              <div><strong>{sshKeyOnlyState ? "Доступ по ключу подтверждён" : sshAccessState?.phase === "awaiting-confirmation" ? "Работает страховочный таймер" : sshPublicAccessOpen || sshAccessState?.phase === "open" ? "SSH/22 и root открыты" : sshAccessState?.phase === "key-installed" ? "Публичный ключ установлен" : sshExposureUnknown ? "Публичный доступ SSH не подтверждён" : "Парольный вход остаётся активным"}</strong><p>{sshAccessState?.message || "Панель ничего не закроет автоматически. Сначала создайте ключ и подтвердите вход в новой сессии."}</p></div>
+              <em>{sshKeyOnlyState ? "HARDENED" : sshAccessState?.phase === "awaiting-confirmation" ? "ROLLBACK ON" : sshPublicAccessOpen || sshAccessState?.phase === "open" ? "SSH OPEN" : sshExposureUnknown ? "UNKNOWN" : "SAFE MODE"}</em>
             </section>
             <section className="sshAdminKeys">
               <div className="sshAdminSectionTitle"><span>Ключи root на сервере</span><small>{sshAccessState?.keys?.length || 0} записей</small></div>

@@ -362,16 +362,10 @@ test("Mihomo profile lifecycle is transactional, idempotent and reconciled", asy
   assert.match(uninstall, /vps-control-mihomo-tuic\.service/);
 });
 
-test("overview aggregates network usage for Mihomo profiles and direct protocols", async () => {
-  const [manager, overview] = await Promise.all([
-    read("protocol-images/mihomo/manager.py"),
-    read("src/features/overview/overview-view.tsx"),
-  ]);
+test("Mihomo exposes profile statistics through the shared stats endpoint", async () => {
+  const manager = await read("protocol-images/mihomo/manager.py");
   assert.match(manager, /@app\.get\("\/api\/mihomo\/stats"/);
   assert.match(manager, /profile_stats_payload\(item\)/);
-  assert.match(overview, /mihomoProfileStats\[profile\.id\]/);
-  assert.match(overview, /protocolClients\.reduce\(\(sum, client\) => sum \+ \(client\.rx_bps \|\| 0\)/);
-  assert.match(overview, /hasClientRates \? clientRx : rate\.rx/);
 });
 
 test("Mihomo provides verified Hysteria2 and TUIC v5 transports", async () => {

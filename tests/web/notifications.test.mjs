@@ -5,6 +5,20 @@ import { systemOperationNotification } from "../../src/control-panel/system-oper
 
 const operation = (id, state = "running", message = id) => ({ id, state, message, source: "test", title: id, kind: "operation" });
 
+test("cancelled operation has a neutral terminal summary and cannot be revived by late progress", () => {
+  const store = createNotificationStore();
+  store.upsert(operation("cancelled"));
+  const notification = systemOperationNotification({ id: "cancelled", state: "cancelled" }, "Command", false);
+  store.finishOperation(notification);
+  store.upsert({ ...notification, state: "running", progress: 50 });
+  const item = store.getSnapshot().find(item => item.id === notification.id);
+  assert.equal(item.state, "cancelled");
+  assert.equal(item.message, "Команда отменена.");
+  assert.equal(item.progress, undefined);
+  store.clearCompleted();
+  assert.equal(store.getSnapshot().some(item => item.id === notification.id), false);
+});
+
 test("API acknowledgement, shell progress and confirmed result share one card", () => {
   for (const state of ["success", "error"]) {
     const store = createNotificationStore();
@@ -29,7 +43,7 @@ test("API acknowledgement, shell progress and confirmed result share one card", 
 
 test("rollback control is attached only to cancellable long actions", () => {
   const cancel = () => {};
-  const update = systemOperationNotification({ unit: "vps-control-action-1.service", action: "update", state: "running" }, "Update", true, cancel);
+  const update = systemOperationNotification({ id: "a".repeat(32), unit: "vps-control-action-1.service", action: "update", state: "running" }, "Update", true, cancel);
   const reboot = systemOperationNotification({ unit: "vps-control-action-2.service", action: "reboot", state: "running" }, "Reboot", true, cancel);
   assert.equal(update.onCancel, cancel);
   assert.equal(reboot.onCancel, undefined);

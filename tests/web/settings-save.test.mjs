@@ -66,3 +66,21 @@ test("workspace publishes available sections without waiting for slow reads and 
   assert.deepEqual(Object.keys(failures), ["modules"]);
   assert.deepEqual(displayed, { status: "new", modules: "old", profiles: "new" });
 });
+
+test("failed observations become unknown before an unrelated slow section completes", async () => {
+  let release;
+  const slow = new Promise((resolve) => { release = resolve; });
+  let activity = true;
+  let draft = "local input";
+  const failure = new Error("invalid observation");
+  const pending = refreshWorkspaceSections(async (path) => path === "status" ? {} : slow, {
+    status: { path: "status", accept: () => { throw failure; }, onFailure: (cause) => { assert.equal(cause, failure); activity = null; } },
+    profiles: { path: "profiles", accept: (value) => { draft = value; } },
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(activity, null);
+  assert.equal(draft, "local input");
+  release("confirmed data");
+  assert.deepEqual(await pending, { status: failure });
+});

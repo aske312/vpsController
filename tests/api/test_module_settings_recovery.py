@@ -141,16 +141,18 @@ class ModuleSettingsRecoveryTests(unittest.TestCase):
                 self.config = manager.CONFIG_ROOT / f"{module}.json"
                 self.config.write_text("original peers")
                 self.state = "running"
-                def fail(_):
+                def fail(*_):
                     self.config.write_text("candidate peers")
                     self.state = "error"
                     raise RuntimeError("quic apply failed")
                 with (patch.object(manager, "SERVICE_BY_MODULE", {module: "fixture.service"}),
-                      patch.object(manager, "write_quic_runtime", side_effect=fail) as writer,
+                      patch.object(manager, "module_is_installed", return_value=True),
+                      patch("quic_settings.prepare", return_value=(b"original peers", {}, "running")),
+                      patch("quic_settings.apply", side_effect=fail) as writer,
                       patch.object(manager, "call_module_script") as install,
                       self.assertRaises(manager.HTTPException)):
                     manager.patch_module_settings(module, manager.ModuleSettingsPatch(values={"mtu": 1400}))
-                writer.assert_called_once_with(module)
+                writer.assert_called_once_with(manager, module, (b"original peers", {}, "running"))
                 install.assert_not_called()
                 self.assertEqual(self.settings.read_bytes(), self.before)
                 self.assertEqual(self.config.read_text(), "original peers")

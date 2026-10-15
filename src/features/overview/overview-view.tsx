@@ -1,34 +1,23 @@
 "use client";
 import { trafficBytes, uptime } from "../../shared/lib/control-plane-ui";
 
-import type { MetricsPeriod, Overview as OverviewData, ProtocolImage, ResourceHistory } from "../../shared/types/control-plane";
-import { graphSegments, knownMetric } from "../../shared/lib/resource-metrics";
+import type { Client, MetricsPeriod, Overview as OverviewData, ProtocolImage, ProtocolStatus, ResourceHistory } from "../../shared/types/control-plane";
+import { graphSegments, knownMetric, networkSample } from "../../shared/lib/resource-metrics";
+import { directProtocolSnapshot, directProtocolUnavailable } from "../../control-panel/protocol-snapshot";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createApiClient } from "../../shared/lib/api-request";
 import { useFailureNotifications } from "../../shared/notifications/notification-center";
 import { formatModuleVersion } from "../../shared/lib/format-version";
-import { ProtocolHealthBadge, type ProtocolHealth } from "../../shared/components/protocol-health-badge";
+import { ProtocolHealthBadge } from "../../shared/components/protocol-health-badge";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import type { Module as MihomoModule } from "../mihomo/types";
 import { createMihomoSummaryStore, EMPTY_MIHOMO_SUMMARY } from "./mihomo-summary";
 import { componentPresentation } from "./component-state";
 import { useMetricsHistory } from "./use-metrics-history";
+import { directChannelObservation } from "./direct-observation";
 
 type ProtocolId = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2" | "tuic" | "trojan" | "openvpn" | "ikev2";
-type Client = {
-  id: string;
-  name: string;
-  protocol: ProtocolId;
-  address: string;
-  quality?: "stable" | "warning" | "error" | "offline";
-  latency_ms?: number;
-  rx_bytes: number;
-  tx_bytes: number;
-  rx_bps?: number;
-  tx_bps?: number;
-  active_connections?: number;
-};
 
 let mihomoSummaryCache: { token: string; store: ReturnType<typeof createMihomoSummaryStore> } | null = null;
 function mihomoSummaryStore(token: string) {
@@ -38,27 +27,10 @@ function mihomoSummaryStore(token: string) {
   return mihomoSummaryCache.store;
 }
 
-type DirectProtocolStatus = {
-  health?: ProtocolHealth;
-  protocol: ProtocolId;
-  interface?: string;
-  active?: boolean;
-  service_active?: boolean;
-  service_enabled?: boolean;
-  active_since?: string;
-  address?: string;
-  listen_port?: number;
-  peers?: number;
-  online_peers?: number;
-  endpoints?: number;
-  last_handshake_age_s?: number;
-  interface_rx_bytes?: number;
-  interface_tx_bytes?: number;
-  unit?: string;
-};
 
 type Props = {
   token: string;
+  observationVersion: number;
   overview: OverviewData | null;
   memUsed: number | null;
   diskUsed: number | null;
@@ -141,6 +113,7 @@ function prettyMax(value: number) {
 
 export function OverviewDashboard({
   token,
+  observationVersion,
   overview,
   memUsed,
   diskUsed,
@@ -177,10 +150,14 @@ export function OverviewDashboard({
   const summaryFailures = useMemo(() => Object.fromEntries(Object.entries(summary.errors).map(([key, message]) => [key, { message: message!, network: summary.networkErrors?.[key as keyof typeof summary.errors] }])), [summary]);
   const retrySummary = useMemo(() => ({ label: "Повторить проверку", run: () => summaryStore.refresh(true) }), [summaryStore]);
   useFailureNotifications("overview-mihomo", "Mihomo на Обзоре", summaryFailures, false, retrySummary);
-  const [directStatuses, setDirectStatuses] = useState<Partial<Record<ProtocolId, DirectProtocolStatus>>>({});
+  const [directStatuses, setDirectStatuses] = useState<Partial<Record<ProtocolId, ProtocolStatus>>>({});
   const [directStatusFailures, setDirectStatusFailures] = useState<Partial<Record<ProtocolId, boolean>>>({});
-  const [directRates, setDirectRates] = useState<Partial<Record<ProtocolId, { rx: number; tx: number }>>>({});
+  const [directSnapshotKey, setDirectSnapshotKey] = useState("");
+  const [directRates, setDirectRates] = useState<Partial<Record<ProtocolId, { rx: number | null; tx: number | null }>>>({});
   const directSamples = useRef<Partial<Record<ProtocolId, { rx: number; tx: number; at: number }>>>({});
+  const directRequest = useMemo(() => createApiClient(token), [token]);
+  const directReadInFlight = useRef(false);
+  const directReadGeneration = useRef(0);
 
   const directChannels = useMemo(
     () => protocolImages.filter((item) =>
@@ -190,50 +167,53 @@ export function OverviewDashboard({
     ),
     [protocolImages],
   );
+  const directIds = directChannels.map((image) => image.id).join(",");
+  const directKey = `${token}:${observationVersion}:${directIds}`;
+  const directProtocols = useMemo(() => directIds ? directIds.split(",") as ProtocolId[] : [], [directIds]);
   const loadDirectStatuses = useCallback(async () => {
-    if (!token || !directChannels.length) {
+    if (!token || !directProtocols.length) {
       setDirectStatuses({});
       setDirectStatusFailures({});
       setDirectRates({});
       directSamples.current = {};
       return;
     }
-    const headers = { Authorization: `Basic ${token}` };
-    const results = await Promise.allSettled(
-      directChannels.map(async (image) => {
-        const protocol = image.id as ProtocolId;
-        const response = await fetch(`/api/protocols/${protocol}/status`, { headers });
-        if (!response.ok) throw new Error(`status ${response.status}`);
-        return response.json() as Promise<DirectProtocolStatus>;
-      }),
-    );
+    if (directReadInFlight.current) return;
+    directReadInFlight.current = true;
+    const generation = directReadGeneration.current;
+    try {
+      const results = await Promise.allSettled(directProtocols.map(async (protocol) =>
+        directProtocolSnapshot(await directRequest(`/protocols/${protocol}/status`, { cache: "no-store" }), protocol)));
+      if (generation !== directReadGeneration.current) return;
 
-    const now = Date.now();
-    const statusUpdates: Partial<Record<ProtocolId, DirectProtocolStatus>> = {};
-    const failureUpdates: Partial<Record<ProtocolId, boolean>> = {};
-    const rateUpdates: Partial<Record<ProtocolId, { rx: number; tx: number }>> = {};
-    results.forEach((result, index) => {
-      const protocol = directChannels[index]?.id as ProtocolId | undefined;
-      if (!protocol) return;
-      failureUpdates[protocol] = result.status !== "fulfilled";
-      if (result.status !== "fulfilled") return;
-      statusUpdates[protocol] = result.value;
-      const rx = result.value.interface_rx_bytes || 0;
-      const tx = result.value.interface_tx_bytes || 0;
-      const previous = directSamples.current[protocol];
-      if (previous) {
-        const seconds = Math.max((now - previous.at) / 1000, 0.1);
-        rateUpdates[protocol] = {
-          rx: Math.max(0, (rx - previous.rx) / seconds),
-          tx: Math.max(0, (tx - previous.tx) / seconds),
-        };
-      }
-      directSamples.current[protocol] = { rx, tx, at: now };
-    });
-    setDirectStatuses((current) => ({ ...current, ...statusUpdates }));
-    setDirectStatusFailures((current) => ({ ...current, ...failureUpdates }));
-    if (Object.keys(rateUpdates).length) setDirectRates((current) => ({ ...current, ...rateUpdates }));
-  }, [directChannels, token]);
+      const now = Date.now();
+      const statusUpdates: Partial<Record<ProtocolId, ProtocolStatus>> = {};
+      const failureUpdates: Partial<Record<ProtocolId, boolean>> = {};
+      const rateUpdates: Partial<Record<ProtocolId, { rx: number | null; tx: number | null }>> = {};
+      results.forEach((result, index) => {
+        const protocol = directProtocols[index];
+        if (!protocol) return;
+        failureUpdates[protocol] = result.status !== "fulfilled";
+        if (result.status !== "fulfilled") {
+          delete directSamples.current[protocol];
+          rateUpdates[protocol] = { rx: null, tx: null };
+          return;
+        }
+        statusUpdates[protocol] = result.value;
+        const sampled = networkSample({ network_rx: result.value.interface_rx_bytes, network_tx: result.value.interface_tx_bytes }, directSamples.current[protocol] || null, now);
+        rateUpdates[protocol] = sampled.rate;
+        if (sampled.sample) directSamples.current[protocol] = sampled.sample;
+      });
+      setDirectStatuses((current) => {
+        const next = { ...current, ...statusUpdates };
+        for (const protocol of directProtocols) if (failureUpdates[protocol]) next[protocol] = directProtocolUnavailable(current[protocol]);
+        return next;
+      });
+      setDirectSnapshotKey(directKey);
+      setDirectStatusFailures((current) => ({ ...current, ...failureUpdates }));
+      if (Object.keys(rateUpdates).length) setDirectRates((current) => ({ ...current, ...rateUpdates }));
+    } finally { directReadInFlight.current = false; }
+  }, [directKey, directProtocols, directRequest, token]);
 
   useEffect(() => {
     if (!token || !mihomoInstalled) return;
@@ -243,11 +223,12 @@ export function OverviewDashboard({
   }, [summaryStore, mihomoInstalled, token]);
 
   useEffect(() => {
+    directReadGeneration.current += 1;
+    directSamples.current = {};
     const initial = window.setTimeout(() => void loadDirectStatuses(), 0);
-    if (!directChannels.length) return () => window.clearTimeout(initial);
-    const timer = window.setInterval(() => void loadDirectStatuses(), 6000);
-    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
-  }, [directChannels, loadDirectStatuses]);
+    const timer = directProtocols.length ? window.setInterval(() => void loadDirectStatuses(), 6000) : null;
+    return () => { directReadGeneration.current += 1; window.clearTimeout(initial); if (timer !== null) window.clearInterval(timer); };
+  }, [directProtocols, loadDirectStatuses, observationVersion]);
 
   const installedMihomoChannels = useMemo(
     () => (summary.modules || []).filter((item) => item.category === "transport" && item.installed),
@@ -261,7 +242,7 @@ export function OverviewDashboard({
     return rank(left) - rank(right) || left.name.localeCompare(right.name, "ru");
   }), [protocolImages]);
   const stableDirectClients = clients.filter((client) => client.quality === "stable").length;
-  const attentionDirectClients = clients.filter((client) => client.quality === "warning" || client.quality === "error").length;
+  const attentionDirectClients = clients.filter((client) => !client.quality || ["warning", "error", "unknown"].includes(client.quality)).length;
   const offlineDirectClients = clients.filter((client) => client.quality === "offline").length;
 
   const profileCount = mihomoProfiles?.length ?? mihomoStatus?.profiles ?? (mihomoInstalled ? "—" : 0);
@@ -290,33 +271,21 @@ export function OverviewDashboard({
   const directChannelStates = useMemo(() => directChannels.map((image) => {
     const protocol = image.id as ProtocolId;
     const status = directStatuses[protocol];
-    const statusFailed = Boolean(directStatusFailures[protocol]);
     const protocolClients = clients.filter((client) => client.protocol === protocol);
-    const clientSessions = protocolClients.reduce((sum, client) => sum + (client.active_connections || 0), 0);
-    const onlinePeers = status?.online_peers || 0;
-    const sessions = Math.max(clientSessions, onlinePeers);
-    const rate = directRates[protocol] || { rx: 0, tx: 0 };
-    const clientRx = protocolClients.reduce((sum, client) => sum + (client.rx_bps || 0), 0);
-    const clientTx = protocolClients.reduce((sum, client) => sum + (client.tx_bps || 0), 0);
-    const hasClientRates = protocolClients.some((client) => client.rx_bps !== undefined || client.tx_bps !== undefined);
-    const rx = hasClientRates ? clientRx : rate.rx;
-    const tx = hasClientRates ? clientTx : rate.tx;
-    const serviceActive = statusFailed ? null : status ? Boolean(status.service_active ?? status.active) : null;
-    const configured = statusFailed ? null : status ? Boolean(status.interface || status.address || status.listen_port || status.unit) : null;
-    const inUse = status?.health?.state === "WORKS";
-    const avgLatencyValues = protocolClients.map((client) => client.latency_ms).filter((value): value is number => typeof value === "number");
-    const avgLatency = avgLatencyValues.length ? Math.round(avgLatencyValues.reduce((sum, value) => sum + value, 0) / avgLatencyValues.length) : null;
-    return { image, protocol, status, statusFailed, protocolClients, sessions, rx, tx, serviceActive, configured, inUse, avgLatency };
-  }), [clients, directChannels, directRates, directStatusFailures, directStatuses]);
+    const observation = directChannelObservation(status, protocolClients, directRates[protocol] || { rx: null, tx: null },
+      directSnapshotKey !== directKey || Boolean(directStatusFailures[protocol]));
+    return { image, protocol, status, protocolClients, ...observation };
+  }), [clients, directChannels, directKey, directRates, directSnapshotKey, directStatusFailures, directStatuses]);
 
   const directInUseCount = directChannelStates.filter((item) => item.inUse).length;
-  const directReadyCount = directChannelStates.filter((item) => item.status?.health?.state === "READY").length;
-  const directStoppedCount = directChannelStates.filter((item) => item.status?.health?.state === "ERROR").length;
+  const directReadyCount = directChannelStates.filter((item) => !item.statusFailed && item.status?.health?.state === "READY").length;
+  const directStoppedCount = directChannelStates.filter((item) => !item.statusFailed && item.status?.health?.state === "ERROR").length;
+  const directUnknownCount = directChannelStates.filter((item) => item.statusFailed).length;
   const routesInUse = mihomoInUseCount + directInUseCount;
   const routesReady = mihomoReadyCount + directReadyCount;
   const mihomoUsageKnown = !mihomoInstalled || mihomoProfiles !== null || mihomoStatus !== null;
-  const routesInUseLabel = mihomoUsageKnown ? routesInUse : "—";
-  const routesReadyLabel = mihomoUsageKnown && (!mihomoInstalled || summary.modules !== null) ? routesReady : "—";
+  const routesInUseLabel = mihomoUsageKnown && !directUnknownCount ? routesInUse : "—";
+  const routesReadyLabel = mihomoUsageKnown && !directUnknownCount && (!mihomoInstalled || summary.modules !== null) ? routesReady : "—";
 
   return (
     <section className="overview" aria-label="Обзор инфраструктуры">
@@ -403,7 +372,7 @@ export function OverviewDashboard({
                     <div><p className="eyebrow">INDEPENDENT</p><h2>Direct Channels</h2><small>Прямые подключения вне Mihomo</small></div>
                   </div>
                   <span className={`overviewState ${directInUseCount ? "online" : "idle"}`}>
-                    {directInUseCount ? `${directInUseCount} WORKS ${directReadyCount} READY` : `${directReadyCount} READY ${directStoppedCount} ERROR`}
+                    {directUnknownCount ? `${directInUseCount} WORKS ${directReadyCount} READY ${directUnknownCount} UNKNOWN` : directInUseCount ? `${directInUseCount} WORKS ${directReadyCount} READY` : `${directReadyCount} READY ${directStoppedCount} ERROR`}
                   </span>
                 </header>
 
@@ -417,7 +386,7 @@ export function OverviewDashboard({
                           <small>{statusFailed ? "runtime status недоступен" : configured === null ? "проверяем конфигурацию" : configured ? `${protocolClients.length} clients  ${sessions} sessions` : "установлен, конфигурация не обнаружена"}</small>
                         </p>
                         <span className="overviewDirectTraffic"><b>↓ {bytes(rx)}/с</b><small>↑ {bytes(tx)}/с</small></span>
-                        <span className="overviewDirectLatency"><b>{avgLatency !== null ? `${avgLatency} ms` : "—"}</b><small>{status?.online_peers ?? 0} peers online</small></span>
+                        <span className="overviewDirectLatency"><b>{avgLatency !== null ? `${avgLatency} ms` : "—"}</b><small>{statusFailed ? "—" : status?.online_peers ?? "—"} peers online</small></span>
                         <ProtocolHealthBadge health={statusFailed ? undefined : directStatuses[protocol]?.health} />
                       </div>
                     );

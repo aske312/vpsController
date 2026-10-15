@@ -10,22 +10,32 @@ import { ProfileProtection } from "./profile-protection";
 import { AccessReveal } from "../../shared/components/access-reveal";
 import { useDialogFocus } from "../../shared/components/use-dialog-focus";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
-import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, ProfileMutationFailed, submitProfileMutation, type ProfileMutation } from "./profile-operation";
+import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, ProfileMutationFailed, ProfileMutationSuperseded, submitProfileMutation, type ProfileMutation } from "./profile-operation";
 import type { NetworkStatus } from "../../shared/types/control-plane";
 import { confirmedRouteAddresses } from "../../shared/lib/network-readiness";
 
-import { useNotifier, useFailureNotifications } from "../../shared/notifications/notification-center";
+import { useNotifier, useFailureNotifications, useNotifications } from "../../shared/notifications/notification-center";
 import { notificationFailure as refreshFailure, type NotificationFailure } from "../../shared/notifications/store";
-import { createApiClient, mutationFailureState } from "../../shared/lib/api-request";
-import { submitSystemOperation, systemActionNeedsPolling, type SystemAction } from "../../control-panel/system-operation";
-import { createSettingsSaveQueue } from "./settings-save";
-import { refreshWorkspaceSections } from "./workspace-refresh";
+import { createApiClient } from "../../shared/lib/api-request";
+import { submitSystemOperation, systemActionSnapshot, systemActionNeedsPolling, systemOperationId, systemOperationNotification, type SystemAction } from "../../control-panel/system-operation";
+import { checkPolicySave, persistPendingPolicySave, POLICY_SAVE_CHANGED, PolicyResultUnknown, readPendingPolicySave, submitPolicySave, type PolicySave, type PresetsResult } from "./policy-operation";
+import { managerStatusSnapshot, moduleSnapshots, networkRoutesSnapshot, personalRuleSnapshot, policySnapshot, presetsSnapshot, profileSnapshots, profileStatsSnapshot, refreshWorkspaceSections } from "./workspace-refresh";
 import { profilePage, PROFILES_PER_PAGE } from "./profile-pagination";
-import { duration, connectionOnline, trafficBytes, aggregateTraffic } from "../../shared/lib/control-plane-ui";
+import { actionLabels, duration, connectionOnline, trafficBytes, aggregateTraffic } from "../../shared/lib/control-plane-ui";
 import QRCode from "qrcode";
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
+
+function validatePolicyResult(save: PolicySave, value: unknown): unknown {
+  if (save.kind === "operation") return systemActionSnapshot(value);
+  const result = save.kind === "dns" || save.kind === "routing" ? policySnapshot(value, save.kind)
+    : save.kind === "presets" ? presetsSnapshot(value) : personalRuleSnapshot(value);
+  if (result.last_operation_id !== save.id || (save.kind === "personal" && save.ruleId && (result as PersonalRule).id !== save.ruleId)) {
+    throw new PolicyResultUnknown();
+  }
+  return result;
+}
 
 function DeviceClientBadge({ device }: { device: ProfileDevice }) {
   if (device.scope === "common" || device.manual || device.scope === "manual") return null;
@@ -52,6 +62,11 @@ function publicError(message: string, status: number) {
   return status >= 500 || TECHNICAL_ERROR.test(value) || /^(?:bad gateway|internal server error)$/i.test(value)
     ? "Команда завершилась с ошибкой. Технические сведения сохранены в журнале."
     : value || "Команда не выполнена.";
+}
+
+function policySaveLabel(save: PolicySave) {
+  if (save.kind === "operation") return actionLabels[save.action.split(":")[0]] || "Операция Mihomo";
+  return { dns: "DNS Mihomo", routing: "Маршрутизация Mihomo", presets: "Пресеты Mihomo", personal: "Персональное правило" }[save.kind];
 }
 
 export function MihomoPage({
@@ -83,17 +98,29 @@ export function MihomoPage({
   const [status, setStatus] = useState<Status | null>(null);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatus | null>(null);
   const [modules, setModules] = useState<Module[]>([]);
+  const refreshedModules = useRef<Module[] | null>(null);
+  const refreshedProfiles = useRef<Profile[] | null>(null);
+  const [profilesReadKnown, setProfilesReadKnown] = useState(false);
+  const [modulesReadKnown, setModulesReadKnown] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const pagination = profilePage(profiles.length, profilesPage);
   const visibleProfiles = profiles.slice(pagination.offset, pagination.offset + PROFILES_PER_PAGE);
   const [dnsPolicy, setDnsPolicy] = useState<PolicySettings | null>(null);
+  const [dnsReadKnown, setDnsReadKnown] = useState(false);
   const [dnsDraft, setDnsDraft] = useState<Record<string, string | number | boolean>>({});
   const [dnsDirty, setDnsDirty] = useState(false);
+  const [dnsDraftRevision, setDnsDraftRevision] = useState<string | undefined>();
+  const dnsSaving = useRef(false);
+  const dnsRevisionConflict = Boolean(dnsDraftRevision && dnsPolicy?.revision !== dnsDraftRevision);
   const dnsDirtyRef = useRef(false);
   const dnsDraftRef = useRef<Record<string, string | number | boolean>>({});
   const [routingPolicy, setRoutingPolicy] = useState<PolicySettings | null>(null);
+  const [routingReadKnown, setRoutingReadKnown] = useState(false);
   const [routingDraft, setRoutingDraft] = useState<Record<string, string | number | boolean>>({});
   const [routingDirty, setRoutingDirty] = useState(false);
+  const [routingDraftRevision, setRoutingDraftRevision] = useState<string | undefined>();
+  const routingSaving = useRef(false);
+  const routingRevisionConflict = Boolean(routingDraftRevision && routingPolicy?.revision !== routingDraftRevision);
   const [activeRuleList, setActiveRuleList] = useState("direct_ru_sites");
   const [ruleSearch, setRuleSearch] = useState("");
   const [gameSearch, setGameSearch] = useState("");
@@ -101,14 +128,25 @@ export function MihomoPage({
   const routingDirtyRef = useRef(false);
   const routingDraftRef = useRef<Record<string, string | number | boolean>>({});
   const [requestBusy, setBusy] = useState("");
-  const busy = requestBusy || (systemActionNeedsPolling(systemOperation) ? systemOperation?.action || "operation" : "");
+  const [pendingPolicySave, setPendingPolicySave] = useState<PolicySave | null>(null);
+  const [pendingProfileSave, setPendingProfileSave] = useState<{ mutation: ProfileMutation; session: number; draft: string } | null>(null);
+  const pendingPolicySaveRef = useRef<PolicySave | null>(null);
+  const pendingPolicyApply = useRef<{ id: string; apply: (result: unknown) => void } | null>(null);
+  const policyChecking = useRef(false);
+  const pageActive = useRef(false);
+  useEffect(() => { pageActive.current = true; return () => { pageActive.current = false; }; }, []);
+  const busy = requestBusy || pendingPolicySave?.id || pendingProfileSave?.mutation.payload.operation_id || (systemActionNeedsPolling(systemOperation) ? systemOperation?.action || "operation" : "");
   const { error: notifyError, success: notifySuccess, operation: notifyOperation } = useNotifier("mihomo", "Mihomo");
+  const notifications = useNotifications();
   const [refreshErrors, setRefreshErrors] = useState<Record<string, NotificationFailure>>({});
   useFailureNotifications("mihomo", "Обновление Mihomo", refreshErrors);
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const refreshRun = useRef(0);
   const [editing, setEditing] = useState<Module | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string | number | boolean>>({});
+  const latestSettingsModule = editing ? modules.find((module) => module.id === editing.id) : undefined;
+  const settingsRevisionConflict = Boolean(editing?.settings_revision
+    && latestSettingsModule?.settings_revision !== editing.settings_revision);
   const settingsSession = useRef(0);
   const settingsClosePending = useRef(false);
   const settingsSignature = JSON.stringify(settingsDraft);
@@ -117,11 +155,11 @@ export function MihomoPage({
   const settingsDirty = Boolean(editing && settingsSignature !== JSON.stringify(editing.settings_values));
   const settingsDialogRef = useDialogFocus<HTMLFormElement>(Boolean(editing), () => { void closeSettings(); });
   const [profileDialog, setProfileDialog] = useState<Profile | "new" | null>(null);
+  const [profileBaselineConflict, setProfileBaselineConflict] = useState(false);
   const profileMutationId = useRef(clientUuid());
   const profileSession = useRef(0);
   const profileClosePending = useRef(false);
   const [profileInitialDraft, setProfileInitialDraft] = useState("");
-  const [pendingProfileSave, setPendingProfileSave] = useState<{ mutation: ProfileMutation; session: number; draft: string } | null>(null);
   const [profileStep, setProfileStep] = useState(1);
   const profileCanvasRef = useRef<HTMLElement>(null);
   const [profileName, setProfileName] = useState("");
@@ -153,7 +191,7 @@ export function MihomoPage({
   const liveDialogProfile = profileDialog && profileDialog !== "new"
     ? profiles.find((profile) => profile.id === profileDialog.id) || profileDialog : null;
   const latestEditProfile = profileDialog && profileDialog !== "new" ? profiles.find((profile) => profile.id === profileDialog.id) : undefined;
-  const profileRevisionConflict = Boolean(profileDialog && profileDialog !== "new" && profileDialog.revision
+  const profileRevisionConflict = profileBaselineConflict || Boolean(profileDialog && profileDialog !== "new" && profileDialog.revision
     && latestEditProfile?.revision !== profileDialog.revision);
   const transitionMessage = liveDialogProfile ? profileTransitionMessage(liveDialogProfile, activeDeviceId) : "";
   const [profileStats, setProfileStats] = useState<Record<string, ProfileStats>>({});
@@ -165,9 +203,32 @@ export function MihomoPage({
   const [readyFailed, setReadyFailed] = useState(false);
   const [presetDialog, setPresetDialog] = useState(false);
   const [presetDraft, setPresetDraft] = useState<ProfilePreset[]>([]);
+  const [presetInitialDraft, setPresetInitialDraft] = useState("");
+  const [presetDraftRevision, setPresetDraftRevision] = useState<string | undefined>();
+  const presetRevisionConflict = Boolean(presetDialog && presetDraftRevision && routingPolicy?.presets_revision !== presetDraftRevision);
+  const presetSession = useRef(0);
+  const presetClosePending = useRef(false);
+  const presetSaving = useRef(false);
+  const presetSignature = JSON.stringify(presetDraft);
+  const presetSignatureRef = useRef(presetSignature);
+  presetSignatureRef.current = presetSignature;
+  const presetDirty = presetDialog && presetSignature !== presetInitialDraft;
+  const presetDialogRef = useDialogFocus<HTMLFormElement>(presetDialog, () => { void closePresets(); });
   const [presetEditorIndex, setPresetEditorIndex] = useState(0);
   const [personalRuleDialog, setPersonalRuleDialog] = useState<PersonalRule | "new" | null>(null);
   const [personalRuleDraft, setPersonalRuleDraft] = useState({ code: "PERS", title: "", description: "", kind: "domain" as PersonalRule["kind"], entries: "", target: "GATE.312" as PersonalRule["target"] });
+  const [personalRuleInitialDraft, setPersonalRuleInitialDraft] = useState("");
+  const personalRuleSession = useRef(0);
+  const personalRuleClosePending = useRef(false);
+  const personalRuleSaving = useRef(false);
+  const personalRuleSignature = JSON.stringify(personalRuleDraft);
+  const personalRuleSignatureRef = useRef(personalRuleSignature);
+  personalRuleSignatureRef.current = personalRuleSignature;
+  const personalRuleDirty = Boolean(personalRuleDialog && personalRuleSignature !== personalRuleInitialDraft);
+  const latestPersonalRule = personalRuleDialog && personalRuleDialog !== "new" ? routingPolicy?.personal_rules?.find((rule) => rule.id === personalRuleDialog.id) : undefined;
+  const personalRuleRevisionConflict = Boolean(personalRuleDialog && personalRuleDialog !== "new"
+    && (personalRuleDialog.revision ? latestPersonalRule?.revision !== personalRuleDialog.revision : !latestPersonalRule));
+  const personalRuleDialogRef = useDialogFocus<HTMLFormElement>(Boolean(personalRuleDialog), () => { void closePersonalRule(); });
 
   useEffect(() => {
     profileCanvasRef.current?.scrollTo({ top: 0, behavior: "auto" });
@@ -184,9 +245,6 @@ export function MihomoPage({
       return client<T>(path, options);
     };
   }, [token, readOnly]);
-  const saveRouting = useMemo(() => createSettingsSaveQueue((values: Record<string, string | number | boolean>) =>
-    request<PolicySettings>("/mihomo/routing/settings", { method: "PATCH", body: JSON.stringify({ values }) })), [request]);
-
   const refresh = useCallback(async (afterAction = true): Promise<void> => {
     if (refreshInFlight.current) {
       if (!afterAction) return refreshInFlight.current;
@@ -196,40 +254,56 @@ export function MihomoPage({
     const run = ++refreshRun.current;
     onLoadingChange?.(true, run);
     const job = (async () => {
+      refreshedModules.current = null;
+      refreshedProfiles.current = null;
       try {
         let profileItems: Profile[] | undefined;
-        const failures = await refreshWorkspaceSections(request, {
-          status: { path: "/mihomo/status", accept: (value) => setStatus(value as Status) },
-          network: { path: "/network", accept: (value) => setNetworkStatus(value as NetworkStatus) },
-          modules: { path: "/mihomo/modules", accept: (value) => setModules((value as { items: Module[] }).items || []) },
-          profiles: { path: "/mihomo/profiles", accept: (value) => {
-            profileItems = (value as { items: Profile[] }).items || [];
+        // Observations and draft baselines must come from this read. A stale
+        // cache hit would hide revalidation failures and keep old readiness.
+        const failures = await refreshWorkspaceSections((path) => request(path, { cache: "no-store" }), {
+          status: { path: "/mihomo/status", accept: (value) => setStatus(managerStatusSnapshot(value)), onFailure: () => setStatus(null) },
+          network: { path: "/network", accept: (value) => setNetworkStatus(networkRoutesSnapshot(value)), onFailure: () => setNetworkStatus(null) },
+          modules: { path: "/mihomo/modules", onFailure: () => setModulesReadKnown(false), accept: (value) => {
+            refreshedModules.current = moduleSnapshots(value);
+            setModulesReadKnown(true);
+            setModules(refreshedModules.current);
+          } },
+          profiles: { path: "/mihomo/profiles", onFailure: () => { setProfilesReadKnown(false); setProfileStats({}); }, accept: (value) => {
+            profileItems = profileSnapshots(value);
+            setProfilesReadKnown(true);
+            refreshedProfiles.current = profileItems;
             setProfiles(profileItems);
             const count = profileItems.length;
             setProfilesPage((current) => profilePage(count, current).page);
           } },
-          dns: { path: "/mihomo/dns/settings", accept: (value) => {
+          dns: { path: "/mihomo/dns/settings", onFailure: () => setDnsReadKnown(false), accept: (value) => {
+            value = policySnapshot(value, "dns");
+            setDnsReadKnown(true);
             setDnsPolicy(value as PolicySettings);
             if (!dnsDirtyRef.current) {
+              setDnsDraftRevision((value as PolicySettings).revision);
               dnsDraftRef.current = { ...(value as PolicySettings).values };
               setDnsDraft(dnsDraftRef.current);
             }
           } },
-          routing: { path: "/mihomo/routing/schema", accept: (value) => {
+          routing: { path: "/mihomo/routing/schema", onFailure: () => setRoutingReadKnown(false), accept: (value) => {
+            value = policySnapshot(value, "routing");
+            setRoutingReadKnown(true);
             setRoutingPolicy(value as PolicySettings);
             if (!routingDirtyRef.current) {
+              setRoutingDraftRevision((value as PolicySettings).revision);
               routingDraftRef.current = { ...(value as PolicySettings).values };
               setRoutingDraft(routingDraftRef.current);
             }
           } },
         });
         const statsEntries = await Promise.all((profileItems || []).map(async (profile) => {
-          try { return [profile.id, await request(`/mihomo/profiles/${profile.id}/stats`)] as const; }
+          try { return [profile.id, profileStatsSnapshot(await request(`/mihomo/profiles/${profile.id}/stats`))] as const; }
           catch (cause) { failures.stats = cause; return [profile.id, null] as const; }
         }));
-        if (profileItems) setProfileStats((previous) => Object.fromEntries(statsEntries
-          .map(([id, value]) => [id, value || previous[id]])
+        if (profileItems) setProfileStats(Object.fromEntries(statsEntries
           .filter(([, value]) => value)) as Record<string, ProfileStats>);
+        else { setProfileStats({}); setProfilesReadKnown(false); }
         setRefreshErrors(Object.fromEntries(Object.entries(failures).map(([key, cause]) => [key, refreshFailure(cause, "Не удалось обновить данные Mihomo")])));
       } catch (cause) {
         setRefreshErrors({ overview: refreshFailure(cause, "Не удалось обновить данные Mihomo") });
@@ -242,10 +316,128 @@ export function MihomoPage({
     return job;
   }, [onLoadingChange, request, setProfilesPage]);
 
-  function reportMutationFailure(id: string, label: string, cause: unknown, fallback: string) {
-    const state = mutationFailureState(cause);
-    notifyOperation(id, label, state, cause instanceof Error ? cause.message : fallback,
-      state === "unknown" ? () => refresh() : undefined);
+  const reportPolicySave = useCallback((save: PolicySave, state: "running" | "unknown" | "success" | "error", message: string, onRecheck?: () => void) => {
+    if (save.kind === "operation") {
+      notifications.upsert({ id: systemOperationId({ id: save.id }), source: "system", title: policySaveLabel(save), kind: "operation", state, message,
+        action: state === "unknown" && onRecheck ? { label: "Проверить результат", run: onRecheck } : undefined });
+    } else notifyOperation(save.id, policySaveLabel(save), state, message, onRecheck);
+  }, [notifications, notifyOperation]);
+
+  const completePolicySave = useCallback(async (save: PolicySave, result: unknown) => {
+    if (pendingPolicySaveRef.current?.id !== save.id) return;
+    const stored = readPendingPolicySave();
+    if ((stored && stored.id !== save.id) || (!pageActive.current && !stored)) return;
+    pendingPolicySaveRef.current = null;
+    persistPendingPolicySave(null);
+    setPendingPolicySave(null);
+    const continuation = pendingPolicyApply.current;
+    pendingPolicyApply.current = null;
+    if (pageActive.current && continuation?.id === save.id) continuation.apply(result);
+    if (save.kind === "operation") {
+      const action = result as SystemAction;
+      onSystemOperation(action);
+      notifications.upsert(systemOperationNotification(action, policySaveLabel(save), systemActionNeedsPolling(action)));
+    }
+    await refresh();
+    if (save.kind !== "operation") reportPolicySave(save, "success", "Изменения сохранены");
+  }, [refresh, reportPolicySave, notifications, onSystemOperation]);
+
+  const recheckPolicySave = useCallback(async (save: PolicySave) => {
+    if (policyChecking.current || pendingPolicySaveRef.current?.id !== save.id) return;
+    policyChecking.current = true;
+    try { await completePolicySave(save, await checkPolicySave(request, save, { validate: (value) => validatePolicyResult(save, value) })); }
+    catch (cause) {
+      const stored = readPendingPolicySave();
+      if (pendingPolicySaveRef.current?.id !== save.id || (stored && stored.id !== save.id) || (!pageActive.current && !stored)) return;
+      reportPolicySave(save, "unknown", cause instanceof Error ? cause.message : new PolicyResultUnknown().message,
+        () => { void recheckPolicySave(save); });
+    } finally { policyChecking.current = false; }
+  }, [request, completePolicySave, reportPolicySave]);
+
+  useEffect(() => {
+    function syncPending(event: Event) {
+      const save = (event as CustomEvent<PolicySave | null>).detail;
+      if (pendingPolicySaveRef.current?.id === save?.id) return;
+      pendingPolicySaveRef.current = save;
+      pendingPolicyApply.current = null;
+      setPendingPolicySave(save);
+      if (save) reportPolicySave(save, "unknown", new PolicyResultUnknown().message, () => { void recheckPolicySave(save); });
+      else void refresh();
+    }
+    window.addEventListener(POLICY_SAVE_CHANGED, syncPending);
+    const save = readPendingPolicySave();
+    if (save && !pendingPolicySaveRef.current) {
+      pendingPolicySaveRef.current = save;
+      setPendingPolicySave(save);
+      reportPolicySave(save, "unknown", new PolicyResultUnknown().message, () => { void recheckPolicySave(save); });
+    }
+    return () => window.removeEventListener(POLICY_SAVE_CHANGED, syncPending);
+  }, [reportPolicySave, recheckPolicySave, refresh]);
+
+  async function saveTrackedMutation<T>(save: PolicySave, path: string, payload: Record<string, unknown>, apply: (result: T) => void, method: string) {
+    if (pendingPolicySaveRef.current) return;
+    pendingPolicySaveRef.current = save;
+    pendingPolicyApply.current = { id: save.id, apply: (result) => apply(result as T) };
+    persistPendingPolicySave(save);
+    setPendingPolicySave(save);
+    reportPolicySave(save, "running", "Отправляем изменения…");
+    try { await completePolicySave(save, await submitPolicySave<T>(request, save, path, payload, method, { admit: submitSystemOperation, validate: (value) => validatePolicyResult(save, value) })); }
+    catch (cause) {
+      const stored = readPendingPolicySave();
+      if (pendingPolicySaveRef.current?.id !== save.id || (stored && stored.id !== save.id) || (!pageActive.current && !stored)) return;
+      if (cause instanceof PolicyResultUnknown) {
+        reportPolicySave(save, "unknown", cause.message, () => { void recheckPolicySave(save); });
+      } else {
+        pendingPolicySaveRef.current = null;
+        pendingPolicyApply.current = null;
+        persistPendingPolicySave(null);
+        setPendingPolicySave(null);
+        reportPolicySave(save, "error", cause instanceof Error ? cause.message : "Не удалось сохранить изменения");
+      }
+      throw cause;
+    }
+  }
+
+  async function savePolicy<T>(kind: Exclude<PolicySave["kind"], "operation">, path: string, payload: Record<string, unknown>, apply: (result: T) => void, method = "PATCH", ruleId?: string) {
+    await saveTrackedMutation({ id: clientUuid().replaceAll("-", ""), kind, ...(ruleId ? { ruleId } : {}) }, path, payload, apply, method);
+  }
+
+  async function saveMihomoOperation(path: string, method: string, action: string, payload: Record<string, unknown> = {}, apply: (result: SystemAction) => void = () => {}) {
+    await saveTrackedMutation({ id: clientUuid().replaceAll("-", ""), kind: "operation", action }, path, payload, apply, method);
+  }
+
+  function clearProfileSaveGuard(identity: string) {
+    if (pendingPolicySaveRef.current?.id !== identity) return;
+    const stored = readPendingPolicySave();
+    if ((stored && stored.id !== identity) || (!pageActive.current && !stored)) return;
+    pendingPolicySaveRef.current = null;
+    pendingPolicyApply.current = null;
+    persistPendingPolicySave(null);
+    setPendingPolicySave(null);
+  }
+
+  async function finishProfileSave(result: Profile, pending: { mutation: ProfileMutation; session: number; draft: string }) {
+    clearProfileSaveGuard(pending.mutation.payload.operation_id.replaceAll("-", ""));
+    await refresh();
+    if (!pageActive.current || profileSession.current !== pending.session) return;
+    profileMutationId.current = clientUuid();
+    if (profileDraftRef.current === pending.draft) {
+      profileSession.current += 1;
+      setProfileDialog(null);
+      return;
+    }
+    const saved = refreshedProfiles.current?.find((profile) => profile.id === result.id && profile.revision
+      && profile.revision === result.revision && (pending.mutation.profileId
+        ? profile.last_operation_id === pending.mutation.payload.operation_id
+        : profile.create_operation_id === pending.mutation.payload.operation_id && !profile.last_operation_id
+          && profile.create_revision === profile.revision));
+    if (saved || !pending.mutation.profileId) {
+      // A confirmed creation becomes an edit even if a later writer prevents
+      // adopting the fresh baseline. Keep all input entered after submission.
+      setProfileDialog(saved || result);
+      setProfileBaselineConflict(!saved);
+      setProfileInitialDraft(pending.draft);
+    }
   }
 
   function updateDnsDraft(key: string, value: string | number | boolean) {
@@ -255,24 +447,44 @@ export function MihomoPage({
     setDnsDirty(true);
   }
 
+  async function reloadPolicy(kind: "dns" | "routing") {
+    const policy = kind === "dns" ? dnsPolicy : routingPolicy;
+    if (!policy || busy || !(kind === "dns" ? dnsReadKnown : routingReadKnown)) return;
+    if ((kind === "dns" ? dnsDirtyRef.current : routingDirtyRef.current) && !await confirmAction({ title: "Загрузить актуальные настройки?", message: "Несохранённые правки будут потеряны. Настройки на сервере не изменятся.", confirmLabel: "Загрузить" })) return;
+    if (kind === "dns") {
+      dnsDraftRef.current = { ...policy.values };
+      setDnsDraft(dnsDraftRef.current);
+      setDnsDraftRevision(policy.revision);
+      dnsDirtyRef.current = false;
+      setDnsDirty(false);
+    } else {
+      routingDraftRef.current = { ...policy.values };
+      setRoutingDraft(routingDraftRef.current);
+      setRoutingDraftRevision(policy.revision);
+      routingDirtyRef.current = false;
+      setRoutingDirty(false);
+    }
+  }
+
   async function saveDnsWorkspace(event: FormEvent) {
     event.preventDefault();
-    const operationId = "settings:dns-private";
-    notifyOperation(operationId, "DNS Mihomo", "running", "Сохраняем DNS для профилей Mihomo…");
-    setBusy(operationId);
+    if (!dnsReadKnown || busy || dnsSaving.current || dnsRevisionConflict) return;
+    dnsSaving.current = true;
+    setBusy("settings:dns-private");
     try {
       const submitted = dnsDraftRef.current;
-      await request("/mihomo/dns/settings", { method: "PATCH", body: JSON.stringify({ values: submitted }) });
-      if (dnsDraftRef.current === submitted) {
-        dnsDirtyRef.current = false;
-        setDnsDirty(false);
-      }
-      await refresh();
-      notifyOperation(operationId, "DNS Mihomo", "success", "DNS-настройки сохранены");
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "DNS-настройки не сохранены";
-      reportMutationFailure(operationId, "DNS Mihomo", cause, message);
+      await savePolicy<PolicySettings>("dns", "/mihomo/dns/settings", { values: submitted, expected_revision: dnsDraftRevision }, (result) => {
+        setDnsDraftRevision(result.revision);
+        setDnsPolicy(result);
+        if (dnsDraftRef.current === submitted) {
+          dnsDirtyRef.current = false;
+          setDnsDirty(false);
+        }
+      });
+    } catch {
+      void refresh();
     } finally {
+      dnsSaving.current = false;
       setBusy("");
     }
   }
@@ -307,7 +519,7 @@ export function MihomoPage({
     return () => { cancelled = true; };
   }, [createdProfile, request, notifyError]);
 
-  useEffect(() => { onDirtyChange?.(dnsDirty || routingDirty || profileDirty || settingsDirty); }, [dnsDirty, routingDirty, profileDirty, settingsDirty, onDirtyChange]);
+  useEffect(() => { onDirtyChange?.(dnsDirty || routingDirty || profileDirty || settingsDirty || presetDirty || personalRuleDirty || Boolean(pendingPolicySave || pendingProfileSave)); }, [dnsDirty, routingDirty, profileDirty, settingsDirty, presetDirty, personalRuleDirty, pendingPolicySave, pendingProfileSave, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   function updateRoutingDraft(key: string, value: string | number | boolean) {
@@ -421,23 +633,24 @@ export function MihomoPage({
 
   async function saveRoutingWorkspace(event: FormEvent) {
     event.preventDefault();
-    const operationId = "settings:routing-policy";
-    notifyOperation(operationId, "Маршрутизация Mihomo", "running", "Сохраняем правила маршрутизации…");
-    setBusy(operationId);
+    if (!routingReadKnown || busy || routingSaving.current || routingRevisionConflict) return;
+    routingSaving.current = true;
+    setBusy("settings:routing-policy");
 
     try {
       const submitted = routingDraftRef.current;
-      await saveRouting(submitted);
-      if (routingDraftRef.current === submitted) {
-        routingDirtyRef.current = false;
-        setRoutingDirty(false);
-      }
-      await refresh();
-      notifyOperation(operationId, "Маршрутизация Mihomo", "success", "Правила сохранены. Обновите подписку в клиенте.");
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Маршрутизация не сохранена";
-      reportMutationFailure(operationId, "Маршрутизация Mihomo", cause, message);
+      await savePolicy<PolicySettings>("routing", "/mihomo/routing/settings", { values: submitted, expected_revision: routingDraftRevision }, (result) => {
+        setRoutingDraftRevision(result.revision);
+        setRoutingPolicy((current) => ({ ...current, ...result }));
+        if (routingDraftRef.current === submitted) {
+          routingDirtyRef.current = false;
+          setRoutingDirty(false);
+        }
+      });
+    } catch {
+      void refresh();
     } finally {
+      routingSaving.current = false;
       setBusy("");
     }
   }
@@ -480,19 +693,28 @@ export function MihomoPage({
   }
 
   const refreshedModuleOperation = useRef<string | undefined>(undefined);
-  const pendingSettingsOperation = useRef<{ id: string; session: number; draft: string } | undefined>(undefined);
+  const pendingSettingsOperation = useRef<{ id: string; moduleId: string; session: number; draft: string } | undefined>(undefined);
+  const pendingRuleDeletion = useRef<{ id: string; ruleId: string } | undefined>(undefined);
   useEffect(() => {
     if (!systemOperation?.action?.startsWith("mihomo-") || !systemOperation.id || refreshedModuleOperation.current === systemOperation.id) return;
     if (systemOperation.state === "succeeded" || systemOperation.state === "failed") {
       refreshedModuleOperation.current = systemOperation.id;
       const pending = pendingSettingsOperation.current?.id === systemOperation.id ? pendingSettingsOperation.current : undefined;
+      const deletion = pendingRuleDeletion.current?.id === systemOperation.id ? pendingRuleDeletion.current : undefined;
+      if (deletion) pendingRuleDeletion.current = undefined;
       if (pending) {
         pendingSettingsOperation.current = undefined;
       }
       void refresh().then(() => {
-        if (pending && systemOperation.state === "succeeded" && settingsSession.current === pending.session && settingsSignatureRef.current === pending.draft) {
-          settingsSession.current += 1;
-          setEditing(null);
+        if (deletion && systemOperation.state === "succeeded") setActiveRuleList((current) => current === `personal:${deletion.ruleId}` ? "direct_ru_sites" : current);
+        if (pending && systemOperation.state === "succeeded" && settingsSession.current === pending.session) {
+          if (settingsSignatureRef.current === pending.draft) {
+            settingsSession.current += 1;
+            setEditing(null);
+          } else {
+            const saved = refreshedModules.current?.find((module) => module.id === pending.moduleId && module.last_settings_operation_id === pending.id);
+            if (saved) setEditing(saved);
+          }
         }
       });
     }
@@ -501,8 +723,8 @@ export function MihomoPage({
   async function recoverProfiles() {
     if (!await confirmAction({ title: "Восстановить Mihomo?", message: "Настройки, конфигурация и состояние служб будут восстановлены из снимка перед прерванным изменением. Подключения могут кратковременно прерваться.", confirmLabel: "Восстановить", danger: true })) return;
     setBusy("recovery");
-    try { onSystemOperation(await submitSystemOperation(request, "/mihomo/recovery", { method: "POST" })); }
-    catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось начать восстановление"); }
+    try { await saveMihomoOperation("/mihomo/recovery", "POST", "mihomo-module-recover:profiles"); }
+    catch { void refresh(); }
     finally { setBusy(""); }
   }
 
@@ -520,10 +742,9 @@ export function MihomoPage({
     if (!confirmed) return;
     setBusy(module.id);
     try {
-      const started = await submitSystemOperation(request, `/mihomo/modules/${module.id}${install ? "/install" : ""}`, { method: install ? "POST" : "DELETE" });
-      onSystemOperation(started);
-    } catch (cause) {
-      notifyError(cause instanceof Error ? cause.message : "Не удалось начать операцию Mihomo");
+      await saveMihomoOperation(`/mihomo/modules/${module.id}${install ? "/install" : ""}`, install ? "POST" : "DELETE", `mihomo-module-${install ? "install" : "remove"}:${module.id}`);
+    } catch {
+      void refresh();
     } finally { setBusy(""); }
   }
 
@@ -541,10 +762,9 @@ export function MihomoPage({
     if (!confirmed) return;
     setBusy(module.id);
     try {
-      const started = await submitSystemOperation(request, `/mihomo/modules/${module.id}/update`, { method: "POST" });
-      onSystemOperation(started);
-    } catch (cause) {
-      notifyError(cause instanceof Error ? cause.message : "Не удалось начать обновление Mihomo");
+      await saveMihomoOperation(`/mihomo/modules/${module.id}/update`, "POST", `mihomo-module-update:${module.id}`);
+    } catch {
+      void refresh();
     } finally { setBusy(""); }
   }
 
@@ -552,6 +772,19 @@ export function MihomoPage({
     settingsSession.current += 1;
     setEditing(module);
     setSettingsDraft({ ...module.settings_values });
+  }
+
+  async function reloadSettings() {
+    if (!latestSettingsModule) return;
+    const session = settingsSession.current;
+    if (settingsDirty && !await confirmAction({ title: "Загрузить актуальные настройки?", message: "Несохранённые правки этой формы будут потеряны. Настройки на сервере не изменятся.", confirmLabel: "Загрузить" })) return;
+    if (settingsSession.current === session) openSettings(latestSettingsModule);
+  }
+
+  function rejectStaleSettings(cause: unknown, session: number) {
+    if (settingsSession.current === session && cause instanceof Error && "status" in cause && cause.status === 409) {
+      void refresh();
+    }
   }
 
   async function closeSettings() {
@@ -568,52 +801,44 @@ export function MihomoPage({
 
   async function saveSettings(event: FormEvent) {
     event.preventDefault();
-    if (!editing || busy) return;
+    if (!editing || busy || settingsRevisionConflict) return;
     const session = settingsSession.current;
     const submittedDraft = settingsSignature;
     if (editing.category !== "dns" && editing.category !== "routing") {
       setBusy(`settings:${editing.id}`);
       try {
-        const started = await submitSystemOperation(request, `/mihomo/modules/${editing.id}/settings`, {
-          method: "PATCH", body: JSON.stringify({ values: settingsDraft }),
+        await saveMihomoOperation(`/mihomo/modules/${editing.id}/settings`, "PATCH", "mihomo-profile-module-settings", { values: settingsDraft, expected_revision: editing.settings_revision }, (started) => {
+          pendingSettingsOperation.current = started.id ? { id: started.id, moduleId: editing.id, session, draft: submittedDraft } : undefined;
         });
-        pendingSettingsOperation.current = started.id ? { id: started.id, session, draft: submittedDraft } : undefined;
-        onSystemOperation(started);
       } catch (cause) {
-        notifyError(cause instanceof Error ? cause.message : "Не удалось начать применение настроек");
+        rejectStaleSettings(cause, session);
       } finally { setBusy(""); }
       return;
     }
     const operationId = `settings:${editing.id}`;
-    const operationLabel = `Настройки ${editing.name}`;
-    notifyOperation(operationId, operationLabel, "running", "Сохраняем настройки внутреннего модуля…");
     setBusy(operationId);
 
     try {
-      const settingsPath = editing.category === "dns"
-        ? "/mihomo/dns/settings"
-        : editing.category === "routing"
-          ? "/mihomo/routing/settings"
-          : `/mihomo/modules/${editing.id}/settings`;
-      await request(settingsPath, {
-        method: "PATCH",
-        body: JSON.stringify({ values: settingsDraft }),
+      const kind = editing.category === "dns" ? "dns" : "routing";
+      await savePolicy<PolicySettings>(kind, `/mihomo/${kind}/settings`, { values: settingsDraft, expected_revision: editing.settings_revision }, (result) => {
+        if (settingsSession.current === session) {
+          if (settingsSignatureRef.current === submittedDraft) {
+            settingsSession.current += 1;
+            setEditing(null);
+          } else {
+            setEditing({ ...editing, settings_values: result.values, settings_revision: result.revision });
+          }
+        }
       });
-      if (settingsSession.current === session && settingsSignatureRef.current === submittedDraft) {
-        settingsSession.current += 1;
-        setEditing(null);
-      }
-      await refresh();
-      notifyOperation(operationId, operationLabel, "success", "Настройки сохранены");
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Настройки не сохранены";
-      reportMutationFailure(operationId, operationLabel, cause, message);
+      rejectStaleSettings(cause, session);
     } finally {
       setBusy("");
     }
   }
 
   function newProfile() {
+    setProfileBaselineConflict(false);
     profileSession.current += 1;
     setProfileInitialDraft(JSON.stringify(["", [], {}, [{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: {} }]]));
     profileMutationId.current = clientUuid();
@@ -628,6 +853,7 @@ export function MihomoPage({
   }
 
   function editProfile(profile: Profile) {
+    setProfileBaselineConflict(false);
     profileSession.current += 1;
     profileMutationId.current = clientUuid();
     setProfileStep(1);
@@ -755,32 +981,37 @@ export function MihomoPage({
     event.preventDefault();
     if (!profileDialog) return;
     if (profileRevisionConflict) { notifyError("Профиль изменился на сервере. Загрузите актуальные данные перед сохранением"); return; }
-    if (busy || pendingProfileSave) return;
+    if (busy || pendingProfileSave || pendingPolicySaveRef.current) return;
     const session = profileSession.current;
     const submittedDraft = profileDraft;
     const mutation: ProfileMutation = {
       profileId: profileDialog === "new" ? undefined : profileDialog.id,
       payload: { name: profileName, devices: profileDevices, connections: profileConnections, routing: profileDevices.find((device) => device.scope === "common")?.routing || profileRouting, operation_id: profileMutationId.current, ...(profileDialog !== "new" ? { expected_revision: profileDialog.revision } : {}) },
     };
+    const save: PolicySave = { id: mutation.payload.operation_id.replaceAll("-", ""), kind: "operation", action: mutation.profileId ? "mihomo-profile-update" : "mihomo-profile-create" };
+    pendingPolicySaveRef.current = save;
+    pendingPolicyApply.current = null;
+    persistPendingPolicySave(save);
+    setPendingPolicySave(save);
+    reportPolicySave(save, "running", "Сохраняем профиль…");
     const report = () => {};
-    const finish = async () => {
-      if (profileSession.current === session && profileDraftRef.current === submittedDraft) {
-        profileSession.current += 1;
-        setProfileDialog(null);
-      }
-      await refresh();
-    };
     const fail = (cause: unknown) => {
+      if (!(cause instanceof ProfileResultUnknown)) clearProfileSaveGuard(save.id);
+      const stored = readPendingPolicySave();
+      if (!pageActive.current && (!stored || stored.id !== save.id)) return;
       if (cause instanceof ProfileResultUnknown) setPendingProfileSave({ mutation, session, draft: submittedDraft });
       if (profileSession.current === session && !(cause instanceof ProfileResultUnknown)) profileMutationId.current = clientUuid();
       notifyError(cause instanceof Error ? cause.message : "Профиль не сохранён");
+      reportPolicySave(save, cause instanceof ProfileResultUnknown ? "unknown" : cause instanceof ProfileMutationSuperseded ? "success" : "error", cause instanceof Error ? cause.message : "Профиль не сохранён",
+        cause instanceof ProfileResultUnknown ? () => { void recheckPolicySave(save); } : undefined);
       void refresh();
     };
     setBusy("profile");
 
     try {
-      await submitProfileMutation(request, mutation, report, { onOperation: onSystemOperation });
-      await finish();
+      const result = await submitProfileMutation(request, mutation, report, { onOperation: onSystemOperation, validateProfiles: profileSnapshots, validateOperation: systemActionSnapshot });
+      await finishProfileSave(result, { mutation, session, draft: submittedDraft });
+      reportPolicySave(save, "success", "Профиль сохранён");
     } catch (cause) {
       fail(cause);
     } finally {
@@ -793,20 +1024,15 @@ export function MihomoPage({
     const pending = pendingProfileSave;
     setBusy("profile");
     try {
-      await checkProfileMutation(request, pending.mutation, () => {}, { onOperation: onSystemOperation });
+      const result = await checkProfileMutation(request, pending.mutation, () => {}, { onOperation: onSystemOperation, validateProfiles: profileSnapshots, validateOperation: systemActionSnapshot });
       setPendingProfileSave(null);
-      if (profileSession.current === pending.session) {
-        profileMutationId.current = clientUuid();
-        if (profileDraftRef.current === pending.draft) {
-          profileSession.current += 1;
-          setProfileDialog(null);
-        }
-      }
-      await refresh();
+      await finishProfileSave(result, pending);
     } catch (cause) {
-      if (cause instanceof ProfileMutationFailed) {
+      if (cause instanceof ProfileMutationFailed || cause instanceof ProfileMutationSuperseded) {
+        clearProfileSaveGuard(pending.mutation.payload.operation_id.replaceAll("-", ""));
         setPendingProfileSave(null);
         if (profileSession.current === pending.session) profileMutationId.current = clientUuid();
+        if (cause instanceof ProfileMutationSuperseded) reportPolicySave({ id: pending.mutation.payload.operation_id.replaceAll("-", ""), kind: "operation", action: "mihomo-profile-update" }, "success", cause.message);
       }
       notifyError(cause instanceof Error ? cause.message : "Не удалось проверить сохранение профиля");
     } finally { setBusy(""); }
@@ -824,10 +1050,9 @@ export function MihomoPage({
     setBusy(operationId);
 
     try {
-      onSystemOperation(await submitSystemOperation(request, `/mihomo/profiles/${profile.id}`, { method: "DELETE" }));
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Профиль не удалён";
-      notifyError(message);
+      await saveMihomoOperation(`/mihomo/profiles/${profile.id}`, "DELETE", "mihomo-profile-delete");
+    } catch {
+      void refresh();
     } finally {
       setBusy("");
     }
@@ -855,10 +1080,9 @@ export function MihomoPage({
     setBusy(operationId);
 
     try {
-      onSystemOperation(await submitSystemOperation(request, `/mihomo/profiles/${profile.id}/devices/${encodeURIComponent(device.id)}`, { method: "DELETE" }));
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Устройство не удалено";
-      notifyError(message);
+      await saveMihomoOperation(`/mihomo/profiles/${profile.id}/devices/${encodeURIComponent(device.id)}`, "DELETE", "mihomo-profile-device-delete");
+    } catch {
+      void refresh();
     } finally {
       setBusy("");
     }
@@ -912,9 +1136,33 @@ export function MihomoPage({
   }
 
   function openPresetSettings() {
-    setPresetDraft((routingPolicy?.presets || []).map((preset) => ({ ...preset, components: preset.components.map((item) => ({ ...item })) })));
+    if (!routingReadKnown) return;
+    const draft = (routingPolicy?.presets || []).map((preset) => ({ ...preset, components: preset.components.map((item) => ({ ...item })) }));
+    presetSession.current += 1;
+    setPresetDraft(draft);
+    setPresetInitialDraft(JSON.stringify(draft));
+    setPresetDraftRevision(routingPolicy?.presets_revision);
     setPresetEditorIndex(0);
     setPresetDialog(true);
+  }
+
+  async function closePresets() {
+    if (presetClosePending.current) return;
+    const session = presetSession.current;
+    presetClosePending.current = true;
+    try {
+      if (presetDirty && !await confirmAction({ title: "Закрыть пресеты без сохранения?", message: "Несохранённые правки будут потеряны. Уже отправленное сохранение продолжит работу.", confirmLabel: "Закрыть без сохранения" })) return;
+      if (presetSession.current !== session) return;
+      presetSession.current += 1;
+      setPresetDialog(false);
+    } finally { presetClosePending.current = false; }
+  }
+
+  async function reloadPresets() {
+    if (!routingReadKnown || busy) return;
+    const session = presetSession.current;
+    if (presetDirty && !await confirmAction({ title: "Загрузить актуальные пресеты?", message: "Несохранённые правки будут потеряны.", confirmLabel: "Загрузить" })) return;
+    if (presetSession.current === session) openPresetSettings();
   }
 
   function addPresetDraft() {
@@ -948,47 +1196,96 @@ export function MihomoPage({
   }
 
   async function savePresetSettings(event: FormEvent) {
-    event.preventDefault(); setBusy("presets");
+    event.preventDefault();
+    if (!routingReadKnown || !presetDialog || busy || presetSaving.current || presetRevisionConflict) return;
+    const session = presetSession.current;
+    const draft = presetSignature;
+    presetSaving.current = true;
+    setBusy("presets");
     try {
-      const result = await request("/mihomo/routing/presets", { method: "PATCH", body: JSON.stringify({ presets: presetDraft }) }) as { presets: ProfilePreset[] };
-      setRoutingPolicy((current) => current ? { ...current, presets: result.presets } : current);
-      setPresetDialog(false); notifySuccess("Настройки быстрых профилей сохранены.");
-    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить пресеты"); }
-    finally { setBusy(""); }
+      await savePolicy<PresetsResult>("presets", "/mihomo/routing/presets", { presets: presetDraft, expected_revision: presetDraftRevision }, (result) => {
+        setRoutingPolicy((current) => current ? { ...current, presets: result.presets, presets_revision: result.revision, presets_last_operation_id: result.last_operation_id } : current);
+        if (presetSession.current === session) {
+          setPresetInitialDraft(draft);
+          setPresetDraftRevision(result.revision);
+          if (presetSignatureRef.current === draft) {
+            presetSession.current += 1;
+            setPresetDialog(false);
+          }
+        }
+      });
+    } catch { void refresh(); }
+    finally { presetSaving.current = false; setBusy(""); }
   }
 
   function openPersonalRuleEditor(rule?: PersonalRule) {
-    setPersonalRuleDraft(rule ? { code: rule.code, title: rule.title, description: rule.description, kind: rule.kind, entries: rule.entries.join("\n"), target: rule.target } : { code: "PERS", title: "", description: "", kind: "domain", entries: "", target: "GATE.312" });
+    if (!routingReadKnown) return;
+    const draft = rule ? { code: rule.code, title: rule.title, description: rule.description, kind: rule.kind, entries: rule.entries.join("\n"), target: rule.target } : { code: "PERS", title: "", description: "", kind: "domain" as const, entries: "", target: "GATE.312" as const };
+    personalRuleSession.current += 1;
+    setPersonalRuleDraft(draft);
+    setPersonalRuleInitialDraft(JSON.stringify(draft));
     setPersonalRuleDialog(rule || "new");
+  }
+
+  async function closePersonalRule() {
+    if (personalRuleClosePending.current) return;
+    const session = personalRuleSession.current;
+    personalRuleClosePending.current = true;
+    try {
+      if (personalRuleDirty && !await confirmAction({ title: "Закрыть правило без сохранения?", message: "Несохранённые правки будут потеряны. Уже отправленное сохранение продолжит работу.", confirmLabel: "Закрыть без сохранения" })) return;
+      if (personalRuleSession.current !== session) return;
+      personalRuleSession.current += 1;
+      setPersonalRuleDialog(null);
+    } finally { personalRuleClosePending.current = false; }
+  }
+
+  async function reloadPersonalRule() {
+    if (!routingReadKnown || busy || !latestPersonalRule) return;
+    const session = personalRuleSession.current;
+    if (personalRuleDirty && !await confirmAction({ title: "Загрузить актуальное правило?", message: "Несохранённые правки будут потеряны.", confirmLabel: "Загрузить" })) return;
+    if (personalRuleSession.current === session) openPersonalRuleEditor(latestPersonalRule);
   }
 
   async function savePersonalRule(event: FormEvent) {
     event.preventDefault();
+    if (!routingReadKnown || !personalRuleDialog || busy || personalRuleSaving.current || personalRuleRevisionConflict) return;
+    const session = personalRuleSession.current;
+    const draft = personalRuleSignature;
+    personalRuleSaving.current = true;
     setBusy("personal-rule");
     try {
-      const payload = { ...personalRuleDraft, entries: personalRuleDraft.entries.replace(/\r/g, "").split("\n").map((entry) => entry.trim()).filter(Boolean) };
+      const payload = { ...personalRuleDraft, expected_revision: personalRuleDialog !== "new" ? personalRuleDialog.revision : undefined, entries: personalRuleDraft.entries.replace(/\r/g, "").split("\n").map((entry) => entry.trim()).filter(Boolean) };
       const ruleId = personalRuleDialog && personalRuleDialog !== "new" ? `/${encodeURIComponent(personalRuleDialog.id)}` : "";
-      await request(`/mihomo/routing/personal-rules${ruleId}`, { method: ruleId ? "PATCH" : "POST", body: JSON.stringify(payload) });
-      setPersonalRuleDialog(null);
-      await refresh();
-      notifySuccess(ruleId ? "Персональное правило обновлено" : "Персональное правило создано");
-    } catch (cause) {
-      notifyError(cause instanceof Error ? cause.message : "Не удалось сохранить персональное правило");
+      await savePolicy<PersonalRule>("personal", `/mihomo/routing/personal-rules${ruleId}`, payload, (saved) => {
+        if (personalRuleSession.current === session) {
+          setPersonalRuleInitialDraft(draft);
+          if (personalRuleSignatureRef.current === draft) {
+            personalRuleSession.current += 1;
+            setPersonalRuleDialog(null);
+          } else {
+            // Further edits belong to the saved rule, including after creation.
+            setPersonalRuleDialog(saved);
+          }
+        }
+      }, ruleId ? "PATCH" : "POST", personalRuleDialog !== "new" ? personalRuleDialog.id : undefined);
+    } catch {
+      void refresh();
     } finally {
+      personalRuleSaving.current = false;
       setBusy("");
     }
   }
 
   async function removePersonalRule(rule: PersonalRule) {
+    if (!routingReadKnown || busy) return;
     if (!await confirmAction({ title: `Удалить правило «${rule.title}»?`, message: "Правило будет убрано из всех устройств, где оно включено.", confirmLabel: "Удалить правило", danger: true })) return;
     setBusy(`personal-rule:${rule.id}`);
     try {
-      await request(`/mihomo/routing/personal-rules/${encodeURIComponent(rule.id)}`, { method: "DELETE" });
-      if (activeRuleList === `personal:${rule.id}`) setActiveRuleList("direct_ru_sites");
-      await refresh();
-      notifySuccess("Персональное правило удалено");
-    } catch (cause) {
-      notifyError(cause instanceof Error ? cause.message : "Не удалось удалить персональное правило");
+      await saveMihomoOperation(`/mihomo/routing/personal-rules/${encodeURIComponent(rule.id)}`, "DELETE", "mihomo-profile-personal-delete", {}, (started) => {
+        pendingRuleDeletion.current = started.id ? { id: started.id, ruleId: rule.id } : undefined;
+      });
+    } catch {
+      void refresh();
     } finally {
       setBusy("");
     }
@@ -1000,7 +1297,7 @@ export function MihomoPage({
   );
   const installedChannels = transportModules.filter((item) => item.installed);
   const profilePresets = routingPolicy?.presets || [];
-  const policiesReady = installedChannels.length > 0 && Boolean(dnsPolicy && routingPolicy);
+  const policiesReady = modulesReadKnown && dnsReadKnown && routingReadKnown && installedChannels.length > 0 && Boolean(dnsPolicy && routingPolicy);
   const editableRuleLists = routingPolicy?.rule_lists || [];
   const personalRules = routingPolicy?.personal_rules || [];
   const selectedRuleList = editableRuleLists.find((item) => item.id === activeRuleList) || editableRuleLists[0];
@@ -1029,8 +1326,8 @@ export function MihomoPage({
   const overviewDevices = profiles.reduce((sum, profile) => sum + registeredProfileDevices(profile).length, 0);
   const overviewConnections = profiles.reduce((sum, profile) => sum + profile.connections.length, 0);
   const overviewActiveConnections = Object.values(profileStats).reduce((sum, item) => sum + Number(item.summary.active || 0), 0);
-  const overviewActivityKnown = profiles.every((profile) => profileStats[profile.id]?.summary && profileStats[profile.id].summary.activity_available !== false);
-  const overviewTraffic = aggregateTraffic(profiles.map((profile) => profileStats[profile.id]?.summary));
+  const overviewActivityKnown = profilesReadKnown && profiles.every((profile) => profileStats[profile.id]?.summary && profileStats[profile.id].summary.activity_available !== false);
+  const overviewTraffic = profilesReadKnown ? aggregateTraffic(profiles.map((profile) => profileStats[profile.id]?.summary)) : null;
   const overviewActiveProfiles = profiles.filter((profile) => Number(profileStats[profile.id]?.summary.active || 0) > 0).length;
   const mihomoHealthIssue = status?.active === true && status.health?.state !== "healthy"
     ? {
@@ -1040,11 +1337,13 @@ export function MihomoPage({
       }
     : null;
   const overviewIssues = [
-    !status?.active ? { title: "Менеджер Mihomo не отвечает", text: "Проверьте состояние сервиса перед выдачей профилей.", view: "channels" as View } : null,
+    status?.active !== true ? { title: status?.active === false ? "Менеджер Mihomo остановлен" : "Состояние менеджера Mihomo неизвестно", text: "Обновите данные и проверьте состояние сервиса перед выдачей профилей.", view: "channels" as View } : null,
     mihomoHealthIssue,
-    !installedChannels.length ? { title: "Нет компонентов подключения", text: "Установите хотя бы один транспорт.", view: "channels" as View } : null,
+    !modulesReadKnown ? { title: "Список компонентов не подтверждён", text: "Обновите данные после восстановления соединения.", view: "channels" as View }
+      : !installedChannels.length ? { title: "Нет компонентов подключения", text: "Установите хотя бы один транспорт.", view: "channels" as View } : null,
     installedChannels.length > 0 && !policiesReady ? { title: "Политики ещё не готовы", text: "Проверьте настройки маршрутизации на странице «Сеть».", view: "routing" as View } : null,
-    installedChannels.length > 0 && !profiles.length ? { title: "Нет профилей", text: "Создайте профиль и добавьте устройство.", view: "profiles" as View } : null,
+    !profilesReadKnown ? { title: "Список профилей не подтверждён", text: "Обновите данные после восстановления соединения.", view: "profiles" as View }
+      : installedChannels.length > 0 && !profiles.length ? { title: "Нет профилей", text: "Создайте профиль и добавьте устройство.", view: "profiles" as View } : null,
     profiles.length > 0 && overviewActivityKnown && overviewActiveConnections === 0 ? { title: "Нет активных подключений", text: "Профили созданы, но клиенты сейчас не подключены.", view: "profiles" as View } : null,
   ].filter(Boolean) as Array<{ title: string; text: string; view: View }>;
   const overviewIssueTargets = overviewIssues.filter((issue, index, items) => items.findIndex((item) => item.view === issue.view) === index);
@@ -1075,9 +1374,9 @@ export function MihomoPage({
 
           <div className="mihomoHeroFacts">
             <HeroFact label="ЯДРО" value={status?.core_version || "—"} note={status?.core_version ? "установленная версия" : "версия недоступна"} />
-            <HeroFact label="ПРОФИЛИ" value={String(status?.profiles ?? profiles.length)} note={`${status?.profiles_in_use || 0} используются`} />
-            <HeroFact label="АКТИВНЫЕ КАНАЛЫ" value={overviewActivityKnown ? String(overviewActiveConnections) : "—"} note={`${overviewConnections} настроено`} />
-            <HeroFact label="КОМПОНЕНТЫ" value={`${status?.channels_installed ?? installedChannels.length}/${status?.modules_total ?? modules.length}`} note={`${status?.channels_in_use?.length || 0} используются`} />
+            <HeroFact label="ПРОФИЛИ" value={String(status?.profiles ?? (profilesReadKnown ? profiles.length : "—"))} note={`${status?.profiles_in_use ?? "—"} используются`} />
+            <HeroFact label="АКТИВНЫЕ КАНАЛЫ" value={overviewActivityKnown ? String(overviewActiveConnections) : "—"} note={`${profilesReadKnown ? overviewConnections : "—"} настроено`} />
+            <HeroFact label="КОМПОНЕНТЫ" value={`${status?.channels_installed ?? (modulesReadKnown ? installedChannels.length : "—")}/${status?.modules_total ?? (modulesReadKnown ? modules.length : "—")}`} note={`${status?.channels_in_use?.length ?? "—"} используются`} />
           </div>
 
           <div className="mihomoHeroActions">
@@ -1097,8 +1396,8 @@ export function MihomoPage({
         <div className="mihomoHeroArt" aria-hidden="true" />
         <nav className="mihomoHost__tabs mihomoTabs mihomoHeroNavigation" aria-label="Разделы Mihomo">
           <Tab id="overview" current={view} onSelect={setView}>Обзор</Tab>
-          <Tab id="profiles" current={view} onSelect={setView} badge={profiles.length}>Профили</Tab>
-          <Tab id="channels" current={view} onSelect={setView} badge={installedChannels.length}>Компоненты</Tab>
+          <Tab id="profiles" current={view} onSelect={setView} badge={profilesReadKnown ? profiles.length : undefined}>Профили</Tab>
+          <Tab id="channels" current={view} onSelect={setView} badge={modulesReadKnown ? installedChannels.length : undefined}>Компоненты</Tab>
           <Tab id="dns" current={view} onSelect={setView}>DNS</Tab>
           <Tab id="rules" current={view} onSelect={setView}>Правила</Tab>
           <Tab id="routing" current={view} onSelect={setView}>Настройки</Tab>
@@ -1110,24 +1409,24 @@ export function MihomoPage({
           <section className="mihomoOverviewPulse">
             <header><div><p className="eyebrow">СОСТОЯНИЕ СЕТИ</p><h2>{!overviewActivityKnown ? "Часть данных о подключениях недоступна" : overviewActiveConnections ? `${overviewActiveConnections} каналов активно` : "Ожидание подключений"}</h2><span>{status?.active ? "Менеджер профилей доступен" : "Проверьте состояние менеджера перед выдачей профилей"}</span></div><i className={status?.active ? "is-online" : ""} /></header>
             <div className="mihomoOverviewPulseGrid">
-              <article><small>ПРОФИЛИ В СЕТИ</small><strong>{overviewActivityKnown ? overviewActiveProfiles : "—"}<i> / {profiles.length}</i></strong><span>с активными клиентами</span></article>
-              <article><small>HWID-УСТРОЙСТВА</small><strong>{overviewDevices}</strong><span>зарегистрировано</span></article>
+              <article><small>ПРОФИЛИ В СЕТИ</small><strong>{overviewActivityKnown ? overviewActiveProfiles : "—"}<i> / {profilesReadKnown ? profiles.length : "—"}</i></strong><span>с активными клиентами</span></article>
+              <article><small>HWID-УСТРОЙСТВА</small><strong>{profilesReadKnown ? overviewDevices : "—"}</strong><span>зарегистрировано</span></article>
               <article><small>ВХОДЯЩИЙ ТРАФИК</small><strong>↓ {trafficBytes(overviewTraffic, "rx_bytes")}</strong><span>↑ {trafficBytes(overviewTraffic, "tx_bytes")} исходящего</span></article>
-              <article><small>НАСТРОЕННЫЕ КАНАЛЫ</small><strong>{overviewConnections}</strong><span>во всех профилях</span></article>
+              <article><small>НАСТРОЕННЫЕ КАНАЛЫ</small><strong>{profilesReadKnown ? overviewConnections : "—"}</strong><span>во всех профилях</span></article>
             </div>
           </section>
 
           <section className="mihomoOverviewDesk">
             <article className="mihomoOverviewLiveProfiles">
               <header><div><p className="eyebrow">ПРОФИЛИ</p><h3>Текущая активность</h3></div>{profiles.length > 0 && <button type="button" onClick={() => setView("profiles")}>Все профили</button>}</header>
-              <div>{profiles.slice(0, 8).map((profile) => { const item = profileStats[profile.id]?.summary; const devices = registeredProfileDevices(profile).length; return <div className="mihomoOverviewLiveRow" key={profile.id}><i className={item?.active ? "is-online" : ""} /><p><b>{profile.name}</b><small>{devices} устройств · {profile.connections.length} каналов</small></p><strong>{item && item.activity_available !== false ? `${item.active}/${item.configured}` : "—"}<small>активно</small></strong><em>↓ {trafficBytes(item, "rx_bytes")}<small>↑ {trafficBytes(item, "tx_bytes")}</small></em></div>; })}</div>
-              {!profiles.length && <div className="mihomoOverviewBlank"><b>Здесь появится активность профилей</b><span>{installedChannels.length ? "Создайте профиль и добавьте первое устройство." : "Сначала установите компонент подключения."}</span></div>}
+              <div>{profiles.slice(0, 8).map((profile) => { const item = profileStats[profile.id]?.summary; const devices = registeredProfileDevices(profile).length; return <div className="mihomoOverviewLiveRow" key={profile.id}><i className={item?.activity_available !== false && item?.active ? "is-online" : ""} /><p><b>{profile.name}</b><small>{devices} устройств · {profile.connections.length} каналов</small></p><strong>{item && item.activity_available !== false ? `${item.active}/${item.configured}` : "—"}<small>активно</small></strong><em>↓ {trafficBytes(item, "rx_bytes")}<small>↑ {trafficBytes(item, "tx_bytes")}</small></em></div>; })}</div>
+              {!profiles.length && <div className="mihomoOverviewBlank"><b>{profilesReadKnown ? "Здесь появится активность профилей" : "Список профилей не подтверждён"}</b><span>{!profilesReadKnown || !modulesReadKnown ? "Обновите данные после восстановления соединения." : installedChannels.length ? "Создайте профиль и добавьте первое устройство." : "Сначала установите компонент подключения."}</span></div>}
             </article>
 
             <aside className={`mihomoOverviewHealth${overviewIssueTargets.length ? " has-issues" : ""}`}>
               <header><p className="eyebrow">СОСТОЯНИЕ</p><h3>{overviewIssueTargets.length ? "Требуется внимание" : "Система готова"}</h3><span>{overviewIssueTargets.length || "OK"}</span></header>
               <div>{overviewIssueTargets.length ? overviewIssueTargets.map((issue) => <button type="button" key={issue.view} onClick={() => setView(issue.view)}><i /><p><b>{issue.title}</b><small>{issue.text}</small></p><em>→</em></button>) : <><div className="mihomoOverviewCheck"><i /><p><b>Ядро</b><small>{status?.core_version || "Работает"}</small></p></div><div className="mihomoOverviewCheck"><i /><p><b>Компоненты</b><small>{installedChannels.length} установлено</small></p></div><div className="mihomoOverviewCheck"><i /><p><b>DNS и правила</b><small>Доступны профилям</small></p></div></>}</div>
-              <footer>{!installedChannels.length ? <button type="button" className="primaryButton" onClick={() => setView("channels")}>Установить компонент</button> : !profiles.length ? <button type="button" className="primaryButton" onClick={newProfile}>Создать профиль</button> : overviewIssueTargets.length ? <small>Готовность не подтверждена — проверьте пункты выше</small> : <small>Дополнительных действий не требуется</small>}</footer>
+              <footer>{!modulesReadKnown || !profilesReadKnown ? <small>Обновите данные для подтверждения состояния</small> : !installedChannels.length ? <button type="button" className="primaryButton" onClick={() => setView("channels")}>Установить компонент</button> : !profiles.length ? <button type="button" className="primaryButton" onClick={newProfile}>Создать профиль</button> : overviewIssueTargets.length ? <small>Готовность не подтверждена — проверьте пункты выше</small> : <small>Дополнительных действий не требуется</small>}</footer>
             </aside>
           </section>
         </div>
@@ -1141,14 +1440,14 @@ export function MihomoPage({
               <h2>Профили устройств</h2>
               <p>Каждый профиль собирается из независимых подключений на базе установленных компонентов.</p>
             </div>
-            <button className="primaryButton" onClick={newProfile} disabled={!installedChannels.length}>Новый профиль</button>
+            <button className="primaryButton" onClick={newProfile} disabled={!modulesReadKnown || !profilesReadKnown || !installedChannels.length}>Новый профиль</button>
           </header>
-          {!installedChannels.length && (
+          {modulesReadKnown && !installedChannels.length && (
             <div className="mihomoHint">Сначала установите хотя бы один компонент протокола Mihomo.</div>
           )}
           <div className="mihomoProfiles">
             {pagination.pages > 1 && <nav className="mihomoProfilesPagination" aria-label="Страницы профилей Mihomo">
-              <span>{pagination.start}–{pagination.end} из {profiles.length}</span>
+              <span>{profilesReadKnown ? `${pagination.start}–${pagination.end} из ${profiles.length}` : "Список не подтверждён"}</span>
               <div>
                 <button type="button" disabled={pagination.page === 1} onClick={() => setProfilesPage(pagination.page - 1)}>Назад</button>
                 <strong aria-live="polite">{pagination.page} / {pagination.pages}</strong>
@@ -1158,7 +1457,7 @@ export function MihomoPage({
             {visibleProfiles.map((profile) => { const allDevices = profile.devices?.length ? profile.devices : [{ id: "profile-common", name: "Общие настройки профиля", scope: "common" as const }]; const devices = registeredProfileDevices(profile); const commonDevice = allDevices.find((device) => device.scope === "common" || device.id === profile.common_device_id) || allDevices[0]; const stats = profileStats[profile.id]?.summary; return (
               <section className="mihomoProfileCard" key={profile.id}>
                 <header className="mihomoProfileHeader">
-                  <button type="button" className="mihomoProfileToggle" aria-expanded={expandedDeviceLists.has(profile.id)} onClick={() => toggleCollapsed(setExpandedDeviceLists, profile.id)}><div className="mihomoProfileIdentity"><span className="mihomoProfileIcon">M</span><p><b>{profile.name}</b><small>{devices.length} устройств · общий пул {profile.connections.filter((connection) => connection.device_id === commonDevice.id).length} каналов{profile.subscription_status === "obsolete" ? " · подписка устарела, требуется новая установка" : ""}</small><em>ID {profile.id} · обновлён {new Date(profile.updated_at || profile.created_at).toLocaleString("ru-RU")}</em></p></div><div className="mihomoProfileSummary"><div><small>Состояние</small><strong className={stats?.active ? "is-online" : ""}><i />{stats && stats.activity_available !== false ? `${stats.active} из ${stats.configured}` : "—"}</strong><span>активных каналов</span></div><div><small>Трафик</small><strong>↓ {trafficBytes(stats, "rx_bytes")}</strong><span>↑ {trafficBytes(stats, "tx_bytes")}</span></div></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
+                  <button type="button" className="mihomoProfileToggle" aria-expanded={expandedDeviceLists.has(profile.id)} onClick={() => toggleCollapsed(setExpandedDeviceLists, profile.id)}><div className="mihomoProfileIdentity"><span className="mihomoProfileIcon">M</span><p><b>{profile.name}</b><small>{devices.length} устройств · общий пул {profile.connections.filter((connection) => connection.device_id === commonDevice.id).length} каналов{profile.subscription_status === "obsolete" ? " · подписка устарела, требуется новая установка" : ""}</small><em>ID {profile.id} · обновлён {new Date(profile.updated_at || profile.created_at).toLocaleString("ru-RU")}</em></p></div><div className="mihomoProfileSummary"><div><small>Состояние</small><strong className={stats?.activity_available !== false && stats?.active ? "is-online" : ""}><i />{stats && stats.activity_available !== false ? `${stats.active} из ${stats.configured}` : "—"}</strong><span>активных каналов</span></div><div><small>Трафик</small><strong>↓ {trafficBytes(stats, "rx_bytes")}</strong><span>↑ {trafficBytes(stats, "tx_bytes")}</span></div></div><i className="mihomoCollapseChevron" aria-hidden="true" /></button>
                   <div className="mihomoRowActions"><button className="primaryButton" onClick={() => void copySubscription(profile)} disabled={busy === `subscription:${profile.id}`}>{profile.subscription_status === "obsolete" ? "Обновить подписку" : "Скопировать подписку"}</button><button onClick={() => { setReadyDevices([]); setCreatedProfile({ ...profile, devices: [commonDevice] }); }}>QR</button><button onClick={() => editProfile(profile)}>Настроить</button><button className="dangerButton" onClick={() => void removeProfile(profile)} disabled={busy === `profile:${profile.id}`}>Удалить</button></div>
                 </header>
                 {expandedDeviceLists.has(profile.id) && <div className="mihomoProfileDevices">
@@ -1184,10 +1483,10 @@ export function MihomoPage({
                 </div>}
               </section>
             ); })}
-            {!profiles.length && <Empty title="Профилей пока нет" text="Установите компонент и соберите первое подключение в профиле." />}
+            {!profiles.length && <Empty title={profilesReadKnown ? "Профилей пока нет" : "Список профилей не подтверждён"} text={profilesReadKnown ? "Установите компонент и соберите первое подключение в профиле." : "Обновите данные после восстановления соединения."} />}
           </div>
           <section className="mihomoClientGuide">
-            <header><p className="eyebrow">CLIENT SETUP</p><h3>Настройка и подключение</h3><p>Одна подписка поддерживает несколько устройств. Каждое приложение с включённой отправкой HWID регистрирует отдельное устройство; без HWID используется общий набор. Формат определяется автоматически, а для Karing и Hiddify доступен выбор YAML/JSON в настройках зарегистрированного устройства.</p></header>
+            <header><p className="eyebrow">CLIENT SETUP</p><h3>Настройка и подключение</h3><p>Одна подписка поддерживает несколько устройств. Приложение с включённой отправкой HWID регистрирует отдельное устройство; без HWID используется общий набор. Проверенному клиенту подписка выдаётся в совместимом формате, непроверенному — в стандартном Mihomo YAML. Формат скачиваемого файла выбирается отдельно в настройках устройства.</p></header>
             <ol><li><b>1</b><span>Нажмите «Скопировать подписку» у нужного профиля.</span></li><li><b>2</b><span>В клиенте добавьте удалённый профиль по URL.</span></li><li><b>3</b><span>После изменений обновите профиль в клиенте.</span></li></ol>
             <details className="mihomoClientAppsDetails"><summary>Приложения для подключения</summary><div className="mihomoClientApps">
               <a href="https://github.com/clash-verge-rev/clash-verge-rev/releases" target="_blank" rel="noreferrer"><small>PC · WINDOWS / LINUX</small><strong>Clash Verge Rev</strong><span>Официальные релизы ↗</span></a>
@@ -1227,6 +1526,7 @@ export function MihomoPage({
 
       {view === "dns" && (
         <form className="mihomoDnsWorkspace mihomoDnsV2" onSubmit={saveDnsWorkspace}>
+          {dnsRevisionConflict && <p className="mihomoHint" role="alert">DNS-настройки изменились. Ваш ввод сохранён. <button type="button" disabled={Boolean(busy)} onClick={() => void reloadPolicy("dns")}>Загрузить актуальные данные</button></p>}
           <header className="mihomoDnsHeader"><div><p className="eyebrow">DNS ПРОФИЛЕЙ</p><h2>Разрешение доменов</h2><p>Выберите режим и два независимых резолвера для подписок Mihomo.</p></div><span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "ГОТОВ" : "ОЖИДАНИЕ"}</span></header>
           <section className="mihomoDnsSummary"><div><small>РЕЖИМ</small><b>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" ? "Fake IP" : "Redir host"}</b><span>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" ? "Быстрее и точнее для правил" : "Максимальная совместимость"}</span></div><div><small>ОСНОВНОЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.nameserver || ""))?.label || "Не выбран"}</b><span>{dnsProviderMeta[String(dnsDraft.nameserver || "")]?.note || "DNS профиля"}</span></div><div><small>РЕЗЕРВНЫЙ</small><b>{dnsOptions.find((item) => item.value === String(dnsDraft.fallback || ""))?.label || "Не выбран"}</b><span>{dnsProviderMeta[String(dnsDraft.fallback || "")]?.note || "Используется при сбое"}</span></div></section>
           <section className="mihomoDnsMode"><header><div><b>Режим обработки</b><small>Как Mihomo сопоставляет домены с правилами маршрутизации.</small></div></header><div>{(dnsModeField?.options || ["fake-ip", "redir-host"]).map((option) => { const value = typeof option === "string" ? option : option.value; const selected = String(dnsDraft.enhanced_mode || dnsModeField?.default || "fake-ip") === value; return <button type="button" key={value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft("enhanced_mode", value)}><span>{value === "fake-ip" ? "FAST" : "COMPAT"}</span><p><b>{value === "fake-ip" ? "Fake IP" : "Redir host"}</b><small>{value === "fake-ip" ? "Рекомендуется для TUN и правил по доменам" : "Для приложений, несовместимых с Fake IP"}</small></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>
@@ -1236,13 +1536,14 @@ export function MihomoPage({
           })}<label><span><b>Кэш DNS</b><small>Алгоритм вытеснения записей</small></span><select value={String(dnsDraft.cache_algorithm || "lru")} onChange={(event) => updateDnsDraft("cache_algorithm", event.target.value)}><option value="lru">LRU · совместимый</option><option value="arc">ARC · адаптивный</option></select></label></div>{String(dnsDraft.enhanced_mode || "fake-ip") === "fake-ip" && <label className="mihomoDnsFakeIp"><span><b>Исключения Fake IP</b><small>По одному домену или маске на строку. Для них клиент получит реальный IP.</small></span><textarea rows={4} value={String(dnsDraft.fake_ip_filter || "")} spellCheck={false} placeholder={"*.lan\n*.local"} onChange={(event) => updateDnsDraft("fake_ip_filter", event.target.value)} /></label>}</section>
           {([['nameserver', 'Основной DNS', 'Используется для обычных запросов.'], ['fallback', 'Резервный DNS', 'Подхватывает запросы при недоступности основного.']] as const).map(([key, title, note]) => <section className="mihomoDnsProviders" key={key}><header><div><b>{title}</b><small>{note}</small></div></header><div>{dnsOptions.map((option) => { const selected = String(dnsDraft[key] || (key === 'nameserver' ? dnsPrimaryField?.default : dnsFallbackField?.default) || "") === option.value; const meta = dnsProviderMeta[option.value] || { code: "DNS", note: "Пользовательский резолвер" }; return <button type="button" key={option.value} className={selected ? "is-selected" : ""} onClick={() => updateDnsDraft(key, option.value)}><span>{meta.code}</span><p><b>{option.label}</b><small>{meta.note}</small></p><i>{selected ? "Выбран" : ""}</i></button>; })}</div></section>)}
           <aside className="mihomoDnsNote"><b>Применение настроек</b><span>Основной и резервный DNS должны отличаться. После сохранения обновите подписку в клиенте, чтобы устройство получило новую конфигурацию.</span></aside>
-          <footer className="mihomoDnsFooter"><button type="button" disabled={!dnsDirty || busy === "settings:dns-private"} onClick={() => { dnsDraftRef.current = { ...(dnsPolicy?.values || {}) }; setDnsDraft(dnsDraftRef.current); dnsDirtyRef.current = false; setDnsDirty(false); }}>Отменить изменения</button><span>{dnsDirty ? "Есть несохранённые изменения" : "Настройки синхронизированы"}</span><button className="primaryButton" type="submit" disabled={!dnsDirty || busy === "settings:dns-private" || dnsDraft.nameserver === dnsDraft.fallback}>{busy === "settings:dns-private" ? "Сохранение…" : dnsDraft.nameserver === dnsDraft.fallback ? "Выберите разные DNS" : "Сохранить DNS"}</button></footer>
+          <footer className="mihomoDnsFooter"><button type="button" disabled={!dnsReadKnown || !dnsDirty || Boolean(busy)} onClick={() => void reloadPolicy("dns")}>Отменить изменения</button><span>{!dnsReadKnown ? "Не удалось прочитать настройки DNS. Обновите данные; ваш ввод сохранён." : dnsDirty ? "Есть несохранённые изменения" : "Настройки синхронизированы"}</span><button className="primaryButton" type="submit" disabled={!dnsReadKnown || !dnsDirty || Boolean(busy) || dnsRevisionConflict || dnsDraft.nameserver === dnsDraft.fallback}>{busy === "settings:dns-private" ? "Сохранение…" : dnsDraft.nameserver === dnsDraft.fallback ? "Выберите разные DNS" : "Сохранить DNS"}</button></footer>
         </form>
       )}
 
 
       {(view === "routing" || view === "rules") && (
         <form className="mihomoRoutingWorkspace" onSubmit={saveRoutingWorkspace}>
+          {routingRevisionConflict && <p className="mihomoHint" role="alert">Настройки маршрутизации изменились. Ваш ввод сохранён. <button type="button" disabled={Boolean(busy)} onClick={() => void reloadPolicy("routing")}>Загрузить актуальные данные</button></p>}
           <header className="mihomoRoutingHeader">
             {view === "rules" ? <div><p className="eyebrow">MIHOMO RULE STUDIO</p><h2>Правила</h2><p>Домены, игровые маршруты, UDP и P2P вынесены в отдельную библиотеку. Каждый набор включается отдельно в профиле.</p></div> : <div><p className="eyebrow">MIHOMO SETTINGS</p><h2>Настройки Mihomo</h2><p>Общее поведение профилей, проверка каналов, домены TLS/CDN и редактируемые шаблоны подключений.</p></div>}
             <span className={policiesReady ? "mihomoPill is-online" : "mihomoPill"}><i />{policiesReady ? "АКТИВНА" : "ОЖИДАНИЕ"}</span>
@@ -1250,13 +1551,13 @@ export function MihomoPage({
 
           {view === "rules" && <>
           <section className="mihomoRuleStudio">
-            <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small><input aria-label="Поиск правил" value={ruleSearch} placeholder="Найти правило…" onChange={(event) => setRuleSearch(event.target.value)} /></header><div className="mihomoRuleLibrary">{visibleRuleGroups.map((section) => <section key={section.group}><h4>{section.group}</h4>{section.rules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</section>)}{(visiblePersonalRules.length > 0 || !normalizedRuleSearch) && <section className="mihomoPersonalRuleLibrary"><h4>Персональные</h4>{visiblePersonalRules.map((rule) => { const profileCount = profiles.reduce((count, profile) => count + (profile.devices || []).filter((device) => (device.personal_rule_ids || []).includes(rule.id)).length, 0); return <button type="button" key={rule.id} className={activeRuleList === `personal:${rule.id}` ? "is-active" : ""} onClick={() => setActiveRuleList(`personal:${rule.id}`)}><span>{rule.code}</span><p><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></p><i>{profileCount} устр.</i></button>; })}<button type="button" className="mihomoRuleLibraryAdd" onClick={() => openPersonalRuleEditor()}>+ Создать персональное правило</button></section>}</div></aside>
+            <aside><header><b>Библиотека правил</b><small>Выберите набор для редактирования</small><input aria-label="Поиск правил" value={ruleSearch} placeholder="Найти правило…" onChange={(event) => setRuleSearch(event.target.value)} /></header><div className="mihomoRuleLibrary">{visibleRuleGroups.map((section) => <section key={section.group}><h4>{section.group}</h4>{section.rules.map((item) => { const profileCount = profiles.filter((profile) => Boolean(profile.routing?.[item.key])).length; return <button type="button" key={item.key} className={activeRuleList === item.key ? "is-active" : ""} onClick={() => setActiveRuleList(item.key)}><span>{item.code}</span><p><b>{item.title}</b><small>{item.text}</small></p><i>{profileCount} проф.</i></button>; })}</section>)}{(visiblePersonalRules.length > 0 || !normalizedRuleSearch) && <section className="mihomoPersonalRuleLibrary"><h4>Персональные</h4>{visiblePersonalRules.map((rule) => { const profileCount = profiles.reduce((count, profile) => count + (profile.devices || []).filter((device) => (device.personal_rule_ids || []).includes(rule.id)).length, 0); return <button type="button" key={rule.id} className={activeRuleList === `personal:${rule.id}` ? "is-active" : ""} onClick={() => setActiveRuleList(`personal:${rule.id}`)}><span>{rule.code}</span><p><b>{rule.title}</b><small>{rule.kind === "process" ? "Приложения в TUN" : "Сайты"} · {rule.entries.length} знач.</small></p><i>{profileCount} устр.</i></button>; })}<button type="button" className="mihomoRuleLibraryAdd" disabled={!routingReadKnown} onClick={() => openPersonalRuleEditor()}>+ Создать персональное правило</button></section>}</div></aside>
             <article>
               {selectedPersonalRule ? <>
                 <header className="mihomoRuleEditorHead"><div><p className="eyebrow">PERSONAL RULE</p><h3>{selectedPersonalRule.title}</h3><p>{selectedPersonalRule.description || (selectedPersonalRule.kind === "process" ? "Приложения, перечисленные ниже, будут направлены через выбранный маршрут в TUN." : "Домены, перечисленные ниже, будут направлены через выбранный маршрут.")}</p></div><span>{selectedPersonalRule.entries.length} знач.</span></header>
                 <div className="mihomoPersonalRuleMeta"><span>{selectedPersonalRule.kind === "process" ? "Приложения в TUN" : "Сайты"}</span><span>{selectedPersonalRule.target}</span></div>
                 <div className="mihomoPersonalRuleEntries">{selectedPersonalRule.entries.map((entry) => <code key={entry}>{entry}</code>)}</div>
-                <footer className="mihomoRuleEditorActions"><span>Правило доступно для включения в настройках каждого устройства.</span><nav><button type="button" className="ghostButton" onClick={() => openPersonalRuleEditor(selectedPersonalRule)}>Изменить</button><button type="button" className="dangerButton" disabled={busy === `personal-rule:${selectedPersonalRule.id}`} onClick={() => void removePersonalRule(selectedPersonalRule)}>Удалить</button></nav></footer>
+                <footer className="mihomoRuleEditorActions"><span>Правило доступно для включения в настройках каждого устройства.</span><nav><button type="button" className="ghostButton" disabled={!routingReadKnown} onClick={() => openPersonalRuleEditor(selectedPersonalRule)}>Изменить</button><button type="button" className="dangerButton" disabled={!routingReadKnown || Boolean(busy)} onClick={() => void removePersonalRule(selectedPersonalRule)}>Удалить</button></nav></footer>
               </> : activeRuleList === "direct_games_udp_enabled" ? <>
                 <header className="mihomoRuleEditorHead"><div><p className="eyebrow">NETWORK RULE</p><h3>UDP напрямую</h3><p>Выбранные исключения остаются в GATE.312, остальной UDP идёт напрямую.</p></div><span>{selectedUdpExclusions.size} искл.</span></header>
                 <div className="mihomoGameCatalog">
@@ -1297,7 +1598,7 @@ export function MihomoPage({
               <div><small>РЕЖИМ</small><b>{routingDraft.mode === "global" ? "Global" : "Rule"}</b><span>маршрутизация трафика</span></div>
               <div><small>СТРАТЕГИЯ</small><b>{routingDraft.strategy === "url-test" ? "Latency" : routingDraft.strategy === "select" ? "Manual" : "Fallback"}</b><span>выбор защищённого канала</span></div>
               <div><small>ПРЕСЕТЫ</small><b>{profilePresets.length}</b><span>{profilePresets.reduce((sum, item) => sum + item.components.length, 0)} каналов в шаблонах</span></div>
-              <button type="button" className="primaryButton" onClick={openPresetSettings}>Редактировать пресеты</button>
+              <button type="button" className="primaryButton" disabled={!routingReadKnown} onClick={openPresetSettings}>Редактировать пресеты</button>
             </div>
             <div className="mihomoSettingsGrid">
               <article><header><span>01</span><div><b>Поведение трафика</b><small>Базовый режим всех профилей</small></div></header><div className="mihomoRoutingFields">
@@ -1321,7 +1622,7 @@ export function MihomoPage({
           </section>
           </>}
 
-          <footer className="mihomoRoutingFooter"><button type="button" disabled={!routingDirty || busy === "settings:routing-policy"} onClick={() => { routingDraftRef.current = { ...(routingPolicy?.values || {}) }; setRoutingDraft(routingDraftRef.current); routingDirtyRef.current = false; setRoutingDirty(false); }}>Отменить изменения</button><span>{routingDirty ? "Есть несохранённые изменения" : "Настройки сохранены. После изменения обновите подписку в клиенте."}</span><button className="primaryButton" type="submit" disabled={!routingDirty || busy === "settings:routing-policy"}>{busy === "settings:routing-policy" ? "Сохранение…" : view === "rules" ? "Сохранить правила" : "Сохранить настройки"}</button></footer>
+          <footer className="mihomoRoutingFooter"><button type="button" disabled={!routingReadKnown || !routingDirty || Boolean(busy)} onClick={() => void reloadPolicy("routing")}>Отменить изменения</button><span>{!routingReadKnown ? "Не удалось прочитать настройки маршрутизации. Обновите данные; ваш ввод сохранён." : routingDirty ? "Есть несохранённые изменения" : "Настройки сохранены. После изменения обновите подписку в клиенте."}</span><button className="primaryButton" type="submit" disabled={!routingReadKnown || !routingDirty || Boolean(busy) || routingRevisionConflict}>{busy === "settings:routing-policy" ? "Сохранение…" : view === "rules" ? "Сохранить правила" : "Сохранить настройки"}</button></footer>
         </form>
       )}
 
@@ -1335,6 +1636,7 @@ export function MihomoPage({
               <button type="button" className="iconButton" aria-label="Закрыть настройки" onClick={() => void closeSettings()}>x</button>
             </header>
             <p>{editing.description}</p>{editing.category === "transport" && <p>Здесь находятся общие параметры сервера. Параметры отдельного подключения доступны в профиле → Подключения.</p>}
+            {settingsRevisionConflict && <p role="alert">{latestSettingsModule ? "Настройки компонента изменились. Ваш ввод сохранён; загрузите актуальные данные перед новой записью." : "Компонент больше не доступен. Ваш ввод сохранён."} <button type="button" disabled={!latestSettingsModule || Boolean(busy)} onClick={() => void reloadSettings()}>Загрузить актуальные настройки</button></p>}
             <div className="mihomoFields">
               {(editing.settings || []).filter((field) => editing.id !== "transport-reality" || String(settingsDraft.transport || "xhttp") === "xhttp" || !["xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)).map((field) => (
                 <label key={field.key}>
@@ -1359,7 +1661,7 @@ export function MihomoPage({
               ))}
             </div>
             <aside>{editing.installed ? "Сохранение настроек перезапустит только этот Mihomo sub-module. Одноимённый Direct-модуль не затрагивается." : "Настройки сохранятся заранее и будут применены при установке sub-module."}</aside>
-            <footer><button type="button" className="ghostButton" onClick={() => void closeSettings()}>Отмена</button><button type="submit" className="primaryButton" disabled={Boolean(busy)}>Сохранить</button></footer>
+            <footer><button type="button" className="ghostButton" onClick={() => void closeSettings()}>Отмена</button><button type="submit" className="primaryButton" disabled={Boolean(busy) || settingsRevisionConflict}>Сохранить</button></footer>
           </form>
         </div>,
         document.body,
@@ -1425,6 +1727,7 @@ export function MihomoPage({
               })}</div>
             </section>
             <section className="mihomoConnectionBuilder">
+              {!networkStatus && <p className="mihomoHint" role="status">Состояние маршрутов сети неизвестно. Обновите данные перед добавлением TLS/CDN-подключения. Ваш ввод сохранён.</p>}
               <header><div><b>Подключения устройства</b><small>Каналы попадут только в подписку выбранного устройства. После создания проверьте TLS/CDN-подключения в разделе «Сеть».</small></div><span className="mihomoStrategyBadge">{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.code} · {profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header>
               <div className="mihomoConnectionAdd">
                 {installedChannels.filter((module) => commonDevice || activeCapabilities.components.includes(module.id)).flatMap((module) => {
@@ -1433,8 +1736,8 @@ export function MihomoPage({
                     const limit = Number(routingPolicy?.values.vless_max_connections_per_device || 5);
                     return [
                       <button key="vless-direct" type="button" disabled={vlessRouteCount(deviceVless, "reality") >= limit} onClick={() => addProfileConnection(module, "direct")}>+ VLESS</button>,
-                      <button key="vless-tls" type="button" disabled={!availableNetworkRoute("tls") || vlessRouteCount(deviceVless, "tls") >= limit} title={!availableNetworkRoute("tls") ? "Сначала добавьте прямой TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
-                      <button key="vless-cdn" type="button" disabled={!availableNetworkRoute("cdn") || vlessRouteCount(deviceVless, "cdn") >= limit} title={!availableNetworkRoute("cdn") ? "Сначала добавьте CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
+                      <button key="vless-tls" type="button" disabled={!availableNetworkRoute("tls") || vlessRouteCount(deviceVless, "tls") >= limit} title={!networkStatus ? "Состояние маршрутов сети неизвестно; обновите данные" : !availableNetworkRoute("tls") ? "Сначала добавьте прямой TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
+                      <button key="vless-cdn" type="button" disabled={!availableNetworkRoute("cdn") || vlessRouteCount(deviceVless, "cdn") >= limit} title={!networkStatus ? "Состояние маршрутов сети неизвестно; обновите данные" : !availableNetworkRoute("cdn") ? "Сначала добавьте CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
                     ];
                   }
                   const singletonUsed = profileConnections.some((item) => item.device_id === activeDeviceId && item.component === module.id);
@@ -1523,9 +1826,10 @@ export function MihomoPage({
         })}{!readyDevices.length && <div className="mihomoHint">{readyFailed ? <><span>Не удалось подготовить ссылки устройств.</span><button onClick={() => setCreatedProfile({ ...createdProfile })}>Повторить</button></> : "Подготавливаем QR-коды устройств…"}</div>}</div>
         <footer><button className="primaryButton" onClick={() => setCreatedProfile(null)}>Готово</button></footer>
       </div></div>}
-      {personalRuleDialog && <div className="mihomoDialogBackdrop mihomoPersonalRuleBackdrop">
-        <form className="mihomoDialog mihomoPersonalRuleDialog" onSubmit={savePersonalRule}>
-          <header><div><p className="eyebrow">PERSONAL RULE</p><h2>{personalRuleDialog === "new" ? "Новое персональное правило" : "Изменить персональное правило"}</h2><small>Правило появится отдельной иконкой в категории «Персональные» и будет доступно всем устройствам.</small></div><button type="button" className="iconButton" aria-label="Закрыть" onClick={() => setPersonalRuleDialog(null)}>×</button></header>
+      {personalRuleDialog && <div className="mihomoDialogBackdrop mihomoPersonalRuleBackdrop" onClick={(event) => { if (event.target === event.currentTarget) void closePersonalRule(); }}>
+        <form ref={personalRuleDialogRef} role="dialog" aria-modal="true" aria-label="Персональное правило" tabIndex={-1} className="mihomoDialog mihomoPersonalRuleDialog" onSubmit={savePersonalRule}>
+          {personalRuleRevisionConflict && <p role="alert">{latestPersonalRule ? "Правило изменилось. Ваш ввод сохранён." : "Правило удалено. Ваш ввод сохранён."} <button type="button" disabled={!latestPersonalRule || Boolean(busy)} onClick={() => void reloadPersonalRule()}>Загрузить актуальные данные</button></p>}
+          <header><div><p className="eyebrow">PERSONAL RULE</p><h2>{personalRuleDialog === "new" ? "Новое персональное правило" : "Изменить персональное правило"}</h2><small>Правило появится отдельной иконкой в категории «Персональные» и будет доступно всем устройствам.</small></div><button type="button" className="iconButton" aria-label="Закрыть" onClick={() => { void closePersonalRule(); }}>×</button></header>
           <div className="mihomoPersonalRuleForm">
             <label><span>Код и название</span><div className="mihomoPersonalRuleFormRow"><input value={personalRuleDraft.code} maxLength={8} placeholder="GAME" onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, code: event.target.value }))} required /><input value={personalRuleDraft.title} maxLength={80} placeholder="Например, Игровой трафик" onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, title: event.target.value }))} required /></div></label>
             <label><span>Тип правила</span><select value={personalRuleDraft.kind} onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, kind: event.target.value as PersonalRule["kind"] }))}><option value="domain">Сайты / домены</option><option value="process">Приложения в TUN</option></select></label>
@@ -1533,15 +1837,16 @@ export function MihomoPage({
             <label><span>Значения — по одному в строке</span><textarea rows={8} value={personalRuleDraft.entries} placeholder={personalRuleDraft.kind === "process" ? "game.exe\ncom.example.game" : "example.com\napi.example.com"} onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, entries: event.target.value }))} required /></label>
             <label><span>Описание <small>необязательно</small></span><input value={personalRuleDraft.description} maxLength={160} placeholder="Когда применять это правило" onChange={(event) => setPersonalRuleDraft((current) => ({ ...current, description: event.target.value }))} /></label>
           </div>
-          <footer><button type="button" className="ghostButton" onClick={() => setPersonalRuleDialog(null)}>Отмена</button><span>После сохранения правило включается отдельно для каждого устройства.</span><button type="submit" className="primaryButton" disabled={busy === "personal-rule"}>Сохранить правило</button></footer>
+          <footer><button type="button" className="ghostButton" onClick={() => { void closePersonalRule(); }}>Отмена</button><span>После сохранения правило включается отдельно для каждого устройства.</span><button type="submit" className="primaryButton" disabled={!routingReadKnown || Boolean(busy) || personalRuleRevisionConflict}>Сохранить правило</button></footer>
         </form>
       </div>}
-      {presetDialog && <div className="mihomoDialogBackdrop mihomoPresetBackdrop">
-        <form className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}>
+      {presetDialog && <div className="mihomoDialogBackdrop mihomoPresetBackdrop" onClick={(event) => { if (event.target === event.currentTarget) void closePresets(); }}>
+        <form ref={presetDialogRef} role="dialog" aria-modal="true" aria-label="Пресеты Mihomo" tabIndex={-1} className="mihomoDialog mihomoPresetDialog" onSubmit={savePresetSettings}>
+          {presetRevisionConflict && <p role="alert">Пресеты изменились. Ваш ввод сохранён. <button type="button" disabled={Boolean(busy)} onClick={() => void reloadPresets()}>Загрузить актуальные данные</button></p>}
           <header>
             <div><p className="eyebrow">PROFILE BLUEPRINTS</p><h2>Пресеты Mihomo</h2><small>Готовые схемы подключений для новых устройств и профилей</small></div>
             <div className="mihomoPresetHeaderStats"><span><b>{presetDraft.length}</b> пресета</span><span><b>{presetDraft.reduce((sum, item) => sum + item.components.length, 0)}</b> каналов</span></div>
-            <button type="button" className="iconButton" aria-label="Закрыть" onClick={() => setPresetDialog(false)}>×</button>
+            <button type="button" className="iconButton" aria-label="Закрыть" onClick={() => { void closePresets(); }}>×</button>
           </header>
           <div className="mihomoPresetIntro"><span>01</span><p><b>Каждый пресет — независимый шаблон.</b><small>Название отображается при создании профиля. Стратегия управляет выбором канала, а список ниже определяет состав подключений.</small></p></div>
           <div className="mihomoPresetEditor">
@@ -1570,7 +1875,7 @@ export function MihomoPage({
               </div>
             </article>)(presetDraft[presetEditorIndex], presetEditorIndex)}
           </div>
-          <footer><p>{presetDraft.some((item) => !item.components.length) ? "В каждом пресете нужен хотя бы один канал" : "Изменения применятся только к новым конфигурациям"}</p><button type="button" className="ghostButton" onClick={() => setPresetDialog(false)}>Отмена</button><button type="submit" className="primaryButton" disabled={busy === "presets" || presetDraft.some((item) => !item.components.length)}>Сохранить пресеты</button></footer>
+          <footer><p>{presetDraft.some((item) => !item.components.length) ? "В каждом пресете нужен хотя бы один канал" : "Изменения применятся только к новым конфигурациям"}</p><button type="button" className="ghostButton" onClick={() => { void closePresets(); }}>Отмена</button><button type="submit" className="primaryButton" disabled={!routingReadKnown || Boolean(busy) || presetRevisionConflict || presetDraft.some((item) => !item.components.length)}>Сохранить пресеты</button></footer>
         </form>
       </div>}
     </section>

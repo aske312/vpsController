@@ -15,6 +15,7 @@ import yaml
 import grpc
 from tests.api.support import manager, free_port, wait_port, managed_mihomo_fixture
 from telemetry import ConnectionTelemetry
+import quic_settings
 from telemetry_pb2 import Connection, ConnectionEvent, ConnectionEvents, SubscribeConnectionsRequest
 
 
@@ -104,7 +105,13 @@ class QuicTrafficTests(unittest.TestCase):
                 with self.subTest(module=module, client=client_format):
                     self.probe(module, client_format)
 
-    def probe(self, module, client_format):
+    def test_settings_apply_preserves_authenticated_user_traffic(self):
+        for module in ("hysteria2", "tuic"):
+            for client_format in ("mihomo", "singbox"):
+                with self.subTest(module=module, client=client_format):
+                    self.probe(module, client_format, edit_settings=True)
+
+    def probe(self, module, client_format, *, edit_settings=False):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             self.enterContext(patch.object(manager.port_allocation, "DATA_ROOT", root / "data"))
@@ -131,7 +138,7 @@ class QuicTrafficTests(unittest.TestCase):
                 cert_root = config_root / "quic"
                 cert_root.mkdir(parents=True)
                 subprocess.run([os.environ["PRIVACY_OPENSSL_BIN"], "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=gate.312", "-keyout", str(cert_root / "server.key"), "-out", str(cert_root / "server.crt")], check=True, capture_output=True, creationflags=flags)
-                port, api_port, proxy_port = free_port(), free_port(), free_port()
+                port, api_port, proxy_port = free_port(udp=True), free_port(), free_port(udp=True)
                 settings = {"port": port, "up_mbps": 100, "down_mbps": 100, "obfs": False, "congestion_control": "bbr", "heartbeat": "10s"}
                 credential = {"instance_id": "a", "uuid": str(uuid.uuid4()), "password": "secret-a", "port": port, "sni": "gate.312", "skip_cert_verify": True, **{k: settings[k] for k in ("up_mbps", "down_mbps", "obfs", "congestion_control", "heartbeat")}}
                 credential.update({"up_mbps": 23, "down_mbps": 45} if module == "hysteria2" else {"congestion_control": "cubic", "heartbeat": "30s", "udp_relay_mode": "quic"})
@@ -143,6 +150,13 @@ class QuicTrafficTests(unittest.TestCase):
                     return subprocess.run(args, capture_output=True, text=True, creationflags=flags)
                 with patch.object(manager, "CONFIG_ROOT", config_root), patch.object(manager, "SINGBOX_BIN", Path(os.environ["PRIVACY_SINGBOX_BIN"])), patch.object(manager, "module_settings", return_value=settings), patch.object(manager, "quic_credentials", return_value=users), patch.object(manager, "quic_telemetry_service", return_value=service), patch.object(manager, "start_quic_telemetry"), patch.object(manager, "run", side_effect=run), patch.object(manager, "service_stably_active", return_value=True), patch.object(manager.shutil, "which", return_value=None):
                     manager.write_quic_runtime("transport-" + module)
+                    if edit_settings:
+                        next_settings = {**settings, **({"up_mbps": 200} if module == "hysteria2" else {"heartbeat": "15s"})}
+                        with patch.object(manager, "observe_service", return_value={"runtime": {"state": "stopped"}}):
+                            prepared = quic_settings.prepare(manager, "transport-" + module, settings, next_settings)
+                            quic_settings.apply(manager, "transport-" + module, prepared)
+                        self.assertEqual(json.loads((cert_root / module / "config.json").read_text())["inbounds"][0]["users"],
+                                         [{"name": row["instance_id"], "password": row["password"], **({"uuid": row["uuid"]} if module == "tuic" else {})} for row in users])
                 def start(args):
                     log = open(root / f"process-{len(logs)}.log", "w+")
                     logs.append(log)

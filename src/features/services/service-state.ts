@@ -15,8 +15,8 @@ export function servicesSummary(services: ServicesStatus | null) {
   const warning = Boolean(services?.reboot_required || services?.failed_units || items.some((item) => runtimeState(item) === "error"));
   return {
     tone: warning || unknown ? "attention" : "healthy",
-    title: services?.reboot_required ? "Требуется перезагрузка" : warning ? "Требует внимания" : unknown ? "Unknown" : "Нет аварий systemd",
-    hint: services?.reboot_required ? "Обновления ожидают reboot" : services?.failed_units ? `${services.failed_units} аварийных unit` : unknown ? "Часть данных о службах недоступна" : "Работоспособность компонентов проверяется отдельно",
+    title: services?.observation_failed ? "Unknown" : services?.reboot_required ? "Требуется перезагрузка" : warning ? "Требует внимания" : unknown ? "Unknown" : "Нет аварий systemd",
+    hint: services?.observation_failed ? "Состояние служб не подтверждено; настройки показаны по последней проверке" : services?.reboot_required ? "Обновления ожидают reboot" : services?.failed_units ? `${services.failed_units} аварийных unit` : unknown ? "Часть данных о службах недоступна" : "Работоспособность компонентов проверяется отдельно",
     active: unknownItems ? "—" : `${items.filter((item) => runtimeState(item) === "running").length}/${items.length}`,
     enabled: !services || items.some((item) => item.unit_present === null || item.unit_file_state === "unknown") ? "—" : `${items.filter((item) => item.enabled).length}/${items.length}`,
     restarts: !services || items.some((item) => item.restarts == null) ? "—" : String(items.reduce((sum, item) => sum + (item.restarts ?? 0), 0)),

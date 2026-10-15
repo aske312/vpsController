@@ -72,7 +72,7 @@ class StandardSubscriptionTrafficTests(unittest.TestCase):
             self.assertEqual(group["proxies"], [parsed["proxies"][0]["name"]])
             # Confine execution to the test's loopback listener; core -t above
             # validated the original subscription without opening TUN or ports.
-            parsed.update({"mixed-port": free_port(), "bind-address": "127.0.0.1", "allow-lan": False,
+            parsed.update({"mixed-port": free_port(udp=True), "bind-address": "127.0.0.1", "allow-lan": False,
                            "tun": {"enable": False}, "dns": {"enable": False}, "geo-auto-update": False,
                            "external-controller": "", "log-level": "error"})
             self.assertNotEqual(parsed["mixed-port"], server_port)

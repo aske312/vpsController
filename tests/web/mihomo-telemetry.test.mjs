@@ -25,4 +25,6 @@ test("service state, previous endpoint and unavailable activity do not mean onli
   assert.equal(connectionOnline({ active: null }), false);
   assert.equal(connectionOnline({ active: false, endpoint: "192.0.2.1:1234" }), false);
   assert.equal(connectionOnline({ active: true }), true);
+  assert.equal(connectionOnline({ active: true, activity_available: false }), false);
+  assert.equal(connectionOnline({ active: true, stats_available: false }), true);
 });

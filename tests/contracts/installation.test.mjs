@@ -177,9 +177,6 @@ test("full uninstall removes owned panel state without recreating action data", 
   assert.match(uninstall, /rm -f -- "\$\{CADDY_CONFIG\}"/);
   assert.match(uninstall, /ufw --force delete allow 443\/tcp/);
   assert.match(manager, /systemctl is-enabled --quiet "\$\{service\}"/);
-  assert.match(manager, /restore_test_app\(\)[\s\S]*write_integrity_manifest/);
-  assert.match(manager, /restore_update_gateway\s+write_integrity_manifest/);
-  assert.match(manager, /автоматический откат выполнен, но восстановленная версия не запустилась/);
 });
 
 test("PRO release metadata binds edition, channel, architecture and full commit", async () => {
@@ -205,10 +202,8 @@ test("PRO release metadata binds edition, channel, architecture and full commit"
   assert.match(api, /awaiting_final_status[\s\S]*total_seconds\(\) < 30/);
 });
 
-test("missing main preview is reported as not installed rather than a broken server update", async () => {
-  const manager = await read("scripts/vps-control.sh");
-  assert.match(manager, /Тестовая сборка main ещё не опубликована; установка не выполнялась, рабочая версия не изменена/);
-});
+// Update/test rollback failures, persisted recovery and exact configuration
+// restoration are exercised by tests/api/test_application_recovery.py.
 
 test("application updates reuse unchanged components", async () => {
   const manager = await read("scripts/vps-control.sh");
@@ -282,7 +277,6 @@ test("manual releases are prebuilt and installed without Docker or package upgra
   assert.match(builder, /NEXT_PUBLIC_BUILD_COMMIT/);
   assert.doesNotMatch(builder, /npm install --omit=optional/);
   assert.match(manager, /install_prebuilt_release\(\)/);
-  assert.match(manager, /systemctl stop "\$\{APP_NAME\}-web\.service" "\$\{APP_NAME\}-api\.service" 2>\/dev\/null \|\| true/);
   assert.match(manager, /legacy_runtime="no"/);
   assert.match(manager, /start_legacy_containers\(\)/);
   assert.match(manager, /cleanup_legacy_runtime/);

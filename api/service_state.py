@@ -5,14 +5,15 @@ import subprocess
 from datetime import datetime, timezone
 
 
-def observe_service(unit: str) -> dict:
+def observe_service(unit: str, *, timer: bool = False) -> dict:
     checked_at = datetime.now(timezone.utc).isoformat()
     properties = {}
     reason = "Не удалось получить состояние службы"
     try:
         result = subprocess.run(
             ["systemctl", "show", unit,
-             "--property=LoadState,ActiveState,SubState,UnitFileState,NRestarts,ActiveEnterTimestamp,Description"],
+             "--property=LoadState,ActiveState,SubState,UnitFileState,NRestarts,ActiveEnterTimestamp,Description"
+             + (",LastTriggerUSec,NextElapseUSecRealtime" if timer else "")],
             capture_output=True, text=True, timeout=8, check=False,
         )
         if result.returncode == 0:
@@ -40,7 +41,7 @@ def observe_service(unit: str) -> dict:
     elif state in {"activating", "deactivating", "reloading", "refreshing", "maintenance"}:
         reason = "Служба меняет состояние; ожидается подтверждение результата"
     restarts = properties.get("NRestarts", "")
-    return {
+    observation = {
         "unit_present": present,
         "installed": present is True,  # Legacy field describes the unit, not a component.
         "active": state == "active" and present is not False,
@@ -53,6 +54,12 @@ def observe_service(unit: str) -> dict:
         "description": properties.get("Description", ""),
         "runtime": {"state": runtime, "reason": reason, "checked_at": checked_at},
     }
+    if timer:
+        observation.update({
+            "last_trigger": None if present is False else properties.get("LastTriggerUSec"),
+            "next_run": None if present is False else properties.get("NextElapseUSecRealtime"),
+        })
+    return observation
 
 
 def ssh_observation(service: dict, socket: dict) -> dict:
@@ -69,6 +76,28 @@ def ssh_observation(service: dict, socket: dict) -> dict:
     if socket["active"] and selected is socket and not service["active"]:
         result["substate"] = "socket activation"
     return result
+
+
+def observed_active(observation: dict) -> bool | None:
+    """A failed read is not an observation of an inactive service."""
+    if observation["unit_present"] is False:
+        return False
+    if observation["unit_present"] is not True or observation["runtime"]["state"] == "unknown":
+        return None
+    return observation["active"]
+
+
+def observed_enabled(observation: dict) -> bool | None:
+    if observation["unit_present"] is False:
+        return False
+    if observation["unit_present"] is not True:
+        return None
+    state = observation["unit_file_state"]
+    if state in {"enabled", "enabled-runtime"}:
+        return True
+    if state in {"disabled", "static", "masked", "masked-runtime", "linked", "linked-runtime", "indirect", "generated", "transient"}:
+        return False
+    return None
 
 
 def failed_unit_count() -> int | None:

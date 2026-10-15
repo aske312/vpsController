@@ -308,10 +308,14 @@ async def public_http_exception_handler(_, exc: HTTPException) -> JSONResponse:
 
 class ModuleSettingsPatch(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
+    expected_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
 class PresetSettingsPatch(BaseModel):
     presets: list[dict[str, Any]] = Field(default_factory=list, min_length=1, max_length=12)
+    expected_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
 class PersonalRuleInput(BaseModel):
@@ -321,6 +325,8 @@ class PersonalRuleInput(BaseModel):
     kind: Literal["domain", "process"] = "domain"
     entries: list[str] = Field(min_length=1, max_length=200)
     target: Literal["GATE.312", "DIRECT", "REJECT"] = "GATE.312"
+    expected_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
 class ProfileConnectionInput(BaseModel):
@@ -642,8 +648,10 @@ def check_profile_revision(item: dict[str, Any], expected: str | None) -> None:
 
 
 def profile_response(item: dict[str, Any]) -> dict[str, Any]:
-    result = {key: value for key, value in normalize_profile(deepcopy(item)).items() if key not in {"subscriptions", "subscription_token", "retiring_connections"}}
+    result = {key: value for key, value in normalize_profile(deepcopy(item)).items() if key not in {"subscriptions", "subscription_token", "retiring_connections", "last_operation_revision"}}
     result["revision"] = profile_revision(item)
+    if item.get("last_operation_revision") and item["last_operation_revision"] != result["revision"]:
+        result["last_operation_id"] = ""
     for device in result["devices"]:
         device_id = str(device["id"])
         device["subscription_format"] = (str(device.get("routing", {}).get("client_config_format", "singbox"))
@@ -706,7 +714,29 @@ def module_settings(module_id: str) -> dict[str, Any]:
     stored = load_json(path, {})
     if not isinstance(stored, dict):
         stored = {}
+    stored = {key: value for key, value in stored.items() if key != "_mutation"}
     return {**default_settings(module_id), **stored}
+
+
+def effective_module_settings(module_id: str) -> dict[str, Any]:
+    if module_id == DNS_MODULE_ID:
+        return dns_settings()
+    if module_id == ROUTING_MODULE_ID:
+        return routing_settings()
+    return module_settings(module_id)
+
+
+def module_settings_revision(module_id: str, values: dict[str, Any] | None = None) -> str:
+    values = effective_module_settings(module_id) if values is None else values
+    schema = dns_schema() if module_id == DNS_MODULE_ID else routing_schema() if module_id == ROUTING_MODULE_ID else manifest(module_id).get("settings", [])
+    editable = {field["key"]: values.get(field["key"], field.get("default"))
+                for field in schema}
+    return hashlib.sha256(json.dumps({"module": module_id, "values": editable}, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def check_module_settings_revision(module_id: str, expected: str | None) -> None:
+    if expected is not None and expected != module_settings_revision(module_id):
+        raise HTTPException(status_code=409, detail="Настройки компонента изменились. Загрузите актуальные данные перед сохранением")
 
 
 def option_value(option: Any) -> Any:
@@ -1422,10 +1452,13 @@ def validate_profile_presets(values: list[dict[str, Any]]) -> list[dict[str, Any
     return result
 
 
-def profile_presets() -> list[dict[str, Any]]:
-    stored = load_json(PRESET_SETTINGS_FILE, None)
+def profile_presets(stored: Any = None) -> list[dict[str, Any]]:
+    if stored is None:
+        stored = load_json(PRESET_SETTINGS_FILE, None)
     if not isinstance(stored, list) or not stored:
         return default_profile_presets()
+    if mutation_record(stored):
+        return validate_profile_presets(stored)
     legacy_ids = {"all-vless", "direct-fallback", "cdn-first", "low-latency", "all"}
     stored_ids = {str(item.get("id", "")) for item in stored if isinstance(item, dict)}
     if stored_ids == legacy_ids and len(stored) == len(legacy_ids):
@@ -1469,15 +1502,17 @@ def dns_defaults() -> dict[str, Any]:
     return values
 
 
-def dns_settings() -> dict[str, Any]:
-    stored = load_json(DNS_SETTINGS_FILE, {})
-    stored = stored if isinstance(stored, dict) else {}
+def dns_settings(stored: Any = None) -> dict[str, Any]:
+    if stored is None:
+        stored = load_json(DNS_SETTINGS_FILE, {})
+    stored = {key: value for key, value in stored.items() if key != "_mutation"} if isinstance(stored, dict) else {}
     return {**dns_defaults(), **stored}
 
 
-def routing_settings() -> dict[str, Any]:
-    stored = load_json(ROUTING_SETTINGS_FILE, {})
-    stored = stored if isinstance(stored, dict) else {}
+def routing_settings(stored: Any = None) -> dict[str, Any]:
+    if stored is None:
+        stored = load_json(ROUTING_SETTINGS_FILE, {})
+    stored = {key: value for key, value in stored.items() if key != "_mutation"} if isinstance(stored, dict) else {}
     # The former default was 180 seconds. Migrate only an untouched legacy
     # settings file; an explicit user value remains unchanged once the new
     # health-check fields have been saved.
@@ -1522,6 +1557,7 @@ def normalize_personal_rule(value: dict[str, Any]) -> dict[str, Any] | None:
         "kind": kind,
         "entries": entries[:200],
         "target": str(value.get("target", "GATE.312")) if value.get("target") in {"GATE.312", "DIRECT", "REJECT"} else "GATE.312",
+        **({"_mutation": record} if (record := mutation_record(value)) else {}),
     }
 
 
@@ -1688,18 +1724,71 @@ def get_action() -> dict[str, Any]:
 
 @app.get("/api/mihomo/routing/schema", dependencies=[Depends(auth_required)])
 def get_routing_schema() -> dict[str, Any]:
-    values = routing_settings()
-    return {"schema": routing_schema(), "values": values, "presets": profile_presets(), "rule_lists": routing_rule_lists(values), "personal_rules": personal_rules()}
+    stored = load_json(ROUTING_SETTINGS_FILE, {})
+    stored_presets = load_json(PRESET_SETTINGS_FILE, [])
+    values = routing_settings(stored)
+    presets = profile_presets(stored_presets)
+    return {"schema": routing_schema(), "values": values, "revision": module_settings_revision(ROUTING_MODULE_ID, values),
+            "last_operation_id": mutation_record(stored).get("id"),
+            "presets": presets, "presets_revision": collection_revision("presets", presets),
+            "presets_last_operation_id": mutation_record(stored_presets).get("id"),
+            "rule_lists": routing_rule_lists(values), "personal_rules": [public_personal_rule(rule) for rule in personal_rules()]}
+
+
+def collection_revision(kind: str, value: Any) -> str:
+    return hashlib.sha256(json.dumps({"kind": kind, "value": value}, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def module_settings_operation_id(module_id: str, values: dict[str, Any]) -> str | None:
+    record = mutation_record(load_json(SETTINGS_ROOT / f"{module_id}.json", {}))
+    # Values and receipt can be observed on opposite sides of another writer.
+    # Publish a receipt only when its stored digest matches these exact values.
+    if record.get("hash") == collection_revision(f"module-settings:{module_id}", values):
+        return record["id"]
+    return None
+
+
+def mutation_record(value: Any) -> dict[str, str]:
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    record = value.get("_mutation", {}) if isinstance(value, dict) else {}
+    if (not isinstance(record, dict) or not isinstance(record.get("id"), str) or not isinstance(record.get("hash"), str)
+            or not re.fullmatch(r"[a-f0-9]{32}", record["id"]) or not re.fullmatch(r"[a-f0-9]{64}", record["hash"])):
+        return {}
+    return {"id": record["id"], "hash": record["hash"]}
+
+
+def mutation_metadata(kind: str, payload: BaseModel) -> dict[str, Any]:
+    return {"_mutation": {"id": payload.operation_id, "hash": collection_revision(kind, payload.model_dump(exclude={"operation_id"}))}} if payload.operation_id else {}
+
+
+def mutation_replayed(value: Any, kind: str, payload: BaseModel) -> bool:
+    record = mutation_record(value)
+    if not payload.operation_id or record.get("id") != payload.operation_id:
+        return False
+    if record != mutation_metadata(kind, payload)["_mutation"]:
+        raise HTTPException(status_code=409, detail="Идентификатор сохранения уже использован для другого запроса")
+    return True
+
+
+def public_personal_rule(rule: dict[str, Any]) -> dict[str, Any]:
+    values = {key: value for key, value in rule.items() if key != "_mutation"}
+    return {**values, "revision": collection_revision("personal-rule", values),
+            **({"last_operation_id": record["id"]} if (record := mutation_record(rule)) else {})}
 
 
 @app.post("/api/mihomo/routing/personal-rules", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def create_personal_rule(payload: PersonalRuleInput) -> dict[str, Any]:
     rules = personal_rules()
+    for existing in rules:
+        if mutation_replayed(existing, "personal-create", payload):
+            return public_personal_rule(existing)
     rule = validate_personal_rule(payload)
+    rule.update(mutation_metadata("personal-create", payload))
     rules.append(rule)
     save_personal_rules(rules)
-    return rule
+    return public_personal_rule(rule)
 
 
 @app.patch("/api/mihomo/routing/personal-rules/{rule_id}", dependencies=[Depends(require_mihomo_mutation)])
@@ -1709,13 +1798,17 @@ def update_personal_rule(rule_id: str, payload: PersonalRuleInput) -> dict[str, 
     index = next((index for index, rule in enumerate(rules) if rule["id"] == rule_id), None)
     if index is None:
         raise HTTPException(status_code=404, detail="Персональное правило не найдено")
+    if mutation_replayed(rules[index], f"personal-update:{rule_id}", payload):
+        return public_personal_rule(rules[index])
+    if payload.expected_revision is not None and payload.expected_revision != public_personal_rule(rules[index])["revision"]:
+        raise HTTPException(status_code=409, detail="Персональное правило изменилось. Загрузите актуальные данные перед сохранением")
     rule = validate_personal_rule(payload, rule_id)
+    rule.update(mutation_metadata(f"personal-update:{rule_id}", payload))
     rules[index] = rule
     save_personal_rules(rules)
-    return rule
+    return public_personal_rule(rule)
 
 
-@app.delete("/api/mihomo/routing/personal-rules/{rule_id}", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def delete_personal_rule(rule_id: str) -> dict[str, Any]:
     rules = personal_rules()
@@ -1741,31 +1834,46 @@ def delete_personal_rule(rule_id: str) -> dict[str, Any]:
 @app.patch("/api/mihomo/routing/presets", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def patch_profile_presets(patch: PresetSettingsPatch) -> dict[str, Any]:
+    if mutation_replayed(load_json(PRESET_SETTINGS_FILE, []), "presets", patch):
+        presets = profile_presets()
+        return {"presets": presets, "revision": collection_revision("presets", presets), "last_operation_id": patch.operation_id}
+    if patch.expected_revision is not None and patch.expected_revision != collection_revision("presets", profile_presets()):
+        raise HTTPException(status_code=409, detail="Пресеты изменились. Загрузите актуальные данные перед сохранением")
     next_presets = validate_profile_presets(patch.presets)
-    atomic_json(PRESET_SETTINGS_FILE, next_presets)
-    return {"presets": next_presets}
+    stored = deepcopy(next_presets)
+    stored[0].update(mutation_metadata("presets", patch))
+    atomic_json(PRESET_SETTINGS_FILE, stored)
+    return {"presets": next_presets, "revision": collection_revision("presets", next_presets), "last_operation_id": patch.operation_id}
 
 
 @app.patch("/api/mihomo/routing/settings", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def patch_routing_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
+    if mutation_replayed(load_json(ROUTING_SETTINGS_FILE, {}), "routing", patch):
+        return get_routing_schema()
+    check_module_settings_revision(ROUTING_MODULE_ID, patch.expected_revision)
     next_values = validate_routing({key: value for key, value in patch.values.items() if key != "tunnel_privacy"}, current=routing_settings())
-    atomic_json(ROUTING_SETTINGS_FILE, next_values)
-    return {"schema": routing_schema(), "values": next_values, "rule_lists": routing_rule_lists(next_values), "personal_rules": personal_rules()}
+    atomic_json(ROUTING_SETTINGS_FILE, {**next_values, **mutation_metadata("routing", patch)})
+    return get_routing_schema()
 
 
 @app.get("/api/mihomo/dns/settings", dependencies=[Depends(auth_required)])
 def get_dns_settings() -> dict[str, Any]:
-    return {"schema": dns_schema(), "values": dns_settings()}
+    stored = load_json(DNS_SETTINGS_FILE, {})
+    values = dns_settings(stored)
+    return {"schema": dns_schema(), "values": values, "revision": module_settings_revision(DNS_MODULE_ID, values), "last_operation_id": mutation_record(stored).get("id")}
 
 
 @app.patch("/api/mihomo/dns/settings", dependencies=[Depends(require_mihomo_mutation)])
 @serialized_profile_mutation
 def patch_dns_settings(patch: ModuleSettingsPatch) -> dict[str, Any]:
+    if mutation_replayed(load_json(DNS_SETTINGS_FILE, {}), "dns", patch):
+        return get_dns_settings()
+    check_module_settings_revision(DNS_MODULE_ID, patch.expected_revision)
     next_values = validate_dns(patch.values)
     SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
-    atomic_json(DNS_SETTINGS_FILE, next_values)
-    return {"schema": dns_schema(), "values": next_values}
+    atomic_json(DNS_SETTINGS_FILE, {**next_values, **mutation_metadata("dns", patch)})
+    return get_dns_settings()
 
 
 def public_endpoint() -> str:
@@ -1968,7 +2076,7 @@ def module_version_info(module_id: str, info: dict[str, Any], installed: bool) -
 
 def module_payload(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
-    settings = module_settings(module_id)
+    settings = effective_module_settings(module_id)
     installed = module_is_installed(module_id)
     service = SERVICE_BY_MODULE.get(module_id)
     return {
@@ -1978,6 +2086,8 @@ def module_payload(module_id: str) -> dict[str, Any]:
         "active": systemctl_active(service) if service else installed,
         "service": service or "",
         "settings_values": settings,
+        "settings_revision": module_settings_revision(module_id, settings),
+        "last_settings_operation_id": module_settings_operation_id(module_id, settings),
         **module_version_info(module_id, info, installed),
     }
 
@@ -2073,6 +2183,8 @@ def prepare_module_port(module_id: str) -> None:
         if module_id in FIXED_UDP_MODULES and any(connection.get("component") == module_id
                for profile in profiles()
                for connection in [*profile.get("connections", []), *profile.get("retiring_connections", [])]):
+            raise
+        if module_id in {"transport-hysteria2", "transport-tuic"} and quic_credentials(module_id):
             raise
         conflict = True
     try:
@@ -2253,16 +2365,20 @@ def get_modules() -> dict[str, Any]:
 @app.get("/api/mihomo/modules/{module_id}/settings", dependencies=[Depends(auth_required)])
 def get_module_settings(module_id: str) -> dict[str, Any]:
     info = manifest(module_id)
+    values = effective_module_settings(module_id)
     return {
         "id": module_id,
         "schema": info.get("settings", []),
-        "values": module_settings(module_id),
+        "values": values,
+        "revision": module_settings_revision(module_id, values),
+        "last_operation_id": module_settings_operation_id(module_id, values),
         "installed": module_is_installed(module_id),
     }
 
 
 @module_mutation("module-settings")
 def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[str, Any]:
+    check_module_settings_revision(module_id, patch.expected_revision)
     previous_values = module_settings(module_id)
     next_values = validate_settings(module_id, patch.values)
     breaking_tunnel_keys = {"subnet", "port"} | ({"s1", "s2", "h1", "h2", "h3", "h4"} if module_id == "transport-awg" else set())
@@ -2270,39 +2386,74 @@ def patch_module_settings(module_id: str, patch: ModuleSettingsPatch) -> dict[st
         if any(connection.get("component") == module_id for profile in profiles()
                for connection in [*profile.get("connections", []), *profile.get("retiring_connections", [])]):
             raise HTTPException(status_code=409, detail="Настройка используется существующими подключениями. Изменение порта, подсети или handshake-параметров требует перехода на новые подключения")
+    if module_id in {"transport-hysteria2", "transport-tuic"}:
+        breaking_keys = {"port", "obfs"} if module_id == "transport-hysteria2" else {"port"}
+        if any(next_values.get(key) != previous_values.get(key) for key in breaking_keys):
+            consumers = any(connection.get("component") == module_id for profile in profiles()
+                            for connection in [*profile.get("connections", []), *profile.get("retiring_connections", [])])
+            if consumers or quic_credentials(module_id):
+                raise HTTPException(status_code=409, detail="Настройка используется существующими подключениями. Изменение порта или обфускации требует перехода на новые подключения")
+        if next_values.get("port") != previous_values.get("port") and module_is_installed(module_id) and shutil.which("ufw"):
+            firewall = run("ufw", "status")
+            if firewall.returncode != 0 or not firewall.stdout.startswith(("Status: active", "Status: inactive")):
+                raise HTTPException(status_code=409, detail="Не удалось подтвердить состояние firewall. Изменение UDP-порта приостановлено")
+            if firewall.stdout.startswith("Status: active"):
+                raise HTTPException(status_code=409, detail="Смена UDP-порта при включённом UFW пока недоступна: откат правил firewall не гарантирован. Другие настройки доступны")
     port_key = MODULE_LISTENERS.get(module_id, (None, set()))[0]
     if port_key and next_values[port_key] != previous_values[port_key]:
         try:
             check_module_port(module_id, int(next_values[port_key]))
         except ModulePortConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-    tunnel_candidate = None
+    runtime_candidate = None
     if module_id in WG_CONFIG_BY_MODULE and module_is_ready(module_id):
         from tunnel_settings import prepare
         try:
-            tunnel_candidate = prepare(sys.modules[__name__], module_id, previous_values, next_values)
+            runtime_candidate = prepare(sys.modules[__name__], module_id, previous_values, next_values)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    elif module_id == "transport-reality" and module_is_installed(module_id):
+        from reality_settings import prepare
+        try:
+            runtime_candidate = prepare(sys.modules[__name__], next_values)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    elif module_id in {"transport-hysteria2", "transport-tuic"} and module_is_installed(module_id):
+        from quic_settings import prepare
+        try:
+            runtime_candidate = prepare(sys.modules[__name__], module_id, previous_values, next_values)
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     snapshot = profile_runtime_transaction({module_id}, settings_modules={module_id}) if module_id in TRANSPORTS else nullcontext()
     with snapshot:
-        return apply_module_settings(module_id, next_values, tunnel_candidate)
+        return apply_module_settings(module_id, next_values, runtime_candidate)
 
 
-def apply_module_settings(module_id: str, next_values: dict[str, Any], tunnel_candidate=None) -> dict[str, Any]:
+def apply_module_settings(module_id: str, next_values: dict[str, Any], runtime_candidate=None) -> dict[str, Any]:
     SETTINGS_ROOT.mkdir(parents=True, exist_ok=True)
-    atomic_json(SETTINGS_ROOT / f"{module_id}.json", next_values)
-    if module_is_ready(module_id) and module_id in TRANSPORTS:
+    identity = os.getenv("VPS_CONTROL_MIHOMO_OPERATION_ID", "")
+    metadata = {"_mutation": {"id": identity, "hash": collection_revision(f"module-settings:{module_id}", next_values)}} if re.fullmatch(r"[a-f0-9]{32}", identity) else {}
+    atomic_json(SETTINGS_ROOT / f"{module_id}.json", {**next_values, **metadata})
+    # SS allocation starts affect only future listeners. Updating that setting
+    # must not install packages, rewrite units or restart existing instances.
+    should_apply = (module_id in {"transport-reality", "transport-hysteria2", "transport-tuic"} and runtime_candidate is not None) or (
+        module_id not in {"transport-reality", "transport-shadowsocks", "transport-hysteria2", "transport-tuic"} and module_id in TRANSPORTS and module_is_ready(module_id))
+    if should_apply:
         write_action(f"module-settings:{module_id}", f"Применение настроек {manifest(module_id)['name']}…")
         try:
             if module_id in WG_CONFIG_BY_MODULE:
-                if tunnel_candidate is None:
+                if runtime_candidate is None:
                     raise RuntimeError("Состояние WG/AWG изменилось перед применением настроек")
                 from tunnel_settings import apply
-                apply(sys.modules[__name__], module_id, tunnel_candidate)
+                apply(sys.modules[__name__], module_id, runtime_candidate)
+            elif module_id == "transport-reality":
+                from reality_settings import apply
+                apply(sys.modules[__name__], runtime_candidate)
             elif module_id in {"transport-hysteria2", "transport-tuic"}:
-                write_quic_runtime(module_id)
+                from quic_settings import apply
+                apply(sys.modules[__name__], module_id, runtime_candidate)
             else:
-                call_module_script(module_id, "install")
+                raise RuntimeError("Применение настроек компонента не поддерживается")
         except (RuntimeError, subprocess.TimeoutExpired) as exc:
             # The enclosing durable transaction restores exact saved files and
             # observed runtime, without replaying the installer after failure.
@@ -2343,6 +2494,8 @@ def start_profile_operation(action: str, payload: dict, identity: str | None):
             if not application_operation.read(root / "operations" / f"{identity}.json"):
                 require_mihomo_management()
                 application_operation.require_recovery_clear(root)
+                if action == "module-settings":
+                    check_module_settings_revision(payload["module_id"], payload["settings"].get("expected_revision"))
             path, digest = application_operation.persist_payload(root, identity, payload)
         return application_operation.start(root, root / "application-action.json", f"mihomo-profile-{action}",
             [sys.executable, str(Path(__file__).resolve()), "--profile-operation", action, str(path), digest], subprocess.run,
@@ -2385,6 +2538,13 @@ def submit_profile_delete(profile_id: str, operation_id: str | None = Header(def
 @app.delete("/api/mihomo/profiles/{profile_id}/devices/{device_id}", status_code=202, dependencies=[Depends(require_mihomo_admission)])
 def submit_device_delete(profile_id: str, device_id: str, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
     return start_profile_operation("device-delete", {"profile_id": profile_id, "device_id": device_id}, operation_id)
+
+
+@app.delete("/api/mihomo/routing/personal-rules/{rule_id}", status_code=202, dependencies=[Depends(require_mihomo_admission)])
+def submit_personal_rule_delete(rule_id: str, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    if not re.fullmatch(r"personal-[a-f0-9]{12}", rule_id):
+        raise HTTPException(status_code=404, detail="Персональное правило не найдено")
+    return start_profile_operation("personal-delete", {"rule_id": rule_id}, operation_id)
 
 
 @app.post("/api/mihomo/reconciliation", status_code=202, dependencies=[Depends(require_mihomo_admission)])
@@ -3227,6 +3387,8 @@ def write_quic_runtime(module_id: str) -> None:
         candidate.unlink(missing_ok=True)
         raise RuntimeError((result.stderr or result.stdout).strip() or f"sing-box rejected {module} configuration")
     previous_config = load_json(config_path, {})
+    old_inbounds = previous_config.get("inbounds", []) if isinstance(previous_config, dict) else []
+    old_port = int(old_inbounds[0].get("listen_port", 0)) if old_inbounds and isinstance(old_inbounds[0], dict) else 0
     previous = config_path.read_bytes() if config_path.exists() else None
     os.replace(candidate, config_path)
     service = SERVICE_BY_MODULE[module_id]
@@ -3237,10 +3399,8 @@ def write_quic_runtime(module_id: str) -> None:
             raise RuntimeError(f"{manifest(module_id)['name']} service did not remain active")
         start_quic_telemetry(module_id, runtime)
         port_allocation.release(f"mihomo:telemetry:{module_id}")
-        if shutil.which("ufw") and run("ufw", "status").stdout.startswith("Status: active"):
+        if old_port != int(settings["port"]) and shutil.which("ufw") and run("ufw", "status").stdout.startswith("Status: active"):
             run("ufw", "allow", f"{int(settings['port'])}/udp", "comment", f"GATE.312 Mihomo {module}")
-            old_inbounds = previous_config.get("inbounds", []) if isinstance(previous_config, dict) else []
-            old_port = int(old_inbounds[0].get("listen_port", 0)) if old_inbounds and isinstance(old_inbounds[0], dict) else 0
             if old_port and old_port != int(settings["port"]):
                 run("ufw", "delete", "allow", f"{old_port}/udp")
     except Exception:
@@ -3976,6 +4136,21 @@ def device_matches_client(device: dict[str, Any], metadata: dict[str, Any]) -> b
     return saved == client_identity_key(metadata) or (saved == "undefined" and not device.get("client_identity_key"))
 
 
+def verification_routing(profile: dict[str, Any], device_id: str) -> dict[str, Any]:
+    """Include exporter inheritance without inheriting device-only switches."""
+    values = device_routing(profile, device_id)
+    routing = {**routing_settings(), **values}
+    routing["_personal_rule_lines"] = personal_rule_lines_for_device(profile, device_id)
+    for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled", "tunnel_ech", "tunnel_privacy"):
+        routing[key] = bool(values.get(key, False))
+    return routing
+
+
+def verification_digest(value: Any) -> str:
+    """Detect content changes without exposing private rules or resolver URLs."""
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
 def client_verification_scenario(profile: dict[str, Any], device_id: str) -> dict[str, Any]:
     """Public protocol requirements, never keys, tokens, target hosts or HWID."""
     profile = normalize_profile(deepcopy(profile))
@@ -4002,14 +4177,17 @@ def client_verification_scenario(profile: dict[str, Any], device_id: str) -> dic
         if component == "transport-shadowsocks":
             value["cipher"] = settings.get("method") or credential.get("method", "chacha20-ietf-poly1305")
         connections.append(value)
-    routing = device_routing(profile, device_id)
+    routing = verification_routing(profile, device_id)
     dns = dns_settings()
     return {"connections": sorted(connections, key=lambda value: json.dumps(value, sort_keys=True)),
             "features": sorted(key for key in FEATURES | RULES if routing.get(key)),
             "strategy": routing.get("strategy", ""),
             "custom_rules": bool(routing.get("rules")),
+            "rules_revision": verification_digest(profile_rules(routing)),
             "personal_rule_kinds": sorted({rule["kind"] for rule in personal_rules_for_device(profile, device_id)}),
-            "dns": {key: dns.get(key) for key in ("enhanced_mode", "ipv6", "prefer_h3")}}
+            "dns": {key: dns.get(key) for key in ("enhanced_mode", "ipv6", "prefer_h3")},
+            "dns_revision": verification_digest(dns),
+            "routing_revision": verification_digest({key: value for key, value in {**routing_defaults(), **routing}.items() if key not in {"_personal_rule_lines", "client_config_format"}})}
 
 
 def verified_profile_clients(profile: dict[str, Any], device_id: str) -> list[dict[str, Any]]:
@@ -4017,7 +4195,7 @@ def verified_profile_clients(profile: dict[str, Any], device_id: str) -> list[di
     if not records:
         return []
     scenario = client_verification_scenario(profile, device_id)
-    routing = device_routing(profile, device_id)
+    routing = verification_routing(profile, device_id)
     selected = [connection for connection in normalize_profile(deepcopy(profile))["connections"] if str(connection.get("device_id")) == device_id]
     result = []
     for record in client_compatibility.matching_records(scenario, records):
@@ -4116,6 +4294,7 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
                 "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
             sync_legacy_profile_fields(item)
+            item["create_revision"] = profile_revision(item)
             data = profiles()
             data.append(item)
             save_profiles(data)
@@ -4233,6 +4412,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     reconcile_profile_encryption(item)
     item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     item["last_operation_id"] = payload.operation_id or ""
+    item["last_operation_revision"] = profile_revision(item) if payload.operation_id else ""
     save_profiles(data)
     write_action(f"profile-update:{profile_id}", f"Профиль «{item['name']}» обновлён", state="done", progress=100)
     return profile_response(item)
@@ -5171,6 +5351,8 @@ def execute_profile_operation(action: str, path: Path, digest: str, identity: st
             delete_profile(payload["profile_id"])
         elif action == "device-delete":
             delete_profile_device(payload["profile_id"], payload["device_id"])
+        elif action == "personal-delete":
+            delete_personal_rule(payload["rule_id"])
         elif action == "reconcile":
             repair_reconciliation()
         elif action == "module-settings":

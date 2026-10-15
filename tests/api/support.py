@@ -41,7 +41,20 @@ def managed_mihomo_fixture(test_case):
     return root
 
 
-def free_port():
+def free_port(*, udp=False):
+    if udp:
+        # Mixed Mihomo listeners bind TCP and UDP on the same number; an unused
+        # TCP port can still be occupied by a different UDP application.
+        for _ in range(64):
+            with socket.socket(type=socket.SOCK_DGRAM) as datagram, socket.socket() as stream:
+                datagram.bind(("127.0.0.1", 0))
+                port = datagram.getsockname()[1]
+                try:
+                    stream.bind(("127.0.0.1", port))
+                except OSError:
+                    continue
+                return port
+        raise OSError("No free loopback TCP/UDP port")
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]

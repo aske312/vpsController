@@ -15,6 +15,7 @@ type Props = {
   dnsChecks: Record<string, DnsCheck>;
   checkingDns: boolean;
   busy: boolean;
+  readFailed: boolean;
   loading: boolean;
   dirty: boolean;
   setDnsDraft: Dispatch<SetStateAction<DnsSettings | null>>;
@@ -29,6 +30,7 @@ export function DnsView({
   dnsChecks,
   checkingDns,
   busy,
+  readFailed,
   loading,
   dirty,
   setDnsDraft,
@@ -540,12 +542,12 @@ export function DnsView({
           </div>
         </details>
       </fieldset>
-      {dns.recovery_required && <p role="alert">Предыдущее применение DNS прервано. Перед новыми изменениями восстановите сохранённые настройки. <button type="button" disabled={busy} onClick={recoverDns}>Восстановить DNS</button></p>}
+      {dns.recovery_required && <p role="alert">Предыдущее применение DNS прервано. Перед новыми изменениями восстановите сохранённые настройки. <button type="button" disabled={busy || readFailed} onClick={recoverDns}>Восстановить DNS</button></p>}
       <footer className={`networkSaveBar ${dirty ? "dirty" : ""}`}>
         <div role="status">
           <strong>
             {busy
-              ? "Применяем…"
+              ? "Ожидаем результата команды"
               : dirty
                 ? "Есть несохранённые изменения"
                 : "Настройки сохранены"}
@@ -563,9 +565,9 @@ export function DnsView({
           <button
             type="submit"
             className="networkPrimaryButton"
-            disabled={!dirty || busy || loading || !canSave || dns.recovery_required}
+            disabled={!dirty || busy || readFailed || loading || !canSave || dns.recovery_required}
           >
-            {busy ? "Применяем…" : "Применить настройки"}
+            Применить настройки
           </button>
         </div>
       </footer>

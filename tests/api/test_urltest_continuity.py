@@ -65,7 +65,7 @@ class URLTestContinuityTests(unittest.TestCase):
                 with patch.object(manager, "SUBMODULE_ROOT", ROOT / "protocol-images/mihomo/modules"), patch.object(manager, "public_endpoint", return_value="127.0.0.1"), patch.object(manager, "module_is_installed", return_value=True):
                     with patch.object(manager, "routing_settings", return_value=profile["devices"][0]["routing"]):
                         config = yaml.safe_load(manager.render_profile(profile))
-                port, api_port = free_port(), free_port()
+                port, api_port = free_port(udp=True), free_port()
                 names = [proxy["name"] for proxy in config["proxies"]]
                 config["proxies"] = [{"name": name, "type": "http", "server": "127.0.0.1", "port": server.server_port} for name, server in zip(names, servers)]
                 config.update({"mixed-port": port, "external-controller": f"127.0.0.1:{api_port}", "secret": "test-secret"})
