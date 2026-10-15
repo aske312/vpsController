@@ -240,6 +240,19 @@ class RelayAPITests(unittest.TestCase):
                 response = self.client.request(method, '/api'+path)
                 self.assertEqual(response.status_code, 401)
 
+    def test_cdn_native_copy_retains_gateway_sni_and_http_host(self):
+        with patch.object(api, 'PUBLIC_IPV4', ORIGIN), patch.object(api, 'PUBLIC_DOMAIN', 'panel.example'), patch.object(api, 'PUBLIC_ENDPOINT', ORIGIN), patch.object(api.cdn_security, 'read_routes', return_value=[{'domain': 'cdn.example'}]), patch.object(api, 'VLESS_ENV', self.root/'absent.env'):
+            hosts = api.relay_origin_hosts()
+        original = 'proxies:\n- name: phone\n  type: vless\n  server: cdn.example\n  port: 443\n  uuid: secret\n  tls: true\n  servername: cdn.example\n  ws-opts:\n    path: /private-path\n    headers:\n      Host: cdn.example\n'
+        output, count = relay_export.rewrite(original, {'transport': 'tcp', 'target_port': 443, 'listen_port': 20000}, AGENT, hosts)
+        self.assertEqual(count, 1)
+        import yaml
+        node = yaml.safe_load(output)['proxies'][0]
+        self.assertEqual((node['server'], node['port']), (AGENT, 20000))
+        self.assertEqual(node['servername'], 'cdn.example')
+        self.assertEqual(node['ws-opts']['headers']['Host'], 'cdn.example')
+        self.assertEqual(node['uuid'], 'secret')
+
     def test_public_proof_uses_private_identity_without_returning_credentials(self):
         agent = FakeAgent()
         control = RelayManager(self.root, ORIGIN, lambda *_: agent)

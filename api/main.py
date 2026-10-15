@@ -2573,6 +2573,19 @@ def relay_control():
     return relay_manager.RelayManager(DATA_DIR, PUBLIC_IPV4)
 
 
+def relay_origin_hosts():
+    hosts = [value for value in (PUBLIC_IPV4, PUBLIC_DOMAIN, PUBLIC_ENDPOINT) if value]
+    # A CDN client file names the gateway virtual host, not the origin IP.
+    # Retain that TLS/HTTP identity while changing only the relay socket address.
+    hosts.extend(route['domain'] for route in cdn_security.read_routes()
+                 if isinstance(route.get('domain'), str) and valid_hostname(route['domain']))
+    if VLESS_ENV.is_file():
+        values = dict(line.split('=', 1) for line in VLESS_ENV.read_text(encoding='utf-8').splitlines() if '=' in line)
+        hosts.extend(values.get(prefix+'_DOMAIN', '') for prefix in ('CDN', 'TLS')
+                     if values.get(prefix+'_ENABLED') == 'yes' and valid_hostname(values.get(prefix+'_DOMAIN', '')))
+    return list(dict.fromkeys(hosts))
+
+
 def relay_targets():
     """Only public protocol ports; never expose API, auth, metrics or local inbounds."""
     allowed = set()
@@ -2622,7 +2635,7 @@ def get_relays(_: None = Depends(require_token)):
         result = control.public()
         private_hosts = {host['id']: host for host in control.read()['hosts']}
         result['targets'] = relay_targets()
-        result['origin_hosts'] = list(dict.fromkeys(value for value in (PUBLIC_IPV4, PUBLIC_DOMAIN, PUBLIC_ENDPOINT) if value))
+        result['origin_hosts'] = relay_origin_hosts()
         candidates = [{'id': item['id'], 'label': item['label']} for item in network_consumers()]
         candidates.extend({'id': f"direct:{item['id']}", 'label': str(item.get('name') or item['id'])} for item in read_clients() if item.get('id') and item.get('protocol') in ('tuic', 'hysteria2'))
         result['consumers'] = list({item['id']: item for item in candidates}.values())
@@ -2792,7 +2805,7 @@ def export_relay_config(host_id: str, route_id: str, payload: RelayExportRequest
         if not actual or actual['state'] != 'listening' or not relay_manager.same_route(actual, route):
             raise ValueError('Listener relay не подтверждён; сначала обновите состояние')
         config, count = relay_export.rewrite(payload.config, route, control.client(host).host,
-                                            (route['target_ip'], PUBLIC_DOMAIN, PUBLIC_ENDPOINT))
+                                            relay_origin_hosts())
         return JSONResponse({'config': config, 'replaced': count}, headers={'Cache-Control': 'no-store'})
     except (ValueError, StopIteration, OSError, relay_manager.AgentAPIError):
         raise HTTPException(status_code=422, detail='Не удалось подготовить relay-копию. Нужен нативный файл одного подключения с адресом и портом текущего origin и совместимым TCP/UDP транспортом') from None
