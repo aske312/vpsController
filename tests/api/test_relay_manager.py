@@ -104,6 +104,20 @@ class RelayManagementTests(unittest.TestCase):
         self.assertEqual(len(recovered.read()['routes']), 1)
         self.assertEqual(sum(method == 'PUT' for method, _ in self.agent.calls), 1)
 
+    def test_pending_operation_can_reconnect_same_host_without_replaying_mutation(self):
+        self.agent.offline_after_write = True
+        with self.assertRaises(OSError):
+            self.control.mutate_route(self.payload(), 'b'*32)
+        self.agent.offline = False
+        host = self.control.read()['hosts'][0]
+        with self.assertRaises(OperationConflict):
+            self.control.save_host({**host, 'id': 'f'*32, 'expected_revision': self.control.read()['revision']}, reconnect=True)
+        self.control.save_host({**host, 'token': 'n'*48, 'expected_revision': self.control.read()['revision']}, reconnect=True)
+        self.assertFalse(self.control.pending.exists())
+        self.assertEqual(self.control.read()['hosts'][0]['token'], 'n'*48)
+        self.assertEqual(len(self.control.read()['routes']), 1)
+        self.assertEqual(sum(method == 'PUT' for method, _ in self.agent.calls), 1)
+
     def test_unknown_write_with_absent_readback_keeps_intent(self):
         self.agent.request = Mock(side_effect=[{'revision': 0, 'items': []}, OSError('lost'), {'revision': 0, 'items': []}])
         with self.assertRaises(OperationConflict):
@@ -217,7 +231,7 @@ class RelayAPITests(unittest.TestCase):
         self.addCleanup(api.app.dependency_overrides.clear)
 
     def test_every_endpoint_requires_auth_before_access_or_validation(self):
-        endpoints = [('GET', '/network/relays'), ('PUT', '/network/relays'), ('DELETE', '/network/relays/id'),
+        endpoints = [('GET', '/network/relays'), ('PUT', '/network/relays'), ('PUT', '/network/relays/reconnect'), ('DELETE', '/network/relays/id'),
                      ('POST', '/network/relays/id/routes'), ('DELETE', '/network/relays/id/routes/route?agent_revision=0'),
                      ('POST', '/network/relays/reconcile'), ('POST', '/network/relays/id/routes/route/export'),
                      ('POST', '/network/relays/id/routes/route/check?consumer_id=direct:client')]

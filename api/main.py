@@ -2651,7 +2651,8 @@ def start_relay_mutation(name, payload, identity):
         with application_operation.locked(DATA_DIR):
             if not application_operation.read(DATA_DIR / 'operations' / f'{identity}.json'):
                 if name != 'relay-reconcile':
-                    relay_control().require_clear()
+                    if name != 'relay-reconnect':
+                        relay_control().require_clear()
                     relay_control().checked(payload['expected_revision'])
             path, digest = application_operation.persist_payload(DATA_DIR, identity, payload)
         return start_application_operation(name,
@@ -2666,6 +2667,13 @@ def start_relay_mutation(name, payload, identity):
 @app.put('/api/network/relays', status_code=202, dependencies=[Depends(require_mutation_admission)])
 def save_relay_host(payload: RelayHostSettings, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
     return start_relay_mutation('relay-host-save', payload.model_dump(), operation_id)
+
+
+@app.put('/api/network/relays/reconnect', status_code=202)
+def reconnect_relay_host(payload: RelayHostSettings, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
+    if not payload.id:
+        raise HTTPException(status_code=422, detail='Выберите существующий узел для восстановления подключения')
+    return start_relay_mutation('relay-reconnect', payload.model_dump(), operation_id)
 
 
 @app.delete('/api/network/relays/{host_id}', status_code=202, dependencies=[Depends(require_mutation_admission)])

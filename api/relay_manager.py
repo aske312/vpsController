@@ -124,8 +124,14 @@ class RelayManager:
         if self.pending.exists():
             raise OperationConflict('Есть неподтверждённое изменение relay. Сначала проверьте его результат')
 
-    def save_host(self, payload):
-        self.require_clear()
+    def save_host(self, payload, *, reconnect=False):
+        intent = None
+        if reconnect and self.pending.exists():
+            intent = json.loads(self.pending.read_text(encoding='utf-8'))
+            if intent.get('route', {}).get('host_id') != payload.get('id'):
+                raise OperationConflict('Восстанавливать подключение можно только к узлу незавершённой операции')
+        else:
+            self.require_clear()
         registry = self.checked(payload['expected_revision'])
         host_id = payload.get('id') or uuid.uuid4().hex
         previous = next((item for item in registry['hosts'] if item['id'] == host_id), {})
@@ -149,10 +155,14 @@ class RelayManager:
             if route['host_id'] != host_id:
                 continue
             found = next((item for item in remote['items'] if item['id'] == route['id']), None)
+            if intent and intent.get('action') == 'delete' and intent['route']['id'] == route['id'] and found is None:
+                continue  # A lost delete acknowledgement may have closed this route.
             if not found or not same_route(found, route):
                 raise OperationConflict('Маршруты узла не совпадают с реестром PRO; параметры не заменены')
         registry['hosts'] = [item for item in registry['hosts'] if item['id'] != host_id] + [host]
         self.write(registry)
+        if intent:
+            self.reconcile()
 
     def delete_host(self, payload):
         self.require_clear()

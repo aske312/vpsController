@@ -67,6 +67,8 @@ def apply_relay_request(api, name, path, digest, identity):
     control = api.relay_control()
     if name == 'relay-host-save':
         control.save_host(api.RelayHostSettings.model_validate(payload).model_dump())
+    elif name == 'relay-reconnect':
+        control.save_host(api.RelayHostSettings.model_validate(payload).model_dump(), reconnect=True)
     elif name == 'relay-host-delete':
         control.delete_host(payload)
     elif name == 'relay-route-create':

@@ -73,11 +73,11 @@ export function NetworkRelays({ request, admit, operation, onOperation, busy, on
   }
 
   async function saveHost() {
-    if (locked || !status || status.pending) return;
+    if (locked || !status || status.pending && !edit) return;
     try {
       const params = relayConnection(connection);
       setConnection("");
-      await submit("/network/relays", { method: "PUT", body: JSON.stringify({ ...params, name: name.trim(), id: edit?.id || null, expected_revision: status.revision }) });
+      await submit(status.pending ? "/network/relays/reconnect" : "/network/relays", { method: "PUT", body: JSON.stringify({ ...params, name: name.trim(), id: edit?.id || null, expected_revision: status.revision }) });
       setName(""); setEdit(null);
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Некорректные параметры подключения"); }
   }
@@ -100,10 +100,10 @@ export function NetworkRelays({ request, admit, operation, onOperation, busy, on
     <div className="relayGrid">
       <form className="networkPanel relayForm" onSubmit={event => { event.preventDefault(); void saveHost(); }}>
         <h3>{edit ? `Обновить подключение: ${edit.name}` : "Добавить Relay Agent"}</h3>
-        <label>Название<input required maxLength={64} value={name} onChange={event => setName(event.target.value)} disabled={locked || status?.pending} /></label>
-        <label>JSON подключения<input type="password" autoComplete="new-password" spellCheck={false} required value={connection} onChange={event => setConnection(event.target.value)} disabled={locked || status?.pending} placeholder="Параметры из раздела Agent на узле" /></label>
+        <label>Название<input required maxLength={64} value={name} onChange={event => setName(event.target.value)} disabled={locked || status?.pending && !edit} /></label>
+        <label>JSON подключения<input type="password" autoComplete="new-password" spellCheck={false} required value={connection} onChange={event => setConnection(event.target.value)} disabled={locked || status?.pending && !edit} placeholder="Параметры из раздела Agent на узле" /></label>
         <small>Содержит адрес, токен и отпечаток сертификата. Новый отпечаток применяется только после явного сохранения и проверки узла.</small>
-        <div className="relayActions"><button type="submit" disabled={locked || status?.pending || !name.trim() || !connection}>Проверить и сохранить</button><button type="button" disabled={sending} onClick={() => { setName(""); setConnection(""); setEdit(null); }}>Отменить</button></div>
+        <div className="relayActions"><button type="submit" disabled={locked || status?.pending && !edit || !name.trim() || !connection}>Проверить и сохранить</button><button type="button" disabled={sending} onClick={() => { setName(""); setConnection(""); setEdit(null); }}>Отменить</button></div>
       </form>
       <form className="networkPanel relayForm" onSubmit={event => {
         event.preventDefault(); if (locked || !status || status.pending || !host || host.agent_revision === undefined) return;
@@ -124,7 +124,7 @@ export function NetworkRelays({ request, admit, operation, onOperation, busy, on
       <p className="relayFingerprint">SHA-256 {item.certificate_sha256}</p>
       {item.error && <p role="status">{item.error}</p>}
       {item.foreign_routes > 0 && <p>Маршрутов вне управления этого PRO: {item.foreign_routes}. Они сохраняются.</p>}
-      <div className="relayActions"><button disabled={locked || status.pending} onClick={() => { setEdit(item); setName(item.name); setConnection(""); }}>Обновить параметры подключения</button><button disabled={locked || status.pending || item.routes.length > 0} onClick={() => setConfirmation({ host: item })}>Удалить узел из PRO</button></div>
+      <div className="relayActions"><button disabled={locked} onClick={() => { setEdit(item); setName(item.name); setConnection(""); }}>Обновить параметры подключения</button><button disabled={locked || status.pending || item.routes.length > 0} onClick={() => setConfirmation({ host: item })}>Удалить узел из PRO</button></div>
       <div className="relayRoutes">{item.routes.map(route => <div className="relayRoute" key={route.id}>
         <div><strong>{route.transport.toUpperCase()} · {new URL(item.agent_url).hostname}:{route.listen_port}</strong><p>→ {route.target_ip}:{route.target_port}</p><code>{route.id}</code></div>
         <div><strong>{failed ? "UNKNOWN" : route.state.toUpperCase()}</strong><p>Полный протокол: {failed ? "UNKNOWN" : route.check?.state.toUpperCase() || "UNCHECKED"}</p>{route.check && <small>{route.check.consumer_id} · проверка с сервера, не из клиентской сети</small>}<p><small>Сессии: {failed ? "—" : route.sessions ?? "—"} · Передано: {failed ? "—" : route.sent_bytes ?? "—"} / {failed ? "—" : route.received_bytes ?? "—"} байт</small></p></div>
