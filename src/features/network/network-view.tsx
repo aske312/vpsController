@@ -29,6 +29,8 @@ import { NetworkEch } from "./network-ech";
 import { NetworkEndpoints } from "./network-endpoints";
 import { NetworkRelayDialogs, NetworkRelayNotice, NetworkRelayRows, relayMatches, useNetworkRelays } from "./network-relays";
 import { dnsComponents } from "./system-dns-control";
+import { NetworkServerAddressRows, useNetworkAddresses } from "./network-addresses";
+import { addressMatches } from "./server-address-state";
 
 export type NetworkListState = { query: string; expanded: string[] };
 
@@ -72,7 +74,9 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
   const [requestBusy, setBusy] = useState(false);
   const [confirmRecovery, setConfirmRecovery] = useState(false);
   const [pending, setPending] = useState<{ id?: string; kind: "dns" | "endpoints" | "delete"; draft?: DnsSettings | NetworkEndpointSettings } | null>(null);
-  const busy = requestBusy || Boolean(pending) || systemActionNeedsPolling(operation);
+  const operationBusy = requestBusy || Boolean(pending) || systemActionNeedsPolling(operation);
+  const addresses = useNetworkAddresses({ request, busy: operationBusy, refreshKey });
+  const busy = operationBusy || Boolean(addresses.pending);
   const [section, setSection] = useState<Section>("diagnostics");
   const [loadFailed, setLoadFailed] = useState(false);
   const [relayDirty, setRelayDirty] = useState(false);
@@ -364,6 +368,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
             <div hidden={section !== "diagnostics"}>
               <DiagnosticsV2
                 relay={relay}
+                addresses={addresses}
                 listState={listState}
                 onListStateChange={onListStateChange}
                 status={status}
@@ -373,7 +378,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
                 busy={busy}
                 readFailed={loadFailed}
                 onRemoveRoute={removeEndpoint}
-                onRefresh={() => { void load(); void relay.load(); }}
+                onRefresh={() => { void load(); void relay.load(); void addresses.load(); }}
                 setEndpointDraft={setEndpointDraft}
                 saveEndpoints={saveEndpoints}
               />
@@ -587,6 +592,7 @@ function NetworkCapabilityCard({ check }: { check: NetworkCapabilityCheck }) {
 }
 function DiagnosticsV2({
   relay,
+  addresses,
   listState,
   onListStateChange,
   status,
@@ -601,6 +607,7 @@ function DiagnosticsV2({
   onRefresh,
 }: {
   relay: ReturnType<typeof useNetworkRelays>;
+  addresses: ReturnType<typeof useNetworkAddresses>;
   listState: NetworkListState;
   onListStateChange: (state: NetworkListState) => void;
   status: NetworkStatus;
@@ -618,27 +625,9 @@ function DiagnosticsV2({
   const setQuery = (query: string) => onListStateChange({ ...listState, query });
   const [deletion, setDeletion] = useState<{ domain: string; remove: () => void } | null>(null);
   const expandedDomains = new Set(listState.expanded);
-  const publicIpv4 =
-    status.server.public_ipv4 ||
-    (!status.server.public_ip.includes(":") ? status.server.public_ip : "");
-  const publicIpv6 =
-    status.server.public_ipv6 ||
-    (status.server.public_ip.includes(":") ? status.server.public_ip : "");
-  const serverRoutes: NetworkStatus["domains"] = [publicIpv4, publicIpv6]
-    .filter(
-      (value, index, values) =>
-        Boolean(value) && values.indexOf(value) === index,
-    )
-    .map((value) => ({
-      value,
-      role: "SERVER",
-      source: "VPS",
-      resolved: [value],
-      matches_origin: true,
-      route: "direct",
-      ip_info: status.server.ip_info?.filter((item) => item.address === value),
-    }));
-  const domains = [...serverRoutes, ...status.domains].filter((item) =>
+  const publicIpv4 = addresses.status?.items.find(row => row.family === "ipv4" && row.role === "primary")?.address || status.server.public_ipv4 || (!status.server.public_ip.includes(":") ? status.server.public_ip : "");
+  const publicIpv6 = addresses.status?.items.find(row => row.family === "ipv6" && row.role === "primary")?.address || status.server.public_ipv6 || "";
+  const domains = status.domains.filter((item) =>
     `${item.value} ${item.role} ${item.resolved.join(" ")}`
       .toLowerCase()
       .includes(query.trim().toLowerCase()),
@@ -751,6 +740,10 @@ function DiagnosticsV2({
               </tr>
             </thead>
             <tbody>
+              <NetworkServerAddressRows control={addresses} query={query} expanded={listState.expanded} onToggle={toggleDomain} renderIdentity={address => {
+                const ipInfo = status.server.ip_info?.filter(item => item.address === address);
+                return ipInfo?.length ? <NetworkIdentityDetails domain={{ value: address, role: "SERVER", source: "VPS", resolved: [address], matches_origin: true, route: "direct", ip_info: ipInfo }} /> : null;
+              }} />
               <NetworkRelayRows relay={relay} query={query} expanded={listState.expanded} onToggle={toggleDomain} />
               {domains.map((domain) => {
                 const rowKey = `${domain.role}-${domain.value}`;
@@ -887,7 +880,7 @@ function DiagnosticsV2({
             </tbody>
           </table>
         </div>
-        {!domains.length && !relay.status?.hosts.some(host => relayMatches(host, query)) && (
+        {addresses.status && !addresses.failed && !addresses.reading && !domains.length && !addresses.status.items.some(row => addressMatches(row, query)) && !relay.status?.hosts.some(host => relayMatches(host, query)) && (
           <p className="networkEmpty">
             {query ? "Совпадений нет." : "Маршруты ещё не настроены."}
           </p>

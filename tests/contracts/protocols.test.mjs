@@ -98,7 +98,8 @@ test("WG and AWG modules install and uninstall independently", async () => {
   assert.match(api, /protocol-install/);
   assert.match(api, /AWG_CLIENT_PORT = int\(os\.getenv\("AWG_CLIENT_PORT", "53020"\)\)/);
   assert.match(api, /client_listen_port = AWG_CLIENT_PORT if payload\.protocol == "awg" else None/);
-  assert.match(api, /endpoint_host = PUBLIC_IP_ENDPOINT or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_ENDPOINT/);
+  // Address selection and preservation of saved WG/AWG endpoints are exercised
+  // through client creation in test_server_addresses.py.
   assert.match(manager, /prepare_package_manager\(\)/);
   assert.match(manager, /\n  prepare_package_manager\r?\n/);
   assert.match(manager, /dpkg --audit/);

@@ -46,6 +46,7 @@ import application_recovery
 import operation_policy
 import network_routes
 import network_probe
+import server_addresses
 import relay_manager
 import relay_client_creation
 import yaml
@@ -79,6 +80,7 @@ from schemas import (
     DnsCheckRequest,
     NetworkEndpointSettings,
     NetworkEndpointCheck,
+    ServerAddressRoleSettings,
     ClientConnectionSettings,
     ClientCreate,
     ProtocolSettingsUpdate,
@@ -2528,6 +2530,36 @@ def get_network(_: None = Depends(require_token)) -> dict:
     return network_status()
 
 
+@app.get('/api/network/addresses')
+def get_server_addresses(_: None = Depends(require_token), change_id: str | None = None) -> dict:
+    try:
+        return server_addresses.inventory(DATA_DIR, (PUBLIC_IPV4, PUBLIC_IPV6, PUBLIC_IP), change_id=change_id)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=503, detail='Не удалось прочитать сохранённые назначения IP сервера') from None
+
+
+@app.put('/api/network/addresses', dependencies=[Depends(require_short_mutation)])
+def set_server_address_role(payload: ServerAddressRoleSettings, _: None = Depends(require_token)) -> dict:
+    try:
+        return server_addresses.configure(DATA_DIR, payload.address, payload.role, payload.expected_revision, payload.operation_id, (PUBLIC_IPV4, PUBLIC_IPV6, PUBLIC_IP))
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except OSError:
+        raise HTTPException(status_code=503, detail='Не удалось сохранить назначение IP; обновите таблицу для проверки результата') from None
+
+
+def new_client_endpoint(fallback: str) -> str:
+    try:
+        if not fallback and not any(role == 'primary' for role in server_addresses.policy(DATA_DIR)['roles'].values()):
+            return ''
+        address = server_addresses.primary_for_new_config(DATA_DIR, fallback or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return f'[{address}]' if ':' in address and not address.startswith('[') else address
+
+
 @app.get("/api/network/routes", dependencies=[Depends(require_token)])
 def network_route_registry() -> dict:
     registry = read_route_registry()
@@ -2578,6 +2610,7 @@ def relay_control():
 
 def relay_origin_hosts():
     hosts = [value for value in (PUBLIC_IPV4, PUBLIC_DOMAIN, PUBLIC_ENDPOINT) if value]
+    hosts.extend(row['address'] for row in server_addresses.inventory(DATA_DIR, (PUBLIC_IPV4, PUBLIC_IPV6, PUBLIC_IP))['items'])
     # A CDN client file names the gateway virtual host, not the origin IP.
     # Retain that TLS/HTTP identity while changing only the relay socket address.
     hosts.extend(route['domain'] for route in cdn_security.read_routes()
@@ -5615,6 +5648,7 @@ def certificate_server_name(path: Path) -> str:
 
 @port_allocation.release_on_error(lambda payload, client_id, safe_name: f"panel:ss:{client_id}")
 def create_shadowsocks_client(payload: ClientCreate, client_id: str, safe_name: str) -> dict:
+    origin_endpoint = new_client_endpoint(PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
     if run("systemctl", "show", "vps-control-shadowsocks.target", "--property=LoadState", "--value") != "loaded":
         raise HTTPException(status_code=409, detail="shadowsocks protocol is not installed")
     used_ports = {int(item["port"]) for item in read_clients() if item.get("protocol") == "shadowsocks" and item.get("port")}
@@ -5654,7 +5688,7 @@ def create_shadowsocks_client(payload: ClientCreate, client_id: str, safe_name: 
         config_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail="Unable to start Shadowsocks client service")
     userinfo = base64.urlsafe_b64encode(f"{method}:{password}".encode()).decode().rstrip("=")
-    endpoint, channel_mode = channel_mode_endpoint("shadowsocks", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode)
+    endpoint, channel_mode = channel_mode_endpoint("shadowsocks", origin_endpoint, payload.settings.channel_mode)
     client_config = f"ss://{userinfo}@{endpoint}:{port}#{urllib.parse.quote(payload.name)}"
     items = read_clients()
     items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "channel_mode": channel_mode, "route_endpoint": endpoint, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
@@ -5670,6 +5704,8 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
 
 
 def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict:
+    selected_origin = new_client_endpoint("")
+    origin_endpoint = selected_origin or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT
     client_id = client_identity or secrets.token_hex(8)
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.name).strip(".-") or "client"
     if payload.protocol == "ikev2":
@@ -5691,7 +5727,7 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
                 temporary_users.replace(IKEV2_USERS); temporary_config.replace(IKEV2_USERS_CONFIG); replaced = True
                 reload_ikev2()
                 settings = json.loads(IKEV2_SETTINGS.read_text(encoding="utf-8"))
-                endpoint = str(settings.get("endpoint") or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
+                endpoint = str(selected_origin or settings.get("endpoint") or PUBLIC_DOMAIN_ENDPOINT or origin_endpoint)
                 endpoint, channel_mode = channel_mode_endpoint("ikev2", endpoint, payload.settings.channel_mode)
                 ca = (IKEV2_SWANCTL_DIR / "x509ca" / "caCert.pem").read_text(encoding="utf-8")
                 client_config = "\n".join([
@@ -5732,7 +5768,7 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
                 certificate = (OPENVPN_PKI / "issued" / f"{client_id}.crt").read_text(encoding="utf-8")
                 private_key = (OPENVPN_PKI / "private" / f"{client_id}.key").read_text(encoding="utf-8")
                 tls_crypt = (OPENVPN_DIR / "tls-crypt.key").read_text(encoding="utf-8")
-                endpoint, channel_mode = channel_mode_endpoint("openvpn", PUBLIC_DOMAIN_ENDPOINT or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode)
+                endpoint, channel_mode = channel_mode_endpoint("openvpn", selected_origin or PUBLIC_DOMAIN_ENDPOINT or origin_endpoint, payload.settings.channel_mode)
                 port = int(settings.get("port", 1194))
                 transport = payload.settings.vpn_transport
                 client_config = "\n".join([
@@ -5772,7 +5808,7 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
                 temporary.replace(HYSTERIA2_USERS)
                 port = int(settings.get("port", 8443))
                 domain = str(settings.get("domain", "")).strip()
-                endpoint, channel_mode = channel_mode_endpoint("hysteria2", domain or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode)
+                endpoint, channel_mode = channel_mode_endpoint("hysteria2", selected_origin or domain or origin_endpoint, payload.settings.channel_mode)
                 tls_mode = payload.settings.tls_mode
                 fingerprint = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", str(HYSTERIA2_DIR / "server.crt")).partition("=")[2].strip()
                 obfs_lines = (["obfs:", "  type: salamander", "  salamander:", f"    password: {json.dumps(payload.settings.obfs_password)}"] if payload.settings.obfs_enabled else [])
@@ -5812,7 +5848,7 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
                 temporary.replace(TUIC_CONFIG)
                 run("systemctl", "restart", "vps-control-tuic.service", timeout=20, check=True)
                 settings = json.loads(TUIC_SETTINGS.read_text(encoding="utf-8"))
-                endpoint, channel_mode = channel_mode_endpoint("tuic", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode)
+                endpoint, channel_mode = channel_mode_endpoint("tuic", origin_endpoint, payload.settings.channel_mode)
                 certificate = (TUIC_DIR / "server.crt").read_text(encoding="utf-8")
                 client = {
                     "log": {"level": "warn"},
@@ -5840,7 +5876,7 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
                 result = subprocess.run(["/usr/local/lib/vps-control-trojan/sing-box", "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
                 if result.returncode: raise RuntimeError(result.stderr.strip())
                 temporary.replace(TROJAN_CONFIG); run("systemctl", "restart", "vps-control-trojan.service", timeout=20, check=True)
-                settings=json.loads(TROJAN_SETTINGS.read_text()); endpoint, channel_mode=channel_mode_endpoint("trojan", PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT, payload.settings.channel_mode); certificate=(TROJAN_DIR/"server.crt").read_text()
+                settings=json.loads(TROJAN_SETTINGS.read_text()); endpoint, channel_mode=channel_mode_endpoint("trojan", origin_endpoint, payload.settings.channel_mode); certificate=(TROJAN_DIR/"server.crt").read_text()
                 client={"log":{"level":"warn"},"inbounds":[{"type":"mixed","tag":"mixed-in","listen":"127.0.0.1","listen_port":2080}],"outbounds":[{"type":"trojan","tag":"connection-out","server":endpoint,"server_port":int(settings.get("port",8445)),"password":password,"tls":{"enabled":True,"server_name":certificate_server_name(TROJAN_DIR / "server.crt"),"certificate":certificate}}],"route":{"final":"connection-out"}}
                 items=read_clients(); items.append({"id":client_id,"name":payload.name,"protocol":payload.protocol,"public_key":client_id,"port":int(settings.get("port",8445)),"channel_mode":channel_mode,"route_endpoint":endpoint,"settings":payload.settings.model_dump(exclude_none=True),"created_at":datetime.now(timezone.utc).isoformat()}); write_clients(items)
                 return {"id":client_id,"filename":f"{safe_name}.json","config":json.dumps(client,ensure_ascii=False,indent=2)}
@@ -5920,7 +5956,7 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
                     xmux_concurrency=payload.settings.xmux_concurrency,
                     sni=payload.settings.sni,
                 ))
-                direct_config = f"vless://{client_uuid}@{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{port}?{direct_query}#{urllib.parse.quote(payload.name + ' Direct')}"
+                direct_config = f"vless://{client_uuid}@{origin_endpoint}:{port}?{direct_query}#{urllib.parse.quote(payload.name + ' Direct')}"
                 direct_transport = vless_stream_profile(vless_reality_inbound(config_data))["transport"].upper()
                 profiles = []
                 if "direct" in requested_routes:
@@ -6006,7 +6042,7 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
     mtu = payload.settings.mtu or configured_int(server_settings, "MTU", default_mtu)
     client_listen_port = AWG_CLIENT_PORT if payload.protocol == "awg" else None
     client_listen_line = f"ListenPort = {client_listen_port}\n" if client_listen_port is not None else ""
-    endpoint_host = PUBLIC_IP_ENDPOINT or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_ENDPOINT
+    endpoint_host = selected_origin or PUBLIC_IP_ENDPOINT or PUBLIC_DOMAIN_ENDPOINT or PUBLIC_ENDPOINT
     endpoint_host, channel_mode = channel_mode_endpoint(payload.protocol, endpoint_host, payload.settings.channel_mode)
     if payload.protocol == "awg":
         extra = "".join(

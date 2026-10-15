@@ -81,6 +81,7 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
     for index, connection in enumerate(connections, 1):
         previous_outbounds, previous_endpoints = len(outbounds), len(endpoints)
         module, credential = connection["component"], connection.get("credential", {})
+        server_address = credential.get("server_address") or endpoint
         base = connection_label(connection, index) if module != "transport-reality" else ""
         if module == "transport-reality":
             mode = str(connection.get("settings", {}).get("route_mode") or credential.get("route_mode") or "both")
@@ -88,11 +89,11 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
             if credential.get("cdn_enabled") and mode in {"cdn", "both"}:
                 variants = ["cdn"] if mode == "cdn" else ["direct", "cdn"]
             for variant in variants:
-                outbounds.append(_vless(connection_label(connection, index, variant, direct_settings), credential, (endpoint, direct_settings), variant, routing, fragment, capabilities))
+                outbounds.append(_vless(connection_label(connection, index, variant, direct_settings), credential, (server_address, direct_settings), variant, routing, fragment, capabilities))
         elif module in {"transport-wg", "transport-awg"}:
             if module == "transport-awg" and not (capabilities and module in capabilities["components"]):
                 raise UnsupportedClientConfig("AmneziaWG требует клиент с ядром sing-box-lx")
-            peer = {"address": endpoint, "port": int(credential["port"]), "public_key": credential["server_public_key"],
+            peer = {"address": server_address, "port": int(credential["port"]), "public_key": credential["server_public_key"],
                     "allowed_ips": ["0.0.0.0/0", "::/0"], "persistent_keepalive_interval": int(credential.get("keepalive", 25))}
             if credential.get("preshared_key"):
                 peer["pre_shared_key"] = credential["preshared_key"]
@@ -102,18 +103,18 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
                 value.update(credential.get("amnezia", {}))
             endpoints.append(value)
         elif module == "transport-shadowsocks":
-            outbounds.append({"type": "shadowsocks", "tag": base, "server": endpoint,
+            outbounds.append({"type": "shadowsocks", "tag": base, "server": server_address,
                               "server_port": int(credential["port"]), "method": credential["method"],
                               "password": credential["password"]})
         elif module == "transport-hysteria2":
-            outbounds.append({"type": "hysteria2", "tag": base, "server": endpoint,
+            outbounds.append({"type": "hysteria2", "tag": base, "server": server_address,
                               "server_port": int(credential["port"]), "password": credential["password"],
                               "up_mbps": int(credential["up_mbps"]), "down_mbps": int(credential["down_mbps"]),
                               "tls": {"enabled": True, "server_name": credential.get("sni", "gate.312"), "insecure": bool(credential.get("skip_cert_verify", True)), "alpn": ["h3"]}})
             if credential.get("obfs"):
                 outbounds[-1]["obfs"] = {"type": "salamander", "password": credential["obfs_password"]}
         elif module == "transport-tuic":
-            outbounds.append({"type": "tuic", "tag": base, "server": endpoint,
+            outbounds.append({"type": "tuic", "tag": base, "server": server_address,
                               "server_port": int(credential["port"]), "uuid": credential["uuid"],
                               "password": credential["password"], "congestion_control": credential.get("congestion_control", "bbr"),
                               "heartbeat": credential.get("heartbeat", "10s"),

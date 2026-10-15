@@ -99,7 +99,7 @@ def direct_groups(protocol, settings, result):
     groups = []
     for text in texts:
         if protocol in ('wg', 'awg'):
-            match = re.search(r'(?m)^Endpoint\s*=\s*[^\s:]+:(\d+)', text)
+            match = re.search(r'(?m)^Endpoint\s*=\s*(?:\[[^\]]+\]|[^\s:]+):(\d+)', text)
             if not match:
                 raise ValueError('Не найден endpoint WG/AWG')
             groups.append([('udp', int(match[1]))])

@@ -47,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
 import application_operation
 import network_routes
+import server_addresses
 import network_probe
 import relay_connections
 from relay_manager import RelayManager
@@ -3680,14 +3681,18 @@ def profile_stats(profile_id: str) -> dict[str, Any]:
 
 
 def provision(profile_id: str, module_id: str, connection_id: str = "default", settings: dict[str, Any] | None = None, defer_reality_restart: bool = False, privacy_enabled: bool = False) -> dict[str, Any]:
+    try:
+        address = server_addresses.primary_for_new_config(DATA_ROOT.parent, public_endpoint())
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     if module_id in ("transport-wg", "transport-awg"):
-        return add_wg_credential(profile_id, module_id, connection_id)
+        return {**add_wg_credential(profile_id, module_id, connection_id), "server_address": address}
     if module_id == "transport-shadowsocks":
-        return add_ss_credential(profile_id, connection_id, settings)
+        return {**add_ss_credential(profile_id, connection_id, settings), "server_address": address}
     if module_id == "transport-reality":
-        return add_reality_credential(profile_id, connection_id, settings or {}, restart_service=not defer_reality_restart, reload_caddy=not defer_reality_restart, privacy_enabled=privacy_enabled)
+        return {**add_reality_credential(profile_id, connection_id, settings or {}, restart_service=not defer_reality_restart, reload_caddy=not defer_reality_restart, privacy_enabled=privacy_enabled), "server_address": address}
     if module_id in {"transport-hysteria2", "transport-tuic"}:
-        return add_quic_credential(profile_id, module_id, connection_id)
+        return {**add_quic_credential(profile_id, module_id, connection_id), "server_address": address}
     raise RuntimeError(f"{module_id} is not a transport")
 
 
@@ -4592,7 +4597,7 @@ def relay_client_lines(connection, lines):
 
 
 def _render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) -> list[str]:
-    server = public_endpoint()
+    server = str(credential.get("server_address") or public_endpoint())
     if module_id in ("transport-wg", "transport-awg"):
         name = "AWG" if module_id == "transport-awg" else "WG"
         lines = [

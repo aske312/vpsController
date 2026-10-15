@@ -461,7 +461,7 @@
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: var(--panel);
+  background: var(--bg);
   box-shadow: none;
 }
 
@@ -1876,3 +1876,15 @@
   [data-network-page] .networkStateFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   [data-network-page] .networkStateFacts > div { min-height: 68px; }
 }
+[data-network-page] .networkAddressRole select {
+  width: 100%;
+  min-width: 140px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: inherit;
+  font: inherit;
+}
+[data-network-page] .networkAddressNotice { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+[data-network-page] .networkAddressNotice button { flex: 0 0 auto; }

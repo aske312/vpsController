@@ -157,6 +157,13 @@ class NetworkEndpointSettings(BaseModel):
     udp_relay_domains: list[str] = Field(default_factory=list, max_length=32)
 
 
+class ServerAddressRoleSettings(BaseModel):
+    address: str = Field(min_length=2, max_length=45)
+    role: Literal['primary', 'reserve', 'additional']
+    expected_revision: str = Field(pattern=r'^[0-9a-f]{32}$')
+    operation_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+
+
 class NetworkEndpointCheck(BaseModel):
     kind: Literal["cdn", "tls_relay", "udp_relay"]
     domain: str = Field(min_length=1, max_length=253)

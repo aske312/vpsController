@@ -33,9 +33,10 @@ def build_xray_configs(connections, routing, dns, rules, endpoint, direct_settin
     names = []
     for index, connection in enumerate(connections, 1):
         credential = connection.get("credential", {})
+        server_address = credential.get("server_address") or endpoint
         if connection["component"] == "transport-shadowsocks":
             names.append(connection_label(connection, index))
-            nodes.append({"protocol": "shadowsocks", "settings": {"servers": [{"address": endpoint, "port": int(credential["port"]), "method": credential["method"], "password": credential["password"]}]}})
+            nodes.append({"protocol": "shadowsocks", "settings": {"servers": [{"address": server_address, "port": int(credential["port"]), "method": credential["method"], "password": credential["password"]}]}})
             if redirect:
                 redirect(connection, [nodes[-1]])
             continue
@@ -51,7 +52,7 @@ def build_xray_configs(connections, routing, dns, rules, endpoint, direct_settin
                 effective = dict(credential)
                 if not credential.get("direct_tag"):
                     effective.update(direct_settings())
-                address, port = endpoint, int(effective["port"])
+                address, port = server_address, int(effective["port"])
                 kind, path = effective.get("transport", "xhttp"), effective.get("path", "/")
                 transport_mode = effective.get("xhttp_mode", "auto")
                 stream = {"security": "reality", "realitySettings": {"serverName": effective["servername"], "fingerprint": credential.get("fingerprint", "chrome"), "publicKey": effective["public_key"], "shortId": effective["short_id"]}}

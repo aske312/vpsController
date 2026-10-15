@@ -54,7 +54,8 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(page, /networkStateStrip/);
   assert.match(page, /SERVER IPv4/);
   assert.match(page, /SERVER IPv6/);
-  assert.match(page, /serverRoutes/);
+  // Public address inventory, roles and search are covered behaviorally by
+  // server-addresses.test.mjs and test_server_addresses.py.
   assert.match(page, /NetworkCapabilityCard/);
   assert.match(page, /Обновить проверки/);
   assert.match(page, /Скопировать IPv6/);
