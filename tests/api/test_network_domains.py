@@ -16,6 +16,13 @@ class NetworkDomainsTests(unittest.TestCase):
             ComponentRegistry(Path(root)).write_receipt(image, "installed")
         self.enterContext(patch.object(api, "NETWORK_ENDPOINTS_FILE", Path(root) / "network-endpoints.json"))
 
+    def test_endpoint_check_publishes_domain_identity_for_page_and_shared_selectors(self):
+        with patch.object(api, 'network_domain_probe', return_value={'value': 'relay.example', 'resolved': [], 'matches_origin': False, 'route': 'unresolved'}):
+            result = api.network_endpoint_check('tls_relay', 'relay.example', include_saved=False)
+        self.assertEqual(result['domain'], 'relay.example')
+        self.assertFalse(result['ready'])
+        self.assertEqual(result['status'], 'unresolved')
+
     def test_ipv6_origin_is_ready_before_dns_record_is_added(self):
         def fake_run(*args, **kwargs):
             outputs = {

@@ -2333,7 +2333,7 @@ def network_endpoint_check(kind: str, domain: str, *, include_saved: bool = True
     else:
         status, ready = "unchecked", False
         message = "DNS и внешний адрес определены, но listener, forwarding, handshake и обмен данными не проверены"
-    result = {**probe, "kind": kind, "status": status, "ready": ready, "verification": "dns_only", "message": message}
+    result = {**probe, "domain": domain, "kind": kind, "status": status, "ready": ready, "verification": "dns_only", "message": message}
     # An explicit probe may have a stronger per-binding result than the
     # stateless DNS/origin observation (for example, the tenth failed check).
     try:
