@@ -52,7 +52,16 @@ export function directProtocolSnapshot(value: unknown, protocol: Protocol): Prot
     for (const key of ["live", "network"]) {
       const observation = diagnostics[key];
       if (observation === undefined) continue;
-      if (!record(observation) || Object.entries(observation).some(([field, item]) => item != null && (key === "network" && ["uplink", "gateway"].includes(field) ? typeof item !== "string" : !finite(item)))) return fail();
+      if (!record(observation) || Object.entries(observation).some(([field, item]) => {
+        if (item == null) return false;
+        if (key === "network" && ["uplink", "gateway"].includes(field)) return typeof item !== "string";
+        if (key === "live") {
+          if (["endpoint", "transport"].includes(field)) return typeof item !== "string";
+          if (field === "resolved") return !strings(item);
+          if (field === "ports") return !Array.isArray(item) || item.some(port => !Number.isInteger(port) || Number(port) < 1 || Number(port) > 65535);
+        }
+        return !finite(item);
+      })) return fail();
     }
     if ((diagnostics.checks !== undefined && !rows(diagnostics.checks, (row) => fields(row, ["id", "name", "value"], "string") && fields(row, ["ok"], "boolean")
       && (row.severity === undefined || ["critical", "warning"].includes(String(row.severity)))))

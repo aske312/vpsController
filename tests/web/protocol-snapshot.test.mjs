@@ -16,6 +16,16 @@ test("valid stream observations keep routes and existing defaults for optional m
   assert.equal(result.diagnostics.status, "pending");
 });
 
+test("Direct diagnostic endpoint metadata coexists with numeric tunnel observations", () => {
+  const live = { endpoint: "203.0.113.10", resolved: ["203.0.113.10"], ports: [8443], transport: "HYSTERIA2" };
+  const source = { ...value, diagnostics: { status: "healthy", live, checks: [], findings: [] } };
+  assert.deepEqual(directProtocolSnapshot(source, value.protocol).diagnostics.live, live);
+  assert.deepEqual(directProtocolSnapshot({ ...source, diagnostics: { ...source.diagnostics, live: { ...live, ports: [] } } }, value.protocol).diagnostics.live.ports, []);
+  for (const malformed of [{ endpoint: {} }, { transport: [] }, { resolved: [null] }, { resolved: {} }, { ports: ["443"] }, { ports: [0] }, { ports: [65536] }, { ports: [1.5] }, { ports: null, latency_ms: "0" }]) {
+    assert.throws(() => directProtocolSnapshot({ ...source, diagnostics: { ...source.diagnostics, live: { ...live, ...malformed } } }, value.protocol));
+  }
+});
+
 test("malformed or foreign protocol observations cannot publish activity, routes or monitoring rows", () => {
   for (const change of [
     (row) => { row.protocol = "wg"; }, (row) => { row.active = "true"; }, (row) => { row.listen_port = 65536; },
