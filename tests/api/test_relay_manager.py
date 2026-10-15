@@ -226,6 +226,31 @@ class RelayAPITests(unittest.TestCase):
                 response = self.client.request(method, '/api'+path)
                 self.assertEqual(response.status_code, 401)
 
+    def test_public_proof_uses_private_identity_without_returning_credentials(self):
+        agent = FakeAgent()
+        control = RelayManager(self.root, ORIGIN, lambda *_: agent)
+        control.save_host({'name': 'Relay', 'agent_url': f'https://{AGENT}:9443', 'token': TOKEN, 'certificate_sha256': PIN, 'expected_revision': '0'*32})
+        host = control.read()['hosts'][0]
+        control.mutate_route({'host_id': host['id'], 'transport': 'tcp', 'target_port': 443, 'listen_port': 20001,
+                              'agent_revision': agent.revision, 'expected_revision': control.read()['revision']}, 'f'*32)
+        registry = control.read()
+        registry['routes'][0]['check'] = {'state': 'ready', 'consumer_id': 'direct:client', 'checked_at': '2026-10-15T00:00:00Z', 'vantage_point': 'server', 'plan_seal': 'sealed'}
+        control.write(registry)
+        api.app.dependency_overrides[api.require_token] = lambda: None
+        def prepare(route, private_host, consumer):
+            self.assertEqual(private_host['token'], TOKEN)
+            return object()
+        with patch.object(api, 'relay_control', return_value=control), patch.object(api, 'relay_targets', return_value=[]), patch.object(api, 'network_consumers', return_value=[]), patch.object(api, 'read_clients', return_value=[]), patch.object(api, 'prepare_relay_probe', side_effect=prepare), patch.object(api.network_probe, 'evidence_key', return_value=b'x'*32), patch.object(api.network_probe, 'plan_seal', return_value='sealed') as seal:
+            response = self.client.get('/api/network/relays')
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()['hosts'][0]['routes'][0]['check']['state'], 'ready')
+            self.assertNotIn(TOKEN, response.text)
+            self.assertNotIn('plan_seal', response.text)
+            seal.return_value = 'changed'
+            changed = self.client.get('/api/network/relays')
+            self.assertEqual(changed.json()['hosts'][0]['routes'][0]['check']['state'], 'unknown')
+        self.assertEqual(control.read()['routes'][0]['check']['state'], 'ready')
+
     def test_host_save_is_durable_and_does_not_put_token_in_command_or_history(self):
         api.app.dependency_overrides[api.require_token] = lambda: None
         with patch.object(api.subprocess, 'run', return_value=Mock(returncode=0)), patch.object(api, 'observe_service', return_value={}):

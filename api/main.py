@@ -2618,7 +2618,9 @@ def relay_targets():
 @app.get('/api/network/relays')
 def get_relays(_: None = Depends(require_token)):
     try:
-        result = relay_control().public()
+        control = relay_control()
+        result = control.public()
+        private_hosts = {host['id']: host for host in control.read()['hosts']}
         result['targets'] = relay_targets()
         result['origin_hosts'] = list(dict.fromkeys(value for value in (PUBLIC_IPV4, PUBLIC_DOMAIN, PUBLIC_ENDPOINT) if value))
         candidates = [{'id': item['id'], 'label': item['label']} for item in network_consumers()]
@@ -2630,7 +2632,7 @@ def get_relays(_: None = Depends(require_token)):
                 if not isinstance(check, dict):
                     continue
                 try:
-                    plan = prepare_relay_probe(route, host, check['consumer_id'])
+                    plan = prepare_relay_probe(route, private_hosts[host['id']], check['consumer_id'])
                     current = network_probe.plan_seal(plan, network_probe.evidence_key(DATA_DIR))
                     valid = host['state'] == 'connected' and route['state'] == 'listening' and current == check.get('plan_seal')
                 except (OSError, ValueError, KeyError, TypeError, HTTPException):
