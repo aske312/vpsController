@@ -70,6 +70,7 @@ function policySaveLabel(save: PolicySave) {
 }
 
 export function MihomoPage({
+  refreshKey = 0,
   token,
   confirmAction,
   coreBusy,
@@ -82,6 +83,7 @@ export function MihomoPage({
   onSystemOperation,
   systemOperation,
 }: {
+  refreshKey?: number;
   token: string;
   onSystemOperation: (action: SystemAction) => void;
   systemOperation?: SystemAction;
@@ -493,7 +495,7 @@ export function MihomoPage({
     const initial = window.setTimeout(() => void refresh(false), 0);
     const timer = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(false); }, 15000);
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
-  }, [refresh]);
+  }, [refresh, refreshKey]);
 
   useEffect(() => {
     if (!createdProfile) return;

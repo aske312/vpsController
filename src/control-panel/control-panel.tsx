@@ -148,6 +148,7 @@ export function ControlPanel() {
   const [sectionDirty, setSectionDirty] = useState(false);
   const [networkListState, setNetworkListState] = useState<NetworkListState>({ query: "", expanded: [] });
   const [networkRefreshKey, setNetworkRefreshKey] = useState(0);
+  const [mihomoRefreshKey, setMihomoRefreshKey] = useState(0);
   const [selectedChannel, setSelectedChannel] = useState<Protocol>("awg");
   const [token, setToken] = useState("");
   const [loginUser, setLoginUser] = useState("admin");
@@ -633,7 +634,10 @@ export function ControlPanel() {
       else if (tab === "services") await loadServices(showBusy);
       else if (tab === "dns") { setTab("network"); setNetworkRefreshKey((value) => value + 1); }
       else if (tab === "network") setNetworkRefreshKey((value) => value + 1);
-      else if (tab === "mihomo") await loadOverview();
+      else if (tab === "mihomo") {
+        if (showBusy) setMihomoRefreshKey((value) => value + 1);
+        await loadOverview(showBusy);
+      }
       else if (tab === "channels") await Promise.all([loadClients(), loadProtocolStatus(selectedChannel)]);
       else if (directProtocolOrder.includes(tab as Protocol)) await Promise.all([loadClients(), loadProtocolStatus(tab as Protocol)]);
       else {
@@ -1880,6 +1884,7 @@ export function ControlPanel() {
 
       {tab === "mihomo" && (
         <MihomoPage
+          refreshKey={mihomoRefreshKey}
           onSystemOperation={acceptSystemOperation}
           systemOperation={application?.action}
           onDirtyChange={setSectionDirty}
