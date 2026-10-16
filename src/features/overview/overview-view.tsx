@@ -495,13 +495,9 @@ export function OverviewDashboard({
 
               return (
                 <div className="overviewComponentRow" key={image.id}>
+                  <span className={`overviewComponentLogo overviewProtocolMark protocol-${image.id}`} title={protocolMark(image.id)}><ProtocolIcon protocol={image.id} /></span>
                   <div className="overviewComponentIdentity">
-                    <span className={`overviewProtocolMark protocol-${image.id}`} title={protocolMark(image.id)}><ProtocolIcon protocol={image.id} /></span>
                     <p><b>{image.name}</b></p>
-                  </div>
-                  <div className="overviewComponentVersion">
-                    <b>{displayedVersion}</b>
-                    {(image.update_available || image.update_via_release) && <small title="Доступна новая версия">↑ {availableVersion}</small>}
                   </div>
                   <div className={`overviewComponentState ${state.summary.tone}`}>
                     <span title={`Установка: ${state.installation}`} aria-label={`Установка: ${state.installation}`}>{image.component_state?.installation.state === "installed" ? "УСТ" : image.component_state?.installation.state === "not_installed" ? "НЕТ" : image.component_state?.installation.state === "incomplete" ? "НЕПОЛН" : "УСТ ?"}</span>
@@ -510,6 +506,11 @@ export function OverviewDashboard({
                     {state.operation && <span>{state.operation}</span>}
                     {image.management?.retained && <span title="Настройки и подключения сохранены">ДАННЫЕ</span>}
                     {image.installed && state.readOnly && <span title={image.management?.reason}>READ ONLY</span>}
+                  </div>
+                  <div className="overviewComponentFooter">
+                  <div className="overviewComponentVersion" title={`Версия: ${displayedVersion}`}>
+                    <b>{displayedVersion}</b>
+                    {(image.update_available || image.update_via_release) && <small title="Доступна новая версия">↑ {availableVersion}</small>}
                   </div>
                   <div className="overviewComponentAction">
                     {image.management?.retained && <button type="button" title="Очистить сохранённые данные" disabled={busy || Boolean(installingProtocol) || Boolean(image.component_state?.operation)} onClick={() => onPurgeProtocol(image)}>Очистить</button>}
@@ -528,6 +529,7 @@ export function OverviewDashboard({
                     ) : (
                       image.id !== "mihomo" && ["warning", "error"].includes(state.summary.tone) && <button type="button" onClick={() => onOpenProtocol(image)}>Проверить</button>
                     )}
+                  </div>
                   </div>
                   {["warning", "error"].includes(state.summary.tone) && <small className="overviewComponentIssue">{state.summary.description}</small>}
                 </div>

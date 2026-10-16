@@ -244,11 +244,12 @@
 .overviewComponentCounters b { color:#d6e4ea; font-size:10px; }
 
 .overviewComponentRegistry { margin-top:12px; }
-.overviewComponentRegistry > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr)); gap:6px; }
-.overviewComponentRow { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) auto; align-content:start; align-items:center; gap:6px; padding:8px; border:1px solid rgba(105,135,160,.16); border-radius:7px; background:rgba(4,11,17,.34); }
+.overviewComponentRegistry > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr)); gap:6px; }
+.overviewComponentRow { min-width:0; display:grid; grid-template-columns:48px minmax(0,1fr); grid-template-areas:'logo name' 'logo tags' 'logo footer' 'issue issue'; align-content:start; align-items:center; gap:4px 8px; padding:6px; border:1px solid rgba(105,135,160,.16); border-radius:7px; background:rgba(4,11,17,.34); }
 
-.overviewComponentIdentity { min-width:0; display:grid; grid-template-columns:20px minmax(0,1fr); align-items:center; gap:5px; }
-.overviewComponentIdentity .overviewProtocolMark { width:20px; height:20px; border-radius:5px; }
+.overviewComponentLogo.overviewProtocolMark { grid-area:logo; align-self:stretch; width:auto; height:auto; min-height:68px; border-radius:5px; }
+.overviewComponentLogo .protocolIcon { width:34px; height:34px; }
+.overviewComponentIdentity { grid-area:name; min-width:0; }
 
 .overviewComponentIdentity p,
 .overviewComponentVersion { min-width:0; display:grid; gap:3px; margin:0; }
@@ -259,25 +260,17 @@
 .overviewComponentIdentity small,
 .overviewComponentVersion small,
 .overviewComponentAction small { overflow-wrap:anywhere; color:#839aa8; font:500 10px/1.4 var(--font-sans); }
-.overviewComponentVersion { max-width:120px; text-align:right; }
+.overviewComponentFooter { grid-area:footer; min-width:0; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px 8px; }
+.overviewComponentVersion { flex:1; font-variant-numeric:tabular-nums; }
+.overviewComponentVersion b { color:#91a8b6; font-size:10px; }
 
-.overviewComponentState { min-width:0; display:flex; flex-wrap:wrap; gap:3px; color:#8fa4b1; font:600 9px/1.3 var(--font-sans); }
-.overviewComponentState > span { padding:3px 4px; border:1px solid currentColor; border-radius:4px; }
-.overviewComponentIssue { grid-column:1/-1; color:var(--amber); font:500 10px/1.4 var(--font-sans); overflow-wrap:anywhere; }
+.overviewComponentState { grid-area:tags; min-width:0; display:flex; flex-wrap:wrap; gap:3px; color:#8fa4b1; font:600 9px/1.3 var(--font-sans); }
+.overviewComponentState > span { padding:2px 4px; border:1px solid currentColor; border-radius:4px; }
+.overviewComponentIssue { grid-area:issue; color:var(--amber); font:500 10px/1.4 var(--font-sans); overflow-wrap:anywhere; }
 .overviewComponentState.online { color:var(--green); }
 .overviewComponentState.running,.overviewComponentState.available { color:var(--cyan); }
 .overviewComponentState.warning,.overviewComponentState.progress { color:var(--amber); }
 .overviewComponentState.error { color:var(--red); }
-.overviewComponentSummary b { display:flex; align-items:center; gap:6px; font-weight:650; }
-.overviewComponentSummary i { flex:none; width:6px; height:6px; border-radius:50%; background:currentColor; }
-.overviewComponentSummary small { display:block; margin-top:3px; color:#8fa4b1; font-size:11px; line-height:1.4; overflow-wrap:anywhere; }
-.overviewComponentState dl { display:grid; gap:5px; margin:8px 0 0; padding-top:8px; border-top:1px solid rgba(106,137,160,.15); }
-.overviewComponentState dl > div { display:grid; grid-template-columns:64px minmax(0,1fr); gap:6px; }
-.overviewComponentState dt { color:#839aa8; font-size:10px; }
-.overviewComponentState dd { min-width:0; margin:0; color:#c4d5df; }
-.overviewComponentState dd b { font-size:11px; font-weight:550; }
-.overviewComponentState dd small { color:#839aa8; font-size:10px; line-height:1.4; overflow-wrap:anywhere; }
-.overviewComponentState dd small::before { content:' · '; }
 
 .overviewComponentAction { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:4px; }
 .overviewComponentAction > div { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; }
@@ -334,7 +327,7 @@
 .overviewComponents { padding:11px; }
 .overviewComponents > header { align-items:flex-start; }
 .overviewComponentCounters { display:none; }
-.overviewComponentRow { padding:8px; }
+.overviewComponentRow { padding:6px; }
 }
 
 @media (max-width:470px) {
