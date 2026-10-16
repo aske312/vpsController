@@ -1446,7 +1446,7 @@ export function ControlPanel() {
     if (opening) void checkProtocolResources(protocol);
   }
 
-  async function removeProtocol(image: ProtocolImage, alreadyConfirmed = false) {
+  async function removeProtocol(image: ProtocolImage, alreadyConfirmed = false, stayOnOverview = false) {
     if (!alreadyConfirmed && !await askConfirmation({
       title: image.id === "mihomo" ? `Удалить ${image.name}?` : "Удалить протокол?",
       message: image.id === "mihomo"
@@ -1472,8 +1472,10 @@ export function ControlPanel() {
         delete next[image.id as Protocol];
         return next;
       });
-      if (nextProtocol) {
-        setSelectedChannel(nextProtocol);
+      if (nextProtocol) setSelectedChannel(nextProtocol);
+      if (stayOnOverview) {
+        setTab("overview");
+      } else if (nextProtocol) {
         setTab("channels");
       } else {
         setTab("overview");
@@ -1901,6 +1903,7 @@ export function ControlPanel() {
           onOpenProtocol={(image) => { setSelectedChannel(image.id as Protocol); setTab("channels"); }}
           onAdoptProtocol={(image) => void adoptProtocol(image)}
           onPurgeProtocol={(image) => void purgeProtocol(image)}
+          onRemoveProtocol={(image) => void removeProtocol(image, false, true)}
         />
       )}
 

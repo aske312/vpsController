@@ -47,6 +47,7 @@ type Props = {
   onOpenProtocol: (image: ProtocolImage) => void;
   onAdoptProtocol: (image: ProtocolImage) => void;
   onPurgeProtocol: (image: ProtocolImage) => void;
+  onRemoveProtocol: (image: ProtocolImage) => void;
 };
 
 const directShort: Record<ProtocolId, string> = {
@@ -129,6 +130,7 @@ export function OverviewDashboard({
   onOpenProtocol,
   onAdoptProtocol,
   onPurgeProtocol,
+  onRemoveProtocol,
 }: Props) {
   const [metricsPeriod, setMetricsPeriod] = useState<MetricsPeriod>("live");
   const metricsHistory = useMetricsHistory(token, metricsPeriod);
@@ -406,20 +408,20 @@ export function OverviewDashboard({
         </div>
       </article>
 
-      <article className="overviewNodeWorkspace">
-      <section className="overviewTelemetry">
+      <article className="nodeOverviewWorkspace">
+      <section className="nodeLiveSystem">
         <header>
           <div><p className="eyebrow">LIVE SYSTEM</p><h2>Телеметрия VPS</h2></div>
           <label>Период <select value={metricsPeriod} onChange={(event) => setMetricsPeriod(event.target.value as MetricsPeriod)} aria-label="Период истории метрик">
             <option value="live">5 минут</option><option value="day">24 часа</option><option value="week">7 дней</option><option value="quarter">90 дней</option>
           </select></label>
         </header>
-        <p className="overviewTelemetryNote">{overview?.resources.stale || metricsHistory.stale ? "Данные временно не обновляются" : missingMetrics.length ? `Данные недоступны: ${missingMetrics.join(", ")}` : metricsHistory.pending ? "Загрузка серверной истории…" : "История хранится на VPS · пропуски показаны разрывами"}
+        <p className="nodeLiveSystemNote">{overview?.resources.stale || metricsHistory.stale ? "Данные временно не обновляются" : missingMetrics.length ? `Данные недоступны: ${missingMetrics.join(", ")}` : metricsHistory.pending ? "Загрузка серверной истории…" : "История хранится на VPS · пропуски показаны разрывами"}
           {metricsHistory.data?.settings.enabled === false && " · запись истории выключена в Службах"}
           {metricsHistory.data?.settings.trimmed_at && " · старые данные сокращены по лимиту места"}
         </p>
 
-        <div className="overviewTaskGraphs">
+        <div className="nodeLiveGraphs">
           <TaskGraph
             label="CPU"
             value={overview?.resources.cpu_percent == null ? "—" : `${overview.resources.cpu_percent.toFixed(0)}%`}
@@ -454,7 +456,7 @@ export function OverviewDashboard({
           />
         </div>
 
-        <div className="overviewSystemFacts">
+        <div className="nodeLiveFacts">
           <FactCard label="DISK USED" value={diskUsed == null ? "—" : `${diskUsed.toFixed(0)}%`} detail={`${bytes(diskUsedBytes)} / ${bytes(diskTotal)}  free ${bytes(diskFree)}`} />
           <FactCard label="UPTIME" value={uptime(overview?.server.uptime_s)} detail={`${overview?.server.city || "Город не определён"}  ${overview?.server.country || "—"}`} />
           <FactCard label="LOAD 1M" value={overview?.resources.load1?.toFixed(2) ?? "—"} detail={`${overview?.resources.cpu_count ?? "—"} CPU cores`} />
@@ -480,9 +482,10 @@ export function OverviewDashboard({
             return <NodeComponentCard key={image.id} image={image}
               healthReason={matchingHealth && !observation?.statusFailed ? observation?.status?.health?.reason : undefined}
               coreVersion={image.id === "mihomo" ? mihomoStatus?.core_version : undefined}
+              port={observation?.statusFailed ? undefined : observation?.status?.listen_port}
               busy={busy} installingProtocol={installingProtocol}
               onInstall={onInstallProtocol} onUpdate={onUpdateProtocol} onOpen={onOpenProtocol}
-              onAdopt={onAdoptProtocol} onPurge={onPurgeProtocol} />;
+              onAdopt={onAdoptProtocol} onPurge={onPurgeProtocol} onRemove={onRemoveProtocol} />;
           })}
           {!protocolImages.length && <p className="overviewEmpty">Каталог модулей временно недоступен.</p>}
         </div>
@@ -523,23 +526,23 @@ function TaskGraph({
   const top = Math.max(maxValue, 1);
 
   return (
-    <section className={`taskGraphCard ${wide ? "wide" : ""}`}>
+    <section className="nodeMetricCard" data-wide={wide}>
       <header>
         <div><span>{label}</span><strong>{value}</strong></div>
-        {legend && <div className="taskGraphLegend">{legend.map((item, index) => <span key={item} className={index ? "green" : "blue"}>{item}</span>)}</div>}
+        {legend && <div className="nodeMetricLegend">{legend.map((item, index) => <span key={item} data-tone={index ? "green" : "blue"}>{item}</span>)}</div>}
       </header>
-      <div className="taskGraphPlot">
+      <div className="nodeMetricPlot">
         <svg viewBox="0 0 100 50" preserveAspectRatio="none" aria-hidden="true">
-          <g className="taskGrid">
+          <g className="nodeMetricGrid">
             {[0, 12.5, 25, 37.5, 50].map((y) => <line key={`y-${y}`} x1="0" x2="100" y1={y} y2={y} />)}
             {[0, 20, 40, 60, 80, 100].map((x) => <line key={`x-${x}`} x1={x} x2={x} y1="0" y2="50" />)}
           </g>
-          {series.flatMap((item, index) => graphSegments(item.values, top).map((points, segment) => <polyline key={`${index}-${segment}`} className={`taskSeries ${item.tone}`} points={points} />))}
+          {series.flatMap((item, index) => graphSegments(item.values, top).map((points, segment) => <polyline key={`${index}-${segment}`} className="nodeMetricSeries" data-tone={item.tone} points={points} />))}
         </svg>
-        <div className="taskYAxis">
+        <div className="nodeMetricYAxis">
           {yTicks.map((ratio) => <span key={ratio}>{yFormatter(top * ratio)}</span>)}
         </div>
-        <div className="taskXAxis">
+        <div className="nodeMetricXAxis">
           {xTicks.map((ratio) => {
             const seconds = sampleWindow * ratio;
             const unit = seconds >= 86400 ? [86400, "д"] as const : seconds >= 3600 ? [3600, "ч"] as const : seconds >= 60 ? [60, "м"] as const : [1, "с"] as const;
@@ -554,7 +557,7 @@ function TaskGraph({
 
 function FactCard({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
-    <div className="overviewFactCard">
+    <div className="nodeLiveFact">
       <span>{label}</span><strong>{value}</strong><small>{detail}</small>
     </div>
   );

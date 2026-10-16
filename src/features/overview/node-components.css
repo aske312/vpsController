@@ -1,29 +1,37 @@
-/* NODE COMPONENTS owns its layout; shared theme sheets do not position cards. */
-.nodeComponents { min-width:0; min-height:0; display:flex; flex-direction:column; padding:10px; border:1px solid var(--line); border-radius:15px; background:var(--cc-surface,#07121b); }
-.nodeComponentsHeader { display:flex; align-items:center; justify-content:space-between; gap:8px; padding-bottom:8px; border-bottom:1px solid rgba(106,137,160,.12); }
-.nodeComponentsHeader h2 { margin:2px 0 0; color:#dfeaf0; font-size:14px; }
-.nodeComponentsCounters { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:3px 8px; color:#8098a8; font-size:9px; }
-.nodeComponentsCounters b { color:#d6e4ea; }
-.nodeComponentsList { min-width:0; display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr)); align-content:start; gap:6px; margin-top:8px; }
-.nodeComponentCard { min-width:0; display:grid; grid-template-columns:30% minmax(0,1fr); gap:8px; padding:6px; border:1px solid rgba(106,137,160,.16); border-radius:7px; background:rgba(4,11,17,.4); }
-.nodeComponentCardLogo { min-width:0; display:grid; place-items:center; align-self:stretch; min-height:76px; border-radius:4px; background:rgba(var(--protocol-rgb,100,184,255),.07); }
-.nodeComponentCardLogo .protocolIcon { width:56px; height:56px; max-width:85%; object-fit:contain; }
-.nodeComponentCardContent { min-width:0; display:grid; grid-template-rows:auto 1fr auto; gap:5px; }
-.nodeComponentCardContent h3 { min-width:0; margin:0; color:#dce9ef; font-size:12px; line-height:1.25; overflow-wrap:anywhere; }
-.nodeComponentCardStatus { min-width:0; align-self:start; color:#8fa4b1; }
+/* Adapted from test-light's protocolSummary/protocolModuleCard. */
+.nodeComponents { min-width:0; padding:12px; border:1px solid var(--cc-line); border-radius:15px; background:var(--cc-surface); }
+.nodeComponentsHeader { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
+.nodeComponentsHeader h2 { margin:3px 0 0; color:var(--text); font-size:17px; }
+.nodeComponentsCounters { display:flex; flex-wrap:wrap; gap:8px; color:var(--muted); font-size:12px; }
+.nodeComponentsList { min-width:0; display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr)); align-items:start; gap:8px; }
+.nodeComponentCard { min-width:0; padding:10px; border:1px solid var(--cc-line); border-radius:8px; background:var(--cc-inset); }
+.nodeComponentCard > header { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+.nodeComponentCardOpen { min-width:0; min-height:28px; display:flex; align-items:center; justify-content:flex-start; gap:7px; margin:0; padding:0; border:0; background:transparent; text-align:left; }
+.nodeComponentCardOpen:disabled { opacity:1; cursor:default; }
+.nodeComponentCardOpen:hover:not(:disabled) { color:var(--cyan); background:transparent; }
+.nodeComponentCardOpen strong { color:var(--text); font-size:14px; line-height:1.3; }
+.nodeComponentCardLogo { width:26px; height:26px; flex-shrink:0; display:grid; place-items:center; }
+.nodeComponentCardLogo .protocolIcon { width:24px; height:24px; }
+.nodeComponentCard > header em { color:var(--muted); font-size:11px; font-weight:500; font-style:normal; }
+.nodeComponentCard > header em[data-state='active'] { color:var(--green); }
+.nodeComponentCard > header em[data-state='stopped'] { color:var(--amber); }
+.nodeComponentCard > header em[data-state='error'] { color:var(--red); }
+.nodeComponentCardFacts { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px 12px; margin:8px 0; }
+.nodeComponentCardFacts > div { min-width:0; display:flex; flex-wrap:wrap; align-items:baseline; gap:5px; }
+.nodeComponentCardFacts dt { color:var(--muted); font-size:11px; }
+.nodeComponentCardFacts dd { margin:0; color:var(--text); font:400 11px/1.4 var(--font-mono); overflow-wrap:anywhere; }
+.nodeComponentCardVersion small { font:inherit; }
+.nodeComponentCardStatus { color:var(--muted); }
 .nodeComponentCardStatus[data-tone='online'] { color:var(--green); }
-.nodeComponentCardStatus[data-tone='running'],.nodeComponentCardStatus[data-tone='available'] { color:var(--cyan); }
 .nodeComponentCardStatus[data-tone='warning'],.nodeComponentCardStatus[data-tone='progress'] { color:var(--amber); }
 .nodeComponentCardStatus[data-tone='error'] { color:var(--red); }
-.nodeComponentCardTags { display:flex; flex-wrap:wrap; gap:3px; font-size:9px; font-weight:600; line-height:1.3; }
-.nodeComponentCardTags > span { padding:2px 4px; border:1px solid currentColor; border-radius:3px; }
-.nodeComponentCardStatus p { margin:4px 0 0; font-size:10px; line-height:1.35; overflow-wrap:anywhere; }
-.nodeComponentCardContent footer { min-width:0; display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:4px 6px; }
-.nodeComponentCardVersion { min-width:0; display:grid; gap:2px; color:#91a8b6; font:500 9px/1.3 var(--font-mono); overflow-wrap:anywhere; }
-.nodeComponentCardVersion small { color:#a9bfcb; font:inherit; }
-.nodeComponentCardActions { min-width:0; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:3px; margin-left:auto; }
-.nodeComponentCardActions button { min-height:24px; max-width:100%; margin:0; padding:3px 6px; border:1px solid rgba(100,184,255,.25); border-radius:4px; background:rgba(100,184,255,.08); color:#79baf0; font:600 9px/1.3 var(--font-sans); overflow-wrap:anywhere; cursor:pointer; }
-.nodeComponentCardActions button[data-tone='warning'] { border-color:rgba(232,183,97,.3); color:var(--amber); }
-.nodeComponentCardActions button:hover:not(:disabled) { background:rgba(100,184,255,.16); }
-.nodeComponentCardActions button:focus-visible { outline:2px solid var(--cyan); outline-offset:2px; }
+.nodeComponentCardTags { display:flex; flex-wrap:wrap; gap:3px; font-size:11px; line-height:1.3; }
+.nodeComponentCardTags > span { padding:1px 3px; border:1px solid currentColor; border-radius:3px; }
+.nodeComponentCardStatus p { margin:4px 0 0; font-size:11px; line-height:1.4; overflow-wrap:anywhere; }
+.nodeComponentCardActions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:5px; margin-top:8px; }
+.nodeComponentCardActions button { min-height:28px; margin:0; padding:4px 7px; border:1px solid var(--cc-line); border-radius:5px; background:color-mix(in srgb,var(--blue) 8%,transparent); color:var(--blue); font:500 12px/1.3 var(--font-sans); cursor:pointer; }
+.nodeComponentCardActions button[data-tone='danger'] { color:var(--red); border-color:color-mix(in srgb,var(--red) 30%,transparent); }
+.nodeComponentCardActions button[data-tone='warning'] { color:var(--amber); }
 .nodeComponentCardActions button:disabled { opacity:.45; cursor:not-allowed; }
+.nodeComponentCardActions button:focus-visible,.nodeComponentCardOpen:focus-visible { outline:2px solid var(--cyan); outline-offset:2px; }
+@media (max-width:700px) { .nodeComponentCardActions button { min-height:36px; } }

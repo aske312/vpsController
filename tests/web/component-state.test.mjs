@@ -14,6 +14,19 @@ test("installed component version never falls back to the available release", ()
 const image = { installed: true, installable: true, update_available: true, management: {state: "managed"},
   component_state: { installation: {state: "installed"}, runtime: {state: "stopped"}, health: {state: "unchecked"}, operation: null } };
 
+test("removal requires a removable managed installation and a confirmed idle state", () => {
+  const removable = {...image, removable: true};
+  assert.equal(componentPresentation(removable).canRemove, true);
+  for (const patch of [
+    {removable: false}, {installed: false}, {management: {state: "unmanaged"}},
+    {management: {state: "unknown"}}, {management: {state: "managed", retained: true}},
+    {component_state: undefined},
+    {component_state: {...image.component_state, installation: {state: "unknown"}}},
+    {component_state: {...image.component_state, operation: {kind: "removing", state: "running"}}},
+    {component_state: {...image.component_state, operation: {kind: "removing", state: "unknown"}}},
+  ]) assert.equal(componentPresentation({...removable, ...patch}).canRemove, false);
+});
+
 test("installation, runtime, health and ongoing action remain independent", () => {
   const state = componentPresentation({...image, component_state: {...image.component_state, operation: {kind: "updating"}}});
   assert.equal(state.installation, "Установлен");

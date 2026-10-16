@@ -136,8 +136,6 @@
 .overviewTopologyStats > span { background:rgba(4,12,19,.64) !important; backdrop-filter:blur(8px); }
 .overviewFlow { width:72%; max-width:1000px !important; grid-template-columns:130px minmax(420px,1fr) 95px !important; }
 .overviewRouteCore,.overviewAccessGlyph,.overviewExitGlyph { backdrop-filter:blur(10px); }
-.overviewNodeWorkspace { grid-template-columns:minmax(0,7fr) minmax(310px,3fr) !important; gap:10px !important; align-items:stretch; }
-.overviewTelemetry { min-height:0; border-color:var(--cc-line) !important; border-radius:15px !important; background:var(--cc-surface) !important; }
 
 /* DNS — resolver field is the main visual surface; policy remains a compact console. */
 .dnsPageHead { padding:3px 2px 7px !important; }
@@ -224,7 +222,6 @@
 .mihomoStatusBoard,.mihomoChannelBoard,.mihomoQuickState,.mihomoProfiles,.mihomoPolicyPanel,.mihomoModulesPanel { border-color:var(--cc-line) !important; border-radius:15px !important; background:var(--cc-surface) !important; }
 
 @media (max-width:1180px) {
-  .overviewNodeWorkspace { grid-template-columns:minmax(0,1fr) !important; }
   .gateMasthead { grid-template-columns:minmax(220px,1fr) auto !important; }
   .gateMastFacts { display:none !important; }
   .overviewTopologyHead,.overviewFlow { width:82%; max-width:82% !important; }
@@ -233,7 +230,7 @@
   .applicationControlContent,.mihomoHeroContent { width:72% !important; }
 }
 @media (max-width:900px) {
-  .overviewNodeWorkspace,.dnsWorkbench,.dnsLowerGrid { grid-template-columns:1fr !important; }
+  .dnsWorkbench,.dnsLowerGrid { grid-template-columns:1fr !important; }
   .overviewTopologyHead,.overviewFlow { width:100%; max-width:100% !important; }
   .overviewFlow { grid-template-columns:105px minmax(0,1fr) !important; }
   .overviewExit { display:none !important; }
