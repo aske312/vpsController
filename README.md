@@ -4,17 +4,59 @@
 
 ## Требования
 
+- **Debian 13 (trixie) — основная и рекомендуемая система**;
 - Debian 13 или Ubuntu Server 22.04/24.04 для Light;
 - Debian 12/13 или Ubuntu Server 22.04/24.04/26.04 для PRO;
 - архитектура `amd64` или `arm64`;
 - для панели — от 1 ГБ оперативной памяти и 5 ГБ свободного места;
-- вход на сервер под `root`;
+- systemd и права `root`;
 - доступ к GitHub и системным репозиториям.
 
 ## Установка
 
+### Подготовка Debian 13
+
+Подключитесь к VPS под `root`. Если вошли обычным пользователем, перейдите в
+root-сессию через `su -` (нужен пароль root) либо `sudo -i`, если sudo уже настроен.
+На минимальной Debian `sudo` может отсутствовать; команды ниже выполняются
+**в root-сессии**, без префикса sudo.
+
+Установите средства загрузки и доверенные сертификаты до скачивания установщика:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh | bash -s -- --edition light
+apt-get update
+apt-get install -y ca-certificates curl
+```
+
+Если `apt-get update` завершается с ошибкой, сначала исправьте доступ к
+репозиториям/DNS. Не отключайте проверку HTTPS-сертификатов. Python, Node.js и
+остальные зависимости выбранного варианта установщик подготавливает сам;
+устанавливать Python-пакеты глобально через pip не требуется.
+
+### Выбор приложения
+
+Скачайте установщик. Только после успешной загрузки выполните команду нужной редакции:
+
+```bash
+curl -fL https://raw.githubusercontent.com/aske312/vpsController/installer/install.sh -o /root/vps-control-install.sh
+```
+
+Light:
+
+```bash
+bash /root/vps-control-install.sh --edition light
+```
+
+PRO:
+
+```bash
+bash /root/vps-control-install.sh --edition pro
+```
+
+Автономный Agent:
+
+```bash
+bash /root/vps-control-install.sh --edition agent
 ```
 
 Параметр `--edition` выбирает вариант установки:
@@ -25,11 +67,25 @@ curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/ins
 | `pro` | Панель PRO с расширенным управлением | Ветка `pro` |
 | `agent` | Автономный Relay Agent без основной панели | Ветка `agent` |
 
-Для другого варианта замените `light` в команде на `pro` или `agent`.
+Выполните только одну из этих команд, соответствующую назначению VPS.
 После установки панели консоль покажет её адрес и данные для входа;
 после установки Agent — параметры подключения узла.
 
-Без `--edition` установщик предложит выбрать вариант в терминале.
+Без `--edition` установщик предложит выбрать вариант в терминале:
+
+```bash
+bash /root/vps-control-install.sh
+```
+
+Для HTTPS по домену заранее направьте его A/AAAA-записи на доступные адреса VPS
+и разрешите входящие TCP 80/443 в firewall провайдера. Параметры панели и
+доступность конкретного протокола зависят от редакции, ОС и запущенного ядра.
+Для AmneziaWG могут понадобиться headers именно запущенного ядра. Если после
+обновления ядра требуется перезагрузка, выполните её в согласованное окно,
+затем повторите установку модуля из панели.
+
+Справка Debian: [учётные записи и sudo](https://www.debian.org/releases/trixie/amd64/ch06s03.en.html#di-user-setup),
+[пакет ca-certificates](https://packages.debian.org/trixie/ca-certificates).
 
 ## Устройство репозитория
 
@@ -39,6 +95,18 @@ curl -fsSL https://raw.githubusercontent.com/aske312/vpsController/installer/ins
 в GitHub Releases или prereleases.
 
 ## Основные команды панели
+
+Выполняются в root-сессии на VPS с установленной Light или PRO; к автономному
+Agent команда `vps-control` не относится.
+
+Состояние панели и повторный вывод данных входа:
+
+```bash
+vps-control status
+vps-control credentials
+```
+
+Данные входа содержат секреты: не публикуйте их в отчётах или переписке.
 
 Назначить домен панели Light:
 
