@@ -3,7 +3,7 @@
   z-index:11000;
   top:90px;
   right:max(18px, env(safe-area-inset-right));
-  width:min(380px, calc(100vw - 36px));
+  width:min(440px, calc(100vw - 36px));
   display:grid;
   gap:6px;
   pointer-events:none;
@@ -11,7 +11,7 @@
   font-family:var(--font-sans), sans-serif;
 }
 .gateNotificationHeader {
-  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px;
   padding:9px 12px; border:1px solid rgba(105,135,160,.25); border-radius:10px;
   background:rgba(10,17,23,.97); pointer-events:auto;
 }
@@ -37,6 +37,7 @@
 .gateOperationCard.error { --notification-color:var(--red, #f07b7b); }
 .gateOperationCard.success { --notification-color:var(--green, #62d7b4); }
 .gateOperationCard.info, .gateOperationCard.cancelled { --notification-color:#97b9dc; }
+.gateOperationCard.unknown { --notification-color:#a5b5c9; }
 .gateOperationContent { display:grid; grid-template-columns:27px minmax(0,1fr) auto; align-items:start; gap:9px; padding:10px 11px 9px; }
 .gateOperationIcon {
   width:27px; height:27px; display:grid; place-items:center; border-radius:8px;
@@ -45,27 +46,35 @@
   font:800 13px/1 var(--font-mono), monospace;
 }
 .gateOperationText { min-width:0; display:grid; gap:3px; overflow-wrap:anywhere; }
-.gateOperationText > span { color:#8397a3; font:650 8px/1.3 var(--font-mono), monospace; letter-spacing:.05em; }
-.gateOperationText > strong { color:#e0ebef; font-size:12px; line-height:1.25; }
-.gateOperationText > small { color:#a6b6c0; font-size:10px; line-height:1.35; white-space:pre-wrap; }
-.gateOperationActions { display:flex; align-items:flex-start; gap:6px; min-height:27px; }
+.gateOperationText > span { color:var(--notification-color); font:650 10px/1.4 var(--font-mono), monospace; letter-spacing:.05em; }
+.gateOperationText > strong { color:#e0ebef; font-size:13px; line-height:1.4; }
+.gateOperationText > small { color:#a6b6c0; font-size:11px; line-height:1.5; white-space:pre-wrap; }
+.gateOperationBody { min-width:0; padding:0 12px 12px 47px; }
+.gateOperationStage { margin:0; color:#d0dde5; font-size:12px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
+.gateOperationDetails { min-width:0; margin-top:8px; color:#a6b6c0; font-size:11px; }
+.gateOperationDetails > summary { width:fit-content; cursor:pointer; padding:4px 0; color:#a6c8dd; }
+.gateOperationDetails p { max-height:28dvh; overflow:auto; overscroll-behavior:contain; margin:6px 0 0; padding:9px; border:1px solid rgba(105,135,160,.2); border-radius:6px; background:rgba(0,0,0,.18); white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.55; }
+.gateOperationMeta { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px; margin-top:10px; color:#93a8b5; font-size:11px; }
+.gateOperationUnknown { display:block; margin-top:8px; color:#a6b6c0; font-size:11px; line-height:1.5; }
+.gateOperationActions { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; padding:9px 12px; border-top:1px solid rgba(105,135,160,.16); }
+.gateOperationCard.collapsed .gateOperationContent { grid-template-columns:minmax(0,1fr) auto; align-items:center; }
 .gateNotificationClose { width:26px; height:26px; display:grid; place-items:center; border:0; border-radius:6px; background:rgba(255,255,255,.04); color:#b9c9d3; font-size:18px; cursor:pointer; }
 .gateNotificationClose:hover { background:rgba(255,255,255,.1); color:#fff; }
 .gateNotificationCancel { padding:6px 8px; min-height:32px; display:grid; place-items:center; border:1px solid color-mix(in srgb, var(--notification-color) 35%, transparent); border-radius:6px; background:transparent; color:var(--notification-color); font-size:11px; line-height:1.3; cursor:pointer; }
 .gateNotificationCancel:hover { background:color-mix(in srgb, var(--notification-color) 12%, transparent); }
 .gateNotificationCancel:disabled { opacity:.6; cursor:wait; }
-.gateOperationPercent { align-self:center; color:#d9e6ec; font:700 10px/1 var(--font-mono), monospace; }
+.gateOperationPercent { color:#d9e6ec; font:600 11px/1.4 var(--font-mono), monospace; }
 .gateOperationTrack { height:3px; overflow:hidden; background:rgba(105,135,160,.1); }
 .gateOperationTrack > i { display:block; height:100%; background:var(--notification-color); transition:width .35s ease; }
 .gateOperationTrack.indeterminate > i { width:34% !important; animation:gateOperationSlide 1.15s ease-in-out infinite; }
 @keyframes gateOperationSlide { from { transform:translateX(-100%); } to { transform:translateX(300%); } }
-.gateOperationButton { margin:0 11px 9px 47px; padding:6px 9px; border:1px solid color-mix(in srgb, var(--notification-color) 35%, transparent); border-radius:6px; color:var(--notification-color); background:transparent; font:600 10px/1.3 var(--font-sans), sans-serif; cursor:pointer; }
+.gateOperationButton { margin:0; min-height:32px; padding:6px 9px; border:1px solid color-mix(in srgb, var(--notification-color) 35%, transparent); border-radius:6px; color:var(--notification-color); background:transparent; font:600 11px/1.4 var(--font-sans), sans-serif; cursor:pointer; white-space:normal; }
 .gateOperationButton:disabled { opacity:.6; cursor:wait; }
 .gateNotificationDock :is(button, [tabindex]):focus-visible { outline:2px solid #97b9dc; outline-offset:2px; }
 @media (max-width:760px) {
   .gateNotificationDock { top:auto; right:10px; left:10px; bottom:calc(76px + env(safe-area-inset-bottom)); width:auto; }
   .gateNotificationList { max-height:45dvh; }
-  .gateNotificationDock:not(.is-expanded) .gateNotificationList { max-height:25dvh; }
+  .gateNotificationDock:not(.is-expanded) .gateNotificationList { max-height:45dvh; }
   .gateNotificationDock:not(.is-expanded) .gateOperationCard:nth-child(n+2) { display:none; }
 }
 @media (prefers-reduced-motion:reduce) {
@@ -83,6 +92,3 @@
 .operationHistoryList p { margin:8px 0; }
 .operationHistoryList details { font-size:12px; margin-top:8px; }
 .operationHistoryList article > div > span { flex-shrink:0; font-size:12px; }
-
-.gateOperationActions { flex-wrap:wrap; }
-.gateOperationText { overflow-wrap:anywhere; }

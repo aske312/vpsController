@@ -9,9 +9,26 @@
 [data-network-page] .relayActions select { max-width: 100%; min-width: 0; }
 [data-network-page] .networkRelayState { font: 11px var(--font-mono), monospace; color: var(--muted); }
 [data-network-page] .networkRelayState.connected { color: var(--green); }
-[data-network-page] .networkRouteChoices { display: grid; gap: 12px; padding: 20px; }
-[data-network-page] .networkRouteChoices button { display: grid; gap: 8px; padding: 20px; text-align: left; white-space: normal; }
-[data-network-page] .networkRouteChoices span { color: var(--muted); font-size: 13px; }
+[data-network-page] .networkRouteChoices { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; padding:14px 20px; border-bottom:1px solid var(--line); }
+[data-network-page] .networkRouteChoices button { display:grid; gap:5px; padding:12px; text-align:left; white-space:normal; border:1px solid var(--line); border-radius:8px; background:var(--panel-inset); }
+[data-network-page] .networkRouteChoices button[aria-pressed='true'] { border-color:var(--cyan); background:rgba(70,169,223,.1); }
+[data-network-page] .networkRouteChoices span { color:var(--muted); font-size:11px; }
+[data-network-page] .networkRouteTypeHint { margin:10px 20px; font-size:11px; color:var(--muted); }
+[data-network-page] .relayConnectionEditor { padding:16px 20px 20px; }
+[data-network-page] .relayConnectionEditor .relayForm { padding:0; gap:12px; }
+[data-network-page] .relayForm > small { color:var(--muted); font-size:11px; line-height:1.5; }
+[data-network-page] .relayConnectionHead { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; }
+[data-network-page] .relayConnectionHead > div { min-width:0; }
+[data-network-page] .relayConnectionHead small { display:block; margin-top:5px; color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+[data-network-page] .relayConnectionHint { display:block; color:var(--muted); font-size:11px; line-height:1.5; }
+[data-network-page] .relayForwardings { display:grid; gap:6px; margin:10px 0; }
+[data-network-page] .relayForwardings > div { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr); gap:12px; padding:9px 10px; border:1px solid var(--line); border-radius:7px; }
+[data-network-page] .relayForwardings span { min-width:0; display:grid; gap:4px; overflow-wrap:anywhere; }
+[data-network-page] .relayForwardings b { font-size:11px; font-weight:600; }
+[data-network-page] .relayForwardings small { color:var(--muted); font-size:10px; line-height:1.5; }
+@media(max-width:620px) {
+  [data-network-page] .networkRouteChoices,[data-network-page] .relayForwardings > div { grid-template-columns:minmax(0,1fr); }
+}
 [data-network-page] .relayFingerprint { overflow-wrap: anywhere; font-size: 12px; color: var(--muted); }
 
 [data-network-page] {
@@ -1442,7 +1459,7 @@
 }
 
 [data-network-page] .networkModal {
-  width: min(1180px, 100%);
+  width: min(760px, 100%);
   max-height: min(860px, calc(100vh - 28px));
   overflow: auto;
   border: 1px solid var(--network-line-strong);
@@ -1471,7 +1488,7 @@
 
 [data-network-page] .networkEndpointGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   padding: 16px;
   align-items: stretch;

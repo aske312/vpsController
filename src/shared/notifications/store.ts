@@ -8,11 +8,12 @@ export type NotificationInput = {
   state: NotificationState;
   kind?: "message" | "operation";
   progress?: number;
+  startedAt?: number;
   action?: NotificationAction;
   onCancel?: () => void | Promise<void>;
   onDismiss?: () => void;
 };
-export type Notification = NotificationInput & { count: number; createdAt: number; expiresAt?: number };
+export type Notification = NotificationInput & { count: number; createdAt: number; finishedAt?: number; expiresAt?: number };
 export type NotificationFailure = { message: string; network?: boolean };
 export function notificationFailure(cause: unknown, fallback: string) {
   return { message: cause instanceof Error ? cause.message : fallback,
@@ -20,7 +21,7 @@ export function notificationFailure(cause: unknown, fallback: string) {
 }
 
 export const isPending = (item: Pick<Notification, "state">) => item.state === "running" || item.state === "unknown";
-const fingerprint = (item: NotificationInput) => JSON.stringify([item.state, item.title, item.message, item.progress, item.action?.label, Boolean(item.onCancel)]);
+const fingerprint = (item: NotificationInput) => JSON.stringify([item.state, item.title, item.message, item.progress, item.startedAt, item.action?.label, Boolean(item.onCancel)]);
 
 /** One store per mounted application. Nothing is shared between SSR requests. */
 export function createNotificationStore(now = Date.now) {
@@ -45,9 +46,10 @@ export function createNotificationStore(now = Date.now) {
     if (finishedOperations.has(input.id)) return input.id;
     if (input.kind === "operation" && input.state !== "error") {
       const summaries = { running: "Выполняется…", unknown: "Ожидаем подтверждения результата.", success: "Готово.", info: "Ожидает выполнения.", cancelled: "Команда отменена." };
-      input = { ...input, message: summaries[input.state] };
+      input = { ...input, message: input.message.trim() || summaries[input.state] };
     }
     const previous = items.find((item) => item.id === input.id);
+    input = { ...input, startedAt: Number.isFinite(input.startedAt) ? input.startedAt : previous?.startedAt };
     const signature = fingerprint(input);
     if (dismissed.get(input.id) === signature) return input.id;
     if (previous && fingerprint(previous) === signature) {
@@ -59,7 +61,9 @@ export function createNotificationStore(now = Date.now) {
     }
     dismissed.delete(input.id);
     const ttl = input.state === "success" || input.state === "cancelled" ? 8000 : input.state === "info" ? 10000 : 0;
-    const item: Notification = { ...input, count: previous?.count ?? 1, createdAt: previous?.createdAt ?? now(), expiresAt: ttl ? (pausedAt ?? now()) + ttl : undefined };
+    const item: Notification = { ...input, count: previous?.count ?? 1, createdAt: previous?.createdAt ?? now(),
+      finishedAt: input.kind === "operation" && !isPending(input) ? previous?.finishedAt ?? now() : undefined,
+      expiresAt: ttl ? (pausedAt ?? now()) + ttl : undefined };
     items = previous ? items.map((entry) => entry.id === item.id ? item : entry) : [...items, item];
     emit();
     return item.id;

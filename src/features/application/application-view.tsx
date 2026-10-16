@@ -23,6 +23,7 @@ type ApplicationViewProps = {
 export function ApplicationView({ application, services, applicationVersion, applicationDependencies, updates, serviceModeActive, busy, applicationLogs, runApplicationAction, changeServiceMode, changePanelAccess, changeCdnSecurity, loadApplicationLogs, downloadLogs, downloadUpdateReport }: ApplicationViewProps) {
   const actionState = applicationActionState(application?.action);
   const versionState = applicationVersionState(applicationVersion);
+  const testReleaseActive = applicationVersion?.branch === "test-pro";
   const recoveryRequired = application?.recovery?.application_required === true;
   const mutationBlocked = busy || recoveryRequired;
   const apiRuntime = applicationRuntime(application?.api);
@@ -92,7 +93,8 @@ export function ApplicationView({ application, services, applicationVersion, app
             <div className="applicationSecondaryActions">
               <button onClick={() => void runApplicationAction("identity")} disabled={mutationBlocked}>Обновить данные VPS</button>
               <button onClick={() => void runApplicationAction("optimize")} disabled={mutationBlocked}>Освободить ресурсы</button>
-              {serviceModeActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={mutationBlocked}>Rollback</button>}
+              {serviceModeActive && <button onClick={() => void runApplicationAction("test-update")} disabled={mutationBlocked}>{testReleaseActive ? "Обновить тестовую версию" : "Перейти на тестовую версию"}</button>}
+              {serviceModeActive && application?.service_mode?.rollback_available && <button onClick={() => void runApplicationAction("test-rollback")} disabled={mutationBlocked}>Вернуться к стабильной версии</button>}
             </div>
           </div>
         </article>
@@ -110,7 +112,7 @@ export function ApplicationView({ application, services, applicationVersion, app
             <header><div><p className="eyebrow">DEPLOYMENT & ACCESS</p><h2>Режим и публикация</h2></div><span>{applicationVersion?.branch || "main"}  {applicationVersion?.current_commit?.slice(0, 12) || "unknown"}</span></header>
             <div className="applicationEnvironmentRows">
               <label>
-                <span><strong>Сервисный режим</strong><small>{serviceModeActive ? "Разрешены локальная test-сборка, rollback и операции обслуживания" : "Обычная production-работа"}</small></span>
+                <span><strong>Сервисный режим</strong><small>{serviceModeActive ? "Доступны тестовый релиз, возврат к сохранённой версии и обслуживание" : "Обычная production-работа"}</small></span>
                 <span className="applicationSwitch"><input type="checkbox" checked={serviceModeActive} onChange={(event) => void changeServiceMode(event.target.checked)} disabled={mutationBlocked} /><i /></span>
               </label>
               <label>

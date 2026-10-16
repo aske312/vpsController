@@ -181,14 +181,14 @@ export function ServicesDashboard({
           </div>
           <div className="servicesLogControls">
             <label className="opsField toggle">
-              <span>Persistent</span>
+              <span>Постоянное хранение<small>{loggingDraft?.persistent ? "Сохранять после перезагрузки" : "Временно, до перезагрузки"}</small></span>
               <span className="serviceToggle compact">
                 <input type="checkbox" checked={loggingDraft?.persistent ?? true} onChange={(event) => onLoggingChange({ persistent: event.target.checked })} disabled={serviceBusy} />
                 <span /><em>{loggingDraft?.persistent ? "ON" : "OFF"}</em>
               </span>
             </label>
             <label className="opsField retention">
-              <span>Retention</span>
+              <span>Срок хранения</span>
               <select value={loggingDraft?.retention_days ?? 30} onChange={(event) => onLoggingChange({ retention_days: Number(event.target.value) })} disabled={serviceBusy}>
                 <option value={1}>1 день</option>
                 <option value={7}>7 дней</option>
@@ -199,10 +199,10 @@ export function ServicesDashboard({
               </select>
               <small>{formatRetention(loggingDraft?.retention_days)}</small>
             </label>
-            <div className="servicesLogActions">
-              <button type="button" className="servicePrimary" onClick={onSaveLogging} disabled={serviceBusy || !loggingDraft}>Сохранить</button>
-              <button type="button" className="serviceDanger" onClick={onClearLogs} disabled={serviceBusy}>Очистить</button>
-            </div>
+          </div>
+          <div className="servicesLogActions">
+            <button type="button" className="servicePrimary" onClick={onSaveLogging} disabled={serviceBusy || !loggingDraft}>Сохранить настройки журналов</button>
+            <button type="button" className="serviceDanger" onClick={onClearLogs} disabled={serviceBusy}>Очистить журналы</button>
           </div>
         </section>
 
@@ -215,7 +215,7 @@ export function ServicesDashboard({
           {metricsSettings?.trimmed_at && <p>Часть старых измерений удалена по дисковому лимиту.</p>}
           {metricsSettings && metricsDraft && metricsSettings.revision !== metricsDraft.revision && <p role="status">Настройки изменились на сервере. Ваши правки сохранены в форме; отмените их, чтобы загрузить актуальные значения.</p>}
           <div className="servicesLogControls">
-            <label className="opsField"><span>Сохранять историю</span><input type="checkbox" checked={metricsDraft?.enabled ?? false} disabled={busy || !metricsDraft} onChange={(event) => onMetricsChange({ enabled: event.target.checked })} /></label>
+            <label className="opsField toggle"><span>Сохранять историю</span><span className="serviceToggle compact"><input type="checkbox" checked={metricsDraft?.enabled ?? false} disabled={busy || !metricsDraft} onChange={(event) => onMetricsChange({ enabled: event.target.checked })} /><span /><em>{metricsDraft?.enabled ? "ON" : "OFF"}</em></span></label>
             {([
               ["raw_hours", "Подробные, часы", 1, 168], ["minute_days", "Минутные, дни", 1, 90],
               ["hour_days", "Часовые, дни", 1, 730], ["disk_limit_mb", "Лимит, МБ", 8, 1024],

@@ -7,6 +7,7 @@ import { useNotifier } from "../../shared/notifications/notification-center";
 import { SystemOperationUnknown, systemActionNeedsPolling } from "../../control-panel/system-operation";
 import type { SystemAction } from "../../shared/types/control-plane";
 import type { NetworkAdmission, NetworkRequest } from "./network-api";
+import { bytes } from "../../shared/lib/control-plane-ui";
 import { relayConnection, relaySnapshot, type RelayStatus, type RelayHost } from "./relay-state";
 
 type Props = { request: NetworkRequest; admit: NetworkAdmission; operation?: SystemAction; onOperation: (value: SystemAction) => void; busy: boolean; onDirtyChange: (dirty: boolean) => void; refreshKey?: number };
@@ -17,6 +18,7 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
   const [reading, setReading] = useState(false);
   const [sending, setSending] = useState(false);
   const [dialog, setDialog] = useState(false);
+  const [embedded, setEmbedded] = useState(false);
   const [changed, setChanged] = useState(false);
   const [discard, setDiscard] = useState(false);
   const [name, setName] = useState("");
@@ -71,9 +73,9 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
   }
   function resetDialog() { setDialog(false); setChanged(false); setName(""); setConnection(""); setAddress(""); setEdit(null); }
   function close() { if (changed) setDiscard(true); else resetDialog(); }
-  function openHost(selected?: RelayHost) {
+  function openHost(selected?: RelayHost, inline = false) {
     setEdit(selected || null); setName(selected?.name || ""); setAddress(selected?.client_address || "");
-    setConnection(""); setDialog(true); setChanged(false);
+    setConnection(""); setEmbedded(inline); setDialog(true); setChanged(false);
   }
   async function saveHost() {
     if (locked || !status || status.pending && !edit) return;
@@ -89,14 +91,14 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
     void submit(`/network/relays/${selected.id}`, { method: "DELETE", headers: { "If-Match": status.revision } });
   }
   return {
-    status, failed, reading, locked, load, submit, dialog, name, address, connection, edit, changed, discard, confirmation,
+    status, failed, reading, locked, load, submit, dialog, embedded, name, address, connection, edit, changed, discard, confirmation,
     openHost, close, resetDialog, saveHost, removeConfirmed, setDiscard, setConfirmation,
     changeName: (value: string) => { setName(value); setChanged(true); },
     changeAddress: (value: string) => { setAddress(value); setChanged(true); },
     changeConnection: (value: string) => { setConnection(value); setChanged(true); },
   };
 }
-type RelayControl = ReturnType<typeof useNetworkRelays>;
+export type RelayControl = ReturnType<typeof useNetworkRelays>;
 
 export function NetworkRelayNotice({ relay }: { relay: RelayControl }) {
   return <>
@@ -113,15 +115,20 @@ export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: 
       <tr className={`networkRouteRow${open ? " is-expanded" : ""}`}>
         <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true" /><span><strong>{address}</strong><small>{item.name} · Relay Agent</small></span></button></td>
         <td><span className={`networkRelayState ${unknown ? "unknown" : "connected"}`}>{unknown ? "UNKNOWN" : "CONNECTED"}</span><small>{unknown ? "Агент не подтверждён" : "Доступен для подключений"}</small></td>
-        <td><span>RELAY</span><small>Адрес для протоколов</small></td>
-        <td><span>TCP / UDP</span><small>Определяется протоколом</small></td>
-        <td><button type="button" disabled={relay.locked} onClick={() => relay.openHost(item)}>Настроить подключение</button></td>
+        <td><span>RELAY</span><small>{item.routes.length} пересылок{item.foreign_routes ? ` · ${item.foreign_routes} вне PRO` : ""}</small></td>
+        <td><span>TCP {item.routes.filter(route => route.transport === "tcp").length} / UDP {item.routes.filter(route => route.transport === "udp").length}</span><small>{unknown ? "Состояние портов неизвестно" : `${item.routes.filter(route => route.state === "listening").length} портов слушают`}</small></td>
+        <td><button type="button" disabled={relay.locked} onClick={() => relay.openHost(item)}>Настроить</button></td>
       </tr>
       {open && <tr className="networkRouteDetailRow"><td colSpan={5}><div className="networkRouteCascade">
-        <header className="networkBlockHeader"><div><p className="eyebrow networkSectionEyebrow">RELAY CONNECTION</p><strong>{item.name} · {address}</strong><p><small>{unknown ? "UNKNOWN" : `Agent ${item.version}`} · {item.agent_url}</small></p></div><button disabled={relay.locked || relay.status?.pending || item.routes.length > 0} title={item.routes.length ? "Узел содержит пересылки действующих подключений" : undefined} onClick={() => relay.setConfirmation(item)}>Удалить узел из PRO</button></header>
+        <header className="networkBlockHeader relayConnectionHead"><div><p className="eyebrow networkSectionEyebrow">RELAY CONNECTION</p><strong>{item.name}</strong><small>Клиенты: {address} · API: {item.agent_url} · {unknown ? "UNKNOWN" : `Agent ${item.version}`}</small></div><button disabled={relay.locked || relay.status?.pending || item.routes.length > 0} title={item.routes.length ? "Узел содержит пересылки действующих подключений" : undefined} onClick={() => relay.setConfirmation(item)}>Удалить узел</button></header>
         <details className="relayFingerprint"><summary>Сертификат подключения</summary><p>SHA-256 {item.certificate_sha256}</p></details>
         {item.error && <p role="status">{item.error}</p>}
-        <p>Выберите этот IP/домен в настройках подключения протокола. Пересылка и внешний порт настраиваются автоматически при сохранении подключения.</p>
+        {item.routes.length > 0 ? <div className="relayForwardings" role="list" aria-label={`Пересылки ${item.name}`}>{item.routes.map(route => <div key={route.id} role="listitem">
+          <span><b>{route.transport.toUpperCase()} :{route.listen_port}</b><small>→ {route.target_ip}:{route.target_port}</small></span>
+          <span><b>{unknown ? "UNKNOWN" : route.state.toUpperCase()}</b><small>{unknown || !route.check ? "Протокол не подтверждён" : `Проверка с VPS: ${route.check.state.toUpperCase()} · ${route.check.consumer_id} · ${new Date(route.check.checked_at).toLocaleString("ru-RU")}`}</small></span>
+          <span><b>{unknown ? "—" : `${route.received_bytes == null ? "—" : bytes(route.received_bytes)} ↓ / ${route.sent_bytes == null ? "—" : bytes(route.sent_bytes)} ↑`}</b><small>{unknown ? "Нет актуальных метрик" : `${route.sessions ?? "—"} сессий · ${route.errors ?? "—"} ошибок`}</small></span>
+        </div>)}</div> : <p className="relayConnectionHint">Пересылок пока нет. Выберите этот узел в Direct или Mihomo — порт настроится при сохранении подключения.</p>}
+        {item.routes.length > 0 && <small className="relayConnectionHint">LISTENING подтверждает порт. Работоспособность протокола проверяется отдельно для подключения.</small>}
       </div></td></tr>}
     </Fragment>;
   })}</>;
@@ -132,21 +139,28 @@ export function relayMatches(host: RelayHost, query: string) {
 }
 
 export function NetworkRelayDialogs({ relay }: { relay: RelayControl }) {
-  const dialogRef = useDialogFocus(relay.dialog, relay.close);
+  const dialogRef = useDialogFocus(relay.dialog && !relay.embedded, relay.close);
   return <>
-    {relay.dialog && <div className="networkModalBackdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) relay.close(); }}><section ref={dialogRef} tabIndex={-1} className="networkModal relayModal" role="dialog" aria-modal="true" aria-labelledby="relay-dialog-title">
+    {relay.dialog && !relay.embedded && <div className="networkModalBackdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) relay.close(); }}><section ref={dialogRef} tabIndex={-1} className="networkModal relayModal" role="dialog" aria-modal="true" aria-labelledby="relay-dialog-title">
       <header className="networkSectionHeading networkModalHeader"><div><p className="eyebrow networkSectionEyebrow">ROUTES · RELAY</p><h2 id="relay-dialog-title">{relay.edit ? "Подключение к Relay Agent" : "Подключить Relay Agent"}</h2></div><button className="networkModalClose" type="button" aria-label="Закрыть" onClick={relay.close}>×</button></header>
-      <NetworkRelayNotice relay={relay} />
-      <form className="relayForm" onSubmit={event => { event.preventDefault(); void relay.saveHost(); }}>
-        <label>Название узла<input required maxLength={64} value={relay.name} onChange={event => relay.changeName(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} /></label>
-        <label>Адрес для подключений<input maxLength={253} value={relay.address} onChange={event => relay.changeAddress(event.target.value)} disabled={relay.locked} placeholder="IP агента или relay.example.com" /></label>
-        <small>Пустое поле использует IP агента. Домен должен указывать только на этот узел, без CDN proxy. Порт определит протокол.</small>
-        <label>JSON подключения<input type="password" autoComplete="new-password" spellCheck={false} required={!relay.edit} value={relay.connection} onChange={event => relay.changeConnection(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder={relay.edit ? "Заполните для обновления токена или сертификата" : "Параметры из раздела Agent на узле"} /></label>
-        <small>Содержит адрес API, токен и отпечаток сертификата. Секреты не возвращаются в браузер.</small>
-        <div className="relayActions"><button type="submit" disabled={relay.locked || relay.status?.pending && !relay.edit || !relay.name.trim() || !relay.edit && !relay.connection}>Проверить и сохранить</button><button type="button" onClick={relay.close}>Отмена</button></div>
-      </form>
+      <NetworkRelayForm relay={relay} />
     </section></div>}
     {relay.discard && <ConfirmationDialog request={{ title: "Закрыть без сохранения?", message: "Изменения подключения к Relay будут потеряны.", cancelLabel: "Остаться", confirmLabel: "Уйти без сохранения" }} onClose={confirmed => { relay.setDiscard(false); if (confirmed) relay.resetDialog(); }} />}
     {relay.confirmation && <ConfirmationDialog request={{ title: "Удалить узел из PRO?", message: `Параметры и токен ${relay.confirmation.name} будут удалены из PRO. Сам агент продолжит работать.`, confirmLabel: "Удалить", danger: true }} onClose={relay.removeConfirmed} />}
   </>;
+}
+
+export function NetworkRelayForm({ relay }: { relay: RelayControl }) {
+  return <div className="relayConnectionEditor">
+    <NetworkRelayNotice relay={relay} />
+    <p className="relayConnectionHint">Подключите установленный Relay Agent. TCP/UDP и внешний порт будут выбраны автоматически для протокола.</p>
+    <form className="relayForm" onSubmit={event => { event.preventDefault(); void relay.saveHost(); }}>
+      <label>Название узла<input required maxLength={64} value={relay.name} onChange={event => relay.changeName(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder="Например, Relay Amsterdam" /></label>
+      <label>IP или домен для клиентов<input maxLength={253} value={relay.address} onChange={event => relay.changeAddress(event.target.value)} disabled={relay.locked} placeholder="IP агента или relay.example.com" /></label>
+      <small>Пустое поле использует IP агента. Для домена: DNS-запись на IP агента, без CDN proxy. Порт указывать не нужно.</small>
+      <label>JSON подключения Agent<input type="password" autoComplete="new-password" spellCheck={false} required={!relay.edit} value={relay.connection} onChange={event => relay.changeConnection(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder={relay.edit ? "Новые параметры для замены токена / сертификата" : "Вставьте JSON из раздела Agent на Relay-сервере"} /></label>
+      <small>Адрес API, токен и отпечаток сертификата. Сохранённый токен в браузер не возвращается.</small>
+      <div className="relayActions"><button type="submit" disabled={relay.locked || relay.status?.pending && !relay.edit || !relay.name.trim() || !relay.edit && !relay.connection}>Проверить и подключить</button><button type="button" onClick={relay.close}>Отмена</button></div>
+    </form>
+  </div>;
 }

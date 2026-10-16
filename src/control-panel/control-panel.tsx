@@ -1174,9 +1174,11 @@ export function ControlPanel() {
   }
 
   function finishSystemCommand(action: SystemAction, error?: string) {
-    const title = actionLabels[(action.action || "").split(":")[0]] || "Операция";
+    const [kind, component] = (action.action || "").split(":", 2);
+    const target = protocolImages.find(image => image.id === component)?.name;
+    const title = [actionLabels[kind] || "Операция", target].filter(Boolean).join(" · ");
     notifications.finishOperation({ ...systemOperationNotification(action, title, false),
-      state: error !== undefined ? "error" : "success", message: error === undefined ? "" : error || "Команда завершилась с ошибкой.", progress: undefined });
+      state: error !== undefined ? "error" : "success", message: error === undefined ? action.message || "Команда выполнена." : error || "Команда завершилась с ошибкой.", progress: undefined });
     if (error === undefined) requestCommandReload();
   }
 
@@ -1810,7 +1812,8 @@ export function ControlPanel() {
   const protocolResourceTotal = activeProtocol?.resources?.items?.length || 0;
   const operationActive = systemActionNeedsPolling(application?.action);
   const operationName = application?.action?.action || "";
-  const operationLabel = actionLabels[operationName.split(":")[0]] || operationName;
+  const operationTarget = protocolImages.find(image => image.id === operationName.split(":")[1])?.name;
+  const operationLabel = [actionLabels[operationName.split(":")[0]] || operationName, operationTarget].filter(Boolean).join(" · ");
   const nodeHasError = notificationItems.some((item) => item.state === "error") || application?.api.active === false || application?.action?.state === "failed" || application?.action?.result === "failed";
   const nodeDegraded = Boolean(application?.containers.some((container) => container.healthy === false || (container.State || "").toLowerCase() !== "running"));
   const serviceModeActive = Boolean(services?.service_mode?.active || application?.service_mode?.active);

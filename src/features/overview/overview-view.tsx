@@ -474,12 +474,6 @@ export function OverviewDashboard({
         </header>
 
         <section className="overviewComponentRegistry" aria-label="Управление модулями узла">
-          <header>
-            <span>МОДУЛЬ</span>
-            <span>ВЕРСИЯ</span>
-            <span>СОСТОЯНИЕ</span>
-            <span>ДЕЙСТВИЕ</span>
-          </header>
           <div>
             {componentImages.map((image) => {
               const observation = directChannelStates.find((item) => item.image.id === image.id);
@@ -509,19 +503,18 @@ export function OverviewDashboard({
                     <b>{displayedVersion}</b>
                     <small>{image.installed ? image.update_available || image.update_via_release ? `новая: ${availableVersion}` : "фактическая версия" : image.installable ? "версия для установки" : "образ не готов"}</small>
                   </div>
-                  <details className={`overviewComponentState ${state.summary.tone}`}>
-                    <summary aria-label={`Состояние ${image.name}: ${state.summary.label}. Подробнее`}>
-                      <span><b><i aria-hidden="true" />{state.summary.label}</b><small>{state.summary.description}</small></span>
-                      <span className="overviewComponentDisclosure" aria-hidden="true">⌄</span>
-                    </summary>
+                  <div className={`overviewComponentState ${state.summary.tone}`}>
+                    <div className="overviewComponentSummary">
+                      <b><i aria-hidden="true" />{state.summary.label}</b><small>{state.summary.description}</small>
+                    </div>
                     <dl>
                       {[
                         ["Установка", state.installation, image.component_state?.installation.reason],
                         ["Служба", state.runtime, image.component_state?.runtime.reason],
                         ["Проверка", state.health, image.component_state?.health.reason],
-                      ].map(([label, value, reason]) => <div key={label}><dt>{label}</dt><dd><b>{value}</b><small>{reason || "Наблюдение от VPS не получено"}</small></dd></div>)}
+                      ].map(([label, value, reason]) => <div key={label}><dt>{label}</dt><dd><b>{value}</b>{reason && reason !== state.summary.description && <small>{reason}</small>}</dd></div>)}
                     </dl>
-                  </details>
+                  </div>
                   <div className="overviewComponentAction">
                     {image.management?.retained && <div><small>Настройки и подключения сохранены</small><button type="button" disabled={busy || Boolean(installingProtocol) || Boolean(image.component_state?.operation)} onClick={() => onPurgeProtocol(image)}>Очистить данные</button></div>}
                     {image.installed && image.management && image.management.state !== "managed" ? (
@@ -531,7 +524,7 @@ export function OverviewDashboard({
                         {!image.installable ? "В разработке" : installingProtocol === image.id ? "Установка…" : "Установить"}
                       </button>
                     ) : image.update_available && image.id !== "mihomo" ? (
-                      <button type="button" onClick={() => onOpenProtocol(image)}>Открыть компонент · доступно обновление</button>
+                      <div><small>Доступно обновление</small><button type="button" onClick={() => onOpenProtocol(image)}>Открыть компонент</button></div>
                     ) : image.update_available ? (
                       <button type="button" className={image.update_breaking ? "warning" : ""} disabled={busy || !state.canUpdate || Boolean(installingProtocol)} onClick={() => onUpdateProtocol(image)}>
                         {installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}

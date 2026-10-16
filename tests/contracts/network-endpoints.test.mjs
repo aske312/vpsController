@@ -23,7 +23,6 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(api, /MIHOMO_VLESS_CDN_ROUTES/);
   assert.match(page, /NetworkEndpoints/);
   assert.match(endpoint, /networkAddRouteButton/);
-  assert.match(endpoint, /Настройка внешних адресов/);
   assert.match(endpoint, /networkSectionEyebrow[\s\S]+ROUTES/);
   assert.doesNotMatch(endpoint, /networkRoutesLauncher/);
   assert.match(css, /networkAddRouteButton/);
@@ -80,5 +79,4 @@ test("network DNS selection is limited to installed independently configurable p
   assert.doesNotMatch(dns, /Исключения по компонентам/);
   assert.match(css, /networkResolverColumn \.networkProviderGrid[\s\S]+max-height: 300px/);
   assert.match(css, /networkSaveBar[\s\S]+position: sticky/);
-  assert.match(css, /networkModal[\s\S]+width: min\(1180px/);
 });

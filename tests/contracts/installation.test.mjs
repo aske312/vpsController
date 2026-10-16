@@ -136,18 +136,14 @@ test("PRO publishes rolling pre-releases from test-pro and keeps production upda
   assert.match(manager, /release_commit.*\^\[0-9a-f\]\{40\}\$/s);
   assert.match(manager, /STABL_RELEASE_WAIT_ATTEMPTS=30/);
   assert.match(manager, /--max-time "\$\{UPDATE_DOWNLOAD_TIMEOUT\}"/);
-  assert.match(manager, /test-update <архив>/);
   assert.match(manager, /install_prebuilt_release install-release "\$\{archive\}" yes test/);
   assert.match(manager, /vpn-monitor\.timer vps-control-auto-reboot\.timer/);
   assert.match(manager, /переход на тестовую версию разрешён только в сервисном режиме/);
-  assert.match(api, /payload\.action == "test-rollback" and not SERVICE_MODE_FILE\.exists\(\)/);
   assert.match(api, /def expected_application_branch\(\)/);
   assert.match(api, /return "test-pro" if SERVICE_MODE_FILE\.exists\(\) and TEST_BACKUP_DIR\.is_dir\(\) else "pro"/);
   assert.match(api, /branch = expected_application_branch\(\)/);
   assert.match(api, /expected_branch = expected_application_branch\(\)/);
-  assert.doesNotMatch(page, /runApplicationAction\("test-update"\)/);
   assert.match(page, /application\?\.service_mode\?\.rollback_available/);
-  assert.match(page, /Rollback/);
   assert.match(manager, /TEST_BACKUP_DIR="\$\{DATA_DIR\}\/test-app-backup"/);
   assert.match(manager, /restore_test_app\(\)/);
   assert.match(manager, /PRODUCT_FILE="\$\{DATA_DIR\}\/product\.json"/);

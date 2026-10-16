@@ -9,6 +9,7 @@ import type {
 } from "../../shared/types/control-plane";
 import { checkNetworkEndpoint, type NetworkRequest } from "./network-api";
 import { endpointCheckForConsumer } from "../../shared/lib/network-readiness";
+import { NetworkRelayForm, type RelayControl } from "./network-relays";
 
 export function NetworkEndpoints({
   request,
@@ -22,7 +23,7 @@ export function NetworkEndpoints({
   onRouteListChange,
   onSave,
   onReset,
-  onAddRelay,
+  relay,
 }: {
   request: NetworkRequest;
   draft: NetworkEndpointSettings;
@@ -35,10 +36,11 @@ export function NetworkEndpoints({
   onRouteListChange: (key: keyof NetworkEndpointSettings, values: string[]) => void;
   onSave: () => void;
   onReset: () => void;
-  onAddRelay: () => void;
+  relay: RelayControl;
 }) {
-  const [open, setOpen] = useState(false);
+  const [opened, setOpen] = useState(false);
   const [addresses, setAddresses] = useState(false);
+  const open = opened && (addresses || relay.dialog && relay.embedded);
   const generation = useRef(0);
   const inFlight = useRef(false);
   useEffect(() => () => { generation.current++; }, []);
@@ -52,7 +54,7 @@ export function NetworkEndpoints({
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [open, hasChanges]);
-  const close = () => { if (hasChanges) setDiscard(true); else { generation.current++; setOpen(false); } };
+  const close = () => { if (!addresses) relay.close(); else if (hasChanges) setDiscard(true); else { generation.current++; setOpen(false); } };
   const dialogRef = useDialogFocus(open, close);
   const [checking, setChecking] = useState<string | null>(null);
   const [consumerIds, setConsumerIds] = useState<Record<string, string>>({});
@@ -138,7 +140,7 @@ export function NetworkEndpoints({
       <button
         type="button"
         className="networkAddRouteButton"
-        onClick={() => { generation.current++; setChecks(initialChecks || {}); setConsumerIds({}); setAddresses(hasChanges); setOpen(true); }}
+        onClick={() => { generation.current++; setChecks(initialChecks || {}); setConsumerIds({}); setAddresses(hasChanges); if (!hasChanges) relay.openHost(undefined, true); setOpen(true); }}
       >
         Добавить маршрут
       </button>
@@ -161,9 +163,9 @@ export function NetworkEndpoints({
             <header className="networkSectionHeading networkModalHeader">
               <div>
                 <p className="eyebrow networkSectionEyebrow">ROUTES</p>
-                <h2 id="network-endpoints-title">{addresses ? "Настройка внешних адресов" : "Добавить маршрут"}</h2>
+                <h2 id="network-endpoints-title">Добавить маршрут</h2>
                 <p>
-                  {addresses ? "Адреса попадут в новые конфигурации клиентов после сохранения. Удаление маршрутов доступно прямо в таблице ROUTES." : "Выберите способ подключения внешнего адреса."}
+                  {addresses ? "CDN / ECH: домен для новых клиентских конфигураций." : "Relay: внешний узел с IP или доменом для клиентов."}
                 </p>
                 {addresses && knownCdnDomains.length > 0 && <div className="networkKnownRoutes"><span>Обнаруженные CDN адреса</span><div>{knownCdnDomains.map((domain) => <code key={domain}>{domain}</code>)}</div><small>Активным общим адресом для новых конфигураций остаётся значение в поле CDN / ECH.</small></div>}
               </div>
@@ -176,10 +178,12 @@ export function NetworkEndpoints({
                 ×
               </button>
             </header>
-            {!addresses && <div className="networkRouteChoices">
-              <button type="button" disabled={busy} onClick={() => { setOpen(false); onAddRelay(); }}><strong>Подключить Relay Agent</strong><span>Сохранить узел и IP/домен для выбора в протоколах. Пересылка настраивается автоматически.</span></button>
-              <button type="button" onClick={() => setAddresses(true)}><strong>CDN / ECH</strong><span>Настроить домен CDN для защищённых подключений.</span></button>
-            </div>}
+            <div className="networkRouteChoices" aria-label="Тип маршрута">
+              <button type="button" aria-pressed={!addresses} disabled={addresses && hasChanges} onClick={() => { if (!addresses) return; relay.openHost(undefined, true); setAddresses(false); }}><strong>Relay · IP / домен</strong><span>Relay Agent · TCP и UDP</span></button>
+              <button type="button" aria-pressed={addresses} disabled={!addresses && relay.changed} onClick={() => { setAddresses(true); relay.resetDialog(); }}><strong>CDN / ECH · домен</strong><span>Домен и proxy у CDN-провайдера</span></button>
+            </div>
+            {(addresses ? hasChanges : relay.changed) && <p className="networkRouteTypeHint">Сохраните или отмените правки перед сменой типа маршрута.</p>}
+            {!addresses && <NetworkRelayForm relay={relay} />}
             {addresses && <>
             <div className="networkEndpointGrid">
               {fields.filter((field) => field.kind === "cdn").map((field) => {
@@ -239,7 +243,7 @@ export function NetworkEndpoints({
                     </div>
                     {!!result?.consumers?.length && <label><span>Подключение для проверки</span><select aria-label={`Подключение ${field.label}`} value={consumerIds[field.key] || ""} disabled={Boolean(checking)} onChange={(event) => setConsumerIds((current) => ({ ...current, [field.key]: event.target.value }))}><option value="">Первое совместимое подключение</option>{result.consumers.map((consumer) => <option key={consumer.id} value={consumer.id}>{consumer.label} · {consumer.id}</option>)}</select></label>}
                     <small>{field.help}</small>
-                    <small className="networkEndpointDnsHint">DNS: {field.kind === "cdn" ? "A/AAAA на origin VPS; для CDN включите proxy у DNS-провайдера." : field.kind === "tls_relay" ? "A/AAAA на внешний TLS relay; порт протокола должен быть проброшен на relay." : "A/AAAA на внешний UDP relay; нужный UDP-порт должен быть проброшен на relay."}</small>
+                    <small className="networkEndpointDnsHint">DNS: A/AAAA на IP этого VPS, proxy включён у CDN-провайдера. IP вместо домена не поддерживается.</small>
                     {result && (
                       <em className={`networkEndpointCheck ${result.status}`}>
                         {result.message}
@@ -270,36 +274,13 @@ export function NetworkEndpoints({
                 );
               })}
             </div>
-            <div className="networkEndpointGuide">
-              <strong>Как это работает</strong>
-              <div>
-                <b>1 · Внешний сервер</b>
-                <span>
-                  Укажите домен CDN. Его DNS-запись должна указывать на origin VPS,
-                  с включённым proxy у CDN-провайдера.
-                </span>
-              </div>
-              <div>
-                <b>2 · Проверка</b>
-                <span>
-                  Проверка выполняется с VPS панели и не изменяет удалённый
-                  сервер.
-                </span>
-              </div>
-              <div>
-                <b>3 · Клиенты</b>
-                <span>
-                  Порт берётся из настроек протокола, а адрес подписки
-                  обновляется после сохранения.
-                </span>
-              </div>
-            </div>
             {pendingAddress && <p role="status">Нажмите «Добавить адрес» для заполненного дополнительного поля или очистите его перед сохранением.</p>}
             <div className="networkEndpointFooter">
               <p>
                 CDN/ECH требует домен. Relay подключается отдельно через Agent;
                 его адрес выбирается в настройках протокола.
               </p>
+              <button type="button" onClick={close}>Отмена</button>
               <button
                 type="button"
                 className="networkPrimaryButton"

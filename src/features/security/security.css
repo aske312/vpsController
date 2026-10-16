@@ -235,7 +235,7 @@
 
 .securityDiagnosticsStats strong{color:#e7f0f5;font:800 13px var(--font-mono),monospace}
 
-.securityDiagnosticsGrid { display:grid; grid-template-columns:minmax(0,.88fr) minmax(0,1.12fr); align-items:start; gap:10px; padding:10px; }
+.securityDiagnosticsGrid { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; gap:10px; padding:10px; }
 
 .securityListeners,.securityLogs { min-width:0; overflow:hidden; border:1px solid rgba(91,116,141,.12); border-radius:11px; background:rgba(3,10,16,.34); }
 

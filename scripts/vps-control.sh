@@ -82,6 +82,7 @@ PRODUCT_EDITION="pro"
 PRODUCTION_BRANCH="pro"
 PRODUCTION_RELEASE_TAG="pro-latest"
 TEST_BRANCH="test-pro"
+TEST_RELEASE_TAG="pro-test-latest"
 ACTION_FILE="${DATA_DIR}/application-action.json"
 RECOVERY_DIR="${DATA_DIR}/recovery"
 SAFE_UPDATE_REPORT="${RECOVERY_DIR}/safe-update-report.txt"
@@ -2941,20 +2942,27 @@ install_prebuilt_release() {
 }
 
 update_prebuilt_branch() {
-  local branch="$1" release_tag="$2"
+  local branch="$1" release_tag="$2" expected_channel="${3:-production}" preserve_previous="${4:-no}"
   local remote="${REMOTE_URL:-https://github.com/aske312/vpsController.git}"
-  local latest current repository_path release_url archive release_commit release_revision ready attempt
+  local latest current current_channel repository_path release_url archive release_commit release_revision ready attempt
 
   if [[ "${remote}" =~ ^git@github\.com:(.+)$ ]]; then
     remote="https://github.com/${BASH_REMATCH[1]}"
   elif [[ "${remote}" =~ ^ssh://git@github\.com/(.+)$ ]]; then
     remote="https://github.com/${BASH_REMATCH[1]}"
   fi
-  [[ "${branch}" == "${PRODUCTION_BRANCH}" ]] || die "готовые релизы публикуются только из ветки ${PRODUCTION_BRANCH}."
+  if [[ "${expected_channel}" == "test" ]]; then
+    [[ -r "${SERVICE_MODE_FILE}" && "${branch}" == "${TEST_BRANCH}" && "${release_tag}" == "${TEST_RELEASE_TAG}" ]] \
+      || die "тестовый релиз разрешён только в сервисном режиме из ветки ${TEST_BRANCH}."
+  else
+    [[ "${expected_channel}" == "production" && "${branch}" == "${PRODUCTION_BRANCH}" && "${release_tag}" == "${PRODUCTION_RELEASE_TAG}" ]] \
+      || die "production-релиз разрешён только из ветки ${PRODUCTION_BRANCH}."
+  fi
   latest="$(git ls-remote "${remote}" "refs/heads/${branch}" 2>/dev/null | awk 'NR == 1 {print $1}')"
   [[ "${latest}" =~ ^[0-9a-f]{40}$ ]] || die "не удалось получить актуальную ревизию ветки ${branch}."
   current="$(cat "${INSTALL_DIR}/.build-commit" 2>/dev/null || true)"
-  if [[ -n "${current}" && "${latest}" == "${current}" ]]; then
+  current_channel="$(release_metadata_value "${INSTALL_DIR}/.prebuilt-release" channel 2>/dev/null || true)"
+  if [[ -n "${current}" && "${latest}" == "${current}" && "${current_channel}" == "${expected_channel}" ]]; then
     ok "установлена актуальная версия ветки ${branch} (${current})."
     return 0
   fi
@@ -2996,7 +3004,7 @@ update_prebuilt_branch() {
   [[ "${release_commit}" =~ ^[0-9a-f]{40}$ && "${latest}" == "${release_commit}" ]] \
     || die "подготовленный релиз не соответствует актуальной ревизии ветки ${branch}."
 
-  install_prebuilt_release install-release "${archive}"
+  install_prebuilt_release install-release "${archive}" "${preserve_previous}" "${expected_channel}"
   ok "приложение обновлено до ${branch} ${release_commit}."
   write_action_status "succeeded" 100 "Обновление установлено и проверено"
 }
@@ -3008,11 +3016,16 @@ update_app() {
 update_test_app() {
   local archive="${2:-}"
   [[ -r "${SERVICE_MODE_FILE}" ]] || die "переход на тестовую версию разрешён только в сервисном режиме."
-  [[ -n "${archive}" ]] || die "укажите путь к локальному test-архиву."
-  if [[ -d "${TEST_BACKUP_DIR}" ]]; then
-    install_prebuilt_release install-release "${archive}" no test
+  if [[ -n "${archive}" ]]; then
+    if [[ -d "${TEST_BACKUP_DIR}" ]]; then
+      install_prebuilt_release install-release "${archive}" no test
+    else
+      install_prebuilt_release install-release "${archive}" yes test
+    fi
+  elif [[ -d "${TEST_BACKUP_DIR}" ]]; then
+    update_prebuilt_branch "${TEST_BRANCH}" "${TEST_RELEASE_TAG}" test no
   else
-    install_prebuilt_release install-release "${archive}" yes test
+    update_prebuilt_branch "${TEST_BRANCH}" "${TEST_RELEASE_TAG}" test yes
   fi
 }
 
@@ -3568,8 +3581,8 @@ usage() {
   stop             остановить панель
   restart          перезапустить панель
   update           обновить PRO проверенным production-релизом ветки pro
-  test-update <архив>
-                   установить локальную test-сборку PRO (только сервисный режим)
+  test-update [архив]
+                   обновить PRO из test-pro или локального test-архива (сервисный режим)
   test-rollback    вернуться к production-версии, сохранённой перед test-сборкой
   install-release <архив>
                    вручную установить заранее собранный Linux-релиз без Docker, npm и apt

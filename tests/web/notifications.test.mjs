@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createNotificationStore } from "../../src/shared/notifications/store.ts";
 import { systemOperationNotification } from "../../src/control-panel/system-operation.ts";
+import { notificationDuration, notificationPresentation, notificationText, orderedNotifications } from "../../src/shared/notifications/operation-presentation.ts";
 
 const operation = (id, state = "running", message = id) => ({ id, state, message, source: "test", title: id, kind: "operation" });
 
@@ -49,15 +50,50 @@ test("rollback control is attached only to cancellable long actions", () => {
   assert.equal(reboot.onCancel, undefined);
 });
 
-test("operation details are shown only on failure", () => {
+test("reported stages and results survive polling instead of being replaced by generic summaries", () => {
   const store = createNotificationStore();
   for (const state of ["running", "unknown", "success"]) {
     store.upsert(operation("one", state, "Verbose execution details"));
-    assert.doesNotMatch(store.getSnapshot()[0].message, /Verbose/);
+    assert.equal(store.getSnapshot()[0].message, "Verbose execution details");
   }
   const failed = systemOperationNotification({ unit: "one", state: "failed", message: "Actual error details" }, "Command", false);
   store.upsert(failed);
   assert.equal(store.getSnapshot().find((item) => item.id === failed.id).message, "Actual error details");
+});
+
+test("operation presentation uses reported steps and never infers readiness from percentages", () => {
+  const source = { kind: "operation", state: "running", message: "Загрузка подготовленного релиза ветки test-pro", progress: 31 };
+  const value = notificationPresentation(source);
+  assert.equal(value.summary, "Загрузка файлов");
+  assert.equal(value.details, source.message);
+  assert.equal(value.progress, 31);
+  assert.equal(notificationPresentation({ ...source, message: "Ждём ответ от внешнего узла", progress: 99 }).summary, "Ждём ответ от внешнего узла");
+  for (const state of ["unknown", "error", "cancelled", "success"]) assert.equal(notificationPresentation({ ...source, state }).progress, undefined);
+  assert.equal(notificationPresentation({ ...source, state: "unknown" }).label, "UNKNOWN");
+  assert.equal(notificationPresentation({ ...source, message: "Ошибка проверки: нет headers" }).summary, "Ошибка проверки: нет headers");
+});
+
+test("server timestamps survive later polls and terminal duration stops growing", () => {
+  let now = 10000;
+  const store = createNotificationStore(() => now);
+  const value = systemOperationNotification({ id: "clock", state: "running", started_at: "1970-01-01T00:00:05Z", message: "Проверяем релиз" }, "Update", true);
+  store.upsert(value);
+  assert.equal(notificationDuration(store.getSnapshot()[0], now), "5 с");
+  store.upsert({ ...operation(value.id), message: "Перезапуск" });
+  assert.equal(store.getSnapshot()[0].startedAt, 5000);
+  now = 70000; store.finishOperation({ ...operation(value.id, "success"), message: "Релиз проверен" });
+  assert.equal(notificationDuration(store.getSnapshot()[0], 999999), "1 мин 5 с");
+  assert.equal(notificationDuration({ createdAt: 5000, startedAt: 6000 }, 1000), "0 с");
+});
+
+test("pending operations take precedence without mutating the store order or losing messages", () => {
+  const store = createNotificationStore();
+  store.upsert(operation("running")); store.upsert(operation("unknown", "unknown"));
+  store.notify("form", "Form", "error", "Ошибка формы");
+  const initial = store.getSnapshot();
+  assert.deepEqual(orderedNotifications(initial).map(item => item.id), ["unknown", "running", "message:1"]);
+  assert.equal(store.getSnapshot(), initial);
+  assert.equal(notificationText("\u001b[31mОшибка\u001b[0m\r\nподробности\u0000"), "Ошибка\nподробности");
 });
 
 test("parallel commands and form errors retain independent cards", () => {

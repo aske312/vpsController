@@ -4235,7 +4235,7 @@ def application_status(_: None = Depends(require_token)) -> dict:
 
 @app.post("/api/application/action")
 def application_action(payload: ApplicationAction, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias="X-Operation-ID")) -> dict:
-    if payload.action == "test-rollback" and not SERVICE_MODE_FILE.exists():
+    if payload.action in ("test-update", "test-rollback") and not SERVICE_MODE_FILE.exists():
         raise HTTPException(status_code=409, detail="Test version requires active service mode")
     bundled_command = INSTALL_DIR / "scripts" / "vps-control.sh"
     command = (["/bin/bash", str(bundled_command), payload.action] if bundled_command.exists() else [CONTROL_COMMAND, payload.action])

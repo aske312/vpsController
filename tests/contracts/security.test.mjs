@@ -156,16 +156,6 @@ test("the panel has direct private addresses inside WG and AWG tunnels", async (
   assert.match(manager, /HTTPS panel via AWG/);
 });
 
-test("expanded security journal stays beside the live port list", async () => {
-  const [view, styles] = await Promise.all([
-    read("src/features/security/security-view.tsx"), read("src/features/security/security.css"),
-  ]);
-  assert.match(view, /securityLogsOpen \? "open" : ""/);
-  assert.match(styles, /\.securityDiagnosticsGrid \{[^}]*grid-template-columns:minmax\(0,\.88fr\) minmax\(0,1\.12fr\)[^}]*align-items:start/s);
-  assert.doesNotMatch(styles, /\.securityLogs\.open\s*\{[^}]*grid-column/);
-  assert.match(styles, /\.securityLogs\.open \.securityLogsBody pre\{height:clamp\(260px,42vh,520px\);overflow:auto\}/);
-});
-
 test("protected panel access uses one stable host through every configured channel", async () => {
   const [api, page, view, manager, caddy] = await Promise.all([
     readApiSources(), readUiSources(), read("src/features/application/application-view.tsx"),

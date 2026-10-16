@@ -127,8 +127,8 @@
 .servicesOperationsGrid {
   min-width:0;
   display:grid;
-  grid-template-columns:minmax(0,1.45fr) minmax(310px,.55fr);
-  grid-template-areas:'maintenance logging' 'metrics metrics';
+  grid-template-columns:minmax(0,1fr);
+  grid-template-areas:'logging' 'metrics' 'history' 'maintenance';
   gap:10px;
   align-items:stretch;
 }
@@ -136,21 +136,27 @@
 .servicesMaintenance { grid-area:maintenance; padding:16px 18px 18px; }
 .servicesLog { grid-area:logging; display:flex; flex-direction:column; gap:14px; padding:16px; }
 .servicesMetrics { grid-area:metrics; }
-.servicesMetrics .servicesLogControls { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); align-items:start; }
+.servicesHistory { grid-area:history; }
+.servicesHistory p { margin:0; color:#91a6b5; font-size:11px; line-height:1.5; }
+.servicesHistoryFields { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.servicesSettingsHint { color:#839aa8; font-size:11px; line-height:1.5; }
+.servicesMetrics .servicesLogControls { grid-template-columns:minmax(180px,1.2fr) repeat(4,minmax(0,1fr)); align-items:start; }
 .servicesMetrics .servicesLogControls > small,.servicesMetrics .servicesLogActions { grid-column:1/-1; }
 .operationsTitle h3 { margin:1px 0 4px; color:#edf5f9; font-size:17px; }
 .operationsTitle small { color:#718796; font-size:11px; line-height:1.4; }
 .servicesMaintenanceHead { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:12px; padding-bottom:11px; border-bottom:1px solid rgba(91,116,141,.10); }
 
-.servicesLogControls { min-width:0; display:grid; grid-template-columns:1fr; gap:10px; }
+.servicesLogControls { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; align-items:center; }
 .opsField { min-width:0; display:grid; gap:5px; }
 .opsField > span:first-child { color:#7d92a2; font-size:9px; font-weight:750; letter-spacing:.09em; text-transform:uppercase; }
 .opsField > small { color:#6f8595; font-size:10px; }
+.opsField > span > small { display:block; margin-top:4px; color:#839aa8; font-size:11px; font-weight:400; text-transform:none; letter-spacing:normal; }
 .opsField select,.opsField input:not([type='checkbox']) { width:100%; min-width:0; height:38px; }
 .opsField.toggle { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-.servicesLogControls .opsField { min-height:62px; padding:10px 12px; border:1px solid rgba(91,116,141,.12); border-radius:11px; background:rgba(3,10,16,.35); }
-.servicesLogActions { display:flex; gap:8px; margin-top:auto; }
-.servicesLogActions button { flex:1 1 0; min-height:36px; }
+.servicesLogControls .opsField { min-height:62px; }
+.servicesLogActions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:auto; padding-top:10px; border-top:1px solid rgba(91,116,141,.12); }
+.servicesLogActions button { min-height:36px; padding:8px 12px; }
+.serviceToggle input:focus-visible + span { outline:2px solid var(--cyan); outline-offset:3px; }
 
 .servicePrimary,.serviceDanger {
   min-height:36px;
@@ -214,8 +220,8 @@
 
 @media (max-width:1180px) {
   .servicesRegistry { width:72%; min-width:0; }
-  .servicesOperationsGrid { grid-template-columns:1fr; grid-template-areas:'maintenance' 'logging' 'metrics'; }
-  .servicesLogControls { grid-template-columns:150px minmax(220px,1fr) auto; align-items:center; }
+  .servicesMetrics .servicesLogControls { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .servicesHistoryFields { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .servicesLogActions { margin-top:0; }
 }
 
@@ -242,5 +248,7 @@
   .servicesRegistry { padding:7px; }
   .serviceActions { flex-wrap:wrap; }
   .servicesMaintenance,.servicesLog { padding:14px; }
+  .servicesHistoryFields,.servicesMetrics .servicesLogControls { grid-template-columns:1fr; }
+  .servicesLogActions { justify-content:flex-start; }
   .maintenanceControls,.maintenanceControls.weekly,.maintenanceRuntime { grid-template-columns:1fr; }
 }

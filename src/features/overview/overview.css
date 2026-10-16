@@ -243,51 +243,42 @@
 
 .overviewComponentCounters b { color:#d6e4ea; font-size:10px; }
 
-.overviewComponentRegistry { margin-top:11px; overflow:hidden; border:1px solid rgba(105,135,160,.13); border-radius:11px; background:rgba(4,11,17,.24); }
+.overviewComponentRegistry { margin-top:12px; }
+.overviewComponentRegistry > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:8px; }
+.overviewComponentRow { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) auto; align-content:start; align-items:start; gap:10px; padding:12px; border:1px solid rgba(105,135,160,.16); border-radius:10px; background:rgba(4,11,17,.34); }
 
-.overviewComponentRegistry > header,
-.overviewComponentRow { display:grid; grid-template-columns:minmax(220px,1.4fr) minmax(150px,.8fr) 112px minmax(130px,.55fr); align-items:center; gap:12px; }
-
-.overviewComponentRegistry > header { min-height:30px; padding:0 12px; border-bottom:1px solid rgba(105,135,160,.12); color:#587080; font:700 7px/1 var(--font-mono); letter-spacing:.09em; }
-
-.overviewComponentRow { min-height:62px; padding:8px 12px; border-bottom:1px solid rgba(105,135,160,.09); }
-
-.overviewComponentRow:last-child { border-bottom:0; }
-
-.overviewComponentIdentity { min-width:0; display:grid; grid-template-columns:38px minmax(0,1fr); align-items:center; gap:9px; }
+.overviewComponentIdentity { min-width:0; display:grid; grid-template-columns:30px minmax(0,1fr); align-items:center; gap:8px; }
+.overviewComponentIdentity .overviewProtocolMark { width:30px; height:30px; }
 
 .overviewComponentIdentity p,
 .overviewComponentVersion { min-width:0; display:grid; gap:3px; margin:0; }
 
 .overviewComponentIdentity b,
-.overviewComponentVersion b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#d8e6ec; font:650 10px/1.2 var(--font-sans); }
+.overviewComponentVersion b { overflow-wrap:anywhere; color:#d8e6ec; font:650 12px/1.3 var(--font-sans); }
 
 .overviewComponentIdentity small,
 .overviewComponentVersion small,
-.overviewComponentAction small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#758b99; font:500 8px/1.3 var(--font-sans); }
+.overviewComponentAction small { overflow-wrap:anywhere; color:#839aa8; font:500 10px/1.4 var(--font-sans); }
+.overviewComponentVersion { max-width:120px; text-align:right; }
 
-details.overviewComponentState { min-width:0; justify-self:stretch; padding:0; border:0; border-radius:6px; background:transparent; color:#8fa4b1; font:500 11px/1.4 var(--font-sans); }
+.overviewComponentState { grid-column:1/-1; min-width:0; color:#8fa4b1; font:500 11px/1.4 var(--font-sans); }
 .overviewComponentState.online { color:var(--green); }
 .overviewComponentState.running,.overviewComponentState.available { color:var(--cyan); }
 .overviewComponentState.warning,.overviewComponentState.progress { color:var(--amber); }
 .overviewComponentState.error { color:var(--red); }
-.overviewComponentState > summary { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; padding:5px 0; cursor:pointer; list-style:none; }
-.overviewComponentState > summary::-webkit-details-marker { display:none; }
-.overviewComponentState > summary:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; border-radius:4px; }
-.overviewComponentState > summary > span:first-child { min-width:0; }
-.overviewComponentState > summary b { display:flex; align-items:center; gap:6px; font-weight:650; }
-.overviewComponentState > summary i { flex:none; width:6px; height:6px; border-radius:50%; background:currentColor; }
-.overviewComponentState > summary small { display:block; margin-top:3px; color:#8fa4b1; font-size:10px; line-height:1.4; }
-.overviewComponentDisclosure { flex:none; color:#8fa4b1; transition:transform .15s; }
-.overviewComponentState[open] .overviewComponentDisclosure { transform:rotate(180deg); }
-.overviewComponentState dl { display:grid; gap:8px; margin:6px 0 0; padding:10px 0 3px; border-top:1px solid rgba(106,137,160,.15); }
-.overviewComponentState dl > div { display:grid; grid-template-columns:66px minmax(0,1fr); gap:8px; }
+.overviewComponentSummary b { display:flex; align-items:center; gap:6px; font-weight:650; }
+.overviewComponentSummary i { flex:none; width:6px; height:6px; border-radius:50%; background:currentColor; }
+.overviewComponentSummary small { display:block; margin-top:3px; color:#8fa4b1; font-size:11px; line-height:1.4; overflow-wrap:anywhere; }
+.overviewComponentState dl { display:grid; gap:5px; margin:8px 0 0; padding-top:8px; border-top:1px solid rgba(106,137,160,.15); }
+.overviewComponentState dl > div { display:grid; grid-template-columns:64px minmax(0,1fr); gap:6px; }
 .overviewComponentState dt { color:#839aa8; font-size:10px; }
 .overviewComponentState dd { min-width:0; margin:0; color:#c4d5df; }
-.overviewComponentState dd b { font-size:10px; font-weight:550; }
-.overviewComponentState dd small { display:block; margin-top:2px; color:#839aa8; font-size:10px; line-height:1.4; overflow-wrap:anywhere; }
+.overviewComponentState dd b { font-size:11px; font-weight:550; }
+.overviewComponentState dd small { color:#839aa8; font-size:10px; line-height:1.4; overflow-wrap:anywhere; }
+.overviewComponentState dd small::before { content:' · '; }
 
-.overviewComponentAction { display:flex; justify-content:flex-end; }
+.overviewComponentAction { grid-column:1/-1; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; border-top:1px solid rgba(106,137,160,.1); padding-top:8px; }
+.overviewComponentAction > div { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; }
 
 .overviewComponentAction button { min-width:104px; min-height:32px; padding:0 10px; border:1px solid rgba(100,184,255,.22); border-radius:8px; background:rgba(100,184,255,.08); color:#79baf0; font:650 9px/1 var(--font-sans); cursor:pointer; }
 
@@ -341,12 +332,7 @@ details.overviewComponentState { min-width:0; justify-self:stretch; padding:0; b
 .overviewComponents { padding:11px; }
 .overviewComponents > header { align-items:flex-start; }
 .overviewComponentCounters { display:none; }
-.overviewComponentRegistry > header { display:none; }
-.overviewComponentRow { grid-template-columns:minmax(0,1fr) auto; }
-.overviewComponentIdentity { grid-column:1; }
-.overviewComponentAction { grid-column:2; grid-row:1; }
-.overviewComponentVersion { grid-column:1; }
-.overviewComponentState { grid-column:2; }
+.overviewComponentRow { padding:10px; }
 }
 
 @media (max-width:470px) {
