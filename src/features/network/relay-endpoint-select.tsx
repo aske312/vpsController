@@ -21,9 +21,9 @@ export function RelayEndpointSelect({ request, value, onChange, disabled = false
   return <label className="relayEndpointSelector"><span>Адрес подключения</span>
     <select value={value} disabled={disabled || failed || Boolean(unavailable) || !status || status.pending} onChange={event => onChange(event.target.value)}>
       <option value="">Напрямую к этому VPS</option>
-      {value && !known && <option value={value}>Сохранённый Relay · состояние неизвестно</option>}
+      {value && !known && <option value={value}>{status && !failed ? "Relay недоступен · узел удалён" : "Сохранённый Relay · состояние неизвестно"}</option>}
       {status?.hosts.map(host => <option key={host.id} value={host.id} disabled={host.state !== "connected"}>{host.client_address || new URL(host.agent_url).hostname} · {host.name}{host.state !== "connected" ? " · UNKNOWN" : ""}</option>)}
     </select>
-    <small>{unavailable || (failed ? "Не удалось получить Relay. Сохранённый выбор не изменён; повторно откройте настройки после восстановления связи." : !status ? "Получаем подключённые Relay…" : status.pending ? "Сначала подтвердите результат предыдущего изменения Relay в ROUTES." : value ? `${transport ? transport+" · " : ""}Пересылка и внешний порт будут настроены автоматически при сохранении.` : "Подключённые в Сеть → ROUTES узлы доступны здесь по IP/домену.")}</small>
+    <small>{unavailable || (failed ? "Не удалось получить Relay. Сохранённый выбор не изменён; повторно откройте настройки после восстановления связи." : !status ? "Получаем подключённые Relay…" : status.pending ? "Сначала подтвердите результат предыдущего изменения Relay в ROUTES." : value && !known ? "Узел удалён. Настройки сохранены; выберите доступный Relay для восстановления подключения." : value ? `${transport ? transport+" · " : ""}Пересылка и внешний порт будут настроены автоматически при сохранении.` : "Подключённые в Сеть → ROUTES узлы доступны здесь по IP/домену.")}</small>
   </label>;
 }
