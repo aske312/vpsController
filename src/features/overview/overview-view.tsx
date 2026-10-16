@@ -425,7 +425,7 @@ export function OverviewDashboard({
           <TaskGraph
             label="CPU"
             value={overview?.resources.cpu_percent == null ? "—" : `${overview.resources.cpu_percent.toFixed(0)}%`}
-            detail={`load ${overview?.resources.load1?.toFixed(2) ?? "—"}  ${overview?.resources.cpu_count ?? "—"} cores`}
+            detail={`Load ${overview?.resources.load1?.toFixed(2) ?? "—"} · ${overview?.resources.cpu_count ?? "—"} CPU`}
             series={[{ values: chartHistory.load, tone: "blue" }]}
             resolution={resolution}
             maxValue={100}
@@ -434,7 +434,7 @@ export function OverviewDashboard({
           <TaskGraph
             label="MEMORY"
             value={memUsed == null ? "—" : `${memUsed.toFixed(0)}%`}
-            detail={`${bytes(memoryUsedBytes)} / ${bytes(memoryTotal)}  free ${bytes(memoryFree)}`}
+            detail={`${bytes(memoryUsedBytes)} / ${bytes(memoryTotal)} · своб. ${bytes(memoryFree)}`}
             series={[{ values: chartHistory.memory, tone: "green" }]}
             resolution={resolution}
             maxValue={100}
@@ -443,7 +443,7 @@ export function OverviewDashboard({
           <TaskGraph
             label="NETWORK"
             value={networkRate.rx == null || networkRate.tx == null ? "—" : `↓ ${bytes(networkRate.rx)}/с  ↑ ${bytes(networkRate.tx)}/с`}
-            detail={`interface total ↓ ${bytes(networkRx)}  ↑ ${bytes(networkTx)}`}
+            detail={`Всего: ↓ ${bytes(networkRx)} · ↑ ${bytes(networkTx)}`}
             series={[
               { values: chartHistory.rx, tone: "blue" },
               { values: chartHistory.tx, tone: "green" },
@@ -457,14 +457,14 @@ export function OverviewDashboard({
         </div>
 
         <div className="nodeLiveFacts">
-          <FactCard label="DISK USED" value={diskUsed == null ? "—" : `${diskUsed.toFixed(0)}%`} detail={`${bytes(diskUsedBytes)} / ${bytes(diskTotal)}  free ${bytes(diskFree)}`} />
-          <FactCard label="UPTIME" value={uptime(overview?.server.uptime_s)} detail={`${overview?.server.city || "Город не определён"}  ${overview?.server.country || "—"}`} />
-          <FactCard label="LOAD 1M" value={overview?.resources.load1?.toFixed(2) ?? "—"} detail={`${overview?.resources.cpu_count ?? "—"} CPU cores`} />
-          <FactCard label="TRAFFIC TOTAL" value={bytes(networkTotal)} detail={`↓ ${bytes(networkRx)}  ↑ ${bytes(networkTx)}`} />
-          <FactCard label="DIRECT CLIENTS" value={`${clients.length}`} detail={`${stableDirectClients} stable  ${attentionDirectClients} attention  ${offlineDirectClients} offline`} />
-          <FactCard label="MIHOMO CREDENTIALS" value={`${credentialsCount ?? (mihomoInstalled ? "—" : 0)}`} detail={`${profileCount} profiles  ${mihomoProfiles?.filter((profile) => profile.connections.length > 0).length ?? mihomoStatus?.profiles_in_use ?? (mihomoInstalled ? "—" : 0)} in use`} />
-          <FactCard label="ROUTES IN USE" value={`${routesInUseLabel}`} detail={`${routesReadyLabel} ready / idle`} />
-          <FactCard label="FREE MEMORY" value={bytes(memoryFree)} detail={memUsed == null ? "Unknown" : `${memUsed.toFixed(0)}% currently used`} />
+          <FactCard label="Диск" value={diskUsed == null ? "—" : `${diskUsed.toFixed(0)}%`} detail={`${bytes(diskUsedBytes)} / ${bytes(diskTotal)} · своб. ${bytes(diskFree)}`} />
+          <FactCard label="Время работы" value={uptime(overview?.server.uptime_s)} detail={`${overview?.server.city || "Город не определён"}, ${overview?.server.country || "—"}`} />
+          <FactCard label="Load · 1 мин" value={overview?.resources.load1?.toFixed(2) ?? "—"} detail={`${overview?.resources.cpu_count ?? "—"} CPU`} />
+          <FactCard label="Трафик · всего" value={bytes(networkTotal)} detail={`↓ ${bytes(networkRx)} · ↑ ${bytes(networkTx)}`} />
+          <FactCard label="Direct · клиенты" value={`${clients.length}`} detail={`${stableDirectClients} норма · ${attentionDirectClients} замеч. · ${offlineDirectClients} офлайн`} />
+          <FactCard label="Mihomo · доступы" value={`${credentialsCount ?? (mihomoInstalled ? "—" : 0)}`} detail={`Профили: ${profileCount} · используются: ${mihomoProfiles?.filter((profile) => profile.connections.length > 0).length ?? mihomoStatus?.profiles_in_use ?? (mihomoInstalled ? "—" : 0)}`} />
+          <FactCard label="Маршруты" value={`${routesInUseLabel}`} detail={`${routesReadyLabel} готовы / ожидают`} />
+          <FactCard label="RAM · свободно" value={bytes(memoryFree)} detail={memUsed == null ? "Нет данных" : `${memUsed.toFixed(0)}% занято`} />
         </div>
       </section>
 
@@ -546,7 +546,7 @@ function TaskGraph({
           {xTicks.map((ratio) => {
             const seconds = sampleWindow * ratio;
             const unit = seconds >= 86400 ? [86400, "д"] as const : seconds >= 3600 ? [3600, "ч"] as const : seconds >= 60 ? [60, "м"] as const : [1, "с"] as const;
-            return <span key={ratio}>{ratio === 0 ? "now" : `−${Math.round(seconds / unit[0])}${unit[1]}`}</span>;
+            return <span key={ratio}>{ratio === 0 ? "сейчас" : `−${Math.round(seconds / unit[0])}${unit[1]}`}</span>;
           })}
         </div>
       </div>
