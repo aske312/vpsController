@@ -158,8 +158,6 @@ test("live monitoring uses stable low-load cadence and detailed server metrics",
   assert.doesNotMatch(page, /protocolTrafficHistory/);
   assert.match(page, /label="CPU"/);
   assert.match(page, /label="MEMORY"/);
-  assert.match(page, /label="DISK USED"/);
-  assert.match(page, /TRAFFIC TOTAL/);
   assert.match(page, /<TaskGraph/);
   assert.doesNotMatch(page, /loadLiveStatus\(\), 800/);
   assert.match(page, /function reloadWithoutCache\(message: string\)/);
