@@ -667,6 +667,8 @@ def profile_response(item: dict[str, Any]) -> dict[str, Any]:
     except (OSError, ValueError, KeyError, TypeError):
         for connection in result.get("connections", []):
             connection["route_state"] = {"state": "unknown", "reason": "Реестр маршрутов недоступен", "addresses": [], "bindings": []}
+    for connection in result.get('connections', []):
+        connection['route_state'] = relay_connections.consumer_state(relay_connection_control(), connection.get('settings', {}), connection['route_state'])
     result["export_filename"] = profile_export_filename(item)
     result["protection_status"] = {}
     for device in result["devices"]:

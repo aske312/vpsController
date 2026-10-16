@@ -19,6 +19,20 @@ def host_id(settings):
     return value
 
 
+def consumer_state(control, settings, fallback):
+    """Overlay missing saved Relay bindings without modifying consumer settings."""
+    selected = host_id(settings)
+    if not selected:
+        return fallback
+    try:
+        exists = any(host['id'] == selected for host in control.read()['hosts'])
+    except (OSError, ValueError, KeyError, TypeError):
+        return {'state': 'unknown', 'reason': 'Реестр Relay недоступен', 'addresses': [], 'bindings': []}
+    if not exists:
+        return {'state': 'stale', 'reason': 'Relay недоступен: узел удалён', 'addresses': [], 'bindings': []}
+    return fallback
+
+
 def connection_groups(connection, direct_settings=None):
     component = connection['component']
     if component not in COMPONENTS:

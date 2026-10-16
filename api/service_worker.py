@@ -70,7 +70,7 @@ def apply_relay_request(api, name, path, digest, identity):
     elif name == 'relay-reconnect':
         control.save_host(api.RelayHostSettings.model_validate(payload).model_dump(), reconnect=True)
     elif name == 'relay-host-delete':
-        control.delete_host(payload)
+        control.delete_host(payload, identity)
     elif name == 'relay-route-create':
         settings = api.RelayRouteSettings.model_validate(payload)
         if {'transport': settings.transport, 'port': settings.target_port} not in api.relay_targets():

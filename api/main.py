@@ -48,6 +48,7 @@ import network_routes
 import network_probe
 import server_addresses
 import relay_manager
+import relay_connections
 import relay_client_creation
 import yaml
 import ech_settings
@@ -1063,6 +1064,9 @@ def all_client_dump(include_quality: bool = True) -> list[dict]:
     except HTTPException:
         for item in items:
             item["route_state"] = {"state": "unknown", "reason": "Реестр маршрутов недоступен", "addresses": [], "bindings": []}
+    saved = {item['id']: item for item in read_clients()}
+    for item in items:
+        item['route_state'] = relay_connections.consumer_state(relay_control(), saved.get(item['id'], {}).get('settings', {}), item['route_state'])
     return items
 
 

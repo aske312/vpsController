@@ -239,12 +239,27 @@ class RelayManager:
         route = min(routes, key=lambda route: route['listen_port'])
         return host.get('client_address') or self.client(host).host, route['listen_port']
 
-    def delete_host(self, payload):
+    def delete_host(self, payload, identity):
         self.require_clear()
         registry = self.checked(payload['expected_revision'])
-        self.host(registry, payload['host_id'])
-        if any(item['host_id'] == payload['host_id'] for item in registry['routes']):
-            raise OperationConflict('Сначала удалите управляемые маршруты этого узла')
+        host = self.host(registry, payload['host_id'])
+        owned = [item for item in registry['routes'] if item['host_id'] == host['id']]
+        if owned:
+            client = self.client(host)
+            remote = route_snapshot(client.request('GET', '/v1/routes'))
+            # Check the whole cascade before deleting any known, changed rule.
+            for route in owned:
+                found = next((item for item in remote['items'] if item['id'] == route['id']), None)
+                if found and not same_route(found, route):
+                    raise OperationConflict('Конфигурация маршрута на агенте изменена; каскадное удаление остановлено')
+            for route in owned:
+                # Each step has its own durable intent and exact-ID readback.
+                # A failed step retains the host; reconciliation never replays a DELETE.
+                remote = route_snapshot(client.request('GET', '/v1/routes'))
+                self.mutate_route({'host_id': host['id'], 'route_id': route['id'],
+                                   'expected_revision': self.read()['revision'],
+                                   'agent_revision': remote['revision']}, identity, delete=True)
+        registry = self.read()
         registry['hosts'] = [item for item in registry['hosts'] if item['id'] != payload['host_id']]
         self.write(registry)
 

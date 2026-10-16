@@ -313,10 +313,84 @@ class RelayManagementTests(unittest.TestCase):
         self.assertEqual(host['routes'][0]['state'], 'unknown')
         self.assertNotIn('sent_bytes', host['routes'][0])
 
-    def test_node_with_owned_routes_cannot_be_forgotten(self):
+    def delete_host(self):
+        self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision']}, 'e'*32)
+
+    def test_host_cascade_removes_owned_routes_preserves_foreign_and_saved_consumers(self):
         self.control.mutate_route(self.payload(), 'b'*32)
+        self.control.mutate_route(self.payload(20002), 'c'*32)
+        foreign = {**self.agent.items[0], 'id': 'foreign', 'listen_port': 20003}
+        self.agent.items.append(foreign)
+        settings = {'relay_host_id': self.host_id}
+        original = copy.deepcopy(settings)
+        fallback = {'state': 'current', 'reason': '', 'addresses': [], 'bindings': []}
+        self.assertEqual(relay_connections.consumer_state(self.control, settings, fallback), fallback)
+        self.agent.lose_ack = True
+        self.delete_host()
+        self.assertEqual(self.agent.items, [foreign])
+        self.assertEqual(self.control.read()['hosts'], [])
+        self.assertEqual(self.control.read()['routes'], [])
+        self.assertEqual(sum(method == 'DELETE' for method, _ in self.agent.calls), 2)
+        self.assertEqual(relay_connections.consumer_state(self.control, settings, fallback)['state'], 'stale')
+        self.assertEqual(settings, original)
+
+    def test_cascade_lost_response_retains_host_until_readback_then_explicit_continuation(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        self.control.mutate_route(self.payload(20002), 'c'*32)
+        self.agent.offline_after_write = True
+        with self.assertRaises(OSError):
+            self.delete_host()
+        self.assertTrue(self.control.pending.exists())
+        self.assertEqual(len(self.control.read()['hosts']), 1)
         with self.assertRaises(OperationConflict):
-            self.control.delete_host({'host_id': self.host_id, 'expected_revision': self.control.read()['revision']})
+            self.delete_host()
+        self.agent.offline = self.agent.offline_after_write = False
+        self.control.reconcile()
+        self.assertEqual(len(self.control.read()['routes']), 1)
+        self.assertEqual(sum(method == 'DELETE' for method, _ in self.agent.calls), 1)
+        self.delete_host()
+        self.assertEqual(self.control.read()['hosts'], [])
+        self.assertEqual(sum(method == 'DELETE' for method, _ in self.agent.calls), 2)
+
+    def test_cascade_preflights_drift_and_does_not_delete_any_route(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        self.control.mutate_route(self.payload(20002), 'c'*32)
+        self.agent.items[-1]['target_port'] = 31337
+        with self.assertRaises(OperationConflict):
+            self.delete_host()
+        self.assertFalse(any(method == 'DELETE' for method, _ in self.agent.calls))
+        self.assertEqual(len(self.control.read()['routes']), 2)
+
+    def test_cascade_revision_conflict_and_offline_agent_keep_registry(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        before = self.control.read()
+        with self.assertRaises(OperationConflict):
+            self.control.delete_host({'host_id': self.host_id, 'expected_revision': '0'*32}, 'e'*32)
+        self.agent.offline = True
+        with self.assertRaises(OSError):
+            self.delete_host()
+        self.assertEqual(self.control.read(), before)
+
+    def test_missing_remote_rule_can_be_cleaned_by_cascade(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        self.agent.items.clear()
+        self.delete_host()
+        self.assertEqual(self.control.read()['hosts'], [])
+        self.assertEqual(self.control.read()['routes'], [])
+
+    def test_empty_host_can_be_removed_offline(self):
+        self.agent.offline = True
+        self.delete_host()
+        self.assertEqual(self.control.read()['hosts'], [])
+
+    def test_rejected_cascade_retains_host_and_route_without_claiming_success(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        self.agent.reject = True
+        with self.assertRaises(OperationConflict):
+            self.delete_host()
+        self.assertEqual(len(self.control.read()['hosts']), 1)
+        self.assertEqual(len(self.control.read()['routes']), 1)
+        self.assertFalse(self.control.pending.exists())
 
     def test_malformed_agent_sources_are_unknown_not_empty(self):
         for result in ({'revision': 0}, {'revision': False, 'items': []}, {'revision': 0, 'items': [{'id': 'bad'}]}):

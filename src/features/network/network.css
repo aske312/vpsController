@@ -13,7 +13,7 @@
 [data-network-page] .networkRelayRow .networkRouteExpand { min-height:28px; padding:0; }
 [data-network-page] .relayCompactSummary { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:0 8px 6px; padding:6px 8px; border:1px solid var(--line); border-radius:5px; font-size:10px; }
 [data-network-page] .relayCompactSummary > span { padding:2px 5px; border:1px solid var(--line); border-radius:4px; color:var(--muted); }
-[data-network-page] .relayCompactSummary > button { margin-left:auto; padding:3px 7px; font-size:10px; }
+[data-network-page] .networkRelayActions { display:flex; flex-wrap:wrap; gap:6px; }
 [data-network-page] .relayCompactSummary > p { flex-basis:100%; margin:0; color:var(--red); overflow-wrap:anywhere; }
 [data-network-page] .networkRouteChoices { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; padding:14px 20px; border-bottom:1px solid var(--line); }
 [data-network-page] .networkRouteChoices button { display:grid; gap:5px; padding:12px; text-align:left; white-space:normal; border:1px solid var(--line); border-radius:8px; background:var(--panel-inset); }
@@ -656,7 +656,8 @@
   text-align: left;
 }
 
-[data-network-page] .networkRouteDelete {
+[data-network-page] .networkRouteDelete,
+[data-network-page] .networkRouteConfigure {
   min-height: 30px;
   padding: 0 10px;
   border-radius: var(--radius-sm);
@@ -724,7 +725,8 @@
   text-align: center;
 }
 
-[data-network-page] .networkRouteDelete {
+[data-network-page] .networkRouteDelete,
+[data-network-page] .networkRouteConfigure {
   min-height: 28px;
   padding: 0 8px;
   border: 1px solid rgba(240, 123, 123, .28);
@@ -734,6 +736,9 @@
   font-size: 9px;
   white-space: nowrap;
 }
+
+[data-network-page] .networkRouteConfigure { border-color:rgba(70,169,223,.28); background:rgba(70,169,223,.07); color:var(--cyan); }
+[data-network-page] .networkRouteConfigure:hover:not(:disabled) { border-color:rgba(70,169,223,.5); background:rgba(70,169,223,.14); }
 
 [data-network-page] .networkRouteDelete:hover:not(:disabled) {
   border-color: rgba(240, 123, 123, .5);
@@ -1709,7 +1714,8 @@
 [data-network-page] .networkRouteTag { min-height: 23px; padding: 3px 8px; font-family: var(--technical-font); font-size: 9px; letter-spacing: .04em; }
 [data-network-page] .networkRouteStatus { margin: 0; padding: 5px 8px; font-family: var(--technical-font); font-size: 9px; }
 [data-network-page] .networkRouteActionEmpty { display: block; color: var(--dim); text-align: left; }
-[data-network-page] .networkRouteDelete { min-height: 30px; padding: 0 10px; border-radius: var(--radius-sm); font: 600 10px var(--ui-font); }
+[data-network-page] .networkRouteDelete,
+[data-network-page] .networkRouteConfigure { min-height: 30px; padding: 0 10px; border-radius: var(--radius-sm); font: 600 10px var(--ui-font); }
 
 [data-network-page] .networkRouteDetailRow > td { padding: 0; border: 0; background: transparent; }
 [data-network-page] .networkRouteCascade { margin: -6px 10px 2px; padding: 16px 18px 18px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-inset); }

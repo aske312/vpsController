@@ -86,7 +86,7 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
   }
   function removeConfirmed(confirmed: boolean) {
     const selected = confirmation; setConfirmation(null);
-    if (!confirmed || !selected || locked || !status || status.pending || selected.routes.length) return;
+    if (!confirmed || !selected || locked || !status || status.pending) return;
     void submit(`/network/relays/${selected.id}`, { method: "DELETE", headers: { "If-Match": status.revision } });
   }
   return {
@@ -114,16 +114,15 @@ export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: 
       <tr className={`networkRouteRow networkRelayRow${open ? " is-expanded" : ""}`}>
         <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true" /><span><strong>{address}</strong><small>{item.name} · Relay Agent</small></span></button></td>
         <td><span className={`networkRelayState ${unknown ? "unknown" : "connected"}`}>{unknown ? "UNKNOWN" : "CONNECTED"}</span></td>
-        <td><span>RELAY · {item.routes.length}</span></td>
+        <td><span>RELAY · {item.routes.length}</span><small>{unknown ? "Порты неизвестны" : `Слушают ${item.routes.filter(route => route.state === "listening").length}/${item.routes.length}`}</small></td>
         <td><span>TCP {item.routes.filter(route => route.transport === "tcp").length} · UDP {item.routes.filter(route => route.transport === "udp").length}</span></td>
-        <td><button type="button" disabled={relay.locked} onClick={() => relay.openHost(item)}>Настроить</button></td>
+        <td><div className="networkRelayActions"><button type="button" className="networkRouteConfigure" disabled={relay.locked} onClick={() => relay.openHost(item)}>Настроить</button><button type="button" className="networkRouteDelete" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setConfirmation(item)}>Удалить</button></div></td>
       </tr>
       {open && <tr className="networkRouteDetailRow"><td colSpan={5}><div className="relayCompactSummary">
         <span title={item.agent_url}>Agent {unknown ? "?" : item.version}</span>
         <span title={`SHA-256 ${item.certificate_sha256}`}>PIN</span>
         <span>{unknown ? "Порты ?" : `${item.routes.filter(route => route.state === "listening").length}/${item.routes.length} LISTEN`}</span>
         {item.foreign_routes > 0 && <span>{item.foreign_routes} вне PRO</span>}
-        <button disabled={relay.locked || relay.status?.pending || item.routes.length > 0} title={item.routes.length ? "Узел содержит пересылки действующих подключений" : undefined} onClick={() => relay.setConfirmation(item)}>Удалить узел</button>
         {item.error && <p role="status">{item.error}</p>}
       </div></td></tr>}
     </Fragment>;
@@ -142,7 +141,7 @@ export function NetworkRelayDialogs({ relay }: { relay: RelayControl }) {
       <NetworkRelayForm relay={relay} />
     </section></div>}
     {relay.discard && <ConfirmationDialog request={{ title: "Закрыть без сохранения?", message: "Изменения подключения к Relay будут потеряны.", cancelLabel: "Остаться", confirmLabel: "Уйти без сохранения" }} onClose={confirmed => { relay.setDiscard(false); if (confirmed) relay.resetDialog(); }} />}
-    {relay.confirmation && <ConfirmationDialog request={{ title: "Удалить узел из PRO?", message: `Параметры и токен ${relay.confirmation.name} будут удалены из PRO. Сам агент продолжит работать.`, confirmLabel: "Удалить", danger: true }} onClose={relay.removeConfirmed} />}
+    {relay.confirmation && <ConfirmationDialog request={{ title: "Удалить Relay?", message: `Узел ${relay.confirmation.name} и его управляемые пересылки (${relay.confirmation.routes.length}) будут удалены. Настройки клиентов и профилей сохранятся, Relay станет недоступен. Сам агент и чужие маршруты сохранятся.`, confirmLabel: "Удалить", danger: true }} onClose={relay.removeConfirmed} />}
   </>;
 }
 
