@@ -469,7 +469,7 @@ export function OverviewDashboard({
 
       <section className="overviewComponents">
         <header>
-          <div><p className="eyebrow">NODE COMPONENTS</p><h2>Компоненты</h2><small>Версия берётся из фактического каталога установки; для Mihomo после запуска показывается версия core.</small></div>
+          <div><p className="eyebrow">NODE COMPONENTS</p><h2>Компоненты</h2></div>
           <div className="overviewComponentCounters"><span><b>{installedServerModules.length}</b> установлено</span><span><b>{installableModules.length}</b> доступно</span></div>
         </header>
 
@@ -497,42 +497,39 @@ export function OverviewDashboard({
                 <div className="overviewComponentRow" key={image.id}>
                   <div className="overviewComponentIdentity">
                     <span className={`overviewProtocolMark protocol-${image.id}`} title={protocolMark(image.id)}><ProtocolIcon protocol={image.id} /></span>
-                    <p><b>{image.name}</b><small>{image.description || image.category_name}</small></p>
+                    <p><b>{image.name}</b></p>
                   </div>
                   <div className="overviewComponentVersion">
                     <b>{displayedVersion}</b>
-                    <small>{image.installed ? image.update_available || image.update_via_release ? `новая: ${availableVersion}` : "фактическая версия" : image.installable ? "версия для установки" : "образ не готов"}</small>
+                    {(image.update_available || image.update_via_release) && <small title="Доступна новая версия">↑ {availableVersion}</small>}
                   </div>
                   <div className={`overviewComponentState ${state.summary.tone}`}>
-                    <div className="overviewComponentSummary">
-                      <b><i aria-hidden="true" />{state.summary.label}</b><small>{state.summary.description}</small>
-                    </div>
-                    <dl>
-                      {[
-                        ["Установка", state.installation, image.component_state?.installation.reason],
-                        ["Служба", state.runtime, image.component_state?.runtime.reason],
-                        ["Проверка", state.health, image.component_state?.health.reason],
-                      ].map(([label, value, reason]) => <div key={label}><dt>{label}</dt><dd><b>{value}</b>{reason && reason !== state.summary.description && <small>{reason}</small>}</dd></div>)}
-                    </dl>
+                    <span title={`Установка: ${state.installation}`} aria-label={`Установка: ${state.installation}`}>{image.component_state?.installation.state === "installed" ? "УСТ" : image.component_state?.installation.state === "not_installed" ? "НЕТ" : image.component_state?.installation.state === "incomplete" ? "НЕПОЛН" : "УСТ ?"}</span>
+                    <span title={`Служба: ${state.runtime}`} aria-label={`Служба: ${state.runtime}`}>{image.component_state?.runtime.state === "running" ? "RUN" : image.component_state?.runtime.state === "stopped" ? "STOP" : image.component_state?.runtime.state === "error" ? "ERR" : "RUN ?"}</span>
+                    <span title={`Проверка: ${state.health}. ${state.summary.description}`} aria-label={`Проверка: ${state.health}`}>{image.component_state?.health.state === "healthy" ? "OK" : image.component_state?.health.state === "possible_issues" ? "WARN" : image.component_state?.health.state === "error" ? "ERR" : image.component_state?.health.state === "unchecked" ? "НЕ ПРОВ" : "CHECK ?"}</span>
+                    {state.operation && <span>{state.operation}</span>}
+                    {image.management?.retained && <span title="Настройки и подключения сохранены">ДАННЫЕ</span>}
+                    {image.installed && state.readOnly && <span title={image.management?.reason}>READ ONLY</span>}
                   </div>
                   <div className="overviewComponentAction">
-                    {image.management?.retained && <div><small>Настройки и подключения сохранены</small><button type="button" disabled={busy || Boolean(installingProtocol) || Boolean(image.component_state?.operation)} onClick={() => onPurgeProtocol(image)}>Очистить данные</button></div>}
+                    {image.management?.retained && <button type="button" title="Очистить сохранённые данные" disabled={busy || Boolean(installingProtocol) || Boolean(image.component_state?.operation)} onClick={() => onPurgeProtocol(image)}>Очистить</button>}
                     {image.installed && image.management && image.management.state !== "managed" ? (
-                      <div><small title={image.management.reason}>Только просмотр и диагностика</small><button type="button" disabled={busy || !state.canAdopt} onClick={() => onAdoptProtocol(image)}>Принять под управление</button></div>
+                      <button type="button" title="Принять под управление" disabled={busy || !state.canAdopt} onClick={() => onAdoptProtocol(image)}>Принять</button>
                     ) : !image.installed ? (
                       <button type="button" disabled={!state.canInstall || busy || Boolean(installingProtocol)} onClick={() => onInstallProtocol(image)}>
-                        {!image.installable ? "В разработке" : installingProtocol === image.id ? "Установка…" : "Установить"}
+                        {!image.installable ? "Недоступен" : installingProtocol === image.id ? "Установка…" : "Установить"}
                       </button>
                     ) : image.update_available && image.id !== "mihomo" ? (
-                      <div><small>Доступно обновление</small><button type="button" onClick={() => onOpenProtocol(image)}>Открыть компонент</button></div>
+                      <button type="button" title="Открыть компонент: доступно обновление" onClick={() => onOpenProtocol(image)}>Обновление</button>
                     ) : image.update_available ? (
                       <button type="button" className={image.update_breaking ? "warning" : ""} disabled={busy || !state.canUpdate || Boolean(installingProtocol)} onClick={() => onUpdateProtocol(image)}>
                         {installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}
                       </button>
                     ) : (
-                      <div><small>Актуальная версия</small>{image.id !== "mihomo" && ["warning", "error"].includes(state.summary.tone) && <button type="button" onClick={() => onOpenProtocol(image)}>Диагностика</button>}</div>
+                      image.id !== "mihomo" && ["warning", "error"].includes(state.summary.tone) && <button type="button" onClick={() => onOpenProtocol(image)}>Проверить</button>
                     )}
                   </div>
+                  {["warning", "error"].includes(state.summary.tone) && <small className="overviewComponentIssue">{state.summary.description}</small>}
                 </div>
               );
             })}

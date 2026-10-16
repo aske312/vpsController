@@ -83,6 +83,7 @@ function NotificationCard({ item, now }: { item: Notification; now: number }) {
   const [checking, setChecking] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [canceling, setCanceling] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const pending = isPending(item);
   const presentation = notificationPresentation(item);
   const { progress } = presentation;
@@ -110,19 +111,21 @@ function NotificationCard({ item, now }: { item: Notification; now: number }) {
   </section>;
   return <section className={`gateOperationCard ${item.state}`} role={item.state === "error" ? "alert" : "status"} aria-atomic="true" aria-label={item.title}>
     <div className="gateOperationContent">
-      <span className="gateOperationIcon" aria-hidden="true">{item.state === "error" ? "!" : item.state === "success" ? "✓" : item.state === "cancelled" ? "−" : pending ? "…" : "i"}</span>
-      <div className="gateOperationText"><span>{presentation.label}{item.count > 1 ? ` · ×${item.count}` : ""}</span><strong>{item.title}</strong></div>
+      <span className="gateOperationIcon" title={presentation.label} aria-hidden="true">{item.state === "running" ? <i className="gateOperationSpinner" /> : item.state === "unknown" ? "?" : item.state === "error" ? "!" : item.state === "success" ? "✓" : item.state === "cancelled" ? "−" : "i"}</span>
+      <div className="gateOperationText"><strong>{item.title}{item.count > 1 ? ` ×${item.count}` : ""}</strong><small title={presentation.summary}>{presentation.summary}</small></div>
+      {item.kind === "operation" && item.state === "running" && <b className="gateOperationPercent" title={progress === undefined ? "Сервер не передал процент" : "Прогресс выполнения"}>{progress === undefined ? "—" : `${progress}%`}</b>}
+      {item.state === "unknown" && item.action && <button type="button" className="gateNotificationMore" disabled={checking} aria-label={item.action.label} title={item.action.label} onClick={() => void runAction()}>↻</button>}
+      <button type="button" className="gateNotificationMore" aria-expanded={detailsOpen} aria-label={`Подробности: ${item.title}`} title="Подробности и действия" onClick={() => setDetailsOpen(value => !value)}>···</button>
       {!pending && <button type="button" className="gateNotificationClose" onClick={() => store.dismiss(item.id)} aria-label={`Закрыть: ${item.title}`}>×</button>}
     </div>
-    <div className="gateOperationBody">
-      <p className="gateOperationStage">{presentation.summary}</p>
-      {presentation.details && <details className="gateOperationDetails"><summary>Подробности</summary><p>{presentation.details}</p></details>}
-      {item.kind === "operation" && <div className="gateOperationMeta"><span aria-live="off">{pending ? "Прошло" : "Длительность"}: {notificationDuration(item, now)}</span>{item.state === "running" && <b className="gateOperationPercent">{progress === undefined ? "Без оценки прогресса" : `${progress}%`}</b>}</div>}
+    {detailsOpen && <div className="gateOperationBody">
+      <p className="gateOperationStage">{presentation.details || presentation.summary}</p>
+      {item.kind === "operation" && <div className="gateOperationMeta"><span>{presentation.label}</span><span aria-live="off">{pending ? "Прошло" : "Длительность"}: {notificationDuration(item, now)}</span></div>}
       {item.state === "unknown" && item.kind === "operation" && <small className="gateOperationUnknown">Проверяем прежнюю команду без повторного запуска.</small>}
-    </div>
+    </div>}
     {item.kind === "operation" && item.state === "running" && <div className={`gateOperationTrack${progress === undefined ? " indeterminate" : ""}`} role="progressbar" aria-label={`Прогресс: ${item.title}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-valuetext={presentation.summary}><i style={{ width: `${progress ?? 34}%` }} /></div>}
-    {(pending || item.action) && <div className="gateOperationActions">
-      {item.action && <button type="button" className="gateOperationButton" disabled={checking || item.state === "running"} onClick={() => void runAction()}>{checking ? "Проверяем…" : item.action.label}</button>}
+    {detailsOpen && (pending || item.action) && <div className="gateOperationActions">
+      {item.action && item.state !== "unknown" && <button type="button" className="gateOperationButton" disabled={checking || item.state === "running"} onClick={() => void runAction()}>{checking ? "Проверяем…" : item.action.label}</button>}
       {item.state === "running" && item.onCancel && <button type="button" className="gateNotificationCancel" onClick={() => void cancelOperation()} disabled={canceling} aria-label={`Остановить и откатить: ${item.title}`}>{canceling ? "Останавливаем…" : "Остановить / откатить"}</button>}
       {pending && <button type="button" className="gateOperationButton" onClick={() => setHidden(true)} aria-label={`Скрыть карточку без остановки: ${item.title}`}>Скрыть</button>}
     </div>}

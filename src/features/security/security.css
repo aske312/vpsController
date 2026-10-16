@@ -235,7 +235,7 @@
 
 .securityDiagnosticsStats strong{color:#e7f0f5;font:800 13px var(--font-mono),monospace}
 
-.securityDiagnosticsGrid { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; gap:10px; padding:10px; }
+.securityDiagnosticsGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:8px; padding:8px; }
 
 .securityListeners,.securityLogs { min-width:0; overflow:hidden; border:1px solid rgba(91,116,141,.12); border-radius:11px; background:rgba(3,10,16,.34); }
 
@@ -245,13 +245,15 @@
 
 .securityDiagTitle span{max-width:52%;color:#718797;font-size:9px;text-align:right}
 
-.securityListeners pre{margin:0;height:auto;overflow:visible;padding:11px 13px;background:#030a10;color:#62c8ff;font:9.5px/1.5 var(--font-mono),monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.securityListeners pre{margin:0;height:clamp(180px,32vh,300px);overflow:auto;padding:9px 10px;background:#030a10;color:#62c8ff;font:10px/1.5 var(--font-mono),monospace;white-space:pre}
 
-.securityLogsToggle{width:100%;min-height:62px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 13px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.securityLogsToggle{width:100%;min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;list-style:none}
+.securityLogsToggle::-webkit-details-marker{display:none}
+.securityLogsToggle:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}
 
 .securityLogsToggle span{display:grid;gap:3px}
 
-.securityLogsToggle strong{font-size:14px}
+.securityLogsToggle strong{font-size:12px}
 
 .securityLogsToggle small{color:#7890a0;font-size:10px}
 
@@ -263,7 +265,7 @@
 
 .securityLogsBody pre{height:188px;margin:0;overflow:auto;padding:11px 13px;background:#030a10;color:#62c8ff;font:9.5px/1.5 var(--font-mono),monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 
-.securityLogs.open .securityLogsBody pre{height:clamp(260px,42vh,520px);overflow:auto}
+.securityLogs.open .securityLogsBody pre{height:clamp(180px,32vh,300px);overflow:auto;white-space:pre}
 
 @media (max-width:1280px) {
 .securityMatrixContent{width:min(78%,980px)}
@@ -278,11 +280,11 @@
 .securityTelemetry>span:nth-child(-n/**/+2){border-bottom:1px solid rgba(91,116,141,.11)}
 .securityMatrixContent{width:100%;background:rgba(5,13,20,.64)}
 .securityMatrixArt{opacity:.30}
-.securityDiagnosticsGrid{grid-template-columns:1fr}
 .securityListeners{border-right:0;border-bottom:1px solid rgba(91,116,141,.11)}
 }
 
 @media (max-width:760px) {
+.securityDiagnosticsGrid{grid-template-columns:1fr}
 .securityOverviewLead{padding:14px;gap:12px}
 .securityPostureRing{width:78px;height:78px}
 .securityPostureRing strong{font-size:21px}

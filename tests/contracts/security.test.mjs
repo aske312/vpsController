@@ -81,7 +81,6 @@ test("security and services expose current logs and retention controls", async (
   assert.match(page, /LIVE DIAGNOSTICS/);
   assert.match(page, /securityNewLogCount/);
   assert.match(page, /downloadLogs/);
-  assert.match(page, /Хранение и автоматическая очистка systemd journal/);
   assert.match(page, /Без автоочистки/);
   assert.match(manager, /configure_logging/);
   assert.match(manager, /clear_managed_logs/);

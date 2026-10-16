@@ -244,24 +244,26 @@
 .overviewComponentCounters b { color:#d6e4ea; font-size:10px; }
 
 .overviewComponentRegistry { margin-top:12px; }
-.overviewComponentRegistry > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:8px; }
-.overviewComponentRow { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) auto; align-content:start; align-items:start; gap:10px; padding:12px; border:1px solid rgba(105,135,160,.16); border-radius:10px; background:rgba(4,11,17,.34); }
+.overviewComponentRegistry > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr)); gap:6px; }
+.overviewComponentRow { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) auto; align-content:start; align-items:center; gap:6px; padding:8px; border:1px solid rgba(105,135,160,.16); border-radius:7px; background:rgba(4,11,17,.34); }
 
-.overviewComponentIdentity { min-width:0; display:grid; grid-template-columns:30px minmax(0,1fr); align-items:center; gap:8px; }
-.overviewComponentIdentity .overviewProtocolMark { width:30px; height:30px; }
+.overviewComponentIdentity { min-width:0; display:grid; grid-template-columns:20px minmax(0,1fr); align-items:center; gap:5px; }
+.overviewComponentIdentity .overviewProtocolMark { width:20px; height:20px; border-radius:5px; }
 
 .overviewComponentIdentity p,
 .overviewComponentVersion { min-width:0; display:grid; gap:3px; margin:0; }
 
 .overviewComponentIdentity b,
-.overviewComponentVersion b { overflow-wrap:anywhere; color:#d8e6ec; font:650 12px/1.3 var(--font-sans); }
+.overviewComponentVersion b { overflow-wrap:anywhere; color:#d8e6ec; font:650 11px/1.3 var(--font-sans); }
 
 .overviewComponentIdentity small,
 .overviewComponentVersion small,
 .overviewComponentAction small { overflow-wrap:anywhere; color:#839aa8; font:500 10px/1.4 var(--font-sans); }
 .overviewComponentVersion { max-width:120px; text-align:right; }
 
-.overviewComponentState { grid-column:1/-1; min-width:0; color:#8fa4b1; font:500 11px/1.4 var(--font-sans); }
+.overviewComponentState { min-width:0; display:flex; flex-wrap:wrap; gap:3px; color:#8fa4b1; font:600 9px/1.3 var(--font-sans); }
+.overviewComponentState > span { padding:3px 4px; border:1px solid currentColor; border-radius:4px; }
+.overviewComponentIssue { grid-column:1/-1; color:var(--amber); font:500 10px/1.4 var(--font-sans); overflow-wrap:anywhere; }
 .overviewComponentState.online { color:var(--green); }
 .overviewComponentState.running,.overviewComponentState.available { color:var(--cyan); }
 .overviewComponentState.warning,.overviewComponentState.progress { color:var(--amber); }
@@ -277,10 +279,10 @@
 .overviewComponentState dd small { color:#839aa8; font-size:10px; line-height:1.4; overflow-wrap:anywhere; }
 .overviewComponentState dd small::before { content:' · '; }
 
-.overviewComponentAction { grid-column:1/-1; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; border-top:1px solid rgba(106,137,160,.1); padding-top:8px; }
+.overviewComponentAction { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:4px; }
 .overviewComponentAction > div { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; }
 
-.overviewComponentAction button { min-width:104px; min-height:32px; padding:0 10px; border:1px solid rgba(100,184,255,.22); border-radius:8px; background:rgba(100,184,255,.08); color:#79baf0; font:650 9px/1 var(--font-sans); cursor:pointer; }
+.overviewComponentAction button { min-height:25px; padding:4px 6px; border:1px solid rgba(100,184,255,.22); border-radius:5px; background:rgba(100,184,255,.08); color:#79baf0; font:650 9px/1.2 var(--font-sans); cursor:pointer; }
 
 .overviewComponentAction button:hover:not(:disabled) { background:rgba(100,184,255,.14); border-color:rgba(100,184,255,.34); }
 
@@ -332,7 +334,7 @@
 .overviewComponents { padding:11px; }
 .overviewComponents > header { align-items:flex-start; }
 .overviewComponentCounters { display:none; }
-.overviewComponentRow { padding:10px; }
+.overviewComponentRow { padding:8px; }
 }
 
 @media (max-width:470px) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, type CSSProperties, type Dispatch, type SetStateAction } from "react";
+import { createContext, useContext, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
 import { applicationVersionState } from "../application/version-state";
 
 const SecurityObservationContext = createContext(false);
@@ -29,6 +29,7 @@ type SecurityViewProps = {
 };
 
 export function SecurityView(props: SecurityViewProps) {
+  const [listenersOpen, setListenersOpen] = useState(false);
   const { securityLoading, securityScore, securityChecks, securityPerimeterChecks, securitySystemChecks, securityApplicationChecks, firewall, ssh, updates, applicationVersion, securitySystem, fail2ban, listeners, listenerSummary, legacy, applicationSecurity, panelSecurity, panelAccessHealthy, sshProtected, failedSshRecords24h, autoRefresh, securityLogsOpen, securityLogSource, securityLogs, securityLogsUpdatedAt, securityNewLogCount, fixSecurity, onOpenApplication, setPasswordDialog, openSshAdminDialog, setSecurityLogsOpen, setSecurityLogSource, setSecurityLogs, loadSecurityLogs, downloadLogs } = props;
   const checkCount = (checks: boolean[]) => props.fullObservationUnknown ? "—" : `${checks.filter(Boolean).length}/${checks.length}`;
   const versionState = applicationVersionState(applicationVersion);
@@ -133,13 +134,13 @@ export function SecurityView(props: SecurityViewProps) {
             </div>
           </header>
           <div className="securityDiagnosticsGrid">
-            <section className="securityListeners">
-              <div className="securityDiagTitle"><div><p className="eyebrow">LIVE NETWORK</p><h3>Открытые порты</h3></div><span>{listeners.length} listeners  kernel {securitySystem?.kernel || "—"}</span></div>
+            <details className="securityListeners" open={listenersOpen} onToggle={event => setListenersOpen(event.currentTarget.open)}>
+              <summary className="securityLogsToggle"><span><p className="eyebrow">LIVE NETWORK</p><strong>Открытые порты · {listeners.length}</strong></span><em>{listenersOpen ? "Скрыть" : "Открыть"}</em></summary>
               <pre>{listeners.join("\n") || "Нет данных"}</pre>
-            </section>
+            </details>
             <section className={`securityLogs ${securityLogsOpen ? "open" : ""}`}>
-              <button className="securityLogsToggle" onClick={() => setSecurityLogsOpen((value) => !value)}>
-                <span><p className="eyebrow">JOURNALCTL</p><strong>Журналы безопасности</strong><small>SSH  Firewall  System</small></span>
+              <button className="securityLogsToggle" aria-expanded={securityLogsOpen} onClick={() => setSecurityLogsOpen((value) => !value)}>
+                <span><p className="eyebrow">JOURNALCTL</p><strong>SSH · Firewall · System</strong></span>
                 <em>{securityLogsOpen ? "Скрыть" : "Открыть"}</em>
               </button>
               {securityLogsOpen && <div className="securityLogsBody"><div className="logTools"><div className="logTabs">{(["ssh", "firewall", "system"] as const).map((source) => <button key={source} className={securityLogSource === source ? "active" : ""} onClick={() => { setSecurityLogSource(source); setSecurityLogs([]); }}>{source === "ssh" ? "SSH" : source === "firewall" ? "Firewall" : "Система"}</button>)}</div><div className="logActions"><span>{securityNewLogCount ? `${securityNewLogCount} новых  ` : ""}{autoRefresh ? `auto${securityLogsUpdatedAt ? `  ${securityLogsUpdatedAt.toLocaleTimeString("ru-RU")}` : ""}` : "paused"}</span><button className="miniButton" onClick={() => void loadSecurityLogs()}>Обновить</button><button className="miniButton" disabled={!securityLogs.length} onClick={() => downloadLogs(`security-${securityLogSource}-${new Date().toISOString().slice(0, 10)}.log`, securityLogs)}>Выгрузить</button></div></div><pre>{securityLogs.join("\n") || "В журнале нет записей"}</pre></div>}

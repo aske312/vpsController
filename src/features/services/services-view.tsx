@@ -68,13 +68,6 @@ function compactSince(value: string) {
   return value.replace(/\s+(MSK|UTC)$/i, "");
 }
 
-function formatRetention(days: number | undefined) {
-  if (!days) return "Без автоочистки";
-  if (days === 1) return "1 день";
-  if (days < 5) return `${days} дня`;
-  return `${days} дней`;
-}
-
 function runtimeSummary(service: ServiceItem) {
   if (runtimeState(service) === "unknown") return service.runtime?.reason || "Состояние службы пока недоступно";
   const autostart = service.unit_file_state === "unknown" ? "Autostart Unknown" : service.enabled ? "Autostart ON" : "Autostart OFF";
@@ -163,7 +156,7 @@ export function ServicesDashboard({
         <header className="servicesOperationsHead">
           <div>
             <p className="eyebrow">OPERATIONS</p>
-            <h2>Журналы и обслуживание</h2>
+            <h2>Обслуживание</h2>
           </div>
           <div className="servicesOperationsFacts">
             <span><small>JOURNAL</small><b>{services?.logging?.disk_usage || "—"}</b></span>
@@ -177,11 +170,10 @@ export function ServicesDashboard({
           <div className="operationsTitle">
             <p className="eyebrow">LOG MANAGEMENT</p>
             <h3>Журналы</h3>
-            <small>Хранение и автоматическая очистка systemd journal.</small>
           </div>
           <div className="servicesLogControls">
             <label className="opsField toggle">
-              <span>Постоянное хранение<small>{loggingDraft?.persistent ? "Сохранять после перезагрузки" : "Временно, до перезагрузки"}</small></span>
+              <span title="Сохранять журналы после перезагрузки">На диске</span>
               <span className="serviceToggle compact">
                 <input type="checkbox" checked={loggingDraft?.persistent ?? true} onChange={(event) => onLoggingChange({ persistent: event.target.checked })} disabled={serviceBusy} />
                 <span /><em>{loggingDraft?.persistent ? "ON" : "OFF"}</em>
@@ -197,33 +189,31 @@ export function ServicesDashboard({
                 <option value={90}>90 дней</option>
                 <option value={0}>Без автоочистки</option>
               </select>
-              <small>{formatRetention(loggingDraft?.retention_days)}</small>
             </label>
           </div>
           <div className="servicesLogActions">
-            <button type="button" className="servicePrimary" onClick={onSaveLogging} disabled={serviceBusy || !loggingDraft}>Сохранить настройки журналов</button>
-            <button type="button" className="serviceDanger" onClick={onClearLogs} disabled={serviceBusy}>Очистить журналы</button>
+            <button type="button" className="servicePrimary" onClick={onSaveLogging} disabled={serviceBusy || !loggingDraft}>Сохранить</button>
+            <button type="button" className="serviceDanger" onClick={onClearLogs} disabled={serviceBusy}>Очистить</button>
           </div>
         </section>
 
         <section className="servicesLog servicesMetrics">
           <div className="operationsTitle">
             <p className="eyebrow">METRICS HISTORY</p><h3>История метрик VPS</h3>
-            <small>Собирается сервером независимо от открытой панели. Содержимое трафика и секреты не записываются.</small>
           </div>
           {metricsSettings?.error && <p role="status">{metricsSettings.error}</p>}
           {metricsSettings?.trimmed_at && <p>Часть старых измерений удалена по дисковому лимиту.</p>}
           {metricsSettings && metricsDraft && metricsSettings.revision !== metricsDraft.revision && <p role="status">Настройки изменились на сервере. Ваши правки сохранены в форме; отмените их, чтобы загрузить актуальные значения.</p>}
           <div className="servicesLogControls">
-            <label className="opsField toggle"><span>Сохранять историю</span><span className="serviceToggle compact"><input type="checkbox" checked={metricsDraft?.enabled ?? false} disabled={busy || !metricsDraft} onChange={(event) => onMetricsChange({ enabled: event.target.checked })} /><span /><em>{metricsDraft?.enabled ? "ON" : "OFF"}</em></span></label>
+            <label className="opsField toggle"><span>Запись</span><span className="serviceToggle compact"><input type="checkbox" aria-label="Сохранять историю метрик" checked={metricsDraft?.enabled ?? false} disabled={busy || !metricsDraft} onChange={(event) => onMetricsChange({ enabled: event.target.checked })} /><span /><em>{metricsDraft?.enabled ? "ON" : "OFF"}</em></span></label>
             {([
-              ["raw_hours", "Подробные, часы", 1, 168], ["minute_days", "Минутные, дни", 1, 90],
-              ["hour_days", "Часовые, дни", 1, 730], ["disk_limit_mb", "Лимит, МБ", 8, 1024],
+              ["raw_hours", "Подробно · ч", 1, 168], ["minute_days", "Минутно · д", 1, 90],
+              ["hour_days", "Часово · д", 1, 730], ["disk_limit_mb", "Лимит · МБ", 8, 1024],
             ] as const).map(([key, label, min, max]) => <label className="opsField" key={key}><span>{label}</span><input type="number" min={min} max={max} value={metricsDraft?.[key] ?? ""} disabled={busy || !metricsDraft} onChange={(event) => onMetricsChange({ [key]: Number(event.target.value) })} /></label>)}
-            <small>{metricsSettings ? `Занято ${(metricsSettings.used_bytes / 1024 / 1024).toFixed(1)} МБ` : "Данные недоступны"}. Снижение сроков или лимита удаляет старые измерения при следующей очистке. Сводки создаются до очистки подробных данных.</small>
+            <small>{metricsSettings ? `${(metricsSettings.used_bytes / 1024 / 1024).toFixed(1)} МБ занято` : "Данные недоступны"} · сокращение лимитов удаляет старые измерения.</small>
             <div className="servicesLogActions">
               <button type="button" className="servicePrimary" onClick={onSaveMetrics} disabled={busy || !metricsDraft || metricsSettings?.revision !== metricsDraft.revision}>Сохранить</button>
-              <button type="button" onClick={onResetMetrics} disabled={busy || !metricsSettings}>Отменить правки</button>
+              <button type="button" onClick={onResetMetrics} disabled={busy || !metricsSettings}>Сбросить</button>
             </div>
           </div>
         </section>
@@ -233,9 +223,8 @@ export function ServicesDashboard({
             <div className="operationsTitle">
               <p className="eyebrow">MAINTENANCE</p>
               <h3>Плановые задачи</h3>
-              <small>Перезагрузка, очистка и консервативные обновления в заданное окно.</small>
             </div>
-            <button type="button" className="servicePrimary ghost" onClick={onSaveAutomation} disabled={serviceBusy || services?.automation_recovery_required}>Сохранить расписание</button>
+            <button type="button" className="servicePrimary ghost" onClick={onSaveAutomation} disabled={serviceBusy || services?.automation_recovery_required}>Сохранить</button>
           </header>
           {services?.automation_recovery_required && <p role="alert">Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Отображаемые настройки могут отличаться от состояния служб. <button type="button" disabled={serviceBusy} onClick={onRecoverAutomation}>Восстановить расписания</button></p>}
           <div className="maintenanceRows">
@@ -296,14 +285,12 @@ function ScheduleRow({ title, value, timer, busy, onChange }: {
     <div className={`maintenanceRow ${value.enabled ? "enabled" : ""}`}>
       <div className="maintenanceIdentity">
         <strong>{title}</strong>
-        <small>{title === "Перезагрузка" ? "Плановый reboot VPS." : "APT-кэш, temp и старые журналы."}</small>
       </div>
 
       <div className={`maintenanceControls ${value.cadence === "weekly" ? "weekly" : ""}`}>
         <label className="opsField toggle">
-          <span>Состояние</span>
           <span className="serviceToggle compact">
-            <input type="checkbox" checked={value.enabled} onChange={(event) => onChange({ enabled: event.target.checked })} disabled={busy} />
+            <input type="checkbox" aria-label={`Включить: ${title}`} checked={value.enabled} onChange={(event) => onChange({ enabled: event.target.checked })} disabled={busy} />
             <span /><em>{value.enabled ? "ON" : "OFF"}</em>
           </span>
         </label>

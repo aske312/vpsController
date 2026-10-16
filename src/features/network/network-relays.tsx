@@ -7,7 +7,6 @@ import { useNotifier } from "../../shared/notifications/notification-center";
 import { SystemOperationUnknown, systemActionNeedsPolling } from "../../control-panel/system-operation";
 import type { SystemAction } from "../../shared/types/control-plane";
 import type { NetworkAdmission, NetworkRequest } from "./network-api";
-import { bytes } from "../../shared/lib/control-plane-ui";
 import { relayConnection, relaySnapshot, type RelayStatus, type RelayHost } from "./relay-state";
 
 type Props = { request: NetworkRequest; admit: NetworkAdmission; operation?: SystemAction; onOperation: (value: SystemAction) => void; busy: boolean; onDirtyChange: (dirty: boolean) => void; refreshKey?: number };
@@ -112,23 +111,20 @@ export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: 
     const key = `relay-${item.id}`, open = expanded.includes(key), address = item.client_address || new URL(item.agent_url).hostname;
     const unknown = relay.failed || item.state !== "connected";
     return <Fragment key={item.id}>
-      <tr className={`networkRouteRow${open ? " is-expanded" : ""}`}>
+      <tr className={`networkRouteRow networkRelayRow${open ? " is-expanded" : ""}`}>
         <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true" /><span><strong>{address}</strong><small>{item.name} · Relay Agent</small></span></button></td>
-        <td><span className={`networkRelayState ${unknown ? "unknown" : "connected"}`}>{unknown ? "UNKNOWN" : "CONNECTED"}</span><small>{unknown ? "Агент не подтверждён" : "Доступен для подключений"}</small></td>
-        <td><span>RELAY</span><small>{item.routes.length} пересылок{item.foreign_routes ? ` · ${item.foreign_routes} вне PRO` : ""}</small></td>
-        <td><span>TCP {item.routes.filter(route => route.transport === "tcp").length} / UDP {item.routes.filter(route => route.transport === "udp").length}</span><small>{unknown ? "Состояние портов неизвестно" : `${item.routes.filter(route => route.state === "listening").length} портов слушают`}</small></td>
+        <td><span className={`networkRelayState ${unknown ? "unknown" : "connected"}`}>{unknown ? "UNKNOWN" : "CONNECTED"}</span></td>
+        <td><span>RELAY · {item.routes.length}</span></td>
+        <td><span>TCP {item.routes.filter(route => route.transport === "tcp").length} · UDP {item.routes.filter(route => route.transport === "udp").length}</span></td>
         <td><button type="button" disabled={relay.locked} onClick={() => relay.openHost(item)}>Настроить</button></td>
       </tr>
-      {open && <tr className="networkRouteDetailRow"><td colSpan={5}><div className="networkRouteCascade">
-        <header className="networkBlockHeader relayConnectionHead"><div><p className="eyebrow networkSectionEyebrow">RELAY CONNECTION</p><strong>{item.name}</strong><small>Клиенты: {address} · API: {item.agent_url} · {unknown ? "UNKNOWN" : `Agent ${item.version}`}</small></div><button disabled={relay.locked || relay.status?.pending || item.routes.length > 0} title={item.routes.length ? "Узел содержит пересылки действующих подключений" : undefined} onClick={() => relay.setConfirmation(item)}>Удалить узел</button></header>
-        <details className="relayFingerprint"><summary>Сертификат подключения</summary><p>SHA-256 {item.certificate_sha256}</p></details>
+      {open && <tr className="networkRouteDetailRow"><td colSpan={5}><div className="relayCompactSummary">
+        <span title={item.agent_url}>Agent {unknown ? "?" : item.version}</span>
+        <span title={`SHA-256 ${item.certificate_sha256}`}>PIN</span>
+        <span>{unknown ? "Порты ?" : `${item.routes.filter(route => route.state === "listening").length}/${item.routes.length} LISTEN`}</span>
+        {item.foreign_routes > 0 && <span>{item.foreign_routes} вне PRO</span>}
+        <button disabled={relay.locked || relay.status?.pending || item.routes.length > 0} title={item.routes.length ? "Узел содержит пересылки действующих подключений" : undefined} onClick={() => relay.setConfirmation(item)}>Удалить узел</button>
         {item.error && <p role="status">{item.error}</p>}
-        {item.routes.length > 0 ? <div className="relayForwardings" role="list" aria-label={`Пересылки ${item.name}`}>{item.routes.map(route => <div key={route.id} role="listitem">
-          <span><b>{route.transport.toUpperCase()} :{route.listen_port}</b><small>→ {route.target_ip}:{route.target_port}</small></span>
-          <span><b>{unknown ? "UNKNOWN" : route.state.toUpperCase()}</b><small>{unknown || !route.check ? "Протокол не подтверждён" : `Проверка с VPS: ${route.check.state.toUpperCase()} · ${route.check.consumer_id} · ${new Date(route.check.checked_at).toLocaleString("ru-RU")}`}</small></span>
-          <span><b>{unknown ? "—" : `${route.received_bytes == null ? "—" : bytes(route.received_bytes)} ↓ / ${route.sent_bytes == null ? "—" : bytes(route.sent_bytes)} ↑`}</b><small>{unknown ? "Нет актуальных метрик" : `${route.sessions ?? "—"} сессий · ${route.errors ?? "—"} ошибок`}</small></span>
-        </div>)}</div> : <p className="relayConnectionHint">Пересылок пока нет. Выберите этот узел в Direct или Mihomo — порт настроится при сохранении подключения.</p>}
-        {item.routes.length > 0 && <small className="relayConnectionHint">LISTENING подтверждает порт. Работоспособность протокола проверяется отдельно для подключения.</small>}
       </div></td></tr>}
     </Fragment>;
   })}</>;

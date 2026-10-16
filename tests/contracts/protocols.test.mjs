@@ -273,7 +273,6 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.doesNotMatch(manager, /PUBLIC_IP="\$\{PUBLIC_IP\}"/);
   assert.match(manager, /PUBLIC_IP="\$\(env_value PUBLIC_IP\)"/);
   assert.match(page, /protocolTab === "shadowsocks" \? "SS" : protocolTab === "vless-reality-xhttp" \? "VLESS"/);
-  assert.match(page, /image\.description \|\| image\.category_name/);
   assert.match(page, /activeProtocolImage/);
   assert.match(page, /setTab\(protocol\)/);
   assert.match(page, /const profiles: Record<Protocol, TunnelProfile>/);
