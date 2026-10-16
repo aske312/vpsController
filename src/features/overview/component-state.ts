@@ -29,12 +29,27 @@ export function componentPresentation(image: ProtocolImage, healthReason?: strin
     if (observed.health.state === "healthy") return summary("Работает", "online", observed.health.reason || "Служба запущена, проверка пройдена.");
     return summary("Запущен", "running", observed.health.state === "unchecked" ? "Работоспособность ещё не проверялась." : "Результат проверки работоспособности недоступен.");
   })();
+  const badge = (() => {
+    const operation = observed?.operation;
+    if (operation) return {label: operation.state === "unknown" ? "UNKNOWN" : operation.kind === "installing" ? "INSTALLING" : operation.kind === "updating" ? "UPDATING" : operation.kind === "removing" ? "REMOVING" : "RUNNING", tone: status.tone};
+    if (!installation || image.management?.state === "unknown") return {label: "UNKNOWN", tone: "unknown"};
+    if (installation === "not_installed") return {label: image.management?.retained ? "SAVED" : image.installable ? "AVAILABLE" : "UNAVAILABLE", tone: "available"};
+    if (installation === "incomplete" || observed?.runtime.state === "error") return {label: "ERROR", tone: "error"};
+    if (observed?.runtime.state === "stopped") return {label: "STOPPED", tone: "warning"};
+    if (observed?.runtime.state !== "running") return {label: "UNKNOWN", tone: "unknown"};
+    if (observed.health.state === "error") return {label: "ERROR", tone: "error"};
+    if (observed.health.state === "possible_issues") return {label: "WARN", tone: "warning"};
+    if (observed.health.state === "unknown") return {label: "UNKNOWN", tone: "unknown"};
+    if (readOnly) return {label: "READ ONLY", tone: "unknown"};
+    return {label: "ACTIVE", tone: status.tone};
+  })();
   return {
     installation: installation ? labels[installation] : labels.unknown,
     runtime: observed ? labels[observed.runtime.state] : labels.unknown,
     health: observed ? labels[observed.health.state] : labels.unknown,
     operation: observed?.operation ? labels[observed.operation.kind || "unknown"] : null,
     summary: status,
+    badge,
     canInstall,
     canAdopt: image.installed && image.management?.state === "unmanaged" && !observed?.operation,
     canUpdate: !readOnly && installation === "installed" && !observed?.operation && Boolean(image.update_available),

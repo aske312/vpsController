@@ -23,7 +23,6 @@ export function NodeComponentCard({ image, healthReason, coreVersion, port, busy
   const observed = image.component_state;
   const versionLabel = componentInstalledVersion(image, coreVersion);
   const attention = ["warning", "error"].includes(state.summary.tone);
-  const runtime = !image.installed ? observed?.installation.state === "not_installed" ? image.installable ? "AVAILABLE" : "UNAVAILABLE" : "UNKNOWN" : observed?.runtime.state === "running" ? "ACTIVE" : observed?.runtime.state === "stopped" ? "STOPPED" : observed?.runtime.state === "error" ? "ERROR" : "UNKNOWN";
 
   return <article className={`nodeComponentCard protocol-${image.id}`} aria-label={image.name}>
     <header>
@@ -31,23 +30,13 @@ export function NodeComponentCard({ image, healthReason, coreVersion, port, busy
         <span className="nodeComponentCardLogo"><ProtocolIcon protocol={image.id} /></span>
         <span className="nodeComponentCardIdentity"><strong>{image.name}</strong><small>{image.category_name || image.category || "Без категории"}</small></span>
       </button>
-      <em data-state={runtime.toLowerCase()}>{runtime}</em>
+      <em className="nodeComponentCardState" data-tone={state.badge.tone} aria-label={`Состояние ${image.name}: ${state.badge.label}`} title={`${state.summary.description}\nУстановка: ${state.installation}\nСлужба: ${state.runtime}\nПроверка: ${state.health}${image.management?.reason ? `\n${image.management.reason}` : ""}`}>{state.badge.label}</em>
     </header>
     <dl className="nodeComponentCardFacts">
       <div><dt>Версия</dt><dd className="nodeComponentCardVersion">{versionLabel}{(image.update_available || image.update_via_release) && <small title="Доступна новая версия"> → {image.available_version ? formatModuleVersion(image.available_version) : "Обновление"}</small>}</dd></div>
       {image.id !== "mihomo" && <div><dt>Порт</dt><dd>{port || "—"}</dd></div>}
     </dl>
-      <div className="nodeComponentCardStatus" data-tone={state.summary.tone}>
-        <div className="nodeComponentCardTags">
-          {observed?.installation.state !== "installed" && <span title={`Установка: ${state.installation}`} aria-label={`Установка: ${state.installation}`}>{observed?.installation.state === "not_installed" ? "НЕТ" : observed?.installation.state === "incomplete" ? "НЕПОЛН" : "УСТ ?"}</span>}
-          <span title={`Служба: ${state.runtime}`} aria-label={`Служба: ${state.runtime}`}>{observed?.runtime.state === "running" ? "RUN" : observed?.runtime.state === "stopped" ? "STOP" : observed?.runtime.state === "error" ? "ERR" : "RUN ?"}</span>
-          <span title={`Проверка: ${state.health}. ${state.summary.description}`} aria-label={`Проверка: ${state.health}`}>{observed?.health.state === "healthy" ? "OK" : observed?.health.state === "possible_issues" ? "WARN" : observed?.health.state === "error" ? "ERR" : observed?.health.state === "unchecked" ? "НЕ ПРОВ" : "CHECK ?"}</span>
-          {state.operation && <span>{state.operation}</span>}
-          {image.management?.retained && <span title="Настройки и подключения сохранены">ДАННЫЕ</span>}
-          {image.installed && state.readOnly && <span title={image.management?.reason}>READ ONLY</span>}
-        </div>
-        {attention && <p>{state.summary.description}</p>}
-      </div>
+    {attention && <p className="nodeComponentCardIssue">{state.summary.description}</p>}
       <footer className="nodeComponentCardActions">
           {image.management?.retained && <button type="button" title="Очистить сохранённые данные" disabled={busy || Boolean(installingProtocol) || Boolean(observed?.operation)} onClick={() => onPurge(image)}>Очистить</button>}
           {image.installed && image.management && image.management.state !== "managed" ? (

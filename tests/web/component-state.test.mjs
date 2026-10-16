@@ -14,6 +14,19 @@ test("installed component version never falls back to the available release", ()
 const image = { installed: true, installable: true, update_available: true, management: {state: "managed"},
   component_state: { installation: {state: "installed"}, runtime: {state: "stopped"}, health: {state: "unchecked"}, operation: null } };
 
+test("one component status prioritizes health, unknown results and active operations", () => {
+  for (const [runtime,health,label] of [
+    ["running","healthy","ACTIVE"], ["running","unchecked","ACTIVE"],
+    ["running","possible_issues","WARN"], ["running","error","ERROR"],
+    ["running","unknown","UNKNOWN"], ["stopped","healthy","STOPPED"],
+    ["error","healthy","ERROR"], ["unknown","healthy","UNKNOWN"],
+  ]) assert.equal(componentPresentation({...image,component_state:{...image.component_state,runtime:{state:runtime},health:{state:health}}}).badge.label,label);
+  const changing={...image,component_state:{...image.component_state,operation:{kind:"updating",state:"running"}}};
+  assert.equal(componentPresentation(changing).badge.label,"UPDATING");
+  assert.equal(componentPresentation({...changing,component_state:{...changing.component_state,operation:{kind:"updating",state:"unknown"}}}).badge.label,"UNKNOWN");
+  assert.equal(componentPresentation({...image,component_state:undefined}).badge.label,"UNKNOWN");
+});
+
 test("removal requires a removable managed installation and a confirmed idle state", () => {
   const removable = {...image, removable: true};
   assert.equal(componentPresentation(removable).canRemove, true);
