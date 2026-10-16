@@ -8,12 +8,12 @@ import { directProtocolSnapshot, directProtocolUnavailable } from "../../control
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createApiClient } from "../../shared/lib/api-request";
 import { useFailureNotifications } from "../../shared/notifications/notification-center";
-import { formatModuleVersion } from "../../shared/lib/format-version";
 import { ProtocolHealthBadge } from "../../shared/components/protocol-health-badge";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import type { Module as MihomoModule } from "../mihomo/types";
 import { createMihomoSummaryStore, EMPTY_MIHOMO_SUMMARY } from "./mihomo-summary";
 import { componentPresentation } from "./component-state";
+import { NodeComponentCard } from "./node-component-card";
 import { useMetricsHistory } from "./use-metrics-history";
 import { directChannelObservation } from "./direct-observation";
 
@@ -81,7 +81,6 @@ const bytes = (value?: number | null) => {
   return `${(value / 1024 ** index).toFixed(index > 2 ? 1 : 0)} ${units[index]}`;
 };
 
-const protocolMark = (id: string) => id === "mihomo" ? "M" : directShort[id as ProtocolId] || id.toUpperCase();
 const normalize = (value = "") => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 const channelAliases: Record<string, string[]> = {
@@ -467,77 +466,26 @@ export function OverviewDashboard({
         </div>
       </section>
 
-      <section className="overviewComponents">
-        <header>
+      <section className="nodeComponents" aria-label="Компоненты узла">
+        <header className="nodeComponentsHeader">
           <div><p className="eyebrow">NODE COMPONENTS</p><h2>Компоненты</h2></div>
-          <div className="overviewComponentCounters"><span><b>{installedServerModules.length}</b> установлено</span><span><b>{installableModules.length}</b> доступно</span></div>
+          <div className="nodeComponentsCounters"><span><b>{installedServerModules.length}</b> установлено</span><span><b>{installableModules.length}</b> доступно</span></div>
         </header>
-
-        <section className="overviewComponentRegistry" aria-label="Управление модулями узла">
-          <div>
-            {componentImages.map((image) => {
-              const observation = directChannelStates.find((item) => item.image.id === image.id);
-              const healthState = observation?.status?.health?.base_state;
-              const matchingHealth = image.component_state?.health.state === "possible_issues" && healthState === "WARN"
-                || image.component_state?.health.state === "error" && healthState === "ERROR";
-              const state = componentPresentation(image, matchingHealth && !observation?.statusFailed ? observation?.status?.health?.reason : undefined);
-              const installedVersion = image.id === "mihomo" && mihomoStatus?.core_version
-                ? formatModuleVersion(mihomoStatus.core_version)
-                : image.installed_version
-                  ? formatModuleVersion(image.installed_version)
-                  : image.installed ? "НЕ ОПРЕДЕЛЕНА" : "—";
-              const displayedVersion = image.installed
-                ? installedVersion
-                : image.installable ? "АКТУАЛЬНАЯ" : "—";
-              const availableVersion = image.available_version
-                ? formatModuleVersion(image.available_version)
-                : "НЕ ОПРЕДЕЛЕНА";
-
-              return (
-                <div className="overviewComponentRow" key={image.id}>
-                  <span className={`overviewComponentLogo overviewProtocolMark protocol-${image.id}`} title={protocolMark(image.id)}><ProtocolIcon protocol={image.id} /></span>
-                  <div className="overviewComponentIdentity">
-                    <p><b>{image.name}</b></p>
-                  </div>
-                  <div className={`overviewComponentState ${state.summary.tone}`}>
-                    <span title={`Установка: ${state.installation}`} aria-label={`Установка: ${state.installation}`}>{image.component_state?.installation.state === "installed" ? "УСТ" : image.component_state?.installation.state === "not_installed" ? "НЕТ" : image.component_state?.installation.state === "incomplete" ? "НЕПОЛН" : "УСТ ?"}</span>
-                    <span title={`Служба: ${state.runtime}`} aria-label={`Служба: ${state.runtime}`}>{image.component_state?.runtime.state === "running" ? "RUN" : image.component_state?.runtime.state === "stopped" ? "STOP" : image.component_state?.runtime.state === "error" ? "ERR" : "RUN ?"}</span>
-                    <span title={`Проверка: ${state.health}. ${state.summary.description}`} aria-label={`Проверка: ${state.health}`}>{image.component_state?.health.state === "healthy" ? "OK" : image.component_state?.health.state === "possible_issues" ? "WARN" : image.component_state?.health.state === "error" ? "ERR" : image.component_state?.health.state === "unchecked" ? "НЕ ПРОВ" : "CHECK ?"}</span>
-                    {state.operation && <span>{state.operation}</span>}
-                    {image.management?.retained && <span title="Настройки и подключения сохранены">ДАННЫЕ</span>}
-                    {image.installed && state.readOnly && <span title={image.management?.reason}>READ ONLY</span>}
-                  </div>
-                  <div className="overviewComponentFooter">
-                  <div className="overviewComponentVersion" title={`Версия: ${displayedVersion}`}>
-                    <b>{displayedVersion}</b>
-                    {(image.update_available || image.update_via_release) && <small title="Доступна новая версия">↑ {availableVersion}</small>}
-                  </div>
-                  <div className="overviewComponentAction">
-                    {image.management?.retained && <button type="button" title="Очистить сохранённые данные" disabled={busy || Boolean(installingProtocol) || Boolean(image.component_state?.operation)} onClick={() => onPurgeProtocol(image)}>Очистить</button>}
-                    {image.installed && image.management && image.management.state !== "managed" ? (
-                      <button type="button" title="Принять под управление" disabled={busy || !state.canAdopt} onClick={() => onAdoptProtocol(image)}>Принять</button>
-                    ) : !image.installed ? (
-                      <button type="button" disabled={!state.canInstall || busy || Boolean(installingProtocol)} onClick={() => onInstallProtocol(image)}>
-                        {!image.installable ? "Недоступен" : installingProtocol === image.id ? "Установка…" : "Установить"}
-                      </button>
-                    ) : image.update_available && image.id !== "mihomo" ? (
-                      <button type="button" title="Открыть компонент: доступно обновление" onClick={() => onOpenProtocol(image)}>Обновление</button>
-                    ) : image.update_available ? (
-                      <button type="button" className={image.update_breaking ? "warning" : ""} disabled={busy || !state.canUpdate || Boolean(installingProtocol)} onClick={() => onUpdateProtocol(image)}>
-                        {installingProtocol === `update-${image.id}` ? "Обновление…" : "Обновить"}
-                      </button>
-                    ) : (
-                      image.id !== "mihomo" && ["warning", "error"].includes(state.summary.tone) && <button type="button" onClick={() => onOpenProtocol(image)}>Проверить</button>
-                    )}
-                  </div>
-                  </div>
-                  {["warning", "error"].includes(state.summary.tone) && <small className="overviewComponentIssue">{state.summary.description}</small>}
-                </div>
-              );
-            })}
-            {!protocolImages.length && <p className="overviewEmpty">Каталог модулей временно недоступен.</p>}
-          </div>
-        </section>
+        <div className="nodeComponentsList">
+          {componentImages.map(image => {
+            const observation = directChannelStates.find(item => item.image.id === image.id);
+            const healthState = observation?.status?.health?.base_state;
+            const matchingHealth = image.component_state?.health.state === "possible_issues" && healthState === "WARN"
+              || image.component_state?.health.state === "error" && healthState === "ERROR";
+            return <NodeComponentCard key={image.id} image={image}
+              healthReason={matchingHealth && !observation?.statusFailed ? observation?.status?.health?.reason : undefined}
+              coreVersion={image.id === "mihomo" ? mihomoStatus?.core_version : undefined}
+              busy={busy} installingProtocol={installingProtocol}
+              onInstall={onInstallProtocol} onUpdate={onUpdateProtocol} onOpen={onOpenProtocol}
+              onAdopt={onAdoptProtocol} onPurge={onPurgeProtocol} />;
+          })}
+          {!protocolImages.length && <p className="overviewEmpty">Каталог модулей временно недоступен.</p>}
+        </div>
       </section>
       </article>
     </section>

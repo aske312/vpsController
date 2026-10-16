@@ -4,3 +4,8 @@ export function formatModuleVersion(value?: string | null, fallback = "—") {
   if (!match) return fallback;
   return `v${match[0].split(".").slice(0, 3).join(".")}`;
 }
+
+export function componentInstalledVersion(image: { id: string; installed: boolean; installed_version?: string | null }, coreVersion?: string) {
+  if (!image.installed) return "Не установлен";
+  return formatModuleVersion(image.id === "mihomo" && coreVersion ? coreVersion : image.installed_version, "Версия неизвестна");
+}

@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { componentPresentation } from "../../src/features/overview/component-state.ts";
+import { componentInstalledVersion } from "../../src/shared/lib/format-version.ts";
+
+test("installed component version never falls back to the available release", () => {
+  const candidate = {id: "wg", installed: true, available_version: "9.9.9"};
+  assert.equal(componentInstalledVersion(candidate), "Версия неизвестна");
+  assert.equal(componentInstalledVersion({...candidate, installed: false}), "Не установлен");
+  assert.equal(componentInstalledVersion({...candidate, installed_version: "1.2.3"}), "v1.2.3");
+  assert.equal(componentInstalledVersion({...candidate, id: "mihomo", installed_version: "1.2.3"}, "2.3.4"), "v2.3.4");
+});
 
 const image = { installed: true, installable: true, update_available: true, management: {state: "managed"},
   component_state: { installation: {state: "installed"}, runtime: {state: "stopped"}, health: {state: "unchecked"}, operation: null } };

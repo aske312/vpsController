@@ -10,8 +10,7 @@
 }
 
 .overviewTopology,
-.overviewTelemetry,
-.overviewComponents {
+.overviewTelemetry {
   position:relative;
   min-width:0;
   border:1px solid var(--line);
@@ -220,8 +219,7 @@
 .overviewTelemetry > header select { width:146px; min-height:34px; padding:6px 10px; font-size:11px; }
 .overviewTelemetryNote { margin:8px 0 12px; color:#8198a6; font:500 10px/1.45 var(--font-sans); overflow-wrap:anywhere; }
 
-.overviewTelemetry h2,
-.overviewComponents h2 { margin:2px 0 0; color:#dfeaf0; font:680 14px/1.2 var(--font-sans); }
+.overviewTelemetry h2 { margin:2px 0 0; color:#dfeaf0; font:680 14px/1.2 var(--font-sans); }
 
 .overviewFactCard { position:relative; min-width:0; min-height:66px; display:grid; align-content:start; gap:4px; padding:9px 10px; overflow:hidden; border:1px solid rgba(105,135,160,.13); border-radius:10px; background:rgba(4,11,17,.26); }
 
@@ -230,58 +228,6 @@
 .overviewFactCard > strong { color:#dce9ee; font:700 12px/1 var(--font-mono); }
 
 .overviewFactCard > small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#607686; font:500 6px/1.2 var(--font-mono); }
-
-.overviewComponents { padding:13px 14px 14px; }
-
-.overviewComponents > header { display:flex; align-items:center; justify-content:space-between; gap:14px; }
-
-.overviewComponents > header > div:first-child > small { display:block; margin-top:3px; color:#617786; font:500 8px/1.35 var(--font-sans); }
-
-.overviewComponentCounters { display:flex; gap:6px; }
-
-.overviewComponentCounters span { padding:7px 9px; border:1px solid rgba(105,135,160,.13); border-radius:9px; color:#667d8b; font:500 7px/1 var(--font-mono); background:rgba(4,11,17,.24); }
-
-.overviewComponentCounters b { color:#d6e4ea; font-size:10px; }
-
-.overviewComponentRegistry { margin-top:12px; }
-.overviewComponentRegistry > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr)); gap:6px; }
-.overviewComponentRow { min-width:0; display:grid; grid-template-columns:48px minmax(0,1fr); grid-template-areas:'logo name' 'logo tags' 'logo footer' 'issue issue'; align-content:start; align-items:center; gap:4px 8px; padding:6px; border:1px solid rgba(105,135,160,.16); border-radius:7px; background:rgba(4,11,17,.34); }
-
-.overviewComponentLogo.overviewProtocolMark { grid-area:logo; align-self:stretch; width:auto; height:auto; min-height:68px; border-radius:5px; }
-.overviewComponentLogo .protocolIcon { width:34px; height:34px; }
-.overviewComponentIdentity { grid-area:name; min-width:0; }
-
-.overviewComponentIdentity p,
-.overviewComponentVersion { min-width:0; display:grid; gap:3px; margin:0; }
-
-.overviewComponentIdentity b,
-.overviewComponentVersion b { overflow-wrap:anywhere; color:#d8e6ec; font:650 11px/1.3 var(--font-sans); }
-
-.overviewComponentIdentity small,
-.overviewComponentVersion small,
-.overviewComponentAction small { overflow-wrap:anywhere; color:#839aa8; font:500 10px/1.4 var(--font-sans); }
-.overviewComponentFooter { grid-area:footer; min-width:0; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px 8px; }
-.overviewComponentVersion { flex:1; font-variant-numeric:tabular-nums; }
-.overviewComponentVersion b { color:#91a8b6; font-size:10px; }
-
-.overviewComponentState { grid-area:tags; min-width:0; display:flex; flex-wrap:wrap; gap:3px; color:#8fa4b1; font:600 9px/1.3 var(--font-sans); }
-.overviewComponentState > span { padding:2px 4px; border:1px solid currentColor; border-radius:4px; }
-.overviewComponentIssue { grid-area:issue; color:var(--amber); font:500 10px/1.4 var(--font-sans); overflow-wrap:anywhere; }
-.overviewComponentState.online { color:var(--green); }
-.overviewComponentState.running,.overviewComponentState.available { color:var(--cyan); }
-.overviewComponentState.warning,.overviewComponentState.progress { color:var(--amber); }
-.overviewComponentState.error { color:var(--red); }
-
-.overviewComponentAction { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:4px; }
-.overviewComponentAction > div { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; }
-
-.overviewComponentAction button { min-height:25px; padding:4px 6px; border:1px solid rgba(100,184,255,.22); border-radius:5px; background:rgba(100,184,255,.08); color:#79baf0; font:650 9px/1.2 var(--font-sans); cursor:pointer; }
-
-.overviewComponentAction button:hover:not(:disabled) { background:rgba(100,184,255,.14); border-color:rgba(100,184,255,.34); }
-
-.overviewComponentAction button.warning { border-color:rgba(232,183,97,.28); background:rgba(232,183,97,.08); color:var(--amber); }
-
-.overviewComponentAction button:disabled { opacity:.45; cursor:wait; }
 
 @media (max-width:1240px) {
 .overviewTopologyHead { padding-right:205px; }
@@ -324,10 +270,6 @@
 .overviewDirectList > div { grid-template-columns:31px minmax(0,1fr) auto; }
 .overviewDirectTraffic,.overviewDirectLatency { display:none; }
 .overviewTelemetry { padding:11px; }
-.overviewComponents { padding:11px; }
-.overviewComponents > header { align-items:flex-start; }
-.overviewComponentCounters { display:none; }
-.overviewComponentRow { padding:6px; }
 }
 
 @media (max-width:470px) {
@@ -460,14 +402,6 @@
 .overviewFactCard > strong { font-size: 13px; }
 
 .overviewFactCard > small { font-size: 8.5px; line-height: 1.3; color: #758b99; }
-
-.overviewComponents h2 { font-size: 15px; }
-
-.overviewComponents > header > div:first-child > small { font-size: 9.5px; line-height: 1.4; color: #758b99; }
-
-.overviewComponentCounters span { font-size: 8.5px; }
-
-.overviewComponentCounters b { font-size: 11px; }
 
 @media (max-width: 760px) {
 .overviewTopologyHead > div:first-child > p:last-child { font-size: 10.5px; }

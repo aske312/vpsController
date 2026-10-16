@@ -161,18 +161,7 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
   border-radius:15px;
   background:linear-gradient(145deg,rgba(8,18,27,.94),rgba(5,12,19,.90));
 }
-.overviewNodeWorkspace > :is(.overviewTelemetry,.overviewComponents) { min-width:0; padding:10px; border:0 !important; border-radius:11px; background:rgba(3,10,16,.28); }
-.overviewComponents > header { align-items:flex-start; }
-.overviewComponents > header small { display:none !important; }
-.overviewComponentCounters { display:grid !important; gap:3px !important; }
-.overviewComponentRegistry > header { display:none; }
-.overviewComponentRow { grid-template-columns:minmax(0,1fr) auto !important; gap:6px 10px !important; min-height:0 !important; padding:8px !important; }
-.overviewComponentIdentity p small { display:none; }
-.overviewComponentVersion { text-align:right; }
-.overviewComponentVersion small { display:none; }
-.overviewComponentState { justify-self:start; }
-.overviewComponentAction { justify-self:end; }
-.overviewComponentAction button { min-height:27px !important; padding:0 8px !important; }
+.overviewNodeWorkspace > .overviewTelemetry { min-width:0; padding:10px; border:0 !important; border-radius:11px; background:rgba(3,10,16,.28); }
 
 /* DNS keeps artwork on its largest operational surface. */
 .dnsWorkspace { gap:10px !important; }
@@ -292,7 +281,6 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
   .gateMasthead { grid-template-columns:minmax(220px,1fr) auto; }
   .gateMastFacts { display:none; }
   .overviewNodeWorkspace { grid-template-columns:1fr; }
-  .overviewComponentRegistry > div { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
 }
 @media (max-width:760px) {
   .dnsOverview,.securityOverview { grid-template-columns:1fr !important; }
@@ -300,7 +288,6 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
   .dnsControlContent { width:100% !important; }
   .dnsControlArt { opacity:.28 !important; }
   .securityDiagnosticsGrid { grid-template-columns:1fr !important; }
-  .overviewComponentRegistry > div { grid-template-columns:1fr; }
 }
 
 /* Revision: plain page introductions and rebuilt operational workspaces. */
