@@ -29,7 +29,7 @@ export function NodeComponentCard({ image, healthReason, coreVersion, port, busy
     <header>
       <button type="button" className="nodeComponentCardOpen" disabled={!image.installed || image.id === "mihomo"} onClick={() => onOpen(image)} aria-label={`Открыть ${image.name}`}>
         <span className="nodeComponentCardLogo"><ProtocolIcon protocol={image.id} /></span>
-        <strong>{image.name}</strong>
+        <span className="nodeComponentCardIdentity"><strong>{image.name}</strong><small>{image.category_name || image.category || "Без категории"}</small></span>
       </button>
       <em data-state={runtime.toLowerCase()}>{runtime}</em>
     </header>
