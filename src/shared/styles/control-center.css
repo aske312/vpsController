@@ -89,36 +89,39 @@
 }
 
 .gateMasthead {
-  min-height: 70px !important;
-  grid-template-columns: minmax(260px, .95fr) minmax(430px, 1.45fr) auto !important;
-  gap: 10px !important;
-  margin-bottom: 12px !important;
-  padding: 8px 9px !important;
+  min-height: 52px !important;
+  grid-template-columns: minmax(200px, auto) minmax(0, 1fr) auto !important;
+  gap: 12px !important;
+  margin-bottom: 10px !important;
+  padding: 6px 10px !important;
   border-color: var(--cc-line) !important;
-  border-radius: 14px !important;
+  border-radius: 10px !important;
   background: linear-gradient(180deg, rgba(7,17,25,.96), rgba(5,14,22,.94)) !important;
   box-shadow: 0 10px 32px rgba(0,0,0,.28), inset 0 1px rgba(255,255,255,.025) !important;
 }
-.gateMastNode { min-width:0; display:grid !important; grid-template-columns:auto minmax(0,1fr) auto !important; align-items:center !important; gap:10px !important; padding:2px 8px 2px 4px; }
+.gateMastNode { min-width:0; display:grid !important; grid-template-columns:auto minmax(0,1fr) auto !important; align-items:center !important; gap:8px !important; padding:0; }
 .gateMastIdentity { min-width:0; }
-.gateMastIdentity > span { display:block; color:#617988; font:750 7px/1 var(--font-mono); letter-spacing:.13em; }
-.gateMastIdentity h2 { min-width:0; margin:3px 0 0 !important; overflow:hidden; font-size:13px !important; white-space:nowrap; text-overflow:ellipsis; }
-.gateMastIdentity p { margin-top:2px !important; font-size:9px !important; }
+.gateMastIdentity > .gateMastEndpoint { display:block; min-width:0; overflow:hidden; color:#a7bdca; font:600 11px/1.4 var(--font-mono); white-space:nowrap; text-overflow:ellipsis; }
 .gateCountryFlag {
-  flex:0 0 auto; width:32px; height:22px; display:inline-flex; margin:0;
+  flex:0 0 auto; width:26px; height:18px; display:inline-flex; margin:0;
   overflow:hidden; border:1px solid rgba(255,255,255,.24); border-radius:3px;
   background:#101b24; box-shadow:0 2px 8px rgba(0,0,0,.38);
 }
 .gateCountryFlag svg { display:block; width:100%; height:100%; }
 .gateCountryFlag.unknown { align-items:center; justify-content:center; color:#78909f; font:700 13px/1 var(--font-mono); }
-.gateMastState { margin:0 !important; padding:6px 8px !important; border:0 !important; border-radius:8px !important; background:rgba(98,215,180,.055) !important; letter-spacing:.03em !important; }
-.gateMastFacts { min-width:0; display:grid !important; grid-template-columns:repeat(5,minmax(62px,1fr)) !important; gap:0 !important; overflow:hidden; border:1px solid rgba(121,151,174,.10); border-radius:10px; background:rgba(2,9,15,.30); }
-.gateMastFacts > div { min-width:0; min-height:43px; padding:7px 9px !important; border:0 !important; border-right:1px solid rgba(121,151,174,.09) !important; border-radius:0 !important; background:transparent !important; }
-.gateMastFacts > div:last-child { border-right:0 !important; }
-.gateMastFacts span { font-size:7px !important; }
-.gateMastFacts strong { margin-top:3px !important; font-size:10px !important; }
+.gateMastState { margin:0 !important; padding:5px 6px !important; border:0 !important; border-radius:5px !important; background:rgba(98,215,180,.055) !important; letter-spacing:0 !important; }
+.gateMastFacts { min-width:0; display:flex !important; align-items:center; justify-content:flex-start; gap:0 !important; overflow-x:auto; border:0; border-radius:0; background:none; scrollbar-width:thin; }
+.gateMastFacts > .gateMastMetric { display:flex; align-items:baseline; gap:6px; flex:0 0 88px; min-width:0; min-height:0; padding:4px 9px !important; border:0 !important; border-right:1px solid rgba(121,151,174,.13) !important; border-radius:0; background:none; }
+.gateMastFacts > .gateMastMetric:first-child { flex-basis:145px; }
+.gateMastFacts > .gateMastMetric.network { flex-basis:270px; }
+.gateMastFacts > .gateMastMetric:last-child { border-right:0 !important; }
+.gateMastFacts span { font-size:9px !important; line-height:16px; letter-spacing:.02em; }
+.gateMastFacts strong { margin:0 !important; font-size:11px !important; line-height:16px; font-variant-numeric:tabular-nums; }
 .gateMastActions { gap:5px !important; }
-.gateMastActions button { min-height:32px !important; border-radius:8px !important; }
+.gateMastActions .autoButton,.gateMastActions .iconButton,.gateMastActions .ghostButton { height:28px !important; min-height:28px !important; border-radius:6px !important; }
+.gateMastActions .iconButton { width:28px !important; }
+.gateMastActions .ghostButton { padding:0 8px !important; }
+.gateMastActions .updatedAt { font-size:9px; }
 
 :is(.overview,.dnsWorkspace,.securityWorkspace,.servicesWorkspace,.applicationWorkspace,.mihomoWorkspace) { gap:12px !important; }
 :is(.overview,.dnsWorkspace,.securityWorkspace,.servicesWorkspace,.applicationWorkspace,.mihomoWorkspace) :is(button,input,select,textarea) { transition:border-color .16s ease, background .16s ease, transform .16s ease; }
@@ -222,8 +225,9 @@
 .mihomoStatusBoard,.mihomoChannelBoard,.mihomoQuickState,.mihomoProfiles,.mihomoPolicyPanel,.mihomoModulesPanel { border-color:var(--cc-line) !important; border-radius:15px !important; background:var(--cc-surface) !important; }
 
 @media (max-width:1180px) {
-  .gateMasthead { grid-template-columns:minmax(220px,1fr) auto !important; }
-  .gateMastFacts { display:none !important; }
+  .gateMasthead { grid-template-columns:minmax(0,1fr) auto !important; row-gap:5px !important; }
+  .gateMastFacts { display:flex !important; grid-column:1/-1; grid-row:2; justify-content:flex-start; border-top:1px solid var(--cc-line); padding-top:4px; }
+  .gateMastFacts > .gateMastMetric { flex-grow:1; justify-content:flex-start; }
   .overviewTopologyHead,.overviewFlow { width:82%; max-width:82% !important; }
   .dnsResolverList { width:78%; min-width:0; }
   .dnsResolverRows { width:72%; min-width:0; }
@@ -241,7 +245,9 @@
 @media (max-width:680px) {
   .gateMasthead { grid-template-columns:minmax(0,1fr) auto !important; }
   .gateMastNode { grid-template-columns:auto minmax(0,1fr) !important; }
-  .gateMastState,.gateMastNode p,.gateMastActions .updatedAt { display:none !important; }
+  .gateMastState,.gateMastActions .updatedAt { display:none !important; }
+  .gateMastFacts { display:none !important; }
+  .gateMastActions .ghostButton { display:inline-flex !important; align-items:center; }
   .overviewTopology,.securityOverview { min-height:0 !important; padding:14px !important; }
   .overviewFlow { grid-template-columns:1fr !important; }
   .dnsResolverBrowser { min-height:0; }

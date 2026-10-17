@@ -77,6 +77,7 @@ export function OperationHistorySettings({ policy, confirm, busy }: {
   const valid = draft && [draft.retention_days, draft.log_retention_days].every((value) => Number.isInteger(value) && value >= 1 && value <= 730) && [draft.disk_limit_mb, draft.log_disk_limit_mb].every((value) => Number.isInteger(value) && value >= 1 && value <= 1024);
   return <section className="servicesLog servicesHistory" aria-label="Хранение истории операций">
     <div className="operationsTitle"><p className="eyebrow">OPERATION HISTORY</p><h3>История операций</h3></div>
+    <div className="operationsBody">
     {error && <p role="alert">{error}</p>}
     {conflict && <p role="status">Настройки на сервере изменились. Ваш ввод сохранён; отмените правки, чтобы принять актуальные значения.</p>}
     <div className="servicesHistoryFields">
@@ -88,10 +89,11 @@ export function OperationHistorySettings({ policy, confirm, busy }: {
     {saved?.logs && <p>Этапы: {(saved.logs.used_bytes / 1024 / 1024).toFixed(1)} МиБ{saved.logs.over_limit ? " · превышение лимита" : ""}</p>}
     {saved && <p>{Object.entries(saved.sources).map(([name, source]) => `${({ system: "Система", mihomo: "Mihomo", cdn: "CDN" } as Record<string, string>)[name] ?? name}: ${(source.used_bytes / 1024 / 1024).toFixed(1)} МиБ${source.over_limit ? " — лимит превышен" : ""}`).join("; ")}</p>}
     <small className="servicesSettingsHint">Активные и неизвестные операции сохраняются. Лимиты применятся при очистке.</small>
+    </div>
     <div className="servicesLogActions">
       <button type="button" className="servicePrimary" disabled={busy || saving || !valid || conflict} onClick={() => void policy.save(confirm)}>{saving ? "Сохранение…" : "Сохранить"}</button>
-      <button type="button" disabled={saving || !saved} onClick={policy.reset}>Сбросить</button>
-      <button type="button" disabled={saving} onClick={() => void policy.load()}>Обновить</button>
+      <button type="button" className="servicePrimary ghost" disabled={saving || !saved} onClick={policy.reset}>Сбросить</button>
+      <button type="button" className="servicePrimary ghost" disabled={saving} onClick={() => void policy.load()}>Обновить</button>
     </div>
   </section>;
 }

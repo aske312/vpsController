@@ -116,11 +116,13 @@
 .serviceActionSecondary.protected { opacity:.68; }
 .serviceActionPrimary:disabled,.serviceActionSecondary:disabled { cursor:not-allowed; opacity:.48; }
 
-.servicesOperations { min-width:0; padding:16px 18px 0; border:1px solid rgba(121,151,174,.16); border-radius:12px; background:linear-gradient(150deg,rgba(10,21,30,.92),rgba(5,13,20,.88)); }
-.servicesOperationsHead { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 0 14px; }
+.servicesOperations { min-width:0; padding:12px 16px 0; border:1px solid rgba(121,151,174,.16); border-radius:12px; background:linear-gradient(150deg,rgba(10,21,30,.92),rgba(5,13,20,.88)); }
+.servicesOperationsHead { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 0 10px; }
+.servicesOperationsHead > div:first-child { display:flex; align-items:baseline; flex-wrap:wrap; gap:6px 12px; }
+.servicesOperationsHead .eyebrow { margin:0; }
 .servicesOperationsHead h2 { margin:0; color:#edf5f9; font-size:16px; }
 .servicesOperationsFacts { display:flex; gap:7px; flex-wrap:wrap; justify-content:flex-end; }
-.servicesOperationsFacts > span { display:inline-flex; align-items:center; gap:7px; min-height:34px; padding:7px 12px; border:1px solid rgba(93,119,143,.13); border-radius:9px; background:rgba(7,16,24,.70); }
+.servicesOperationsFacts > span { display:inline-flex; align-items:center; gap:7px; min-height:26px; padding:3px 0 3px 12px; border:0; border-left:1px solid rgba(93,119,143,.18); border-radius:0; background:none; }
 .servicesOperationsFacts small { color:#718797; font-size:8px; font-weight:750; letter-spacing:.09em; }
 .servicesOperationsFacts b { color:#dce9ef; font:700 10px var(--font-mono); }
 
@@ -129,20 +131,29 @@
   display:flex;
   flex-direction:column;
 }
-.servicesMaintenance,.servicesLog { min-width:0; padding:16px 0; border:0; border-top:1px solid rgba(121,151,174,.16); border-radius:0; background:none; }
-.servicesLog { display:flex; flex-direction:column; gap:12px; }
+.servicesMaintenance,.servicesLog { min-width:0; display:grid; grid-template-columns:150px minmax(0,1fr) auto; align-items:start; gap:12px 18px; padding:12px 0; border:0; border-top:1px solid rgba(121,151,174,.16); border-radius:0; background:none; }
+.servicesMaintenance { grid-template-columns:150px minmax(0,1fr); }
+.operationsBody { min-width:0; display:grid; gap:7px; }
+.operationsBody > :is(p,small) { margin:0; color:#839aa8; font-size:11px; line-height:1.5; }
+.servicesOperations .operationsTitle { flex-direction:column; gap:5px; align-items:flex-start; padding-top:2px; }
+.servicesOperations .opsField { display:grid; grid-template-columns:1fr; align-self:end; align-content:end; gap:5px; }
+.servicesOperations .opsField > span:first-child { font-size:9px; letter-spacing:.03em; }
+.servicesOperations .opsField.toggle { display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-end; }
+.servicesOperations .opsField.toggle > .serviceToggle { min-height:28px; }
+.servicesOperations .servicesLogActions { margin:0; padding:0; border:0; align-self:start; }
+.servicesMaintenance .servicesLogActions { justify-content:flex-end; }
 .servicesHistory p { margin:0; color:#91a6b5; font-size:11px; line-height:1.5; }
-.servicesHistoryFields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px 10px; }
+.servicesHistoryFields { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px 10px; }
 .servicesSettingsHint { color:#839aa8; font-size:11px; line-height:1.5; }
-.servicesMetrics .servicesLogControls { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:center; }
-.servicesMetrics .servicesLogControls > small,.servicesMetrics .servicesLogActions { grid-column:1/-1; }
+.servicesMetrics .servicesLogControls { grid-template-columns:80px repeat(4,minmax(0,1fr)); align-items:end; }
+.servicesMetrics .servicesLogControls > small { grid-column:1/-1; }
 .operationsTitle { display:flex; flex-wrap:wrap; gap:4px 8px; align-items:baseline; }
 .operationsTitle .eyebrow { margin:0; font-size:8px; }
 .operationsTitle h3 { margin:0; color:#edf5f9; font-size:14px; }
 .operationsTitle small { color:#718796; font-size:11px; line-height:1.4; }
 .servicesMaintenanceHead { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
 
-.servicesLogControls { min-width:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px 10px; align-items:center; }
+.servicesLogControls { min-width:0; display:grid; grid-template-columns:100px minmax(120px,180px); gap:6px 12px; align-items:end; }
 .opsField { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) 74px; align-items:center; gap:6px; }
 .opsField > span:first-child { color:#7d92a2; font-size:9px; font-weight:750; letter-spacing:.09em; text-transform:uppercase; }
 .opsField > small { color:#6f8595; font-size:10px; }
@@ -218,7 +229,9 @@
 
 @media (max-width:1180px) {
   .servicesRegistry { width:72%; min-width:0; }
-  .servicesMetrics .servicesLogControls { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .servicesMaintenance,.servicesLog { grid-template-columns:125px minmax(0,1fr); gap:10px 14px; }
+  .servicesLog > .servicesLogActions { grid-column:2; justify-content:flex-end; }
+  .servicesMetrics .servicesLogControls { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .servicesHistoryFields { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .servicesLogActions { margin-top:0; }
 }
@@ -230,7 +243,7 @@
   .serviceActions { justify-content:flex-start; }
   .serviceRuntime small { white-space:normal; }
   .servicesOperationsHead,.servicesMaintenanceHead { flex-direction:column; align-items:flex-start; }
-  .servicesLogControls { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .servicesOperations .servicesLogControls { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .maintenanceRow { grid-template-columns:1fr; }
   .maintenanceControls,.maintenanceControls.weekly { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .maintenanceRuntime { grid-column:auto; }
@@ -246,7 +259,10 @@
   .servicesRegistry { padding:7px; }
   .serviceActions { flex-wrap:wrap; }
   .servicesOperations { padding:12px 14px 0; }
-  .servicesHistoryFields,.servicesMetrics .servicesLogControls,.servicesLogControls { grid-template-columns:1fr; }
+  .servicesMaintenance,.servicesLog { grid-template-columns:minmax(0,1fr); gap:10px; }
+  .servicesOperations .operationsTitle { flex-direction:row; align-items:baseline; gap:5px 10px; }
+  .servicesLog > .servicesLogActions { grid-column:1; justify-content:flex-start; }
+  .servicesHistoryFields,.servicesOperations .servicesLogControls { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .servicesLogActions { justify-content:flex-start; }
   .maintenanceControls,.maintenanceControls.weekly { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }

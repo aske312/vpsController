@@ -170,7 +170,7 @@ export function ServicesDashboard({
             <p className="eyebrow">LOG MANAGEMENT</p>
             <h3>Журналы</h3>
           </div>
-          <div className="servicesLogControls">
+          <div className="operationsBody"><div className="servicesLogControls">
             <label className="opsField toggle">
               <span title="Сохранять журналы после перезагрузки">На диске</span>
               <span className="serviceToggle compact">
@@ -189,7 +189,7 @@ export function ServicesDashboard({
                 <option value={0}>Без автоочистки</option>
               </select>
             </label>
-          </div>
+          </div></div>
           <div className="servicesLogActions">
             <button type="button" className="servicePrimary" onClick={onSaveLogging} disabled={serviceBusy || !loggingDraft}>Сохранить</button>
             <button type="button" className="serviceDanger" onClick={onClearLogs} disabled={serviceBusy}>Очистить</button>
@@ -200,6 +200,7 @@ export function ServicesDashboard({
           <div className="operationsTitle">
             <p className="eyebrow">METRICS HISTORY</p><h3>История метрик VPS</h3>
           </div>
+          <div className="operationsBody">
           {metricsSettings?.error && <p role="status">{metricsSettings.error}</p>}
           {metricsSettings?.trimmed_at && <p>Часть старых измерений удалена по дисковому лимиту.</p>}
           {metricsSettings && metricsDraft && metricsSettings.revision !== metricsDraft.revision && <p role="status">Настройки изменились на сервере. Ваши правки сохранены в форме; отмените их, чтобы загрузить актуальные значения.</p>}
@@ -210,10 +211,11 @@ export function ServicesDashboard({
               ["hour_days", "Часово · д", 1, 730], ["disk_limit_mb", "Лимит · МБ", 8, 1024],
             ] as const).map(([key, label, min, max]) => <label className="opsField" key={key}><span>{label}</span><input type="number" min={min} max={max} value={metricsDraft?.[key] ?? ""} disabled={busy || !metricsDraft} onChange={(event) => onMetricsChange({ [key]: Number(event.target.value) })} /></label>)}
             <small>{metricsSettings ? `${(metricsSettings.used_bytes / 1024 / 1024).toFixed(1)} МБ занято` : "Данные недоступны"} · сокращение лимитов удаляет старые измерения.</small>
-            <div className="servicesLogActions">
+          </div>
+          </div>
+          <div className="servicesLogActions">
               <button type="button" className="servicePrimary" onClick={onSaveMetrics} disabled={busy || !metricsDraft || metricsSettings?.revision !== metricsDraft.revision}>Сохранить</button>
-              <button type="button" onClick={onResetMetrics} disabled={busy || !metricsSettings}>Сбросить</button>
-            </div>
+              <button type="button" className="servicePrimary ghost" onClick={onResetMetrics} disabled={busy || !metricsSettings}>Сбросить</button>
           </div>
         </section>
 
@@ -225,6 +227,7 @@ export function ServicesDashboard({
               <h3>Плановые задачи</h3>
             </div>
           </header>
+          <div className="operationsBody">
           {services?.automation_recovery_required && <p role="alert">Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Отображаемые настройки могут отличаться от состояния служб. <button type="button" disabled={serviceBusy} onClick={onRecoverAutomation}>Восстановить расписания</button></p>}
           <div className="maintenanceRows">
             <ScheduleRow title="Перезагрузка" value={automationDraft?.reboot} timer={services?.timers.reboot} busy={serviceBusy} onChange={(patch) => onAutomationChange("reboot", patch)} />
@@ -233,6 +236,7 @@ export function ServicesDashboard({
           </div>
           <div className="servicesLogActions">
             <button type="button" className="servicePrimary" onClick={onSaveAutomation} disabled={serviceBusy || services?.automation_recovery_required}>Сохранить</button>
+          </div>
           </div>
         </section>
         </div>

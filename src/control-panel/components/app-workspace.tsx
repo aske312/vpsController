@@ -118,19 +118,17 @@ export function AppWorkspace({
           <div className="gateMastNode">
             <CountryFlag code={countryCode} label={server?.country || "Страна не определена"} />
             <div className="gateMastIdentity">
-              <span>PRIMARY NODE</span>
-              <h2>{server?.city || server?.name || "Primary Node"}</h2>
-              <p><span>{server?.country || "—"}</span><span className="mono">{server?.public_endpoint || server?.public_ip || "—"}</span></p>
+              <span className="gateMastEndpoint mono" title={server?.public_endpoint || server?.public_ip}>{server?.public_endpoint || server?.public_ip || "—"}</span>
             </div>
             <div className={`gateMastState ${nodeState}`}>{applicationStateTitle}</div>
           </div>
 
           <div className="gateMastFacts" aria-label="Метрики сервера">
-            <div className="gateMastMetric"><span>UPTIME</span><strong>{uptimeLabel}</strong><i /></div>
-            <div className="gateMastMetric"><span>LOAD</span><strong>{loadLabel}</strong><i /></div>
-            <div className="gateMastMetric"><span>CPU</span><strong>{cpuLabel}</strong><i /></div>
-            <div className="gateMastMetric"><span>RAM</span><strong>{ramLabel}</strong><i /></div>
-            <div className="gateMastMetric network"><span>NETWORK</span><strong>{networkLabel}</strong><i /></div>
+            <div className="gateMastMetric"><span>UPTIME</span><strong>{uptimeLabel}</strong></div>
+            <div className="gateMastMetric"><span>LOAD</span><strong>{loadLabel}</strong></div>
+            <div className="gateMastMetric"><span>CPU</span><strong>{cpuLabel}</strong></div>
+            <div className="gateMastMetric"><span>RAM</span><strong>{ramLabel}</strong></div>
+            <div className="gateMastMetric network"><span>NETWORK</span><strong>{networkLabel}</strong></div>
           </div>
 
           <div className="gateMastActions">
