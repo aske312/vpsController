@@ -2,12 +2,14 @@
 
 import { NetworkRouteSummaryBadge } from "./network-route-badge";
 import { serverAddressSummary } from "./route-summary";
+import { ServerAddressDetails } from "./network-route-details";
+import type { NetworkIpIdentity } from "../../shared/types/control-plane";
 
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ApiRequestError } from "../../shared/lib/api-request";
 import { useNotifier } from "../../shared/notifications/notification-center";
 import type { NetworkRequest } from "./network-api";
-import { addressMatches, addressRoleLabels, confirmsAddressChange, serverAddressesSnapshot, type AddressChange, type ServerAddressInventory, type ServerAddressRole } from "./server-address-state";
+import { addressMatches, confirmsAddressChange, serverAddressesSnapshot, type AddressChange, type ServerAddressInventory, type ServerAddressRole } from "./server-address-state";
 
 type Pending = Omit<AddressChange, "revision">;
 const storageKey = "312-server-address-role-pending";
@@ -83,7 +85,7 @@ export function useNetworkAddresses({ request, busy, refreshKey }: { request: Ne
   return { status, failed, reading, pending, locked: busy || failed || reading || Boolean(pending) || status?.discovery.state !== "ready", load, setRole };
 }
 
-export function NetworkServerAddressRows({ control, query, expanded, onToggle, renderIdentity }: { control: ReturnType<typeof useNetworkAddresses>; query: string; expanded: string[]; onToggle: (key: string) => void; renderIdentity?: (address: string) => ReactNode }) {
+export function NetworkServerAddressRows({ control, query, expanded, onToggle, ipInfo }: { control: ReturnType<typeof useNetworkAddresses>; query: string; expanded: string[]; onToggle: (key: string) => void; ipInfo?: NetworkIpIdentity[] }) {
   const { status } = control;
   return <>
     {(control.failed || !status || status.discovery.state === "error" || control.pending) && <tr><td colSpan={5}><div className="networkAddressNotice" role="status">
@@ -101,13 +103,7 @@ export function NetworkServerAddressRows({ control, query, expanded, onToggle, r
         <td><label className="networkAddressRole"><span className="networkSrOnly">Назначение {row.address}</span><select value={row.role} disabled={control.locked || row.presence !== "present"} onChange={event => void control.setRole(row.address, event.target.value as ServerAddressRole)}>
           <option value="primary">Основной</option><option value="reserve" disabled={row.role === "primary"}>Резервный</option><option value="additional" disabled={row.role === "primary"}>Дополнительный</option>
         </select></label></td>
-      </tr>{open && <tr className="networkRouteDetailRow"><td colSpan={5}><div className="networkRouteCascade">
-        <strong>{row.address} · {addressRoleLabels[row.role]}</strong>
-        <p>{summary.detail}</p>
-        <p>{row.role === "primary" ? "Используется в новых прямых конфигурациях. Для смены основного выберите другой IP этого семейства; прежний станет резервным." : row.role === "reserve" ? "Резервный адрес сохранён. Автоматическое переключение подключений пока не включено." : "Публичный адрес сервера доступен для назначения основным или резервным."}</p>
-        <small>{row.source === "interface" ? `Обнаружен на интерфейсах: ${row.interfaces.join(", ")}` : row.source === "configured" ? "Указан в настройках сервера; назначение интерфейсу не подтверждено (возможен NAT)." : "Сохранён ранее; сейчас адрес не найден на активном интерфейсе."}</small>
-        {renderIdentity?.(row.address)}
-      </div></td></tr>}</Fragment>;
+      </tr>{open && <tr className="networkRouteDetailRow"><td colSpan={5}><ServerAddressDetails row={row} summary={summary} observedAt={status.detected_at} identity={ipInfo?.find(item => item.address === row.address)} /></td></tr>}</Fragment>;
     })}
   </>;
 }

@@ -29,7 +29,6 @@ test("network owns shared CDN and relay endpoints while protected channels keep 
   assert.match(css, /networkRouteStatus\.ready/);
   assert.match(page, /expandedDomains/);
   assert.match(page, /networkRouteDetailRow/);
-  assert.match(page, /networkRouteCascade/);
   // Route display semantics are covered behaviorally by network-route-summary.test.mjs.
   assert.match(endpoint, /result\.status === "unchecked"/);
   assert.match(api, /"verification": "dns_only"/);

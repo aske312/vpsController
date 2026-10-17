@@ -30,6 +30,7 @@ import { NetworkEndpoints } from "./network-endpoints";
 import { NetworkRelayDialogs, NetworkRelayNotice, NetworkRelayRows, relayMatches, useNetworkRelays } from "./network-relays";
 import { NetworkRouteSummaryBadge } from "./network-route-badge";
 import { domainRouteSummary } from "./route-summary";
+import { DomainRouteDetails, RouteDetailsSection } from "./network-route-details";
 import { NetworkCloudflare, type NetworkCloudflareControl } from "./network-cloudflare";
 import { dnsComponents } from "./system-dns-control";
 import { NetworkServerAddressRows, useNetworkAddresses } from "./network-addresses";
@@ -417,78 +418,6 @@ function NetworkStateFact({ label, value, note, mono = false }: { label: string;
   );
 }
 
-function NetworkIdentityDetails({
-  domain,
-}: {
-  domain: NetworkStatus["domains"][number];
-}) {
-  const dns = domain.dns;
-  const ipInfo = domain.ip_info || [];
-  const addresses = domain.resolved.length
-    ? domain.resolved
-    : ipInfo.map((item) => item.address);
-  if (!dns && !domain.edge && !addresses.length)
-    return (
-      <div className="networkIdentityEmpty">DNS/IP-сведения не получены</div>
-    );
-  return (
-    <div className="networkIdentityBody">
-      {dns && (
-        <div className="networkIdentityDns">
-          <span>Авторитетный DNS</span>
-          <strong>{dns.provider}</strong>
-          <small>
-            {dns.nameservers.length
-              ? dns.nameservers.join(", ")
-              : "NS не получены"}
-          </small>
-          {dns.records && (
-            <small>
-              A: {dns.records.a.length ? dns.records.a.join(", ") : "нет"} · AAAA: {dns.records.aaaa.length ? dns.records.aaaa.join(", ") : "нет"}
-            </small>
-          )}
-        </div>
-      )}
-      {domain.edge && (
-        <div className="networkIdentityDns">
-          <span>CDN / edge</span>
-          <strong>{domain.edge.provider}</strong>
-          <small>
-            {domain.edge.source}
-            {domain.edge.cnames.length
-              ? ` · ${domain.edge.cnames.join(", ")}`
-              : ""}
-          </small>
-        </div>
-      )}
-      {addresses.length > 0 && (
-        <div className="networkIdentityIps">
-          {addresses.map((address) => {
-            const item = ipInfo.find(
-              (candidate) => candidate.address === address,
-            );
-            return (
-              <div className="networkIdentityIp" key={address}>
-                <code>{address}</code>
-                <span>
-                  {item
-                    ? [item.hoster, item.asn].filter(Boolean).join(" · ") ||
-                      "Unknown"
-                    : "Сведения об IP не получены"}
-                </span>
-                {item?.provider && item.provider !== item.hoster && (
-                  <small>RDAP: {item.provider}</small>
-                )}
-                {item?.ptr && <small>PTR: {item.ptr}</small>}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function NetworkCapabilityCard({ check }: { check: NetworkCapabilityCheck }) {
   const [copied, setCopied] = useState(false);
   const canPublishIpv6 =
@@ -675,10 +604,7 @@ function DiagnosticsV2({
               </tr>
             </thead>
             <tbody>
-              <NetworkServerAddressRows control={addresses} query={query} expanded={listState.expanded} onToggle={toggleDomain} renderIdentity={address => {
-                const ipInfo = status?.server.ip_info?.filter(item => item.address === address);
-                return ipInfo?.length ? <NetworkIdentityDetails domain={{ value: address, role: "SERVER", source: "VPS", resolved: [address], matches_origin: true, route: "direct", ip_info: ipInfo }} /> : null;
-              }} />
+              <NetworkServerAddressRows control={addresses} query={query} expanded={listState.expanded} onToggle={toggleDomain} ipInfo={status?.server.ip_info} />
               <NetworkRelayRows relay={relay} query={query} expanded={listState.expanded} onToggle={toggleDomain} />
               {domains.map((domain) => {
                 const rowKey = `${domain.role}-${domain.value}`;
@@ -754,57 +680,14 @@ function DiagnosticsV2({
                     {expanded && (
                       <tr className="networkRouteDetailRow">
                         <td colSpan={5}>
-                          <div className="networkRouteCascade">
-                            <div className="networkRouteCascadeHeader">
-                              <div>
-                                <p className="eyebrow networkSectionEyebrow">ROUTE DETAILS</p>
-                                <strong>{domain.value}</strong>
-                              </div>
-                              <NetworkRouteSummaryBadge summary={summary} />
-                            </div>
-                            <p className="networkRouteEvidence">{summary.detail}</p>
-                            <div className="networkRouteCascadeMeta">
-                              <div>
-                                <small>Роль</small>
-                                <strong>{domain.role}</strong>
-                              </div>
-                              <div>
-                                <small>Источник</small>
-                                <strong>{domain.source}</strong>
-                              </div>
-                              <div>
-                                <small>Адреса</small>
-                                <strong>{domain.resolved.length ? domain.resolved.length + " IP" : "Нет IP"}</strong>
-                              </div>
-                            </div>
-                            <NetworkIdentityDetails domain={domain} />
-                            {checks.map(check => (
-                              <div className={`networkRouteCheckNotice ${check.status}`} key={check.kind}>
-                                <strong>Последняя проверка {({ cdn: "CDN", tls_relay: "TLS", udp_relay: "UDP" })[check.kind]}</strong>
-                                <span>{check.message}</span>
-                                <small>
-                                  {check.checked_at ? formatTime(check.checked_at) : "Время не записано"}
-                                  {check.failed_checks ? ` · неудач подряд: ${check.failed_checks}` : ""}
-                                </small>
-                              </div>
-                            ))}
-                            {domain.status === "stale" && domain.stale_usages?.length ? (
-                              <div className="networkRouteStaleNotice">
-                                <strong>Домен сохранён в подключениях:</strong>
-                                <span>{domain.stale_usages.join(" · ")}</span>
-                              </div>
-                            ) : null}
-                            {domain.role.includes("CDN") && (
-                              <>
-                              {cloudflare && <NetworkCloudflare domain={domain.value} detected={domain.edge?.provider.toLowerCase().includes("cloudflare") === true} request={request} control={{ ...cloudflare, blocked: cloudflare.blocked || busy || readFailed }} refreshKey={refreshKey} />}
-                              <NetworkEch
-                                domain={domain.value}
-                                route={domain.route}
-                                request={request}
-                              />
-                              </>
+                          <DomainRouteDetails domain={domain} checks={checks} summary={summary} observedAt={status?.detected_at} failed={readFailed}>
+                            {(domain.endpoint_kind === "cdn" || checks.some(check => check.kind === "cdn") || /cdn/i.test(domain.role)) && (
+                              <RouteDetailsSection title="Защита CDN и ECH" wide collapsible>
+                                {cloudflare && <NetworkCloudflare domain={domain.value} detected={domain.edge?.provider.toLowerCase().includes("cloudflare") === true} request={request} control={{ ...cloudflare, blocked: cloudflare.blocked || busy || readFailed }} refreshKey={refreshKey} />}
+                                <NetworkEch domain={domain.value} route={domain.route} request={request} />
+                              </RouteDetailsSection>
                             )}
-                          </div>
+                          </DomainRouteDetails>
                         </td>
                       </tr>
                     )}
