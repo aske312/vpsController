@@ -28,7 +28,8 @@ import { DnsView } from "./network-dns";
 import { NetworkEch } from "./network-ech";
 import { NetworkEndpoints } from "./network-endpoints";
 import { NetworkRelayDialogs, NetworkRelayNotice, NetworkRelayRows, relayMatches, useNetworkRelays } from "./network-relays";
-import { NetworkRouteBadge, type NetworkRouteTone } from "./network-route-badge";
+import { NetworkRouteSummaryBadge } from "./network-route-badge";
+import { domainRouteSummary } from "./route-summary";
 import { NetworkCloudflare, type NetworkCloudflareControl } from "./network-cloudflare";
 import { dnsComponents } from "./system-dns-control";
 import { NetworkServerAddressRows, useNetworkAddresses } from "./network-addresses";
@@ -406,80 +407,6 @@ function formatTime(value: string) {
       });
 }
 
-function routeTags(domain: NetworkStatus["domains"][number]) {
-  const role = domain.role.toLowerCase();
-  const tags: Array<{ label: string; kind: string }> = [];
-  const add = (label: string, kind: string) => {
-    if (!tags.some((tag) => tag.label === label)) tags.push({ label, kind });
-  };
-  if (role.includes("panel")) add("UI", "ui");
-  if (role.includes("server")) add("ORIGIN", "origin");
-  if (role.includes("cdn")) add("CDN", "cdn");
-  if (role.includes("udp")) {
-    add("UDP", "udp");
-    add("RELAY", "relay");
-  }
-  if (role.includes("tls")) add("TLS", "tls");
-  if (
-    !role.includes("udp") &&
-    (role.includes("vless") ||
-      role.includes("cdn") ||
-      role.includes("tls") ||
-      role.includes("panel") ||
-      role.includes("relay"))
-  )
-    add("TCP", "tcp");
-  if (domain.route === "proxy_or_cdn") add("PROXY", "proxy");
-  else if (domain.route === "direct") add("DIRECT", "direct");
-  else add("DNS?", "unknown");
-  return tags;
-}
-
-function NetworkRouteTags({
-  domain,
-}: {
-  domain: NetworkStatus["domains"][number];
-}) {
-  return (
-    <div className="networkRouteTags" aria-label="Тип маршрута">
-      {routeTags(domain).map((tag) => (
-        <span className={`networkRouteTag ${tag.kind}`} key={tag.label}>
-          {tag.label}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function routeStatusFor(domain: NetworkStatus["domains"][number]): NetworkEndpointCheck["status"] | null {
-  if (domain.status === "stale") return "stale";
-  const role = domain.role.toLowerCase();
-  const isCdn = role.includes("cdn");
-  const isTls = role.includes("tls");
-  const isUdp = role.includes("udp");
-  if (!isCdn && !isTls && !isUdp) return null;
-  if (!domain.resolved.length || domain.route === "unresolved") return "unresolved";
-  if (isCdn) return domain.route === "proxy_or_cdn" ? "unchecked" : "warning";
-  return domain.route === "direct" ? "warning" : "unchecked";
-}
-
-function NetworkRouteStatus({ status }: { status: NetworkEndpointCheck["status"] | null }) {
-  const display: { className: NetworkRouteTone; label: string } = status === "ready"
-    ? { className: "ready", label: "READY" }
-    : status === "error"
-      ? { className: "error", label: "ERROR" }
-    : status === "unchecked"
-      ? { className: "unchecked", label: "UNCHECKED" }
-    : status === "stale"
-      ? { className: "obsolete", label: "OBSOLETE" }
-    : status === "unresolved"
-      ? { className: "error", label: "ERROR" }
-      : status === "warning"
-        ? { className: "warning", label: "WARN" }
-        : { className: "active", label: "ACTIVE" };
-  return <NetworkRouteBadge tone={display.className}>{display.label}</NetworkRouteBadge>;
-}
-
 function NetworkStateFact({ label, value, note, mono = false }: { label: string; value: string; note: string; mono?: boolean }) {
   return (
     <div>
@@ -742,8 +669,8 @@ function DiagnosticsV2({
               <tr>
                 <th>Адрес</th>
                 <th>Статус</th>
-                <th>Назначение</th>
-                <th>Канал</th>
+                <th>Тип адреса</th>
+                <th>Подключение</th>
                 <th>Управление</th>
               </tr>
             </thead>
@@ -758,7 +685,11 @@ function DiagnosticsV2({
                 const expanded = expandedDomains.has(rowKey);
                 const endpointCheck = endpointCheckFor(domain);
                 const endpointKind = endpointKindFor(domain, endpointCheck);
-                const routeStatus = endpointCheck?.status || routeStatusFor(domain);
+                const checks = [...new Map([
+                  ...Object.values(status?.transport_endpoint_checks || {}),
+                  ...Object.values(status?.transport_endpoint_checks_by_domain || {}),
+                ].filter(check => check.domain.toLowerCase() === domain.value.toLowerCase()).map(check => [check.kind, check])).values()];
+                const summary = domainRouteSummary(domain, checks, readFailed, [publicIpv4, publicIpv6, ...(addresses.status?.items.filter(row => row.presence === "present").map(row => row.address) || [])]);
                 const removeRoute = () => {
                   if (endpointCheck) {
                     onRemoveRoute(endpointCheck.kind, domain.value);
@@ -790,26 +721,17 @@ function DiagnosticsV2({
                           />
                           <span>
                             <strong>{domain.value}</strong>
-                            <small>
-                              {domain.value.includes(":") || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(domain.value)
-                                ? "IP"
-                                : "DOMAIN"}
-                              {domain.resolved.length
-                                ? ` · ${domain.resolved.length} IP · раскрыть сведения`
-                                : " · раскрыть сведения"}
-                            </small>
                           </span>
                         </button>
                       </td>
                       <td>
-                        <NetworkRouteStatus status={routeStatus} />
+                        <NetworkRouteSummaryBadge summary={summary} />
                       </td>
                       <td>
-                        <span>{domain.role}</span>
-                        <small>{domain.source}</small>
+                        <span>{summary.type}</span>
                       </td>
                       <td>
-                        <NetworkRouteTags domain={domain} />
+                        <span className="networkRouteConnection">{summary.connection}</span>
                       </td>
                       <td>
                         {endpointKind && domain.role !== "SERVER" ? (
@@ -838,8 +760,9 @@ function DiagnosticsV2({
                                 <p className="eyebrow networkSectionEyebrow">ROUTE DETAILS</p>
                                 <strong>{domain.value}</strong>
                               </div>
-                              <NetworkRouteTags domain={domain} />
+                              <NetworkRouteSummaryBadge summary={summary} />
                             </div>
+                            <p className="networkRouteEvidence">{summary.detail}</p>
                             <div className="networkRouteCascadeMeta">
                               <div>
                                 <small>Роль</small>
@@ -855,16 +778,16 @@ function DiagnosticsV2({
                               </div>
                             </div>
                             <NetworkIdentityDetails domain={domain} />
-                            {endpointCheck && (
-                              <div className={`networkRouteCheckNotice ${endpointCheck.status}`}>
-                                <strong>Последняя проверка маршрута</strong>
-                                <span>{endpointCheck.message}</span>
+                            {checks.map(check => (
+                              <div className={`networkRouteCheckNotice ${check.status}`} key={check.kind}>
+                                <strong>Последняя проверка {({ cdn: "CDN", tls_relay: "TLS", udp_relay: "UDP" })[check.kind]}</strong>
+                                <span>{check.message}</span>
                                 <small>
-                                  {endpointCheck.checked_at ? formatTime(endpointCheck.checked_at) : "Время не записано"}
-                                  {endpointCheck.failed_checks ? ` · неудач подряд: ${endpointCheck.failed_checks}` : ""}
+                                  {check.checked_at ? formatTime(check.checked_at) : "Время не записано"}
+                                  {check.failed_checks ? ` · неудач подряд: ${check.failed_checks}` : ""}
                                 </small>
                               </div>
-                            )}
+                            ))}
                             {domain.status === "stale" && domain.stale_usages?.length ? (
                               <div className="networkRouteStaleNotice">
                                 <strong>Домен сохранён в подключениях:</strong>

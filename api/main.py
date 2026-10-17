@@ -1629,7 +1629,7 @@ def system_resources() -> dict:
 
 
 @app.get("/api/metrics/history")
-def get_metrics_history(period: Literal["live", "day", "week", "quarter"] = "live", _: None = Depends(require_token)) -> dict:
+def get_metrics_history(period: Literal["live", "hour", "day", "week", "quarter"] = "live", _: None = Depends(require_token)) -> dict:
     try:
         return {**metrics_history_store.query(period), "error": metrics_monitor.error if metrics_monitor else ""}
     except (OSError, sqlite3.Error, ValueError):

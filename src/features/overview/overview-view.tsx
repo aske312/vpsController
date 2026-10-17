@@ -403,7 +403,7 @@ export function OverviewDashboard({
         <header>
           <div><p className="eyebrow">LIVE SYSTEM</p><h2>Телеметрия VPS</h2></div>
           <label>Период <select value={metricsPeriod} onChange={(event) => setMetricsPeriod(event.target.value as MetricsPeriod)} aria-label="Период истории метрик">
-            <option value="live">5 минут</option><option value="day">24 часа</option><option value="week">7 дней</option><option value="quarter">90 дней</option>
+            <option value="live">5 минут</option><option value="hour">1 час</option><option value="day">24 часа</option><option value="week">7 дней</option><option value="quarter">90 дней</option>
           </select></label>
         </header>
         <p className="nodeLiveSystemNote">{overview?.resources.stale || metricsHistory.stale ? "Данные временно не обновляются" : missingMetrics.length ? `Данные недоступны: ${missingMetrics.join(", ")}` : metricsHistory.pending ? "Загрузка серверной истории…" : "История хранится на VPS · пропуски показаны разрывами"}

@@ -61,6 +61,19 @@ class MetricsHistoryTests(unittest.TestCase):
         with self.store.database() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM raw").fetchone()[0], 1)
 
+    def test_hour_is_a_bounded_minute_series_with_real_averages_and_gaps(self):
+        self.store.record(self.sample(cpu=90), 86340)
+        self.store.record(self.sample(cpu=20), 86400)
+        self.store.record(self.sample(cpu=40, uptime=103), 86403)
+        result = self.store.query("hour", now=90000)
+        self.assertEqual(result["period"], "hour")
+        self.assertEqual(result["resolution_s"], 60)
+        self.assertEqual(len(result["points"]), 61)
+        self.assertEqual(result["points"][0]["at"], 86400)
+        self.assertEqual(result["points"][-1]["at"], 90000)
+        self.assertEqual(result["points"][0]["cpu_percent"], 30)
+        self.assertTrue(all(point["cpu_percent"] is None for point in result["points"][1:]))
+
     def test_history_api_requires_auth_and_invalid_period_and_settings_are_rejected(self):
         client = TestClient(api.app)
         self.assertEqual(client.get("/api/metrics/history").status_code, 401)
@@ -75,6 +88,10 @@ class MetricsHistoryTests(unittest.TestCase):
             self.assertEqual(client.put("/api/services/metrics", json=payload).status_code, 200)
             self.assertEqual(client.put("/api/services/metrics", json=payload).status_code, 409)
             self.assertEqual(client.get("/api/metrics/history").status_code, 200)
+            hour = client.get("/api/metrics/history?period=hour")
+            self.assertEqual(hour.status_code, 200)
+            self.assertEqual(hour.json()["period"], "hour")
+            self.assertEqual(hour.json()["resolution_s"], 60)
 
     def test_disk_budget_reclaims_old_raw_first_and_applies_on_each_connection(self):
         self.store.record(self.sample(), 86400)

@@ -42,6 +42,11 @@
 [data-network-page] .relayFingerprint { overflow-wrap: anywhere; font-size: 12px; color: var(--muted); }
 
 [data-network-page] {
+  --panel: var(--cc-surface);
+  --panel-soft: var(--cc-inset);
+  --panel-inset: rgba(3, 10, 16, .66);
+  --panel-raised: rgba(13, 29, 40, .82);
+  --line: var(--cc-line);
   --network-bg: var(--bg);
   --network-panel: var(--panel);
   --network-panel-soft: var(--panel-soft);
@@ -374,7 +379,7 @@
   box-shadow: 0 0 0 2px rgba(98, 200, 255, .08);
 }
 
-[data-network-page] .networkTableWrap { width: 100%; overflow-x: auto; }
+[data-network-page] .networkTableWrap { position: relative; min-width: 0; width: 100%; overflow-x: auto; }
 
 [data-network-page] .networkTableWrap table {
   width: 100%;
@@ -622,12 +627,6 @@
 [data-network-page] .networkServerRoute strong {
   font-family: var(--technical-font);
   font-size: 12px;
-}
-
-[data-network-page] .networkTableWrap td:nth-child(2) > span {
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 600;
 }
 
 [data-network-page] .networkTableWrap td:nth-child(2) > small {
@@ -1664,9 +1663,9 @@
 
 [data-network-page] .networkV2 > .networkPanel {
   border-color: var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: 12px;
   background: var(--panel);
-  box-shadow: none;
+  box-shadow: 0 12px 36px rgba(0,0,0,.16);
 }
 
 [data-network-page] .networkBlockHeader {
@@ -1690,20 +1689,20 @@
 [data-network-page] .networkStateLine > div { padding: 14px 22px; }
 [data-network-page] .networkV2Actions { align-self: center; }
 [data-network-page] .networkTableWrap { padding: 0 14px 14px; }
-[data-network-page] .networkTableWrap table { min-width: 860px; border-spacing: 0 6px; border-collapse: separate; }
+[data-network-page] .networkTableWrap table { min-width: 900px; border-spacing: 0; border-collapse: collapse; }
 [data-network-page] .networkTableWrap th { padding: 12px 10px 7px; border-bottom: 1px solid var(--line); background: transparent; color: var(--dim); font: 600 11px/1.2 var(--ui-font); letter-spacing: 0; text-transform: none; }
-[data-network-page] .networkV2RouteBlock th:first-child { width: 34%; }
-[data-network-page] .networkV2RouteBlock th:nth-child(2) { width: 14%; }
-[data-network-page] .networkV2RouteBlock th:nth-child(3) { width: 21%; }
-[data-network-page] .networkV2RouteBlock th:nth-child(4) { width: 13%; }
+[data-network-page] .networkV2RouteBlock th:first-child { width: 28%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(2) { width: 18%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(3) { width: 18%; }
+[data-network-page] .networkV2RouteBlock th:nth-child(4) { width: 18%; }
 [data-network-page] .networkV2RouteBlock th:nth-child(5) { width: 18%; }
 
 [data-network-page] .networkTableWrap tbody > tr.networkRouteRow > td,
-[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow > td { padding: 15px 10px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel-soft); }
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow > td { padding: 12px 10px; border-top: 0; border-bottom: 1px solid var(--line); background: transparent; }
 [data-network-page] .networkTableWrap tbody > tr.networkRouteRow > td:first-child,
-[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow > td:first-child { border-left: 1px solid var(--line); border-radius: var(--radius-md) 0 0 var(--radius-md); }
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow > td:first-child { border-left: 0; border-radius: 0; }
 [data-network-page] .networkTableWrap tbody > tr.networkRouteRow > td:last-child,
-[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow > td:last-child { border-right: 1px solid var(--line); border-radius: 0 var(--radius-md) var(--radius-md) 0; }
+[data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow > td:last-child { border-right: 0; border-radius: 0; }
 [data-network-page] .networkTableWrap tbody > tr.networkRouteRow:hover > td,
 [data-network-page] .networkTableWrap tbody > tr.networkServerRouteRow:hover > td,
 [data-network-page] .networkTableWrap tbody > tr.networkRouteRow.is-expanded > td,
@@ -1712,7 +1711,8 @@
 [data-network-page] .networkRouteExpand { min-height: 38px; }
 [data-network-page] .networkRouteExpand strong,
 [data-network-page] .networkServerRoute strong { font-family: var(--technical-font); font-size: 12px; }
-[data-network-page] .networkTableWrap td:nth-child(2) > span { color: var(--text); font-size: 11px; font-weight: 600; }
+[data-network-page] .networkRouteConnection { display:block; color:var(--network-muted); font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
+[data-network-page] .networkRouteEvidence { margin:8px 0; color:var(--network-muted); font-size:12px; line-height:1.5; }
 [data-network-page] .networkTableWrap td:nth-child(2) > small { margin-top: 4px; color: var(--muted); font-size: 10px; }
 [data-network-page] .networkRouteTags { gap: 5px; }
 [data-network-page] .networkRouteTag { min-height: 23px; padding: 3px 8px; font-family: var(--technical-font); font-size: 9px; letter-spacing: .04em; }
@@ -1757,7 +1757,7 @@
 [data-network-page] .networkPageHeader {
   min-height: 76px;
   margin: 0;
-  padding: 20px 22px 18px;
+  padding: 3px 2px 7px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -1772,8 +1772,8 @@
 [data-network-page] .networkPageIdentity h1 {
   margin: 7px 0 0;
   color: var(--text);
-  font-size: 22px;
-  font-weight: 650;
+  font-size: clamp(24px,2.2vw,30px);
+  font-weight: 700;
   letter-spacing: -.035em;
   line-height: 1.1;
 }
@@ -1810,7 +1810,7 @@
   overflow: hidden;
   border: 1px solid rgba(92, 112, 136, .2);
   border-radius: 12px;
-  background: rgba(91, 111, 136, .14);
+  background: transparent;
 }
 
 [data-network-page] .networkStateFacts > div {
@@ -1841,6 +1841,7 @@
 }
 
 [data-network-page] .networkStateFacts strong.mono {
+  margin: 0;
   color: var(--cyan);
   font-size: 12px;
 }
@@ -1904,7 +1905,7 @@
 }
 
 @media (max-width: 700px) {
-  [data-network-page] .networkPageHeader { padding: 17px 16px 15px; }
+  [data-network-page] .networkPageHeader { padding: 3px 2px 7px; }
   [data-network-page] .networkStateHero { padding: 17px 16px 15px; }
   [data-network-page] .networkStateFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   [data-network-page] .networkStateFacts > div { min-height: 68px; }

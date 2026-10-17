@@ -17,7 +17,7 @@ FIELDS = ("cpu_percent", "load1", "load5", "load15", "memory_total", "memory_ava
           "network_rx", "network_tx", "uptime_s", "memory_used_percent", "disk_used_percent", "rx_bps", "tx_bps", "rx_delta", "tx_delta")
 COUNTERS = {"network_rx", "network_tx", "uptime_s"}
 DELTAS = {"rx_delta", "tx_delta"}
-PERIODS = {"live": (300, 3), "day": (86400, 60), "week": (604800, 3600), "quarter": (7776000, 3600)}
+PERIODS = {"live": (300, 3), "hour": (3600, 60), "day": (86400, 60), "week": (604800, 3600), "quarter": (7776000, 3600)}
 
 
 class SettingsConflict(ValueError):

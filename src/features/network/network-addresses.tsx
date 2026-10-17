@@ -1,6 +1,7 @@
 "use client";
 
-import { NetworkRouteBadge } from "./network-route-badge";
+import { NetworkRouteSummaryBadge } from "./network-route-badge";
+import { serverAddressSummary } from "./route-summary";
 
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiRequestError } from "../../shared/lib/api-request";
@@ -91,16 +92,18 @@ export function NetworkServerAddressRows({ control, query, expanded, onToggle, r
     </div></td></tr>}
     {status?.items.filter(row => addressMatches(row, query)).map(row => {
       const key = `SERVER-${row.address}`; const open = expanded.includes(key);
+      const summary = serverAddressSummary(row, control.failed || status.discovery.state === "error", Boolean(control.pending));
       return <Fragment key={key}><tr className={`networkServerRouteRow${open ? " is-expanded" : ""}`}>
-        <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true"/><span><strong>{row.address}</strong><small>{row.family.toUpperCase()} · SERVER</small></span></button></td>
-        <td><NetworkRouteBadge tone={row.presence === "present" ? "active" : row.presence === "missing" ? "error" : "unchecked"}>{row.presence === "present" ? "Назначен" : row.presence === "missing" ? "Отсутствует" : "Не подтверждён"}</NetworkRouteBadge></td>
-        <td><strong>{addressRoleLabels[row.role]}</strong><small>{row.interfaces.join(", ") || "Назначение сохранено"}</small></td>
-        <td><span className="networkRouteTags"><span className="networkRouteTag direct">DIRECT</span></span></td>
+        <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true"/><span><strong>{row.address}</strong></span></button></td>
+        <td><NetworkRouteSummaryBadge summary={summary} /></td>
+        <td><span>{summary.type}</span></td>
+        <td><span className="networkRouteConnection">{summary.connection}</span></td>
         <td><label className="networkAddressRole"><span className="networkSrOnly">Назначение {row.address}</span><select value={row.role} disabled={control.locked || row.presence !== "present"} onChange={event => void control.setRole(row.address, event.target.value as ServerAddressRole)}>
           <option value="primary">Основной</option><option value="reserve" disabled={row.role === "primary"}>Резервный</option><option value="additional" disabled={row.role === "primary"}>Дополнительный</option>
         </select></label></td>
       </tr>{open && <tr className="networkRouteDetailRow"><td colSpan={5}><div className="networkRouteCascade">
         <strong>{row.address} · {addressRoleLabels[row.role]}</strong>
+        <p>{summary.detail}</p>
         <p>{row.role === "primary" ? "Используется в новых прямых конфигурациях. Для смены основного выберите другой IP этого семейства; прежний станет резервным." : row.role === "reserve" ? "Резервный адрес сохранён. Автоматическое переключение подключений пока не включено." : "Публичный адрес сервера доступен для назначения основным или резервным."}</p>
         <small>{row.source === "interface" ? `Обнаружен на интерфейсах: ${row.interfaces.join(", ")}` : row.source === "configured" ? "Указан в настройках сервера; назначение интерфейсу не подтверждено (возможен NAT)." : "Сохранён ранее; сейчас адрес не найден на активном интерфейсе."}</small>
         {renderIdentity?.(row.address)}

@@ -8,7 +8,8 @@ import { SystemOperationUnknown, systemActionNeedsPolling } from "../../control-
 import type { SystemAction } from "../../shared/types/control-plane";
 import type { NetworkAdmission, NetworkRequest } from "./network-api";
 import { relayConnection, relaySnapshot, type RelayStatus, type RelayHost } from "./relay-state";
-import { NetworkRouteBadge } from "./network-route-badge";
+import { NetworkRouteSummaryBadge } from "./network-route-badge";
+import { relayRouteSummary } from "./route-summary";
 
 type Props = { request: NetworkRequest; admit: NetworkAdmission; operation?: SystemAction; onOperation: (value: SystemAction) => void; busy: boolean; onDirtyChange: (dirty: boolean) => void; refreshKey?: number };
 
@@ -129,21 +130,34 @@ export function NetworkRelayNotice({ relay }: { relay: RelayControl }) {
 export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: RelayControl; query: string; expanded: string[]; onToggle: (key: string) => void }) {
   return <>{relay.status?.hosts.filter(item => relayMatches(item, query)).map(item => {
     const key = `relay-${item.id}`, open = expanded.includes(key), address = item.client_address || new URL(item.agent_url).hostname;
-    const unknown = relay.failed || item.state !== "connected";
+    const unknown = relay.failed || relay.status?.pending || item.state !== "connected";
+    const summary = relayRouteSummary(item, relay.failed, relay.status?.pending, relay.reading);
     return <Fragment key={item.id}>
       <tr className={`networkRouteRow networkRelayRow${open ? " is-expanded" : ""}`}>
-        <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true" /><span><strong>{address}</strong><small>{item.name} · Relay Agent</small></span></button></td>
-        <td><NetworkRouteBadge tone={unknown ? "unchecked" : "active"}>{unknown ? relay.reading ? "Проверяем…" : "UNKNOWN" : "CONNECTED"}</NetworkRouteBadge></td>
-        <td><span>RELAY · {item.routes.length}</span><small>{unknown ? "Порты неизвестны" : `Слушают ${item.routes.filter(route => route.state === "listening").length}/${item.routes.length}`}</small></td>
-        <td><div className="networkRouteTags"><span className="networkRouteTag">TCP {item.routes.filter(route => route.transport === "tcp").length}</span><span className="networkRouteTag">UDP {item.routes.filter(route => route.transport === "udp").length}</span></div></td>
+        <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true" /><span><strong>{address}</strong></span></button></td>
+        <td><NetworkRouteSummaryBadge summary={summary} /></td>
+        <td><span>{summary.type}</span></td>
+        <td><span className="networkRouteConnection" title="Число настроенных перенаправлений. Состояние каждого порта — в подробностях.">{summary.connection}</span></td>
         <td><div className="networkRelayActions"><button type="button" className="networkRouteConfigure" disabled={relay.locked} onClick={() => relay.openHost(item)}>Настроить</button><button type="button" className="networkRouteDelete" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setConfirmation(item)}>Удалить</button></div></td>
       </tr>
-      {open && <tr className="networkRouteDetailRow"><td colSpan={5}><div className="relayCompactSummary">
+      {open && <tr className="networkRouteDetailRow"><td colSpan={5}><div className="networkRouteCascade">
+        <strong>{item.name}</strong><p>{summary.detail}</p>
+        <div className="relayCompactSummary">
         <span title={item.agent_url}>Agent {unknown ? "?" : item.version}</span>
         <span title={`SHA-256 ${item.certificate_sha256}`}>PIN</span>
         <span>{unknown ? "Порты ?" : `${item.routes.filter(route => route.state === "listening").length}/${item.routes.length} LISTEN`}</span>
         {item.foreign_routes > 0 && <span>{item.foreign_routes} вне PRO</span>}
         {item.error && <p role="status">{item.error}</p>}
+        </div>
+        {item.routes.length > 0 && <div className="relayForwardings" aria-label="Перенаправления Relay">
+          {item.routes.map(route => <div key={route.id}>
+            <span><small>Вход</small><b>{route.transport.toUpperCase()} :{route.listen_port}</b></span>
+            <span><small>Назначение</small><b>{route.target_ip.includes(":") ? `[${route.target_ip}]` : route.target_ip}:{route.target_port}</b></span>
+            <span><small>Состояние порта</small><b>{unknown || relay.status?.pending ? "Не подтверждено" : ({ listening: "Слушает", failed: "Ошибка", missing: "Отсутствует", drift: "Настройки изменены", unknown: "Неизвестно" })[route.state]}</b>
+              {!unknown && !relay.status?.pending && route.check && <small>Проверка подключения: {({ ready: "пройдена с VPS", failed: "ошибка", unknown: "не подтверждена" })[route.check.state]}</small>}
+            </span>
+          </div>)}
+        </div>}
       </div></td></tr>}
     </Fragment>;
   })}</>;
