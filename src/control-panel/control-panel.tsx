@@ -1,7 +1,7 @@
 "use client";
 
 import { useNotifications, useNotifier, useNotificationList } from "../shared/notifications/notification-center";
-import { createApiClient, invalidateApiSession, onApiSessionExpired } from "../shared/lib/api-request";
+import { createApiClient, invalidateApiReads, invalidateApiSession, onApiSessionExpired } from "../shared/lib/api-request";
 import { refreshResource } from "../shared/lib/refresh-resource";
 import { useCdnSecurity } from "../features/application/use-cdn-security";
 import { cdnSecuritySnapshot, type CdnSecurityStatus } from "../shared/lib/cdn-security-operation";
@@ -317,6 +317,7 @@ export function ControlPanel() {
   const acceptSystemOperation = useCallback((operation: SystemAction) => {
     if (acceptedOperation.current?.id !== operation.id || acceptedOperation.current?.state !== operation.state) {
       applicationObservationVersion.current += 1;
+      invalidateApiReads(token);
       setNetworkStatus(null);
       setOverview(overviewUnavailable);
       setClients(clientsUnavailable);
@@ -331,7 +332,7 @@ export function ControlPanel() {
     }
     acceptedOperation.current = { id: operation.id, state: operation.state };
     setApplication((current) => ({ ...current, api: current?.api || { active: null, enabled: null }, containers: current?.containers || [], action: operation }));
-  }, []);
+  }, [token]);
   const { pending: admissionPending, submit: submitSystemOperation, retain: retainAdmission, recheck: recheckAdmission, cancel: cancelSystemOperation } = useSystemAdmission(request, token, acceptSystemOperation);
   const busy = localBusy || admissionPending || systemActionNeedsPolling(application?.action);
   const admitNetworkOperation = useCallback((path: string, options: RequestInit) => submitSystemOperation(request, path, options), [request, submitSystemOperation]);
@@ -412,6 +413,12 @@ export function ControlPanel() {
     // navigation. Previously these were loaded only by opening Overview.
     if (token && !overview && tab !== "overview") void loadOverview();
   }, [loadOverview, overview, tab, token]);
+
+  useEffect(() => {
+    if (!token || !autoRefresh || tab !== "overview" || !protocolImages.some((image) => image.version_checking)) return;
+    const timer = window.setTimeout(() => void loadOverview(true), 3000);
+    return () => window.clearTimeout(timer);
+  }, [autoRefresh, loadOverview, protocolImages, tab, token]);
 
   const loadClients = useCallback(async () => {
     if (!token) return;

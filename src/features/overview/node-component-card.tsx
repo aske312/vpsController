@@ -33,7 +33,7 @@ export function NodeComponentCard({ image, healthReason, coreVersion, port, busy
       <em className="nodeComponentCardState" data-tone={state.badge.tone} aria-label={`Состояние ${image.name}: ${state.badge.label}`} title={`${state.summary.description}\nУстановка: ${state.installation}\nСлужба: ${state.runtime}\nПроверка: ${state.health}${image.management?.reason ? `\n${image.management.reason}` : ""}`}>{state.badge.label}</em>
     </header>
     <dl className="nodeComponentCardFacts">
-      <div><dt>Версия</dt><dd className="nodeComponentCardVersion">{versionLabel}{(image.update_available || image.update_via_release) && <small title="Доступна новая версия"> → {image.available_version ? formatModuleVersion(image.available_version) : "Обновление"}</small>}</dd></div>
+      <div><dt>Версия</dt><dd className="nodeComponentCardVersion">{versionLabel}{image.version_checking ? <small> · проверяем обновления</small> : (image.update_available || image.update_via_release) && <small title="Доступна новая версия"> → {image.available_version ? formatModuleVersion(image.available_version) : "Обновление"}</small>}</dd></div>
       {image.id !== "mihomo" && <div><dt>Порт</dt><dd>{port || "—"}</dd></div>}
     </dl>
     {attention && <p className="nodeComponentCardIssue">{state.summary.description}</p>}

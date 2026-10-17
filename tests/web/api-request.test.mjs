@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test, afterEach } from "node:test";
-import { createApiClient, invalidateApiSession, onApiSessionExpired } from "../../src/shared/lib/api-request.ts";
+import { createApiClient, invalidateApiReads, invalidateApiSession, onApiSessionExpired } from "../../src/shared/lib/api-request.ts";
 
 const originalFetch = globalThis.fetch;
 const originalNow = Date.now;
-afterEach(() => { globalThis.fetch = originalFetch; Date.now = originalNow; });
+afterEach(() => { globalThis.fetch = originalFetch; Date.now = originalNow; invalidateApiSession("test-token", false); });
 const client = (options = {}) => createApiClient("test-token", { retryDelaysMs: [0, 0], ...options });
 const ok = () => new Response('{"ok":true}', { headers: { "content-type": "application/json" } });
 
@@ -262,4 +262,78 @@ test("a read started during a write is not retained as a post-write baseline", a
   await during;
   globalThis.fetch = async () => Response.json({version: "after"});
   assert.deepEqual(await request("/protocol-images"), {version: "after"});
+});
+
+test("clients share session cache and concurrent fresh reads, with independent result objects", async () => {
+  const first = client(), second = client({formatHttpError: detail => detail});
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return Response.json({nested: {version: calls}}); };
+  const [a, b] = await Promise.all([first("/protocol-images", {cache: "no-store"}), second("/protocol-images", {cache: "no-store"})]);
+  assert.equal(calls, 1);
+  a.nested.version = "draft";
+  assert.equal(b.nested.version, 1);
+  assert.deepEqual(await second("/protocol-images"), {nested: {version: 1}});
+  assert.equal(calls, 1);
+  await second("/protocol-images", {cache: "reload"});
+  assert.equal(calls, 2);
+});
+
+test("a mutation in another client invalidates shared cache and excludes older in-flight reads", async () => {
+  const reader = client(), writer = client();
+  let reads = 0, finish;
+  globalThis.fetch = async (_path, init) => {
+    if (init.method === "POST") return ok();
+    reads++;
+    return reads === 2 ? new Promise(resolve => { finish = resolve; }) : Response.json({version: reads});
+  };
+  await reader("/protocol-images");
+  const old = reader("/protocol-images", {cache: "no-store"});
+  await writer("/settings", {method: "POST", body: "{}"});
+  assert.deepEqual(await writer("/protocol-images"), {version: 3});
+  finish(Response.json({version: "obsolete"}));
+  await old;
+  assert.deepEqual(await reader("/protocol-images"), {version: 3});
+  assert.equal(reads, 3);
+});
+
+test("shared HTTP errors keep each consumer's formatter", async () => {
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return Response.json({detail: "denied"}, {status: 403}); };
+  const first = client({formatHttpError: detail => `first: ${detail}`});
+  const second = client({formatHttpError: detail => `second: ${detail}`});
+  const results = await Promise.allSettled([first("/services", {cache: "no-store"}), second("/services", {cache: "no-store"})]);
+  assert.equal(calls, 1);
+  assert.deepEqual(results.map(result => result.reason.message), ["first: denied", "second: denied"]);
+});
+
+test("transport policies, custom headers and cancellation keep reads independent", async () => {
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return ok(); };
+  const first = client(), second = client({readTimeoutMs: 1000});
+  await Promise.all([first("/services", {cache: "no-store"}), second("/services", {cache: "no-store"})]);
+  assert.equal(calls, 2);
+  await Promise.all([
+    first("/services", {headers: {"X-Read": "custom"}}),
+    first("/services", {signal: new AbortController().signal}),
+    first("/services", {cache: "no-store"}),
+  ]);
+  assert.equal(calls, 5);
+  await first("/services");
+  assert.equal(calls, 5);
+});
+
+test("operation phases and observation scopes exclude pre-phase pending reads", async () => {
+  for (const boundary of ["phase", "scope"]) {
+    let calls = 0, finish;
+    globalThis.fetch = async () => ++calls === 1 ? new Promise(resolve => { finish = resolve; }) : Response.json({version: calls});
+    const request = client();
+    const old = request("/protocols/wg/status", {cache: "no-store", readScope: 1});
+    if (boundary === "phase") invalidateApiReads("test-token");
+    const fresh = request("/protocols/wg/status", {cache: "no-store", readScope: boundary === "phase" ? 1 : 2});
+    assert.deepEqual(await fresh, {version: 2});
+    finish(Response.json({version: "old"}));
+    await old;
+    assert.deepEqual(await request("/protocols/wg/status"), {version: 2});
+    invalidateApiSession("test-token", false);
+  }
 });

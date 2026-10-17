@@ -50,10 +50,11 @@ import server_addresses
 import relay_manager
 import relay_connections
 import relay_client_creation
+from read_cache import StampedReadCache, file_stamp
 import yaml
 import ech_settings
 from protocol_health import TrafficSampler, protocol_health
-from service_state import observe_service, ssh_observation, observed_active, observed_enabled, failed_unit_count
+from service_state import observe_service, ssh_observation, observed_active, observed_enabled, failed_unit_count, observation_scope
 from component_state import image_files, component_state
 from component_registry import ComponentRegistry, RegistryError, paths_from_manifest, inventory, fingerprint
 from system_metrics import CpuSampler, collect_resources
@@ -278,6 +279,10 @@ XRAY_BIN = "/usr/local/lib/vps-control-vless-reality-xhttp/xray"
 XRAY_GITHUB_REPO = "XTLS/Xray-core"
 github_release_lock = threading.Lock()
 github_release_cache: dict[str, dict] = {}
+github_release_refreshing: set[str] = set()
+github_release_retry_after: dict[str, float] = {}
+version_reads = StampedReadCache()
+DPKG_STATUS_FILE = Path("/var/lib/dpkg/status")
 client_mutation_lock = threading.Lock()
 RESOURCE_TARGETS = (
     ("Google", "https://www.google.com/generate_204"),
@@ -3540,6 +3545,12 @@ def security_logs(
 
 
 def apt_package_versions(package: str) -> tuple[str, str]:
+    status_stamp = file_stamp(DPKG_STATUS_FILE)
+    stamp = (status_stamp, file_stamp(Path("/var/cache/apt/pkgcache.bin")), file_stamp(Path("/var/lib/apt/lists"))) if status_stamp is not None else None
+    return version_reads.get(("apt", package), stamp, lambda: _apt_package_versions(package), valid=any)
+
+
+def _apt_package_versions(package: str) -> tuple[str, str]:
     """Return (installed, candidate) versions for an apt package. Cheap:
     reads apt's local index, no network."""
     # LC_ALL=C: a non-English locale (this server runs ru_RU) makes
@@ -3575,17 +3586,34 @@ def version_major(value: str) -> str:
 def xray_installed_version(binary: str) -> str:
     if not Path(binary).is_file():
         return ""
-    output = run(binary, "version", timeout=5)
-    match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
-    return match.group(1) if match else ""
+    def read():
+        output = run(binary, "version", timeout=5)
+        match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
+        return match.group(1) if match else ""
+    return version_reads.get(("xray", binary), file_stamp(Path(binary)), read)
 
 
 def github_latest_tag(repo: str) -> str:
-    cached = github_release_cache.get(repo)
-    if cached and time.time() - cached["_cached_at"] < 3600:
-        return cached["tag"]
-    if not github_release_lock.acquire(blocking=False):
-        return cached["tag"] if cached else ""
+    """Version update discovery must not hold up local runtime observations."""
+    with github_release_lock:
+        cached = github_release_cache.get(repo)
+        fresh = cached and time.time() - cached["_cached_at"] < 3600
+        start = not fresh and repo not in github_release_refreshing and time.monotonic() >= github_release_retry_after.get(repo, 0)
+        if start:
+            github_release_refreshing.add(repo)
+    if start:
+        try:
+            threading.Thread(target=refresh_github_latest_tag, args=(repo,), daemon=True, name="component-version-check").start()
+        except RuntimeError:
+            with github_release_lock:
+                github_release_refreshing.discard(repo)
+                github_release_retry_after[repo] = time.monotonic() + 60
+    with github_release_lock:
+        return github_release_cache.get(repo, {}).get("tag", "")
+
+
+def refresh_github_latest_tag(repo: str) -> None:
+    tag = ""
     try:
         output = run(
             "curl", "--silent", "--show-error", "--connect-timeout", "3", "--max-time", "6",
@@ -3594,12 +3622,15 @@ def github_latest_tag(repo: str) -> str:
         )
         tag = ""
         try:
-            tag = str(json.loads(output).get("tag_name", "")).lstrip("v")
+            payload = json.loads(output)
+            candidate = payload.get("tag_name", "") if isinstance(payload, dict) else ""
+            tag = candidate.lstrip("v") if isinstance(candidate, str) else ""
         except (ValueError, json.JSONDecodeError):
             pass
+        if not re.fullmatch(r"[0-9][0-9A-Za-z._-]*", tag):
+            tag = ""
         if tag:
-            github_release_cache[repo] = {"tag": tag, "_cached_at": time.time()}
-            return tag
+            return
         latest_url = run(
             "curl", "--silent", "--show-error", "--location", "--connect-timeout", "3", "--max-time", "8",
             "--output", "/dev/null", "--write-out", "%{url_effective}",
@@ -3607,11 +3638,17 @@ def github_latest_tag(repo: str) -> str:
         )
         fallback_tag = latest_url.rstrip("/").rsplit("/", 1)[-1].lstrip("v")
         if re.fullmatch(r"[0-9][0-9A-Za-z._-]*", fallback_tag):
-            github_release_cache[repo] = {"tag": fallback_tag, "_cached_at": time.time()}
-            return fallback_tag
-        return cached["tag"] if cached else ""
+            tag = fallback_tag
+    except (OSError, RuntimeError):
+        pass
     finally:
-        github_release_lock.release()
+        with github_release_lock:
+            if tag:
+                github_release_cache[repo] = {"tag": tag, "_cached_at": time.time()}
+                github_release_retry_after.pop(repo, None)
+            else:
+                github_release_retry_after[repo] = time.monotonic() + 60
+            github_release_refreshing.discard(repo)
 
 
 MIHOMO_RUNTIME_CORE_BIN = Path("/var/lib/vps-control/mihomo/bin/mihomo")
@@ -3628,9 +3665,11 @@ def mihomo_core_installed_version() -> str:
     core = MIHOMO_RUNTIME_CORE_BIN if MIHOMO_RUNTIME_CORE_BIN.is_file() else MIHOMO_BUNDLED_CORE_BIN
     if not core.is_file():
         return ""
-    output = run(str(core), "-v", timeout=5)
-    match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
-    return match.group(1) if match else ""
+    def read():
+        output = run(str(core), "-v", timeout=5)
+        match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
+        return match.group(1) if match else ""
+    return version_reads.get(("mihomo", str(core)), file_stamp(core), read)
 
 
 def awg_installed_version() -> str:
@@ -3650,13 +3689,17 @@ def standalone_binary_version(binary: Path, *arguments: str) -> str:
     """Read a semantic version from a release binary without starting it."""
     if not binary.is_file():
         return ""
-    output = run(str(binary), *arguments, timeout=5)
-    match = re.search(r"\bv?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b", output)
-    return match.group(1) if match else ""
+    def read():
+        output = run(str(binary), *arguments, timeout=5)
+        match = re.search(r"\bv?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b", output)
+        return match.group(1) if match else ""
+    return version_reads.get(("binary", str(binary), arguments), file_stamp(binary), read)
 
 
 def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bool) -> dict[str, Any]:
     package = str(manifest.get("package", ""))
+    repo = {"vless-reality-xhttp": XRAY_GITHUB_REPO, "mihomo": MIHOMO_GITHUB_REPO,
+            "hysteria2": HYSTERIA2_GITHUB_REPO, "tuic": SING_BOX_GITHUB_REPO, "trojan": SING_BOX_GITHUB_REPO}.get(image_id)
     update_available_override: bool | None = None
     if image_id == "awg":
         # The PPA package is the installation/update channel. GitHub release
@@ -3696,10 +3739,12 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
         "update_available": update_available,
         "update_breaking": update_breaking,
         "update_via_release": False,
+        "version_checking": bool(repo and repo in github_release_refreshing),
     }
 
 
-def protocol_image_manifests() -> dict[str, dict]:
+@observation_scope()
+def protocol_image_manifests(*, include_versions: bool = True) -> dict[str, dict]:
     images: dict[str, dict] = {}
     if not PROTOCOL_IMAGES_DIR.exists():
         return images
@@ -3740,7 +3785,7 @@ def protocol_image_manifests() -> dict[str, dict]:
         unit = observe_service(service)
         files = image_files(manifest, interface, INSTALL_DIR)
         installed = any(value is True for value in files) or unit["active"] or ("@" not in service_template and unit["unit_present"] is True)
-        versions = protocol_version_info(manifest, image_id, installed)
+        versions = protocol_version_info(manifest, image_id, installed) if include_versions else {}
         diagnostics = (network_diagnostic_cache if image_id in ("wg", "awg") else direct_diagnostic_cache).get(image_id)
         images[image_id] = {
             "id": image_id,
@@ -4354,7 +4399,7 @@ def protocol_managed_services() -> dict[str, dict]:
     # never need a matching entry added by hand.
     services: dict[str, dict] = {
         image["id"]: {"name": image["name"], "unit": image["service"], "controls": ["start", "stop", "restart"], "component_id": image["id"]}
-        for image in protocol_image_manifests().values()
+        for image in protocol_image_manifests(include_versions=False).values()
         if image.get("installed") and image.get("service")
     }
     try:
@@ -4583,6 +4628,7 @@ def update_operation_history_settings(payload: OperationHistorySettings, _: None
 
 
 @app.get("/api/services")
+@observation_scope()
 def services_status(_: None = Depends(require_token)) -> dict:
     failed = failed_unit_count()
     items = []
@@ -4598,10 +4644,10 @@ def services_status(_: None = Depends(require_token)) -> dict:
             items.append(details)
     vpn_urls = []
     panel_channels = configured_panel_channels()
-    openvpn_interface = run("bash", "-lc", "ip -o -4 route show 10.74.0.0/24 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i==\"dev\") {print $(i+1); exit}}'")
     if PUBLIC_DOMAIN:
         vpn_urls.append(f"https://{PUBLIC_DOMAIN}")
     else:
+        openvpn_interface = run("bash", "-lc", "ip -o -4 route show 10.74.0.0/24 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i==\"dev\") {print $(i+1); exit}}'")
         for interface in (WG_INTERFACE, AWG_INTERFACE, openvpn_interface):
             if not interface:
                 continue

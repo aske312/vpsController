@@ -2,10 +2,39 @@
 from __future__ import annotations
 
 import subprocess
+from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
 from datetime import datetime, timezone
+
+_observations: ContextVar[dict | None] = ContextVar("service_observations", default=None)
+
+
+@contextmanager
+def observation_scope():
+    """Reuse systemd reads within one response, never across HTTP requests."""
+    if _observations.get() is not None:
+        yield
+        return
+    token = _observations.set({})
+    try:
+        yield
+    finally:
+        _observations.reset(token)
 
 
 def observe_service(unit: str, *, timer: bool = False) -> dict:
+    scope = _observations.get()
+    key = (unit, timer)
+    if scope is not None and key in scope:
+        return deepcopy(scope[key])
+    observation = _observe_service(unit, timer=timer)
+    if scope is not None:
+        scope[key] = deepcopy(observation)
+    return observation
+
+
+def _observe_service(unit: str, *, timer: bool = False) -> dict:
     checked_at = datetime.now(timezone.utc).isoformat()
     properties = {}
     reason = "Не удалось получить состояние службы"

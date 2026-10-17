@@ -7,8 +7,16 @@ type RequestOptions = {
 type ApiResult = Awaited<ReturnType<Response["json"]>>;
 type CachedResponse = { value: ApiResult; cachedAt: number };
 type CachePolicy = { ttlMs: number; staleMs: number; persist: boolean };
+type SessionReads = {
+  pending: Map<string, Promise<ApiResult>>;
+  cache: Map<string, CachedResponse>;
+  readVersions: Map<string, number>;
+  generation: number;
+  writes: number;
+};
 
 export type ApiRequestInit<T = unknown> = RequestInit & {
+  readScope?: string | number;
   onRevalidated?: (value: T) => void;
   onRevalidationError?: (cause: unknown) => void;
 };
@@ -30,6 +38,7 @@ const CACHE_POLICIES: Array<{ match: RegExp; policy: CachePolicy }> = [
 const CACHE_STORAGE_PREFIX = "312-api-cache:";
 let nextSessionGeneration = 0;
 const sessionGenerations = new Map<string, number>();
+const sessionReads = new Map<string, SessionReads>();
 const sessionExpiryListeners = new Map<string, Set<() => void>>();
 
 export function onApiSessionExpired(token: string, callback: () => void) {
@@ -44,8 +53,20 @@ export function onApiSessionExpired(token: string, callback: () => void) {
 
 export function invalidateApiSession(token: string, notify = true) {
   if (!sessionGenerations.delete(token)) return;
+  sessionReads.delete(token);
   clearPersistedCache(token);
   if (notify) for (const callback of sessionExpiryListeners.get(token) || []) callback();
+}
+
+/** A server operation phase starts a new observation even without another POST. */
+export function invalidateApiReads(token: string) {
+  const state = sessionReads.get(token);
+  if (!state) return;
+  state.generation += 1;
+  state.pending.clear();
+  state.cache.clear();
+  state.readVersions.clear();
+  clearPersistedCache(token);
 }
 
 function cachePolicy(path: string): CachePolicy | null {
@@ -122,25 +143,37 @@ export function mutationFailureState(cause: unknown): "unknown" | "error" {
     ? "unknown" : "error";
 }
 
-// One client per authenticated UI. Reads share in-flight requests and a short
-// stale-while-revalidate cache so switching tabs and reopening the panel feels
-// immediate without making live telemetry or logs stale.
+// All clients in one authenticated session share reads. Custom cancellation and
+// headers remain independent; fresh observations never join a cached revalidation.
 export function createApiClient(token: string, options: RequestOptions = {}) {
   if (!sessionGenerations.has(token)) sessionGenerations.set(token, ++nextSessionGeneration);
   const sessionGeneration = sessionGenerations.get(token);
   const currentSession = () => Boolean(token) && sessionGenerations.get(token) === sessionGeneration;
   const expired = () => new ApiRequestError("Сессия панели завершена. Войдите заново.", "http", 401);
-  const pending = new Map<string, Promise<ApiResult>>();
-  const cache = new Map<string, CachedResponse>();
-  let cacheGeneration = 0;
-  const readVersions = new Map<string, number>();
-  readPersistedCache(token, cache);
+  if (!sessionReads.has(token)) {
+    const cache = new Map<string, CachedResponse>();
+    readPersistedCache(token, cache);
+    sessionReads.set(token, { pending: new Map(), cache, readVersions: new Map(), generation: 0, writes: 0 });
+  }
+  const state = sessionReads.get(token)!;
+  const { pending, cache, readVersions } = state;
+  const transportKey = JSON.stringify([options.readTimeoutMs ?? 20000, options.retryDelaysMs ?? [400, 1200]]);
+  const formatCause = (cause: unknown) => cause instanceof ApiRequestError && cause.kind === "http" && options.formatHttpError
+    ? new ApiRequestError(options.formatHttpError(cause.message, cause.status || 500), cause.kind, cause.status) : cause;
+  const invalidateReads = () => {
+    state.generation += 1;
+    pending.clear();
+    cache.clear();
+    readVersions.clear();
+    if (currentSession()) clearPersistedCache(token);
+  };
   const request = async (path: string, init: RequestInit = {}): Promise<ApiResult> => {
     if (!currentSession()) throw expired();
     const method = (init.method || "GET").toUpperCase();
     const read = method === "GET" && init.body == null;
-    const generation = cacheGeneration;
-    const version = read && cachePolicy(path) ? (readVersions.get(path) || 0) + 1 : 0;
+    const generation = state.generation;
+    const canonicalRead = read && !init.headers && !init.signal;
+    const version = canonicalRead && cachePolicy(path) ? (readVersions.get(path) || 0) + 1 : 0;
     if (version) readVersions.set(path, version);
     const delays = read ? (options.retryDelaysMs ?? [400, 1200]) : [];
     // Do not expose query strings, subscription tokens, or authentication in errors.
@@ -171,7 +204,7 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
             }
             if (body?.operation_id) detail += ` · операция ${body.operation_id}`;
           } catch { /* Do not display an HTML gateway page in the UI. */ }
-          throw new ApiRequestError(options.formatHttpError?.(detail, response.status) || detail, "http", response.status);
+          throw new ApiRequestError(detail, "http", response.status);
         }
         if (response.status === 204 || method === "HEAD") return null;
         // Consume inside the retry boundary: a stream may break after headers arrive.
@@ -181,8 +214,8 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
         let value: ApiResult;
         try { value = JSON.parse(body); }
         catch { throw new ApiRequestError(`Панель получила неполный или некорректный ответ (${operation}). Обновите данные.`, "response"); }
-        const policy = read ? cachePolicy(path) : null;
-        if (policy && generation === cacheGeneration && readVersions.get(path) === version) {
+        const policy = canonicalRead ? cachePolicy(path) : null;
+        if (policy && !state.writes && generation === state.generation && readVersions.get(path) === version) {
           const entry = { value, cachedAt: Date.now() };
           cache.set(path, entry);
           persistCache(token, path, entry, policy);
@@ -205,35 +238,36 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
       await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
     }
   };
-  return <T = ApiResult>(path: string, options: ApiRequestInit<T> = {}): Promise<T> => {
-    const { onRevalidated, onRevalidationError, ...init } = options;
+  const execute = <T = ApiResult>(path: string, options: ApiRequestInit<T> = {}): Promise<T> => {
+    const { onRevalidated, onRevalidationError, readScope = "", ...init } = options;
     if (!currentSession()) return Promise.reject(expired());
     const method = (init.method || "GET").toUpperCase();
     const read = method === "GET" && init.body == null;
-    const share = read && !init.headers && !init.signal;
+    const share = read && !init.headers && !init.signal && init.cache !== "reload";
     const policy = share ? cachePolicy(path) : null;
     const bypassCache = init.cache === "no-store" || init.cache === "reload";
+    const pendingKey = JSON.stringify([transportKey, bypassCache ? "fresh" : "cached", readScope, path]);
     if (read && share && policy && !bypassCache) {
       const entry = cache.get(path);
       if (entry) {
         const age = Date.now() - entry.cachedAt;
         if (age <= policy.ttlMs) return Promise.resolve(entry.value) as Promise<T>;
         if (age <= policy.staleMs) {
-          if (!pending.has(path)) {
+          if (!pending.has(pendingKey)) {
             const revalidation = request(path, init).finally(() => {
-              if (pending.get(path) === revalidation) pending.delete(path);
+              if (pending.get(pendingKey) === revalidation) pending.delete(pendingKey);
             });
-            pending.set(path, revalidation);
+            pending.set(pendingKey, revalidation);
             // Revalidation also runs for callers that only need a cached preview.
             void revalidation.catch(() => undefined);
           }
-          const generation = cacheGeneration;
+          const generation = state.generation;
           const version = readVersions.get(path);
-          const current = () => currentSession() && generation === cacheGeneration && readVersions.get(path) === version;
-          void pending.get(path)!.then((value) => {
-            if (current()) onRevalidated?.(value as T);
+          const current = () => currentSession() && generation === state.generation && readVersions.get(path) === version;
+          void pending.get(pendingKey)!.then((value) => {
+            if (current()) onRevalidated?.(structuredClone(value) as T);
           }).catch((cause) => {
-            if (current()) onRevalidationError?.(cause);
+            if (current()) onRevalidationError?.(formatCause(cause));
           }).catch(() => undefined);
           return Promise.resolve(entry.value) as Promise<T>;
         }
@@ -241,26 +275,27 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
     }
     if (init.method && !["GET", "HEAD"].includes(method)) {
       // A refresh after a command must not join a read started before that command.
-      pending.clear();
-      cache.clear();
-      cacheGeneration += 1;
-      clearPersistedCache(token);
+      state.writes += 1;
+      invalidateReads();
       return request(path, init).finally(() => {
         // Reads that started while the command ran are not a post-command baseline.
-        cacheGeneration += 1;
-        pending.clear();
-        cache.clear();
-        clearPersistedCache(token);
+        state.writes -= 1;
+        invalidateReads();
       }) as Promise<T>;
     }
     // Custom headers/signals may represent independent callers and must not merge.
     if (!share) return request(path, init) as Promise<T>;
-    const existing = bypassCache ? undefined : pending.get(path);
+    const existing = pending.get(pendingKey);
     if (existing) return existing as Promise<T>;
     const result = request(path, init).finally(() => {
-      if (pending.get(path) === result) pending.delete(path);
+      if (pending.get(pendingKey) === result) pending.delete(pendingKey);
     });
-    pending.set(path, result);
+    pending.set(pendingKey, result);
     return result as Promise<T>;
   };
+  return <T = ApiResult>(path: string, init: ApiRequestInit<T> = {}): Promise<T> => execute<T>(path, init).then((value) => {
+    if (!currentSession()) throw expired();
+    // Draft editing by one consumer must not mutate another section's cache.
+    return structuredClone(value);
+  }).catch((cause) => { throw formatCause(cause); });
 }

@@ -20,10 +20,10 @@ import { directChannelObservation } from "./direct-observation";
 
 type ProtocolId = "wg" | "awg" | "shadowsocks" | "vless-reality-xhttp" | "hysteria2" | "tuic" | "trojan" | "openvpn" | "ikev2";
 
-let mihomoSummaryCache: { token: string; store: ReturnType<typeof createMihomoSummaryStore> } | null = null;
-function mihomoSummaryStore(token: string) {
-  if (mihomoSummaryCache?.token !== token) {
-    mihomoSummaryCache = { token, store: createMihomoSummaryStore(createApiClient(token)) };
+let mihomoSummaryCache: { token: string; observationVersion: number; store: ReturnType<typeof createMihomoSummaryStore> } | null = null;
+function mihomoSummaryStore(token: string, observationVersion: number) {
+  if (mihomoSummaryCache?.token !== token || mihomoSummaryCache.observationVersion !== observationVersion) {
+    mihomoSummaryCache = { token, observationVersion, store: createMihomoSummaryStore(createApiClient(token)) };
   }
   return mihomoSummaryCache.store;
 }
@@ -144,7 +144,7 @@ export function OverviewDashboard({
   const resolution = metricsHistory.data?.resolution_s ?? 3;
   const mihomoImage = protocolImages.find((item) => item.id === "mihomo");
   const mihomoInstalled = Boolean(mihomoImage?.installed);
-  const summaryStore = useMemo(() => mihomoSummaryStore(mihomoInstalled ? token : ""), [mihomoInstalled, token]);
+  const summaryStore = useMemo(() => mihomoSummaryStore(mihomoInstalled ? token : "", observationVersion), [mihomoInstalled, observationVersion, token]);
   const summary = useSyncExternalStore(summaryStore.subscribe, summaryStore.getSnapshot, () => EMPTY_MIHOMO_SUMMARY);
   const mihomoStatus = summary.status;
   const mihomoProfiles = summary.profiles;
@@ -186,7 +186,7 @@ export function OverviewDashboard({
       if (directReadsInFlight.current[protocol] === generation) return;
       directReadsInFlight.current[protocol] = generation;
       try { await refreshResource(
-        () => directRequest(`/protocols/${protocol}/status`, { cache: "no-store" }).then((value) => directProtocolSnapshot(value, protocol)),
+        () => directRequest(`/protocols/${protocol}/status`, { cache: "no-store", readScope: directKey }).then((value) => directProtocolSnapshot(value, protocol)),
         (next) => {
           const sampled = networkSample({ network_rx: next.interface_rx_bytes, network_tx: next.interface_tx_bytes }, directSamples.current[protocol] || null, Date.now());
           if (sampled.sample) directSamples.current[protocol] = sampled.sample;
