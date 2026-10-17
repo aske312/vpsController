@@ -8,6 +8,11 @@ type ApiResult = Awaited<ReturnType<Response["json"]>>;
 type CachedResponse = { value: ApiResult; cachedAt: number };
 type CachePolicy = { ttlMs: number; staleMs: number; persist: boolean };
 
+export type ApiRequestInit<T = unknown> = RequestInit & {
+  onRevalidated?: (value: T) => void;
+  onRevalidationError?: (cause: unknown) => void;
+};
+
 const CACHE_POLICIES: Array<{ match: RegExp; policy: CachePolicy }> = [
   { match: /^\/overview$/, policy: { ttlMs: 5_000, staleMs: 60_000, persist: true } },
   { match: /^\/protocol-images$/, policy: { ttlMs: 30_000, staleMs: 300_000, persist: true } },
@@ -127,11 +132,16 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
   const expired = () => new ApiRequestError("Сессия панели завершена. Войдите заново.", "http", 401);
   const pending = new Map<string, Promise<ApiResult>>();
   const cache = new Map<string, CachedResponse>();
+  let cacheGeneration = 0;
+  const readVersions = new Map<string, number>();
   readPersistedCache(token, cache);
   const request = async (path: string, init: RequestInit = {}): Promise<ApiResult> => {
     if (!currentSession()) throw expired();
     const method = (init.method || "GET").toUpperCase();
     const read = method === "GET" && init.body == null;
+    const generation = cacheGeneration;
+    const version = read && cachePolicy(path) ? (readVersions.get(path) || 0) + 1 : 0;
+    if (version) readVersions.set(path, version);
     const delays = read ? (options.retryDelaysMs ?? [400, 1200]) : [];
     // Do not expose query strings, subscription tokens, or authentication in errors.
     const operation = path.split("?")[0].replace(/\/s\/[^/]+|\/subscriptions\/[^/]+/g, "/subscription");
@@ -172,7 +182,7 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
         try { value = JSON.parse(body); }
         catch { throw new ApiRequestError(`Панель получила неполный или некорректный ответ (${operation}). Обновите данные.`, "response"); }
         const policy = read ? cachePolicy(path) : null;
-        if (policy) {
+        if (policy && generation === cacheGeneration && readVersions.get(path) === version) {
           const entry = { value, cachedAt: Date.now() };
           cache.set(path, entry);
           persistCache(token, path, entry, policy);
@@ -195,7 +205,8 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
       await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
     }
   };
-  return <T = ApiResult>(path: string, init: RequestInit = {}): Promise<T> => {
+  return <T = ApiResult>(path: string, options: ApiRequestInit<T> = {}): Promise<T> => {
+    const { onRevalidated, onRevalidationError, ...init } = options;
     if (!currentSession()) return Promise.reject(expired());
     const method = (init.method || "GET").toUpperCase();
     const read = method === "GET" && init.body == null;
@@ -209,11 +220,21 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
         if (age <= policy.ttlMs) return Promise.resolve(entry.value) as Promise<T>;
         if (age <= policy.staleMs) {
           if (!pending.has(path)) {
-            const revalidation = request(path, init).catch(() => undefined).finally(() => {
+            const revalidation = request(path, init).finally(() => {
               if (pending.get(path) === revalidation) pending.delete(path);
             });
             pending.set(path, revalidation);
+            // Revalidation also runs for callers that only need a cached preview.
+            void revalidation.catch(() => undefined);
           }
+          const generation = cacheGeneration;
+          const version = readVersions.get(path);
+          const current = () => currentSession() && generation === cacheGeneration && readVersions.get(path) === version;
+          void pending.get(path)!.then((value) => {
+            if (current()) onRevalidated?.(value as T);
+          }).catch((cause) => {
+            if (current()) onRevalidationError?.(cause);
+          }).catch(() => undefined);
           return Promise.resolve(entry.value) as Promise<T>;
         }
       }
@@ -222,8 +243,15 @@ export function createApiClient(token: string, options: RequestOptions = {}) {
       // A refresh after a command must not join a read started before that command.
       pending.clear();
       cache.clear();
+      cacheGeneration += 1;
       clearPersistedCache(token);
-      return request(path, init).finally(() => pending.clear()) as Promise<T>;
+      return request(path, init).finally(() => {
+        // Reads that started while the command ran are not a post-command baseline.
+        cacheGeneration += 1;
+        pending.clear();
+        cache.clear();
+        clearPersistedCache(token);
+      }) as Promise<T>;
     }
     // Custom headers/signals may represent independent callers and must not merge.
     if (!share) return request(path, init) as Promise<T>;

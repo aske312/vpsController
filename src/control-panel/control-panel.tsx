@@ -2,6 +2,7 @@
 
 import { useNotifications, useNotifier, useNotificationList } from "../shared/notifications/notification-center";
 import { createApiClient, invalidateApiSession, onApiSessionExpired } from "../shared/lib/api-request";
+import { refreshResource } from "../shared/lib/refresh-resource";
 import { useCdnSecurity } from "../features/application/use-cdn-security";
 import { cdnSecuritySnapshot, type CdnSecurityStatus } from "../shared/lib/cdn-security-operation";
 import { RefreshNotices, refreshFailure } from "./components/refresh-notices";
@@ -207,6 +208,7 @@ export function ControlPanel() {
   const requestCommandReload = useCallback(() => setReloadRequested(true), []);
   const [trackActionCompletion] = useState(createSystemActionCompletionTracker);
   const applicationObservationVersion = useRef(0);
+  const overviewReadVersion = useRef(0);
   const acceptedOperation = useRef<{ id?: string; state?: string } | null>(null);
   const [passwordDialog, setPasswordDialog] = useState(false);
   const [sshAdminDialog, setSshAdminDialog] = useState(false);
@@ -379,37 +381,37 @@ export function ControlPanel() {
   const loadOverview = useCallback(async (force = false) => {
     if (!token) return;
     const observationVersion = applicationObservationVersion.current;
-    try {
-      const [next, imageData] = await Promise.allSettled([
-        request("/overview", { cache: "no-store" }).then(overviewSnapshot),
-        request("/protocol-images", force ? { cache: "no-store" } : undefined) as Promise<{ items: ProtocolImage[] }>,
-      ]);
-      if (observationVersion !== applicationObservationVersion.current) return;
-      if (next.status === "fulfilled") setOverview(next.value);
-      else setOverview(overviewUnavailable);
-      if (imageData.status === "fulfilled") {
-        setProtocolImages(imageData.value.items || []);
-        if (installingProtocol && imageData.value.items.some((image) => image.id === installingProtocol && image.installed)) {
-          setInstallingProtocol("");
-        }
-      }
-      if (next.status === "fulfilled" || imageData.status === "fulfilled") setLastUpdated(new Date());
+    const readVersion = ++overviewReadVersion.current;
+    const isCurrent = () => observationVersion === applicationObservationVersion.current && readVersion === overviewReadVersion.current;
+    const report = (key: string, cause?: unknown) => {
       setRefreshErrors((current) => {
         const errors = { ...current };
-        if (next.status === "fulfilled") delete errors.loadOverview;
-        else errors.loadOverview = refreshFailure(next.reason, "Не удалось обновить телеметрию VPS");
-        if (imageData.status === "fulfilled") delete errors.loadProtocolImages;
-        else errors.loadProtocolImages = refreshFailure(imageData.reason, "Не удалось обновить каталог компонентов");
+        if (cause === undefined) delete errors[key];
+        else errors[key] = refreshFailure(cause, key === "loadOverview" ? "Не удалось обновить телеметрию VPS" : "Не удалось обновить каталог компонентов");
         return errors;
       });
-    } catch (cause) { setRefreshErrors((current) => ({ ...current, loadOverview: refreshFailure(cause, "Ошибка соединения") })); }
+    };
+    await Promise.all([
+      refreshResource(() => request("/overview", { cache: "no-store" }).then(overviewSnapshot), (next) => {
+        setOverview(next);
+        setLastUpdated(new Date());
+        report("loadOverview");
+      }, (cause) => { setOverview(overviewUnavailable); report("loadOverview", cause); }, isCurrent),
+      refreshResource<{ items: ProtocolImage[] }>((updates) => request("/protocol-images", { ...updates, ...(force ? { cache: "no-store" } : {}) }), (data) => {
+        if (!Array.isArray(data?.items)) throw new Error("Некорректный каталог компонентов");
+        setProtocolImages(data.items);
+        if (installingProtocol && data.items.some((image) => image.id === installingProtocol && image.installed)) setInstallingProtocol("");
+        setLastUpdated(new Date());
+        report("loadProtocolImages");
+      }, (cause) => { report("loadProtocolImages", cause); }, isCurrent),
+    ]);
   }, [installingProtocol, request, token]);
 
   useEffect(() => {
     // A restored section also needs the server and module inventory used by
     // navigation. Previously these were loaded only by opening Overview.
-    if (token && !overview) void loadOverview();
-  }, [loadOverview, overview, token]);
+    if (token && !overview && tab !== "overview") void loadOverview();
+  }, [loadOverview, overview, tab, token]);
 
   const loadClients = useCallback(async () => {
     if (!token) return;
@@ -486,35 +488,28 @@ export function ControlPanel() {
     const observationVersion = applicationObservationVersion.current;
     const metricVersion = ++metricsObservationVersion.current;
     try {
-      const [serviceResult, metricsResult] = await Promise.allSettled([
-        request<ServicesStatus>("/services", force ? { cache: "no-store" } : undefined),
-        request<MetricsSettings>("/services/metrics", force ? { cache: "no-store" } : undefined),
-      ]);
-      if (observationVersion !== applicationObservationVersion.current) return;
-      if (serviceResult.status === "fulfilled") {
-        const next = serviceResult.value;
-        setServices(next);
-        if (!automationDirty.current) setAutomationDraft(next.automation);
-        if (!loggingDirty.current) setLoggingDraft({
-          persistent: next.logging?.persistent ?? true,
-          retention_days: next.logging?.retention_days ?? 30,
-        });
-        setLastUpdated(new Date());
-      } else setServices(servicesUnavailable);
-      if (metricVersion === metricsObservationVersion.current && metricsResult.status === "fulfilled") {
-        setMetricsSettings(metricsResult.value);
-        if (!metricsDirty.current) setMetricsDraft(metricsResult.value);
-      } else if (metricVersion === metricsObservationVersion.current) setMetricsSettings(null);
-      setRefreshErrors((current) => {
-        const errors = { ...current };
-        if (serviceResult.status === "fulfilled") delete errors.loadServices;
-        else errors.loadServices = refreshFailure(serviceResult.reason, "Не удалось обновить состояние служб");
-        if (metricVersion === metricsObservationVersion.current) {
-          if (metricsResult.status === "fulfilled") delete errors.loadMetricsSettings;
-          else errors.loadMetricsSettings = refreshFailure(metricsResult.reason, "Не удалось обновить настройки хранения метрик");
-        }
-        return errors;
+      const isCurrent = () => observationVersion === applicationObservationVersion.current;
+      const report = (key: string, cause?: unknown) => setRefreshErrors((current) => {
+        const next = { ...current };
+        if (cause === undefined) delete next[key];
+        else next[key] = refreshFailure(cause, key === "loadServices" ? "Не удалось обновить состояние служб" : "Не удалось обновить настройки хранения метрик");
+        return next;
       });
+      await Promise.all([
+        refreshResource(() => request<ServicesStatus>("/services", force ? { cache: "no-store" } : undefined), (next) => {
+          setServices(next);
+          if (!automationDirty.current) setAutomationDraft(next.automation);
+          if (!loggingDirty.current) setLoggingDraft({ persistent: next.logging?.persistent ?? true, retention_days: next.logging?.retention_days ?? 30 });
+          setLastUpdated(new Date());
+          report("loadServices");
+        }, (cause) => { setServices(servicesUnavailable); report("loadServices", cause); }, isCurrent),
+        refreshResource(() => request<MetricsSettings>("/services/metrics", force ? { cache: "no-store" } : undefined), (next) => {
+          setMetricsSettings(next);
+          if (!metricsDirty.current) setMetricsDraft(next);
+          report("loadMetricsSettings");
+        }, (cause) => { setMetricsSettings(null); report("loadMetricsSettings", cause); },
+        () => isCurrent() && metricVersion === metricsObservationVersion.current),
+      ]);
     } finally { servicesLoading.current = false; }
   }, [request, token]);
 

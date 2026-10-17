@@ -7,6 +7,7 @@ import { directProtocolSnapshot, directProtocolUnavailable } from "../../control
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createApiClient } from "../../shared/lib/api-request";
+import { refreshResource } from "../../shared/lib/refresh-resource";
 import { useFailureNotifications } from "../../shared/notifications/notification-center";
 import { ProtocolHealthBadge } from "../../shared/components/protocol-health-badge";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
@@ -153,11 +154,11 @@ export function OverviewDashboard({
   useFailureNotifications("overview-mihomo", "Mihomo на Обзоре", summaryFailures, false, retrySummary);
   const [directStatuses, setDirectStatuses] = useState<Partial<Record<ProtocolId, ProtocolStatus>>>({});
   const [directStatusFailures, setDirectStatusFailures] = useState<Partial<Record<ProtocolId, boolean>>>({});
-  const [directSnapshotKey, setDirectSnapshotKey] = useState("");
+  const [directSnapshotKeys, setDirectSnapshotKeys] = useState<Partial<Record<ProtocolId, string>>>({});
   const [directRates, setDirectRates] = useState<Partial<Record<ProtocolId, { rx: number | null; tx: number | null }>>>({});
   const directSamples = useRef<Partial<Record<ProtocolId, { rx: number; tx: number; at: number }>>>({});
   const directRequest = useMemo(() => createApiClient(token), [token]);
-  const directReadInFlight = useRef(false);
+  const directReadsInFlight = useRef<Partial<Record<ProtocolId, number>>>({});
   const directReadGeneration = useRef(0);
 
   const directChannels = useMemo(
@@ -174,46 +175,35 @@ export function OverviewDashboard({
   const loadDirectStatuses = useCallback(async () => {
     if (!token || !directProtocols.length) {
       setDirectStatuses({});
+      setDirectSnapshotKeys({});
       setDirectStatusFailures({});
       setDirectRates({});
       directSamples.current = {};
       return;
     }
-    if (directReadInFlight.current) return;
-    directReadInFlight.current = true;
     const generation = directReadGeneration.current;
-    try {
-      const results = await Promise.allSettled(directProtocols.map(async (protocol) =>
-        directProtocolSnapshot(await directRequest(`/protocols/${protocol}/status`, { cache: "no-store" }), protocol)));
-      if (generation !== directReadGeneration.current) return;
-
-      const now = Date.now();
-      const statusUpdates: Partial<Record<ProtocolId, ProtocolStatus>> = {};
-      const failureUpdates: Partial<Record<ProtocolId, boolean>> = {};
-      const rateUpdates: Partial<Record<ProtocolId, { rx: number | null; tx: number | null }>> = {};
-      results.forEach((result, index) => {
-        const protocol = directProtocols[index];
-        if (!protocol) return;
-        failureUpdates[protocol] = result.status !== "fulfilled";
-        if (result.status !== "fulfilled") {
+    await Promise.all(directProtocols.map(async (protocol) => {
+      if (directReadsInFlight.current[protocol] === generation) return;
+      directReadsInFlight.current[protocol] = generation;
+      try { await refreshResource(
+        () => directRequest(`/protocols/${protocol}/status`, { cache: "no-store" }).then((value) => directProtocolSnapshot(value, protocol)),
+        (next) => {
+          const sampled = networkSample({ network_rx: next.interface_rx_bytes, network_tx: next.interface_tx_bytes }, directSamples.current[protocol] || null, Date.now());
+          if (sampled.sample) directSamples.current[protocol] = sampled.sample;
+          setDirectStatuses((current) => ({ ...current, [protocol]: next }));
+          setDirectSnapshotKeys((current) => ({ ...current, [protocol]: directKey }));
+          setDirectStatusFailures((current) => ({ ...current, [protocol]: false }));
+          setDirectRates((current) => ({ ...current, [protocol]: sampled.rate }));
+        },
+        () => {
           delete directSamples.current[protocol];
-          rateUpdates[protocol] = { rx: null, tx: null };
-          return;
-        }
-        statusUpdates[protocol] = result.value;
-        const sampled = networkSample({ network_rx: result.value.interface_rx_bytes, network_tx: result.value.interface_tx_bytes }, directSamples.current[protocol] || null, now);
-        rateUpdates[protocol] = sampled.rate;
-        if (sampled.sample) directSamples.current[protocol] = sampled.sample;
-      });
-      setDirectStatuses((current) => {
-        const next = { ...current, ...statusUpdates };
-        for (const protocol of directProtocols) if (failureUpdates[protocol]) next[protocol] = directProtocolUnavailable(current[protocol]);
-        return next;
-      });
-      setDirectSnapshotKey(directKey);
-      setDirectStatusFailures((current) => ({ ...current, ...failureUpdates }));
-      if (Object.keys(rateUpdates).length) setDirectRates((current) => ({ ...current, ...rateUpdates }));
-    } finally { directReadInFlight.current = false; }
+          setDirectStatuses((current) => ({ ...current, [protocol]: directProtocolUnavailable(current[protocol]) }));
+          setDirectStatusFailures((current) => ({ ...current, [protocol]: true }));
+          setDirectRates((current) => ({ ...current, [protocol]: { rx: null, tx: null } }));
+        },
+        () => generation === directReadGeneration.current,
+      ); } finally { if (directReadsInFlight.current[protocol] === generation) delete directReadsInFlight.current[protocol]; }
+    }));
   }, [directKey, directProtocols, directRequest, token]);
 
   useEffect(() => {
@@ -274,9 +264,9 @@ export function OverviewDashboard({
     const status = directStatuses[protocol];
     const protocolClients = clients.filter((client) => client.protocol === protocol);
     const observation = directChannelObservation(status, protocolClients, directRates[protocol] || { rx: null, tx: null },
-      directSnapshotKey !== directKey || Boolean(directStatusFailures[protocol]));
+      directSnapshotKeys[protocol] !== directKey || Boolean(directStatusFailures[protocol]));
     return { image, protocol, status, protocolClients, ...observation };
-  }), [clients, directChannels, directKey, directRates, directSnapshotKey, directStatusFailures, directStatuses]);
+  }), [clients, directChannels, directKey, directRates, directSnapshotKeys, directStatusFailures, directStatuses]);
 
   const directInUseCount = directChannelStates.filter((item) => item.inUse).length;
   const directReadyCount = directChannelStates.filter((item) => !item.statusFailed && item.status?.health?.state === "READY").length;

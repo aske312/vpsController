@@ -85,3 +85,30 @@ test("concurrent reads share a refresh, fresh data is cached, and stores remain 
   const other = createMihomoSummaryStore(async (path) => responses[path]);
   assert.equal(other.getSnapshot().profiles, null);
 });
+
+test("background responses update subscribers and cannot overwrite a newer refresh", async () => {
+  const callbacks = new Map();
+  const store = createMihomoSummaryStore(async (path, options) => {
+    callbacks.set(path, options);
+    return responses[path];
+  });
+  const snapshots = [];
+  const unsubscribe = store.subscribe(() => snapshots.push(store.getSnapshot()));
+  await store.refresh();
+  const first = callbacks.get("/mihomo/profiles");
+  first.onRevalidated({items: []});
+  assert.deepEqual(store.getSnapshot().profiles, []);
+  first.onRevalidationError(new Error("offline"));
+  assert.ok(store.getSnapshot().errors.profiles);
+  first.onRevalidated({items: [profile]});
+  assert.deepEqual(store.getSnapshot().profiles, [profile]);
+  assert.equal(store.getSnapshot().errors.profiles, undefined);
+  await store.refresh(true);
+  assert.equal(callbacks.get("/mihomo/profiles").cache, "no-store");
+  const count = snapshots.length;
+  first.onRevalidated({items: []});
+  first.onRevalidationError(new Error("obsolete"));
+  assert.equal(snapshots.length, count);
+  assert.deepEqual(store.getSnapshot().profiles, [profile]);
+  unsubscribe();
+});

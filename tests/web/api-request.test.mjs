@@ -3,7 +3,8 @@ import { test, afterEach } from "node:test";
 import { createApiClient, invalidateApiSession, onApiSessionExpired } from "../../src/shared/lib/api-request.ts";
 
 const originalFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = originalFetch; });
+const originalNow = Date.now;
+afterEach(() => { globalThis.fetch = originalFetch; Date.now = originalNow; });
 const client = (options = {}) => createApiClient("test-token", { retryDelaysMs: [0, 0], ...options });
 const ok = () => new Response('{"ok":true}', { headers: { "content-type": "application/json" } });
 
@@ -179,4 +180,86 @@ test("refresh after a write cannot join a read from before the write", async () 
   assert.equal(reads, 2);
   releaseOld();
   await old;
+});
+
+const flush = () => new Promise(resolve => setImmediate(resolve));
+
+test("stale readers receive a shared fresh response without another poll", async () => {
+  let now = 100_000;
+  Date.now = () => now;
+  let finish;
+  let calls = 0;
+  globalThis.fetch = async () => ++calls === 1 ? Response.json({version: 1})
+    : new Promise(resolve => { finish = resolve; });
+  const request = client();
+  await request("/protocol-images");
+  now += 31_000;
+  const first = [], second = [];
+  assert.deepEqual(await request("/protocol-images", {onRevalidated: value => first.push(value)}), {version: 1});
+  await request("/protocol-images", {onRevalidated: value => second.push(value)});
+  assert.equal(calls, 2);
+  assert.deepEqual(first, []);
+  finish(Response.json({version: 2}));
+  await flush();
+  assert.deepEqual(first, [{version: 2}]);
+  assert.deepEqual(second, [{version: 2}]);
+  assert.deepEqual(await request("/protocol-images"), {version: 2});
+  assert.equal(calls, 2);
+});
+
+test("background failures reach the active consumer, and the next read can recover", async () => {
+  let now = 100_000;
+  Date.now = () => now;
+  let calls = 0;
+  const errors = [];
+  globalThis.fetch = async () => ++calls === 2 ? Response.json({detail: "unavailable"}, {status: 500}) : Response.json({version: calls});
+  const request = client({retryDelaysMs: []});
+  await request("/protocol-images");
+  now += 31_000;
+  await request("/protocol-images", {onRevalidated: assert.fail, onRevalidationError: cause => errors.push(cause)});
+  await flush();
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].status, 500);
+  const updates = [];
+  await request("/protocol-images", {onRevalidated: value => updates.push(value)});
+  await flush();
+  assert.deepEqual(updates, [{version: 3}]);
+});
+
+test("superseded background reads cannot repopulate cache or notify observers", async () => {
+  for (const boundary of ["write", "force", "logout"]) {
+    let now = 100_000;
+    Date.now = () => now;
+    let calls = 0;
+    let finish;
+    globalThis.fetch = async () => ++calls === 2 ? new Promise(resolve => { finish = resolve; }) : Response.json({version: calls});
+    const token = `revalidate-${boundary}`;
+    const request = createApiClient(token, {retryDelaysMs: []});
+    await request("/protocol-images");
+    now += 31_000;
+    await request("/protocol-images", {onRevalidated: assert.fail, onRevalidationError: assert.fail});
+    if (boundary === "write") await request("/settings", {method: "POST", body: "{}"});
+    else if (boundary === "force") await request("/protocol-images", {cache: "no-store"});
+    else invalidateApiSession(token, false);
+    finish(Response.json({version: "obsolete"}));
+    await flush();
+    if (boundary === "logout") await assert.rejects(request("/protocol-images"), {status: 401});
+    else assert.deepEqual(await request("/protocol-images"), {version: boundary === "write" ? 4 : 3});
+  }
+});
+
+test("a read started during a write is not retained as a post-write baseline", async () => {
+  let endWrite, endRead;
+  globalThis.fetch = async (_path, init) => init.method === "POST"
+    ? new Promise(resolve => { endWrite = resolve; })
+    : new Promise(resolve => { endRead = resolve; });
+  const request = client();
+  const write = request("/settings", {method: "POST", body: "{}"});
+  const during = request("/protocol-images");
+  endWrite(ok());
+  await write;
+  endRead(Response.json({version: "during"}));
+  await during;
+  globalThis.fetch = async () => Response.json({version: "after"});
+  assert.deepEqual(await request("/protocol-images"), {version: "after"});
 });
