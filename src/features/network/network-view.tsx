@@ -80,7 +80,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
   const [section, setSection] = useState<Section>("diagnostics");
   const [loadFailed, setLoadFailed] = useState(false);
   const [relayDirty, setRelayDirty] = useState(false);
-  const relay = useNetworkRelays({ request, admit: admitOperation, operation, onOperation, busy, onDirtyChange: setRelayDirty, refreshKey });
+  const relay = useNetworkRelays({ request, admit: admitOperation, operation, onOperation, busy: busy || loading || !status || loadFailed, onDirtyChange: setRelayDirty, refreshKey });
   const loadingRef = useRef(false);
   const loadingRun = useRef(0);
   const savingRef = useRef(false);
@@ -342,9 +342,9 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
                 : "Повторите загрузку кнопкой «Обновить»."}
             </p>
           </section>
-        ) : (
+        ) : null}
           <>
-            {loadFailed && (
+            {status && loadFailed && (
               <p className="networkNotice" role="status">
                 Обновление не удалось. Показаны последние полученные данные.
               </p>
@@ -384,7 +384,6 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
               />
             </div>
           </>
-        )}
       </main>
     </div>
   );
@@ -610,7 +609,7 @@ function DiagnosticsV2({
   addresses: ReturnType<typeof useNetworkAddresses>;
   listState: NetworkListState;
   onListStateChange: (state: NetworkListState) => void;
-  status: NetworkStatus;
+  status: NetworkStatus | null;
   request: NetworkRequest;
   endpointDraft: NetworkEndpointSettings | null;
   endpointDirty: boolean;
@@ -625,9 +624,9 @@ function DiagnosticsV2({
   const setQuery = (query: string) => onListStateChange({ ...listState, query });
   const [deletion, setDeletion] = useState<{ domain: string; remove: () => void } | null>(null);
   const expandedDomains = new Set(listState.expanded);
-  const publicIpv4 = addresses.status?.items.find(row => row.family === "ipv4" && row.role === "primary")?.address || status.server.public_ipv4 || (!status.server.public_ip.includes(":") ? status.server.public_ip : "");
-  const publicIpv6 = addresses.status?.items.find(row => row.family === "ipv6" && row.role === "primary")?.address || status.server.public_ipv6 || "";
-  const domains = status.domains.filter((item) =>
+  const publicIpv4 = addresses.status?.items.find(row => row.family === "ipv4" && row.role === "primary")?.address || status?.server.public_ipv4 || (status && !status.server.public_ip.includes(":") ? status.server.public_ip : "");
+  const publicIpv6 = addresses.status?.items.find(row => row.family === "ipv6" && row.role === "primary")?.address || status?.server.public_ipv6 || "";
+  const domains = (status?.domains || []).filter((item) =>
     `${item.value} ${item.role} ${item.resolved.join(" ")}`
       .toLowerCase()
       .includes(query.trim().toLowerCase()),
@@ -643,8 +642,8 @@ function DiagnosticsV2({
   };
   const endpointCheckFor = (domain: NetworkStatus["domains"][number]) => {
     const kind = endpointKindFor(domain);
-    const keyed = kind ? status.transport_endpoint_checks_by_domain?.[`${kind}:${domain.value}`] : undefined;
-    return keyed || Object.values(status.transport_endpoint_checks || {}).find(
+    const keyed = kind ? status?.transport_endpoint_checks_by_domain?.[`${kind}:${domain.value}`] : undefined;
+    return keyed || Object.values(status?.transport_endpoint_checks || {}).find(
       (check) => check?.kind === kind && (check?.domain || (check as NetworkEndpointCheck & { value?: string }).value)?.toLowerCase() === domain.value.toLowerCase(),
     );
   };
@@ -669,11 +668,11 @@ function DiagnosticsV2({
             </div>
           </div>
           <div className="networkStateFacts" aria-label="Факты о состоянии сети">
-            <NetworkStateFact label="SERVER IPv4" value={publicIpv4 || "Не обнаружен"} note="origin VPS" mono />
-            <NetworkStateFact label="SERVER IPv6" value={publicIpv6 || "Не обнаружен"} note={publicIpv6 ? "доступен для публикации" : "не обнаружен"} mono />
-            <NetworkStateFact label="DNS" value={status.resolvers.join(", ") || "Нет данных"} note={`${status.resolvers.length} резолвера`} mono />
-            <NetworkStateFact label="EDGE" value={status.edge.provider} note={status.edge.mode} />
-            <NetworkStateFact label="LISTENERS" value={String(status.listeners.length)} note="TCP listeners" />
+            <NetworkStateFact label="SERVER IPv4" value={publicIpv4 || (status ? "Не обнаружен" : "—")} note="origin VPS" mono />
+            <NetworkStateFact label="SERVER IPv6" value={publicIpv6 || (status ? "Не обнаружен" : "—")} note={publicIpv6 ? "доступен для публикации" : status ? "не обнаружен" : "загружается"} mono />
+            <NetworkStateFact label="DNS" value={status?.resolvers.join(", ") || "—"} note={status ? `${status.resolvers.length} резолвера` : "загружается"} mono />
+            <NetworkStateFact label="EDGE" value={status?.edge.provider || "—"} note={status?.edge.mode || "загружается"} />
+            <NetworkStateFact label="LISTENERS" value={status ? String(status.listeners.length) : "—"} note="TCP listeners" />
           </div>
         </header>
       </section>
@@ -696,7 +695,7 @@ function DiagnosticsV2({
                 placeholder="Найти адрес"
               />
             </label>
-            {endpointDraft && (
+            {status && endpointDraft && (
                 <NetworkEndpoints
                   relay={relay}
                   request={request}
@@ -741,7 +740,7 @@ function DiagnosticsV2({
             </thead>
             <tbody>
               <NetworkServerAddressRows control={addresses} query={query} expanded={listState.expanded} onToggle={toggleDomain} renderIdentity={address => {
-                const ipInfo = status.server.ip_info?.filter(item => item.address === address);
+                const ipInfo = status?.server.ip_info?.filter(item => item.address === address);
                 return ipInfo?.length ? <NetworkIdentityDetails domain={{ value: address, role: "SERVER", source: "VPS", resolved: [address], matches_origin: true, route: "direct", ip_info: ipInfo }} /> : null;
               }} />
               <NetworkRelayRows relay={relay} query={query} expanded={listState.expanded} onToggle={toggleDomain} />
@@ -880,13 +879,13 @@ function DiagnosticsV2({
             </tbody>
           </table>
         </div>
-        {addresses.status && !addresses.failed && !addresses.reading && !domains.length && !addresses.status.items.some(row => addressMatches(row, query)) && !relay.status?.hosts.some(host => relayMatches(host, query)) && (
+        {status && relay.status && !relay.reading && addresses.status && !addresses.failed && !addresses.reading && !domains.length && !addresses.status.items.some(row => addressMatches(row, query)) && !relay.status?.hosts.some(host => relayMatches(host, query)) && (
           <p className="networkEmpty">
             {query ? "Совпадений нет." : "Маршруты ещё не настроены."}
           </p>
         )}
       </section>
-      {status.capabilities && (
+      {status?.capabilities && (
         <section className="networkV2Capabilities networkPanel">
           <header className="networkBlockHeader">
             <div>

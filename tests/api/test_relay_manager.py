@@ -72,6 +72,28 @@ class RelayManagementTests(unittest.TestCase):
         return {'host_id': self.host_id, 'transport': 'tcp', 'listen_port': port, 'target_port': 443,
                 'expected_revision': self.control.read()['revision'], 'agent_revision': self.agent.revision}
 
+    def test_inventory_never_probes_or_returns_saved_readiness(self):
+        self.control.mutate_route(self.payload(), 'b'*32)
+        registry = self.control.read()
+        registry['routes'][0]['check'] = {'state': 'ready', 'consumer_id': 'direct:client',
+                                        'checked_at': '2026-10-17T00:00:00Z', 'vantage_point': 'server', 'plan_seal': 'private'}
+        self.control.write(registry)
+        self.agent.calls.clear()
+        self.agent.offline = True
+        snapshot = self.control.public(probe=False)
+        host = snapshot['hosts'][0]
+        route = host['routes'][0]
+        self.assertEqual(self.agent.calls, [])
+        self.assertEqual(host['state'], 'unknown')
+        self.assertEqual(route['state'], 'unknown')
+        self.assertFalse(route['target_verified'])
+        for key in ('check', 'sent_bytes', 'received_bytes', 'sessions', 'errors'):
+            self.assertNotIn(key, route)
+        self.assertNotIn('version', host)
+        self.assertNotIn('agent_revision', host)
+        self.assertNotIn(TOKEN, json.dumps(snapshot))
+        self.assertNotIn('private', json.dumps(snapshot))
+
     def test_protocol_preparation_reuses_owned_rule_without_mutation(self):
         self.control.mutate_route(self.payload(), 'b'*32)
         self.control.ensure(self.host_id, [[('tcp', 443)], [('tcp', 443)]], 'c'*32)
@@ -459,7 +481,7 @@ class RelayAPITests(unittest.TestCase):
         self.addCleanup(api.app.dependency_overrides.clear)
 
     def test_every_endpoint_requires_auth_before_access_or_validation(self):
-        endpoints = [('GET', '/network/relays'), ('PUT', '/network/relays'), ('PUT', '/network/relays/reconnect'), ('DELETE', '/network/relays/id'),
+        endpoints = [('GET', '/network/relays'), ('GET', '/network/relays?view=inventory'), ('PUT', '/network/relays'), ('PUT', '/network/relays/reconnect'), ('DELETE', '/network/relays/id'),
                      ('POST', '/clients/relay'), ('GET', '/clients/relay/id'), ('POST', '/clients/relay/id/resume'),
                      ('POST', '/network/relays/id/routes'), ('DELETE', '/network/relays/id/routes/route?agent_revision=0'),
                      ('POST', '/network/relays/reconcile'), ('POST', '/network/relays/id/routes/route/export'),
@@ -468,6 +490,25 @@ class RelayAPITests(unittest.TestCase):
             with self.subTest(path=path):
                 response = self.client.request(method, '/api'+path)
                 self.assertEqual(response.status_code, 401)
+
+    def test_inventory_skips_live_collectors_and_is_not_cached(self):
+        api.app.dependency_overrides[api.require_token] = lambda: None
+        control = Mock()
+        control.public.return_value = {'revision': '0'*32, 'hosts': [], 'pending': False, 'origin_ip': ORIGIN}
+        with patch.object(api, 'relay_control', return_value=control), patch.object(api, 'relay_origin_hosts', return_value=[ORIGIN]), patch.object(api, 'relay_targets', side_effect=AssertionError('live targets')), patch.object(api, 'network_consumers', side_effect=AssertionError('live consumers')), patch.object(api, 'prepare_relay_probe', side_effect=AssertionError('live evidence')):
+            response = self.client.get('/api/network/relays?view=inventory')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['cache-control'], 'no-store')
+        control.public.assert_called_once_with(probe=False)
+        control.read.assert_not_called()
+        self.assertEqual(response.json()['targets'], [])
+        self.assertEqual(response.json()['consumers'], [])
+        self.assertEqual(self.client.get('/api/network/relays?view=invalid').status_code, 422)
+
+    def test_invalid_inventory_is_unavailable(self):
+        api.app.dependency_overrides[api.require_token] = lambda: None
+        with patch.object(api, 'relay_control', side_effect=ValueError('invalid registry')):
+            self.assertEqual(self.client.get('/api/network/relays?view=inventory').status_code, 503)
 
     def test_cdn_native_copy_retains_gateway_sni_and_http_host(self):
         with patch.object(api, 'PUBLIC_IPV4', ORIGIN), patch.object(api, 'PUBLIC_DOMAIN', 'panel.example'), patch.object(api, 'PUBLIC_ENDPOINT', ORIGIN), patch.object(api.cdn_security, 'read_routes', return_value=[{'domain': 'cdn.example'}]), patch.object(api, 'VLESS_ENV', self.root/'absent.env'):

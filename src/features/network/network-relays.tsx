@@ -27,23 +27,40 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
   const [confirmation, setConfirmation] = useState<RelayHost | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const generation = useRef(0);
-  const inFlight = useRef(false);
+  const inFlight = useRef<{ controller: AbortController; run: number } | null>(null);
+  const hasSnapshot = useRef(false);
   const saving = useRef(false);
+  const terminalRead = useRef("");
   const { error: notifyError } = useNotifier("relay", "Relay");
-  const load = useCallback(async () => {
-    if (inFlight.current || saving.current) return;
-    inFlight.current = true; setReading(true);
-    const run = generation.current;
+  const load = useCallback(async (force = false) => {
+    if (saving.current || inFlight.current && !force) return;
+    inFlight.current?.controller.abort();
+    const job = { controller: new AbortController(), run: ++generation.current };
+    inFlight.current = job; setReading(true);
+    const current = () => job.run === generation.current && !job.controller.signal.aborted;
+    let livePublished = false;
+    if (!hasSnapshot.current || force) {
+      void request("/network/relays?view=inventory", { cache: "no-store", signal: job.controller.signal })
+        .then(relaySnapshot).then(data => {
+          if (current() && !livePublished) { hasSnapshot.current = true; setStatus(data); }
+        }).catch(() => { /* The live read remains authoritative. */ });
+    }
     try {
-      const data = relaySnapshot(await request("/network/relays", { cache: "no-store" }));
-      if (run === generation.current) { setStatus(data); setFailed(false); }
-    } catch { if (run === generation.current) setFailed(true); }
-    finally { if (run === generation.current) setReading(false); inFlight.current = false; }
+      const data = relaySnapshot(await request("/network/relays", { cache: "no-store", signal: job.controller.signal }));
+      if (current()) { livePublished = true; hasSnapshot.current = true; setStatus(data); setFailed(false); }
+    } catch { if (current()) setFailed(true); }
+    finally {
+      if (current()) setReading(false);
+      if (inFlight.current === job) inFlight.current = null;
+    }
   }, [request]);
   useEffect(() => {
-    const current = generation;
+    hasSnapshot.current = false;
+    return () => { generation.current++; inFlight.current?.controller.abort(); inFlight.current = null; };
+  }, [request]);
+  useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
-    return () => { window.clearTimeout(timer); current.current++; };
+    return () => window.clearTimeout(timer);
   }, [load, refreshKey]);
   useEffect(() => { onDirtyChange(changed); }, [changed, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
@@ -55,13 +72,15 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
   useEffect(() => {
     if (!operation?.action?.startsWith("relay-") || systemActionNeedsPolling(operation)) return;
     if (pending && operation.id !== pending) return;
-    const timer = window.setTimeout(() => { setPending(null); void load(); }, 0);
+    const key = `${operation.id}:${operation.state}`;
+    if (terminalRead.current === key) return;
+    const timer = window.setTimeout(() => { terminalRead.current = key; setPending(null); void load(true); }, 0);
     return () => window.clearTimeout(timer);
   }, [operation, pending, load]);
   const locked = busy || sending || reading || failed || !status || Boolean(pending);
   async function submit(path: string, init: RequestInit) {
     if (saving.current) return false;
-    saving.current = true; generation.current++; setSending(true);
+    saving.current = true; generation.current++; inFlight.current?.controller.abort(); inFlight.current = null; setReading(false); setSending(true);
     try {
       const started = await admit(path, init);
       setPending(systemActionNeedsPolling(started) ? started.id || null : null); onOperation(started); return true;
@@ -113,7 +132,7 @@ export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: 
     return <Fragment key={item.id}>
       <tr className={`networkRouteRow networkRelayRow${open ? " is-expanded" : ""}`}>
         <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true" /><span><strong>{address}</strong><small>{item.name} · Relay Agent</small></span></button></td>
-        <td><span className={`networkRelayState ${unknown ? "unknown" : "connected"}`}>{unknown ? "UNKNOWN" : "CONNECTED"}</span></td>
+        <td><span className={`networkRelayState ${unknown ? "unknown" : "connected"}`}>{unknown ? relay.reading ? "Проверяем…" : "UNKNOWN" : "CONNECTED"}</span></td>
         <td><span>RELAY · {item.routes.length}</span><small>{unknown ? "Порты неизвестны" : `Слушают ${item.routes.filter(route => route.state === "listening").length}/${item.routes.length}`}</small></td>
         <td><span>TCP {item.routes.filter(route => route.transport === "tcp").length} · UDP {item.routes.filter(route => route.transport === "udp").length}</span></td>
         <td><div className="networkRelayActions"><button type="button" className="networkRouteConfigure" disabled={relay.locked} onClick={() => relay.openHost(item)}>Настроить</button><button type="button" className="networkRouteDelete" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setConfirmation(item)}>Удалить</button></div></td>

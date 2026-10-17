@@ -330,7 +330,7 @@ class RelayManager:
         if found and found['state'] != 'listening':
             raise OperationConflict('Маршрут сохранён, но listener агента не запущен')
 
-    def public(self):
+    def public(self, *, probe=True):
         registry = self.read()
         result = {'revision': registry['revision'], 'hosts': [], 'pending': self.pending.exists(), 'origin_ip': self.origin}
 
@@ -339,6 +339,12 @@ class RelayManager:
             public['client_address'] = host.get('client_address') or self.client(host).host
             public.update(token_configured=True, state='unknown', routes=[], foreign_routes=0)
             owned = [item for item in registry['routes'] if item['host_id'] == host['id']]
+            if not probe:
+                # Registry addresses are useful before agent I/O completes, but
+                # carry no live state, counters or saved readiness evidence.
+                public['routes'] = [{**{key: route[key] for key in ('id', 'host_id', 'transport', 'listen_port', 'target_ip', 'target_port')},
+                                     'state': 'unknown', 'target_verified': False} for route in owned]
+                return public
             try:
                 client = self.client(host)
                 status = status_snapshot(client.request('GET', '/v1/status'))
@@ -356,6 +362,9 @@ class RelayManager:
                 public['routes'] = [{**route, 'state': 'unknown', 'target_verified': False} for route in owned]
             return public
 
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            result['hosts'] = list(pool.map(observe, registry['hosts']))
+        if probe:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                result['hosts'] = list(pool.map(observe, registry['hosts']))
+        else:
+            result['hosts'] = [observe(host) for host in registry['hosts']]
         return result
