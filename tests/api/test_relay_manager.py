@@ -495,7 +495,7 @@ class RelayAPITests(unittest.TestCase):
         api.app.dependency_overrides[api.require_token] = lambda: None
         control = Mock()
         control.public.return_value = {'revision': '0'*32, 'hosts': [], 'pending': False, 'origin_ip': ORIGIN}
-        with patch.object(api, 'relay_control', return_value=control), patch.object(api, 'relay_origin_hosts', return_value=[ORIGIN]), patch.object(api, 'relay_targets', side_effect=AssertionError('live targets')), patch.object(api, 'network_consumers', side_effect=AssertionError('live consumers')), patch.object(api, 'prepare_relay_probe', side_effect=AssertionError('live evidence')):
+        with patch.object(api, 'relay_control', return_value=control), patch.object(api, 'relay_origin_hosts', side_effect=AssertionError('origin discovery')), patch.object(api, 'relay_targets', side_effect=AssertionError('live targets')), patch.object(api, 'network_consumers', side_effect=AssertionError('live consumers')), patch.object(api, 'prepare_relay_probe', side_effect=AssertionError('live evidence')):
             response = self.client.get('/api/network/relays?view=inventory')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers['cache-control'], 'no-store')

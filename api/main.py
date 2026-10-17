@@ -2679,7 +2679,7 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
         control = relay_control()
         if view == 'inventory':
             result = control.public(probe=False)
-            result.update(targets=[], consumers=[], origin_hosts=relay_origin_hosts())
+            result.update(targets=[], consumers=[], origin_hosts=[])
             return JSONResponse(result, headers={'Cache-Control': 'no-store'})
         result = control.public()
         private_hosts = {host['id']: host for host in control.read()['hosts']}
