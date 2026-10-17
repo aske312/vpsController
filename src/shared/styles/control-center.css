@@ -101,7 +101,7 @@
 }
 .gateMastNode { min-width:0; display:grid !important; grid-template-columns:auto minmax(0,1fr) auto !important; align-items:center !important; gap:8px !important; padding:0; }
 .gateMastIdentity { min-width:0; }
-.gateMastIdentity > .gateMastEndpoint { display:block; min-width:0; overflow:hidden; color:#a7bdca; font:600 11px/1.4 var(--font-mono); white-space:nowrap; text-overflow:ellipsis; }
+.gateMastIdentity > .gateMastEndpoint { display:block; min-width:0; margin:0; overflow:hidden; color:#a7bdca; font:600 11px/16px var(--font-mono); white-space:nowrap; text-overflow:ellipsis; }
 .gateCountryFlag {
   flex:0 0 auto; width:26px; height:18px; display:inline-flex; margin:0;
   overflow:hidden; border:1px solid rgba(255,255,255,.24); border-radius:3px;
