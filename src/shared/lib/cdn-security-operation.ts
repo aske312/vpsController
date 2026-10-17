@@ -11,7 +11,7 @@ export type CdnOperation = {
   result?: EchRecord;
 };
 export type EchRecord = { domain: string; public_name: string; type: string; priority: number; target: string; ttl: number; parameters: string; content: string };
-export type CdnSecurityStatus = { authenticated_origin_pulls: boolean; operation?: CdnOperation | null };
+export type CdnSecurityStatus = { authenticated_origin_pulls: boolean; operation?: CdnOperation | null; cloudflare_domains?: string[] };
 type Request = ReturnType<typeof createApiClient>;
 type Report = (operation: CdnOperation) => void;
 type Options = { signal?: AbortSignal; pollDelayMs?: number; timeoutMs?: number };
@@ -55,6 +55,7 @@ function record(value: unknown): value is Record<string, unknown> {
 
 export function cdnSecuritySnapshot(value: unknown): CdnSecurityStatus {
   if (!record(value) || typeof value.authenticated_origin_pulls !== "boolean") throw new CdnResultUnknown("Некорректное состояние проверки сертификата CF");
+  if (value.cloudflare_domains !== undefined && (!Array.isArray(value.cloudflare_domains) || value.cloudflare_domains.some(domain => typeof domain !== "string" || !domain))) throw new CdnResultUnknown("Некорректный список Cloudflare CDN");
   const operation = value.operation;
   if (operation != null) {
     if (!record(operation) || typeof operation.id !== "string" || !/^[a-f0-9]{32}$/.test(operation.id)

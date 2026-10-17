@@ -4849,7 +4849,11 @@ def cdn_security_status(operation_id: str | None = None, _: None = Depends(requi
         raise HTTPException(status_code=422, detail="Некорректный идентификатор операции") from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Операция пока не найдена") from exc
-    return {**cdn_security.settings(), "operation": operation}
+    try:
+        domains = sorted({route['domain'] for route in cdn_security.read_routes() if route.get('cloudflare', True)})
+        return {**cdn_security.settings(), "operation": operation, "cloudflare_domains": domains}
+    except (OSError, ValueError, KeyError):
+        raise HTTPException(status_code=503, detail="Не удалось прочитать настройки Cloudflare CDN") from None
 
 
 @app.put("/api/application/cdn-security", status_code=202)

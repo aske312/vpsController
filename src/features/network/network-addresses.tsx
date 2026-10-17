@@ -1,5 +1,7 @@
 "use client";
 
+import { NetworkRouteBadge } from "./network-route-badge";
+
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiRequestError } from "../../shared/lib/api-request";
 import { useNotifier } from "../../shared/notifications/notification-center";
@@ -91,9 +93,9 @@ export function NetworkServerAddressRows({ control, query, expanded, onToggle, r
       const key = `SERVER-${row.address}`; const open = expanded.includes(key);
       return <Fragment key={key}><tr className={`networkServerRouteRow${open ? " is-expanded" : ""}`}>
         <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true"/><span><strong>{row.address}</strong><small>{row.family.toUpperCase()} · SERVER</small></span></button></td>
-        <td><span className={`networkRelayState ${row.presence === "present" ? "connected" : "unknown"}`}>{row.presence === "present" ? "Назначен" : row.presence === "missing" ? "Отсутствует" : "Не подтверждён"}</span></td>
+        <td><NetworkRouteBadge tone={row.presence === "present" ? "active" : row.presence === "missing" ? "error" : "unchecked"}>{row.presence === "present" ? "Назначен" : row.presence === "missing" ? "Отсутствует" : "Не подтверждён"}</NetworkRouteBadge></td>
         <td><strong>{addressRoleLabels[row.role]}</strong><small>{row.interfaces.join(", ") || "Назначение сохранено"}</small></td>
-        <td><span className="networkRouteTags"><span>DIRECT</span></span></td>
+        <td><span className="networkRouteTags"><span className="networkRouteTag direct">DIRECT</span></span></td>
         <td><label className="networkAddressRole"><span className="networkSrOnly">Назначение {row.address}</span><select value={row.role} disabled={control.locked || row.presence !== "present"} onChange={event => void control.setRole(row.address, event.target.value as ServerAddressRole)}>
           <option value="primary">Основной</option><option value="reserve" disabled={row.role === "primary"}>Резервный</option><option value="additional" disabled={row.role === "primary"}>Дополнительный</option>
         </select></label></td>

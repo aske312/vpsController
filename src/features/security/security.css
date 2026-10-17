@@ -235,7 +235,7 @@
 
 .securityDiagnosticsStats strong{color:#e7f0f5;font:800 13px var(--font-mono),monospace}
 
-.securityDiagnosticsGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:8px; padding:8px; }
+.securityDiagnosticsGrid { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; gap:12px; padding:14px; }
 
 .securityListeners,.securityLogs { min-width:0; overflow:hidden; border:1px solid rgba(91,116,141,.12); border-radius:11px; background:rgba(3,10,16,.34); }
 
@@ -245,7 +245,7 @@
 
 .securityDiagTitle span{max-width:52%;color:#718797;font-size:9px;text-align:right}
 
-.securityListeners pre{margin:0;height:clamp(180px,32vh,300px);overflow:auto;padding:9px 10px;background:#030a10;color:#62c8ff;font:10px/1.5 var(--font-mono),monospace;white-space:pre}
+.securityListeners pre{margin:0;height:clamp(180px,30vh,300px);overflow:auto;padding:14px 16px;border-top:1px solid rgba(91,116,141,.10);background:#030a10;color:#9ad4ed;font:11px/1.7 var(--font-mono),monospace;white-space:pre}
 
 .securityLogsToggle{width:100%;min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;list-style:none}
 .securityLogsToggle::-webkit-details-marker{display:none}
@@ -265,7 +265,7 @@
 
 .securityLogsBody pre{height:188px;margin:0;overflow:auto;padding:11px 13px;background:#030a10;color:#62c8ff;font:9.5px/1.5 var(--font-mono),monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 
-.securityLogs.open .securityLogsBody pre{height:clamp(180px,32vh,300px);overflow:auto;white-space:pre}
+.securityLogs.open .securityLogsBody pre{height:clamp(220px,38vh,380px);padding:14px 16px;font-size:11px;line-height:1.7;overflow:auto;white-space:pre}
 
 @media (max-width:1280px) {
 .securityMatrixContent{width:min(78%,980px)}
@@ -280,7 +280,6 @@
 .securityTelemetry>span:nth-child(-n/**/+2){border-bottom:1px solid rgba(91,116,141,.11)}
 .securityMatrixContent{width:100%;background:rgba(5,13,20,.64)}
 .securityMatrixArt{opacity:.30}
-.securityListeners{border-right:0;border-bottom:1px solid rgba(91,116,141,.11)}
 }
 
 @media (max-width:760px) {

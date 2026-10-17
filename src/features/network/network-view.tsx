@@ -28,6 +28,8 @@ import { DnsView } from "./network-dns";
 import { NetworkEch } from "./network-ech";
 import { NetworkEndpoints } from "./network-endpoints";
 import { NetworkRelayDialogs, NetworkRelayNotice, NetworkRelayRows, relayMatches, useNetworkRelays } from "./network-relays";
+import { NetworkRouteBadge, type NetworkRouteTone } from "./network-route-badge";
+import { NetworkCloudflare, type NetworkCloudflareControl } from "./network-cloudflare";
 import { dnsComponents } from "./system-dns-control";
 import { NetworkServerAddressRows, useNetworkAddresses } from "./network-addresses";
 import { addressMatches } from "./server-address-state";
@@ -35,6 +37,7 @@ import { addressMatches } from "./server-address-state";
 export type NetworkListState = { query: string; expanded: string[] };
 
 type Props = {
+  cloudflare?: NetworkCloudflareControl;
   operation?: SystemAction;
   onOperation: (operation: SystemAction) => void;
   admitOperation: NetworkAdmission;
@@ -58,7 +61,7 @@ function NetworkIcon() {
   );
 }
 
-export function NetworkView({ request, admitOperation, refreshKey = 0, onLoadingChange, onDirtyChange, listState, onListStateChange, operation, onOperation }: Props) {
+export function NetworkView({ request, admitOperation, refreshKey = 0, onLoadingChange, onDirtyChange, listState, onListStateChange, operation, onOperation, cloudflare }: Props) {
   const { error: notifyError } = useNotifier(
     "network",
     "Сеть",
@@ -367,6 +370,8 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
             </div>
             <div hidden={section !== "diagnostics"}>
               <DiagnosticsV2
+                cloudflare={cloudflare}
+                refreshKey={refreshKey}
                 relay={relay}
                 addresses={addresses}
                 listState={listState}
@@ -459,7 +464,7 @@ function routeStatusFor(domain: NetworkStatus["domains"][number]): NetworkEndpoi
 }
 
 function NetworkRouteStatus({ status }: { status: NetworkEndpointCheck["status"] | null }) {
-  const display = status === "ready"
+  const display: { className: NetworkRouteTone; label: string } = status === "ready"
     ? { className: "ready", label: "READY" }
     : status === "error"
       ? { className: "error", label: "ERROR" }
@@ -472,7 +477,7 @@ function NetworkRouteStatus({ status }: { status: NetworkEndpointCheck["status"]
       : status === "warning"
         ? { className: "warning", label: "WARN" }
         : { className: "active", label: "ACTIVE" };
-  return <span className={`networkRouteStatus ${display.className}`}>{display.label}</span>;
+  return <NetworkRouteBadge tone={display.className}>{display.label}</NetworkRouteBadge>;
 }
 
 function NetworkStateFact({ label, value, note, mono = false }: { label: string; value: string; note: string; mono?: boolean }) {
@@ -590,6 +595,8 @@ function NetworkCapabilityCard({ check }: { check: NetworkCapabilityCheck }) {
   );
 }
 function DiagnosticsV2({
+  cloudflare,
+  refreshKey,
   relay,
   addresses,
   listState,
@@ -605,6 +612,8 @@ function DiagnosticsV2({
   saveEndpoints,
   onRefresh,
 }: {
+  cloudflare?: NetworkCloudflareControl;
+  refreshKey: number;
   relay: ReturnType<typeof useNetworkRelays>;
   addresses: ReturnType<typeof useNetworkAddresses>;
   listState: NetworkListState;
@@ -863,11 +872,14 @@ function DiagnosticsV2({
                               </div>
                             ) : null}
                             {domain.role.includes("CDN") && (
+                              <>
+                              {cloudflare && <NetworkCloudflare domain={domain.value} detected={domain.edge?.provider.toLowerCase().includes("cloudflare") === true} request={request} control={{ ...cloudflare, blocked: cloudflare.blocked || busy || readFailed }} refreshKey={refreshKey} />}
                               <NetworkEch
                                 domain={domain.value}
                                 route={domain.route}
                                 request={request}
                               />
+                              </>
                             )}
                           </div>
                         </td>

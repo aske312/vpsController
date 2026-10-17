@@ -14,13 +14,12 @@ type ApplicationViewProps = {
   serviceModeActive: boolean; busy: boolean; applicationLogs: string[];
   runApplicationAction: (action: ApplicationAction) => Promise<void> | void;
   changeServiceMode: (enabled: boolean) => Promise<void> | void;
-  changeCdnSecurity: (enabled: boolean) => Promise<void> | void;
   changePanelAccess: (mode: "vpn" | "external") => Promise<void> | void;
   loadApplicationLogs: () => Promise<void> | void; downloadLogs: (filename: string, lines: string[]) => void;
   downloadUpdateReport: () => Promise<void> | void;
 };
 
-export function ApplicationView({ application, services, applicationVersion, applicationDependencies, updates, serviceModeActive, busy, applicationLogs, runApplicationAction, changeServiceMode, changePanelAccess, changeCdnSecurity, loadApplicationLogs, downloadLogs, downloadUpdateReport }: ApplicationViewProps) {
+export function ApplicationView({ application, services, applicationVersion, applicationDependencies, updates, serviceModeActive, busy, applicationLogs, runApplicationAction, changeServiceMode, changePanelAccess, loadApplicationLogs, downloadLogs, downloadUpdateReport }: ApplicationViewProps) {
   const actionState = applicationActionState(application?.action);
   const versionState = applicationVersionState(applicationVersion);
   const testReleaseActive = applicationVersion?.branch === "test-pro";
@@ -118,10 +117,6 @@ export function ApplicationView({ application, services, applicationVersion, app
               <label>
                 <span><strong>Защищённый доступ</strong><small>{services?.panel_access?.public ? `Выключен · адрес после включения ${services?.panel_access?.internal_url || "http://admin.312.net"}` : `Доступ через ${services?.panel_access?.internal_url || (services?.panel_access?.vpn_urls || []).join("  ") || "защищённое подключение"}`}</small></span>
                 <span className="applicationSwitch"><input type="checkbox" checked={!services?.panel_access?.public} onChange={(event) => void changePanelAccess(event.target.checked ? "vpn" : "external")} disabled={mutationBlocked || !services || services.observation_failed || (services.panel_access?.public !== false && services.panel_access?.can_enable === false)} /><i /></span>
-              </label>
-              <label>
-                <span><strong>Проверка сертификата Cloudflare</strong><small>Только CDN-каналы. Сначала включите Full (strict) и Authenticated Origin Pulls в CF. При ошибке проверки настройка откатится; возможен краткий разрыв CDN.</small><small>Подтверждает сеть CF, а не принадлежность вашему аккаунту.</small></span>
-                <span className="applicationSwitch"><input type="checkbox" checked={Boolean(application?.cdn_security?.authenticated_origin_pulls)} onChange={(event) => void changeCdnSecurity(event.target.checked)} disabled={mutationBlocked || !application?.cdn_security} /><i /></span>
               </label>
             </div>
             <div className="applicationRelease">

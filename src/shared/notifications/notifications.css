@@ -86,14 +86,80 @@
   .gateOperationTrack.indeterminate > i { animation:none; }
   .gateOperationTrack > i { transition:none; }
 }
-.operationHistoryDialog { width:min(760px, calc(100vw - 32px)); max-height:85dvh; padding:24px; border:1px solid #364352; border-radius:12px; background:#141c25; color:#e0ebef; }
-.operationHistoryDialog::backdrop { background:rgba(0,0,0,.65); }
-.operationHistoryDialog header, .operationHistoryDialog nav, .operationHistoryList article > div { display:flex; gap:16px; justify-content:space-between; align-items:start; }
-.operationHistoryDialog header p, .operationHistoryDialog small { color:#a1b2c3; }
-.operationHistoryDialog nav { padding:16px 0; }
-.operationHistoryDialog button { padding:6px 12px; border:1px solid #465666; border-radius:6px; }
-.operationHistoryList { display:grid; gap:12px; overflow-wrap:anywhere; }
-.operationHistoryList article { padding:14px; border:1px solid #364352; border-radius:8px; }
-.operationHistoryList p { margin:8px 0; }
-.operationHistoryList details { font-size:12px; margin-top:8px; }
-.operationHistoryList article > div > span { flex-shrink:0; font-size:12px; }
+.operationHistoryDialog { width:min(1160px, calc(100vw - 32px)); height:min(88dvh,860px); max-width:none; max-height:94dvh; margin:auto; padding:0; overflow:hidden; border:1px solid #334653; border-radius:16px; background:#0b151e; color:#e0ebef; box-shadow:0 30px 100px #0008; }
+.operationHistoryDialog::backdrop { background:rgba(0,0,0,.72); backdrop-filter:blur(4px); }
+.operationHistoryShell { display:flex; flex-direction:column; height:100%; min-height:0; }
+.operationHistoryDialog button { min-height:32px; padding:6px 10px; border:1px solid #344955; border-radius:7px; background:#14242f; color:#d9e7ef; font:inherit; font-size:11px; cursor:pointer; }
+.operationHistoryDialog button:disabled { cursor:default; opacity:.5; }
+.operationHistoryDialog :is(button,input,summary):focus-visible { outline:2px solid #62c8ff; outline-offset:2px; }
+.operationHistoryHeader { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; padding:20px 24px 14px; }
+.operationHistoryHeader .eyebrow { margin:0 0 6px; color:#6fa8c4; font-size:9px; letter-spacing:.14em; }
+.operationHistoryHeader h2 { margin:0; font-size:23px; }
+.operationHistoryHeader p:not(.eyebrow) { margin:7px 0 0; color:#91a8b7; font-size:12px; line-height:1.5; }
+.operationHistoryHeader > button { min-width:34px; font-size:20px; padding:2px 9px; }
+.operationHistoryTools { display:flex; align-items:flex-end; gap:12px; padding:0 24px 12px; }
+.operationHistorySearch { display:grid; flex:1; gap:6px; min-width:0; color:#9bb1bf; font-size:11px; }
+.operationHistorySearch input { min-width:0; width:100%; height:36px; padding:7px 11px; border:1px solid #30434f; border-radius:8px; background:#07111a; color:#e0ebef; font:inherit; font-size:12px; }
+.operationHistoryTools > button { min-height:36px; }
+.operationHistoryFilters { display:flex; flex-wrap:wrap; gap:6px; padding:0 24px 14px; }
+.operationHistoryFilters button { display:inline-flex; align-items:center; gap:9px; background:transparent; border-color:transparent; color:#9cb0bf; }
+.operationHistoryFilters button[aria-pressed='true'] { border-color:#37657c; background:#153042; color:#9fdbf6; }
+.operationHistoryFilters button > span { font-size:10px; opacity:.7; }
+.operationHistoryWorkspace { display:grid; grid-template-columns:minmax(260px,.85fr) minmax(0,1.4fr); flex:1; min-height:0; border-top:1px solid #263b47; }
+.operationHistoryList { min-height:0; min-width:0; overflow:auto; border-right:1px solid #263b47; background:#08121b; scrollbar-gutter:stable; }
+.operationHistoryListHeading { display:flex; justify-content:space-between; gap:10px; padding:12px 16px 8px; color:#7895a6; font-size:10px; }
+.operationHistoryDialog .operationHistoryItem { display:grid; width:calc(100% - 16px); min-width:0; gap:8px; margin:4px 8px 8px; padding:13px; border-color:transparent; background:transparent; text-align:left; overflow-wrap:anywhere; }
+.operationHistoryDialog .operationHistoryItem:hover { background:#10212d; }
+.operationHistoryDialog .operationHistoryItem[aria-pressed='true'] { border-color:#2b6079; background:#112c3d; }
+.operationHistoryItem strong { color:#e1edf4; font-size:12px; line-height:1.5; }
+.operationHistoryItemMeta { display:flex; flex-wrap:wrap; gap:4px 10px; color:#87a0b1; font-size:10px; }
+.operationHistoryExcerpt { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; color:#8da5b5; font-size:11px; line-height:1.5; white-space:pre-line; }
+.operationState { display:inline-flex; width:fit-content; align-items:center; padding:4px 7px; border:1px solid currentColor; border-radius:6px; color:#9badb8; font-size:10px; line-height:1.2; }
+.operationState.active { color:#72c9f3; background:#163040; border-color:#31586f; }
+.operationState.success { color:#7ed9b8; background:#102c25; border-color:#285343; }
+.operationState.error { color:#f3a0a0; background:#351d24; border-color:#63333e; }
+.operationState.unknown { color:#e8c383; background:#302a1d; border-color:#5b4b2e; }
+.operationHistoryDetail { min-width:0; min-height:0; padding:24px; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.operationHistoryDetailHeading h3 { margin:12px 0 8px; font-size:20px; line-height:1.4; overflow-wrap:anywhere; }
+.operationHistoryDetailHeading > p { color:#8da5b5; font-size:11px; }
+.operationHistoryResult { margin:18px 0; padding:13px 15px; border-left:3px solid #47748b; border-radius:0 7px 7px 0; background:#11222e; color:#ccdee8; font-size:12px; line-height:1.7; white-space:pre-wrap; overflow-wrap:anywhere; }
+.operationHistoryResult.error { border-color:#d98287; background:#2a1920; }
+.operationHistoryProgress { display:flex; align-items:center; gap:12px; color:#88caeb; font-size:11px; }
+.operationHistoryProgress progress { flex:1; width:100%; height:6px; accent-color:#62c8ff; }
+.operationJournal { margin-top:24px; }
+.operationJournalHeading { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+.operationJournalHeading h4 { margin:0; font-size:13px; }
+.operationJournal > p { color:#8da5b5; font-size:12px; line-height:1.6; }
+.operationTimeline { display:grid; gap:0; margin:18px 0 0 5px; padding:0; list-style:none; }
+.operationTimeline li { position:relative; padding:0 0 22px 19px; border-left:1px solid #304858; min-width:0; }
+.operationTimeline li:last-child { padding-bottom:0; border-left-color:transparent; }
+.operationTimeline li::before { position:absolute; content:''; width:7px; height:7px; left:-4px; top:7px; border-radius:50%; background:#6caac9; box-shadow:0 0 0 4px #0b151e; }
+.operationTimeline li > div { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.operationTimeline time { color:#8ca8b9; font:10px var(--font-mono),monospace; }
+.operationTimeline p { margin:9px 0 0; color:#c7d9e4; font-size:12px; line-height:1.7; white-space:pre-wrap; overflow-wrap:anywhere; }
+.operationHistoryTechnical { margin-top:26px; padding-top:16px; border-top:1px solid #263b47; color:#91aaba; font-size:11px; }
+.operationHistoryTechnical summary { width:fit-content; cursor:pointer; }
+.operationHistoryTechnical dl { display:grid; gap:7px; margin:14px 0 0; }
+.operationHistoryTechnical dt { color:#6e8a9c; }
+.operationHistoryTechnical dd { margin:0 0 6px; overflow-wrap:anywhere; color:#b7cedc; }
+.operationHistoryEmpty { padding:18px; color:#8da5b5; font-size:12px; line-height:1.7; }
+.operationHistoryNotice { flex-shrink:0; margin:0; padding:10px 24px; background:#2b2519; color:#e4c68f; font-size:11px; line-height:1.6; }
+.operationHistoryFooter { display:flex; flex-wrap:wrap; justify-content:space-between; gap:7px 16px; padding:12px 24px; border-top:1px solid #263b47; color:#7895a6; font-size:10px; line-height:1.5; }
+@media (max-width:720px) {
+  .operationHistoryDialog { width:calc(100vw - 16px); height:94dvh; border-radius:12px; }
+  .operationHistoryHeader { padding:14px 14px 12px; gap:12px; }
+  .operationHistoryHeader h2 { font-size:20px; }
+  .operationHistoryHeader p:not(.eyebrow) { font-size:11px; }
+  .operationHistoryTools { padding:0 14px 10px; gap:8px; }
+  .operationHistoryTools > button { max-width:110px; }
+  .operationHistoryFilters { gap:2px; padding:0 10px 10px; }
+  .operationHistoryFilters button { padding:6px; gap:5px; font-size:10px; }
+  .operationHistoryWorkspace { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(110px,26dvh) minmax(0,1fr); }
+  .operationHistoryList { border-right:0; border-bottom:1px solid #263b47; }
+  .operationHistoryDialog .operationHistoryItem { gap:5px; padding:10px; }
+  .operationHistoryExcerpt { -webkit-line-clamp:1; }
+  .operationHistoryDetail { padding:16px; }
+  .operationHistoryDetailHeading h3 { font-size:17px; }
+  .operationHistoryFooter { padding:9px 14px; font-size:9px; }
+  .operationHistoryNotice { padding:9px 14px; }
+}

@@ -1929,7 +1929,7 @@ export function ControlPanel() {
         />
       )}
 
-      {tab === "network" && <NetworkView operation={application?.action} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} listState={networkListState} onListStateChange={setNetworkListState} onDirtyChange={setSectionDirty} request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} />}
+      {tab === "network" && <NetworkView operation={application?.action} admitOperation={admitNetworkOperation} onOperation={acceptSystemOperation} listState={networkListState} onListStateChange={setNetworkListState} onDirtyChange={setSectionDirty} request={request} refreshKey={networkRefreshKey} onLoadingChange={handleNetworkLoadingChange} cloudflare={{ change: cdnCommand.change, pending: cdnCommand.pending, blocked: busy || application?.recovery?.application_required === true }} />}
 
       {tab === "security" && <SecurityView
         securityLoading={securityLoading}
@@ -1983,7 +1983,6 @@ export function ControlPanel() {
         runApplicationAction={runApplicationAction}
         changeServiceMode={changeServiceMode}
         changePanelAccess={changePanelAccess}
-        changeCdnSecurity={cdnCommand.change}
         loadApplicationLogs={loadApplicationLogs}
         downloadLogs={downloadLogs}
         downloadUpdateReport={downloadUpdateReport}

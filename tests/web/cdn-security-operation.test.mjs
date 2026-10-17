@@ -8,6 +8,10 @@ const originalWindow = globalThis.window;
 afterEach(() => { globalThis.fetch = originalFetch; if (originalWindow === undefined) delete globalThis.window; else globalThis.window = originalWindow; });
 const request = () => createApiClient("test", { retryDelaysMs: [] });
 const initial = { id: "a".repeat(32), enabled: true, state: "queued", progress: 0, message: "Starting" };
+test("Cloudflare route association accepts domain lists and rejects malformed membership", () => {
+  assert.deepEqual(cdnSecuritySnapshot({ authenticated_origin_pulls: false, cloudflare_domains: ["cdn.example"] }).cloudflare_domains, ["cdn.example"]);
+  for (const cloudflare_domains of ["cdn.example", [null], [{}], [""]]) assert.throws(() => cdnSecuritySnapshot({ authenticated_origin_pulls: false, cloudflare_domains }), CdnResultUnknown);
+});
 const result = (state, enabled = true) => ({ authenticated_origin_pulls: enabled, operation: { ...initial, state, progress: state === "succeeded" ? 100 : 45 } });
 
 test("restored CF/ECH descriptors contain only identity and remain unconfirmed", () => {

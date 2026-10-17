@@ -1,5 +1,13 @@
 /* Network workspace: one compact visual system shared with Application, Security and Services. */
 
+[data-network-page] .networkCloudflare { display:grid; gap:10px; margin:16px 0; padding:16px; border:1px solid var(--network-line); border-radius:10px; background:var(--network-panel-soft); }
+[data-network-page] .networkCloudflareHeading { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+[data-network-page] .networkCloudflareHeading h3 { margin:6px 0 0; font-size:13px; }
+[data-network-page] .networkCloudflare p { margin:0; color:var(--network-muted); font-size:12px; line-height:1.6; }
+[data-network-page] .networkCloudflare > small { color:var(--network-dim); font-size:11px; line-height:1.6; }
+[data-network-page] .networkCloudflareToggle { display:inline-flex; align-items:center; gap:9px; font-size:11px; white-space:nowrap; }
+[data-network-page] .networkCloudflareToggle input { width:17px; height:17px; accent-color:var(--network-cyan); }
+
 [data-network-page] .relayModal { max-width: 640px; }
 [data-network-page] .relayForm { padding: 20px; display: grid; gap: 14px; min-width: 0; }
 [data-network-page] .relayForm label { display: grid; gap: 8px; }
@@ -7,10 +15,6 @@
 [data-network-page] .relayActions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 [data-network-page] .relayActions label { display: grid; gap: 6px; min-width: 0; max-width: 100%; }
 [data-network-page] .relayActions select { max-width: 100%; min-width: 0; }
-[data-network-page] .networkRelayState { font: 11px var(--font-mono), monospace; color: var(--muted); }
-[data-network-page] .networkRelayState.connected { color: var(--green); }
-[data-network-page] .networkRelayRow > td { padding:6px 8px; }
-[data-network-page] .networkRelayRow .networkRouteExpand { min-height:28px; padding:0; }
 [data-network-page] .relayCompactSummary { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:0 8px 6px; padding:6px 8px; border:1px solid var(--line); border-radius:5px; font-size:10px; }
 [data-network-page] .relayCompactSummary > span { padding:2px 5px; border:1px solid var(--line); border-radius:4px; color:var(--muted); }
 [data-network-page] .networkRelayActions { display:flex; flex-wrap:wrap; gap:6px; }

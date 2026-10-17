@@ -139,6 +139,24 @@ class CdnOperationTests(unittest.TestCase):
             self.assertEqual(client.get(f"/api/application/cdn-security?operation_id={OTHER_ID}", auth=("test", "test")).status_code, 404)
             self.assertEqual(client.get("/api/application/cdn-security?operation_id=../../etc/passwd", auth=("test", "test")).status_code, 422)
 
+    def test_status_lists_only_configured_cloudflare_domains_without_route_secrets(self):
+        from fastapi.testclient import TestClient
+        client = TestClient(api.app)
+        routes = [{'domain': 'cdn.example', 'cloudflare': True, 'path': '/private', 'port': 12345},
+                  {'domain': 'tls.example', 'cloudflare': False}, {'domain': 'cdn.example', 'cloudflare': True}]
+        with patch.object(api, 'ADMIN_USER', 'test'), patch.object(api, 'ADMIN_PASSWORD', 'test'), patch.object(api.cdn_security, 'read_routes', return_value=routes), patch.object(api.cdn_security, 'settings', return_value={'authenticated_origin_pulls': False}):
+            response = client.get('/api/application/cdn-security', auth=('test', 'test'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['cloudflare_domains'], ['cdn.example'])
+        self.assertNotIn('/private', response.text)
+        self.assertNotIn('12345', response.text)
+
+    def test_unreadable_cloudflare_inventory_is_not_an_empty_success(self):
+        from fastapi.testclient import TestClient
+        with patch.object(api, 'ADMIN_USER', 'test'), patch.object(api, 'ADMIN_PASSWORD', 'test'), patch.object(api.cdn_security, 'read_routes', side_effect=OSError('unavailable')):
+            response = TestClient(api.app).get('/api/application/cdn-security', auth=('test', 'test'))
+        self.assertEqual(response.status_code, 503)
+
     def test_api_accepts_a_background_operation_and_rejects_invalid_ids(self):
         from fastapi.testclient import TestClient
         client = TestClient(api.app)

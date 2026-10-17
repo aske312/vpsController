@@ -165,7 +165,6 @@ export function ServicesDashboard({
         </header>
 
         <div className="servicesOperationsGrid">
-        {operationHistorySettings}
         <section className="servicesLog">
           <div className="operationsTitle">
             <p className="eyebrow">LOG MANAGEMENT</p>
@@ -218,19 +217,22 @@ export function ServicesDashboard({
           </div>
         </section>
 
+        {operationHistorySettings}
         <section className="servicesMaintenance">
           <header className="servicesMaintenanceHead">
             <div className="operationsTitle">
               <p className="eyebrow">MAINTENANCE</p>
               <h3>Плановые задачи</h3>
             </div>
-            <button type="button" className="servicePrimary ghost" onClick={onSaveAutomation} disabled={serviceBusy || services?.automation_recovery_required}>Сохранить</button>
           </header>
           {services?.automation_recovery_required && <p role="alert">Предыдущее применение расписаний не завершено. Снимок восстановления сохранён. Отображаемые настройки могут отличаться от состояния служб. <button type="button" disabled={serviceBusy} onClick={onRecoverAutomation}>Восстановить расписания</button></p>}
           <div className="maintenanceRows">
             <ScheduleRow title="Перезагрузка" value={automationDraft?.reboot} timer={services?.timers.reboot} busy={serviceBusy} onChange={(patch) => onAutomationChange("reboot", patch)} />
             <ScheduleRow title="Очистка" value={automationDraft?.cleanup} timer={services?.timers.cleanup} busy={serviceBusy} onChange={(patch) => onAutomationChange("cleanup", patch)} />
             <ScheduleRow title="Безопасные автообновления" value={automationDraft?.update} timer={services?.timers.update} busy={serviceBusy} onChange={(patch) => onAutomationChange("update", patch)} />
+          </div>
+          <div className="servicesLogActions">
+            <button type="button" className="servicePrimary" onClick={onSaveAutomation} disabled={serviceBusy || services?.automation_recovery_required}>Сохранить</button>
           </div>
         </section>
         </div>

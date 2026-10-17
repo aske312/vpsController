@@ -8,6 +8,7 @@ import { SystemOperationUnknown, systemActionNeedsPolling } from "../../control-
 import type { SystemAction } from "../../shared/types/control-plane";
 import type { NetworkAdmission, NetworkRequest } from "./network-api";
 import { relayConnection, relaySnapshot, type RelayStatus, type RelayHost } from "./relay-state";
+import { NetworkRouteBadge } from "./network-route-badge";
 
 type Props = { request: NetworkRequest; admit: NetworkAdmission; operation?: SystemAction; onOperation: (value: SystemAction) => void; busy: boolean; onDirtyChange: (dirty: boolean) => void; refreshKey?: number };
 
@@ -132,9 +133,9 @@ export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: 
     return <Fragment key={item.id}>
       <tr className={`networkRouteRow networkRelayRow${open ? " is-expanded" : ""}`}>
         <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true" /><span><strong>{address}</strong><small>{item.name} · Relay Agent</small></span></button></td>
-        <td><span className={`networkRelayState ${unknown ? "unknown" : "connected"}`}>{unknown ? relay.reading ? "Проверяем…" : "UNKNOWN" : "CONNECTED"}</span></td>
+        <td><NetworkRouteBadge tone={unknown ? "unchecked" : "active"}>{unknown ? relay.reading ? "Проверяем…" : "UNKNOWN" : "CONNECTED"}</NetworkRouteBadge></td>
         <td><span>RELAY · {item.routes.length}</span><small>{unknown ? "Порты неизвестны" : `Слушают ${item.routes.filter(route => route.state === "listening").length}/${item.routes.length}`}</small></td>
-        <td><span>TCP {item.routes.filter(route => route.transport === "tcp").length} · UDP {item.routes.filter(route => route.transport === "udp").length}</span></td>
+        <td><div className="networkRouteTags"><span className="networkRouteTag">TCP {item.routes.filter(route => route.transport === "tcp").length}</span><span className="networkRouteTag">UDP {item.routes.filter(route => route.transport === "udp").length}</span></div></td>
         <td><div className="networkRelayActions"><button type="button" className="networkRouteConfigure" disabled={relay.locked} onClick={() => relay.openHost(item)}>Настроить</button><button type="button" className="networkRouteDelete" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setConfirmation(item)}>Удалить</button></div></td>
       </tr>
       {open && <tr className="networkRouteDetailRow"><td colSpan={5}><div className="relayCompactSummary">

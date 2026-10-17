@@ -126,7 +126,7 @@ export function SecurityView(props: SecurityViewProps) {
 
         <article className="securityDiagnostics">
           <header className="securityDiagnosticsHead">
-            <div><p className="eyebrow">LIVE DIAGNOSTICS</p><h2>Сетевая поверхность и журналы</h2><span>Диагностика вынесена из основной матрицы, чтобы не перегружать security workspace.</span></div>
+            <div><p className="eyebrow">LIVE DIAGNOSTICS</p><h2>Журналы и открытые порты</h2><span>Сообщения служб и слушающие сокеты текущего VPS.</span></div>
             <div className="securityDiagnosticsStats">
               <span><small>TCP</small><strong>{listenerSummary?.tcp ?? "—"}</strong></span>
               <span><small>UDP</small><strong>{listenerSummary?.udp ?? "—"}</strong></span>
@@ -134,17 +134,17 @@ export function SecurityView(props: SecurityViewProps) {
             </div>
           </header>
           <div className="securityDiagnosticsGrid">
-            <details className="securityListeners" open={listenersOpen} onToggle={event => setListenersOpen(event.currentTarget.open)}>
-              <summary className="securityLogsToggle"><span><p className="eyebrow">LIVE NETWORK</p><strong>Открытые порты · {listeners.length}</strong></span><em>{listenersOpen ? "Скрыть" : "Открыть"}</em></summary>
-              <pre>{listeners.join("\n") || "Нет данных"}</pre>
-            </details>
             <section className={`securityLogs ${securityLogsOpen ? "open" : ""}`}>
               <button className="securityLogsToggle" aria-expanded={securityLogsOpen} onClick={() => setSecurityLogsOpen((value) => !value)}>
-                <span><p className="eyebrow">JOURNALCTL</p><strong>SSH · Firewall · System</strong></span>
+                <span><p className="eyebrow">JOURNALCTL</p><strong>Журналы безопасности</strong><small>SSH · Firewall · Система</small></span>
                 <em>{securityLogsOpen ? "Скрыть" : "Открыть"}</em>
               </button>
               {securityLogsOpen && <div className="securityLogsBody"><div className="logTools"><div className="logTabs">{(["ssh", "firewall", "system"] as const).map((source) => <button key={source} className={securityLogSource === source ? "active" : ""} onClick={() => { setSecurityLogSource(source); setSecurityLogs([]); }}>{source === "ssh" ? "SSH" : source === "firewall" ? "Firewall" : "Система"}</button>)}</div><div className="logActions"><span>{securityNewLogCount ? `${securityNewLogCount} новых  ` : ""}{autoRefresh ? `auto${securityLogsUpdatedAt ? `  ${securityLogsUpdatedAt.toLocaleTimeString("ru-RU")}` : ""}` : "paused"}</span><button className="miniButton" onClick={() => void loadSecurityLogs()}>Обновить</button><button className="miniButton" disabled={!securityLogs.length} onClick={() => downloadLogs(`security-${securityLogSource}-${new Date().toISOString().slice(0, 10)}.log`, securityLogs)}>Выгрузить</button></div></div><pre>{securityLogs.join("\n") || "В журнале нет записей"}</pre></div>}
             </section>
+            <details className="securityListeners" open={listenersOpen} onToggle={event => setListenersOpen(event.currentTarget.open)}>
+              <summary className="securityLogsToggle"><span><p className="eyebrow">LIVE NETWORK</p><strong>Открытые порты · {listeners.length}</strong><small>TCP и UDP · внешние и локальные сокеты</small></span><em>{listenersOpen ? "Скрыть" : "Открыть"}</em></summary>
+              <pre tabIndex={0} aria-label="Слушающие сокеты">{listeners.join("\n") || "Нет данных"}</pre>
+            </details>
           </div>
         </article>
       </section>;
