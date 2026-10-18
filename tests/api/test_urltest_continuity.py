@@ -14,7 +14,7 @@ import urllib.request
 from unittest.mock import patch
 
 import yaml
-from tests.api.support import manager, ROOT, free_port, wait_port
+from tests.api.support import manager, ROOT, free_port, wait_port, wait_http_proxy, mihomo_readiness
 
 
 @unittest.skipUnless(os.getenv("PRIVACY_MIHOMO_BIN"), "Requires real Mihomo")
@@ -58,6 +58,7 @@ class URLTestContinuityTests(unittest.TestCase):
             servers.append(server)
         try:
             with ExitStack() as cleanup:
+                readiness_port = cleanup.enter_context(mihomo_readiness())
                 root = Path(cleanup.enter_context(tempfile.TemporaryDirectory()))
                 profile = {"id": "audit", "name": "audit", "common_device_id": "common", "devices": [{"id": "common", "routing": {"strategy": "url-test", "interval": 1, "tolerance": 0, "health_timeout": 1000, "max_failed_times": 1, "test_url": "http://audit.test/health"}}], "connections": [
                     {"id": name, "name": name, "component": "transport-shadowsocks", "device_id": "common", "credential": {"port": 31000 + index, "method": "aes-128-gcm", "password": "test"}}
@@ -69,6 +70,7 @@ class URLTestContinuityTests(unittest.TestCase):
                 names = [proxy["name"] for proxy in config["proxies"]]
                 config["proxies"] = [{"name": name, "type": "http", "server": "127.0.0.1", "port": server.server_port} for name, server in zip(names, servers)]
                 config.update({"mixed-port": port, "external-controller": f"127.0.0.1:{api_port}", "secret": "test-secret"})
+                config["rules"].insert(0, f"DST-PORT,{readiness_port},DIRECT")
                 config["dns"]["enable"] = False
                 path = root / "config.yaml"
                 path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
@@ -81,6 +83,7 @@ class URLTestContinuityTests(unittest.TestCase):
                     cleanup.callback(stop_core)
                     wait_port(port, process)
                     wait_port(api_port, process)
+                    wait_http_proxy(port, process, readiness_port)
 
                     def selected():
                         request = urllib.request.Request(f"http://127.0.0.1:{api_port}/proxies", headers={"Authorization": "Bearer test-secret"})

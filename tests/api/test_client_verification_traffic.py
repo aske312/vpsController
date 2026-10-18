@@ -13,7 +13,7 @@ from unittest.mock import patch
 import uuid
 
 import yaml
-from tests.api.support import manager, free_port, wait_port, managed_mihomo_fixture
+from tests.api.support import manager, free_port, wait_port, wait_http_proxy, mihomo_readiness, managed_mihomo_fixture
 
 
 @unittest.skipUnless(os.getenv("PRIVACY_XRAY_BIN") and os.getenv("PRIVACY_MIHOMO_BIN"), "Set local test core paths")
@@ -31,7 +31,7 @@ class StandardSubscriptionTrafficTests(unittest.TestCase):
             def log_message(self, *_):
                 pass
 
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, mihomo_readiness() as readiness_port:
             root = Path(directory)
             origin = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Origin)
             self.addCleanup(origin.server_close)
@@ -75,6 +75,7 @@ class StandardSubscriptionTrafficTests(unittest.TestCase):
             parsed.update({"mixed-port": free_port(udp=True), "bind-address": "127.0.0.1", "allow-lan": False,
                            "tun": {"enable": False}, "dns": {"enable": False}, "geo-auto-update": False,
                            "external-controller": "", "log-level": "error"})
+            parsed["rules"].insert(0, f"DST-PORT,{readiness_port},DIRECT")
             self.assertNotEqual(parsed["mixed-port"], server_port)
             client_file = root / "client.yaml"
             client_file.write_text(yaml.safe_dump(parsed), encoding="utf-8")
@@ -87,6 +88,7 @@ class StandardSubscriptionTrafficTests(unittest.TestCase):
                         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
                         processes.append(process)
                         wait_port(port, process)
+                    wait_http_proxy(parsed["mixed-port"], processes[-1], readiness_port)
                     with socket.create_connection(("127.0.0.1", parsed["mixed-port"]), timeout=5) as connection:
                         connection.settimeout(5)
                         connection.sendall(f"GET http://127.0.0.1:{origin.server_port}/ HTTP/1.1\r\nHost: 127.0.0.1:{origin.server_port}\r\nConnection: close\r\n\r\n".encode())

@@ -22,6 +22,10 @@ class NativeClientCreationTests(unittest.TestCase):
         self.adapter = SimpleNamespace(DATA_DIR=self.directory, ClientCreate=api.ClientCreate,
             ComponentRegistry=Mock(), create_client_native=Mock(return_value={
                 'id': self.identity[:16], 'config': 'private-export', 'filename': 'test.conf'}))
+        def create(*_, on_mutation, **__):
+            on_mutation()
+            return self.adapter.create_client_native.return_value
+        self.adapter.create_client_native.side_effect = create
 
     def test_lost_response_reads_exact_export_and_does_not_repeat_creation(self):
         creation.perform(self.adapter, self.payload, self.identity)
@@ -34,7 +38,10 @@ class NativeClientCreationTests(unittest.TestCase):
             self.assertEqual(creation.result_path(self.adapter, self.identity).stat().st_mode & 0o777, 0o600)
 
     def test_crash_after_side_effect_preserves_intent_and_blocks_reexecution(self):
-        self.adapter.create_client_native.side_effect = SystemExit('simulated crash')
+        def crash(*_, on_mutation, **__):
+            on_mutation()
+            raise SystemExit('simulated crash')
+        self.adapter.create_client_native.side_effect = crash
         with self.assertRaises(SystemExit):
             creation.perform(self.adapter, self.payload, self.identity)
         self.assertEqual(creation.read_result(self.adapter, self.identity), {'state': 'unknown'})
@@ -82,6 +89,47 @@ class NativeClientCreationTests(unittest.TestCase):
             creation.perform(self.adapter, self.payload, self.identity)
         self.adapter.create_client_native.assert_not_called()
         self.assertFalse(creation.result_path(self.adapter, self.identity).exists())
+
+    def test_rejected_validation_does_not_leave_an_unknown_mutation(self):
+        self.adapter.create_client_native.side_effect = api.HTTPException(status_code=422, detail='Stale listener')
+        with self.assertRaises(api.HTTPException):
+            creation.perform(self.adapter, self.payload, self.identity)
+        self.assertEqual(creation.read_result(self.adapter, self.identity), {'state': 'pending'})
+        self.assertFalse(creation.result_path(self.adapter, self.identity).exists())
+
+    def test_vless_rejects_stale_listener_before_mutation_boundary(self):
+        config = self.directory/'config.json'
+        environment = self.directory/'reality.env'
+        original = json.dumps({'inbounds':[{'tag':'vless-reality','protocol':'vless','streamSettings':{
+            'network':'xhttp','security':'reality','xhttpSettings':{'path':'/active','mode':'auto'},
+            'realitySettings':{'serverNames':['test.example']}}}]})
+        config.write_text(original)
+        environment.write_text('TARGET=test.example:443\n')
+        boundary = Mock()
+        with patch.object(api, 'VLESS_CONFIG', config), patch.object(api, 'VLESS_ENV', environment), \
+                patch.object(api, 'new_client_endpoint', return_value='127.0.0.1'):
+            with self.assertRaises(api.HTTPException) as error:
+                api.create_client_native(api.ClientCreate(name='Stale', protocol='vless-reality-xhttp',vless_routes=['direct']), on_mutation=boundary)
+        self.assertEqual(error.exception.status_code,422)
+        boundary.assert_not_called()
+        self.assertEqual(config.read_text(),original)
+
+    def test_openvpn_transport_mismatch_is_rejected_before_certificate_issuance(self):
+        config = self.directory/'server.conf'
+        settings = self.directory/'settings.json'
+        config.write_text('server fixture')
+        boundary = Mock()
+        for server, client in (('udp','tcp'), ('tcp','udp')):
+            with self.subTest(server=server, client=client):
+                settings.write_text(json.dumps({'protocol':server}))
+                with patch.object(api,'OPENVPN_CONFIG',config), patch.object(api,'OPENVPN_SETTINGS',settings), \
+                        patch.object(api,'run',return_value='enabled'), patch.object(api,'run_easyrsa') as issue, \
+                        patch.object(api,'new_client_endpoint',return_value='127.0.0.1'):
+                    with self.assertRaises(api.HTTPException) as error:
+                        api.create_client_native(api.ClientCreate(name='Mismatch',protocol='openvpn',settings={'vpn_transport':client}),on_mutation=boundary)
+                self.assertEqual(error.exception.status_code,422)
+                issue.assert_not_called()
+        boundary.assert_not_called()
 
     def test_admission_keeps_payload_identity_and_conflicts_on_different_input(self):
         with patch.object(api, 'DATA_DIR', self.directory), patch.object(api, 'ComponentRegistry'), \

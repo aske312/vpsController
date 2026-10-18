@@ -5706,11 +5706,13 @@ def certificate_server_name(path: Path) -> str:
 
 
 @port_allocation.release_on_error(lambda payload, client_id, safe_name: f"panel:ss:{client_id}")
-def create_shadowsocks_client(payload: ClientCreate, client_id: str, safe_name: str) -> dict:
+def create_shadowsocks_client(payload: ClientCreate, client_id: str, safe_name: str, *, on_mutation=None) -> dict:
     origin_endpoint = new_client_endpoint(PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT)
     if run("systemctl", "show", "vps-control-shadowsocks.target", "--property=LoadState", "--value") != "loaded":
         raise HTTPException(status_code=409, detail="shadowsocks protocol is not installed")
     used_ports = {int(item["port"]) for item in read_clients() if item.get("protocol") == "shadowsocks" and item.get("port")}
+    if on_mutation:
+        on_mutation()
     try:
         port = port_allocation.allocate(f"panel:ss:{client_id}", SHADOWSOCKS_PORT_START, {"tcp", "udp"}, used=used_ports, count=10000)
     except port_allocation.PortConflict as exc:
@@ -5722,7 +5724,7 @@ def create_shadowsocks_client(payload: ClientCreate, client_id: str, safe_name: 
     try:
         SHADOWSOCKS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         temporary_config.write_text(json.dumps({
-            "server": "::", "server_port": port, "password": password, "method": method,
+            "server": ["0.0.0.0", "::"], "server_port": port, "password": password, "method": method,
             "timeout": payload.settings.timeout or 300, "mode": payload.settings.shadowsocks_mode, "fast_open": False,
             "no_delay": payload.settings.no_delay, "mtu": payload.settings.mtu or 1200,
         }, indent=2), encoding="utf-8")
@@ -5790,7 +5792,7 @@ def create_client(payload: ClientCreate, _: None = Depends(require_token)) -> di
     return create_client_native(payload)
 
 
-def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict:
+def create_client_native(payload: ClientCreate, *, client_identity=None, on_mutation=None) -> dict:
     selected_origin = new_client_endpoint("")
     origin_endpoint = selected_origin or PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT
     client_id = client_identity or secrets.token_hex(8)
@@ -5808,6 +5810,8 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
                 users = json.loads(original_users)
                 password = secrets.token_urlsafe(32)
                 users[client_id] = password
+                if on_mutation:
+                    on_mutation()
                 temporary_users.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
                 temporary_config.write_text(render_ikev2_users(users), encoding="utf-8")
                 os.chmod(temporary_users, 0o600); os.chmod(temporary_config, 0o600)
@@ -5847,6 +5851,13 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
             issued = False
             try:
                 settings = json.loads(OPENVPN_SETTINGS.read_text(encoding="utf-8"))
+                transport = settings.get("protocol", "udp")
+                if transport not in {"udp", "tcp"}:
+                    raise HTTPException(status_code=409, detail="Не удалось подтвердить транспорт OpenVPN listener")
+                if payload.settings.vpn_transport != transport:
+                    raise HTTPException(status_code=422, detail=f"Транспорт OpenVPN listener изменён; используйте {transport.upper()}")
+                if on_mutation:
+                    on_mutation()
                 generated = run_easyrsa("build-client-full", client_id, "nopass")
                 if generated.returncode:
                     raise RuntimeError(generated.stderr.strip() or "EasyRSA failed to issue a client certificate")
@@ -5857,7 +5868,6 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
                 tls_crypt = (OPENVPN_DIR / "tls-crypt.key").read_text(encoding="utf-8")
                 endpoint, channel_mode = channel_mode_endpoint("openvpn", selected_origin or PUBLIC_DOMAIN_ENDPOINT or origin_endpoint, payload.settings.channel_mode)
                 port = int(settings.get("port", 1194))
-                transport = payload.settings.vpn_transport
                 client_config = "\n".join([
                     "client", "dev tun", f"proto {'tcp-client' if transport == 'tcp' else 'udp'}",
                     f"remote {endpoint} {port}", "resolv-retry infinite", "nobind", "persist-key", "persist-tun",
@@ -5890,6 +5900,8 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
                 password = secrets.token_urlsafe(32)
                 users[client_id] = password
                 temporary = HYSTERIA2_USERS.with_suffix(".tmp")
+                if on_mutation:
+                    on_mutation()
                 temporary.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
                 os.chmod(temporary, 0o600)
                 temporary.replace(HYSTERIA2_USERS)
@@ -5927,6 +5939,8 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
                 inbound = next(item for item in config.get("inbounds", []) if item.get("type") == "tuic")
                 user_uuid, password = str(uuid.uuid4()), secrets.token_urlsafe(32)
                 inbound.setdefault("users", []).append({"name": client_id, "uuid": user_uuid, "password": password})
+                if on_mutation:
+                    on_mutation()
                 temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
                 os.chmod(temporary, 0o600)
                 result = subprocess.run(["/usr/local/lib/vps-control-tuic/sing-box", "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
@@ -5959,7 +5973,10 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
             original = TROJAN_CONFIG.read_bytes(); temporary = TROJAN_CONFIG.with_suffix(".tmp.json")
             try:
                 config = json.loads(original); inbound = next(row for row in config.get("inbounds", []) if row.get("type") == "trojan"); password = secrets.token_urlsafe(32)
-                inbound.setdefault("users", []).append({"name": client_id, "password": password}); temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2)); os.chmod(temporary, 0o600)
+                inbound.setdefault("users", []).append({"name": client_id, "password": password})
+                if on_mutation:
+                    on_mutation()
+                temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2)); os.chmod(temporary, 0o600)
                 result = subprocess.run(["/usr/local/lib/vps-control-trojan/sing-box", "check", "-c", str(temporary)], capture_output=True, text=True, timeout=15, check=False)
                 if result.returncode: raise RuntimeError(result.stderr.strip())
                 temporary.replace(TROJAN_CONFIG); run("systemctl", "restart", "vps-control-trojan.service", timeout=20, check=True)
@@ -5975,7 +5992,7 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
             finally: temporary.unlink(missing_ok=True)
     if payload.protocol == "shadowsocks":
         with client_mutation_lock:
-            return create_shadowsocks_client(payload, client_id, safe_name)
+            return create_shadowsocks_client(payload, client_id, safe_name, on_mutation=on_mutation)
 
     if payload.protocol == "vless-reality-xhttp":
         with client_mutation_lock:
@@ -6022,6 +6039,8 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
                 for inbound in selected_inbounds:
                     inbound.setdefault("settings", {}).setdefault("clients", []).append({"id": client_uuid, "email": f"{client_id}@312.net"})
                 stage = "запись временной конфигурации"
+                if on_mutation:
+                    on_mutation()
                 tmp.write_text(json.dumps(config_data, ensure_ascii=False, indent=2), encoding="utf-8")
                 os.chmod(tmp, 0o640)
                 os.chown(tmp, 0, 65534)
@@ -6114,6 +6133,8 @@ def create_client_native(payload: ClientCreate, *, client_identity=None) -> dict
     psk = key(f"{command} genpsk")
     address = next_address(payload.protocol)
     interface = WG_INTERFACE if payload.protocol == "wg" else AWG_INTERFACE
+    if on_mutation:
+        on_mutation()
     append_peer(config_path, client_id, public_key, psk, str(address))
     run_with_input(
         [command, "set", interface, "peer", public_key, "preshared-key", "/dev/stdin", "allowed-ips", f"{address}/32"],

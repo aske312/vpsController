@@ -23,9 +23,11 @@ def perform(api, payload, identity):
     if client.settings.relay_host_id:
         raise ValueError('Для Relay используйте управляемое создание подключения')
     api.ComponentRegistry(api.DATA_DIR).require_managed(client.protocol)
-    # Fsync the intent before any protocol changes, including certificate issuance.
-    atomic_json(path, {'state': 'unknown', 'client_id': identity[:16]})
-    result = api.create_client_native(client, client_identity=identity[:16])
+    # Validation can reject stale listener settings without creating anything.
+    # The protocol writer fsyncs this marker at the first mutation boundary.
+    def mark_mutation():
+        atomic_json(path, {'state': 'unknown', 'client_id': identity[:16]})
+    result = api.create_client_native(client, client_identity=identity[:16], on_mutation=mark_mutation)
     if result.get('id') != identity[:16]:
         raise OperationConflict('ID созданного подключения не подтверждён')
     atomic_json(path, {'state': 'ready', 'client_id': identity[:16],

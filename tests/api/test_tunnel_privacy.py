@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import yaml
-from tests.api.support import manager, ROOT, free_port, wait_port
+from tests.api.support import manager, ROOT, free_port, wait_port, wait_http_proxy, mihomo_readiness
 
 
 class TunnelPrivacyTests(unittest.TestCase):
@@ -394,7 +394,7 @@ class RealCorePrivacyTests(unittest.TestCase):
             _, wrong_encryption = manager.vless_encryption_pair({"privacy_mode": "encrypted"})
         transports = (os.environ["PRIVACY_TEST_TRANSPORT"],) if os.getenv("PRIVACY_TEST_TRANSPORT") else ("websocket", "xhttp", "httpupgrade", "grpc")
         for transport in transports:
-            with self.subTest(transport=transport), tempfile.TemporaryDirectory() as temp:
+            with self.subTest(transport=transport), tempfile.TemporaryDirectory() as temp, mihomo_readiness() as readiness_port:
                 root = Path(temp)
                 upstream_port, proxy_port, relay_port = free_port(), free_port(), free_port()
                 identity = str(uuid.uuid4())
@@ -471,12 +471,13 @@ class RealCorePrivacyTests(unittest.TestCase):
                         proxy = yaml.safe_load("proxies:\n" + "\n".join(manager.render_vless_cdn(credential, "Connection 1")))["proxies"][0]
                         # Test the stream exposed after CDN TLS termination.
                         proxy.update({"tls": False, "port": relay_port})
-                        client_config = {"port": proxy_port, "bind-address": "127.0.0.1", "allow-lan": False, "mode": "rule", "log-level": "warning", "proxies": [proxy], "rules": ["MATCH,Connection 1"]}
+                        client_config = {"port": proxy_port, "bind-address": "127.0.0.1", "allow-lan": False, "mode": "rule", "log-level": "warning", "proxies": [proxy], "rules": [f"DST-PORT,{readiness_port},DIRECT", "MATCH,Connection 1"]}
                         (root / "client.yaml").write_text(yaml.safe_dump(client_config))
                         client_process = subprocess.Popen([str(mihomo), "-d", str(root), "-f", str(root / "client.yaml")], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=flags)
                         processes.append(client_process)
                         try:
                             wait_port(proxy_port, client_process)
+                            wait_http_proxy(proxy_port, client_process, readiness_port)
                         except AssertionError:
                             client_process.terminate()
                             output, _ = client_process.communicate(timeout=10)

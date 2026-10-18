@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 import yaml
-from tests.api.support import manager, ROOT, free_port, wait_port
+from tests.api.support import manager, ROOT, free_port, wait_port, wait_http_proxy, mihomo_readiness
 
 
 def profile():
@@ -135,7 +135,7 @@ class RuleExportTests(unittest.TestCase):
             threading.Thread(target=server.serve_forever, daemon=True).start()
             servers.append(server)
         try:
-            with tempfile.TemporaryDirectory() as folder:
+            with tempfile.TemporaryDirectory() as folder, mihomo_readiness() as readiness_port:
                 root = Path(folder)
                 item = profile()
                 item["devices"][0]["routing"] = {"strategy": "select", "direct_ru_banks": True,
@@ -145,6 +145,7 @@ class RuleExportTests(unittest.TestCase):
                 config["hosts"] = {name: "127.0.0.1" for name in ("sberbank.ru", "ads.audit.test", "allowed.ads.audit.test", "unmatched.audit.test")}
                 config["dns"]["enable"] = False
                 config["log-level"] = "debug"
+                config["rules"].insert(0, f"DST-PORT,{readiness_port},DIRECT")
                 config["mixed-port"] = port = free_port(udp=True)
                 # Isolate routing from the transport layer already covered by
                 # the encrypted and QUIC traffic tests.
@@ -156,6 +157,7 @@ class RuleExportTests(unittest.TestCase):
                     process = subprocess.Popen([os.environ["PRIVACY_MIHOMO_BIN"], "-d", str(root), "-f", str(path)], stdout=log, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
                     try:
                         wait_port(port, process)
+                        wait_http_proxy(port, process, readiness_port)
                         for domain, expected in (("sberbank.ru", b"via-direct"), ("unmatched.audit.test", b"via-tunnel"), ("ads.audit.test", b"502"), ("allowed.ads.audit.test", b"via-direct")):
                             with self.subTest(domain=domain), socket.create_connection(("127.0.0.1", port), timeout=5) as connection:
                                 connection.settimeout(5)

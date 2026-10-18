@@ -13,7 +13,7 @@ from unittest.mock import patch
 import uuid
 
 import yaml
-from tests.api.support import manager, free_port, wait_port
+from tests.api.support import manager, free_port, wait_port, wait_http_proxy, mihomo_readiness
 
 
 @unittest.skipUnless(os.getenv("PRIVACY_XRAY_BIN") and os.getenv("PRIVACY_MIHOMO_BIN"), "Set local test core paths")
@@ -38,7 +38,7 @@ class ProfileTransitionTrafficTests(unittest.TestCase):
             def log_message(self, *_):
                 pass
 
-        with tempfile.TemporaryDirectory() as temp:
+        with tempfile.TemporaryDirectory() as temp, mihomo_readiness() as readiness_port:
             root = Path(temp)
             origin = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Origin)
             self.addCleanup(origin.server_close)
@@ -88,9 +88,10 @@ class ProfileTransitionTrafficTests(unittest.TestCase):
                         proxy = yaml.safe_load("proxies:\n" + "\n".join(manager.render_vless_cdn(credential, "connection")))["proxies"][0]
                         proxy.update(tls=False, port=credential[port_key])
                     client_file = client_home / "config.yaml"
-                    client_file.write_text(yaml.safe_dump({"port": proxy_port, "bind-address": "127.0.0.1", "allow-lan": False, "log-level": "error", "proxies": [proxy], "rules": ["MATCH,connection"]}))
+                    client_file.write_text(yaml.safe_dump({"port": proxy_port, "bind-address": "127.0.0.1", "allow-lan": False, "log-level": "error", "proxies": [proxy], "rules": [f"DST-PORT,{readiness_port},DIRECT", "MATCH,connection"]}))
                     client = start([str(mihomo), "-d", str(client_home), "-f", str(client_file)])
                     wait_port(proxy_port, client)
+                    wait_http_proxy(proxy_port, client, readiness_port)
 
                 def probe(port):
                     with socket.create_connection(("127.0.0.1", port), timeout=5) as connection:

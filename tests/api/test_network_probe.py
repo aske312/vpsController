@@ -190,7 +190,14 @@ class NetworkProbePlanTests(unittest.TestCase):
                                 current["inbounds"][0]["settings"]["clients"] = []
                             if change == "listener":
                                 current["inbounds"][0]["streamSettings"]["xhttpSettings"]["path"] = "/changed"
-                            config.write_text(json.dumps(current))
+                            if change == "file":
+                                # An actual replacement has a distinct inode even when
+                                # the filesystem clock gives rapid writes the same mtime.
+                                replacement = config.with_suffix('.replacement')
+                                replacement.write_text(json.dumps(current))
+                                replacement.replace(config)
+                            else:
+                                config.write_text(json.dumps(current))
                         if change in {"revision", "retired"}:
                             current = json.loads(api.NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8"))
                             binding = current["route_registry"]["bindings"][0]

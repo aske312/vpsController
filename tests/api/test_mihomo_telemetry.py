@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import yaml
 import grpc
-from tests.api.support import manager, free_port, wait_port, managed_mihomo_fixture
+from tests.api.support import manager, free_port, wait_port, wait_http_proxy, mihomo_readiness, managed_mihomo_fixture
 from telemetry import ConnectionTelemetry
 import quic_settings
 from telemetry_pb2 import Connection, ConnectionEvent, ConnectionEvents, SubscribeConnectionsRequest
@@ -112,7 +112,7 @@ class QuicTrafficTests(unittest.TestCase):
                     self.probe(module, client_format, edit_settings=True)
 
     def probe(self, module, client_format, *, edit_settings=False):
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory() as folder, mihomo_readiness() as readiness_port:
             root = Path(folder)
             self.enterContext(patch.object(manager.port_allocation, "DATA_ROOT", root / "data"))
             self.enterContext(patch.object(manager.port_allocation, "CONFIG_ROOT", root / "managed"))
@@ -175,7 +175,8 @@ class QuicTrafficTests(unittest.TestCase):
                 with patch.object(manager, "public_endpoint", return_value="127.0.0.1"):
                     proxy = yaml.safe_load("proxies:\n" + "\n".join(manager.render_proxy("transport-" + module, credential, "test")))["proxies"][0]
                 client_file = root / "client.yaml"
-                client_file.write_text(yaml.safe_dump({"mixed-port": proxy_port, "proxies": [proxy], "rules": ["MATCH,test"]}), encoding="utf-8")
+                client_file.write_text(yaml.safe_dump({"mixed-port": proxy_port, "proxies": [proxy],
+                    "rules": [f"DST-PORT,{readiness_port},DIRECT", "MATCH,test"]}), encoding="utf-8")
                 if client_format == "singbox":
                     config = manager.build_singbox_config([{"id": "a", "component": "transport-" + module, "credential": credential}], {}, {"nameserver": "1.1.1.1", "fallback": "8.8.8.8"}, [], "127.0.0.1", lambda: {}, None)
                     config["inbounds"] = [{"type": "mixed", "listen": "127.0.0.1", "listen_port": proxy_port}]
@@ -185,6 +186,8 @@ class QuicTrafficTests(unittest.TestCase):
                 else:
                     client = start([os.environ["PRIVACY_MIHOMO_BIN"], "-d", str(root), "-f", str(client_file)])
                 wait_port(proxy_port, client)
+                if client_format == "mihomo":
+                    wait_http_proxy(proxy_port, client, readiness_port)
                 connection = socket.create_connection(("127.0.0.1", proxy_port), timeout=5)
                 connection.settimeout(5)
                 connection.sendall(f"GET http://127.0.0.1:{origin.server_port}/ HTTP/1.1\r\nHost: 127.0.0.1:{origin.server_port}\r\nConnection: close\r\n\r\n".encode())
