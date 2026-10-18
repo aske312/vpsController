@@ -7,10 +7,11 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR=""
 PUBLIC_IP=""
 API_PORT=""
+DOMAINS=()
 cleanup() { [[ -z "${WORK_DIR}" ]] || rm -rf -- "${WORK_DIR}"; }
 trap cleanup EXIT
 usage() {
-  printf 'Установка 312node.net Relay Agent без панели: bash install-agent.sh [--public-ip IPv4] [--api-port PORT]\n'
+  printf 'Установка 312node.net Relay Agent без панели: bash install-agent.sh [--public-ip IPv4] [--api-port PORT] [--domain NAME ...]\n'
 }
 while (($#)); do
   case "$1" in
@@ -22,6 +23,10 @@ while (($#)); do
       [[ $# -ge 2 ]] || { usage >&2; exit 2; }
       API_PORT="$2"; shift 2 ;;
     --api-port=*) API_PORT="${1#*=}"; shift ;;
+    --domain)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      DOMAINS+=("$2"); shift 2 ;;
+    --domain=*) DOMAINS+=("${1#*=}"); shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Неизвестный параметр: %s\n' "$1" >&2; exit 2 ;;
   esac
@@ -54,19 +59,19 @@ except ValueError:
 PY
 SOURCE="${SCRIPT_DIR}/protocol-images/relay-agent"
 [[ -d "${SOURCE}" ]] || SOURCE="${SCRIPT_DIR}/../protocol-images/relay-agent"
-if [[ ! -f "${SOURCE}/install.sh" || ! -f "${SOURCE}/agent.py" || ! -f "${SOURCE}/credentials.py" ]]; then
+if [[ ! -f "${SOURCE}/install.sh" || ! -f "${SOURCE}/agent.py" || ! -f "${SOURCE}/credentials.py" || ! -f "${SOURCE}/addresses.py" ]]; then
   WORK_DIR="$(mktemp -d /tmp/vps-relay-installer.XXXXXX)"
   curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
     --connect-timeout 15 --max-time 180 --output "${WORK_DIR}/source.tar.gz" \
     "${REPOSITORY}/archive/${BRANCH}.tar.gz"
   tar -xzf "${WORK_DIR}/source.tar.gz" -C "${WORK_DIR}"
   candidates=("${WORK_DIR}"/*/protocol-images/relay-agent)
-  [[ ${#candidates[@]} -eq 1 && -f "${candidates[0]}/install.sh" && -f "${candidates[0]}/agent.py" && -f "${candidates[0]}/credentials.py" ]] \
+  [[ ${#candidates[@]} -eq 1 && -f "${candidates[0]}/install.sh" && -f "${candidates[0]}/agent.py" && -f "${candidates[0]}/credentials.py" && -f "${candidates[0]}/addresses.py" ]] \
     || { printf 'Архив не содержит Relay Agent.\n' >&2; exit 1; }
   SOURCE="${candidates[0]}"
 fi
 printf 'Устанавливаем 312node.net Relay Agent для %s…\n' "${PUBLIC_IP}"
-RELAY_PUBLIC_IP="${PUBLIC_IP}" RELAY_API_PORT="${API_PORT}" bash "${SOURCE}/install.sh"
+RELAY_DOMAINS_JSON="$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "${DOMAINS[@]}")" RELAY_PUBLIC_IP="${PUBLIC_IP}" RELAY_API_PORT="${API_PORT}" bash "${SOURCE}/install.sh"
 printf '\nДанные для добавления в изолированную сеть (сохраните токен):\n'
 python3 /usr/local/lib/vps-control-relay-agent/credentials.py
 printf '\nПовторно показать: python3 /usr/local/lib/vps-control-relay-agent/credentials.py\n'

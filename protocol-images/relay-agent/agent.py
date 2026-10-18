@@ -13,8 +13,9 @@ import socket
 import ssl
 import tempfile
 import time
+from addresses import read_inventory, dual_stack_available
 
-VERSION = '1.0.1'
+VERSION = '1.1.0'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -94,7 +95,10 @@ class RelayRoute(asyncio.DatagramProtocol):
 
     async def start(self):
         # Exclusive reservation; do not share a port with an existing protocol.
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM if self.config['transport'] == 'tcp' else socket.SOCK_DGRAM)
+        ipv6 = ':' in self.listen_host
+        sock = socket.socket(socket.AF_INET6 if ipv6 else socket.AF_INET, socket.SOCK_STREAM if self.config['transport'] == 'tcp' else socket.SOCK_DGRAM)
+        if ipv6:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
         if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         elif self.config['transport'] == 'tcp':
@@ -219,7 +223,8 @@ class RelayRoute(asyncio.DatagramProtocol):
 
 
 class Agent:
-    def __init__(self, config_dir=CONFIG_DIR, state_dir=STATE_DIR, listen_host='0.0.0.0'):
+    def __init__(self, config_dir=CONFIG_DIR, state_dir=STATE_DIR, listen_host=None):
+        listen_host = listen_host or ('::' if dual_stack_available() else '0.0.0.0')
         self.config_dir, self.state_dir, self.listen_host = Path(config_dir), Path(state_dir), listen_host
         self.routes, self.failed = {}, {}
         self.revision = 0
@@ -227,7 +232,10 @@ class Agent:
         self.http_connections = 0
 
     def settings(self):
-        return json.loads((self.config_dir / 'config.json').read_text())
+        config = json.loads((self.config_dir / 'config.json').read_text())
+        inventory = read_inventory(self.config_dir, config)
+        config['own_ips'] = list(set(config.get('own_ips', []) + inventory['ipv4'] + inventory['ipv6']))
+        return config
 
     def save(self, configs):
         revision = self.revision + 1
@@ -266,7 +274,9 @@ class Agent:
         if method == 'GET' and path == '/v1/status':
             return {'api_version': 1, 'version': VERSION, 'revision': self.revision, 'routes': len(self.routes),
                     'failed_routes': len(self.failed), 'transports': ['tcp', 'udp'], 'address_family': 'ipv4',
-                    'listen_ports': {'min': PORT_MIN, 'max': PORT_MAX}, 'max_routes': MAX_ROUTES}
+                    'listen_ports': {'min': PORT_MIN, 'max': PORT_MAX}, 'max_routes': MAX_ROUTES,
+                    'addresses': read_inventory(self.config_dir, self.settings()),
+                    'client_address_families': ['ipv4', 'ipv6'] if self.listen_host == '::' else ['ipv4']}
         if method == 'GET' and path == '/v1/routes':
             return {'revision': self.revision, 'items': [route.status() for route in self.routes.values()] +
                     [{**item['config'], 'state': 'failed', 'error': item['error'], 'target_verified': False} for item in self.failed.values()]}
@@ -359,7 +369,14 @@ class Agent:
         port = self.settings().get('api_port', API_PORT)
         if type(port) is not int or not 1024 <= port <= 65535 or PORT_MIN <= port <= PORT_MAX:
             raise RelayError('Invalid Relay API port')
-        server = await asyncio.start_server(self.http_client, self.listen_host, port, ssl=context,
+        sock = socket.socket(socket.AF_INET6 if ':' in self.listen_host else socket.AF_INET, socket.SOCK_STREAM)
+        if ':' in self.listen_host:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((self.listen_host, port))
+        sock.listen(128)
+        sock.setblocking(False)
+        server = await asyncio.start_server(self.http_client, sock=sock, ssl=context,
                                             ssl_handshake_timeout=5, limit=8192)
         async with server:
             await stop.wait()

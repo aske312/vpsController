@@ -50,7 +50,7 @@ def inside(source, sandbox, api_port=None, occupy_default=False):
     staged = sandbox / 'qa/source'
     for name in ('install.sh', 'scripts/install-agent.sh',
                  'protocol-images/relay-agent/install.sh', 'protocol-images/relay-agent/agent.py',
-                 'protocol-images/relay-agent/credentials.py', 'protocol-images/relay-agent/uninstall.sh'):
+                 'protocol-images/relay-agent/credentials.py', 'protocol-images/relay-agent/addresses.py', 'protocol-images/relay-agent/uninstall.sh'):
         target = staged / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / name, target)
@@ -101,6 +101,12 @@ if sys.argv[1] in ('restart', 'disable'):
 ''')
     for path in (sandbox / 'qa/bin').iterdir(): path.chmod(0o755)
     run('ip', 'link', 'set', 'lo', 'up')
+    run('ip', 'link', 'add', 'qa0', 'type', 'dummy')
+    run('ip', 'addr', 'add', '8.8.4.4/32', 'dev', 'qa0')
+    run('ip', '-6', 'addr', 'add', '2606:4700::1111/128', 'dev', 'qa0', 'nodad')
+    run('ip', 'link', 'set', 'qa0', 'up')
+    (sandbox/'etc/caddy').mkdir()
+    (sandbox/'etc/caddy/Caddyfile').write_text('relay.example {\n respond "ok"\n}\n')
     os.chroot(sandbox)
     os.chdir('/')
     os.environ['PATH'] = '/qa/bin:/usr/sbin:/usr/bin:/sbin:/bin'
@@ -116,11 +122,17 @@ if sys.argv[1] in ('restart', 'disable'):
     bad = subprocess.run(['bash', bootstrap, *arguments, '--public-ip', '127.0.0.1'],
                          capture_output=True, text=True)
     assert bad.returncode != 0 and not Path('/etc/vps-control-relay-agent').exists()
-    result = run('bash', bootstrap, *arguments, *(['--api-port', str(api_port)] if api_port else []))
+    bad_domain = subprocess.run(['bash', bootstrap, *arguments, '--domain', 'https://invalid.example'],capture_output=True,text=True)
+    assert bad_domain.returncode != 0 and not Path('/etc/vps-control-relay-agent').exists()
+    result = run('bash', bootstrap, *arguments, '--domain', 'manual.example', *(['--api-port', str(api_port)] if api_port else []))
     config_root = Path('/etc/vps-control-relay-agent')
     config = json.loads((config_root / 'config.json').read_text())
     connection = json.loads(run('python3', '/usr/local/lib/vps-control-relay-agent/credentials.py').stdout)
     assert connection['agent_url'] == f'https://8.8.8.8:{expected_port}'
+    assert '8.8.4.4' in connection['addresses']['ipv4']
+    assert connection['addresses']['ipv6'] == ['2606:4700::1111']
+    assert 'relay.example' in connection['addresses']['domains']
+    assert 'manual.example' in connection['addresses']['domains']
     assert config['api_port'] == expected_port
     if blocker: assert blocker.getsockname()[1] == 9443
     assert connection['token'] in result.stdout
@@ -133,6 +145,13 @@ if sys.argv[1] in ('restart', 'disable'):
     context = ssl.create_default_context(cafile=str(config_root / 'server.crt'))
     request = Request(f'https://127.0.0.1:{expected_port}/v1/status', headers={'Authorization': 'Bearer ' + connection['token']})
     with urlopen(request, context=context, timeout=5) as response: assert response.status == 200
+    ipv6_context = ssl.create_default_context(cafile=str(config_root / 'server.crt'))
+    ipv6_context.check_hostname = False
+    ipv6_request = Request(f'https://[::1]:{expected_port}/v1/status', headers={'Authorization': 'Bearer ' + connection['token']})
+    with urlopen(ipv6_request, context=ipv6_context, timeout=5) as response:
+        advertised = json.load(response)
+        assert advertised['client_address_families'] == ['ipv4', 'ipv6']
+        assert advertised['addresses'] == connection['addresses']
     from urllib.error import HTTPError
     try: urlopen(f'https://127.0.0.1:{expected_port}/v1/status', context=context, timeout=5)
     except HTTPError as error: assert error.code == 401
@@ -147,6 +166,11 @@ if sys.argv[1] in ('restart', 'disable'):
     run('bash', bootstrap, *arguments, '--public-ip', '8.8.8.8')
     assert all((config_root / name).read_bytes() == value for name, value in before.items())
     assert state.read_bytes() == saved_routes
+    Path('/etc/caddy/Caddyfile').write_text('changed.example {\n respond "ok"\n}\n')
+    run('python3', '/usr/local/lib/vps-control-relay-agent/addresses.py')
+    refreshed = json.loads(run('python3', '/usr/local/lib/vps-control-relay-agent/credentials.py').stdout)
+    assert set(refreshed['addresses']['domains']) == {'manual.example', 'changed.example'}
+    assert refreshed['token'] == connection['token']
     with urlopen(request, context=context, timeout=5) as response: assert json.load(response)['routes'] == 1
     if Path('/qa/light').exists():
         Path('/etc/vps-control.env').write_text('PUBLIC_IP=8.8.8.8\n')
@@ -157,7 +181,8 @@ if sys.argv[1] in ('restart', 'disable'):
         with urlopen(request, context=context, timeout=5) as response: assert json.load(response)['routes'] == 1
         Path('/etc/vps-control.env').unlink()
     assert not Path('/opt/vps-control').exists()
-    assert list(Path('/etc/systemd/system').glob('*.service')) == [Path('/etc/systemd/system/vps-control-relay-agent.service')]
+    assert {path.name for path in Path('/etc/systemd/system').glob('*.service')} == {'vps-control-relay-agent.service', 'vps-control-relay-addresses.service'}
+    assert Path('/etc/systemd/system/vps-control-relay-addresses.timer').is_file()
     import pwd
     user = pwd.getpwnam('vps-relay')
     denied = subprocess.run(['python3', '/usr/local/lib/vps-control-relay-agent/credentials.py'],

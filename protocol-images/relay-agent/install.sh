@@ -11,11 +11,16 @@ if ! command -v openssl >/dev/null || ! command -v python3 >/dev/null || ! comma
   apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl openssl python3
 fi
 # Validate before changing services or firewall. Reinstall preserves identity and routes.
-API_PORT="$(python3 - "${ROOT}/config.json" "${ENV_FILE:-/etc/vps-control.env}" <<'PY_PORT'
+API_PORT="$(python3 - "${ROOT}/config.json" "${ENV_FILE:-/etc/vps-control.env}" "${SOURCE}" <<'PY_PORT'
 import json, os, shlex, socket, subprocess, sys
 from pathlib import Path
-path, env_path = map(Path, sys.argv[1:])
+path, env_path = map(Path, sys.argv[1:3])
+sys.path.insert(0, sys.argv[3])
+from addresses import dual_stack_available, domain
 config = json.loads(path.read_text()) if path.exists() else {}
+domains = json.loads(os.environ.get('RELAY_DOMAINS_JSON', '[]')) or config.get('domains', [])
+if not isinstance(domains, list) or len(domains) > 64 or any(not isinstance(value, str) or not domain(value) for value in domains):
+    raise SystemExit('Invalid Relay domain list')
 values = {}
 for line in (env_path.read_text().splitlines() if env_path.exists() else []):
     if '=' in line and not line.lstrip().startswith('#'):
@@ -48,8 +53,10 @@ for port in candidates:
     if port == previous and managed_active:
         print(port)
         break
-    with socket.socket() as probe:
-        try: probe.bind(('0.0.0.0', port))
+    ipv6 = dual_stack_available()
+    with socket.socket(socket.AF_INET6 if ipv6 else socket.AF_INET) as probe:
+        if ipv6: probe.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        try: probe.bind(('::' if ipv6 else '0.0.0.0', port))
         except OSError:
             if requested or previous is not None: raise SystemExit(f'Relay API port {port} is already occupied; saved identity was not changed')
             continue
@@ -109,10 +116,12 @@ id -u vps-relay >/dev/null 2>&1 || useradd --system --gid vps-relay --home-dir "
 install -d -o root -g vps-relay -m 0750 "${ROOT}"
 install -d -o vps-relay -g vps-relay -m 0700 "${STATE}"
 install -d -o root -g root -m 0755 "${LIB}"
-python3 - "${ROOT}" "${ENV_FILE:-/etc/vps-control.env}" <<'PY'
+python3 - "${ROOT}" "${ENV_FILE:-/etc/vps-control.env}" "${SOURCE}" <<'PY'
 import grp, hashlib, ipaddress, json, os, secrets, shlex, socket, subprocess, sys
 from pathlib import Path
 root = Path(sys.argv[1])
+sys.path.insert(0, sys.argv[3])
+from addresses import domain
 values = {}
 env_path = Path(sys.argv[2])
 for line in (env_path.read_text().splitlines() if env_path.exists() else []):
@@ -139,18 +148,26 @@ for address in addresses:
     try: own_ips.add(str(ipaddress.ip_address(address)))
     except ValueError: pass
 config = root / 'config.json'
+previous = json.loads(config.read_text()) if config.exists() else {}
+domains = json.loads(os.environ.get('RELAY_DOMAINS_JSON', '[]')) or previous.get('domains', [])
+if not isinstance(domains, list) or len(domains) > 64 or any(not isinstance(value, str) or not domain(value) for value in domains):
+    raise SystemExit('Invalid Relay domain list')
 temporary = root / 'config.json.new'
-temporary.write_text(json.dumps({'token_sha256': hashlib.sha256(token.encode()).hexdigest(), 'own_ips': sorted(own_ips), 'public_ip': ip, 'api_port': int(os.environ['RELAY_API_PORT'])}))
+temporary.write_text(json.dumps({'token_sha256': hashlib.sha256(token.encode()).hexdigest(), 'own_ips': sorted(own_ips), 'public_ip': ip, 'api_port': int(os.environ['RELAY_API_PORT']), 'domains': sorted({domain(value) for value in domains})}))
 os.chown(temporary, 0, gid); os.chmod(temporary, 0o640); os.replace(temporary, config)
 for name in ('server.crt', 'server.key'):
     os.chown(root / name, 0, gid); os.chmod(root / name, 0o640)
 PY
 backup="$(mktemp -d)"
 trap 'rm -rf -- "${backup}"' EXIT
-[[ ! -f "${LIB}/agent.py" ]] || cp "${LIB}/agent.py" "${backup}/agent.py"
+for name in agent.py addresses.py credentials.py manifest.json; do
+  [[ ! -f "${LIB}/${name}" ]] || cp "${LIB}/${name}" "${backup}/${name}"
+done
 install -m 0755 "${SOURCE}/agent.py" "${LIB}/agent.py"
 install -m 0700 "${SOURCE}/credentials.py" "${LIB}/credentials.py"
+install -m 0644 "${SOURCE}/addresses.py" "${LIB}/addresses.py"
 install -m 0644 "${SOURCE}/manifest.json" "${LIB}/manifest.json"
+python3 "${LIB}/addresses.py" "${ROOT}"
 cat >/etc/systemd/system/vps-control-relay-agent.service <<'EOF'
 [Unit]
 Description=312node.net Relay Agent
@@ -171,7 +188,7 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-RestrictAddressFamilies=AF_INET AF_UNIX
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 ReadWritePaths=/var/lib/vps-control-relay-agent
 UMask=0077
 LimitNOFILE=32768
@@ -181,7 +198,31 @@ IPAccounting=true
 [Install]
 WantedBy=multi-user.target
 EOF
+cat >/etc/systemd/system/vps-control-relay-addresses.service <<'EOF'
+[Unit]
+Description=Refresh public Relay addresses from local configuration
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/vps-control-relay-agent/addresses.py
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/etc/vps-control-relay-agent
+UMask=0077
+TimeoutStartSec=30
+EOF
+cat >/etc/systemd/system/vps-control-relay-addresses.timer <<'EOF'
+[Unit]
+Description=Refresh Relay address inventory
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+[Install]
+WantedBy=timers.target
+EOF
 systemctl daemon-reload
+systemctl enable --now vps-control-relay-addresses.timer
 systemctl enable vps-control-relay-agent.service
 systemctl restart vps-control-relay-agent.service
 for attempt in {1..20}; do
@@ -199,10 +240,13 @@ for attempt in {1..20}; do
   sleep 1
 done
 if [[ -f "${backup}/agent.py" ]]; then
-  install -m 0755 "${backup}/agent.py" "${LIB}/agent.py"
+  for name in agent.py addresses.py credentials.py manifest.json; do
+    [[ ! -f "${backup}/${name}" ]] || cp "${backup}/${name}" "${LIB}/${name}"
+  done
   systemctl restart vps-control-relay-agent.service || true
 else
   systemctl disable --now vps-control-relay-agent.service || true
+  systemctl disable --now vps-control-relay-addresses.timer || true
 fi
 echo 'Relay Agent не подтвердил запуск; проверьте journalctl -u vps-control-relay-agent.' >&2
 exit 1

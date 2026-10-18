@@ -21,8 +21,8 @@ class RelayClient:
         if url.scheme != 'https' or url.username or url.password or url.query or url.fragment or url.path not in ('', '/'):
             raise ValueError('Expected an HTTPS agent origin')
         address = ipaddress.ip_address(url.hostname)
-        if not address.is_global or address.version != 4:
-            raise ValueError('Expected a public IPv4 agent address')
+        if not address.is_global or address.is_multicast or getattr(address, 'ipv4_mapped', None) or '%' in str(url.hostname):
+            raise ValueError('Expected a public IP agent address')
         if url.port is None or not 1024 <= url.port <= 65535 or 20000 <= url.port <= 20999:
             raise ValueError('Expected an explicit Relay API port outside the route range')
         if not re.fullmatch(r'[0-9a-fA-F]{64}', certificate_sha256): raise ValueError('Invalid certificate fingerprint')

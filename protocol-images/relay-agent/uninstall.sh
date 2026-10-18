@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 systemctl disable --now vps-control-relay-agent.service 2>/dev/null || true
+systemctl disable --now vps-control-relay-addresses.timer vps-control-relay-addresses.service 2>/dev/null || true
 if command -v ufw >/dev/null; then
   # Remove only rules tagged by this module, preserving rules created by the owner.
   python3 - <<'PY'
@@ -14,6 +15,7 @@ for number in sorted(numbers,reverse=True): subprocess.run(['ufw','--force','del
 PY
 fi
 rm -f /etc/systemd/system/vps-control-relay-agent.service
+rm -f /etc/systemd/system/vps-control-relay-addresses.service /etc/systemd/system/vps-control-relay-addresses.timer
 systemctl daemon-reload
 rm -rf -- /usr/local/lib/vps-control-relay-agent
 if [[ "${PRESERVE_COMPONENT_DATA:-0}" != 1 ]]; then

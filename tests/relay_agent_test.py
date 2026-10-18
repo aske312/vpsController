@@ -11,6 +11,8 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'protocol-images/relay-agent'))
+import addresses
 
 
 spec = importlib.util.spec_from_file_location('relay_agent_runtime', Path(__file__).resolve().parents[1] / 'protocol-images/relay-agent/agent.py')
@@ -31,6 +33,21 @@ def free_port():
 
 
 class ValidationTests(unittest.TestCase):
+    def test_inventory_collects_all_public_addresses_and_configured_names_without_dns(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root/'environment').write_text('PUBLIC_DOMAIN=panel.example\nADMIN_PASSWORD=never-publish\n')
+            (root/'hostname').write_text('relay.example\n')
+            (root/'hosts').write_text('8.8.4.4 alias.example\n10.0.0.1 private.example\n')
+            (root/'Caddyfile').write_text('https://web.example:19443, other.example {\n reverse_proxy hidden.example:8000\n}\n')
+            with patch('socket.getaddrinfo', side_effect=AssertionError('Discovery must not probe DNS')):
+                value = addresses.discover({'public_ip':'8.8.8.8','domains':['manual.example']}, addresses=['8.8.8.8','8.8.4.4','2606:4700::1111','fe80::1','10.0.0.1'], environment_paths=[root/'environment'],caddy_root=root,hostname_path=root/'hostname',hosts_path=root/'hosts')
+            self.assertEqual(value['ipv4'],['8.8.8.8','8.8.4.4'])
+            self.assertEqual(value['ipv6'],['2606:4700::1111'])
+            self.assertEqual(set(value['domains']),{'panel.example','relay.example','alias.example','web.example','other.example','manual.example'})
+            self.assertNotIn('never-publish',json.dumps(value))
+            self.assertNotIn('hidden.example',json.dumps(value))
+
     def test_client_accepts_selected_api_port_but_rejects_route_and_invalid_ports(self):
         for port in (9443, 9444, 19443, 65535):
             self.assertEqual(pro_client.RelayClient(f'https://8.8.8.8:{port}', 'x' * 64, 'a' * 64).port, port)
@@ -164,6 +181,33 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             replacement = relay.RelayRoute(route.config, '127.0.0.1')
             await replacement.start()
             await replacement.close()
+
+    @unittest.skipIf(sys.platform == 'win32', 'Linux dual-stack acceptance; Windows loopback policy differs')
+    async def test_dual_stack_tcp_and_udp_accept_ipv6_and_ipv4_clients(self):
+        if not addresses.dual_stack_available():self.skipTest('Dual stack unavailable')
+        async def echo(reader, writer):
+            writer.write(await reader.read(1024));await writer.drain();writer.close()
+        class Echo(asyncio.DatagramProtocol):
+            def connection_made(self, transport):self.transport=transport
+            def datagram_received(self, data, peer):self.transport.sendto(data,peer)
+        loop=asyncio.get_running_loop()
+        origin=await asyncio.start_server(echo,'127.0.0.1',0)
+        udp,_=await loop.create_datagram_endpoint(Echo,local_addr=('127.0.0.1',0))
+        tcp=relay.RelayRoute({**self.body,'id':'tcp','target_ip':'127.0.0.1','target_port':origin.sockets[0].getsockname()[1]},'::')
+        datagram=relay.RelayRoute({**self.body,'id':'udp','transport':'udp','target_ip':'127.0.0.1','target_port':udp.get_extra_info('sockname')[1]},'::')
+        await tcp.start();await datagram.start()
+        try:
+            for host,family in (('::1',socket.AF_INET6),('127.0.0.1',socket.AF_INET)):
+                reader,writer=await asyncio.open_connection(host,self.body['listen_port'])
+                writer.write(b'tcp-check');await writer.drain()
+                self.assertEqual(await asyncio.wait_for(reader.read(1024),3),b'tcp-check')
+                writer.close();await writer.wait_closed()
+                with socket.socket(family,socket.SOCK_DGRAM) as sock:
+                    sock.setblocking(False);sock.bind((host,0))
+                    await loop.sock_sendto(sock,b'udp-check',(host,self.body['listen_port']))
+                    self.assertEqual(await asyncio.wait_for(loop.sock_recv(sock,1024),3),b'udp-check')
+        finally:
+            await tcp.close();await datagram.close();origin.close();await origin.wait_closed();udp.close()
 
     async def test_udp_clients_keep_independent_reply_paths_and_first_packet_bursts(self):
         class Echo(asyncio.DatagramProtocol):

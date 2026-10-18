@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import ssl
+from addresses import read_inventory
 
 
 def connection(root):
@@ -15,6 +16,7 @@ def connection(root):
         raise ValueError('Invalid Relay API port')
     return {'api_version': 1, 'agent_url': f"https://{config['public_ip']}:{port}",
             'certificate_sha256': hashlib.sha256(certificate).hexdigest(),
+            'addresses': read_inventory(root, config),
             'token': (root / 'token').read_text().strip()}
 
 
