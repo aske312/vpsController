@@ -27,10 +27,15 @@ class StandaloneTests(unittest.TestCase):
                 'certificate_sha256': hashlib.sha256(b'synthetic-certificate').hexdigest(),
                 'token': 'synthetic-token'})
             self.assertEqual(credentials.connection(root), result)
+            (root / 'config.json').write_text(json.dumps({'public_ip': '8.8.8.8', 'api_port': 9444}))
+            self.assertEqual(credentials.connection(root)['agent_url'], 'https://8.8.8.8:9444')
+            for port in (True, '9444', 80, 20000, 20999, 65536):
+                (root / 'config.json').write_text(json.dumps({'public_ip': '8.8.8.8', 'api_port': port}))
+                with self.subTest(port=port), self.assertRaises(ValueError): credentials.connection(root)
 
     @unittest.skipUnless(__import__('os').name == 'posix', 'Bash installer behaviour requires Linux')
     def test_invalid_arguments_exit_before_installing(self):
-        for arguments in (['--unknown'], ['--public-ip']):
+        for arguments in (['--unknown'], ['--public-ip'], ['--api-port'], ['--api-port=nope'], ['--api-port=20001'], ['--api-port=80']):
             result = subprocess.run(['bash', str(ROOT / 'scripts/install-agent.sh'), *arguments],
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 2)

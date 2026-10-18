@@ -31,6 +31,12 @@ def free_port():
 
 
 class ValidationTests(unittest.TestCase):
+    def test_client_accepts_selected_api_port_but_rejects_route_and_invalid_ports(self):
+        for port in (9443, 9444, 19443, 65535):
+            self.assertEqual(pro_client.RelayClient(f'https://8.8.8.8:{port}', 'x' * 64, 'a' * 64).port, port)
+        for url in ('https://8.8.8.8', 'https://8.8.8.8:80', 'https://8.8.8.8:20000', 'https://8.8.8.8:20999', 'https://8.8.8.8:65536'):
+            with self.subTest(url=url), self.assertRaises(ValueError): pro_client.RelayClient(url, 'x' * 64, 'a' * 64)
+
     def test_targets_cannot_escape_to_private_metadata_dns_or_self(self):
         body = {'transport': 'tcp', 'listen_port': 20001, 'target_ip': '1.1.1.1', 'target_port': 443}
         for ip in ('127.0.0.1', '10.0.0.1', '169.254.169.254', '100.64.0.1', '224.0.0.1', '0.0.0.0', '192.168.1.1', 'example.org', '::ffff:1.1.1.1', '2606:4700::1111'):

@@ -18,11 +18,15 @@ def run(*command, **kwargs):
     result = subprocess.run(command, capture_output=True, text=True, **kwargs)
     if result.returncode:
         print(result.stderr[-2000:], file=sys.stderr)
+        log = Path('/var/log/relay-test.log')
+        if log.exists(): print(log.read_text()[-2500:], file=sys.stderr)
         result.check_returncode()
     return result
 
 
-def inside(source, sandbox):
+def inside(source, sandbox, api_port=None, occupy_default=False):
+    os.umask(0o022)
+    expected_port = api_port or (9444 if occupy_default else 9443)
     sandbox.chmod(0o755)
     run('mount', '--make-rprivate', '/')
     for name in ('usr', 'dev', 'etc/ssl'):
@@ -80,6 +84,7 @@ esac
 import grp, os, pwd, signal, subprocess, sys, time
 from pathlib import Path
 pid = Path('/run/relay-test.pid')
+if sys.argv[1] == 'is-active': sys.exit(0 if pid.exists() else 3)
 if sys.argv[1] in ('restart', 'disable'):
     if pid.exists():
         try: os.kill(int(pid.read_text()), signal.SIGTERM)
@@ -99,6 +104,10 @@ if sys.argv[1] in ('restart', 'disable'):
     os.chroot(sandbox)
     os.chdir('/')
     os.environ['PATH'] = '/qa/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+    import socket
+    blocker = None
+    if occupy_default:
+        blocker = socket.socket(); blocker.bind(('0.0.0.0', 9443)); blocker.listen()
     bootstrap = '/qa/source/install.sh'
     for edition in (('light', 'pro') if selector else ()):
         run('bash', bootstrap, '--edition', edition, '--domain', 'panel.example.com')
@@ -107,27 +116,29 @@ if sys.argv[1] in ('restart', 'disable'):
     bad = subprocess.run(['bash', bootstrap, *arguments, '--public-ip', '127.0.0.1'],
                          capture_output=True, text=True)
     assert bad.returncode != 0 and not Path('/etc/vps-control-relay-agent').exists()
-    result = run('bash', bootstrap, *arguments)
+    result = run('bash', bootstrap, *arguments, *(['--api-port', str(api_port)] if api_port else []))
     config_root = Path('/etc/vps-control-relay-agent')
     config = json.loads((config_root / 'config.json').read_text())
     connection = json.loads(run('python3', '/usr/local/lib/vps-control-relay-agent/credentials.py').stdout)
-    assert connection['agent_url'] == 'https://8.8.8.8:9443'
+    assert connection['agent_url'] == f'https://8.8.8.8:{expected_port}'
+    assert config['api_port'] == expected_port
+    if blocker: assert blocker.getsockname()[1] == 9443
     assert connection['token'] in result.stdout
     assert connection['certificate_sha256'] == hashlib.sha256(ssl.PEM_cert_to_DER_cert((config_root / 'server.crt').read_text())).hexdigest()
     assert config['token_sha256'] == hashlib.sha256(connection['token'].encode()).hexdigest()
     firewall = Path('/qa/ufw-calls').read_text()
-    assert all(rule in firewall for rule in ('9443/tcp', '20000:20999/tcp', '20000:20999/udp'))
+    assert all(rule in firewall for rule in (f'{expected_port}/tcp', '20000:20999/tcp', '20000:20999/udp'))
     assert (config_root / 'token').stat().st_mode & 0o777 == 0o600
     assert (config_root / 'server.key').stat().st_mode & 0o777 == 0o640
     context = ssl.create_default_context(cafile=str(config_root / 'server.crt'))
-    request = Request('https://127.0.0.1:9443/v1/status', headers={'Authorization': 'Bearer ' + connection['token']})
+    request = Request(f'https://127.0.0.1:{expected_port}/v1/status', headers={'Authorization': 'Bearer ' + connection['token']})
     with urlopen(request, context=context, timeout=5) as response: assert response.status == 200
     from urllib.error import HTTPError
-    try: urlopen('https://127.0.0.1:9443/v1/status', context=context, timeout=5)
+    try: urlopen(f'https://127.0.0.1:{expected_port}/v1/status', context=context, timeout=5)
     except HTTPError as error: assert error.code == 401
     else: raise AssertionError('Unauthenticated request was accepted')
     route = {'transport': 'tcp', 'listen_port': 20001, 'target_ip': '1.1.1.1', 'target_port': 443}
-    create = Request('https://127.0.0.1:9443/v1/routes/smoke', data=json.dumps(route).encode(), method='PUT',
+    create = Request(f'https://127.0.0.1:{expected_port}/v1/routes/smoke', data=json.dumps(route).encode(), method='PUT',
         headers={'Authorization': 'Bearer ' + connection['token'], 'If-Match': '0', 'Content-Type': 'application/json'})
     with urlopen(create, context=context, timeout=5) as response: assert response.status == 200
     before = {name: (config_root / name).read_bytes() for name in ('token', 'server.crt', 'server.key')}
@@ -164,14 +175,18 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('source', type=Path)
     parser.add_argument('--inside', type=Path)
+    parser.add_argument('--api-port', type=int)
+    parser.add_argument('--occupy-default', action='store_true')
     options = parser.parse_args()
     if options.inside:
-        inside(options.source.resolve(), options.inside.resolve())
+        inside(options.source.resolve(), options.inside.resolve(), options.api_port, options.occupy_default)
     else:
         if os.geteuid() != 0: raise SystemExit('Run as root; this test uses isolated namespaces')
         with tempfile.TemporaryDirectory(prefix='relay-clean-smoke-') as folder:
             result = subprocess.run(['unshare', '--mount', '--net', '--pid', '--fork',
-                'python3', str(Path(__file__).resolve()), str(options.source.resolve()), '--inside', folder],
+                'python3', str(Path(__file__).resolve()), str(options.source.resolve()), '--inside', folder,
+                *(['--api-port', str(options.api_port)] if options.api_port else []),
+                *(['--occupy-default'] if options.occupy_default else [])],
                 capture_output=True, text=True, timeout=90)
             if result.returncode:
                 # Never print captured installer output: it can contain a generated token.

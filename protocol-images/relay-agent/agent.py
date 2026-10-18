@@ -14,7 +14,7 @@ import ssl
 import tempfile
 import time
 
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -356,7 +356,10 @@ class Agent:
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
         for signum in (signal.SIGTERM, signal.SIGINT): loop.add_signal_handler(signum, stop.set)
-        server = await asyncio.start_server(self.http_client, self.listen_host, API_PORT, ssl=context,
+        port = self.settings().get('api_port', API_PORT)
+        if type(port) is not int or not 1024 <= port <= 65535 or PORT_MIN <= port <= PORT_MAX:
+            raise RelayError('Invalid Relay API port')
+        server = await asyncio.start_server(self.http_client, self.listen_host, port, ssl=context,
                                             ssl_handshake_timeout=5, limit=8192)
         async with server:
             await stop.wait()

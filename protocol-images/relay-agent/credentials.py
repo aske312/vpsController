@@ -10,7 +10,10 @@ def connection(root):
     root = Path(root)
     config = json.loads((root / 'config.json').read_text())
     certificate = ssl.PEM_cert_to_DER_cert((root / 'server.crt').read_text())
-    return {'api_version': 1, 'agent_url': f"https://{config['public_ip']}:9443",
+    port = config.get('api_port', 9443)
+    if type(port) is not int or not 1024 <= port <= 65535 or 20000 <= port <= 20999:
+        raise ValueError('Invalid Relay API port')
+    return {'api_version': 1, 'agent_url': f"https://{config['public_ip']}:{port}",
             'certificate_sha256': hashlib.sha256(certificate).hexdigest(),
             'token': (root / 'token').read_text().strip()}
 

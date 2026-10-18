@@ -23,7 +23,8 @@ class RelayClient:
         address = ipaddress.ip_address(url.hostname)
         if not address.is_global or address.version != 4:
             raise ValueError('Expected a public IPv4 agent address')
-        if url.port != 9443: raise ValueError('Expected agent port 9443')
+        if url.port is None or not 1024 <= url.port <= 65535 or 20000 <= url.port <= 20999:
+            raise ValueError('Expected an explicit Relay API port outside the route range')
         if not re.fullmatch(r'[0-9a-fA-F]{64}', certificate_sha256): raise ValueError('Invalid certificate fingerprint')
         if not re.fullmatch(r'[a-zA-Z0-9_-]{40,128}', token): raise ValueError('Invalid agent token')
         self.host, self.port, self.token = str(address), url.port, token

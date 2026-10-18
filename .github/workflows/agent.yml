@@ -26,4 +26,7 @@ jobs:
           python3 tests/relay_standalone_test.py
           python3 tests/relay_agent_test.py
       - name: Install twice in isolated namespaces without a panel
-        run: sudo python3 tests/relay_standalone_smoke.py .
+        run: |
+          sudo python3 tests/relay_standalone_smoke.py .
+          sudo python3 tests/relay_standalone_smoke.py . --occupy-default
+          sudo python3 tests/relay_standalone_smoke.py . --api-port 19443

@@ -6,10 +6,11 @@ BRANCH="${VPS_CONTROL_BRANCH:-agent}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR=""
 PUBLIC_IP=""
+API_PORT=""
 cleanup() { [[ -z "${WORK_DIR}" ]] || rm -rf -- "${WORK_DIR}"; }
 trap cleanup EXIT
 usage() {
-  printf 'Установка 312node.net Relay Agent без панели: bash install-agent.sh [--public-ip IPv4]\n'
+  printf 'Установка 312node.net Relay Agent без панели: bash install-agent.sh [--public-ip IPv4] [--api-port PORT]\n'
 }
 while (($#)); do
   case "$1" in
@@ -17,10 +18,18 @@ while (($#)); do
       [[ $# -ge 2 ]] || { usage >&2; exit 2; }
       PUBLIC_IP="$2"; shift 2 ;;
     --public-ip=*) PUBLIC_IP="${1#*=}"; shift ;;
+    --api-port)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      API_PORT="$2"; shift 2 ;;
+    --api-port=*) API_PORT="${1#*=}"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Неизвестный параметр: %s\n' "$1" >&2; exit 2 ;;
   esac
 done
+if [[ -n "${API_PORT}" ]] && { [[ ! "${API_PORT}" =~ ^[0-9]{1,5}$ ]] || (( 10#${API_PORT} < 1024 || 10#${API_PORT} > 65535 || (10#${API_PORT} >= 20000 && 10#${API_PORT} <= 20999) )); }; then
+  printf 'Invalid Relay API port. Use 1024-65535 outside 20000-20999.\n' >&2
+  exit 2
+fi
 [[ ${EUID} -eq 0 ]] || { printf 'Установщик необходимо запустить от root.\n' >&2; exit 1; }
 command -v apt-get >/dev/null || { printf 'Требуется ОС с apt-get (Debian/Ubuntu).\n' >&2; exit 1; }
 export DEBIAN_FRONTEND=noninteractive
@@ -57,7 +66,7 @@ if [[ ! -f "${SOURCE}/install.sh" || ! -f "${SOURCE}/agent.py" || ! -f "${SOURCE
   SOURCE="${candidates[0]}"
 fi
 printf 'Устанавливаем 312node.net Relay Agent для %s…\n' "${PUBLIC_IP}"
-RELAY_PUBLIC_IP="${PUBLIC_IP}" bash "${SOURCE}/install.sh"
+RELAY_PUBLIC_IP="${PUBLIC_IP}" RELAY_API_PORT="${API_PORT}" bash "${SOURCE}/install.sh"
 printf '\nДанные для добавления в изолированную сеть (сохраните токен):\n'
 python3 /usr/local/lib/vps-control-relay-agent/credentials.py
 printf '\nПовторно показать: python3 /usr/local/lib/vps-control-relay-agent/credentials.py\n'

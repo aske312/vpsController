@@ -11,8 +11,58 @@ if ! command -v openssl >/dev/null || ! command -v python3 >/dev/null || ! comma
   apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl openssl python3
 fi
 # Validate before changing services or firewall. Reinstall preserves identity and routes.
+API_PORT="$(python3 - "${ROOT}/config.json" "${ENV_FILE:-/etc/vps-control.env}" <<'PY_PORT'
+import json, os, shlex, socket, subprocess, sys
+from pathlib import Path
+path, env_path = map(Path, sys.argv[1:])
+config = json.loads(path.read_text()) if path.exists() else {}
+values = {}
+for line in (env_path.read_text().splitlines() if env_path.exists() else []):
+    if '=' in line and not line.lstrip().startswith('#'):
+        key, value = line.split('=', 1)
+        parsed = shlex.split(value)
+        values[key] = parsed[0] if parsed else ''
+reserved = {int(values.get(name, '0') or '0') for name in ('AWG_PORT', 'HYSTERIA2_PORT', 'TUIC_PORT', 'XRAY_PORT', 'HTTP_PORT')}
+ranges = []
+for token in values.get('HYSTERIA2_PORTS', '').split(','):
+    bounds = token.split('-')
+    if all(item.isdigit() for item in bounds): ranges.append((int(bounds[0]), int(bounds[-1])))
+data_dir = Path(values.get('DATA_DIR', '/var/lib/vps-control'))
+for folder in [data_dir / 'awg-ports', *list((data_dir / 'protocol-ports').glob('*'))]:
+    for entry in folder.glob('*.json'):
+        port = json.loads(entry.read_text()).get('port', 0)
+        if type(port) is not int: raise SystemExit('Invalid protocol port reservation')
+        reserved.add(port)
+requested = os.environ.get('RELAY_API_PORT')
+previous = config.get('api_port', 9443) if path.exists() else None
+managed_active = subprocess.run(['systemctl', 'is-active', '--quiet', 'vps-control-relay-agent.service']).returncode == 0
+if managed_active and not path.exists(): raise SystemExit('Active Relay Agent has no saved identity')
+candidates = [requested] if requested else [previous] if previous is not None else range(9443, 9500)
+for port in candidates:
+    if isinstance(port, str) and port.isascii() and port.isdigit(): port = int(port)
+    if type(port) is not int or not 1024 <= port <= 65535 or 20000 <= port <= 20999:
+        raise SystemExit('Relay API port must be 1024-65535 outside 20000-20999')
+    if port in reserved or any(low <= port <= high for low, high in ranges):
+        if requested or previous is not None: raise SystemExit(f'Relay API port {port} conflicts with a configured component')
+        continue
+    if port == previous and managed_active:
+        print(port)
+        break
+    with socket.socket() as probe:
+        try: probe.bind(('0.0.0.0', port))
+        except OSError:
+            if requested or previous is not None: raise SystemExit(f'Relay API port {port} is already occupied; saved identity was not changed')
+            continue
+    print(port)
+    break
+else:
+    raise SystemExit('No free Relay API port in 9443-9499; use --api-port PORT')
+PY_PORT
+)"
+export RELAY_API_PORT="${API_PORT}"
+
 python3 - "${ENV_FILE:-/etc/vps-control.env}" <<'PY'
-import ipaddress, json, os, shlex, socket, sys
+import ipaddress, json, os, shlex, socket, subprocess, sys
 from pathlib import Path
 values = {}
 env_path = Path(sys.argv[1])
@@ -22,6 +72,7 @@ for line in (env_path.read_text().splitlines() if env_path.exists() else []):
         parsed = shlex.split(value)
         values[key] = parsed[0] if parsed else ''
 ip = os.environ.get('RELAY_PUBLIC_IP') or values.get('PUBLIC_IP', '')
+api_port = int(os.environ["RELAY_API_PORT"])
 address = ipaddress.ip_address(ip)
 if address.version != 4 or not address.is_global:
     raise SystemExit('Relay Agent requires a public IPv4 address')
@@ -30,25 +81,27 @@ if config_path.exists() and json.loads(config_path.read_text())['public_ip'] != 
     raise SystemExit('Relay Agent public IP differs from its existing identity; refusing to reuse the certificate')
 for name in ('AWG_PORT', 'HYSTERIA2_PORT', 'TUIC_PORT', 'XRAY_PORT', 'HTTP_PORT'):
     port = int(values.get(name, '0') or '0')
-    if port == 9443 or 20000 <= port <= 20999:
+    if port == api_port or 20000 <= port <= 20999:
         raise SystemExit('Relay port range conflicts with an existing component: '+name)
 for token in values.get('HYSTERIA2_PORTS', '').split(','):
     bounds = token.split('-')
     if all(item.isdigit() for item in bounds):
         low, high = int(bounds[0]), int(bounds[-1])
-        if low <= 9443 <= high or low <= 20999 and high >= 20000:
+        if low <= api_port <= high or low <= 20999 and high >= 20000:
             raise SystemExit('Relay port range conflicts with Hysteria2 listeners')
 data_dir = Path(values.get('DATA_DIR', '/var/lib/vps-control'))
 for folder in [data_dir / 'awg-ports', *list((data_dir / 'protocol-ports').glob('*'))]:
     for path in folder.glob('*.json'):
         try: port = int(json.loads(path.read_text()).get('port', 0))
         except (ValueError, TypeError): raise SystemExit('Invalid protocol port reservation')
-        if port == 9443 or 20000 <= port <= 20999:
+        if port == api_port or 20000 <= port <= 20999:
             raise SystemExit('Relay port range conflicts with an existing protocol alias')
-if not Path('/etc/systemd/system/vps-control-relay-agent.service').exists():
+previous = json.loads(config_path.read_text()).get('api_port', 9443) if config_path.exists() else None
+managed_active = subprocess.run(['systemctl', 'is-active', '--quiet', 'vps-control-relay-agent.service']).returncode == 0
+if previous != api_port or not managed_active:
     sock = socket.socket()
-    try: sock.bind(('0.0.0.0', 9443))
-    except OSError: raise SystemExit('Relay API port 9443 is already occupied')
+    try: sock.bind(('0.0.0.0', api_port))
+    except OSError: raise SystemExit(f'Relay API port {api_port} is already occupied')
     finally: sock.close()
 PY
 getent group vps-relay >/dev/null || groupadd --system vps-relay
@@ -87,7 +140,7 @@ for address in addresses:
     except ValueError: pass
 config = root / 'config.json'
 temporary = root / 'config.json.new'
-temporary.write_text(json.dumps({'token_sha256': hashlib.sha256(token.encode()).hexdigest(), 'own_ips': sorted(own_ips), 'public_ip': ip}))
+temporary.write_text(json.dumps({'token_sha256': hashlib.sha256(token.encode()).hexdigest(), 'own_ips': sorted(own_ips), 'public_ip': ip, 'api_port': int(os.environ['RELAY_API_PORT'])}))
 os.chown(temporary, 0, gid); os.chmod(temporary, 0o640); os.replace(temporary, config)
 for name in ('server.crt', 'server.key'):
     os.chown(root / name, 0, gid); os.chmod(root / name, 0o640)
@@ -134,9 +187,9 @@ systemctl restart vps-control-relay-agent.service
 for attempt in {1..20}; do
   if curl --silent --fail --cacert "${ROOT}/server.crt" --max-time 2 \
     --config <(printf 'header = "Authorization: Bearer %s"\n' "$(cat "${ROOT}/token")") \
-    https://127.0.0.1:9443/v1/status >/dev/null; then
+    "https://127.0.0.1:${API_PORT}/v1/status" >/dev/null; then
     if command -v ufw >/dev/null; then
-      ufw allow 9443/tcp comment 'vps-control relay API'
+      ufw allow "${API_PORT}/tcp" comment 'vps-control relay API'
       ufw allow 20000:20999/tcp comment 'vps-control relay TCP'
       ufw allow 20000:20999/udp comment 'vps-control relay UDP'
     fi
