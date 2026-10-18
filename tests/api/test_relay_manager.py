@@ -307,6 +307,107 @@ class RelayManagementTests(unittest.TestCase):
         self.assertFalse(self.control.pending.exists())
         self.assertEqual(sum(method == 'DELETE' for method, _ in self.agent.calls), 1)
 
+    def unknown_put(self):
+        original = self.agent.request
+        def lost_before_apply(method, path, *args, **kwargs):
+            if method == 'PUT':
+                self.agent.calls.append((method, path))
+                raise TimeoutError('lost before apply')
+            return original(method, path, *args, **kwargs)
+        with patch.object(self.agent, 'request', side_effect=lost_before_apply), self.assertRaises(OperationConflict):
+            self.control.mutate_route(self.payload(), 'b'*32)
+        return json.loads(self.control.pending.read_text())
+
+    def test_explicit_resume_recovers_absent_put_with_exact_original_identity(self):
+        intent = self.unknown_put()
+        with patch.object(self.agent, 'request', wraps=self.agent.request) as request:
+            self.control.resume('b'*32)
+        writes = [call for call in request.call_args_list if call.args[0] == 'PUT']
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0].args[1], '/v1/routes/'+intent['route']['id'])
+        self.assertEqual(writes[0].kwargs['revision'], intent['agent_revision'])
+        self.assertEqual(self.control.read()['routes'][0]['id'], intent['route']['id'])
+        self.assertFalse(self.control.pending.exists())
+
+    def test_resume_readback_finds_delayed_apply_without_another_write(self):
+        intent = self.unknown_put()
+        self.agent.request('PUT', '/v1/routes/'+intent['route']['id'], {key:intent['route'][key] for key in ('transport','listen_port','target_ip','target_port')}, revision=0)
+        self.agent.calls.clear()
+        self.control.resume('b'*32)
+        self.assertTrue(all(method == 'GET' for method, _ in self.agent.calls))
+        self.assertFalse(self.control.pending.exists())
+
+    def test_resume_does_not_rebase_over_changed_revision_or_replay_deleted_intent(self):
+        self.unknown_put()
+        self.agent.revision = 1
+        self.agent.calls.clear()
+        with self.assertRaises(OperationConflict):
+            self.control.resume('b'*32)
+        self.assertFalse(self.control.pending.exists())
+        self.assertTrue(all(method == 'GET' for method, _ in self.agent.calls))
+        with self.assertRaises(OperationConflict):
+            self.control.resume('b'*32)
+
+    def test_resume_keeps_unknown_on_another_lost_reply_and_never_loops(self):
+        self.unknown_put()
+        self.agent.request = Mock(side_effect=[{'revision':0,'items':[]}, TimeoutError('lost'), {'revision':0,'items':[]}])
+        with self.assertRaises(OperationConflict):
+            self.control.resume('b'*32)
+        self.assertEqual([call.args[0] for call in self.agent.request.call_args_list], ['GET','PUT','GET'])
+        self.assertTrue(self.control.pending.exists())
+
+    def test_resume_rejects_wrong_intent_offline_drift_and_regressed_revision(self):
+        intent = self.unknown_put()
+        self.agent.calls.clear()
+        with self.assertRaises(OperationConflict):
+            self.control.resume('c'*32)
+        self.assertEqual(self.agent.calls, [])
+        self.agent.offline = True
+        with self.assertRaises(OSError):
+            self.control.resume('b'*32)
+        self.agent.offline = False
+        self.agent.items = [{**intent['route'], 'target_port':444, 'state':'listening', 'target_verified':False}]
+        with self.assertRaises(OperationConflict):
+            self.control.resume('b'*32)
+        self.assertTrue(self.control.pending.exists())
+
+    def test_resume_error_does_not_treat_retry_rejection_as_original_rejection(self):
+        self.unknown_put()
+        self.agent.reject = True
+        with self.assertRaises(OperationConflict):
+            self.control.resume('b'*32)
+        intent = json.loads(self.control.pending.read_text())
+        self.assertFalse(intent['rejected'])
+        self.assertEqual(intent['last_error'], 'agent_http_409')
+        public = self.control.public(probe=False)
+        self.assertEqual(public['recovery']['host_id'], self.host_id)
+        self.assertNotIn(TOKEN, json.dumps(public))
+
+    def test_resume_delete_is_explicit_and_uses_original_revision(self):
+        self.control.mutate_route(self.payload(), 'a'*32)
+        original = self.agent.request
+        with patch.object(self.agent, 'request', side_effect=lambda method,path,*args,**kwargs: (_ for _ in ()).throw(TimeoutError()) if method == 'DELETE' else original(method,path,*args,**kwargs)):
+            with self.assertRaises(OperationConflict):
+                self.control.mutate_route({**self.payload(),'route_id':'pro-'+'a'*32}, 'b'*32, delete=True)
+        self.agent.calls.clear()
+        self.control.resume('b'*32)
+        self.assertEqual(sum(method == 'DELETE' for method,_ in self.agent.calls), 1)
+        self.assertEqual(self.control.read()['routes'], [])
+        self.assertFalse(self.control.pending.exists())
+
+    def test_resume_refuses_agent_revision_rollback_and_origin_change(self):
+        intent = self.unknown_put()
+        intent['agent_revision'] = 2
+        self.control.pending.write_text(json.dumps(intent))
+        with self.assertRaises(OperationConflict):
+            self.control.resume('b'*32)
+        self.assertTrue(self.control.pending.exists())
+        self.control.origin = '1.1.1.1'
+        self.agent.calls.clear()
+        with self.assertRaises(OperationConflict):
+            self.control.resume('b'*32)
+        self.assertEqual(self.agent.calls, [])
+
     def test_rejected_write_is_confirmed_absent_and_does_not_claim_success(self):
         self.agent.reject = True
         with self.assertRaises(OperationConflict):
@@ -484,7 +585,7 @@ class RelayAPITests(unittest.TestCase):
         endpoints = [('GET', '/network/relays'), ('GET', '/network/relays?view=inventory'), ('PUT', '/network/relays'), ('PUT', '/network/relays/reconnect'), ('DELETE', '/network/relays/id'),
                      ('POST', '/clients/relay'), ('GET', '/clients/relay/id'), ('POST', '/clients/relay/id/resume'),
                      ('POST', '/network/relays/id/routes'), ('DELETE', '/network/relays/id/routes/route?agent_revision=0'),
-                     ('POST', '/network/relays/reconcile'), ('POST', '/network/relays/id/routes/route/export'),
+                     ('POST', '/network/relays/reconcile'), ('POST', '/network/relays/resume'), ('POST', '/network/relays/id/routes/route/export'),
                      ('POST', '/network/relays/id/routes/route/check?consumer_id=direct:client')]
         for method, path in endpoints:
             with self.subTest(path=path):
@@ -580,6 +681,18 @@ class RelayAPITests(unittest.TestCase):
         with patch.object(api.subprocess, 'run', return_value=Mock(returncode=0)):
             response = self.client.post('/api/network/relays/reconcile', headers={'X-Operation-ID': 'e'*32})
         self.assertEqual(response.status_code, 202, response.text)
+
+    def test_explicit_resume_admission_is_validated_and_available_during_relay_recovery(self):
+        (self.root/'relay').mkdir()
+        (self.root/'relay/pending.json').write_text('{}')
+        api.app.dependency_overrides[api.require_token] = lambda: None
+        self.assertEqual(self.client.post('/api/network/relays/resume', json={'pending_operation_id':'invalid'}).status_code, 422)
+        with patch.object(api.subprocess, 'run', return_value=Mock(returncode=0)):
+            response = self.client.post('/api/network/relays/resume', json={'pending_operation_id':'b'*32}, headers={'X-Operation-ID':'f'*32})
+        self.assertEqual(response.status_code, 202, response.text)
+        require_recovery_clear(self.root, 'relay-resume')
+        with self.assertRaises(OperationConflict):
+            require_recovery_clear(self.root, 'relay-host-save')
 
 
 if __name__ == '__main__':

@@ -30,6 +30,10 @@ class RelayRouteSettings(BaseModel):
     agent_revision: int = Field(strict=True, ge=0)
 
 
+class RelayRecoverySettings(BaseModel):
+    pending_operation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+
+
 class RelayExportRequest(BaseModel):
     config: str = Field(min_length=1, max_length=262144)
 

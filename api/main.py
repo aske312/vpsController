@@ -89,6 +89,7 @@ from schemas import (
     ProtocolSettingsUpdate,
     RelayHostSettings,
     RelayRouteSettings,
+    RelayRecoverySettings,
     RelayExportRequest,
     RelayClientCreate,
     RelayClientResume,
@@ -2713,7 +2714,7 @@ def start_relay_mutation(name, payload, identity):
         identity = application_operation.operation_id(identity)
         with application_operation.locked(DATA_DIR):
             if not application_operation.read(DATA_DIR / 'operations' / f'{identity}.json'):
-                if name != 'relay-reconcile':
+                if name not in ('relay-reconcile', 'relay-resume'):
                     if name != 'relay-reconnect':
                         relay_control().require_clear()
                     relay_control().checked(payload['expected_revision'])
@@ -2757,6 +2758,11 @@ def delete_relay_route(host_id: str, route_id: str, agent_revision: int, _: None
 @app.post('/api/network/relays/reconcile', status_code=202)
 def reconcile_relay(_: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
     return start_relay_mutation('relay-reconcile', {}, operation_id)
+
+
+@app.post('/api/network/relays/resume', status_code=202)
+def resume_relay(payload: RelayRecoverySettings, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
+    return start_relay_mutation('relay-resume', payload.model_dump(), operation_id)
 
 
 @app.post('/api/clients/relay', status_code=202, dependencies=[Depends(require_mutation_admission)])

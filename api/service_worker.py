@@ -80,6 +80,9 @@ def apply_relay_request(api, name, path, digest, identity):
         control.mutate_route(payload, identity, delete=True)
     elif name == 'relay-reconcile':
         control.reconcile()
+    elif name == 'relay-resume':
+        settings = api.RelayRecoverySettings.model_validate(payload)
+        control.resume(settings.pending_operation_id)
     elif name == 'relay-route-check':
         api.perform_relay_probe(payload)
     elif name in ('relay-client-create', 'relay-client-resume'):

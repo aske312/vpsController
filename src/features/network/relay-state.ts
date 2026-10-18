@@ -15,6 +15,7 @@ export type RelayStatus = {
   revision: string; hosts: RelayHost[]; pending: boolean; origin_ip: string; origin_hosts: string[];
   targets: { transport: "tcp" | "udp"; port: number }[];
   consumers?: { id: string; label: string }[];
+  recovery?: { operation_id: string; host_id: string; action: "put" | "delete"; transport: "tcp" | "udp"; listen_port: number; target_ip: string; target_port: number; error: string };
 };
 export type RelayClientResult = ClientExport;
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -29,6 +30,14 @@ export function relaySnapshot(value: unknown): RelayStatus {
     || value.hosts.length > 8 || typeof value.pending !== "boolean" || typeof value.origin_ip !== "string" || !Array.isArray(value.origin_hosts) || value.origin_hosts.some(host => typeof host !== "string")
     || !Array.isArray(value.targets) || value.targets.some(target => !object(target) || !["tcp", "udp"].includes(String(target.transport)) || !integer(target.port, 1, 65535))) return invalid();
   const ids = new Set<string>();
+  if (value.recovery !== undefined) {
+    const recovery = value.recovery;
+    if (!value.pending || !object(recovery) || typeof recovery.operation_id !== "string" || !/^[0-9a-f]{32}$/.test(recovery.operation_id)
+      || typeof recovery.host_id !== "string" || !/^[0-9a-f]{32}$/.test(recovery.host_id) || !["put", "delete"].includes(String(recovery.action))
+      || !["tcp", "udp"].includes(String(recovery.transport)) || !integer(recovery.listen_port, 20000, 20999)
+      || typeof recovery.target_ip !== "string" || !integer(recovery.target_port, 1, 65535)
+      || typeof recovery.error !== "string" || !/^(response_unknown|agent_http_\d{3})$/.test(recovery.error)) return invalid();
+  }
   for (const host of value.hosts) {
     if (!object(host) || typeof host.id !== "string" || !/^[0-9a-f]{32}$/.test(host.id) || ids.has(host.id) || typeof host.name !== "string"
       || typeof host.agent_url !== "string" || !/^https:\/\/[\d.]+:9443\/?$/.test(host.agent_url) || typeof host.certificate_sha256 !== "string" || !/^[0-9a-fA-F]{64}$/.test(host.certificate_sha256)

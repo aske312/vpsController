@@ -30,3 +30,10 @@ test('automatic client delivery requires a complete native result and valid vari
   for (const client_address of [null, {}, '', 'a'.repeat(254)]) assert.throws(() => relaySnapshot({ ...status, hosts: [{ ...host, client_address }] }));
   assert.equal(relaySnapshot({ ...status, hosts: [{ ...host, client_address: 'relay.example' }] }).hosts[0].client_address, 'relay.example');
 });
+
+test('recovery metadata names the exact pending Relay without exposing credentials', () => {
+  const recovery = { operation_id:'e'.repeat(32),host_id:host.id,action:'put',transport:'udp',listen_port:20001,target_ip:status.origin_ip,target_port:51831,error:'response_unknown' };
+  assert.equal(relaySnapshot({...status,pending:true,recovery}).recovery.host_id,host.id);
+  for (const changed of [{operation_id:''},{action:'replay'},{listen_port:22},{error:'raw secret'}]) assert.throws(()=>relaySnapshot({...status,pending:true,recovery:{...recovery,...changed}}));
+  assert.throws(()=>relaySnapshot({...status,pending:false,recovery}));
+});

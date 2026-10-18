@@ -1,6 +1,6 @@
 """PRO-owned relay hosts and durable remote intents, separate from legacy DNS routes.
 
-Never replay an uncertain mutation. Reconciliation only reads the exact remote ID
+Never automatically replay an uncertain mutation. Reconciliation reads the exact remote ID
 and commits its observed outcome. Foreign routes are visible but never adopted.
 """
 from __future__ import annotations
@@ -294,11 +294,16 @@ class RelayManager:
             intent['acknowledged'] = True
         except AgentAPIError as exc:
             intent['rejected'] = exc.status in (401, 409, 422, 428, 495)
+            intent['last_error'] = f'agent_http_{exc.status}'
         except Exception:
             # The response can be lost after apply; resolve by read, never replay.
-            pass
+            intent['last_error'] = 'response_unknown'
         atomic_json(self.pending, intent)
         return self.reconcile()
+
+    def resume(self, operation_id):
+        from relay_recovery import resume_intent
+        return resume_intent(self, operation_id)
 
     def reconcile(self):
         if not self.pending.exists():
@@ -317,6 +322,11 @@ class RelayManager:
         if found and not same_route(found, route):
             raise OperationConflict('Маршрут агента не совпадает с сохранённым намерением; требуется проверка владельцем')
         applied = (found is None) if intent['action'] == 'delete' else (found is not None)
+        if (not applied and type(intent.get('agent_revision')) is int
+                and remote['revision'] > intent['agent_revision']):
+            # The agent serializes mutations and requires the original If-Match.
+            # An absent result plus an advanced revision fences a delayed request.
+            intent['rejected'] = True
         if not applied and not intent.get('rejected'):
             raise OperationConflict('Результат relay пока неизвестен; сохранённое намерение оставлено для повторного чтения без отправки команды')
         if applied:
@@ -333,6 +343,12 @@ class RelayManager:
     def public(self, *, probe=True):
         registry = self.read()
         result = {'revision': registry['revision'], 'hosts': [], 'pending': self.pending.exists(), 'origin_ip': self.origin}
+        if result['pending']:
+            intent = json.loads(self.pending.read_text(encoding='utf-8'))
+            route = intent['route']
+            result['recovery'] = {key: route[key] for key in ('host_id', 'transport', 'listen_port', 'target_ip', 'target_port')}
+            result['recovery'].update(operation_id=intent['operation_id'], action=intent['action'],
+                                      error=intent.get('last_error', 'response_unknown'))
 
         def observe(host):
             public = {key: host[key] for key in ('id', 'name', 'agent_url', 'certificate_sha256', 'api_version')}

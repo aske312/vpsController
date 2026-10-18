@@ -28,6 +28,7 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
   const [connection, setConnection] = useState("");
   const [edit, setEdit] = useState<RelayHost | null>(null);
   const [confirmation, setConfirmation] = useState<RelayHost | null>(null);
+  const [recoveryConfirmation, setRecoveryConfirmation] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const generation = useRef(0);
   const inFlight = useRef<{ controller: AbortController; run: number } | null>(null);
@@ -118,7 +119,7 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
   }
   return {
     status, failed, reading, locked, load, submit, dialog, embedded, name, address, connection, edit, changed, discard, confirmation,
-    openHost, close, resetDialog, saveHost, removeConfirmed, setDiscard, setConfirmation,
+    openHost, close, resetDialog, saveHost, removeConfirmed, setDiscard, setConfirmation, recoveryConfirmation, setRecoveryConfirmation,
     changeName: (value: string) => { setName(value); setChanged(true); },
     changeAddress: (value: string) => { setAddress(value); setChanged(true); },
     changeConnection: (value: string) => { setConnection(value); setChanged(true); },
@@ -127,17 +128,25 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
 export type RelayControl = ReturnType<typeof useNetworkRelays>;
 
 export function NetworkRelayNotice({ relay }: { relay: RelayControl }) {
+  const recovery = relay.status?.recovery;
+  const host = relay.status?.hosts.find(item => item.id === recovery?.host_id);
   return <>
     {relay.failed && <p role="status" className="networkNotice">Relay UNKNOWN — обновление не удалось. Действия заблокированы до успешного чтения. <button disabled={relay.reading} onClick={() => void relay.load()}>Повторить чтение Relay</button></p>}
-    {relay.status?.pending && <div className="networkNotice" role="status"><strong>Результат изменения Relay не подтверждён.</strong><p>Проверка прочитает состояние агента без повторной отправки команды.</p><button disabled={relay.locked} onClick={() => void relay.submit("/network/relays/reconcile", { method: "POST" })}>Проверить результат операции</button></div>}
+    {relay.status?.pending && <div className="networkNotice" role="status"><strong>Результат изменения Relay не подтверждён{host ? ` · ${host.name} (${host.client_address || new URL(host.agent_url).hostname})` : ""}.</strong>
+      {recovery && <p>{recovery.action === "put" ? "Создание" : "Удаление"} {recovery.transport.toUpperCase()} {recovery.listen_port} → {recovery.target_ip}:{recovery.target_port}. {recovery.error === "response_unknown" ? "Ответ на команду не получен." : `Агент ответил HTTP ${recovery.error.replace("agent_http_", "")}.`}</p>}
+      <p>Проверка только прочитает состояние. Восстановление отдельно повторит сохранённую команду с тем же ID и ревизией, если результат ещё не подтверждён. После восстановления повторно сохраните настройки профиля.</p>
+      <button disabled={relay.locked} onClick={() => void relay.submit("/network/relays/reconcile", { method: "POST" })}>Проверить результат операции</button>
+      {recovery && <button disabled={relay.locked} onClick={() => relay.setRecoveryConfirmation(true)}>Восстановить пересылку</button>}
+    </div>}
   </>;
 }
 
 export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: RelayControl; query: string; expanded: string[]; onToggle: (key: string) => void }) {
   return <>{relay.status?.hosts.filter(item => relayMatches(item, query)).map(item => {
     const key = `relay-${item.id}`, open = expanded.includes(key), address = item.client_address || new URL(item.agent_url).hostname;
-    const unknown = relay.failed || relay.status?.pending || item.state !== "connected";
-    const summary = relayRouteSummary(item, relay.failed, relay.status?.pending, relay.reading);
+    const pending = Boolean(relay.status?.pending && (!relay.status.recovery || relay.status.recovery.host_id === item.id));
+    const unknown = relay.failed || pending || item.state !== "connected";
+    const summary = relayRouteSummary(item, relay.failed, pending, relay.reading);
     return <Fragment key={item.id}>
       <tr className={`networkRouteRow networkRelayRow${open ? " is-expanded" : ""}`}>
         <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true" /><span><strong>{address}</strong></span></button></td>
@@ -158,6 +167,10 @@ export function relayMatches(host: RelayHost, query: string) {
 export function NetworkRelayDialogs({ relay }: { relay: RelayControl }) {
   const dialogRef = useDialogFocus(relay.dialog && !relay.embedded, relay.close);
   return <>
+    {relay.recoveryConfirmation && relay.status?.recovery && <ConfirmationDialog request={{ title: "Восстановить пересылку Relay?", message: "Сначала будет прочитан точный маршрут. При необходимости повторится только сохранённая команда с прежними ID, параметрами и ревизией. Дубликат маршрута не создаётся; при изменении агента операция остановится. Настройки профиля затем нужно сохранить повторно.", confirmLabel: "Восстановить пересылку" }} onClose={confirmed => {
+      relay.setRecoveryConfirmation(false);
+      if (confirmed && !relay.locked && relay.status?.recovery) void relay.submit("/network/relays/resume", { method: "POST", body: JSON.stringify({ pending_operation_id: relay.status.recovery.operation_id }) });
+    }} />}
     {relay.dialog && !relay.embedded && <div className="networkModalBackdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) relay.close(); }}><section ref={dialogRef} tabIndex={-1} className="networkModal relayModal" role="dialog" aria-modal="true" aria-labelledby="relay-dialog-title">
       <header className="networkSectionHeading networkModalHeader"><div><p className="eyebrow networkSectionEyebrow">ROUTES · RELAY</p><h2 id="relay-dialog-title">{relay.edit ? "Подключение к Relay Agent" : "Подключить Relay Agent"}</h2></div><button className="networkModalClose" type="button" aria-label="Закрыть" onClick={relay.close}>×</button></header>
       <NetworkRelayForm relay={relay} />
