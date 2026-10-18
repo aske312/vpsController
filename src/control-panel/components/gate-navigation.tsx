@@ -118,7 +118,7 @@ function NavButton({
   onClick: () => void;
 }) {
   return (
-    <button type="button" className={`gateNavButton ${active ? "active" : ""} ${tone} ${compact ? "compact" : ""} ${badge ? "hasBadge" : ""}`} onClick={onClick}>
+    <button type="button" aria-label={label} aria-current={active ? "page" : undefined} title={label} className={`gateNavButton ${active ? "active" : ""} ${tone} ${compact ? "compact" : ""} ${badge ? "hasBadge" : ""}`} onClick={onClick}>
       <span className="gateNavGlyph"><NavGlyph name={icon} /></span>
       <b>{label}</b>
       {badge && <span className="gateNavBeta">{badge}</span>}

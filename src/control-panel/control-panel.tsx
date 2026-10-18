@@ -15,6 +15,7 @@ import QRCode from "qrcode";
 import { AccessReveal } from "../shared/components/access-reveal";
 import { endpointCheckReady, endpointSelectable } from "../shared/lib/network-readiness";
 import { ConfirmationDialog } from "../shared/components/confirmation-dialog";
+import { useDialogFocus } from "../shared/components/use-dialog-focus";
 import { LegalFooter } from "../shared/components/legal-footer";
 import { basicCredentials } from "../features/auth/basic-credentials";
 import { ProtocolIcon } from "../shared/components/protocol-icon";
@@ -1058,6 +1059,8 @@ export function ControlPanel() {
     setClientDialog(false); setGenerated(""); setGeneratedProfiles([]); setGeneratedQr(""); setGeneratedQrError("");
   }
 
+  const clientDialogRef = useDialogFocus<HTMLFormElement>(clientDialog && Boolean(token), closeClientDialog);
+
   function resetClientDialog() {
     setGenerated(""); setGeneratedProfiles([]); setGeneratedQr(""); setGeneratedQrError("");
   }
@@ -1612,6 +1615,11 @@ export function ControlPanel() {
   async function addClient(event: FormEvent) {
     event.preventDefault();
     if (clientCreationInFlight.current || nativeClient.pending || relayClient.pending) return;
+    const clientName = newClient.name.trim();
+    if (!/^[\p{L}\p{N}_. -]{2,48}$/u.test(clientName)) {
+      notifyError("Название устройства: от 2 до 48 символов — буквы, цифры, пробел, точка, дефис или _");
+      return;
+    }
     clientCreationInFlight.current = true;
     setBusy(true); setGenerated(""); setGeneratedQr(""); setGeneratedQrError("");
     if (!installedProtocols.includes(selectedClientProtocol)) {
@@ -1630,7 +1638,7 @@ export function ControlPanel() {
         channel_mode: selectedConnectionType.routeId ? "direct" as ClientChannelMode : selectedConnectionType.channelMode || "direct",
         ...(selectedConnectionType.routeId === "cdn" ? { cdn_domain: selectedCdnDomain || selectedVlessRoute?.available_domains?.[0] || "" } : {}),
       };
-      const payload = { ...newClient, protocol: selectedConnectionType.protocol, settings, ...(selectedConnectionType.routeId ? { vless_routes: [selectedConnectionType.routeId] } : {}) };
+      const payload = { ...newClient, name: clientName, protocol: selectedConnectionType.protocol, settings, ...(selectedConnectionType.routeId ? { vless_routes: [selectedConnectionType.routeId] } : {}) };
       if (settings.relay_host_id) {
         if (relayClient.pending || relayClient.sending) return;
         await relayClient.start(payload);
@@ -2076,7 +2084,7 @@ export function ControlPanel() {
         removeClient={removeClient}
       />}
       {clientDialog && <div className="confirmBackdrop" role="presentation" onMouseDown={closeClientDialog}>
-        <form className="connectionDialog addClient" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={addClient}>
+        <form ref={clientDialogRef} tabIndex={-1} className="connectionDialog addClient" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={addClient}>
           <header className="connectionDialogHead"><div><h2 id="connection-dialog-title">{generated ? "Подключение создано" : "Новое подключение"}</h2><p>{generated ? "Конфигурация готова к передаче на устройство." : "Укажите устройство и выберите протокол доступа."}</p></div><button className="connectionDialogClose" type="button" onClick={closeClientDialog}>Закрыть</button></header>
           {!generated ? <>
             <div className="connectionCreateBody">
@@ -2086,7 +2094,7 @@ export function ControlPanel() {
                 <p>Имя используется только в панели. После создания конфигурацию можно передать файлом или показать QR-код владельцу устройства.</p>
               </div>
               <div className="connectionForm">
-                <label>Название устройства<input autoFocus required minLength={2} maxLength={48} pattern="[\\p{L}\\p{N}_. -]{2,48}" title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов</small></label>
+                <label>Название устройства<input data-dialog-initial required minLength={2} maxLength={48} pattern={"[\\p{L}\\p{N}_. \\-]{2,48}"} title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов</small></label>
               </div>
               <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} aria-pressed={selectedConnectionType?.id === option.id} disabled={Boolean(option.unavailable)} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, channel_mode: option.channelMode || "direct", relay_host_id: option.protocol === "ikev2" || option.channelMode && option.channelMode !== "direct" ? "" : current.relay_host_id, cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name} <ProtocolHealthBadge health={protocolStatuses[option.protocol]?.health} /></strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
               {selectedConnectionType?.unavailable && <p role="status">{selectedConnectionType.unavailable} <button type="button" onClick={() => { void loadNetworkStatus(); if (selectedClientProtocol === "vless-reality-xhttp") void loadProtocolStatus(selectedClientProtocol); }}>Проверить маршруты</button></p>}

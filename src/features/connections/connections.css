@@ -554,6 +554,8 @@
 
 .connectionDialog {
   width: min(660px, calc(100vw - 32px)) !important;
+  max-width: 100%;
+  min-width: 0;
   padding: 0 !important;
   overflow: hidden;
   border: 1px solid rgba(91, 116, 141, .25) !important;

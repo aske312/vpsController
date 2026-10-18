@@ -1679,6 +1679,9 @@
 }
 
 [data-network-page] .networkBlockHeader > div:first-child { min-width: 0; }
+[data-network-page] .networkRoutesHeader { flex-wrap: wrap; }
+[data-network-page] .networkRoutesHeader .networkV2Actions { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+[data-network-page] .networkRoutesHeader .networkSearch { flex: 1 1 190px; min-width: 0; }
 [data-network-page] .networkSectionEyebrow { margin: 0; color: var(--dim); font: 700 10px/1 var(--technical-font); letter-spacing: .12em; text-transform: uppercase; }
 [data-network-page] .networkBlockHeader h2 { margin: 7px 0 0; color: var(--text); font-size: 22px; font-weight: 650; letter-spacing: -.035em; line-height: 1.1; }
 [data-network-page] .networkBlockHint { display: block; max-width: 70ch; margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
