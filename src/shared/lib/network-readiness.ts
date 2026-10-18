@@ -7,6 +7,15 @@ export function endpointCheckReady(check: NetworkEndpointCheck | undefined): boo
     && Number.isInteger(check.checked_revision) && check.checked_revision === check.desired_revision);
 }
 
+export function configuredCdnDomains(status: NetworkStatus | null | undefined): string[] {
+  const domains = Array.isArray(status?.domains) ? status.domains : [];
+  return [...new Set([
+    status?.transport_endpoints?.cdn_domain || "",
+    ...(Array.isArray(status?.transport_endpoints?.cdn_domains) ? status.transport_endpoints.cdn_domains : []),
+    ...domains.filter(domain => domain && (domain.endpoint_kind === "cdn" || typeof domain.role === "string" && /\bcdn\b/i.test(domain.role))).map(domain => domain.value),
+  ].filter((domain): domain is string => typeof domain === "string").map(domain => domain.trim().toLowerCase()).filter(Boolean))];
+}
+
 export function endpointSelectable(check: NetworkEndpointCheck | undefined): boolean {
   return Boolean(check?.selectable === true && check.binding_id && check.desired_revision
     && check.resolved.length);

@@ -7,7 +7,7 @@ import { useNotifier } from "../../shared/notifications/notification-center";
 import { SystemOperationUnknown, systemActionNeedsPolling } from "../../control-panel/system-operation";
 import type { SystemAction } from "../../shared/types/control-plane";
 import type { NetworkAdmission, NetworkRequest } from "./network-api";
-import { relayConnection, relaySnapshot, type RelayStatus, type RelayHost } from "./relay-state";
+import { relayAddresses, relayConnection, relaySnapshot, type RelayStatus, type RelayHost } from "./relay-state";
 import { NetworkRouteSummaryBadge } from "./network-route-badge";
 import { relayRouteSummary } from "./route-summary";
 import { RelayRouteDetails } from "./network-route-details";
@@ -142,14 +142,14 @@ export function NetworkRelayNotice({ relay }: { relay: RelayControl }) {
 }
 
 export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: RelayControl; query: string; expanded: string[]; onToggle: (key: string) => void }) {
-  return <>{relay.status?.hosts.filter(item => relayMatches(item, query)).map(item => {
-    const key = `relay-${item.id}`, open = expanded.includes(key), address = item.client_address || new URL(item.agent_url).hostname;
+  return <>{relay.status?.hosts.flatMap(item => relayAddresses(item).map((address, index) => ({ item, address, index }))).filter(({ item, address }) => relayAddressMatches(item, address, query)).map(({ item, address, index }) => {
+    const key = index === 0 ? `relay-${item.id}` : `relay-${item.id}-${address}`, open = expanded.includes(key);
     const pending = Boolean(relay.status?.pending && (!relay.status.recovery || relay.status.recovery.host_id === item.id));
     const unknown = relay.failed || pending || item.state !== "connected";
     const summary = relayRouteSummary(item, relay.failed, pending, relay.reading);
-    return <Fragment key={item.id}>
+    return <Fragment key={key}>
       <tr className={`networkRouteRow networkRelayRow${open ? " is-expanded" : ""}`}>
-        <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true" /><span><strong>{address}</strong></span></button></td>
+        <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true" /><span><strong>{address}</strong><small>{item.name}</small></span></button></td>
         <td><NetworkRouteSummaryBadge summary={summary} /></td>
         <td><span>{summary.type}</span></td>
         <td><span className="networkRouteConnection" title="Число настроенных перенаправлений. Состояние каждого порта — в подробностях.">{summary.connection}</span></td>
@@ -161,7 +161,11 @@ export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: 
 }
 
 export function relayMatches(host: RelayHost, query: string) {
-  return `${host.name} ${host.agent_url} ${host.client_address || ""} relay`.toLowerCase().includes(query.trim().toLowerCase());
+  return relayAddresses(host).some(address => relayAddressMatches(host, address, query));
+}
+
+function relayAddressMatches(host: RelayHost, address: string, query: string) {
+  return `${host.name} ${host.agent_url} ${address} relay`.toLowerCase().includes(query.trim().toLowerCase());
 }
 
 export function NetworkRelayDialogs({ relay }: { relay: RelayControl }) {

@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { confirmedRouteAddresses, endpointCheckReady, endpointSelectable, endpointCheckForConsumer } from "../../src/shared/lib/network-readiness.ts";
+import { configuredCdnDomains, confirmedRouteAddresses, endpointCheckReady, endpointSelectable, endpointCheckForConsumer } from "../../src/shared/lib/network-readiness.ts";
+
+test("configured CDN inventory is independent of live checks and excludes other domains", () => {
+  assert.deepEqual(configuredCdnDomains(null), []);
+  assert.deepEqual(configuredCdnDomains({}), []);
+  assert.deepEqual(configuredCdnDomains({transport_endpoints:{cdn_domain:{}},domains:[null,{}, {endpoint_kind:'cdn',value:{}}]}), []);
+  assert.deepEqual(configuredCdnDomains({transport_endpoints: {cdn_domain:'EDGE.Example',cdn_domains:['edge.example','second.example']},domains:[{value:'discovered.example',role:'CDN endpoint'},{value:'panel.example',role:'panel'}]}), ['edge.example','second.example','discovered.example']);
+});
 
 function ready(kind, domain = "same.example") {
   return { kind, domain, status: "ready", ready: true, verification: "end_to_end",

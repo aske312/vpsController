@@ -2689,16 +2689,24 @@ def next_tunnel_address(module_id: str) -> tuple[str, str]:
     network = ipaddress.ip_network(str(settings["subnet"]))
     used = set()
     for profile in profiles():
-        for connection in profile.get("connections", []):
+        for connection in [*profile.get("connections", []), *profile.get("retiring_connections", [])]:
             credential = connection.get("credential", {})
             if connection.get("component") == module_id and credential.get("ip"):
                 used.add(str(credential["ip"]).split("/", 1)[0])
+    # A profile is saved after the whole batch. Peers already provisioned in
+    # this transaction must reserve their addresses before that save too.
+    reserved = []
+    config = WG_CONFIG_BY_MODULE.get(module_id)
+    if config and config.is_file():
+        for line in config.read_text(encoding="utf-8").splitlines():
+            if re.match(r"^\s*AllowedIPs\s*=", line):
+                reserved.extend(ipaddress.ip_network(value.strip(), strict=False) for value in line.split("=", 1)[1].split(","))
     hosts = list(network.hosts())
     if len(hosts) < 3:
         raise RuntimeError("Mihomo subnet is too small")
     server = hosts[0]
     for host in hosts[1:]:
-        if str(host) not in used:
+        if str(host) not in used and not any(host in prefix for prefix in reserved):
             return str(host), f"{server}/{network.prefixlen}"
     raise RuntimeError(f"No free addresses in {network}")
 

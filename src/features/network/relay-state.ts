@@ -10,7 +10,7 @@ export type RelayHost = {
   id: string; name: string; agent_url: string; client_address?: string; certificate_sha256: string; api_version: 1;
   token_configured: boolean; state: "connected" | "unknown"; version?: string; agent_revision?: number;
   foreign_routes: number; routes: RelayRoute[]; error?: string;
-  addresses?: { ipv4: string[]; ipv6: string[]; domains: string[] };
+  addresses?: { ipv4: string[]; ipv6: string[]; domains: string[]; cdn_domains?: string[] };
 };
 export type RelayStatus = {
   revision: string; hosts: RelayHost[]; pending: boolean; origin_ip: string; origin_hosts: string[];
@@ -57,10 +57,11 @@ export function relaySnapshot(value: unknown): RelayStatus {
     ids.add(host.id);
     if (host.addresses !== undefined) {
       const addresses = host.addresses;
-      if (!object(addresses) || ["ipv4", "ipv6", "domains"].some(key => {
+      if (!object(addresses) || ["ipv4", "ipv6", "domains", ...(addresses.cdn_domains === undefined ? [] : ["cdn_domains"])].some(key => {
         const items = addresses[key];
         return !Array.isArray(items) || items.length > 64 || items.some((address: unknown) => typeof address !== "string" || !address || address.length > 253 || /[\s/@?#]/.test(address));
       })) return invalid();
+      if (Array.isArray(addresses.cdn_domains) && addresses.cdn_domains.some(address => !(addresses.domains as string[]).includes(address))) return invalid();
     }
     const routeIds = new Set<string>();
     for (const route of host.routes) {

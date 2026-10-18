@@ -64,7 +64,7 @@ class FakeAgent:
 class RelayManagementTests(unittest.TestCase):
     def test_inventory_rejects_private_addresses_and_api_accepts_public_ipv6_with_pinning(self):
         status=self.agent.request('GET','/v1/status')
-        for addresses in ({'ipv4':['10.0.0.1']},{'ipv6':['::1']},{'domains':['bad/host']},{'ipv4':['2606:4700::1111']}):
+        for addresses in ({'ipv4':['10.0.0.1']},{'ipv6':['::1']},{'domains':['bad/host']},{'ipv4':['2606:4700::1111']},{'domains':['relay.example'],'cdn_domains':['other.example']},{'cdn_domains':'relay.example'}):
             with self.subTest(addresses=addresses),self.assertRaises(ValueError):status_snapshot({**status,'addresses':addresses})
         client=RelayClient('https://[2606:4700::1111]:9444',TOKEN,PIN)
         self.assertEqual((client.host,client.port),('2606:4700::1111',9444))
@@ -72,7 +72,7 @@ class RelayManagementTests(unittest.TestCase):
             with self.subTest(url=url),self.assertRaises(ValueError):RelayClient(url,TOKEN,PIN)
 
     def test_all_agent_addresses_are_cached_without_live_checks_or_registry_revision_changes(self):
-        self.agent.addresses = {'ipv4':[AGENT,'8.8.4.4'],'ipv6':['2606:4700::1111'],'domains':['relay.example','backup.example']}
+        self.agent.addresses = {'ipv4':[AGENT,'8.8.4.4'],'ipv6':['2606:4700::1111'],'domains':['relay.example','backup.example'],'cdn_domains':['backup.example']}
         revision = self.control.read()['revision']
         self.control.public()
         self.assertEqual(self.control.read()['revision'],revision)

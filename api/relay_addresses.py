@@ -35,6 +35,14 @@ def normalize_addresses(value, fallback):
             if (version is None and address is not None) or (version is not None and (address is None or address.version!=version)):
                 raise ValueError('Семейство адреса Relay не совпадает')
             if normalized not in result[key]:result[key].append(normalized)
+    if 'cdn_domains' in value:
+        items = value['cdn_domains']
+        if not isinstance(items, list) or len(items)>64:raise ValueError('Некорректный список CDN-доменов Relay')
+        result['cdn_domains'] = []
+        for item in items:
+            normalized = normalize_address(item)
+            if normalized not in result['domains']:raise ValueError('CDN-домен отсутствует в адресах Relay')
+            if normalized not in result['cdn_domains']:result['cdn_domains'].append(normalized)
     if fallback is None:return result
     address = ipaddress.ip_address(normalize_address(fallback))
     key = 'ipv4' if address.version==4 else 'ipv6'
