@@ -4,6 +4,7 @@ import re
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 import yaml
+from relay_addresses import authority
 
 
 def rewrite(text, route, address, origin_hosts):
@@ -25,7 +26,7 @@ def rewrite(text, route, address, origin_hosts):
             if not matches(match[2], int(match[3])):
                 return match[0]
             changed += 1
-            return f'{match[1]}{address}:{port}'
+            return match[1]+authority(address, port)
         result = re.sub(r'(?m)^(\s*Endpoint\s*=\s*)([^\s:]+):(\d+)\s*$', endpoint, text)
     elif re.match(r'^(vless|trojan|ss|hysteria2|hy2|tuic)://', text.strip()):
         lines = []
@@ -42,7 +43,7 @@ def rewrite(text, route, address, origin_hosts):
             if protocol in ('trojan', 'hysteria2', 'hy2', 'tuic') or query.get('security') == 'tls':
                 query.setdefault('sni', value.hostname)
             userinfo = value.netloc.rsplit('@', 1)[0]+'@' if '@' in value.netloc else ''
-            lines.append(urlunsplit((value.scheme, f'{userinfo}{address}:{port}', value.path, urlencode(query), value.fragment)))
+            lines.append(urlunsplit((value.scheme, userinfo+authority(address, port), value.path, urlencode(query), value.fragment)))
             changed += 1
         result = '\n'.join(lines)+'\n'
     else:

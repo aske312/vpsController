@@ -16,6 +16,7 @@ import uuid
 
 from application_operation import atomic_json, OperationConflict
 from relay_client import RelayClient, AgentAPIError
+from relay_addresses import normalize_address, normalize_addresses, all_addresses, authority
 
 CONFIG_KEYS = ('transport', 'listen_port', 'target_ip', 'target_port')
 
@@ -65,6 +66,9 @@ def status_snapshot(value):
             raise ValueError('Неполный status агента')
     if value['max_routes'] != 64 or value['routes'] + value['failed_routes'] > 64:
         raise ValueError('Несовместимые лимиты агента')
+    if 'addresses' in value:normalize_addresses(value['addresses'], None)
+    if 'client_address_families' in value and (not isinstance(value['client_address_families'],list) or any(item not in ('ipv4','ipv6') for item in value['client_address_families'])):
+        raise ValueError('Некорректные семейства адресов агента')
     return value
 
 
@@ -92,8 +96,7 @@ class RelayManager:
             if not re.fullmatch(r'[0-9a-f]{32}', str(host.get('id', ''))) or host['id'] in ids or host['agent_url'] in origins or not isinstance(host.get('name'), str):
                 raise ValueError('Повреждён узел relay')
             address = host.get('client_address')
-            if address is not None and (not isinstance(address, str) or not address or len(address) > 253 or any(character in address for character in '/:@\r\n ')):
-                raise ValueError('Повреждён клиентский адрес Relay')
+            if address is not None:normalize_address(address)
             ids.add(host['id']); origins.add(host['agent_url'])
         route_ids = set()
         for route in value['routes']:
@@ -116,6 +119,21 @@ class RelayManager:
 
     def client(self, host):
         return self.client_factory(host['agent_url'], host['token'], host['certificate_sha256'])
+
+    def addresses(self, host):
+        try:
+            value = json.loads((self.root/'addresses'/(host['id']+'.json')).read_text())
+            return normalize_addresses(value, self.client(host).host)
+        except (OSError, ValueError, TypeError):
+            return normalize_addresses(host.get('addresses'), self.client(host).host)
+
+    def observed_addresses(self, host, status):
+        value = normalize_addresses(status.get('addresses'), self.client(host).host)
+        if 'ipv6' not in status.get('client_address_families', []):value['ipv6'] = []
+        folder = self.root/'addresses'
+        folder.mkdir(mode=0o700,parents=True,exist_ok=True)
+        if value != self.addresses(host):atomic_json(folder/(host['id']+'.json'), value)
+        return value
 
     def host(self, registry, identity):
         return next((item for item in registry['hosts'] if item['id'] == identity), None) or self.missing()
@@ -142,21 +160,25 @@ class RelayManager:
         host = {key: payload.get(key) for key in ('name', 'agent_url', 'certificate_sha256')}
         host.update(id=host_id, token=payload.get('token') or previous.get('token'), api_version=1)
         client = self.client(host)
-        host['agent_url'] = f'https://{client.host}:9443'
+        host['agent_url'] = 'https://'+authority(client.host, client.port)
         host['certificate_sha256'] = host['certificate_sha256'].lower()
         if client.host == public_ipv4(self.origin):
+            raise ValueError('Узел relay должен отличаться от текущего VPS')
+        status = status_snapshot(client.request('GET', '/v1/status'))
+        host['addresses'] = normalize_addresses(status.get('addresses'), client.host)
+        if 'ipv6' not in status.get('client_address_families', []):host['addresses']['ipv6'] = []
+        if self.origin in all_addresses(host['addresses']):
             raise ValueError('Узел relay должен отличаться от текущего VPS')
         address = payload.get('client_address')
         if address is None:
             address = previous.get('client_address')
-        host['client_address'] = self.validate_address(address or client.host, client.host)
+        host['client_address'] = self.validate_address(address or client.host, client.host, host['addresses'])
         if previous and previous['agent_url'] != host['agent_url']:
             raise ValueError('Адрес существующего узла неизменяем; добавьте новый узел')
         if any(item['agent_url'] == host['agent_url'] and item['id'] != host_id for item in registry['hosts']):
             raise ValueError('Этот агент уже добавлен')
         if not previous and len(registry['hosts']) >= 8:
             raise ValueError('Допустимо не более 8 relay-узлов')
-        status_snapshot(client.request('GET', '/v1/status'))
         remote = route_snapshot(client.request('GET', '/v1/routes'))
         # A deliberate repin must still refer to the managed route inventory.
         for route in registry['routes']:
@@ -173,14 +195,14 @@ class RelayManager:
             self.reconcile()
 
     @staticmethod
-    def validate_address(value, agent_ip):
+    def validate_address(value, agent_ip, addresses=None):
         value = str(value).strip().lower().rstrip('.')
-        if value == agent_ip:
-            return value
+        value = normalize_address(value)
+        if value in all_addresses(addresses or normalize_addresses(None, agent_ip)):return value
         if len(value) > 253 or not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?', value):
             raise ValueError('Адрес клиента должен быть IP агента или доменом этого узла без порта')
         resolved = {item[4][0] for item in socket.getaddrinfo(value, None, type=socket.SOCK_STREAM)}
-        if resolved != {agent_ip}:
+        if not resolved or not resolved <= set(all_addresses(addresses or normalize_addresses(None, agent_ip))):
             raise ValueError('Домен Relay должен разрешаться только в IPv4 выбранного агента, без CDN proxy')
         return value
 
@@ -194,7 +216,6 @@ class RelayManager:
         registry = self.read()
         host = self.host(registry, host_id)
         client = self.client(host)
-        self.validate_address(host.get('client_address') or client.host, client.host)
         status_snapshot(client.request('GET', '/v1/status'))
         for group in groups:
             sockets = list(dict.fromkeys((transport, port) for transport, port in group))
@@ -227,7 +248,7 @@ class RelayManager:
                                    'expected_revision': registry['revision'], 'agent_revision': remote['revision']}, identity, route_identity=route_identity)
         return self.read()
 
-    def endpoint(self, host_id, transport, target_port, *, paired=False):
+    def endpoint(self, host_id, transport, target_port, *, paired=False, address=None):
         """Resolve a saved binding without a network request during subscription refresh."""
         registry = self.read()
         host = self.host(registry, host_id)
@@ -237,7 +258,7 @@ class RelayManager:
         if not routes:
             raise OperationConflict('Пересылка Relay для подключения не подготовлена. Сохраните настройки подключения после восстановления агента')
         route = min(routes, key=lambda route: route['listen_port'])
-        return host.get('client_address') or self.client(host).host, route['listen_port']
+        return normalize_address(address) if address else host.get('client_address') or self.client(host).host, route['listen_port']
 
     def delete_host(self, payload, identity):
         self.require_clear()
@@ -353,6 +374,7 @@ class RelayManager:
         def observe(host):
             public = {key: host[key] for key in ('id', 'name', 'agent_url', 'certificate_sha256', 'api_version')}
             public['client_address'] = host.get('client_address') or self.client(host).host
+            public['addresses'] = self.addresses(host)
             public.update(token_configured=True, state='unknown', routes=[], foreign_routes=0)
             owned = [item for item in registry['routes'] if item['host_id'] == host['id']]
             if not probe:
@@ -364,6 +386,7 @@ class RelayManager:
             try:
                 client = self.client(host)
                 status = status_snapshot(client.request('GET', '/v1/status'))
+                public['addresses'] = self.observed_addresses(host, status)
                 remote = route_snapshot(client.request('GET', '/v1/routes'))
                 public.update(state='connected', version=status['version'], agent_revision=remote['revision'])
                 ids = {item['id'] for item in owned}

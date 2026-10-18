@@ -183,6 +183,7 @@ class ClientConnectionSettings(BaseModel):
     route_mode: Literal["all", "ipv4"] = "ipv4"
     channel_mode: Literal["direct", "tls_relay", "udp_relay"] = "direct"
     relay_host_id: str = Field(default='', pattern=r'^(?:[0-9a-f]{32})?$')
+    relay_address: str = Field(default='', max_length=253)
     shadowsocks_mode: Literal["tcp_only", "tcp_and_udp"] = "tcp_and_udp"
     timeout: int | None = Field(default=None, ge=30, le=3600)
     no_delay: bool = True

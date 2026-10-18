@@ -2889,7 +2889,7 @@ def export_relay_config(host_id: str, route_id: str, payload: RelayExportRequest
         actual = next((item for item in remote['items'] if item['id'] == route_id), None)
         if not actual or actual['state'] != 'listening' or not relay_manager.same_route(actual, route):
             raise ValueError('Listener relay не подтверждён; сначала обновите состояние')
-        config, count = relay_export.rewrite(payload.config, route, control.client(host).host,
+        config, count = relay_export.rewrite(payload.config, route, host.get('client_address') or control.client(host).host,
                                             relay_origin_hosts())
         return JSONResponse({'config': config, 'replaced': count}, headers={'Cache-Control': 'no-store'})
     except (ValueError, StopIteration, OSError, relay_manager.AgentAPIError):

@@ -28,6 +28,7 @@ PIN = 'a'*64
 class FakeAgent:
     def __init__(self):
         self.host = AGENT
+        self.port = 9443
         self.revision = 0
         self.items = []
         self.calls = []
@@ -35,6 +36,7 @@ class FakeAgent:
         self.lose_ack = False
         self.offline_after_write = False
         self.reject = False
+        self.addresses = None
 
     def request(self, method, path, body=None, revision=None):
         self.calls.append((method, path))
@@ -42,7 +44,7 @@ class FakeAgent:
             raise OSError('offline')
         if method == 'GET':
             if path == '/v1/status':
-                return {'api_version': 1, 'version': '1.0.0', 'revision': self.revision, 'routes': len(self.items), 'failed_routes': 0, 'transports': ['tcp', 'udp'], 'address_family': 'ipv4', 'listen_ports': {'min': 20000, 'max': 20999}, 'max_routes': 64}
+                return {'api_version': 1, 'version': '1.0.0', 'revision': self.revision, 'routes': len(self.items), 'failed_routes': 0, 'transports': ['tcp', 'udp'], 'address_family': 'ipv4', 'listen_ports': {'min': 20000, 'max': 20999}, 'max_routes': 64, **({'addresses':self.addresses,'client_address_families':['ipv4','ipv6']} if self.addresses else {})}
             return copy.deepcopy({'revision': self.revision, 'items': self.items})
         if self.reject:
             raise AgentAPIError(409, 'rejected')
@@ -60,6 +62,40 @@ class FakeAgent:
 
 
 class RelayManagementTests(unittest.TestCase):
+    def test_inventory_rejects_private_addresses_and_api_accepts_public_ipv6_with_pinning(self):
+        status=self.agent.request('GET','/v1/status')
+        for addresses in ({'ipv4':['10.0.0.1']},{'ipv6':['::1']},{'domains':['bad/host']},{'ipv4':['2606:4700::1111']}):
+            with self.subTest(addresses=addresses),self.assertRaises(ValueError):status_snapshot({**status,'addresses':addresses})
+        client=RelayClient('https://[2606:4700::1111]:9444',TOKEN,PIN)
+        self.assertEqual((client.host,client.port),('2606:4700::1111',9444))
+        for url in ('https://[::1]:9443','https://[fc00::1]:9443','https://[::ffff:8.8.8.8]:9443','https://8.8.8.8:20000'):
+            with self.subTest(url=url),self.assertRaises(ValueError):RelayClient(url,TOKEN,PIN)
+
+    def test_all_agent_addresses_are_cached_without_live_checks_or_registry_revision_changes(self):
+        self.agent.addresses = {'ipv4':[AGENT,'8.8.4.4'],'ipv6':['2606:4700::1111'],'domains':['relay.example','backup.example']}
+        revision = self.control.read()['revision']
+        self.control.public()
+        self.assertEqual(self.control.read()['revision'],revision)
+        self.agent.calls.clear()
+        inventory=self.control.public(probe=False)
+        self.assertEqual(inventory['hosts'][0]['addresses'],self.agent.addresses)
+        self.assertEqual(self.agent.calls,[])
+        host=self.control.read()['hosts'][0]
+        with patch('relay_manager.socket.getaddrinfo',side_effect=AssertionError('Known agent domain needs no DNS gate')):
+            self.control.save_host({**host,'client_address':'backup.example','expected_revision':revision})
+        self.assertEqual(self.control.read()['hosts'][0]['client_address'],'backup.example')
+
+    def test_selected_ipv6_address_survives_exports_without_changing_other_connections(self):
+        self.control.ensure(self.host_id,[[('tcp',443)],[('udp',51820)]],'c'*32)
+        settings={'relay_host_id':self.host_id,'relay_address':'2606:4700::1111'}
+        result=relay_connections.direct_result(self.control,'vless-reality-xhttp',settings,{'config':'vless://user@195.14.118.112:443?security=reality','filename':'test.txt'})
+        self.assertIn('@[2606:4700::1111]:',result['config'])
+        wg=relay_connections.direct_result(self.control,'wg',settings,{'config':'[Interface]\n[Peer]\nEndpoint = 195.14.118.112:51820\n','filename':'test.conf'})
+        self.assertIn('Endpoint = [2606:4700::1111]:',wg['config'])
+        self.assertEqual(self.control.endpoint(self.host_id,'tcp',443)[0],AGENT)
+        with self.assertRaises(ValueError):
+            self.control.endpoint(self.host_id,'tcp',443,address='::1')
+
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.agent = FakeAgent()
@@ -146,9 +182,9 @@ class RelayManagementTests(unittest.TestCase):
             self.control.save_host({**host, 'client_address': 'Relay.Example', 'expected_revision': self.control.read()['revision']})
         self.assertEqual(self.control.public()['hosts'][0]['client_address'], 'relay.example')
         self.assertNotIn(TOKEN, json.dumps(self.control.public()))
-        with patch('relay_manager.socket.getaddrinfo', return_value=[(2, 1, 6, '', ('1.1.1.1', 0))]), self.assertRaises(ValueError):
+        with patch('relay_manager.socket.getaddrinfo', side_effect=AssertionError('No recurring DNS gate')):
             self.control.ensure(self.host_id, [[('tcp', 443)]], 'c'*32)
-        self.assertFalse(any(method == 'PUT' for method, _ in self.agent.calls))
+        self.assertTrue(any(method == 'PUT' for method, _ in self.agent.calls))
 
     def test_orphan_origin_port_is_reserved_but_current_owner_can_keep_it(self):
         self.control.ensure(self.host_id, [[('tcp', 31000)]], 'c'*32)
@@ -233,6 +269,10 @@ class RelayManagementTests(unittest.TestCase):
         clients.clear()
         path = relay_client_creation.result_path(adapter, identity)
         stored = json.loads(path.read_text()); stored['stage'] = 'native-created'; path.write_text(json.dumps(stored))
+        clients.append({'id':stored['client_id'],'protocol':'wg','settings':{**settings,'relay_address':'relay.example'}})
+        with self.assertRaises(OperationConflict):
+            relay_client_creation.perform(adapter, {'expected_revision':self.control.read()['revision']}, 'f'*32, resume_id=identity)
+        clients.clear()
         with self.assertRaises(OperationConflict):
             relay_client_creation.perform(adapter, {'expected_revision': self.control.read()['revision']}, 'e'*32, resume_id=identity)
 

@@ -4476,7 +4476,7 @@ def q(value: Any) -> str:
 
 def client_connection_keys(component: str) -> set[str]:
     advanced = {field["key"] for field in MIHOMO_CLIENT_FIELDS.get(component, ())}
-    return advanced | {"relay_host_id"} | {
+    return advanced | {"relay_host_id", "relay_address"} | {
         "transport-wg": {"mtu", "keepalive"}, "transport-awg": {"mtu", "keepalive", "jc", "jmin", "jmax"},
         "transport-reality": {"fingerprint"},
         "transport-hysteria2": {"up_mbps", "down_mbps", "sni", "skip_cert_verify"},

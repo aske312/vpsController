@@ -10,6 +10,7 @@ export type RelayHost = {
   id: string; name: string; agent_url: string; client_address?: string; certificate_sha256: string; api_version: 1;
   token_configured: boolean; state: "connected" | "unknown"; version?: string; agent_revision?: number;
   foreign_routes: number; routes: RelayRoute[]; error?: string;
+  addresses?: { ipv4: string[]; ipv6: string[]; domains: string[] };
 };
 export type RelayStatus = {
   revision: string; hosts: RelayHost[]; pending: boolean; origin_ip: string; origin_hosts: string[];
@@ -20,6 +21,14 @@ export type RelayStatus = {
 export type RelayClientResult = ClientExport;
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 const integer = (value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
+export function relayApiOrigin(value: unknown): value is string {
+  if (typeof value !== "string" || !/^https:\/\/(?:[\d.]+|\[[a-fA-F0-9:]+\]):\d+\/?$/.test(value)) return false;
+  try { const url = new URL(value); const port = Number(url.port || 443); return port >= 1024 && port <= 65535 && !(port >= 20000 && port <= 20999); }
+  catch { return false; }
+}
+export function relayAddresses(host: RelayHost): string[] {
+  return [...new Set([host.client_address || new URL(host.agent_url).hostname.replace(/^\[|\]$/g, ""), ...(host.addresses?.ipv4 || []), ...(host.addresses?.ipv6 || []), ...(host.addresses?.domains || [])])];
+}
 export function relayClientResult(value: unknown): RelayClientResult {
   try { return clientExport(value) as RelayClientResult; }
   catch { throw new Error("Некорректный результат подключения через Relay"); }
@@ -40,12 +49,19 @@ export function relaySnapshot(value: unknown): RelayStatus {
   }
   for (const host of value.hosts) {
     if (!object(host) || typeof host.id !== "string" || !/^[0-9a-f]{32}$/.test(host.id) || ids.has(host.id) || typeof host.name !== "string"
-      || typeof host.agent_url !== "string" || !/^https:\/\/[\d.]+:9443\/?$/.test(host.agent_url) || typeof host.certificate_sha256 !== "string" || !/^[0-9a-fA-F]{64}$/.test(host.certificate_sha256)
+      || !relayApiOrigin(host.agent_url) || typeof host.certificate_sha256 !== "string" || !/^[0-9a-fA-F]{64}$/.test(host.certificate_sha256)
       || host.client_address !== undefined && (typeof host.client_address !== "string" || !host.client_address || host.client_address.length > 253)
       || host.api_version !== 1 || host.token_configured !== true || "token" in host || !["connected", "unknown"].includes(String(host.state))
       || !integer(host.foreign_routes) || !Array.isArray(host.routes) || host.error !== undefined && typeof host.error !== "string"
       || host.state === "connected" && (!integer(host.agent_revision) || typeof host.version !== "string")) return invalid();
     ids.add(host.id);
+    if (host.addresses !== undefined) {
+      const addresses = host.addresses;
+      if (!object(addresses) || ["ipv4", "ipv6", "domains"].some(key => {
+        const items = addresses[key];
+        return !Array.isArray(items) || items.length > 64 || items.some((address: unknown) => typeof address !== "string" || !address || address.length > 253 || /[\s/@?#]/.test(address));
+      })) return invalid();
+    }
     const routeIds = new Set<string>();
     for (const route of host.routes) {
       if (!object(route) || typeof route.id !== "string" || !/^pro-[0-9a-f]{32}$/.test(route.id) || routeIds.has(route.id) || route.host_id !== host.id
@@ -63,7 +79,7 @@ export function relaySnapshot(value: unknown): RelayStatus {
 
 export function relayConnection(text: string) {
   const value: unknown = JSON.parse(text);
-  if (!object(value) || value.api_version !== 1 || typeof value.agent_url !== "string" || !/^https:\/\/[\d.]+:9443\/?$/.test(value.agent_url)
+  if (!object(value) || value.api_version !== 1 || !relayApiOrigin(value.agent_url)
     || typeof value.token !== "string" || !/^[A-Za-z0-9_-]{40,128}$/.test(value.token) || typeof value.certificate_sha256 !== "string" || !/^[a-fA-F0-9]{64}$/.test(value.certificate_sha256)) throw new Error("Нужен JSON подключения Relay Agent API v1");
   return { agent_url: value.agent_url, token: value.token, certificate_sha256: value.certificate_sha256.toLowerCase(), api_version: 1 as const };
 }

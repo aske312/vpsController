@@ -30,7 +30,8 @@ def perform(api, payload, identity, *, resume_id=None):
         settings, protocol = stored['settings'], stored['protocol']
         api.ComponentRegistry(api.DATA_DIR).require_managed(protocol)
         current = next((item for item in api.read_clients() if item.get('id') == stored['client_id'] and item.get('protocol') == protocol), None)
-        if not current or current.get('settings', {}).get('relay_host_id') != settings['relay_host_id']:
+        if (not current or current.get('settings', {}).get('relay_host_id') != settings['relay_host_id']
+                or (current.get('settings', {}).get('relay_address') or '') != (settings.get('relay_address') or '')):
             raise OperationConflict('Сохранённое подключение изменено или удалено; Relay не применён')
     else:
         if resume_id:

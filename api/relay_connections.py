@@ -6,6 +6,7 @@ import re
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
+from relay_addresses import normalize_address, authority
 
 
 UDP_COMPONENTS = {'transport-wg', 'transport-awg', 'transport-hysteria2', 'transport-tuic'}
@@ -16,7 +17,13 @@ def host_id(settings):
     value = settings.get('relay_host_id', '')
     if not isinstance(value, str) or value and not re.fullmatch(r'[0-9a-f]{32}', value):
         raise ValueError('Некорректный Relay узел подключения')
+    if value and settings.get('relay_address'):normalize_address(settings['relay_address'])
     return value
+
+
+def selected_endpoint(control, settings, transport, port, **kwargs):
+    if settings.get('relay_address'):kwargs['address'] = normalize_address(settings['relay_address'])
+    return control.endpoint(host_id(settings), transport, port, **kwargs)
 
 
 def consumer_state(control, settings, fallback):
@@ -80,7 +87,7 @@ def redirect_nodes(control, connection, nodes, endpoints=()):
         if 'server' in node:
             key = 'server_port' if 'server_port' in node else 'port'
             original = node['server']
-            address, port = control.endpoint(selected, transport, int(node[key]), paired=paired)
+            address, port = selected_endpoint(control, connection.get('settings', {}), transport, int(node[key]), paired=paired)
             if isinstance(node.get('tls'), dict) and node['tls'].get('enabled'):
                 node['tls'].setdefault('server_name', original)
             elif node.get('tls') is True:
@@ -89,10 +96,10 @@ def redirect_nodes(control, connection, nodes, endpoints=()):
         elif node.get('protocol') in ('vless', 'shadowsocks', 'trojan'):
             entries = node.get('settings', {}).get('vnext' if node['protocol'] == 'vless' else 'servers', [])
             for entry in entries:
-                entry['address'], entry['port'] = control.endpoint(selected, transport, int(entry['port']), paired=paired)
+                entry['address'], entry['port'] = selected_endpoint(control, connection.get('settings', {}), transport, int(entry['port']), paired=paired)
     for node in endpoints:
         for peer in node.get('peers', []):
-            peer['address'], peer['port'] = control.endpoint(selected, 'udp', int(peer['port']))
+            peer['address'], peer['port'] = selected_endpoint(control, connection.get('settings', {}), 'udp', int(peer['port']))
 
 
 def redirect_mihomo_lines(control, component, settings, lines):
@@ -102,7 +109,7 @@ def redirect_mihomo_lines(control, component, settings, lines):
     port = next((int(line.split(':', 1)[1]) for line in lines if line.startswith('    port: ')), None)
     if port is None:
         raise ValueError('Порт подключения не определён')
-    address, external = control.endpoint(host_id(settings), 'udp' if component in UDP_COMPONENTS else 'tcp', port, paired=component == 'transport-shadowsocks')
+    address, external = selected_endpoint(control, settings, 'udp' if component in UDP_COMPONENTS else 'tcp', port, paired=component == 'transport-shadowsocks')
     return [f'    server: {json.dumps(address)}' if line.startswith('    server: ') else f'    port: {external}' if line.startswith('    port: ') else line for line in lines]
 
 
@@ -145,22 +152,22 @@ def direct_result(control, protocol, settings, result):
     def rewrite(text):
         if protocol in ('wg', 'awg'):
             def peer(match):
-                address, port = control.endpoint(selected, 'udp', int(match[2]))
-                return match[1]+f'{address}:{port}'
+                address, port = selected_endpoint(control, settings, 'udp', int(match[2]))
+                return match[1]+authority(address, port)
             return re.sub(r'(?m)^(Endpoint\s*=\s*)[^\s:]+:(\d+)', peer, text)
         if protocol == 'openvpn':
             transport = 'tcp' if re.search(r'(?m)^proto\s+tcp', text) else 'udp'
             def remote(match):
-                address, port = control.endpoint(selected, transport, int(match[1]))
+                address, port = selected_endpoint(control, settings, transport, int(match[1]))
                 return f'remote {address} {port}'
             return re.sub(r'(?m)^remote\s+\S+\s+(\d+)', remote, text)
         if protocol in ('vless-reality-xhttp', 'shadowsocks'):
             lines = []
             for line in text.strip().splitlines():
                 uri = urlsplit(line)
-                address, port = control.endpoint(selected, 'tcp', uri.port, paired=protocol == 'shadowsocks' and settings.get('shadowsocks_mode', 'tcp_and_udp') == 'tcp_and_udp')
+                address, port = selected_endpoint(control, settings, 'tcp', uri.port, paired=protocol == 'shadowsocks' and settings.get('shadowsocks_mode', 'tcp_and_udp') == 'tcp_and_udp')
                 user = uri.netloc.rsplit('@', 1)[0]+'@' if '@' in uri.netloc else ''
-                lines.append(urlunsplit((uri.scheme, f'{user}{address}:{port}', uri.path, uri.query, uri.fragment)))
+                lines.append(urlunsplit((uri.scheme, user+authority(address, port), uri.path, uri.query, uri.fragment)))
             return '\n'.join(lines)
         value = yaml.safe_load(text)
         component = {'hysteria2': 'transport-hysteria2', 'tuic': 'transport-tuic', 'trojan': 'transport-reality'}[protocol]

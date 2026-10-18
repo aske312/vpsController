@@ -30,3 +30,14 @@ test("an explicit editing lock still disables Relay selection", () => {
   }));
   assert.match(html, /<select[^>]*disabled=""/);
 });
+
+test("one Relay exposes every IPv4, IPv6 and domain and retains the selected address", () => {
+  const addresses={ipv4:['85.209.155.229','8.8.4.4'],ipv6:['2606:4700::1111'],domains:['relay.example','alternate.example']};
+  const html=renderToStaticMarkup(createElement(RelayEndpointSelect,{
+    request:async()=>({}),inventory:{status:{hosts:[{...host,addresses}]},failed:false},
+    value:host.id,address:'2606:4700::1111',onChange:()=>{},
+  }));
+  for(const address of [...addresses.ipv4,...addresses.ipv6,...addresses.domains]) assert.ok(html.includes(address));
+  assert.match(html,/2606:4700::1111[^<]*selected=""/);
+  assert.doesNotMatch(html,/disabled=/);
+});

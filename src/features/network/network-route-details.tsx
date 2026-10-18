@@ -114,6 +114,7 @@ export function RelayRouteDetails({ host, address, summary, unknown }: { host: R
     <RouteDetailsSection title="Подключение к агенту"><dl className="routeDetailsFacts">
       <Field label="Имя узла">{shown(host.name)}</Field>
       <Field label="Адрес агента" mono>{host.agent_url}</Field>
+      {host.addresses && <Field label="Адреса для клиентов"><Values values={[...host.addresses.ipv4, ...host.addresses.ipv6, ...host.addresses.domains]} /></Field>}
       <Field label="Версия агента">{unknown ? "Не подтверждена" : shown(host.version)}</Field>
       <Field label="Перенаправления приложения">{unknown && !host.routes.length ? "Не получено" : `${host.routes.length}${unknown ? " · сохранённые сведения" : ""}`}</Field>
       <Field label="Другие правила агента">{unknown ? "Не подтверждены" : host.foreign_routes}</Field>
