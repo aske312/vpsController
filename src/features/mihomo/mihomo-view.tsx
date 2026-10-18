@@ -43,19 +43,6 @@ function DeviceClientBadge({ device }: { device: ProfileDevice }) {
   return <span className="mihomoDeviceClientBadge" title={device.client_name ? `Определено приложение: ${device.client_name}` : "Приложение пока не определено"}>{deviceClientShortName(device)}</span>;
 }
 
-function vlessRouteBuckets(connection: ProfileConnection): Array<"reality" | "cdn" | "tls"> {
-  if (connection.component !== "transport-reality") return [];
-  const mode = String(connection.settings.route_mode || (connection.settings.cdn_enabled ? "both" : "direct"));
-  if (mode === "both") return ["reality", "cdn"];
-  if (mode === "cdn") return ["cdn"];
-  if (mode === "tls") return ["tls"];
-  return ["reality"];
-}
-
-function vlessRouteCount(connections: ProfileConnection[], route: "reality" | "cdn" | "tls") {
-  return connections.reduce((count, connection) => count + (vlessRouteBuckets(connection).includes(route) ? 1 : 0), 0);
-}
-
 const TECHNICAL_ERROR = /(?:\n|traceback|systemctl|journalctl|apt(?:-get)?|dpkg|stderr|stdout|exit status|failed to start|reading package lists|building dependency tree)/i;
 
 function publicError(message: string, status: number) {
@@ -908,7 +895,8 @@ export function MihomoPage({
   function unusedRealityTarget(connections: ProfileConnection[]) {
     const used = new Set(connections.filter((connection) => connection.component === "transport-reality" && ["direct", "both"].includes(String(connection.settings.route_mode || "direct"))).map((connection) => String(connection.settings.target || "").trim().split(":")[0].toLowerCase()));
     const available = realityTargets.filter((host) => !used.has(host));
-    return available.length ? `${available[0]}:443` : "";
+    const host = available[0] || realityTargets[0];
+    return host ? `${host}:443` : "";
   }
 
   function addProfileConnection(module: Module, vlessRoute: "direct" | "tls" | "cdn" = "direct") {
@@ -943,14 +931,12 @@ export function MihomoPage({
   function applyProfilePreset(preset: ProfilePreset) {
     const cdnDomain = availableNetworkRoute("cdn");
     const tlsDomain = availableNetworkRoute("tls");
-    const usedSingletons = new Set<string>();
     const connections: ProfileConnection[] = [];
     for (const definition of preset.components) {
       const componentId = definition.id === "$primary" ? String(routingPolicy?.values.preset_primary || "transport-reality")
         : definition.id === "$fallback" ? String(routingPolicy?.values.preset_fallback || "transport-awg") : definition.id;
       const componentModule = modules.find((item) => item.installed && item.id === componentId);
-      if (!componentModule || (componentId !== "transport-reality" && usedSingletons.has(componentId))) continue;
-      usedSingletons.add(componentId);
+      if (!componentModule) continue;
       const settings = Object.fromEntries((componentModule.connection_settings || []).map((field) => [field.key, field.default]));
       if (componentId === "transport-reality" && definition.tls) {
         settings.route_mode = "tls";
@@ -1614,7 +1600,6 @@ export function MihomoPage({
                 <label><span>Таймаут, мс</span><input type="number" min={1000} max={10000} value={Number(routingDraft.health_timeout || 3000)} onChange={(event) => updateRoutingDraft("health_timeout", Number(event.target.value))} /></label>
                 <label><span>Ошибок до внеочередной проверки</span><input type="number" min={1} max={10} value={Number(routingDraft.max_failed_times || 2)} onChange={(event) => updateRoutingDraft("max_failed_times", Number(event.target.value))} /></label>
                 <label><span>Допуск смены, мс</span><input type="number" min={0} max={1000} value={Number(routingDraft.tolerance || 50)} onChange={(event) => updateRoutingDraft("tolerance", Number(event.target.value))} /></label>
-                <label><span>VLESS на устройство</span><input type="number" min={1} max={5} value={Number(routingDraft.vless_max_connections_per_device || 5)} onChange={(event) => updateRoutingDraft("vless_max_connections_per_device", Number(event.target.value))} /></label>
               </div></article>
             </div>
           </section>
@@ -1735,16 +1720,13 @@ export function MihomoPage({
               <div className="mihomoConnectionAdd">
                 {installedChannels.filter((module) => commonDevice || activeCapabilities.components.includes(module.id)).flatMap((module) => {
                   if (module.id === "transport-reality") {
-                    const deviceVless = profileConnections.filter((connection) => connection.device_id === activeDeviceId && connection.component === "transport-reality");
-                    const limit = Number(routingPolicy?.values.vless_max_connections_per_device || 5);
                     return [
-                      <button key="vless-direct" type="button" disabled={vlessRouteCount(deviceVless, "reality") >= limit} onClick={() => addProfileConnection(module, "direct")}>+ VLESS</button>,
-                      <button key="vless-tls" type="button" disabled={!availableNetworkRoute("tls") || vlessRouteCount(deviceVless, "tls") >= limit} title={!networkStatus ? "Состояние маршрутов сети неизвестно; обновите данные" : !availableNetworkRoute("tls") ? "Сначала добавьте прямой TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
-                      <button key="vless-cdn" type="button" disabled={!availableNetworkRoute("cdn") || vlessRouteCount(deviceVless, "cdn") >= limit} title={!networkStatus ? "Состояние маршрутов сети неизвестно; обновите данные" : !availableNetworkRoute("cdn") ? "Сначала добавьте CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
+                      <button key="vless-direct" type="button" onClick={() => addProfileConnection(module, "direct")}>+ VLESS</button>,
+                      <button key="vless-tls" type="button" disabled={!availableNetworkRoute("tls")} title={!networkStatus ? "Состояние маршрутов сети неизвестно; обновите данные" : !availableNetworkRoute("tls") ? "Сначала добавьте прямой TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ VLESS TLS</button>,
+                      <button key="vless-cdn" type="button" disabled={!availableNetworkRoute("cdn")} title={!networkStatus ? "Состояние маршрутов сети неизвестно; обновите данные" : !availableNetworkRoute("cdn") ? "Сначала добавьте CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ VLESS CDN</button>,
                     ];
                   }
-                  const singletonUsed = profileConnections.some((item) => item.device_id === activeDeviceId && item.component === module.id);
-                  return [<button key={module.id} type="button" disabled={singletonUsed} onClick={() => addProfileConnection(module)}>+ {module.name}</button>];
+                  return [<button key={module.id} type="button" onClick={() => addProfileConnection(module)}>+ {module.name}</button>];
                 })}
               </div>
               <div className="mihomoConnectionWorkspace">

@@ -222,8 +222,6 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.doesNotMatch(manager, /with_suffix\("\.candidate"\)/);
   assert.match(manager, /class ProfileConnectionInput/);
   assert.match(manager, /def validate_connection_inputs/);
-  assert.match(manager, /def validate_vless_connection_limit/);
-  assert.match(manager, /vless_max_connections_per_device/);
   assert.match(manager, /def render_vless_cdn/);
   assert.match(manager, /cdn_transport/);
   assert.match(manager, /cdn_xhttp_mode/);
@@ -234,7 +232,6 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.match(manager, /batch_reality = any\(definition\["component"\] == "transport-reality" for definition in definitions\)/);
   assert.match(manager, /defer_reality_restart=batch_reality/);
   assert.match(manager, /original_config = config_path\.read_bytes\(\)/);
-  assert.match(manager, /component != "transport-reality" and singleton_key in used_singletons/);
   assert.match(manager, /class ProfileDeviceInput/);
   assert.match(manager, /device_id: str/);
   assert.match(manager, /render_profile\(item: dict\[str, Any\], device_id/);
@@ -251,7 +248,6 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   assert.doesNotMatch(view, /sniffer: true/);
   assert.doesNotMatch(view, /tun_enabled: true/);
   assert.match(view, /profileStep === 2 && <ProfileProtection common=\{commonDevice\}/);
-  assert.match(view, /vless_max_connections_per_device/);
   assert.ok(view.indexOf(">Защита</button>") < view.indexOf(">Маршрутизация</button>"), "protection must precede routing in the profile editor");
   assert.ok(view.indexOf(">Маршрутизация</button>") < view.indexOf(">Подключения <i>"), "routing must precede connections in the profile editor");
   assert.match(view, /cdn_enabled/);

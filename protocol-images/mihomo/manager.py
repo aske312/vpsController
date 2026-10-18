@@ -856,7 +856,11 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
         if isinstance(item, dict) and item.get("key")
     }
     result = dict(current) if current is not None else routing_defaults()
+    result.pop("vless_max_connections_per_device", None)
     for key, raw in values.items():
+        # Accept saved profiles and older clients without restoring the retired cap.
+        if key == "vless_max_connections_per_device":
+            continue
         if key == "client_config_format":
             if raw not in CAPABILITIES:
                 raise HTTPException(status_code=422, detail="Неизвестный формат клиента")
@@ -1434,14 +1438,10 @@ def validate_profile_presets(values: list[dict[str, Any]]) -> list[dict[str, Any
         if strategy not in {"fallback", "url-test", "select"}:
             raise HTTPException(status_code=422, detail=f"Unsupported strategy for preset {preset_id}")
         components: list[dict[str, Any]] = []
-        used_singletons: set[str] = set()
         for component in value.get("components", []):
             component_id = str(component.get("id", ""))
             if component_id not in TRANSPORTS:
                 raise HTTPException(status_code=422, detail=f"Unknown component in preset {preset_id}")
-            if component_id != "transport-reality" and component_id in used_singletons:
-                continue
-            used_singletons.add(component_id)
             is_cdn = bool(component.get("cdn", False))
             is_tls = bool(component.get("tls", False))
             if is_cdn and is_tls:
@@ -1527,6 +1527,7 @@ def routing_settings(stored: Any = None) -> dict[str, Any]:
     # single source of truth; discard legacy copies from the policy response.
     stored.pop("preset_cdn_domain", None)
     stored.pop("preset_tls_domain", None)
+    stored.pop("vless_max_connections_per_device", None)
     return {**routing_defaults(), **stored}
 
 
@@ -3723,36 +3724,10 @@ def validate_channels(channels: list[str]) -> list[str]:
     return result
 
 
-def max_vless_connections_per_device() -> int:
-    try:
-        return max(1, min(5, int(routing_settings().get("vless_max_connections_per_device", 5))))
-    except (TypeError, ValueError):
-        return 5
-
-
-def validate_vless_connection_limit(values: list[dict[str, Any]]) -> None:
-    limit = max_vless_connections_per_device()
-    counts: dict[tuple[str, str], int] = {}
-    route_labels = {"reality": "REALITY", "cdn": "CDN", "tls": "TLS"}
-    for value in values:
-        if value.get("component") != "transport-reality":
-            continue
-        device_id = str(value.get("device_id", "profile-common"))
-        settings = value.get("settings") if isinstance(value.get("settings"), dict) else {}
-        route_mode = str(settings.get("route_mode", "direct"))
-        routes = ("reality", "cdn") if route_mode == "both" else ((route_mode,) if route_mode in route_labels else ("reality",))
-        for route in routes:
-            key = (device_id, route)
-            counts[key] = counts.get(key, 0) + 1
-            if counts[key] > limit:
-                raise HTTPException(status_code=422, detail=f"Для одного устройства можно добавить не более {limit} VLESS-подключений в режиме {route_labels[route]}")
-
-
 def validate_connection_inputs(values: list[ProfileConnectionInput], existing_connections: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     existing_by_id = {str(item.get("id")): item for item in (existing_connections or [])}
     used_ids: set[str] = set()
-    used_singletons: set[tuple[str, str]] = set()
     used_targets: dict[str, set[str]] = {}
     for value in values:
         if value.component == "transport-reality" and value.settings.get("route_mode", "direct") in {"direct", "both"} and value.settings.get("target"):
@@ -3760,10 +3735,6 @@ def validate_connection_inputs(values: list[ProfileConnectionInput], existing_co
     for index, value in enumerate(values):
         component = value.component
         validate_channels([component])
-        singleton_key = (value.device_id, component)
-        if component != "transport-reality" and singleton_key in used_singletons:
-            raise HTTPException(status_code=422, detail=f"Only VLESS can currently be added more than once: {manifest(component)['name']}")
-        used_singletons.add(singleton_key)
         connection_id = value.id or f"connection-{index + 1}-{uuid.uuid4().hex[:6]}"
         if connection_id in used_ids:
             raise HTTPException(status_code=422, detail=f"Duplicate connection id: {connection_id}")
@@ -3771,9 +3742,7 @@ def validate_connection_inputs(values: list[ProfileConnectionInput], existing_co
         settings_input = dict(value.settings)
         if component == "transport-reality" and settings_input.get("route_mode", "direct") in {"direct", "both"} and not settings_input.get("target"):
             used = used_targets.setdefault(value.device_id, set())
-            available = [host for host in MIHOMO_REALITY_SNI_POOL if host not in used]
-            if not available:
-                raise HTTPException(status_code=422, detail="Свободные REALITY SNI закончились: укажите адрес вручную")
+            available = [host for host in MIHOMO_REALITY_SNI_POOL if host not in used] or list(MIHOMO_REALITY_SNI_POOL)
             host = secrets.choice(available)
             used.add(host)
             settings_input["target"] = f"{host}:443"
@@ -4279,7 +4248,6 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
         if existing:
             return profile_response(existing)
     definitions = validate_connection_inputs(payload.connections) if payload.connections is not None else legacy_connection_inputs(payload.channels)
-    validate_vless_connection_limit(definitions)
     devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
     if payload.connections is None:
         for definition in definitions:
@@ -4360,7 +4328,6 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     if payload.connections is not None:
         reality_changed = False
         definitions = validate_connection_inputs(payload.connections, item.get("connections", []))
-        validate_vless_connection_limit(definitions)
         device_ids = {str(device.get("id")) for device in item.get("devices", [])}
         if any(definition.get("device_id") not in device_ids for definition in definitions):
             raise HTTPException(status_code=422, detail="A connection references a missing profile device")
