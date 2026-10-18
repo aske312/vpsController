@@ -54,7 +54,7 @@ def perform(api, payload, identity, *, resume_id=None):
     stored['groups'] = groups
     atomic_json(path, stored)
     control.ensure(settings['relay_host_id'], groups, identity)
-    result = direct_result(control, protocol, settings, stored['result'])
+    result = {**direct_result(control, protocol, settings, stored['result']), 'protocol': protocol}
     # Persist the download before reporting success. A lost response is a GET.
     stored.update(stage='ready', result=result)
     atomic_json(path, stored)

@@ -1,4 +1,4 @@
-import { clientExport } from "../../shared/lib/client-export";
+import { clientExport, type ClientExport } from "../../shared/lib/client-export";
 
 export type RelayRoute = {
   id: string; host_id: string; transport: "tcp" | "udp"; listen_port: number; target_ip: string; target_port: number;
@@ -16,7 +16,7 @@ export type RelayStatus = {
   targets: { transport: "tcp" | "udp"; port: number }[];
   consumers?: { id: string; label: string }[];
 };
-export type RelayClientResult = { config: string; filename?: string; profiles?: { id: string; name: string; filename: string; config: string }[] };
+export type RelayClientResult = ClientExport;
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 const integer = (value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
 export function relayClientResult(value: unknown): RelayClientResult {

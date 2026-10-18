@@ -7,6 +7,13 @@ test("native connections keep a valid configuration and optional route exports",
   assert.equal(clientExport(result), result);
 });
 
+test("restored exports keep their confirmed protocol independently of the current form", () => {
+  const result = { config: "ss://fixture", filename: "phone.txt", protocol: "shadowsocks" };
+  assert.equal(clientExport(result).protocol, "shadowsocks");
+  assert.throws(() => clientExport({ ...result, protocol: "unexpected" }));
+  assert.throws(() => clientExport({ ...result, protocol: ["wg"] }));
+});
+
 test("incomplete or unsafe export responses cannot produce a configuration download", () => {
   for (const result of [{}, { config: "" }, { config: {} }, { config: "ok", filename: "../phone.conf" }, { config: "ok", profiles: {} }, { config: "ok", profiles: [{ id: "cdn", name: "CDN", filename: "phone.conf" }] }, { config: "ok", profiles: Array(2).fill({ id: "same", name: "CDN", filename: "phone.conf", config: "ok" }) }]) {
     assert.throws(() => clientExport(result), /Обновите список подключений/);

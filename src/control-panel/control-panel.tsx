@@ -233,6 +233,7 @@ export function ControlPanel() {
   const [newClientSettings, setNewClientSettings] = useState<NewClientSettings>({ mtu: 1280, keepalive: 25, route_mode: "ipv4", channel_mode: "direct", shadowsocks_mode: "tcp_and_udp", timeout: 300, no_delay: true, fingerprint: "chrome", cdn_domain: "", transport: "xhttp", transport_path: "/", xhttp_mode: "auto", xpadding: "100-1000", xmux_concurrency: 12, sni: "ya.ru", tls_transport: "xhttp", tls_xhttp_mode: "auto", cdn_transport: "websocket", cdn_xhttp_mode: "auto", jc: 6, jmin: 8, jmax: 80, s1: 64, s2: 112, h1: 150000000, h2: 600000000, h3: 1000000000, h4: 1400000000, tls_mode: "pinned", obfs_enabled: false, obfs_password: "", up_mbps: 100, down_mbps: 100, congestion_control: "bbr", heartbeat: "10s", vpn_transport: "udp" });
   const [generated, setGenerated] = useState("");
   const [generatedName, setGeneratedName] = useState("client.conf");
+  const [generatedProtocol, setGeneratedProtocol] = useState<Protocol | undefined>();
   const [generatedProfiles, setGeneratedProfiles] = useState<GeneratedProfile[]>([]);
   const [generatedQr, setGeneratedQr] = useState("");
   const [generatedQrError, setGeneratedQrError] = useState("");
@@ -1664,6 +1665,7 @@ export function ControlPanel() {
     const preferred = profiles.find(profile => profile.id === "cdn") || profiles[0];
     setGeneratedProfiles(profiles); setGenerated(preferred?.config || result.config);
     setGeneratedName(preferred?.filename || result.filename || "relay-client.conf");
+    setGeneratedProtocol(result.protocol);
     setGeneratedQr(""); setGeneratedQrError(""); setClientDialog(true);
     downloadConfig(preferred?.filename || result.filename || "relay-client.conf", preferred?.config || result.config);
     setNewClient(current => ({ ...current, name: "" })); void loadClients();
@@ -2111,7 +2113,7 @@ export function ControlPanel() {
             <div className="connectionGenerated">
               <div className="connectionGeneratedSummary">
                 <div><span>CONFIGURATION</span><strong>{generatedName}</strong></div>
-                <div><span>PROTOCOL</span><strong>{labels[selectedClientProtocol]}</strong></div>
+                <div><span>PROTOCOL</span><strong>{generatedProtocol ? labels[generatedProtocol] : "Не указан в сохранённом экспорте"}</strong></div>
                 <p>Конфигурация содержит данные доступа. Передавайте её только владельцу устройства.</p>
               </div>
               <div className="connectionGeneratedGrid">
@@ -2120,7 +2122,7 @@ export function ControlPanel() {
                   <AccessReveal key={generatedName}>
                   {generatedQr ? <div className="connectionQrCanvas"><Image src={generatedQr} width={284} height={284} unoptimized alt={`QR-код конфигурации ${generatedName}`} /></div> : <div className="connectionQrCanvas pending"><span>{generatedQrError || "Создаём QR-код…"}</span></div>}
                   </AccessReveal>
-                  <p>{generatedQrError ? "Эта конфигурация слишком велика для QR-кода. Скачайте файл и импортируйте его в клиент протокола." : selectedClientProtocol === "awg" ? "Откройте именно приложение AmneziaWG (не WireGuard) и отсканируйте код." : "Откройте клиент протокола на устройстве и отсканируйте код."}</p>
+                  <p>{generatedQrError ? "Эта конфигурация слишком велика для QR-кода. Скачайте файл и импортируйте его в клиент протокола." : generatedProtocol === "awg" ? "Откройте именно приложение AmneziaWG (не WireGuard) и отсканируйте код." : "Откройте клиент протокола на устройстве и отсканируйте код."}</p>
                 </section>
                 <section className="connectionTransfer">
                   <div className="connectionTransferIntro"><span>TRANSFER</span><strong>Передача конфигурации</strong><p>{generatedQrError ? "Скачайте файл конфигурации и импортируйте его в клиент протокола." : "Используйте один из вариантов ниже. Файл и QR содержат одинаковую конфигурацию подключения."}</p></div>

@@ -30,6 +30,7 @@ def perform(api, payload, identity):
     result = api.create_client_native(client, client_identity=identity[:16], on_mutation=mark_mutation)
     if result.get('id') != identity[:16]:
         raise OperationConflict('ID созданного подключения не подтверждён')
+    result = {**result, 'protocol': client.protocol}
     atomic_json(path, {'state': 'ready', 'client_id': identity[:16],
                        'expires_at': time.time() + RESULT_TTL, 'result': result})
 

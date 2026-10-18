@@ -33,6 +33,7 @@ class NativeClientCreationTests(unittest.TestCase):
         self.adapter.create_client_native.assert_called_once()
         for _ in range(2):
             self.assertEqual(creation.read_result(self.adapter, self.identity)['result']['config'], 'private-export')
+            self.assertEqual(creation.read_result(self.adapter, self.identity)['result']['protocol'], 'wg')
         self.assertEqual(creation.read_result(self.adapter, 'b' * 32), {'state': 'pending'})
         if os.name == 'posix':
             self.assertEqual(creation.result_path(self.adapter, self.identity).stat().st_mode & 0o777, 0o600)
