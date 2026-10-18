@@ -552,6 +552,10 @@
   backdrop-filter: blur(11px) saturate(.92);
 }
 
+.confirmBackdrop:has(.connectionDialog) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .connectionDialog {
   width: min(660px, calc(100vw - 32px)) !important;
   max-width: 100%;
