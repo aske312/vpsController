@@ -47,7 +47,7 @@ connections {
       id = $ENDPOINT
     }
     remote {
-      auth = eap-dynamic
+      auth = eap-mschapv2
       eap_id = %any
     }
     children {

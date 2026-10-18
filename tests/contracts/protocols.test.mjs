@@ -646,7 +646,7 @@ test("direct IKEv2 is installable and reloads isolated EAP users", async () => {
   assert.equal(manifest.id, "ikev2"); assert.equal(manifest.installable, true);
   assert.ok(manifest.preflight_packages.includes("libcharon-extauth-plugins"));
   assert.match(install, /libcharon-extauth-plugins/);
-  assert.match(install, /Another strongSwan runtime is active/); assert.match(install, /EAP|eap-dynamic/);
+  assert.match(install, /Another strongSwan runtime is active/); assert.match(install, /auth = eap-mschapv2/);
   assert.match(install, /libstrongswan-standard-plugins/); assert.match(install, /SWAN=\/etc\/swanctl/); assert.match(firewall, /--dport 500/); assert.match(firewall, /--dport 4500/);
   assert.match(api, /render_ikev2_users/); assert.match(api, /reload_ikev2/); assert.match(api, /payload\.protocol == "ikev2"/);
   assert.match(view, /title: "IKEv2"/);

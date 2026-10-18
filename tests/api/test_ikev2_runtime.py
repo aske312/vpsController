@@ -1,6 +1,8 @@
 """Update-time EAP repair preserves foreign runtimes and stopped services."""
 import subprocess
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from tests.api.support import api
@@ -25,6 +27,7 @@ class Ikev2RuntimeTests(unittest.TestCase):
                         state['installed'] = True
                     return subprocess.CompletedProcess(arguments,0)
                 with (patch.object(runtime,'SERVICE_FILE',Mock(is_file=lambda:True)),
+                        patch.object(runtime,'CONFIG_FILE',Mock(is_file=lambda:False)),
                         patch.object(runtime,'ComponentRegistry') as registry,
                         patch.object(runtime.subprocess,'run',side_effect=command)):
                     if not owned:
@@ -48,3 +51,41 @@ class Ikev2RuntimeTests(unittest.TestCase):
                     self.assertIn('--no-remove',packages[0])
                     self.assertEqual(packages[0][-1],runtime.PACKAGE)
                     self.assertEqual(services,[['systemctl','try-restart','vps-control-ikev2.service']])
+
+    def test_existing_managed_auth_migrates_only_legacy_remote_and_is_idempotent(self):
+        original = '''connections {
+  other {
+    remote {
+      auth = eap-dynamic
+    }
+  }
+  ikev2-eap {
+    local {
+      auth = pubkey
+    }
+    remote {
+      auth = eap-dynamic # preserve comment
+      eap_id = %any
+    }
+  }
+}
+include users.conf
+'''
+        with tempfile.TemporaryDirectory() as folder:
+            config = Path(folder)/'swanctl.conf'
+            config.write_text(original)
+            config.chmod(0o600)
+            with (patch.object(runtime,'SERVICE_FILE',Mock(is_file=lambda:True)),
+                  patch.object(runtime,'CONFIG_FILE',config),
+                  patch.object(runtime,'ComponentRegistry') as registry,
+                  patch.object(runtime,'installed',return_value=True),
+                  patch.object(runtime.subprocess,'run') as command):
+                registry.return_value.require_managed.side_effect = RegistryError('foreign')
+                self.assertFalse(runtime.repair())
+                self.assertEqual(config.read_text(), original)
+                registry.return_value.require_managed.side_effect = None
+                self.assertTrue(runtime.repair())
+                self.assertEqual(config.read_text(), original.replace('eap-dynamic #','eap-mschapv2 #'))
+                self.assertFalse(runtime.repair())
+                command.assert_called_once_with(['systemctl','try-restart','vps-control-ikev2.service'],check=True,timeout=60)
+                self.assertEqual(list(Path(folder).glob('.eap-repair-*')),[])
