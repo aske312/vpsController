@@ -6,7 +6,7 @@ if systemctl is-active --quiet strongswan-starter.service || systemctl is-active
   echo 'Another strongSwan runtime is active; refusing to replace it.' >&2; exit 1
 fi
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends charon-systemd strongswan-pki strongswan-swanctl libcharon-extra-plugins libstrongswan-extra-plugins libstrongswan-standard-plugins iptables
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends charon-systemd strongswan-pki strongswan-swanctl libcharon-extra-plugins libcharon-extauth-plugins libstrongswan-extra-plugins libstrongswan-standard-plugins iptables
 systemctl disable --now charon-systemd.service strongswan.service strongswan-starter.service 2>/dev/null || true
 install -d -m 0700 "$ROOT" "$SWAN/private" "$SWAN/x509" "$SWAN/x509ca"; install -d -m 0755 /usr/local/lib/vps-control-ikev2
 ENDPOINT="${PUBLIC_DOMAIN:-${PUBLIC_IPV4:-${PUBLIC_IPV6:-}}}"; [[ -n "$ENDPOINT" ]] || { echo 'Public endpoint is required' >&2; exit 1; }

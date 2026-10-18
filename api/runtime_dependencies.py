@@ -14,6 +14,7 @@ import tempfile
 import urllib.request
 
 import legacy_dns
+import ikev2_runtime
 
 ROOT = Path(__file__).resolve().parent
 CADDY_CONFIG = Path('/etc/caddy/Caddyfile')
@@ -84,6 +85,8 @@ def install() -> None:
     # swapping releases. Run migrations even when Caddy is already current.
     if legacy_dns.migrate():
         print("Legacy DNS: boot ordering fixed; running services were not restarted.", flush=True)
+    if ikev2_runtime.repair():
+        print("IKEv2: EAP-MSCHAPv2 dependency restored; existing keys and users preserved.", flush=True)
     if caddy_is_current():
         return
     with tempfile.TemporaryDirectory(prefix='vps-caddy-install-') as temp:

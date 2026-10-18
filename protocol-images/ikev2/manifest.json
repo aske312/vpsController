@@ -17,6 +17,7 @@
     "strongswan-pki",
     "strongswan-swanctl",
     "libcharon-extra-plugins",
+    "libcharon-extauth-plugins",
     "libstrongswan-extra-plugins",
     "libstrongswan-standard-plugins",
     "iptables"

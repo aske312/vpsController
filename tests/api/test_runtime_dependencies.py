@@ -15,12 +15,23 @@ class DependencyTests(unittest.TestCase):
         migration = patch.object(dependencies.legacy_dns, 'migrate', return_value=False)
         self.migrate_dns = migration.start()
         self.addCleanup(migration.stop)
+        repair = patch.object(dependencies.ikev2_runtime, 'repair', return_value=False)
+        self.repair_ikev2 = repair.start()
+        self.addCleanup(repair.stop)
 
     def test_newer_caddy_is_preserved_without_installing_anything(self):
         with patch.object(dependencies.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, 'v2.12.0', '')) as run:
             dependencies.install()
             self.assertEqual(run.call_count, 1)
             self.migrate_dns.assert_called_once_with()
+            self.repair_ikev2.assert_called_once_with()
+
+    def test_ikev2_repair_failure_prevents_gateway_package_changes(self):
+        self.repair_ikev2.side_effect = RuntimeError('Missing EAP dependency')
+        with patch.object(dependencies.subprocess, 'run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'Missing EAP dependency'):
+                dependencies.install()
+            run.assert_not_called()
 
     def test_dns_migration_failure_prevents_package_changes(self):
         self.migrate_dns.side_effect = RuntimeError('Invalid legacy DNS')

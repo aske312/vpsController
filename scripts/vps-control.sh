@@ -2582,10 +2582,14 @@ EOF
   systemctl start "${service}"
 }
 
+# Older IKEv2 installs omitted the password authentication plugin. Only repair
+# explicitly managed instances and preserve their keys, users and stopped state.
+ensure_ikev2_auth_runtime() {
+  python3 "${INSTALL_DIR}/api/ikev2_runtime.py"
+}
+
 # Profiles survive application releases, while their package-backed transport
-# may have been removed by an older uninstaller or an administrator. Repair the
-# runtime before restarting preserved instances; otherwise systemd enters an
-# unbounded restart loop because the generated units still reference ss-server.
+# may have been removed by an older uninstaller or an administrator.
 ensure_mihomo_profile_runtimes() {
   python3 "${INSTALL_DIR}/api/component_registry.py" check-managed \
     --manifest "${INSTALL_DIR}/protocol-images/mihomo/manifest.json" --data-dir "${DATA_DIR}" >/dev/null 2>&1 || return 0
@@ -2658,6 +2662,7 @@ PY
   ensure_api_write_access
   install_protocol_monitor
   ensure_mihomo_profile_runtimes
+  ensure_ikev2_auth_runtime
   info "Запуск обновлённой версии 312node.net"
   stop_legacy_containers
   systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service
@@ -2903,6 +2908,7 @@ install_prebuilt_release() {
     || ! install_protocol_monitor \
     || ! ensure_api_write_access \
     || ! ensure_mihomo_profile_runtimes \
+    || ! ensure_ikev2_auth_runtime \
     || ! ensure_amneziawg_kernel_module \
     || ! grep -Eq '^ReadWritePaths=.*-?/etc/vps-control([[:space:]]|$)' "${SERVICE_FILE}" \
     || ! build_commit="$(awk -F= '$1 == "commit" {print $2}' "${INSTALL_DIR}/.prebuilt-release")" \
@@ -3058,6 +3064,7 @@ restore_test_app() {
       "${INSTALL_DIR}/api/resources/cloudflare-origin-pull-ca.pem"
   fi
   if ! install_api || ! install_web || ! install_protocol_monitor || ! ensure_api_write_access || ! ensure_mihomo_profile_runtimes \
+    || ! ensure_ikev2_auth_runtime \
     || ! write_integrity_manifest \
     || ! systemctl daemon-reload \
     || ! systemctl restart "${APP_NAME}-api.service" "${APP_NAME}-web.service" caddy.service \
