@@ -36,7 +36,7 @@ class ValidationTests(unittest.TestCase):
     def test_inventory_collects_all_public_addresses_and_configured_names_without_dns(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            (root/'environment').write_text('PUBLIC_DOMAIN=panel.example\nADMIN_PASSWORD=never-publish\n')
+            (root/'environment').write_text('PUBLIC_DOMAIN=panel.example\nCDN_DOMAIN=edge.example\nADMIN_PASSWORD=never-publish\n')
             (root/'hostname').write_text('relay.example\n')
             (root/'hosts').write_text('8.8.4.4 alias.example\n10.0.0.1 private.example\n')
             (root/'Caddyfile').write_text('https://web.example:19443, other.example {\n reverse_proxy hidden.example:8000\n}\n')
@@ -44,7 +44,8 @@ class ValidationTests(unittest.TestCase):
                 value = addresses.discover({'public_ip':'8.8.8.8','domains':['manual.example']}, addresses=['8.8.8.8','8.8.4.4','2606:4700::1111','fe80::1','10.0.0.1'], environment_paths=[root/'environment'],caddy_root=root,hostname_path=root/'hostname',hosts_path=root/'hosts')
             self.assertEqual(value['ipv4'],['8.8.8.8','8.8.4.4'])
             self.assertEqual(value['ipv6'],['2606:4700::1111'])
-            self.assertEqual(set(value['domains']),{'panel.example','relay.example','alias.example','web.example','other.example','manual.example'})
+            self.assertEqual(set(value['domains']),{'panel.example','relay.example','alias.example','web.example','other.example','manual.example','edge.example'})
+            self.assertEqual(value['cdn_domains'], ['edge.example'])
             self.assertNotIn('never-publish',json.dumps(value))
             self.assertNotIn('hidden.example',json.dumps(value))
 

@@ -27,7 +27,7 @@ class StandaloneTests(unittest.TestCase):
             result = credentials.connection(root)
             self.assertEqual(result, {'api_version': 1, 'agent_url': 'https://8.8.8.8:9443',
                 'certificate_sha256': hashlib.sha256(b'synthetic-certificate').hexdigest(),
-                'token': 'synthetic-token', 'addresses': {'ipv4': ['8.8.8.8'], 'ipv6': [], 'domains': []}})
+            'token': 'synthetic-token', 'addresses': {'ipv4': ['8.8.8.8'], 'ipv6': [], 'domains': [], 'cdn_domains': []}})
             self.assertEqual(credentials.connection(root), result)
             (root / 'config.json').write_text(json.dumps({'public_ip': '8.8.8.8', 'api_port': 9444}))
             self.assertEqual(credentials.connection(root)['agent_url'], 'https://8.8.8.8:9444')

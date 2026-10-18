@@ -19,6 +19,9 @@ sys.path.insert(0, sys.argv[3])
 from addresses import dual_stack_available, domain
 config = json.loads(path.read_text()) if path.exists() else {}
 domains = json.loads(os.environ.get('RELAY_DOMAINS_JSON', '[]')) or config.get('domains', [])
+cdn_domains = json.loads(os.environ.get('RELAY_CDN_DOMAINS_JSON', '[]')) or config.get('cdn_domains', [])
+if not isinstance(cdn_domains, list) or len(cdn_domains) > 64 or any(not isinstance(value, str) or not domain(value) for value in cdn_domains):
+    raise SystemExit('Invalid Relay CDN domain list')
 if not isinstance(domains, list) or len(domains) > 64 or any(not isinstance(value, str) or not domain(value) for value in domains):
     raise SystemExit('Invalid Relay domain list')
 values = {}
@@ -150,10 +153,13 @@ for address in addresses:
 config = root / 'config.json'
 previous = json.loads(config.read_text()) if config.exists() else {}
 domains = json.loads(os.environ.get('RELAY_DOMAINS_JSON', '[]')) or previous.get('domains', [])
+cdn_domains = json.loads(os.environ.get('RELAY_CDN_DOMAINS_JSON', '[]')) or previous.get('cdn_domains', [])
+if not isinstance(cdn_domains, list) or len(cdn_domains) > 64 or any(not isinstance(value, str) or not domain(value) for value in cdn_domains):
+    raise SystemExit('Invalid Relay CDN domain list')
 if not isinstance(domains, list) or len(domains) > 64 or any(not isinstance(value, str) or not domain(value) for value in domains):
     raise SystemExit('Invalid Relay domain list')
 temporary = root / 'config.json.new'
-temporary.write_text(json.dumps({'token_sha256': hashlib.sha256(token.encode()).hexdigest(), 'own_ips': sorted(own_ips), 'public_ip': ip, 'api_port': int(os.environ['RELAY_API_PORT']), 'domains': sorted({domain(value) for value in domains})}))
+temporary.write_text(json.dumps({'token_sha256': hashlib.sha256(token.encode()).hexdigest(), 'own_ips': sorted(own_ips), 'public_ip': ip, 'api_port': int(os.environ['RELAY_API_PORT']), 'domains': sorted({domain(value) for value in domains}), 'cdn_domains': sorted({domain(value) for value in cdn_domains})}))
 os.chown(temporary, 0, gid); os.chmod(temporary, 0o640); os.replace(temporary, config)
 for name in ('server.crt', 'server.key'):
     os.chown(root / name, 0, gid); os.chmod(root / name, 0o640)

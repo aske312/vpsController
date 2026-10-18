@@ -8,10 +8,11 @@ WORK_DIR=""
 PUBLIC_IP=""
 API_PORT=""
 DOMAINS=()
+CDN_DOMAINS=()
 cleanup() { [[ -z "${WORK_DIR}" ]] || rm -rf -- "${WORK_DIR}"; }
 trap cleanup EXIT
 usage() {
-  printf 'Установка 312node.net Relay Agent без панели: bash install-agent.sh [--public-ip IPv4] [--api-port PORT] [--domain NAME ...]\n'
+  printf 'Установка 312node.net Relay Agent без панели: bash install-agent.sh [--public-ip IPv4] [--api-port PORT] [--domain NAME ...] [--cdn-domain NAME ...]\n'
 }
 while (($#)); do
   case "$1" in
@@ -27,6 +28,10 @@ while (($#)); do
       [[ $# -ge 2 ]] || { usage >&2; exit 2; }
       DOMAINS+=("$2"); shift 2 ;;
     --domain=*) DOMAINS+=("${1#*=}"); shift ;;
+    --cdn-domain)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      CDN_DOMAINS+=("$2"); shift 2 ;;
+    --cdn-domain=*) CDN_DOMAINS+=("${1#*=}"); shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Неизвестный параметр: %s\n' "$1" >&2; exit 2 ;;
   esac
@@ -71,7 +76,7 @@ if [[ ! -f "${SOURCE}/install.sh" || ! -f "${SOURCE}/agent.py" || ! -f "${SOURCE
   SOURCE="${candidates[0]}"
 fi
 printf 'Устанавливаем 312node.net Relay Agent для %s…\n' "${PUBLIC_IP}"
-RELAY_DOMAINS_JSON="$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "${DOMAINS[@]}")" RELAY_PUBLIC_IP="${PUBLIC_IP}" RELAY_API_PORT="${API_PORT}" bash "${SOURCE}/install.sh"
+RELAY_CDN_DOMAINS_JSON="$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "${CDN_DOMAINS[@]}")" RELAY_DOMAINS_JSON="$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "${DOMAINS[@]}")" RELAY_PUBLIC_IP="${PUBLIC_IP}" RELAY_API_PORT="${API_PORT}" bash "${SOURCE}/install.sh"
 printf '\nДанные для добавления в изолированную сеть (сохраните токен):\n'
 python3 /usr/local/lib/vps-control-relay-agent/credentials.py
 printf '\nПовторно показать: python3 /usr/local/lib/vps-control-relay-agent/credentials.py\n'

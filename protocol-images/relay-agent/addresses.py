@@ -45,6 +45,11 @@ def normalize(value, primary=None):
             raise ValueError('Invalid address list')
         result[key] = sorted({item for raw in items if (item := domain(raw) if version is None else public_ip(raw))
                               and (version is None or ipaddress.ip_address(item).version == version)})
+    if 'cdn_domains' in value:
+        items = value['cdn_domains']
+        if not isinstance(items, list) or len(items) > LIMIT or any(not isinstance(item, str) for item in items):
+            raise ValueError('Invalid CDN domain list')
+        result['cdn_domains'] = sorted({name for raw in items if (name := domain(raw)) and name in result['domains']})
     if primary and (address := public_ip(primary)):
         key = 'ipv4' if ipaddress.ip_address(address).version == 4 else 'ipv6'
         result[key] = [address, *[item for item in result[key] if item != address]][:LIMIT]
@@ -58,13 +63,13 @@ def read_inventory(root, config=None):
         value = json.loads((root / 'addresses.json').read_text())
         return normalize(value, config.get('public_ip'))
     except (OSError, ValueError, TypeError):
-        return normalize({'ipv4': [config['public_ip']] if config.get('public_ip') else [], 'domains': config.get('domains', [])})
+        return normalize({'ipv4': [config['public_ip']] if config.get('public_ip') else [], 'domains': config.get('domains', []) + config.get('cdn_domains', []), 'cdn_domains': config.get('cdn_domains', [])})
 
 
 def discover(config, *, addresses=None, environment_paths=None, caddy_root=Path('/etc/caddy'), hostname_path=Path('/etc/hostname'), hosts_path=Path('/etc/hosts')):
     if addresses is None:
         addresses = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=5, check=True).stdout.split()
-    result = {'ipv4': [], 'ipv6': [], 'domains': list(config.get('domains', []))}
+    result = {'ipv4': [], 'ipv6': [], 'domains': list(config.get('domains', [])) + list(config.get('cdn_domains', [])), 'cdn_domains': list(config.get('cdn_domains', []))}
     for raw in addresses:
         if address := public_ip(raw):
             result['ipv4' if ipaddress.ip_address(address).version == 4 else 'ipv6'].append(address)
@@ -80,6 +85,8 @@ def discover(config, *, addresses=None, environment_paths=None, caddy_root=Path(
             values = shlex.split(raw, comments=True)
             if values and (name := domain(values[0])):
                 result['domains'].append(name)
+                if key.strip() in ('CDN_DOMAIN', 'CF_DOMAIN'):
+                    result['cdn_domains'].append(name)
     if hostname_path.exists() and (name := domain(hostname_path.read_text().strip())):
         result['domains'].append(name)
     own = set(result['ipv4'] + result['ipv6'] + [config.get('public_ip', '')])

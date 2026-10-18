@@ -124,7 +124,7 @@ if sys.argv[1] in ('restart', 'disable'):
     assert bad.returncode != 0 and not Path('/etc/vps-control-relay-agent').exists()
     bad_domain = subprocess.run(['bash', bootstrap, *arguments, '--domain', 'https://invalid.example'],capture_output=True,text=True)
     assert bad_domain.returncode != 0 and not Path('/etc/vps-control-relay-agent').exists()
-    result = run('bash', bootstrap, *arguments, '--domain', 'manual.example', *(['--api-port', str(api_port)] if api_port else []))
+    result = run('bash', bootstrap, *arguments, '--domain', 'manual.example', '--cdn-domain', 'edge.example', *(['--api-port', str(api_port)] if api_port else []))
     config_root = Path('/etc/vps-control-relay-agent')
     config = json.loads((config_root / 'config.json').read_text())
     connection = json.loads(run('python3', '/usr/local/lib/vps-control-relay-agent/credentials.py').stdout)
@@ -133,6 +133,7 @@ if sys.argv[1] in ('restart', 'disable'):
     assert connection['addresses']['ipv6'] == ['2606:4700::1111']
     assert 'relay.example' in connection['addresses']['domains']
     assert 'manual.example' in connection['addresses']['domains']
+    assert connection['addresses']['cdn_domains'] == ['edge.example']
     assert config['api_port'] == expected_port
     if blocker: assert blocker.getsockname()[1] == 9443
     assert connection['token'] in result.stdout
@@ -169,7 +170,8 @@ if sys.argv[1] in ('restart', 'disable'):
     Path('/etc/caddy/Caddyfile').write_text('changed.example {\n respond "ok"\n}\n')
     run('python3', '/usr/local/lib/vps-control-relay-agent/addresses.py')
     refreshed = json.loads(run('python3', '/usr/local/lib/vps-control-relay-agent/credentials.py').stdout)
-    assert set(refreshed['addresses']['domains']) == {'manual.example', 'changed.example'}
+    assert set(refreshed['addresses']['domains']) == {'manual.example', 'changed.example', 'edge.example'}
+    assert refreshed['addresses']['cdn_domains'] == ['edge.example']
     assert refreshed['token'] == connection['token']
     with urlopen(request, context=context, timeout=5) as response: assert json.load(response)['routes'] == 1
     if Path('/qa/light').exists():
