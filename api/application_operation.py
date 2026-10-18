@@ -288,6 +288,9 @@ def history(data_dir: Path, limit: int = 100) -> list[dict]:
 def prune(data_dir: Path, protected: str | None, *, retention_days=None, byte_budget=None, directory: Path | None = None) -> None:
     """Only terminal operation records; current/unknown/active records survive."""
     from operation_policy import read as retention_policy
+    from native_client_creation import expire_results
+
+    expire_results(data_dir)
 
     try:
         policy = retention_policy(data_dir)

@@ -50,6 +50,7 @@ import server_addresses
 import relay_manager
 import relay_connections
 import relay_client_creation
+import native_client_creation
 from read_cache import StampedReadCache, file_stamp
 import yaml
 import ech_settings
@@ -5752,6 +5753,34 @@ def create_shadowsocks_client(payload: ClientCreate, client_id: str, safe_name: 
     items.append({"id": client_id, "name": payload.name, "protocol": payload.protocol, "public_key": client_id, "port": port, "channel_mode": channel_mode, "route_endpoint": endpoint, "settings": payload.settings.model_dump(exclude_none=True), "created_at": datetime.now(timezone.utc).isoformat()})
     write_clients(items)
     return {"id": client_id, "filename": f"{safe_name}.txt", "config": client_config}
+
+
+@app.post('/api/clients/native', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def start_native_client(payload: ClientCreate, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
+    if payload.settings.relay_host_id:
+        raise HTTPException(status_code=422, detail='Для Relay используйте управляемое создание подключения')
+    try:
+        ComponentRegistry(DATA_DIR).require_managed(payload.protocol)
+        identity = application_operation.operation_id(operation_id)
+        with application_operation.locked(DATA_DIR):
+            path, digest = application_operation.persist_payload(DATA_DIR, identity, payload.model_dump())
+        return start_application_operation('native-client-create',
+            [sys.executable, str(Path(__file__).with_name('service_worker.py')), '--native-client', str(path), digest],
+            operation_id=identity, properties=(f'--property=EnvironmentFile={ENV_FILE}',))
+    except (RegistryError, application_operation.OperationConflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except OSError:
+        raise HTTPException(status_code=503, detail='Не удалось подготовить создание; проверьте историю операций') from None
+
+
+@app.get('/api/clients/native/{result_id}')
+def native_client_result(result_id: str, _: None = Depends(require_token)):
+    try:
+        return JSONResponse(native_client_creation.read_result(sys.modules[__name__], result_id), headers={'Cache-Control': 'no-store'})
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @app.post("/api/clients", dependencies=[Depends(require_component_management)])

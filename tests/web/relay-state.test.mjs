@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { relayConnection, relaySnapshot, relayClientResult } from '../../src/features/network/relay-state.ts';
+import test, { after } from 'node:test';
+import { createServer } from 'vite';
+const loader = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: 'custom', optimizeDeps: { noDiscovery: true } });
+after(() => loader.close());
+const { relayConnection, relaySnapshot, relayClientResult } = await loader.ssrLoadModule('/src/features/network/relay-state.ts');
 
 const connection = { api_version: 1, agent_url: 'https://85.209.155.229:9443', token: 's'.repeat(48), certificate_sha256: 'a'.repeat(64) };
 const host = { id: 'b'.repeat(32), name: 'Relay', agent_url: connection.agent_url, certificate_sha256: connection.certificate_sha256, api_version: 1, token_configured: true, state: 'connected', version: '1.0.0', agent_revision: 0, foreign_routes: 0, routes: [] };

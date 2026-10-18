@@ -1,3 +1,5 @@
+import { clientExport } from "../../shared/lib/client-export";
+
 export type RelayRoute = {
   id: string; host_id: string; transport: "tcp" | "udp"; listen_port: number; target_ip: string; target_port: number;
   state: "listening" | "failed" | "missing" | "drift" | "unknown"; target_verified: false;
@@ -18,12 +20,8 @@ export type RelayClientResult = { config: string; filename?: string; profiles?: 
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 const integer = (value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
 export function relayClientResult(value: unknown): RelayClientResult {
-  const config = (item: unknown) => typeof item === "string" && item.length > 0 && item.length <= 262144;
-  const filename = (item: unknown) => typeof item === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(item) && item !== "." && item !== "..";
-  if (!object(value) || !config(value.config) || value.filename !== undefined && !filename(value.filename)
-    || value.profiles !== undefined && (!Array.isArray(value.profiles) || value.profiles.length > 3 || value.profiles.some(item => !object(item) || typeof item.id !== "string" || !item.id || typeof item.name !== "string" || !filename(item.filename) || !config(item.config))
-      || new Set(value.profiles.map(item => item.id)).size !== value.profiles.length)) throw new Error("Некорректный результат подключения через Relay");
-  return value as RelayClientResult;
+  try { return clientExport(value) as RelayClientResult; }
+  catch { throw new Error("Некорректный результат подключения через Relay"); }
 }
 export function relaySnapshot(value: unknown): RelayStatus {
   const invalid = () => { throw new Error("Не удалось подтвердить сведения о relay"); };

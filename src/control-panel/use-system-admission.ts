@@ -96,7 +96,8 @@ export function useSystemAdmission(request: ReturnType<typeof createApiClient>, 
     const previous = pendingRef.current || readSystemAdmission();
     if (previous?.id) throw new SystemOperationUnknown(previous.id);
     if (!token) throw new Error("Войдите в панель перед отправкой команды");
-    const id = crypto.randomUUID().replaceAll("-", "");
+    const id = new Headers(options.headers).get("X-Operation-ID") || crypto.randomUUID().replaceAll("-", "");
+    if (!/^[a-f0-9]{32}$/.test(id)) throw new Error("Некорректный идентификатор операции");
     const initial = restoreSystemAdmission({ id })!;
     const controller = new AbortController();
     inFlight.current = controller;

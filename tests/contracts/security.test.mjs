@@ -119,9 +119,7 @@ test("authentication and VPN controls preserve consistent UI states", async () =
   const [api, page, eslint, manager] = await Promise.all([
     readApiSources(), readUiSources(), read("eslint.config.mjs"), read("scripts/vps-control.sh"),
   ]);
-  assert.match(page, /async function login\(event: FormEvent\)/);
-  assert.match(page, /const response = await fetch\("\/api\/overview"/);
-  assert.match(page, /onSubmit=\{login\}/);
+  // Credential encoding and transport behavior are tested independently of JSX/source syntax.
   assert.match(page, /current_password: currentAdminPassword, new_password: newAdminPassword, confirm_password: confirmAdminPassword/);
   assert.match(page, /Текущий пароль/);
   assert.match(page, /Повторите новый пароль/);

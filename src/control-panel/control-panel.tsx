@@ -16,6 +16,7 @@ import { AccessReveal } from "../shared/components/access-reveal";
 import { endpointCheckReady, endpointSelectable } from "../shared/lib/network-readiness";
 import { ConfirmationDialog } from "../shared/components/confirmation-dialog";
 import { LegalFooter } from "../shared/components/legal-footer";
+import { basicCredentials } from "../features/auth/basic-credentials";
 import { ProtocolIcon } from "../shared/components/protocol-icon";
 import { MihomoPage } from "../features/mihomo/mihomo-view";
 import { OverviewDashboard } from "../features/overview/overview-view";
@@ -155,6 +156,8 @@ export function ControlPanel() {
   const [mihomoRefreshKey, setMihomoRefreshKey] = useState(0);
   const [selectedChannel, setSelectedChannel] = useState<Protocol>("awg");
   const [token, setToken] = useState("");
+  const loginInFlight = useRef(false);
+  const clientCreationInFlight = useRef(false);
   const [loginUser, setLoginUser] = useState("admin");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
@@ -337,6 +340,8 @@ export function ControlPanel() {
   const busy = localBusy || admissionPending || systemActionNeedsPolling(application?.action);
   const admitNetworkOperation = useCallback((path: string, options: RequestInit) => submitSystemOperation(request, path, options), [request, submitSystemOperation]);
   const relayClient = useRelayClient({ request, admit: admitNetworkOperation, onOperation: acceptSystemOperation, onResult: acceptRelayClientResult });
+
+  const nativeClient = useRelayClient({ request, admit: admitNetworkOperation, onOperation: acceptSystemOperation, onResult: acceptRelayClientResult, native: true });
 
   const operationHistoryPolicy = useOperationHistorySettings(request, Boolean(token));
 
@@ -1598,8 +1603,12 @@ export function ControlPanel() {
   }, [generated, notifyError]);
 
   async function addClient(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setGenerated(""); setGeneratedQr(""); setGeneratedQrError("");
+    event.preventDefault();
+    if (clientCreationInFlight.current || nativeClient.pending || relayClient.pending) return;
+    clientCreationInFlight.current = true;
+    setBusy(true); setGenerated(""); setGeneratedQr(""); setGeneratedQrError("");
     if (!installedProtocols.includes(selectedClientProtocol)) {
+      clientCreationInFlight.current = false;
       setBusy(false); notifyError("Сначала установите выбранный протокол"); return;
     }
     try {
@@ -1617,17 +1626,9 @@ export function ControlPanel() {
         await relayClient.start(payload);
         return;
       }
-      const result = await request("/clients", { method: "POST", body: JSON.stringify(payload) }) as { config: string; filename?: string; profiles?: GeneratedProfile[] };
-      const profiles = result.profiles?.filter((profile) => profile.config && profile.filename) || [];
-      const preferred = profiles.find((profile) => profile.id === "cdn") || profiles[0];
-      setGeneratedProfiles(profiles);
-      setGenerated(preferred?.config || result.config);
-      setGeneratedName(preferred?.filename || result.filename || `${newClient.name}.conf`);
-      downloadConfig(preferred?.filename || result.filename || `${newClient.name}.conf`, preferred?.config || result.config);
-      setNewClient({ ...newClient, name: "" });
-      await loadClients();
+      await nativeClient.start(payload);
     } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось создать клиента"); }
-    finally { setBusy(false); }
+    finally { clientCreationInFlight.current = false; setBusy(false); }
   }
 
   function downloadConfig(filename: string, config: string) {
@@ -1668,17 +1669,17 @@ export function ControlPanel() {
 
   async function login(event: FormEvent) {
     event.preventDefault();
+    if (loginInFlight.current) return;
+    loginInFlight.current = true;
     setBusy(true);
-    const candidateToken = btoa(`${loginUser}:${loginPassword}`);
     try {
-      const response = await fetch("/api/overview", {
-        headers: { Authorization: `Basic ${candidateToken}` },
-      });
-      if (!response.ok) {
-        throw new Error(response.status === 401
+      const candidateToken = basicCredentials(loginUser, loginPassword);
+      await createApiClient(candidateToken, {
+        retryDelaysMs: [],
+        formatHttpError: (_detail, status) => status === 401
           ? "Неверный логин или пароль"
-          : `Не удалось проверить учётные данные (ошибка ${response.status})`);
-      }
+          : `Не удалось проверить учётные данные (ошибка ${status})`,
+      })("/overview", { cache: "no-store" });
       notifications.reset();
       setReloadRequested(false);
       setToken(candidateToken);
@@ -1687,6 +1688,7 @@ export function ControlPanel() {
     } catch (cause) {
       notifyError(cause instanceof Error ? cause.message : "Не удалось войти в панель");
     } finally {
+      loginInFlight.current = false;
       setBusy(false);
     }
   }
@@ -2079,12 +2081,13 @@ export function ControlPanel() {
               <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} aria-pressed={selectedConnectionType?.id === option.id} disabled={Boolean(option.unavailable)} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, channel_mode: option.channelMode || "direct", relay_host_id: option.protocol === "ikev2" || option.channelMode && option.channelMode !== "direct" ? "" : current.relay_host_id, cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name} <ProtocolHealthBadge health={protocolStatuses[option.protocol]?.health} /></strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
               {selectedConnectionType?.unavailable && <p role="status">{selectedConnectionType.unavailable} <button type="button" onClick={() => { void loadNetworkStatus(); if (selectedClientProtocol === "vless-reality-xhttp") void loadProtocolStatus(selectedClientProtocol); }}>Проверить маршруты</button></p>}
               {selectedConnectionType && <>
-                <div className="connectionForm"><RelayEndpointSelect request={request} value={newClientSettings.relay_host_id || ""} onChange={relay_host_id => setNewClientSettings(current => ({ ...current, relay_host_id }))} disabled={busy || relayClient.pending || relayClient.sending} unavailable={selectedClientProtocol === "ikev2" ? "IKEv2 требует стандартные порты 500/4500 и несовместим с Relay Agent v1." : newClientSettings.channel_mode !== "direct" ? "Для автоматического Relay выберите основной тип протокола." : undefined} transport={["wg", "awg", "hysteria2", "tuic"].includes(selectedClientProtocol) ? "UDP" : selectedClientProtocol === "shadowsocks" && newClientSettings.shadowsocks_mode === "tcp_and_udp" ? "TCP + UDP" : selectedClientProtocol === "openvpn" ? newClientSettings.vpn_transport.toUpperCase() : "TCP"} /></div>
+                <div className="connectionForm"><RelayEndpointSelect request={request} value={newClientSettings.relay_host_id || ""} onChange={relay_host_id => setNewClientSettings(current => ({ ...current, relay_host_id }))} disabled={busy || nativeClient.pending || nativeClient.sending || relayClient.pending || relayClient.sending} unavailable={selectedClientProtocol === "ikev2" ? "IKEv2 требует стандартные порты 500/4500 и несовместим с Relay Agent v1." : newClientSettings.channel_mode !== "direct" ? "Для автоматического Relay выберите основной тип протокола." : undefined} transport={["wg", "awg", "hysteria2", "tuic"].includes(selectedClientProtocol) ? "UDP" : selectedClientProtocol === "shadowsocks" && newClientSettings.shadowsocks_mode === "tcp_and_udp" ? "TCP + UDP" : selectedClientProtocol === "openvpn" ? newClientSettings.vpn_transport.toUpperCase() : "TCP"} /></div>
                 <ClientConnectionSettings selectedConnectionType={selectedConnectionType} selectedVlessRoute={selectedVlessRoute} newClientSettings={newClientSettings} setNewClientSettings={setNewClientSettings} />
               </>}
+              {nativeClient.pending && <div role="status" className="networkNotice"><strong>{nativeClient.failed ? "Результат создания требует проверки" : "Создаём подключение…"}</strong><p>Повторное создание заблокировано. Проверяем результат операции; конфигурация доступна в течение 24 часов.</p><button type="button" onClick={() => void nativeClient.check()}>Проверить результат подключения</button>{nativeClient.terminalFailure && <button type="button" onClick={nativeClient.dismiss}>Закрыть результат</button>}</div>}
               {relayClient.pending && <div role="status" className="networkNotice"><strong>{relayClient.failed ? "Результат настройки Relay требует проверки" : "Создаём подключение и настраиваем Relay…"}</strong><p>Создание клиента не будет отправлено повторно. При прерванной пересылке сначала проверьте результат операции в ROUTES.</p><button type="button" onClick={() => void relayClient.check()}>Проверить результат подключения</button>{relayClient.canResume && <button type="button" disabled={busy || relayClient.sending} onClick={() => void relayClient.resume()}>Продолжить настройку Relay</button>}{relayClient.terminalFailure && <button type="button" onClick={relayClient.dismiss}>Закрыть результат</button>}</div>}
             </div>
-            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy || relayClient.pending || relayClient.sending || !selectedConnectionType || Boolean(selectedConnectionType.unavailable)}>{localBusy || relayClient.pending || relayClient.sending ? "Создаём…" : "Создать подключение"}</button></div>
+            <div className="connectionDialogActions"><button type="button" onClick={closeClientDialog}>Отмена</button><button className="primaryButton" disabled={busy || nativeClient.pending || nativeClient.sending || relayClient.pending || relayClient.sending || !selectedConnectionType || Boolean(selectedConnectionType.unavailable)}>{localBusy || nativeClient.pending || nativeClient.sending || relayClient.pending || relayClient.sending ? "Создаём…" : "Создать подключение"}</button></div>
           </> : <>
             <div className="connectionGenerated">
               <div className="connectionGeneratedSummary">

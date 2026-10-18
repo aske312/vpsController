@@ -93,7 +93,14 @@ if __name__ == "__main__":
 
     identity = os.environ["VPS_CONTROL_OPERATION_ID"]
     unit = os.environ["VPS_CONTROL_OPERATION_UNIT"]
-    if sys.argv[1] == '--relay':
+    if sys.argv[1] == '--native-client':
+        path, digest = sys.argv[2:4]
+        def create_native():
+            operations.require_recovery_clear(api.DATA_DIR, 'native-client-create')
+            payload = operations.load_payload(api.DATA_DIR, identity, Path(path), digest)
+            api.native_client_creation.perform(api, payload, identity)
+        success = execute_operation(api, 'native-client-create', create_native, identity, unit)
+    elif sys.argv[1] == '--relay':
         name, path, digest = sys.argv[2:5]
         success = execute_operation(api, name, lambda: apply_relay_request(api, name, Path(path), digest, identity), identity, unit)
     elif sys.argv[1] == "--network":

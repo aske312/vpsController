@@ -6,11 +6,28 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from fastapi.security import HTTPBasicCredentials
 from fastapi.testclient import TestClient
-from tests.api.support import api
+from tests.api.support import api, manager
 import application_operation as operations
 
 
 class CoreAuthTests(unittest.TestCase):
+    def test_every_admin_route_rejects_missing_credentials_before_execution(self):
+        import re
+        totals = {"core": 0, "mihomo": 0}
+        for name, module in (("core", api), ("mihomo", manager)):
+            client = TestClient(module.app)
+            for route in module.app.routes:
+                if not route.path.startswith("/api/") or route.path in ("/api/health", "/api/auth/status") or "/subscriptions/" in route.path:
+                    continue
+                path = re.sub(r"\{[^}]+\}", "fixture", route.path)
+                for method in route.methods - {"HEAD", "OPTIONS"}:
+                    with self.subTest(application=name, method=method, route=route.path):
+                        response = client.request(method, path, json={} if method != "GET" else None)
+                        self.assertEqual(response.status_code, 401)
+                        totals[name] += 1
+        self.assertGreater(totals["core"], 60)
+        self.assertGreater(totals["mihomo"], 20)
+
     def test_non_ascii_credentials_and_current_password_fail_cleanly(self):
         with patch.object(api, "ADMIN_USER", "fixture"), patch.object(api, "ADMIN_PASSWORD", "previous"):
             for user, password in (("другой", "previous"), ("fixture", "неверный")):
