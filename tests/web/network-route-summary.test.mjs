@@ -50,6 +50,9 @@ test("IP inventory failures and pending changes cannot display a confirmed assig
 });
 
 test("Relay summary includes forwarding faults and never reuses stale liveness", () => {
+  const offline = relayRouteSummary({ ...host, name: "Amsterdam", state: "unknown", error: "Agent connection timed out" });
+  assert.equal(offline.state, "error");
+  assert.match(offline.detail, /Amsterdam.*timed out/);
   for (const state of ["failed", "missing", "drift"]) assert.equal(relayRouteSummary({ ...host, routes: [{ transport: "tcp", state }] }).state, "error");
   assert.equal(relayRouteSummary({ ...host, routes: [{ transport: "tcp", state: "listening", check: { state: "failed" } }] }).state, "error");
   assert.equal(relayRouteSummary({ ...host, routes: [{ transport: "udp", state: "unknown" }] }).state, "unknown");

@@ -107,14 +107,15 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
   useEffect(() => { onDirtyChange?.(dirty || endpointDirty || relayDirty); }, [dirty, endpointDirty, relayDirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
     if (loadingRef.current || savingRef.current) return;
     loadingRef.current = true;
     const run = ++loadingRun.current;
-    onLoadingChange?.(true, run);
-    setLoading(true);
+    const showLoading = !background || !savedEndpointRef.current;
+    if (showLoading) { onLoadingChange?.(true, run); setLoading(true); }
     try {
       const next = await readNetworkControl(request);
+      if (run !== loadingRun.current) return;
       const previous = savedRef.current;
       setStatus(next.network);
       setEndpointDraft((current) =>
@@ -133,6 +134,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       setDns(next.dns);
       setLoadFailed(false);
     } catch (cause) {
+      if (run !== loadingRun.current) return;
       setLoadFailed(true);
       notifyError(
         cause instanceof Error
@@ -141,14 +143,13 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       );
     } finally {
       loadingRef.current = false;
-      setLoading(false);
-      onLoadingChange?.(false, run);
+      if (showLoading) { setLoading(false); onLoadingChange?.(false, run); }
     }
   }, [notifyError, onLoadingChange, request]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
+    void load(true);
   }, [load, refreshKey]);
 
   useEffect(() => {
@@ -192,8 +193,8 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
   }, [notifyError, request]);
 
   const saveDnsSettings = useCallback(async () => {
-    if (!dnsDraft || loadFailed || busy || savingRef.current || loadingRef.current) return;
-    savingRef.current = true;
+    if (!dnsDraft || loadFailed || busy || savingRef.current || loading) return;
+    savingRef.current = true; loadingRun.current++;
     setBusy(true);
     try {
       const settings = {
@@ -228,11 +229,11 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       savingRef.current = false;
       setBusy(false);
     }
-  }, [admitOperation, busy, dns, dnsDraft, loadFailed, notifyError, onOperation]);
+  }, [admitOperation, busy, dns, dnsDraft, loadFailed, loading, notifyError, onOperation]);
 
   const saveEndpoints = useCallback(async () => {
-    if (!endpointDraft || loadFailed || busy || savingRef.current || loadingRef.current) return;
-    savingRef.current = true;
+    if (!endpointDraft || loadFailed || busy || savingRef.current || loading) return;
+    savingRef.current = true; loadingRun.current++;
     setBusy(true);
     try {
       const settings = Object.fromEntries(
@@ -255,11 +256,11 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       savingRef.current = false;
       setBusy(false);
     }
-  }, [admitOperation, busy, endpointDraft, loadFailed, notifyError, onOperation]);
+  }, [admitOperation, busy, endpointDraft, loadFailed, loading, notifyError, onOperation]);
 
   const removeEndpoint = useCallback(async (kind: NetworkEndpointCheck["kind"], domain: string) => {
-    if (loadFailed || busy || savingRef.current || loadingRef.current) return;
-    savingRef.current = true;
+    if (loadFailed || busy || savingRef.current || loading) return;
+    savingRef.current = true; loadingRun.current++;
     setBusy(true);
     try {
       const started = await deleteNetworkEndpoint(admitOperation, kind, domain, status?.transport_endpoints.revision);
@@ -272,14 +273,14 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       savingRef.current = false;
       setBusy(false);
     }
-  }, [admitOperation, busy, loadFailed, loadingRef, notifyError, onOperation, status]);
+  }, [admitOperation, busy, loadFailed, loading, notifyError, onOperation, status]);
 
   return (
     <div data-network-page="true">
       {confirmRecovery && <ConfirmationDialog request={{ title: "Восстановить DNS?", message: "Будут восстановлены DNS-файлы и состояния служб до прерванного применения. Подключения могут кратковременно прерваться.", confirmLabel: "Восстановить DNS", danger: true }} onClose={(confirmed) => {
         setConfirmRecovery(false);
-        if (!confirmed || loadFailed || busy || savingRef.current || loadingRef.current) return;
-        savingRef.current = true;
+        if (!confirmed || loadFailed || busy || savingRef.current || loading) return;
+        savingRef.current = true; loadingRun.current++;
         setBusy(true);
         void recoverNetworkDns(admitOperation).then((started) => { setPending({ id: started.id, kind: "dns", draft: dnsDraft || undefined }); onOperation(started); }).catch((cause) => { if (!(cause instanceof SystemOperationUnknown)) notifyError(cause instanceof Error ? cause.message : "Не удалось начать восстановление DNS"); }).finally(() => { savingRef.current = false; setBusy(false); });
       }} />}

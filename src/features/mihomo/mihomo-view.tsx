@@ -13,7 +13,7 @@ import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, ProfileMutationFailed, ProfileMutationSuperseded, submitProfileMutation, type ProfileMutation } from "./profile-operation";
 import type { NetworkStatus } from "../../shared/types/control-plane";
 import { confirmedRouteAddresses } from "../../shared/lib/network-readiness";
-import { RelayEndpointSelect } from "../network/relay-endpoint-select";
+import { RelayEndpointSelect, useRelayInventory } from "../network/relay-endpoint-select";
 
 import { useNotifier, useFailureNotifications, useNotifications } from "../../shared/notifications/notification-center";
 import { notificationFailure as refreshFailure, type NotificationFailure } from "../../shared/notifications/store";
@@ -235,6 +235,14 @@ export function MihomoPage({
       return client<T>(path, options);
     };
   }, [token, readOnly]);
+  const relayInventory = useRelayInventory(request);
+  useEffect(() => {
+    let cancelled = false;
+    void request("/network", { cache: "no-store" }).then(networkRoutesSnapshot).then(value => {
+      if (!cancelled) setNetworkStatus(value);
+    }).catch(() => { /* Keep the address list independent of periodic telemetry. */ });
+    return () => { cancelled = true; };
+  }, [request]);
   const refresh = useCallback(async (afterAction = true): Promise<void> => {
     if (refreshInFlight.current) {
       if (!afterAction) return refreshInFlight.current;
@@ -252,7 +260,6 @@ export function MihomoPage({
         // cache hit would hide revalidation failures and keep old readiness.
         const failures = await refreshWorkspaceSections((path) => request(path, { cache: "no-store" }), {
           status: { path: "/mihomo/status", accept: (value) => setStatus(managerStatusSnapshot(value)), onFailure: () => setStatus(null) },
-          network: { path: "/network", accept: (value) => setNetworkStatus(networkRoutesSnapshot(value)), onFailure: () => setNetworkStatus(null) },
           modules: { path: "/mihomo/modules", onFailure: () => setModulesReadKnown(false), accept: (value) => {
             refreshedModules.current = moduleSnapshots(value);
             setModulesReadKnown(true);
@@ -1744,7 +1751,7 @@ export function MihomoPage({
                       <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}><span aria-hidden="true">×</span></button>
                     </header>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
-                    <RelayEndpointSelect request={request} value={String(connection.settings.relay_host_id || "")} onChange={value => updateConnectionSetting(connection.id, "relay_host_id", value)} disabled={Boolean(busy) || Boolean(pendingProfileSave)} transport={["transport-wg", "transport-awg", "transport-hysteria2", "transport-tuic"].includes(connection.component) ? "UDP" : connection.component === "transport-shadowsocks" ? "TCP + UDP" : "TCP"} />
+                    <RelayEndpointSelect request={request} inventory={relayInventory} value={String(connection.settings.relay_host_id || "")} onChange={value => updateConnectionSetting(connection.id, "relay_host_id", value)} disabled={Boolean(busy) || Boolean(pendingProfileSave)} transport={["transport-wg", "transport-awg", "transport-hysteria2", "transport-tuic"].includes(connection.component) ? "UDP" : connection.component === "transport-shadowsocks" ? "TCP + UDP" : "TCP"} />
                     {!supported && <p>Подключение несовместимо с форматом клиента. Удалите его или выберите поддерживаемый формат.</p>}
                     <div className="mihomoConnectionFields">
                       {schema.filter((field) => {

@@ -35,14 +35,19 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
   const saving = useRef(false);
   const terminalRead = useRef("");
   const { error: notifyError } = useNotifier("relay", "Relay");
+  const cancelLoad = useCallback(() => {
+    generation.current++;
+    inFlight.current?.controller.abort();
+    inFlight.current = null;
+  }, []);
   const load = useCallback(async (force = false) => {
     if (saving.current || inFlight.current && !force) return;
     inFlight.current?.controller.abort();
     const job = { controller: new AbortController(), run: ++generation.current };
-    inFlight.current = job; setReading(true);
+    inFlight.current = job; setReading(!hasSnapshot.current);
     const current = () => job.run === generation.current && !job.controller.signal.aborted;
     let livePublished = false;
-    if (!hasSnapshot.current || force) {
+    if (!hasSnapshot.current) {
       void request("/network/relays?view=inventory", { cache: "no-store", signal: job.controller.signal })
         .then(relaySnapshot).then(data => {
           if (current() && !livePublished) { hasSnapshot.current = true; setStatus(data); }
@@ -59,8 +64,8 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
   }, [request]);
   useEffect(() => {
     hasSnapshot.current = false;
-    return () => { generation.current++; inFlight.current?.controller.abort(); inFlight.current = null; };
-  }, [request]);
+    return cancelLoad;
+  }, [request, cancelLoad]);
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
@@ -83,7 +88,7 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
   const locked = busy || sending || reading || failed || !status || Boolean(pending);
   async function submit(path: string, init: RequestInit) {
     if (saving.current) return false;
-    saving.current = true; generation.current++; inFlight.current?.controller.abort(); inFlight.current = null; setReading(false); setSending(true);
+    saving.current = true; cancelLoad(); setReading(false); setSending(true);
     try {
       const started = await admit(path, init);
       setPending(systemActionNeedsPolling(started) ? started.id || null : null); onOperation(started); return true;

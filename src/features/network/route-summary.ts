@@ -48,6 +48,7 @@ export function relayRouteSummary(host: RelayHost, failed = false, pending = fal
   const base = { type: "Relay Agent", connection: transports.map(item => `${item.transport.toUpperCase()}: ${item.count}`).join(" · ") || (failed || pending || host.state !== "connected" ? "Порты неизвестны" : "Нет перенаправлений") };
   if (pending) return { ...base, state: "pending", label: "Проверяем", detail: "Результат изменения Relay ещё не подтверждён." };
   if (reading && host.state !== "connected") return { ...base, state: "pending", label: "Проверяем", detail: "Проверяем соединение с агентом и состояние его портов." };
+  if (host.error) return { ...base, state: "error", label: "Ошибка Relay", detail: `${host.name}: ${host.error}` };
   if (failed || host.state !== "connected") return { ...base, state: "unknown", label: "Нет данных", detail: "Доступность агента и портов не подтверждена. Число перенаправлений — из сохранённых настроек." };
   if (host.routes.some(route => ["failed", "missing", "drift"].includes(route.state) || route.check?.state === "failed")) return { ...base, state: "error", label: "Ошибка портов", detail: "Есть отсутствующие, изменённые или не прошедшие проверку перенаправления. Раскройте адрес для сведений о портах." };
   if (host.routes.some(route => route.state === "unknown")) return { ...base, state: "unknown", label: "Порты неизвестны", detail: "Агент доступен, но состояние части перенаправлений не подтверждено." };

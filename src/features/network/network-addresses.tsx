@@ -28,6 +28,8 @@ export function useNetworkAddresses({ request, busy, refreshKey }: { request: Ne
   const [pending, setPending] = useState<Pending | null>(null);
   const sending = useRef(false);
   const readingNow = useRef(false);
+  const hasSnapshot = useRef(false);
+  const generation = useRef(0);
   const active = useRef(true);
   const attempt = useRef<Pending | null>(null);
   const notifier = useNotifier("server-addresses", "Публичные IP");
@@ -37,33 +39,35 @@ export function useNetworkAddresses({ request, busy, refreshKey }: { request: Ne
     try { if (value) sessionStorage.setItem(storageKey, JSON.stringify(value)); else sessionStorage.removeItem(storageKey); } catch { /* Memory still prevents replay during this session. */ }
   }, []);
   const accept = useCallback((value: ServerAddressInventory) => {
-    if (active.current) { setStatus(value); setFailed(false); }
+    if (active.current) { hasSnapshot.current = true; setStatus(value); setFailed(false); }
     const current = attempt.current;
     if (current && confirmsAddressChange(value, current)) {
       remember(null);
       notifier.operation(current.id, "Назначение IP", "success", "Изменение подтверждено. Основной IP применяется к новым конфигурациям; резерв сохраняется для дальнейшего использования.");
     }
   }, [notifier, remember]);
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
     if (sending.current || readingNow.current) return;
     readingNow.current = true;
-    if (active.current) setReading(true);
+    const run = ++generation.current;
+    if (active.current) setReading(!background || !hasSnapshot.current || Boolean(attempt.current));
     const current = attempt.current;
     try {
-      accept(serverAddressesSnapshot(await request(`/network/addresses${current ? `?change_id=${current.id}` : ""}`, { cache: "no-store" })));
-    } catch { if (active.current) setFailed(true); }
+      const value = serverAddressesSnapshot(await request(`/network/addresses${current ? `?change_id=${current.id}` : ""}`, { cache: "no-store" }));
+      if (run === generation.current) accept(value);
+    } catch { if (active.current && run === generation.current) setFailed(true); }
     finally { readingNow.current = false; if (active.current) setReading(false); }
   }, [accept, request]);
   useEffect(() => {
     active.current = true;
     remember(readPending());
-    const timer = window.setTimeout(() => void load(), 0);
+    const timer = window.setTimeout(() => void load(true), 0);
     return () => { active.current = false; window.clearTimeout(timer); };
   }, [load, remember, refreshKey]);
   const setRole = async (address: string, role: ServerAddressRole) => {
-    if (!status || busy || failed || readingNow.current || sending.current || attempt.current || status.discovery.state !== "ready") return;
+    if (!status || busy || failed || reading || sending.current || attempt.current || status.discovery.state !== "ready") return;
     const current: Pending = { id: crypto.randomUUID().replaceAll("-", ""), address, role, previous_revision: status.revision };
-    sending.current = true; remember(current);
+    generation.current++; sending.current = true; remember(current);
     notifier.operation(current.id, "Назначение IP", "running", "Сохраняем назначение адреса…");
     try {
       const value = serverAddressesSnapshot(await request("/network/addresses", { method: "PUT", body: JSON.stringify({ address, role, expected_revision: current.previous_revision, operation_id: current.id }) }));
