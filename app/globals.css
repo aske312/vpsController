@@ -5,6 +5,7 @@
 @import "./styles/dashboard.css";
 @import "./styles/system.css";
 @import "./styles/protocols.css";
+@import "./styles/agent.css";
 @import "./styles/connections.css";
 @import "./styles/overlays.css";
 @import "./styles/notifications.css";
