@@ -10,7 +10,56 @@ after(() => loader.close());
 const { RelayEndpointSelect } = await loader.ssrLoadModule("/src/features/network/relay-endpoint-select.tsx");
 const { NetworkRelayRows, relayMatches } = await loader.ssrLoadModule("/src/features/network/network-relays.tsx");
 const { connectionAddressModes } = await loader.ssrLoadModule("/src/features/mihomo/connection-address.ts");
+const { MihomoConnectionAddress } = await loader.ssrLoadModule("/src/features/mihomo/connection-address-select.tsx");
 const host = { id: "b".repeat(32), name: "Amsterdam", client_address: "relay.example", agent_url: "https://85.209.155.229:9443", state: "unknown", routes: [] };
+
+const mihomoAddress = (component, settings = {}, props = {}) => renderToStaticMarkup(createElement(MihomoConnectionAddress, {
+  connection: { id: 'fixture', name: 'fixture', device_id: 'phone', component, settings },
+  inventory: { status: { hosts: [{ ...host, addresses: { ipv4: ['85.209.155.229'], ipv6: [], domains: ['relay.example', 'cdn-relay.example'], cdn_domains: ['cdn-relay.example'] } }] }, failed: false },
+  tlsDomains: ['origin-tls.example'], udpDomains: ['origin-udp.example'], cdnDomains: ['origin-cdn.example'], webTransports: ['websocket'], supported: true, disabled: false, onChange: () => {}, ...props,
+}));
+
+test('Mihomo separates protocol mode from Relay endpoint and keeps TLS identity visible', () => {
+  const settings = { route_mode: 'tls', tls_domain: 'origin-tls.example', relay_host_id: host.id, relay_address: 'relay.example' };
+  const html = mihomoAddress('transport-reality', settings);
+  assert.match(html, /<button[^>]*aria-pressed="true"[^>]*>TLS<\/button>/);
+  assert.doesNotMatch(html, /<button[^>]*>Relay<\/button>|<button[^>]*>UDP<\/button>/);
+  assert.match(html, /<optgroup label="TLS · через Relay">/);
+  assert.match(html, /relay.example.*selected=""/);
+  assert.match(html, /aria-label="TLS-сервис основного VPS"/);
+  assert.match(html, /origin-tls.example.*selected=""/);
+  assert.doesNotMatch(html, /cdn-relay.example/);
+  assert.match(mihomoAddress('transport-reality', {route_mode:'direct'}), /<optgroup label="REALITY · через Relay">/);
+});
+
+test('Mihomo exposes Relay domains in UDP for every supported UDP protocol', () => {
+  for (const component of ['transport-wg', 'transport-awg', 'transport-hysteria2', 'transport-tuic', 'transport-shadowsocks']) {
+    const html = mihomoAddress(component, { relay_host_id: host.id, relay_address: 'relay.example' });
+    assert.ok(html.includes(`<optgroup label="${component === 'transport-shadowsocks' ? 'TCP + UDP' : 'UDP'} · через Relay">`));
+    assert.match(html, /origin-udp.example/);
+    assert.match(html, /relay.example.*selected=""/);
+    assert.doesNotMatch(html, /<button[^>]*>(TLS|CDN|REALITY|Relay)<\/button>|cdn-relay.example/);
+  }
+});
+
+test('Mihomo hides unsupported CDN through Relay but retains saved legacy routes', () => {
+  const html = mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example'});
+  assert.doesNotMatch(html, /relay.example|через Relay/);
+  const saved = mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example',relay_host_id:host.id,relay_address:'saved.example'});
+  assert.match(saved, /saved.example.*selected=""/);
+  assert.match(saved, /сохранённый адрес/);
+});
+
+test('Mihomo retains excluded or unavailable saved Relay endpoints and allows direct recovery', () => {
+  const html = mihomoAddress('transport-tuic', {relay_host_id:host.id,relay_address:'saved.example'}, {inventory:{status:null,failed:true}});
+  assert.match(html, /saved.example.*selected=""/);
+  assert.doesNotMatch(html, /<select[^>]*disabled=/);
+  assert.match(html, /origin-udp.example/);
+  assert.doesNotMatch(mihomoAddress('transport-reality', {}, {webTransports:[]}), /<button[^>]*>(TLS|CDN)<\/button>/);
+  assert.doesNotMatch(mihomoAddress('unknown'), /<button[^>]*>|через Relay/);
+  const excluded = mihomoAddress('transport-wg', {}, {inventory:{status:{hosts:[{...host,excluded_addresses:['relay.example']}]},failed:false}});
+  assert.doesNotMatch(excluded, /relay.example/);
+});
 
 test('protocol-incompatible modes are absent rather than disabled', () => {
   for (const component of ['transport-reality', 'transport-wg', 'transport-tuic', 'transport-hysteria2', 'transport-awg', 'transport-shadowsocks', 'unknown']) {

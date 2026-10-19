@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import yaml
 from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
@@ -284,6 +285,63 @@ class RelayManagementTests(unittest.TestCase):
         self.agent.offline = True
         relay_connections.prepare_mihomo(self.control, [{**connection, 'name': 'Renamed'}], 'd'*32, previous=[connection])
         self.assertEqual(sum(method == 'PUT' for method, _ in self.agent.calls), before)
+
+    def test_mihomo_tls_relay_domain_preserves_certificate_identity_in_all_exports(self):
+        self.agent.addresses = {'ipv4': [AGENT], 'ipv6': [], 'domains': ['relay.example', 'backup.example']}
+        self.control.public()
+        credential = {'uuid': 'key-value', 'route_mode': 'tls', 'tls_enabled': True, 'tls_domain': 'origin.example',
+                      'tls_path': '/private', 'tls_transport': 'websocket', 'cdn_enabled': False}
+        connection = {'id': 'tls', 'name': 'TLS', 'component': 'transport-reality',
+                      'settings': {'relay_host_id': self.host_id, 'relay_address': 'relay.example', 'route_mode': 'tls'},
+                      'credential': credential}
+        original = copy.deepcopy(connection)
+        relay_connections.prepare_mihomo(self.control, [connection], 'c'*32)
+        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
+        dns = {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}
+        for address in ('relay.example', 'backup.example'):
+            selected = {**connection, 'settings': {**connection['settings'], 'relay_address': address}}
+            with self.subTest(address=address):
+                lines = relay_connections.redirect_mihomo_lines(self.control, connection['component'], selected['settings'], manager.render_vless_tls(credential, 'TLS'))
+                node = yaml.safe_load('proxies:\n'+'\n'.join(lines))['proxies'][0]
+                self.assertEqual((node['server'], node['port']), (address, 20000))
+                self.assertEqual(node['servername'], 'origin.example')
+                self.assertEqual(node['ws-opts']['headers']['Host'], 'origin.example')
+                singbox = manager.build_singbox_config([selected], {}, dns, [], ORIGIN, lambda: {}, False, redirect=redirect)
+                node = next(item for item in singbox['outbounds'] if item['type'] == 'vless')
+                self.assertEqual((node['server'], node['server_port']), (address, 20000))
+                self.assertEqual(node['tls']['server_name'], 'origin.example')
+                self.assertEqual(node['transport']['headers']['Host'], 'origin.example')
+                xray = manager.build_xray_configs([selected], {}, dns, [], ORIGIN, lambda: {}, redirect)
+                node = xray[0]['outbounds'][0]
+                self.assertEqual(node['settings']['vnext'][0]['address'], address)
+                self.assertEqual(node['streamSettings']['tlsSettings']['serverName'], 'origin.example')
+                self.agent.calls.clear()
+                relay_connections.prepare_mihomo(self.control, [selected], 'd'*32, previous=[connection])
+                self.assertEqual(self.agent.calls, [])
+        self.assertEqual(connection, original)
+
+    def test_mihomo_udp_relay_domain_keeps_each_protocol_socket_and_identity(self):
+        self.agent.addresses = {'ipv4': [AGENT], 'ipv6': [], 'domains': ['relay.example']}
+        self.control.public()
+        base = {'server_address': ORIGIN, 'ip': '10.0.0.2/32', 'private_key': 'private', 'server_public_key': 'public', 'mtu': 1400,
+                'password': 'password', 'uuid': '00000000-0000-4000-8000-000000000001', 'method': 'aes-128-gcm',
+                'up_mbps': 100, 'down_mbps': 100, 'sni': 'cert.example', 'skip_cert_verify': False,
+                'amnezia': {key: 1 for key in ('jc', 'jmin', 'jmax', 's1', 's2', 'h1', 'h2', 'h3', 'h4')}}
+        for index, component in enumerate(sorted(relay_connections.UDP_COMPONENTS | {'transport-shadowsocks'})):
+            with self.subTest(component=component):
+                credential = {**base, 'port': 31000+index}
+                connection = {'id': component, 'name': component, 'component': component, 'credential': credential,
+                              'settings': {'relay_host_id': self.host_id, 'relay_address': 'relay.example'}}
+                original = copy.deepcopy(connection)
+                relay_connections.prepare_mihomo(self.control, [connection], 'c'*32)
+                address, port = self.control.endpoint(self.host_id, 'udp', credential['port'], paired=component == 'transport-shadowsocks', address='relay.example')
+                lines = relay_connections.redirect_mihomo_lines(self.control, component, connection['settings'], manager.render_proxy(component, credential, component))
+                proxy = yaml.safe_load('proxies:\n'+'\n'.join(lines))['proxies'][0]
+                self.assertEqual((proxy['server'], proxy['port']), (address, port))
+                if component in ('transport-tuic', 'transport-hysteria2'):
+                    self.assertEqual(proxy['sni'], 'cert.example')
+                    self.assertFalse(proxy['skip-cert-verify'])
+                self.assertEqual(connection, original)
 
     def test_direct_worker_retains_native_result_and_resume_never_creates_another_client(self):
         identity = 'c'*32
