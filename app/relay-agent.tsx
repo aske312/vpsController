@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ProtocolIcon } from "./protocol-icon";
 import type { ProtocolImage } from "./page";
+import { RelayChainDraft } from "./relay-chain-draft";
 
 type Connection = { api_version: number; agent_url: string; certificate_sha256: string; token?: string };
 type Status = Connection & { active: boolean; error?: string; items: Array<{ id: string; transport: string; listen_port: number; target_ip: string; target_port: number; state: string }> };
@@ -101,6 +102,8 @@ export function RelayAgent({ image, request, busy, confirmRotation, onServiceAct
         <div className="agentServiceRow"><div><h3>Удаление агента</h3><p>Отключить этот узел от relay-сети.</p></div><button className="danger" disabled={locked} onClick={onRemove}>Удалить</button></div>
       </aside>
     </div>
+
+    <RelayChainDraft node={status?.agent_url} disabled={locked} />
 
     <article className="panel agentRoutes" aria-labelledby="agent-routes-title">
       <div className="panelHead"><div><p className="eyebrow">ПЕРЕДАЧА ТРАФИКА</p><h2 id="agent-routes-title">Маршруты <span className="agentCount">{status?.items.length ?? "—"}</span></h2></div><button disabled={locked} onClick={() => setRefreshKey((value) => value + 1)}>Обновить состояние</button></div>

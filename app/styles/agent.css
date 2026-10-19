@@ -1,4 +1,6 @@
 .agentWorkspace { display: grid; gap: 10px; }
+.agentChainFields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; border: 0; padding: 0; margin: 16px 0; }
+.agentChainFields label { display: grid; align-content: start; gap: 6px; }
 .agentHeader { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .agentIdentity { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .agentIdentity > .protocolIcon { width: 40px; height: 40px; color: var(--cyan); }
