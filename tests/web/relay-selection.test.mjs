@@ -24,18 +24,20 @@ test('Mihomo separates protocol mode from Relay endpoint and keeps TLS identity 
   const html = mihomoAddress('transport-reality', settings);
   assert.match(html, /<button[^>]*aria-pressed="true"[^>]*>TLS<\/button>/);
   assert.doesNotMatch(html, /<button[^>]*>Relay<\/button>|<button[^>]*>UDP<\/button>/);
-  assert.match(html, /<optgroup label="TLS · через Relay">/);
+  assert.doesNotMatch(html, /<optgroup/);
+  assert.match(html, />relay.example · через Relay · Amsterdam<\/option>/);
   assert.match(html, /relay.example.*selected=""/);
   assert.match(html, /aria-label="TLS-сервис основного VPS"/);
   assert.match(html, /origin-tls.example.*selected=""/);
   assert.doesNotMatch(html, /cdn-relay.example/);
-  assert.match(mihomoAddress('transport-reality', {route_mode:'direct'}), /<optgroup label="REALITY · через Relay">/);
+  assert.match(mihomoAddress('transport-reality', {route_mode:'direct'}), />relay.example · через Relay · Amsterdam<\/option>/);
 });
 
 test('Mihomo exposes Relay domains in UDP for every supported UDP protocol', () => {
   for (const component of ['transport-wg', 'transport-awg', 'transport-hysteria2', 'transport-tuic', 'transport-shadowsocks']) {
     const html = mihomoAddress(component, { relay_host_id: host.id, relay_address: 'relay.example' });
-    assert.ok(html.includes(`<optgroup label="${component === 'transport-shadowsocks' ? 'TCP + UDP' : 'UDP'} · через Relay">`));
+    assert.doesNotMatch(html, /<optgroup/);
+    assert.match(html, />relay.example · через Relay · Amsterdam<\/option>/);
     assert.match(html, /origin-udp.example/);
     assert.match(html, /relay.example.*selected=""/);
     assert.doesNotMatch(html, /<button[^>]*>(TLS|CDN|REALITY|Relay)<\/button>|cdn-relay.example/);
