@@ -10,16 +10,37 @@ export function useRelayInventory(request: NetworkRequest, enabled = true) {
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
+    let hasSnapshot = false;
+    let refreshed = false;
+    let refreshing = false;
+    let lastAttempt = 0;
     const controller = new AbortController();
+    const publish = (data: RelayStatus) => {
+      if (cancelled) return;
+      hasSnapshot = true; setStatus(data); setFailed(false);
+    };
     void request("/network/relays?view=inventory", { cache: "no-store", signal: controller.signal }).then(relaySnapshot).then(data => {
-      if (!cancelled) { setStatus(data); setFailed(false); }
-    }).catch(() => { if (!cancelled) setFailed(true); });
-    return () => { cancelled = true; controller.abort(); };
+      if (!refreshed) publish(data);
+    }).catch(() => { if (!cancelled && !hasSnapshot) setFailed(true); });
+    const refresh = async () => {
+      if (cancelled || refreshing || Date.now() - lastAttempt < 5000) return;
+      refreshing = true; lastAttempt = Date.now();
+      try {
+        const data = relaySnapshot(await request("/network/relays?view=addresses", { cache: "no-store", signal: controller.signal }));
+        refreshed = true; publish(data);
+      } catch { if (!cancelled && !hasSnapshot) setFailed(true); }
+      finally { refreshing = false; }
+    };
+    void refresh();
+    const interval = window.setInterval(() => { if (document.visibilityState !== "hidden") void refresh(); }, 60000);
+    const onFocus = () => { void refresh(); };
+    window.addEventListener("focus", onFocus);
+    return () => { cancelled = true; controller.abort(); window.clearInterval(interval); window.removeEventListener("focus", onFocus); };
   }, [request, enabled]);
   return { status, failed };
 }
 
-/** Selection uses the saved inventory; liveness belongs to ROUTES diagnostics. */
+/** Cached addresses remain usable while background discovery refreshes them. */
 type DomainChoice = { domains: string[]; value: string; disabled?: boolean; onChange: (domain: string) => void };
 
 export function RelayEndpointSelect({ request, inventory, value, address = "", onChange, disabled = false, unavailable, transport, cdn, tls, udp, relaySupported = true, modeControls = false }: {
@@ -69,6 +90,6 @@ export function RelayEndpointSelect({ request, inventory, value, address = "", o
       {relaySupported && !unavailable && (!modeControls || mode === "relay") && relays.length > 0 && <optgroup label="Relay">{relays.filter(choice => choice.value === selected || matches(`${choice.address} ${choice.host.name}`)).map(choice => <option key={choice.value} value={choice.value}>{choice.address} · {choice.host.name}</option>)}</optgroup>}
     </select>
     </>}
-    <small>{unavailable || (mode === "tls" ? "Прямой TLS-вход через выбранный домен. Сертификат будет настроен при сохранении профиля." : mode === "udp" ? "Прямой UDP-адрес. Порт, SNI и настройки сертификата протокола сохраняются." : failed ? "Не удалось получить список Relay. Сохранённый выбор не изменён; откройте экран заново для повторной загрузки." : !status ? "Получаем список Relay…" : value && !known ? "Узел удалён. Настройки сохранены; выберите Relay для восстановления подключения." : value ? `${transport ? transport+" · " : ""}Пересылка и внешний порт будут настроены автоматически при сохранении.` : cdn?.value ? "VLESS через выбранный CDN-домен." : "Подключённые в Сеть → ROUTES узлы доступны здесь по IP/домену.")}</small>
+    <small>{unavailable || (mode === "tls" ? "Прямой TLS-вход через выбранный домен. Сертификат будет настроен при сохранении профиля." : mode === "udp" ? "Прямой UDP-адрес. Порт, SNI и настройки сертификата протокола сохраняются." : failed ? "Не удалось получить список Relay. Сохранённый выбор не изменён; повторим загрузку автоматически." : !status ? "Получаем список Relay…" : value && !known ? "Узел удалён. Настройки сохранены; выберите Relay для восстановления подключения." : value ? `${transport ? transport+" · " : ""}Пересылка и внешний порт будут настроены автоматически при сохранении.` : cdn?.value ? "VLESS через выбранный CDN-домен." : "Подключённые в Сеть → ROUTES узлы доступны здесь по IP/домену.")}</small>
   </div>;
 }

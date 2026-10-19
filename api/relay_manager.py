@@ -374,7 +374,7 @@ class RelayManager:
         if found and found['state'] != 'listening':
             raise OperationConflict('Маршрут сохранён, но listener агента не запущен')
 
-    def public(self, *, probe=True):
+    def public(self, *, probe=True, addresses_only=False):
         registry = self.read()
         result = {'revision': registry['revision'], 'hosts': [], 'pending': self.pending.exists(), 'origin_ip': self.origin}
         if result['pending']:
@@ -391,16 +391,19 @@ class RelayManager:
             public['excluded_addresses'] = host.get('excluded_addresses', [])
             public.update(token_configured=True, state='unknown', routes=[], foreign_routes=0)
             owned = [item for item in registry['routes'] if item['host_id'] == host['id']]
-            if not probe:
+            if not probe or addresses_only:
                 # Registry addresses are useful before agent I/O completes, but
                 # carry no live state, counters or saved readiness evidence.
                 public['routes'] = [{**{key: route[key] for key in ('id', 'host_id', 'transport', 'listen_port', 'target_ip', 'target_port')},
                                      'state': 'unknown', 'target_verified': False} for route in owned]
-                return public
+                if not probe:
+                    return public
             try:
                 client = self.client(host)
                 status = status_snapshot(client.request('GET', '/v1/status'))
                 public['addresses'] = self.observed_addresses(host, status)
+                if addresses_only:
+                    return public
                 remote = route_snapshot(client.request('GET', '/v1/routes'))
                 public.update(state='connected', version=status['version'], agent_revision=remote['revision'])
                 ids = {item['id'] for item in owned}
@@ -412,7 +415,8 @@ class RelayManager:
                     public['routes'].append({**route, **counters, 'state': state, 'target_verified': False})
             except Exception as exc:
                 public['error'] = str(exc) if isinstance(exc, AgentAPIError) else 'Не удалось подтвердить состояние агента'
-                public['routes'] = [{**route, 'state': 'unknown', 'target_verified': False} for route in owned]
+                if not addresses_only:
+                    public['routes'] = [{**route, 'state': 'unknown', 'target_verified': False} for route in owned]
             return public
 
         if probe:

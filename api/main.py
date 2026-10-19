@@ -2680,11 +2680,11 @@ def relay_targets():
 
 
 @app.get('/api/network/relays')
-def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventory'] = 'live'):
+def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventory', 'addresses'] = 'live'):
     try:
         control = relay_control()
-        if view == 'inventory':
-            result = control.public(probe=False)
+        if view in ('inventory', 'addresses'):
+            result = control.public(probe=False) if view == 'inventory' else control.public(addresses_only=True)
             result.update(targets=[], consumers=[], origin_hosts=[])
             return JSONResponse(result, headers={'Cache-Control': 'no-store'})
         result = control.public()

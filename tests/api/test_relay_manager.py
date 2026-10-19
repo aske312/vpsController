@@ -62,6 +62,25 @@ class FakeAgent:
 
 
 class RelayManagementTests(unittest.TestCase):
+    def test_address_refresh_discovers_changes_without_json_routes_or_registry_mutation(self):
+        self.control.ensure(self.host_id, [[('tcp', 443)]], 'c'*32)
+        before = self.control.read()
+        self.agent.addresses = {'ipv4': [AGENT, '8.8.4.4'], 'ipv6': [], 'domains': ['new.example']}
+        self.agent.calls.clear()
+        host = self.control.public(addresses_only=True)['hosts'][0]
+        self.assertEqual(self.agent.calls, [('GET', '/v1/status')])
+        self.assertEqual(host['addresses'], self.agent.addresses)
+        self.assertEqual(self.control.read(), before)
+        self.assertEqual(host['state'], 'unknown')
+        self.assertEqual(host['routes'][0]['state'], 'unknown')
+        self.agent.offline = True
+        cached = self.control.public(addresses_only=True)['hosts'][0]
+        self.assertEqual(cached['addresses'], self.agent.addresses)
+        self.assertEqual(cached['state'], 'unknown')
+        self.agent.calls.clear()
+        self.assertEqual(self.control.public(probe=False)['hosts'][0]['addresses'], self.agent.addresses)
+        self.assertEqual(self.agent.calls, [])
+
     def test_excluding_one_address_preserves_host_routes_and_survives_refresh_and_reconnect(self):
         self.agent.addresses = {'ipv4': [AGENT, '8.8.4.4'], 'ipv6': [], 'domains': []}
         self.control.public()
@@ -647,7 +666,7 @@ class RelayAPITests(unittest.TestCase):
         self.addCleanup(api.app.dependency_overrides.clear)
 
     def test_every_endpoint_requires_auth_before_access_or_validation(self):
-        endpoints = [('GET', '/network/relays'), ('GET', '/network/relays?view=inventory'), ('PUT', '/network/relays'), ('PUT', '/network/relays/reconnect'), ('DELETE', '/network/relays/id'),
+        endpoints = [('GET', '/network/relays'), ('GET', '/network/relays?view=inventory'), ('GET', '/network/relays?view=addresses'), ('PUT', '/network/relays'), ('PUT', '/network/relays/reconnect'), ('DELETE', '/network/relays/id'),
                      ('DELETE', '/network/relays/id/address?address=8.8.4.4'), ('DELETE', '/network/relays/id/address?address=8.8.4.4&restore=true'),
                      ('POST', '/clients/relay'), ('GET', '/clients/relay/id'), ('POST', '/clients/relay/id/resume'),
                      ('POST', '/network/relays/id/routes'), ('DELETE', '/network/relays/id/routes/route?agent_revision=0'),
@@ -676,6 +695,17 @@ class RelayAPITests(unittest.TestCase):
         api.app.dependency_overrides[api.require_token] = lambda: None
         with patch.object(api, 'relay_control', side_effect=ValueError('invalid registry')):
             self.assertEqual(self.client.get('/api/network/relays?view=inventory').status_code, 503)
+
+    def test_address_refresh_skips_live_collectors(self):
+        api.app.dependency_overrides[api.require_token] = lambda: None
+        control = Mock()
+        control.public.return_value = {'revision': '0'*32, 'hosts': [], 'pending': False, 'origin_ip': ORIGIN}
+        with patch.object(api, 'relay_control', return_value=control), patch.object(api, 'relay_origin_hosts', side_effect=AssertionError('origin discovery')), patch.object(api, 'relay_targets', side_effect=AssertionError('live targets')), patch.object(api, 'network_consumers', side_effect=AssertionError('live consumers')):
+            response = self.client.get('/api/network/relays?view=addresses')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['cache-control'], 'no-store')
+        control.public.assert_called_once_with(addresses_only=True)
+        control.read.assert_not_called()
 
     def test_cdn_native_copy_retains_gateway_sni_and_http_host(self):
         with patch.object(api, 'PUBLIC_IPV4', ORIGIN), patch.object(api, 'PUBLIC_DOMAIN', 'panel.example'), patch.object(api, 'PUBLIC_ENDPOINT', ORIGIN), patch.object(api.cdn_security, 'read_routes', return_value=[{'domain': 'cdn.example'}]), patch.object(api, 'VLESS_ENV', self.root/'absent.env'):
