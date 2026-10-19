@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { configuredCdnDomains, confirmedRouteAddresses, endpointCheckReady, endpointSelectable, endpointCheckForConsumer } from "../../src/shared/lib/network-readiness.ts";
+import { configuredCdnDomains, confirmedRouteAddresses, directRouteAddresses, endpointCheckReady, endpointSelectable, endpointCheckForConsumer } from "../../src/shared/lib/network-readiness.ts";
 
 test("configured CDN inventory is independent of live checks and excludes other domains", () => {
   assert.deepEqual(configuredCdnDomains(null), []);
@@ -55,6 +55,18 @@ test("first connection can select an active unchecked route without claiming REA
   for (const fields of [{ selectable: false }, { binding_id: "" }, { resolved: [] }]) {
     assert.equal(endpointSelectable({ ...check, ...fields }), false);
   }
+});
+
+test('direct TLS and UDP choices require origin DNS and an active role, without requiring traffic proof', () => {
+  for (const [kind, routeKind] of [['tls', 'tls_relay'], ['udp', 'udp_relay']]) {
+    const check = { ...ready(routeKind), status: 'warning', ready: false, matches_origin: true, selectable: true };
+    const status = { transport_endpoint_checks: { [routeKind]: check }, transport_endpoint_checks_by_domain: { [`${routeKind}:same.example`]: check } };
+    assert.deepEqual(directRouteAddresses(status, kind), ['same.example']);
+    for (const changes of [{matches_origin:false},{selectable:false},{resolved:[]}]) {
+      assert.deepEqual(directRouteAddresses({transport_endpoint_checks:{[routeKind]:{...check,...changes}}},kind),[]);
+    }
+  }
+  assert.deepEqual(directRouteAddresses(null,'udp'),[]);
 });
 
 test("consumer selection cannot reuse another connection's result or hide route removal", () => {

@@ -9,7 +9,34 @@ const loader = await createServer({ configFile: false, plugins: [reactPlugin()],
 after(() => loader.close());
 const { RelayEndpointSelect } = await loader.ssrLoadModule("/src/features/network/relay-endpoint-select.tsx");
 const { NetworkRelayRows, relayMatches } = await loader.ssrLoadModule("/src/features/network/network-relays.tsx");
+const { connectionAddressModes } = await loader.ssrLoadModule("/src/features/mihomo/connection-address.ts");
 const host = { id: "b".repeat(32), name: "Amsterdam", client_address: "relay.example", agent_url: "https://85.209.155.229:9443", state: "unknown", routes: [] };
+
+test('protocol-incompatible modes are absent rather than disabled', () => {
+  for (const component of ['transport-reality', 'transport-wg', 'transport-tuic', 'transport-hysteria2', 'transport-awg', 'transport-shadowsocks', 'unknown']) {
+    const modes = connectionAddressModes(component);
+    const choice = kind => ({ domains: ['direct.example'], value: '', disabled: !modes[kind], onChange: () => {} });
+    const html = renderToStaticMarkup(createElement(RelayEndpointSelect, {
+      modeControls: true, relaySupported: modes.relay, request: async () => ({}),
+      inventory: {status: {hosts: [host]}, failed: false}, value: '', onChange: () => {},
+      tls: choice('tls'), udp: choice('udp'), cdn: choice('cdn'),
+    }));
+    for (const [kind, label] of [['tls', 'TLS'], ['udp', 'UDP'], ['cdn', 'CDN'], ['relay', 'Relay']]) {
+      assert.equal(new RegExp(`<button[^>]*>${label}</button>`).test(html), modes[kind], `${component} ${kind}`);
+    }
+  }
+});
+
+test('local TLS and UDP remain usable without Relay inventory while native Relay stays locked', () => {
+  const props = { request: async () => ({}), inventory: { status: null, failed: true }, value: '', onChange: () => {} };
+  for (const kind of ['tls', 'udp']) {
+    const html = renderToStaticMarkup(createElement(RelayEndpointSelect, { ...props, modeControls: true, [kind]: { domains: ['direct.example'], value: 'direct.example', onChange: () => {} } }));
+    assert.match(html, /direct.example[^>]*selected=""/);
+    assert.doesNotMatch(html, /<select[^>]*disabled=/);
+  }
+  const native = renderToStaticMarkup(createElement(RelayEndpointSelect, props));
+  assert.match(native, /<select[^>]*disabled=/);
+});
 
 test("saved Relay addresses remain selectable regardless of liveness and pending diagnostics", () => {
   for (const state of ["unknown", "connected"]) for (const pending of [false, true]) {

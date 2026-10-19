@@ -553,6 +553,10 @@ def network_consumers() -> list[dict]:
         raise ValueError("Invalid Mihomo profiles")
     for profile in profiles:
         for connection in [*profile.get("connections", []), *profile.get("retiring_connections", [])]:
+            direct_udp = connection.get('settings', {}).get('udp_domain')
+            if direct_udp and not connection.get('settings', {}).get('relay_host_id') and connection.get('component') in relay_connections.UDP_COMPONENTS | {'transport-shadowsocks'}:
+                result.append({"id": f"mihomo:{profile['id']}:{connection['id']}", "owner": "mihomo", "label": str(profile.get("name") or profile["id"]),
+                               "kind": "udp_relay", "address": str(direct_udp).strip().lower(), "reference": "snapshot"})
             if connection.get("component") != "transport-reality":
                 continue
             mode = connection.get("settings", {}).get("route_mode") or connection.get("credential", {}).get("route_mode") or "direct"

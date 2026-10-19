@@ -37,3 +37,9 @@ export function confirmedRouteAddresses(status: NetworkStatus | null | undefined
   return [...new Set(checks.filter((check) => check.kind === routeKind && (provision ? endpointSelectable(check) : endpointCheckReady(check)))
     .map((check) => check.domain.trim().toLowerCase()).filter(Boolean))];
 }
+
+export function directRouteAddresses(status: NetworkStatus | null | undefined, kind: "tls" | "udp"): string[] {
+  const routeKind = kind === "tls" ? "tls_relay" : "udp_relay";
+  const checks = [...Object.values(status?.transport_endpoint_checks_by_domain || {}), status?.transport_endpoint_checks?.[routeKind]];
+  return [...new Set(checks.filter((check): check is NetworkEndpointCheck => Boolean(check && check.kind === routeKind && check.matches_origin && endpointSelectable(check))).map(check => check.domain.trim().toLowerCase()))];
+}

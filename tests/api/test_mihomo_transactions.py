@@ -11,6 +11,22 @@ manager = load_module("mihomo_manager_under_test", "protocol-images/mihomo/manag
 
 
 class MihomoTransactionTests(unittest.TestCase):
+    def test_udp_domain_edit_preserves_credentials_and_does_not_restart_protocol(self):
+        self.legacy_channel_fixture()
+        credential = {'public_key': 'key', 'server_address': '195.14.118.112', 'port': 51830}
+        saved = json.loads(self.profile_file.read_text())
+        saved[0]['connections'] = [{'id': 'wg', 'component': 'transport-wg', 'device_id': 'common', 'settings': {'mtu': 1400}, 'credential': credential}]
+        self.profile_file.write_text(json.dumps(saved))
+        with patch.object(manager, 'mihomo_route_endpoint_selectable', return_value=True), patch.object(manager, 'public_endpoint', return_value='195.14.118.112'), patch.object(manager.server_addresses, 'primary_for_new_config', return_value='195.14.118.112'), patch.object(manager.socket, 'getaddrinfo', return_value=[(2, 2, 17, '', ('195.14.118.112', 0))]), patch.object(manager, 'preflight_client_export_update'), patch.object(manager, 'profile_response', side_effect=lambda item: item), patch.object(manager, 'provision') as provision, patch.object(manager, 'deprovision') as deprovision, patch.object(manager, 'run') as command:
+            manager.update_profile('legacy', manager.ProfileUpdate(connections=[manager.ProfileConnectionInput(id='wg', component='transport-wg', device_id='common', settings={'mtu': 1400, 'udp_domain': 'direct.example'})]))
+        connection = json.loads(self.profile_file.read_text())[0]['connections'][0]
+        self.assertEqual(connection['settings']['udp_domain'], 'direct.example')
+        self.assertEqual(connection['credential'], credential)
+        self.assertEqual(self.external.read_text(), 'original peers')
+        provision.assert_not_called()
+        deprovision.assert_not_called()
+        self.assertFalse(any(call.args[:2] == ('systemctl', 'restart') for call in command.call_args_list))
+
     def legacy_channel_fixture(self):
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.profile_file = root / "profiles.json"

@@ -2929,7 +2929,7 @@ def valid_sni_hostname(value: str) -> bool:
 def mihomo_route_endpoint_selectable(kind: str, domain: str) -> bool:
     try:
         registry = network_routes.migrate(json.loads(NETWORK_ENDPOINTS_FILE.read_text(encoding="utf-8")))
-        route_kind = {"cdn": "cdn", "tls": "tls_relay"}[kind]
+        route_kind = {"cdn": "cdn", "tls": "tls_relay", "udp": "udp_relay"}[kind]
         return network_routes.admission_allowed(network_routes.active_binding(registry, route_kind, domain))
     except (OSError, ValueError, KeyError, TypeError):
         return False
@@ -2949,6 +2949,26 @@ def validate_connection(component: str, values: dict[str, Any], *, allow_unverif
             relay_connection_control().host(relay_connection_control().read(), selected_relay)
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=422, detail='Подключите выбранный Relay на странице Сеть → ROUTES') from exc
+    if "udp_domain" in result:
+        domain = result["udp_domain"]
+        if not isinstance(domain, str) or len(domain) > 253:
+            raise HTTPException(status_code=422, detail="Некорректный UDP-адрес")
+        domain = domain.strip().lower().rstrip('.')
+        if domain:
+            if component not in relay_connections.UDP_COMPONENTS | {'transport-shadowsocks'} or selected_relay:
+                raise HTTPException(status_code=422, detail="Прямой UDP-адрес несовместим с этим подключением")
+            if not allow_unverified_network_route:
+                if not mihomo_route_endpoint_selectable('udp', domain):
+                    raise HTTPException(status_code=409, detail="Добавьте UDP-адрес на странице Сеть → ROUTES")
+                try:
+                    expected = {public_endpoint(), server_addresses.primary_for_new_config(DATA_ROOT.parent, public_endpoint()), os.getenv('PUBLIC_IPV6', '')} - {''}
+                    expected.update(row['address'] for row in server_addresses.inventory(DATA_ROOT.parent, expected)['items'] if row['presence'] == 'present')
+                    resolved = {row[4][0] for row in socket.getaddrinfo(domain, None, type=socket.SOCK_DGRAM)}
+                except (OSError, ValueError) as exc:
+                    raise HTTPException(status_code=409, detail="Не удалось подтвердить прямой UDP-адрес") from exc
+                if not resolved or not resolved <= expected:
+                    raise HTTPException(status_code=422, detail="UDP-домен должен указывать на IP этого VPS, без CDN proxy")
+        result['udp_domain'] = domain
     if result.get("fingerprint", "chrome") not in {"chrome", "firefox", "safari", "ios", "android", "edge", "random"}:
         raise HTTPException(status_code=422, detail="Неизвестный TLS fingerprint")
     if "sni" in result:
@@ -3757,7 +3777,7 @@ def validate_connection_inputs(values: list[ProfileConnectionInput], existing_co
         saved = existing_by_id.get(connection_id, {})
         saved_settings = saved.get("settings", {}) if saved.get("component") == component else {}
         candidate_settings = {**connection_defaults(component), **settings_input}
-        route_keys = ("route_mode", "cdn_domain", "tls_domain")
+        route_keys = ("route_mode", "cdn_domain", "tls_domain", "udp_domain")
         preserves_network_route = bool(saved_settings) and all(
             str(candidate_settings.get(key, "")).strip().lower() == str(saved_settings.get(key, "")).strip().lower()
             for key in route_keys
@@ -4484,7 +4504,7 @@ def q(value: Any) -> str:
 
 def client_connection_keys(component: str) -> set[str]:
     advanced = {field["key"] for field in MIHOMO_CLIENT_FIELDS.get(component, ())}
-    return advanced | {"relay_host_id", "relay_address"} | {
+    return advanced | {"relay_host_id", "relay_address", "udp_domain"} | {
         "transport-wg": {"mtu", "keepalive"}, "transport-awg": {"mtu", "keepalive", "jc", "jmin", "jmax"},
         "transport-reality": {"fingerprint"},
         "transport-hysteria2": {"up_mbps", "down_mbps", "sni", "skip_cert_verify"},
@@ -4528,6 +4548,8 @@ def effective_client_connections(connections: list[dict[str, Any]]) -> list[dict
                         amnezia[key] = int(match[1])
                 credential["amnezia"] = amnezia
         credential.update({key: value for key, value in connection.get("settings", {}).items() if key in client_connection_keys(str(module))})
+        if connection.get('settings', {}).get('udp_domain') and not connection.get('settings', {}).get('relay_host_id'):
+            credential['server_address'] = connection['settings']['udp_domain']
         if module == "transport-awg":
             credential["amnezia"] = {**credential.get("amnezia", {}), **{key: value for key, value in connection.get("settings", {}).items() if key in {"jc", "jmin", "jmax"}}}
         result.append({**connection, "credential": credential})

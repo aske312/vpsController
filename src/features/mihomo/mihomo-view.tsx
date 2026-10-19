@@ -12,9 +12,9 @@ import { useDialogFocus } from "../../shared/components/use-dialog-focus";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
 import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, ProfileMutationFailed, ProfileMutationSuperseded, submitProfileMutation, type ProfileMutation } from "./profile-operation";
 import type { NetworkStatus } from "../../shared/types/control-plane";
-import { configuredCdnDomains, confirmedRouteAddresses } from "../../shared/lib/network-readiness";
+import { configuredCdnDomains, confirmedRouteAddresses, directRouteAddresses } from "../../shared/lib/network-readiness";
 import { RelayEndpointSelect, useRelayInventory } from "../network/relay-endpoint-select";
-import { applyConnectionAddress } from "./connection-address";
+import { applyConnectionAddress, connectionAddressModes } from "./connection-address";
 
 import { useNotifier, useFailureNotifications, useNotifications } from "../../shared/notifications/notification-center";
 import { notificationFailure as refreshFailure, type NotificationFailure } from "../../shared/notifications/store";
@@ -893,11 +893,11 @@ export function MihomoPage({
   }
 
   function availableNetworkRoute(kind: "cdn" | "tls" | "udp") {
-    return confirmedRouteAddresses(networkStatus, kind, true)[0] || "";
+    return availableNetworkRoutes(kind)[0] || "";
   }
 
   function availableNetworkRoutes(kind: "cdn" | "tls" | "udp") {
-    return confirmedRouteAddresses(networkStatus, kind, true);
+    return kind === "cdn" ? confirmedRouteAddresses(networkStatus, kind, true) : directRouteAddresses(networkStatus, kind);
   }
 
   function unusedRealityTarget(connections: ProfileConnection[]) {
@@ -1745,6 +1745,8 @@ export function MihomoPage({
                   const supported = commonDevice || clientConnectionSupported(connection, activeProfileRouting.client_config_format, activeProfileDevice?.manual ? undefined : activeProfileDevice?.client_name);
                   const schema = commonDevice || activeCapabilities.components.includes(connection.component) ? protocolModule?.connection_settings || [] : [];
                   const vlessRoute = connection.component === "transport-reality" ? String(connection.settings.route_mode || (connection.settings.cdn_enabled ? "both" : "direct")) : "";
+                  const addressModes = connectionAddressModes(connection.component);
+                  const webTransports = ["xhttp", "websocket", "httpupgrade", "grpc"].filter(transport => commonDevice || activeCapabilities.transports.includes(transport));
                   return <article key={connection.id} className={`mihomoConnectionCard mihomoConnectionEditor protocol-${connection.component}${vlessRoute ? ` is-vless-${vlessRoute}` : ""}`}>
                     <header>
                       <span className={`protocol-${connection.component}`} title={channelShort[connection.component] || "CH"}><ProtocolIcon protocol={connection.component} /></span>
@@ -1752,17 +1754,21 @@ export function MihomoPage({
                       <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}><span aria-hidden="true">×</span></button>
                     </header>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
-                    <RelayEndpointSelect modeControls request={request} inventory={relayInventory} value={String(connection.settings.relay_host_id || "")} address={String(connection.settings.relay_address || "")} onChange={(value, address) => {
-                      updateProfileConnection(connection.id, { settings: { ...connection.settings, relay_host_id: value, relay_address: address || "", ...(vlessRoute === "cdn" ? { route_mode: "direct", cdn_enabled: false } : {}) } });
-                    }} cdn={{ domains: configuredCdnDomains(networkStatus), value: vlessRoute === "cdn" ? String(connection.settings.cdn_domain || "") : "", disabled: connection.component !== "transport-reality", onChange: domain => {
-                      updateProfileConnection(connection.id, { settings: { ...connection.settings, route_mode: "cdn", cdn_enabled: true, cdn_domain: domain, relay_host_id: "", relay_address: "" } });
+                    <RelayEndpointSelect modeControls request={request} inventory={relayInventory} relaySupported={supported && addressModes.relay} value={String(connection.settings.relay_host_id || "")} address={String(connection.settings.relay_address || "")} onChange={(value, address) => {
+                      updateProfileConnection(connection.id, { settings: { ...connection.settings, relay_host_id: value, relay_address: address || "", udp_domain: "", ...(vlessRoute === "cdn" || !value && vlessRoute === "tls" ? { route_mode: "direct", cdn_enabled: false } : {}) } });
+                    }} tls={{ domains: availableNetworkRoutes("tls"), value: vlessRoute === "tls" ? String(connection.settings.tls_domain || "") : "", disabled: !addressModes.tls || !webTransports.length, onChange: domain => {
+                      updateProfileConnection(connection.id, { settings: { ...connection.settings, route_mode: "tls", cdn_enabled: false, tls_domain: domain, tls_transport: webTransports.includes(String(connection.settings.tls_transport)) ? connection.settings.tls_transport : webTransports[0], udp_domain: "", relay_host_id: "", relay_address: "" } });
+                    } }} udp={{ domains: availableNetworkRoutes("udp"), value: String(connection.settings.udp_domain || ""), disabled: !supported || !addressModes.udp, onChange: domain => {
+                      updateProfileConnection(connection.id, { settings: { ...connection.settings, udp_domain: domain, relay_host_id: "", relay_address: "" } });
+                    } }} cdn={{ domains: configuredCdnDomains(networkStatus), value: vlessRoute === "cdn" ? String(connection.settings.cdn_domain || "") : "", disabled: !addressModes.cdn || !webTransports.length, onChange: domain => {
+                      updateProfileConnection(connection.id, { settings: { ...connection.settings, route_mode: "cdn", cdn_enabled: true, cdn_domain: domain, cdn_transport: webTransports.includes(String(connection.settings.cdn_transport)) ? connection.settings.cdn_transport : webTransports[0], udp_domain: "", relay_host_id: "", relay_address: "" } });
                     } }} disabled={Boolean(busy) || Boolean(pendingProfileSave)} transport={["transport-wg", "transport-awg", "transport-hysteria2", "transport-tuic"].includes(connection.component) ? "UDP" : connection.component === "transport-shadowsocks" ? "TCP + UDP" : "TCP"} />
-                    {deviceConnections.length > 1 && <div className="mihomoAddressApply"><button type="button" disabled={Boolean(busy) || Boolean(pendingProfileSave)} onClick={() => setProfileConnections(current => applyConnectionAddress(current, connection))}>Применить адрес к {vlessRoute === "cdn" && !connection.settings.relay_host_id ? "VLESS-подключениям" : "всем подключениям"} устройства</button><small>Порты и параметры протоколов сохранятся. Изменения применятся при сохранении профиля.</small></div>}
+                    {deviceConnections.length > 1 && <div className="mihomoAddressApply"><button type="button" disabled={!supported || Boolean(busy) || Boolean(pendingProfileSave)} onClick={() => setProfileConnections(current => applyConnectionAddress(current, connection))}>Применить адрес к {(["cdn", "tls"].includes(vlessRoute) && !connection.settings.relay_host_id) ? "VLESS-подключениям" : connection.settings.udp_domain ? "UDP-подключениям" : "всем подключениям"} устройства</button><small>Порты и параметры протоколов сохранятся. Изменения применятся при сохранении профиля.</small></div>}
                     {!supported && <p>Подключение несовместимо с форматом клиента. Удалите его или выберите поддерживаемый формат.</p>}
                     <div className="mihomoConnectionFields">
                       {schema.filter((field) => {
                         if (field.formats && !commonDevice && !field.formats.includes(String(activeProfileRouting.client_config_format || "mihomo"))) return false;
-                        if (["route_mode", "cdn_enabled", "privacy_mode", "cdn_ech", "cdn_domain"].includes(field.key)) return false;
+                        if (["route_mode", "cdn_enabled", "privacy_mode", "cdn_ech", "cdn_domain", "tls_domain"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute === "cdn" && ["port", "target", "transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute === "direct" && ["cdn_domain", "cdn_transport", "cdn_xhttp_mode"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute !== "tls" && ["tls_domain", "tls_transport", "tls_xhttp_mode"].includes(field.key)) return false;
@@ -1775,7 +1781,7 @@ export function MihomoPage({
                         return true;
                       }).map((field) => <label key={field.key} className={field.type === "boolean" ? "is-toggle" : ""}>
                         <span>{field.label}</span>
-                        {((field.key === "cdn_domain" && vlessRoute === "cdn") || (field.key === "tls_domain" && vlessRoute === "tls")) ? (() => { const kind = field.key === "cdn_domain" ? "cdn" : "tls"; const routes = availableNetworkRoutes(kind); return routes.length > 0 ? <select value={routes.includes(String(connection.settings[field.key] || "")) ? String(connection.settings[field.key]) : routes[0]} onChange={(event) => updateConnectionSetting(connection.id, field.key, event.target.value)}>{routes.map((domain) => <option key={domain} value={domain}>{domain}</option>)}</select> : <span className="mihomoUnavailableField">Нет активных доменов</span>; })() : ["target", "sni"].includes(field.key) ? <>
+                        {["target", "sni"].includes(field.key) ? <>
                           <select aria-label={`${field.label}: список адресов`} value="" onChange={(event) => { if (event.target.value) updateConnectionSetting(connection.id, field.key, event.target.value); }}>
                             <option value="">Выбрать SNI из полного списка…</option>
                             {realityTargets.map((host) => <option key={host} value={field.key === "target" ? `${host}:443` : host}>{host}</option>)}
