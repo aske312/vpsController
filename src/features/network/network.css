@@ -1925,3 +1925,5 @@
 }
 [data-network-page] .networkAddressNotice { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 [data-network-page] .networkAddressNotice button { flex: 0 0 auto; }
+.relayEndpointSelector { display: grid; gap: 6px; min-width: 0; }
+.relayEndpointSelector > small { color: var(--muted); overflow-wrap: anywhere; }

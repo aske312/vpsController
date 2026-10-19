@@ -62,6 +62,31 @@ class FakeAgent:
 
 
 class RelayManagementTests(unittest.TestCase):
+    def test_excluding_one_address_preserves_host_routes_and_survives_refresh_and_reconnect(self):
+        self.agent.addresses = {'ipv4': [AGENT, '8.8.4.4'], 'ipv6': [], 'domains': []}
+        self.control.public()
+        self.control.ensure(self.host_id, [[('tcp', 443)]], 'c'*32)
+        before = self.control.read()
+        self.agent.calls.clear()
+        self.control.exclude_address({'host_id': self.host_id, 'address': AGENT, 'expected_revision': before['revision']})
+        self.assertEqual(self.agent.calls, [])
+        after = self.control.read()
+        self.assertEqual(after['routes'], before['routes'])
+        self.assertEqual(self.control.endpoint(self.host_id, 'tcp', 443)[0], AGENT)
+        for probe in (False, True):
+            host = self.control.public(probe=probe)['hosts'][0]
+            self.assertEqual(host['excluded_addresses'], [AGENT])
+            self.assertIn('8.8.4.4', host['addresses']['ipv4'])
+        self.control.save_host({**after['hosts'][0], 'expected_revision': after['revision']})
+        self.assertEqual(self.control.read()['hosts'][0]['excluded_addresses'], [AGENT])
+        with self.assertRaises(OperationConflict):
+            self.control.exclude_address({'host_id': self.host_id, 'address': '8.8.4.4', 'expected_revision': before['revision']})
+        revision = self.control.read()['revision']
+        with self.assertRaises(ValueError):
+            self.control.exclude_address({'host_id': self.host_id, 'address': '1.1.1.1', 'expected_revision': revision})
+        self.control.exclude_address({'host_id': self.host_id, 'address': AGENT, 'restore': True, 'expected_revision': revision})
+        self.assertEqual(self.control.public(probe=False)['hosts'][0]['excluded_addresses'], [])
+
     def test_inventory_rejects_private_addresses_and_api_accepts_public_ipv6_with_pinning(self):
         status=self.agent.request('GET','/v1/status')
         for addresses in ({'ipv4':['10.0.0.1']},{'ipv6':['::1']},{'domains':['bad/host']},{'ipv4':['2606:4700::1111']},{'domains':['relay.example'],'cdn_domains':['other.example']},{'cdn_domains':'relay.example'}):
@@ -623,6 +648,7 @@ class RelayAPITests(unittest.TestCase):
 
     def test_every_endpoint_requires_auth_before_access_or_validation(self):
         endpoints = [('GET', '/network/relays'), ('GET', '/network/relays?view=inventory'), ('PUT', '/network/relays'), ('PUT', '/network/relays/reconnect'), ('DELETE', '/network/relays/id'),
+                     ('DELETE', '/network/relays/id/address?address=8.8.4.4'), ('DELETE', '/network/relays/id/address?address=8.8.4.4&restore=true'),
                      ('POST', '/clients/relay'), ('GET', '/clients/relay/id'), ('POST', '/clients/relay/id/resume'),
                      ('POST', '/network/relays/id/routes'), ('DELETE', '/network/relays/id/routes/route?agent_revision=0'),
                      ('POST', '/network/relays/reconcile'), ('POST', '/network/relays/resume'), ('POST', '/network/relays/id/routes/route/export'),
@@ -718,6 +744,7 @@ class RelayAPITests(unittest.TestCase):
         (self.root/'relay/pending.json').write_text('{}')
         api.app.dependency_overrides[api.require_token] = lambda: None
         self.assertEqual(self.client.put('/api/network/relays', json={}).status_code, 409)
+        self.assertEqual(self.client.delete('/api/network/relays/id/address?address=8.8.4.4').status_code, 409)
         with patch.object(api.subprocess, 'run', return_value=Mock(returncode=0)):
             response = self.client.post('/api/network/relays/reconcile', headers={'X-Operation-ID': 'e'*32})
         self.assertEqual(response.status_code, 202, response.text)

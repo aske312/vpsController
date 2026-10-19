@@ -14,6 +14,7 @@ import { checkProfileMutation, profileTransitionMessage, ProfileResultUnknown, P
 import type { NetworkStatus } from "../../shared/types/control-plane";
 import { configuredCdnDomains, confirmedRouteAddresses } from "../../shared/lib/network-readiness";
 import { RelayEndpointSelect, useRelayInventory } from "../network/relay-endpoint-select";
+import { applyConnectionAddress } from "./connection-address";
 
 import { useNotifier, useFailureNotifications, useNotifications } from "../../shared/notifications/notification-center";
 import { notificationFailure as refreshFailure, type NotificationFailure } from "../../shared/notifications/store";
@@ -1751,16 +1752,17 @@ export function MihomoPage({
                       <button type="button" className="mihomoConnectionQuickDelete" title="Удалить подключение" aria-label={`Удалить ${connection.name}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setProfileConnections((current) => current.filter((item) => item.id !== connection.id)); }}><span aria-hidden="true">×</span></button>
                     </header>
                     <label><span>Название в профиле</span><input value={connection.name} maxLength={80} onChange={(event) => updateProfileConnection(connection.id, { name: event.target.value })} /></label>
-                    <RelayEndpointSelect request={request} inventory={relayInventory} value={String(connection.settings.relay_host_id || "")} address={String(connection.settings.relay_address || "")} onChange={(value, address) => {
-                      updateProfileConnection(connection.id, { settings: { ...connection.settings, relay_host_id: value, relay_address: address || "", ...(vlessRoute === "cdn" && !value ? { route_mode: "direct", cdn_enabled: false } : {}) } });
+                    <RelayEndpointSelect modeControls request={request} inventory={relayInventory} value={String(connection.settings.relay_host_id || "")} address={String(connection.settings.relay_address || "")} onChange={(value, address) => {
+                      updateProfileConnection(connection.id, { settings: { ...connection.settings, relay_host_id: value, relay_address: address || "", ...(vlessRoute === "cdn" ? { route_mode: "direct", cdn_enabled: false } : {}) } });
                     }} cdn={{ domains: configuredCdnDomains(networkStatus), value: vlessRoute === "cdn" ? String(connection.settings.cdn_domain || "") : "", disabled: connection.component !== "transport-reality", onChange: domain => {
                       updateProfileConnection(connection.id, { settings: { ...connection.settings, route_mode: "cdn", cdn_enabled: true, cdn_domain: domain, relay_host_id: "", relay_address: "" } });
                     } }} disabled={Boolean(busy) || Boolean(pendingProfileSave)} transport={["transport-wg", "transport-awg", "transport-hysteria2", "transport-tuic"].includes(connection.component) ? "UDP" : connection.component === "transport-shadowsocks" ? "TCP + UDP" : "TCP"} />
+                    {deviceConnections.length > 1 && <div className="mihomoAddressApply"><button type="button" disabled={Boolean(busy) || Boolean(pendingProfileSave)} onClick={() => setProfileConnections(current => applyConnectionAddress(current, connection))}>Применить адрес к {vlessRoute === "cdn" && !connection.settings.relay_host_id ? "VLESS-подключениям" : "всем подключениям"} устройства</button><small>Порты и параметры протоколов сохранятся. Изменения применятся при сохранении профиля.</small></div>}
                     {!supported && <p>Подключение несовместимо с форматом клиента. Удалите его или выберите поддерживаемый формат.</p>}
                     <div className="mihomoConnectionFields">
                       {schema.filter((field) => {
                         if (field.formats && !commonDevice && !field.formats.includes(String(activeProfileRouting.client_config_format || "mihomo"))) return false;
-                        if (["route_mode", "cdn_enabled", "privacy_mode", "cdn_ech"].includes(field.key)) return false;
+                        if (["route_mode", "cdn_enabled", "privacy_mode", "cdn_ech", "cdn_domain"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute === "cdn" && ["port", "target", "transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute === "direct" && ["cdn_domain", "cdn_transport", "cdn_xhttp_mode"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute !== "tls" && ["tls_domain", "tls_transport", "tls_xhttp_mode"].includes(field.key)) return false;

@@ -32,6 +32,22 @@ test("an explicit editing lock still disables Relay selection", () => {
   assert.match(html, /<select[^>]*disabled=""/);
 });
 
+test("excluded addresses disappear independently from ROUTES and new connection choices", () => {
+  const item = { ...host, addresses: { ipv4: ['85.209.155.229', '8.8.4.4'], ipv6: [], domains: ['relay.example'] }, excluded_addresses: ['relay.example', '85.209.155.229'] };
+  const html = renderToStaticMarkup(createElement(RelayEndpointSelect, {
+    request: async () => ({}), inventory: { status: { hosts: [item] }, failed: false }, value: '', onChange: () => {},
+  }));
+  assert.ok(html.includes('8.8.4.4'));
+  assert.ok(!html.includes('relay.example'));
+  assert.ok(!html.includes('85.209.155.229'));
+  assert.equal(relayMatches(item, 'relay.example'), false);
+  assert.equal(relayMatches(item, '8.8.4.4'), true);
+  const saved = renderToStaticMarkup(createElement(RelayEndpointSelect, {
+    request: async () => ({}), inventory: { status: { hosts: [item] }, failed: false }, value: host.id, address: 'relay.example', onChange: () => {},
+  }));
+  assert.match(saved, /relay.example.*selected=""/);
+});
+
 test("one Relay exposes every IPv4, IPv6 and domain and retains the selected address", () => {
   const addresses={ipv4:['85.209.155.229','8.8.4.4'],ipv6:['2606:4700::1111'],domains:['relay.example','alternate.example']};
   const html=renderToStaticMarkup(createElement(RelayEndpointSelect,{

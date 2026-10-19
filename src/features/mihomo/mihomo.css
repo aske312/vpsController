@@ -1353,3 +1353,6 @@
 .mihomoProfilesPagination button { min-height:32px; padding:0 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel-soft); color:inherit; }
 .mihomoProfilesPagination button:disabled { opacity:.45; cursor:default; }
 .mihomoProfilesPagination strong { white-space:nowrap; font-family:var(--font-mono),monospace; }
+.mihomoAddressModes { display: flex; flex-wrap: wrap; gap: 6px; }
+.mihomoAddressApply { display: grid; justify-items: start; gap: 6px; }
+.mihomoAddressModes button[aria-pressed="true"] { border-color: var(--cyan); color: var(--cyan); }

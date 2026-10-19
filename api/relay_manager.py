@@ -159,6 +159,7 @@ class RelayManager:
         previous = next((item for item in registry['hosts'] if item['id'] == host_id), {})
         host = {key: payload.get(key) for key in ('name', 'agent_url', 'certificate_sha256')}
         host.update(id=host_id, token=payload.get('token') or previous.get('token'), api_version=1)
+        host['excluded_addresses'] = previous.get('excluded_addresses', [])
         client = self.client(host)
         host['agent_url'] = 'https://'+authority(client.host, client.port)
         host['certificate_sha256'] = host['certificate_sha256'].lower()
@@ -259,6 +260,18 @@ class RelayManager:
             raise OperationConflict('Пересылка Relay для подключения не подготовлена. Сохраните настройки подключения после восстановления агента')
         route = min(routes, key=lambda route: route['listen_port'])
         return normalize_address(address) if address else host.get('client_address') or self.client(host).host, route['listen_port']
+
+    def exclude_address(self, payload):
+        self.require_clear()
+        registry = self.checked(payload['expected_revision'])
+        host = self.host(registry, payload['host_id'])
+        address = normalize_address(payload['address'])
+        available = set(all_addresses(self.addresses(host))) | {host.get('client_address') or self.client(host).host}
+        if address not in available and not (payload.get('restore') and address in host.get('excluded_addresses', [])):
+            raise ValueError('Адрес Relay не найден')
+        excluded = set(host.get('excluded_addresses', []))
+        host['excluded_addresses'] = sorted(excluded - {address} if payload.get('restore') else excluded | {address})
+        self.write(registry)
 
     def delete_host(self, payload, identity):
         self.require_clear()
@@ -375,6 +388,7 @@ class RelayManager:
             public = {key: host[key] for key in ('id', 'name', 'agent_url', 'certificate_sha256', 'api_version')}
             public['client_address'] = host.get('client_address') or self.client(host).host
             public['addresses'] = self.addresses(host)
+            public['excluded_addresses'] = host.get('excluded_addresses', [])
             public.update(token_configured=True, state='unknown', routes=[], foreign_routes=0)
             owned = [item for item in registry['routes'] if item['host_id'] == host['id']]
             if not probe:

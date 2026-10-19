@@ -10,6 +10,7 @@ export type RelayHost = {
   id: string; name: string; agent_url: string; client_address?: string; certificate_sha256: string; api_version: 1;
   token_configured: boolean; state: "connected" | "unknown"; version?: string; agent_revision?: number;
   foreign_routes: number; routes: RelayRoute[]; error?: string;
+  excluded_addresses?: string[];
   addresses?: { ipv4: string[]; ipv6: string[]; domains: string[]; cdn_domains?: string[] };
 };
 export type RelayStatus = {
@@ -27,7 +28,7 @@ export function relayApiOrigin(value: unknown): value is string {
   catch { return false; }
 }
 export function relayAddresses(host: RelayHost): string[] {
-  return [...new Set([host.client_address || new URL(host.agent_url).hostname.replace(/^\[|\]$/g, ""), ...(host.addresses?.ipv4 || []), ...(host.addresses?.ipv6 || []), ...(host.addresses?.domains || [])])];
+  return [...new Set([host.client_address || new URL(host.agent_url).hostname.replace(/^\[|\]$/g, ""), ...(host.addresses?.ipv4 || []), ...(host.addresses?.ipv6 || []), ...(host.addresses?.domains || [])])].filter(address => !host.excluded_addresses?.includes(address));
 }
 export function relayClientResult(value: unknown): RelayClientResult {
   try { return clientExport(value) as RelayClientResult; }
@@ -55,6 +56,7 @@ export function relaySnapshot(value: unknown): RelayStatus {
       || !integer(host.foreign_routes) || !Array.isArray(host.routes) || host.error !== undefined && typeof host.error !== "string"
       || host.state === "connected" && (!integer(host.agent_revision) || typeof host.version !== "string")) return invalid();
     ids.add(host.id);
+    if (host.excluded_addresses !== undefined && (!Array.isArray(host.excluded_addresses) || host.excluded_addresses.some(address => typeof address !== "string" || !address || address.length > 253))) return invalid();
     if (host.addresses !== undefined) {
       const addresses = host.addresses;
       if (!object(addresses) || ["ipv4", "ipv6", "domains", ...(addresses.cdn_domains === undefined ? [] : ["cdn_domains"])].some(key => {

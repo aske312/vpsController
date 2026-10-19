@@ -71,6 +71,8 @@ def apply_relay_request(api, name, path, digest, identity):
         control.save_host(api.RelayHostSettings.model_validate(payload).model_dump(), reconnect=True)
     elif name == 'relay-host-delete':
         control.delete_host(payload, identity)
+    elif name == 'relay-address-delete':
+        control.exclude_address(payload)
     elif name == 'relay-route-create':
         settings = api.RelayRouteSettings.model_validate(payload)
         if {'transport': settings.transport, 'port': settings.target_port} not in api.relay_targets():

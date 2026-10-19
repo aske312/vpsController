@@ -2745,6 +2745,11 @@ def delete_relay_host(host_id: str, _: None = Depends(require_token), operation_
     return start_relay_mutation('relay-host-delete', {'host_id': host_id, 'expected_revision': expected_revision}, operation_id)
 
 
+@app.delete('/api/network/relays/{host_id}/address', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def delete_relay_address(host_id: str, address: str, restore: bool = False, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match')):
+    return start_relay_mutation('relay-address-delete', {'host_id': host_id, 'address': address, 'restore': restore, 'expected_revision': expected_revision}, operation_id)
+
+
 @app.post('/api/network/relays/{host_id}/routes', status_code=202, dependencies=[Depends(require_mutation_admission)])
 def add_relay_route(host_id: str, payload: RelayRouteSettings, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID')):
     return start_relay_mutation('relay-route-create', {**payload.model_dump(), 'host_id': host_id}, operation_id)
