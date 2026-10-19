@@ -22,10 +22,10 @@ class ProbeProducerTests(unittest.TestCase):
         host = {'id':'b'*32, 'certificate_sha256':'a'*64}
         route = {'id':'pro-'+'c'*32, 'target_ip':api.PUBLIC_IPV4, 'transport':'tcp', 'target_port':443, 'listen_port':20000}
         with patch.object(api, 'read_route_registry', return_value={'bindings':[self.binding]}), patch.object(api, 'prepare_network_probe', return_value=(plan,{})):
-            relayed = api.prepare_relay_probe(route, host, plan.consumer_id)
-            self.assertEqual(relayed.client, plan.client)
-            self.assertEqual((relayed.address, relayed.port), ('edge.example', 443))
-            self.assertNotEqual(relayed.fingerprint, plan.fingerprint)
+            # The domain plan proves the CDN chain; it must not falsely certify
+            # an exact agent ingress rule whose CF mapping is managed externally.
+            with self.assertRaises(probe.ProbeUnavailable):
+                api.prepare_relay_probe(route, host, plan.consumer_id)
             with self.assertRaises(probe.ProbeUnavailable):
                 api.prepare_relay_probe(route, {**host, 'id':'d'*32}, plan.consumer_id)
         self.descriptors['device-node']['relay_origins'] = ['8.8.4.4']

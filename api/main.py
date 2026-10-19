@@ -2845,11 +2845,10 @@ def prepare_relay_probe(route, host, consumer_id):
         if plan.relay_host_id:
             if plan.relay_host_id != host['id']:
                 continue
-            # The gateway path accepts this agent's source IPs only. Probe the
-            # actual public CDN socket, preserving CF TLS/AOP and Origin Rules.
-            fingerprint = hashlib.sha256(json.dumps([plan.fingerprint, route['id'], route['listen_port'],
-                route['target_ip'], host['certificate_sha256']], sort_keys=True).encode()).hexdigest()
-            return replace(plan, binding_id=route['id'], fingerprint=fingerprint)
+            # A public CDN nonce proves the consumer chain and the agent source,
+            # but cannot identify which ingress port CF chose. Do not attribute
+            # that evidence to this exact Relay rule without CF configuration.
+            raise network_probe.ProbeUnavailable('CDN через Relay проверяется по CDN-домену в ROUTES; отдельный ingress-порт агента этим не подтверждается')
         address = relay_control().client(host).host
         client = copy.deepcopy(plan.client)
         if plan.engine == 'xray':
