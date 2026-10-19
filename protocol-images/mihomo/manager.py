@@ -3077,6 +3077,49 @@ def validate_connection(component: str, values: dict[str, Any], *, allow_unverif
     return result
 
 
+def validate_cdn_delivery(definitions: list[dict[str, Any]], profile_id: str | None = None) -> None:
+    """A hostname's Cloudflare DNS destination is shared by all its consumers."""
+    connections = list(definitions)
+    for profile in profiles():
+        if profile.get('id') != profile_id:
+            saved = profile.get('connections', [])
+            if not saved and profile.get('credentials', {}).get('transport-reality'):
+                saved = [{'component':'transport-reality', 'credential':profile['credentials']['transport-reality']}]
+            connections.extend(saved)
+        connections.extend(item.get('connection', {}) for item in profile.get('retiring_connections', []))
+    deliveries: dict[str, set[str]] = {}
+    relay_domains = set()
+    for connection in connections:
+        if connection.get('component') != 'transport-reality':
+            continue
+        settings, credential = connection.get('settings', {}), connection.get('credential', {})
+        mode = settings.get('route_mode') or credential.get('route_mode') or ('both' if credential.get('cdn_enabled') else 'direct')
+        if mode in {'cdn','both'}:
+            domain = str(settings.get('cdn_domain') or credential.get('cdn_domain') or '').strip().lower()
+            if domain:
+                relay = settings.get('relay_host_id') if settings.get('relay_cdn') is True else ''
+                deliveries.setdefault(domain,set()).add(str(relay or 'origin'))
+                if relay:
+                    relay_domains.add(domain)
+        if mode == 'tls':
+            domain = str(settings.get('tls_domain') or credential.get('tls_domain') or '').strip().lower()
+            if domain:
+                deliveries.setdefault(domain,set()).add('direct-tls')
+    if not relay_domains:
+        return
+    try:
+        native = dict(line.split('=',1) for line in DIRECT_VLESS_ENV.read_text(encoding='utf-8').splitlines() if '=' in line)
+    except FileNotFoundError:
+        native = {}
+    for prefix in ('CDN','TLS'):
+        if native.get(prefix+'_ENABLED','').strip().strip('"') == 'yes':
+            domain = native.get(prefix+'_DOMAIN','').strip().strip('"').lower()
+            deliveries.setdefault(domain,set()).add('native-origin')
+    for domain in relay_domains:
+        if len(deliveries[domain]) > 1:
+            raise HTTPException(status_code=409, detail=f'Для CDN через Relay нужен отдельный домен: {domain} уже используется другим сервером приёма или прямым TLS')
+
+
 def used_vless_ports(config: dict[str, Any]) -> set[int]:
     return {int(item.get("port", 0)) for item in config.get("inbounds", []) if isinstance(item, dict) and int(item.get("port", 0) or 0) > 0}
 
@@ -4295,6 +4338,7 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
         if existing:
             return profile_response(existing)
     definitions = validate_connection_inputs(payload.connections) if payload.connections is not None else legacy_connection_inputs(payload.channels)
+    validate_cdn_delivery(definitions)
     devices = [{**device.model_dump(), "routing": validate_routing(device.routing, current={})} for device in payload.devices]
     if payload.connections is None:
         for definition in definitions:
@@ -4375,6 +4419,7 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     if payload.connections is not None:
         reality_changed = False
         definitions = validate_connection_inputs(payload.connections, item.get("connections", []))
+        validate_cdn_delivery(definitions, profile_id)
         device_ids = {str(device.get("id")) for device in item.get("devices", [])}
         if any(definition.get("device_id") not in device_ids for definition in definitions):
             raise HTTPException(status_code=422, detail="A connection references a missing profile device")

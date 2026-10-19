@@ -15,6 +15,32 @@ UDP_COMPONENTS = ('transport-wg', 'transport-awg', 'transport-hysteria2', 'trans
 
 
 class MihomoEndpointDomainTests(unittest.TestCase):
+    def test_cdn_relay_hostname_cannot_break_other_origin_or_agent_consumers(self):
+        def connection(host='', mode='cdn'):
+            return {'component':'transport-reality', 'settings':{'route_mode':mode, 'cdn_domain':'cdn.example',
+                    'tls_domain':'cdn.example', 'relay_host_id':host, 'relay_cdn':bool(host)}}
+        target = connection('b'*32)
+        native = self.root/'native.env'
+        with patch.object(manager, 'DIRECT_VLESS_ENV', native), patch.object(manager, 'profiles', return_value=[{'id':'other','connections':[connection()]}]) as saved:
+            with self.assertRaises(manager.HTTPException):
+                manager.validate_cdn_delivery([target])
+            # Replacing every consumer in this profile is safe; other profiles
+            # and retiring/native consumers remain independent owners.
+            manager.validate_cdn_delivery([target], 'other')
+            saved.return_value = [{'id':'other','connections':[connection('b'*32)]}]
+            manager.validate_cdn_delivery([target])
+            for existing in (connection('c'*32), connection(mode='tls')):
+                saved.return_value = [{'id':'other','connections':[existing]}]
+                with self.assertRaises(manager.HTTPException):
+                    manager.validate_cdn_delivery([target])
+            saved.return_value = [{'id':'same','retiring_connections':[{'connection':connection()}]}]
+            with self.assertRaises(manager.HTTPException):
+                manager.validate_cdn_delivery([target], 'same')
+            saved.return_value = []
+            native.write_text('CDN_ENABLED=yes\nCDN_DOMAIN=cdn.example\n')
+            with self.assertRaises(manager.HTTPException):
+                manager.validate_cdn_delivery([target])
+
     def test_cdn_relay_validation_derives_origin_acl_and_rejects_incompatible_modes(self):
         control = Mock()
         control.addresses.return_value = {'ipv4': ['85.209.155.229', '8.8.4.4'], 'ipv6': [], 'domains': []}
