@@ -20,6 +20,29 @@ security = api.cdn_security
 
 
 class CdnSecurityTests(unittest.TestCase):
+    def test_cdn_relay_source_policy_is_per_path_and_keeps_cf_mtls(self):
+        routes = [{'domain': 'cdn.example', 'path': '/relay', 'port': 12345, 'relay_origins': ['85.209.155.229']},
+                  {'domain': 'cdn.example', 'path': '/direct', 'port': 12346}]
+        text = security.render_routes(routes, {'authenticated_origin_pulls': True}, protected=True)
+        self.assertIn('require_and_verify', text)
+        relay, direct = text.split('handle /direct')
+        self.assertIn('@outsideCF0 not remote_ip 85.209.155.229\n', relay)
+        self.assertNotIn('85.209.155.229', direct)
+        self.assertIn('@outsideCF1 not remote_ip', direct)
+        for value in (['127.0.0.1'], ['10.0.0.1'], ['relay.example'], '85.209.155.229'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                security.render_routes([{**routes[0], 'relay_origins': value}], {}, protected=True)
+
+    def test_firewall_replaces_only_owned_relay_allowances(self):
+        with patch.object(security, 'read_env', return_value={'ACCESS_MODE':'vpn'}), patch.object(security, 'read_routes', return_value=[{'relay_origins':['85.209.155.229']}]), patch.object(security.subprocess, 'run') as run:
+            run.return_value.stdout = '[ 4] 443/tcp ALLOW IN 8.8.4.4 # GATE.312 Relay CDN HTTPS\n[ 5] 443/tcp ALLOW IN 1.1.1.1 # owner rule\n'
+            security.configure_firewall()
+        commands = [call.args[0] for call in run.call_args_list]
+        allow = ['ufw','allow','from','85.209.155.229','to','any','port','443','proto','tcp','comment','GATE.312 Relay CDN HTTPS']
+        delete = ['ufw','--force','delete','4']
+        self.assertLess(commands.index(allow), commands.index(delete))
+        self.assertNotIn(['ufw','--force','delete','5'], commands)
+
     def test_disabling_policy_reloads_gateway_only_once(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(security, "SNIPPET", Path(temp) / "route.caddy"), patch.object(security, "STATE", Path(temp) / "state.json"), patch.object(security, "read_routes", return_value=[]), patch.object(security, "reload_caddy") as reload:
             security.configure_aop(False)
@@ -128,6 +151,40 @@ class CdnSecurityTests(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv("PRIVACY_CADDY_BIN"), "Set Caddy binary for real gateway checks")
 class RealCaddyTests(unittest.TestCase):
+    def test_relay_cdn_path_rejects_direct_cf_and_spoofed_headers(self):
+        class Origin(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200); self.end_headers(); self.wfile.write(b'origin')
+            def log_message(self, *_): pass
+        origin = http.server.ThreadingHTTPServer(('127.0.0.1',0), Origin)
+        threading.Thread(target=origin.serve_forever,daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as temp:
+                port = free_port()
+                routes = [{'domain':'test.example','path':'/relay','port':origin.server_port,'relay_origins':['127.0.0.1']},
+                          {'domain':'test.example','path':'/cf','port':origin.server_port}]
+                # Production validation rejects loopback; this fixture models
+                # distinct CF and Relay source interfaces on an isolated host.
+                with patch.object(security, 'relay_origins', side_effect=lambda route: route.get('relay_origins', [])), patch.object(security, 'networks', return_value=['127.0.0.2/32']):
+                    config = security.render_routes(routes, {}, protected=True)
+                path = Path(temp)/'Caddyfile'
+                path.write_text('{\n admin off\n auto_https off\n}\n'+config.replace('test.example {',f'http://127.0.0.1:{port} {{'))
+                process = subprocess.Popen([os.environ['PRIVACY_CADDY_BIN'],'run','--config',str(path)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                try:
+                    wait_port(port,process)
+                    for source, target, expected in [('127.0.0.1','/relay',200),('127.0.0.2','/relay',403),('127.0.0.1','/cf',403),('127.0.0.2','/cf',200)]:
+                        connection = http.client.HTTPConnection('127.0.0.1',port,source_address=(source,0),timeout=5)
+                        try:
+                            connection.request('GET',target,headers={'CF-Connecting-IP':'127.0.0.1','X-Forwarded-For':'127.0.0.1'})
+                            response = connection.getresponse()
+                            self.assertEqual(response.status,expected,(source,target))
+                            response.read()
+                        finally: connection.close()
+                finally:
+                    process.terminate(); process.wait(timeout=10)
+        finally:
+            origin.shutdown(); origin.server_close()
+
     @unittest.skipIf(os.name == "nt", "The deployment template runs under bash")
     def test_protected_shell_template_is_valid_without_touching_system_config(self):
         with tempfile.TemporaryDirectory() as temp:

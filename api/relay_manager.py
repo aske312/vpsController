@@ -207,7 +207,7 @@ class RelayManager:
             raise ValueError('Домен Relay должен разрешаться только в IPv4 выбранного агента, без CDN proxy')
         return value
 
-    def ensure(self, host_id, groups, identity):
+    def ensure(self, host_id, groups, identity, *, allow_acme=False):
         """Prepare protocol-derived sockets, reusing owned rules and never replaying intent.
 
         Each group needs the same external port (e.g. Shadowsocks TCP + UDP).
@@ -220,7 +220,7 @@ class RelayManager:
         status_snapshot(client.request('GET', '/v1/status'))
         for group in groups:
             sockets = list(dict.fromkeys((transport, port) for transport, port in group))
-            if not sockets or any(transport not in ('tcp', 'udp') or type(port) is not int or not 1 <= port <= 65535 or port in (22, 80, 8000, 9443) for transport, port in sockets):
+            if not sockets or any(transport not in ('tcp', 'udp') or type(port) is not int or not 1 <= port <= 65535 or port in (22, 8000, 9443) or port == 80 and not (allow_acme and transport == 'tcp') for transport, port in sockets):
                 raise ValueError('Нельзя публиковать этот listener через Relay')
             registry = self.read()
             remote = route_snapshot(client.request('GET', '/v1/routes'))
@@ -246,7 +246,7 @@ class RelayManager:
                     continue
                 route_identity = uuid.uuid5(uuid.NAMESPACE_URL, f'{host_id}:{self.origin}:{transport}:{target}:{selected}').hex
                 self.mutate_route({'host_id': host_id, 'transport': transport, 'target_port': target, 'listen_port': selected,
-                                   'expected_revision': registry['revision'], 'agent_revision': remote['revision']}, identity, route_identity=route_identity)
+                                   'expected_revision': registry['revision'], 'agent_revision': remote['revision']}, identity, route_identity=route_identity, allow_acme=allow_acme)
         return self.read()
 
     def endpoint(self, host_id, transport, target_port, *, paired=False, address=None):
@@ -297,7 +297,7 @@ class RelayManager:
         registry['hosts'] = [item for item in registry['hosts'] if item['id'] != payload['host_id']]
         self.write(registry)
 
-    def mutate_route(self, payload, identity, *, delete=False, route_identity=None):
+    def mutate_route(self, payload, identity, *, delete=False, route_identity=None, allow_acme=False):
         self.require_clear()
         registry = self.checked(payload['expected_revision'])
         host = self.host(registry, payload['host_id'])
@@ -314,7 +314,7 @@ class RelayManager:
                 raise OperationConflict('Конфигурация маршрута на агенте изменена; чужой маршрут не удалён')
         else:
             route = {'id': 'pro-'+(route_identity or identity), 'host_id': host['id'], **validate_config({**payload, 'target_ip': public_ipv4(self.origin)})}
-            if route['target_ip'] == client.host or route['target_port'] in (22, 80, 8000, 9443):
+            if route['target_ip'] == client.host or route['target_port'] in (22, 8000, 9443) or route['target_port'] == 80 and not (allow_acme and route['transport'] == 'tcp'):
                 raise ValueError('Этот порт назначения нельзя публиковать через relay')
             if len(remote['items']) >= 64 or any(item['transport'] == route['transport'] and item['listen_port'] == route['listen_port'] for item in remote['items']):
                 raise OperationConflict('Порт relay занят или достигнут лимит маршрутов')

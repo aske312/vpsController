@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import yaml
 from tests.api.support import api, manager, ROOT
@@ -15,6 +15,23 @@ UDP_COMPONENTS = ('transport-wg', 'transport-awg', 'transport-hysteria2', 'trans
 
 
 class MihomoEndpointDomainTests(unittest.TestCase):
+    def test_cdn_relay_validation_derives_origin_acl_and_rejects_incompatible_modes(self):
+        control = Mock()
+        control.addresses.return_value = {'ipv4': ['85.209.155.229', '8.8.4.4'], 'ipv6': [], 'domains': []}
+        control.client.return_value.host = '85.209.155.229'
+        values = {'route_mode': 'cdn', 'cdn_domain': 'cdn.example', 'cdn_transport': 'websocket',
+                  'relay_host_id': 'b'*32, 'relay_cdn': True, 'cdn_relay_ips': '1.1.1.1'}
+        with patch.object(manager, 'relay_connection_control', return_value=control), patch.object(manager, 'mihomo_route_endpoint_selectable', return_value=True):
+            result = manager.validate_connection('transport-reality', values)
+            self.assertEqual(set(result['cdn_relay_ips'].split(',')), {'85.209.155.229', '8.8.4.4'})
+            for component, patch_values in [('transport-wg', {}), ('transport-reality', {'relay_host_id': ''}),
+                                            ('transport-reality', {'route_mode': 'tls'}), ('transport-reality', {'cdn_transport': 'grpc'}),
+                                            ('transport-reality', {'relay_cdn': 'yes'})]:
+                with self.subTest(component=component, patch=patch_values), self.assertRaises(manager.HTTPException):
+                    manager.validate_connection(component, {**values, **patch_values})
+            result = manager.validate_connection('transport-reality', {**values, 'relay_cdn': False})
+            self.assertNotIn('cdn_relay_ips', result)
+
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.endpoints = self.root / 'network.json'

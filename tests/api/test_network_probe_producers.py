@@ -12,6 +12,26 @@ import network_routes
 
 
 class ProbeProducerTests(unittest.TestCase):
+    def test_cdn_relay_probe_requires_exact_gateway_acl_and_keeps_public_cdn_socket(self):
+        self.profiles[0]['connections'][0]['settings'].update(relay_cdn=True, relay_host_id='b'*32, cdn_relay_ips='85.209.155.229')
+        with self.assertRaises(probe.ProbeUnavailable):
+            self.prepare()
+        self.descriptors['device-node']['relay_origins'] = ['85.209.155.229']
+        plan = self.prepare()
+        self.assertEqual((plan.address, plan.port, plan.relay_host_id), ('edge.example', 443, 'b'*32))
+        host = {'id':'b'*32, 'certificate_sha256':'a'*64}
+        route = {'id':'pro-'+'c'*32, 'target_ip':api.PUBLIC_IPV4, 'transport':'tcp', 'target_port':443, 'listen_port':20000}
+        with patch.object(api, 'read_route_registry', return_value={'bindings':[self.binding]}), patch.object(api, 'prepare_network_probe', return_value=(plan,{})):
+            relayed = api.prepare_relay_probe(route, host, plan.consumer_id)
+            self.assertEqual(relayed.client, plan.client)
+            self.assertEqual((relayed.address, relayed.port), ('edge.example', 443))
+            self.assertNotEqual(relayed.fingerprint, plan.fingerprint)
+            with self.assertRaises(probe.ProbeUnavailable):
+                api.prepare_relay_probe(route, {**host, 'id':'d'*32}, plan.consumer_id)
+        self.descriptors['device-node']['relay_origins'] = ['8.8.4.4']
+        with self.assertRaises(probe.ProbeUnavailable):
+            self.prepare()
+
     def setUp(self):
         self.binding = {"id": "binding", "state": "active", "kind": "cdn", "address": "edge.example", "desired_revision": 1}
         self.credential = {"uuid": "private-uuid", "cdn_enabled": True, "cdn_domain": "edge.example", "cdn_port": 10443, "cdn_path": "/live"}

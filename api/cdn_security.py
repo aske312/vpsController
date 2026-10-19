@@ -73,6 +73,21 @@ def read_routes() -> list[dict]:
     return routes
 
 
+def relay_origins(route: dict) -> list[str]:
+    values = route.get('relay_origins', [])
+    if not isinstance(values, list) or len(values) > 64:
+        raise ValueError('Invalid Relay origin addresses')
+    result = set()
+    for value in values:
+        address = ipaddress.ip_address(value)
+        if address.version != 4 or not address.is_global or address.is_multicast:
+            raise ValueError('Relay origin must be a public IPv4')
+        result.add(str(address))
+    if result and not route.get('cloudflare', True):
+        raise ValueError('Relay origin policy requires a CDN route')
+    return sorted(result)
+
+
 def render_routes(routes: list[dict], policy: dict | None = None, protected: bool | None = None, probe: str = "") -> str:
     policy = settings() if policy is None else policy
     protected = read_env(ENV).get("ACCESS_MODE") == "vpn" if protected is None else protected
@@ -86,6 +101,8 @@ def render_routes(routes: list[dict], policy: dict | None = None, protected: boo
         grouped.setdefault(domain, []).append(route)
     lines = []
     for domain, items in grouped.items():
+        origin_ips = sorted({ip for item in items for ip in relay_origins(item)})
+        domain_ranges = ' '.join([ranges, *origin_ips])
         cf_only = all(item.get("cloudflare", True) for item in items)
         if aop and not cf_only and any(item.get("cloudflare", True) for item in items):
             raise ValueError("Для CDN и прямого TLS нужны разные домены перед включением проверки CF")
@@ -101,7 +118,7 @@ def render_routes(routes: list[dict], policy: dict | None = None, protected: boo
             # certificate verification report a misleading HTTP 403.
             lines += [f"        handle /__cf_check_{probe} {{", f'            respond "{probe}" 200', "        }"]
         if cf_only and (protected or aop):
-            lines += [f"        @outsideCF not remote_ip {ranges}", "        respond @outsideCF 403"]
+            lines += [f"        @outsideCF not remote_ip {domain_ranges}", "        respond @outsideCF 403"]
         for index, item in enumerate(items):
             path = str(item["path"])
             if not re.fullmatch(r"/[A-Za-z0-9_./-]*", path):
@@ -112,8 +129,12 @@ def render_routes(routes: list[dict], policy: dict | None = None, protected: boo
             matcher = path + "*" if item.get("transport") in {"xhttp", "grpc"} else path
             upstream = ("h2c://" if item.get("transport") == "grpc" else "") + f"127.0.0.1:{port}"
             lines += [f"        handle {matcher} {{", "            route {"]
-            if not cf_only and item.get("cloudflare", True) and protected:
-                lines += [f"                @outsideCF{index} not remote_ip {ranges}", f"                respond @outsideCF{index} 403"]
+            allowed_relay = relay_origins(item)
+            if allowed_relay or item.get("cloudflare", True) and (protected or aop) and (not cf_only or origin_ips):
+                # For a Relay-owned transport path, even a direct Cloudflare
+                # request is rejected. A successful CDN probe must traverse it.
+                allowed = ' '.join(allowed_relay) if allowed_relay else ranges
+                lines += [f"                @outsideCF{index} not remote_ip {allowed}", f"                respond @outsideCF{index} 403"]
             lines += [f"                reverse_proxy {upstream}", "            }", "        }"]
         lines += ["        respond 404", "    }", "}"]
     return "\n".join(lines) + ("\n" if lines else "")
@@ -148,6 +169,20 @@ def configure_firewall() -> None:
     # HTTP remains reachable for certificate issuance, never an origin proxy.
     if routes or read_env(ENV).get("PUBLIC_DOMAIN"):
         subprocess.run(["ufw", "allow", "80/tcp", "comment", "GATE.312 ACME HTTP"], check=True, capture_output=True)
+    expected = sorted({address for route in routes for address in relay_origins(route)})
+    marker = 'GATE.312 Relay CDN HTTPS'
+    # Install new exact allowances first, then remove only our obsolete rules.
+    for address in expected:
+        subprocess.run(['ufw', 'allow', 'from', address, 'to', 'any', 'port', '443', 'proto', 'tcp', 'comment', marker], check=True, capture_output=True)
+    snapshot = subprocess.run(['ufw', 'status', 'numbered'], check=True, capture_output=True, text=True)
+    if isinstance(snapshot.stdout, str):
+        obsolete = []
+        for line in snapshot.stdout.splitlines():
+            match = re.fullmatch(r'\[\s*(\d+)\]\s+443/tcp\s+ALLOW IN\s+(\S+)\s+# ' + re.escape(marker), line.strip())
+            if match and match[2] not in expected:
+                obsolete.append(int(match[1]))
+        for number in sorted(obsolete, reverse=True):
+            subprocess.run(['ufw', '--force', 'delete', str(number)], check=True, capture_output=True)
 
 
 def configure_aop(enabled: bool, progress: Callable[[int, str], None] = lambda *_: None) -> None:

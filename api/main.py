@@ -2842,6 +2842,14 @@ def prepare_relay_probe(route, host, consumer_id):
     for plan in plans():
         if plan.consumer_id != consumer_id or plan.port != route['target_port'] or route['transport'] != ('udp' if plan.engine == 'singbox' else 'tcp'):
             continue
+        if plan.relay_host_id:
+            if plan.relay_host_id != host['id']:
+                continue
+            # The gateway path accepts this agent's source IPs only. Probe the
+            # actual public CDN socket, preserving CF TLS/AOP and Origin Rules.
+            fingerprint = hashlib.sha256(json.dumps([plan.fingerprint, route['id'], route['listen_port'],
+                route['target_ip'], host['certificate_sha256']], sort_keys=True).encode()).hexdigest()
+            return replace(plan, binding_id=route['id'], fingerprint=fingerprint)
         address = relay_control().client(host).host
         client = copy.deepcopy(plan.client)
         if plan.engine == 'xray':

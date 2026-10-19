@@ -261,6 +261,7 @@ class ProbePlan:
     producer: str = "direct_vless"
     engine: str = "xray"
     server_behavior: dict = field(default_factory=dict, repr=False)
+    relay_host_id: str = ""
 
     def summary(self) -> dict:
         return {"state": "planned", "binding_id": self.binding_id,
@@ -416,12 +417,27 @@ def prepare_mihomo_vless(binding: dict, consumers: list[dict], profiles: list[di
             encryption = credential.get("encryption") or "none"
             if (inbound.get("settings", {}).get("decryption", "none") == "none") != (encryption == "none"):
                 continue
+            relay_host_id = settings.get('relay_host_id', '') if settings.get('relay_cdn') is True else ''
+            if settings.get('relay_cdn') is True and not relay_host_id:
+                continue
+            if descriptor.get('relay_origins') and not relay_host_id:
+                continue
+            if relay_host_id:
+                expected = sorted(set(str(settings.get('cdn_relay_ips', '')).split(',')))
+                if (variant != 'cdn' or mode != 'cdn' or transport not in {'ws', 'websocket'}
+                        or not re.fullmatch(r'[0-9a-f]{32}', relay_host_id) or not all(expected)
+                        or sorted(set(descriptor.get('relay_origins', []))) != expected):
+                    continue
             client_stream = {"network": transport, "security": "tls", "tlsSettings": {"serverName": address, "allowInsecure": False}, key: copy.deepcopy(stream.get(key, {}))}
             outbound = {"protocol": "vless", "settings": {"vnext": [{"address": address, "port": 443, "users": [{"id": credential["uuid"], "encryption": encryption}]}]}, "streamSettings": client_stream}
-            fingerprint = _fingerprint(binding, consumer_id, {"tag": tag, "port": port, "stream": client_stream,
-                "gateway": {key: descriptor.get(key) for key in ("domain", "path", "port", "transport")}}, "mihomo_vless")
+            material = {"tag": tag, "port": port, "stream": client_stream,
+                        "gateway": {key: descriptor.get(key) for key in ("domain", "path", "port", "transport")}}
+            if relay_host_id:
+                material['relay_host_id'] = relay_host_id
+                material['gateway']['relay_origins'] = descriptor['relay_origins']
+            fingerprint = _fingerprint(binding, consumer_id, material, "mihomo_vless")
             return ProbePlan(binding["id"], binding["desired_revision"], consumer_id, address, 443, tag, port, transport, fingerprint, outbound, producer="mihomo_vless",
-                             server_behavior={"routing": config.get("routing"), "outbounds": config.get("outbounds"),
+                             relay_host_id=relay_host_id, server_behavior={"routing": config.get("routing"), "outbounds": config.get("outbounds"),
                                               "settings": {key: value for key, value in inbound.get("settings", {}).items() if key != "clients"}})
     raise ProbeUnavailable("Нет однозначного существующего Mihomo VLESS consumer с live listener и gateway route")
 

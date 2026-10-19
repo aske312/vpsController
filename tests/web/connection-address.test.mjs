@@ -3,6 +3,19 @@ import test from 'node:test';
 import { applyConnectionAddress, connectionAddressModes } from '../../src/features/mihomo/connection-address.ts';
 
 const connection = (id, component, settings = {}, device_id = 'phone') => ({ id, component, device_id, name: id, settings });
+
+test('bulk CDN through Relay stays on VLESS and clears the flag when leaving CDN', () => {
+  const vless = connection('vless', 'transport-reality', { route_mode: 'tls', tls_domain: 'origin.example' });
+  const udp = connection('udp', 'transport-tuic', { sni: 'cert.example' });
+  const source = connection('cdn', 'transport-reality', { route_mode:'cdn', cdn_domain:'cdn.example', relay_cdn:true, relay_host_id:'b'.repeat(32) });
+  const result = applyConnectionAddress([vless, udp], source);
+  assert.equal(result[0].settings.route_mode, 'cdn');
+  assert.equal(result[0].settings.relay_cdn, true);
+  assert.equal(result[0].settings.cdn_transport, 'websocket');
+  assert.equal(result[1], udp);
+  const cleared = applyConnectionAddress(result, {...source, settings:{route_mode:'direct'}});
+  assert.equal(cleared[0].settings.relay_cdn, false);
+});
 test('bulk address selection preserves protocol parameters and isolates devices', () => {
   const vless = connection('vless', 'transport-reality', { route_mode: 'cdn', cdn_domain: 'cdn.example', cdn_enabled: true, port: 443, uuid: 'secret' });
   const udp = connection('udp', 'transport-tuic', { port: 8443, password: 'secret' });

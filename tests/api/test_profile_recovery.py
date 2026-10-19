@@ -55,6 +55,10 @@ class ProfileRecoveryTests(unittest.TestCase):
 
     def test_reality_recovery_applies_firewall_without_nested_control_operation(self):
         real_is_file = Path.is_file
+        descriptor = manager.CONFIG_ROOT / 'reality/caddy-routes/cdn.json'
+        descriptor.parent.mkdir(parents=True)
+        original = {'domain':'cdn.example','path':'/cdn','port':10087,'relay_origins':['85.209.155.229']}
+        descriptor.write_text(json.dumps(original))
 
         def is_file(path):
             if str(path).replace("\\", "/") == "/opt/vps-control/api/cdn_security.py":
@@ -65,6 +69,8 @@ class ProfileRecoveryTests(unittest.TestCase):
             with self.assertRaises(KeyboardInterrupt):
                 with manager.profile_runtime_transaction({"transport-reality"}):
                     manager.PROFILE_FILE.write_text('[]')
+                    descriptor.write_text(json.dumps({**original, 'relay_origins':['8.8.4.4']}))
+                    (descriptor.parent/'new.json').write_text('{}')
                     self.state = "error"
                     raise KeyboardInterrupt()
             with (
@@ -77,6 +83,8 @@ class ProfileRecoveryTests(unittest.TestCase):
             [call.args for call in self.command.call_args_list],
         )
         self.assertFalse(recovery.marker(manager).exists())
+        self.assertEqual(json.loads(descriptor.read_text()), original)
+        self.assertFalse((descriptor.parent/'new.json').exists())
 
     def test_restore_error_retains_snapshot_and_other_files_restore(self):
         self.interrupt()

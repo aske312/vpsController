@@ -52,6 +52,15 @@ test('Mihomo hides unsupported CDN through Relay but retains saved legacy routes
   assert.match(saved, /сохранённый адрес/);
 });
 
+test('explicit CDN Relay keeps the public CDN domain selectable and shows separate ingress setup', () => {
+  const html = mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example',relay_host_id:host.id,relay_cdn:true});
+  assert.match(html, /origin-cdn.example.*selected=""/);
+  assert.match(html, /aria-label="Сервер приёма CDN"/);
+  assert.match(html, /Full \(strict\)/);
+  assert.doesNotMatch(html, /сохранённый адрес|<optgroup/);
+  assert.doesNotMatch(mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example'}, {webTransports:['grpc']}), /aria-label="Сервер приёма CDN"/);
+});
+
 test('Mihomo retains excluded or unavailable saved Relay endpoints and allows direct recovery', () => {
   const html = mihomoAddress('transport-tuic', {relay_host_id:host.id,relay_address:'saved.example'}, {inventory:{status:null,failed:true}});
   assert.match(html, /saved.example.*selected=""/);

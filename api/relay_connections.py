@@ -6,7 +6,7 @@ import re
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
-from relay_addresses import normalize_address, authority
+from relay_addresses import normalize_address, normalize_addresses, authority
 
 
 UDP_COMPONENTS = {'transport-wg', 'transport-awg', 'transport-hysteria2', 'transport-tuic'}
@@ -22,6 +22,16 @@ def host_id(settings):
 
 
 def selected_endpoint(control, settings, transport, port, **kwargs):
+    if settings.get('relay_cdn') is True:
+        if settings.get('route_mode') != 'cdn' or transport != 'tcp' or port != 443:
+            raise ValueError('CDN через Relay требует VLESS CDN на HTTPS 443')
+        domain = normalize_address(settings.get('cdn_domain', ''))
+        normalize_addresses({'domains': [domain]}, None)
+        # Both rules must exist; their ingress ports belong to Cloudflare Origin
+        # Rules and must never replace the public CDN port in a client export.
+        control.endpoint(host_id(settings), 'tcp', 443)
+        control.endpoint(host_id(settings), 'tcp', 80)
+        return domain, 443
     if settings.get('relay_address'):kwargs['address'] = normalize_address(settings['relay_address'])
     return control.endpoint(host_id(settings), transport, port, **kwargs)
 
@@ -45,6 +55,8 @@ def connection_groups(connection, direct_settings=None):
     if component not in COMPONENTS:
         raise ValueError('Протокол не поддерживает Relay Agent API v1')
     credential = connection.get('credential', {})
+    if connection.get('settings', {}).get('relay_cdn') is True and component != 'transport-reality':
+        raise ValueError('CDN через Relay поддерживает только VLESS')
     if component == 'transport-reality':
         mode = connection.get('settings', {}).get('route_mode') or credential.get('route_mode') or 'both'
         groups = []
@@ -53,6 +65,10 @@ def connection_groups(connection, direct_settings=None):
             groups.append([('tcp', int(effective['port']))])
         if mode in ('cdn', 'both') and credential.get('cdn_enabled') or mode == 'tls':
             groups.append([('tcp', 443)])
+        if connection.get('settings', {}).get('relay_cdn') is True:
+            if mode != 'cdn' or not credential.get('cdn_enabled'):
+                raise ValueError('CDN через Relay требует отдельного CDN-подключения')
+            groups.append([('tcp', 80)])
         return groups
     port = int(credential['port'])
     return [[('tcp', port), ('udp', port)]] if component == 'transport-shadowsocks' else [[('udp', port)]]
@@ -60,11 +76,16 @@ def connection_groups(connection, direct_settings=None):
 
 def prepare_mihomo(control, connections, identity, direct_settings=None, previous=()):
     by_host = defaultdict(list)
+    acme_hosts = set()
     saved = {item['id']: item for item in previous}
     for connection in connections:
         selected = host_id(connection.get('settings', {}))
         if selected:
             groups = connection_groups(connection, direct_settings)
+            if not connection.get('settings', {}).get('relay_cdn') and any(port == 80 for group in groups for _, port in group):
+                raise ValueError('HTTP 80 разрешён только для ACME CDN через Relay')
+            if connection.get('settings', {}).get('relay_cdn') is True:
+                acme_hosts.add(selected)
             old = saved.get(connection.get('id'), {})
             if old.get('component') == connection['component'] and host_id(old.get('settings', {})) == selected and connection_groups(old, direct_settings) == groups:
                 for group in groups:
@@ -73,7 +94,7 @@ def prepare_mihomo(control, connections, identity, direct_settings=None, previou
                 continue
             by_host[selected].extend(groups)
     for selected, groups in by_host.items():
-        control.ensure(selected, groups, identity)
+        control.ensure(selected, groups, identity, **({'allow_acme': True} if selected in acme_hosts else {}))
 
 
 def redirect_nodes(control, connection, nodes, endpoints=()):

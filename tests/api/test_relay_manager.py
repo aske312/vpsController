@@ -63,6 +63,41 @@ class FakeAgent:
 
 
 class RelayManagementTests(unittest.TestCase):
+    def test_cdn_relay_exports_public_443_and_prepares_https_and_acme_ingress(self):
+        credential = {'uuid': 'key-value', 'cdn_enabled': True, 'cdn_domain': 'cdn.example', 'cdn_path': '/private', 'cdn_transport': 'websocket'}
+        connection = {'id': 'cdn', 'name': 'CDN', 'component': 'transport-reality', 'credential': credential,
+                      'settings': {'route_mode': 'cdn', 'cdn_domain': 'cdn.example', 'relay_host_id': self.host_id, 'relay_cdn': True}}
+        relay_connections.prepare_mihomo(self.control, [connection], 'c'*32)
+        rules = self.control.read()['routes']
+        self.assertEqual({(r['transport'], r['target_port']) for r in rules}, {('tcp', 443), ('tcp', 80)})
+        self.assertTrue(all(20000 <= r['listen_port'] <= 20999 for r in rules))
+        source = copy.deepcopy(connection)
+        lines = relay_connections.redirect_mihomo_lines(self.control, connection['component'], connection['settings'], manager.render_vless_cdn(credential, 'CDN'))
+        node = yaml.safe_load('proxies:\n'+'\n'.join(lines))['proxies'][0]
+        self.assertEqual((node['server'], node['port'], node['servername']), ('cdn.example', 443, 'cdn.example'))
+        self.assertEqual(node['ws-opts']['headers']['Host'], 'cdn.example')
+        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
+        dns = {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}
+        singbox = manager.build_singbox_config([connection], {}, dns, [], ORIGIN, lambda: {}, False, redirect=redirect)
+        node = next(item for item in singbox['outbounds'] if item['type'] == 'vless')
+        self.assertEqual((node['server'], node['server_port'], node['tls']['server_name']), ('cdn.example', 443, 'cdn.example'))
+        xray = manager.build_xray_configs([connection], {}, dns, [], ORIGIN, lambda: {}, redirect)
+        self.assertEqual(xray[0]['outbounds'][0]['settings']['vnext'][0]['address'], 'cdn.example')
+        self.assertEqual(xray[0]['outbounds'][0]['settings']['vnext'][0]['port'], 443)
+        self.assertEqual(connection, source)
+        self.agent.offline = True
+        relay_connections.prepare_mihomo(self.control, [connection], 'd'*32, previous=[connection])
+        with self.assertRaises(ValueError):
+            relay_connections.selected_endpoint(self.control, connection['settings'], 'udp', 443)
+        self.agent.offline = False
+        with self.assertRaises(ValueError):
+            self.control.ensure(self.host_id, [[('tcp',80)]], 'd'*32)
+        with self.assertRaises(ValueError):
+            self.control.ensure(self.host_id, [[('udp',80)]], 'd'*32, allow_acme=True)
+        unsafe = {'id':'ss','component':'transport-shadowsocks','credential':{'port':80},'settings':{'relay_host_id':self.host_id}}
+        with self.assertRaises(ValueError):
+            relay_connections.prepare_mihomo(self.control, [connection, unsafe], 'e'*32)
+
     def test_address_refresh_discovers_changes_without_json_routes_or_registry_mutation(self):
         self.control.ensure(self.host_id, [[('tcp', 443)]], 'c'*32)
         before = self.control.read()

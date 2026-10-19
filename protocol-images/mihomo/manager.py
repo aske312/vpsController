@@ -2949,6 +2949,20 @@ def validate_connection(component: str, values: dict[str, Any], *, allow_unverif
             relay_connection_control().host(relay_connection_control().read(), selected_relay)
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=422, detail='Подключите выбранный Relay на странице Сеть → ROUTES') from exc
+    relay_cdn = result.get('relay_cdn', False)
+    if type(relay_cdn) is not bool:
+        raise HTTPException(status_code=422, detail='Некорректный способ доставки CDN')
+    if relay_cdn and (component != 'transport-reality' or not selected_relay or result.get('route_mode') != 'cdn' or result.get('cdn_transport', 'websocket') != 'websocket'):
+        raise HTTPException(status_code=422, detail='CDN через Relay поддерживает отдельный VLESS CDN WebSocket')
+    # Derived from the authenticated agent inventory, never trust supplied ACLs.
+    result.pop('cdn_relay_ips', None)
+    if relay_cdn:
+        control = relay_connection_control()
+        host = control.host(control.read(), selected_relay)
+        addresses = control.addresses(host)['ipv4'] + [control.client(host).host]
+        result['cdn_relay_ips'] = ','.join(sorted({address for address in addresses if ipaddress.ip_address(address).version == 4}))
+        if not result['cdn_relay_ips']:
+            raise HTTPException(status_code=422, detail='Для CDN через Relay нужен известный публичный IPv4 агента')
     if "udp_domain" in result:
         domain = result["udp_domain"]
         if not isinstance(domain, str) or len(domain) > 253:
@@ -3087,11 +3101,14 @@ def vless_stream(settings: dict[str, Any], private_key: str, short_id: str) -> d
     return stream
 
 
-def write_mihomo_vless_cdn(connection_id: str, enabled: bool, domain: str, path: str, port: int, transport: str = "websocket", rebuild: bool = True) -> None:
+def write_mihomo_vless_cdn(connection_id: str, enabled: bool, domain: str, path: str, port: int, transport: str = "websocket", rebuild: bool = True, relay_origins: str = "") -> None:
     VLESS_CDN_ROUTE_ROOT.mkdir(parents=True, exist_ok=True)
     descriptor = VLESS_CDN_ROUTE_ROOT / f"{connection_id}.json"
     if enabled:
-        atomic_json(descriptor, {"domain": domain, "path": path, "port": int(port), "transport": transport}, mode=0o600)
+        value = {"domain": domain, "path": path, "port": int(port), "transport": transport}
+        if relay_origins:
+            value['relay_origins'] = relay_origins.split(',')
+        atomic_json(descriptor, value, mode=0o600)
     else:
         descriptor.unlink(missing_ok=True)
     if rebuild:
@@ -3317,7 +3334,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         ]) + "\n")
     original_config = config_path.read_bytes()
     try:
-        write_mihomo_vless_cdn(route_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"], rebuild=reload_caddy)
+        write_mihomo_vless_cdn(route_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"], rebuild=reload_caddy, relay_origins=settings.get('cdn_relay_ips', '') if settings.get('relay_cdn') else '')
         write_mihomo_vless_cdn(f"tls-{route_id}", settings["tls_enabled"], settings["tls_domain"], tls_path, tls_port, settings["tls_transport"], rebuild=reload_caddy)
         apply_reality_config(config_path, config, restart_service=restart_service)
         port_allocation.release_prefix(allocation_owner + ":")
@@ -3777,7 +3794,9 @@ def validate_connection_inputs(values: list[ProfileConnectionInput], existing_co
         saved = existing_by_id.get(connection_id, {})
         saved_settings = saved.get("settings", {}) if saved.get("component") == component else {}
         candidate_settings = {**connection_defaults(component), **settings_input}
-        route_keys = ("route_mode", "cdn_domain", "tls_domain", "udp_domain")
+        route_keys = ("route_mode", "cdn_domain", "tls_domain", "udp_domain", "relay_cdn")
+        if candidate_settings.get('relay_cdn'):
+            route_keys += ('relay_host_id',)
         preserves_network_route = bool(saved_settings) and all(
             str(candidate_settings.get(key, "")).strip().lower() == str(saved_settings.get(key, "")).strip().lower()
             for key in route_keys
