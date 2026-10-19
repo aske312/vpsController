@@ -9,6 +9,44 @@ from component_registry import ComponentRegistry
 
 
 class NetworkDomainsTests(unittest.TestCase):
+    def test_editing_tls_udp_or_additional_cdn_does_not_reconfigure_native_cdn(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        env = root / 'reality.env'
+        config = root / 'config.json'
+        config.write_text('{}')
+        self.enterContext(patch.object(api, 'VLESS_ENV', env))
+        self.enterContext(patch.object(api, 'VLESS_CONFIG', config))
+        self.enterContext(patch.object(api, 'network_consumers', return_value=[]))
+        self.enterContext(patch.object(api, 'network_status', return_value={}))
+        for enabled, native_domain in [('no', ''), ('yes', 'other.example')]:
+            with self.subTest(enabled=enabled, native_domain=native_domain):
+                original = f'CDN_ENABLED={enabled}\nCDN_DOMAIN={native_domain}\n'
+                env.write_text(original)
+                api.write_network_endpoint_settings({'cdn_domain': 'cdn.example'})
+                with patch.object(api, 'update_protocol_settings') as update:
+                    api.update_network_endpoints(api.NetworkEndpointSettings(
+                        cdn_domain='cdn.example', cdn_domains=['cdn.example', 'extra.example'],
+                        tls_relay_domain='direct.example', udp_relay_domain='direct.example'), None)
+                update.assert_not_called()
+                self.assertEqual(env.read_text(), original)
+                saved = api.read_network_endpoint_settings()
+                self.assertEqual(saved['tls_relay_domains'], ['direct.example'])
+                self.assertEqual(saved['udp_relay_domains'], ['direct.example'])
+                self.assertEqual(saved['cdn_domains'], ['cdn.example', 'extra.example'])
+
+    def test_changing_primary_cdn_still_configures_native_listener(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        env = root / 'reality.env'
+        config = root / 'config.json'
+        env.write_text('CDN_ENABLED=no\nCDN_DOMAIN=\n')
+        config.write_text('{}')
+        with patch.object(api, 'VLESS_ENV', env), patch.object(api, 'VLESS_CONFIG', config), patch.object(api, 'network_consumers', return_value=[]), patch.object(api, 'network_status', return_value={}), patch.object(api, 'require_owned_components'), patch.object(api, 'update_protocol_settings') as update:
+            api.write_network_endpoint_settings({'cdn_domain': 'old.example'})
+            api.update_network_endpoints(api.NetworkEndpointSettings(cdn_domain='new.example'), None)
+        update.assert_called_once()
+        self.assertEqual(update.call_args.args[1].cdn_domain, 'new.example')
+        self.assertTrue(update.call_args.args[1].cdn_enabled)
+
     def setUp(self):
         root = self.enterContext(tempfile.TemporaryDirectory())
         self.enterContext(patch.object(api, "DATA_DIR", Path(root)))

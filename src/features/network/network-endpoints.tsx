@@ -39,8 +39,8 @@ export function NetworkEndpoints({
   relay: RelayControl;
 }) {
   const [opened, setOpen] = useState(false);
-  const [addresses, setAddresses] = useState(false);
-  const open = opened && (addresses || relay.dialog && relay.embedded);
+  const [addresses, setAddresses] = useState<false | "cdn" | "direct">(false);
+  const open = opened && Boolean(addresses || relay.dialog && relay.embedded);
   const generation = useRef(0);
   const inFlight = useRef(false);
   useEffect(() => () => { generation.current++; }, []);
@@ -80,18 +80,18 @@ export function NetworkEndpoints({
     {
       key: "tls_relay_domain",
       kind: "tls_relay",
-      label: "TLS relay",
-      short: "TCP через внешний сервер",
-      placeholder: "relay.example.com или 203.0.113.10",
-      help: "Укажите домен или IP внешнего relay. Порт берётся из выбранного протокола.",
+      label: "TLS-домен",
+      short: "Прямое TLS-подключение",
+      placeholder: "tls.example.com",
+      help: "Адрес сервера для TLS-подключений. Сертификат и SNI настраиваются в протоколе; сохранение адреса не создаёт TLS-вход.",
     },
     {
       key: "udp_relay_domain",
       kind: "udp_relay",
-      label: "UDP relay",
-      short: "UDP через внешний сервер",
-      placeholder: "relay.example.com или 203.0.113.10",
-      help: "Укажите домен или IP внешнего relay. Relay должен пересылать нужный UDP-порт.",
+      label: "UDP-домен или IP",
+      short: "Прямое UDP-подключение",
+      placeholder: "tls.example.com или IP сервера",
+      help: "Адрес для существующих UDP-протоколов. Можно использовать тот же домен, что и для TLS. Порт задаётся протоколом; сохранение адреса не запускает UDP-службу.",
     },
   ];
   const routeValues = (key: keyof NetworkEndpointSettings): string[] => {
@@ -140,7 +140,7 @@ export function NetworkEndpoints({
       <button
         type="button"
         className="networkAddRouteButton"
-        onClick={() => { generation.current++; setChecks(initialChecks || {}); setConsumerIds({}); setAddresses(hasChanges); if (!hasChanges) relay.openHost(undefined, true); setOpen(true); }}
+        onClick={() => { generation.current++; setChecks(initialChecks || {}); setConsumerIds({}); setAddresses(current => hasChanges ? current || "cdn" : false); if (!hasChanges) relay.openHost(undefined, true); setOpen(true); }}
       >
         Добавить маршрут
       </button>
@@ -165,9 +165,9 @@ export function NetworkEndpoints({
                 <p className="eyebrow networkSectionEyebrow">ROUTES</p>
                 <h2 id="network-endpoints-title">Добавить маршрут</h2>
                 <p>
-                  {addresses ? "CDN / ECH: домен для новых клиентских конфигураций." : "Relay: внешний узел с IP или доменом для клиентов."}
+                  {addresses === "direct" ? "Прямой домен сервера для TLS и UDP. Один домен может использоваться для обоих типов подключения." : addresses === "cdn" ? "CDN / ECH: домен для новых клиентских конфигураций." : "Relay: внешний узел с IP или доменом для клиентов."}
                 </p>
-                {addresses && knownCdnDomains.length > 0 && <div className="networkKnownRoutes"><span>Обнаруженные CDN адреса</span><div>{knownCdnDomains.map((domain) => <code key={domain}>{domain}</code>)}</div><small>Активным общим адресом для новых конфигураций остаётся значение в поле CDN / ECH.</small></div>}
+                {addresses === "cdn" && knownCdnDomains.length > 0 && <div className="networkKnownRoutes"><span>Обнаруженные CDN адреса</span><div>{knownCdnDomains.map((domain) => <code key={domain}>{domain}</code>)}</div><small>Активным общим адресом для новых конфигураций остаётся значение в поле CDN / ECH.</small></div>}
               </div>
               <button
                 type="button"
@@ -180,13 +180,14 @@ export function NetworkEndpoints({
             </header>
             <div className="networkRouteChoices" aria-label="Тип маршрута">
               <button type="button" aria-pressed={!addresses} disabled={addresses && hasChanges} onClick={() => { if (!addresses) return; relay.openHost(undefined, true); setAddresses(false); }}><strong>Relay · IP / домен</strong><span>Relay Agent · TCP и UDP</span></button>
-              <button type="button" aria-pressed={addresses} disabled={!addresses && relay.changed} onClick={() => { setAddresses(true); relay.resetDialog(); }}><strong>CDN / ECH · домен</strong><span>Домен и proxy у CDN-провайдера</span></button>
+              <button type="button" aria-pressed={addresses === "cdn"} disabled={addresses !== "cdn" && (hasChanges || relay.changed)} onClick={() => { setAddresses("cdn"); relay.resetDialog(); }}><strong>CDN / ECH · домен</strong><span>Домен и proxy у CDN-провайдера</span></button>
+              <button type="button" aria-pressed={addresses === "direct"} disabled={addresses !== "direct" && (hasChanges || relay.changed)} onClick={() => { setAddresses("direct"); relay.resetDialog(); }}><strong>Прямой домен · TLS / UDP</strong><span>DNS only · адрес этого сервера</span></button>
             </div>
             {(addresses ? hasChanges : relay.changed) && <p className="networkRouteTypeHint">Сохраните или отмените правки перед сменой типа маршрута.</p>}
             {!addresses && <NetworkRelayForm relay={relay} />}
             {addresses && <>
             <div className="networkEndpointGrid">
-              {fields.filter((field) => field.kind === "cdn").map((field) => {
+              {fields.filter((field) => addresses === "cdn" ? field.kind === "cdn" : field.kind !== "cdn").map((field) => {
                 const checked = checks[field.key];
                 const result = endpointCheckForConsumer(checked?.domain.toLowerCase() === String(draft[field.key] || "").trim().toLowerCase() ? checked : undefined, consumerIds[field.key] || "");
                 const value = String(draft[field.key] || "").trim();
@@ -220,6 +221,7 @@ export function NetworkEndpoints({
                         aria-label={field.label}
                         type="text"
                         value={draft[field.key]}
+                        disabled={busy || readFailed}
                         onChange={(event) => {
                           generation.current++;
                           setConsumerIds((current) => ({ ...current, [field.key]: "" }));
@@ -243,7 +245,7 @@ export function NetworkEndpoints({
                     </div>
                     {!!result?.consumers?.length && <label><span>Подключение для проверки</span><select aria-label={`Подключение ${field.label}`} value={consumerIds[field.key] || ""} disabled={Boolean(checking)} onChange={(event) => setConsumerIds((current) => ({ ...current, [field.key]: event.target.value }))}><option value="">Первое совместимое подключение</option>{result.consumers.map((consumer) => <option key={consumer.id} value={consumer.id}>{consumer.label} · {consumer.id}</option>)}</select></label>}
                     <small>{field.help}</small>
-                    <small className="networkEndpointDnsHint">DNS: A/AAAA на IP этого VPS, proxy включён у CDN-провайдера. IP вместо домена не поддерживается.</small>
+                    <small className="networkEndpointDnsHint">{field.kind === "cdn" ? "DNS: A/AAAA на IP этого VPS, proxy включён у CDN-провайдера. IP вместо домена не поддерживается." : "DNS: A/AAAA на IP этого VPS. В Cloudflare выберите DNS only — серое облако. Порт в DNS-записи не указывается."}</small>
                     {result && (
                       <em className={`networkEndpointCheck ${result.status}`}>
                         {result.message}
@@ -277,8 +279,7 @@ export function NetworkEndpoints({
             {pendingAddress && <p role="status">Нажмите «Добавить адрес» для заполненного дополнительного поля или очистите его перед сохранением.</p>}
             <div className="networkEndpointFooter">
               <p>
-                CDN/ECH требует домен. Relay подключается отдельно через Agent;
-                его адрес выбирается в настройках протокола.
+                {addresses === "cdn" ? "CDN/ECH требует домен. Relay подключается отдельно через Agent; его адрес выбирается в настройках протокола." : "Сохраняется адрес и его назначение. Подключения, порты и сертификаты настраиваются отдельно в протоколах; существующие конфигурации клиентов не меняются."}
               </p>
               <button type="button" onClick={close}>Отмена</button>
               <button

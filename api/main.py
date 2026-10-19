@@ -2949,7 +2949,10 @@ def update_network_endpoints(payload: NetworkEndpointSettings, _: None = Depends
     # Relay endpoints only need to be consumed during client export; their
     # remote edge host is intentionally outside this node's control plane.
     cdn_domain = settings["cdn_domain"]
-    if cdn_domain and VLESS_CONFIG.exists() and VLESS_ENV.exists():
+    # An unchanged registry address must not enable or repair a native CDN listener
+    # while editing TLS/UDP (or an additional CDN address).
+    cdn_changed = cdn_domain != read_network_endpoint_settings()["cdn_domain"]
+    if cdn_changed and cdn_domain and VLESS_CONFIG.exists() and VLESS_ENV.exists():
         reality = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
         previous_domain = reality.get("CDN_DOMAIN", "").strip().lower()
         if previous_domain and previous_domain != cdn_domain and endpoint_connection_usages("cdn", previous_domain):
