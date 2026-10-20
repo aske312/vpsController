@@ -8,6 +8,7 @@ import type {
   NetworkEndpointSettings,
 } from "../../shared/types/control-plane";
 import { checkNetworkEndpoint, type NetworkRequest } from "./network-api";
+import { emptyEndpointSettings, endpointAddress, endpointValues, type EndpointField } from "./endpoint-additions";
 import { endpointCheckForConsumer } from "../../shared/lib/network-readiness";
 import { NetworkRelayForm, type RelayControl } from "./network-relays";
 
@@ -27,56 +28,58 @@ function RouteTypeIcon({ mode }: { mode: AddressMode }) {
 
 export function NetworkEndpoints({
   request,
-  draft,
-  initialChecks,
-  knownCdnDomains = [],
+  existing,
   busy,
   readFailed,
-  dirty,
-  onChange,
-  onRouteListChange,
+  onDirtyChange,
   onSave,
   onReset,
   relay,
 }: {
   request: NetworkRequest;
-  draft: NetworkEndpointSettings;
-  initialChecks?: Partial<Record<keyof NetworkEndpointSettings, NetworkEndpointCheck>>;
-  knownCdnDomains?: string[];
+  existing: NetworkEndpointSettings;
   busy: boolean;
   readFailed: boolean;
-  dirty: boolean;
-  onChange: (key: keyof NetworkEndpointSettings, value: string) => void;
-  onRouteListChange: (key: keyof NetworkEndpointSettings, values: string[]) => void;
-  onSave: () => void;
+  onDirtyChange: (dirty: boolean) => void;
+  onSave: (additions: NetworkEndpointSettings) => void;
   onReset: () => void;
   relay: RelayControl;
 }) {
   const [opened, setOpen] = useState(false);
   const [addresses, setAddresses] = useState<AddressMode>(false);
-  const open = opened && Boolean(addresses || relay.dialog && relay.embedded);
+  const open = opened;
   const generation = useRef(0);
   const inFlight = useRef(false);
   useEffect(() => () => { generation.current++; }, []);
   const [discard, setDiscard] = useState(false);
+  const [draft, setDraft] = useState(emptyEndpointSettings);
   const [extra, setExtra] = useState<Record<string, string>>({});
   const pendingAddress = Object.values(extra).some((value) => value.trim());
+  const dirty = (Object.keys(emptyEndpointSettings()) as EndpointField[]).some(key => {
+    const saved = new Set(endpointValues(existing, key).map(endpointAddress));
+    return endpointValues(draft, key).some(value => endpointAddress(value) && !saved.has(endpointAddress(value)));
+  });
   const hasChanges = dirty || pendingAddress;
+  useEffect(() => { onDirtyChange(hasChanges); }, [hasChanges, onDirtyChange]);
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
   useEffect(() => {
     if (!open || !hasChanges) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [open, hasChanges]);
-  const close = () => { if (!addresses) relay.close(); else if (hasChanges) setDiscard(true); else { generation.current++; setOpen(false); } };
+  const close = () => {
+    if (hasChanges || relay.changed) setDiscard(true);
+    else { generation.current++; relay.resetDialog(); setOpen(false); }
+  };
   const dialogRef = useDialogFocus(open, close);
   const [checking, setChecking] = useState<string | null>(null);
   const [consumerIds, setConsumerIds] = useState<Record<string, string>>({});
   const [checks, setChecks] = useState<
     Partial<Record<keyof NetworkEndpointSettings, NetworkEndpointCheck>>
-  >(initialChecks || {});
+  >({});
   const fields: Array<{
-    key: keyof NetworkEndpointSettings;
+    key: EndpointField;
     kind: NetworkEndpointCheck["kind"];
     label: string;
     short: string;
@@ -108,11 +111,7 @@ export function NetworkEndpoints({
       help: "Адрес для существующих UDP-протоколов. Можно использовать тот же домен, что и для TLS. Порт задаётся протоколом; сохранение адреса не запускает UDP-службу.",
     },
   ];
-  const routeValues = (key: keyof NetworkEndpointSettings): string[] => {
-    const listKey = ({ cdn_domain: "cdn_domains", tls_relay_domain: "tls_relay_domains", udp_relay_domain: "udp_relay_domains" } as const)[key as "cdn_domain" | "tls_relay_domain" | "udp_relay_domain"];
-    const values = draft[listKey];
-    return values?.length ? values : (draft[key] ? [String(draft[key])] : []);
-  };
+  const routeValues = (key: EndpointField) => endpointValues(draft, key);
   async function check(field: (typeof fields)[number]) {
     const domain = String(draft[field.key] || "").trim();
     if (!domain || busy || readFailed || inFlight.current) return;
@@ -154,7 +153,7 @@ export function NetworkEndpoints({
       <button
         type="button"
         className="networkAddRouteButton"
-        onClick={() => { generation.current++; setChecks(initialChecks || {}); setConsumerIds({}); setAddresses(current => hasChanges ? current || "cdn" : false); if (!hasChanges) relay.openHost(undefined, true); setOpen(true); }}
+        onClick={() => { generation.current++; setDraft(emptyEndpointSettings()); setExtra({}); setChecks({}); setConsumerIds({}); setAddresses(false); relay.openHost(undefined, true); setOpen(true); }}
       >
         Добавить маршрут
       </button>
@@ -194,26 +193,31 @@ export function NetworkEndpoints({
             <aside className="networkRouteSidebar">
               <p className="networkRouteStep">01 <span>Способ подключения</span></p>
               <nav className="networkRouteChoices" aria-label="Тип маршрута">
-                {routeTypes.map((type) => <button key={String(type.mode)} type="button" aria-pressed={addresses === type.mode} data-dialog-initial={addresses === type.mode || undefined} disabled={addresses !== type.mode && (hasChanges || relay.changed)} onClick={() => {
+                {routeTypes.map((type) => <button key={String(type.mode)} type="button" aria-pressed={addresses === type.mode} data-dialog-initial={addresses === type.mode || undefined} onClick={() => {
                   if (addresses === type.mode) return;
                   generation.current++;
-                  if (type.mode === false) relay.openHost(undefined, true); else relay.resetDialog();
+                  if (type.mode === false && !relay.dialog) relay.openHost(undefined, true);
                   setAddresses(type.mode);
                 }}><i><RouteTypeIcon mode={type.mode} /></i><span><strong>{type.title}</strong><small>{type.description}</small></span><b aria-hidden="true">›</b></button>)}
               </nav>
-              <p className="networkRouteSidebarNote">{(addresses ? hasChanges : relay.changed) ? "Сохраните или отмените правки перед сменой типа маршрута." : "Адрес будет доступен при настройке подключений Direct и Mihomo."}</p>
+              <p className="networkRouteSidebarNote">{hasChanges || relay.changed ? "Черновики сохраняются при переключении. Сохраните настройки нужных типов перед закрытием." : "Адрес будет доступен при настройке подключений Direct и Mihomo."}</p>
             </aside>
             <div className="networkRouteContent">
               <header className="networkRouteContentHeader"><div><p className="networkRouteStep">02 <span>Настройка маршрута</span></p><h3>{addresses === false ? "Подключение Relay Agent" : addresses === "cdn" ? "Домен для CDN" : addresses === "tls" ? "Домен для TLS" : "Адрес для UDP"}</h3></div><span className="networkRouteKindBadge">{routeTypes.find((type) => type.mode === addresses)?.tag}</span></header>
-            {!addresses && <NetworkRelayForm relay={relay} />}
+            {!addresses && <NetworkRelayForm relay={{ ...relay, close, saveHost: async () => {
+              const saveGeneration = generation.current;
+              const saved = await relay.saveHost();
+              if (saved && !hasChanges && generation.current === saveGeneration) { generation.current++; setOpen(false); }
+              return saved;
+            } }} />}
             {addresses && <>
-            {addresses === "cdn" && knownCdnDomains.length > 0 && <details className="networkKnownRoutes"><summary>Обнаруженные CDN-адреса · {knownCdnDomains.length}</summary><div>{knownCdnDomains.map((domain) => <code key={domain}>{domain}</code>)}</div><small>Общий адрес для новых конфигураций задаётся в основном поле ниже.</small></details>}
             <div className="networkEndpointGrid">
               {fields.filter((field) => field.kind === ({ cdn: "cdn", tls: "tls_relay", udp: "udp_relay" } as const)[addresses]).map((field) => {
                 const checked = checks[field.key];
                 const result = endpointCheckForConsumer(checked?.domain.toLowerCase() === String(draft[field.key] || "").trim().toLowerCase() ? checked : undefined, consumerIds[field.key] || "");
                 const value = String(draft[field.key] || "").trim();
                 const values = routeValues(field.key);
+                const duplicate = Boolean(value && endpointValues(existing, field.key).some(saved => endpointAddress(saved) === endpointAddress(value)));
                 return (
                   <article
                     className={`networkEndpointCard ${result?.status || ""}`}
@@ -239,7 +243,7 @@ export function NetworkEndpoints({
                       </span>
                     </div>
                     <div className="networkEndpointInput">
-                      <label className="networkEndpointPrimaryField"><span>Основной адрес</span>
+                      <label className="networkEndpointPrimaryField"><span>Новый адрес</span>
                       <input
                         aria-label={field.label}
                         type="text"
@@ -253,7 +257,8 @@ export function NetworkEndpoints({
                             delete next[field.key];
                             return next;
                           });
-                          onChange(field.key, event.target.value);
+                          const value = event.target.value;
+                          setDraft(current => ({ ...current, [field.key]: value }));
                         }}
                         placeholder={field.placeholder}
                         autoComplete="off"
@@ -267,6 +272,7 @@ export function NetworkEndpoints({
                         {checking === field.key ? "Проверяем…" : "Проверить"}
                       </button>
                     </div>
+                    {duplicate && <small className="networkRouteDraftHint">Этот адрес уже добавлен для выбранного типа маршрута.</small>}
                     {!!result?.consumers?.length && <label><span>Подключение для проверки</span><select aria-label={`Подключение ${field.label}`} value={consumerIds[field.key] || ""} disabled={Boolean(checking)} onChange={(event) => setConsumerIds((current) => ({ ...current, [field.key]: event.target.value }))}><option value="">Первое совместимое подключение</option>{result.consumers.map((consumer) => <option key={consumer.id} value={consumer.id}>{consumer.label} · {consumer.id}</option>)}</select></label>}
                     <small>{field.help}</small>
                     <small className="networkEndpointDnsHint">{field.kind === "cdn" ? "DNS: A/AAAA на IP этого VPS, proxy включён у CDN-провайдера. IP вместо домена не поддерживается." : "DNS: A/AAAA на IP этого VPS. В Cloudflare выберите DNS only — серое облако. Порт в DNS-записи не указывается."}</small>
@@ -285,14 +291,15 @@ export function NetworkEndpoints({
                       </em>
                     )}
                     <details className="networkEndpointRouteList">
-                      <summary>Дополнительные адреса <span>{Math.max(0, values.length - 1)}</span></summary>
-                      {values.slice(1).map((route) => <div key={route}><code>{route}</code></div>)}
+                      <summary>Дополнительные адреса <span>{values.filter(route => route !== draft[field.key]).length}</span></summary>
+                      {values.filter(route => route !== draft[field.key]).map((route) => <div key={route}><code>{route}</code></div>)}
                       <label>Дополнительный адрес · {field.label}
                         <input type="text" value={extra[field.key] || ""} placeholder={field.placeholder} autoComplete="off" disabled={busy} onChange={(event) => setExtra((current) => ({ ...current, [field.key]: event.target.value }))} />
                       </label>
-                      <button type="button" disabled={busy || !extra[field.key]?.trim() || values.includes(extra[field.key].trim().toLowerCase())} onClick={() => {
-                        const route = extra[field.key].trim().toLowerCase();
-                        onRouteListChange(field.key, [...values, route]);
+                      <button type="button" disabled={busy || readFailed || !extra[field.key]?.trim() || [...values, ...endpointValues(existing, field.key)].some(value => endpointAddress(value) === endpointAddress(extra[field.key]))} onClick={() => {
+                        const route = endpointAddress(extra[field.key]);
+                        const listKey = ({ cdn_domain: "cdn_domains", tls_relay_domain: "tls_relay_domains", udp_relay_domain: "udp_relay_domains" } as const)[field.key];
+                        setDraft(current => ({ ...current, [listKey]: [...(current[listKey] || []), route] }));
                         setExtra((current) => ({ ...current, [field.key]: "" }));
                       }}>Добавить адрес</button>
                     </details>
@@ -309,10 +316,10 @@ export function NetworkEndpoints({
               <button
                 type="button"
                 className="networkPrimaryButton"
-                onClick={onSave}
+                onClick={() => onSave(draft)}
                 disabled={busy || readFailed || !dirty || pendingAddress}
               >
-                Сохранить маршрут
+                Добавить адреса
               </button>
               </div>
             </div>
@@ -322,9 +329,9 @@ export function NetworkEndpoints({
           </section>
         </div>
       )}
-      {discard && <ConfirmationDialog request={{ title: "Закрыть без сохранения?", message: "Изменения внешних адресов будут потеряны. Настройки на сервере не изменятся.", cancelLabel: "Остаться", confirmLabel: "Уйти без сохранения" }} onClose={(confirmed) => {
+      {discard && <ConfirmationDialog request={{ title: "Закрыть без сохранения?", message: "Несохранённые изменения адресов и подключения Relay будут потеряны. Уже сохранённые настройки останутся на сервере.", cancelLabel: "Остаться", confirmLabel: "Уйти без сохранения" }} onClose={(confirmed) => {
         setDiscard(false);
-        if (confirmed) { generation.current++; onReset(); setExtra({}); setOpen(false); }
+        if (confirmed) { generation.current++; onReset(); setDraft(emptyEndpointSettings()); setExtra({}); relay.resetDialog(); setOpen(false); }
       }} />}
     </>
   );

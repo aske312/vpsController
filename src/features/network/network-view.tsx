@@ -26,6 +26,7 @@ import {
 } from "./network-api";
 import { DnsView } from "./network-dns";
 import { NetworkEch } from "./network-ech";
+import { appendNetworkEndpoints } from "./endpoint-additions";
 import { NetworkEndpoints } from "./network-endpoints";
 import { NetworkRelayDialogs, NetworkRelayNotice, NetworkRelayRows, relayMatches, useNetworkRelays } from "./network-relays";
 import { NetworkRouteSummaryBadge } from "./network-route-badge";
@@ -85,6 +86,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
   const [section, setSection] = useState<Section>("diagnostics");
   const [loadFailed, setLoadFailed] = useState(false);
   const [relayDirty, setRelayDirty] = useState(false);
+  const [routeDirty, setRouteDirty] = useState(false);
   const relay = useNetworkRelays({ request, admit: admitOperation, operation, onOperation, busy: busy || loading || !status || loadFailed, onDirtyChange: setRelayDirty, refreshKey });
   const loadingRef = useRef(false);
   const loadingRun = useRef(0);
@@ -104,7 +106,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       JSON.stringify(endpointDraft),
   );
 
-  useEffect(() => { onDirtyChange?.(dirty || endpointDirty || relayDirty); }, [dirty, endpointDirty, relayDirty, onDirtyChange]);
+  useEffect(() => { onDirtyChange?.(dirty || endpointDirty || relayDirty || routeDirty); }, [dirty, endpointDirty, relayDirty, routeDirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   const load = useCallback(async (background = false) => {
@@ -117,10 +119,12 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       const next = await readNetworkControl(request);
       if (run !== loadingRun.current) return;
       const previous = savedRef.current;
+      // The state updater may run after the refs below advance to this response.
+      const previousEndpoints = savedEndpointRef.current;
       setStatus(next.network);
       setEndpointDraft((current) =>
         !current ||
-        JSON.stringify(current) === JSON.stringify(savedEndpointRef.current)
+        JSON.stringify(current) === JSON.stringify(previousEndpoints)
           ? next.network.transport_endpoints
           : current,
       );
@@ -231,22 +235,22 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
     }
   }, [admitOperation, busy, dns, dnsDraft, loadFailed, loading, notifyError, onOperation]);
 
-  const saveEndpoints = useCallback(async () => {
-    if (!endpointDraft || loadFailed || busy || savingRef.current || loading) return;
+  const saveEndpoints = useCallback(async (additions: NetworkEndpointSettings) => {
+    if (!status || loadFailed || busy || savingRef.current || loading) return;
+    const settings = appendNetworkEndpoints(status.transport_endpoints, additions);
     savingRef.current = true; loadingRun.current++;
     setBusy(true);
     try {
-      const settings = Object.fromEntries(
-        Object.entries(endpointDraft).map(([key, value]) => [
-          key,
-          Array.isArray(value) ? value.map((item) => item.trim()) : String(value || "").trim(),
-        ]),
-      ) as NetworkEndpointSettings;
       const started = await saveNetworkEndpoints(admitOperation, settings);
-      setPending({ id: started.id, kind: "endpoints", draft: endpointDraft });
+      setEndpointDraft(settings);
+      setPending({ id: started.id, kind: "endpoints", draft: settings });
       onOperation(started);
     } catch (cause) {
-      if (cause instanceof SystemOperationUnknown) return;
+      if (cause instanceof SystemOperationUnknown) {
+        setEndpointDraft(settings);
+        setPending({ id: cause.id, kind: "endpoints", draft: settings });
+        return;
+      }
       notifyError(
         cause instanceof Error
           ? cause.message
@@ -256,7 +260,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
       savingRef.current = false;
       setBusy(false);
     }
-  }, [admitOperation, busy, endpointDraft, loadFailed, loading, notifyError, onOperation]);
+  }, [admitOperation, busy, status, loadFailed, loading, notifyError, onOperation]);
 
   const removeEndpoint = useCallback(async (kind: NetworkEndpointCheck["kind"], domain: string) => {
     if (loadFailed || busy || savingRef.current || loading) return;
@@ -388,6 +392,7 @@ export function NetworkView({ request, admitOperation, refreshKey = 0, onLoading
                 onRemoveRoute={removeEndpoint}
                 onRefresh={() => { void load(); void relay.load(); void addresses.load(); }}
                 setEndpointDraft={setEndpointDraft}
+                onRouteDirtyChange={setRouteDirty}
                 saveEndpoints={saveEndpoints}
               />
             </div>
@@ -466,6 +471,7 @@ function DiagnosticsV2({
   readFailed,
   onRemoveRoute,
   setEndpointDraft,
+  onRouteDirtyChange,
   saveEndpoints,
   onRefresh,
 }: {
@@ -483,7 +489,8 @@ function DiagnosticsV2({
   readFailed: boolean;
   onRemoveRoute: (kind: NetworkEndpointCheck["kind"], domain: string) => void;
   setEndpointDraft: (value: NetworkEndpointSettings) => void;
-  saveEndpoints: () => void;
+  onRouteDirtyChange: (dirty: boolean) => void;
+  saveEndpoints: (additions: NetworkEndpointSettings) => void;
   onRefresh: () => void;
 }) {
   const query = listState.query;
@@ -565,27 +572,10 @@ function DiagnosticsV2({
                 <NetworkEndpoints
                   relay={relay}
                   request={request}
-                  draft={endpointDraft}
-                  knownCdnDomains={[...new Set(status.domains.filter((domain) => domain.role.toLowerCase().includes("cdn")).map((domain) => domain.value))]}
-                initialChecks={status.transport_endpoint_checks ? {
-                  cdn_domain: status.transport_endpoint_checks.cdn,
-                  tls_relay_domain: status.transport_endpoint_checks.tls_relay,
-                  udp_relay_domain: status.transport_endpoint_checks.udp_relay,
-                } : undefined}
+                  existing={status.transport_endpoints}
                 busy={busy}
                 readFailed={readFailed}
-                dirty={endpointDirty}
-                onChange={(key, value) => {
-                  const primaryKey = key as "cdn_domain" | "tls_relay_domain" | "udp_relay_domain";
-                  const listKey = ({ cdn_domain: "cdn_domains", tls_relay_domain: "tls_relay_domains", udp_relay_domain: "udp_relay_domains" } as const)[primaryKey];
-                  const current = endpointDraft[listKey] || (endpointDraft[primaryKey] ? [endpointDraft[primaryKey]] : []);
-                  setEndpointDraft({ ...endpointDraft, [primaryKey]: value, [listKey]: [value, ...current.filter((item) => item !== endpointDraft[primaryKey] && item !== value)] });
-                }}
-                onRouteListChange={(key, values) => {
-                  const primaryKey = key as "cdn_domain" | "tls_relay_domain" | "udp_relay_domain";
-                  const listKey = ({ cdn_domain: "cdn_domains", tls_relay_domain: "tls_relay_domains", udp_relay_domain: "udp_relay_domains" } as const)[primaryKey];
-                  setEndpointDraft({ ...endpointDraft, [primaryKey]: values[0] || "", [listKey]: values });
-                }}
+                onDirtyChange={onRouteDirtyChange}
                 onReset={() => setEndpointDraft(status.transport_endpoints)}
                 onSave={saveEndpoints}
               />

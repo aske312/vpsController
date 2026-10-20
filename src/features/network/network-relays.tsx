@@ -106,12 +106,13 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
     setConnection(""); setEmbedded(inline); setDialog(true); setChanged(false);
   }
   async function saveHost() {
-    if (locked || !status || status.pending && !edit) return;
+    if (locked || !status || status.pending && !edit) return false;
     try {
       const params = connection ? relayConnection(connection) : edit ? { agent_url: edit.agent_url, certificate_sha256: edit.certificate_sha256, api_version: 1, token: "" } : relayConnection("");
       setConnection("");
-      if (await submit(status.pending ? "/network/relays/reconnect" : "/network/relays", { method: "PUT", body: JSON.stringify({ ...params, name: name.trim(), client_address: address.trim(), id: edit?.id || null, expected_revision: status.revision }) })) resetDialog();
-    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Некорректные параметры подключения"); }
+      if (await submit(status.pending ? "/network/relays/reconnect" : "/network/relays", { method: "PUT", body: JSON.stringify({ ...params, name: name.trim(), client_address: address.trim(), id: edit?.id || null, expected_revision: status.revision }) })) { resetDialog(); return true; }
+      return false;
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Некорректные параметры подключения"); return false; }
   }
   function removeConfirmed(confirmed: boolean) {
     const selected = confirmation; setConfirmation(null);
