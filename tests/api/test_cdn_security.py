@@ -166,6 +166,7 @@ class RealCaddyTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as temp:
                 port = free_port()
                 routes = [{'domain':'test.example','path':'/relay','port':origin.server_port,'relay_origins':['127.0.0.1']},
+                          {'domain':'test.example','path':'/second','port':origin.server_port,'relay_origins':['127.0.0.3']},
                           {'domain':'test.example','path':'/cf','port':origin.server_port}]
                 # Production validation rejects loopback; this fixture models
                 # distinct CF and Relay source interfaces on an isolated host.
@@ -173,10 +174,13 @@ class RealCaddyTests(unittest.TestCase):
                     config = security.render_routes(routes, {}, protected=True)
                 path = Path(temp)/'Caddyfile'
                 path.write_text('{\n admin off\n auto_https off\n}\n'+config.replace('test.example {',f'http://127.0.0.1:{port} {{'))
-                process = subprocess.Popen([os.environ['PRIVACY_CADDY_BIN'],'run','--config',str(path)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                process = subprocess.Popen([os.environ['PRIVACY_CADDY_BIN'],'run','--config',str(path)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                    env={**os.environ,'XDG_CONFIG_HOME':str(Path(temp)/'xdg-config'),'XDG_DATA_HOME':str(Path(temp)/'xdg-data')})
                 try:
                     wait_port(port,process)
-                    for source, target, expected in [('127.0.0.1','/relay',200),('127.0.0.2','/relay',403),('127.0.0.1','/cf',403),('127.0.0.2','/cf',200)]:
+                    for source, permitted in (('127.0.0.1','/relay'),('127.0.0.2','/cf'),('127.0.0.3','/second')):
+                      for target in ('/relay','/cf','/second'):
+                        expected = 200 if target == permitted else 403
                         connection = http.client.HTTPConnection('127.0.0.1',port,source_address=(source,0),timeout=5)
                         try:
                             connection.request('GET',target,headers={'CF-Connecting-IP':'127.0.0.1','X-Forwarded-For':'127.0.0.1'})

@@ -1,6 +1,7 @@
 import { clientExport, type ClientExport } from "../../shared/lib/client-export";
 
 export type RelayRoute = {
+  cdn_domain?: string;
   id: string; host_id: string; transport: "tcp" | "udp"; listen_port: number; target_ip: string; target_port: number;
   state: "listening" | "failed" | "missing" | "drift" | "unknown"; target_verified: false;
   sent_bytes?: number; received_bytes?: number; sessions?: number; errors?: number;

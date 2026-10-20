@@ -10,7 +10,7 @@ from relay_addresses import authority
 def rewrite(text, route, address, origin_hosts):
     if len(text.encode('utf-8')) > 262144:
         raise ValueError('Файл слишком большой')
-    hosts = {str(host).lower() for host in origin_hosts}
+    hosts = {route['cdn_domain']} if route.get('cdn_domain') else {str(host).lower() for host in origin_hosts}
     changed = 0
     port = route['listen_port']
 
@@ -66,7 +66,7 @@ def rewrite(text, route, address, origin_hosts):
             if kind in ('direct', 'block', 'dns', 'selector', 'urltest', 'freedom', 'blackhole'):
                 continue
             udp = kind in ('wireguard', 'hysteria2', 'tuic')
-            if kind not in ('wireguard', 'hysteria2', 'tuic', 'vless', 'trojan', 'ss', 'shadowsocks'):
+            if kind not in ('wireguard', 'hysteria2', 'tuic', 'vless', 'vmess', 'trojan', 'ss', 'shadowsocks'):
                 raise ValueError('В экспорте есть неподдержанный протокол')
             if route['transport'] != ('udp' if udp else 'tcp'):
                 raise ValueError('Экспорт содержит подключение с другим транспортом')
@@ -81,13 +81,13 @@ def rewrite(text, route, address, origin_hosts):
                     node['tls'].setdefault('server_name', old_host)
                 if node.get('tls') is True or kind in ('hysteria2', 'tuic', 'trojan') and 'proxies' in value:
                     node.setdefault('sni', old_host)
-                    if kind in ('vless', 'trojan'):
+                    if kind in ('vless', 'vmess', 'trojan'):
                         node.setdefault('servername', node['sni'])
                 node['server'], node[port_key] = address, port
                 changed += 1
             else:
                 settings = node.get('settings', {})
-                entries = settings.get('vnext') if kind == 'vless' else settings.get('servers')
+                entries = settings.get('vnext') if kind in ('vless', 'vmess') else settings.get('servers')
                 if not isinstance(entries, list) or len(entries) != 1 or not matches(entries[0].get('address'), entries[0].get('port')):
                     raise ValueError('Неоднозначный адрес Xray')
                 old_host = entries[0]['address']

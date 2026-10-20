@@ -28,13 +28,14 @@ test('bulk REALITY address does not turn VMess or Trojan into an invalid connect
   assert.equal(applyConnectionAddress([vmess], source)[0], vmess);
 });
 
-test('bulk CDN through Relay stays on VLESS and clears the flag when leaving CDN', () => {
+test('bulk CDN through Relay preserves its placement and clears the flag when leaving CDN', () => {
   const vless = connection('vless', 'transport-reality', { route_mode: 'tls', tls_domain: 'origin.example', cdn_transport:'xhttp', cdn_xhttp_mode:'packet-up' });
   const udp = connection('udp', 'transport-tuic', { sni: 'cert.example' });
-  const source = connection('cdn', 'transport-reality', { route_mode:'cdn', cdn_domain:'cdn.example', relay_cdn:true, relay_host_id:'b'.repeat(32) });
+  const source = connection('cdn', 'transport-reality', { route_mode:'cdn', cdn_domain:'cdn.example', relay_cdn:true, relay_cdn_mode:'before_cdn', relay_host_id:'b'.repeat(32) });
   const result = applyConnectionAddress([vless, udp], source);
   assert.equal(result[0].settings.route_mode, 'cdn');
   assert.equal(result[0].settings.relay_cdn, true);
+  assert.equal(result[0].settings.relay_cdn_mode, 'before_cdn');
   assert.equal(result[0].settings.cdn_transport, 'xhttp');
   assert.equal(result[0].settings.cdn_xhttp_mode, 'packet-up');
   assert.equal(result[1], udp);

@@ -1,4 +1,11 @@
 import json
+import copy
+import contextlib
+import select
+import socket
+import socketserver
+import threading
+from dataclasses import replace
 import hashlib
 import ssl
 import os
@@ -15,6 +22,39 @@ import relay_connections
 
 REAL_RUN = subprocess.run
 REAL_POPEN = subprocess.Popen
+
+
+@contextlib.contextmanager
+def transparent_relay(target_port):
+    """A byte-preserving TCP hop in front of the isolated TLS CDN gateway."""
+    class Forward(socketserver.BaseRequestHandler):
+        def handle(self):
+            with socket.create_connection(('127.0.0.1', target_port), timeout=5) as upstream:
+                while True:
+                    ready, _, _ = select.select([self.request, upstream], [], [], 10)
+                    if not ready:
+                        return
+                    for source in ready:
+                        try:
+                            data = source.recv(65536)
+                        except ConnectionResetError:
+                            return
+                        if not data:
+                            return
+                        try:
+                            (upstream if source is self.request else self.request).sendall(data)
+                        except (BrokenPipeError, ConnectionResetError):
+                            return
+    class Server(socketserver.ThreadingTCPServer):
+        daemon_threads = True
+    with Server(('127.0.0.1', 0), Forward) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield server.server_address[1]
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
 
 
 class NativeXrayTests(unittest.TestCase):
@@ -36,6 +76,9 @@ class NativeXrayTests(unittest.TestCase):
                             'MIHOMO_VLESS_CDN_ROUTES':self.root/'mihomo-routes'}.items():
             self.enterContext(patch.object(api, name, value))
         self.enterContext(patch.object(cdn_security, 'DIRECT_ENV', self.env))
+        self.enterContext(patch.object(cdn_security, 'ROUTES', self.root/'mihomo-routes'))
+        self.enterContext(patch.object(cdn_security, 'ENV', self.root/'environment'))
+        self.enterContext(patch.object(cdn_security, 'STATE', self.root/'cdn-security.json'))
         self.enterContext(patch.dict('os.environ', {'DATA_DIR':str(self.root)}))
         self.enterContext(patch.object(api, 'new_client_endpoint', return_value='192.0.2.1'))
         self.enterContext(patch.object(api, 'read_network_endpoint_settings', return_value={'cdn_domains':['cdn.example'], 'tls_relay_domains':['tls.example']}))
@@ -76,13 +119,14 @@ class NativeXrayTests(unittest.TestCase):
                         self.assertNotIn(config['outbounds'][0]['settings'].get('servers',[{}])[0].get('password','UNUSED'), json.dumps(plan.summary()))
                     control = Mock()
                     control.endpoint.return_value = ('relay.example', 20000)
+                    control.cdn_endpoint.return_value = ('relay.example', 20001)
                     settings = {**saved['settings'], 'relay_host_id':'b'*32}
-                    self.assertEqual(relay_connections.direct_groups('vless-reality-xhttp', settings, result), [[('tcp',443)],[('tcp',443)]])
+                    self.assertEqual(relay_connections.direct_groups('vless-reality-xhttp', settings, result), [[('tcp',443)]])
                     redirected = relay_connections.direct_result(control, 'vless-reality-xhttp', settings, result)
                     self.assertIsInstance(json.loads(redirected['config']), list)
                     for outbound in (row['outbounds'][0] for row in json.loads(redirected['config'])):
                         endpoint = outbound['settings']['servers' if kind=='trojan' else 'vnext'][0]
-                        self.assertEqual((endpoint['address'],endpoint['port']), ('relay.example',20000))
+                        self.assertEqual((endpoint['address'],endpoint['port']), ('relay.example',20001 if outbound['streamSettings']['tlsSettings']['serverName'] == 'cdn.example' else 20000))
                         self.assertIn(outbound['streamSettings']['tlsSettings']['serverName'], {'tls.example','cdn.example'})
                     api.xray_native.delete(api, saved, [saved])
                     self.assertEqual(json.loads(self.config.read_text())['inbounds'], [self.neighbor])
@@ -143,7 +187,8 @@ class NativeXrayTests(unittest.TestCase):
                             text = text.replace(domain+' {', f'https://{domain}:{front} {{\n    bind 127.0.0.1\n    tls {json.dumps(str(cert))} {json.dumps(str(key))}')
                         caddyfile = self.root/'Caddyfile'
                         caddyfile.write_text('{\n admin off\n auto_https off\n servers {\n  protocols h1 h2\n }\n}\n'+text)
-                        gateway = subprocess.Popen([caddy,'run','--config',str(caddyfile)],stdout=gateway_log,stderr=gateway_log)
+                        gateway = subprocess.Popen([caddy,'run','--config',str(caddyfile)],stdout=gateway_log,stderr=gateway_log,
+                            env={**os.environ, 'XDG_CONFIG_HOME':str(self.root/'xdg-config'), 'XDG_DATA_HOME':str(self.root/'xdg-data')})
                         try:
                             wait_port(front, gateway)
                         except AssertionError as exc:
@@ -167,6 +212,24 @@ class NativeXrayTests(unittest.TestCase):
                             with patch.object(network_probe.subprocess, 'Popen', side_effect=start):
                                 actual = network_probe.execute_direct_vless(plan, binary, '127.0.0.1', timeout=5)
                             self.assertEqual(actual['state'], 'verified', actual)
+                            # The same native protocol/transport must also work
+                            # with an opaque TCP Relay before TLS termination.
+                            with transparent_relay(front) as relay_port:
+                                forwarded = copy.deepcopy(outbound)
+                                forwarded['settings']['servers' if kind=='trojan' else 'vnext'][0]['port'] = relay_port
+                                chained = replace(plan, client=forwarded)
+                                with patch.object(network_probe.subprocess, 'Popen', side_effect=start):
+                                    actual = network_probe.execute_direct_vless(chained, binary, '127.0.0.1', timeout=5)
+                                self.assertEqual(actual['state'], 'verified', actual)
+                            if kind == 'trojan' and transport == 'httpupgrade':
+                                with patch.object(network_probe.subprocess, 'Popen', side_effect=start):
+                                    unavailable = network_probe.execute_direct_vless(chained, binary, '127.0.0.1', timeout=2)
+                                self.assertNotEqual(unavailable['state'], 'verified', unavailable)
+                                invalid = copy.deepcopy(outbound)
+                                invalid['settings']['servers'][0]['password'] += '-wrong'
+                                with patch.object(network_probe.subprocess, 'Popen', side_effect=start):
+                                    rejected = network_probe.execute_direct_vless(replace(plan, client=invalid), binary, '127.0.0.1', timeout=3)
+                                self.assertEqual(rejected['state'], 'failed', rejected)
                     finally:
                         if gateway is not None:
                             gateway.terminate()

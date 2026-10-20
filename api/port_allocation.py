@@ -140,7 +140,8 @@ def reservations() -> dict[str, set[tuple[str, int]]]:
     for route in relay.get('routes', []):
         if not isinstance(route, dict) or route.get('transport') not in ('tcp', 'udp') or type(route.get('target_port')) is not int or not 1 <= route['target_port'] <= 65535:
             raise PortConflict('Некорректная ссылка Relay на порт origin')
-        result.setdefault('relay-origin:'+str(route.get('id')), set()).add((route['transport'], route['target_port']))
+        if not route.get('cdn_domain'):
+            result.setdefault('relay-origin:'+str(route.get('id')), set()).add((route['transport'], route['target_port']))
     for module in LISTENERS:
         for key, protocol, port, configured in module_ports(module):
             owner = f"panel:{module}:{key}"

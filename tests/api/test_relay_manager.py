@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import socket
 from pathlib import Path
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ from application_operation import OperationConflict, require_recovery_clear
 from network_probe import ProbePlan
 import relay_export
 import relay_connections
+import relay_cdn
 import relay_client_creation
 import port_allocation
 from types import SimpleNamespace
@@ -63,6 +65,123 @@ class FakeAgent:
 
 
 class RelayManagementTests(unittest.TestCase):
+    def test_first_hop_cdn_keeps_protocol_transport_and_tls_in_every_export(self):
+        dns = {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}
+        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
+        for kind in ('vless', 'vmess', 'trojan'):
+            for transport in ('websocket', 'xhttp', 'grpc', 'httpupgrade'):
+                with self.subTest(protocol=kind, transport=transport):
+                    credential = {'xray_protocol':kind, 'uuid':'secret-id', 'password':'secret-password', 'cdn_enabled':True,
+                                  'cdn_domain':'cdn.example', 'cdn_path':'/private', 'cdn_transport':transport, 'cdn_xhttp_mode':'packet-up'}
+                    settings = {'xray_protocol':kind, 'route_mode':'cdn', 'cdn_domain':'cdn.example', 'cdn_transport':transport,
+                                'relay_host_id':self.host_id, 'relay_cdn':True, 'relay_cdn_mode':'before_cdn'}
+                    connection = {'id':'cdn', 'name':'CDN', 'component':'transport-reality', 'credential':credential, 'settings':settings}
+                    with patch.object(relay_cdn, 'resolve', return_value='104.16.1.2'):
+                        relay_connections.prepare_mihomo(self.control, [connection], 'c'*32)
+                    routes = self.control.read()['routes']
+                    self.assertEqual([(row['target_ip'],row['target_port'],row['cdn_domain']) for row in routes], [('104.16.1.2',443,'cdn.example')])
+                    port = routes[0]['listen_port']
+                    original = copy.deepcopy(connection)
+                    node = manager.build_xray_configs([connection], {}, dns, [], ORIGIN, lambda: {}, redirect)[0]['outbounds'][0]
+                    endpoint = node['settings']['servers' if kind == 'trojan' else 'vnext'][0]
+                    self.assertEqual((endpoint['address'],endpoint['port']), (AGENT,port))
+                    self.assertEqual(node['protocol'],kind)
+                    self.assertEqual(node['streamSettings']['tlsSettings']['serverName'],'cdn.example')
+                    self.assertEqual(node['streamSettings']['network'],'ws' if transport == 'websocket' else transport)
+                    lines = relay_connections.redirect_mihomo_lines(self.control, 'transport-reality', settings, manager.render_vless_cdn(credential, 'CDN'))
+                    proxy = yaml.safe_load('proxies:\n'+'\n'.join(lines))['proxies'][0]
+                    self.assertEqual((proxy['server'],proxy['port'],proxy['servername']), (AGENT,port,'cdn.example'))
+                    self.assertEqual(proxy['type'], kind)
+                    if transport != 'xhttp':
+                        proxy = manager.build_singbox_config([connection], {}, dns, [], ORIGIN, lambda: {}, False, redirect=redirect)['outbounds'][0]
+                        self.assertEqual((proxy['server'],proxy['server_port'],proxy['tls']['server_name']), (AGENT,port,'cdn.example'))
+                    self.assertEqual(connection,original)
+
+    def test_cdn_target_is_validated_pinned_and_does_not_reuse_origin_socket(self):
+        self.control.ensure(self.host_id, [[('tcp',443)]], 'c'*32)
+        dns = lambda address: [(socket.AF_INET,socket.SOCK_STREAM,6,'',(address,443))]
+        for address in ('10.0.0.1',ORIGIN,AGENT,'8.8.8.8'):
+            with self.subTest(address=address), patch.object(relay_cdn.socket,'getaddrinfo',return_value=dns(address)), self.assertRaises(ValueError):
+                self.control.ensure_cdn(self.host_id,'cdn.example','c'*32)
+        self.assertEqual(len(self.control.read()['routes']),1)
+        with patch.object(relay_cdn.socket,'getaddrinfo',return_value=dns('104.16.1.2')):
+            self.control.ensure_cdn(self.host_id,'cdn.example','d'*32)
+        before = self.control.read()
+        self.assertNotEqual(self.control.endpoint(self.host_id,'tcp',443)[1],self.control.cdn_endpoint(self.host_id,'cdn.example')[1])
+        self.agent.calls.clear()
+        with patch.object(relay_cdn.socket,'getaddrinfo',side_effect=AssertionError('DNS during export')):
+            self.control.cdn_endpoint(self.host_id,'cdn.example')
+            self.assertEqual(self.agent.calls,[])
+            self.control.ensure_cdn(self.host_id,'cdn.example','e'*32)
+        self.assertEqual(before,self.control.read())
+
+    def test_lost_cdn_ack_recovers_exact_pinned_target_without_replay(self):
+        self.agent.lose_ack = True
+        self.agent.offline_after_write = True
+        with patch.object(relay_cdn,'resolve',return_value='104.16.1.2'), self.assertRaises(OSError):
+            self.control.ensure_cdn(self.host_id,'cdn.example','d'*32)
+        self.agent.offline = False
+        self.control.reconcile()
+        self.assertEqual(self.control.cdn_route(self.host_id,'cdn.example')['target_ip'],'104.16.1.2')
+        self.assertEqual(len([call for call in self.agent.calls if call[0]=='PUT']),1)
+
+    def test_cdn_nonce_is_bound_to_exact_relay_and_preserves_sni(self):
+        from dataclasses import replace
+        with patch.object(relay_cdn,'resolve',return_value='104.16.1.2'):
+            self.control.ensure_cdn(self.host_id,'cdn.example','d'*32)
+        plan = ProbePlan('cdn',1,'direct:phone','cdn.example',443,'cdn',10087,'ws','original',
+                         {'protocol':'trojan','settings':{'servers':[{'address':'cdn.example','port':443,'password':'secret'}]},
+                          'streamSettings':{'network':'ws','tlsSettings':{'serverName':'cdn.example'},'wsSettings':{'path':'/private','headers':{'Host':'cdn.example'}}}},
+                         relay_host_id=self.host_id,relay_target_domain='cdn.example')
+        with patch.object(api,'relay_control',return_value=self.control):
+            actual = api.prepare_client_relay_probe(plan)
+            self.assertEqual(actual.client['settings']['servers'][0]['address'],AGENT)
+            self.assertEqual(actual.client['streamSettings'],plan.client['streamSettings'])
+            self.assertNotEqual(actual.fingerprint,plan.fingerprint)
+            saved = self.control.read()
+            saved['routes'][0]['check'] = {'state':'ready'}
+            self.control.write(saved)
+            self.assertEqual(api.prepare_client_relay_probe(plan).fingerprint,actual.fingerprint)
+            changed = api.prepare_client_relay_probe(replace(plan,relay_client_address='relay.example'))
+            self.assertNotEqual(changed.fingerprint,actual.fingerprint)
+            self.assertEqual(changed.address,'relay.example')
+            host = self.control.host(self.control.read(), self.host_id)
+            route = self.control.cdn_route(self.host_id,'cdn.example')
+            with patch.object(api,'read_route_registry',return_value={'bindings':[{'state':'active'}]}), patch.object(api,'prepare_network_probe',return_value=(actual,{})):
+                checked = api.prepare_relay_probe(route,host,plan.consumer_id)
+                self.assertEqual(checked.binding_id,route['id'])
+                self.assertEqual(checked.address,AGENT)
+                with self.assertRaises(api.network_probe.ProbeUnavailable):
+                    api.prepare_relay_probe({**route,'id':'pro-'+'e'*32},host,plan.consumer_id)
+
+    def test_direct_cdn_worker_captures_once_and_finishes_pinned_relay_after_lost_ack(self):
+        identity = 'c'*32
+        settings = {'relay_host_id':self.host_id, 'xray_protocol':'trojan'}
+        client = {'id':identity[:16], 'protocol':'vless-reality-xhttp', 'settings':settings, 'route_endpoints':{'cdn':'cdn.example'}}
+        outbound = {'protocol':'trojan', 'settings':{'servers':[{'address':'cdn.example','port':443,'password':'secret'}]},
+                    'streamSettings':{'network':'grpc','tlsSettings':{'serverName':'cdn.example'},'grpcSettings':{'serviceName':'private'}}}
+        native_result = {'id':identity[:16], 'config':json.dumps({'outbounds':[outbound]}), 'filename':'cdn.json',
+                         'profiles':[{'id':'cdn','config':json.dumps({'outbounds':[outbound]})}]}
+        native = Mock(return_value=native_result)
+        adapter = SimpleNamespace(DATA_DIR=self.root,relay_control=lambda:self.control,ClientCreate=api.ClientCreate,
+                                  create_client_native=native,ComponentRegistry=lambda *_:Mock(),read_clients=lambda:[client])
+        payload = {'client':{'name':'Phone','protocol':'vless-reality-xhttp','settings':settings,'vless_routes':['cdn']},'expected_revision':self.control.read()['revision']}
+        self.agent.offline_after_write = True
+        with patch.object(relay_cdn,'resolve',return_value='104.16.1.2'), self.assertRaises(OSError):
+            relay_client_creation.perform(adapter,payload,identity)
+        self.assertTrue(relay_client_creation.read_result(adapter,identity)['can_resume'])
+        self.agent.offline = self.agent.offline_after_write = False
+        self.control.reconcile()
+        with patch.object(relay_cdn,'resolve',side_effect=AssertionError('DNS during recovery')):
+            relay_client_creation.perform(adapter,{'expected_revision':self.control.read()['revision']},'d'*32,resume_id=identity)
+        result = relay_client_creation.read_result(adapter,identity)
+        self.assertEqual(result['state'],'ready')
+        node = json.loads(result['result']['config'])['outbounds'][0]
+        self.assertEqual(node['settings']['servers'][0],{'address':AGENT,'port':20000,'password':'secret'})
+        self.assertEqual(node['streamSettings'],outbound['streamSettings'])
+        self.assertEqual(native.call_count,1)
+        self.assertEqual(len(self.control.read()['routes']),1)
+
     def test_cdn_relay_preserves_each_transport_in_client_exports(self):
         dns = {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}
         redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
@@ -826,7 +945,10 @@ class RelayAPITests(unittest.TestCase):
         with patch.object(api, 'PUBLIC_IPV4', ORIGIN), patch.object(api, 'PUBLIC_DOMAIN', 'panel.example'), patch.object(api, 'PUBLIC_ENDPOINT', ORIGIN), patch.object(api.cdn_security, 'read_routes', return_value=[{'domain': 'cdn.example'}]), patch.object(api, 'VLESS_ENV', self.root/'absent.env'):
             hosts = api.relay_origin_hosts()
         original = 'proxies:\n- name: phone\n  type: vless\n  server: cdn.example\n  port: 443\n  uuid: secret\n  tls: true\n  servername: cdn.example\n  ws-opts:\n    path: /private-path\n    headers:\n      Host: cdn.example\n'
-        output, count = relay_export.rewrite(original, {'transport': 'tcp', 'target_port': 443, 'listen_port': 20000}, AGENT, hosts)
+        route = {'transport':'tcp','target_port':443,'listen_port':20000}
+        with self.assertRaises(ValueError):
+            relay_export.rewrite(original,route,AGENT,hosts)
+        output, count = relay_export.rewrite(original, {**route,'cdn_domain':'cdn.example'}, AGENT, hosts)
         self.assertEqual(count, 1)
         import yaml
         node = yaml.safe_load(output)['proxies'][0]

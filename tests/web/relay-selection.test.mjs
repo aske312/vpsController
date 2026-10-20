@@ -44,23 +44,32 @@ test('Mihomo exposes Relay domains in UDP for every supported UDP protocol', () 
   }
 });
 
-test('Mihomo hides unsupported CDN through Relay but retains saved legacy routes', () => {
+test('Mihomo offers Relay before CDN and retains saved legacy choices', () => {
   const html = mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example'});
-  assert.doesNotMatch(html, /relay.example|через Relay/);
+  assert.match(html, /Вход в CDN/);
+  assert.match(html, /relay.example/);
   const saved = mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example',relay_host_id:host.id,relay_address:'saved.example'});
   assert.match(saved, /saved.example.*selected=""/);
   assert.match(saved, /сохранённый адрес/);
 });
 
-test('explicit CDN Relay keeps the public CDN domain selectable and shows separate ingress setup', () => {
+test('legacy CDN Relay stays explicit and can be moved before CDN', () => {
   const html = mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example',relay_host_id:host.id,relay_cdn:true});
   assert.match(html, /origin-cdn.example.*selected=""/);
-  assert.match(html, /aria-label="Сервер приёма CDN"/);
-  assert.match(html, /Full \(strict\)/);
+  assert.match(html, /aria-label="Вход в CDN"/);
+  assert.match(html, /Origin Rules/);
   assert.doesNotMatch(html, /сохранённый адрес|<optgroup/);
   for (const transport of ['websocket', 'xhttp', 'grpc', 'httpupgrade']) {
-    assert.match(mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example',cdn_transport:transport}, {webTransports:[transport]}), /aria-label="Сервер приёма CDN"/);
+    assert.match(mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example',cdn_transport:transport}, {webTransports:[transport]}), /aria-label="Вход в CDN"/);
   }
+});
+
+test('first hop CDN Relay shows the preserved CDN domain and a Relay entry address', () => {
+  const html = mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example',relay_host_id:host.id,relay_cdn:true,relay_cdn_mode:'before_cdn'});
+  assert.match(html, /origin-cdn.example.*selected=""/);
+  assert.match(html, /Cloudflare Free/);
+  assert.match(html, /SNI, Host/);
+  assert.doesNotMatch(html, /Origin Rules:|Перенести Relay/);
 });
 
 test('Mihomo retains excluded or unavailable saved Relay endpoints and allows direct recovery', () => {

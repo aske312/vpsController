@@ -117,6 +117,18 @@ class MihomoOperationTests(unittest.TestCase):
         started = manager.start_module_operation("profiles", "recover", "f" * 32)
         self.assertEqual(started["state"], "queued")
 
+    def test_cdn_delivery_conflict_is_rejected_before_payload_or_worker(self):
+        identity = '9' * 32
+        definitions = [{'id':'node', 'component':'transport-reality', 'settings':{'route_mode':'cdn'}}]
+        payload = {'profile_id':'profile', 'settings':{'connections':definitions}}
+        with patch.object(manager, 'validate_cdn_delivery', side_effect=manager.HTTPException(409, 'Dedicated CDN hostname required')) as validate:
+            with self.assertRaises(manager.HTTPException) as conflict:
+                manager.start_profile_operation('update', payload, identity)
+            self.assertEqual(conflict.exception.status_code, 409)
+            validate.assert_called_once_with(definitions, 'profile')
+        self.launch.assert_not_called()
+        self.assertFalse((self.root/'operation-inputs'/f'{identity}.json').exists())
+
     def test_module_settings_are_admitted_once_and_applied_only_by_worker(self):
         client = TestClient(manager.app)
         manager.app.dependency_overrides[manager.auth_required] = lambda: None

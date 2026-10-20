@@ -29,6 +29,7 @@ export function applyConnectionAddress(connections: ProfileConnection[], source:
     if (connection.device_id !== source.device_id || cdn && !modes.cdn || tls && !modes.tls || udp && !modes.udp || relay && !modes.relay) return connection;
     const settings: ProfileConnection["settings"] = { ...connection.settings, relay_host_id: relay ? source.settings.relay_host_id : "", relay_address: relay ? source.settings.relay_address || "" : "", udp_domain: udp ? source.settings.udp_domain : "" };
     if (cdnRelay || "relay_cdn" in settings) settings.relay_cdn = cdnRelay;
+    if (cdnRelay) settings.relay_cdn_mode = source.settings.relay_cdn_mode || "after_cdn";
     if (connection.component === "transport-reality") {
       if (cdn) Object.assign(settings, { route_mode: "cdn", cdn_enabled: true, cdn_domain: source.settings.cdn_domain });
       else if (tls) Object.assign(settings, { route_mode: "tls", cdn_enabled: false, tls_domain: source.settings.tls_domain });

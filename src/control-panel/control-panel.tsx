@@ -1636,9 +1636,6 @@ export function ControlPanel() {
       }
       if (!selectedConnectionType) throw new Error("Нет доступного маршрута для подключения");
       if (selectedConnectionType.unavailable) throw new Error(selectedConnectionType.unavailable);
-      if (selectedClientProtocol === "vless-reality-xhttp" && newClientSettings.xray_protocol !== "vless" && newClientSettings.relay_host_id && newClientVlessRoutes.includes("cdn")) {
-        throw new Error("Для CDN через Relay используйте компонент Xray внутри Mihomo. В Direct через Relay доступен TLS.");
-      }
       const { cdn_domain: selectedCdnDomain, ...commonSettings } = newClientSettings;
       const settings = {
         ...commonSettings,

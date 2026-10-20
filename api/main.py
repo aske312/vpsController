@@ -52,6 +52,7 @@ import relay_connections
 import relay_client_creation
 import native_client_creation
 import xray_native
+import xray_core
 from read_cache import StampedReadCache, file_stamp
 import yaml
 import ech_settings
@@ -2285,6 +2286,23 @@ def network_probe_sources(producer: str, kind: str, consumer_id: str) -> dict[st
         quic_roots={"hysteria2": HYSTERIA2_DIR, "tuic": TUIC_DIR})
 
 
+def prepare_client_relay_probe(plan):
+    """Bind the nonce client to the exact saved first-hop Relay socket."""
+    if not plan.relay_target_domain:
+        return plan
+    import copy
+    from dataclasses import replace
+    control = relay_control()
+    route = control.cdn_route(plan.relay_host_id, plan.relay_target_domain)
+    host = control.host(control.read(), plan.relay_host_id)
+    address, port = control.cdn_endpoint(plan.relay_host_id, plan.relay_target_domain, address=plan.relay_client_address or None)
+    client = copy.deepcopy(plan.client)
+    client['settings']['servers' if client['protocol'] == 'trojan' else 'vnext'][0].update(address=address, port=port)
+    material = [plan.fingerprint, {key: route[key] for key in ('id', 'cdn_domain', *relay_manager.CONFIG_KEYS)}, address, host['certificate_sha256']]
+    fingerprint = hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
+    return replace(plan, address=address, port=port, client=client, fingerprint=fingerprint, relay_route_id=route['id'])
+
+
 def prepare_network_probe(binding: dict, consumer_id: str | None = None):
     if not binding or binding.get("state") != "active":
         raise network_probe.ProbeUnavailable("Маршрут больше не активен")
@@ -2299,7 +2317,13 @@ def prepare_network_probe(binding: dict, consumer_id: str | None = None):
             environment = dict(line.split("=", 1) for line in VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
             plan = network_probe.prepare_direct_vless(binding, consumers, read_clients(), config, environment)
             if sources != network_probe.source_revision(paths): raise network_probe.ProbeUnavailable("Конфигурация изменилась")
-            return plan, sources
+            if binding['kind'] == 'cdn':
+                current = next((item for item in read_clients() if 'direct:'+item.get('id', '') == plan.consumer_id), {})
+                selected_relay = current.get('settings', {}).get('relay_host_id')
+                if selected_relay:
+                    from dataclasses import replace
+                    plan = replace(plan, relay_host_id=selected_relay, relay_target_domain=binding['address'], relay_client_address=current.get('settings', {}).get('relay_address', ''))
+            return prepare_client_relay_probe(plan), sources
         except (OSError, ValueError, TypeError, KeyError):
             pass
         for consumer in consumers:
@@ -2313,7 +2337,7 @@ def prepare_network_probe(binding: dict, consumer_id: str | None = None):
                 descriptor = json.loads(paths["gateway_route"].read_text(encoding="utf-8"))
                 plan = network_probe.prepare_mihomo_vless(binding, [consumer], profiles, config, {paths["gateway_route"].stem: descriptor})
                 if sources != network_probe.source_revision(paths): raise network_probe.ProbeUnavailable("Конфигурация изменилась")
-                return plan, sources
+                return prepare_client_relay_probe(plan), sources
             except (OSError, ValueError, TypeError, KeyError):
                 continue
     elif binding["kind"] == "udp_relay":
@@ -2628,15 +2652,17 @@ def relay_control():
 def relay_origin_hosts():
     hosts = [value for value in (PUBLIC_IPV4, PUBLIC_DOMAIN, PUBLIC_ENDPOINT) if value]
     hosts.extend(row['address'] for row in server_addresses.inventory(DATA_DIR, (PUBLIC_IPV4, PUBLIC_IPV6, PUBLIC_IP))['items'])
-    # A CDN client file names the gateway virtual host, not the origin IP.
-    # Retain that TLS/HTTP identity while changing only the relay socket address.
-    hosts.extend(route['domain'] for route in cdn_security.read_routes()
-                 if isinstance(route.get('domain'), str) and valid_hostname(route['domain']))
+    routes = cdn_security.read_routes()
+    cdn_domains = {route['domain'] for route in routes if route.get('cloudflare', True)}
+    hosts.extend(route['domain'] for route in routes
+                 if not route.get('cloudflare', True) and isinstance(route.get('domain'), str) and valid_hostname(route['domain']))
     if VLESS_ENV.is_file():
         values = dict(line.split('=', 1) for line in VLESS_ENV.read_text(encoding='utf-8').splitlines() if '=' in line)
-        hosts.extend(values.get(prefix+'_DOMAIN', '') for prefix in ('CDN', 'TLS')
-                     if values.get(prefix+'_ENABLED') == 'yes' and valid_hostname(values.get(prefix+'_DOMAIN', '')))
-    return list(dict.fromkeys(hosts))
+        if values.get('CDN_ENABLED') == 'yes':
+            cdn_domains.add(values.get('CDN_DOMAIN', ''))
+        if values.get('TLS_ENABLED') == 'yes' and valid_hostname(values.get('TLS_DOMAIN', '')):
+            hosts.append(values['TLS_DOMAIN'])
+    return list(dict.fromkeys(host for host in hosts if host not in cdn_domains))
 
 
 def relay_targets():
@@ -2808,7 +2834,7 @@ def resume_relay_client(result_id: str, payload: RelayClientResume, _: None = De
 def prepare_relay_probe(route, host, consumer_id):
     from dataclasses import replace
     import copy
-    if route['target_ip'] != PUBLIC_IPV4 or not consumer_id:
+    if (route['target_ip'] != PUBLIC_IPV4 and not route.get('cdn_domain')) or not consumer_id:
         raise network_probe.ProbeUnavailable('Origin или consumer маршрута не совпадает с текущим VPS')
     def plans():
         registry = read_route_registry()
@@ -2842,6 +2868,11 @@ def prepare_relay_probe(route, host, consumer_id):
         except (OSError, ValueError, KeyError, TypeError, HTTPException, yaml.YAMLError):
             return
     for plan in plans():
+        if route.get('cdn_domain'):
+            if (plan.consumer_id == consumer_id and plan.relay_route_id == route['id'] and plan.relay_host_id == host['id']
+                    and plan.relay_target_domain == route['cdn_domain']):
+                return replace(plan, binding_id=route['id'])
+            continue
         if plan.consumer_id != consumer_id or plan.port != route['target_port'] or route['transport'] != ('udp' if plan.engine == 'singbox' else 'tcp'):
             continue
         if plan.relay_host_id:
@@ -3620,8 +3651,7 @@ def xray_installed_version(binary: str) -> str:
         return ""
     def read():
         output = run(binary, "version", timeout=5)
-        match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
-        return match.group(1) if match else ""
+        return xray_core.version(output)
     return version_reads.get(("xray", binary), file_stamp(Path(binary)), read)
 
 
@@ -3750,7 +3780,7 @@ def protocol_version_info(manifest: dict[str, Any], image_id: str, installed: bo
             installed_version = ""
     elif image_id == "vless-reality-xhttp":
         installed_version = xray_installed_version(XRAY_BIN) if installed else ""
-        available_version = github_latest_tag(XRAY_GITHUB_REPO)
+        available_version = xray_installed_version(str(xray_core.BUNDLED_BINARY))
     elif image_id == "mihomo":
         installed_version = mihomo_core_installed_version() if installed else ""
         available_version = github_latest_tag(MIHOMO_GITHUB_REPO)

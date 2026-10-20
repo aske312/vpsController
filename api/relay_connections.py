@@ -6,6 +6,7 @@ import re
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
+import relay_cdn
 from relay_addresses import normalize_address, normalize_addresses, authority
 
 
@@ -24,9 +25,11 @@ def host_id(settings):
 def selected_endpoint(control, settings, transport, port, **kwargs):
     if settings.get('relay_cdn') is True:
         if settings.get('route_mode') != 'cdn' or transport != 'tcp' or port != 443:
-            raise ValueError('CDN через Relay требует VLESS CDN на HTTPS 443')
+            raise ValueError('CDN через Relay требует Xray CDN на HTTPS 443')
         domain = normalize_address(settings.get('cdn_domain', ''))
         normalize_addresses({'domains': [domain]}, None)
+        if relay_cdn.before(settings):
+            return control.cdn_endpoint(host_id(settings), domain, address=settings.get('relay_address') or None)
         # Both rules must exist; their ingress ports belong to Cloudflare Origin
         # Rules and must never replace the public CDN port in a client export.
         control.endpoint(host_id(settings), 'tcp', 443)
@@ -68,7 +71,8 @@ def connection_groups(connection, direct_settings=None):
         if connection.get('settings', {}).get('relay_cdn') is True:
             if mode != 'cdn' or not credential.get('cdn_enabled'):
                 raise ValueError('CDN через Relay требует отдельного CDN-подключения')
-            groups.append([('tcp', 80)])
+            if relay_cdn.after(connection.get('settings', {})):
+                groups.append([('tcp', 80)])
         return groups
     port = int(credential['port'])
     return [[('tcp', port), ('udp', port)]] if component == 'transport-shadowsocks' else [[('udp', port)]]
@@ -82,12 +86,15 @@ def prepare_mihomo(control, connections, identity, direct_settings=None, previou
         selected = host_id(connection.get('settings', {}))
         if selected:
             groups = connection_groups(connection, direct_settings)
+            if relay_cdn.before(connection.get('settings', {})):
+                control.ensure_cdn(selected, connection['settings']['cdn_domain'], identity)
+                continue
             if not connection.get('settings', {}).get('relay_cdn') and any(port == 80 for group in groups for _, port in group):
                 raise ValueError('HTTP 80 разрешён только для ACME CDN через Relay')
-            if connection.get('settings', {}).get('relay_cdn') is True:
+            if relay_cdn.after(connection.get('settings', {})):
                 acme_hosts.add(selected)
             old = saved.get(connection.get('id'), {})
-            if old.get('component') == connection['component'] and host_id(old.get('settings', {})) == selected and connection_groups(old, direct_settings) == groups:
+            if old.get('component') == connection['component'] and not relay_cdn.before(old.get('settings', {})) and host_id(old.get('settings', {})) == selected and connection_groups(old, direct_settings) == groups:
                 for group in groups:
                     for transport, port in group:
                         control.endpoint(selected, transport, port, paired=len(group) > 1)
@@ -137,7 +144,8 @@ def redirect_mihomo_lines(control, component, settings, lines):
 def direct_groups(protocol, settings, result):
     if protocol == 'ikev2':
         raise ValueError('IKEv2 требует стандартные UDP 500/4500; диапазон Relay Agent v1 несовместим')
-    texts = [item['config'] for item in result.get('profiles', [])] or [result['config']]
+    profiles = result.get('profiles', [])
+    texts = [item['config'] for item in profiles if not (protocol == 'vless-reality-xhttp' and item.get('id') == 'cdn')] if profiles else [result['config']]
     groups = []
     for text in texts:
         if protocol in ('wg', 'awg'):
@@ -166,9 +174,21 @@ def direct_groups(protocol, settings, result):
             value = yaml.safe_load(text)
             nodes = value.get('proxies', value.get('outbounds', []))
             groups.extend([('udp' if protocol in ('hysteria2', 'tuic') else 'tcp', int(node.get('server_port', node.get('port'))))] for node in nodes if 'server' in node)
-    if not groups:
+    if not groups and not any(item.get('id') == 'cdn' for item in profiles):
         raise ValueError('Не удалось определить listener протокола')
     return groups
+
+
+def direct_cdn_settings(settings, profile):
+    """Use the protocol writer's final endpoint, including its default domain."""
+    text = profile['config']
+    if text.lstrip().startswith('{'):
+        outbound = json.loads(text)['outbounds'][0]
+        entries = outbound['settings']['servers' if outbound['protocol'] == 'trojan' else 'vnext']
+        domain = entries[0]['address']
+    else:
+        domain = urlsplit(text.strip()).hostname
+    return {**settings, 'relay_cdn': True, 'relay_cdn_mode': 'before_cdn', 'route_mode': 'cdn', 'cdn_domain': relay_cdn.domain(domain)}
 
 
 def direct_result(control, protocol, settings, result):
@@ -176,7 +196,7 @@ def direct_result(control, protocol, settings, result):
     if not selected:
         return result
     result = copy.deepcopy(result)
-    def rewrite(text):
+    def rewrite(text, settings=settings):
         if protocol in ('wg', 'awg'):
             def peer(match):
                 address, port = selected_endpoint(control, settings, 'udp', int(match[2]))
@@ -210,7 +230,8 @@ def direct_result(control, protocol, settings, result):
             return yaml.safe_dump(value, allow_unicode=True, sort_keys=False)
     if result.get('profiles'):
         for profile in result['profiles']:
-            profile['config'] = rewrite(profile['config'])
+            effective = direct_cdn_settings(settings, profile) if protocol == 'vless-reality-xhttp' and profile.get('id') == 'cdn' else settings
+            profile['config'] = rewrite(profile['config'], effective)
         if protocol == 'vless-reality-xhttp' and settings.get('xray_protocol', 'vless') != 'vless':
             configs = [json.loads(profile['config']) for profile in result['profiles']]
             result['config'] = json.dumps(configs if len(configs)>1 else configs[0], ensure_ascii=False, indent=2)

@@ -7,7 +7,7 @@ import json
 import re
 
 from application_operation import atomic_json, OperationConflict
-from relay_connections import direct_groups, direct_result
+from relay_connections import direct_groups, direct_result, direct_cdn_settings
 
 
 def result_path(api, identity):
@@ -37,8 +37,6 @@ def perform(api, payload, identity, *, resume_id=None):
         if resume_id:
             raise ValueError('Результат подключения не найден')
         client = api.ClientCreate.model_validate(payload['client'])
-        if client.protocol == 'vless-reality-xhttp' and client.settings.xray_protocol != 'vless' and 'cdn' in (client.vless_routes or []):
-            raise ValueError('Для CDN через Relay используйте компонент Xray внутри Mihomo; в Direct через Relay доступен TLS')
         if not client.settings.relay_host_id or client.protocol == 'ikev2' or client.settings.channel_mode != 'direct':
             raise ValueError('Нужен совместимый протокол и выбранный Relay без старого режима relay')
         control.host(control.checked(payload['expected_revision']), client.settings.relay_host_id)
@@ -57,6 +55,11 @@ def perform(api, payload, identity, *, resume_id=None):
     stored['groups'] = groups
     atomic_json(path, stored)
     control.ensure(settings['relay_host_id'], groups, identity)
+    if protocol == 'vless-reality-xhttp':
+        for profile in stored['result'].get('profiles', []):
+            if profile.get('id') == 'cdn':
+                effective = direct_cdn_settings(settings, profile)
+                control.ensure_cdn(settings['relay_host_id'], effective['cdn_domain'], identity)
     result = {**direct_result(control, protocol, settings, stored['result']), 'protocol': protocol}
     # Persist the download before reporting success. A lost response is a GET.
     stored.update(stage='ready', result=result)

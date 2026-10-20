@@ -15,10 +15,18 @@ UDP_COMPONENTS = ('transport-wg', 'transport-awg', 'transport-hysteria2', 'trans
 
 
 class MihomoEndpointDomainTests(unittest.TestCase):
+    def test_first_hop_cdn_relay_can_share_origin_hostname(self):
+        settings = {'route_mode':'cdn','cdn_domain':'cdn.example','relay_cdn':True,'relay_cdn_mode':'before_cdn','relay_host_id':'b'*32}
+        target = {'component':'transport-reality','settings':settings}
+        native = self.root/'native.env'
+        native.write_text('CDN_ENABLED=yes\nCDN_DOMAIN=cdn.example\n')
+        with patch.object(manager,'DIRECT_VLESS_ENV',native), patch.object(manager,'profiles',return_value=[{'connections':[{'component':'transport-reality','settings':{**settings,'relay_host_id':'c'*32}}]}]):
+            manager.validate_cdn_delivery([target])
+
     def test_cdn_relay_hostname_cannot_break_other_origin_or_agent_consumers(self):
         def connection(host='', mode='cdn'):
             return {'component':'transport-reality', 'settings':{'route_mode':mode, 'cdn_domain':'cdn.example',
-                    'tls_domain':'cdn.example', 'relay_host_id':host, 'relay_cdn':bool(host)}}
+                    'tls_domain':'cdn.example', 'relay_host_id':host, 'relay_cdn':bool(host), 'relay_cdn_mode':'after_cdn'}}
         target = connection('b'*32)
         native = self.root/'native.env'
         with patch.object(manager, 'DIRECT_VLESS_ENV', native), patch.object(manager, 'profiles', return_value=[{'id':'other','connections':[connection()]}]) as saved:
@@ -54,6 +62,8 @@ class MihomoEndpointDomainTests(unittest.TestCase):
                     self.assertEqual(result['cdn_transport'], transport)
                     self.assertEqual(result['cdn_xhttp_mode'], 'packet-up')
                     self.assertEqual(set(result['cdn_relay_ips'].split(',')), {'85.209.155.229', '8.8.4.4'})
+                    first_hop = manager.validate_connection('transport-reality', {**values, 'cdn_transport':transport, 'relay_cdn_mode':'before_cdn'})
+                    self.assertNotIn('cdn_relay_ips',first_hop)
             for component, patch_values in [('transport-wg', {}), ('transport-reality', {'relay_host_id': ''}),
                                             ('transport-reality', {'route_mode': 'tls'}), ('transport-reality', {'cdn_transport': 'raw'}),
                                             ('transport-reality', {'relay_cdn': 'yes'})]:
@@ -68,6 +78,7 @@ class MihomoEndpointDomainTests(unittest.TestCase):
         self.endpoints.write_text(json.dumps({'udp_relay_domains': [DOMAIN]}))
         for name, value in {'SUBMODULE_ROOT': ROOT / 'protocol-images/mihomo/modules', 'DATA_ROOT': self.root / 'mihomo', 'CONFIG_ROOT': self.root / 'config', 'NETWORK_ENDPOINTS_FILE': self.endpoints}.items():
             self.enterContext(patch.object(manager, name, value))
+        self.enterContext(patch.object(manager, 'WG_CONFIG_BY_MODULE', {name:self.root/(name+'.conf') for name in manager.WG_CONFIG_BY_MODULE}))
         self.enterContext(patch.object(manager, 'module_is_installed', return_value=True))
         self.enterContext(patch.object(manager, 'module_is_ready', return_value=True))
         self.enterContext(patch.object(manager, 'public_endpoint', return_value=ORIGIN))

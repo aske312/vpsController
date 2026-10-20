@@ -17,6 +17,7 @@ import uuid
 from application_operation import atomic_json, OperationConflict
 from relay_client import RelayClient, AgentAPIError
 from relay_addresses import normalize_address, normalize_addresses, all_addresses, authority
+import relay_cdn
 
 CONFIG_KEYS = ('transport', 'listen_port', 'target_ip', 'target_port')
 
@@ -101,6 +102,11 @@ class RelayManager:
         route_ids = set()
         for route in value['routes']:
             validate_config(route)
+            if route.get('cdn_domain'):
+                relay_cdn.domain(route['cdn_domain'])
+                relay_cdn.edge_ip(route['target_ip'])
+                if route['transport'] != 'tcp' or route['target_port'] != 443:
+                    raise ValueError('Некорректная пересылка к CDN')
             if route.get('host_id') not in ids or not re.fullmatch(r'pro-[0-9a-f]{32}', str(route.get('id'))) or route['id'] in route_ids:
                 raise ValueError('Повреждён маршрут relay')
             route_ids.add(route['id'])
@@ -208,12 +214,25 @@ class RelayManager:
         return value
 
     def ensure(self, host_id, groups, identity, *, allow_acme=False):
+        return self._ensure(host_id, groups, identity, allow_acme=allow_acme)
+
+    def ensure_cdn(self, host_id, domain, identity):
+        self.require_clear()
+        domain = relay_cdn.domain(domain)
+        # Existing sockets are immutable: delivered exports retain their port
+        # and pinned destination. New domains get independent durable rules.
+        existing = [route for route in self.read()['routes'] if route['host_id'] == host_id and route.get('cdn_domain') == domain]
+        target = relay_cdn.edge_ip(existing[0]['target_ip']) if existing else relay_cdn.resolve(domain)
+        return self._ensure(host_id, [[('tcp', 443)]], identity, target_ip=target, cdn_domain=domain)
+
+    def _ensure(self, host_id, groups, identity, *, allow_acme=False, target_ip=None, cdn_domain=None):
         """Prepare protocol-derived sockets, reusing owned rules and never replaying intent.
 
         Each group needs the same external port (e.g. Shadowsocks TCP + UDP).
         Unused rules are retained; their origin ports remain reserved separately.
         """
         self.require_clear()
+        target_ip = target_ip or self.origin
         registry = self.read()
         host = self.host(registry, host_id)
         client = self.client(host)
@@ -224,13 +243,13 @@ class RelayManager:
                 raise ValueError('Нельзя публиковать этот listener через Relay')
             registry = self.read()
             remote = route_snapshot(client.request('GET', '/v1/routes'))
-            owned = [route for route in registry['routes'] if route['host_id'] == host_id]
+            owned = [route for route in registry['routes'] if route['host_id'] == host_id and route.get('cdn_domain') == cdn_domain]
             candidates = sorted({route['listen_port'] for route in owned if (route['transport'], route['target_port']) in sockets})
             candidates.extend(port for port in range(20000, 21000) if port not in candidates)
             def compatible(port):
                 for transport, target in sockets:
                     found = next((route for route in remote['items'] if route['transport'] == transport and route['listen_port'] == port), None)
-                    if found and not any(route['id'] == found['id'] and same_route(route, found) and route['target_ip'] == self.origin and route['target_port'] == target and found['state'] == 'listening' for route in owned):
+                    if found and not any(route['id'] == found['id'] and same_route(route, found) and route['target_ip'] == target_ip and route['target_port'] == target and found['state'] == 'listening' for route in owned):
                         return False
                 return True
             selected = next((port for port in candidates if compatible(port)), None)
@@ -241,13 +260,29 @@ class RelayManager:
                 remote = route_snapshot(client.request('GET', '/v1/routes'))
                 found = next((route for route in remote['items'] if route['transport'] == transport and route['listen_port'] == selected), None)
                 if found:
-                    if not any(route['id'] == found['id'] and same_route(route, found) and route['target_ip'] == self.origin and route['target_port'] == target and found['state'] == 'listening' for route in registry['routes'] if route['host_id'] == host_id):
+                    if not any(route['id'] == found['id'] and same_route(route, found) and route['target_ip'] == target_ip and route['target_port'] == target and found['state'] == 'listening' for route in owned):
                         raise OperationConflict('Маршруты агента изменились во время настройки')
                     continue
-                route_identity = uuid.uuid5(uuid.NAMESPACE_URL, f'{host_id}:{self.origin}:{transport}:{target}:{selected}').hex
+                seed = f'{host_id}:{target_ip}:{transport}:{target}:{selected}'
+                if cdn_domain:
+                    seed += ':'+cdn_domain
+                route_identity = uuid.uuid5(uuid.NAMESPACE_URL, seed).hex
                 self.mutate_route({'host_id': host_id, 'transport': transport, 'target_port': target, 'listen_port': selected,
-                                   'expected_revision': registry['revision'], 'agent_revision': remote['revision']}, identity, route_identity=route_identity, allow_acme=allow_acme)
+                                   'expected_revision': registry['revision'], 'agent_revision': remote['revision']}, identity, route_identity=route_identity, allow_acme=allow_acme,
+                                  _cdn_domain=cdn_domain, _target_ip=target_ip if cdn_domain else None)
         return self.read()
+
+    def cdn_route(self, host_id, domain):
+        domain = relay_cdn.domain(domain)
+        routes = [route for route in self.read()['routes'] if route['host_id'] == host_id and route.get('cdn_domain') == domain]
+        if not routes:
+            raise OperationConflict('Пересылка Relay к CDN не подготовлена. Сохраните настройки подключения')
+        return min(routes, key=lambda route: route['listen_port'])
+
+    def cdn_endpoint(self, host_id, domain, *, address=None):
+        route = self.cdn_route(host_id, domain)
+        host = self.host(self.read(), host_id)
+        return normalize_address(address) if address else host.get('client_address') or self.client(host).host, route['listen_port']
 
     def endpoint(self, host_id, transport, target_port, *, paired=False, address=None):
         """Resolve a saved binding without a network request during subscription refresh."""
@@ -297,7 +332,7 @@ class RelayManager:
         registry['hosts'] = [item for item in registry['hosts'] if item['id'] != payload['host_id']]
         self.write(registry)
 
-    def mutate_route(self, payload, identity, *, delete=False, route_identity=None, allow_acme=False):
+    def mutate_route(self, payload, identity, *, delete=False, route_identity=None, allow_acme=False, _cdn_domain=None, _target_ip=None):
         self.require_clear()
         registry = self.checked(payload['expected_revision'])
         host = self.host(registry, payload['host_id'])
@@ -313,7 +348,12 @@ class RelayManager:
             if found and not same_route(found, route):
                 raise OperationConflict('Конфигурация маршрута на агенте изменена; чужой маршрут не удалён')
         else:
-            route = {'id': 'pro-'+(route_identity or identity), 'host_id': host['id'], **validate_config({**payload, 'target_ip': public_ipv4(self.origin)})}
+            target_ip = relay_cdn.edge_ip(_target_ip) if _cdn_domain else public_ipv4(self.origin)
+            route = {'id': 'pro-'+(route_identity or identity), 'host_id': host['id'], **validate_config({**payload, 'target_ip': target_ip})}
+            if _cdn_domain:
+                if route['transport'] != 'tcp' or route['target_port'] != 443:
+                    raise ValueError('Relay к CDN поддерживает TCP 443')
+                route['cdn_domain'] = relay_cdn.domain(_cdn_domain)
             if route['target_ip'] == client.host or route['target_port'] in (22, 8000, 9443) or route['target_port'] == 80 and not (allow_acme and route['transport'] == 'tcp'):
                 raise ValueError('Этот порт назначения нельзя публиковать через relay')
             if len(remote['items']) >= 64 or any(item['transport'] == route['transport'] and item['listen_port'] == route['listen_port'] for item in remote['items']):
@@ -395,6 +435,7 @@ class RelayManager:
                 # Registry addresses are useful before agent I/O completes, but
                 # carry no live state, counters or saved readiness evidence.
                 public['routes'] = [{**{key: route[key] for key in ('id', 'host_id', 'transport', 'listen_port', 'target_ip', 'target_port')},
+                                     **({'cdn_domain':route['cdn_domain']} if route.get('cdn_domain') else {}),
                                      'state': 'unknown', 'target_verified': False} for route in owned]
                 if not probe:
                     return public

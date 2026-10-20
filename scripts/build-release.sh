@@ -7,7 +7,7 @@ WORK_DIR="$(mktemp -d)"
 STAGE="${WORK_DIR}/vps-control-release"
 trap 'rm -rf -- "${WORK_DIR}"' EXIT
 
-for command_name in curl gzip node npm openssl rsync sha256sum tar; do
+for command_name in curl go gzip node npm openssl rsync sha256sum tar; do
   command -v "${command_name}" >/dev/null 2>&1 || { echo "Missing command: ${command_name}" >&2; exit 1; }
 done
 [[ "$(uname -s)" == "Linux" ]] || { echo "Release must be built on Linux." >&2; exit 1; }
@@ -70,6 +70,7 @@ curl -fL --retry 4 --retry-all-errors \
 printf '%s  %s\n' "${mihomo_sha256}" "${mihomo_archive}" | sha256sum -c -
 
 mkdir -p "${STAGE}/api/bin"
+bash "${ROOT_DIR}/scripts/build-xray.sh" "${STAGE}/api/bin/xray"
 python3 "${STAGE}/api/runtime_dependencies.py" download --directory "${STAGE}/api/packages"
 gzip -dc "${mihomo_archive}" >"${STAGE}/api/bin/mihomo"
 chmod 0755 "${STAGE}/api/bin/mihomo"
@@ -138,7 +139,7 @@ NODE
   node --input-type=module -e "await import('rolldown')"
 )
 
-printf 'schema=1\nedition=%s\nchannel=%s\nversion=%s\ncommit=%s\nbuilt_at=%s\nplatform=linux\narchitecture=%s\nmihomo=%s\n' \
+printf 'schema=1\nedition=%s\nchannel=%s\nversion=%s\ncommit=%s\nbuilt_at=%s\nplatform=linux\narchitecture=%s\nmihomo=%s\nxray=26.3.27+vps1\n' \
   "${RELEASE_EDITION}" "${RELEASE_CHANNEL}" "${app_version}" "${commit}" \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${release_architecture}" "${MIHOMO_VERSION}" \
   >"${STAGE}/.prebuilt-release"

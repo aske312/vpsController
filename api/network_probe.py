@@ -263,6 +263,9 @@ class ProbePlan:
     engine: str = "xray"
     server_behavior: dict = field(default_factory=dict, repr=False)
     relay_host_id: str = ""
+    relay_target_domain: str = ""
+    relay_route_id: str = ""
+    relay_client_address: str = ""
 
     def summary(self) -> dict:
         return {"state": "planned", "binding_id": self.binding_id,
@@ -464,7 +467,11 @@ def prepare_mihomo_vless(binding: dict, consumers: list[dict], profiles: list[di
                 continue
             if descriptor.get('relay_origins') and not relay_host_id:
                 continue
-            if relay_host_id:
+            before_cdn = settings.get('relay_cdn_mode') == 'before_cdn' and bool(relay_host_id)
+            if before_cdn:
+                if variant != 'cdn' or mode != 'cdn' or descriptor.get('relay_origins') or not re.fullmatch(r'[0-9a-f]{32}', relay_host_id):
+                    continue
+            elif relay_host_id:
                 expected = sorted(set(str(settings.get('cdn_relay_ips', '')).split(',')))
                 if (variant != 'cdn' or mode != 'cdn'
                         or not re.fullmatch(r'[0-9a-f]{32}', relay_host_id) or not all(expected)
@@ -476,10 +483,11 @@ def prepare_mihomo_vless(binding: dict, consumers: list[dict], profiles: list[di
                         "gateway": {key: descriptor.get(key) for key in ("domain", "path", "port", "transport")}}
             if relay_host_id:
                 material['relay_host_id'] = relay_host_id
-                material['gateway']['relay_origins'] = descriptor['relay_origins']
+                material['gateway']['relay_origins'] = descriptor.get('relay_origins', [])
+                material['relay_cdn_mode'] = settings.get('relay_cdn_mode', 'after_cdn')
             fingerprint = _fingerprint(binding, consumer_id, material, "mihomo_vless")
             return ProbePlan(binding["id"], binding["desired_revision"], consumer_id, address, 443, tag, port, transport, fingerprint, outbound, producer="mihomo_vless",
-                             relay_host_id=relay_host_id, server_behavior={"routing": config.get("routing"), "outbounds": config.get("outbounds"),
+                             relay_host_id=relay_host_id, relay_target_domain=address if before_cdn else '', relay_client_address=settings.get('relay_address', '') if before_cdn else '', server_behavior={"routing": config.get("routing"), "outbounds": config.get("outbounds"),
                                               "settings": {key: value for key, value in inbound.get("settings", {}).items() if key != "clients"}})
     raise ProbeUnavailable("Нет однозначного существующего Mihomo VLESS consumer с live listener и gateway route")
 

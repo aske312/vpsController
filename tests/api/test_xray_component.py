@@ -24,6 +24,8 @@ class XrayComponentTests(unittest.TestCase):
         for name, value in {'CONFIG_ROOT':self.root, 'VLESS_CDN_ROUTE_ROOT':self.root/'routes',
                             'SUBMODULE_ROOT':ROOT/'protocol-images/mihomo/modules'}.items():
             self.enterContext(patch.object(manager, name, value))
+        for name, value in {'ROUTES':self.root/'routes', 'DIRECT_ENV':self.root/'native.env', 'ENV':self.root/'environment', 'STATE':self.root/'cdn-security.json'}.items():
+            self.enterContext(patch.object(manager.cdn_security, name, value))
         for name in ('module_is_installed', 'module_is_ready', 'direct_tls_domain_ready', 'mihomo_route_endpoint_selectable'):
             self.enterContext(patch.object(manager, name, return_value=True))
         self.enterContext(patch.object(manager, 'reality_env', return_value={'PRIVATE_KEY':'private', 'PUBLIC_KEY':'public'}))

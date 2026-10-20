@@ -132,6 +132,7 @@ export function RelayRouteDetails({ host, address, summary, unknown }: { host: R
         <header><strong>{route.transport.toUpperCase()} · порт {route.listen_port}</strong><NetworkRouteBadge tone={unknown || route.state === "unknown" ? "unchecked" : route.state === "listening" ? "active" : "error"}>{unknown ? "Не подтверждён" : ({ listening: "Слушает", failed: "Ошибка", missing: "Отсутствует", drift: "Изменён", unknown: "Неизвестно" })[route.state]}</NetworkRouteBadge></header>
         <dl className="routeDetailsFacts">
           <Field label="Адрес назначения" mono>{route.target_ip.includes(":") ? `[${route.target_ip}]` : route.target_ip}:{route.target_port}</Field>
+          {route.cdn_domain && <Field label="CDN-домен" mono>{route.cdn_domain} · клиент → Relay → CDN → VPS</Field>}
           <Field label="Проверка подключения">{unknown || !route.check || route.check.state === "unknown" ? "Не подтверждена" : route.check.state === "ready" ? "Пройдена с VPS" : "Ошибка проверки"}</Field>
           {route.check?.checked_at && <Field label="Время проверки">{time(route.check.checked_at)}</Field>}
         </dl>

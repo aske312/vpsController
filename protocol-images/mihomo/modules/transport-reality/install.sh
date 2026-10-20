@@ -20,17 +20,16 @@ XRAY_DNS="$(setting dns '1.1.1.1, 1.0.0.1')"; LOGLEVEL="$(setting loglevel warni
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl openssl unzip iptables
 install -d -m 0755 "${MODULE_DIR}"
-release_tag="$(curl -fsSL --retry 4 -o /dev/null -w '%{url_effective}' https://github.com/XTLS/Xray-core/releases/latest)"; release_tag="${release_tag##*/}"; version="${release_tag#v}"
-[[ "${release_tag}" =~ ^v[0-9] ]] || { echo 'Не удалось определить версию Xray' >&2; exit 1; }
-current=""; [[ ! -x "${MODULE_DIR}/xray" ]] || current="$("${MODULE_DIR}/xray" version 2>/dev/null | head -n1 || true)"
-if [[ "${current}" != *"${version}"* ]]; then
- case "$(dpkg --print-architecture)" in amd64) asset=Xray-linux-64.zip;; arm64) asset=Xray-linux-arm64-v8a.zip;; *) exit 1;; esac
- tmp="$(mktemp -d)"; trap 'rm -rf "${tmp}"' EXIT; url="https://github.com/XTLS/Xray-core/releases/download/${release_tag}/${asset}"
- curl -fL --retry 4 -o "${tmp}/${asset}" "${url}"; curl -fL --retry 4 -o "${tmp}/digest" "${url}.dgst"
- expected="$(grep -Eio '[0-9a-f]{64}' "${tmp}/digest"|head -n1|tr A-F a-f)"; actual="$(sha256sum "${tmp}/${asset}"|awk '{print $1}')"; [[ -n "${expected}" && "${expected}" == "${actual}" ]] || exit 1
- unzip -q -o "${tmp}/${asset}" xray -d "${tmp}"; install -m 0755 "${tmp}/xray" "${MODULE_DIR}/xray"; rm -rf "${tmp}"; trap - EXIT
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/xray-core.sh"
+candidate_binary="${MODULE_DIR}/.xray.new"
+trap 'rm -f -- "${candidate_binary}"' EXIT
+stage_xray_core "${candidate_binary}"
+if [[ -s "${CONFIG_DIR}/config.json" ]]; then
+ "${candidate_binary}" run -test -config "${CONFIG_DIR}/config.json"
 fi
-[[ "${XRAY_UPDATE_ONLY:-}" != 1 ]] || { echo "Mihomo/VLESS: Xray ${version} обновлён"; exit 0; }
+mv -f -- "${candidate_binary}" "${MODULE_DIR}/xray"
+trap - EXIT
+[[ "${XRAY_UPDATE_ONLY:-}" != 1 ]] || { echo "Mihomo/Xray: подготовленное ядро обновлено"; exit 0; }
 install -d -o root -g nogroup -m 0750 "${CONFIG_DIR}"; chmod 0711 "$(dirname "${CONFIG_DIR}")"
 if [[ ! -s "${CONFIG_DIR}/reality.env" ]]; then
  keys="$("${MODULE_DIR}/xray" x25519)"; private="$(sed -n 's/^PrivateKey:[[:space:]]*//p'<<<"${keys}"|head -n1)"; public="$(sed -n -E 's/^(Password( \(PublicKey\))?|PublicKey):[[:space:]]*//p'<<<"${keys}"|head -n1)"

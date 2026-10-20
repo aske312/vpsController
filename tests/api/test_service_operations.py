@@ -170,3 +170,22 @@ class ServiceOperationTests(unittest.TestCase):
             replay = api.manage_service("fixture", api.ServiceAction(action="stop"), None, "e" * 32)
             self.assertEqual(replay["id"], started["id"])
             self.launch.assert_called_once()
+
+    def test_worker_preserves_public_validation_reason_but_not_internal_errors(self):
+        reason = 'CDN-домен cdn.example используется прямым TLS. Для разных назначений нужны отдельные домены'
+        cases = (HTTPException(409, reason), RuntimeError('password=private'), HTTPException(500, 'secret internal detail'))
+        for index, failure in enumerate(cases):
+            with self.subTest(error=type(failure).__name__):
+                identity = str(index + 1) * 32
+                started = operations.start(self.root, api.ACTION_FILE, 'fixture', ['true'], self.launch, request_id=identity)
+                def perform():
+                    raise failure
+                with patch.object(api.logger, 'exception'), patch.object(api.logger, 'warning'):
+                    self.assertFalse(service_worker.execute_operation(api, 'fixture', perform, identity, started['unit']))
+                saved = operations.read(api.ACTION_FILE)
+                self.assertEqual(saved['state'], 'failed')
+                if index == 0:
+                    self.assertEqual(saved['message'], reason)
+                else:
+                    self.assertNotIn('private', saved['message'])
+                    self.assertNotIn('secret', saved['message'])

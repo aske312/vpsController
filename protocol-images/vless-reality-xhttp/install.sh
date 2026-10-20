@@ -88,26 +88,10 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=300 update
 apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl openssl unzip iptables
 
-case "$(dpkg --print-architecture)" in
-  amd64) asset="Xray-linux-64.zip" ;;
-  arm64) asset="Xray-linux-arm64-v8a.zip" ;;
-  *) echo "Архитектура не поддерживается Xray image" >&2; exit 1 ;;
-esac
-
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf -- "${tmp_dir}"' EXIT
-latest_url="$(curl -fsSL --retry 3 -o /dev/null -w '%{url_effective}' https://github.com/XTLS/Xray-core/releases/latest)"
-release_tag="${latest_url##*/}"
-[[ "${release_tag}" =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { echo "Не удалось определить последний официальный релиз Xray" >&2; exit 1; }
-download_url="https://github.com/XTLS/Xray-core/releases/download/${release_tag}/${asset}"
-digest_url="${download_url}.dgst"
-curl -fL --retry 3 -o "${tmp_dir}/${asset}" "${download_url}"
-curl -fL --retry 3 -o "${tmp_dir}/${asset}.dgst" "${digest_url}"
-expected="$(grep -Eio '[0-9a-f]{64}' "${tmp_dir}/${asset}.dgst" | head -n 1 | tr 'A-F' 'a-f')"
-actual="$(sha256sum "${tmp_dir}/${asset}" | awk '{print $1}')"
-[[ -n "${expected}" && "${actual}" == "${expected}" ]] || { echo "Контрольная сумма Xray не совпала" >&2; exit 1; }
-unzip -q "${tmp_dir}/${asset}" xray -d "${tmp_dir}"
-"${tmp_dir}/xray" version >/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../scripts/xray-core.sh"
+stage_xray_core "${tmp_dir}/xray"
 
 install -d -m 0755 "${MODULE_DIR}"
 

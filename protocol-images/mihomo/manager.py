@@ -50,7 +50,9 @@ import network_routes
 import server_addresses
 import network_probe
 import relay_connections
+import relay_cdn
 import xray_protocols
+import xray_core
 from relay_manager import RelayManager
 from service_state import observe_service
 import port_allocation
@@ -2033,8 +2035,7 @@ def xray_installed_version(binary: Path) -> str:
     if not binary.is_file():
         return ""
     output = run(str(binary), "version").stdout
-    match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", output)
-    return match.group(1) if match else ""
+    return xray_core.version(output)
 
 
 def singbox_installed_version() -> str:
@@ -2104,7 +2105,7 @@ def module_version_info(module_id: str, info: dict[str, Any], installed: bool) -
             installed_version = ""
     elif module_id == "transport-reality":
         installed_version = xray_installed_version(REALITY_XRAY_BIN) if installed else ""
-        available_version = github_latest_tag(XRAY_GITHUB_REPO)
+        available_version = xray_installed_version(xray_core.BUNDLED_BINARY)
     elif module_id in {"transport-hysteria2", "transport-tuic"}:
         installed_version = singbox_installed_version() if installed else ""
         available_version = github_latest_tag(SINGBOX_GITHUB_REPO)
@@ -2542,6 +2543,10 @@ def start_profile_operation(action: str, payload: dict, identity: str | None):
                 application_operation.require_recovery_clear(root)
                 if action == "module-settings":
                     check_module_settings_revision(payload["module_id"], payload["settings"].get("expected_revision"))
+                elif action in {"create", "update"} and payload.get("settings", {}).get("connections") is not None:
+                    # Reject a CDN/direct-TLS role conflict before accepting a
+                    # background operation. The worker rechecks against live state.
+                    validate_cdn_delivery(payload["settings"]["connections"], payload.get("profile_id"))
             path, digest = application_operation.persist_payload(root, identity, payload)
         return application_operation.start(root, root / "application-action.json", f"mihomo-profile-{action}",
             [sys.executable, str(Path(__file__).resolve()), "--profile-operation", action, str(path), digest], subprocess.run,
@@ -2710,9 +2715,8 @@ def update_module(module_id: str) -> dict[str, Any]:
         elif module_id in {"transport-hysteria2", "transport-tuic"}:
             call_module_script(module_id, "install", extra_env={"SINGBOX_UPDATE_ONLY": "1"})
         else:
-            # Self-fetching module (transport-reality's bundled Xray): its
-            # installer already downloads and verifies the latest official
-            # release. XRAY_UPDATE_ONLY makes it stop right after swapping
+            # The release supplies the reviewed Xray binary and checksum.
+            # XRAY_UPDATE_ONLY makes the installer stop right after swapping
             # the binary in, skipping the TLS probe/config/systemd-restart
             # steps so the running service and its live profile connections
             # aren't touched by this update.
@@ -2992,11 +2996,13 @@ def validate_connection(component: str, values: dict[str, Any], *, allow_unverif
     relay_cdn = result.get('relay_cdn', False)
     if type(relay_cdn) is not bool:
         raise HTTPException(status_code=422, detail='Некорректный способ доставки CDN')
+    if result.get('relay_cdn_mode', 'after_cdn') not in {'before_cdn', 'after_cdn'}:
+        raise HTTPException(status_code=422, detail='Некорректное положение Relay в цепочке CDN')
     if relay_cdn and (component != 'transport-reality' or not selected_relay or result.get('route_mode') != 'cdn' or result.get('cdn_transport', 'websocket') not in {'websocket', 'xhttp', 'grpc', 'httpupgrade'}):
         raise HTTPException(status_code=422, detail='CDN через Relay требует отдельного Xray CDN с транспортом WebSocket, XHTTP, gRPC или HTTPUpgrade')
     # Derived from the authenticated agent inventory, never trust supplied ACLs.
     result.pop('cdn_relay_ips', None)
-    if relay_cdn:
+    if relay_cdn and result.get('relay_cdn_mode') != 'before_cdn':
         control = relay_connection_control()
         host = control.host(control.read(), selected_relay)
         addresses = control.addresses(host)['ipv4'] + [control.client(host).host]
@@ -3128,8 +3134,17 @@ def validate_connection(component: str, values: dict[str, Any], *, allow_unverif
 
 def validate_cdn_delivery(definitions: list[dict[str, Any]], profile_id: str | None = None) -> None:
     """A hostname's Cloudflare DNS destination is shared by all its consumers."""
-    connections = list(definitions)
-    for profile in profiles():
+    snapshots = profiles()
+    saved_settings = {connection.get('id'):connection.get('settings', {}) for profile in snapshots if profile.get('id') == profile_id
+                      for connection in profile.get('connections', [])}
+    connections = []
+    for connection in definitions:
+        settings = dict(connection.get('settings', {}))
+        if settings.get('relay_cdn') and 'relay_cdn_mode' not in settings:
+            previous = saved_settings.get(connection.get('id'), {})
+            settings['relay_cdn_mode'] = previous.get('relay_cdn_mode', 'after_cdn') if previous.get('relay_cdn') else 'before_cdn'
+        connections.append({**connection, 'settings':settings})
+    for profile in snapshots:
         if profile.get('id') != profile_id:
             saved = profile.get('connections', [])
             if not saved and profile.get('credentials', {}).get('transport-reality'):
@@ -3146,7 +3161,7 @@ def validate_cdn_delivery(definitions: list[dict[str, Any]], profile_id: str | N
         if mode in {'cdn','both'}:
             domain = str(settings.get('cdn_domain') or credential.get('cdn_domain') or '').strip().lower()
             if domain:
-                relay = settings.get('relay_host_id') if settings.get('relay_cdn') is True else ''
+                relay = settings.get('relay_host_id') if relay_cdn.after(settings) else ''
                 deliveries.setdefault(domain,set()).add(str(relay or 'origin'))
                 if relay:
                     relay_domains.add(domain)
@@ -3433,7 +3448,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         ]) + "\n")
     original_config = config_path.read_bytes()
     try:
-        write_mihomo_vless_cdn(route_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"], rebuild=reload_caddy, relay_origins=settings.get('cdn_relay_ips', '') if settings.get('relay_cdn') else '')
+        write_mihomo_vless_cdn(route_id, settings["cdn_enabled"], settings["cdn_domain"], cdn_path, cdn_port, settings["cdn_transport"], rebuild=reload_caddy, relay_origins=settings.get('cdn_relay_ips', '') if relay_cdn.after(settings) else '')
         write_mihomo_vless_cdn(f"tls-{route_id}", settings["tls_enabled"], settings["tls_domain"], tls_path, tls_port, settings["tls_transport"], rebuild=reload_caddy)
         apply_reality_config(config_path, config, restart_service=restart_service)
         port_allocation.release_prefix(allocation_owner + ":")
@@ -3892,8 +3907,10 @@ def validate_connection_inputs(values: list[ProfileConnectionInput], existing_co
             settings_input["target"] = f"{host}:443"
         saved = existing_by_id.get(connection_id, {})
         saved_settings = saved.get("settings", {}) if saved.get("component") == component else {}
+        if settings_input.get('relay_cdn') and 'relay_cdn_mode' not in settings_input:
+            settings_input['relay_cdn_mode'] = saved_settings.get('relay_cdn_mode', 'after_cdn') if saved_settings.get('relay_cdn') else 'before_cdn'
         candidate_settings = {**connection_defaults(component), **settings_input}
-        route_keys = ("route_mode", "cdn_domain", "tls_domain", "udp_domain", "relay_cdn")
+        route_keys = ("route_mode", "cdn_domain", "tls_domain", "udp_domain", "relay_cdn", "relay_cdn_mode")
         if candidate_settings.get('relay_cdn'):
             route_keys += ('relay_host_id',)
         preserves_network_route = bool(saved_settings) and all(

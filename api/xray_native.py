@@ -65,8 +65,6 @@ def create(api, payload, client_id, safe_name, on_mutation=None):
     requested = list(dict.fromkeys(payload.vless_routes or []))
     if not requested or any(route not in {'tls', 'cdn'} for route in requested):
         raise api.HTTPException(status_code=422, detail='Для VMess и Trojan выберите TLS или CDN')
-    if payload.settings.relay_host_id and 'cdn' in requested:
-        raise api.HTTPException(status_code=422, detail='Для CDN через Relay создайте подключение в компоненте Xray внутри Mihomo. В Direct доступны CDN через основной VPS и TLS через Relay')
     routes = []
     for route in requested:
         domain = str(payload.settings.cdn_domain or values.get('CDN_DOMAIN', '')) if route == 'cdn' else values.get('TLS_DOMAIN', '')

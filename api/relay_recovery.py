@@ -33,7 +33,13 @@ def resume_intent(control, operation_id):
             or not re.fullmatch(r'pro-[0-9a-f]{32}', route.get('id', ''))
             or type(intent.get('agent_revision')) is not int or intent['agent_revision'] < 0):
         raise ValueError('Повреждена запись восстановления relay')
-    if route['target_ip'] != control.origin:
+    if route.get('cdn_domain'):
+        import relay_cdn
+        relay_cdn.domain(route['cdn_domain'])
+        relay_cdn.edge_ip(route['target_ip'])
+        if route['transport'] != 'tcp' or route['target_port'] != 443:
+            raise OperationConflict('Некорректное назначение CDN')
+    elif route['target_ip'] != control.origin:
         raise OperationConflict('Origin изменился; восстановление старого маршрута остановлено')
     host = control.host(control.read(), route['host_id'])
     client = control.client(host)

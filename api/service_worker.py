@@ -5,6 +5,7 @@ import os
 import json
 from pathlib import Path
 import sys
+from fastapi import HTTPException
 
 import application_operation as operations
 
@@ -28,10 +29,17 @@ def execute_operation(api, name: str, perform, identity: str, unit: str) -> bool
         try:
             # Recheck ownership and the recovery path at execution time.
             perform()
-        except Exception:
-            api.logger.exception("Managed service operation failed: %s", identity)
+        except Exception as exc:
+            message = "Операция не завершена успешно; проверьте диагностику и состояние перед повтором"
+            if isinstance(exc, HTTPException) and 400 <= exc.status_code < 500 and isinstance(exc.detail, str) and exc.detail.strip():
+                # These are the same public validation messages returned by the
+                # synchronous API. Never publish arbitrary exception/command text.
+                message = exc.detail.strip()[:1000]
+                api.logger.warning("Managed operation rejected: %s (HTTP %s)", identity, exc.status_code)
+            else:
+                api.logger.exception("Managed service operation failed: %s", identity)
             operations.write_status(api.DATA_DIR, api.ACTION_FILE, name, "failed", 10,
-                                    "Операция не завершена успешно; проверьте диагностику и состояние перед повтором",
+                                    message,
                                     started, identity, unit)
             return False
         operations.write_status(api.DATA_DIR, api.ACTION_FILE, name, "succeeded", 100,

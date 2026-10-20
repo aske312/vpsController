@@ -12,6 +12,17 @@ import network_routes
 
 
 class ProbeProducerTests(unittest.TestCase):
+    def test_first_hop_cdn_probe_requires_cf_gateway_without_relay_source_acl(self):
+        settings = self.profiles[0]['connections'][0]['settings']
+        settings.update(relay_cdn=True, relay_host_id='b'*32, relay_cdn_mode='before_cdn', relay_address='relay.example')
+        plan = self.prepare()
+        self.assertEqual(plan.relay_target_domain,'edge.example')
+        self.assertEqual(plan.relay_client_address,'relay.example')
+        self.assertEqual(plan.relay_host_id,'b'*32)
+        self.descriptors['device-node']['relay_origins'] = ['85.209.155.229']
+        with self.assertRaises(probe.ProbeUnavailable):
+            self.prepare()
+
     def test_trojan_relay_probe_rewrites_socket_and_preserves_tls_and_password(self):
         self.binding['kind'] = self.refs[0]['kind'] = 'tls_relay'
         self.credential.update(xray_protocol='trojan', password='temporary-test-password', tls_enabled=True,
