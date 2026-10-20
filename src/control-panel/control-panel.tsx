@@ -64,6 +64,7 @@ type NewClientSettings = {
   timeout: number;
   no_delay: boolean;
   fingerprint: "chrome" | "firefox" | "safari";
+  xray_protocol: "vless" | "vmess" | "trojan";
   cdn_domain: string;
   transport: "xhttp" | "raw" | "grpc";
   transport_path: string;
@@ -231,7 +232,7 @@ export function ControlPanel() {
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
   const [newClient, setNewClient] = useState({ name: "", protocol: "wg" as Protocol });
   const [newClientVlessRoutes, setNewClientVlessRoutes] = useState<Array<"direct" | "tls" | "cdn">>(["direct"]);
-  const [newClientSettings, setNewClientSettings] = useState<NewClientSettings>({ mtu: 1280, keepalive: 25, route_mode: "ipv4", channel_mode: "direct", shadowsocks_mode: "tcp_and_udp", timeout: 300, no_delay: true, fingerprint: "chrome", cdn_domain: "", transport: "xhttp", transport_path: "/", xhttp_mode: "auto", xpadding: "100-1000", xmux_concurrency: 12, sni: "ya.ru", tls_transport: "xhttp", tls_xhttp_mode: "auto", cdn_transport: "websocket", cdn_xhttp_mode: "auto", jc: 6, jmin: 8, jmax: 80, s1: 64, s2: 112, h1: 150000000, h2: 600000000, h3: 1000000000, h4: 1400000000, tls_mode: "pinned", obfs_enabled: false, obfs_password: "", up_mbps: 100, down_mbps: 100, congestion_control: "bbr", heartbeat: "10s", vpn_transport: "udp" });
+  const [newClientSettings, setNewClientSettings] = useState<NewClientSettings>({ mtu: 1280, keepalive: 25, route_mode: "ipv4", channel_mode: "direct", shadowsocks_mode: "tcp_and_udp", timeout: 300, no_delay: true, fingerprint: "chrome", xray_protocol: "vless", cdn_domain: "", transport: "xhttp", transport_path: "/", xhttp_mode: "auto", xpadding: "100-1000", xmux_concurrency: 12, sni: "ya.ru", tls_transport: "xhttp", tls_xhttp_mode: "auto", cdn_transport: "websocket", cdn_xhttp_mode: "auto", jc: 6, jmin: 8, jmax: 80, s1: 64, s2: 112, h1: 150000000, h2: 600000000, h3: 1000000000, h4: 1400000000, tls_mode: "pinned", obfs_enabled: false, obfs_password: "", up_mbps: 100, down_mbps: 100, congestion_control: "bbr", heartbeat: "10s", vpn_transport: "udp" });
   const [generated, setGenerated] = useState("");
   const [generatedName, setGeneratedName] = useState("client.conf");
   const [generatedProtocol, setGeneratedProtocol] = useState<Protocol | undefined>();
@@ -1536,6 +1537,7 @@ export function ControlPanel() {
   const selectedClientProtocol = installedProtocols.includes(newClient.protocol) ? newClient.protocol : installedProtocols[0] || "wg";
   const vlessRouteStatus = protocolStatuses["vless-reality-xhttp"]?.observation_failed ? {} : protocolStatuses["vless-reality-xhttp"]?.routes || {};
   const hasNetworkRoute = (kind: "cdn" | "tls_relay" | "udp_relay", protocol: Protocol) => Object.values(networkStatus?.transport_endpoint_checks_by_domain || {}).some((check) => check.kind === kind && (["tuic", "hysteria2"].includes(protocol) && kind === "udp_relay" ? endpointSelectable(check) : endpointCheckReady(check) && check.verified_connection?.protocol === protocol));
+  const nativeXrayName = ({vless:"VLESS",vmess:"VMess",trojan:"Trojan"})[newClientSettings.xray_protocol];
   const connectionTypeOptions = installedProtocols.flatMap<ClientConnectionType>((protocol) => {
     const badge = protocol === "shadowsocks" ? "SS" : protocol === "hysteria2" ? "HY2" : protocol === "tuic" ? "TUIC" : protocol === "trojan" ? "TRJ" : protocol === "openvpn" ? "OVPN" : protocol === "ikev2" ? "IKE" : protocol.toUpperCase();
     if (protocol !== "vless-reality-xhttp") {
@@ -1551,9 +1553,9 @@ export function ControlPanel() {
     }
     return ([
       ["direct", "VLESS REALITY", "RLTY", "Прямой маршрут с маскировкой REALITY"],
-      ["tls", "VLESS TLS", "TLS", "Прямой домен с TLS-сертификатом"],
-      ["cdn", "VLESS CDN", "CDN", "Маршрут через настроенный CDN-домен"],
-    ] as const).filter(([id]) => id === "direct"
+      ["tls", `${nativeXrayName} TLS`, "TLS", "Прямой домен с TLS-сертификатом"],
+      ["cdn", `${nativeXrayName} CDN`, "CDN", "Маршрут через настроенный CDN-домен"],
+    ] as const).filter(([id]) => id !== "direct" || newClientSettings.xray_protocol === "vless").filter(([id]) => id === "direct"
       ? vlessRouteStatus[id]?.enabled !== false
       : Boolean(vlessRouteStatus[id]?.enabled && vlessRouteStatus[id]?.available_domains?.length)
     ).map(([routeId, name, routeBadge, description]) => ({ id: `vless-${routeId}`, protocol, routeId, name, badge: routeBadge, description }));
@@ -1634,6 +1636,9 @@ export function ControlPanel() {
       }
       if (!selectedConnectionType) throw new Error("Нет доступного маршрута для подключения");
       if (selectedConnectionType.unavailable) throw new Error(selectedConnectionType.unavailable);
+      if (selectedClientProtocol === "vless-reality-xhttp" && newClientSettings.xray_protocol !== "vless" && newClientSettings.relay_host_id && newClientVlessRoutes.includes("cdn")) {
+        throw new Error("Для CDN через Relay используйте компонент Xray внутри Mihomo. В Direct через Relay доступен TLS.");
+      }
       const { cdn_domain: selectedCdnDomain, ...commonSettings } = newClientSettings;
       const settings = {
         ...commonSettings,
@@ -1830,7 +1835,7 @@ export function ControlPanel() {
   const activeProtocol = protocolTab ? protocolStatuses[protocolTab] : undefined;
   const activeProtocolRate = protocolTab ? protocolRates[protocolTab] || { rx: null, tx: null } : { rx: null, tx: null };
   const activeProtocolImage = protocolTab ? protocolImages.find((image) => image.id === protocolTab) : undefined;
-  const protocolCode = protocolTab === "wg" ? "WG" : protocolTab === "awg" ? "AWG" : protocolTab === "shadowsocks" ? "SS" : protocolTab === "vless-reality-xhttp" ? "VLESS" : "";
+  const protocolCode = protocolTab === "wg" ? "WG" : protocolTab === "awg" ? "AWG" : protocolTab === "shadowsocks" ? "SS" : protocolTab === "vless-reality-xhttp" ? "XRAY" : "";
   const protocolIsTunnel = protocolTab === "wg" || protocolTab === "awg" || protocolTab === "openvpn" || protocolTab === "ikev2";
   const protocolOperational = Boolean(activeProtocol && (protocolIsTunnel ? activeProtocol.active && activeProtocol.service_active : activeProtocol.service_active));
   const protocolAvailability = activeProtocol?.history.availability_percent ?? (protocolOperational ? 100 : 0);
@@ -2099,6 +2104,15 @@ export function ControlPanel() {
               <div className="connectionForm">
                 <label>Название устройства<input data-dialog-initial required minLength={2} maxLength={48} pattern={"[\\p{L}\\p{N}_. \\-]{2,48}"} title="От 2 до 48 символов: буквы, цифры, пробел, точка, дефис или _" value={newClient.name} onChange={(event) => setNewClient({ ...newClient, name: event.target.value })} placeholder="Например: iPhone 15" /><small className="fieldHint">2–48 символов</small></label>
               </div>
+              {selectedClientProtocol === "vless-reality-xhttp" && <label><span>Протокол Xray</span><select aria-label="Протокол Xray" value={newClientSettings.xray_protocol} onChange={event => {
+                const xray_protocol = event.target.value as NewClientSettings["xray_protocol"];
+                setNewClientSettings(current => ({ ...current, xray_protocol }));
+                if (xray_protocol !== "vless" && newClientVlessRoutes.includes("direct")) {
+                  const route = vlessRouteStatus.tls?.enabled && vlessRouteStatus.tls?.available_domains?.length ? "tls" : "cdn";
+                  setNewClientVlessRoutes([route]);
+                  if (route === "cdn") setNewClientSettings(current => ({ ...current, cdn_domain:vlessRouteStatus.cdn?.available_domains?.[0] || "" }));
+                }
+              }}><option value="vless">VLESS</option><option value="vmess">VMess</option><option value="trojan">Trojan</option></select><small>VLESS: REALITY, TLS и CDN. VMess и Trojan: TLS или CDN.</small></label>}
               <fieldset className="connectionProtocolPicker"><legend>Тип подключения</legend><div>{connectionTypeOptions.map((option) => <button type="button" key={option.id} aria-pressed={selectedConnectionType?.id === option.id} disabled={Boolean(option.unavailable)} className={`protocol-${option.protocol}${selectedConnectionType?.id === option.id ? " active" : ""}`} onClick={() => { setNewClient({ ...newClient, protocol: option.protocol }); setNewClientVlessRoutes(option.routeId ? [option.routeId] : ["direct"]); setNewClientSettings((current) => ({ ...current, channel_mode: option.channelMode || "direct", relay_host_id: option.protocol === "ikev2" || option.channelMode && option.channelMode !== "direct" ? "" : current.relay_host_id, cdn_domain: option.routeId === "cdn" ? vlessRouteStatus.cdn?.confirmed_domains?.[0] || "" : "" })); }}><b><ProtocolIcon protocol={option.protocol} /></b><span><strong>{option.name} <ProtocolHealthBadge health={protocolStatuses[option.protocol]?.health} /></strong><small>{option.description}</small></span><i /></button>)}</div></fieldset>
               {selectedConnectionType?.unavailable && <p role="status">{selectedConnectionType.unavailable} <button type="button" onClick={() => { void loadNetworkStatus(); if (selectedClientProtocol === "vless-reality-xhttp") void loadProtocolStatus(selectedClientProtocol); }}>Проверить маршруты</button></p>}
               {selectedConnectionType && <>

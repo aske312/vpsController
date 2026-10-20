@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 from profile_transition import GRACE_SECONDS, stage_vless_transition, transition_delivery_revision, mark_transition_delivered
 from client_singbox import build_singbox_config, singbox_rules, UnsupportedClientConfig
 from client_xray import build_xray_configs, xray_rules
@@ -43,13 +44,13 @@ from client_capabilities import CAPABILITIES, FEATURES, RULES, compatible_routin
 from telemetry import ConnectionTelemetry
 from xray_stats import XrayStats
 import ss_runtime
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "api"))
 import cdn_security
 import application_operation
 import network_routes
 import server_addresses
 import network_probe
 import relay_connections
+import xray_protocols
 from relay_manager import RelayManager
 from service_state import observe_service
 import port_allocation
@@ -674,7 +675,7 @@ def profile_response(item: dict[str, Any]) -> dict[str, Any]:
     for device in result["devices"]:
         device["supported_formats"] = list(client_formats(device))
         device_id = str(device["id"])
-        connections = [entry for entry in result.get("connections", []) if entry.get("device_id") == device_id and entry.get("component") == "transport-reality"]
+        connections = [entry for entry in result.get("connections", []) if entry.get("device_id") == device_id and entry.get("component") == "transport-reality" and xray_protocols.protocol(entry.get('credential', {})) == 'vless']
         requested = bool(device_routing(result, device_id).get("tunnel_privacy", False))
         route_counts = {"reality": 0, "cdn": 0, "tls": 0}
         for connection in connections:
@@ -2952,8 +2953,8 @@ def validate_connection(component: str, values: dict[str, Any], *, allow_unverif
     relay_cdn = result.get('relay_cdn', False)
     if type(relay_cdn) is not bool:
         raise HTTPException(status_code=422, detail='Некорректный способ доставки CDN')
-    if relay_cdn and (component != 'transport-reality' or not selected_relay or result.get('route_mode') != 'cdn' or result.get('cdn_transport', 'websocket') != 'websocket'):
-        raise HTTPException(status_code=422, detail='CDN через Relay поддерживает отдельный VLESS CDN WebSocket')
+    if relay_cdn and (component != 'transport-reality' or not selected_relay or result.get('route_mode') != 'cdn' or result.get('cdn_transport', 'websocket') not in {'websocket', 'xhttp', 'grpc', 'httpupgrade'}):
+        raise HTTPException(status_code=422, detail='CDN через Relay требует отдельного Xray CDN с транспортом WebSocket, XHTTP, gRPC или HTTPUpgrade')
     # Derived from the authenticated agent inventory, never trust supplied ACLs.
     result.pop('cdn_relay_ips', None)
     if relay_cdn:
@@ -3017,6 +3018,15 @@ def validate_connection(component: str, values: dict[str, Any], *, allow_unverif
             raise HTTPException(status_code=422, detail="Начальное окно не может превышать максимальное")
     if component != "transport-reality":
         return result
+    kind = result.get('xray_protocol', 'vless')
+    if kind not in xray_protocols.PROTOCOLS:
+        raise HTTPException(status_code=422, detail='Неподдерживаемый протокол Xray')
+    if kind == 'vless':
+        # Absence is the persisted VLESS default. Do not recreate old listeners
+        # merely because the editor now has an explicit protocol selector.
+        result.pop('xray_protocol', None)
+    if kind != 'vless' and result.get('route_mode', 'direct') not in {'tls', 'cdn'}:
+        raise HTTPException(status_code=422, detail='VMess и Trojan требуют отдельного TLS- или CDN-подключения')
     # Privacy is global; stale clients cannot override it per connection.
     result.pop("privacy_mode", None)
     result.pop("cdn_ech", None)
@@ -3115,6 +3125,8 @@ def validate_cdn_delivery(definitions: list[dict[str, Any]], profile_id: str | N
         if native.get(prefix+'_ENABLED','').strip().strip('"') == 'yes':
             domain = native.get(prefix+'_DOMAIN','').strip().strip('"').lower()
             deliveries.setdefault(domain,set()).add('native-origin')
+    for route in cdn_security.native_xray_routes():
+        deliveries.setdefault(route['domain'], set()).add('native-origin' if route.get('cloudflare', True) else 'direct-tls')
     for domain in relay_domains:
         if len(deliveries[domain]) > 1:
             raise HTTPException(status_code=409, detail=f'Для CDN через Relay нужен отдельный домен: {domain} уже используется другим сервером приёма или прямым TLS')
@@ -3168,7 +3180,7 @@ def edge_stream(transport: str, path: str, xhttp_mode: str) -> dict[str, Any]:
 
 
 def rebuild_vless_cdn_snippet() -> None:
-    routes: list[dict[str, Any]] = []
+    routes: list[dict[str, Any]] = cdn_security.native_xray_routes()
     direct = {}
     try:
         direct = dict(line.split("=", 1) for line in DIRECT_VLESS_ENV.read_text(encoding="utf-8").splitlines() if "=" in line)
@@ -3288,6 +3300,8 @@ def apply_tunnel_privacy(enabled: bool) -> None:
             if connection.get("component") != "transport-reality":
                 continue
             credential = connection.get("credential", {})
+            if xray_protocols.protocol(credential) != 'vless':
+                continue
             identity = credential.get("uuid")
             inbounds = [entry for entry in config.get("inbounds", []) if identity and entry.get("protocol") == "vless" and any(client.get("id") == identity for client in entry.get("settings", {}).get("clients", []))]
             if not inbounds or any(len(entry["settings"]["clients"]) != 1 for entry in inbounds):
@@ -3321,6 +3335,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     if not isinstance(config.get("inbounds"), list):
         raise RuntimeError("Mihomo Reality server configuration is invalid")
     settings = validate_connection("transport-reality", connection_settings)
+    kind = settings.get('xray_protocol', 'vless')
     core = module_settings("transport-reality")
     direct_enabled = settings["route_mode"] in {"direct", "both"}
     allocation_owner = f"mihomo:vless:{profile_id}-{connection_id}"
@@ -3335,16 +3350,17 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     tls_port = next_vless_port(port_allocation_config, int(core.get("tls_port_start", 11443)), allocation_owner + ":tls") if settings["tls_enabled"] else 0
     env = reality_env()
     private_key, public_key = env.get("PRIVATE_KEY", ""), env.get("PUBLIC_KEY", "")
-    if not private_key or not public_key:
+    if kind == 'vless' and (not private_key or not public_key):
         raise RuntimeError("Mihomo VLESS key material is missing")
     user_id = str(uuid.uuid4())
+    password = secrets.token_urlsafe(32) if kind == 'trojan' else ''
     email = f"mihomo-{profile_id}-{connection_id}"
     # Connection ids come from the client draft and can be reused when a user
     # retries creation or creates another profile from the same open form.
     # Xray tags and Caddy descriptors are global, so scope them by profile too.
     route_id = f"{profile_id}-{connection_id}"
     direct_tag = f"mihomo-vless-{route_id}"
-    decryption, encryption = vless_encryption_pair({"privacy_mode": "encrypted" if privacy_enabled else "standard"})
+    decryption, encryption = vless_encryption_pair({"privacy_mode": "encrypted" if privacy_enabled else "standard"}) if kind == 'vless' else ('none', '')
     if direct_enabled:
         config["inbounds"].append({"tag": direct_tag, "listen": "::", "port": direct_port, "protocol": "vless", "settings": {"clients": [{"id": user_id, "email": email, "flow": ""}], "decryption": "none"}, "streamSettings": vless_stream(settings, private_key, env.get("SHORT_ID", "")), "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}})
     cdn_path = "/" + secrets.token_hex(16)
@@ -3367,7 +3383,8 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     owned_tags = {direct_tag, f"mihomo-vless-tls-{route_id}", f"mihomo-vless-cdn-{route_id}"}
     for inbound in config["inbounds"]:
         if inbound.get("tag") in owned_tags:
-            inbound["settings"]["decryption"] = decryption
+            inbound['protocol'] = kind
+            inbound['settings'] = xray_protocols.server_settings(kind, password if kind == 'trojan' else user_id, email, decryption)
     if encryption:
         # Reject unsupported client cores before committing server changes.
         validate_rendered_profile("proxies:\n" + "\n".join([
@@ -3395,7 +3412,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
         if reload_caddy:
             run("systemctl", "reload", "caddy.service")
         raise
-    return {"encryption": encryption, "uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "route_mode": settings["route_mode"], "tls_enabled": settings["tls_enabled"], "tls_domain": settings["tls_domain"], "tls_port": tls_port, "tls_path": tls_path, "tls_transport": settings["tls_transport"], "tls_xhttp_mode": settings["tls_xhttp_mode"], "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": cdn_path, "cdn_transport": settings["cdn_transport"], "cdn_xhttp_mode": settings["cdn_xhttp_mode"]}
+    return {**({"xray_protocol": kind} if kind != "vless" else {}), **({"password": password} if password else {}), "encryption": encryption, "uuid": user_id, "port": direct_port, "public_key": public_key, "short_id": env.get("SHORT_ID", ""), "servername": settings["target"].rsplit(":", 1)[0], "transport": settings["transport"], "path": settings["transport_path"], "xhttp_mode": settings["xhttp_mode"], "direct_tag": direct_tag, "route_mode": settings["route_mode"], "tls_enabled": settings["tls_enabled"], "tls_domain": settings["tls_domain"], "tls_port": tls_port, "tls_path": tls_path, "tls_transport": settings["tls_transport"], "tls_xhttp_mode": settings["tls_xhttp_mode"], "cdn_enabled": settings["cdn_enabled"], "cdn_domain": settings["cdn_domain"], "cdn_port": cdn_port, "cdn_path": cdn_path, "cdn_transport": settings["cdn_transport"], "cdn_xhttp_mode": settings["cdn_xhttp_mode"]}
 
 
 def remove_reality_credential(profile_id: str, credential: dict[str, Any], restart_service: bool = True, reload_caddy: bool = True) -> None:
@@ -3918,6 +3935,8 @@ def reconcile_profile_encryption(profile: dict[str, Any]) -> None:
             continue
         enabled = bool(device_routing(profile, str(connection.get("device_id", "device-1"))).get("tunnel_privacy", False))
         credential = connection.get("credential", {})
+        if xray_protocols.protocol(credential) != "vless":
+            continue
         if enabled == bool(credential.get("encryption")):
             continue
         retiring = profile.setdefault("retiring_connections", [])
@@ -4238,6 +4257,8 @@ def client_verification_scenario(profile: dict[str, Any], device_id: str) -> dic
         component = connection["component"]
         value = {"component": component}
         if component == "transport-reality":
+            if xray_protocols.protocol(credential) != 'vless':
+                value['xray_protocol'] = xray_protocols.protocol(credential)
             mode = settings.get("route_mode") or credential.get("route_mode") or "direct"
             variants = ["direct", "cdn"] if mode == "both" and (settings.get("cdn_enabled") or credential.get("cdn_enabled")) else ["direct" if mode == "both" else mode]
             value["routes"] = [{"kind": variant, "transport": (settings.get("transport") or credential.get("transport") or reality_connection_settings().get("transport", "xhttp")) if variant == "direct" else (settings.get(f"{variant}_transport") or credential.get(f"{variant}_transport") or ("websocket" if variant == "cdn" else "xhttp"))} for variant in variants]
@@ -4781,9 +4802,10 @@ def render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
 
 def _render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
     transport = str(credential.get("cdn_transport", "websocket"))
+    kind = xray_protocols.protocol(credential)
     lines = [
         f"  - name: {q(proxy_name)}",
-        "    type: vless",
+        f"    type: {kind}",
         f"    server: {q(credential['cdn_domain'])}",
         "    port: 443",
         f"    uuid: {q(credential['uuid'])}",
@@ -4793,8 +4815,8 @@ def _render_vless_cdn(credential: dict[str, Any], proxy_name: str) -> list[str]:
         f"    client-fingerprint: {q(credential.get('fingerprint', 'chrome'))}",
         f"    network: {'ws' if transport in {'websocket', 'httpupgrade'} else transport}",
     ]
-    if credential.get("encryption"):
-        lines.insert(6, f"    encryption: {q(credential['encryption'])}")
+    lines = [line for line in lines if not line.startswith("    uuid:")]
+    lines[5:5] = [f"    {key}: {q(value) if isinstance(value, str) else value}" for key, value in xray_protocols.mihomo_auth(credential).items()]
     if credential.get("cdn_ech", False):
         lines += ["    ech-opts:", "      enable: true"]
     if transport == "xhttp":
@@ -4833,7 +4855,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     rendered: list[tuple[dict[str, Any], str | None, str | None, str | None]] = []
     for index, connection in enumerate(connections):
         component = str(connection["component"])
-        if privacy and component == "transport-reality" and not connection.get("credential", {}).get("encryption"):
+        if privacy and component == "transport-reality" and xray_protocols.protocol(connection.get('credential', {})) == 'vless' and not connection.get("credential", {}).get("encryption"):
             raise HTTPException(status_code=409, detail="Шифрование отмечено в настройках, но ещё не применено к подключениям. Сохраните профиль в панели, затем обновите подписку в клиенте.")
         mode = connection.get("settings", {}).get("route_mode") or connection.get("credential", {}).get("route_mode")
         base = connection_label(connection, index + 1, mode if mode in {"cdn", "tls"} else "direct", reality_connection_settings)

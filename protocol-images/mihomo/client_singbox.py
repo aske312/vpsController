@@ -6,6 +6,7 @@ outbounds. Unknown or unsupported connection types fail the export explicitly.
 from urllib.parse import urlsplit
 import re
 from client_labels import connection_label
+import xray_protocols
 
 
 class UnsupportedClientConfig(ValueError):
@@ -62,8 +63,14 @@ def _vless(tag, credential, endpoint, variant, routing, fragment, capabilities=N
         mode = credential.get(f"{variant}_xhttp_mode", "auto")
         tls = _tls(server, None, bool(routing.get("tunnel_ech")) and variant == "cdn", fragment)
     tls["utls"]["fingerprint"] = credential.get("fingerprint", "chrome")
-    value = {"type": "vless", "tag": tag, "server": server, "server_port": port,
-             "uuid": credential["uuid"], "tls": tls}
+    kind = xray_protocols.protocol(credential)
+    value = {"type": kind, "tag": tag, "server": server, "server_port": port, "tls": tls}
+    if kind == 'trojan':
+        value['password'] = credential['password']
+    else:
+        value['uuid'] = credential['uuid']
+    if kind == 'vmess':
+        value.update(security='auto', alter_id=0)
     if credential.get("encryption"):
         value["encryption"] = credential["encryption"]
     if tls.get("ech"):

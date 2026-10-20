@@ -23,12 +23,16 @@ class CdnSecurityTests(unittest.TestCase):
     def test_cdn_relay_source_policy_is_per_path_and_keeps_cf_mtls(self):
         routes = [{'domain': 'cdn.example', 'path': '/relay', 'port': 12345, 'relay_origins': ['85.209.155.229']},
                   {'domain': 'cdn.example', 'path': '/direct', 'port': 12346}]
-        text = security.render_routes(routes, {'authenticated_origin_pulls': True}, protected=True)
-        self.assertIn('require_and_verify', text)
-        relay, direct = text.split('handle /direct')
-        self.assertIn('@outsideCF0 not remote_ip 85.209.155.229\n', relay)
-        self.assertNotIn('85.209.155.229', direct)
-        self.assertIn('@outsideCF1 not remote_ip', direct)
+        for transport in ('websocket', 'xhttp', 'grpc', 'httpupgrade'):
+            with self.subTest(transport=transport):
+                text = security.render_routes([{**routes[0], 'transport': transport}, routes[1]], {'authenticated_origin_pulls': True}, protected=True)
+                self.assertIn('require_and_verify', text)
+                relay, direct = text.split('handle /direct')
+                self.assertIn('@outsideCF0 not remote_ip 85.209.155.229\n', relay)
+                self.assertNotIn('85.209.155.229', direct)
+                self.assertIn('@outsideCF1 not remote_ip', direct)
+                self.assertIn('handle /relay* {' if transport in {'xhttp', 'grpc'} else 'handle /relay {', relay)
+                self.assertIn('reverse_proxy ' + ('h2c://' if transport == 'grpc' else '') + '127.0.0.1:12345', relay)
         for value in (['127.0.0.1'], ['10.0.0.1'], ['relay.example'], '85.209.155.229'):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 security.render_routes([{**routes[0], 'relay_origins': value}], {}, protected=True)

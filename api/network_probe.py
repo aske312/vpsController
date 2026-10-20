@@ -18,8 +18,9 @@ import subprocess
 import tempfile
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+import xray_protocols
 
 
 class ProbeUnavailable(ValueError):
@@ -272,7 +273,7 @@ class ProbePlan:
     def evidence(self, key: bytes) -> dict:
         tls = self.client.get("tls", {})
         return {"producer": self.producer, "consumer_id": self.consumer_id,
-                "protocol": "vless" if self.engine == "xray" else self.producer.removeprefix("direct_"),
+                "protocol": self.client.get('protocol', 'vless') if self.engine == "xray" else self.producer.removeprefix("direct_"),
                 "transport": self.transport, "vantage_point": "server", "plan_seal": plan_seal(self, key),
                 **({"server_name": tls["server_name"]} if tls.get("server_name") else {})}
 
@@ -285,6 +286,9 @@ def prepare_direct_vless(binding: dict, consumers: list[dict], clients: list[dic
     kind = binding.get("kind")
     if kind not in {"cdn", "tls_relay"}:
         raise ProbeUnavailable("Для UDP-маршрута пока нет поддержанного клиента проверки")
+    native_plan = prepare_native_xray(binding, consumers, clients, config)
+    if native_plan is not None:
+        return native_plan
     prefix = "CDN" if kind == "cdn" else "TLS"
     if environment.get(f"{prefix}_ENABLED") != "yes":
         raise ProbeUnavailable("Соответствующий VLESS listener отключён")
@@ -370,6 +374,41 @@ def _fingerprint(binding: dict, consumer_id: str, listener: dict, producer: str)
     return hashlib.sha256(json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def prepare_native_xray(binding, consumers, clients, config):
+    """Adapt Direct-owned snapshots to the shared exact Xray listener checker."""
+    variant = 'cdn' if binding['kind'] == 'cdn' else 'tls'
+    references = {row['id'] for row in consumers if row.get('owner') == 'direct' and row.get('reference') == 'snapshot'
+                  and row.get('kind') == binding['kind'] and row.get('address') == binding['address']}
+    for client in clients:
+        consumer = 'direct:' + str(client.get('id', ''))
+        if consumer not in references or client.get('protocol') != 'vless-reality-xhttp' or client.get('xray_protocol') not in {'vmess', 'trojan'}:
+            continue
+        tag = f"xray-{variant}-{client['id']}"
+        owned = [row for row in config.get('inbounds', []) if row.get('tag') == tag and row.get('protocol') == client['xray_protocol']]
+        descriptors = [row for row in client.get('xray_routes', []) if row.get('tag') == tag and row.get('domain') == binding['address']
+                       and row.get('cloudflare') is (variant == 'cdn')]
+        if len(owned) != 1 or len(descriptors) != 1:
+            continue
+        users = [row for row in owned[0].get('settings', {}).get('clients', []) if row.get('email') == client['id']+'@312.net']
+        if len(users) != 1:
+            continue
+        descriptor = descriptors[0]
+        credential = {'xray_protocol':client['xray_protocol'], 'uuid':client.get('public_key'),
+                      'password':users[0].get('password'), variant+'_enabled':True, variant+'_domain':descriptor['domain'],
+                      variant+'_path':descriptor['path'], variant+'_port':descriptor['port']}
+        route_id = 'direct-' + client['id']
+        proxy_inbound = {**owned[0], 'tag':f'mihomo-vless-{variant}-{route_id}'}
+        profiles = [{'id':'direct', 'connections':[{'id':client['id'], 'component':'transport-reality', 'settings':{'route_mode':variant}, 'credential':credential}]}]
+        refs = [{'id':f"mihomo:direct:{client['id']}", 'owner':'mihomo', 'kind':binding['kind'], 'address':binding['address'], 'reference':'snapshot'}]
+        try:
+            plan = prepare_mihomo_vless(binding, refs, profiles, {**config, 'inbounds':[proxy_inbound]},
+                                        {('tls-' if variant == 'tls' else '')+route_id:descriptor})
+        except ProbeUnavailable:
+            continue
+        return replace(plan, producer='direct_vless', consumer_id=consumer, listener_tag=tag)
+    return None
+
+
 def prepare_mihomo_vless(binding: dict, consumers: list[dict], profiles: list[dict], config: dict,
                           descriptors: dict[str, dict]) -> ProbePlan:
     if binding.get("state") != "active" or binding.get("kind") not in {"cdn", "tls_relay"}:
@@ -394,7 +433,8 @@ def prepare_mihomo_vless(binding: dict, consumers: list[dict], profiles: list[di
                 continue
             route_id = f"{profile['id']}-{connection['id']}"
             tag = f"mihomo-vless-{variant}-{route_id}"
-            matches = [item for item in config.get("inbounds", []) if item.get("protocol") == "vless" and item.get("tag") == tag]
+            kind = xray_protocols.protocol(credential)
+            matches = [item for item in config.get("inbounds", []) if item.get("protocol") == kind and item.get("tag") == tag]
             descriptor = descriptors.get(("tls-" if variant == "tls" else "") + route_id, {})
             if len(matches) != 1:
                 continue
@@ -402,7 +442,9 @@ def prepare_mihomo_vless(binding: dict, consumers: list[dict], profiles: list[di
             stream = inbound.get("streamSettings", {})
             transport = stream.get("network")
             key = {"ws": "wsSettings", "websocket": "wsSettings", "xhttp": "xhttpSettings", "grpc": "grpcSettings", "httpupgrade": "httpupgradeSettings"}.get(transport)
-            live_users = [item for item in inbound.get("settings", {}).get("clients", []) if credential.get("uuid") and item.get("id") == credential["uuid"]]
+            identity_key = 'password' if kind == 'trojan' else 'id'
+            identity = credential.get('password' if kind == 'trojan' else 'uuid')
+            live_users = [item for item in inbound.get("settings", {}).get("clients", []) if identity and item.get(identity_key) == identity]
             if not key or stream.get("security", "none") != "none" or len(live_users) != 1 or live_users[0].get("flow"):
                 continue
             port = inbound.get("port")
@@ -415,7 +457,7 @@ def prepare_mihomo_vless(binding: dict, consumers: list[dict], profiles: list[di
                     or {"ws": "websocket"}.get(transport, transport) != {"ws": "websocket"}.get(descriptor.get("transport"), descriptor.get("transport"))):
                 continue
             encryption = credential.get("encryption") or "none"
-            if (inbound.get("settings", {}).get("decryption", "none") == "none") != (encryption == "none"):
+            if kind == 'vless' and (inbound.get("settings", {}).get("decryption", "none") == "none") != (encryption == "none"):
                 continue
             relay_host_id = settings.get('relay_host_id', '') if settings.get('relay_cdn') is True else ''
             if settings.get('relay_cdn') is True and not relay_host_id:
@@ -424,13 +466,13 @@ def prepare_mihomo_vless(binding: dict, consumers: list[dict], profiles: list[di
                 continue
             if relay_host_id:
                 expected = sorted(set(str(settings.get('cdn_relay_ips', '')).split(',')))
-                if (variant != 'cdn' or mode != 'cdn' or transport not in {'ws', 'websocket'}
+                if (variant != 'cdn' or mode != 'cdn'
                         or not re.fullmatch(r'[0-9a-f]{32}', relay_host_id) or not all(expected)
                         or sorted(set(descriptor.get('relay_origins', []))) != expected):
                     continue
             client_stream = {"network": transport, "security": "tls", "tlsSettings": {"serverName": address, "allowInsecure": False}, key: copy.deepcopy(stream.get(key, {}))}
-            outbound = {"protocol": "vless", "settings": {"vnext": [{"address": address, "port": 443, "users": [{"id": credential["uuid"], "encryption": encryption}]}]}, "streamSettings": client_stream}
-            material = {"tag": tag, "port": port, "stream": client_stream,
+            outbound = {"protocol": kind, "settings": xray_protocols.outbound_settings(credential, address, 443), "streamSettings": client_stream}
+            material = {"tag": tag, "protocol": kind, "port": port, "stream": client_stream,
                         "gateway": {key: descriptor.get(key) for key in ("domain", "path", "port", "transport")}}
             if relay_host_id:
                 material['relay_host_id'] = relay_host_id

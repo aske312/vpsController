@@ -1,4 +1,5 @@
 """Public connection names shared by all subscription exporters."""
+import xray_protocols
 
 
 def connection_label(connection, index, variant="direct", direct_settings=None):
@@ -19,4 +20,5 @@ def connection_label(connection, index, variant="direct", direct_settings=None):
         transport = credential.get(f"{variant}_transport", "websocket" if variant == "cdn" else "xhttp")
         security = "TLS · CDN" if variant == "cdn" else "TLS"
     transport = {"tcp": "TCP", "raw": "TCP", "websocket": "WebSocket", "grpc": "gRPC", "xhttp": "XHTTP", "httpupgrade": "HTTPUpgrade"}.get(transport, transport)
-    return f"{index} · VLESS · {transport} · {security}"
+    name = {'vless': 'VLESS', 'vmess': 'VMess', 'trojan': 'Trojan'}[xray_protocols.protocol(credential)]
+    return f"{index} · {name} · {transport} · {security}"

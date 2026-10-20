@@ -48,10 +48,14 @@ class MihomoEndpointDomainTests(unittest.TestCase):
         values = {'route_mode': 'cdn', 'cdn_domain': 'cdn.example', 'cdn_transport': 'websocket',
                   'relay_host_id': 'b'*32, 'relay_cdn': True, 'cdn_relay_ips': '1.1.1.1'}
         with patch.object(manager, 'relay_connection_control', return_value=control), patch.object(manager, 'mihomo_route_endpoint_selectable', return_value=True):
-            result = manager.validate_connection('transport-reality', values)
-            self.assertEqual(set(result['cdn_relay_ips'].split(',')), {'85.209.155.229', '8.8.4.4'})
+            for transport in ('websocket', 'xhttp', 'grpc', 'httpupgrade'):
+                with self.subTest(transport=transport):
+                    result = manager.validate_connection('transport-reality', {**values, 'cdn_transport': transport, 'cdn_xhttp_mode': 'packet-up'})
+                    self.assertEqual(result['cdn_transport'], transport)
+                    self.assertEqual(result['cdn_xhttp_mode'], 'packet-up')
+                    self.assertEqual(set(result['cdn_relay_ips'].split(',')), {'85.209.155.229', '8.8.4.4'})
             for component, patch_values in [('transport-wg', {}), ('transport-reality', {'relay_host_id': ''}),
-                                            ('transport-reality', {'route_mode': 'tls'}), ('transport-reality', {'cdn_transport': 'grpc'}),
+                                            ('transport-reality', {'route_mode': 'tls'}), ('transport-reality', {'cdn_transport': 'raw'}),
                                             ('transport-reality', {'relay_cdn': 'yes'})]:
                 with self.subTest(component=component, patch=patch_values), self.assertRaises(manager.HTTPException):
                     manager.validate_connection(component, {**values, **patch_values})

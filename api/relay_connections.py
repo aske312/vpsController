@@ -56,7 +56,7 @@ def connection_groups(connection, direct_settings=None):
         raise ValueError('Протокол не поддерживает Relay Agent API v1')
     credential = connection.get('credential', {})
     if connection.get('settings', {}).get('relay_cdn') is True and component != 'transport-reality':
-        raise ValueError('CDN через Relay поддерживает только VLESS')
+        raise ValueError('CDN через Relay поддерживает только компонент Xray')
     if component == 'transport-reality':
         mode = connection.get('settings', {}).get('route_mode') or credential.get('route_mode') or 'both'
         groups = []
@@ -114,8 +114,8 @@ def redirect_nodes(control, connection, nodes, endpoints=()):
             elif node.get('tls') is True:
                 node.setdefault('servername', original)
             node['server'], node[key] = address, port
-        elif node.get('protocol') in ('vless', 'shadowsocks', 'trojan'):
-            entries = node.get('settings', {}).get('vnext' if node['protocol'] == 'vless' else 'servers', [])
+        elif node.get('protocol') in ('vless', 'vmess', 'shadowsocks', 'trojan'):
+            entries = node.get('settings', {}).get('vnext' if node['protocol'] in {'vless', 'vmess'} else 'servers', [])
             for entry in entries:
                 entry['address'], entry['port'] = selected_endpoint(control, connection.get('settings', {}), transport, int(entry['port']), paired=paired)
     for node in endpoints:
@@ -151,6 +151,12 @@ def direct_groups(protocol, settings, result):
                 raise ValueError('Не найден endpoint OpenVPN')
             groups.append([('tcp' if re.search(r'(?m)^proto\s+tcp', text) else 'udp', int(match[1]))])
         elif protocol in ('vless-reality-xhttp', 'shadowsocks'):
+            if protocol == 'vless-reality-xhttp' and text.lstrip().startswith('{'):
+                for node in json.loads(text).get('outbounds', []):
+                    entries = node.get('settings', {}).get('vnext' if node.get('protocol') in {'vless', 'vmess'} else 'servers', [])
+                    for entry in entries:
+                        groups.append([('tcp', int(entry['port']))])
+                continue
             for line in text.strip().splitlines():
                 port = urlsplit(line).port
                 if port is None:
@@ -183,6 +189,10 @@ def direct_result(control, protocol, settings, result):
                 return f'remote {address} {port}'
             return re.sub(r'(?m)^remote\s+\S+\s+(\d+)', remote, text)
         if protocol in ('vless-reality-xhttp', 'shadowsocks'):
+            if protocol == 'vless-reality-xhttp' and text.lstrip().startswith('{'):
+                value = json.loads(text)
+                redirect_nodes(control, {'component':'transport-reality', 'settings':settings}, value.get('outbounds', []))
+                return json.dumps(value, ensure_ascii=False, indent=2)
             lines = []
             for line in text.strip().splitlines():
                 uri = urlsplit(line)
@@ -201,7 +211,11 @@ def direct_result(control, protocol, settings, result):
     if result.get('profiles'):
         for profile in result['profiles']:
             profile['config'] = rewrite(profile['config'])
-        result['config'] = '\n'.join(profile['config'] for profile in result['profiles'])
+        if protocol == 'vless-reality-xhttp' and settings.get('xray_protocol', 'vless') != 'vless':
+            configs = [json.loads(profile['config']) for profile in result['profiles']]
+            result['config'] = json.dumps(configs if len(configs)>1 else configs[0], ensure_ascii=False, indent=2)
+        else:
+            result['config'] = '\n'.join(profile['config'] for profile in result['profiles'])
     else:
         result['config'] = rewrite(result['config'])
     return result

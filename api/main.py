@@ -51,6 +51,7 @@ import relay_manager
 import relay_connections
 import relay_client_creation
 import native_client_creation
+import xray_native
 from read_cache import StampedReadCache, file_stamp
 import yaml
 import ech_settings
@@ -619,7 +620,7 @@ def endpoint_connection_usages(kind: str, domain: str) -> list[str]:
         protocol = str(item.get("protocol", ""))
         used = False
         if protocol == "vless-reality-xhttp":
-            route_domain = {"cdn": reality.get("CDN_DOMAIN", ""), "tls_relay": reality.get("TLS_DOMAIN", "")}.get(kind, "")
+            route_domain = item.get('route_endpoints', {}).get(kind) or {"cdn": reality.get("CDN_DOMAIN", ""), "tls_relay": reality.get("TLS_DOMAIN", "")}.get(kind, "")
             used = ((kind == "cdn" and "cdn" in item.get("vless_routes", [])) or (kind == "tls_relay" and "tls" in item.get("vless_routes", []))) and route_domain.strip().lower() == domain
         elif kind in {"tls_relay", "udp_relay"}:
             used = item.get("channel_mode") == kind
@@ -727,7 +728,7 @@ def save_channel_mode(protocol: str, mode: str) -> None:
 
 PANEL_PROTOCOL_LABELS = {
     "wg": "WireGuard", "awg": "AmneziaWG", "shadowsocks": "Shadowsocks",
-    "vless-reality-xhttp": "VLESS", "hysteria2": "Hysteria2", "tuic": "TUIC v5",
+    "vless-reality-xhttp": "Xray", "hysteria2": "Hysteria2", "tuic": "TUIC v5",
     "trojan": "Trojan", "openvpn": "OpenVPN", "ikev2": "IKEv2",
 }
 
@@ -1003,7 +1004,7 @@ def stream_proxy_dump() -> list[dict]:
             address = f'{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{item.get("port", "—")}'
         elif protocol == "vless-reality-xhttp":
             active = run("systemctl", "is-active", "vps-control-vless-reality-xhttp.service") == "active"
-            address = f'{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{item.get("port", 8443)}'
+            address = f"{next((value for value in item.get('route_endpoints', {}).values() if value), '')}:443" if item.get('xray_protocol') in {'vmess', 'trojan'} else f'{PUBLIC_IP_ENDPOINT or PUBLIC_ENDPOINT}:{item.get("port", 8443)}'
             email = f'{item.get("id", "")}@312.net'
             rx_bytes, tx_bytes, handshake_age, rx_bps, tx_bps = xray_user_stats(email, xray_activity.get(email))
             active_connections = 1 if handshake_age is not None and handshake_age < STREAM_ACTIVITY_WINDOW_S else 0
@@ -1056,6 +1057,7 @@ def stream_proxy_dump() -> list[dict]:
         )
         peers.append({
             "id": item.get("id", ""), "name": item.get("name", "Подключение"), "protocol": protocol,
+            **({'xray_protocol':item['xray_protocol']} if item.get('xray_protocol') in {'vmess', 'trojan'} else {}),
             "public_key": item.get("public_key", item.get("id", "")), "endpoint": address, "address": address,
             "handshake_age_s": handshake_age, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes, "enabled": True,
             "rx_bps": rx_bps, "tx_bps": tx_bps, "active_connections": active_connections,
@@ -2852,7 +2854,7 @@ def prepare_relay_probe(route, host, consumer_id):
         address = relay_control().client(host).host
         client = copy.deepcopy(plan.client)
         if plan.engine == 'xray':
-            client['settings']['vnext'][0].update(address=address, port=route['listen_port'])
+            client['settings']['servers' if client.get('protocol') == 'trojan' else 'vnext'][0].update(address=address, port=route['listen_port'])
         else:
             client.update(server=address, server_port=route['listen_port'])
         fingerprint = hashlib.sha256(json.dumps([plan.fingerprint, route['id'], address, route['listen_port'], route['target_ip'], host['certificate_sha256']], sort_keys=True).encode()).hexdigest()
@@ -5383,7 +5385,7 @@ def configure_vless_tls(config: dict, reality: dict, enabled: bool, domain: str,
 
 
 def write_vless_cdn_snippet(enabled: bool, domain: str, path: str, transport: str = "websocket") -> None:
-    routes: list[dict] = []
+    routes: list[dict] = cdn_security.native_xray_routes(VLESS_CONFIG, CLIENTS_FILE)
     if enabled:
         configured = read_network_endpoint_settings().get("cdn_domains", [])
         domains = list(dict.fromkeys([domain, *(configured if isinstance(configured, list) else [])]))
@@ -6021,6 +6023,8 @@ def create_client_native(payload: ClientCreate, *, client_identity=None, on_muta
 
     if payload.protocol == "vless-reality-xhttp":
         with client_mutation_lock:
+            if payload.settings.xray_protocol != 'vless':
+                return xray_native.create(sys.modules[__name__], payload, client_id, safe_name, on_mutation)
             if not VLESS_CONFIG.exists() or not VLESS_ENV.exists():
                 raise HTTPException(status_code=409, detail="vless-reality-xhttp protocol is not installed")
             # Xray detects the input format from the filename extension.
@@ -6258,6 +6262,9 @@ def delete_client(client_id: str, _: None = Depends(require_token)) -> dict:
         write_clients([entry for entry in items if entry["id"] != client_id])
         return {"deleted": client_id}
     if protocol == "vless-reality-xhttp":
+        if item.get('xray_protocol', 'vless') != 'vless':
+            with client_mutation_lock:
+                return xray_native.delete(sys.modules[__name__], item, read_clients())
         try:
             config_data = json.loads(VLESS_CONFIG.read_text(encoding="utf-8"))
             for inbound in config_data.get("inbounds", []):

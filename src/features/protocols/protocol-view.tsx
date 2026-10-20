@@ -87,12 +87,12 @@ const profiles: Record<Protocol, TunnelProfile> = {
     planned: [],
   },
   "vless-reality-xhttp": {
-    short: "VLESS", family: "XRAY TRANSPORT", title: "VLESS", accent: "violet",
-    description: "Модуль Xray с независимыми входами REALITY, прямым TLS и CDN-маршрутом.",
+    short: "XRAY", family: "XRAY TRANSPORT", title: "Xray", accent: "violet",
+    description: "VLESS, VMess и Trojan. VLESS поддерживает REALITY; TLS и CDN доступны для всех трёх протоколов.",
     capabilities: [
       { name: "REALITY", detail: "Прямой маскируемый вход" },
       { name: "TLS route", detail: "Независимый TLS-домен", route: "tls" },
-      { name: "CDN route", detail: "XHTTP / WS / gRPC через CDN", route: "cdn" },
+      { name: "CDN route", detail: "XHTTP / WS / gRPC / HTTPUpgrade", route: "cdn" },
     ],
     planned: [],
   },

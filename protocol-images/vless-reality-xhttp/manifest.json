@@ -1,9 +1,9 @@
 {
   "id": "vless-reality-xhttp",
-  "name": "VLESS",
+  "name": "Xray",
   "version": "1.2.1",
   "installable": true,
-  "description": "Три независимых контура VLESS на Xray: REALITY, прямой TLS и CDN",
+  "description": "Xray: VLESS с REALITY/TLS/CDN, VMess и Trojan с TLS/CDN",
   "category": "secure-tunnels",
   "category_name": "Защищённые туннели",
   "installer": "install.sh",

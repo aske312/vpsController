@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { relayAddresses, type RelayStatus } from "../network/relay-state";
-import { connectionAddressModes } from "./connection-address";
+import { connectionAddressModes, xrayProtocolSettings } from "./connection-address";
 import type { ProfileConnection } from "./types";
 
 /** Protocol mode and the address of the next hop are independent choices. */
@@ -14,6 +14,7 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
 }) {
   const [query, setQuery] = useState("");
   const settings = connection.settings;
+  const xrayProtocol = String(settings.xray_protocol || "vless");
   const modes = connectionAddressModes(connection.component);
   const mode = modes.tls ? String(settings.route_mode || (settings.cdn_enabled ? "both" : "direct")) : modes.udp ? "udp" : "direct";
   const label = mode === "direct" && modes.tls ? "REALITY" : mode === "udp" && connection.component === "transport-shadowsocks" ? "TCP + UDP" : mode === "both" ? "Прежний режим" : mode.toUpperCase();
@@ -48,10 +49,13 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
     }
   }
   return <div className="relayEndpointSelector">
+    {modes.tls && <label><span>Протокол Xray</span><select aria-label="Протокол Xray" value={xrayProtocol} disabled={locked} onChange={event => onChange(xrayProtocolSettings(settings, event.target.value, tlsDomains, cdnDomains))}>
+      <option value="vless">VLESS</option><option value="vmess">VMess</option><option value="trojan">Trojan</option>
+    </select></label>}
     <span>Режим подключения</span>
     <span className="mihomoAddressModes" role="group" aria-label="Режим подключения">
       {modes.tls ? <>
-        <button type="button" aria-pressed={mode === "direct"} disabled={locked} onClick={() => selectMode("direct")}>REALITY</button>
+        {xrayProtocol === "vless" && <button type="button" aria-pressed={mode === "direct"} disabled={locked} onClick={() => selectMode("direct")}>REALITY</button>}
         {webTransports.length > 0 && <>
           <button type="button" aria-pressed={mode === "tls"} disabled={locked || !tlsServices.length} onClick={() => selectMode("tls")}>TLS</button>
           <button type="button" aria-pressed={mode === "cdn"} disabled={locked || !cdnDomains.length && !settings.cdn_domain} onClick={() => selectMode("cdn")}>CDN</button>
@@ -73,15 +77,16 @@ export function MihomoConnectionAddress({ connection, inventory, tlsDomains, udp
       {domains.filter(item => selected === JSON.stringify(["direct", item]) || matches(item)).map(item => <option key={item} value={JSON.stringify(["direct", item])}>{item} · {cdnRelay ? `CDN через Relay · ${savedHost?.name || "сохранённый узел"}` : mode === "cdn" ? "CDN" : "напрямую"}</option>)}
       {canRelay && choices.filter(choice => choice.key === selected || matches(`${choice.address} ${choice.host.name}`)).map(choice => <option key={choice.key} value={choice.key}>{choice.address} · через Relay · {choice.host.name}</option>)}
     </select></label>
-    {mode === "cdn" && (webTransports.includes("websocket") || cdnRelay) && <><label><span>Сервер приёма CDN</span><select aria-label="Сервер приёма CDN" value={relay} disabled={locked} onChange={event => change({ relay_host_id: event.target.value, relay_address: "", relay_cdn: Boolean(event.target.value), ...(event.target.value ? { cdn_transport: "websocket" } : {}) })}>
+    {mode === "cdn" && (webTransports.length > 0 || cdnRelay) && <><label><span>Сервер приёма CDN</span><select aria-label="Сервер приёма CDN" value={relay} disabled={locked} onChange={event => change({ relay_host_id: event.target.value, relay_address: "", relay_cdn: Boolean(event.target.value) })}>
       <option value="">Основной VPS</option>
       {relay && !savedHost && <option value={relay}>Сохранённый Relay</option>}
       {inventory.status?.hosts.map(host => <option key={host.id} value={host.id}>{host.name} · {new URL(host.agent_url).hostname}</option>)}
-    </select></label>{relay && !cdnRelay && <button type="button" disabled={locked} onClick={() => change({ relay_cdn: true, relay_address: "", cdn_transport: "websocket" })}>Применить CDN через Relay</button>}
+    </select></label>{relay && !cdnRelay && <button type="button" disabled={locked} onClick={() => change({ relay_cdn: true, relay_address: "" })}>Применить CDN через Relay</button>}
     {cdnRelay && <><small>Порты Origin Rules: HTTPS → {cdnPort(443) || "после сохранения"}; HTTP ACME → {cdnPort(80) || "после сохранения"}.</small>
+      {settings.cdn_transport === "grpc" && <small>Для gRPC включите поддержку gRPC в Cloudflare и HTTP/2 до основного VPS.</small>}
       <details><summary>Настройки Cloudflare</summary><p>Для {domain} включите DNS proxy и укажите IP выбранного Relay. Используйте отдельный CDN-домен для этого сервера приёма. TLS: Full (strict). Правило для HTTPS направьте на порт HTTPS выше. Отдельное правило HTTP для /.well-known/acme-challenge/* направьте на порт ACME, без редиректа на HTTPS. Это нужно для выпуска и продления сертификата на основном VPS. Порты также доступны в Сеть → ROUTES после сохранения. Клиент подключается к {domain}:443. Правила Cloudflare не меняются автоматически; готовность подтверждает проверка маршрута.</p></details></>}</>}
     {mode === "tls" && relay && <label><span>TLS-сервис основного VPS</span><select aria-label="TLS-сервис основного VPS" value={tlsDomain} disabled={locked} onChange={event => change({ tls_domain: event.target.value })}>{tlsServices.map(item => <option key={item} value={item}>{item}</option>)}</select><small>Имя TLS-сервиса сохраняется для SNI и проверки сертификата; подключение идёт на адрес Relay.</small></label>}
-    <small>{cdnRelay ? "VLESS WebSocket через CDN и Relay. Сертификат CDN-домена и обработчик протокола находятся на основном VPS." : relay ? savedOnly ? "Сохранённый маршрут оставлен без изменений. Для нового назначения выберите доступный адрес." : mode === "tls" ? "Relay пересылает TCP до TLS-сервиса основного VPS. Внешний порт будет назначен при сохранении." : `Через Relay · ${mode === "udp" ? label : "TCP"}. Порт и пересылка будут настроены при сохранении; параметры протокола сохраняются.` : mode === "cdn" ? "VLESS через CDN-домен основного VPS." : mode === "tls" ? "TLS-вход основного VPS с проверкой сертификата." : "Прямое подключение к основному VPS."}</small>
+    <small>{cdnRelay ? "Xray через CDN и Relay. Сертификат CDN-домена и обработчик протокола находятся на основном VPS." : relay ? savedOnly ? "Сохранённый маршрут оставлен без изменений. Для нового назначения выберите доступный адрес." : mode === "tls" ? "Relay пересылает TCP до TLS-сервиса основного VPS. Внешний порт будет назначен при сохранении." : `Через Relay · ${mode === "udp" ? label : "TCP"}. Порт и пересылка будут настроены при сохранении; параметры протокола сохраняются.` : mode === "cdn" ? "Xray через CDN-домен основного VPS." : mode === "tls" ? "TLS-вход основного VPS с проверкой сертификата." : "Прямое подключение к основному VPS."}</small>
     {modes.tls && webTransports.length > 0 && !tlsServices.length && <small>Для TLS через Relay сначала добавьте рабочий TLS-домен основного VPS в Сеть → ROUTES.</small>}
     {canRelay && (inventory.failed || !inventory.status) && <small>{inventory.failed ? "Список Relay временно недоступен. Сохранённый адрес оставлен без изменений." : "Обновляем адреса подключённых Relay…"}</small>}
   </div>;

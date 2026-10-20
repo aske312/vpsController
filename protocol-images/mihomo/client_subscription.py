@@ -1,6 +1,8 @@
 """Subscription import page and VLESS share links for URI-only clients."""
 from html import escape
 from urllib.parse import quote, urlencode
+import base64
+import json
 
 
 CLIENT_HINTS = {"happ": "Happ", "singbox": "sing-box", "v2rage": "v2RAGE"}
@@ -20,10 +22,11 @@ def vless_subscription(configs):
     links = []
     for config in configs:
         node = config["outbounds"][0]
-        if node["protocol"] != "vless":
+        kind = node['protocol']
+        if kind not in {'vless', 'vmess', 'trojan'}:
             continue
-        server = node["settings"]["vnext"][0]
-        user = server["users"][0]
+        server = node["settings"]['servers' if kind == 'trojan' else 'vnext'][0]
+        user = server if kind == 'trojan' else server["users"][0]
         stream = node.get("streamSettings", {})
         params = {"encryption": user.get("encryption", "none"), "type": stream.get("network", "tcp"), "security": stream.get("security", "none")}
         tls = stream.get("realitySettings", stream.get("tlsSettings", {}))
@@ -36,8 +39,18 @@ def vless_subscription(configs):
             params["serviceName"] = stream["grpcSettings"].get("serviceName", "")
         if "httpupgradeSettings" in stream:
             params.update(stream["httpupgradeSettings"])
+        if kind == 'vmess':
+            data = {'v':'2', 'ps':config['remarks'], 'add':server['address'], 'port':str(server['port']),
+                    'id':user['id'], 'aid':'0', 'scy':'auto', 'net':params['type'], 'type':'none',
+                    'host':params.get('host', ''), 'path':params.get('serviceName', params.get('path', '')),
+                    'tls':'tls' if params['security'] == 'tls' else '', 'sni':params.get('sni', ''), 'fp':params.get('fp', '')}
+            links.append('vmess://' + base64.b64encode(json.dumps(data, ensure_ascii=False).encode()).decode())
+            continue
+        if kind == 'trojan':
+            params.pop('encryption', None)
         address = server["address"]
         if ":" in address:
             address = f"[{address}]"
-        links.append(f'vless://{quote(user["id"], safe="")}@{address}:{server["port"]}?{urlencode(params, quote_via=quote)}#{quote(config["remarks"], safe="")}')
+        identity = user['password'] if kind == 'trojan' else user['id']
+        links.append(f'{kind}://{quote(identity, safe="")}@{address}:{server["port"]}?{urlencode(params, quote_via=quote)}#{quote(config["remarks"], safe="")}')
     return "\n".join(links) + "\n"

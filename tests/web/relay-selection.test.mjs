@@ -58,7 +58,9 @@ test('explicit CDN Relay keeps the public CDN domain selectable and shows separa
   assert.match(html, /aria-label="Сервер приёма CDN"/);
   assert.match(html, /Full \(strict\)/);
   assert.doesNotMatch(html, /сохранённый адрес|<optgroup/);
-  assert.doesNotMatch(mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example'}, {webTransports:['grpc']}), /aria-label="Сервер приёма CDN"/);
+  for (const transport of ['websocket', 'xhttp', 'grpc', 'httpupgrade']) {
+    assert.match(mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example',cdn_transport:transport}, {webTransports:[transport]}), /aria-label="Сервер приёма CDN"/);
+  }
 });
 
 test('Mihomo retains excluded or unavailable saved Relay endpoints and allows direct recovery', () => {

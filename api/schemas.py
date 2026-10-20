@@ -188,6 +188,7 @@ class ClientConnectionSettings(BaseModel):
     timeout: int | None = Field(default=None, ge=30, le=3600)
     no_delay: bool = True
     fingerprint: Literal["chrome", "firefox", "safari"] = "chrome"
+    xray_protocol: Literal['vless', 'vmess', 'trojan'] = 'vless'
     cdn_domain: str | None = Field(default=None, max_length=253, pattern=r"^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
     transport: Literal["xhttp", "raw", "grpc"] = "xhttp"
     transport_path: str = Field(default="/", min_length=1, max_length=128, pattern=r"^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$")

@@ -37,6 +37,8 @@ def perform(api, payload, identity, *, resume_id=None):
         if resume_id:
             raise ValueError('Результат подключения не найден')
         client = api.ClientCreate.model_validate(payload['client'])
+        if client.protocol == 'vless-reality-xhttp' and client.settings.xray_protocol != 'vless' and 'cdn' in (client.vless_routes or []):
+            raise ValueError('Для CDN через Relay используйте компонент Xray внутри Mihomo; в Direct через Relay доступен TLS')
         if not client.settings.relay_host_id or client.protocol == 'ikev2' or client.settings.channel_mode != 'direct':
             raise ValueError('Нужен совместимый протокол и выбранный Relay без старого режима relay')
         control.host(control.checked(payload['expected_revision']), client.settings.relay_host_id)

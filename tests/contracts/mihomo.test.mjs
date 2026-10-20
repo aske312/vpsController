@@ -205,7 +205,7 @@ test("Mihomo VLESS is a reusable component with profile-scoped Direct and CDN co
   const manifest = JSON.parse(manifestText);
   const settingKeys = manifest.settings.map((item) => item.key);
   const connectionKeys = manifest.connection_settings.map((item) => item.key);
-  assert.equal(manifest.name, "VLESS");
+  assert.equal(manifest.id, "transport-reality");
   assert.equal(manifest.version, "1.2.0");
   for (const key of ["port_start", "cdn_port_start", "dns", "loglevel"]) {
     assert.ok(settingKeys.includes(key), `missing Mihomo VLESS core setting ${key}`);

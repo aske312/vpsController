@@ -1,17 +1,42 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyConnectionAddress, connectionAddressModes } from '../../src/features/mihomo/connection-address.ts';
+import { applyConnectionAddress, connectionAddressModes, xrayProtocolSettings } from '../../src/features/mihomo/connection-address.ts';
 
 const connection = (id, component, settings = {}, device_id = 'phone') => ({ id, component, device_id, name: id, settings });
 
+test('Xray protocol selection retains transport options and uses compatible modes', () => {
+  const settings = {route_mode:'direct', port:12000, target:'sni.example:443', transport:'xhttp', xpadding:'100-200',
+    tls_transport:'grpc', cdn_transport:'httpupgrade', tls_xhttp_mode:'packet-up', relay_host_id:'b'.repeat(32)};
+  for (const protocol of ['vmess', 'trojan']) {
+    const selected = xrayProtocolSettings(settings, protocol, ['tls.example'], ['cdn.example']);
+    assert.equal(selected.route_mode, 'tls');
+    assert.equal(selected.xray_protocol, protocol);
+    for (const key of Object.keys(settings).filter(key => key !== 'route_mode')) assert.equal(selected[key], settings[key]);
+    assert.equal(selected.tls_domain, 'tls.example');
+    assert.equal(xrayProtocolSettings(settings, protocol, [], ['cdn.example']).route_mode, 'cdn');
+    const cdn = {...settings, route_mode:'cdn', relay_cdn:true, cdn_domain:'cdn.example'};
+    assert.deepEqual(xrayProtocolSettings(cdn, protocol, [], []), {...cdn, xray_protocol:protocol});
+    const restored = xrayProtocolSettings(selected, 'vless', [], []);
+    assert.equal(restored.transport, settings.transport);
+    assert.equal(restored.target, settings.target);
+  }
+});
+
+test('bulk REALITY address does not turn VMess or Trojan into an invalid connection', () => {
+  const vmess = connection('vmess', 'transport-reality', {xray_protocol:'vmess', route_mode:'tls', tls_domain:'tls.example'});
+  const source = connection('vless', 'transport-reality', {route_mode:'direct', relay_host_id:'b'.repeat(32)});
+  assert.equal(applyConnectionAddress([vmess], source)[0], vmess);
+});
+
 test('bulk CDN through Relay stays on VLESS and clears the flag when leaving CDN', () => {
-  const vless = connection('vless', 'transport-reality', { route_mode: 'tls', tls_domain: 'origin.example' });
+  const vless = connection('vless', 'transport-reality', { route_mode: 'tls', tls_domain: 'origin.example', cdn_transport:'xhttp', cdn_xhttp_mode:'packet-up' });
   const udp = connection('udp', 'transport-tuic', { sni: 'cert.example' });
   const source = connection('cdn', 'transport-reality', { route_mode:'cdn', cdn_domain:'cdn.example', relay_cdn:true, relay_host_id:'b'.repeat(32) });
   const result = applyConnectionAddress([vless, udp], source);
   assert.equal(result[0].settings.route_mode, 'cdn');
   assert.equal(result[0].settings.relay_cdn, true);
-  assert.equal(result[0].settings.cdn_transport, 'websocket');
+  assert.equal(result[0].settings.cdn_transport, 'xhttp');
+  assert.equal(result[0].settings.cdn_xhttp_mode, 'packet-up');
   assert.equal(result[1], udp);
   const cleared = applyConnectionAddress(result, {...source, settings:{route_mode:'direct'}});
   assert.equal(cleared[0].settings.relay_cdn, false);

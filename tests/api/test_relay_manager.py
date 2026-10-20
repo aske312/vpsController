@@ -63,7 +63,43 @@ class FakeAgent:
 
 
 class RelayManagementTests(unittest.TestCase):
-    def test_cdn_relay_exports_public_443_and_prepares_https_and_acme_ingress(self):
+    def test_cdn_relay_preserves_each_transport_in_client_exports(self):
+        dns = {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}
+        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
+        for transport, key in [('websocket', 'wsSettings'), ('xhttp', 'xhttpSettings'), ('grpc', 'grpcSettings'), ('httpupgrade', 'httpupgradeSettings')]:
+            with self.subTest(transport=transport):
+                credential = {'uuid': 'key-value', 'cdn_enabled': True, 'cdn_domain': 'cdn.example',
+                              'cdn_path': '/private', 'cdn_transport': transport, 'cdn_xhttp_mode': 'packet-up'}
+                connection = {'id': 'cdn', 'name': 'CDN', 'component': 'transport-reality', 'credential': credential,
+                              'settings': {'route_mode': 'cdn', 'cdn_domain': 'cdn.example', 'cdn_transport': transport,
+                                           'relay_host_id': self.host_id, 'relay_cdn': True}}
+                relay_connections.prepare_mihomo(self.control, [connection], 'c'*32)
+                self.assertEqual({(r['transport'], r['target_port']) for r in self.control.read()['routes']}, {('tcp', 443), ('tcp', 80)})
+                source = copy.deepcopy(connection)
+                lines = relay_connections.redirect_mihomo_lines(self.control, connection['component'], connection['settings'], manager.render_vless_cdn(credential, 'CDN'))
+                node = yaml.safe_load('proxies:\n'+'\n'.join(lines))['proxies'][0]
+                self.assertEqual((node['server'], node['port'], node['servername']), ('cdn.example', 443, 'cdn.example'))
+                self.assertEqual(node['network'], 'ws' if transport in {'websocket', 'httpupgrade'} else transport)
+                if transport == 'httpupgrade': self.assertTrue(node['ws-opts']['v2ray-http-upgrade'])
+                if transport == 'xhttp': self.assertEqual(node['xhttp-opts'], {'path':'/private', 'mode':'packet-up'})
+                if transport == 'grpc': self.assertEqual(node['grpc-opts']['grpc-service-name'], 'private')
+                xray = manager.build_xray_configs([connection], {}, dns, [], ORIGIN, lambda: {}, redirect)[0]['outbounds'][0]
+                endpoint = xray['settings']['vnext'][0]
+                self.assertEqual((endpoint['address'], endpoint['port']), ('cdn.example', 443))
+                stream = xray['streamSettings']
+                self.assertEqual(stream['network'], 'ws' if transport == 'websocket' else transport)
+                self.assertEqual(stream['tlsSettings']['serverName'], 'cdn.example')
+                self.assertEqual(stream[key]['serviceName' if transport == 'grpc' else 'path'], 'private' if transport == 'grpc' else '/private')
+                if transport == 'xhttp': self.assertEqual(stream[key]['mode'], 'packet-up')
+                if transport != 'xhttp':
+                    exported = manager.build_singbox_config([connection], {}, dns, [], ORIGIN, lambda: {}, False, redirect=redirect)
+                    node = next(item for item in exported['outbounds'] if item['type'] == 'vless')
+                    self.assertEqual((node['server'], node['server_port'], node['tls']['server_name']), ('cdn.example', 443, 'cdn.example'))
+                    self.assertEqual(node['transport']['type'], 'ws' if transport == 'websocket' else transport)
+                    self.assertEqual(node['transport']['service_name' if transport == 'grpc' else 'path'], 'private' if transport == 'grpc' else '/private')
+                self.assertEqual(connection, source)
+
+    def test_cdn_relay_reuses_https_and_acme_ingress_and_rejects_other_port80_consumers(self):
         credential = {'uuid': 'key-value', 'cdn_enabled': True, 'cdn_domain': 'cdn.example', 'cdn_path': '/private', 'cdn_transport': 'websocket'}
         connection = {'id': 'cdn', 'name': 'CDN', 'component': 'transport-reality', 'credential': credential,
                       'settings': {'route_mode': 'cdn', 'cdn_domain': 'cdn.example', 'relay_host_id': self.host_id, 'relay_cdn': True}}
@@ -71,20 +107,6 @@ class RelayManagementTests(unittest.TestCase):
         rules = self.control.read()['routes']
         self.assertEqual({(r['transport'], r['target_port']) for r in rules}, {('tcp', 443), ('tcp', 80)})
         self.assertTrue(all(20000 <= r['listen_port'] <= 20999 for r in rules))
-        source = copy.deepcopy(connection)
-        lines = relay_connections.redirect_mihomo_lines(self.control, connection['component'], connection['settings'], manager.render_vless_cdn(credential, 'CDN'))
-        node = yaml.safe_load('proxies:\n'+'\n'.join(lines))['proxies'][0]
-        self.assertEqual((node['server'], node['port'], node['servername']), ('cdn.example', 443, 'cdn.example'))
-        self.assertEqual(node['ws-opts']['headers']['Host'], 'cdn.example')
-        redirect = lambda item, nodes, endpoints=(): relay_connections.redirect_nodes(self.control, item, nodes, endpoints)
-        dns = {'nameserver': '1.1.1.1', 'fallback': '8.8.8.8'}
-        singbox = manager.build_singbox_config([connection], {}, dns, [], ORIGIN, lambda: {}, False, redirect=redirect)
-        node = next(item for item in singbox['outbounds'] if item['type'] == 'vless')
-        self.assertEqual((node['server'], node['server_port'], node['tls']['server_name']), ('cdn.example', 443, 'cdn.example'))
-        xray = manager.build_xray_configs([connection], {}, dns, [], ORIGIN, lambda: {}, redirect)
-        self.assertEqual(xray[0]['outbounds'][0]['settings']['vnext'][0]['address'], 'cdn.example')
-        self.assertEqual(xray[0]['outbounds'][0]['settings']['vnext'][0]['port'], 443)
-        self.assertEqual(connection, source)
         self.agent.offline = True
         relay_connections.prepare_mihomo(self.control, [connection], 'd'*32, previous=[connection])
         with self.assertRaises(ValueError):

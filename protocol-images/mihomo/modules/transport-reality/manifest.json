@@ -1,9 +1,9 @@
 {
   "id": "transport-reality",
-  "name": "VLESS",
+  "name": "Xray",
   "version": "1.2.0",
   "installable": true,
-  "description": "Сервер VLESS с REALITY, TLS и CDN.",
+  "description": "Компонент Xray: VLESS, VMess и Trojan с транспортами TLS/CDN; REALITY для VLESS.",
   "category": "transport",
   "category_name": "Компоненты",
   "default_enabled": false,
@@ -77,6 +77,18 @@
     }
   ],
   "connection_settings": [
+    {
+      "key": "xray_protocol",
+      "label": "Протокол Xray",
+      "type": "select",
+      "default": "vless",
+      "options": [
+        { "value": "vless", "label": "VLESS" },
+        { "value": "vmess", "label": "VMess" },
+        { "value": "trojan", "label": "Trojan" }
+      ],
+      "help": "VLESS: REALITY, TLS и CDN. VMess и Trojan: TLS или CDN."
+    },
     {
       "key": "route_mode",
       "label": "Маршрут",

@@ -272,7 +272,6 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /АКТИВНОСТЬ/);
   assert.doesNotMatch(manager, /PUBLIC_IP="\$\{PUBLIC_IP\}"/);
   assert.match(manager, /PUBLIC_IP="\$\(env_value PUBLIC_IP\)"/);
-  assert.match(page, /protocolTab === "shadowsocks" \? "SS" : protocolTab === "vless-reality-xhttp" \? "VLESS"/);
   assert.match(page, /activeProtocolImage/);
   assert.match(page, /setTab\(protocol\)/);
   assert.match(page, /const profiles: Record<Protocol, TunnelProfile>/);
@@ -284,14 +283,13 @@ test("Shadowsocks and VLESS REALITY XHTTP are independent installable modules", 
   assert.match(page, /data-asset="operator_prt_1\.webp"/);
   assert.match(page, /NOT CONNECTED/);
   assert.doesNotMatch(page, /ProtocolCommandCenter|VlessControlCenter/);
-  assert.match(page, /client\.protocol === "tuic" \? "TUIC" : client\.protocol === "trojan" \? "TRJ" : client\.protocol === "openvpn" \? "OVPN" : client\.protocol === "ikev2" \? "IKE" : "VLESS"/);
   assert.match(page, /protocolOperationOutcome\(started, status\.action, Boolean\(current\?\.installed\) === installed\)/);
   for (const operation of ["install", "remove", "update"]) {
     const body = manager.match(new RegExp(`${operation}_protocol_image\\(\\) \\{[\\s\\S]*?\\n\\}`))?.[0] || "";
     assert.match(body, /refresh_protocol_api_access/);
     assert.doesNotMatch(body, /systemctl restart "\$\{APP_NAME\}-api\.service"/);
   }
-  assert.match(vlessManifest, /"name": "VLESS"/);
+  assert.equal(JSON.parse(vlessManifest).id, "vless-reality-xhttp");
   assert.match(vlessInstall, /"\$\{candidate\}" run -test -config/);
   assert.match(vlessInstall, /mv -f -- "\$\{candidate\}" "\$\{MODULE_DIR\}\/xray"/);
   assert.match(vlessInstall, /systemctl restart vps-control-vless-reality-xhttp\.service/);

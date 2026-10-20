@@ -61,7 +61,7 @@ def read_routes() -> list[dict]:
         return os.getenv("VPS_CONTROL_EXCLUDE_COMPONENT") != image_id and (
             not registry.management(image_id).get("retained") or os.getenv("VPS_CONTROL_RESTORE_COMPONENT") == image_id)
     values = read_env(DIRECT_ENV) if available("vless-reality-xhttp") else {}
-    routes = []
+    routes = native_xray_routes() if available('vless-reality-xhttp') else []
     for prefix in ("CDN", "TLS"):
         if values.get(f"{prefix}_ENABLED") == "yes" and values.get(f"{prefix}_DOMAIN"):
             routes.append({"domain": values[f"{prefix}_DOMAIN"], "path": values.get(f"{prefix}_PATH", values.get("WS_PATH", "/")), "port": int(values.get(f"{prefix}_PORT", "10087")), "transport": values.get(f"{prefix}_TRANSPORT", "websocket"), "cloudflare": prefix == "CDN"})
@@ -70,6 +70,36 @@ def read_routes() -> list[dict]:
         # Old descriptors used the tls- filename prefix, before an explicit flag.
         value.setdefault("cloudflare", not path.stem.startswith("tls-"))
         routes.append(value)
+    return routes
+
+
+def native_xray_routes(config_path=None, clients_path=None) -> list[dict]:
+    """Use applied Direct listener snapshots, never credentials or request ACLs."""
+    config_path = config_path or DIRECT_ENV.with_name('config.json')
+    clients_path = clients_path or Path(os.getenv('DATA_DIR', '/var/lib/vps-control')) / 'clients.json'
+    if not config_path.exists() or not clients_path.exists():
+        return []
+    clients = json.loads(clients_path.read_text(encoding='utf-8'))
+    config = json.loads(config_path.read_text(encoding='utf-8'))
+    routes = []
+    for client in clients:
+        if client.get('protocol') != 'vless-reality-xhttp' or client.get('xray_protocol') not in {'vmess', 'trojan'}:
+            continue
+        for descriptor in client.get('xray_routes', []):
+            kind = 'cdn' if descriptor.get('cloudflare') is True else 'tls'
+            tag = f"xray-{kind}-{client['id']}"
+            matching = [row for row in config.get('inbounds', []) if row.get('tag') == tag and row.get('protocol') == client['xray_protocol']]
+            if len(matching) != 1:
+                raise ValueError('Direct Xray listener snapshot is stale')
+            inbound = matching[0]
+            stream = inbound.get('streamSettings', {})
+            key = {'xhttp':'xhttpSettings', 'grpc':'grpcSettings', 'websocket':'wsSettings', 'httpupgrade':'httpupgradeSettings'}.get(descriptor.get('transport'))
+            path = stream.get(key, {}).get('serviceName' if descriptor.get('transport') == 'grpc' else 'path')
+            if descriptor.get('transport') == 'grpc': path = '/' + str(path).lstrip('/')
+            if (descriptor.get('tag') != tag or inbound.get('listen') != '127.0.0.1' or inbound.get('port') != descriptor.get('port')
+                    or not key or stream.get('security', 'none') != 'none' or stream.get('network') != descriptor['transport'] or path != descriptor.get('path')):
+                raise ValueError('Direct Xray gateway snapshot is stale')
+            routes.append({key:descriptor[key] for key in ('domain', 'path', 'port', 'transport', 'cloudflare')})
     return routes
 
 

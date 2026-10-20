@@ -2,6 +2,7 @@
 from copy import deepcopy
 from client_singbox import UnsupportedClientConfig
 from client_labels import connection_label
+import xray_protocols
 
 
 def xray_rules(rules):
@@ -72,7 +73,7 @@ def build_xray_configs(connections, routing, dns, rules, endpoint, direct_settin
                 stream["httpupgradeSettings"] = {"path": path, "host": address}
             elif kind not in {"raw", "tcp"}:
                 raise UnsupportedClientConfig(f"Транспорт {kind} не поддерживается экспортом Happ")
-            nodes.append({"protocol": "vless", "settings": {"vnext": [{"address": address, "port": port, "users": [{"id": credential["uuid"], "encryption": credential.get("encryption") or "none"}]}]}, "streamSettings": stream})
+            nodes.append({"protocol": xray_protocols.protocol(credential), "settings": xray_protocols.outbound_settings(credential, address, port), "streamSettings": stream})
             if redirect:
                 redirect(connection, [nodes[-1]])
     if not nodes:
