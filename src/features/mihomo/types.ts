@@ -80,6 +80,7 @@ export type Profile = {
 };
 
 export type ProfileConnection = {
+  credential?: { port?: number; server_address?: string };
   route_state?: { state: "current" | "stale" | "unknown"; reason: string; addresses: string[]; bindings: string[] };
   id: string;
   component: string;

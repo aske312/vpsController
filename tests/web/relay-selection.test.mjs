@@ -58,6 +58,7 @@ test('legacy CDN Relay stays explicit and can be moved before CDN', () => {
   assert.match(html, /origin-cdn.example.*selected=""/);
   assert.match(html, /aria-label="Вход в CDN"/);
   assert.match(html, /Origin Rules/);
+  assert.match(html, /Клиент → CDN \(origin-cdn.example:443\) → Relay \(relay.example[^)]*\) → VPS/);
   assert.doesNotMatch(html, /сохранённый адрес|<optgroup/);
   for (const transport of ['websocket', 'xhttp', 'grpc', 'httpupgrade']) {
     assert.match(mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example',cdn_transport:transport}, {webTransports:[transport]}), /aria-label="Вход в CDN"/);
@@ -67,9 +68,36 @@ test('legacy CDN Relay stays explicit and can be moved before CDN', () => {
 test('first hop CDN Relay shows the preserved CDN domain and a Relay entry address', () => {
   const html = mihomoAddress('transport-reality', {route_mode:'cdn',cdn_domain:'origin-cdn.example',relay_host_id:host.id,relay_cdn:true,relay_cdn_mode:'before_cdn'});
   assert.match(html, /origin-cdn.example.*selected=""/);
-  assert.match(html, /Cloudflare Free/);
-  assert.match(html, /SNI, Host/);
-  assert.doesNotMatch(html, /Origin Rules:|Перенести Relay/);
+  assert.match(html, /Клиент → Relay \(relay.example[^)]*\) → CDN \(origin-cdn.example:443\) → VPS/);
+  assert.doesNotMatch(html, /<details|Настройки Cloudflare|SNI, Host|Origin Rules:|Перенести Relay/);
+});
+
+test('Mihomo route maps use protocol ports, matching Relay sockets and bracketed IPv6', () => {
+  const origin = '203.0.113.10';
+  for (const component of ['transport-reality','transport-wg','transport-awg','transport-shadowsocks','transport-hysteria2','transport-tuic']) {
+    const transports = component === 'transport-reality' ? ['tcp'] : component === 'transport-shadowsocks' ? ['tcp','udp'] : ['udp'];
+    const routes = transports.map(transport => ({transport,target_ip:origin,target_port:31000,listen_port:20001}));
+    const props = {connection:{id:'node',component,settings:{route_mode:'direct',relay_host_id:host.id,relay_address:'2001:db8::1'},credential:{server_address:origin,port:31000}},
+      inventory:{status:{origin_ip:origin,hosts:[{...host,routes}]},failed:false}};
+    const html = mihomoAddress(component, {}, props);
+    assert.match(html, /Клиент → Relay \(\[2001:db8::1\]:20001\) → VPS \(203.0.113.10:31000\)/, component);
+    // A draft port without a matching prepared rule cannot borrow another port.
+    props.connection.settings.port = 31001;
+    assert.match(mihomoAddress(component, {}, props), /Relay \(\[2001:db8::1\] · порт после сохранения\) → VPS \(203.0.113.10:31001\)/);
+  }
+});
+
+test('Mihomo CDN and direct maps use their own addresses and ignore unrelated Relay destinations', () => {
+  const origin = '203.0.113.10';
+  const inventory = {status:{origin_ip:origin,hosts:[{...host,routes:[
+    {transport:'tcp',target_ip:origin,target_port:443,listen_port:20001},
+    {transport:'tcp',target_ip:'104.16.1.2',target_port:443,listen_port:20002,cdn_domain:'origin-cdn.example'},
+  ]}]},failed:false};
+  const base = {route_mode:'cdn',cdn_domain:'origin-cdn.example',relay_host_id:host.id,relay_cdn:true};
+  assert.match(mihomoAddress('transport-reality',{...base,relay_cdn_mode:'before_cdn'},{inventory}), /Relay \(relay.example:20002\) → CDN \(origin-cdn.example:443\) → VPS \(203.0.113.10:443\)/);
+  assert.match(mihomoAddress('transport-reality',base,{inventory}), /CDN \(origin-cdn.example:443\) → Relay \(relay.example:20001\) → VPS \(203.0.113.10:443\)/);
+  assert.match(mihomoAddress('transport-reality',{route_mode:'tls',tls_domain:'origin-tls.example'},{inventory}), /Клиент → VPS \(origin-tls.example:443\)/);
+  assert.match(mihomoAddress('transport-reality',{route_mode:'cdn',cdn_domain:'other.example',relay_host_id:host.id,relay_cdn:true,relay_cdn_mode:'before_cdn'},{inventory}), /Relay \(relay.example · порт после сохранения\) → CDN \(other.example:443\)/);
 });
 
 test('Mihomo retains excluded or unavailable saved Relay endpoints and allows direct recovery', () => {

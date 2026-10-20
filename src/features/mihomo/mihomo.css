@@ -1356,3 +1356,13 @@
 .mihomoAddressModes { display: flex; flex-wrap: wrap; gap: 6px; }
 .mihomoAddressApply { display: grid; justify-items: start; gap: 6px; }
 .mihomoAddressModes button[aria-pressed="true"] { border-color: var(--cyan); color: var(--cyan); }
+.mihomoConnectionRoute { display:grid; gap:4px; min-width:0; padding:3px 0; }
+.mihomoRouteLine { display:flex; flex-wrap:wrap; align-items:center; gap:4px; min-width:0; }
+.mihomoRouteStep { display:inline-flex; align-items:center; gap:4px; min-width:0; max-width:100%; }
+.mihomoRouteArrow { flex:none; color:var(--muted); font-size:12px; }
+.mihomoRouteHop { display:inline-flex; align-items:baseline; gap:5px; min-width:0; max-width:100%; padding:3px 6px; border:1px solid var(--line); border-radius:5px; background:var(--panel-soft); line-height:1.4; }
+.mihomoRouteHop b { flex:none; color:var(--muted); font-size:10px; font-weight:500; }
+.mihomoRouteHop code { min-width:0; color:var(--text); font:10px/1.4 var(--font-mono),monospace; overflow-wrap:anywhere; }
+.mihomoRouteHop[data-hop="relay"] b { color:var(--cyan); }
+.mihomoRouteHop[data-hop="cdn"] b { color:var(--amber); }
+.mihomoRouteHop[data-hop="vps"] b { color:var(--green); }
