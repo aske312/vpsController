@@ -11,6 +11,20 @@ import { checkNetworkEndpoint, type NetworkRequest } from "./network-api";
 import { endpointCheckForConsumer } from "../../shared/lib/network-readiness";
 import { NetworkRelayForm, type RelayControl } from "./network-relays";
 
+type AddressMode = false | "cdn" | "tls" | "udp";
+const routeTypes = [
+  { mode: false, title: "Relay Agent", description: "Вход через другой сервер", tag: "TCP + UDP" },
+  { mode: "cdn", title: "CDN", description: "Домен за CDN-провайдером", tag: "PROXY" },
+  { mode: "tls", title: "TLS", description: "Прямое подключение по домену", tag: "DNS ONLY" },
+  { mode: "udp", title: "UDP", description: "Прямой домен или IP", tag: "DNS ONLY" },
+] as const;
+
+function RouteTypeIcon({ mode }: { mode: AddressMode }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {mode === false ? <><rect x="3" y="3" width="7" height="6" rx="1.5" /><rect x="14" y="15" width="7" height="6" rx="1.5" /><path d="M6.5 9v7a2 2 0 0 0 2 2H14M17.5 15V8a2 2 0 0 0-2-2H10" /></> : mode === "cdn" ? <><path d="M7 18a5 5 0 0 1-1-9.9 6.5 6.5 0 0 1 12.3-1A5.5 5.5 0 0 1 18 18" /><path d="m9 16 3-3 3 3m-3-3v8" /></> : mode === "tls" ? <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2" /></> : <><path d="M4 8h16m-4-4 4 4-4 4M20 16H4m4-4-4 4 4 4" /></>}
+  </svg>;
+}
+
 export function NetworkEndpoints({
   request,
   draft,
@@ -39,7 +53,7 @@ export function NetworkEndpoints({
   relay: RelayControl;
 }) {
   const [opened, setOpen] = useState(false);
-  const [addresses, setAddresses] = useState<false | "cdn" | "direct">(false);
+  const [addresses, setAddresses] = useState<AddressMode>(false);
   const open = opened && Boolean(addresses || relay.dialog && relay.embedded);
   const generation = useRef(0);
   const inFlight = useRef(false);
@@ -155,19 +169,17 @@ export function NetworkEndpoints({
           <section
             ref={dialogRef}
             tabIndex={-1}
-            className="networkModal"
+            className="networkModal networkRouteEditor"
             role="dialog"
             aria-modal="true"
             aria-labelledby="network-endpoints-title"
+            aria-describedby="network-endpoints-description"
           >
             <header className="networkSectionHeading networkModalHeader">
               <div>
                 <p className="eyebrow networkSectionEyebrow">ROUTES</p>
-                <h2 id="network-endpoints-title">Добавить маршрут</h2>
-                <p>
-                  {addresses === "direct" ? "Прямой домен сервера для TLS и UDP. Один домен может использоваться для обоих типов подключения." : addresses === "cdn" ? "CDN / ECH: домен для новых клиентских конфигураций." : "Relay: внешний узел с IP или доменом для клиентов."}
-                </p>
-                {addresses === "cdn" && knownCdnDomains.length > 0 && <div className="networkKnownRoutes"><span>Обнаруженные CDN адреса</span><div>{knownCdnDomains.map((domain) => <code key={domain}>{domain}</code>)}</div><small>Активным общим адресом для новых конфигураций остаётся значение в поле CDN / ECH.</small></div>}
+                <h2 id="network-endpoints-title">Новый маршрут</h2>
+                <p id="network-endpoints-description">Выберите способ подключения и добавьте адрес для ваших протоколов.</p>
               </div>
               <button
                 type="button"
@@ -178,16 +190,26 @@ export function NetworkEndpoints({
                 ×
               </button>
             </header>
-            <div className="networkRouteChoices" aria-label="Тип маршрута">
-              <button type="button" aria-pressed={!addresses} disabled={addresses && hasChanges} onClick={() => { if (!addresses) return; relay.openHost(undefined, true); setAddresses(false); }}><strong>Relay · IP / домен</strong><span>Relay Agent · TCP и UDP</span></button>
-              <button type="button" aria-pressed={addresses === "cdn"} disabled={addresses !== "cdn" && (hasChanges || relay.changed)} onClick={() => { setAddresses("cdn"); relay.resetDialog(); }}><strong>CDN / ECH · домен</strong><span>Домен и proxy у CDN-провайдера</span></button>
-              <button type="button" aria-pressed={addresses === "direct"} disabled={addresses !== "direct" && (hasChanges || relay.changed)} onClick={() => { setAddresses("direct"); relay.resetDialog(); }}><strong>Прямой домен · TLS / UDP</strong><span>DNS only · адрес этого сервера</span></button>
-            </div>
-            {(addresses ? hasChanges : relay.changed) && <p className="networkRouteTypeHint">Сохраните или отмените правки перед сменой типа маршрута.</p>}
+            <div className="networkRouteEditorBody">
+            <aside className="networkRouteSidebar">
+              <p className="networkRouteStep">01 <span>Способ подключения</span></p>
+              <nav className="networkRouteChoices" aria-label="Тип маршрута">
+                {routeTypes.map((type) => <button key={String(type.mode)} type="button" aria-pressed={addresses === type.mode} data-dialog-initial={addresses === type.mode || undefined} disabled={addresses !== type.mode && (hasChanges || relay.changed)} onClick={() => {
+                  if (addresses === type.mode) return;
+                  generation.current++;
+                  if (type.mode === false) relay.openHost(undefined, true); else relay.resetDialog();
+                  setAddresses(type.mode);
+                }}><i><RouteTypeIcon mode={type.mode} /></i><span><strong>{type.title}</strong><small>{type.description}</small></span><b aria-hidden="true">›</b></button>)}
+              </nav>
+              <p className="networkRouteSidebarNote">{(addresses ? hasChanges : relay.changed) ? "Сохраните или отмените правки перед сменой типа маршрута." : "Адрес будет доступен при настройке подключений Direct и Mihomo."}</p>
+            </aside>
+            <div className="networkRouteContent">
+              <header className="networkRouteContentHeader"><div><p className="networkRouteStep">02 <span>Настройка маршрута</span></p><h3>{addresses === false ? "Подключение Relay Agent" : addresses === "cdn" ? "Домен для CDN" : addresses === "tls" ? "Домен для TLS" : "Адрес для UDP"}</h3></div><span className="networkRouteKindBadge">{routeTypes.find((type) => type.mode === addresses)?.tag}</span></header>
             {!addresses && <NetworkRelayForm relay={relay} />}
             {addresses && <>
+            {addresses === "cdn" && knownCdnDomains.length > 0 && <details className="networkKnownRoutes"><summary>Обнаруженные CDN-адреса · {knownCdnDomains.length}</summary><div>{knownCdnDomains.map((domain) => <code key={domain}>{domain}</code>)}</div><small>Общий адрес для новых конфигураций задаётся в основном поле ниже.</small></details>}
             <div className="networkEndpointGrid">
-              {fields.filter((field) => addresses === "cdn" ? field.kind === "cdn" : field.kind !== "cdn").map((field) => {
+              {fields.filter((field) => field.kind === ({ cdn: "cdn", tls: "tls_relay", udp: "udp_relay" } as const)[addresses]).map((field) => {
                 const checked = checks[field.key];
                 const result = endpointCheckForConsumer(checked?.domain.toLowerCase() === String(draft[field.key] || "").trim().toLowerCase() ? checked : undefined, consumerIds[field.key] || "");
                 const value = String(draft[field.key] || "").trim();
@@ -217,6 +239,7 @@ export function NetworkEndpoints({
                       </span>
                     </div>
                     <div className="networkEndpointInput">
+                      <label className="networkEndpointPrimaryField"><span>Основной адрес</span>
                       <input
                         aria-label={field.label}
                         type="text"
@@ -235,6 +258,7 @@ export function NetworkEndpoints({
                         placeholder={field.placeholder}
                         autoComplete="off"
                       />
+                      </label>
                       <button
                         type="button"
                         onClick={() => void check(field)}
@@ -260,8 +284,8 @@ export function NetworkEndpoints({
                           : ""}
                       </em>
                     )}
-                    <div className="networkEndpointRouteList">
-                      <span>Адреса этого типа</span>
+                    <details className="networkEndpointRouteList">
+                      <summary>Дополнительные адреса <span>{Math.max(0, values.length - 1)}</span></summary>
                       {values.slice(1).map((route) => <div key={route}><code>{route}</code></div>)}
                       <label>Дополнительный адрес · {field.label}
                         <input type="text" value={extra[field.key] || ""} placeholder={field.placeholder} autoComplete="off" disabled={busy} onChange={(event) => setExtra((current) => ({ ...current, [field.key]: event.target.value }))} />
@@ -271,27 +295,30 @@ export function NetworkEndpoints({
                         onRouteListChange(field.key, [...values, route]);
                         setExtra((current) => ({ ...current, [field.key]: "" }));
                       }}>Добавить адрес</button>
-                    </div>
+                    </details>
                   </article>
                 );
               })}
             </div>
-            {pendingAddress && <p role="status">Нажмите «Добавить адрес» для заполненного дополнительного поля или очистите его перед сохранением.</p>}
+            {pendingAddress && <p className="networkRouteDraftHint" role="status">Нажмите «Добавить адрес» для заполненного дополнительного поля или очистите его перед сохранением.</p>}
             <div className="networkEndpointFooter">
               <p>
                 {addresses === "cdn" ? "CDN/ECH требует домен. Relay подключается отдельно через Agent; его адрес выбирается в настройках протокола." : "Сохраняется адрес и его назначение. Подключения, порты и сертификаты настраиваются отдельно в протоколах; существующие конфигурации клиентов не меняются."}
               </p>
-              <button type="button" onClick={close}>Отмена</button>
+              <div className="networkRouteFooterActions"><button type="button" onClick={close}>Отмена</button>
               <button
                 type="button"
                 className="networkPrimaryButton"
                 onClick={onSave}
                 disabled={busy || readFailed || !dirty || pendingAddress}
               >
-                Сохранить адреса
+                Сохранить маршрут
               </button>
+              </div>
             </div>
             </>}
+            </div>
+            </div>
           </section>
         </div>
       )}

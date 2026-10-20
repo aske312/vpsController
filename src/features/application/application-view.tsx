@@ -3,7 +3,6 @@
 import type { ApplicationAction, ApplicationDependency, ApplicationStatus, ServicesStatus } from "../../shared/types/control-plane";
 import { applicationRuntime } from "./runtime-state";
 import { applicationVersionState } from "./version-state";
-import { actionLabels, applicationActionState } from "../../shared/lib/control-plane-ui";
 
 type ApplicationVersion = { branch?: string; current_commit?: string; latest_commit?: string; outdated?: boolean | null; checked_at?: string | null; error?: string; refreshing?: boolean };
 type UpdateStatus = { available?: number | null; security?: number | null; kernel_available?: boolean | null; reboot_required?: boolean; automatic?: boolean | null; source?: string; checked_at?: string | null; refreshing?: boolean };
@@ -20,7 +19,6 @@ type ApplicationViewProps = {
 };
 
 export function ApplicationView({ application, services, applicationVersion, applicationDependencies, updates, serviceModeActive, busy, applicationLogs, runApplicationAction, changeServiceMode, changePanelAccess, loadApplicationLogs, downloadLogs, downloadUpdateReport }: ApplicationViewProps) {
-  const actionState = applicationActionState(application?.action);
   const versionState = applicationVersionState(applicationVersion);
   const testReleaseActive = applicationVersion?.branch === "test-pro";
   const recoveryRequired = application?.recovery?.application_required === true;
@@ -75,11 +73,6 @@ export function ApplicationView({ application, services, applicationVersion, app
                 <span><strong>{container.component_name || container.Service || `Компонент ${index + 1}`}</strong><small>{container.purpose} · {container.presentation.reason}</small></span>
                 <b>{container.presentation.label}</b>
               </div>)}
-              {application?.action?.action && <div className={actionState === "FAILED" ? "failed" : actionState === "DONE" ? "healthy" : "pending"}>
-                <i />
-                <span><strong>Последняя команда  {actionLabels[application.action.action.split(":")[0]] || application.action.action}</strong><small>{actionState === "RUNNING" ? "Команда выполняется системной службой" : actionState === "DONE" ? "Завершена без ошибок" : application.action.message || "Результат уточняется"}</small></span>
-                <b>{actionState}</b>
-              </div>}
             </div>
 
             <div className="applicationPrimaryActions">

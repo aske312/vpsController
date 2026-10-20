@@ -195,16 +195,22 @@ export function NetworkRelayForm({ relay }: { relay: RelayControl }) {
     <NetworkRelayNotice relay={relay} />
     <p className="relayConnectionHint">Подключите установленный Relay Agent. TCP/UDP и внешний порт будут выбраны автоматически для протокола.</p>
     <form className="relayForm" onSubmit={event => { event.preventDefault(); void relay.saveHost(); }}>
+      <div className="relayFieldGroup">
+      <h4>Узел и адрес</h4>
       <label>Название узла<input required maxLength={64} value={relay.name} onChange={event => relay.changeName(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder="Например, Relay Amsterdam" /></label>
       <label>IP или домен для клиентов<input maxLength={253} value={relay.address} onChange={event => relay.changeAddress(event.target.value)} disabled={relay.locked} placeholder="IP агента или relay.example.com" /></label>
       <small>Пустое поле использует IP агента. Для домена: DNS-запись на IP агента, без CDN proxy. Порт указывать не нужно.</small>
-      <label>JSON подключения Agent<input type="password" autoComplete="new-password" spellCheck={false} required={!relay.edit} value={relay.connection} onChange={event => relay.changeConnection(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder={relay.edit ? "Новые параметры для замены токена / сертификата" : "Вставьте JSON из раздела Agent на Relay-сервере"} /></label>
+      </div>
+      <div className="relayFieldGroup">
+      <h4>Данные подключения</h4>
+      <label>JSON подключения Agent<input type="password" autoComplete="new-password" spellCheck={false} required={!relay.edit} value={relay.connection} onChange={event => relay.changeConnection(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder={relay.edit ? "Новые параметры для замены токена / сертификата" : "Вставьте JSON из раздела Agent"} /></label>
       <small>Адрес API, токен и отпечаток сертификата. Сохранённый токен в браузер не возвращается.</small>
+      </div>
       {!!relay.edit?.excluded_addresses?.length && <div><b>Исключённые адреса</b>{relay.edit.excluded_addresses.map(address => <p key={address}>{address} <button type="button" disabled={relay.locked || relay.status?.pending} onClick={() => {
         if (relay.edit && relay.status) void relay.submit(`/network/relays/${relay.edit.id}/address?address=${encodeURIComponent(address)}&restore=true`, { method: "DELETE", headers: { "If-Match": relay.status.revision } }).then(started => { if (started) relay.resetDialog(); });
       }}>Вернуть в список</button></p>)}</div>}
       {relay.edit && <button type="button" className="networkRouteDelete" disabled={relay.locked || relay.status?.pending} onClick={() => { relay.setConfirmation(relay.edit); }}>Удалить узел и все пересылки</button>}
-      <div className="relayActions"><button type="submit" disabled={relay.locked || relay.status?.pending && !relay.edit || !relay.name.trim() || !relay.edit && !relay.connection}>Проверить и подключить</button><button type="button" onClick={relay.close}>Отмена</button></div>
+      <div className="relayActions"><button type="button" onClick={relay.close}>Отмена</button><button type="submit" className="networkPrimaryButton" disabled={relay.locked || relay.status?.pending && !relay.edit || !relay.name.trim() || !relay.edit && !relay.connection}>{relay.edit ? "Проверить и сохранить" : "Подключить Relay"}</button></div>
     </form>
   </div>;
 }

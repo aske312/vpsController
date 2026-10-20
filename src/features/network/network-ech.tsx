@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useCdnSecurity } from "../application/use-cdn-security";
 import { OperationNotifications } from "../../control-panel/components/operation-notifications";
+import { useNotifier } from "../../shared/notifications/notification-center";
 import type { CdnOperation, CdnSecurityStatus, EchRecord } from "../../shared/lib/cdn-security-operation";
 import type { NetworkRequest } from "./network-api";
 
@@ -10,7 +11,7 @@ export function NetworkEch({ domain, route, request }: { domain: string; route: 
   const [open, setOpen] = useState(false);
   const [record, setRecord] = useState<EchRecord | null>(null);
   const [serverOperation, setServerOperation] = useState<CdnOperation | null>(null);
-  const [error, setError] = useState("");
+  const { error: notifyError } = useNotifier("network-ech", `ECH · ${domain}`);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState("");
   const [capability, setCapability] = useState<{ supported: boolean; message: string } | null>(null);
@@ -21,20 +22,19 @@ export function NetworkEch({ domain, route, request }: { domain: string; route: 
 
   async function load() {
     setLoading(true);
-    setError("");
     try {
       const status = await request<{ record: EchRecord | null; operation: CdnOperation | null; capability: { supported: boolean; message: string } }>(`/application/ech?domain=${encodeURIComponent(domain)}`);
       setRecord(status.record);
       setServerOperation(status.operation);
       setCapability(status.capability);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось прочитать настройку ECH");
+      notifyError(cause instanceof Error ? cause.message : "Не удалось прочитать настройку ECH");
     } finally { setLoading(false); }
   }
 
   async function copy(label: string, value: string) {
     try { await navigator.clipboard.writeText(value); setCopied(label); }
-    catch { setError("Не удалось скопировать. Выделите значение и скопируйте вручную."); }
+    catch { notifyError("Не удалось скопировать. Выделите значение и скопируйте вручную."); }
   }
 
   return <div className="networkEch">
@@ -46,8 +46,6 @@ export function NetworkEch({ domain, route, request }: { domain: string; route: 
       {capability?.message && <p role="status">{capability.message}</p>}
       <button type="button" className="ghostButton" disabled={loading || command.pending} onClick={() => void load()}>Обновить данные</button>
       {loading && <p role="status">Загрузка…</p>}
-      {error && <p role="alert">{error}</p>}
-      {command.operation && <p role="status">{command.operation.message}</p>}
       {record && <>
         <p>Добавьте запись в зоне домена. Если DNS-панель сама дописывает зону, укажите только относительное имя: например, <code>cdn</code> для зоны <code>example.com</code>.</p>
         <dl>{([
