@@ -6,7 +6,8 @@ from pathlib import Path
 import tempfile
 import unittest
 import yaml
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from urllib.parse import unquote
 
 from tests.api.support import manager, managed_mihomo_fixture
 
@@ -68,6 +69,50 @@ class ClientOptionsTests(unittest.TestCase):
         data, extension = manager.render_client_profile(self.profile, "phone", "singbox")
         self.assertEqual(extension, "json")
         self.assertIn('"outbounds"', data)
+
+    def test_subscription_names_follow_routes_relay_name_in_every_format(self):
+        connection = self.profile['connections'][0]
+        connection['settings'].update(relay_host_id='a'*32, relay_cdn=True, cdn_domain='example.com')
+        source = deepcopy(self.profile)
+        control = Mock()
+        control.endpoint.return_value = ('example.com', 443)
+        with patch.object(manager, 'relay_connection_control', return_value=control):
+            for name in ['Relay West', 'Москва · "CDN"']:
+                control.read.return_value = {'hosts': [{'id': 'a'*32, 'name': name}]}
+                for format in ['mihomo', 'singbox', 'xray', 'uri']:
+                    with self.subTest(name=name, format=format):
+                        control.read.reset_mock()
+                        data, _ = manager.render_client_profile(self.profile, 'common', format)
+                        if format == 'mihomo':
+                            config = yaml.safe_load(data)
+                            label = config['proxies'][0]['name']
+                            group = config['proxy-groups'][0]
+                            self.assertEqual(group['name'], '312node.net')
+                            self.assertEqual(group['proxies'], [label])
+                            self.assertEqual(config['rules'][-1], 'MATCH,312node.net')
+                        elif format == 'singbox':
+                            config = json.loads(data)
+                            label = config['outbounds'][0]['tag']
+                            self.assertEqual(config['route']['final'], label)
+                        elif format == 'xray':
+                            label = json.loads(data)[0]['remarks']
+                        else:
+                            label = unquote(data.strip().rsplit('#', 1)[1])
+                        self.assertEqual(label, f'1 · VLESS · WebSocket · TLS · CDN · Relay: {name}')
+                        control.read.assert_called_once_with()
+        self.assertEqual(self.profile, source)
+
+    def test_relay_labels_keep_protocol_details_for_all_components_and_modes(self):
+        for component in ['transport-wg', 'transport-awg', 'transport-shadowsocks',
+                          'transport-hysteria2', 'transport-tuic', 'transport-reality']:
+            for variant in ['direct', 'tls', 'cdn']:
+                with self.subTest(component=component, variant=variant):
+                    connection = {'component': component, 'credential': {}, 'settings': {}}
+                    original = manager.connection_label(connection, 1, variant)
+                    connection.update(_relay_name='North')
+                    self.assertEqual(manager.connection_label(connection, 1, variant), original)
+                    connection['settings']['relay_host_id'] = 'a'*32
+                    self.assertEqual(manager.connection_label(connection, 1, variant), original + ' · Relay: North')
 
     def test_manual_device_settings_survive_input_and_normalization(self):
         device = manager.ProfileDeviceInput(id="phone", name="iPhone", manual=True, os="ios",

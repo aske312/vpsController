@@ -908,7 +908,7 @@ export function MihomoPage({
     return host ? `${host}:443` : "";
   }
 
-  function addProfileConnection(module: Module, vlessRoute: "direct" | "tls" | "cdn" = "direct") {
+  function addProfileConnection(module: Module) {
     const settings = Object.fromEntries((module.connection_settings || []).map((field) => [field.key, field.default]));
     if (module.id === "transport-reality") {
       if (!commonDevice) {
@@ -916,18 +916,16 @@ export function MihomoPage({
           if (!activeCapabilities.transports.includes(String(settings[key]))) settings[key] = key === "transport" ? "raw" : "websocket";
         }
       }
-      settings.route_mode = vlessRoute;
-      if (vlessRoute === "direct") settings.target = unusedRealityTarget(deviceConnections);
-      settings.cdn_enabled = vlessRoute === "cdn";
-      if (vlessRoute === "cdn") settings.cdn_domain = availableNetworkRoute("cdn");
-      if (vlessRoute === "tls") settings.tls_domain = availableNetworkRoute("tls");
+      settings.route_mode = "direct";
+      settings.target = unusedRealityTarget(deviceConnections);
+      settings.cdn_enabled = false;
     }
     const id = `connection-${clientUuid()}`;
     setSelectedConnectionId(id);
     setProfileConnections((current) => [...current, {
       id,
       component: module.id,
-      name: module.id === "transport-reality" ? (vlessRoute === "cdn" ? "Xray CDN" : vlessRoute === "tls" ? "Xray TLS" : "Xray REALITY") : module.name,
+      name: module.id === "transport-reality" ? "Xray" : module.name,
       device_id: activeDeviceId,
       settings,
     }]);
@@ -1727,16 +1725,9 @@ export function MihomoPage({
               {!networkStatus && <p className="mihomoHint" role="status">Состояние маршрутов сети неизвестно. Обновите данные перед добавлением TLS/CDN-подключения. Ваш ввод сохранён.</p>}
               <header><div><b>Подключения устройства</b><small>Каналы попадут только в подписку выбранного устройства. После создания проверьте TLS/CDN-подключения в разделе «Сеть».</small></div><span className="mihomoStrategyBadge">{profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.code} · {profileStrategies.find((item) => item.value === String(activeProfileRouting.strategy || ""))?.title}</span></header>
               <div className="mihomoConnectionAdd">
-                {installedChannels.filter((module) => commonDevice || activeCapabilities.components.includes(module.id)).flatMap((module) => {
-                  if (module.id === "transport-reality") {
-                    return [
-                      <button key="vless-direct" type="button" onClick={() => addProfileConnection(module, "direct")}>+ Xray</button>,
-                      <button key="vless-tls" type="button" disabled={!availableNetworkRoute("tls")} title={!networkStatus ? "Состояние маршрутов сети неизвестно; обновите данные" : !availableNetworkRoute("tls") ? "Сначала добавьте прямой TLS-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "tls")}>+ Xray TLS</button>,
-                      <button key="vless-cdn" type="button" disabled={!availableNetworkRoute("cdn")} title={!networkStatus ? "Состояние маршрутов сети неизвестно; обновите данные" : !availableNetworkRoute("cdn") ? "Сначала добавьте CDN-адрес в разделе «Сеть»" : undefined} onClick={() => addProfileConnection(module, "cdn")}>+ Xray CDN</button>,
-                    ];
-                  }
-                  return [<button key={module.id} type="button" onClick={() => addProfileConnection(module)}>+ {module.name}</button>];
-                })}
+                {installedChannels.filter((module) => commonDevice || activeCapabilities.components.includes(module.id)).map((module) => (
+                  <button key={module.id} type="button" onClick={() => addProfileConnection(module)}>+ {module.id === "transport-reality" ? "Xray" : module.name}</button>
+                ))}
               </div>
               <div className="mihomoConnectionWorkspace">
                 {deviceConnections.length > 0 && <nav className="mihomoConnectionNav" aria-label="Подключения выбранного устройства">{deviceConnections.map((connection) => <button key={connection.id} type="button" className={selectedConnection?.id === connection.id ? "is-active" : ""} aria-pressed={selectedConnection?.id === connection.id} onClick={() => setSelectedConnectionId(connection.id)}><span className={`protocol-${connection.component}`}><ProtocolIcon protocol={connection.component} /></span><span><b>{connection.name}</b>{connection.route_state?.state === "stale" && <small title={connection.route_state.reason}>{connection.route_state.addresses.length ? `Stale · ${connection.route_state.addresses.join(", ")}` : connection.route_state.reason}</small>}<small>{modules.find((module) => module.id === connection.component)?.name} · {connection.settings.relay_host_id ? "Relay" : connection.settings.route_mode === "cdn" ? "CDN" : connection.settings.route_mode === "tls" ? "TLS" : "Прямое"}</small></span></button>)}</nav>}

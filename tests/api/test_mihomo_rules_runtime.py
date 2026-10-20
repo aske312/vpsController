@@ -92,6 +92,25 @@ class RuleExportTests(unittest.TestCase):
             if strategy == "url-test":
                 self.assertEqual(group["tolerance"], 99)
 
+    def test_mobile_ad_rules_are_inherited_and_exported_to_both_rule_clients(self):
+        item = profile()
+        item['routing'] = {'block_ads': True}
+        source = deepcopy(item)
+        yaml_rules = yaml.safe_load(manager.render_profile(deepcopy(item)))['rules']
+        config = json.loads(manager.render_client_profile(deepcopy(item), 'common', 'singbox')[0])
+        blocked_suffixes = {domain for rule in config['route']['rules'] if rule.get('outbound') == 'block'
+                            for domain in rule.get('domain_suffix', [])}
+        for domain in ['bidmachine.io', 'adsmoloco.com', 'pangle.io', 'tapjoyads.com',
+                       'appodealx.com', 'adservice.google.com', 'iadsdk.apple.com']:
+            with self.subTest(domain=domain):
+                self.assertIn(f'DOMAIN-SUFFIX,{domain},REJECT', yaml_rules)
+                self.assertIn(domain, blocked_suffixes)
+        # Device switches still override inherited profile settings.
+        item['devices'][0]['routing']['block_ads'] = False
+        self.assertNotIn('DOMAIN-SUFFIX,adsmoloco.com,REJECT', yaml.safe_load(manager.render_profile(deepcopy(item)))['rules'])
+        item['devices'][0]['routing'] = {}
+        self.assertEqual(item, source)
+
     def test_export_uses_applied_quic_settings_without_mutating_saved_credentials(self):
         connections = [{"component": "transport-hysteria2", "credential": {"port": 1234, "password": "client", "obfs": False}}]
         with patch.object(manager, "load_json", return_value={"inbounds": [{"type": "hysteria2", "listen_port": 5678, "up_mbps": 123, "down_mbps": 456, "obfs": {"type": "salamander", "password": "applied-obfs"}}]}):
@@ -138,11 +157,21 @@ class RuleExportTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as folder, mihomo_readiness() as readiness_port:
                 root = Path(folder)
                 item = profile()
+                # Exercise the bundled domain rules offline; GEOSITE downloading
+                # is separate from explicit advertising-domain matching.
+                ad_rules = [rule for rule in manager.configured_preset_rules({}, 'block_ads')
+                            if not rule.startswith('GEOSITE,')]
                 item["devices"][0]["routing"] = {"strategy": "select", "direct_ru_banks": True,
-                    "block_ads": True, "block_ads_rules": "DOMAIN-SUFFIX,ads.audit.test,REJECT"}
+                    "block_ads": True, "block_ads_rules": '\n'.join(ad_rules + ['DOMAIN-SUFFIX,ads.audit.test,REJECT'])}
                 with patch.object(manager, "personal_rule_lines_for_device", return_value=["DOMAIN,allowed.ads.audit.test,DIRECT"]):
                     config = yaml.safe_load(manager.render_profile(item))
-                config["hosts"] = {name: "127.0.0.1" for name in ("sberbank.ru", "ads.audit.test", "allowed.ads.audit.test", "unmatched.audit.test")}
+                cases = [('sberbank.ru', b'via-direct'), ('unmatched.audit.test', b'via-tunnel'),
+                         ('ads.audit.test', b'502'), ('allowed.ads.audit.test', b'via-direct'),
+                         ('delivery.adsmoloco.com', b'502'), ('api.pangle.io', b'502'),
+                         ('iadsdk.apple.com', b'502'), ('adservice.google.com', b'502'),
+                         ('www.apple.com', b'via-tunnel'), ('video.googlevideo.com', b'via-tunnel'),
+                         ('adservice.google.com.audit.test', b'via-tunnel')]
+                config["hosts"] = {name: "127.0.0.1" for name, _ in cases}
                 config["dns"]["enable"] = False
                 config["log-level"] = "debug"
                 config["rules"].insert(0, f"DST-PORT,{readiness_port},DIRECT")
@@ -158,7 +187,7 @@ class RuleExportTests(unittest.TestCase):
                     try:
                         wait_port(port, process)
                         wait_http_proxy(port, process, readiness_port)
-                        for domain, expected in (("sberbank.ru", b"via-direct"), ("unmatched.audit.test", b"via-tunnel"), ("ads.audit.test", b"502"), ("allowed.ads.audit.test", b"via-direct")):
+                        for domain, expected in cases:
                             with self.subTest(domain=domain), socket.create_connection(("127.0.0.1", port), timeout=5) as connection:
                                 connection.settimeout(5)
                                 connection.sendall(f"GET http://{domain}:{servers[0].server_port}/ HTTP/1.1\r\nHost: {domain}:{servers[0].server_port}\r\nConnection: close\r\n\r\n".encode())

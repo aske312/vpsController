@@ -73,7 +73,7 @@ CORE_BIN = RUNTIME_CORE_BIN if RUNTIME_CORE_BIN.is_file() else BUNDLED_CORE_BIN
 # The manager service runs with ProtectHome=true, so /root is masked and
 # that mkdir fails. Point it at a writable directory explicitly instead.
 CORE_HOME = DATA_ROOT / "core-home"
-MIHOMO_PROXY_GROUP = "312.net"
+MIHOMO_PROXY_GROUP = "312node.net"
 SERVER_CITY = os.getenv("SERVER_CITY", "Unknown")
 # SNI values for Mihomo-only REALITY exports. These are high-traffic HTTPS
 # candidates checked for TLS 1.3 / h2; reachability varies by network.
@@ -963,6 +963,45 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN-SUFFIX,startappservice.com,REJECT",
         "DOMAIN-SUFFIX,mintegral.com,REJECT",
         "DOMAIN-SUFFIX,unityads.unity3d.com,REJECT",
+        # Mobile ad SDKs and their delivery/CDN domains. Reviewed against
+        # https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
+        # Shared application/video domains must not be added here.
+        "DOMAIN-SUFFIX,admob.com,REJECT",
+        "DOMAIN-SUFFIX,bidmachine.io,REJECT",
+        "DOMAIN-SUFFIX,adsmoloco.com,REJECT",
+        "DOMAIN-SUFFIX,pangle.io,REJECT",
+        "DOMAIN-SUFFIX,pglstatp-toutiao.com,REJECT",
+        "DOMAIN-SUFFIX,inmobi.cn,REJECT",
+        "DOMAIN-SUFFIX,inmobicdn.net,REJECT",
+        "DOMAIN-SUFFIX,tapjoy.com,REJECT",
+        "DOMAIN-SUFFIX,tapjoyads.com,REJECT",
+        "DOMAIN-SUFFIX,supersonicads.com,REJECT",
+        "DOMAIN-SUFFIX,inner-active.mobi,REJECT",
+        "DOMAIN-SUFFIX,appnext.com,REJECT",
+        "DOMAIN-SUFFIX,appodeal.com,REJECT",
+        "DOMAIN-SUFFIX,appodealx.com,REJECT",
+        "DOMAIN-SUFFIX,mtgglobals.com,REJECT",
+        "DOMAIN-SUFFIX,rayjump.com,REJECT",
+        "DOMAIN-SUFFIX,adfurikun.jp,REJECT",
+        "DOMAIN-SUFFIX,gmossp-sp.jp,REJECT",
+        "DOMAIN-SUFFIX,admost.com,REJECT",
+        "DOMAIN-SUFFIX,adxcorp.kr,REJECT",
+        "DOMAIN-SUFFIX,aaxads.com,REJECT",
+        "DOMAIN-SUFFIX,admixer.net,REJECT",
+        "DOMAIN-SUFFIX,adtelligent.com,REJECT",
+        "DOMAIN-SUFFIX,adzerk.net,REJECT",
+        "DOMAIN-SUFFIX,admanmedia.com,REJECT",
+        "DOMAIN-SUFFIX,undertone.com,REJECT",
+        "DOMAIN-SUFFIX,yieldlab.net,REJECT",
+        "DOMAIN-SUFFIX,zemanta.com,REJECT",
+        # Dedicated ad subdomains of otherwise shared service domains.
+        "DOMAIN-SUFFIX,adservice.google.com,REJECT",
+        "DOMAIN-SUFFIX,iadsdk.apple.com,REJECT",
+        "DOMAIN-SUFFIX,ads.linkedin.com,REJECT",
+        "DOMAIN-SUFFIX,ads-api.twitter.com,REJECT",
+        "DOMAIN-SUFFIX,ads-twitter.com,REJECT",
+        "DOMAIN-SUFFIX,mobads.baidu.com,REJECT",
+        "DOMAIN-SUFFIX,ads.oppomobile.com,REJECT",
         # Dedicated instream video advertising / SSAI decision platforms.
         # Blocking their delivery hosts removes many pre-roll and mid-roll ads
         # without blocking the video CDN of the site itself.
@@ -4659,6 +4698,14 @@ def relay_connection_control():
     return RelayManager(DATA_ROOT.parent, public_endpoint())
 
 
+def with_relay_labels(connections):
+    """Use current ROUTES names only in the exported copy of each connection."""
+    selected = {relay_connections.host_id(item.get('settings', {})) for item in connections} - {''}
+    names = {host['id']: host['name'] for host in relay_connection_control().read()['hosts']} if selected else {}
+    return [{**item, '_relay_name': names.get(item.get('settings', {}).get('relay_host_id'), '')}
+            for item in connections]
+
+
 def prepare_profile_relays(item, identity=None, previous=()):
     if not any(relay_connections.host_id(connection.get('settings', {})) for connection in item.get('connections', [])):
         return
@@ -4847,6 +4894,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     normalized["connections"] = effective_client_connections(normalized.get("connections", []))
     selected_device = device_id or str(normalized["common_device_id"])
     connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
+    connections = with_relay_labels(connections)
     if not connections:
         raise HTTPException(status_code=409, detail="У профиля нет подключений Mihomo")
     profile_routing = device_routing(normalized, selected_device)
@@ -5103,6 +5151,7 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
     for key in ("tunnel_ech", "tunnel_privacy"):
         routing[key] = bool(device_values.get(key, False))
     try:
+        connections = with_relay_labels(connections)
         if export_format in {"xray", "uri"}:
             config = build_xray_configs(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings, relay_client_nodes)
             if export_format == "uri":

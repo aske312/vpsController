@@ -3,6 +3,14 @@ import xray_protocols
 
 
 def connection_label(connection, index, variant="direct", direct_settings=None):
+    label = _protocol_label(connection, index, variant, direct_settings)
+    relay_name = connection.get("_relay_name")
+    if relay_name and connection.get("settings", {}).get("relay_host_id"):
+        label += f" · Relay: {relay_name}"
+    return label
+
+
+def _protocol_label(connection, index, variant, direct_settings):
     component = connection["component"]
     protocols = {"transport-wg": "WireGuard · UDP", "transport-awg": "AmneziaWG · UDP",
                  "transport-shadowsocks": "Shadowsocks · TCP/UDP", "transport-hysteria2": "Hysteria2 · QUIC",
