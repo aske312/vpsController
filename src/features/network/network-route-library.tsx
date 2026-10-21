@@ -12,8 +12,8 @@ import { addressMatches, addressRoleLabels } from "./server-address-state";
 import type { RelayControl } from "./network-relays";
 import { NetworkRelayNotice } from "./network-relays";
 import { NetworkRouteSummaryBadge } from "./network-route-badge";
-import { serverAddressSummary } from "./route-summary";
-import { filterEntries, needsAttention, routeEntries, type RouteFilter } from "./route-library-state";
+import { serverAddressSummary, type RouteSummary } from "./route-summary";
+import { filterEntries, needsAttention, routeEntries } from "./route-library-state";
 import { DomainEntryPanel, RelayEntryPanel, RouteDisclosure } from "./route-library-panels";
 import { NetworkCloudflare, type NetworkCloudflareControl } from "./network-cloudflare";
 import { NetworkEch } from "./network-ech";
@@ -21,30 +21,27 @@ import { NetworkEch } from "./network-ech";
 type Props = { status: NetworkStatus | null; relay: RelayControl; addresses: ReturnType<typeof useNetworkAddresses>; request: NetworkRequest; listState: NetworkListState; onListStateChange: (state: NetworkListState) => void; busy: boolean; failed: boolean; endpointDirty: boolean; onRemove: (kind: NetworkEndpointCheck["kind"], address: string) => void; add: ReactNode; onRefresh?: () => void; cloudflare?: NetworkCloudflareControl; refreshKey: number };
 
 export function NetworkRouteLibrary({ status, relay, addresses, request, listState, onListStateChange, busy, failed, endpointDirty, onRemove, add, onRefresh, cloudflare, refreshKey }: Props) {
-  const [serverExpanded, setServerExpanded] = useState(false);
-  const [filter, setFilter] = useState<RouteFilter>("all");
   const [deletion, setDeletion] = useState<{ kind: NetworkEndpointCheck["kind"]; address: string } | null>(null);
   const entries = routeEntries(status, relay.status?.hosts || [], failed, relay.failed, Boolean(relay.status?.pending), relay.reading);
-  const visible = filterEntries(entries, listState.query, filter);
+  const visible = filterEntries(entries, listState.query, "all");
   const selected = entries.find(entry => listState.expanded.includes(entry.id));
   const serverRow = addresses.status?.items.find(row => listState.expanded.includes(`SERVER-${row.address}`));
   const serverItems = addresses.status?.items.filter(row => addressMatches(row, listState.query)) || [];
-  const attention = entries.filter(entry => needsAttention(entry.summary)).length;
   const close = () => onListStateChange({ ...listState, expanded: [] });
   const open = (id: string) => onListStateChange({ ...listState, expanded: [id] });
   const serverProblem = addresses.failed || addresses.status?.discovery.state === "error" || Boolean(addresses.pending);
   return <section className="routeLibrary" aria-label="Точки входа">
-    <header className="routeLibraryHeader"><div><p className="eyebrow">ROUTES</p><h2>Точки входа</h2><p>Адреса для подключения устройств</p></div>{add}</header>
-    <div className="routeLibraryToolbar"><nav aria-label="Фильтр адресов">{([["all", "Все"], ["relay", "Relay"], ["domain", "Домены"], ["attention", "Требуют внимания"]] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}{value === "attention" && attention > 0 && <span>{attention}</span>}</button>)}</nav><label className="routeLibrarySearch"><span className="networkSrOnly">Найти адрес или Relay</span><input type="search" placeholder="Адрес или название" value={listState.query} onChange={event => onListStateChange({ ...listState, query: event.target.value })} /></label></div>
+    <header className="routeLibraryHeader"><div><p className="eyebrow">ROUTES</p><h2>Точки входа</h2><p>Адреса для подключения устройств</p></div><div className="routeLibraryHeaderActions"><label className="routeLibrarySearch"><span className="networkSrOnly">Найти адрес или Relay</span><input type="search" placeholder="Адрес или название" value={listState.query} onChange={event => onListStateChange({ ...listState, query: event.target.value })} /></label>{add}</div></header>
+
     <NetworkRelayNotice relay={relay} />
-    <div className="networkProviderGrid routeLibraryList">{visible.map(entry => <button type="button" className="networkProvider routeLibraryRow" data-state={entry.summary.state} aria-haspopup="dialog" key={entry.id} onClick={() => open(entry.id)} aria-label={`Открыть ${entry.title}`}><span className="networkProviderCode" aria-hidden="true">{entry.kind === "relay" ? "RELAY" : "DNS"}</span><span className="networkProviderText"><strong>{entry.title}</strong><small>{entry.kind === "relay" ? entry.address : entry.subtitle}</small><NetworkRouteSummaryBadge summary={entry.summary} /></span><span className="networkProviderIndicator" aria-hidden="true" /></button>)}</div>
-    {!visible.length && <div className="routeLibraryEmpty"><strong>{relay.reading && !relay.status ? "Загружаем адреса…" : listState.query || filter !== "all" ? "Адресов по этому фильтру нет" : "Добавьте первую точку входа"}</strong><p>{listState.query || filter !== "all" ? "Измените поиск или выберите «Все»." : "Подключите Relay или добавьте домен."}</p></div>}
-    <details className="routeLibraryServer" open={serverExpanded || Boolean(listState.query && serverItems.length) || serverProblem} onToggle={event => setServerExpanded(event.currentTarget.open)}><summary><span>Адреса этого сервера<small>{addresses.status?.items.length ?? "…"}</small></span><span aria-hidden="true">⌄</span></summary><p>Для прямого подключения к VPS.</p>
+    <div className="networkProviderGrid routeLibraryList">{visible.map(entry => <RouteStatusCard key={entry.id} title={entry.title} subtitle={entry.kind === "relay" ? entry.address : entry.subtitle} code={entry.kind === "relay" ? "RELAY" : "DNS"} summary={entry.summary} onOpen={() => open(entry.id)} facts={entry.kind === "relay" ? <><span>Маршрутов: {entry.host.routes.length}</span><span>{entry.host.version ? `Agent ${entry.host.version}` : "Версия Agent неизвестна"}</span></> : <span>{entry.summary.connection}</span>} />)}</div>
+    {!visible.length && (!listState.query || !serverItems.length) && <div className="routeLibraryEmpty"><strong>{relay.reading && !relay.status ? "Загружаем адреса…" : listState.query ? "Адресов по этому запросу нет" : "Добавьте первую точку входа"}</strong><p>{listState.query ? "Измените поисковый запрос." : "Подключите Relay или добавьте домен."}</p></div>}
+    <section className="routeLibraryServer" aria-label="Адреса этого сервера"><header><h3>Адреса этого сервера <small>{addresses.status?.items.length ?? "…"}</small></h3><p>Для прямого подключения к VPS</p></header>
       {serverProblem && <div className="routeLibraryCallout" role="status"><p>{addresses.pending ? "Проверяем результат назначения IP. Команда не повторяется." : "Актуальность адресов не подтверждена."}</p><button type="button" disabled={addresses.reading} onClick={() => void addresses.load()}>Проверить состояние</button></div>}
       {!addresses.status && <p>Определяем адреса…</p>}
-      <div className="networkProviderGrid routeServerGrid">{serverItems.map(row => <button type="button" className="networkProvider routeLibraryRow" data-state={serverAddressSummary(row, Boolean(serverProblem), Boolean(addresses.pending)).state} aria-haspopup="dialog" key={row.address} onClick={() => open(`SERVER-${row.address}`)} aria-label={`Открыть ${row.address}`}><span className="networkProviderCode" aria-hidden="true">{row.family === "ipv4" ? "4" : "6"}</span><span className="networkProviderText"><strong>{row.address}</strong><small>{addressRoleLabels[row.role]}</small><NetworkRouteSummaryBadge summary={serverAddressSummary(row, Boolean(serverProblem), Boolean(addresses.pending))} /></span><span className="networkProviderIndicator" aria-hidden="true" /></button>)}
+      <div className="networkProviderGrid routeServerGrid">{serverItems.map(row => <RouteStatusCard key={row.address} title={row.address} subtitle={addressRoleLabels[row.role]} code={row.family === "ipv4" ? "IPv4" : "IPv6"} summary={serverAddressSummary(row, Boolean(serverProblem), Boolean(addresses.pending))} onOpen={() => open(`SERVER-${row.address}`)} facts={<span>{row.role === "primary" ? "Для новых подключений" : row.role === "reserve" ? "Резервный адрес" : row.presence === "present" && !serverProblem ? "Можно назначить основным" : "Назначение недоступно"}</span>} />)}
       </div>
-    </details>
+    </section>
     {selected && <RouteControlDialog title={selected.title} address={selected.address} subtitle={selected.kind === "relay" ? selected.address : selected.subtitle} badge={<NetworkRouteSummaryBadge summary={selected.summary} />} close={close}>
       {needsAttention(selected.summary) && <p className="routeLibraryCallout" role="status">{selected.summary.detail}</p>}
       {selected.kind === "relay" ? <RelayEntryPanel key={selected.id} host={selected.host} relay={relay} close={close} /> : <DomainEntryPanel key={selected.id} entry={selected} request={request} disabled={busy || failed || endpointDirty} onChecked={onRefresh} onRemove={(kind, address) => setDeletion({ kind, address })}>
@@ -57,6 +54,15 @@ export function NetworkRouteLibrary({ status, relay, addresses, request, listSta
     </RouteControlDialog>}
     {deletion && <ConfirmationDialog request={{ title: "Удалить адрес?", message: "Адрес перестанет предлагаться для новых подключений. Существующие подключения сохранят свои настройки.", confirmLabel: "Удалить", danger: true, phrase: deletion.address }} onClose={confirmed => { const item = deletion; setDeletion(null); if (confirmed) { close(); onRemove(item.kind, item.address); } }} />}
   </section>;
+}
+
+function RouteStatusCard({ title, subtitle, code, summary, onOpen, facts }: { title: string; subtitle: string; code: string; summary: RouteSummary; onOpen: () => void; facts: ReactNode }) {
+  return <button type="button" className="networkProvider routeLibraryRow" data-state={summary.state} aria-haspopup="dialog" onClick={onOpen} aria-label={`Открыть ${title}`}>
+    <span className="networkProviderCode" aria-hidden="true">{code}</span>
+    <span className="networkProviderText"><strong title={title}>{title}</strong><small title={subtitle}>{subtitle}</small><NetworkRouteSummaryBadge summary={summary} /></span>
+    <span className="networkProviderIndicator" aria-hidden="true" />
+    <span className="routeCardFacts">{facts}</span>
+  </button>;
 }
 
 function RouteControlDialog({ title, address, subtitle, badge, close, children }: { title: string; address: string; subtitle: string; badge: ReactNode; close: () => void; children: ReactNode }) {
