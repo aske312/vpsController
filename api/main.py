@@ -46,6 +46,7 @@ import application_recovery
 import operation_policy
 import network_routes
 import network_probe
+import resource_country
 import server_addresses
 import relay_manager
 import relay_media
@@ -69,6 +70,7 @@ from component_registry import ComponentRegistry, RegistryError, paths_from_mani
 from system_metrics import CpuSampler, collect_resources
 from metrics_history import MetricsHistory, MetricsMonitor, SettingsConflict
 from schemas import (
+    ResourceCountryRequest,
     RelayDeviceReport,
     RelayAgentUpdate,
     ComponentPurge,
@@ -2589,6 +2591,14 @@ def network_status() -> dict:
 @app.get("/api/network")
 def get_network(_: None = Depends(require_token)) -> dict:
     return network_status()
+
+
+resource_countries = resource_country.CountryLookup()
+
+
+@app.post('/api/network/locations')
+def get_resource_countries(payload: ResourceCountryRequest, _: None = Depends(require_token)):
+    return JSONResponse(resource_countries.lookup([str(ip) for ip in payload.addresses]), headers={'Cache-Control': 'no-store'})
 
 
 @app.get('/api/network/addresses')

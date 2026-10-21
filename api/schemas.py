@@ -4,11 +4,16 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field, StrictInt
+from pydantic import BaseModel, Field, StrictInt, IPvAnyAddress
 
 
 class BootstrapRequest(BaseModel):
     password: str = Field(min_length=1, max_length=256)
+
+
+class ResourceCountryRequest(BaseModel):
+    model_config = {'extra': 'forbid'}
+    addresses: list[IPvAnyAddress] = Field(min_length=1, max_length=100)
 
 
 class RelayHostSettings(BaseModel):
