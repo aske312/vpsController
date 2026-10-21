@@ -380,6 +380,8 @@ def settings_ttl(item): return max(0.1, item.deadline - time.monotonic())
 def validate_measurement(identity, body, own_ips):
     if not re.fullmatch(r'[0-9a-f]{32}', identity) or not isinstance(body, dict) or set(body) != {'route_id', 'target_ip', 'target_port', 'key', 'ttl_seconds'}:
         raise ValueError('Invalid measurement')
+    if not isinstance(body['target_ip'], str) or not isinstance(body['route_id'], str) or not isinstance(body['key'], str):
+        raise ValueError('Invalid measurement field types')
     address = ipaddress.ip_address(body['target_ip'])
     if address.version != 4 or not address.is_global or address.is_multicast or str(address) in own_ips:
         raise ValueError('Invalid measurement target')
