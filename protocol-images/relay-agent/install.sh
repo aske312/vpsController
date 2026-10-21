@@ -181,6 +181,17 @@ rollback() {
       if [[ -f "${backup}/${name}" ]]; then cp -p "${backup}/${name}" "${LIB}/${name}"; else rm -f "${LIB}/${name}"; fi
     done
     systemctl restart vps-control-relay-agent.service || true
+    rollback_ready=0
+    for attempt in {1..20}; do
+      if curl --silent --fail --cacert "${ROOT}/server.crt" --max-time 2 \
+        --config <(printf 'header = "Authorization: Bearer %s"\n' "$(cat "${ROOT}/token")") \
+        "https://127.0.0.1:${API_PORT}/v1/status" | python3 -c 'import json,sys; value=json.load(sys.stdin); sys.exit(0 if value.get("failed_routes")==0 else 1)'; then
+        rollback_ready=1
+        break
+      fi
+      sleep 1
+    done
+    [[ "${rollback_ready}" == 1 ]] || echo 'Откат файлов выполнен, но запуск прежнего Agent не подтверждён.' >&2
   fi
   rm -rf -- "${backup}"
   return "${result}"
