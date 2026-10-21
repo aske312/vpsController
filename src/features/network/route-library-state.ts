@@ -1,5 +1,5 @@
 import type { NetworkStatus, NetworkEndpointCheck } from "../../shared/types/control-plane";
-import type { RelayHost } from "./relay-state";
+import type { RelayHost, RelayRoute } from "./relay-state";
 import { relayAddresses } from "./relay-state";
 import { domainRouteSummary, relayRouteSummary, type RouteSummary } from "./route-summary";
 
@@ -7,6 +7,7 @@ export type RouteEntry = { id: string; kind: "relay"; title: string; address: st
   | { id: string; kind: "domain"; title: string; address: string; subtitle: string; search: string; summary: RouteSummary; domain: NetworkStatus["domains"][number]; checks: NetworkEndpointCheck[] };
 export type RouteFilter = "all" | "relay" | "domain" | "attention";
 export const needsAttention = (summary: RouteSummary) => ["error", "warning", "stale", "unknown"].includes(summary.state);
+export const routeNeedsAttention = (route: RelayRoute) => ["failed", "missing", "drift", "unknown"].includes(route.state) || route.check?.state === "failed" || ["failed", "warning"].includes(route.device_test?.state || "") || [route.check?.cleanup_state, route.device_test?.cleanup_state].some(state => state === "failed" || state === "pending");
 
 export function routeEntries(status: NetworkStatus | null, hosts: RelayHost[], failed: boolean, relayFailed: boolean, pending: boolean, reading: boolean): RouteEntry[] {
   const entries: RouteEntry[] = hosts.map(host => {

@@ -10,6 +10,7 @@ import type { RelayHost, RelayRoute } from "./relay-state";
 import { relayAddresses } from "./relay-state";
 import { RelayDeviceResult, RelayLossResult } from "./relay-test-results";
 import type { RouteEntry } from "./route-library-state";
+import { routeNeedsAttention } from "./route-library-state";
 
 export function RouteDisclosure({ title, children }: { title: string; children: ReactNode }) {
   return <details className="routeLibraryDisclosure"><summary>{title}<span aria-hidden="true">+</span></summary><div>{children}</div></details>;
@@ -18,7 +19,7 @@ export function RouteDisclosure({ title, children }: { title: string; children: 
 export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay: RelayControl; close: () => void }) {
   const [selected, setSelected] = useState("");
   const [consumer, setConsumer] = useState("");
-  const route = host.routes.find(item => item.id === selected) || host.routes.find(item => ["preparing", "awaiting_client", "processing"].includes(item.device_test?.state || "")) || host.routes.find(item => ["failed", "missing", "drift"].includes(item.state) || item.check?.state === "failed") || host.routes[0];
+  const route = host.routes.find(item => item.id === selected) || host.routes.find(item => ["preparing", "awaiting_client", "processing"].includes(item.device_test?.state || "")) || host.routes.find(routeNeedsAttention) || host.routes[0];
   const consumers = (relay.status?.consumers || []).filter(item => !item.host_id || item.host_id === host.id);
   const locked = relay.locked || host.state !== "connected" || Boolean(relay.status?.pending);
   const active = host.routes.some(item => ["preparing", "awaiting_client", "processing"].includes(item.device_test?.state || ""));
@@ -31,7 +32,7 @@ export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay
     {host.agent_update && <p role="status">Обновление Agent: {({ sending: "команда отправляется", queued: "в очереди", running: "выполняется", updated: "завершено", failed: "не удалось выполнить", unknown: "результат не подтверждён, команда не повторяется" })[host.agent_update.state]}.</p>}
     <section className="routeLibrarySection"><h3>Проверить подключение</h3>
       {route ? <>
-        <label>Маршрут<select value={route.id} onChange={event => { setSelected(event.target.value); setConsumer(""); }}>{host.routes.map(item => <option key={item.id} value={item.id}>{consumers.find(candidate => candidate.id === item.check?.consumer_id)?.label || `${item.transport.toUpperCase()} · ${item.listen_port}`}{["failed", "missing", "drift"].includes(item.state) || item.check?.state === "failed" ? " · ошибка" : ""}</option>)}</select></label>
+        <label>Маршрут<select value={route.id} onChange={event => { setSelected(event.target.value); setConsumer(""); }}>{host.routes.map(item => <option key={item.id} value={item.id}>{consumers.find(candidate => candidate.id === item.check?.consumer_id)?.label || `${item.transport.toUpperCase()} · ${item.listen_port}`}{routeNeedsAttention(item) ? " · ошибка" : ""}</option>)}</select></label>
         <label>Подключение<select value={consumer} onChange={event => setConsumer(event.target.value)} disabled={locked || active}><option value="">Выберите подключение</option>{consumers.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
         <div className="routeLibraryQuickActions"><button type="button" disabled={locked || active || route.state !== "listening" || !consumer} onClick={() => submit(`/network/relays/${host.id}/routes/${route.id}/check?mode=media&consumer_id=${encodeURIComponent(consumer)}`)}>Проверить с VPS</button>{host.capabilities?.includes("udp-measurement-v1") && <button type="button" disabled={locked || active || route.state !== "listening" || !consumer} onClick={() => submit(`/network/relays/${host.id}/routes/${route.id}/device-tests?consumer_id=${encodeURIComponent(consumer)}`)}>Тест с устройства</button>}</div>
         <RelayCheckResult route={route} stale={host.state !== "connected"} />
