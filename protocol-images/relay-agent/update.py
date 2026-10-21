@@ -115,7 +115,13 @@ def main():
         try:
             request = read_request()
             if request:
+                previous_status = ROOT/'manual-update-status.json'
+                previous_request = json.loads(previous_status.read_text()) if previous_status.exists() else {}
+                if previous_request.get('id') == request['id']:
+                    (STATE/'update-request.json').unlink(missing_ok=True)
+                    return  # A restarted systemd.path must never replay an accepted request.
                 manual_status(request, 'running')
+                (STATE/'update-request.json').unlink(missing_ok=True)
                 version = json.loads(Path(__file__).with_name('manifest.json').read_text())['version']
                 if tuple(map(int, request['version'].split('.'))) <= tuple(map(int, version.split('.'))):
                     raise ValueError('Agent is no longer outdated')
@@ -156,7 +162,7 @@ def main():
             raise SystemExit('Relay update failed; existing installation retained or restored')
         finally:
             # Consume once. A lost API response must never replay an installation.
-            if request_seen or request is not None: (STATE/'update-request.json').unlink(missing_ok=True)
+            if request_seen and request is None: (STATE/'update-request.json').unlink(missing_ok=True)
 
 
 if __name__ == '__main__':

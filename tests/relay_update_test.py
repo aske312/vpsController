@@ -52,6 +52,16 @@ class UpdateTests(unittest.TestCase):
                 path.write_text(json.dumps(value))
                 with self.assertRaises(ValueError): update.read_request()
 
+    def test_root_worker_does_not_replay_a_request_after_restart(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); request = {'id':'a'*32,'version':'9.0.0','digest':'sha256:'+'b'*64,'requested_at':__import__('time').time()}
+            (root/'update-request.json').write_text(json.dumps(request))
+            (root/'manual-update-status.json').write_text(json.dumps({**request,'state':'running'}))
+            with patch.object(update,'ROOT',root),patch.object(update,'STATE',root),patch.object(update.os,'geteuid',return_value=0,create=True),patch.object(update,'open',side_effect=lambda path,*args,**kwargs: open(root/'lock',*args,**kwargs),create=True),patch.dict(sys.modules,{'fcntl':SimpleNamespace(flock=lambda *_:None,LOCK_EX=2,LOCK_NB=4)}),patch.object(update,'fetch') as fetch:
+                update.main()
+            self.assertFalse((root/'update-request.json').exists())
+            fetch.assert_not_called()
+
     def test_disabled_updater_does_not_contact_github(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); (root/'updates.json').write_text('{"enabled":false}')
