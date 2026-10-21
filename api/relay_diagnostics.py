@@ -39,6 +39,15 @@ def updates(value):
             if not isinstance(value[key], str) or not re.fullmatch(pattern, value[key]):
                 raise ValueError('Invalid Agent update metadata')
             result[key] = value[key]
+    if 'manual' in value:
+        manual = value['manual']
+        if not isinstance(manual, dict) or manual.get('state') not in ('queued', 'running', 'updated', 'failed', 'unknown'):
+            raise ValueError('Invalid manual update state')
+        for key, pattern in [('id', r'[0-9a-f]{32}'), ('version', r'\d{1,6}\.\d{1,6}\.\d{1,6}'), ('digest', r'sha256:[0-9a-f]{64}')]:
+            if not isinstance(manual.get(key), str) or not re.fullmatch(pattern, manual[key]): raise ValueError('Invalid manual update metadata')
+        if type(manual.get('requested_at')) not in (float, int) or not 0 <= manual['requested_at'] <= 253402300799:
+            raise ValueError('Invalid update time')
+        result['manual'] = {key: manual[key] for key in ('id', 'version', 'digest', 'requested_at', 'state')}
     return result
 
 

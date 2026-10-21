@@ -118,6 +118,19 @@ const relayErrorLabels: Record<string, string> = {
 };
 const mediaReasonLabels: Record<string, string> = { media_verified: "Видео и три перемотки проверены по содержимому", timeout: "Таймаут передачи видео", transport_error: "Туннель не передал видео", content_mismatch: "Содержимое видео не совпало с эталоном", range_mismatch: "Перемотка не передала нужный фрагмент", client_unavailable: "Тестовый клиент не запустился или отсутствует", configuration_changed: "Настройки изменились во время теста", unsupported_or_unavailable: "Для подключения нет безопасного поддержанного теста либо его настройки недоступны" };
 
+function RelayAgentUpdate({ host, disabled, onUpdate }: { host: RelayHost; disabled: boolean; onUpdate?: () => void }) {
+  const release = host.agent_release, update = host.agent_update;
+  const pending = update && ["sending", "queued", "running", "unknown"].includes(update.state);
+  const testing = host.routes.some(route => ["preparing", "awaiting_client", "processing"].includes(route.device_test?.state || ""));
+  return <div>
+    {release?.state === "outdated" && <p>Доступен Agent {release.version}. {host.capabilities?.includes("manual-update-v1") ? <button type="button" disabled={disabled || Boolean(pending) || testing || !onUpdate} onClick={onUpdate}>Обновить Agent до {release.version}</button> : "Для команды из PRO сначала установите Agent 1.4 или новее вручную либо дождитесь суточного автообновления."}</p>}
+    {release?.state === "unknown" && <p>Доступная версия Agent не подтверждена.</p>}
+    {release?.state === "current" && <p>Установлена актуальная версия Agent.</p>}
+    {update && <p role="status">Обновление{update.version ? ` до ${update.version}` : ""}: {({ sending: "команда отправляется", queued: "ожидает запуска", running: "выполняется", updated: "завершено", failed: "ошибка; проверьте журнал обновления Agent", unknown: "результат пока не подтверждён; команда повторно не отправляется" })[update.state]}.</p>}
+    {release?.state === "outdated" && host.capabilities?.includes("manual-update-v1") && <p>При обновлении Agent перезапустится; активные соединения могут прерваться. Ключи и настройки сохраняются.</p>}
+  </div>;
+}
+
 function RelayMediaTest({ consumers, disabled, onTest, onDeviceTest }: { consumers: { id: string; label: string }[]; disabled: boolean; onTest: (id: string) => void; onDeviceTest?: (id: string) => void }) {
   const [selected, setSelected] = useState("");
   const value = consumers.some(item => item.id === selected) ? selected : "";
@@ -125,7 +138,7 @@ function RelayMediaTest({ consumers, disabled, onTest, onDeviceTest }: { consume
 }
 
 type TestActions = { onTest?: (routeId: string, consumerId: string) => void; onDeviceTest?: (routeId: string, consumerId: string) => void; onDownloadTest?: (routeId: string, testId: string) => void; onUploadTest?: (routeId: string, testId: string, file: File) => void; onCancelTest?: (routeId: string, testId: string) => void };
-export function RelayRouteDetails({ host, address, summary, unknown, consumers = [], disabled = true, onTest, onDeviceTest, onDownloadTest, onUploadTest, onCancelTest }: { host: RelayHost; address: string; summary: RouteSummary; unknown: boolean; consumers?: { id: string; label: string; host_id?: string }[]; disabled?: boolean } & TestActions) {
+export function RelayRouteDetails({ host, address, summary, unknown, consumers = [], disabled = true, onUpdate, onTest, onDeviceTest, onDownloadTest, onUploadTest, onCancelTest }: { host: RelayHost; address: string; summary: RouteSummary; unknown: boolean; consumers?: { id: string; label: string; host_id?: string }[]; disabled?: boolean; onUpdate?: () => void } & TestActions) {
   return <NetworkRouteDetails address={address} summary={summary}>
     <RouteDetailsSection title="Подключение к агенту"><dl className="routeDetailsFacts">
       <Field label="Имя узла">{shown(host.name)}</Field>
@@ -137,6 +150,7 @@ export function RelayRouteDetails({ host, address, summary, unknown, consumers =
       <Field label="Автообновление Agent">{unknown || !host.updates ? "Нет сведений от агента" : host.updates.enabled ? "Включено · раз в сутки" : "Выключено"}</Field>
       {host.updates && <Field label="Проверка обновлений">{unknown ? "Не подтверждена" : ({ unchecked: "Ещё не выполнялась", current: "Установлен текущий пакет", updated: "Обновлён", disabled: "Выключена", failed: "Ошибка обновления", unknown: "Состояние неизвестно" })[host.updates.state]}{host.updates.checked_at && ` · ${time(host.updates.checked_at)}`}</Field>}
     </dl>
+      <RelayAgentUpdate host={host} disabled={disabled || unknown} onUpdate={onUpdate} />
       {host.error && <p className="routeDetailsWarning" role="status">{host.error}</p>}
       {host.address_checks?.filter(item => ["unresolved", "mismatch"].includes(item.state)).map(item => <p className="routeDetailsWarning" key={item.domain}>{item.domain}: {item.state === "mismatch" ? "DNS указывает на другой сервер" : "DNS не подтверждён"}. Для новых подключений используйте IP Relay или корректный домен.</p>)}
       <details className="routeDetailsTechnical"><summary>Сохранённый отпечаток сертификата</summary><code>{host.certificate_sha256}</code></details>

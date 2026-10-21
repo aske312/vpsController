@@ -9,6 +9,14 @@ const connection = { api_version: 1, agent_url: 'https://85.209.155.229:9443', t
 const host = { id: 'b'.repeat(32), name: 'Relay', agent_url: connection.agent_url, certificate_sha256: connection.certificate_sha256, api_version: 1, token_configured: true, state: 'connected', version: '1.0.0', agent_revision: 0, foreign_routes: 0, routes: [] };
 const status = { revision: 'c'.repeat(32), hosts: [host], pending: false, origin_ip: '195.14.118.112', origin_hosts: ['195.14.118.112'], targets: [{ transport: 'tcp', port: 443 }] };
 
+test('release discovery and manual update results require known states and verified metadata', () => {
+  const agent_release = { state: 'outdated', version: '1.5.0', digest: 'sha256:'+'a'.repeat(64) };
+  const snapshot = fields => ({ ...status, hosts: [{ ...host, ...fields }] });
+  assert.equal(relaySnapshot(snapshot({ agent_release, agent_update: { state: 'queued', polling: true } })).hosts[0].agent_release.state, 'outdated');
+  for (const change of [{ digest: 'missing' }, { version: 'latest' }, { state: 'verified by HTTP 200' }]) assert.throws(() => relaySnapshot(snapshot({ agent_release: { ...agent_release, ...change } })));
+  assert.throws(() => relaySnapshot(snapshot({ agent_update: { state: 'raw command output' } })));
+});
+
 test('optional Agent update status stays compatible with old agents and rejects unknown state', () => {
   assert.equal(relaySnapshot(status).hosts[0].updates, undefined);
   const updates = { enabled: true, interval_hours: 24, state: 'updated', version: '1.2.0' };

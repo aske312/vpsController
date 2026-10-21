@@ -950,7 +950,7 @@ class RelayAPITests(unittest.TestCase):
         self.addCleanup(api.app.dependency_overrides.clear)
 
     def test_every_endpoint_requires_auth_before_access_or_validation(self):
-        endpoints = [('GET', '/network/relays'), ('GET', '/network/relays?view=inventory'), ('GET', '/network/relays?view=addresses'), ('PUT', '/network/relays'), ('PUT', '/network/relays/reconnect'), ('DELETE', '/network/relays/id'),
+        endpoints = [('GET', '/network/relays'), ('POST', '/network/relays/id/update'), ('GET', '/network/relays?view=inventory'), ('GET', '/network/relays?view=addresses'), ('PUT', '/network/relays'), ('PUT', '/network/relays/reconnect'), ('DELETE', '/network/relays/id'),
                      ('DELETE', '/network/relays/id/address?address=8.8.4.4'), ('DELETE', '/network/relays/id/address?address=8.8.4.4&restore=true'),
                      ('POST', '/clients/relay'), ('GET', '/clients/relay/id'), ('POST', '/clients/relay/id/resume'),
                      ('POST', '/network/relays/id/routes'), ('DELETE', '/network/relays/id/routes/route?agent_revision=0'),

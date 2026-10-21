@@ -17,6 +17,8 @@ export type RelayHost = {
   token_configured: boolean; state: "connected" | "unknown"; version?: string; agent_revision?: number;
   foreign_routes: number; routes: RelayRoute[]; error?: string;
   capabilities?: string[];
+  agent_release?: { state: "unknown" | "current" | "outdated" | "newer"; version?: string; digest?: string };
+  agent_update?: { state: "sending" | "queued" | "running" | "updated" | "failed" | "unknown"; id?: string; version?: string; requested_at?: number; polling?: boolean };
   updates?: { enabled: boolean; interval_hours: 24; state: "unchecked" | "current" | "updated" | "disabled" | "failed" | "unknown"; checked_at?: string; version?: string };
   address_checks?: { domain: string; state: "verified" | "dns_only" | "unresolved" | "mismatch" }[];
   excluded_addresses?: string[];
@@ -73,6 +75,8 @@ export function relaySnapshot(value: unknown): RelayStatus {
       || !integer(host.foreign_routes) || !Array.isArray(host.routes) || host.error !== undefined && typeof host.error !== "string"
       || host.state === "connected" && (!integer(host.agent_revision) || typeof host.version !== "string")) return invalid();
     ids.add(host.id);
+    if (host.agent_release !== undefined && (!object(host.agent_release) || !["unknown", "current", "outdated", "newer"].includes(String(host.agent_release.state)) || host.agent_release.state !== "unknown" && (typeof host.agent_release.version !== "string" || !/^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(host.agent_release.version) || typeof host.agent_release.digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(host.agent_release.digest)))) return invalid();
+    if (host.agent_update !== undefined && (!object(host.agent_update) || !["sending", "queued", "running", "updated", "failed", "unknown"].includes(String(host.agent_update.state)))) return invalid();
     if (host.capabilities !== undefined && (!Array.isArray(host.capabilities) || host.capabilities.length > 16 || host.capabilities.some(item => typeof item !== "string" || !/^[a-z0-9-]{1,64}$/.test(item)))) return invalid();
     if (host.excluded_addresses !== undefined && (!Array.isArray(host.excluded_addresses) || host.excluded_addresses.some(address => typeof address !== "string" || !address || address.length > 253))) return invalid();
     if (host.updates !== undefined && (!object(host.updates) || typeof host.updates.enabled !== "boolean" || host.updates.interval_hours !== 24 || !["unchecked", "current", "updated", "disabled", "failed", "unknown"].includes(String(host.updates.state)))) return invalid();

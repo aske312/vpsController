@@ -95,6 +95,9 @@ def apply_relay_request(api, name, path, digest, identity):
         control.resume(settings.pending_operation_id)
     elif name == 'relay-route-check':
         api.perform_relay_probe(payload)
+    elif name == 'relay-agent-update':
+        api.RelayAgentUpdate.model_validate({key: payload[key] for key in ('version', 'digest', 'expected_revision')})
+        api.relay_update.perform(api, payload, identity)
     elif name == 'relay-device-test-start':
         api.relay_device_test.start(api, payload, identity)
     elif name == 'relay-device-test-report':

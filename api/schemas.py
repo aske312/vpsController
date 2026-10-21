@@ -30,6 +30,13 @@ class RelayRouteSettings(BaseModel):
     agent_revision: int = Field(strict=True, ge=0)
 
 
+class RelayAgentUpdate(BaseModel):
+    model_config = {'extra': 'forbid'}
+    version: str = Field(pattern=r'^\d{1,6}\.\d{1,6}\.\d{1,6}$')
+    digest: str = Field(pattern=r'^sha256:[0-9a-f]{64}$')
+    expected_revision: str = Field(pattern=r'^[0-9a-f]{32}$')
+
+
 class RelayRecoverySettings(BaseModel):
     pending_operation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
 

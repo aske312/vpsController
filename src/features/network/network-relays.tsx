@@ -72,7 +72,7 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, [load, refreshKey]);
-  const testingDevice = status?.hosts.some(host => host.routes.some(route => ["preparing", "awaiting_client", "processing"].includes(route.device_test?.state || "")));
+  const testingDevice = status?.hosts.some(host => host.routes.some(route => ["preparing", "awaiting_client", "processing"].includes(route.device_test?.state || "")) || host.agent_update?.polling);
   useEffect(() => {
     if (!testingDevice) return;
     const timer = window.setInterval(() => { if (document.visibilityState !== "hidden") void load(); }, 3000);
@@ -181,6 +181,7 @@ export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: 
         <td><div className="networkRelayActions"><button type="button" className="networkRouteConfigure" disabled={relay.locked} onClick={() => relay.openHost(item)}>Настроить</button>{address && <button type="button" className="networkRouteDelete" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setAddressConfirmation({ host: item, address })}>Удалить адрес</button>}</div></td>
       </tr>
       {open && <tr className="networkRouteDetailRow"><td colSpan={5}><RelayRouteDetails host={item} address={address} summary={summary} unknown={unknown} consumers={relay.status?.consumers || []} disabled={relay.locked || pending || unknown} onTest={(routeId, consumerId) => void relay.submit(`/network/relays/${item.id}/routes/${routeId}/check?mode=media&consumer_id=${encodeURIComponent(consumerId)}`, { method: "POST", headers: { "If-Match": relay.status?.revision || "" } })}
+        onUpdate={() => void relay.submit(`/network/relays/${item.id}/update`, { method: "POST", body: JSON.stringify({ version: item.agent_release?.version, digest: item.agent_release?.digest, expected_revision: relay.status?.revision }) })}
         onDeviceTest={(routeId, consumerId) => void relay.submit(`/network/relays/${item.id}/routes/${routeId}/device-tests?consumer_id=${encodeURIComponent(consumerId)}`, { method: "POST", headers: { "If-Match": relay.status?.revision || "" } })}
         onDownloadTest={(routeId, testId) => void relay.downloadTest(item.id, routeId, testId)} onUploadTest={(routeId, testId, file) => void relay.uploadTest(item.id, routeId, testId, file)}
         onCancelTest={(routeId, testId) => void relay.submit(`/network/relays/${item.id}/routes/${routeId}/device-tests/${testId}`, { method: "DELETE", headers: { "If-Match": relay.status?.revision || "" } })} /></td></tr>}
