@@ -13,7 +13,10 @@ import uuid
 
 
 def run(*args):
-    return subprocess.run(args, check=True, capture_output=True, text=True)
+    result = subprocess.run(args, capture_output=True, text=True)
+    if result.returncode: print(result.stderr[-2500:])
+    result.check_returncode()
+    return result
 
 
 def main():
@@ -22,6 +25,8 @@ def main():
     unit = 'vps-relay-update-test-'+uuid.uuid4().hex
     with tempfile.TemporaryDirectory(prefix='relay-update-smoke-') as folder:
         root = Path(folder); root.chmod(0o755)
+        runtime = root/'runtime'; runtime.mkdir(mode=0o755)
+        for name in ('agent.py','addresses.py'): shutil.copy(source/name, runtime/name)
         config = root/'config'; config.mkdir(mode=0o755)
         state = root/'state'; state.mkdir(mode=0o700)
         user = pwd.getpwnam('nobody'); os.chown(state, user.pw_uid, user.pw_gid)
@@ -48,7 +53,7 @@ def main():
         wrapper = root/'worker.py'
         wrapper.write_text('import sys,json\nfrom pathlib import Path\nsys.path.insert(0,'+repr(str(library))+')\nimport update\nupdate.ROOT=Path('+repr(str(config))+')\nupdate.STATE=Path('+repr(str(state))+')\nupdate.fetch=lambda url,limit: Path('+repr(str(root))+',"release.json" if url==update.RELEASE else "release.tar.gz").read_bytes()\nupdate.main()\n')
         submit = root/'submit.py'
-        submit.write_text('import sys,asyncio\nfrom pathlib import Path\nsys.path.insert(0,'+repr(str(source))+')\nfrom agent import Agent\nagent=Agent(Path('+repr(str(config))+'),Path('+repr(str(state))+'),"127.0.0.1")\nasyncio.run(agent.dispatch("PUT","/v1/updates/'+('a'*32)+'",{"authorization":"Bearer fixture-token"},'+repr({'version':'9.0.0','digest':digest})+'))\n')
+        submit.write_text('import sys,asyncio\nfrom pathlib import Path\nsys.path.insert(0,'+repr(str(runtime))+')\nfrom agent import Agent\nagent=Agent(Path('+repr(str(config))+'),Path('+repr(str(state))+'),"127.0.0.1")\nasyncio.run(agent.dispatch("PUT","/v1/updates/'+('a'*32)+'",{"authorization":"Bearer fixture-token"},'+repr({'version':'9.0.0','digest':digest})+'))\n')
         service = Path('/run/systemd/system')/(unit+'.service')
         watcher = service.with_suffix('.path')
         try:
