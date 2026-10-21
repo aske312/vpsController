@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+systemctl disable --now vps-control-relay-update.timer vps-control-relay-update.service 2>/dev/null || true
+rm -f /etc/systemd/system/vps-control-relay-update.service /etc/systemd/system/vps-control-relay-update.timer
 systemctl disable --now vps-control-relay-agent.service 2>/dev/null || true
 systemctl disable --now vps-control-relay-addresses.timer vps-control-relay-addresses.service 2>/dev/null || true
 if command -v ufw >/dev/null; then

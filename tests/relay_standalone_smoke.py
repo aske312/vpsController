@@ -50,7 +50,7 @@ def inside(source, sandbox, api_port=None, occupy_default=False):
     staged = sandbox / 'qa/source'
     for name in ('install.sh', 'scripts/install-agent.sh',
                  'protocol-images/relay-agent/install.sh', 'protocol-images/relay-agent/agent.py',
-                 'protocol-images/relay-agent/credentials.py', 'protocol-images/relay-agent/addresses.py', 'protocol-images/relay-agent/uninstall.sh'):
+                 'protocol-images/relay-agent/credentials.py', 'protocol-images/relay-agent/addresses.py', 'protocol-images/relay-agent/uninstall.sh', 'protocol-images/relay-agent/update.py'):
         target = staged / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / name, target)
@@ -106,6 +106,7 @@ if sys.argv[1] in ('restart', 'disable'):
     run('ip', '-6', 'addr', 'add', '2606:4700::1111/128', 'dev', 'qa0', 'nodad')
     run('ip', 'link', 'set', 'qa0', 'up')
     (sandbox/'etc/caddy').mkdir()
+    (sandbox/'etc/hosts').write_text('127.0.0.1 localhost\n::1 localhost\n8.8.8.8 manual.example edge.example relay.example changed.example\n')
     (sandbox/'etc/caddy/Caddyfile').write_text('relay.example {\n respond "ok"\n}\n')
     os.chroot(sandbox)
     os.chdir('/')
@@ -131,9 +132,12 @@ if sys.argv[1] in ('restart', 'disable'):
     assert connection['agent_url'] == f'https://8.8.8.8:{expected_port}'
     assert '8.8.4.4' in connection['addresses']['ipv4']
     assert connection['addresses']['ipv6'] == ['2606:4700::1111']
-    assert 'relay.example' in connection['addresses']['domains']
-    assert 'manual.example' in connection['addresses']['domains']
-    assert connection['addresses']['cdn_domains'] == ['edge.example']
+    # The isolated network has no public DNS/Internet. Local hosts are not public DNS proof.
+    assert connection['addresses']['domains'] == []
+    assert connection['addresses']['cdn_domains'] == []
+    checks = json.loads((config_root/'addresses.json').read_text())['domain_checks']
+    assert {'relay.example', 'manual.example', 'edge.example'} <= {item['domain'] for item in checks}
+    assert all(item['state'] == 'unresolved' for item in checks)
     assert config['api_port'] == expected_port
     if blocker: assert blocker.getsockname()[1] == 9443
     assert connection['token'] in result.stdout
@@ -164,14 +168,18 @@ if sys.argv[1] in ('restart', 'disable'):
     before = {name: (config_root / name).read_bytes() for name in ('token', 'server.crt', 'server.key')}
     state = Path('/var/lib/vps-control-relay-agent/routes.json')
     saved_routes = state.read_bytes()
+    assert json.loads((config_root/'updates.json').read_text()) == {'enabled': True}
+    (config_root/'updates.json').write_text('{"enabled":false}')
     run('bash', bootstrap, *arguments, '--public-ip', '8.8.8.8')
     assert all((config_root / name).read_bytes() == value for name, value in before.items())
     assert state.read_bytes() == saved_routes
     Path('/etc/caddy/Caddyfile').write_text('changed.example {\n respond "ok"\n}\n')
+    Path('/etc/hosts').write_text('127.0.0.1 localhost\n::1 localhost\n8.8.8.8 manual.example edge.example changed.example\n')
     run('python3', '/usr/local/lib/vps-control-relay-agent/addresses.py')
     refreshed = json.loads(run('python3', '/usr/local/lib/vps-control-relay-agent/credentials.py').stdout)
-    assert set(refreshed['addresses']['domains']) == {'manual.example', 'changed.example', 'edge.example'}
-    assert refreshed['addresses']['cdn_domains'] == ['edge.example']
+    assert refreshed['addresses']['domains'] == []
+    assert refreshed['addresses']['cdn_domains'] == []
+    assert {item['domain'] for item in json.loads((config_root/'addresses.json').read_text())['domain_checks']} == {'manual.example', 'changed.example', 'edge.example'}
     assert refreshed['token'] == connection['token']
     with urlopen(request, context=context, timeout=5) as response: assert json.load(response)['routes'] == 1
     if Path('/qa/light').exists():
@@ -183,7 +191,9 @@ if sys.argv[1] in ('restart', 'disable'):
         with urlopen(request, context=context, timeout=5) as response: assert json.load(response)['routes'] == 1
         Path('/etc/vps-control.env').unlink()
     assert not Path('/opt/vps-control').exists()
-    assert {path.name for path in Path('/etc/systemd/system').glob('*.service')} == {'vps-control-relay-agent.service', 'vps-control-relay-addresses.service'}
+    assert {path.name for path in Path('/etc/systemd/system').glob('*.service')} == {'vps-control-relay-agent.service', 'vps-control-relay-addresses.service', 'vps-control-relay-update.service'}
+    assert json.loads((config_root/'updates.json').read_text()) == {'enabled': False}
+    assert Path('/etc/systemd/system/vps-control-relay-update.timer').is_file()
     assert Path('/etc/systemd/system/vps-control-relay-addresses.timer').is_file()
     import pwd
     user = pwd.getpwnam('vps-relay')
@@ -192,6 +202,19 @@ if sys.argv[1] in ('restart', 'disable'):
     assert denied.returncode != 0 and connection['token'] not in denied.stdout + denied.stderr
     changed = subprocess.run(['bash', bootstrap, *arguments, '--public-ip', '1.1.1.1'], capture_output=True, text=True)
     assert changed.returncode != 0 and all((config_root / name).read_bytes() == value for name, value in before.items())
+    # A syntactically valid but broken runtime must roll back without losing routes or identity.
+    installed_agent = Path('/usr/local/lib/vps-control-relay-agent/agent.py').read_bytes()
+    broken = Path('/qa/broken-agent')
+    shutil.copytree('/qa/source/protocol-images/relay-agent', broken)
+    (broken/'agent.py').write_text('raise SystemExit("Synthetic startup failure")\n')
+    rejected = subprocess.run(['bash', str(broken/'install.sh')], capture_output=True, text=True)
+    assert rejected.returncode != 0
+    assert Path('/usr/local/lib/vps-control-relay-agent/agent.py').read_bytes() == installed_agent
+    assert state.read_bytes() == saved_routes
+    assert all((config_root / name).read_bytes() == value for name, value in before.items())
+    with urlopen(request, context=context, timeout=5) as response:
+        restored = json.load(response)
+        assert restored['routes'] == 1 and restored['failed_routes'] == 0
     run('systemctl', 'disable', 'vps-control-relay-agent.service')
     print(json.dumps({'standalone_bootstrap': True, 'no_panel': True, 'tls_authenticated': True,
         'anonymous_rejected': True, 'root_only_credentials': True, 'reinstall_preserves_identity_and_routes': True,

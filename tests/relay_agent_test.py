@@ -33,6 +33,28 @@ def free_port():
 
 
 class ValidationTests(unittest.TestCase):
+    def test_only_dns_confirmed_domains_are_eligible(self):
+        inventory = {'ipv4': ['8.8.8.8'], 'ipv6': [], 'domains': ['valid.example', 'mixed.example', 'empty.example', 'cdn.example'], 'cdn_domains': ['cdn.example']}
+        resolve = lambda name: {'valid.example': ['8.8.8.8'], 'mixed.example': ['8.8.8.8', '1.1.1.1'], 'empty.example': [], 'cdn.example': ['1.1.1.1']}[name]
+        value = addresses.verify_domains(inventory, resolve)
+        self.assertEqual(value['domains'], ['valid.example', 'cdn.example'])
+        self.assertEqual(value['cdn_domains'], ['cdn.example'])
+        self.assertEqual({item['domain']: item['state'] for item in value['domain_checks']}, {'valid.example': 'verified', 'mixed.example': 'mismatch', 'empty.example': 'unresolved', 'cdn.example': 'dns_only'})
+        self.assertEqual(len(inventory['domains']), 4)
+
+    def test_udp_overload_is_counted_without_recording_payload_or_client_address(self):
+        from types import SimpleNamespace
+        route = relay.RelayRoute({'id': 'test', 'transport': 'udp'})
+        route.sessions[('127.0.0.1', 1234)] = SimpleNamespace(touched=0, transport=SimpleNamespace(get_write_buffer_size=lambda: 262144))
+        route.datagram_received(b'private-payload', ('127.0.0.1', 1234))
+        route.error_received(OSError('secret operating system detail'))
+        status = route.status()
+        self.assertEqual(status['errors'], 2)
+        self.assertEqual(status['diagnostics']['dropped_packets'], 1)
+        self.assertEqual(status['diagnostics']['error_counts'], {'udp_buffer_full': 1, 'udp_listener_error': 1})
+        self.assertNotIn('private-payload', json.dumps(status))
+        self.assertNotIn('secret operating', json.dumps(status))
+
     def test_inventory_collects_all_public_addresses_and_configured_names_without_dns(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -227,6 +249,9 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 replies = [await asyncio.wait_for(loop.sock_recv(sock, 1024), 3) for _ in range(2)]
                 self.assertEqual(set(replies), {bytes([index])+b'first', bytes([index])+b'second'})
             self.assertEqual(len(route.sessions), 2)
+            self.assertEqual(route.status()['diagnostics']['sent_packets'], 4)
+            self.assertEqual(route.status()['diagnostics']['received_packets'], 4)
+            self.assertEqual(route.status()['diagnostics']['dropped_packets'], 0)
         finally:
             for sock in clients: sock.close()
             await route.close(); origin.close()

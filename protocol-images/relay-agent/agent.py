@@ -15,7 +15,7 @@ import tempfile
 import time
 from addresses import read_inventory, dual_stack_available
 
-VERSION = '1.1.1'
+VERSION = '1.2.0'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -79,9 +79,12 @@ class UpstreamUDP(asyncio.DatagramProtocol):
         if not self.route.closed and self.route.transport.get_write_buffer_size() < 262144:
             self.route.transport.sendto(data, self.client)
             self.route.received += len(data)
+            self.route.packet_received()
+        elif not self.route.closed:
+            self.route.failure('udp_buffer_full', dropped=True)
 
     def error_received(self, _exc):
-        self.route.errors += 1
+        self.route.failure('udp_upstream_error')
 
 
 class RelayRoute(asyncio.DatagramProtocol):
@@ -91,7 +94,24 @@ class RelayRoute(asyncio.DatagramProtocol):
         self.sessions, self.pending = {}, {}
         self.tasks, self.writers = set(), set()
         self.sent = self.received = self.errors = 0
+        self.sent_packets = self.received_packets = self.dropped_packets = 0
+        self.error_counts = {}
+        self.last_error = self.last_error_at = None
+        self.last_sent_at = self.last_received_at = None
         self.closed = False
+
+    def failure(self, code, *, dropped=False):
+        self.errors += 1
+        self.error_counts[code] = self.error_counts.get(code, 0) + 1
+        self.last_error, self.last_error_at = code, int(time.time())
+        if dropped: self.dropped_packets += 1
+
+    def packet_received(self):
+        self.received_packets += 1
+        self.last_received_at = int(time.time())
+
+    def error_received(self, _exc):
+        self.failure('udp_listener_error')
 
     async def start(self):
         # Exclusive reservation; do not share a port with an existing protocol.
@@ -125,6 +145,7 @@ class RelayRoute(asyncio.DatagramProtocol):
 
     async def tcp_client(self, reader, writer):
         if self.closed or len(self.tasks) >= MAX_SESSIONS:
+            if not self.closed: self.failure('session_limit')
             writer.close()
             return
         task = asyncio.current_task()
@@ -132,9 +153,11 @@ class RelayRoute(asyncio.DatagramProtocol):
         self.writers.add(writer)
         upstream = None
         pumps = []
+        phase = 'tcp_connect'
         try:
             incoming, upstream = await asyncio.wait_for(asyncio.open_connection(self.config['target_ip'], self.config['target_port']), 10)
             self.writers.add(upstream)
+            phase = 'tcp_transfer'
 
             async def pump(source, destination, direction):
                 while True:
@@ -145,14 +168,18 @@ class RelayRoute(asyncio.DatagramProtocol):
                         return
                     destination.write(data)
                     await asyncio.wait_for(destination.drain(), 30)
-                    if direction == 'sent': self.sent += len(data)
-                    else: self.received += len(data)
+                    if direction == 'sent':
+                        self.sent += len(data)
+                        self.last_sent_at = int(time.time())
+                    else:
+                        self.received += len(data)
+                        self.last_received_at = int(time.time())
 
             pumps = [asyncio.create_task(pump(reader, upstream, 'sent')), asyncio.create_task(pump(incoming, writer, 'received'))]
             # Preserve half-close: a client can finish its request before the response.
             await asyncio.gather(*pumps)
-        except (OSError, asyncio.TimeoutError):
-            self.errors += 1
+        except (OSError, asyncio.TimeoutError) as exc:
+            self.failure(phase + ('_timeout' if isinstance(exc, asyncio.TimeoutError) else '_error'))
         finally:
             for item in pumps: item.cancel()
             if pumps: await asyncio.gather(*pumps, return_exceptions=True)
@@ -173,11 +200,18 @@ class RelayRoute(asyncio.DatagramProtocol):
             if session.transport.get_write_buffer_size() < 262144:
                 session.transport.sendto(data)
                 self.sent += len(data)
+                self.sent_packets += 1
+                self.last_sent_at = int(time.time())
+            else:
+                self.failure('udp_buffer_full', dropped=True)
         elif client in self.pending:
             if len(self.pending[client]) < 8: self.pending[client].append(data)
+            else: self.failure('udp_pending_full', dropped=True)
         elif client not in self.pending and len(self.sessions) + len(self.pending) < MAX_SESSIONS:
             self.pending[client] = [data]
             self.track(self.new_udp_session(client))
+        else:
+            self.failure('session_limit', dropped=True)
 
     async def new_udp_session(self, client):
         try:
@@ -190,8 +224,10 @@ class RelayRoute(asyncio.DatagramProtocol):
             for data in self.pending[client]:
                 session.transport.sendto(data)
                 self.sent += len(data)
+                self.sent_packets += 1
+                self.last_sent_at = int(time.time())
         except OSError:
-            self.errors += 1
+            self.failure('udp_session_error')
         finally:
             self.pending.pop(client, None)
 
@@ -219,7 +255,11 @@ class RelayRoute(asyncio.DatagramProtocol):
     def status(self):
         return {**self.config, 'state': 'listening', 'sent_bytes': self.sent, 'received_bytes': self.received,
                 'sessions': len(self.sessions) if self.transport else len(self.writers) // 2, 'errors': self.errors,
-                'target_verified': False}
+                'target_verified': False,
+                'diagnostics': {'sent_packets': self.sent_packets, 'received_packets': self.received_packets,
+                    'dropped_packets': self.dropped_packets, 'error_counts': dict(self.error_counts),
+                    'last_error': self.last_error, 'last_error_at': self.last_error_at,
+                    'last_sent_at': self.last_sent_at, 'last_received_at': self.last_received_at}}
 
 
 class Agent:
@@ -276,6 +316,8 @@ class Agent:
                     'failed_routes': len(self.failed), 'transports': ['tcp', 'udp'], 'address_family': 'ipv4',
                     'listen_ports': {'min': PORT_MIN, 'max': PORT_MAX}, 'max_routes': MAX_ROUTES,
                     'addresses': read_inventory(self.config_dir, self.settings()),
+                    'updates': self.update_status(),
+                    'address_checks': self.address_checks(),
                     'client_address_families': ['ipv4', 'ipv6'] if self.listen_host == '::' else ['ipv4']}
         if method == 'GET' and path == '/v1/routes':
             return {'revision': self.revision, 'items': [route.status() for route in self.routes.values()] +
@@ -317,6 +359,22 @@ class Agent:
                 raise
             self.routes[route_id] = route
             return {'revision': self.revision, 'item': route.status()}
+
+    def update_status(self):
+        try:
+            enabled = json.loads((self.config_dir / 'updates.json').read_text()).get('enabled') is True
+            path = self.config_dir / 'update-status.json'
+            value = json.loads(path.read_text()) if path.exists() else {'state': 'unchecked'}
+            return {'enabled': enabled, 'interval_hours': 24,
+                    **{key: value[key] for key in ('state', 'checked_at', 'version') if key in value}}
+        except (OSError, ValueError, TypeError):
+            return {'enabled': False, 'interval_hours': 24, 'state': 'unknown'}
+
+    def address_checks(self):
+        try:
+            return json.loads((self.config_dir / 'addresses.json').read_text()).get('domain_checks', [])
+        except (OSError, ValueError):
+            return []
 
     async def http_client(self, reader, writer):
         if self.http_connections >= 32:

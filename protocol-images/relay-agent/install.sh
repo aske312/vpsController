@@ -6,6 +6,11 @@ LIB=/usr/local/lib/vps-control-relay-agent
 SOURCE="$(cd -- "$(dirname -- "$0")" && pwd)"
 export DEBIAN_FRONTEND=noninteractive
 [[ ${EUID} -eq 0 ]] || { echo 'Relay Agent необходимо устанавливать от root.' >&2; exit 1; }
+if [[ "${RELAY_UPDATE_LOCKED:-0}" != 1 ]]; then
+  mkdir -p /run/lock
+  exec 9>/run/lock/vps-control-relay-update.lock
+  flock -n 9 || { echo 'Relay Agent уже обновляется.' >&2; exit 1; }
+fi
 if ! command -v openssl >/dev/null || ! command -v python3 >/dev/null || ! command -v curl >/dev/null; then
   apt-get -o DPkg::Lock::Timeout=300 update
   apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl openssl python3
@@ -82,6 +87,8 @@ for line in (env_path.read_text().splitlines() if env_path.exists() else []):
         parsed = shlex.split(value)
         values[key] = parsed[0] if parsed else ''
 ip = os.environ.get('RELAY_PUBLIC_IP') or values.get('PUBLIC_IP', '')
+if not ip and Path('/etc/vps-control-relay-agent/config.json').exists():
+    ip = json.loads(Path('/etc/vps-control-relay-agent/config.json').read_text())['public_ip']
 api_port = int(os.environ["RELAY_API_PORT"])
 address = ipaddress.ip_address(ip)
 if address.version != 4 or not address.is_global:
@@ -132,7 +139,8 @@ for line in (env_path.read_text().splitlines() if env_path.exists() else []):
         key, value = line.split('=', 1)
         parsed = shlex.split(value)
         values[key] = parsed[0] if parsed else ''
-ip = str(ipaddress.ip_address(os.environ.get('RELAY_PUBLIC_IP') or values['PUBLIC_IP']))
+existing = json.loads((root / 'config.json').read_text()) if (root / 'config.json').exists() else {}
+ip = str(ipaddress.ip_address(os.environ.get('RELAY_PUBLIC_IP') or values.get('PUBLIC_IP') or existing.get('public_ip')))
 token_path = root / 'token'
 if not token_path.exists():
     fd = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -165,14 +173,32 @@ for name in ('server.crt', 'server.key'):
     os.chown(root / name, 0, gid); os.chmod(root / name, 0o640)
 PY
 backup="$(mktemp -d)"
-trap 'rm -rf -- "${backup}"' EXIT
-for name in agent.py addresses.py credentials.py manifest.json; do
-  [[ ! -f "${LIB}/${name}" ]] || cp "${LIB}/${name}" "${backup}/${name}"
+install_complete=0
+rollback() {
+  result=$?
+  if [[ "${install_complete}" != 1 && -f "${backup}/agent.py" ]]; then
+    for name in agent.py addresses.py credentials.py manifest.json update.py; do
+      if [[ -f "${backup}/${name}" ]]; then cp -p "${backup}/${name}" "${LIB}/${name}"; else rm -f "${LIB}/${name}"; fi
+    done
+    systemctl restart vps-control-relay-agent.service || true
+  fi
+  rm -rf -- "${backup}"
+  return "${result}"
+}
+trap rollback EXIT
+for name in agent.py addresses.py credentials.py manifest.json update.py; do
+  [[ ! -f "${LIB}/${name}" ]] || cp -p "${LIB}/${name}" "${backup}/${name}"
 done
 install -m 0755 "${SOURCE}/agent.py" "${LIB}/agent.py"
 install -m 0700 "${SOURCE}/credentials.py" "${LIB}/credentials.py"
 install -m 0644 "${SOURCE}/addresses.py" "${LIB}/addresses.py"
 install -m 0644 "${SOURCE}/manifest.json" "${LIB}/manifest.json"
+install -m 0700 "${SOURCE}/update.py" "${LIB}/update.py"
+if [[ ! -f "${ROOT}/updates.json" ]]; then
+  printf '{"enabled":true}\n' >"${ROOT}/updates.json"
+fi
+chown root:vps-relay "${ROOT}/updates.json"
+chmod 0640 "${ROOT}/updates.json"
 python3 "${LIB}/addresses.py" "${ROOT}"
 cat >/etc/systemd/system/vps-control-relay-agent.service <<'EOF'
 [Unit]
@@ -216,7 +242,7 @@ ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/etc/vps-control-relay-agent
 UMask=0077
-TimeoutStartSec=30
+TimeoutStartSec=50
 EOF
 cat >/etc/systemd/system/vps-control-relay-addresses.timer <<'EOF'
 [Unit]
@@ -227,30 +253,48 @@ OnUnitActiveSec=5min
 [Install]
 WantedBy=timers.target
 EOF
+cat >/etc/systemd/system/vps-control-relay-update.service <<'EOF'
+[Unit]
+Description=Update Relay Agent from verified GitHub release
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/vps-control-relay-agent/update.py
+UMask=0077
+TimeoutStartSec=10min
+EOF
+cat >/etc/systemd/system/vps-control-relay-update.timer <<'EOF'
+[Unit]
+Description=Check Relay Agent updates daily
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
 systemctl daemon-reload
 systemctl enable --now vps-control-relay-addresses.timer
 systemctl enable vps-control-relay-agent.service
-systemctl restart vps-control-relay-agent.service
+systemctl restart vps-control-relay-agent.service || true
 for attempt in {1..20}; do
   if curl --silent --fail --cacert "${ROOT}/server.crt" --max-time 2 \
     --config <(printf 'header = "Authorization: Bearer %s"\n' "$(cat "${ROOT}/token")") \
-    "https://127.0.0.1:${API_PORT}/v1/status" >/dev/null; then
+    "https://127.0.0.1:${API_PORT}/v1/status" | python3 -c 'import json,sys; value=json.load(sys.stdin); sys.exit(0 if value.get("failed_routes")==0 else 1)'; then
     if command -v ufw >/dev/null; then
       ufw allow "${API_PORT}/tcp" comment 'vps-control relay API'
       ufw allow 20000:20999/tcp comment 'vps-control relay TCP'
       ufw allow 20000:20999/udp comment 'vps-control relay UDP'
     fi
     echo 'Relay Agent установлен и готов к подключению.'
+    systemctl enable --now vps-control-relay-update.timer
+    install_complete=1
     exit 0
   fi
   sleep 1
 done
-if [[ -f "${backup}/agent.py" ]]; then
-  for name in agent.py addresses.py credentials.py manifest.json; do
-    [[ ! -f "${backup}/${name}" ]] || cp "${backup}/${name}" "${LIB}/${name}"
-  done
-  systemctl restart vps-control-relay-agent.service || true
-else
+if [[ ! -f "${backup}/agent.py" ]]; then
   systemctl disable --now vps-control-relay-agent.service || true
   systemctl disable --now vps-control-relay-addresses.timer || true
 fi

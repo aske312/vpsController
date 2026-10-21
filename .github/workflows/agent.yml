@@ -25,8 +25,26 @@ jobs:
           bash -n install.sh scripts/install-agent.sh protocol-images/relay-agent/install.sh protocol-images/relay-agent/uninstall.sh
           python3 tests/relay_standalone_test.py
           python3 tests/relay_agent_test.py
+          python3 tests/relay_update_test.py
       - name: Install twice in isolated namespaces without a panel
         run: |
           sudo python3 tests/relay_standalone_smoke.py .
           sudo python3 tests/relay_standalone_smoke.py . --occupy-default
           sudo python3 tests/relay_standalone_smoke.py . --api-port 19443
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/agent'
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency: agent-release
+    steps:
+      - uses: actions/checkout@v7
+      - name: Package tested Agent
+        run: tar -czf relay-agent.tar.gz -C protocol-images/relay-agent agent.py addresses.py credentials.py manifest.json install.sh uninstall.sh update.py
+      - name: Publish Agent update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view agent-latest >/dev/null 2>&1 || gh release create agent-latest --title 'Relay Agent' --notes 'Daily update channel; published after Agent verification.' --target "$GITHUB_SHA" --prerelease
+          gh release upload agent-latest relay-agent.tar.gz --clobber

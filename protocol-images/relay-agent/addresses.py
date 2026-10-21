@@ -126,12 +126,50 @@ def dual_stack_available():
         return False
 
 
+def verify_domains(value, resolver=None):
+    """Keep local hostname discovery separate from public DNS eligibility."""
+    import concurrent.futures
+    def resolve(name):
+        if resolver:
+            return resolver(name)
+        import urllib.parse
+        import urllib.request
+        # Public DNS, bypassing /etc/hosts and environment HTTP proxies.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        found = []
+        for kind in (1, 28):
+            query = urllib.parse.urlencode({'name': name, 'type': kind})
+            request = urllib.request.Request('https://1.1.1.1/dns-query?' + query, headers={'Accept': 'application/dns-json'})
+            with opener.open(request, timeout=2) as response:
+                data = response.read(8193)
+            if len(data) > 8192: raise ValueError('DNS response too large')
+            answer = json.loads(data)
+            if not isinstance(answer, dict) or answer.get('Status') not in (0, 3) or not isinstance(answer.get('Answer', []), list): raise ValueError('DNS unavailable')
+            found.extend(item['data'] for item in answer.get('Answer', []) if isinstance(item, dict) and item.get('type') == kind and isinstance(item.get('data'), str))
+        return found
+    own = set(value['ipv4'] + value['ipv6'])
+    def check(name):
+        try:
+            found = {str(ipaddress.ip_address(item)) for item in resolve(name)}
+            if name in value.get('cdn_domains', []) and found and all(public_ip(item) for item in found):
+                state = 'dns_only'
+            else:
+                state = 'verified' if found and found <= own else 'mismatch' if found else 'unresolved'
+        except (OSError, ValueError, subprocess.SubprocessError):
+            state = 'unresolved'
+        return {'domain': name, 'state': state}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        checks = list(pool.map(check, value['domains']))
+    domains = [item['domain'] for item in checks if item['state'] in ('verified', 'dns_only')]
+    return {**value, 'domains': domains, 'cdn_domains': [name for name in value.get('cdn_domains', []) if name in domains], 'domain_checks': checks}
+
+
 if __name__ == '__main__':
     import sys
     if os.geteuid() != 0:
         raise SystemExit('Address refresh requires root')
     root = Path(sys.argv[1] if len(sys.argv) > 1 else '/etc/vps-control-relay-agent')
-    value = discover(json.loads((root / 'config.json').read_text()))
+    value = verify_domains(discover(json.loads((root / 'config.json').read_text())))
     value['updated_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     fd, temporary = tempfile.mkstemp(prefix='.addresses-', dir=root)
     try:
