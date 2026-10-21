@@ -16,6 +16,14 @@ test('optional Agent update status stays compatible with old agents and rejects 
   assert.throws(() => relaySnapshot({ ...status, hosts: [{ ...host, updates: { ...updates, state: 'raw command output' } }] }));
   assert.throws(() => relaySnapshot({ ...status, hosts: [{ ...host, updates: { ...updates, enabled: 'yes' } }] }));
 });
+
+test('client tests and loss evidence reject malformed counters and states before rendering', () => {
+  const route = { id: 'pro-' + 'a'.repeat(32), host_id: host.id, transport: 'udp', listen_port: 20001, target_ip: status.origin_ip, target_port: 443, state: 'listening', target_verified: false };
+  const device = { id: 'b'.repeat(32), state: 'awaiting_client', reason: 'awaiting_client', created_at: 1000, expires_at: 1600, consumer_id: 'mihomo:p:c', vantage_point: 'client', verification: 'client_report_with_udp_witness' };
+  const snapshot = data => ({ ...status, hosts: [{ ...host, routes: [{ ...route, device_test: data }] }] });
+  assert.equal(relaySnapshot(snapshot(device)).hosts[0].routes[0].device_test.state, 'awaiting_client');
+  for (const changed of [{ state: 'fake verified' }, { created_at: NaN }, { measurement: { state: 'ready', reason: 'udp_verified', sent: 100, loss_percent: -1 } }, { measurement: { state: 'ready', reason: 'udp_verified', rtt_ms: {} } }]) assert.throws(() => relaySnapshot(snapshot({ ...device, ...changed })));
+});
 test('connection import requires a complete explicit API v1 identity', () => {
   assert.deepEqual(relayConnection(JSON.stringify(connection)), connection);
   for (const changed of [{ api_version: 2 }, { token: '' }, { certificate_sha256: '' }, { agent_url: 'http://85.209.155.229:9443' }]) assert.throws(() => relayConnection(JSON.stringify({ ...connection, ...changed })));

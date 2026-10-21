@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from tests.api.support import api
 import relay_diagnostics
 import relay_media
+import relay_test_runner
 from network_probe import ProbePlan, ProbeUnavailable
 
 
@@ -44,7 +45,7 @@ class RelayMediaTests(unittest.TestCase):
             return body if byte_range is None else body[byte_range[0]:byte_range[1]+1]
         with tempfile.TemporaryDirectory() as folder:
             binary = Path(folder)/'core'; binary.touch()
-            with patch.object(relay_media, 'MEDIA_SIZE', len(body)), patch.object(relay_media, 'MEDIA_SHA256', hashlib.sha256(body).hexdigest()), patch.object(relay_media, 'transfer', side_effect=transfer) as read, patch.object(relay_media.subprocess, 'Popen', return_value=process), patch.object(relay_media.socket, 'create_connection', return_value=unittest.mock.MagicMock()):
+            with patch.object(relay_test_runner, 'MEDIA_SIZE', len(body)), patch.object(relay_test_runner, 'MEDIA_SHA256', hashlib.sha256(body).hexdigest()), patch.object(relay_test_runner, 'transfer', side_effect=transfer) as read, patch.object(relay_media.subprocess, 'Popen', return_value=process), patch.object(relay_media.socket, 'create_connection', return_value=unittest.mock.MagicMock()):
                 result = relay_media.execute(self.plan(), str(binary))
             self.assertEqual(result['state'], 'ready')
             self.assertEqual(read.call_count, 4)
@@ -56,7 +57,7 @@ class RelayMediaTests(unittest.TestCase):
         process = Mock(); process.poll.return_value = None
         with tempfile.TemporaryDirectory() as folder:
             binary = Path(folder)/'core'; binary.touch()
-            with patch.object(relay_media, 'transfer', side_effect=TimeoutError), patch.object(relay_media.subprocess, 'Popen', return_value=process), patch.object(relay_media.socket, 'create_connection', return_value=unittest.mock.MagicMock()):
+            with patch.object(relay_test_runner, 'transfer', side_effect=TimeoutError), patch.object(relay_media.subprocess, 'Popen', return_value=process), patch.object(relay_media.socket, 'create_connection', return_value=unittest.mock.MagicMock()):
                 result = relay_media.execute(self.plan(), str(binary))
             self.assertEqual(result, {'state': 'failed', 'reason': 'timeout'})
             process.terminate.assert_called_once()

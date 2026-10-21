@@ -95,6 +95,13 @@ def apply_relay_request(api, name, path, digest, identity):
         control.resume(settings.pending_operation_id)
     elif name == 'relay-route-check':
         api.perform_relay_probe(payload)
+    elif name == 'relay-device-test-start':
+        api.relay_device_test.start(api, payload, identity)
+    elif name == 'relay-device-test-report':
+        payload['report'] = api.RelayDeviceReport.model_validate(payload['report']).model_dump()
+        api.relay_device_test.accept(api, payload)
+    elif name == 'relay-device-test-cancel':
+        api.relay_device_test.cancel(api, payload)
     elif name in ('relay-client-create', 'relay-client-resume'):
         api.relay_client_creation.perform(api, payload, identity, resume_id=payload.get('result_id'))
     else:

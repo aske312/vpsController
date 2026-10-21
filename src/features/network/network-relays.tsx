@@ -72,6 +72,12 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, [load, refreshKey]);
+  const testingDevice = status?.hosts.some(host => host.routes.some(route => ["preparing", "awaiting_client", "processing"].includes(route.device_test?.state || "")));
+  useEffect(() => {
+    if (!testingDevice) return;
+    const timer = window.setInterval(() => { if (document.visibilityState !== "hidden") void load(); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [testingDevice, load]);
   useEffect(() => { onDirtyChange(changed); }, [changed, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
   useEffect(() => {
@@ -119,8 +125,25 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
     if (!confirmed || !selected || locked || !status || status.pending) return;
     void submit(`/network/relays/${selected.id}`, { method: "DELETE", headers: { "If-Match": status.revision } });
   }
+  async function downloadTest(hostId: string, routeId: string, testId: string) {
+    try {
+      const kit = await request<{ filename: string; content_base64: string }>(`/network/relays/${hostId}/routes/${routeId}/device-tests/${testId}/kit`, { cache: "no-store" });
+      if (typeof kit.content_base64 !== "string" || kit.content_base64.length > 100000 || !/^relay-test-[a-f0-9]{8}\.zip$/.test(kit.filename)) throw new Error("Некорректный комплект теста");
+      const bytes = Uint8Array.from(atob(kit.content_base64), char => char.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/zip" }));
+      const anchor = document.createElement("a"); anchor.href = url; anchor.download = kit.filename; anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось скачать тест"); }
+  }
+  async function uploadTest(hostId: string, routeId: string, testId: string, file: File) {
+    try {
+      if (file.size > 16384) throw new Error("Результат теста слишком большой");
+      const report: unknown = JSON.parse(await file.text());
+      await submit(`/network/relays/${hostId}/routes/${routeId}/device-tests/${testId}/report`, { method: "POST", headers: { "If-Match": status?.revision || "" }, body: JSON.stringify(report) });
+    } catch (cause) { notifyError(cause instanceof Error ? cause.message : "Не удалось прочитать результат теста"); }
+  }
   return {
-    status, failed, reading, locked, load, submit, dialog, embedded, name, address, connection, edit, changed, discard, confirmation, addressConfirmation, setAddressConfirmation,
+    status, failed, reading, locked, load, submit, downloadTest, uploadTest, dialog, embedded, name, address, connection, edit, changed, discard, confirmation, addressConfirmation, setAddressConfirmation,
     openHost, close, resetDialog, saveHost, removeConfirmed, setDiscard, setConfirmation, recoveryConfirmation, setRecoveryConfirmation,
     changeName: (value: string) => { setName(value); setChanged(true); },
     changeAddress: (value: string) => { setAddress(value); setChanged(true); },
@@ -157,7 +180,10 @@ export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: 
         <td><span className="networkRouteConnection" title="Число настроенных перенаправлений. Состояние каждого порта — в подробностях.">{summary.connection}</span></td>
         <td><div className="networkRelayActions"><button type="button" className="networkRouteConfigure" disabled={relay.locked} onClick={() => relay.openHost(item)}>Настроить</button>{address && <button type="button" className="networkRouteDelete" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setAddressConfirmation({ host: item, address })}>Удалить адрес</button>}</div></td>
       </tr>
-      {open && <tr className="networkRouteDetailRow"><td colSpan={5}><RelayRouteDetails host={item} address={address} summary={summary} unknown={unknown} consumers={relay.status?.consumers || []} disabled={relay.locked || pending || unknown} onTest={(routeId, consumerId) => void relay.submit(`/network/relays/${item.id}/routes/${routeId}/check?mode=media&consumer_id=${encodeURIComponent(consumerId)}`, { method: "POST", headers: { "If-Match": relay.status?.revision || "" } })} /></td></tr>}
+      {open && <tr className="networkRouteDetailRow"><td colSpan={5}><RelayRouteDetails host={item} address={address} summary={summary} unknown={unknown} consumers={relay.status?.consumers || []} disabled={relay.locked || pending || unknown} onTest={(routeId, consumerId) => void relay.submit(`/network/relays/${item.id}/routes/${routeId}/check?mode=media&consumer_id=${encodeURIComponent(consumerId)}`, { method: "POST", headers: { "If-Match": relay.status?.revision || "" } })}
+        onDeviceTest={(routeId, consumerId) => void relay.submit(`/network/relays/${item.id}/routes/${routeId}/device-tests?consumer_id=${encodeURIComponent(consumerId)}`, { method: "POST", headers: { "If-Match": relay.status?.revision || "" } })}
+        onDownloadTest={(routeId, testId) => void relay.downloadTest(item.id, routeId, testId)} onUploadTest={(routeId, testId, file) => void relay.uploadTest(item.id, routeId, testId, file)}
+        onCancelTest={(routeId, testId) => void relay.submit(`/network/relays/${item.id}/routes/${routeId}/device-tests/${testId}`, { method: "DELETE", headers: { "If-Match": relay.status?.revision || "" } })} /></td></tr>}
     </Fragment>;
   })}</>;
 }

@@ -47,6 +47,9 @@ def route_snapshot(value):
     if not isinstance(value, dict) or type(value.get('revision')) is not int or value['revision'] < 0 or not isinstance(value.get('items'), list) or len(value['items']) > 64:
         raise ValueError('Неполный ответ маршрутов агента')
     seen, ports = set(), set()
+    reserved = value.get('reserved_udp_ports', [])
+    if not isinstance(reserved, list) or len(reserved) > 2 or any(type(port) is not int or not 20000 <= port <= 20999 for port in reserved) or len(set(reserved)) != len(reserved):
+        raise ValueError('Некорректные временные резервации Agent')
     for item in value['items']:
         validate_config(item)
         identity = item.get('id')
@@ -76,6 +79,8 @@ def status_snapshot(value):
         raise ValueError('Несовместимые лимиты агента')
     if 'addresses' in value:normalize_addresses(value['addresses'], None)
     if 'updates' in value: value['updates'] = relay_diagnostics.updates(value['updates'])
+    if 'capabilities' in value and (not isinstance(value['capabilities'], list) or len(value['capabilities']) > 16 or any(not isinstance(item, str) or not re.fullmatch(r'[a-z0-9-]{1,64}', item) for item in value['capabilities'])):
+        raise ValueError('Некорректные возможности Agent')
     if 'address_checks' in value: value['address_checks'] = relay_diagnostics.address_checks(value['address_checks'])
     if 'client_address_families' in value and (not isinstance(value['client_address_families'],list) or any(item not in ('ipv4','ipv6') for item in value['client_address_families'])):
         raise ValueError('Некорректные семейства адресов агента')
@@ -269,6 +274,8 @@ class RelayManager:
             candidates = sorted({route['listen_port'] for route in owned if (route['transport'], route['target_port']) in sockets})
             candidates.extend(port for port in range(20000, 21000) if port not in candidates)
             def compatible(port):
+                if port in remote.get('reserved_udp_ports', []) and any(transport == 'udp' for transport, _ in sockets):
+                    return False
                 for transport, target in sockets:
                     found = next((route for route in remote['items'] if route['transport'] == transport and route['listen_port'] == port), None)
                     if found and not any(route['id'] == found['id'] and same_route(route, found) and route['target_ip'] == target_ip and route['target_port'] == target and found['state'] == 'listening' for route in owned):
@@ -469,7 +476,7 @@ class RelayManager:
                     return public
                 remote = route_snapshot(client.request('GET', '/v1/routes'))
                 public.update(state='connected', version=status['version'], agent_revision=remote['revision'])
-                public.update({key: status[key] for key in ('updates', 'address_checks') if key in status})
+                public.update({key: status[key] for key in ('updates', 'address_checks', 'capabilities') if key in status})
                 ids = {item['id'] for item in owned}
                 public['foreign_routes'] = sum(item['id'] not in ids for item in remote['items'])
                 for route in owned:

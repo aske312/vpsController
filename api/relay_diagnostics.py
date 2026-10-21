@@ -22,6 +22,10 @@ def diagnostics(value):
     if not isinstance(counts, dict) or any(key not in ERROR_CODES or type(number) is not int or not 0 <= number <= 2**53 - 1 for key, number in counts.items()):
         raise ValueError('Invalid Agent error counters')
     result['error_counts'] = counts
+    if 'return_state' in value:
+        if value['return_state'] not in ('no_return', 'waiting', 'flowing', 'idle') or type(value.get('no_return_sessions')) is not int or not 0 <= value['no_return_sessions'] <= 128:
+            raise ValueError('Invalid return traffic observation')
+        result.update(return_state=value['return_state'], no_return_sessions=value['no_return_sessions'])
     return result
 
 

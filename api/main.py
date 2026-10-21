@@ -49,6 +49,10 @@ import network_probe
 import server_addresses
 import relay_manager
 import relay_media
+import relay_device_test
+import relay_test_peer
+import relay_measurement
+import relay_test_runner
 import relay_connections
 import relay_client_creation
 import native_client_creation
@@ -64,6 +68,7 @@ from component_registry import ComponentRegistry, RegistryError, paths_from_mani
 from system_metrics import CpuSampler, collect_resources
 from metrics_history import MetricsHistory, MetricsMonitor, SettingsConflict
 from schemas import (
+    RelayDeviceReport,
     ComponentPurge,
     BootstrapRequest,
     AdminPasswordChange,
@@ -102,14 +107,20 @@ from schemas import (
 async def lifespan(_: FastAPI):
     global metrics_monitor
     migration_task = None
+    relay_recovery_task = None
     # Linux is the supported server runtime. Importing the API starts no threads.
     if platform.system() == "Linux":
         migration_task = asyncio.create_task(migrate_legacy_components())
+        relay_recovery_task = asyncio.create_task(recover_relay_tests())
         metrics_monitor = MetricsMonitor(metrics_history_store, collect_system_resources)
         metrics_monitor.start()
     try:
         yield
     finally:
+        if relay_recovery_task is not None:
+            relay_recovery_task.cancel()
+            try: await relay_recovery_task
+            except asyncio.CancelledError: pass
         if migration_task is not None:
             migration_task.cancel()
             try:
@@ -131,6 +142,12 @@ async def migrate_legacy_components():
             await asyncio.sleep(5)
     except Exception:
         logger.warning("Legacy component migration unavailable; manual adoption remains available")
+
+
+async def recover_relay_tests():
+    while True:
+        await asyncio.to_thread(relay_device_test.recover, sys.modules[__name__])
+        await asyncio.sleep(60)
 
 
 app = FastAPI(title="Infrastructure API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -2722,6 +2739,7 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
         result['origin_hosts'] = relay_origin_hosts()
         candidates = [{'id': item['id'], 'label': item['label']} for item in network_consumers()]
         candidates.extend({'id': f"direct:{item['id']}", 'label': str(item.get('name') or item['id'])} for item in read_clients() if item.get('id') and item.get('protocol') in ('tuic', 'hysteria2'))
+        candidates.extend({'id': f"direct:{item['id']}", 'label': str(item.get('name') or item['id'])} for item in read_clients() if item.get('id') and item.get('protocol') in ('wg', 'awg'))
         profiles_path = DATA_DIR / 'mihomo' / 'profiles.json'
         if profiles_path.is_file():
             for profile in json.loads(profiles_path.read_text(encoding='utf-8')):
@@ -2739,9 +2757,9 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
                     plan = prepare_relay_media_probe(route, private_hosts[host['id']], check['consumer_id']) if check.get('mode') == 'media' else prepare_relay_probe(route, private_hosts[host['id']], check['consumer_id'])
                     current = network_probe.plan_seal(plan, network_probe.evidence_key(DATA_DIR))
                     valid = host['state'] == 'connected' and route['state'] == 'listening' and current == check.get('plan_seal')
-                except (OSError, ValueError, KeyError, TypeError, HTTPException):
+                except (OSError, ValueError, KeyError, TypeError, HTTPException, subprocess.SubprocessError):
                     valid = False
-                route['check'] = {key: check[key] for key in ('state', 'consumer_id', 'checked_at', 'vantage_point', 'mode', 'reason', 'verified_bytes', 'range_checks', 'seconds') if key in check}
+                route['check'] = {key: check[key] for key in ('state', 'consumer_id', 'checked_at', 'vantage_point', 'mode', 'reason', 'verified_bytes', 'range_checks', 'seconds', 'measurement', 'cleanup_state') if key in check}
                 try:
                     if check.get('mode') == 'media' and (datetime.now(timezone.utc) - datetime.fromisoformat(check['checked_at'])).total_seconds() > 3600:
                         valid = False
@@ -2749,6 +2767,7 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
                     valid = False
                 if not valid:
                     route['check']['state'] = 'unknown'
+        relay_device_test.attach(sys.modules[__name__], result)
         return JSONResponse(result, headers={'Cache-Control': 'no-store'})
     except (OSError, ValueError):
         raise HTTPException(status_code=503, detail='Реестр relay недоступен') from None
@@ -2925,14 +2944,17 @@ def perform_relay_probe(payload):
         plan = prepare(route, host, payload['consumer_id'])
         key = network_probe.evidence_key(DATA_DIR, create=True)
         check['plan_seal'] = network_probe.plan_seal(plan, key)
-        result = execute_relay_media_probe(plan) if mode == 'media' else execute_network_probe(plan)
+        if mode == 'media':
+            result = relay_device_test.execute_server(sys.modules[__name__], route, host, payload['consumer_id'])
+        else:
+            result = execute_network_probe(plan)
         after = prepare(route, host, payload['consumer_id'])
         if network_probe.plan_seal(after, key) == check['plan_seal'] and remote_current():
             check['state'] = 'ready' if result.get('state') in ('verified', 'ready') else 'failed' if result.get('state') == 'failed' else 'unknown'
-            check.update({key: result[key] for key in ('reason', 'verified_bytes', 'range_checks', 'seconds') if key in result})
+            check.update({key: result[key] for key in ('reason', 'verified_bytes', 'range_checks', 'seconds', 'measurement', 'cleanup_state') if key in result})
         else:
             check['reason'] = 'configuration_changed'
-    except (OSError, ValueError, HTTPException, relay_manager.AgentAPIError):
+    except (OSError, ValueError, HTTPException, relay_manager.AgentAPIError, subprocess.SubprocessError):
         check['reason'] = 'unsupported_or_unavailable'
     check['checked_at'] = datetime.now(timezone.utc).isoformat()
     route['check'] = check
@@ -2947,12 +2969,12 @@ def check_relay_route(host_id: str, route_id: str, consumer_id: str, mode: Liter
 
 
 def prepare_relay_media_probe(route, host, consumer_id):
-    if consumer_id.startswith('mihomo:'):
-        return relay_media.mihomo_plan(sys.modules[__name__], route, host, consumer_id)
-    return prepare_relay_probe(route, host, consumer_id)
+    return relay_test_peer.base_plan(sys.modules[__name__], route, host, consumer_id)
 
 
 def execute_relay_media_probe(plan):
+    if plan.client.get('type') == 'wireguard' and not plan.server_behavior.get('diagnostic_peer'):
+        raise network_probe.ProbeUnavailable('Для WG/AWG требуется отдельный временный peer')
     if plan.engine == 'mihomo':
         binary = DATA_DIR / 'mihomo' / 'bin' / 'mihomo'
     elif plan.engine == 'singbox':
@@ -2960,6 +2982,29 @@ def execute_relay_media_probe(plan):
     else:
         binary = '/usr/local/lib/vps-control-mihomo-reality/xray' if plan.producer == 'mihomo_vless' else XRAY_BIN
     return relay_media.execute(plan, str(binary))
+
+
+@app.post('/api/network/relays/{host_id}/routes/{route_id}/device-tests', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def start_relay_device_test(host_id: str, route_id: str, consumer_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match')):
+    return start_relay_mutation('relay-device-test-start', {'host_id': host_id, 'route_id': route_id, 'consumer_id': consumer_id, 'expected_revision': expected_revision}, operation_id)
+
+
+@app.get('/api/network/relays/{host_id}/routes/{route_id}/device-tests/{test_id}/kit')
+def get_relay_device_test_kit(host_id: str, route_id: str, test_id: str, _: None = Depends(require_token)):
+    try:
+        return JSONResponse(relay_device_test.kit(sys.modules[__name__], host_id, route_id, test_id), headers={'Cache-Control': 'no-store'})
+    except (ValueError, OSError, KeyError):
+        raise HTTPException(status_code=409, detail='Комплект теста ещё не готов или уже истёк. Обновите ROUTES.') from None
+
+
+@app.post('/api/network/relays/{host_id}/routes/{route_id}/device-tests/{test_id}/report', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def report_relay_device_test(host_id: str, route_id: str, test_id: str, payload: RelayDeviceReport, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match')):
+    return start_relay_mutation('relay-device-test-report', {'host_id': host_id, 'route_id': route_id, 'test_id': test_id, 'report': payload.model_dump(), 'expected_revision': expected_revision}, operation_id)
+
+
+@app.delete('/api/network/relays/{host_id}/routes/{route_id}/device-tests/{test_id}', status_code=202, dependencies=[Depends(require_mutation_admission)])
+def cancel_relay_device_test(host_id: str, route_id: str, test_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match')):
+    return start_relay_mutation('relay-device-test-cancel', {'host_id': host_id, 'route_id': route_id, 'test_id': test_id, 'expected_revision': expected_revision}, operation_id)
 
 
 @app.post('/api/network/relays/{host_id}/routes/{route_id}/export')
@@ -5773,6 +5818,11 @@ def next_address(protocol: Literal["wg", "awg"]) -> ipaddress.IPv4Address:
         for item in read_clients()
         if item["protocol"] == protocol and item.get("address")
     }
+    interface = WG_INTERFACE if protocol == 'wg' else AWG_INTERFACE
+    for lease in (DATA_DIR/'relay-tests').glob('*/cleanup.json'):
+        record = json.loads(lease.read_text())
+        if record.get('peer', {}).get('interface') == interface and not record.get('peer_removed'):
+            used.add(ipaddress.ip_interface(record['peer']['allowed_ip']).ip)
     for address in list(network.hosts())[1:]:
         if address not in used:
             return address

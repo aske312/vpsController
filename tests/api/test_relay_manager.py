@@ -329,6 +329,17 @@ class RelayManagementTests(unittest.TestCase):
         return {'host_id': self.host_id, 'transport': 'tcp', 'listen_port': port, 'target_port': 443,
                 'expected_revision': self.control.read()['revision'], 'agent_revision': self.agent.revision}
 
+    def test_allocator_skips_transient_udp_measurement_ports(self):
+        request = self.agent.request
+        def observed(method, path, *args, **kwargs):
+            result = request(method, path, *args, **kwargs)
+            if method == 'GET' and path == '/v1/routes': result['reserved_udp_ports'] = [20000]
+            return result
+        with patch.object(self.agent, 'request', side_effect=observed):
+            self.control.ensure(self.host_id, [[('udp', 443)]], 'a'*32)
+        route = self.control.read()['routes'][0]
+        self.assertEqual(route['listen_port'], 20001)
+
     def test_inventory_never_probes_or_returns_saved_readiness(self):
         self.control.mutate_route(self.payload(), 'b'*32)
         registry = self.control.read()

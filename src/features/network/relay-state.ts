@@ -1,17 +1,22 @@
 import { clientExport, type ClientExport } from "../../shared/lib/client-export";
 
+export type RelayMeasurement = { state: "ready" | "failed" | "warning" | "unknown"; reason: string; scope?: "diagnostic_udp_path"; sent?: number; received?: number; loss_percent?: number; client_to_relay_lost?: number; relay_to_vps_lost?: number; vps_to_relay_lost?: number; relay_to_client_lost?: number; agent_local_drops?: number; origin_local_drops?: number; agent_socket_errors?: number; rtt_ms?: number | null; relay_vps_rtt_ms?: number | null; packet_size?: number };
+export type RelayDeviceTest = { id: string; state: "preparing" | "awaiting_client" | "processing" | "ready" | "warning" | "failed" | "unknown" | "expired" | "cancelled"; reason: string; created_at: number; expires_at: number; finished_at?: number; consumer_id: string; cleanup_state?: "cleaned" | "failed"; media?: { state: "ready" | "failed" | "unknown"; reason: string; verified_bytes?: number | null; seconds?: number | null }; measurement?: RelayMeasurement; vantage_point: "client"; verification: "client_report_with_udp_witness" };
+
 export type RelayRoute = {
   cdn_domain?: string;
   id: string; host_id: string; transport: "tcp" | "udp"; listen_port: number; target_ip: string; target_port: number;
   state: "listening" | "failed" | "missing" | "drift" | "unknown"; target_verified: false;
   sent_bytes?: number; received_bytes?: number; sessions?: number; errors?: number;
-  diagnostics?: { sent_packets: number; received_packets: number; dropped_packets: number; last_sent_at: number | null; last_received_at: number | null; last_error_at: number | null; last_error: string | null; error_counts: Record<string, number> };
-  check?: { state: "ready" | "failed" | "unknown"; consumer_id: string; checked_at: string; vantage_point: "server"; mode?: "exchange" | "media"; reason?: string; verified_bytes?: number; range_checks?: number; seconds?: number };
+  diagnostics?: { sent_packets: number; received_packets: number; dropped_packets: number; last_sent_at: number | null; last_received_at: number | null; last_error_at: number | null; last_error: string | null; error_counts: Record<string, number>; return_state?: "no_return" | "waiting" | "flowing" | "idle"; no_return_sessions?: number };
+  check?: { state: "ready" | "failed" | "unknown"; consumer_id: string; checked_at: string; vantage_point: "server"; mode?: "exchange" | "media"; reason?: string; verified_bytes?: number; range_checks?: number; seconds?: number; measurement?: RelayMeasurement; cleanup_state?: "cleaned" | "failed" };
+  device_test?: RelayDeviceTest;
 };
 export type RelayHost = {
   id: string; name: string; agent_url: string; client_address?: string; certificate_sha256: string; api_version: 1;
   token_configured: boolean; state: "connected" | "unknown"; version?: string; agent_revision?: number;
   foreign_routes: number; routes: RelayRoute[]; error?: string;
+  capabilities?: string[];
   updates?: { enabled: boolean; interval_hours: 24; state: "unchecked" | "current" | "updated" | "disabled" | "failed" | "unknown"; checked_at?: string; version?: string };
   address_checks?: { domain: string; state: "verified" | "dns_only" | "unresolved" | "mismatch" }[];
   excluded_addresses?: string[];
@@ -26,6 +31,14 @@ export type RelayStatus = {
 export type RelayClientResult = ClientExport;
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 const integer = (value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
+const finite = (value: unknown, max: number) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= max;
+function measurementValid(value: unknown) {
+  if (!object(value) || !["ready", "failed", "warning", "unknown"].includes(String(value.state)) || typeof value.reason !== "string") return false;
+  if (value.scope !== undefined && value.scope !== "diagnostic_udp_path") return false;
+  for (const key of ["sent", "received", "client_to_relay_lost", "relay_to_vps_lost", "vps_to_relay_lost", "relay_to_client_lost", "origin_local_drops"]) if (value[key] !== undefined && !integer(value[key], 0, 100)) return false;
+  for (const key of ["rtt_ms", "relay_vps_rtt_ms"]) if (value[key] !== undefined && value[key] !== null && !finite(value[key], 120000)) return false;
+  return value.loss_percent === undefined || finite(value.loss_percent, 100);
+}
 export function relayApiOrigin(value: unknown): value is string {
   if (typeof value !== "string" || !/^https:\/\/(?:[\d.]+|\[[a-fA-F0-9:]+\]):\d+\/?$/.test(value)) return false;
   try { const url = new URL(value); const port = Number(url.port || 443); return port >= 1024 && port <= 65535 && !(port >= 20000 && port <= 20999); }
@@ -60,6 +73,7 @@ export function relaySnapshot(value: unknown): RelayStatus {
       || !integer(host.foreign_routes) || !Array.isArray(host.routes) || host.error !== undefined && typeof host.error !== "string"
       || host.state === "connected" && (!integer(host.agent_revision) || typeof host.version !== "string")) return invalid();
     ids.add(host.id);
+    if (host.capabilities !== undefined && (!Array.isArray(host.capabilities) || host.capabilities.length > 16 || host.capabilities.some(item => typeof item !== "string" || !/^[a-z0-9-]{1,64}$/.test(item)))) return invalid();
     if (host.excluded_addresses !== undefined && (!Array.isArray(host.excluded_addresses) || host.excluded_addresses.some(address => typeof address !== "string" || !address || address.length > 253))) return invalid();
     if (host.updates !== undefined && (!object(host.updates) || typeof host.updates.enabled !== "boolean" || host.updates.interval_hours !== 24 || !["unchecked", "current", "updated", "disabled", "failed", "unknown"].includes(String(host.updates.state)))) return invalid();
     if (host.address_checks !== undefined && (!Array.isArray(host.address_checks) || host.address_checks.length > 64 || host.address_checks.some(item => !object(item) || typeof item.domain !== "string" || !["verified", "dns_only", "unresolved", "mismatch"].includes(String(item.state))))) return invalid();
@@ -81,9 +95,17 @@ export function relaySnapshot(value: unknown): RelayStatus {
       if (route.diagnostics !== undefined) {
         const data = route.diagnostics;
         if (!object(data) || ["sent_packets", "received_packets", "dropped_packets"].some(key => !integer(data[key])) || ["last_sent_at", "last_received_at", "last_error_at"].some(key => data[key] !== null && !integer(data[key], 0, 253402300799)) || data.last_error !== null && typeof data.last_error !== "string" || !object(data.error_counts) || Object.values(data.error_counts).some(item => !integer(item))) return invalid();
+        if (data.return_state !== undefined && (!["no_return", "waiting", "flowing", "idle"].includes(String(data.return_state)) || !integer(data.no_return_sessions, 0, 128))) return invalid();
       }
       if (object(route.check) && route.check.mode !== undefined && !["exchange", "media"].includes(String(route.check.mode))) return invalid();
       if (route.check !== undefined && (!object(route.check) || !["ready", "failed", "unknown"].includes(String(route.check.state)) || typeof route.check.consumer_id !== "string" || typeof route.check.checked_at !== "string" || route.check.vantage_point !== "server")) return invalid();
+      if (object(route.check) && route.check.measurement !== undefined && !measurementValid(route.check.measurement)) return invalid();
+      if (route.device_test !== undefined) {
+        const data = route.device_test;
+        if (!object(data) || typeof data.id !== "string" || !/^[0-9a-f]{32}$/.test(data.id) || !["preparing", "awaiting_client", "processing", "ready", "warning", "failed", "unknown", "expired", "cancelled"].includes(String(data.state)) || !finite(data.created_at, 253402300799) || !finite(data.expires_at, 253402300799) || typeof data.consumer_id !== "string" || data.vantage_point !== "client" || data.verification !== "client_report_with_udp_witness") return invalid();
+        if (data.measurement !== undefined && !measurementValid(data.measurement)) return invalid();
+        if (data.media !== undefined && (!object(data.media) || !["ready", "failed", "unknown"].includes(String(data.media.state)))) return invalid();
+      }
       routeIds.add(route.id);
     }
   }

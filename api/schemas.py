@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 
 
 class BootstrapRequest(BaseModel):
@@ -36,6 +36,31 @@ class RelayRecoverySettings(BaseModel):
 
 class RelayExportRequest(BaseModel):
     config: str = Field(min_length=1, max_length=262144)
+
+
+class RelayMediaResult(BaseModel):
+    model_config = {'extra': 'forbid'}
+    state: Literal['ready', 'failed', 'unknown']
+    reason: Literal['media_verified', 'timeout', 'transport_error', 'client_unavailable', 'content_mismatch', 'range_mismatch']
+    verified_bytes: int | None = Field(default=None, strict=True, ge=0, le=4372373)
+    range_checks: int | None = Field(default=None, strict=True, ge=0, le=3)
+    seconds: float | None = Field(default=None, ge=0, le=600)
+
+
+class RelayUdpResult(BaseModel):
+    model_config = {'extra': 'forbid'}
+    state: Literal['completed', 'unavailable']
+    sent_sequences: list[StrictInt] = Field(max_length=100)
+    received_sequences: list[StrictInt] = Field(max_length=100)
+    rtt_ms: float | None = Field(default=None, ge=0, le=10000)
+
+
+class RelayDeviceReport(BaseModel):
+    model_config = {'extra': 'forbid'}
+    id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    token: str = Field(pattern=r'^[0-9a-f]{64}$')
+    media: RelayMediaResult
+    measurement: RelayUdpResult
 
 
 class AdminPasswordChange(BaseModel):

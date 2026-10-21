@@ -2774,6 +2774,13 @@ def next_tunnel_address(module_id: str) -> tuple[str, str]:
             if re.match(r"^\s*AllowedIPs\s*=", line):
                 reserved.extend(ipaddress.ip_network(value.strip(), strict=False) for value in line.split("=", 1)[1].split(","))
     hosts = list(network.hosts())
+    # Diagnostic peers are kernel-only and never enter profiles/config files.
+    for lease in (DATA_ROOT.parent / 'relay-tests').glob('*/cleanup.json'):
+        record = json.loads(lease.read_text(encoding='utf-8'))
+        peer = record.get('peer', {})
+        expected_interface = 'mh-wg0' if module_id == 'transport-wg' else 'mh-awg0'
+        if peer.get('interface') == expected_interface and not record.get('peer_removed'):
+            reserved.append(ipaddress.ip_network(peer['allowed_ip']))
     if len(hosts) < 3:
         raise RuntimeError("Mihomo subnet is too small")
     server = hosts[0]

@@ -5,6 +5,7 @@ import type { ServerAddress } from "./server-address-state";
 import { addressRoleLabels } from "./server-address-state";
 import { domainRouteSummary, type RouteSummary } from "./route-summary";
 import { NetworkRouteBadge, NetworkRouteSummaryBadge } from "./network-route-badge";
+import { RelayDeviceResult, RelayLossResult } from "./relay-test-results";
 
 type Domain = NetworkStatus["domains"][number];
 const sourceLabels: Record<string, string> = { environment: "Настройки сервера", settings: "Настройки маршрутов", gateway: "Шлюз подключений", connection: "Сохранённые подключения" };
@@ -117,13 +118,14 @@ const relayErrorLabels: Record<string, string> = {
 };
 const mediaReasonLabels: Record<string, string> = { media_verified: "Видео и три перемотки проверены по содержимому", timeout: "Таймаут передачи видео", transport_error: "Туннель не передал видео", content_mismatch: "Содержимое видео не совпало с эталоном", range_mismatch: "Перемотка не передала нужный фрагмент", client_unavailable: "Тестовый клиент не запустился или отсутствует", configuration_changed: "Настройки изменились во время теста", unsupported_or_unavailable: "Для подключения нет безопасного поддержанного теста либо его настройки недоступны" };
 
-function RelayMediaTest({ consumers, disabled, onTest }: { consumers: { id: string; label: string }[]; disabled: boolean; onTest: (id: string) => void }) {
+function RelayMediaTest({ consumers, disabled, onTest, onDeviceTest }: { consumers: { id: string; label: string }[]; disabled: boolean; onTest: (id: string) => void; onDeviceTest?: (id: string) => void }) {
   const [selected, setSelected] = useState("");
   const value = consumers.some(item => item.id === selected) ? selected : "";
-  return <div className="relayActions"><label>Подключение для медиатеста<select aria-label="Подключение для медиатеста" value={value} disabled={disabled || !consumers.length} onChange={event => setSelected(event.target.value)}><option value="">Выберите подключение</option>{consumers.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label><button type="button" disabled={disabled || !value} onClick={() => onTest(value)}>Проверить видео с VPS</button></div>;
+  return <div className="relayActions"><label>Подключение для медиатеста<select aria-label="Подключение для медиатеста" value={value} disabled={disabled || !consumers.length} onChange={event => setSelected(event.target.value)}><option value="">Выберите подключение</option>{consumers.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label><button type="button" disabled={disabled || !value} onClick={() => onTest(value)}>Проверить с VPS</button>{onDeviceTest && <button type="button" disabled={disabled || !value} onClick={() => onDeviceTest(value)}>Тест с устройства</button>}</div>;
 }
 
-export function RelayRouteDetails({ host, address, summary, unknown, consumers = [], disabled = true, onTest }: { host: RelayHost; address: string; summary: RouteSummary; unknown: boolean; consumers?: { id: string; label: string; host_id?: string }[]; disabled?: boolean; onTest?: (routeId: string, consumerId: string) => void }) {
+type TestActions = { onTest?: (routeId: string, consumerId: string) => void; onDeviceTest?: (routeId: string, consumerId: string) => void; onDownloadTest?: (routeId: string, testId: string) => void; onUploadTest?: (routeId: string, testId: string, file: File) => void; onCancelTest?: (routeId: string, testId: string) => void };
+export function RelayRouteDetails({ host, address, summary, unknown, consumers = [], disabled = true, onTest, onDeviceTest, onDownloadTest, onUploadTest, onCancelTest }: { host: RelayHost; address: string; summary: RouteSummary; unknown: boolean; consumers?: { id: string; label: string; host_id?: string }[]; disabled?: boolean } & TestActions) {
   return <NetworkRouteDetails address={address} summary={summary}>
     <RouteDetailsSection title="Подключение к агенту"><dl className="routeDetailsFacts">
       <Field label="Имя узла">{shown(host.name)}</Field>
@@ -143,7 +145,7 @@ export function RelayRouteDetails({ host, address, summary, unknown, consumers =
       <Field label="Слушающие порты">{unknown ? "Не подтверждены" : host.routes.length ? `${host.routes.filter(route => route.state === "listening").length} из ${host.routes.length}` : "Нет перенаправлений"}</Field>
       <Field label="Проверки с VPS">{unknown ? "Не подтверждены" : host.routes.length ? `${host.routes.filter(route => route.state === "listening" && route.check?.state === "ready").length} из ${host.routes.length}` : "Нет результатов"}</Field>
       <Field label="Правила с ошибками">{unknown ? "Не подтверждены" : host.routes.filter(route => ["failed", "missing", "drift"].includes(route.state) || route.check?.state === "failed").length}</Field>
-    </dl><p>{unknown ? "Сохранённые правила не доказывают, что порты сейчас слушают." : "Слушающий порт и проверка с VPS показаны отдельно. Полный путь с внешнего клиента здесь не проверяется."}</p></RouteDetailsSection>
+    </dl><p>{unknown ? "Сохранённые правила не доказывают, что порты сейчас слушают." : "Порт, тест с VPS и тест с устройства показаны отдельно. Выберите подключение в подробностях перенаправления."}</p></RouteDetailsSection>
     <RouteDetailsSection title="Перенаправления Relay" wide collapsible hint={unknown ? "Сохранённые сведения" : `Правил: ${host.routes.length}`}>
       {host.routes.length ? <div className="routeDetailsForwardings" aria-label="Перенаправления Relay">{host.routes.map(route => <article key={route.id} className="routeDetailsForwarding">
         <header><strong>{route.transport.toUpperCase()} · порт {route.listen_port}</strong><NetworkRouteBadge tone={unknown || route.state === "unknown" ? "unchecked" : route.state === "listening" ? "active" : "error"}>{unknown ? "Не подтверждён" : ({ listening: "Слушает", failed: "Ошибка", missing: "Отсутствует", drift: "Изменён", unknown: "Неизвестно" })[route.state]}</NetworkRouteBadge></header>
@@ -158,12 +160,16 @@ export function RelayRouteDetails({ host, address, summary, unknown, consumers =
             {route.transport === "udp" && <Field label="UDP: пакеты к назначению / обратно / отброшено">{unknown ? "Не подтверждено" : `${route.diagnostics.sent_packets} / ${route.diagnostics.received_packets} / ${route.diagnostics.dropped_packets}`}</Field>}
             <Field label="Последний ответ">{unknown ? "Не подтверждён" : route.diagnostics.last_received_at ? time(new Date(route.diagnostics.last_received_at * 1000).toISOString()) : "Ещё не получен"}</Field>
             <Field label="Последняя отправка">{unknown ? "Не подтверждена" : route.diagnostics.last_sent_at ? time(new Date(route.diagnostics.last_sent_at * 1000).toISOString()) : "Ещё не было"}</Field>
+            {route.diagnostics.return_state && <Field label="Обратный трафик">{unknown ? "Не подтверждён" : ({ no_return: `Нет ответа более 5 секунд · сессий: ${route.diagnostics.no_return_sessions}`, waiting: "Ожидается ответ", flowing: "Ответы поступают", idle: "Нет свежего обмена" })[route.diagnostics.return_state]}</Field>}
             {route.diagnostics.last_error && <Field label="Последняя ошибка">{unknown ? "Не подтверждена" : relayErrorLabels[route.diagnostics.last_error] || "Неизвестная ошибка"}{route.diagnostics.last_error_at ? ` · ${time(new Date(route.diagnostics.last_error_at * 1000).toISOString())}` : ""}</Field>}
             {Object.keys(route.diagnostics.error_counts).length > 0 && <Field label="Причины ошибок">{unknown ? "Не подтверждены" : <Values values={Object.entries(route.diagnostics.error_counts).map(([code, count]) => `${relayErrorLabels[code] || "Неизвестная ошибка"}: ${count}`)} />}</Field>}
           </>}
           {route.check?.mode === "media" && <Field label="Медиатест">{unknown || route.check.state === "unknown" ? "Актуальный результат не подтверждён. " : ""}{mediaReasonLabels[route.check.reason || ""] || "Нет результата"}{route.check.verified_bytes !== undefined && ` · ${route.check.verified_bytes} байт · ${route.check.seconds ?? "—"} с`}</Field>}
         </dl>
-        {onTest && <><RelayMediaTest consumers={consumers.filter(item => !item.host_id || item.host_id === host.id)} disabled={disabled || route.state !== "listening"} onTest={id => onTest(route.id, id)} /><p>Тест запускается на VPS через выбранный Relay, передаёт видео и проверяет перемотку. Путь с вашего устройства требует отдельной проверки. Активные WireGuard/AmneziaWG peer тестом не используются.</p></>}
+        <RelayLossResult result={route.check?.measurement} source="VPS" stale={unknown || route.check?.state === "unknown"} />
+        {route.check?.cleanup_state === "failed" && <p role="alert">Не удалось подтвердить очистку ресурсов серверного теста.</p>}
+        {onTest && <><RelayMediaTest consumers={consumers.filter(item => !item.host_id || item.host_id === host.id)} disabled={disabled || route.state !== "listening" || ["preparing", "awaiting_client", "processing"].includes(route.device_test?.state || "")} onTest={id => onTest(route.id, id)} onDeviceTest={onDeviceTest && host.capabilities?.includes("udp-measurement-v1") ? id => onDeviceTest(route.id, id) : undefined} /><p>Для WG/AWG создаётся отдельный временный peer. Тест удаляет его после завершения, отмены или истечения времени; рабочие peer сохраняются.</p>{!host.capabilities?.includes("udp-measurement-v1") && <p>Для UDP-измерений и теста с устройства нужен Agent 1.3 или новее.</p>}</>}
+        <RelayDeviceResult test={route.device_test} disabled={disabled} onDownload={route.device_test && onDownloadTest ? () => onDownloadTest(route.id, route.device_test!.id) : undefined} onUpload={route.device_test && onUploadTest ? file => onUploadTest(route.id, route.device_test!.id, file) : undefined} onCancel={route.device_test && onCancelTest ? () => onCancelTest(route.id, route.device_test!.id) : undefined} />
       </article>)}</div> : <p>{unknown ? "Сведения о портах не получены." : "Перенаправления приложения не настроены."}</p>}
     </RouteDetailsSection>
   </NetworkRouteDetails>;
