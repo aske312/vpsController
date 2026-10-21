@@ -80,6 +80,27 @@ class MihomoConnectionCountTests(unittest.TestCase):
         self.assertEqual(current["strategy"], "fallback")
         self.assertEqual(old["vless_max_connections_per_device"], 1)
 
+    def test_device_priority_reaches_fallback_and_manual_groups(self):
+        connections = [{"id": key, "name": key, "device_id": device, "component": "transport-shadowsocks",
+                        "settings": {}, "credential": {"port": 18443, "method": "aes-256-gcm", "password": key}}
+                       for key, device in [("primary", "phone"), ("unrelated", "common"), ("reserve", "phone")]]
+        for strategy in ("fallback", "select"):
+            item = {"id": "fixture", "name": "Priority", "common_device_id": "common",
+                    "devices": [{"id": device, "routing": {"strategy": strategy}} for device in ("common", "phone")],
+                    "connections": connections}
+            with self.subTest(strategy=strategy), patch.object(manager, "public_endpoint", return_value="192.0.2.1"):
+                before = yaml.safe_load(manager.render_profile(item, "phone"))
+                item["connections"] = list(reversed(connections))
+                after = yaml.safe_load(manager.render_profile(item, "phone"))
+                self.assertEqual(after["proxy-groups"][0]["type"], strategy)
+                def group_passwords(config):
+                    by_name = {proxy["name"]: proxy["password"] for proxy in config["proxies"]}
+                    return [by_name[name] for name in config["proxy-groups"][0]["proxies"]]
+                self.assertEqual(group_passwords(before), ["primary", "reserve"])
+                self.assertEqual(group_passwords(after), ["reserve", "primary"])
+                self.assertEqual([proxy["password"] for proxy in after["proxies"]], ["reserve", "primary"])
+                self.assertEqual([proxy["password"] for proxy in yaml.safe_load(manager.render_profile(item, "common"))["proxies"]], ["unrelated"])
+
     def test_multiple_quic_credentials_have_independent_secrets_and_revocation(self):
         for component in ("transport-hysteria2", "transport-tuic"):
             with self.subTest(component=component), tempfile.TemporaryDirectory() as directory:

@@ -16,6 +16,8 @@ import { configuredCdnDomains, confirmedRouteAddresses, directRouteAddresses } f
 import { useRelayInventory } from "../network/relay-endpoint-select";
 import { MihomoConnectionAddress } from "./connection-address-select";
 import { applyConnectionAddress } from "./connection-address";
+import { reorderDeviceConnections } from "./connection-order";
+import { ConnectionOrderNav } from "./connection-order-nav";
 
 import { useNotifier, useFailureNotifications, useNotifications } from "../../shared/notifications/notification-center";
 import { notificationFailure as refreshFailure, type NotificationFailure } from "../../shared/notifications/store";
@@ -1730,7 +1732,7 @@ export function MihomoPage({
                 ))}
               </div>
               <div className="mihomoConnectionWorkspace">
-                {deviceConnections.length > 0 && <nav className="mihomoConnectionNav" aria-label="Подключения выбранного устройства">{deviceConnections.map((connection) => <button key={connection.id} type="button" className={selectedConnection?.id === connection.id ? "is-active" : ""} aria-pressed={selectedConnection?.id === connection.id} onClick={() => setSelectedConnectionId(connection.id)}><span className={`protocol-${connection.component}`}><ProtocolIcon protocol={connection.component} /></span><span><b>{connection.name}</b>{connection.route_state?.state === "stale" && <small title={connection.route_state.reason}>{connection.route_state.addresses.length ? `Stale · ${connection.route_state.addresses.join(", ")}` : connection.route_state.reason}</small>}<small>{modules.find((module) => module.id === connection.component)?.name} · {connection.settings.relay_host_id ? "Relay" : connection.settings.route_mode === "cdn" ? "CDN" : connection.settings.route_mode === "tls" ? "TLS" : "Прямое"}</small></span></button>)}</nav>}
+                {deviceConnections.length > 0 && <ConnectionOrderNav key={activeDeviceId} connections={deviceConnections} modules={modules} selectedId={selectedConnection?.id} disabled={Boolean(busy) || Boolean(pendingProfileSave)} onSelect={setSelectedConnectionId} onReorder={(sourceId, targetId) => setProfileConnections((current) => reorderDeviceConnections(current, sourceId, targetId))} />}
                 <div className="mihomoConnectionList">
                 {(selectedConnection ? [selectedConnection] : []).map((connection, index) => {
                   const protocolModule = modules.find((item) => item.id === connection.component);
