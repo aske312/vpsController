@@ -22,7 +22,6 @@ export function ConnectionOrderNav({ connections, modules, selectedId, disabled,
   }
 
   return <div className="mihomoConnectionOrder">
-    {connections.length > 1 && <small className="mihomoConnectionOrderHint">Перетащите за ⠿, чтобы изменить приоритет. Первое подключение — основное для «Резерв» и начальное для «Вручную».</small>}
     <nav ref={nav} className="mihomoConnectionNav" aria-label="Подключения выбранного устройства">
       {connections.map((connection, index) => <div key={connection.id} data-connection-id={connection.id}
         className={`mihomoConnectionTile${selectedId === connection.id ? " is-active" : ""}${drag?.id === connection.id ? " is-dragging" : ""}${drag && drag.id !== connection.id && drag.targetId === connection.id ? " is-drop-target" : ""}`}

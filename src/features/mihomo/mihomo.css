@@ -1328,7 +1328,6 @@
 .mihomoConnectionWorkspace { display:grid; grid-template-columns:minmax(165px,220px) minmax(0,1fr); gap:16px; align-items:start; }
 .mihomoConnectionNav { display:grid; gap:6px; min-width:0; }
 .mihomoConnectionOrder { min-width:0; }
-.mihomoConnectionOrderHint { display:block; margin-bottom:10px; color:var(--muted); font-size:11px; line-height:1.5; }
 .mihomoConnectionTile { display:flex; align-items:stretch; position:relative; border:1px solid var(--line); border-radius:10px; background:rgba(8,17,26,.95); color:var(--text); min-width:0; }
 .mihomoConnectionTile.is-active { border-color:#59c792; background:var(--panel-soft); }
 .mihomoConnectionTile.is-dragging { z-index:2; box-shadow:0 8px 24px #0008; opacity:.85; pointer-events:none; }
