@@ -139,14 +139,16 @@ def main():
     print('Test finished. Upload result.json in PRO / ROUTES. Media:', result['media']['state'])
 
 
-def execute(plan, binary):
+def execute(plan, binary, *, work_root=None):
     started = time.monotonic()
     process = None
     try:
         if not Path(binary).is_file():
             return {'state': 'unknown', 'reason': 'client_unavailable'}
         with ExitStack() as stack:
-            folder = stack.enter_context(tempfile.TemporaryDirectory(prefix='relay-media-'))
+            runtime = Path(work_root)/'runtime' if work_root else None
+            if runtime: runtime.mkdir(parents=True, mode=0o700, exist_ok=True)
+            folder = stack.enter_context(tempfile.TemporaryDirectory(prefix='relay-media-', dir=runtime))
             root = Path(folder)
             with socket.socket() as reservation:
                 reservation.bind(('127.0.0.1', 0))

@@ -17,6 +17,7 @@ import time
 import zipfile
 import ipaddress
 import ssl
+from relay_client import AgentAPIError
 
 import network_probe
 import relay_measurement
@@ -50,6 +51,11 @@ def directory(api, identity):
 def read_public(api, identity):
     value = json.loads((directory(api, identity)/'public.json').read_text())
     if value.get('id') != identity: raise ValueError('Invalid test state')
+    if value.get('cleanup_state') in ('failed', 'pending'):
+        journal = directory(api, identity)/'cleanup.json'
+        record = json.loads(journal.read_text()) if journal.exists() else {}
+        if record.get('cleaned'):
+            value = {**value, 'cleanup_state': 'pending' if record.get('measurement') and not record.get('remote_cleaned') else 'cleaned'}
     if value['state'] in ACTIVE and time.time() > value['expires_at']:
         value = {**value, 'state': 'expired', 'reason': 'test_expired'}
     return value
@@ -167,6 +173,7 @@ def build_kit(root, value, origin):
 def serve(api, identity):
     root = directory(api, identity); public = read_public(api, identity)
     stage = 'export_unavailable'
+    measurement = None
     try:
         with ExitStack() as stack:
             with provisioning_lock(api):
@@ -184,7 +191,8 @@ def serve(api, identity):
                 stage = 'temporary_peer_unavailable'
                 plan = stack.enter_context(relay_test_peer.disposable_plan(api, route, host, payload['consumer_id'], root, scheduled=True))
                 stage = 'measurement_unavailable'
-                measurement = stack.enter_context(relay_measurement.Measurement(api, route, host, root, TTL))
+                measurement = relay_measurement.Measurement(api, route, host, root, TTL)
+                stack.enter_context(measurement)
                 private = {'id': identity, 'token': secrets.token_hex(32), 'expires_at': public['expires_at'],
                            'engine': plan.engine, 'client': plan.client, 'measurement': measurement.settings()}
                 stage = 'kit_unavailable'
@@ -221,7 +229,7 @@ def serve(api, identity):
     finally:
         ok = cleanup(root/'cleanup.json')
         (root/'report.json').unlink(missing_ok=True)
-        public['cleanup_state'] = 'cleaned' if ok else 'failed'
+        public['cleanup_state'] = 'failed' if not ok else 'pending' if measurement is not None and measurement.cleanup_pending else 'cleaned'
         public['finished_at'] = time.time()
         atomic(root/'public.json', public)
 
@@ -236,9 +244,15 @@ def recover(api):
 
 def _recover(api):
     """Recover leases after expiry/reboot; live client workers survive an API restart."""
-    for path in (api.DATA_DIR/'relay-tests').glob('*/cleanup.json'):
+    remote_budget = 2
+    for path in sorted((api.DATA_DIR/'relay-tests').glob('*/cleanup.json'), key=lambda item: item.stat().st_mtime_ns):
         try:
             record = json.loads(path.read_text())
+            if record.get('measurement') and record.get('cleaned') and not record.get('remote_cleaned') and remote_budget:
+                remote_budget -= 1
+                record['remote_cleaned'] = remote_cleanup_confirmed(api, record['measurement'])
+                record['remote_checked_at'] = time.time()
+                atomic(path, record)
             public_path = path.parent/'public.json'
             expired = record.get('expires_at', 0) <= time.time()
             if public_path.exists() and not expired:
@@ -247,14 +261,27 @@ def _recover(api):
                     if public.get('state') == 'preparing' and time.time() - public['created_at'] < 30: continue
                     active = subprocess.run(['systemctl', 'is-active', '--quiet', 'vps-relay-device-test-' + path.parent.name], capture_output=True, timeout=5)
                     expired = active.returncode != 0
-            if expired and not record.get('cleaned'):
-                cleanup(path)
+            if expired:
+                if not record.get('cleaned'): cleanup(path)
                 if public_path.exists():
                     public = json.loads(public_path.read_text())
+                    original = dict(public)
+                    cleaned = json.loads(path.read_text()).get('cleaned')
+                    public['cleanup_state'] = 'failed' if not cleaned else 'pending' if record.get('measurement') and not record.get('remote_cleaned') else 'cleaned'
                     if public.get('state') in ACTIVE:
-                        public.update(state='expired', reason='test_expired', finished_at=time.time(), cleanup_state='cleaned' if json.loads(path.read_text()).get('cleaned') else 'failed')
-                        atomic(public_path, public)
+                        public.update(state='expired', reason='test_expired', finished_at=time.time())
+                    if public != original: atomic(public_path, public)
         except (OSError, ValueError, subprocess.SubprocessError): continue
+
+
+def remote_cleanup_confirmed(api, measurement):
+    try:
+        control = api.relay_control(); host = control.host(control.read(), measurement['host_id'])
+        client = control.client(host); client.timeout = 2
+        value = client.request('GET', '/v1/measurements/' + measurement['id'])
+        return value.get('id') == measurement['id'] and value.get('route_id') == measurement['route_id'] and value.get('state') == 'expired'
+    except AgentAPIError as exc: return exc.status == 404
+    except Exception: return False
 
 
 def execute_server(api, route, host, consumer_id):
@@ -262,19 +289,23 @@ def execute_server(api, route, host, consumer_id):
     from relay_test_runner import udp_measurement
     root = api.DATA_DIR/'relay-tests'/uuid.uuid4().hex
     result = {'state': 'unknown', 'reason': 'client_unavailable'}
+    measurement = None
     relay_test_peer.schedule_cleanup(api, root)
     try:
         with relay_test_peer.disposable_plan(api, route, host, consumer_id, root, scheduled=True) as plan:
-            result = api.execute_relay_media_probe(plan)
+            result = api.execute_relay_media_probe(plan, directory=root)
             try:
-                with relay_measurement.Measurement(api, route, host, root) as measurement:
+                measurement = relay_measurement.Measurement(api, route, host, root)
+                with measurement:
                     result['measurement'] = measurement.result(udp_measurement(measurement.settings()))
             except (OSError, ValueError, api.relay_manager.AgentAPIError, subprocess.SubprocessError):
                 result['measurement'] = {'state': 'unknown', 'reason': 'measurement_unavailable'}
     except (OSError, ValueError, api.HTTPException, subprocess.SubprocessError):
         result = {'state': 'unknown', 'reason': 'client_unavailable'}
     finally:
-        result['cleanup_state'] = 'cleaned' if cleanup(root/'cleanup.json') else 'failed'
+        ok = cleanup(root/'cleanup.json')
+        result['cleanup_state'] = 'failed' if not ok else 'pending' if measurement is not None and measurement.cleanup_pending else 'cleaned'
+        result['measurement_id'] = root.name
     return result
 
 

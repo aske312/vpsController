@@ -2760,6 +2760,12 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
                 except (OSError, ValueError, KeyError, TypeError, HTTPException, subprocess.SubprocessError):
                     valid = False
                 route['check'] = {key: check[key] for key in ('state', 'consumer_id', 'checked_at', 'vantage_point', 'mode', 'reason', 'verified_bytes', 'range_checks', 'seconds', 'measurement', 'cleanup_state') if key in check}
+                if route['check'].get('cleanup_state') == 'pending' and check.get('measurement_id'):
+                    try:
+                        journal = relay_device_test.directory(sys.modules[__name__], check['measurement_id'])/'cleanup.json'
+                        record = json.loads(journal.read_text())
+                        if record.get('cleaned') and record.get('remote_cleaned'): route['check']['cleanup_state'] = 'cleaned'
+                    except (OSError, ValueError): pass
                 try:
                     if check.get('mode') == 'media' and (datetime.now(timezone.utc) - datetime.fromisoformat(check['checked_at'])).total_seconds() > 3600:
                         valid = False
@@ -2951,7 +2957,7 @@ def perform_relay_probe(payload):
         after = prepare(route, host, payload['consumer_id'])
         if network_probe.plan_seal(after, key) == check['plan_seal'] and remote_current():
             check['state'] = 'ready' if result.get('state') in ('verified', 'ready') else 'failed' if result.get('state') == 'failed' else 'unknown'
-            check.update({key: result[key] for key in ('reason', 'verified_bytes', 'range_checks', 'seconds', 'measurement', 'cleanup_state') if key in result})
+            check.update({key: result[key] for key in ('reason', 'verified_bytes', 'range_checks', 'seconds', 'measurement', 'cleanup_state', 'measurement_id') if key in result})
         else:
             check['reason'] = 'configuration_changed'
     except (OSError, ValueError, HTTPException, relay_manager.AgentAPIError, subprocess.SubprocessError):
@@ -2972,7 +2978,7 @@ def prepare_relay_media_probe(route, host, consumer_id):
     return relay_test_peer.base_plan(sys.modules[__name__], route, host, consumer_id)
 
 
-def execute_relay_media_probe(plan):
+def execute_relay_media_probe(plan, *, directory=None):
     if plan.client.get('type') == 'wireguard' and not plan.server_behavior.get('diagnostic_peer'):
         raise network_probe.ProbeUnavailable('Для WG/AWG требуется отдельный временный peer')
     if plan.engine == 'mihomo':
@@ -2981,7 +2987,7 @@ def execute_relay_media_probe(plan):
         binary = next((path for path in (Path('/usr/local/bin/sing-box'), TUIC_BIN) if path.is_file()), TUIC_BIN)
     else:
         binary = '/usr/local/lib/vps-control-mihomo-reality/xray' if plan.producer == 'mihomo_vless' else XRAY_BIN
-    return relay_media.execute(plan, str(binary))
+    return relay_media.execute(plan, str(binary), work_root=directory)
 
 
 @app.post('/api/network/relays/{host_id}/routes/{route_id}/device-tests', status_code=202, dependencies=[Depends(require_mutation_admission)])

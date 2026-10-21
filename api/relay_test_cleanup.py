@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import shutil
 
 
 def atomic(path, value):
@@ -66,6 +67,13 @@ def cleanup(path):
     for name in ('private.json', 'kit.zip', 'request.json', 'report.json'):
         try: (path.parent / name).unlink(missing_ok=True)
         except OSError: errors.append('private_cleanup_failed')
+    runtime = path.parent/'runtime'
+    try:
+        if runtime.is_symlink(): runtime.unlink()
+        elif runtime.exists():
+            if runtime.resolve().parent != path.parent.resolve(): raise OSError('Unexpected runtime directory')
+            shutil.rmtree(runtime)
+    except OSError: errors.append('private_cleanup_failed')
     record['cleanup_errors'] = errors
     record['cleaned'] = not errors
     atomic(path, record)

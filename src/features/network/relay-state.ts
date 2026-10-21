@@ -1,7 +1,7 @@
 import { clientExport, type ClientExport } from "../../shared/lib/client-export";
 
 export type RelayMeasurement = { state: "ready" | "failed" | "warning" | "unknown"; reason: string; scope?: "diagnostic_udp_path"; sent?: number; received?: number; loss_percent?: number; client_to_relay_lost?: number; relay_to_vps_lost?: number; vps_to_relay_lost?: number; relay_to_client_lost?: number; agent_local_drops?: number; origin_local_drops?: number; agent_socket_errors?: number; rtt_ms?: number | null; relay_vps_rtt_ms?: number | null; packet_size?: number };
-export type RelayDeviceTest = { id: string; state: "preparing" | "awaiting_client" | "processing" | "ready" | "warning" | "failed" | "unknown" | "expired" | "cancelled"; reason: string; created_at: number; expires_at: number; finished_at?: number; consumer_id: string; cleanup_state?: "cleaned" | "failed"; media?: { state: "ready" | "failed" | "unknown"; reason: string; verified_bytes?: number | null; seconds?: number | null }; measurement?: RelayMeasurement; vantage_point: "client"; verification: "client_report_with_udp_witness" };
+export type RelayDeviceTest = { id: string; state: "preparing" | "awaiting_client" | "processing" | "ready" | "warning" | "failed" | "unknown" | "expired" | "cancelled"; reason: string; created_at: number; expires_at: number; finished_at?: number; consumer_id: string; cleanup_state?: "cleaned" | "failed" | "pending"; media?: { state: "ready" | "failed" | "unknown"; reason: string; verified_bytes?: number | null; seconds?: number | null }; measurement?: RelayMeasurement; vantage_point: "client"; verification: "client_report_with_udp_witness" };
 
 export type RelayRoute = {
   cdn_domain?: string;
@@ -9,7 +9,7 @@ export type RelayRoute = {
   state: "listening" | "failed" | "missing" | "drift" | "unknown"; target_verified: false;
   sent_bytes?: number; received_bytes?: number; sessions?: number; errors?: number;
   diagnostics?: { sent_packets: number; received_packets: number; dropped_packets: number; last_sent_at: number | null; last_received_at: number | null; last_error_at: number | null; last_error: string | null; error_counts: Record<string, number>; return_state?: "no_return" | "waiting" | "flowing" | "idle"; no_return_sessions?: number };
-  check?: { state: "ready" | "failed" | "unknown"; consumer_id: string; checked_at: string; vantage_point: "server"; mode?: "exchange" | "media"; reason?: string; verified_bytes?: number; range_checks?: number; seconds?: number; measurement?: RelayMeasurement; cleanup_state?: "cleaned" | "failed" };
+  check?: { state: "ready" | "failed" | "unknown"; consumer_id: string; checked_at: string; vantage_point: "server"; mode?: "exchange" | "media"; reason?: string; verified_bytes?: number; range_checks?: number; seconds?: number; measurement?: RelayMeasurement; cleanup_state?: "cleaned" | "failed" | "pending" };
   device_test?: RelayDeviceTest;
 };
 export type RelayHost = {

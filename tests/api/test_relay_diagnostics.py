@@ -8,7 +8,7 @@ import tempfile
 import time
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock, patch
 import zipfile
 
 from tests.api.support import api, manager
@@ -130,6 +130,32 @@ class PeerTests(unittest.TestCase):
 
 
 class ClientKitTests(unittest.TestCase):
+    def test_remote_cleanup_is_confirmed_by_read_only_observation(self):
+        client = Mock()
+        control = SimpleNamespace(read=lambda: {}, host=lambda *_: {}, client=lambda _: client)
+        context = SimpleNamespace(relay_control=lambda: control)
+        measurement = {'id': 'a'*32, 'host_id': 'host', 'route_id': 'route'}
+        for state, expected in [('active', False), ('expired', True)]:
+            client.request.return_value = {**measurement, 'state': state}
+            self.assertEqual(relay_device_test.remote_cleanup_confirmed(context, measurement), expected)
+        for error, expected in [(relay_device_test.AgentAPIError(404, 'missing'), True), (OSError('offline'), False)]:
+            client.request.side_effect = error
+            self.assertEqual(relay_device_test.remote_cleanup_confirmed(context, measurement), expected)
+        self.assertTrue(all(call.args[0] == 'GET' for call in client.request.call_args_list))
+
+    def test_recovery_does_not_claim_remote_cleanup_on_connection_loss(self):
+        with tempfile.TemporaryDirectory() as folder:
+            context = SimpleNamespace(DATA_DIR=Path(folder)); identity = 'a'*32
+            root = relay_device_test.directory(context, identity); root.mkdir(parents=True)
+            relay_test_cleanup.atomic(root/'cleanup.json', {'expires_at': 0, 'measurement': {'id': identity}})
+            relay_test_cleanup.atomic(root/'public.json', {'id': identity, 'state': 'processing', 'expires_at': 0})
+            with patch.object(relay_device_test, 'remote_cleanup_confirmed', return_value=False):
+                relay_device_test.recover(context)
+            self.assertEqual(relay_device_test.read_public(context, identity)['cleanup_state'], 'pending')
+            with patch.object(relay_device_test, 'remote_cleanup_confirmed', return_value=True):
+                relay_device_test.recover(context)
+            self.assertEqual(relay_device_test.read_public(context, identity)['cleanup_state'], 'cleaned')
+
     def test_worker_accepts_client_report_publishes_scoped_result_and_cleans_kit(self):
         from schemas import RelayDeviceReport
         with tempfile.TemporaryDirectory() as folder:
@@ -149,9 +175,9 @@ class ClientKitTests(unittest.TestCase):
             relay_test_cleanup.atomic(directory/'cleanup.json',{'expires_at':time.time()+600})
             report={'id':identity,'token':'b'*64,'media':{'state':'ready','reason':'media_verified','verified_bytes':4372373,'range_checks':3,'seconds':10},'measurement':{'state':'completed','sent_sequences':list(range(100)),'received_sequences':list(range(100)),'rtt_ms':12}}
             relay_test_cleanup.atomic(directory/'report.json',report)
-            measurement=Mock(); measurement.settings.return_value={'address':'1.1.1.1','port':20002,'key':'c'*64,'id':identity}
+            measurement=MagicMock(); measurement.__enter__.return_value=measurement; measurement.__exit__.return_value=False; measurement.cleanup_pending=False; measurement.settings.return_value={'address':'1.1.1.1','port':20002,'key':'c'*64,'id':identity}
             measurement.result.return_value={'state':'ready','reason':'udp_verified','loss_percent':0}
-            with patch.object(relay_device_test,'provisioning_lock',return_value=contextlib.nullcontext()), patch.object(relay_test_peer,'disposable_plan',return_value=contextlib.nullcontext(plan)), patch.object(relay_measurement,'Measurement',return_value=contextlib.nullcontext(measurement)), patch.object(relay_device_test.secrets,'token_hex',return_value='b'*64):
+            with patch.object(relay_device_test,'provisioning_lock',return_value=contextlib.nullcontext()), patch.object(relay_test_peer,'disposable_plan',return_value=contextlib.nullcontext(plan)), patch.object(relay_measurement,'Measurement',return_value=measurement), patch.object(relay_device_test.secrets,'token_hex',return_value='b'*64):
                 relay_device_test.serve(context,identity)
             result=json.loads((directory/'public.json').read_text())
             self.assertEqual(result['state'],'ready')
@@ -213,6 +239,7 @@ class ClientKitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder); path=root/'cleanup.json'; relay_test_cleanup.atomic(path, {'expires_at':0})
             for name in ('private.json','kit.zip','request.json'): (root/name).write_text('private')
+            (root/'runtime'/'worker').mkdir(parents=True);(root/'runtime'/'worker'/'client.json').write_text('private')
             self.assertTrue(relay_test_cleanup.cleanup(path)); self.assertTrue(relay_test_cleanup.cleanup(path))
             self.assertEqual({file.name for file in root.iterdir()}, {'cleanup.json'})
 

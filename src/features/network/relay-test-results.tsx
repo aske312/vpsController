@@ -45,6 +45,6 @@ export function RelayDeviceResult({ test, disabled, onDownload, onUpload, onCanc
     {active && <button type="button" disabled={disabled || !onCancel} onClick={onCancel}>Отменить тест</button>}
     {test.media && <p>Видео: {test.media.state === "ready" ? "получено и проверено" : test.media.state === "failed" ? "не прошло проверку" : "результат не подтверждён"}{test.media.verified_bytes ? ` · ${test.media.verified_bytes} байт` : ""}. Медиарезультат сообщён клиентской утилитой; UDP-путь сопоставлен с наблюдениями Relay и VPS.</p>}
     <RelayLossResult result={test.measurement} source="устройство" stale={test.state === "unknown"} />
-    {test.cleanup_state && <p role={test.cleanup_state === "failed" ? "alert" : undefined}>{test.cleanup_state === "cleaned" ? "Временные ресурсы теста удалены." : "Не удалось подтвердить полную очистку временных ресурсов; требуется проверка на сервере."}</p>}
+    {test.cleanup_state && <p role={test.cleanup_state === "failed" ? "alert" : undefined}>{test.cleanup_state === "cleaned" ? "Временные ресурсы теста удалены." : test.cleanup_state === "pending" ? "Удаление диагностического порта Relay ещё не подтверждено; Agent закроет его по сроку." : "Не удалось подтвердить полную очистку временных ресурсов; требуется проверка на сервере."}</p>}
   </section>;
 }

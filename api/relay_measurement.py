@@ -9,6 +9,9 @@ from relay_test_cleanup import atomic, firewall_rule, cleanup
 from relay_test_runner import measurement_sequence
 import subprocess
 import math
+import shutil
+import ipaddress
+from relay_client import AgentAPIError
 
 
 def sequences(value):
@@ -55,12 +58,15 @@ class Measurement:
 
     def __enter__(self):
         try:
+            if ipaddress.ip_address(self.client.host).version != 4 or not shutil.which('iptables'):
+                raise OSError('Diagnostic listener prerequisites unavailable')
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.socket.bind(('0.0.0.0', 0)); self.socket.settimeout(0.1)
             port = self.socket.getsockname()[1]
             journal = self.directory/'cleanup.json'
             record = json.loads(journal.read_text())
             record['firewall'] = {'id': self.id, 'source': self.client.host, 'port': port}
+            record['measurement'] = {'id': self.id, 'host_id': self.host['id'], 'route_id': self.route['id']}
             atomic(journal, record)
             subprocess.run(['iptables', '-w', '5', '-I', *firewall_rule(record['firewall'])], check=True, capture_output=True, timeout=8)
             self.thread = threading.Thread(target=self.serve, daemon=True); self.thread.start()
@@ -111,8 +117,17 @@ class Measurement:
             try:
                 observed = self.client.request('GET', '/v1/measurements/' + self.id)
                 if observed.get('id') == self.id and observed.get('route_id') == self.route['id']:
-                    self.client.request('DELETE', '/v1/measurements/' + self.id)
+                    if observed.get('state') != 'expired': self.client.request('DELETE', '/v1/measurements/' + self.id)
+                else: self.cleanup_pending = True
+            except AgentAPIError as exc:
+                self.cleanup_pending = exc.status != 404
             except Exception: self.cleanup_pending = True  # Agent TTL still removes the listener.
+        journal = self.directory/'cleanup.json'
+        if journal.exists():
+            record = json.loads(journal.read_text())
+            if record.get('measurement'):
+                record['remote_cleaned'] = not self.cleanup_pending
+                atomic(journal, record)
         cleanup(self.directory/'cleanup.json')
 
     def __exit__(self, *_): self.close()
