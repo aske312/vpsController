@@ -31,7 +31,7 @@ class RelayClient:
         self.fingerprint, self.timeout = certificate_sha256.lower(), timeout
 
     def request(self, method, path, body=None, revision=None):
-        if path not in ('/v1/status', '/v1/routes') and not re.fullmatch(r'/v1/routes/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', path):
+        if path not in ('/v1/status', '/v1/routes') and not re.fullmatch(r'/v1/routes/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', path) and not re.fullmatch(r'/v1/measurements/[0-9a-f]{32}', path):
             raise ValueError('Invalid API path')
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.minimum_version = ssl.TLSVersion.TLSv1_2

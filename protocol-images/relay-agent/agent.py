@@ -14,8 +14,9 @@ import ssl
 import tempfile
 import time
 from addresses import read_inventory, dual_stack_available
+import struct
 
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -70,12 +71,14 @@ class UpstreamUDP(asyncio.DatagramProtocol):
     def __init__(self, route, client):
         self.route, self.client, self.transport = route, client, None
         self.touched = time.monotonic()
+        self.awaiting_since = None
 
     def connection_made(self, transport):
         self.transport = transport
 
     def datagram_received(self, data, _addr):
         self.touched = time.monotonic()
+        self.awaiting_since = None
         if not self.route.closed and self.route.transport.get_write_buffer_size() < 262144:
             self.route.transport.sendto(data, self.client)
             self.route.received += len(data)
@@ -98,6 +101,7 @@ class RelayRoute(asyncio.DatagramProtocol):
         self.error_counts = {}
         self.last_error = self.last_error_at = None
         self.last_sent_at = self.last_received_at = None
+        self.tcp_waiting = {}
         self.closed = False
 
     def failure(self, code, *, dropped=False):
@@ -171,9 +175,11 @@ class RelayRoute(asyncio.DatagramProtocol):
                     if direction == 'sent':
                         self.sent += len(data)
                         self.last_sent_at = int(time.time())
+                        self.tcp_waiting.setdefault(task, time.monotonic())
                     else:
                         self.received += len(data)
                         self.last_received_at = int(time.time())
+                        self.tcp_waiting.pop(task, None)
 
             pumps = [asyncio.create_task(pump(reader, upstream, 'sent')), asyncio.create_task(pump(incoming, writer, 'received'))]
             # Preserve half-close: a client can finish its request before the response.
@@ -188,6 +194,7 @@ class RelayRoute(asyncio.DatagramProtocol):
                     self.writers.discard(item)
                     item.close()
             self.tasks.discard(task)
+            self.tcp_waiting.pop(task, None)
 
     def connection_made(self, transport):
         self.transport = transport
@@ -202,6 +209,7 @@ class RelayRoute(asyncio.DatagramProtocol):
                 self.sent += len(data)
                 self.sent_packets += 1
                 self.last_sent_at = int(time.time())
+                if session.awaiting_since is None: session.awaiting_since = time.monotonic()
             else:
                 self.failure('udp_buffer_full', dropped=True)
         elif client in self.pending:
@@ -226,6 +234,7 @@ class RelayRoute(asyncio.DatagramProtocol):
                 self.sent += len(data)
                 self.sent_packets += 1
                 self.last_sent_at = int(time.time())
+                if session.awaiting_since is None: session.awaiting_since = time.monotonic()
         except OSError:
             self.failure('udp_session_error')
         finally:
@@ -253,13 +262,132 @@ class RelayRoute(asyncio.DatagramProtocol):
         self.sessions.clear()
 
     def status(self):
+        now = time.monotonic()
+        waiting = list(self.tcp_waiting.values()) + [item.awaiting_since for item in self.sessions.values() if getattr(item, 'awaiting_since', None) is not None]
+        unanswered = sum(now - value >= 5 for value in waiting)
+        return_state = 'no_return' if unanswered else 'waiting' if waiting else 'flowing' if self.last_received_at and time.time() - self.last_received_at < 30 else 'idle'
         return {**self.config, 'state': 'listening', 'sent_bytes': self.sent, 'received_bytes': self.received,
                 'sessions': len(self.sessions) if self.transport else len(self.writers) // 2, 'errors': self.errors,
                 'target_verified': False,
                 'diagnostics': {'sent_packets': self.sent_packets, 'received_packets': self.received_packets,
+                    'return_state': return_state, 'no_return_sessions': unanswered,
                     'dropped_packets': self.dropped_packets, 'error_counts': dict(self.error_counts),
                     'last_error': self.last_error, 'last_error_at': self.last_error_at,
                     'last_sent_at': self.last_sent_at, 'last_received_at': self.last_received_at}}
+
+
+MAGIC = b'RLY2'
+COUNT = 100
+SIZE = 1200
+
+
+def packet(identity, key, sequence):
+    body = MAGIC + bytes.fromhex(identity) + struct.pack('!H', sequence)
+    body += bytes(SIZE - 32 - len(body))
+    return body + hmac.digest(bytes.fromhex(key), body, 'sha256')
+
+
+def sequence(data, identity, key):
+    if len(data) != SIZE or data[:20] != MAGIC + bytes.fromhex(identity): return None
+    if not hmac.compare_digest(data[-32:], hmac.digest(bytes.fromhex(key), data[:-32], 'sha256')): return None
+    number = struct.unpack('!H', data[20:22])[0]
+    return number if number < COUNT else None
+
+
+class Replies(asyncio.DatagramProtocol):
+    def __init__(self, owner): self.owner = owner
+    def datagram_received(self, data, _address): self.owner.reply(data)
+    def error_received(self, _error): self.owner.socket_errors += 1
+
+
+class Measurement(asyncio.DatagramProtocol):
+    def __init__(self, identity, settings):
+        self.id, self.settings = identity, settings
+        self.key = settings['key']
+        self.deadline = time.monotonic() + settings['ttl_seconds']
+        self.ingress, self.forwarded, self.returned, self.egress = set(), set(), set(), set()
+        self.clients, self.started = {}, {}
+        self.rtts = []
+        self.local_drops = self.socket_errors = 0
+        self.transport = self.upstream = None
+        self.closed = False
+
+    def connection_made(self, transport): self.transport = transport
+    def error_received(self, _error): self.socket_errors += 1
+
+    async def start(self, listen_host, ports):
+        loop = asyncio.get_running_loop()
+        for port in ports:
+            sock = socket.socket(socket.AF_INET6 if ':' in listen_host else socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                if ':' in listen_host: sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                sock.bind((listen_host, port)); sock.setblocking(False)
+                await loop.create_datagram_endpoint(lambda: self, sock=sock)
+                self.port = port
+                break
+            except OSError: sock.close()
+        else: raise OSError('No diagnostic port available')
+        try:
+            self.upstream, _ = await loop.create_datagram_endpoint(lambda: Replies(self),
+                remote_addr=(self.settings['target_ip'], self.settings['target_port']), family=socket.AF_INET)
+        except BaseException:
+            self.close(); raise
+        loop.call_later(settings_ttl(self), self.close)
+
+    def datagram_received(self, data, client):
+        if self.closed or time.monotonic() >= self.deadline: return
+        number = sequence(data, self.id, self.key)
+        if number is None or number in self.ingress: return
+        self.ingress.add(number)
+        self.clients[number] = client
+        if self.upstream.get_write_buffer_size() >= 262144:
+            self.local_drops += 1; return
+        self.started[number] = time.monotonic()
+        self.upstream.sendto(data)
+        self.forwarded.add(number)
+
+    def reply(self, data):
+        if self.closed: return
+        number = sequence(data, self.id, self.key)
+        if number is None or number not in self.forwarded or number in self.returned: return
+        self.returned.add(number)
+        self.rtts.append(round((time.monotonic() - self.started[number]) * 1000, 2))
+        if self.transport.get_write_buffer_size() >= 262144:
+            self.local_drops += 1; return
+        self.transport.sendto(data, self.clients[number])
+        self.egress.add(number)
+
+    def close(self):
+        self.closed = True
+        for transport in (self.transport, self.upstream):
+            if transport: transport.close()
+        self.clients.clear()
+        self.key = ''
+        self.settings.pop('key', None)
+
+    def status(self):
+        return {'id': self.id, 'route_id': self.settings['route_id'], 'listen_port': self.port,
+            'state': 'expired' if self.closed else 'active', 'packet_count': COUNT, 'packet_size': SIZE,
+            'received_sequences': sorted(self.ingress), 'forwarded_sequences': sorted(self.forwarded),
+            'returned_sequences': sorted(self.returned), 'sent_sequences': sorted(self.egress),
+            'local_drops': self.local_drops, 'socket_errors': self.socket_errors,
+            'upstream_rtt_ms': round(sum(self.rtts) / len(self.rtts), 2) if self.rtts else None}
+
+
+def settings_ttl(item): return max(0.1, item.deadline - time.monotonic())
+
+
+def validate_measurement(identity, body, own_ips):
+    if not re.fullmatch(r'[0-9a-f]{32}', identity) or not isinstance(body, dict) or set(body) != {'route_id', 'target_ip', 'target_port', 'key', 'ttl_seconds'}:
+        raise ValueError('Invalid measurement')
+    address = ipaddress.ip_address(body['target_ip'])
+    if address.version != 4 or not address.is_global or address.is_multicast or str(address) in own_ips:
+        raise ValueError('Invalid measurement target')
+    if type(body['target_port']) is not int or not 1024 <= body['target_port'] <= 65535 or type(body['ttl_seconds']) is not int or not 10 <= body['ttl_seconds'] <= 1200:
+        raise ValueError('Invalid measurement limits')
+    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}', str(body['route_id'])) or not re.fullmatch(r'[0-9a-f]{64}', str(body['key'])):
+        raise ValueError('Invalid measurement identity')
+    return {**body, 'target_ip': str(address)}
 
 
 class Agent:
@@ -270,6 +398,7 @@ class Agent:
         self.revision = 0
         self.lock = asyncio.Lock()
         self.http_connections = 0
+        self.measurements = {}
 
     def settings(self):
         config = json.loads((self.config_dir / 'config.json').read_text())
@@ -317,11 +446,16 @@ class Agent:
                     'listen_ports': {'min': PORT_MIN, 'max': PORT_MAX}, 'max_routes': MAX_ROUTES,
                     'addresses': read_inventory(self.config_dir, self.settings()),
                     'updates': self.update_status(),
+                    'capabilities': ['udp-measurement-v1'],
                     'address_checks': self.address_checks(),
                     'client_address_families': ['ipv4', 'ipv6'] if self.listen_host == '::' else ['ipv4']}
         if method == 'GET' and path == '/v1/routes':
-            return {'revision': self.revision, 'items': [route.status() for route in self.routes.values()] +
+            return {'revision': self.revision, 'reserved_udp_ports': sorted(item.port for item in self.measurements.values() if not item.closed), 'items': [route.status() for route in self.routes.values()] +
                     [{**item['config'], 'state': 'failed', 'error': item['error'], 'target_verified': False} for item in self.failed.values()]}
+        measure = re.fullmatch(r'/v1/measurements/([0-9a-f]{32})', path)
+        if measure:
+            async with self.lock:
+                return await self.measurement_request(method, measure[1], body)
         match = re.fullmatch(r'/v1/routes/([a-zA-Z0-9][a-zA-Z0-9_-]{0,63})', path)
         if not match or method not in ('PUT', 'DELETE'): raise RelayError('Not found', 404)
         route_id = match[1]
@@ -369,6 +503,31 @@ class Agent:
                     **{key: value[key] for key in ('state', 'checked_at', 'version') if key in value}}
         except (OSError, ValueError, TypeError):
             return {'enabled': False, 'interval_hours': 24, 'state': 'unknown'}
+
+    async def measurement_request(self, method, identity, body):
+        existing = self.measurements.get(identity)
+        if method == 'DELETE':
+            if existing: existing.close(); self.measurements.pop(identity, None)
+            return {'deleted': identity}
+        if method == 'GET':
+            if not existing: raise RelayError('Measurement unavailable', 404)
+            return existing.status()
+        if method != 'PUT': raise RelayError('Not found', 404)
+        try: settings = validate_measurement(identity, body, self.settings()['own_ips'])
+        except (ValueError, TypeError, KeyError): raise RelayError('Invalid measurement settings') from None
+        if existing:
+            if existing.closed: raise RelayError('Measurement expired; use a new identity', 409)
+            if existing.settings != settings: raise RelayError('Measurement identity changed', 409)
+            return existing.status()
+        self.measurements = {key: item for key, item in self.measurements.items() if not item.closed}
+        if len(self.measurements) >= 2 or settings['route_id'] not in self.routes:
+            raise RelayError('Measurement limit or route unavailable', 409)
+        used = {item['listen_port'] for item in self.configs() if item['transport'] == 'udp'} | {item.port for item in self.measurements.values()}
+        item = Measurement(identity, settings)
+        try: await item.start(self.listen_host, [port for port in range(PORT_MIN, PORT_MAX + 1) if port not in used])
+        except OSError: raise RelayError('Measurement listener unavailable', 409) from None
+        self.measurements[identity] = item
+        return item.status()
 
     def address_checks(self):
         try:
@@ -438,6 +597,7 @@ class Agent:
                                             ssl_handshake_timeout=5, limit=8192)
         async with server:
             await stop.wait()
+        for item in self.measurements.values(): item.close()
         for route in self.routes.values(): await route.close()
 
 

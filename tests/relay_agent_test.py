@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'protocol-images/relay-agent'))
 import addresses
 
@@ -110,8 +110,68 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.body = {'transport': 'tcp', 'listen_port': free_port(), 'target_ip': '1.1.1.1', 'target_port': 443}
 
     async def asyncTearDown(self):
+        for measurement in self.agent.measurements.values(): measurement.close()
         for route in self.agent.routes.values(): await route.close()
         self.temp.cleanup()
+
+    async def test_measurement_forwards_authenticated_packets_and_is_transient(self):
+        class Echo(asyncio.DatagramProtocol):
+            def connection_made(self, transport): self.transport=transport
+            def datagram_received(self, data, client): self.transport.sendto(data, client)
+        loop=asyncio.get_running_loop()
+        transport,_=await loop.create_datagram_endpoint(Echo,local_addr=('127.0.0.1',0))
+        await self.agent.dispatch('PUT','/v1/routes/test',self.headers,self.body)
+        before=(self.agent.state_dir/'routes.json').read_bytes()
+        identity='a'*32; key='b'*64
+        settings={'route_id':'test','target_ip':'1.1.1.1','target_port':transport.get_extra_info('sockname')[1],'key':key,'ttl_seconds':30}
+        validate=relay.validate_measurement
+        def local(identity, body, own):
+            return {**validate(identity, body, own),'target_ip':'127.0.0.1'}
+        try:
+            with patch.object(relay,'validate_measurement',side_effect=local):
+                started=await self.agent.dispatch('PUT','/v1/measurements/'+identity,self.headers,settings)
+                repeated=await self.agent.dispatch('PUT','/v1/measurements/'+identity,self.headers,settings)
+            self.assertEqual(started,repeated)
+            self.assertNotIn(key,json.dumps(started))
+            with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as client:
+                client.setblocking(False); client.bind(('127.0.0.1',0))
+                for number in range(100):
+                    packet=relay.packet(identity,key,number)
+                    await loop.sock_sendto(client,packet,('127.0.0.1',started['listen_port']))
+                    self.assertEqual(await asyncio.wait_for(loop.sock_recv(client,2048),3),packet)
+            observed=await self.agent.dispatch('GET','/v1/measurements/'+identity,self.headers,{})
+            self.assertEqual(observed['received_sequences'],list(range(100)))
+            self.assertEqual(observed['returned_sequences'],list(range(100)))
+            self.assertEqual(observed['local_drops'],0)
+            self.assertEqual((self.agent.state_dir/'routes.json').read_bytes(),before)
+            await self.agent.dispatch('DELETE','/v1/measurements/'+identity,self.headers,{})
+            self.assertEqual((self.agent.state_dir/'routes.json').read_bytes(),before)
+        finally: transport.close()
+
+    async def test_measurement_rejects_untrusted_packets_and_cannot_extend_lifetime(self):
+        identity='a'*32; key='b'*64
+        settings={'route_id':'test','target_ip':'127.0.0.1','target_port':12345,'key':key,'ttl_seconds':10}
+        item=relay.Measurement(identity,settings)
+        item.upstream=Mock(); item.upstream.get_write_buffer_size.return_value=0
+        for packet in (b'not a test',relay.packet(identity,'c'*64,1),relay.packet('d'*32,key,1),relay.packet(identity,key,101)):
+            item.datagram_received(packet,('127.0.0.1',1234))
+        item.upstream.sendto.assert_not_called()
+        packet=relay.packet(identity,key,1)
+        item.datagram_received(packet,('127.0.0.1',1234));item.datagram_received(packet,('127.0.0.1',1234))
+        item.upstream.sendto.assert_called_once()
+        item.deadline=0
+        item.datagram_received(relay.packet(identity,key,2),('127.0.0.1',1234))
+        self.assertEqual(item.ingress,{1})
+
+    async def test_no_return_traffic_is_observed_per_active_session(self):
+        route=relay.RelayRoute({**self.body,'id':'test'})
+        route.tcp_waiting['test']=__import__('time').monotonic()-6
+        diagnostics=route.status()['diagnostics']
+        self.assertEqual(diagnostics['return_state'],'no_return')
+        self.assertEqual(diagnostics['no_return_sessions'],1)
+        self.assertEqual(route.errors,0)
+        route.tcp_waiting.clear()
+        self.assertEqual(route.status()['diagnostics']['return_state'],'idle')
 
     async def test_auth_rotation_revokes_old_token_without_stopping_routes(self):
         with self.assertRaises(relay.RelayError) as error: await self.agent.dispatch('GET', '/v1/status', {}, {})
