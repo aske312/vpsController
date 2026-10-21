@@ -1,5 +1,6 @@
 /* Address workspace inside the shared PRO application shell. */
 @import "./route-control.css";
+@import "./route-address-tools.css";
 [data-network-page] .routeLibrary { font-family:var(--ui-font); }
 [data-network-page] .routeLibrary .networkRouteStatus { font:500 12px/1.4 var(--ui-font); letter-spacing:0; padding:4px 9px; }
 [data-network-page] .routeControlModal { width:min(740px,100%); }
@@ -84,7 +85,7 @@
 [data-network-page] .routeLibrarySection select { width:100%; min-height:38px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel-inset); color:var(--text); font-size:13px; }
 [data-network-page] .routeLibraryDisclosure { min-width:0; border-top:1px solid var(--line); }
 [data-network-page] .routeLibraryDisclosure > summary { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 0; list-style:none; color:var(--muted); font-size:13px; cursor:pointer; }
-[data-network-page] .routeLibraryDisclosure[open] > summary > span { transform:rotate(45deg); }
+[data-network-page] .routeLibraryDisclosure[open] > summary > .routeDisclosureToggle { transform:rotate(45deg); }
 [data-network-page] .routeLibraryDisclosure > div { display:grid; gap:12px; padding:0 0 16px; }
 [data-network-page] .routeLibraryAddresses { display:grid; gap:10px; margin:0; padding:0; list-style:none; }
 [data-network-page] .routeLibraryAddresses li { display:flex; align-items:center; justify-content:space-between; gap:12px; min-width:0; }

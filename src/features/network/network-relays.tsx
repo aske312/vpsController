@@ -9,6 +9,8 @@ import type { SystemAction } from "../../shared/types/control-plane";
 import type { NetworkAdmission, NetworkRequest } from "./network-api";
 import { relayAddresses, relayConnection, relaySnapshot, type RelayStatus, type RelayHost } from "./relay-state";
 
+import { RouteTypeIcon } from "./route-type-icon";
+
 type Props = { request: NetworkRequest; admit: NetworkAdmission; operation?: SystemAction; onOperation: (value: SystemAction) => void; busy: boolean; onDirtyChange: (dirty: boolean) => void; refreshKey?: number };
 
 export function useNetworkRelays({ request, admit, operation, onOperation, busy, onDirtyChange, refreshKey }: Props) {
@@ -183,8 +185,8 @@ export function NetworkRelayDialogs({ relay }: { relay: RelayControl }) {
       relay.setRecoveryConfirmation(false);
       if (confirmed && !relay.locked && relay.status?.recovery) void relay.submit("/network/relays/resume", { method: "POST", body: JSON.stringify({ pending_operation_id: relay.status.recovery.operation_id }) });
     }} />}
-    {relay.dialog && !relay.embedded && <div className="networkModalBackdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) relay.close(); }}><section ref={dialogRef} tabIndex={-1} className="networkModal relayModal" role="dialog" aria-modal="true" aria-labelledby="relay-dialog-title">
-      <header className="networkSectionHeading networkModalHeader"><div><p className="eyebrow networkSectionEyebrow">ROUTES · RELAY</p><h2 id="relay-dialog-title">{relay.edit ? "Подключение к Relay Agent" : "Подключить Relay Agent"}</h2></div><button className="networkModalClose" type="button" aria-label="Закрыть" onClick={relay.close}>×</button></header>
+    {relay.dialog && !relay.embedded && <div className="networkModalBackdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) relay.close(); }}><section ref={dialogRef} tabIndex={-1} className="networkModal relayModal relaySettingsModal" role="dialog" aria-modal="true" aria-labelledby="relay-dialog-title">
+      <header className="networkSectionHeading networkModalHeader"><div className="relaySettingsHeading"><span className="routeModalSymbol"><RouteTypeIcon kind="relay" /></span><div><p className="eyebrow networkSectionEyebrow">RELAY AGENT</p><h2 id="relay-dialog-title">{relay.edit ? "Настройки Relay" : "Подключить Relay"}</h2><p>{relay.edit?.name || "Параметры узла и доступа к Agent"}</p></div></div><button className="networkModalClose" type="button" aria-label="Закрыть" onClick={relay.close}>×</button></header>
       <NetworkRelayForm relay={relay} />
     </section></div>}
     {relay.discard && <ConfirmationDialog request={{ title: "Закрыть без сохранения?", message: "Изменения подключения к Relay будут потеряны.", cancelLabel: "Остаться", confirmLabel: "Уйти без сохранения" }} onClose={confirmed => { relay.setDiscard(false); if (confirmed) relay.resetDialog(); }} />}
@@ -193,26 +195,30 @@ export function NetworkRelayDialogs({ relay }: { relay: RelayControl }) {
 }
 
 export function NetworkRelayForm({ relay }: { relay: RelayControl }) {
-  return <div className="relayConnectionEditor">
+  let preview: ReturnType<typeof relayConnection> | null = null;
+  if (relay.connection.trim()) { try { preview = relayConnection(relay.connection); } catch { /* Validation is shown next to the field; credentials remain private. */ } }
+  const invalid = Boolean(relay.connection.trim() && !preview);
+  return <div className="relayConnectionEditor relaySettingsEditor">
     <NetworkRelayNotice relay={relay} />
-    <form className="relayForm" onSubmit={event => { event.preventDefault(); void relay.saveHost(); }}>
-      <div className="relayFieldGroup">
-      <h4>Узел и адрес</h4>
-      <label>Название узла<input required maxLength={64} value={relay.name} onChange={event => relay.changeName(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder="Например, Relay Amsterdam" /></label>
-      <label>IP или домен для клиентов<input maxLength={253} value={relay.address} onChange={event => relay.changeAddress(event.target.value)} disabled={relay.locked} placeholder="IP агента или relay.example.com" /></label>
-      <small>Необязательно. По умолчанию используется IP Relay.</small>
-      <details><summary>Если используете домен</summary><small>DNS должен указывать на Relay, без CDN proxy. Порт указывать не нужно.</small></details>
-      </div>
-      <div className="relayFieldGroup">
-      <h4>Данные подключения</h4>
-      <label>JSON подключения Agent<input type="password" autoComplete="new-password" spellCheck={false} required={!relay.edit} value={relay.connection} onChange={event => relay.changeConnection(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder={relay.edit ? "Новые параметры для замены токена / сертификата" : "Вставьте JSON из раздела Agent"} /></label>
-      <small>Скопируйте JSON из установленного Agent.</small>
-      </div>
-      {!!relay.edit?.excluded_addresses?.length && <div><b>Исключённые адреса</b>{relay.edit.excluded_addresses.map(address => <p key={address}>{address} <button type="button" disabled={relay.locked || relay.status?.pending} onClick={() => {
+    <form className="relayForm" onSubmit={event => { event.preventDefault(); if (!invalid) void relay.saveHost(); }}>
+      <section className="relaySettingsSection"><header><h3>Узел и адрес подключения</h3><p>Название для панели и адрес, который получат новые клиенты.</p></header>
+        <label>Название узла<input required maxLength={64} value={relay.name} onChange={event => relay.changeName(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder="Например, Relay Amsterdam" /></label>
+        <label>IP или домен для клиентов<input maxLength={253} value={relay.address} onChange={event => relay.changeAddress(event.target.value)} disabled={relay.locked} placeholder="По умолчанию — IP Agent" /></label>
+        <small>Домен должен указывать на Relay без CDN proxy. Схема и порт не нужны.</small>
+      </section>
+      <section className="relaySettingsSection"><header><h3>Доступ к Agent</h3><p>{relay.edit ? "Действующее подключение сохранено. Новые данные нужны только для его замены." : "Вставьте JSON подключения из установленного Relay Agent."}</p></header>
+        {relay.edit && <dl className="relaySavedConnection"><div><dt>Agent</dt><dd>{relay.edit.agent_url}</dd></div><div><dt>Ключ доступа</dt><dd>{relay.edit.token_configured ? "Сохранён" : "Не настроен"}</dd></div></dl>}
+        <details className="relayCredentialEditor" open={!relay.edit || undefined}><summary>{relay.edit ? relay.connection ? "Новые данные подключения введены" : "Заменить данные подключения" : "JSON подключения"}<span aria-hidden="true">+</span></summary><div>
+          <label>JSON подключения Agent<input type="password" autoComplete="new-password" spellCheck={false} required={!relay.edit} value={relay.connection} onChange={event => relay.changeConnection(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} aria-invalid={invalid || undefined} placeholder="Вставьте JSON из раздела Agent" /></label>
+          {invalid && <p role="status" className="relayFormValidation">JSON не распознан. Вставьте полные данные подключения Agent.</p>}
+          {preview && <p className="relayConnectionPreview">Будет использован Agent: <code>{preview.agent_url}</code></p>}
+          {relay.connection && <button type="button" disabled={relay.locked} onClick={() => relay.changeConnection("")}>Убрать новые данные</button>}
+        </div></details>
+      </section>
+      {!!relay.edit?.excluded_addresses?.length && <section className="relaySettingsSection"><header><h3>Исключённые адреса</h3><p>Можно вернуть их в выбор для новых подключений.</p></header><ul className="relayExcludedAddresses">{relay.edit.excluded_addresses.map(address => <li key={address}><code>{address}</code><button type="button" disabled={relay.locked || relay.status?.pending} onClick={() => {
         if (relay.edit && relay.status) void relay.submit(`/network/relays/${relay.edit.id}/address?address=${encodeURIComponent(address)}&restore=true`, { method: "DELETE", headers: { "If-Match": relay.status.revision } }).then(started => { if (started) relay.resetDialog(); });
-      }}>Вернуть в список</button></p>)}</div>}
-      {relay.edit && <button type="button" className="networkRouteDelete" disabled={relay.locked || relay.status?.pending} onClick={() => { relay.setConfirmation(relay.edit); }}>Удалить узел и все пересылки</button>}
-      <div className="relayActions"><button type="button" onClick={relay.close}>Отмена</button><button type="submit" className="networkPrimaryButton" disabled={relay.locked || relay.status?.pending && !relay.edit || !relay.name.trim() || !relay.edit && !relay.connection}>{relay.edit ? "Проверить и сохранить" : "Подключить Relay"}</button></div>
+      }}>Вернуть</button></li>)}</ul></section>}
+      <footer className="relaySettingsFooter">{relay.edit && <button type="button" className="routeLibraryDanger" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setConfirmation(relay.edit)}>Удалить Relay</button>}<div className="relayActions"><button type="button" onClick={relay.close}>Отмена</button><button type="submit" className="networkPrimaryButton" disabled={invalid || relay.locked || relay.status?.pending && !relay.edit || !relay.name.trim() || !relay.edit && !relay.connection}>{relay.edit ? "Проверить и сохранить" : "Подключить Relay"}</button></div></footer>
     </form>
   </div>;
 }

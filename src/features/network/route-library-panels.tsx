@@ -3,19 +3,18 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type { NetworkEndpointCheck } from "../../shared/types/control-plane";
-import { useNotifier } from "../../shared/notifications/notification-center";
-import { checkNetworkEndpoint, type NetworkRequest } from "./network-api";
-import { endpointCheckForConsumer } from "../../shared/lib/network-readiness";
+import type { NetworkRequest } from "./network-api";
 import type { RelayControl } from "./network-relays";
 import type { RelayHost, RelayRoute } from "./relay-state";
-import { relayAddresses } from "./relay-state";
 import { RelayDeviceResult, RelayLossResult } from "./relay-test-results";
 import type { RouteEntry } from "./route-library-state";
 import { domainRouteKinds, routeNeedsAttention } from "./route-library-state";
+import { useEndpointSweep } from "./use-endpoint-sweep";
+import { RelayAddressList } from "./relay-address-list";
 import { RouteTypeIcon } from "./route-type-icon";
 
 export function RouteDisclosure({ title, children }: { title: string; children: ReactNode }) {
-  return <details className="routeLibraryDisclosure"><summary>{title}<span aria-hidden="true">+</span></summary><div>{children}</div></details>;
+  return <details className="routeLibraryDisclosure"><summary>{title}<span className="routeDisclosureToggle" aria-hidden="true">+</span></summary><div>{children}</div></details>;
 }
 
 export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay: RelayControl; close: () => void }) {
@@ -47,8 +46,7 @@ export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay
         </div>
       </> : <p>Подключения через этот Relay ещё не созданы.</p>}
     </section>
-    <RouteDisclosure title={`Адреса узла · ${relayAddresses(host).length}`}><ul className="routeLibraryAddresses">{relayAddresses(host).map(address => <li key={address}><code>{address}</code><button type="button" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setAddressConfirmation({ host, address })}>Исключить</button></li>)}</ul><small>Исключение убирает адрес из выбора для новых подключений.</small></RouteDisclosure>
-    {host.address_checks?.filter(item => ["unresolved", "mismatch"].includes(item.state)).map(item => <p className="routeLibraryCallout" key={item.domain}>{item.domain}: {item.state === "mismatch" ? "DNS указывает на другой сервер" : "DNS не определён"}.</p>)}
+    <RelayAddressList host={host} relay={relay} />
     <footer className="routeControlFooter"><span>Удаление отключит пересылки этого узла.</span><button type="button" disabled={relay.locked || relay.status?.pending} className="routeLibraryDanger" onClick={() => relay.setConfirmation(host)}>Удалить Relay</button></footer>
   </>;
 }
@@ -65,35 +63,28 @@ function RelayCheckResult({ route, stale }: { route: RelayRoute; stale: boolean 
 }
 
 export function DomainEntryPanel({ entry, request, disabled, onRemove, onChecked, children }: { entry: Extract<RouteEntry, { kind: "domain" }>; request: NetworkRequest; disabled: boolean; onRemove: (kind: NetworkEndpointCheck["kind"], domain: string) => void; onChecked?: () => void; children?: ReactNode }) {
-  const [checking, setChecking] = useState(false);
   const [selected, setSelected] = useState("");
-  const [results, setResults] = useState<Partial<Record<NetworkEndpointCheck["kind"], NetworkEndpointCheck>>>({});
-  const [consumers, setConsumers] = useState<Record<string, string>>({});
-  const { error } = useNotifier("route-check", "Проверка адреса");
+  const sweep = useEndpointSweep(request, onChecked);
+  const checking = sweep.checking;
   const kinds = domainRouteKinds(entry);
   const kind = kinds.includes(selected as NetworkEndpointCheck["kind"]) ? selected as NetworkEndpointCheck["kind"] : kinds[0];
-  const saved = entry.checks.find(check => check.kind === kind);
-  const raw = results[kind] || saved;
-  const consumer = consumers[kind] || "";
-  const check = endpointCheckForConsumer(raw, consumer);
+  const hasSweep = sweep.scope === `${kind}:${entry.address}`;
+  const check = hasSweep ? sweep.observation : entry.checks.find(check => check.kind === kind);
   const presentation = kind === "cdn" ? { title: "Подключение через CDN", note: "Проверьте домен и передачу через CDN, затем настройте защиту соединения с сервером.", scope: "Проверка CDN не подтверждает доступность из сети вашего устройства." }
     : kind === "tls_relay" ? { title: "Прямое TLS-подключение", note: "Домен используется для защищённого подключения к серверу.", scope: "Сертификат и SNI задаются в настройках протокола. Этот адрес сам по себе не создаёт TLS-вход." }
     : { title: kind ? "Подключение по UDP" : "Домен сервера", note: kind ? "Проверьте передачу через существующее UDP-подключение." : "Сведения о домене и его DNS-адресах.", scope: "Порт и ключи задаются в настройках протокола." };
-  async function runCheck() {
-    if (!kind || disabled || checking) return;
-    setChecking(true);
-    try { const next = await checkNetworkEndpoint(request, kind, entry.address, consumer || undefined); setResults(current => ({ ...current, [kind]: next })); onChecked?.(); }
-    catch (cause) { error(cause instanceof Error ? cause.message : "Проверка не выполнена"); }
-    finally { setChecking(false); }
-  }
   return <>
     {kinds.length > 1 && <div className="routeKindSwitch" role="group" aria-label="Тип подключения">{kinds.map(item => <button type="button" key={item} aria-pressed={kind === item} disabled={checking} onClick={() => setSelected(item)}><RouteTypeIcon kind={({ cdn: "cdn", tls_relay: "tls", udp_relay: "udp" } as const)[item]} />{({ cdn: "CDN", tls_relay: "TLS", udp_relay: "UDP" })[item]}</button>)}</div>}
     <section className="routeTaskCard" data-address-kind={kind || "domain"}><header className="routeTaskHeading"><span className="routeTaskIcon"><RouteTypeIcon kind={kind ? ({ cdn: "cdn", tls_relay: "tls", udp_relay: "udp" } as const)[kind] : "domain"} /></span><div><h3>{presentation.title}</h3><p>{presentation.note}</p></div></header>
       <div className="routeDnsOverview"><span>DNS</span><div><strong>{entry.summary.connection}</strong><div className="routeDnsChips">{entry.domain.resolved.map(address => <code key={address}>{address}</code>)}</div></div></div>
       {kind && <>
-        {!!raw?.consumers?.length && <label className="routeControlField">Подключение для проверки<select value={consumer} disabled={disabled || checking} onChange={event => setConsumers(current => ({ ...current, [kind]: event.target.value }))}><option value="">Только проверка адреса</option>{raw.consumers.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>}
-        <div className="routeLibraryQuickActions"><button type="button" className="routeActionPrimary" disabled={disabled || checking || entry.domain.status === "stale"} onClick={() => void runCheck()}>{checking ? "Проверяем…" : consumer ? "Проверить подключение" : "Проверить адрес"}</button></div>
+        <div className="routeLibraryQuickActions"><button type="button" className="routeActionPrimary" disabled={disabled || checking || entry.domain.status === "stale"} onClick={() => void sweep.run(kind, entry.address)}>{checking ? "Проверяем компоненты…" : "Проверить адрес"}</button>{checking && <button type="button" onClick={sweep.stop}>Остановить после текущего теста</button>}</div>
+        <small>Автоматически проверяются установленные компоненты Direct и Mihomo, настроенные для этого адреса. Для остальных будет указана причина.</small>
         <div className="routeTestResults" role="status"><p>{disabled ? "Сохранённые сведения; актуальность не подтверждена." : check?.message || "Проверка ещё не выполнена."}</p>{check?.checked_at && <small>{new Date(check.checked_at).toLocaleString("ru-RU")}</small>}</div>
+        {hasSweep && <div className="routeComponentResults">{(["direct", "mihomo"] as const).map(owner => {
+          const rows = sweep.rows.filter(row => row.owner === owner);
+          return rows.length > 0 && <section key={owner}><h4>{owner === "direct" ? "Direct" : "Mihomo"}<span>{rows.filter(row => row.state === "ready").length} / {rows.length}</span></h4>{rows.map(row => <details key={row.id} data-state={disabled ? "unknown" : row.state}><summary><span><strong>{row.label}</strong>{row.consumer_label && <small>{row.consumer_label}</small>}</span><span>{disabled ? "Сохранено" : ({ pending: "В очереди", running: "Проверяем…", ready: "Обмен подтверждён", failed: "Ошибка", unavailable: "Не проверено", unknown: "Нет результата" })[row.state]}</span></summary><p>{disabled ? "Актуальность результата не подтверждена." : row.message || "Ожидаем запуск проверки"}</p></details>)}</section>;
+        })}{!sweep.rows.length && !checking && <p>{sweep.failure || "Установленные транспортные компоненты не найдены."}</p>}</div>}
         <small>{presentation.scope}</small>
       </>}
     </section>

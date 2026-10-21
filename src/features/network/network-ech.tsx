@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { RouteTypeIcon } from "./route-type-icon";
 import { useCdnSecurity } from "../application/use-cdn-security";
 import { OperationNotifications } from "../../control-panel/components/operation-notifications";
 import { useNotifier } from "../../shared/notifications/notification-center";
@@ -37,10 +38,10 @@ export function NetworkEch({ domain, route, request }: { domain: string; route: 
     catch { notifyError("Не удалось скопировать. Выделите значение и скопируйте вручную."); }
   }
 
-  return <div className="networkEch">
-    <button type="button" className="ghostButton" aria-expanded={open} onClick={() => { setOpen(!open); if (!open) void load(); }}>ECH / DNS-запись</button>
+  return <><details className="networkEch routeLibraryDisclosure routeEchDisclosure" open={open} onToggle={event => { const next = event.currentTarget.open; if (next !== open) { setOpen(next); if (next) void load(); } }}>
+    <summary><span className="routeDisclosureLabel"><RouteTypeIcon kind="tls" />ECH / DNS-запись</span><span className="routeDisclosureToggle" aria-hidden="true">+</span></summary>
     {open && <section aria-label={`ECH для ${domain}`}>
-      <strong>ECH для {domain}</strong>
+      <header><h4>Защита имени подключения</h4><p>Настройка ECH и запись HTTPS для DNS-провайдера.</p></header>
       <p>Создаёт ключи ECH на сервере и готовую HTTPS-запись для вашего DNS-провайдера. Обычный TLS-сертификат выпускается отдельно и автоматически.</p>
       {route === "proxy_or_cdn" ? <p>Домен направлен через внешний прокси/CDN. Включите ECH у этого провайдера: ключи нашего VPS не подходят для его TLS-соединения.</p> : <button type="button" className="primaryButton" disabled={loading || command.pending || route === "unresolved" || !capability?.supported} onClick={() => void command.prepareEch(domain)}>{command.pending ? "Подготовка ECH…" : record ? "Проверить настройку сервера" : "Подготовить ECH"}</button>}
       {capability?.message && <p role="status">{capability.message}</p>}
@@ -48,14 +49,15 @@ export function NetworkEch({ domain, route, request }: { domain: string; route: 
       {loading && <p role="status">Загрузка…</p>}
       {record && <>
         <p>Добавьте запись в зоне домена. Если DNS-панель сама дописывает зону, укажите только относительное имя: например, <code>cdn</code> для зоны <code>example.com</code>.</p>
-        <dl>{([
-          ["Полное имя", record.domain], ["Type", record.type], ["Priority", String(record.priority)],
-          ["Target name", record.target], ["TTL", String(record.ttl)], ["Service Parameters", record.parameters], ["Record content (если одно поле)", record.content],
-        ] as [string, string][]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd><code>{value}</code><button type="button" className="ghostButton" onClick={() => void copy(label, value)}>{copied === label ? "Скопировано" : "Копировать"}</button></dd></div>)}</dl>
+        <div className="routeEchRecord"><div className="routeEchRecordTitle"><strong>Запись для DNS</strong><span>{record.type}</span></div>
+          <dl className="routeEchFields">{([["Имя", record.domain], ["Значение", record.content]] as [string, string][]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd><code>{value}</code><button type="button" onClick={() => void copy(label, value)}>{copied === label ? "Скопировано" : "Копировать"}</button></dd></div>)}</dl>
+          <small>Если провайдер сам дописывает зону, используйте относительное имя, например cdn.</small>
+        </div>
+        <details className="routeEchAdvanced"><summary>Для DNS-панелей с отдельными полями</summary><dl className="routeEchFields">{([["Приоритет", String(record.priority)], ["Target", record.target], ["TTL", String(record.ttl)], ["Параметры", record.parameters]] as [string, string][]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd><code>{value}</code><button type="button" onClick={() => void copy(label, value)}>{copied === label ? "Скопировано" : "Копировать"}</button></dd></div>)}</dl></details>
         <p>TTL можно увеличить до минимального значения провайдера. A/AAAA-запись сохраняется. После публикации и обновления DNS включите ECH в настройках устройства и обновите подписку.</p>
         <p>Внешнее имя ECH: <code>{record.public_name}</code>. Ключи управляются сервером; после их ротации обновите HTTPS-запись. Здесь всегда можно получить текущие параметры. Данные DNS автоматически не изменяются.</p>
       </>}
     </section>}
-    <OperationNotifications active={false} command={command.operation} onRecheck={command.recheck} onDismiss={command.dismiss} />
-  </div>;
+    </details><OperationNotifications active={false} command={command.operation} onRecheck={command.recheck} onDismiss={command.dismiss} />
+  </>;
 }

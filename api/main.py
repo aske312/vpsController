@@ -46,6 +46,7 @@ import application_recovery
 import operation_policy
 import network_routes
 import network_probe
+import network_check_targets
 import resource_country
 import server_addresses
 import relay_manager
@@ -3116,6 +3117,25 @@ def update_network_endpoints(payload: NetworkEndpointSettings, _: None = Depends
             )
     write_network_endpoint_settings(settings)
     return network_status()
+
+
+@app.get('/api/network/endpoints/check-targets')
+def get_network_check_targets(kind: Literal['cdn', 'tls_relay', 'udp_relay'], domain: str, _: None = Depends(require_token)):
+    domain = domain.strip().lower()
+    if not (valid_hostname(domain) if kind == 'cdn' else valid_network_endpoint(domain)):
+        raise HTTPException(status_code=422, detail='Некорректный адрес')
+    try:
+        state = json.loads(MIHOMO_STATE_FILE.read_text(encoding='utf-8')) if MIHOMO_STATE_FILE.exists() else {}
+        modules = state.get('modules', {})
+        profiles_path = DATA_DIR / 'mihomo' / 'profiles.json'
+        profiles = json.loads(profiles_path.read_text(encoding='utf-8')) if profiles_path.exists() else []
+        if not isinstance(modules, dict) or not isinstance(profiles, list):
+            raise ValueError('Invalid component inventory')
+        items = network_check_targets.targets(protocol_image_manifests(include_versions=False), modules,
+            network_consumers(), read_clients(), profiles, kind, domain)
+        return {'kind': kind, 'domain': domain, 'items': items, 'observation': network_endpoint_check(kind, domain, include_saved=False)}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        raise HTTPException(status_code=503, detail='Не удалось определить все установленные компоненты') from None
 
 
 @app.post("/api/network/endpoints/check", dependencies=[Depends(require_mutation_admission)])

@@ -1,0 +1,62 @@
+[data-network-page] .routeDisclosureLabel { display:flex; align-items:center; flex-wrap:wrap; gap:9px; }
+[data-network-page] .routeDisclosureLabel small { padding:2px 6px; border:1px solid var(--line); border-radius:5px; }
+[data-network-page] .routeDisclosureLabel .routeAddressIssue { color:var(--amber); }
+[data-network-page] .routeNodeAddresses, [data-network-page] .relayExcludedAddresses { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
+[data-network-page] .routeNodeAddresses li { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:12px; border:1px solid var(--line); border-radius:9px; background:var(--panel-inset); }
+[data-network-page] .routeNodeAddress { display:flex; align-items:center; gap:10px; min-width:0; }
+[data-network-page] .routeNodeAddress > div { display:grid; gap:5px; min-width:0; }
+[data-network-page] .routeNodeAddress code { color:var(--text); overflow-wrap:anywhere; font:12px/1.5 var(--technical-font); }
+[data-network-page] .routeAddressActions { display:flex; flex-wrap:wrap; gap:6px; }
+[data-network-page] .routeComponentResults { display:grid; gap:16px; }
+[data-network-page] .routeComponentResults section { min-width:0; }
+[data-network-page] .routeComponentResults h4 { display:flex; align-items:center; justify-content:space-between; margin:0 0 8px; }
+[data-network-page] .routeComponentResults h4 > span { color:var(--muted); font-weight:400; }
+[data-network-page] .routeComponentResults details { border-top:1px solid var(--line); }
+[data-network-page] .routeComponentResults summary { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; list-style:none; cursor:pointer; }
+[data-network-page] .routeComponentResults summary strong { color:var(--text); font:500 12px/1.5 var(--ui-font); }
+[data-network-page] .routeComponentResults summary > span:last-child { flex-shrink:0; color:var(--muted); font:400 11px/1.5 var(--ui-font); }
+[data-network-page] .routeComponentResults [data-state=ready] summary > span:last-child { color:var(--green); }
+[data-network-page] .routeComponentResults [data-state=failed] summary > span:last-child { color:var(--red); }
+[data-network-page] .routeComponentResults [data-state=running] summary > span:last-child { color:var(--cyan); }
+[data-network-page] .routeComponentResults details > p { padding-bottom:12px; }
+[data-network-page] .routeEchDisclosure > section { display:grid; gap:12px; padding-bottom:16px; }
+[data-network-page] .routeEchDisclosure h4 { margin:0; color:var(--text); font-size:13px; }
+[data-network-page] .routeEchRecord { display:grid; gap:12px; padding:14px; border:1px solid var(--line); border-radius:10px; background:var(--panel-inset); }
+[data-network-page] .routeEchRecordTitle { display:flex; align-items:center; justify-content:space-between; gap:12px; color:var(--text); font-size:12px; }
+[data-network-page] .routeEchRecordTitle > span { color:var(--cyan); font:11px var(--technical-font); }
+[data-network-page] .routeEchFields { display:grid; gap:12px; margin:0; }
+[data-network-page] .routeEchFields > div { display:grid; gap:5px; min-width:0; }
+[data-network-page] .routeEchFields dt { color:var(--muted); font-size:11px; }
+[data-network-page] .routeEchFields dd { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:9px; min-width:0; margin:0; }
+[data-network-page] .routeEchFields code { flex:1; min-width:120px; overflow-wrap:anywhere; white-space:normal; color:var(--text); font:11px/1.6 var(--technical-font); }
+[data-network-page] .routeEchAdvanced > summary { margin-bottom:12px; color:var(--muted); font-size:12px; cursor:pointer; }
+[data-network-page] .relaySettingsModal { width:min(680px,100%); }
+[data-network-page] .relaySettingsHeading { display:flex; align-items:flex-start; gap:14px; }
+[data-network-page] .relaySettingsHeading h2 { margin:4px 0; font-size:20px; }
+[data-network-page] .relaySettingsHeading p { margin:0; color:var(--muted); font-size:12px; }
+[data-network-page] .relaySettingsEditor .relayForm { gap:16px; }
+[data-network-page] .relaySettingsSection { display:grid; gap:14px; min-width:0; padding:16px; border:1px solid var(--line); border-radius:11px; background:var(--panel-inset); }
+[data-network-page] .relaySettingsSection header { display:grid; gap:5px; }
+[data-network-page] .relaySettingsSection h3 { margin:0; color:var(--text); font:600 14px/1.5 var(--ui-font); }
+[data-network-page] .relaySettingsSection p, [data-network-page] .relaySettingsSection small { margin:0; color:var(--muted); font:400 12px/1.6 var(--ui-font); overflow-wrap:anywhere; }
+[data-network-page] .relaySettingsSection label { color:var(--muted); font:400 12px/1.5 var(--ui-font); }
+[data-network-page] .relaySettingsEditor input { min-height:40px; font-size:12px; }
+[data-network-page] .relaySettingsEditor button { min-height:36px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--text); font:500 12px/1.4 var(--ui-font); cursor:pointer; }
+[data-network-page] .relaySettingsEditor button:disabled { opacity:.45; cursor:default; }
+[data-network-page] .relaySettingsEditor .networkPrimaryButton { border-color:var(--cyan); color:var(--cyan); }
+[data-network-page] .relaySavedConnection { display:grid; gap:10px; margin:0; }
+[data-network-page] .relaySavedConnection > div { display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px; font-size:12px; }
+[data-network-page] .relaySavedConnection dt { color:var(--muted); }
+[data-network-page] .relaySavedConnection dd { margin:0; color:var(--text); overflow-wrap:anywhere; }
+[data-network-page] .relayCredentialEditor { min-width:0; border-top:1px solid var(--line); }
+[data-network-page] .relayCredentialEditor summary { display:flex; justify-content:space-between; gap:10px; padding:12px 0 0; color:var(--cyan); font-size:12px; list-style:none; cursor:pointer; }
+[data-network-page] .relayCredentialEditor > div { display:grid; gap:10px; padding-top:14px; }
+[data-network-page] .relayCredentialEditor > div > button { justify-self:start; }
+[data-network-page] .relaySettingsSection .relayFormValidation { color:var(--amber); }
+[data-network-page] .relayConnectionPreview code { overflow-wrap:anywhere; }
+[data-network-page] .relayExcludedAddresses li { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+[data-network-page] .relayExcludedAddresses code { overflow-wrap:anywhere; font:12px var(--technical-font); }
+[data-network-page] .relaySettingsFooter { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
+[data-network-page] .relaySettingsFooter .routeLibraryDanger { color:var(--red); border-color:transparent; background:none; }
+[data-network-page] .relaySettingsFooter .relayActions { margin-left:auto; }
+[data-network-page] .relaySettingsEditor :is(button,input,summary):focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
