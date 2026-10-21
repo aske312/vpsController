@@ -285,6 +285,15 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOF
+cat >/etc/systemd/system/vps-control-relay-update.path <<'EOF'
+[Unit]
+Description=Watch authenticated Relay update requests
+[Path]
+PathExists=/var/lib/vps-control-relay-agent/update-request.json
+Unit=vps-control-relay-update.service
+[Install]
+WantedBy=multi-user.target
+EOF
 systemctl daemon-reload
 systemctl enable --now vps-control-relay-addresses.timer
 systemctl enable vps-control-relay-agent.service
@@ -300,6 +309,7 @@ for attempt in {1..20}; do
     fi
     echo 'Relay Agent установлен и готов к подключению.'
     systemctl enable --now vps-control-relay-update.timer
+    systemctl enable --now vps-control-relay-update.path
     install_complete=1
     exit 0
   fi

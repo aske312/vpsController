@@ -17,6 +17,41 @@ spec.loader.exec_module(update)
 
 
 class UpdateTests(unittest.TestCase):
+    def test_manual_update_uses_verified_package_even_when_daily_updates_are_disabled(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as folder, ExitStack() as stack:
+            root = Path(folder); (root/'updates.json').write_text('{"enabled":false}')
+            stage_source = root/'source'; stage_source.mkdir()
+            for name in update.FILES:
+                data = (SOURCE/name).read_bytes()
+                if name == 'manifest.json': data = json.dumps({'id':'relay-agent','source_branch':'agent','version':'9.0.0'}).encode()
+                (stage_source/name).write_bytes(data)
+            archive = root/'archive.tar.gz'
+            with tarfile.open(archive, 'w:gz') as stream:
+                for name in update.FILES: stream.add(stage_source/name, arcname=name)
+            data = archive.read_bytes(); digest = 'sha256:'+hashlib.sha256(data).hexdigest()
+            request = {'id':'a'*32,'version':'9.0.0','digest':digest,'requested_at':__import__('time').time()}
+            (root/'update-request.json').write_text(json.dumps(request))
+            release = {'tag_name':'agent-latest','assets':[{'name':'relay-agent.tar.gz','browser_download_url':update.ASSET_PREFIX+'relay-agent.tar.gz','digest':digest}]}
+            for attribute, value in [('ROOT',root),('STATE',root)]: stack.enter_context(patch.object(update,attribute,value))
+            stack.enter_context(patch.object(update.os,'geteuid',return_value=0,create=True))
+            stack.enter_context(patch.object(update,'open',side_effect=lambda path,*args,**kwargs: open(root/'lock' if str(path)=='/run/lock/vps-control-relay-update.lock' else path,*args,**kwargs),create=True))
+            stack.enter_context(patch.dict(sys.modules,{'fcntl':SimpleNamespace(flock=lambda *_:None,LOCK_EX=2,LOCK_NB=4)}))
+            stack.enter_context(patch.object(update,'fetch',side_effect=[json.dumps(release).encode(),data]))
+            metadata = stack.enter_context(patch.object(update,'write_metadata'))
+            run = stack.enter_context(patch.object(update.subprocess,'run'))
+            update.main()
+            self.assertFalse((root/'update-request.json').exists())
+            self.assertEqual([call.args[1]['state'] for call in metadata.call_args_list if call.args[0]=='manual-update-status.json'], ['running','updated'])
+            self.assertEqual(sum(call.args[0][0]=='bash' and call.args[0][1].endswith('install.sh') and '-n' not in call.args[0] for call in run.call_args_list),1)
+
+    def test_manual_request_rejects_expired_and_arbitrary_commands(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(update,'STATE',Path(folder)):
+            path = Path(folder)/'update-request.json'
+            for value in ({'command':'reboot'}, {'id':'a'*32,'version':'9.0.0','digest':'sha256:'+'b'*64,'requested_at':0}):
+                path.write_text(json.dumps(value))
+                with self.assertRaises(ValueError): update.read_request()
+
     def test_disabled_updater_does_not_contact_github(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); (root/'updates.json').write_text('{"enabled":false}')

@@ -16,7 +16,7 @@ import time
 from addresses import read_inventory, dual_stack_available
 import struct
 
-VERSION = '1.3.0'
+VERSION = '1.4.0'
 CONFIG_DIR = Path('/etc/vps-control-relay-agent')
 STATE_DIR = Path('/var/lib/vps-control-relay-agent')
 API_PORT = 9443
@@ -448,12 +448,16 @@ class Agent:
                     'listen_ports': {'min': PORT_MIN, 'max': PORT_MAX}, 'max_routes': MAX_ROUTES,
                     'addresses': read_inventory(self.config_dir, self.settings()),
                     'updates': self.update_status(),
-                    'capabilities': ['udp-measurement-v1'],
+                    'capabilities': ['udp-measurement-v1', 'manual-update-v1'],
                     'address_checks': self.address_checks(),
                     'client_address_families': ['ipv4', 'ipv6'] if self.listen_host == '::' else ['ipv4']}
         if method == 'GET' and path == '/v1/routes':
             return {'revision': self.revision, 'reserved_udp_ports': sorted(item.port for item in self.measurements.values() if not item.closed), 'items': [route.status() for route in self.routes.values()] +
                     [{**item['config'], 'state': 'failed', 'error': item['error'], 'target_verified': False} for item in self.failed.values()]}
+        update = re.fullmatch(r'/v1/updates/([0-9a-f]{32})', path)
+        if update and method in ('PUT', 'GET'):
+            async with self.lock:
+                return self.update_request(method, update[1], body)
         measure = re.fullmatch(r'/v1/measurements/([0-9a-f]{32})', path)
         if measure:
             async with self.lock:
@@ -501,10 +505,43 @@ class Agent:
             enabled = json.loads((self.config_dir / 'updates.json').read_text()).get('enabled') is True
             path = self.config_dir / 'update-status.json'
             value = json.loads(path.read_text()) if path.exists() else {'state': 'unchecked'}
-            return {'enabled': enabled, 'interval_hours': 24,
-                    **{key: value[key] for key in ('state', 'checked_at', 'version') if key in value}}
+            result = {'enabled': enabled, 'interval_hours': 24,
+                      **{key: value[key] for key in ('state', 'checked_at', 'version') if key in value}}
+            manual = self.manual_update_status()
+            if manual: result['manual'] = manual
+            return result
         except (OSError, ValueError, TypeError):
             return {'enabled': False, 'interval_hours': 24, 'state': 'unknown'}
+
+    def manual_update_status(self):
+        path = self.state_dir/'update-request.json'
+        if path.exists():
+            value = json.loads(path.read_text())
+            status = self.config_dir/'manual-update-status.json'
+            if status.exists():
+                observed = json.loads(status.read_text())
+                if observed.get('id') == value.get('id'): return observed
+            return {**value, 'state': 'queued' if time.time()-value['requested_at'] < 900 else 'unknown'}
+        path = self.config_dir/'manual-update-status.json'
+        return json.loads(path.read_text()) if path.exists() else None
+
+    def update_request(self, method, identity, body):
+        previous = self.manual_update_status()
+        if method == 'GET':
+            if not previous or previous.get('id') != identity: raise RelayError('Update request unavailable', 404)
+            return previous
+        if not isinstance(body, dict) or set(body) != {'version', 'digest'} or not isinstance(body['version'], str) or not re.fullmatch(r'\d{1,6}\.\d{1,6}\.\d{1,6}', body['version']) or not isinstance(body['digest'], str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', body['digest']):
+            raise RelayError('Invalid update request')
+        if previous and previous.get('id') == identity:
+            if any(previous.get(key) != body[key] for key in body): raise RelayError('Update request changed', 409)
+            return previous
+        if (self.state_dir/'update-request.json').exists() or previous and previous.get('state') in ('queued', 'running', 'unknown'):
+            raise RelayError('Previous update result must be confirmed', 409)
+        if tuple(map(int, body['version'].split('.'))) <= tuple(map(int, VERSION.split('.'))):
+            raise RelayError('Only a newer Agent version can be installed', 409)
+        request = {**body, 'id': identity, 'requested_at': time.time()}
+        atomic_json(self.state_dir/'update-request.json', request)
+        return {**request, 'state': 'queued'}
 
     async def measurement_request(self, method, identity, body):
         existing = self.measurements.get(identity)

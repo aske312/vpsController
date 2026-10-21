@@ -100,6 +100,22 @@ class ValidationTests(unittest.TestCase):
 
 
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_update_command_is_authenticated_idempotent_and_does_not_change_routes(self):
+        identity = 'a'*32; body = {'version': '9.0.0', 'digest': 'sha256:'+'b'*64}
+        before = self.agent.revision
+        with self.assertRaises(relay.RelayError):
+            await self.agent.dispatch('PUT', '/v1/updates/'+identity, {}, body)
+        value = await self.agent.dispatch('PUT', '/v1/updates/'+identity, self.headers, body)
+        self.assertEqual(value['state'], 'queued')
+        self.assertEqual(await self.agent.dispatch('PUT', '/v1/updates/'+identity, self.headers, body), value)
+        self.assertEqual(await self.agent.dispatch('GET', '/v1/updates/'+identity, self.headers, {}), value)
+        for other_id, other_body in [('c'*32, body), (identity, {**body, 'version': '9.0.1'})]:
+            with self.assertRaises(relay.RelayError): await self.agent.dispatch('PUT', '/v1/updates/'+other_id, self.headers, other_body)
+        self.assertEqual(self.agent.revision, before)
+        (self.agent.state_dir/'update-request.json').unlink()
+        for invalid in ({**body, 'version': relay.VERSION}, {**body, 'version': '1.0.0'}, {**body, 'command': 'reboot'}, {**body, 'digest': 'bad'}):
+            with self.assertRaises(relay.RelayError): await self.agent.dispatch('PUT', '/v1/updates/'+identity, self.headers, invalid)
+
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)

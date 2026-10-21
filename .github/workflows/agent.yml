@@ -31,6 +31,8 @@ jobs:
           sudo python3 tests/relay_standalone_smoke.py .
           sudo python3 tests/relay_standalone_smoke.py . --occupy-default
           sudo python3 tests/relay_standalone_smoke.py . --api-port 19443
+      - name: Verify authenticated manual update through systemd
+        run: sudo python3 tests/relay_update_smoke.py
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/agent'
     needs: verify
@@ -41,10 +43,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Package tested Agent
-        run: tar -czf relay-agent.tar.gz -C protocol-images/relay-agent agent.py addresses.py credentials.py manifest.json install.sh uninstall.sh update.py
+        run: |
+          tar -czf relay-agent.tar.gz -C protocol-images/relay-agent agent.py addresses.py credentials.py manifest.json install.sh uninstall.sh update.py
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          version = json.loads(Path('protocol-images/relay-agent/manifest.json').read_text())['version']
+          digest = 'sha256:' + hashlib.sha256(Path('relay-agent.tar.gz').read_bytes()).hexdigest()
+          Path('relay-agent-version.json').write_text(json.dumps({'version': version, 'digest': digest}))
+          PY
       - name: Publish Agent update
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view agent-latest >/dev/null 2>&1 || gh release create agent-latest --title 'Relay Agent' --notes 'Daily update channel; published after Agent verification.' --target "$GITHUB_SHA" --prerelease
           gh release upload agent-latest relay-agent.tar.gz --clobber
+          gh release upload agent-latest relay-agent-version.json --clobber
