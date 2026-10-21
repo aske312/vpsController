@@ -302,7 +302,7 @@ class RelayManagementTests(unittest.TestCase):
         self.assertEqual(inventory['hosts'][0]['addresses'],self.agent.addresses)
         self.assertEqual(self.agent.calls,[])
         host=self.control.read()['hosts'][0]
-        with patch('relay_manager.socket.getaddrinfo',side_effect=AssertionError('Known agent domain needs no DNS gate')):
+        with patch('relay_manager.socket.getaddrinfo',return_value=[(socket.AF_INET,socket.SOCK_STREAM,6,'',(AGENT,0))]):
             self.control.save_host({**host,'client_address':'backup.example','expected_revision':revision})
         self.assertEqual(self.control.read()['hosts'][0]['client_address'],'backup.example')
 
@@ -407,6 +407,43 @@ class RelayManagementTests(unittest.TestCase):
             self.control.ensure(self.host_id, [[('tcp', 443)]], 'c'*32)
         self.assertTrue(any(method == 'PUT' for method, _ in self.agent.calls))
 
+    def test_advertised_hostname_still_requires_dns_to_match_the_selected_agent(self):
+        self.agent.addresses = {'ipv4': [AGENT], 'ipv6': [], 'domains': ['relay.example']}
+        self.control.public()
+        host = self.control.read()['hosts'][0]
+        original = copy.deepcopy(self.control.read())
+        for answers in ([ORIGIN], [AGENT, '8.8.8.8'], []):
+            with self.subTest(answers=answers), patch('relay_manager.socket.getaddrinfo', return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, '', (ip, 0)) for ip in answers]):
+                with self.assertRaises(ValueError):
+                    self.control.save_host({**host, 'client_address': 'relay.example', 'expected_revision': original['revision']})
+                self.assertEqual(self.control.read(), original)
+        with patch('relay_manager.socket.getaddrinfo', side_effect=socket.gaierror('unavailable')):
+            with self.assertRaises(ValueError):self.control.validate_client_address(self.host_id, 'relay.example')
+
+    def test_new_connection_rejects_origin_or_wrong_domain_before_preparing_routes(self):
+        self.agent.addresses = {'ipv4': [AGENT], 'ipv6': [], 'domains': ['relay.example']}
+        self.control.public()
+        original = copy.deepcopy(self.control.read())
+        for address in (ORIGIN, 'relay.example'):
+            connection = {'id': 'new', 'component': 'transport-tuic', 'credential': {'port': 10443},
+                          'settings': {'relay_host_id': self.host_id, 'relay_address': address}}
+            self.agent.calls.clear()
+            with self.subTest(address=address), patch('relay_manager.socket.getaddrinfo', return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, '', (ORIGIN, 0))]):
+                with self.assertRaises(ValueError):relay_connections.prepare_mihomo(self.control, [connection], 'c'*32)
+            self.assertFalse(any(method != 'GET' for method, _ in self.agent.calls))
+            self.assertEqual(self.control.read(), original)
+
+    def test_saved_connection_and_export_do_not_add_a_recurring_dns_gate(self):
+        self.agent.addresses = {'ipv4': [AGENT], 'ipv6': [], 'domains': ['relay.example']}
+        self.control.public()
+        connection = {'id': 'saved', 'component': 'transport-tuic', 'credential': {'port': 10443},
+                      'settings': {'relay_host_id': self.host_id, 'relay_address': 'relay.example'}}
+        with patch('relay_manager.socket.getaddrinfo', return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, '', (AGENT, 0))]):
+            relay_connections.prepare_mihomo(self.control, [connection], 'c'*32)
+        with patch('relay_manager.socket.getaddrinfo', side_effect=AssertionError('No DNS during saved export/edit')):
+            relay_connections.prepare_mihomo(self.control, [connection], 'd'*32, previous=[connection])
+            self.assertEqual(self.control.endpoint(self.host_id, 'udp', 10443, address='relay.example')[0], 'relay.example')
+
     def test_orphan_origin_port_is_reserved_but_current_owner_can_keep_it(self):
         self.control.ensure(self.host_id, [[('tcp', 31000)]], 'c'*32)
         with patch.object(port_allocation, 'DATA_ROOT', self.root), patch.object(port_allocation, 'CONFIG_ROOT', self.root/'etc'), patch.object(port_allocation, 'ENV_FILE', self.root/'environment'):
@@ -462,7 +499,8 @@ class RelayManagementTests(unittest.TestCase):
         relay_connections.prepare_mihomo(self.control, [{**connection, 'name': 'Renamed'}], 'd'*32, previous=[connection])
         self.assertEqual(sum(method == 'PUT' for method, _ in self.agent.calls), before)
 
-    def test_mihomo_tls_relay_domain_preserves_certificate_identity_in_all_exports(self):
+    @patch('relay_manager.socket.getaddrinfo', return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, '', (AGENT, 0))])
+    def test_mihomo_tls_relay_domain_preserves_certificate_identity_in_all_exports(self, _dns):
         self.agent.addresses = {'ipv4': [AGENT], 'ipv6': [], 'domains': ['relay.example', 'backup.example']}
         self.control.public()
         credential = {'uuid': 'key-value', 'route_mode': 'tls', 'tls_enabled': True, 'tls_domain': 'origin.example',
@@ -496,7 +534,8 @@ class RelayManagementTests(unittest.TestCase):
                 self.assertEqual(self.agent.calls, [])
         self.assertEqual(connection, original)
 
-    def test_mihomo_udp_relay_domain_keeps_each_protocol_socket_and_identity(self):
+    @patch('relay_manager.socket.getaddrinfo', return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, '', (AGENT, 0))])
+    def test_mihomo_udp_relay_domain_keeps_each_protocol_socket_and_identity(self, _dns):
         self.agent.addresses = {'ipv4': [AGENT], 'ipv6': [], 'domains': ['relay.example']}
         self.control.public()
         base = {'server_address': ORIGIN, 'ip': '10.0.0.2/32', 'private_key': 'private', 'server_public_key': 'public', 'mtu': 1400,

@@ -40,6 +40,7 @@ def perform(api, payload, identity, *, resume_id=None):
         if not client.settings.relay_host_id or client.protocol == 'ikev2' or client.settings.channel_mode != 'direct':
             raise ValueError('Нужен совместимый протокол и выбранный Relay без старого режима relay')
         control.host(control.checked(payload['expected_revision']), client.settings.relay_host_id)
+        control.validate_client_address(client.settings.relay_host_id, client.settings.relay_address)
         settings, protocol = client.settings.model_dump(exclude_none=True), client.protocol
         api.ComponentRegistry(api.DATA_DIR).require_managed(protocol)
         control.ensure(settings['relay_host_id'], [], identity)

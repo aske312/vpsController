@@ -85,6 +85,10 @@ def prepare_mihomo(control, connections, identity, direct_settings=None, previou
     for connection in connections:
         selected = host_id(connection.get('settings', {}))
         if selected:
+            old = saved.get(connection.get('id'), {})
+            if (host_id(old.get('settings', {})) != selected
+                    or old.get('settings', {}).get('relay_address', '') != connection.get('settings', {}).get('relay_address', '')):
+                control.validate_client_address(selected, connection.get('settings', {}).get('relay_address'))
             groups = connection_groups(connection, direct_settings)
             if relay_cdn.before(connection.get('settings', {})):
                 control.ensure_cdn(selected, connection['settings']['cdn_domain'], identity)
@@ -93,7 +97,6 @@ def prepare_mihomo(control, connections, identity, direct_settings=None, previou
                 raise ValueError('HTTP 80 разрешён только для ACME CDN через Relay')
             if relay_cdn.after(connection.get('settings', {})):
                 acme_hosts.add(selected)
-            old = saved.get(connection.get('id'), {})
             if old.get('component') == connection['component'] and not relay_cdn.before(old.get('settings', {})) and host_id(old.get('settings', {})) == selected and connection_groups(old, direct_settings) == groups:
                 for group in groups:
                     for transport, port in group:

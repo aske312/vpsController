@@ -22,6 +22,10 @@ import relay_cdn
 CONFIG_KEYS = ('transport', 'listen_port', 'target_ip', 'target_port')
 
 
+class RelayAddressError(ValueError):
+    """A public, actionable error about the selected client-facing endpoint."""
+
+
 def public_ipv4(value):
     address = ipaddress.ip_address(value)
     if address.version != 4 or not address.is_global or address.is_multicast:
@@ -205,13 +209,26 @@ class RelayManager:
     def validate_address(value, agent_ip, addresses=None):
         value = str(value).strip().lower().rstrip('.')
         value = normalize_address(value)
-        if value in all_addresses(addresses or normalize_addresses(None, agent_ip)):return value
+        inventory = addresses or normalize_addresses(None, agent_ip)
+        own_ips = set(inventory['ipv4'] + inventory['ipv6'])
+        if value in own_ips:return value
         if len(value) > 253 or not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?', value):
-            raise ValueError('Адрес клиента должен быть IP агента или доменом этого узла без порта')
-        resolved = {item[4][0] for item in socket.getaddrinfo(value, None, type=socket.SOCK_STREAM)}
-        if not resolved or not resolved <= set(all_addresses(addresses or normalize_addresses(None, agent_ip))):
-            raise ValueError('Домен Relay должен разрешаться только в IPv4 выбранного агента, без CDN proxy')
+            raise RelayAddressError('Адрес клиента должен быть IP агента или доменом этого узла без порта')
+        try:
+            resolved = {item[4][0] for item in socket.getaddrinfo(value, None, type=socket.SOCK_STREAM)}
+        except OSError as exc:
+            raise RelayAddressError('Не удалось разрешить домен Relay; проверьте DNS или выберите IP агента') from exc
+        if not resolved or not resolved <= own_ips:
+            raise RelayAddressError('Домен Relay должен разрешаться только в IP выбранного агента, без CDN proxy')
         return value
+
+    def validate_client_address(self, host_id, address=None):
+        """Validate a newly selected endpoint, never a recurring subscription read."""
+        host = self.host(self.read(), host_id)
+        value = normalize_address(address or host.get('client_address') or self.client(host).host)
+        if value == self.origin or value in host.get('excluded_addresses', []):
+            raise RelayAddressError('Выберите доступный адрес Relay; адрес текущего VPS использовать нельзя')
+        return self.validate_address(value, self.client(host).host, self.addresses(host))
 
     def ensure(self, host_id, groups, identity, *, allow_acme=False):
         return self._ensure(host_id, groups, identity, allow_acme=allow_acme)

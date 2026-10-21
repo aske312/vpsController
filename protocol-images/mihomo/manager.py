@@ -15,6 +15,7 @@ import secrets
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import tempfile
 import threading
@@ -53,7 +54,7 @@ import relay_connections
 import relay_cdn
 import xray_protocols
 import xray_core
-from relay_manager import RelayManager
+from relay_manager import RelayManager, RelayAddressError
 from service_state import observe_service
 import port_allocation
 from component_registry import ComponentRegistry, RegistryError
@@ -4350,7 +4351,10 @@ def client_verification_scenario(profile: dict[str, Any], device_id: str) -> dic
         # define a different application capability scenario.
         effective_options = {**{key: credential[key] for key in client_compatibility.PROTOCOL_OPTIONS if key in credential}, **settings}
         value["options"] = {key: effective_options[key] for key in sorted(effective_options) if key in client_compatibility.PROTOCOL_OPTIONS}
-        value["certificate_pinning"] = bool(settings.get("certificate_fingerprint") or credential.get("certificate_fingerprint"))
+        pin_credential = {**credential, **{key: value for key, value in settings.items() if key in client_connection_keys(component)}}
+        if device_routing(profile, device_id).get("client_config_format", "mihomo") == "mihomo":
+            pin_credential = mihomo_quic_certificate(component, pin_credential)
+        value["certificate_pinning"] = bool(pin_credential.get("certificate_fingerprint"))
         if component == "transport-awg":
             value["amnezia"] = {key: credential.get("amnezia", {}).get(key) for key in ("version", "jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4")}
         if component == "transport-shadowsocks":
@@ -4735,7 +4739,33 @@ def mihomo_client_options(component: str, credential: dict[str, Any]) -> list[st
 
 
 def render_proxy(module_id: str, credential: dict[str, Any], proxy_name: str) -> list[str]:
+    credential = mihomo_quic_certificate(module_id, credential)
     return _render_proxy(module_id, credential, proxy_name) + mihomo_client_options(module_id, credential)
+
+
+def mihomo_quic_certificate(module_id: str, credential: dict[str, Any]) -> dict[str, Any]:
+    """Pin the applied QUIC listener's leaf certificate instead of trusting any certificate.
+
+    The configured SNI and explicit PKI/pin choices remain intact. The exported
+    fingerprint performs verification even when skip-cert-verify is selected.
+    Other exporters do not inherit this Mihomo-only certificate option.
+    """
+    if module_id not in {"transport-hysteria2", "transport-tuic"} or credential.get("certificate_fingerprint") or not credential.get("skip_cert_verify", True):
+        return credential
+    config = load_json(quic_root(module_id) / "config.json", {})
+    inbound = next((row for row in config.get("inbounds", []) if row.get("type") == quic_module_name(module_id)), {})
+    certificate = inbound.get("tls", {}).get("certificate_path")
+    if not certificate:
+        return credential
+    try:
+        source = Path(certificate).read_text(encoding="utf-8")
+        leaf = re.search(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", source, re.S)
+        if not leaf or len(source) > 1024 * 1024:
+            raise ValueError("Invalid certificate")
+        fingerprint = hashlib.sha256(ssl.PEM_cert_to_DER_cert(leaf[0])).hexdigest()
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise HTTPException(status_code=409, detail="Не удалось прочитать сертификат QUIC для проверки отпечатка. Проверьте установленный компонент.") from exc
+    return {**credential, "certificate_fingerprint": fingerprint}
 
 
 def relay_connection_control():
@@ -4756,6 +4786,8 @@ def prepare_profile_relays(item, identity=None, previous=()):
     try:
         relay_connections.prepare_mihomo(relay_connection_control(), effective_client_connections(item['connections']),
                                         (identity or uuid.uuid4().hex).replace('-', ''), reality_connection_settings, previous)
+    except RelayAddressError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (ValueError, OSError, RuntimeError) as exc:
         raise HTTPException(status_code=409, detail='Не удалось подтвердить пересылку Relay. Проверьте узел и результат операции в ROUTES перед повтором') from exc
 

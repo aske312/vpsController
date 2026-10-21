@@ -1,4 +1,7 @@
 import os
+import copy
+import hashlib
+import ssl
 from pathlib import Path
 import subprocess
 import tempfile
@@ -71,3 +74,28 @@ class ProfileProtocolOptionsTests(unittest.TestCase):
         for module, values in (("awg", {"jmin": 100, "jmax": 10}), ("hysteria2", {"initial_stream_receive_window": 2000, "max_stream_receive_window": 1000}), ("tuic", {"max_open_streams": -1}), ("tuic", {"certificate_fingerprint": "not-sha256"}), ("reality", {"tfo": "false"})):
             with self.subTest(module=module), self.assertRaises(manager.HTTPException):
                 manager.validate_connection("transport-" + module, values)
+
+    def test_mihomo_pins_the_applied_quic_certificate_without_changing_credentials_or_sni(self):
+        certificate = ROOT / "api/resources/cloudflare-origin-pull-ca.pem"
+        expected = hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate.read_text())).hexdigest()
+        for module in ("tuic", "hysteria2"):
+            credential = {"port": 18443, "uuid": "00000000-0000-4000-8000-000000000001", "password": "fixture", "up_mbps": 100, "down_mbps": 100, "sni": "cover.example", "skip_cert_verify": True}
+            original = copy.deepcopy(credential)
+            config = {"inbounds": [{"type": module, "tls": {"certificate_path": str(certificate)}}]}
+            with self.subTest(module=module), patch.object(manager, "load_json", return_value=config):
+                node = yaml.safe_load("proxies:\n" + "\n".join(manager.render_proxy("transport-" + module, credential, "QUIC")))["proxies"][0]
+            self.assertEqual(node["fingerprint"], expected)
+            self.assertEqual(node["sni"], "cover.example")
+            self.assertEqual(credential, original)
+
+    def test_explicit_quic_trust_choices_are_preserved_and_bad_applied_certificates_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bad_certificate = Path(directory) / "bad.pem"
+            bad_certificate.write_text("not a certificate")
+            config = {"inbounds": [{"type": "tuic", "tls": {"certificate_path": str(bad_certificate)}}]}
+            with patch.object(manager, "load_json", return_value=config):
+                with self.assertRaises(manager.HTTPException) as raised:
+                    manager.mihomo_quic_certificate("transport-tuic", {"skip_cert_verify": True})
+                self.assertEqual(raised.exception.status_code, 409)
+                for credential in ({"skip_cert_verify": False}, {"skip_cert_verify": True, "certificate_fingerprint": "ab" * 32}):
+                    self.assertIs(manager.mihomo_quic_certificate("transport-tuic", credential), credential)
