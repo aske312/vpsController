@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type { NetworkEndpointCheck } from "../../shared/types/control-plane";
 import { useNotifier } from "../../shared/notifications/notification-center";
 import { checkNetworkEndpoint, type NetworkRequest } from "./network-api";
+import { endpointCheckForConsumer } from "../../shared/lib/network-readiness";
 import type { RelayControl } from "./network-relays";
 import type { RelayHost, RelayRoute } from "./relay-state";
 import { relayAddresses } from "./relay-state";
@@ -27,22 +28,27 @@ export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay
   const updating = host.agent_update && ["sending", "queued", "running", "unknown"].includes(host.agent_update.state);
   const submit = (path: string) => void relay.submit(path, { method: "POST", headers: { "If-Match": relay.status?.revision || "" } });
   return <>
-    <div className="routeLibraryQuickActions"><button type="button" onClick={() => { close(); relay.openHost(host); }} disabled={relay.locked}>Настроить Relay</button><span>Agent {host.version || "—"}</span></div>
+    <section className="routeAgentCard"><div><h3>Agent {host.version || "· версия неизвестна"}</h3><p>Автообновление {host.updates ? host.updates.enabled ? "раз в сутки" : "выключено" : "· нет данных"}</p></div><button type="button" onClick={() => { close(); relay.openHost(host); }} disabled={relay.locked}>Настроить Relay</button></section>
     {version?.state === "outdated" && <div className="routeLibraryCallout"><p>Доступно обновление Agent {version.version}</p>{host.capabilities?.includes("manual-update-v1") ? <><button type="button" disabled={locked || Boolean(updating) || active} onClick={() => void relay.submit(`/network/relays/${host.id}/update`, { method: "POST", body: JSON.stringify({ version: version.version, digest: version.digest, expected_revision: relay.status?.revision }) })}>Обновить Agent</button><small>Agent перезапустится. Ключи и настройки сохранятся.</small></> : <small>Для команды из PRO сначала обновите Agent до 1.4 штатным установщиком или суточным updater.</small>}</div>}
     {host.agent_update && <p role="status">Обновление Agent: {({ sending: "команда отправляется", queued: "в очереди", running: "выполняется", updated: "завершено", failed: "не удалось выполнить", unknown: "результат не подтверждён, команда не повторяется" })[host.agent_update.state]}.</p>}
-    <section className="routeLibrarySection"><h3>Проверить подключение</h3>
+    {host.updates?.state === "failed" && <p className="routeLibraryCallout" role="alert">Последняя попытка автообновления не удалась.</p>}
+    <section className="routeTaskCard"><header><h3>Проверка передачи</h3><p>Выберите маршрут и подключение для теста.</p></header>
       {route ? <>
+        <div className="routeFieldPair">
         <label>Маршрут<select value={route.id} onChange={event => { setSelected(event.target.value); setConsumer(""); }}>{host.routes.map(item => <option key={item.id} value={item.id}>{consumers.find(candidate => candidate.id === item.check?.consumer_id)?.label || `${item.transport.toUpperCase()} · ${item.listen_port}`}{routeNeedsAttention(item) ? " · ошибка" : ""}</option>)}</select></label>
         <label>Подключение<select value={consumer} onChange={event => setConsumer(event.target.value)} disabled={locked || active}><option value="">Выберите подключение</option>{consumers.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
-        <div className="routeLibraryQuickActions"><button type="button" disabled={locked || active || route.state !== "listening" || !consumer} onClick={() => submit(`/network/relays/${host.id}/routes/${route.id}/check?mode=media&consumer_id=${encodeURIComponent(consumer)}`)}>Проверить с VPS</button>{host.capabilities?.includes("udp-measurement-v1") && <button type="button" disabled={locked || active || route.state !== "listening" || !consumer} onClick={() => submit(`/network/relays/${host.id}/routes/${route.id}/device-tests?consumer_id=${encodeURIComponent(consumer)}`)}>Тест с устройства</button>}</div>
+        </div>
+        <div className="routeTestOptions"><div><h4>Со стороны сервера</h4><p>Передача видео через выбранный протокол и Relay.</p><button type="button" className="routeActionPrimary" disabled={locked || active || route.state !== "listening" || !consumer} onClick={() => submit(`/network/relays/${host.id}/routes/${route.id}/check?mode=media&consumer_id=${encodeURIComponent(consumer)}`)}>Проверить с VPS</button></div>{host.capabilities?.includes("udp-measurement-v1") && <div><h4>Из вашей сети</h4><p>Комплект для запуска на устройстве и загрузки отчёта.</p><button type="button" disabled={locked || active || route.state !== "listening" || !consumer} onClick={() => submit(`/network/relays/${host.id}/routes/${route.id}/device-tests?consumer_id=${encodeURIComponent(consumer)}`)}>Тест с устройства</button></div>}</div>
+        {active && <p role="status">Тест с устройства уже запущен. Завершите или отмените его перед новой проверкой.</p>}
+        <div className="routeTestResults" aria-label="Результаты проверок">
         <RelayCheckResult route={route} stale={host.state !== "connected"} />
         <RelayDeviceResult test={route.device_test} disabled={locked} onDownload={() => void relay.downloadTest(host.id, route.id, route.device_test!.id)} onUpload={file => void relay.uploadTest(host.id, route.id, route.device_test!.id, file)} onCancel={() => void relay.submit(`/network/relays/${host.id}/routes/${route.id}/device-tests/${route.device_test!.id}`, { method: "DELETE", headers: { "If-Match": relay.status?.revision || "" } })} />
-        <small>Тест с VPS проверяет передачу видео. Для проверки своей сети запустите комплект на устройстве.</small>
+        </div>
       </> : <p>Подключения через этот Relay ещё не созданы.</p>}
     </section>
     <RouteDisclosure title={`Адреса узла · ${relayAddresses(host).length}`}><ul className="routeLibraryAddresses">{relayAddresses(host).map(address => <li key={address}><code>{address}</code><button type="button" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setAddressConfirmation({ host, address })}>Исключить</button></li>)}</ul><small>Исключение убирает адрес из выбора для новых подключений.</small></RouteDisclosure>
     {host.address_checks?.filter(item => ["unresolved", "mismatch"].includes(item.state)).map(item => <p className="routeLibraryCallout" key={item.domain}>{item.domain}: {item.state === "mismatch" ? "DNS указывает на другой сервер" : "DNS не определён"}.</p>)}
-    <RouteDisclosure title="Обновления и обслуживание"><p>Автообновление: {host.updates ? host.updates.enabled ? "раз в сутки" : "выключено" : "нет данных"}.</p>{host.updates?.state === "failed" && <p role="alert">Последняя попытка обновления не удалась.</p>}<button type="button" disabled={relay.locked || relay.status?.pending} className="routeLibraryDanger" onClick={() => relay.setConfirmation(host)}>Удалить Relay</button></RouteDisclosure>
+    <footer className="routeControlFooter"><span>Удаление отключит пересылки этого узла.</span><button type="button" disabled={relay.locked || relay.status?.pending} className="routeLibraryDanger" onClick={() => relay.setConfirmation(host)}>Удалить Relay</button></footer>
   </>;
 }
 
@@ -60,26 +66,39 @@ function RelayCheckResult({ route, stale }: { route: RelayRoute; stale: boolean 
 export function DomainEntryPanel({ entry, request, disabled, onRemove, onChecked, children }: { entry: Extract<RouteEntry, { kind: "domain" }>; request: NetworkRequest; disabled: boolean; onRemove: (kind: NetworkEndpointCheck["kind"], domain: string) => void; onChecked?: () => void; children?: ReactNode }) {
   const [checking, setChecking] = useState(false);
   const [selected, setSelected] = useState("");
-  const [result, setResult] = useState<NetworkEndpointCheck | null>(null);
+  const [results, setResults] = useState<Partial<Record<NetworkEndpointCheck["kind"], NetworkEndpointCheck>>>({});
+  const [consumers, setConsumers] = useState<Record<string, string>>({});
   const { error } = useNotifier("route-check", "Проверка адреса");
   const inferred = ([['cdn', /cdn/i], ['tls_relay', /tls/i], ['udp_relay', /udp/i]] as const).filter(([, pattern]) => pattern.test(entry.domain.role)).map(([kind]) => kind);
   const kinds = [...new Set([...entry.checks.map(check => check.kind), ...(entry.domain.endpoint_kind ? [entry.domain.endpoint_kind] : []), ...inferred])];
   const kind = kinds.includes(selected as NetworkEndpointCheck["kind"]) ? selected as NetworkEndpointCheck["kind"] : kinds[0];
   const saved = entry.checks.find(check => check.kind === kind);
-  const check = result?.kind === kind ? result : saved;
+  const raw = results[kind] || saved;
+  const consumer = consumers[kind] || "";
+  const check = endpointCheckForConsumer(raw, consumer);
+  const presentation = kind === "cdn" ? { title: "Подключение через CDN", note: "Проверьте домен и передачу через CDN, затем настройте защиту соединения с сервером.", scope: "Проверка CDN не подтверждает доступность из сети вашего устройства." }
+    : kind === "tls_relay" ? { title: "Прямое TLS-подключение", note: "Домен используется для защищённого подключения к серверу.", scope: "Сертификат и SNI задаются в настройках протокола. Этот адрес сам по себе не создаёт TLS-вход." }
+    : { title: kind ? "Подключение по UDP" : "Домен сервера", note: kind ? "Проверьте передачу через существующее UDP-подключение." : "Сведения о домене и его DNS-адресах.", scope: "Порт и ключи задаются в настройках протокола." };
   async function runCheck() {
     if (!kind || disabled || checking) return;
     setChecking(true);
-    try { setResult(await checkNetworkEndpoint(request, kind, entry.address)); onChecked?.(); }
+    try { const next = await checkNetworkEndpoint(request, kind, entry.address, consumer || undefined); setResults(current => ({ ...current, [kind]: next })); onChecked?.(); }
     catch (cause) { error(cause instanceof Error ? cause.message : "Проверка не выполнена"); }
     finally { setChecking(false); }
   }
   return <>
-    <p>{entry.summary.connection}</p>
-    {kind && <section className="routeLibrarySection"><h3>Проверить адрес</h3>{kinds.length > 1 && <label>Тип подключения<select value={kind} onChange={event => setSelected(event.target.value)}>{kinds.map(item => <option key={item} value={item}>{({ cdn: "CDN", tls_relay: "TLS", udp_relay: "UDP" })[item]}</option>)}</select></label>}<button type="button" disabled={disabled || checking || entry.domain.status === "stale"} onClick={() => void runCheck()}>{checking ? "Проверяем…" : "Проверить с VPS"}</button>{check && <p role="status">{disabled ? "Сохранённый результат; актуальность не подтверждена." : check.message}</p>}{check?.checked_at && <small>{new Date(check.checked_at).toLocaleString("ru-RU")}</small>}</section>}
+    {kinds.length > 1 && <div className="routeKindSwitch" role="group" aria-label="Тип подключения">{kinds.map(item => <button type="button" key={item} aria-pressed={kind === item} disabled={checking} onClick={() => setSelected(item)}>{({ cdn: "CDN", tls_relay: "TLS", udp_relay: "UDP" })[item]}</button>)}</div>}
+    <section className="routeTaskCard" data-address-kind={kind || "domain"}><header><h3>{presentation.title}</h3><p>{presentation.note}</p></header>
+      <div className="routeDnsOverview"><span>DNS</span><div><strong>{entry.summary.connection}</strong><div className="routeDnsChips">{entry.domain.resolved.map(address => <code key={address}>{address}</code>)}</div></div></div>
+      {kind && <>
+        {!!raw?.consumers?.length && <label className="routeControlField">Подключение для проверки<select value={consumer} disabled={disabled || checking} onChange={event => setConsumers(current => ({ ...current, [kind]: event.target.value }))}><option value="">Только проверка адреса</option>{raw.consumers.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>}
+        <div className="routeLibraryQuickActions"><button type="button" className="routeActionPrimary" disabled={disabled || checking || entry.domain.status === "stale"} onClick={() => void runCheck()}>{checking ? "Проверяем…" : consumer ? "Проверить подключение" : "Проверить адрес"}</button></div>
+        <div className="routeTestResults" role="status"><p>{disabled ? "Сохранённые сведения; актуальность не подтверждена." : check?.message || "Проверка ещё не выполнена."}</p>{check?.checked_at && <small>{new Date(check.checked_at).toLocaleString("ru-RU")}</small>}</div>
+        <small>{presentation.scope}</small>
+      </>}
+    </section>
     {!!entry.domain.stale_usages?.length && <p>Адрес сохранён в подключениях: {entry.domain.stale_usages.join(", ")}.</p>}
-    <RouteDisclosure title="DNS-адреса"><ul className="routeLibraryAddresses">{entry.domain.resolved.map(address => <li key={address}><code>{address}</code></li>)}</ul>{!entry.domain.resolved.length && <p>DNS не определён.</p>}</RouteDisclosure>
-    {children}
-    {kind && <footer className="routeLibraryFooter"><button type="button" className="routeLibraryDanger" disabled={disabled || checking} onClick={() => onRemove(kind, entry.address)}>Удалить адрес</button></footer>}
+    {kind === "cdn" && children}
+    {kind && <footer className="routeControlFooter"><span>{kinds.length > 1 ? `Удаление из ${({ cdn: "CDN", tls_relay: "TLS", udp_relay: "UDP" })[kind]}` : "Убрать адрес из новых подключений"}</span><button type="button" className="routeLibraryDanger" disabled={disabled || checking} onClick={() => onRemove(kind, entry.address)}>Удалить адрес</button></footer>}
   </>;
 }

@@ -1,7 +1,8 @@
 /* Address workspace inside the shared PRO application shell. */
+@import "./route-control.css";
 [data-network-page] .routeLibrary { font-family:var(--ui-font); }
 [data-network-page] .routeLibrary .networkRouteStatus { font:500 12px/1.4 var(--ui-font); letter-spacing:0; padding:4px 9px; }
-[data-network-page] .routeControlModal { width:min(680px,100%); }
+[data-network-page] .routeControlModal { width:min(740px,100%); }
 [data-network-page] .routeControlModal .networkModalHeader { border-bottom:1px solid var(--line); }
 [data-network-page] .routeDetailsIdentity { display:grid; gap:10px; min-width:0; }
 [data-network-page] .routeDetailsIdentity > div { min-width:0; }

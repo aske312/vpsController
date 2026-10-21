@@ -1,0 +1,60 @@
+/* Address-specific controls inside the shared centered dialog. */
+[data-network-page] .routeControlModal { width:min(740px,100%); }
+[data-network-page] .routeControlModal.routeControl-server { width:min(640px,100%); }
+[data-network-page] .routeControlModal .networkModalHeader { padding:20px 22px 16px; }
+[data-network-page] .routeModalHeading { display:flex; align-items:center; gap:14px; min-width:0; }
+[data-network-page] .routeModalSymbol { display:grid; place-items:center; flex:0 0 42px; height:42px; border:1px solid var(--line); border-radius:12px; color:var(--cyan); background:var(--panel-inset); font:600 18px var(--ui-font); }
+[data-network-page] .routeControlModal .routeDetailsIdentity { gap:7px; }
+[data-network-page] .routeControlModal .networkModalClose { cursor:pointer; font-size:20px; }
+[data-network-page] .routeModalAddress { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; padding:10px 22px; border-bottom:1px solid var(--line); background:var(--panel-inset); }
+[data-network-page] .routeModalAddress code { min-width:0; overflow-wrap:anywhere; color:var(--muted); font:12px var(--technical-font); }
+[data-network-page] .routeModalAddress .routeLibraryCopy { padding:0; border:0; background:none; color:var(--cyan); font:500 12px/1.5 var(--ui-font); cursor:pointer; }
+[data-network-page] .routeControlModal .routeDetailsBody { gap:14px; padding:18px 22px 20px; }
+[data-network-page] .routeControlModal .routeDetailsBody p { font-size:12px; line-height:1.6; }
+[data-network-page] .routeControlModal .routeDetailsBody small { font-size:11px; line-height:1.5; }
+[data-network-page] .routeTaskCard { display:grid; gap:16px; min-width:0; padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--panel-inset); }
+[data-network-page] .routeTaskCard h3, [data-network-page] .routeAgentCard h3 { margin:0; color:var(--text); font:600 14px/1.5 var(--ui-font); }
+[data-network-page] .routeTaskCard header { display:grid; gap:5px; }
+[data-network-page] .routeTaskCard h4 { margin:0; color:var(--text); font:600 12px/1.5 var(--ui-font); }
+[data-network-page] .routeAgentCard { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:4px 0; }
+[data-network-page] .routeAgentCard > div { display:grid; gap:4px; }
+[data-network-page] .routeFieldPair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+[data-network-page] .routeFieldPair label, [data-network-page] .routeControlField { display:grid; gap:7px; min-width:0; color:var(--muted); font-size:12px; }
+[data-network-page] .routeTaskCard select { width:100%; min-width:0; min-height:40px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--text); font:400 12px/1.4 var(--ui-font); }
+[data-network-page] .routeTestOptions { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr)); gap:10px; }
+[data-network-page] .routeTestOptions > div { display:grid; grid-template-rows:auto 1fr auto; align-items:start; gap:9px; padding:14px; border:1px solid var(--line); border-radius:9px; background:var(--panel); }
+[data-network-page] .routeTestOptions button { justify-self:start; }
+[data-network-page] .routeDetailsBody .routeActionPrimary { border-color:color-mix(in srgb,var(--cyan) 45%,var(--line)); background:color-mix(in srgb,var(--cyan) 10%,var(--panel)); color:var(--cyan); }
+[data-network-page] .routeTestResults { display:grid; gap:8px; padding:12px 14px; border-left:2px solid var(--cyan); border-radius:0 8px 8px 0; background:var(--panel); }
+[data-network-page] .routeControlFooter { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; padding-top:14px; border-top:1px solid var(--line); }
+[data-network-page] .routeControlFooter > span { color:var(--dim); font-size:11px; }
+[data-network-page] .routeDetailsBody .routeControlFooter .routeLibraryDanger { border-color:transparent; background:none; }
+[data-network-page] .routeKindSwitch { display:flex; flex-wrap:wrap; gap:6px; }
+[data-network-page] .routeKindSwitch button[aria-pressed=true] { border-color:var(--cyan); color:var(--cyan); }
+[data-network-page] .routeDnsOverview { display:flex; align-items:flex-start; gap:12px; padding:12px; border-radius:9px; background:var(--panel); }
+[data-network-page] .routeDnsOverview > span { padding:4px 7px; border:1px solid var(--line); border-radius:5px; color:var(--muted); font:600 10px var(--ui-font); }
+[data-network-page] .routeDnsOverview > div { display:grid; gap:8px; min-width:0; }
+[data-network-page] .routeDnsOverview strong { color:var(--text); font:500 12px/1.5 var(--ui-font); }
+[data-network-page] .routeDnsChips { display:flex; flex-wrap:wrap; gap:6px; }
+[data-network-page] .routeDnsChips code { overflow-wrap:anywhere; color:var(--muted); font:11px/1.5 var(--technical-font); }
+[data-network-page] .routeDnsChips code + code::before { content:"·"; padding-right:6px; }
+[data-network-page] .routeCdnSettings .networkCloudflare { margin:0; padding:0; border:0; background:none; }
+[data-network-page] .routeRoleChoices { display:grid; gap:8px; min-width:0; margin:0; padding:0; border:0; }
+[data-network-page] .routeRoleChoices > label { display:grid; grid-template-columns:18px minmax(0,1fr) auto; align-items:center; gap:10px; padding:12px; border:1px solid var(--line); border-radius:9px; background:var(--panel); cursor:pointer; }
+[data-network-page] .routeRoleChoices > label.is-selected { border-color:color-mix(in srgb,var(--cyan) 55%,var(--line)); background:color-mix(in srgb,var(--cyan) 5%,var(--panel)); }
+[data-network-page] .routeRoleChoices input { width:16px; height:16px; min-height:16px; padding:0; margin:0; border:0; background:none; accent-color:var(--cyan); }
+[data-network-page] .routeRoleChoices input:disabled { opacity:.45; }
+[data-network-page] .routeRoleChoices label > span { display:grid; gap:4px; min-width:0; }
+[data-network-page] .routeRoleChoices strong { color:var(--text); font:500 13px/1.5 var(--ui-font); }
+[data-network-page] .routeCurrentRole { color:var(--dim); font-size:10px; }
+[data-network-page] .routeRoleApply { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
+[data-network-page] .routeControlModal :is(button,input,select,summary):focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
+@media(max-width:560px) {
+  [data-network-page] .routeControlModal .networkModalHeader { padding:16px; }
+  [data-network-page] .routeModalAddress { padding:10px 16px; }
+  [data-network-page] .routeControlModal .routeDetailsBody { padding:14px; }
+  [data-network-page] .routeModalSymbol { display:none; }
+  [data-network-page] .routeTaskCard { padding:14px; }
+  [data-network-page] .routeFieldPair { grid-template-columns:minmax(0,1fr); }
+  [data-network-page] .routeCurrentRole { display:none; }
+}
