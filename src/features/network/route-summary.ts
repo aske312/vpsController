@@ -50,8 +50,9 @@ export function relayRouteSummary(host: RelayHost, failed = false, pending = fal
   if (reading && host.state !== "connected") return { ...base, state: "pending", label: "Проверяем", detail: "Проверяем соединение с агентом и состояние его портов." };
   if (host.error) return { ...base, state: "error", label: "Ошибка Relay", detail: `${host.name}: ${host.error}` };
   if (failed || host.state !== "connected") return { ...base, state: "unknown", label: "Нет данных", detail: "Доступность агента и портов не подтверждена. Число перенаправлений — из сохранённых настроек." };
-  if (host.routes.some(route => ["failed", "missing", "drift"].includes(route.state) || route.check?.state === "failed")) return { ...base, state: "error", label: "Ошибка портов", detail: "Есть отсутствующие, изменённые или не прошедшие проверку перенаправления. Раскройте адрес для сведений о портах." };
+  if (host.routes.some(route => ["failed", "missing", "drift"].includes(route.state) || route.check?.state === "failed")) return { ...base, state: "error", label: "Ошибка маршрута", detail: "Есть отсутствующие, изменённые или не прошедшие проверку перенаправления. Раскройте адрес для результатов и ошибок." };
   if (host.routes.some(route => route.state === "unknown")) return { ...base, state: "unknown", label: "Порты неизвестны", detail: "Агент доступен, но состояние части перенаправлений не подтверждено." };
+  if (host.updates?.state === "failed") return { ...base, state: "warning", label: "Ошибка обновления", detail: "Agent доступен, но последняя попытка автообновления не удалась. Перенаправления и результаты проверок показаны в подробностях." };
   if (host.routes.length) return { ...base, state: "listening", label: "Порты слушают", detail: "Агент подтвердил слушающие порты. Это не подтверждение полного пути клиента до назначения." };
   return { ...base, state: "connected", label: "Агент доступен", detail: "Соединение с Relay Agent подтверждено; перенаправления ещё не настроены." };
 }

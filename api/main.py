@@ -48,6 +48,7 @@ import network_routes
 import network_probe
 import server_addresses
 import relay_manager
+import relay_media
 import relay_connections
 import relay_client_creation
 import native_client_creation
@@ -2721,6 +2722,13 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
         result['origin_hosts'] = relay_origin_hosts()
         candidates = [{'id': item['id'], 'label': item['label']} for item in network_consumers()]
         candidates.extend({'id': f"direct:{item['id']}", 'label': str(item.get('name') or item['id'])} for item in read_clients() if item.get('id') and item.get('protocol') in ('tuic', 'hysteria2'))
+        profiles_path = DATA_DIR / 'mihomo' / 'profiles.json'
+        if profiles_path.is_file():
+            for profile in json.loads(profiles_path.read_text(encoding='utf-8')):
+                for item in profile.get('connections', []):
+                    relay_id = item.get('settings', {}).get('relay_host_id')
+                    if relay_id and item.get('id'):
+                        candidates.append({'id': f"mihomo:{profile['id']}:{item['id']}", 'label': f"{profile.get('name', profile['id'])} · {item.get('name') or item['id']}", 'host_id': relay_id})
         result['consumers'] = list({item['id']: item for item in candidates}.values())
         for host in result['hosts']:
             for route in host['routes']:
@@ -2728,12 +2736,17 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
                 if not isinstance(check, dict):
                     continue
                 try:
-                    plan = prepare_relay_probe(route, private_hosts[host['id']], check['consumer_id'])
+                    plan = prepare_relay_media_probe(route, private_hosts[host['id']], check['consumer_id']) if check.get('mode') == 'media' else prepare_relay_probe(route, private_hosts[host['id']], check['consumer_id'])
                     current = network_probe.plan_seal(plan, network_probe.evidence_key(DATA_DIR))
                     valid = host['state'] == 'connected' and route['state'] == 'listening' and current == check.get('plan_seal')
                 except (OSError, ValueError, KeyError, TypeError, HTTPException):
                     valid = False
-                route['check'] = {key: check[key] for key in ('state', 'consumer_id', 'checked_at', 'vantage_point') if key in check}
+                route['check'] = {key: check[key] for key in ('state', 'consumer_id', 'checked_at', 'vantage_point', 'mode', 'reason', 'verified_bytes', 'range_checks', 'seconds') if key in check}
+                try:
+                    if check.get('mode') == 'media' and (datetime.now(timezone.utc) - datetime.fromisoformat(check['checked_at'])).total_seconds() > 3600:
+                        valid = False
+                except (ValueError, KeyError, TypeError):
+                    valid = False
                 if not valid:
                     route['check']['state'] = 'unknown'
         return JSONResponse(result, headers={'Cache-Control': 'no-store'})
@@ -2905,24 +2918,48 @@ def perform_relay_probe(payload):
         return actual and actual['state'] == 'listening' and relay_manager.same_route(actual, route)
     if not remote_current():
         raise ValueError('Listener relay не подтверждён')
-    check = {'state': 'unknown', 'consumer_id': payload['consumer_id'], 'checked_at': datetime.now(timezone.utc).isoformat(), 'vantage_point': 'server'}
+    mode = payload.get('mode', 'exchange')
+    prepare = prepare_relay_media_probe if mode == 'media' else prepare_relay_probe
+    check = {'state': 'unknown', 'consumer_id': payload['consumer_id'], 'checked_at': datetime.now(timezone.utc).isoformat(), 'vantage_point': 'server', 'mode': mode}
     try:
-        plan = prepare_relay_probe(route, host, payload['consumer_id'])
+        plan = prepare(route, host, payload['consumer_id'])
         key = network_probe.evidence_key(DATA_DIR, create=True)
         check['plan_seal'] = network_probe.plan_seal(plan, key)
-        result = execute_network_probe(plan)
-        after = prepare_relay_probe(route, host, payload['consumer_id'])
+        result = execute_relay_media_probe(plan) if mode == 'media' else execute_network_probe(plan)
+        after = prepare(route, host, payload['consumer_id'])
         if network_probe.plan_seal(after, key) == check['plan_seal'] and remote_current():
-            check['state'] = 'ready' if result.get('state') == 'verified' else 'failed' if result.get('state') == 'failed' else 'unknown'
+            check['state'] = 'ready' if result.get('state') in ('verified', 'ready') else 'failed' if result.get('state') == 'failed' else 'unknown'
+            check.update({key: result[key] for key in ('reason', 'verified_bytes', 'range_checks', 'seconds') if key in result})
+        else:
+            check['reason'] = 'configuration_changed'
     except (OSError, ValueError, HTTPException, relay_manager.AgentAPIError):
-        pass
+        check['reason'] = 'unsupported_or_unavailable'
+    check['checked_at'] = datetime.now(timezone.utc).isoformat()
     route['check'] = check
     control.write(registry)
+    if mode == 'media' and check['state'] != 'ready':
+        raise HTTPException(status_code=409, detail='Медиатест не подтвердил работоспособность подключения. Причина и время проверки сохранены в ROUTES.')
 
 
 @app.post('/api/network/relays/{host_id}/routes/{route_id}/check', status_code=202, dependencies=[Depends(require_mutation_admission)])
-def check_relay_route(host_id: str, route_id: str, consumer_id: str, _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match')):
-    return start_relay_mutation('relay-route-check', {'host_id': host_id, 'route_id': route_id, 'consumer_id': consumer_id, 'expected_revision': expected_revision}, operation_id)
+def check_relay_route(host_id: str, route_id: str, consumer_id: str, mode: Literal['exchange', 'media'] = 'exchange', _: None = Depends(require_token), operation_id: str | None = Header(default=None, alias='X-Operation-ID'), expected_revision: str | None = Header(default=None, alias='If-Match')):
+    return start_relay_mutation('relay-route-check', {'host_id': host_id, 'route_id': route_id, 'consumer_id': consumer_id, 'expected_revision': expected_revision, 'mode': mode}, operation_id)
+
+
+def prepare_relay_media_probe(route, host, consumer_id):
+    if consumer_id.startswith('mihomo:'):
+        return relay_media.mihomo_plan(sys.modules[__name__], route, host, consumer_id)
+    return prepare_relay_probe(route, host, consumer_id)
+
+
+def execute_relay_media_probe(plan):
+    if plan.engine == 'mihomo':
+        binary = DATA_DIR / 'mihomo' / 'bin' / 'mihomo'
+    elif plan.engine == 'singbox':
+        binary = next((path for path in (Path('/usr/local/bin/sing-box'), TUIC_BIN) if path.is_file()), TUIC_BIN)
+    else:
+        binary = '/usr/local/lib/vps-control-mihomo-reality/xray' if plan.producer == 'mihomo_vless' else XRAY_BIN
+    return relay_media.execute(plan, str(binary))
 
 
 @app.post('/api/network/relays/{host_id}/routes/{route_id}/export')

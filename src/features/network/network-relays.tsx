@@ -157,7 +157,7 @@ export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: 
         <td><span className="networkRouteConnection" title="Число настроенных перенаправлений. Состояние каждого порта — в подробностях.">{summary.connection}</span></td>
         <td><div className="networkRelayActions"><button type="button" className="networkRouteConfigure" disabled={relay.locked} onClick={() => relay.openHost(item)}>Настроить</button>{address && <button type="button" className="networkRouteDelete" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setAddressConfirmation({ host: item, address })}>Удалить адрес</button>}</div></td>
       </tr>
-      {open && <tr className="networkRouteDetailRow"><td colSpan={5}><RelayRouteDetails host={item} address={address} summary={summary} unknown={unknown} /></td></tr>}
+      {open && <tr className="networkRouteDetailRow"><td colSpan={5}><RelayRouteDetails host={item} address={address} summary={summary} unknown={unknown} consumers={relay.status?.consumers || []} disabled={relay.locked || pending || unknown} onTest={(routeId, consumerId) => void relay.submit(`/network/relays/${item.id}/routes/${routeId}/check?mode=media&consumer_id=${encodeURIComponent(consumerId)}`, { method: "POST", headers: { "If-Match": relay.status?.revision || "" } })} /></td></tr>}
     </Fragment>;
   })}</>;
 }

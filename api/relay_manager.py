@@ -18,6 +18,7 @@ from application_operation import atomic_json, OperationConflict
 from relay_client import RelayClient, AgentAPIError
 from relay_addresses import normalize_address, normalize_addresses, all_addresses, authority
 import relay_cdn
+import relay_diagnostics
 
 CONFIG_KEYS = ('transport', 'listen_port', 'target_ip', 'target_port')
 
@@ -57,6 +58,8 @@ def route_snapshot(value):
         for key in ('sent_bytes', 'received_bytes', 'errors', 'sessions'):
             if key in item and (type(item[key]) is not int or item[key] < 0):
                 raise ValueError('Некорректные счётчики агента')
+        if 'diagnostics' in item:
+            item['diagnostics'] = relay_diagnostics.diagnostics(item['diagnostics'])
         seen.add(identity); ports.add(port)
     return value
 
@@ -72,6 +75,8 @@ def status_snapshot(value):
     if value['max_routes'] != 64 or value['routes'] + value['failed_routes'] > 64:
         raise ValueError('Несовместимые лимиты агента')
     if 'addresses' in value:normalize_addresses(value['addresses'], None)
+    if 'updates' in value: value['updates'] = relay_diagnostics.updates(value['updates'])
+    if 'address_checks' in value: value['address_checks'] = relay_diagnostics.address_checks(value['address_checks'])
     if 'client_address_families' in value and (not isinstance(value['client_address_families'],list) or any(item not in ('ipv4','ipv6') for item in value['client_address_families'])):
         raise ValueError('Некорректные семейства адресов агента')
     return value
@@ -464,12 +469,15 @@ class RelayManager:
                     return public
                 remote = route_snapshot(client.request('GET', '/v1/routes'))
                 public.update(state='connected', version=status['version'], agent_revision=remote['revision'])
+                public.update({key: status[key] for key in ('updates', 'address_checks') if key in status})
                 ids = {item['id'] for item in owned}
                 public['foreign_routes'] = sum(item['id'] not in ids for item in remote['items'])
                 for route in owned:
                     actual = next((item for item in remote['items'] if item['id'] == route['id']), None)
                     state = 'missing' if actual is None else 'drift' if not same_route(actual, route) else actual['state']
                     counters = {key: actual[key] for key in ('sent_bytes', 'received_bytes', 'errors', 'sessions') if actual and key in actual}
+                    if actual and 'diagnostics' in actual:
+                        counters['diagnostics'] = actual['diagnostics']
                     public['routes'].append({**route, **counters, 'state': state, 'target_verified': False})
             except Exception as exc:
                 public['error'] = str(exc) if isinstance(exc, AgentAPIError) else 'Не удалось подтвердить состояние агента'

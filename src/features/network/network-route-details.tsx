@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { NetworkEndpointCheck, NetworkIpIdentity, NetworkStatus } from "../../shared/types/control-plane";
 import type { RelayHost } from "./relay-state";
 import type { ServerAddress } from "./server-address-state";
@@ -109,7 +109,21 @@ export function DomainRouteDetails({ domain, checks, summary, observedAt, failed
   </NetworkRouteDetails>;
 }
 
-export function RelayRouteDetails({ host, address, summary, unknown }: { host: RelayHost; address: string; summary: RouteSummary; unknown: boolean }) {
+const relayErrorLabels: Record<string, string> = {
+  tcp_connect_timeout: "Таймаут подключения к назначению", tcp_connect_error: "Не удалось подключиться к назначению",
+  tcp_transfer_timeout: "Таймаут передачи TCP", tcp_transfer_error: "Ошибка передачи TCP", udp_upstream_error: "Ошибка UDP от назначения",
+  udp_listener_error: "Ошибка входящего UDP", udp_buffer_full: "Переполнен буфер UDP", udp_pending_full: "Переполнена очередь первого пакета UDP",
+  udp_session_error: "Не удалось создать UDP-сессию", session_limit: "Достигнут лимит сессий",
+};
+const mediaReasonLabels: Record<string, string> = { media_verified: "Видео и три перемотки проверены по содержимому", timeout: "Таймаут передачи видео", transport_error: "Туннель не передал видео", content_mismatch: "Содержимое видео не совпало с эталоном", range_mismatch: "Перемотка не передала нужный фрагмент", client_unavailable: "Тестовый клиент не запустился или отсутствует", configuration_changed: "Настройки изменились во время теста", unsupported_or_unavailable: "Для подключения нет безопасного поддержанного теста либо его настройки недоступны" };
+
+function RelayMediaTest({ consumers, disabled, onTest }: { consumers: { id: string; label: string }[]; disabled: boolean; onTest: (id: string) => void }) {
+  const [selected, setSelected] = useState("");
+  const value = consumers.some(item => item.id === selected) ? selected : "";
+  return <div className="relayActions"><label>Подключение для медиатеста<select aria-label="Подключение для медиатеста" value={value} disabled={disabled || !consumers.length} onChange={event => setSelected(event.target.value)}><option value="">Выберите подключение</option>{consumers.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label><button type="button" disabled={disabled || !value} onClick={() => onTest(value)}>Проверить видео с VPS</button></div>;
+}
+
+export function RelayRouteDetails({ host, address, summary, unknown, consumers = [], disabled = true, onTest }: { host: RelayHost; address: string; summary: RouteSummary; unknown: boolean; consumers?: { id: string; label: string; host_id?: string }[]; disabled?: boolean; onTest?: (routeId: string, consumerId: string) => void }) {
   return <NetworkRouteDetails address={address} summary={summary}>
     <RouteDetailsSection title="Подключение к агенту"><dl className="routeDetailsFacts">
       <Field label="Имя узла">{shown(host.name)}</Field>
@@ -118,8 +132,11 @@ export function RelayRouteDetails({ host, address, summary, unknown }: { host: R
       <Field label="Версия агента">{unknown ? "Не подтверждена" : shown(host.version)}</Field>
       <Field label="Перенаправления приложения">{unknown && !host.routes.length ? "Не получено" : `${host.routes.length}${unknown ? " · сохранённые сведения" : ""}`}</Field>
       <Field label="Другие правила агента">{unknown ? "Не подтверждены" : host.foreign_routes}</Field>
+      <Field label="Автообновление Agent">{unknown || !host.updates ? "Нет сведений от агента" : host.updates.enabled ? "Включено · раз в сутки" : "Выключено"}</Field>
+      {host.updates && <Field label="Проверка обновлений">{unknown ? "Не подтверждена" : ({ unchecked: "Ещё не выполнялась", current: "Установлен текущий пакет", updated: "Обновлён", disabled: "Выключена", failed: "Ошибка обновления", unknown: "Состояние неизвестно" })[host.updates.state]}{host.updates.checked_at && ` · ${time(host.updates.checked_at)}`}</Field>}
     </dl>
       {host.error && <p className="routeDetailsWarning" role="status">{host.error}</p>}
+      {host.address_checks?.filter(item => ["unresolved", "mismatch"].includes(item.state)).map(item => <p className="routeDetailsWarning" key={item.domain}>{item.domain}: {item.state === "mismatch" ? "DNS указывает на другой сервер" : "DNS не подтверждён"}. Для новых подключений используйте IP Relay или корректный домен.</p>)}
       <details className="routeDetailsTechnical"><summary>Сохранённый отпечаток сертификата</summary><code>{host.certificate_sha256}</code></details>
     </RouteDetailsSection>
     <RouteDetailsSection title="Состояние перенаправлений"><dl className="routeDetailsFacts">
@@ -135,7 +152,18 @@ export function RelayRouteDetails({ host, address, summary, unknown }: { host: R
           {route.cdn_domain && <Field label="CDN-домен" mono>{route.cdn_domain} · клиент → Relay → CDN → VPS</Field>}
           <Field label="Проверка подключения">{unknown || !route.check || route.check.state === "unknown" ? "Не подтверждена" : route.check.state === "ready" ? "Пройдена с VPS" : "Ошибка проверки"}</Field>
           {route.check?.checked_at && <Field label="Время проверки">{time(route.check.checked_at)}</Field>}
+          <Field label="Передано к назначению / обратно">{unknown ? "Не подтверждено" : `${route.sent_bytes ?? "—"} / ${route.received_bytes ?? "—"} байт`}</Field>
+          <Field label="Сессии / ошибки">{unknown ? "Не подтверждены" : `${route.sessions ?? "—"} / ${route.errors ?? "—"}`}</Field>
+          {route.diagnostics && <>
+            {route.transport === "udp" && <Field label="UDP: пакеты к назначению / обратно / отброшено">{unknown ? "Не подтверждено" : `${route.diagnostics.sent_packets} / ${route.diagnostics.received_packets} / ${route.diagnostics.dropped_packets}`}</Field>}
+            <Field label="Последний ответ">{unknown ? "Не подтверждён" : route.diagnostics.last_received_at ? time(new Date(route.diagnostics.last_received_at * 1000).toISOString()) : "Ещё не получен"}</Field>
+            <Field label="Последняя отправка">{unknown ? "Не подтверждена" : route.diagnostics.last_sent_at ? time(new Date(route.diagnostics.last_sent_at * 1000).toISOString()) : "Ещё не было"}</Field>
+            {route.diagnostics.last_error && <Field label="Последняя ошибка">{unknown ? "Не подтверждена" : relayErrorLabels[route.diagnostics.last_error] || "Неизвестная ошибка"}{route.diagnostics.last_error_at ? ` · ${time(new Date(route.diagnostics.last_error_at * 1000).toISOString())}` : ""}</Field>}
+            {Object.keys(route.diagnostics.error_counts).length > 0 && <Field label="Причины ошибок">{unknown ? "Не подтверждены" : <Values values={Object.entries(route.diagnostics.error_counts).map(([code, count]) => `${relayErrorLabels[code] || "Неизвестная ошибка"}: ${count}`)} />}</Field>}
+          </>}
+          {route.check?.mode === "media" && <Field label="Медиатест">{unknown || route.check.state === "unknown" ? "Актуальный результат не подтверждён. " : ""}{mediaReasonLabels[route.check.reason || ""] || "Нет результата"}{route.check.verified_bytes !== undefined && ` · ${route.check.verified_bytes} байт · ${route.check.seconds ?? "—"} с`}</Field>}
         </dl>
+        {onTest && <><RelayMediaTest consumers={consumers.filter(item => !item.host_id || item.host_id === host.id)} disabled={disabled || route.state !== "listening"} onTest={id => onTest(route.id, id)} /><p>Тест запускается на VPS через выбранный Relay, передаёт видео и проверяет перемотку. Путь с вашего устройства требует отдельной проверки. Активные WireGuard/AmneziaWG peer тестом не используются.</p></>}
       </article>)}</div> : <p>{unknown ? "Сведения о портах не получены." : "Перенаправления приложения не настроены."}</p>}
     </RouteDetailsSection>
   </NetworkRouteDetails>;

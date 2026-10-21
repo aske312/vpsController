@@ -5,19 +5,22 @@ export type RelayRoute = {
   id: string; host_id: string; transport: "tcp" | "udp"; listen_port: number; target_ip: string; target_port: number;
   state: "listening" | "failed" | "missing" | "drift" | "unknown"; target_verified: false;
   sent_bytes?: number; received_bytes?: number; sessions?: number; errors?: number;
-  check?: { state: "ready" | "failed" | "unknown"; consumer_id: string; checked_at: string; vantage_point: "server" };
+  diagnostics?: { sent_packets: number; received_packets: number; dropped_packets: number; last_sent_at: number | null; last_received_at: number | null; last_error_at: number | null; last_error: string | null; error_counts: Record<string, number> };
+  check?: { state: "ready" | "failed" | "unknown"; consumer_id: string; checked_at: string; vantage_point: "server"; mode?: "exchange" | "media"; reason?: string; verified_bytes?: number; range_checks?: number; seconds?: number };
 };
 export type RelayHost = {
   id: string; name: string; agent_url: string; client_address?: string; certificate_sha256: string; api_version: 1;
   token_configured: boolean; state: "connected" | "unknown"; version?: string; agent_revision?: number;
   foreign_routes: number; routes: RelayRoute[]; error?: string;
+  updates?: { enabled: boolean; interval_hours: 24; state: "unchecked" | "current" | "updated" | "disabled" | "failed" | "unknown"; checked_at?: string; version?: string };
+  address_checks?: { domain: string; state: "verified" | "dns_only" | "unresolved" | "mismatch" }[];
   excluded_addresses?: string[];
   addresses?: { ipv4: string[]; ipv6: string[]; domains: string[]; cdn_domains?: string[] };
 };
 export type RelayStatus = {
   revision: string; hosts: RelayHost[]; pending: boolean; origin_ip: string; origin_hosts: string[];
   targets: { transport: "tcp" | "udp"; port: number }[];
-  consumers?: { id: string; label: string }[];
+  consumers?: { id: string; label: string; host_id?: string }[];
   recovery?: { operation_id: string; host_id: string; action: "put" | "delete"; transport: "tcp" | "udp"; listen_port: number; target_ip: string; target_port: number; error: string };
 };
 export type RelayClientResult = ClientExport;
@@ -58,6 +61,8 @@ export function relaySnapshot(value: unknown): RelayStatus {
       || host.state === "connected" && (!integer(host.agent_revision) || typeof host.version !== "string")) return invalid();
     ids.add(host.id);
     if (host.excluded_addresses !== undefined && (!Array.isArray(host.excluded_addresses) || host.excluded_addresses.some(address => typeof address !== "string" || !address || address.length > 253))) return invalid();
+    if (host.updates !== undefined && (!object(host.updates) || typeof host.updates.enabled !== "boolean" || host.updates.interval_hours !== 24 || !["unchecked", "current", "updated", "disabled", "failed", "unknown"].includes(String(host.updates.state)))) return invalid();
+    if (host.address_checks !== undefined && (!Array.isArray(host.address_checks) || host.address_checks.length > 64 || host.address_checks.some(item => !object(item) || typeof item.domain !== "string" || !["verified", "dns_only", "unresolved", "mismatch"].includes(String(item.state))))) return invalid();
     if (host.addresses !== undefined) {
       const addresses = host.addresses;
       if (!object(addresses) || ["ipv4", "ipv6", "domains", ...(addresses.cdn_domains === undefined ? [] : ["cdn_domains"])].some(key => {
@@ -73,6 +78,11 @@ export function relaySnapshot(value: unknown): RelayStatus {
         || !["listening", "failed", "missing", "drift", "unknown"].includes(String(route.state)) || route.target_verified !== false
         || host.state === "unknown" && route.state !== "unknown") return invalid();
       for (const key of ["sent_bytes", "received_bytes", "sessions", "errors"]) if (route[key] !== undefined && !integer(route[key])) return invalid();
+      if (route.diagnostics !== undefined) {
+        const data = route.diagnostics;
+        if (!object(data) || ["sent_packets", "received_packets", "dropped_packets"].some(key => !integer(data[key])) || ["last_sent_at", "last_received_at", "last_error_at"].some(key => data[key] !== null && !integer(data[key], 0, 253402300799)) || data.last_error !== null && typeof data.last_error !== "string" || !object(data.error_counts) || Object.values(data.error_counts).some(item => !integer(item))) return invalid();
+      }
+      if (object(route.check) && route.check.mode !== undefined && !["exchange", "media"].includes(String(route.check.mode))) return invalid();
       if (route.check !== undefined && (!object(route.check) || !["ready", "failed", "unknown"].includes(String(route.check.state)) || typeof route.check.consumer_id !== "string" || typeof route.check.checked_at !== "string" || route.check.vantage_point !== "server")) return invalid();
       routeIds.add(route.id);
     }
