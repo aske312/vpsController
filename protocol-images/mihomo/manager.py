@@ -1022,6 +1022,28 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN-SUFFIX,smartclip.net,REJECT",
         "DOMAIN-SUFFIX,lkqd.net,REJECT",
         "DOMAIN-SUFFIX,advertising.com,REJECT",
+        # Dedicated video/adult ad networks, also available without geosite.
+        # Reviewed against AdGuardSDNSFilter/Filters/filter.txt and
+        # MetaCubeX/meta-rules-dat (geo/geosite/category-ads-all.list).
+        # Never block shared youtube.com/googlevideo.com/phncdn.com CDNs:
+        # same-host and server-inserted video ads need player-level filtering.
+        "DOMAIN-SUFFIX,ads.youtube.com,REJECT",
+        "DOMAIN-SUFFIX,vidoomy.com,REJECT",
+        "DOMAIN-SUFFIX,trafficjunky.net,REJECT",
+        "DOMAIN-SUFFIX,trafficjunky.com,REJECT",
+        "DOMAIN-SUFFIX,exoclick.com,REJECT",
+        "DOMAIN-SUFFIX,exosrv.com,REJECT",
+        "DOMAIN-SUFFIX,juicyads.com,REJECT",
+        "DOMAIN-SUFFIX,tsyndicate.com,REJECT",
+        "DOMAIN-SUFFIX,trafficstars.com,REJECT",
+        "DOMAIN-SUFFIX,trafficfactory.biz,REJECT",
+        "DOMAIN-SUFFIX,ero-advertising.com,REJECT",
+        "DOMAIN-SUFFIX,eroadvertising.com,REJECT",
+        "DOMAIN-SUFFIX,realsrv.com,REJECT",
+        "DOMAIN-SUFFIX,adsco.re,REJECT",
+        "DOMAIN-SUFFIX,popads.net,REJECT",
+        "DOMAIN-SUFFIX,popcash.net,REJECT",
+        "DOMAIN-SUFFIX,propellerads.com,REJECT",
     ],
     "block_privacy": [
         # Analytics and profiling endpoints that are normally independent of
@@ -1432,15 +1454,20 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
     # router, NAS or smart-home device never disappears behind the profile.
     if routing.get("direct_local_network", False):
         rules.extend(configured_preset_rules(routing, "direct_local_network"))
-    # Device-specific rules must be evaluated before the shared library. This
-    # lets a personal exception win over a broader global rule.
-    rules.extend(
+    personal = [
         str(rule).strip()
         for rule in routing.get("_personal_rule_lines", [])
         if str(rule).strip()
-    )
+    ]
+    # Explicit domain exceptions keep their priority. An application-wide
+    # route (browser/player) must not bypass enabled ad/privacy protection.
+    rules.extend(rule for rule in personal if not rule.startswith("PROCESS-"))
+    for setting in ("block_ads", "block_privacy"):
+        if routing.get(setting, False):
+            rules.extend(configured_preset_rules(routing, setting))
+    rules.extend(rule for rule in personal if rule.startswith("PROCESS-"))
     for setting in DIRECT_RULE_PRESETS:
-        if setting == "direct_local_network":
+        if setting in {"direct_local_network", "block_ads", "block_privacy"}:
             continue
         if routing.get(setting, False):
             rules.extend(configured_preset_rules(routing, setting))

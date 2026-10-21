@@ -198,7 +198,7 @@ export const profileDirectRules = [
 export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
   block_ads: [
     { id: "base", code: "AD", name: "Базовый список рекламы", tokens: ["category-ads-all"] },
-    { id: "google", code: "G ADS", name: "Google Ads", tokens: ["doubleclick", "googlesyndication", "googleadservices", "googletagservices"] },
+    { id: "google", code: "G ADS", name: "Google Ads", tokens: ["doubleclick", "googlesyndication", "googleadservices", "googletagservices", "adservice.google.com", "ads.youtube.com"] },
     { id: "yandex", code: "YA AD", name: "Яндекс Реклама", tokens: ["yandexadexchange", "an.yandex.ru", "adfox"] },
     { id: "vk_ads", code: "VK AD", name: "VK / myTarget", tokens: ["mytarget"] },
     { id: "native", code: "NATIVE", name: "Taboola и Outbrain", tokens: ["taboola", "outbrain"] },
@@ -207,7 +207,9 @@ export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
     { id: "global_rtb", code: "RTB", name: "Международные RTB-сети", tokens: ["adnxs", "adsrvr", "adform", "adroll", "openx", "pubmatic", "rubiconproject", "casalemedia", "serving-sys", "smartadserver", "smaato", "yieldmo", "lijit", "media.net", "advertising.com"] },
     { id: "ru_rtb", code: "RU RTB", name: "Российские RTB-сети", tokens: ["between.digital", "adriver", "soloway", "buzzoola", "hybrid.ai", "otm-r", "videonow"] },
     { id: "mobile", code: "APP", name: "Реклама в приложениях", tokens: ["applovin", "applvn", "vungle", "ironsrc", "chartboost", "inmobi", "adcolony", "startappservice", "mintegral", "unityads"] },
-    { id: "video", code: "VIDEO", name: "Реклама в видео", tokens: ["springserve", "spotx", "freewheel", "fwmrm", "innovid", "tremorhub", "unrulymedia", "cedato", "connatix", "aniview", "teads", "smartclip", "lkqd"] },
+    { id: "video", code: "VIDEO", name: "Реклама в видео", tokens: ["springserve", "spotx", "freewheel", "fwmrm", "innovid", "tremorhub", "unrulymedia", "cedato", "connatix", "aniview", "teads", "smartclip", "lkqd", "vidoomy"] },
+    { id: "adult_video", code: "18+ AD", name: "Реклама PornHub и других видеосайтов", tokens: ["trafficjunky", "exoclick", "exosrv", "juicyads", "tsyndicate", "trafficstars", "trafficfactory", "ero-advertising", "eroadvertising", "realsrv", "adsco.re"] },
+    { id: "popups", code: "POP AD", name: "Рекламные всплывающие окна", tokens: ["popads", "popcash", "propellerads"] },
     { id: "metrics", code: "TRACK", name: "Рекламные измерения", tokens: ["scorecardresearch", "moatads", "adsafeprotected"] },
   ],
   block_privacy: [

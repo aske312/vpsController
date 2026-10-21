@@ -120,6 +120,44 @@ class RuleExportTests(unittest.TestCase):
         self.assertEqual(result[0]["credential"]["obfs_password"], "applied-obfs")
         self.assertEqual(connections[0]["credential"], {"port": 1234, "password": "client", "obfs": False})
 
+    def test_browser_routes_do_not_bypass_protection_but_domain_exceptions_still_win(self):
+        for process in ('PROCESS-NAME,chrome.exe,GATE.312', 'PROCESS-NAME-WILDCARD,*firefox*,DIRECT'):
+            with self.subTest(process=process):
+                personal = [process, 'DOMAIN,allowed.trafficjunky.net,DIRECT']
+                routing = {'block_ads': True, 'block_privacy': True, 'direct_ru_sites': True,
+                           'direct_games_udp_enabled': True, '_personal_rule_lines': personal}
+                rules = manager.profile_rules(routing)
+                self.assertLess(rules.index(personal[1]), rules.index('DOMAIN-SUFFIX,trafficjunky.net,REJECT'))
+                self.assertLess(rules.index('DOMAIN-SUFFIX,trafficjunky.net,REJECT'), rules.index(process))
+                self.assertLess(rules.index('DOMAIN-SUFFIX,google-analytics.com,REJECT'), rules.index(process))
+                self.assertLess(rules.index(process), rules.index('NETWORK,UDP,DIRECT'))
+                routing.update(block_ads=False, block_privacy=False)
+                disabled = manager.profile_rules(routing)
+                self.assertNotIn('DOMAIN-SUFFIX,trafficjunky.net,REJECT', disabled)
+                self.assertNotIn('DOMAIN-SUFFIX,google-analytics.com,REJECT', disabled)
+                self.assertEqual(disabled[:2], [personal[1], process])
+
+    def test_video_ad_networks_reach_mihomo_and_singbox_and_switch_off(self):
+        item = profile()
+        item['routing'] = {'block_ads': True}
+        domains = ['ads.youtube.com', 'trafficjunky.net', 'trafficjunky.com', 'exoclick.com',
+                   'exosrv.com', 'juicyads.com', 'tsyndicate.com', 'trafficstars.com',
+                   'trafficfactory.biz', 'realsrv.com', 'adsco.re', 'vidoomy.com', 'popads.net']
+        for enabled in (True, False):
+            item['devices'][0]['routing'] = {'block_ads': enabled}
+            rules = yaml.safe_load(manager.render_profile(deepcopy(item)))['rules']
+            config = json.loads(manager.render_client_profile(deepcopy(item), 'common', 'singbox')[0])
+            blocked = {domain for rule in config['route']['rules'] if rule.get('outbound') == 'block'
+                       for domain in rule.get('domain_suffix', [])}
+            for domain in domains:
+                with self.subTest(enabled=enabled, domain=domain):
+                    self.assertEqual(f'DOMAIN-SUFFIX,{domain},REJECT' in rules, enabled)
+                    self.assertEqual(domain in blocked, enabled)
+            for domain in ['youtube.com', 'googlevideo.com', 'pornhub.com', 'phncdn.com',
+                           'xvideos.com', 'xhcdn.com', 'dailymotion.com', 'twitch.tv']:
+                self.assertNotIn(f'DOMAIN-SUFFIX,{domain},REJECT', rules)
+                self.assertNotIn(domain, blocked)
+
     def test_unsupported_custom_fragment_ranges_are_not_silently_saved(self):
         with self.assertRaises(manager.HTTPException):
             manager.validate_routing({"tunnel_fragment_size": "300-500"}, current={})
@@ -169,6 +207,11 @@ class RuleExportTests(unittest.TestCase):
                          ('ads.audit.test', b'502'), ('allowed.ads.audit.test', b'via-direct'),
                          ('delivery.adsmoloco.com', b'502'), ('api.pangle.io', b'502'),
                          ('iadsdk.apple.com', b'502'), ('adservice.google.com', b'502'),
+                         ('ads.youtube.com', b'502'), ('ads.trafficjunky.net', b'502'),
+                         ('static.trafficjunky.com', b'502'), ('syndication.exoclick.com', b'502'),
+                         ('ads.trafficstars.com', b'502'), ('delivery.vidoomy.com', b'502'),
+                         ('pornhub.com', b'via-tunnel'), ('video.phncdn.com', b'via-tunnel'),
+                         ('youtube.com', b'via-tunnel'), ('ads.trafficjunky.net.audit.test', b'via-tunnel'),
                          ('www.apple.com', b'via-tunnel'), ('video.googlevideo.com', b'via-tunnel'),
                          ('adservice.google.com.audit.test', b'via-tunnel')]
                 config["hosts"] = {name: "127.0.0.1" for name, _ in cases}
