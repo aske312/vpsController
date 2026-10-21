@@ -30,8 +30,23 @@
 [data-network-page] .routeLibraryRow .networkProviderText { gap:6px; }
 [data-network-page] .routeLibraryRow .networkProviderText strong { font-size:13px; }
 [data-network-page] .routeLibraryRow .networkProviderText small { font-size:11px; }
+[data-network-page] .routeTypeIcon { display:block; flex-shrink:0; width:1em; height:1em; font-size:22px; }
+[data-network-page] .routeTypeIcon[data-kind=relay] { color:var(--violet); }
+[data-network-page] .routeTypeIcon[data-kind=cdn] { color:var(--cyan); }
+[data-network-page] .routeTypeIcon[data-kind=ip] { color:var(--blue); }
+[data-network-page] .routeTypeIcon[data-kind=udp] { color:var(--amber); }
+[data-network-page] .routeTypeIcon[data-kind=tls] { color:var(--green); }
+[data-network-page] .routeTypeIcon[data-kind=domain] { color:var(--muted); }
+[data-network-page] .routeCardIcon .routeTypeIcon { font-size:clamp(20px,1.5vw,24px); }
+[data-network-page] .routeLibraryRow { grid-template-columns:40px minmax(0,1fr) 8px; align-items:start; column-gap:12px; }
+[data-network-page] .routeLibraryRow .routeCardIcon { align-self:start; min-height:40px; margin-top:2px; border:1px solid var(--line); border-radius:10px; background:var(--panel-inset); color:var(--cyan); }
+[data-network-page] .routeLibraryRow .networkProviderText { align-self:start; }
+[data-network-page] .routeLibraryRow .networkProviderText strong { line-height:20px; }
+[data-network-page] .routeLibraryRow .networkProviderText small { line-height:16px; }
+[data-network-page] .routeLibraryRow .networkProviderIndicator { margin-top:8px; }
 [data-network-page] .routeCardFacts { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; grid-column:1/-1; padding-top:10px; border-top:1px solid var(--line); color:var(--muted); font:400 11px/1.4 var(--ui-font); }
 [data-network-page] .routeCardFacts > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+[data-network-page] .routeCardFacts { align-items:baseline; align-self:end; }
 [data-network-page] .routeLibraryRow .networkRouteStatus { justify-self:start; padding:0; border:0; background:none; font:500 11px/1.4 var(--ui-font); }
 [data-network-page] .routeLibraryRow[data-state=verified] .networkProviderIndicator { border-color:var(--green); background:var(--green); }
 [data-network-page] .routeLibraryRow:is([data-state=connected],[data-state=listening],[data-state=present]) .networkProviderIndicator { border-color:var(--cyan); background:var(--cyan); }
@@ -83,6 +98,11 @@
 [data-network-page] .networkRouteChoices > button > span { display:grid; gap:5px; }
 [data-network-page] .networkRouteChoices > button > span strong { font-size:13px; }
 [data-network-page] .networkRouteChoices > button > span small { color:var(--muted); font-size:11px; line-height:1.5; }
+[data-network-page] .networkRouteChoices > button { align-items:flex-start; }
+[data-network-page] .networkRouteChoices > button > i { margin-top:1px; }
+[data-network-page] .networkRouteChoices .routeTypeIcon { width:1em; height:1em; font-size:clamp(20px,1.6vw,24px); }
+[data-network-page] .networkRouteChoices > button > span strong { line-height:18px; }
+[data-network-page] .networkRouteChoices > button > span small { margin:0; line-height:16px; }
 [data-network-page] .networkRouteChoices > button > b { display:none; }
 [data-network-page] .networkRouteSidebarNote { margin-bottom:0; }
 [data-network-page] .networkRouteContent { padding:24px 26px; }
@@ -113,7 +133,8 @@
   [data-network-page] .networkRouteEditorBody { grid-template-columns:110px minmax(0,1fr); }
   [data-network-page] .networkRouteSidebar { padding:12px 6px; }
   [data-network-page] .networkRouteChoices > button { gap:6px; padding:10px 6px; }
-  [data-network-page] .networkRouteChoices > button > i { display:none; }
+  [data-network-page] .networkRouteChoices > button { flex-direction:column; }
+  [data-network-page] .networkRouteChoices > button > i { display:grid; width:22px; height:22px; flex-basis:auto; }
   [data-network-page] .networkRouteChoices > button > span strong { font-size:12px; }
   [data-network-page] .networkRouteContent { padding:16px 12px; }
   [data-network-page] .networkRouteEditor .networkEndpointInput { flex-wrap:wrap; }

@@ -11,7 +11,8 @@ import type { RelayHost, RelayRoute } from "./relay-state";
 import { relayAddresses } from "./relay-state";
 import { RelayDeviceResult, RelayLossResult } from "./relay-test-results";
 import type { RouteEntry } from "./route-library-state";
-import { routeNeedsAttention } from "./route-library-state";
+import { domainRouteKinds, routeNeedsAttention } from "./route-library-state";
+import { RouteTypeIcon } from "./route-type-icon";
 
 export function RouteDisclosure({ title, children }: { title: string; children: ReactNode }) {
   return <details className="routeLibraryDisclosure"><summary>{title}<span aria-hidden="true">+</span></summary><div>{children}</div></details>;
@@ -69,8 +70,7 @@ export function DomainEntryPanel({ entry, request, disabled, onRemove, onChecked
   const [results, setResults] = useState<Partial<Record<NetworkEndpointCheck["kind"], NetworkEndpointCheck>>>({});
   const [consumers, setConsumers] = useState<Record<string, string>>({});
   const { error } = useNotifier("route-check", "Проверка адреса");
-  const inferred = ([['cdn', /cdn/i], ['tls_relay', /tls/i], ['udp_relay', /udp/i]] as const).filter(([, pattern]) => pattern.test(entry.domain.role)).map(([kind]) => kind);
-  const kinds = [...new Set([...entry.checks.map(check => check.kind), ...(entry.domain.endpoint_kind ? [entry.domain.endpoint_kind] : []), ...inferred])];
+  const kinds = domainRouteKinds(entry);
   const kind = kinds.includes(selected as NetworkEndpointCheck["kind"]) ? selected as NetworkEndpointCheck["kind"] : kinds[0];
   const saved = entry.checks.find(check => check.kind === kind);
   const raw = results[kind] || saved;
@@ -87,8 +87,8 @@ export function DomainEntryPanel({ entry, request, disabled, onRemove, onChecked
     finally { setChecking(false); }
   }
   return <>
-    {kinds.length > 1 && <div className="routeKindSwitch" role="group" aria-label="Тип подключения">{kinds.map(item => <button type="button" key={item} aria-pressed={kind === item} disabled={checking} onClick={() => setSelected(item)}>{({ cdn: "CDN", tls_relay: "TLS", udp_relay: "UDP" })[item]}</button>)}</div>}
-    <section className="routeTaskCard" data-address-kind={kind || "domain"}><header><h3>{presentation.title}</h3><p>{presentation.note}</p></header>
+    {kinds.length > 1 && <div className="routeKindSwitch" role="group" aria-label="Тип подключения">{kinds.map(item => <button type="button" key={item} aria-pressed={kind === item} disabled={checking} onClick={() => setSelected(item)}><RouteTypeIcon kind={({ cdn: "cdn", tls_relay: "tls", udp_relay: "udp" } as const)[item]} />{({ cdn: "CDN", tls_relay: "TLS", udp_relay: "UDP" })[item]}</button>)}</div>}
+    <section className="routeTaskCard" data-address-kind={kind || "domain"}><header className="routeTaskHeading"><span className="routeTaskIcon"><RouteTypeIcon kind={kind ? ({ cdn: "cdn", tls_relay: "tls", udp_relay: "udp" } as const)[kind] : "domain"} /></span><div><h3>{presentation.title}</h3><p>{presentation.note}</p></div></header>
       <div className="routeDnsOverview"><span>DNS</span><div><strong>{entry.summary.connection}</strong><div className="routeDnsChips">{entry.domain.resolved.map(address => <code key={address}>{address}</code>)}</div></div></div>
       {kind && <>
         {!!raw?.consumers?.length && <label className="routeControlField">Подключение для проверки<select value={consumer} disabled={disabled || checking} onChange={event => setConsumers(current => ({ ...current, [kind]: event.target.value }))}><option value="">Только проверка адреса</option>{raw.consumers.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>}

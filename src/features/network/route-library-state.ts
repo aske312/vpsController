@@ -6,6 +6,10 @@ import { domainRouteSummary, relayRouteSummary, type RouteSummary } from "./rout
 export type RouteEntry = { id: string; kind: "relay"; title: string; address: string; subtitle: string; search: string; summary: RouteSummary; host: RelayHost }
   | { id: string; kind: "domain"; title: string; address: string; subtitle: string; search: string; summary: RouteSummary; domain: NetworkStatus["domains"][number]; checks: NetworkEndpointCheck[] };
 export type RouteFilter = "all" | "relay" | "domain" | "attention";
+export function domainRouteKinds(entry: Extract<RouteEntry, { kind: "domain" }>) {
+  const inferred = ([['cdn', /cdn/i], ['tls_relay', /tls/i], ['udp_relay', /udp/i]] as const).filter(([, pattern]) => pattern.test(entry.domain.role)).map(([kind]) => kind);
+  return [...new Set([...entry.checks.map(check => check.kind), ...(entry.domain.endpoint_kind ? [entry.domain.endpoint_kind] : []), ...inferred])];
+}
 export const needsAttention = (summary: RouteSummary) => ["error", "warning", "stale", "unknown"].includes(summary.state);
 export const routeNeedsAttention = (route: RelayRoute) => ["failed", "missing", "drift", "unknown"].includes(route.state) || route.check?.state === "failed" || ["failed", "warning"].includes(route.device_test?.state || "") || [route.check?.cleanup_state, route.device_test?.cleanup_state].some(state => state === "failed" || state === "pending");
 

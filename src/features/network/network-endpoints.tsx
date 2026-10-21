@@ -12,6 +12,8 @@ import { emptyEndpointSettings, endpointAddress, endpointValues, type EndpointFi
 import { endpointCheckForConsumer } from "../../shared/lib/network-readiness";
 import { NetworkRelayForm, type RelayControl } from "./network-relays";
 
+import { RouteTypeIcon } from "./route-type-icon";
+
 type AddressMode = false | "cdn" | "tls" | "udp";
 const routeTypes = [
   { mode: false, title: "Relay Agent", description: "Вход через другой сервер", tag: "TCP + UDP" },
@@ -19,12 +21,6 @@ const routeTypes = [
   { mode: "tls", title: "TLS", description: "Прямое подключение по домену", tag: "DNS ONLY" },
   { mode: "udp", title: "UDP", description: "Прямой домен или IP", tag: "DNS ONLY" },
 ] as const;
-
-function RouteTypeIcon({ mode }: { mode: AddressMode }) {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    {mode === false ? <><rect x="3" y="3" width="7" height="6" rx="1.5" /><rect x="14" y="15" width="7" height="6" rx="1.5" /><path d="M6.5 9v7a2 2 0 0 0 2 2H14M17.5 15V8a2 2 0 0 0-2-2H10" /></> : mode === "cdn" ? <><path d="M7 18a5 5 0 0 1-1-9.9 6.5 6.5 0 0 1 12.3-1A5.5 5.5 0 0 1 18 18" /><path d="m9 16 3-3 3 3m-3-3v8" /></> : mode === "tls" ? <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2" /></> : <><path d="M4 8h16m-4-4 4 4-4 4M20 16H4m4-4-4 4 4 4" /></>}
-  </svg>;
-}
 
 export function NetworkEndpoints({
   request,
@@ -197,7 +193,7 @@ export function NetworkEndpoints({
                   generation.current++;
                   if (type.mode === false && !relay.dialog) relay.openHost(undefined, true);
                   setAddresses(type.mode);
-                }}><i><RouteTypeIcon mode={type.mode} /></i><span><strong>{type.title}</strong><small>{type.description}</small></span><b aria-hidden="true">›</b></button>)}
+                }}><i><RouteTypeIcon kind={type.mode === false ? "relay" : type.mode} /></i><span><strong>{type.title}</strong><small>{type.description}</small></span><b aria-hidden="true">›</b></button>)}
               </nav>
               {(hasChanges || relay.changed) && <p className="networkRouteSidebarNote">Есть несохранённые изменения.</p>}
             </aside>
