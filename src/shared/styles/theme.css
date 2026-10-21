@@ -41,9 +41,9 @@
   --accent: var(--green);
 
   /* Typography */
-  --ui-font: var(--font-sans), "Segoe UI", Arial, sans-serif;
-  --display-font: var(--font-sans), "Segoe UI", Arial, sans-serif;
-  --technical-font: var(--font-mono), "Cascadia Mono", Consolas, monospace;
+  --ui-font: var(--font-sans, "Segoe UI"), Arial, sans-serif;
+  --display-font: var(--font-sans, "Segoe UI"), Arial, sans-serif;
+  --technical-font: var(--font-mono, "Cascadia Mono"), Consolas, monospace;
   --font-geist-sans: var(--font-sans);
   --font-geist-mono: var(--font-mono);
 

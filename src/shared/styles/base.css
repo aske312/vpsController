@@ -15,7 +15,7 @@ body {
   radial-gradient(circle at 12% 82%, rgba(112, 183, 232, .045), transparent 30%),
   var(--bg);
   color: var(--text);
-  font-family: var(--font-sans), Arial, sans-serif;
+  font-family: var(--font-sans, "Segoe UI"), Arial, sans-serif;
 }
 
 button, input, select, textarea {
