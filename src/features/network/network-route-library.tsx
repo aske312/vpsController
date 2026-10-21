@@ -67,5 +67,5 @@ function RouteSheet({ title, address, subtitle, badge, close, children }: { titl
 function CopyAddress({ address }: { address: string }) {
   const [copied, setCopied] = useState(false);
   const { error } = useNotifier("copy-route", "Адрес");
-  return <button className="routeLibraryCopy" type="button" onClick={() => { void navigator.clipboard.writeText(address).then(() => setCopied(true)).catch(() => error("Не удалось скопировать адрес")); }}>{copied ? "Адрес скопирован" : "Скопировать адрес"}</button>;
+  return <button className="routeLibraryCopy" type="button" onClick={async () => { try { await navigator.clipboard.writeText(address); setCopied(true); } catch { error("Копирование недоступно. Выделите адрес и скопируйте его вручную."); } }}>{copied ? "Адрес скопирован" : "Скопировать адрес"}</button>;
 }
