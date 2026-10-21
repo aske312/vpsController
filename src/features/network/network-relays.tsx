@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ConfirmationDialog } from "../../shared/components/confirmation-dialog";
 import { useDialogFocus } from "../../shared/components/use-dialog-focus";
 import { useNotifier } from "../../shared/notifications/notification-center";
@@ -8,9 +8,6 @@ import { SystemOperationUnknown, systemActionNeedsPolling } from "../../control-
 import type { SystemAction } from "../../shared/types/control-plane";
 import type { NetworkAdmission, NetworkRequest } from "./network-api";
 import { relayAddresses, relayConnection, relaySnapshot, type RelayStatus, type RelayHost } from "./relay-state";
-import { NetworkRouteSummaryBadge } from "./network-route-badge";
-import { relayRouteSummary } from "./route-summary";
-import { RelayRouteDetails } from "./network-route-details";
 
 type Props = { request: NetworkRequest; admit: NetworkAdmission; operation?: SystemAction; onOperation: (value: SystemAction) => void; busy: boolean; onDirtyChange: (dirty: boolean) => void; refreshKey?: number };
 
@@ -166,29 +163,6 @@ export function NetworkRelayNotice({ relay }: { relay: RelayControl }) {
   </>;
 }
 
-export function NetworkRelayRows({ relay, query, expanded, onToggle }: { relay: RelayControl; query: string; expanded: string[]; onToggle: (key: string) => void }) {
-  return <>{relay.status?.hosts.flatMap(item => (relayAddresses(item).length ? relayAddresses(item) : [""]).map((address, index) => ({ item, address, index }))).filter(({ item, address }) => relayAddressMatches(item, address, query)).map(({ item, address, index }) => {
-    const key = index === 0 ? `relay-${item.id}` : `relay-${item.id}-${address}`, open = expanded.includes(key);
-    const pending = Boolean(relay.status?.pending && (!relay.status.recovery || relay.status.recovery.host_id === item.id));
-    const unknown = relay.failed || pending || item.state !== "connected";
-    const summary = relayRouteSummary(item, relay.failed, pending, relay.reading);
-    return <Fragment key={key}>
-      <tr className={`networkRouteRow networkRelayRow${open ? " is-expanded" : ""}`}>
-        <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true" /><span><strong>{address || "Все адреса исключены"}</strong><small>{item.name}</small></span></button></td>
-        <td><NetworkRouteSummaryBadge summary={summary} /></td>
-        <td><span>{summary.type}</span></td>
-        <td><span className="networkRouteConnection" title="Число настроенных перенаправлений. Состояние каждого порта — в подробностях.">{summary.connection}</span></td>
-        <td><div className="networkRelayActions"><button type="button" className="networkRouteConfigure" disabled={relay.locked} onClick={() => relay.openHost(item)}>Настроить</button>{address && <button type="button" className="networkRouteDelete" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setAddressConfirmation({ host: item, address })}>Удалить адрес</button>}</div></td>
-      </tr>
-      {open && <tr className="networkRouteDetailRow"><td colSpan={5}><RelayRouteDetails host={item} address={address} summary={summary} unknown={unknown} consumers={relay.status?.consumers || []} disabled={relay.locked || pending || unknown} onTest={(routeId, consumerId) => void relay.submit(`/network/relays/${item.id}/routes/${routeId}/check?mode=media&consumer_id=${encodeURIComponent(consumerId)}`, { method: "POST", headers: { "If-Match": relay.status?.revision || "" } })}
-        onUpdate={() => void relay.submit(`/network/relays/${item.id}/update`, { method: "POST", body: JSON.stringify({ version: item.agent_release?.version, digest: item.agent_release?.digest, expected_revision: relay.status?.revision }) })}
-        onDeviceTest={(routeId, consumerId) => void relay.submit(`/network/relays/${item.id}/routes/${routeId}/device-tests?consumer_id=${encodeURIComponent(consumerId)}`, { method: "POST", headers: { "If-Match": relay.status?.revision || "" } })}
-        onDownloadTest={(routeId, testId) => void relay.downloadTest(item.id, routeId, testId)} onUploadTest={(routeId, testId, file) => void relay.uploadTest(item.id, routeId, testId, file)}
-        onCancelTest={(routeId, testId) => void relay.submit(`/network/relays/${item.id}/routes/${routeId}/device-tests/${testId}`, { method: "DELETE", headers: { "If-Match": relay.status?.revision || "" } })} /></td></tr>}
-    </Fragment>;
-  })}</>;
-}
-
 export function relayMatches(host: RelayHost, query: string) {
   return relayAddresses(host).some(address => relayAddressMatches(host, address, query));
 }
@@ -221,18 +195,18 @@ export function NetworkRelayDialogs({ relay }: { relay: RelayControl }) {
 export function NetworkRelayForm({ relay }: { relay: RelayControl }) {
   return <div className="relayConnectionEditor">
     <NetworkRelayNotice relay={relay} />
-    <p className="relayConnectionHint">Подключите установленный Relay Agent. TCP/UDP и внешний порт будут выбраны автоматически для протокола.</p>
     <form className="relayForm" onSubmit={event => { event.preventDefault(); void relay.saveHost(); }}>
       <div className="relayFieldGroup">
       <h4>Узел и адрес</h4>
       <label>Название узла<input required maxLength={64} value={relay.name} onChange={event => relay.changeName(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder="Например, Relay Amsterdam" /></label>
       <label>IP или домен для клиентов<input maxLength={253} value={relay.address} onChange={event => relay.changeAddress(event.target.value)} disabled={relay.locked} placeholder="IP агента или relay.example.com" /></label>
-      <small>Пустое поле использует IP агента. Для домена: DNS-запись на IP агента, без CDN proxy. Порт указывать не нужно.</small>
+      <small>Необязательно. По умолчанию используется IP Relay.</small>
+      <details><summary>Если используете домен</summary><small>DNS должен указывать на Relay, без CDN proxy. Порт указывать не нужно.</small></details>
       </div>
       <div className="relayFieldGroup">
       <h4>Данные подключения</h4>
       <label>JSON подключения Agent<input type="password" autoComplete="new-password" spellCheck={false} required={!relay.edit} value={relay.connection} onChange={event => relay.changeConnection(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder={relay.edit ? "Новые параметры для замены токена / сертификата" : "Вставьте JSON из раздела Agent"} /></label>
-      <small>Адрес API, токен и отпечаток сертификата. Сохранённый токен в браузер не возвращается.</small>
+      <small>Скопируйте JSON из установленного Agent.</small>
       </div>
       {!!relay.edit?.excluded_addresses?.length && <div><b>Исключённые адреса</b>{relay.edit.excluded_addresses.map(address => <p key={address}>{address} <button type="button" disabled={relay.locked || relay.status?.pending} onClick={() => {
         if (relay.edit && relay.status) void relay.submit(`/network/relays/${relay.edit.id}/address?address=${encodeURIComponent(address)}&restore=true`, { method: "DELETE", headers: { "If-Match": relay.status.revision } }).then(started => { if (started) relay.resetDialog(); });

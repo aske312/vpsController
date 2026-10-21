@@ -2,63 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { read, readApiSources } from "./support.mjs";
 
-test("network owns shared CDN and relay endpoints while protected channels keep protocol identities", async () => {
-  const [api, page, networkApi, types, endpoint, css] = await Promise.all([
-    readApiSources(),
-    read("src/features/network/network-view.tsx"),
-    read("src/features/network/network-api.ts"),
-    read("src/shared/types/control-plane.ts"),
-    read("src/features/network/network-endpoints.tsx"),
-    read("src/features/network/network.css"),
-  ]);
-  assert.match(api, /NetworkEndpointSettings/);
-  // HTTP admission and mutation conflicts are covered by test_core_auth.py.
-  assert.match(api, /channel_mode/);
-  assert.match(api, /tls_relay_domain/);
-  assert.match(api, /udp_relay_domain/);
-  assert.match(api, /cdn_domains/);
-  assert.match(api, /tls_relay_domains/);
-  assert.match(api, /udp_relay_domains/);
-  assert.match(api, /delete_network_endpoint/);
-  assert.match(api, /MIHOMO_VLESS_CDN_ROUTES/);
-  assert.match(page, /NetworkEndpoints/);
-  assert.match(endpoint, /networkAddRouteButton/);
-  assert.match(endpoint, /networkSectionEyebrow[\s\S]+ROUTES/);
-  assert.doesNotMatch(endpoint, /networkRoutesLauncher/);
-  assert.match(css, /networkAddRouteButton/);
-  assert.match(css, /networkRouteStatus\.ready/);
-  assert.match(page, /expandedDomains/);
-  assert.match(page, /networkRouteDetailRow/);
-  // Route display semantics are covered behaviorally by network-route-summary.test.mjs.
-  assert.match(endpoint, /result\.status === "unchecked"/);
+test("network owns shared endpoints while protected channels keep protocol identities", async () => {
+  const [api, networkApi, types] = await Promise.all([readApiSources(), read("src/features/network/network-api.ts"), read("src/shared/types/control-plane.ts")]);
+  for (const field of ["NetworkEndpointSettings", "channel_mode", "tls_relay_domain", "udp_relay_domain", "cdn_domains", "tls_relay_domains", "udp_relay_domains", "delete_network_endpoint", "MIHOMO_VLESS_CDN_ROUTES"]) assert.ok(api.includes(field), field);
   assert.match(api, /"verification": "dns_only"/);
-  // Binding identity/revision and DNS-only admission are verified behaviorally
-  // by test_network_routes.py and network-readiness.test.mjs.
   assert.match(api, /check_id = uuid\.uuid4\(\)\.hex/);
   assert.match(types, /failed_checks\?: number/);
-  assert.match(endpoint, /неудач подряд/);
-  assert.match(page, /networkRouteDelete/);
-  assert.match(page, /onRemoveRoute\(endpointCheck\.kind/);
-  assert.match(page, /networkBlockHeader/);
-  assert.doesNotMatch(endpoint, /networkEndpointDelete|Отключить и удалить/);
-  assert.match(page, /transport_endpoint_checks_by_domain/);
-  assert.match(page, /transport_endpoint_checks_by_domain\?\.\[`\$\{kind\}:\$\{domain\.value\}`\]/);
-  assert.match(page, /check\?\.domain/);
-  assert.match(page, /networkStateStrip/);
-  assert.match(page, /SERVER IPv4/);
-  assert.match(page, /SERVER IPv6/);
-  // Public address inventory, roles and search are covered behaviorally by
-  // server-addresses.test.mjs and test_server_addresses.py.
-  assert.match(page, /NetworkCapabilityCard/);
-  assert.match(page, /Обновить проверки/);
-  assert.match(page, /Скопировать IPv6/);
-  assert.doesNotMatch(page, /networkEvidence/);
-  assert.ok(page.indexOf("networkStateStrip") < page.indexOf("networkV2RouteBlock"));
-  assert.match(css, /\.networkV2[\s\S]+gap: 12px/);
-  assert.match(css, /--network-text: var\(--text\)/);
-  assert.match(networkApi, /saveNetworkEndpoints/);
   assert.match(types, /transport_endpoints/);
   assert.match(types, /NetworkEndpointSettings/);
+  assert.match(networkApi, /saveNetworkEndpoints/);
+  // Admission, binding identity and readiness are verified by API and state tests.
+  // Presentation is free to change without retaining table markup or copy.
 });
 
 test("network DNS selection is limited to installed independently configurable protocols", async () => {

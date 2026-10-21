@@ -155,7 +155,7 @@ export function NetworkEndpoints({
         className="networkAddRouteButton"
         onClick={() => { generation.current++; setDraft(emptyEndpointSettings()); setExtra({}); setChecks({}); setConsumerIds({}); setAddresses(false); relay.openHost(undefined, true); setOpen(true); }}
       >
-        Добавить маршрут
+        Добавить
       </button>
       {open && (
         <div
@@ -177,8 +177,8 @@ export function NetworkEndpoints({
             <header className="networkSectionHeading networkModalHeader">
               <div>
                 <p className="eyebrow networkSectionEyebrow">ROUTES</p>
-                <h2 id="network-endpoints-title">Новый маршрут</h2>
-                <p id="network-endpoints-description">Выберите способ подключения и добавьте адрес для ваших протоколов.</p>
+                <h2 id="network-endpoints-title">Добавить точку входа</h2>
+                <p id="network-endpoints-description">Выберите, как устройства будут подключаться к серверу.</p>
               </div>
               <button
                 type="button"
@@ -191,7 +191,6 @@ export function NetworkEndpoints({
             </header>
             <div className="networkRouteEditorBody">
             <aside className="networkRouteSidebar">
-              <p className="networkRouteStep">01 <span>Способ подключения</span></p>
               <nav className="networkRouteChoices" aria-label="Тип маршрута">
                 {routeTypes.map((type) => <button key={String(type.mode)} type="button" aria-pressed={addresses === type.mode} data-dialog-initial={addresses === type.mode || undefined} onClick={() => {
                   if (addresses === type.mode) return;
@@ -200,10 +199,10 @@ export function NetworkEndpoints({
                   setAddresses(type.mode);
                 }}><i><RouteTypeIcon mode={type.mode} /></i><span><strong>{type.title}</strong><small>{type.description}</small></span><b aria-hidden="true">›</b></button>)}
               </nav>
-              <p className="networkRouteSidebarNote">{hasChanges || relay.changed ? "Черновики сохраняются при переключении. Сохраните настройки нужных типов перед закрытием." : "Адрес будет доступен при настройке подключений Direct и Mihomo."}</p>
+              {(hasChanges || relay.changed) && <p className="networkRouteSidebarNote">Есть несохранённые изменения.</p>}
             </aside>
             <div className="networkRouteContent">
-              <header className="networkRouteContentHeader"><div><p className="networkRouteStep">02 <span>Настройка маршрута</span></p><h3>{addresses === false ? "Подключение Relay Agent" : addresses === "cdn" ? "Домен для CDN" : addresses === "tls" ? "Домен для TLS" : "Адрес для UDP"}</h3></div><span className="networkRouteKindBadge">{routeTypes.find((type) => type.mode === addresses)?.tag}</span></header>
+              <header className="networkRouteContentHeader"><h3>{addresses === false ? "Подключить Relay" : addresses === "cdn" ? "Домен для CDN" : addresses === "tls" ? "Домен для TLS" : "Адрес для UDP"}</h3></header>
             {!addresses && <NetworkRelayForm relay={{ ...relay, close, saveHost: async () => {
               const saveGeneration = generation.current;
               const saved = await relay.saveHost();
@@ -223,25 +222,6 @@ export function NetworkEndpoints({
                     className={`networkEndpointCard ${result?.status || ""}`}
                     key={field.key}
                   >
-                    <div className="networkEndpointCardHead">
-                      <div>
-                        <h3>{field.label}</h3>
-                        <span>{field.short}</span>
-                      </div>
-                      <span className="networkEndpointState">
-                        {result
-                          ? result.status === "ready"
-                            ? "READY"
-                            : result.status === "unchecked"
-                              ? "UNCHECKED"
-                            : result.status === "warning"
-                              ? "WARN"
-                              : "ERROR"
-                          : value
-                            ? "Не проверен"
-                            : "Не задан"}
-                      </span>
-                    </div>
                     <div className="networkEndpointInput">
                       <label className="networkEndpointPrimaryField"><span>Новый адрес</span>
                       <input
@@ -274,17 +254,10 @@ export function NetworkEndpoints({
                     </div>
                     {duplicate && <small className="networkRouteDraftHint">Этот адрес уже добавлен для выбранного типа маршрута.</small>}
                     {!!result?.consumers?.length && <label><span>Подключение для проверки</span><select aria-label={`Подключение ${field.label}`} value={consumerIds[field.key] || ""} disabled={Boolean(checking)} onChange={(event) => setConsumerIds((current) => ({ ...current, [field.key]: event.target.value }))}><option value="">Первое совместимое подключение</option>{result.consumers.map((consumer) => <option key={consumer.id} value={consumer.id}>{consumer.label} · {consumer.id}</option>)}</select></label>}
-                    <small>{field.help}</small>
-                    <small className="networkEndpointDnsHint">{field.kind === "cdn" ? "DNS: A/AAAA на IP этого VPS, proxy включён у CDN-провайдера. IP вместо домена не поддерживается." : "DNS: A/AAAA на IP этого VPS. В Cloudflare выберите DNS only — серое облако. Порт в DNS-записи не указывается."}</small>
+                    <details className="networkEndpointDnsHint"><summary>Как настроить DNS</summary><p>{field.kind === "cdn" ? "A/AAAA на IP VPS, proxy включён у CDN-провайдера. Нужен домен." : "Для домена: A/AAAA на IP VPS. В Cloudflare выберите DNS only. Порт в DNS не указывается."}</p><p>{field.help}</p></details>
                     {result && (
                       <em className={`networkEndpointCheck ${result.status}`}>
                         {result.message}
-                        {result.resolved.length
-                          ? ` · ${result.resolved.join(", ")}`
-                          : ""}
-                        {result.failed_checks
-                          ? ` · неудач подряд: ${result.failed_checks}`
-                          : ""}
                         {result.checked_at
                           ? ` · ${new Date(result.checked_at).toLocaleString("ru-RU")}`
                           : ""}
@@ -310,7 +283,7 @@ export function NetworkEndpoints({
             {pendingAddress && <p className="networkRouteDraftHint" role="status">Нажмите «Добавить адрес» для заполненного дополнительного поля или очистите его перед сохранением.</p>}
             <div className="networkEndpointFooter">
               <p>
-                {addresses === "cdn" ? "CDN/ECH требует домен. Relay подключается отдельно через Agent; его адрес выбирается в настройках протокола." : "Сохраняется адрес и его назначение. Подключения, порты и сертификаты настраиваются отдельно в протоколах; существующие конфигурации клиентов не меняются."}
+                Существующие подключения не изменятся.
               </p>
               <div className="networkRouteFooterActions"><button type="button" onClick={close}>Отмена</button>
               <button

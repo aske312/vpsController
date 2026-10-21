@@ -8,7 +8,8 @@ import reactPlugin from "@vitejs/plugin-react";
 const loader = await createServer({ configFile: false, plugins: [reactPlugin()], server: { middlewareMode: true, hmr: false }, appType: "custom", optimizeDeps: { noDiscovery: true } });
 after(() => loader.close());
 const { RelayEndpointSelect } = await loader.ssrLoadModule("/src/features/network/relay-endpoint-select.tsx");
-const { NetworkRelayRows, relayMatches } = await loader.ssrLoadModule("/src/features/network/network-relays.tsx");
+const { routeEntries, filterEntries } = await loader.ssrLoadModule("/src/features/network/route-library-state.ts");
+const { relayMatches } = await loader.ssrLoadModule("/src/features/network/network-relays.tsx");
 const { connectionAddressModes } = await loader.ssrLoadModule("/src/features/mihomo/connection-address.ts");
 const { MihomoConnectionAddress } = await loader.ssrLoadModule("/src/features/mihomo/connection-address-select.tsx");
 const host = { id: "b".repeat(32), name: "Amsterdam", client_address: "relay.example", agent_url: "https://85.209.155.229:9443", state: "unknown", routes: [] };
@@ -185,31 +186,31 @@ test("one Relay exposes every IPv4, IPv6 and domain and retains the selected add
   assert.doesNotMatch(html,/disabled=/);
 });
 
-test("ROUTES lists and searches every Relay address with a legacy fallback", () => {
+test("ROUTES groups a Relay once and still finds each eligible address", () => {
   const addresses = { ipv4: ['85.209.155.229', '8.8.4.4'], ipv6: ['2606:4700::1111'], domains: ['relay.example', 'alternate.example'] };
-  const item = { ...host, addresses };
-  const render = (query = '', selectedHost = item, expanded = []) => renderToStaticMarkup(createElement('table', null, createElement('tbody', null, createElement(NetworkRelayRows, {
-    relay: { status: { hosts: [selectedHost], pending: false }, failed: false, reading: false, locked: false },
-    query, expanded, onToggle: () => {},
-  }))));
-  const all = render();
-  assert.equal((all.match(/<tr\b/g) || []).length, 5);
-  for (const address of [...addresses.ipv4, ...addresses.ipv6, ...addresses.domains]) {
-    assert.ok(all.includes(`<strong>${address}</strong>`));
-    assert.ok(relayMatches(item, address));
-  }
-  for (const address of ['8.8.4.4', '2606:4700::1111', 'alternate.example']) {
-    const filtered = render(address);
-    assert.equal((filtered.match(/<tr\b/g) || []).length, 1);
-    assert.ok(filtered.includes(`<strong>${address}</strong>`));
-  }
-  assert.equal((render('Amsterdam').match(/<tr\b/g) || []).length, 5);
-  assert.equal((render('', host).match(/<tr\b/g) || []).length, 1);
-  assert.ok(render('', host).includes('<strong>relay.example</strong>'));
-  assert.equal((render('', item, [`relay-${host.id}-2606:4700::1111`]).match(/aria-expanded="true"/g) || []).length, 1);
-  assert.equal(render('unmatched.example'), '<table><tbody></tbody></table>');
+  const entries = routeEntries(null, [{ ...host, addresses }], false, false, false, false);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].address, host.client_address);
+  for (const address of [...addresses.ipv4, ...addresses.ipv6, ...addresses.domains]) assert.equal(filterEntries(entries,address,'all').length,1);
+  assert.equal(filterEntries(entries,'missing.example','all').length,0);
+  assert.equal(filterEntries(entries,'Amsterdam','all').length,1);
+  const legacy = routeEntries(null, [host], false, false, false, false);
+  assert.equal(legacy[0].address, host.client_address);
 });
 
+test("entry library merges shared domains while retaining both purposes and failure evidence", () => {
+  const domains = ['TLS', 'UDP'].map(role => ({ value: 'shared.example', role, resolved: ['8.8.4.4'], matches_origin: true, route: 'direct' }));
+  const checks = { tls_relay: { domain: 'shared.example', kind: 'tls_relay', status: 'error', message: 'Connection failed' } };
+  const entries = routeEntries({ domains, server: { public_ip: '8.8.4.4' }, transport_endpoint_checks: checks }, [], false, false, false, false);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].checks.length, 1);
+  assert.equal(entries[0].summary.state, 'error');
+  assert.match(entries[0].subtitle, /TLS/);
+  assert.match(entries[0].subtitle, /UDP/);
+  assert.equal(filterEntries(entries, '', 'attention').length, 1);
+  assert.equal(filterEntries(entries, '', 'relay').length, 0);
+  assert.equal(routeEntries({ domains, server: {} }, [], true, false, false, false)[0].summary.state, 'unknown');
+});
 test("connection addresses group local and remote CDN domains separately from Relay", () => {
   const html = renderToStaticMarkup(createElement(RelayEndpointSelect, {
     request: async () => ({}), inventory: {status: {hosts: [{...host, addresses: {ipv4:['85.209.155.229'],ipv6:[],domains:['relay.example','remote-cdn.example'],cdn_domains:['remote-cdn.example']}}]},failed:false},

@@ -1,15 +1,11 @@
 "use client";
 
-import { NetworkRouteSummaryBadge } from "./network-route-badge";
-import { serverAddressSummary } from "./route-summary";
-import { ServerAddressDetails } from "./network-route-details";
-import type { NetworkIpIdentity } from "../../shared/types/control-plane";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiRequestError } from "../../shared/lib/api-request";
 import { useNotifier } from "../../shared/notifications/notification-center";
 import type { NetworkRequest } from "./network-api";
-import { addressMatches, confirmsAddressChange, serverAddressesSnapshot, type AddressChange, type ServerAddressInventory, type ServerAddressRole } from "./server-address-state";
+import { confirmsAddressChange, serverAddressesSnapshot, type AddressChange, type ServerAddressInventory, type ServerAddressRole } from "./server-address-state";
 
 type Pending = Omit<AddressChange, "revision">;
 const storageKey = "312-server-address-role-pending";
@@ -87,27 +83,4 @@ export function useNetworkAddresses({ request, busy, refreshKey }: { request: Ne
     } finally { sending.current = false; }
   };
   return { status, failed, reading, pending, locked: busy || failed || reading || Boolean(pending) || status?.discovery.state !== "ready", load, setRole };
-}
-
-export function NetworkServerAddressRows({ control, query, expanded, onToggle, ipInfo }: { control: ReturnType<typeof useNetworkAddresses>; query: string; expanded: string[]; onToggle: (key: string) => void; ipInfo?: NetworkIpIdentity[] }) {
-  const { status } = control;
-  return <>
-    {(control.failed || !status || status.discovery.state === "error" || control.pending) && <tr><td colSpan={5}><div className="networkAddressNotice" role="status">
-      <span>{control.pending ? "Проверяем результат назначения IP. Команда повторно не отправляется." : control.failed ? "Не удалось обновить публичные IP. Сохранённые строки оставлены для просмотра." : status?.discovery.message || "Определяем публичные IP сервера…"}</span>
-      <button type="button" disabled={control.reading} onClick={() => void control.load()}>Проверить результат</button>
-    </div></td></tr>}
-    {status?.items.filter(row => addressMatches(row, query)).map(row => {
-      const key = `SERVER-${row.address}`; const open = expanded.includes(key);
-      const summary = serverAddressSummary(row, control.failed || status.discovery.state === "error", Boolean(control.pending));
-      return <Fragment key={key}><tr className={`networkServerRouteRow${open ? " is-expanded" : ""}`}>
-        <td><button type="button" className="networkRouteExpand" aria-expanded={open} onClick={() => onToggle(key)}><span className="networkRouteExpandMark" aria-hidden="true"/><span><strong>{row.address}</strong></span></button></td>
-        <td><NetworkRouteSummaryBadge summary={summary} /></td>
-        <td><span>{summary.type}</span></td>
-        <td><span className="networkRouteConnection">{summary.connection}</span></td>
-        <td><label className="networkAddressRole"><span className="networkSrOnly">Назначение {row.address}</span><select value={row.role} disabled={control.locked || row.presence !== "present"} onChange={event => void control.setRole(row.address, event.target.value as ServerAddressRole)}>
-          <option value="primary">Основной</option><option value="reserve" disabled={row.role === "primary"}>Резервный</option><option value="additional" disabled={row.role === "primary"}>Дополнительный</option>
-        </select></label></td>
-      </tr>{open && <tr className="networkRouteDetailRow"><td colSpan={5}><ServerAddressDetails row={row} summary={summary} observedAt={status.detected_at} identity={ipInfo?.find(item => item.address === row.address)} /></td></tr>}</Fragment>;
-    })}
-  </>;
 }
