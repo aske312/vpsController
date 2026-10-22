@@ -168,13 +168,10 @@ export function NetworkEndpoints({
             role="dialog"
             aria-modal="true"
             aria-labelledby="network-endpoints-title"
-            aria-describedby="network-endpoints-description"
           >
             <header className="networkSectionHeading networkModalHeader">
               <div>
-                <p className="eyebrow networkSectionEyebrow">ROUTES</p>
                 <h2 id="network-endpoints-title">Добавить точку входа</h2>
-                <p id="network-endpoints-description">Выберите, как устройства будут подключаться к серверу.</p>
               </div>
               <button
                 type="button"

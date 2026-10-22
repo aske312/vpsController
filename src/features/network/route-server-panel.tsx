@@ -5,9 +5,9 @@ import type { useNetworkAddresses } from "./network-addresses";
 import { addressRoleLabels, type ServerAddress, type ServerAddressRole } from "./server-address-state";
 
 const roles: Array<{ role: ServerAddressRole; description: string }> = [
-  { role: "primary", description: "Для новых прямых подключений этого семейства IP" },
-  { role: "reserve", description: "Сохранить в резерве без автопереключения" },
-  { role: "additional", description: "Оставить доступным для отдельного назначения" },
+  { role: "primary", description: "Для новых подключений" },
+  { role: "reserve", description: "Без автопереключения" },
+  { role: "additional", description: "Для отдельных подключений" },
 ];
 
 export function ServerAddressPanel({ row, control }: { row: ServerAddress; control: ReturnType<typeof useNetworkAddresses> }) {
@@ -15,7 +15,7 @@ export function ServerAddressPanel({ row, control }: { row: ServerAddress; contr
   const chosen = selection || row.role;
   const locked = control.locked || row.presence !== "present";
   return <>
-    <section className="routeTaskCard"><header><h3>Как использовать этот IP</h3><p>Выберите назначение адреса для {row.family === "ipv4" ? "IPv4" : "IPv6"}.</p></header>
+    <section className="routeTaskCard"><header><h3>Назначение IP</h3></header>
       <fieldset className="routeRoleChoices"><legend className="networkSrOnly">Роль IP-адреса</legend>{roles.map(({ role, description }) => <label key={role} className={chosen === role ? "is-selected" : ""}>
         <input type="radio" name="server-address-role" value={role} checked={chosen === role} disabled={locked} onChange={() => setSelection(role)} />
         <span><strong>{addressRoleLabels[role]}</strong><small>{description}</small></span>{row.role === role && <span className="routeCurrentRole">Сейчас</span>}

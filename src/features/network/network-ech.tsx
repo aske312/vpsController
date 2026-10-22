@@ -38,24 +38,25 @@ export function NetworkEch({ domain, route, request }: { domain: string; route: 
     catch { notifyError("Не удалось скопировать. Выделите значение и скопируйте вручную."); }
   }
 
-  return <><details className="networkEch routeLibraryDisclosure routeEchDisclosure" open={open} onToggle={event => { const next = event.currentTarget.open; if (next !== open) { setOpen(next); if (next) void load(); } }}>
-    <summary><span className="routeDisclosureLabel"><RouteTypeIcon kind="tls" />ECH / DNS-запись</span><span className="routeDisclosureToggle" aria-hidden="true">+</span></summary>
+  const throughCdn = route === "proxy_or_cdn";
+  return <>
+    {throughCdn && <div className="routeCdnEchProvider"><span><RouteTypeIcon kind="tls" />ECH</span><span>У CDN-провайдера</span></div>}
+    <details className="networkEch routeLibraryDisclosure routeEchDisclosure" open={open} onToggle={event => { const next = event.currentTarget.open; if (next !== open) { setOpen(next); if (next) void load(); } }}>
+    <summary><span className="routeDisclosureLabel">{throughCdn ? "Дополнительно: запись VPS" : <><RouteTypeIcon kind="tls" />ECH на VPS</>}</span><span className="routeDisclosureToggle" aria-hidden="true">+</span></summary>
     {open && <section aria-label={`ECH для ${domain}`}>
-      <header><h4>Защита имени подключения</h4><p>Настройка ECH и запись HTTPS для DNS-провайдера.</p></header>
-      <p>Создаёт ключи ECH на сервере и готовую HTTPS-запись для вашего DNS-провайдера. Обычный TLS-сертификат выпускается отдельно и автоматически.</p>
-      {route === "proxy_or_cdn" ? <p>Домен направлен через внешний прокси/CDN. Включите ECH у этого провайдера: ключи нашего VPS не подходят для его TLS-соединения.</p> : <button type="button" className="primaryButton" disabled={loading || command.pending || route === "unresolved" || !capability?.supported} onClick={() => void command.prepareEch(domain)}>{command.pending ? "Подготовка ECH…" : record ? "Проверить настройку сервера" : "Подготовить ECH"}</button>}
-      {capability?.message && <p role="status">{capability.message}</p>}
-      <button type="button" className="ghostButton" disabled={loading || command.pending} onClick={() => void load()}>Обновить данные</button>
+      {throughCdn && <p className="routeCdnHint">Только для прямого TLS-соединения с VPS. Для CDN эту запись публиковать не нужно.</p>}
+      <div className="routeEchActions">
+        {!throughCdn && <button type="button" className="routeActionPrimary" disabled={loading || command.pending || route === "unresolved" || !capability?.supported} onClick={() => void command.prepareEch(domain)}>{command.pending ? "Подготовка ECH…" : record ? "Проверить ECH" : "Подготовить ECH"}</button>}
+        <button type="button" disabled={loading || command.pending} onClick={() => void load()}>Обновить</button>
+      </div>
+      {!throughCdn && capability?.message && <p className="routeCdnHint" role="status">{capability.message}</p>}
       {loading && <p role="status">Загрузка…</p>}
       {record && <>
-        <p>Добавьте запись в зоне домена. Если DNS-панель сама дописывает зону, укажите только относительное имя: например, <code>cdn</code> для зоны <code>example.com</code>.</p>
-        <div className="routeEchRecord"><div className="routeEchRecordTitle"><strong>Запись для DNS</strong><span>{record.type}</span></div>
+        <div className="routeEchRecord"><div className="routeEchRecordTitle"><strong>{route === "proxy_or_cdn" ? "HTTPS-запись VPS" : "HTTPS-запись для DNS"}</strong><span>{record.type}</span></div>
           <dl className="routeEchFields">{([["Имя", record.domain], ["Значение", record.content]] as [string, string][]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd><code>{value}</code><button type="button" onClick={() => void copy(label, value)}>{copied === label ? "Скопировано" : "Копировать"}</button></dd></div>)}</dl>
-          <small>Если провайдер сам дописывает зону, используйте относительное имя, например cdn.</small>
         </div>
-        <details className="routeEchAdvanced"><summary>Для DNS-панелей с отдельными полями</summary><dl className="routeEchFields">{([["Приоритет", String(record.priority)], ["Target", record.target], ["TTL", String(record.ttl)], ["Параметры", record.parameters]] as [string, string][]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd><code>{value}</code><button type="button" onClick={() => void copy(label, value)}>{copied === label ? "Скопировано" : "Копировать"}</button></dd></div>)}</dl></details>
-        <p>TTL можно увеличить до минимального значения провайдера. A/AAAA-запись сохраняется. После публикации и обновления DNS включите ECH в настройках устройства и обновите подписку.</p>
-        <p>Внешнее имя ECH: <code>{record.public_name}</code>. Ключи управляются сервером; после их ротации обновите HTTPS-запись. Здесь всегда можно получить текущие параметры. Данные DNS автоматически не изменяются.</p>
+        <details className="routeCdnHelp"><summary>Отдельные поля DNS<span aria-hidden="true">+</span></summary><div><dl className="routeEchFields">{([["Приоритет", String(record.priority)], ["Target", record.target], ["TTL", String(record.ttl)], ["Параметры", record.parameters]] as [string, string][]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd><code>{value}</code><button type="button" onClick={() => void copy(label, value)}>{copied === label ? "Скопировано" : "Копировать"}</button></dd></div>)}</dl></div></details>
+        <dl className="routeCdnHelpMeta"><div><dt>Внешнее имя ECH</dt><dd><code>{record.public_name}</code></dd></div></dl>
       </>}
     </section>}
     </details><OperationNotifications active={false} command={command.operation} onRecheck={command.recheck} onDismiss={command.dismiss} />

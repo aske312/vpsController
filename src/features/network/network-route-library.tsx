@@ -8,57 +8,56 @@ import type { NetworkStatus, NetworkEndpointCheck } from "../../shared/types/con
 import type { NetworkRequest } from "./network-api";
 import type { NetworkListState } from "./network-view";
 import type { useNetworkAddresses } from "./network-addresses";
-import { addressMatches, addressRoleLabels } from "./server-address-state";
+import { addressRoleLabels } from "./server-address-state";
 import type { RelayControl } from "./network-relays";
 import { NetworkRelayNotice } from "./network-relays";
 import { NetworkRouteSummaryBadge } from "./network-route-badge";
 import { serverAddressSummary, type RouteSummary } from "./route-summary";
-import { domainRouteKinds, filterEntries, needsAttention, routeEntries, type RouteEntry } from "./route-library-state";
+import { domainRouteKinds, needsAttention, routeEntries, type RouteEntry } from "./route-library-state";
 import { DomainEntryPanel, RelayEntryPanel } from "./route-library-panels";
-import { NetworkCloudflare, type NetworkCloudflareControl } from "./network-cloudflare";
+import type { NetworkCloudflareControl } from "./network-cloudflare";
 import type { RouteIconKind } from "./route-type-icon";
 import { RoutePagination, routePage } from "./route-pagination";
 import { RouteResourceIcon } from "./route-resource-icon";
 import { useResourceCountries } from "./use-resource-countries";
 import { entryCountryAddresses, resourceCountry } from "./resource-country";
 import { ServerAddressPanel } from "./route-server-panel";
-import { NetworkEch } from "./network-ech";
+import { NetworkCdnSettings } from "./network-cdn-settings";
 
 type Props = { status: NetworkStatus | null; relay: RelayControl; addresses: ReturnType<typeof useNetworkAddresses>; request: NetworkRequest; listState: NetworkListState; onListStateChange: (state: NetworkListState) => void; busy: boolean; failed: boolean; endpointDirty: boolean; onRemove: (kind: NetworkEndpointCheck["kind"], address: string) => void; add: ReactNode; onRefresh?: () => void; cloudflare?: NetworkCloudflareControl; refreshKey: number };
 
 export function NetworkRouteLibrary({ status, relay, addresses, request, listState, onListStateChange, busy, failed, endpointDirty, onRemove, add, onRefresh, cloudflare, refreshKey }: Props) {
-  const [entryPage, setEntryPage] = useState({ query: "", page: 1 });
-  const [ipPage, setIpPage] = useState({ query: "", page: 1 });
+  const [entryPage, setEntryPage] = useState(1);
+  const [ipPage, setIpPage] = useState(1);
   const [deletion, setDeletion] = useState<{ kind: NetworkEndpointCheck["kind"]; address: string } | null>(null);
   const entries = routeEntries(status, relay.status?.hosts || [], failed, relay.failed, Boolean(relay.status?.pending), relay.reading);
-  const visible = filterEntries(entries, listState.query, "all");
   const locations = useResourceCountries(request, entries.flatMap(entryCountryAddresses));
   const selected = entries.find(entry => listState.expanded.includes(entry.id));
   const serverRow = addresses.status?.items.find(row => listState.expanded.includes(`SERVER-${row.address}`));
-  const serverItems = addresses.status?.items.filter(row => addressMatches(row, listState.query)) || [];
-  const entryPagination = routePage(visible, entryPage.query === listState.query ? entryPage.page : 1);
-  const ipPagination = routePage(serverItems, ipPage.query === listState.query ? ipPage.page : 1);
+  const serverItems = addresses.status?.items || [];
+  const entryPagination = routePage(entries, entryPage);
+  const ipPagination = routePage(serverItems, ipPage);
   const close = () => onListStateChange({ ...listState, expanded: [] });
   const open = (id: string) => onListStateChange({ ...listState, expanded: [id] });
   const serverProblem = addresses.failed || addresses.status?.discovery.state === "error" || Boolean(addresses.pending);
   return <section className="routeLibrary" aria-label="Точки входа">
-    <header className="routeLibraryHeader"><div><p className="eyebrow">ROUTES</p><h2>Точки входа</h2><p>Адреса для подключения устройств</p></div><div className="routeLibraryHeaderActions"><label className="routeLibrarySearch"><span className="networkSrOnly">Найти адрес или Relay</span><input type="search" placeholder="Адрес или название" value={listState.query} onChange={event => { const query = event.target.value; setEntryPage({ query, page: 1 }); setIpPage({ query, page: 1 }); onListStateChange({ ...listState, query }); }} /></label>{add}</div></header>
+    <header className="routeLibraryHeader"><div><h2>Точки входа</h2></div><div className="routeLibraryHeaderActions">{add}</div></header>
 
     <NetworkRelayNotice relay={relay} />
     <div className="networkProviderGrid routeLibraryList">{entryPagination.items.map(entry => <RouteStatusCard key={entry.id} title={entry.title} subtitle={entry.kind === "relay" ? entry.address : entry.subtitle} icon={entryIcon(entry)} country={resourceCountry(entryCountryAddresses(entry), locations)} cdn={entry.kind === "domain" && domainRouteKinds(entry).includes("cdn")} summary={entry.summary} onOpen={() => open(entry.id)} facts={entry.kind === "relay" ? <><span>Маршрутов: {entry.host.routes.length}</span><span>{entry.host.version ? `Agent ${entry.host.version}` : "Версия Agent неизвестна"}</span></> : <span>{entry.summary.connection}</span>} />)}</div>
-    <RoutePagination {...entryPagination} label="Точки входа" onChange={page => setEntryPage({ query: listState.query, page })} />
-    {!visible.length && (!listState.query || !serverItems.length) && <div className="routeLibraryEmpty"><strong>{relay.reading && !relay.status ? "Загружаем адреса…" : listState.query ? "Адресов по этому запросу нет" : "Добавьте первую точку входа"}</strong><p>{listState.query ? "Измените поисковый запрос." : "Подключите Relay или добавьте домен."}</p></div>}
-    <section className="routeLibraryServer" aria-label="Адреса этого сервера"><header><h3>Адреса этого сервера <small>{addresses.status?.items.length ?? "…"}</small></h3><p>Для прямого подключения к VPS</p></header>
+    <RoutePagination {...entryPagination} label="Точки входа" onChange={setEntryPage} />
+    {!entries.length && <div className="routeLibraryEmpty"><strong>{relay.reading && !relay.status ? "Загружаем адреса…" : "Добавьте первую точку входа"}</strong><p>Подключите Relay или добавьте домен.</p></div>}
+    <section className="routeLibraryServer" aria-label="Адреса этого сервера"><header><h3>Адреса этого сервера <small>{addresses.status?.items.length ?? "…"}</small></h3></header>
       {serverProblem && <div className="routeLibraryCallout" role="status"><p>{addresses.pending ? "Проверяем результат назначения IP. Команда не повторяется." : "Актуальность адресов не подтверждена."}</p><button type="button" disabled={addresses.reading} onClick={() => void addresses.load()}>Проверить состояние</button></div>}
       {!addresses.status && <p>Определяем адреса…</p>}
       <div className="networkProviderGrid routeServerGrid">{ipPagination.items.map(row => <RouteStatusCard key={row.address} title={row.address} subtitle={`${row.family === "ipv4" ? "IPv4" : "IPv6"} · ${addressRoleLabels[row.role]}`} icon="ip" summary={serverAddressSummary(row, Boolean(serverProblem), Boolean(addresses.pending))} onOpen={() => open(`SERVER-${row.address}`)} facts={<span>{row.role === "primary" ? "Для новых подключений" : row.role === "reserve" ? "Резервный адрес" : row.presence === "present" && !serverProblem ? "Можно назначить основным" : "Назначение недоступно"}</span>} />)}
       </div>
-      <RoutePagination {...ipPagination} label="Адреса этого сервера" onChange={page => setIpPage({ query: listState.query, page })} />
+      <RoutePagination {...ipPagination} label="Адреса этого сервера" onChange={setIpPage} />
     </section>
     {selected && <RouteControlDialog title={selected.title} address={selected.address} subtitle={selected.kind === "relay" ? "Relay Agent" : selected.subtitle} type={selected.kind} icon={entryIcon(selected)} country={resourceCountry(entryCountryAddresses(selected), locations)} cdn={selected.kind === "domain" && domainRouteKinds(selected).includes("cdn")} badge={<NetworkRouteSummaryBadge summary={selected.summary} />} close={close}>
       {needsAttention(selected.summary) && <p className="routeLibraryCallout" role="status">{selected.summary.detail}</p>}
       {selected.kind === "relay" ? <RelayEntryPanel key={selected.id} host={selected.host} relay={relay} close={close} /> : <DomainEntryPanel key={selected.id} entry={selected} request={request} disabled={busy || failed || endpointDirty} onChecked={onRefresh} onRemove={(kind, address) => setDeletion({ kind, address })}>
-        {(selected.checks.some(check => check.kind === "cdn") || selected.domain.endpoint_kind === "cdn" || /cdn/i.test(selected.domain.role)) && <section className="routeTaskCard routeCdnSettings"><header><h3>Защита CDN</h3><p>Параметры соединения CDN с сервером и публикации ECH.</p></header>{cloudflare && <NetworkCloudflare domain={selected.address} detected={selected.domain.edge?.provider.toLowerCase().includes("cloudflare") === true} request={request} control={{ ...cloudflare, blocked: cloudflare.blocked || busy || failed }} refreshKey={refreshKey} />}<NetworkEch domain={selected.address} route={selected.domain.route} request={request} /></section>}
+        <NetworkCdnSettings domain={selected.address} route={selected.domain.route} detected={selected.domain.edge?.provider.toLowerCase().includes("cloudflare") === true} request={request} control={cloudflare && { ...cloudflare, blocked: cloudflare.blocked || busy || failed }} refreshKey={refreshKey} />
       </DomainEntryPanel>}
     </RouteControlDialog>}
     {serverRow && <RouteControlDialog title={serverRow.address} address={serverRow.address} subtitle={`IP сервера · ${serverRow.family === "ipv4" ? "IPv4" : "IPv6"}`} type="server" icon="ip" badge={<NetworkRouteSummaryBadge summary={serverAddressSummary(serverRow, Boolean(serverProblem), Boolean(addresses.pending))} />} close={close}>

@@ -43,11 +43,10 @@ export function NetworkCloudflare({ domain, detected, request, control, refreshK
     finally { setSending(false); setRevision(value => value + 1); }
   }
   return <section className="networkCloudflare" aria-label={`Защита Cloudflare ${domain}`}>
-    <div className="networkCloudflareHeading"><div><p className="eyebrow">CLOUDFLARE · ORIGIN AUTHENTICATION</p><h3>Проверять сертификат Cloudflare</h3></div>
+    <div className="networkCloudflareHeading"><div><h3>Сертификат Cloudflare</h3></div>
       <label className="networkCloudflareToggle"><input type="checkbox" aria-label={`Проверять сертификат Cloudflare для ${domain}`} checked={status?.authenticated_origin_pulls ?? false} disabled={blocked} onChange={event => void change(event.target.checked)} /><span>{pending || sending ? "Проверяем операцию…" : reading ? "Проверяем…" : status?.authenticated_origin_pulls ? "Включено" : "Выключено"}</span></label>
     </div>
-    <p>Принимать CDN-соединения только с клиентским сертификатом Cloudflare. Настройка общая для всех Cloudflare CDN-маршрутов этого сервера.</p>
-    <small>Перед включением настройте Full (strict) и Authenticated Origin Pulls в Cloudflare. При ошибке проверка откатит изменение; возможен краткий разрыв CDN. Сертификат подтверждает сеть Cloudflare, но не ваш аккаунт.</small>
+    <small>Для всех Cloudflare-маршрутов. {status?.authenticated_origin_pulls ? "Доступ только с сертификатом Cloudflare." : "Перед включением настройте Full (strict) и Origin Pulls; возможен краткий разрыв."}</small>
     {error && <p role="status">{error} <button type="button" disabled={reading} onClick={() => setRevision(value => value + 1)}>Обновить</button></p>}
   </section>;
 }

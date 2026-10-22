@@ -201,21 +201,22 @@ export function NetworkRelayForm({ relay }: { relay: RelayControl }) {
   return <div className="relayConnectionEditor relaySettingsEditor">
     <NetworkRelayNotice relay={relay} />
     <form className="relayForm" onSubmit={event => { event.preventDefault(); if (!invalid) void relay.saveHost(); }}>
-      <section className="relaySettingsSection"><header><h3>Узел и адрес подключения</h3><p>Название для панели и адрес, который получат новые клиенты.</p></header>
+      <section className="relaySettingsSection"><header><h3>Узел</h3></header>
         <label>Название узла<input required maxLength={64} value={relay.name} onChange={event => relay.changeName(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} placeholder="Например, Relay Amsterdam" /></label>
         <label>IP или домен для клиентов<input maxLength={253} value={relay.address} onChange={event => relay.changeAddress(event.target.value)} disabled={relay.locked} placeholder="По умолчанию — IP Agent" /></label>
-        <small>Домен должен указывать на Relay без CDN proxy. Схема и порт не нужны.</small>
+        <small>Без CDN, схемы и порта.</small>
       </section>
-      <section className="relaySettingsSection"><header><h3>Доступ к Agent</h3><p>{relay.edit ? "Действующее подключение сохранено. Новые данные нужны только для его замены." : "Вставьте JSON подключения из установленного Relay Agent."}</p></header>
+      <section className="relaySettingsSection"><header><h3>Доступ к Agent</h3></header>
         {relay.edit && <dl className="relaySavedConnection"><div><dt>Agent</dt><dd>{relay.edit.agent_url}</dd></div><div><dt>Ключ доступа</dt><dd>{relay.edit.token_configured ? "Сохранён" : "Не настроен"}</dd></div></dl>}
         <details className="relayCredentialEditor" open={!relay.edit || undefined}><summary>{relay.edit ? relay.connection ? "Новые данные подключения введены" : "Заменить данные подключения" : "JSON подключения"}<span aria-hidden="true">+</span></summary><div>
           <label>JSON подключения Agent<input type="password" autoComplete="new-password" spellCheck={false} required={!relay.edit} value={relay.connection} onChange={event => relay.changeConnection(event.target.value)} disabled={relay.locked || relay.status?.pending && !relay.edit} aria-invalid={invalid || undefined} placeholder="Вставьте JSON из раздела Agent" /></label>
+          {relay.edit && <small>Пустое поле сохранит текущий ключ.</small>}
           {invalid && <p role="status" className="relayFormValidation">JSON не распознан. Вставьте полные данные подключения Agent.</p>}
-          {preview && <p className="relayConnectionPreview">Будет использован Agent: <code>{preview.agent_url}</code></p>}
+          {preview && <p className="relayConnectionPreview">Agent: <code>{preview.agent_url}</code></p>}
           {relay.connection && <button type="button" disabled={relay.locked} onClick={() => relay.changeConnection("")}>Убрать новые данные</button>}
         </div></details>
       </section>
-      {!!relay.edit?.excluded_addresses?.length && <section className="relaySettingsSection"><header><h3>Исключённые адреса</h3><p>Можно вернуть их в выбор для новых подключений.</p></header><ul className="relayExcludedAddresses">{relay.edit.excluded_addresses.map(address => <li key={address}><code>{address}</code><button type="button" disabled={relay.locked || relay.status?.pending} onClick={() => {
+      {!!relay.edit?.excluded_addresses?.length && <section className="relaySettingsSection"><header><h3>Исключённые адреса</h3></header><ul className="relayExcludedAddresses">{relay.edit.excluded_addresses.map(address => <li key={address}><code>{address}</code><button type="button" disabled={relay.locked || relay.status?.pending} onClick={() => {
         if (relay.edit && relay.status) void relay.submit(`/network/relays/${relay.edit.id}/address?address=${encodeURIComponent(address)}&restore=true`, { method: "DELETE", headers: { "If-Match": relay.status.revision } }).then(started => { if (started) relay.resetDialog(); });
       }}>Вернуть</button></li>)}</ul></section>}
       <footer className="relaySettingsFooter">{relay.edit && <button type="button" className="routeLibraryDanger" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setConfirmation(relay.edit)}>Удалить Relay</button>}<div className="relayActions"><button type="button" onClick={relay.close}>Отмена</button><button type="submit" className="networkPrimaryButton" disabled={invalid || relay.locked || relay.status?.pending && !relay.edit || !relay.name.trim() || !relay.edit && !relay.connection}>{relay.edit ? "Проверить и сохранить" : "Подключить Relay"}</button></div></footer>

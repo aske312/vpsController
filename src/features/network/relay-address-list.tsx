@@ -18,6 +18,6 @@ export function RelayAddressList({ host, relay }: { host: RelayHost; relay: Rela
       const type = ip ? ip.includes(":") ? "IPv6" : "IPv4" : "Домен";
       const dns = check ? ({ verified: "DNS подтверждён", dns_only: "DNS определён", unresolved: "Нет DNS", mismatch: "DNS указывает на другой сервер" })[check.state] : "";
       return <li key={address}><div className="routeNodeAddress"><RouteTypeIcon kind={ip ? "ip" : "domain"} /><div><code>{address}</code><small>{type}{index === 0 ? " · Для клиентов" : ""}{dns ? ` · ${dns}` : ""}</small></div></div><div className="routeAddressActions"><button type="button" aria-label={`Копировать ${address}`} onClick={async () => { try { await navigator.clipboard.writeText(address); setCopied(address); } catch { error("Не удалось скопировать адрес. Выделите его и скопируйте вручную."); } }}>{copied === address ? "Скопировано" : "Копировать"}</button><button type="button" disabled={relay.locked || relay.status?.pending} onClick={() => relay.setAddressConfirmation({ host, address })}>Исключить</button></div></li>;
-    })}</ul><small>Исключение убирает адрес из выбора для новых подключений. Существующие подключения сохраняются.</small>
+    })}</ul><small>Исключение действует только на новые подключения.</small>
   </div></details>;
 }

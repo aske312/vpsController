@@ -29,7 +29,36 @@
 [data-network-page] .routeEchFields dt { color:var(--muted); font-size:11px; }
 [data-network-page] .routeEchFields dd { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:9px; min-width:0; margin:0; }
 [data-network-page] .routeEchFields code { flex:1; min-width:120px; overflow-wrap:anywhere; white-space:normal; color:var(--text); font:11px/1.6 var(--technical-font); }
-[data-network-page] .routeEchAdvanced > summary { margin-bottom:12px; color:var(--muted); font-size:12px; cursor:pointer; }
+[data-network-page] .routeEchActions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+[data-network-page] .routeCdnEchProvider { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding-top:12px; border-top:1px solid var(--line); font:500 12px/1.5 var(--ui-font); }
+[data-network-page] .routeCdnEchProvider > span:first-child { display:flex; align-items:center; gap:8px; color:var(--text); }
+[data-network-page] .routeCdnEchProvider > span:last-child { color:var(--muted); font-weight:400; }
+[data-network-page] .routeCdnSettings .networkEch { margin:0; }
+[data-network-page] .routeCdnSettings .routeEchDisclosure > summary { padding:10px 0; font-size:12px; }
+[data-network-page] .routeCdnSettings > .routeCdnHelp { margin-top:0; }
+[data-network-page] .routeCdnSettings .networkCloudflareHeading { align-items:center; }
+[data-network-page] .routeCdnSettings .networkCloudflareHeading h3 { margin:0; font-size:13px; }
+[data-network-page] .routeCdnSettings .routeCdnHint { margin:0; padding:10px 12px; border-left:2px solid var(--line); border-radius:0 7px 7px 0; background:var(--panel); color:var(--muted); font:400 12px/1.6 var(--ui-font); }
+[data-network-page] .routeCdnSettings .routeCdnHintWarning { border-left-color:var(--amber); }
+[data-network-page] .routeCdnHelp { min-width:0; border-top:1px solid var(--line); }
+[data-network-page] .routeCdnHelp > summary { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0; list-style:none; color:var(--muted); font:500 12px/1.5 var(--ui-font); cursor:pointer; }
+[data-network-page] .routeCdnHelp > summary::-webkit-details-marker { display:none; }
+[data-network-page] .routeCdnHelp > summary > span { flex:0 0 auto; transition:transform .15s ease; }
+[data-network-page] .routeCdnHelp[open] > summary > span { transform:rotate(45deg); }
+[data-network-page] .routeCdnHelp > summary:focus-visible { outline:2px solid var(--cyan); outline-offset:2px; border-radius:4px; }
+[data-network-page] .routeCdnHelp > div { display:grid; gap:10px; padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--panel); }
+[data-network-page] .routeCdnHelp > div > p { margin:0; font:400 12px/1.6 var(--ui-font); }
+[data-network-page] .routeCdnHelp ol { display:grid; gap:10px; margin:0; padding-left:20px; color:var(--muted); font:400 12px/1.6 var(--ui-font); }
+[data-network-page] .routeCdnHelp li { padding-left:3px; overflow-wrap:anywhere; }
+[data-network-page] .routeCdnHelp code { color:var(--text); font:11px/1.6 var(--technical-font); overflow-wrap:anywhere; }
+[data-network-page] .routeEchDisclosure .routeEchFields { gap:12px; margin:0; }
+[data-network-page] .routeEchDisclosure .routeEchFields > div { grid-template-columns:1fr; gap:6px; }
+[data-network-page] .routeEchDisclosure .routeEchFields dt { font:400 11px/1.5 var(--ui-font); }
+[data-network-page] .routeEchDisclosure .routeEchFields dd { align-items:flex-start; }
+[data-network-page] .routeEchDisclosure .routeCdnHelpMeta { display:block; margin:0; padding-top:10px; border-top:1px solid var(--line); }
+[data-network-page] .routeEchDisclosure .routeCdnHelpMeta > div { display:flex; flex-wrap:wrap; gap:6px 12px; }
+[data-network-page] .routeEchDisclosure .routeCdnHelpMeta dt { color:var(--muted); font:400 11px/1.6 var(--ui-font); }
+[data-network-page] .routeEchDisclosure .routeCdnHelpMeta dd { margin:0; }
 [data-network-page] .relaySettingsModal { width:min(680px,100%); }
 [data-network-page] .relaySettingsHeading { display:flex; align-items:flex-start; gap:14px; }
 [data-network-page] .relaySettingsHeading h2 { margin:4px 0; font-size:20px; }

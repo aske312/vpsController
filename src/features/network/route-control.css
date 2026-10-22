@@ -15,6 +15,7 @@
 [data-network-page] .routeControlModal .routeDetailsBody { gap:14px; padding:18px 22px 20px; }
 [data-network-page] .routeControlModal .routeDetailsBody p { font-size:12px; line-height:1.6; }
 [data-network-page] .routeControlModal .routeDetailsBody small { font-size:11px; line-height:1.5; }
+[data-network-page] .routeControlModal .routeDetailsBody button { width:fit-content; max-width:100%; justify-self:start; flex:0 0 auto; }
 [data-network-page] .routeTaskCard { display:grid; gap:16px; min-width:0; padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--panel-inset); }
 [data-network-page] .routeTaskCard h3, [data-network-page] .routeAgentCard h3 { margin:0; color:var(--text); font:600 14px/1.5 var(--ui-font); }
 [data-network-page] .routeTaskCard header { display:grid; gap:5px; }
@@ -31,6 +32,16 @@
 [data-network-page] .routeTestOptions { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr)); gap:10px; }
 [data-network-page] .routeTestOptions > div { display:grid; grid-template-rows:auto 1fr auto; align-items:start; gap:9px; padding:14px; border:1px solid var(--line); border-radius:9px; background:var(--panel); }
 [data-network-page] .routeTestOptions button { justify-self:start; }
+[data-network-page] .routeRelayTests .routeTestOptions { grid-template-columns:minmax(0,1fr); }
+[data-network-page] .routeRelayTests .routeTestOptions > div { grid-template-rows:auto; gap:12px; }
+[data-network-page] .routeRelayTests h3 small { display:inline; margin-left:6px; color:var(--muted); font-weight:400; }
+[data-network-page] .routeRelayPath { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; color:var(--muted); background:var(--panel); font-size:12px; }
+[data-network-page] .routeRelayPath code { color:var(--text); font:12px/1.6 var(--technical-font); }
+[data-network-page] .routeRelayPathState { margin-left:auto; }
+[data-network-page] .routeRelayPathState[data-state=listening] { color:var(--cyan); }
+[data-network-page] .routeRelayPathState:is([data-state=failed],[data-state=missing],[data-state=drift]) { color:var(--amber); }
+[data-network-page] .routeTransport-tls_relay { border-top:2px solid var(--green); }
+[data-network-page] .routeTransport-udp_relay { border-top:2px solid var(--amber); }
 [data-network-page] .routeDetailsBody .routeActionPrimary { border-color:color-mix(in srgb,var(--cyan) 45%,var(--line)); background:color-mix(in srgb,var(--cyan) 10%,var(--panel)); color:var(--cyan); }
 [data-network-page] .routeTestResults { display:grid; gap:8px; padding:12px 14px; border-left:2px solid var(--cyan); border-radius:0 8px 8px 0; background:var(--panel); }
 [data-network-page] .routeControlFooter { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; padding-top:14px; border-top:1px solid var(--line); }
