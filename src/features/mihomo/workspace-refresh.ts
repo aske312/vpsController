@@ -84,12 +84,26 @@ export function moduleSnapshots(value: unknown): Module[] {
   return items as Module[];
 }
 
+function subscriptionLimits(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!record(value)) return false;
+  return ([['speed_mbps', 100000], ['traffic_gb', 1000000], ['days', 36500]] as const).every(([key, max]) => value[key] === null || (Number.isInteger(value[key]) && Number(value[key]) >= 1 && Number(value[key]) <= max));
+}
+
+function subscriptionLimitStatus(value: unknown): boolean {
+  if (value === undefined) return true;
+  return record(value) && ['active', 'expired', 'exhausted', 'unknown'].includes(String(value.state))
+    && typeof value.enforced === 'boolean' && Number.isSafeInteger(value.used_bytes) && Number(value.used_bytes) >= 0
+    && ['started_at', 'expires_at', 'checked_at'].every(key => value[key] === null || (typeof value[key] === 'number' && Number.isFinite(value[key]) && Number(value[key]) >= 0 && Number(value[key]) <= 253402300799));
+}
+
 export function profileSnapshots(value: unknown): Profile[] {
   const items = namedCollection(value);
   for (const item of items) {
     if (!optionalStrings(item, ["export_filename", "created_at", "updated_at", "common_device_id", "revision", "create_revision", "create_operation_id", "last_operation_id"])
       || (item.subscription_status !== undefined && !["active", "obsolete", "missing"].includes(String(item.subscription_status)))
       || (item.protection_status !== undefined && !protectionStatus(item.protection_status))
+      || !subscriptionLimits(item.limits) || !subscriptionLimitStatus(item.limits_status)
       || (item.channels !== undefined && !stringList(item.channels))
       || !uniqueRows(item.connections) || item.connections.some((row) => !record(row) || typeof row.component !== "string"
         || !optionalStrings(row, ["name", "device_id"]) || !scalarRecord(row.settings) || !routeState(row.route_state))

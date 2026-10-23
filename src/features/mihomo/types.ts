@@ -60,6 +60,9 @@ export type Module = {
   update_breaking?: boolean;
 };
 
+export type SubscriptionLimits = { speed_mbps: number | null; traffic_gb: number | null; days: number | null };
+export type SubscriptionLimitsStatus = { state: "active" | "expired" | "exhausted" | "unknown"; enforced: boolean; used_bytes: number; started_at: number | null; expires_at: number | null; checked_at: number | null };
+
 export type Profile = {
   id: string;
   revision?: string;
@@ -68,6 +71,8 @@ export type Profile = {
   last_operation_id?: string;
   export_filename: string;
   name: string;
+  limits?: SubscriptionLimits;
+  limits_status?: SubscriptionLimitsStatus;
   channels: string[];
   connections: ProfileConnection[];
   routing?: Record<string, string | number | boolean>;

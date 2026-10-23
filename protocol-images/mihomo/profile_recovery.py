@@ -53,6 +53,7 @@ def restore_enablement(api, unit, saved):
 
 def allowed_files(api, modules, *, include_personal_rules=False, settings_modules=()):
     return {"profiles": api.PROFILE_FILE, "routing": api.ROUTING_SETTINGS_FILE,
+            "subscription-limits": api.PROFILE_FILE.parent / "subscription-limits" / "policy.json",
             **({"personal-rules": api.PERSONAL_RULES_FILE} if include_personal_rules else {}),
             **{f"settings-{module}": api.SETTINGS_ROOT / f"{module}.json" for module in settings_modules},
             **{f"external-{module}": path for module, path in api.WG_CONFIG_BY_MODULE.items() if module in modules}}

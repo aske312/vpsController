@@ -7,6 +7,8 @@ import { Tab, HeroFact, ModuleCatalog, Empty } from "./components";
 import { clientCapabilities, compatibleClientRouting, clientConnectionSupported } from "./client-capabilities";
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
+import { SubscriptionLimitsFields, unlimitedSubscription } from "./subscription-limits";
+import type { SubscriptionLimits } from "./types";
 import { AccessReveal } from "../../shared/components/access-reveal";
 import { useDialogFocus } from "../../shared/components/use-dialog-focus";
 import { ProtocolIcon } from "../../shared/components/protocol-icon";
@@ -157,11 +159,12 @@ export function MihomoPage({
   const [profileStep, setProfileStep] = useState(1);
   const profileCanvasRef = useRef<HTMLElement>(null);
   const [profileName, setProfileName] = useState("");
+  const [profileLimits, setProfileLimits] = useState<SubscriptionLimits>({ ...unlimitedSubscription });
   const [profileConnections, setProfileConnections] = useState<ProfileConnection[]>([]);
   const [profileRouting, setProfileRouting] = useState<Record<string, string | number | boolean>>({});
   const [profileStrategyTouched, setProfileStrategyTouched] = useState(false);
   const [profileDevices, setProfileDevices] = useState<ProfileDevice[]>([{ id: "profile-common", name: "Общие настройки профиля", scope: "common" }]);
-  const profileDraft = JSON.stringify([profileName, profileConnections, profileRouting, profileDevices]);
+  const profileDraft = JSON.stringify([profileName, profileConnections, profileRouting, profileDevices, profileLimits]);
   const profileDraftRef = useRef(profileDraft);
   profileDraftRef.current = profileDraft;
   const profileDirty = Boolean(profileDialog && profileDraft !== profileInitialDraft);
@@ -841,12 +844,13 @@ export function MihomoPage({
   function newProfile() {
     setProfileBaselineConflict(false);
     profileSession.current += 1;
-    setProfileInitialDraft(JSON.stringify(["", [], {}, [{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: {} }]]));
+    setProfileInitialDraft(JSON.stringify(["", [], {}, [{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: {} }], unlimitedSubscription]));
     profileMutationId.current = clientUuid();
     setProfileStep(1);
     setProfileStrategyTouched(false);
     setProfileDialog("new");
     setProfileName("");
+    setProfileLimits({ ...unlimitedSubscription });
     setProfileConnections([]);
     setProfileRouting({});
     setProfileDevices([{ id: "profile-common", name: "Общие настройки профиля", scope: "common", routing: {} }]);
@@ -861,6 +865,7 @@ export function MihomoPage({
     setProfileStrategyTouched(true);
     setProfileDialog(profile);
     setProfileName(profile.name);
+    setProfileLimits({ ...unlimitedSubscription, ...profile.limits });
     const connections = (profile.connections || []).map((connection) => ({
       ...connection,
       settings: connection.component === "transport-reality"
@@ -871,7 +876,7 @@ export function MihomoPage({
     setProfileRouting({ ...(profile.routing || {}) });
     const devices = (profile.devices?.length ? profile.devices : [{ id: "profile-common", name: "Общие настройки профиля", scope: "common" as const }]).map((device) => ({ ...device, routing: device.scope === "common" ? { ...(device.routing || profile.routing || {}) } : compatibleClientRouting(device.routing || {}, String(device.routing?.client_config_format || "mihomo"), device.os || "unknown", device.manual ? undefined : device.client_name) }));
     setProfileDevices(devices);
-    setProfileInitialDraft(JSON.stringify([profile.name, connections, { ...(profile.routing || {}) }, devices]));
+    setProfileInitialDraft(JSON.stringify([profile.name, connections, { ...(profile.routing || {}) }, devices, { ...unlimitedSubscription, ...profile.limits }]));
     setActiveDeviceId(profile.common_device_id || devices.find((device) => device.scope === "common")?.id || devices[0].id);
   }
 
@@ -984,7 +989,7 @@ export function MihomoPage({
     const submittedDraft = profileDraft;
     const mutation: ProfileMutation = {
       profileId: profileDialog === "new" ? undefined : profileDialog.id,
-      payload: { name: profileName, devices: profileDevices, connections: profileConnections, routing: profileDevices.find((device) => device.scope === "common")?.routing || profileRouting, operation_id: profileMutationId.current, ...(profileDialog !== "new" ? { expected_revision: profileDialog.revision } : {}) },
+      payload: { name: profileName, limits: profileLimits, devices: profileDevices, connections: profileConnections, routing: profileDevices.find((device) => device.scope === "common")?.routing || profileRouting, operation_id: profileMutationId.current, ...(profileDialog !== "new" ? { expected_revision: profileDialog.revision } : {}) },
     };
     const save: PolicySave = { id: mutation.payload.operation_id.replaceAll("-", ""), kind: "operation", action: mutation.profileId ? "mihomo-profile-update" : "mihomo-profile-create" };
     pendingPolicySaveRef.current = save;
@@ -1690,6 +1695,7 @@ export function MihomoPage({
               {profileDevices.find((device) => device.id === activeDeviceId)?.scope === "common" ? <>
                 <header><div><b>Название профиля</b><small>Отображается в панели и помогает отличать подписки.</small></div></header>
                 <label><span>Название профиля</span><input value={profileName} onChange={(event) => setProfileName(event.target.value)} required maxLength={80} placeholder="Например, Основной" /></label>
+                <SubscriptionLimitsFields value={profileLimits} status={latestEditProfile?.limits_status} disabled={Boolean(busy) || Boolean(pendingProfileSave)} onChange={setProfileLimits} />
               </> : <>
                 <header><div><b>Устройство</b><small>Индивидуальные подключения, маршрутизация и файл для клиента.</small></div></header>
                 <p>{activeProfileDevice?.manual ? "Общая конфигурация sing-box для всех устройств этого профиля. Без привязки к HWID; трафик и подключения общие." : "Устройство зарегистрировано по HWID. Приложение: " + (activeProfileDevice?.client_name || "не определено")}</p>
@@ -1756,6 +1762,7 @@ export function MihomoPage({
                     {!supported && <p>Подключение несовместимо с форматом клиента. Удалите его или выберите поддерживаемый формат.</p>}
                     <div className="mihomoConnectionFields">
                       {schema.filter((field) => {
+                        if (connection.component === "transport-hysteria2" && ["up_mbps", "down_mbps"].includes(field.key)) return false;
                         if (field.formats && !commonDevice && !field.formats.includes(String(activeProfileRouting.client_config_format || "mihomo"))) return false;
                         if (["xray_protocol", "route_mode", "cdn_enabled", "privacy_mode", "cdn_ech", "cdn_domain", "tls_domain"].includes(field.key)) return false;
                         if (connection.component === "transport-reality" && vlessRoute === "cdn" && ["port", "target", "transport", "transport_path", "xhttp_mode", "xpadding", "xmux_concurrency"].includes(field.key)) return false;

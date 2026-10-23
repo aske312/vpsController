@@ -175,6 +175,7 @@ for name, installed in state.get('modules', {}).items():
 PY
 )
 fi
+bash "${MODULE_DIR}/install-subscription-limits.sh"
 systemctl daemon-reload
 systemctl enable --now vps-control-mihomo-manager.service
 

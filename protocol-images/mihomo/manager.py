@@ -54,6 +54,7 @@ import relay_connections
 import relay_cdn
 import xray_protocols
 import xray_core
+import subscription_limits
 from relay_manager import RelayManager, RelayAddressError
 from service_state import observe_service
 import port_allocation
@@ -166,8 +167,13 @@ def transactional_profile_mutation(function):
 @contextmanager
 def profile_runtime_transaction(modules: set[str], *, include_personal_rules: bool = False, settings_modules: set[str] | None = None):
     from profile_recovery import transaction
-    with transaction(sys.modules[__name__], modules, include_personal_rules=include_personal_rules, settings_modules=settings_modules or set()):
-        yield
+    previous_policy = subscription_limits.current_policy(sys.modules[__name__])
+    try:
+        with transaction(sys.modules[__name__], modules, include_personal_rules=include_personal_rules, settings_modules=settings_modules or set()):
+            yield
+    except BaseException:
+        subscription_limits.restore(sys.modules[__name__], previous_policy)
+        raise
 
 
 def recover_profile_runtime():
@@ -366,6 +372,7 @@ class ProfileCreate(BaseModel):
     connections: list[ProfileConnectionInput] | None = None
     devices: list[ProfileDeviceInput] = Field(default_factory=lambda: [ProfileDeviceInput(id="profile-common", name="Общие настройки профиля")], min_length=1)
     routing: dict[str, Any] = Field(default_factory=dict)
+    limits: subscription_limits.SubscriptionLimits | None = None
     operation_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
 
 
@@ -375,6 +382,7 @@ class ProfileUpdate(BaseModel):
     connections: list[ProfileConnectionInput] | None = None
     devices: list[ProfileDeviceInput] | None = Field(default=None, min_length=1)
     routing: dict[str, Any] | None = None
+    limits: subscription_limits.SubscriptionLimits | None = None
     operation_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
     expected_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
@@ -511,6 +519,7 @@ def save_state(value: dict[str, Any]) -> None:
 def normalize_profile(item: dict[str, Any]) -> dict[str, Any]:
     """Expose legacy profiles through the connection-instance model."""
     result = dict(item)
+    result["limits"] = subscription_limits.normalized(result.get("limits"))
     connections = result.get("connections")
     if not isinstance(connections, list):
         credentials = result.get("credentials", {}) if isinstance(result.get("credentials"), dict) else {}
@@ -628,6 +637,7 @@ def profiles() -> list[dict[str, Any]]:
 
 
 def save_profiles(value: list[dict[str, Any]]) -> None:
+    subscription_limits.sync(sys.modules[__name__], value)
     atomic_json(PROFILE_FILE, value)
 
 
@@ -642,7 +652,7 @@ def profile_revision(item: dict[str, Any]) -> str:
     value = normalize_profile(deepcopy(item))
     device_keys = ("id", "name", "scope", "manual", "routing", "personal_rule_ids", "os", "client_name", "import_client")
     connection_keys = ("id", "name", "component", "device_id", "settings")
-    editable = {"id": value["id"], "name": value.get("name"), "routing": value.get("routing", {}),
+    editable = {"id": value["id"], "name": value.get("name"), "routing": value.get("routing", {}), "limits": subscription_limits.normalized(value.get("limits")),
                 "common_device_id": value["common_device_id"],
                 "devices": [{key: device.get(key) for key in device_keys} for device in value["devices"]],
                 "connections": [{key: connection.get(key) for key in connection_keys} for connection in value["connections"]]}
@@ -657,6 +667,7 @@ def check_profile_revision(item: dict[str, Any], expected: str | None) -> None:
 def profile_response(item: dict[str, Any]) -> dict[str, Any]:
     result = {key: value for key, value in normalize_profile(deepcopy(item)).items() if key not in {"subscriptions", "subscription_token", "retiring_connections", "last_operation_revision"}}
     result["revision"] = profile_revision(item)
+    result["limits_status"] = subscription_limits.status(item, DATA_ROOT / "subscription-limits")
     if item.get("last_operation_revision") and item["last_operation_revision"] != result["revision"]:
         result["last_operation_id"] = ""
     for device in result["devices"]:
@@ -3305,6 +3316,7 @@ def rebuild_vless_cdn_snippet() -> None:
 
 def apply_reality_config(config_path: Path, config: dict[str, Any], restart_service: bool = True) -> None:
     ensure_vless_panel_route(config)
+    config = subscription_limits.decorate_xray(config, subscription_limits.current_policy(sys.modules[__name__]))
     config.setdefault("policy", {}).setdefault("levels", {}).setdefault("0", {})["statsUserOnline"] = True
     # Xray determines the config loader from the final extension. Keep .json
     # last; names such as config.json.candidate are rejected by newer Xray.
@@ -3584,6 +3596,7 @@ def write_quic_runtime(module_id: str) -> None:
         inbound.update({"congestion_control": settings["congestion_control"], "auth_timeout": "3s", "zero_rtt_handshake": False, "heartbeat": settings["heartbeat"]})
     candidate = root / "config.candidate.json"
     runtime = {"log": {"level": "warn"}, "inbounds": [inbound], "outbounds": [{"type": "direct"}]}
+    runtime = subscription_limits.decorate_quic(runtime, subscription_limits.current_policy(sys.modules[__name__]), module)
     telemetry_service = quic_telemetry_service(module_id, load_json(config_path, {}))
     if telemetry_service:
         runtime["services"] = [telemetry_service]
@@ -4339,6 +4352,7 @@ def verification_digest(value: Any) -> str:
 def client_verification_scenario(profile: dict[str, Any], device_id: str) -> dict[str, Any]:
     """Public protocol requirements, never keys, tokens, target hosts or HWID."""
     profile = normalize_profile(deepcopy(profile))
+    profile["connections"] = subscription_limits.client_connections(profile, profile["connections"])
     connections = []
     for connection in profile["connections"]:
         if str(connection.get("device_id")) != device_id:
@@ -4483,6 +4497,8 @@ def create_profile(payload: ProfileCreate) -> dict[str, Any]:
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
+            if payload.limits is not None:
+                subscription_limits.set_limits(item, payload.limits.model_dump())
             sync_legacy_profile_fields(item)
             item["create_revision"] = profile_revision(item)
             data = profiles()
@@ -4510,6 +4526,8 @@ def update_profile(profile_id: str, payload: ProfileUpdate) -> dict[str, Any]:
     write_action(f"profile-update:{profile_id}", f"Обновление профиля «{item.get('name', '')}»…", progress=15)
     if payload.name is not None:
         item["name"] = payload.name.strip()
+    if payload.limits is not None:
+        subscription_limits.set_limits(item, payload.limits.model_dump())
     if payload.routing is not None:
         item["routing"] = validate_routing(payload.routing, current=item.get("routing", {}))
     if payload.devices is not None:
@@ -4974,7 +4992,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "transport-tuic": "TUIC",
     }
     normalized = normalize_profile(item)
-    normalized["connections"] = effective_client_connections(normalized.get("connections", []))
+    normalized["connections"] = subscription_limits.client_connections(normalized, effective_client_connections(normalized.get("connections", [])))
     selected_device = device_id or str(normalized["common_device_id"])
     connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
     connections = with_relay_labels(connections)
@@ -5189,7 +5207,7 @@ def validate_client_capabilities(profile):
 
 def render_client_profile(item: dict[str, Any], device_id: str, requested_format: str | None = None, client_name: str | None = None) -> tuple[str, str]:
     profile = normalize_profile(item)
-    profile["connections"] = effective_client_connections(profile.get("connections", []))
+    profile["connections"] = subscription_limits.client_connections(profile, effective_client_connections(profile.get("connections", [])))
     device = next((entry for entry in profile["devices"] if entry["id"] == device_id), {})
     client_name = None if device.get("manual") else client_name or device.get("client_name")
     device_values = device_routing(profile, device_id)
@@ -5495,6 +5513,9 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
                 break
     if not selected_profile:
         raise HTTPException(status_code=404, detail="Subscription not found")
+    access = subscription_limits.status(selected_profile, DATA_ROOT / "subscription-limits")
+    if access["state"] in {"expired", "exhausted"}:
+        raise HTTPException(status_code=403, detail="Срок подписки истёк" if access["state"] == "expired" else "Объём трафика подписки исчерпан")
     if "text/html" in request.headers.get("accept", "").lower() and not request.query_params.get("client") and not client_formats(subscription_device_metadata(request)):
         import_device = bound_device or str(normalize_profile(selected_profile)["common_device_id"])
         apps = [client_compatibility.public_record(record) for record in verified_profile_clients(selected_profile, import_device)]
@@ -5562,6 +5583,7 @@ def public_profile_subscription(token: str, request: Request, allow_changes: boo
             "Cache-Control": "no-store",
             "Content-Disposition": f'inline; filename="{Path(profile_export_filename(selected_profile)).stem}.{extension}"',
             "Profile-Update-Interval": "24",
+            "Subscription-Userinfo": subscription_limits.userinfo(selected_profile, DATA_ROOT / "subscription-limits"),
         },
     )
 

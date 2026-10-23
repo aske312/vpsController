@@ -87,6 +87,14 @@ if ((${#failures[@]})); then
 fi
 
 systemctl disable --now "${MANAGER_SERVICE}" >/dev/null 2>&1 || true
+systemctl disable --now vps-control-subscription-limits.service >/dev/null 2>&1 || true
+if command -v nft >/dev/null 2>&1 && nft list table inet vps_mihomo_limits >/dev/null 2>&1; then
+  nft delete table inet vps_mihomo_limits
+fi
+rm -f /etc/systemd/system/vps-control-subscription-limits.service
+for unit in vps-control-mihomo-manager vps-control-mihomo-reality vps-control-mihomo-tuic vps-control-mihomo-hysteria2 vps-control-mihomo-ss@ wg-quick@mh-wg0 awg-quick@mh-awg0; do
+  rm -f "/etc/systemd/system/${unit}.service.d/20-subscription-limits.conf"
+done
 systemctl disable --now "${CAPABILITIES_TIMER}" "${CAPABILITIES_SERVICE}" >/dev/null 2>&1 || true
 rm -f /etc/systemd/system/vps-control-mihomo-manager.service \
   /etc/systemd/system/"${CAPABILITIES_SERVICE}" \
