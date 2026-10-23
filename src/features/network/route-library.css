@@ -73,7 +73,7 @@
 [data-network-page] .routeLibraryServer .routePagination { margin:12px 0 0; }
 [data-network-page] .routeLibrary > .networkNotice { margin:0 28px 16px; }
 [data-network-page] .routeLibraryDiagnostics { padding:16px 22px; border:1px solid var(--line); border-radius:12px; background:var(--panel); }
-[data-network-page] .routeLibraryDiagnostics > summary { color:var(--muted); font-size:13px; cursor:pointer; }
+[data-network-page] .routeLibraryDiagnostics > h2 { margin:0; color:var(--muted); font-size:13px; font-weight:400; }
 [data-network-page] .routeLibraryDiagnostics .networkCapabilityActions { margin:16px 0; }
 [data-network-page] .routeLibraryQuickActions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
 [data-network-page] .routeLibraryQuickActions > span { margin-left:auto; color:var(--dim); font-size:13px; }

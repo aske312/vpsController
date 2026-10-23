@@ -481,6 +481,6 @@ function DiagnosticsV2({
 }) {
   return <div className="networkV2">
     <NetworkRouteLibrary status={status} relay={relay} addresses={addresses} request={request} listState={listState} onListStateChange={onListStateChange} busy={busy} failed={readFailed} endpointDirty={endpointDirty} onRemove={onRemoveRoute} onRefresh={onRefresh} cloudflare={cloudflare} refreshKey={refreshKey} add={status && endpointDraft && <NetworkEndpoints relay={relay} request={request} existing={status.transport_endpoints} busy={busy} readFailed={readFailed} onDirtyChange={onRouteDirtyChange} onReset={() => setEndpointDraft(status.transport_endpoints)} onSave={saveEndpoints} />} />
-    {status?.capabilities && <details className="routeLibraryDiagnostics"><summary>Диагностика сети</summary><div className="networkCapabilityActions"><button type="button" onClick={onRefresh} disabled={busy}>Обновить проверки</button></div><div className="networkCapabilityGrid">{status.capabilities.checks.map(check => <NetworkCapabilityCard check={check} key={check.id} />)}</div></details>}
+    {status?.capabilities && <section className="routeLibraryDiagnostics" aria-label="Диагностика сети"><h2>Диагностика сети</h2><div className="networkCapabilityActions"><button type="button" onClick={onRefresh} disabled={busy}>Обновить проверки</button></div><div className="networkCapabilityGrid">{status.capabilities.checks.map(check => <NetworkCapabilityCard check={check} key={check.id} />)}</div></section>}
   </div>;
 }

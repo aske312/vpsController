@@ -2,6 +2,7 @@ import io
 import json
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
@@ -9,27 +10,60 @@ from pydantic import ValidationError
 from tests.api.support import api
 
 
+class InlineExecutor:
+    def submit(self, function, *args):
+        function(*args)
+
+
 class ResourceCountryTests(unittest.TestCase):
-    def lookup(self, rows):
-        opener = Mock(side_effect=lambda *args, **kwargs: io.BytesIO(json.dumps(rows).encode()))
+    def lookup(self, codes):
+        def respond(request, **kwargs):
+            index, template = next((i, url) for i, url in enumerate(api.resource_country._PROVIDER_URLS)
+                                   if request.full_url.startswith(url.split("{ip}")[0]))
+            prefix, suffix = template.split("{ip}")
+            ip = request.full_url.removeprefix(prefix).removesuffix(suffix)
+            value = codes[index]
+            if isinstance(value, Exception):
+                raise value
+            row = value if isinstance(value, dict) else {"ip": ip, "country_code": value}
+            return io.BytesIO(json.dumps(row).encode())
+        opener = Mock(side_effect=respond)
         clock = [10.0]
-        service = api.resource_country.CountryLookup(opener=opener, clock=lambda: clock[0])
+        service = api.resource_country.CountryLookup(opener=opener, clock=lambda: clock[0], executor=InlineExecutor())
         return service, opener, clock
 
-    def test_public_ips_are_batched_deduplicated_and_cached(self):
-        service, opener, clock = self.lookup([{'ip': '8.8.8.8', 'country': 'US'}, {'ip': '2606:4700::1111', 'country': 'AU'}])
-        result = service.lookup(['8.8.8.8', '8.8.8.8', '2606:4700::1111'])
-        self.assertEqual([item['country_code'] for item in result['items']], ['US', 'AU'])
-        request = opener.call_args.args[0]
-        self.assertEqual(request.full_url, 'https://api.country.is/')
-        self.assertEqual(json.loads(request.data), ['8.8.8.8', '2606:4700::1111'])
-        self.assertEqual(opener.call_args.kwargs['timeout'], 4)
-        clock[0] += 86399
-        service.lookup(['8.8.8.8'])
-        self.assertEqual(opener.call_count, 1)
-        clock[0] += 2
-        service.lookup(['8.8.8.8', '2606:4700::1111'])
-        self.assertEqual(opener.call_count, 2)
+    def test_majority_corrects_outlier_without_address_overrides(self):
+        service, opener, _ = self.lookup(['FI', 'FI', 'US', 'FI', 'US'])
+        self.assertEqual(service.lookup(['85.209.155.229'])['items'][0]['country_code'], 'FI')
+        self.assertEqual(opener.call_count, 5)
+
+    def test_no_quorum_does_not_invent_a_country(self):
+        for codes in (['FI', 'US', None, None, None], ['FI', None, None, None, None],
+                      ['FI', 'FI', 'US', 'US', None], [None] * 5):
+            with self.subTest(codes=codes):
+                service, _, _ = self.lookup(codes)
+                self.assertIsNone(service.lookup(['85.209.155.229'])['items'][0]['country_code'])
+
+    def test_failures_do_not_prevent_remaining_sources_reaching_quorum(self):
+        service, _, _ = self.lookup([OSError('offline'), 'FI', 'FI', None, None])
+        self.assertEqual(service.lookup(['85.209.155.229'])['items'][0]['country_code'], 'FI')
+
+    def test_cdn_and_ipv6_use_same_consensus(self):
+        service, _, _ = self.lookup(['US'] * 5)
+        ips = ['104.21.60.146', '172.67.197.199', '2606:4700:3033::6815:3c92']
+        self.assertEqual([row['country_code'] for row in service.lookup(ips)['items']], ['US'] * 3)
+
+    def test_deduplication_cache_expiry_and_negative_cache(self):
+        for codes, ttl in ((['FI'] * 5, 86400), ([None] * 5, 300)):
+            service, opener, clock = self.lookup(codes)
+            service.lookup(['85.209.155.229'] * 2)
+            self.assertEqual(opener.call_count, 5)
+            clock[0] += ttl - 1
+            service.lookup(['85.209.155.229'])
+            self.assertEqual(opener.call_count, 5)
+            clock[0] += 2
+            service.lookup(['85.209.155.229'])
+            self.assertEqual(opener.call_count, 10)
 
     def test_private_reserved_and_multicast_are_never_disclosed(self):
         service, opener, _ = self.lookup([])
@@ -39,42 +73,42 @@ class ResourceCountryTests(unittest.TestCase):
         self.assertFalse(result['pending'])
         opener.assert_not_called()
 
-    def test_failure_is_negative_cached_and_does_not_invent_countries(self):
-        service, opener, clock = self.lookup([])
-        opener.side_effect = OSError('unavailable')
-        self.assertIsNone(service.lookup(['8.8.8.8'])['items'][0]['country_code'])
-        clock[0] += 299
-        service.lookup(['8.8.8.8'])
-        self.assertEqual(opener.call_count, 1)
-        clock[0] += 2
-        service.lookup(['8.8.8.8'])
-        self.assertEqual(opener.call_count, 2)
+    def test_provider_shapes_and_address_binding(self):
+        normalize = api.resource_country.country_record
+        ip = '85.209.155.229'
+        for row in ({'ip': ip, 'country_code': 'FI'}, {'ipAddress': ip, 'countryCode': 'FI'},
+                    {'ip': ip, 'location': {'country_code': 'FI'}},
+                    {'ip': ip, 'network': {'autonomous_system': {'country': 'FI'}}},
+                    {'ip': ip, 'country': 'fi'}):
+            self.assertEqual(normalize(row, ip), 'FI')
+        for row in ({'ip': '8.8.8.8', 'country_code': 'US'}, {'country_code': 'US'},
+                    {'ip': ip, 'success': False, 'country_code': 'FI'},
+                    {'ip': ip, 'country_code': '../US'}, [], {'ip': ip, 'country_code': 42}):
+            self.assertIsNone(normalize(row, ip))
 
-    def test_unrelated_duplicate_or_malformed_evidence_is_rejected(self):
-        for rows in ([{'ip': '1.1.1.1', 'country': 'US'}], [{'ip': '8.8.8.8', 'country': '../US'}],
-                     [{'ip': '8.8.8.8', 'country': 'US'}] * 2, {'country': 'US'}):
-            with self.subTest(rows=rows):
-                service, _, _ = self.lookup(rows)
-                self.assertIsNone(service.lookup(['8.8.8.8'])['items'][0]['country_code'])
+    def test_oversized_and_malformed_responses_are_ignored(self):
+        for raw in (b'x' * 65537, b'not json', b'[]'):
+            service = api.resource_country.CountryLookup(opener=lambda *a, **k: io.BytesIO(raw), executor=InlineExecutor())
+            self.assertIsNone(service.lookup(['85.209.155.229'])['items'][0]['country_code'])
 
-    def test_concurrent_read_does_not_repeat_the_provider_request(self):
+    def test_background_lookup_is_nonblocking_and_deduplicated(self):
         entered, release = threading.Event(), threading.Event()
-        def open_request(*args, **kwargs):
+        def respond(*args, **kwargs):
             entered.set()
             release.wait(3)
-            return io.BytesIO(b'[{"ip":"8.8.8.8","country":"US"}]')
-        opener = Mock(side_effect=open_request)
-        service = api.resource_country.CountryLookup(opener=opener)
-        thread = threading.Thread(target=lambda: service.lookup(['8.8.8.8']))
-        thread.start()
-        try:
-            self.assertTrue(entered.wait(2))
-            self.assertTrue(service.lookup(['8.8.8.8'])['pending'])
-            self.assertEqual(opener.call_count, 1)
-        finally:
-            release.set(); thread.join(4)
-        self.assertFalse(thread.is_alive())
-        self.assertEqual(service.lookup(['8.8.8.8'])['items'][0]['country_code'], 'US')
+            return io.BytesIO(b'{"ip":"85.209.155.229","country_code":"FI"}')
+        opener = Mock(side_effect=respond)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            service = api.resource_country.CountryLookup(opener=opener, executor=executor)
+            try:
+                self.assertTrue(service.lookup(['85.209.155.229'])['pending'])
+                self.assertTrue(entered.wait(2))
+                self.assertTrue(service.lookup(['85.209.155.229'])['pending'])
+                self.assertEqual(opener.call_count, 1)
+            finally:
+                release.set()
+        self.assertFalse(service.lookup(['85.209.155.229'])['pending'])
+        self.assertEqual(service.lookup(['85.209.155.229'])['items'][0]['country_code'], 'FI')
 
     def test_endpoint_requires_auth_and_accepts_only_bounded_ip_lists(self):
         client = TestClient(api.app)
