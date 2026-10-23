@@ -13,6 +13,7 @@ import { useEndpointSweep } from "./use-endpoint-sweep";
 import { RelayAddressList } from "./relay-address-list";
 import { RouteTypeIcon } from "./route-type-icon";
 import { resourceIp } from "./resource-country";
+import { RelayConsumerPicker, RelayRoutePicker } from "./relay-route-picker";
 
 export function RouteDisclosure({ title, children }: { title: string; children: ReactNode }) {
   return <details className="routeLibraryDisclosure"><summary>{title}<span className="routeDisclosureToggle" aria-hidden="true">+</span></summary><div>{children}</div></details>;
@@ -20,9 +21,10 @@ export function RouteDisclosure({ title, children }: { title: string; children: 
 
 export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay: RelayControl; close: () => void }) {
   const [selected, setSelected] = useState("");
-  const [consumer, setConsumer] = useState("");
+  const [selectedConsumer, setConsumer] = useState("");
   const route = host.routes.find(item => item.id === selected) || host.routes.find(item => ["preparing", "awaiting_client", "processing"].includes(item.device_test?.state || "")) || host.routes.find(routeNeedsAttention) || host.routes[0];
   const consumers = (relay.status?.consumers || []).filter(item => !item.host_id || item.host_id === host.id);
+  const consumer = consumers.some(item => item.id === selectedConsumer) ? selectedConsumer : "";
   const locked = relay.locked || host.state !== "connected" || Boolean(relay.status?.pending);
   const active = host.routes.some(item => ["preparing", "awaiting_client", "processing"].includes(item.device_test?.state || ""));
   const version = host.agent_release;
@@ -35,10 +37,8 @@ export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay
     {host.updates?.state === "failed" && <p className="routeLibraryCallout" role="alert">Последняя попытка автообновления не удалась.</p>}
     <section className="routeTaskCard routeRelayTests"><header><h3>Маршруты Relay <small>{host.routes.length}</small></h3></header>
       {route ? <>
-        <div className="routeFieldPair">
-        <label>Маршрут<select value={route.id} onChange={event => { setSelected(event.target.value); setConsumer(""); }}>{host.routes.map(item => <option key={item.id} value={item.id}>{consumers.find(candidate => candidate.id === item.check?.consumer_id)?.label || `${item.transport.toUpperCase()} · ${item.listen_port}`}{routeNeedsAttention(item) ? " · ошибка" : ""}</option>)}</select></label>
-        <label>Подключение<select value={consumer} onChange={event => setConsumer(event.target.value)} disabled={locked || active}><option value="">Выберите подключение</option>{consumers.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
-        </div>
+        <RelayRoutePicker host={host} selected={route.id} onChange={id => { if (id !== route.id) { setSelected(id); setConsumer(""); } }} />
+        <RelayConsumerPicker consumers={consumers} selected={consumer} onChange={setConsumer} disabled={locked || active} />
         <div className="routeRelayPath"><code>{route.transport.toUpperCase()} :{route.listen_port}</code><span aria-hidden="true">→</span><code>VPS :{route.target_port}</code><span className="routeRelayPathState" data-state={route.state}>{({ listening: "Порт слушает", failed: "Ошибка", missing: "Пересылка отсутствует", drift: "Настройки расходятся", unknown: "Нет данных" })[route.state]}</span></div>
         <div className="routeTestOptions"><div><h4>Видео с VPS</h4><button type="button" className="routeActionPrimary" disabled={locked || active || route.state !== "listening" || !consumer} onClick={() => submit(`/network/relays/${host.id}/routes/${route.id}/check?mode=media&consumer_id=${encodeURIComponent(consumer)}`)}>Проверить с VPS</button><div className="routeTestResults" aria-label="Результат с VPS"><RelayCheckResult route={route} stale={host.state !== "connected"} /></div></div>{host.capabilities?.includes("udp-measurement-v1") && <div><h4>Из вашей сети</h4><button type="button" disabled={locked || active || route.state !== "listening" || !consumer} onClick={() => submit(`/network/relays/${host.id}/routes/${route.id}/device-tests?consumer_id=${encodeURIComponent(consumer)}`)}>Тест с устройства</button><small>Скачать комплект → запустить → загрузить отчёт.</small></div>}</div>
         {active && <p role="status">Тест с устройства уже запущен. Завершите или отмените его перед новой проверкой.</p>}
