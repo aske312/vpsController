@@ -35,17 +35,19 @@ export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay
     {version?.state === "outdated" && <div className="routeLibraryCallout"><p>Доступно обновление Agent {version.version}</p>{host.capabilities?.includes("manual-update-v1") ? <><button type="button" disabled={locked || Boolean(updating) || active} onClick={() => void relay.submit(`/network/relays/${host.id}/update`, { method: "POST", body: JSON.stringify({ version: version.version, digest: version.digest, expected_revision: relay.status?.revision }) })}>Обновить Agent</button><small>Agent перезапустится. Ключи и настройки сохранятся.</small></> : <small>Для команды из PRO сначала обновите Agent до 1.4 штатным установщиком или суточным updater.</small>}</div>}
     {host.agent_update && <p role="status">Обновление Agent: {({ sending: "команда отправляется", queued: "в очереди", running: "выполняется", updated: "завершено", failed: "не удалось выполнить", unknown: "результат не подтверждён, команда не повторяется" })[host.agent_update.state]}.</p>}
     {host.updates?.state === "failed" && <p className="routeLibraryCallout" role="alert">Последняя попытка автообновления не удалась.</p>}
-    <section className="routeTaskCard routeRelayTests"><header><h3>Маршруты Relay <small>{host.routes.length}</small></h3></header>
+    <section className="routeTaskCard routeRelayTests" aria-label="Проверка маршрута Relay">
       {route ? <>
-        <RelayRoutePicker host={host} selected={route.id} onChange={id => { if (id !== route.id) { setSelected(id); setConsumer(""); } }} />
-        <RelayConsumerPicker consumers={consumers} selected={consumer} onChange={setConsumer} disabled={locked || active} />
+        <div className="relayPickerColumns">
+          <RelayRoutePicker key={host.id} host={host} selected={route.id} onChange={id => { if (id !== route.id) { setSelected(id); setConsumer(""); } }} />
+          <RelayConsumerPicker key={`${host.id}:${route.id}`} consumers={consumers} selected={consumer} onChange={setConsumer} disabled={locked || active} />
+        </div>
         <div className="routeRelayPath"><code>{route.transport.toUpperCase()} :{route.listen_port}</code><span aria-hidden="true">→</span><code>VPS :{route.target_port}</code><span className="routeRelayPathState" data-state={route.state}>{({ listening: "Порт слушает", failed: "Ошибка", missing: "Пересылка отсутствует", drift: "Настройки расходятся", unknown: "Нет данных" })[route.state]}</span></div>
         <div className="routeTestOptions"><div><h4>Видео с VPS</h4><button type="button" className="routeActionPrimary" disabled={locked || active || route.state !== "listening" || !consumer} onClick={() => submit(`/network/relays/${host.id}/routes/${route.id}/check?mode=media&consumer_id=${encodeURIComponent(consumer)}`)}>Проверить с VPS</button><div className="routeTestResults" aria-label="Результат с VPS"><RelayCheckResult route={route} stale={host.state !== "connected"} /></div></div>{host.capabilities?.includes("udp-measurement-v1") && <div><h4>Из вашей сети</h4><button type="button" disabled={locked || active || route.state !== "listening" || !consumer} onClick={() => submit(`/network/relays/${host.id}/routes/${route.id}/device-tests?consumer_id=${encodeURIComponent(consumer)}`)}>Тест с устройства</button><small>Скачать комплект → запустить → загрузить отчёт.</small></div>}</div>
         {active && <p role="status">Тест с устройства уже запущен. Завершите или отмените его перед новой проверкой.</p>}
         {route.device_test && <div className="routeTestResults" aria-label="Тест с устройства">
         <RelayDeviceResult test={route.device_test} disabled={locked} onDownload={() => void relay.downloadTest(host.id, route.id, route.device_test!.id)} onUpload={file => void relay.uploadTest(host.id, route.id, route.device_test!.id, file)} onCancel={() => void relay.submit(`/network/relays/${host.id}/routes/${route.id}/device-tests/${route.device_test!.id}`, { method: "DELETE", headers: { "If-Match": relay.status?.revision || "" } })} />
         </div>}
-      </> : <p>Подключения через этот Relay ещё не созданы.</p>}
+      </> : <><header><h3>Маршруты Relay <small>0</small></h3></header><p>Подключения через этот Relay ещё не созданы.</p></>}
     </section>
     <RelayAddressList host={host} relay={relay} />
     <footer className="routeControlFooter"><button type="button" disabled={relay.locked || relay.status?.pending} className="routeLibraryDanger" onClick={() => relay.setConfirmation(host)}>Удалить Relay</button></footer>

@@ -35,24 +35,37 @@
 [data-network-page] .routeRelayTests .routeTestOptions { grid-template-columns:minmax(0,1fr); }
 [data-network-page] .routeRelayTests .routeTestOptions > div { grid-template-rows:auto; gap:12px; }
 [data-network-page] .routeRelayTests h3 small { display:inline; margin-left:6px; color:var(--muted); font-weight:400; }
-[data-network-page] .relayRouteChoices { display:grid; gap:8px; max-height:320px; overflow-y:auto; padding:3px; }
-[data-network-page] .routeRelayTests button.relayRouteChoice { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; align-items:center; gap:12px; width:100%; justify-self:stretch; padding:12px; border:1px solid var(--line); border-radius:9px; background:var(--panel); color:var(--text); text-align:left; cursor:pointer; }
-[data-network-page] .relayRouteChoiceIdentity, [data-network-page] .relayRouteChoiceSessions { display:grid; gap:4px; min-width:0; }
+[data-network-page] .relayPickerColumns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:16px; min-width:0; }
+[data-network-page] .relayRoutePicker, [data-network-page] .relayConsumerPicker { display:grid; gap:8px; min-width:0; }
+[data-network-page] .relayRouteChoices, [data-network-page] .relayConsumerChoices { display:grid; gap:0; min-width:0; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--panel); }
+[data-network-page] .routeRelayTests button.relayRouteChoice { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:2px 8px; width:100%; justify-self:stretch; padding:8px 10px; border:0; border-bottom:1px solid var(--line); border-radius:0; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
+[data-network-page] .relayRouteChoiceIdentity { display:flex; align-items:baseline; flex-wrap:wrap; gap:2px 8px; min-width:0; }
+[data-network-page] .relayRouteChoiceSessions { display:grid; gap:0; min-width:0; grid-column:2; grid-row:1 / 3; }
 [data-network-page] .relayRouteChoiceIdentity strong { font:600 12px/1.5 var(--technical-font); }
 [data-network-page] .relayRouteChoiceIdentity small, [data-network-page] .relayRouteChoiceSessions small { color:var(--muted); font-size:11px; }
 [data-network-page] .relayRouteChoiceSessions { text-align:right; }
-[data-network-page] .relayRouteChoiceSessions strong { font:600 15px/1.4 var(--technical-font); font-variant-numeric:tabular-nums; }
-[data-network-page] .relayRouteChoiceStatus { color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+[data-network-page] .relayRouteChoiceSessions strong { font:600 13px/1.4 var(--technical-font); font-variant-numeric:tabular-nums; }
+[data-network-page] .relayRouteChoiceStatus { grid-column:1; grid-row:2; color:var(--muted); font-size:10px; overflow-wrap:anywhere; }
 [data-network-page] .relayRouteChoiceStatus[data-state=listening] { color:var(--cyan); }
 [data-network-page] .relayRouteChoiceStatus[data-state=warning] { color:var(--amber); }
-[data-network-page] .relayConsumerPicker { display:grid; gap:10px; min-width:0; }
 [data-network-page] .relayConsumerHeading { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:6px 12px; }
 [data-network-page] .relayConsumerHeading h4 span { margin-left:5px; color:var(--muted); font-weight:400; }
-[data-network-page] .relayConsumerHeading > span { color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
-[data-network-page] .relayConsumerPicker input { width:100%; min-width:0; min-height:38px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--text); font:12px/1.5 var(--ui-font); }
-[data-network-page] .relayConsumerChoices { display:flex; flex-wrap:wrap; align-content:flex-start; gap:7px; max-height:180px; overflow-y:auto; padding:3px; }
-[data-network-page] .relayConsumerChoices button { min-width:0; max-width:100%; min-height:36px; padding:8px 10px; white-space:normal; overflow-wrap:anywhere; text-align:left; }
-[data-network-page] .routeRelayTests .relayRouteChoice[aria-pressed=true], [data-network-page] .relayConsumerChoices button[aria-pressed=true] { border-color:var(--cyan); background:color-mix(in srgb,var(--cyan) 8%,var(--panel)); color:var(--cyan); }
+[data-network-page] .relayPickerSearch { position:relative; min-width:0; }
+[data-network-page] .relayPickerSearch input { width:100%; min-width:0; min-height:36px; padding:7px 32px 7px 10px; border:1px solid var(--line); border-radius:7px; background:var(--panel); color:var(--text); font:12px/1.5 var(--ui-font); }
+[data-network-page] .relayPickerSearch input::-webkit-search-cancel-button { -webkit-appearance:none; }
+[data-network-page] .routeRelayTests .relayPickerSearch button { position:absolute; top:1px; right:1px; bottom:1px; min-height:0; width:30px; padding:0; border:0; background:transparent; color:var(--muted); }
+[data-network-page] .routeRelayTests .relayConsumerChoices button { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; justify-self:stretch; min-width:0; max-width:100%; min-height:42px; padding:8px 10px; border:0; border-bottom:1px solid var(--line); border-radius:0; background:transparent; white-space:normal; text-align:left; }
+[data-network-page] .relayConsumerChoices button > span { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; font-size:12px; line-height:1.5; }
+[data-network-page] .relayConsumerChoices button > i { flex:0 0 12px; font-style:normal; }
+[data-network-page] .routeRelayTests :is(.relayRouteChoice,.relayConsumerChoices button):last-child { border-bottom:0; }
+[data-network-page] .routeRelayTests .relayRouteChoice[aria-pressed=true], [data-network-page] .relayConsumerChoices button[aria-pressed=true] { box-shadow:inset 2px 0 var(--cyan); background:color-mix(in srgb,var(--cyan) 8%,var(--panel)); color:var(--cyan); }
+[data-network-page] .relayPickerPages { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--muted); font:11px/1.5 var(--ui-font); }
+[data-network-page] .relayPickerPages > div { display:flex; gap:4px; }
+[data-network-page] .routeRelayTests .relayPickerPages button { min-width:30px; min-height:28px; padding:0 6px; font-size:18px; }
+[data-network-page] .relayPickerSelection { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; padding-top:2px; }
+[data-network-page] .relayPickerSelection > span { min-width:0; }
+[data-network-page] .relayPickerSelection strong { display:block; overflow-wrap:anywhere; color:var(--text); font:500 11px/1.5 var(--ui-font); }
+[data-network-page] .routeRelayTests .relayPickerSelection button { flex-shrink:0; min-height:28px; padding:0; border:0; background:transparent; color:var(--cyan); font-size:10px; }
 [data-network-page] .routeRelayPath { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; color:var(--muted); background:var(--panel); font-size:12px; }
 [data-network-page] .routeRelayPath code { color:var(--text); font:12px/1.6 var(--technical-font); }
 [data-network-page] .routeRelayPathState { margin-left:auto; }
@@ -90,6 +103,7 @@
 [data-network-page] .routeRoleApply { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
 [data-network-page] .routeControlModal :is(button,input,select,summary):focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
 @media(max-width:560px) {
+  [data-network-page] .relayPickerColumns { grid-template-columns:minmax(0,1fr); gap:18px; }
   [data-network-page] .routeRelayTests button.relayRouteChoice { grid-template-columns:minmax(0,1fr) auto; gap:6px 12px; }
   [data-network-page] .relayRouteChoiceStatus { grid-column:1; grid-row:2; }
   [data-network-page] .relayRouteChoiceSessions { grid-column:2; grid-row:1 / 3; }

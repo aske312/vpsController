@@ -5,10 +5,47 @@ import type { RelayHost, RelayStatus } from "./relay-state";
 import { routeNeedsAttention } from "./route-library-state";
 
 const routeStates = { listening: "Порт слушает", failed: "Ошибка", missing: "Пересылка отсутствует", drift: "Настройки расходятся", unknown: "Нет данных" };
+const PAGE_SIZE = 5;
+
+function useChoices<T extends { id: string }>(items: T[], selected: string, describe: (item: T) => string) {
+  const [query, setQuery] = useState("");
+  const [requestedPage, setPage] = useState(() => Math.max(1, Math.ceil((items.findIndex(item => item.id === selected) + 1) / PAGE_SIZE)));
+  const words = query.trim().toLocaleLowerCase("ru-RU").split(/\s+/).filter(Boolean);
+  const filtered = items.filter(item => words.every(word => describe(item).toLocaleLowerCase("ru-RU").includes(word)));
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const page = Math.min(requestedPage, pages);
+  const visible = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const selection = items.find(item => item.id === selected);
+  return { query, page, pages, visible, selection, count: filtered.length,
+    selectedVisible: visible.some(item => item.id === selected), setPage,
+    search: (value: string) => { setQuery(value); setPage(1); },
+    reveal: () => { setQuery(""); setPage(Math.max(1, Math.ceil((items.findIndex(item => item.id === selected) + 1) / PAGE_SIZE))); },
+  };
+}
+
+function ChoiceSearch({ query, onChange, label, placeholder }: { query: string; onChange: (value: string) => void; label: string; placeholder: string }) {
+  return <div className="relayPickerSearch"><input type="search" aria-label={label} placeholder={placeholder} value={query} onChange={event => onChange(event.target.value)} />{query && <button type="button" aria-label={`Очистить: ${label}`} onClick={() => onChange("")}>×</button>}</div>;
+}
+
+function ChoicePages({ page, pages, count, label, onChange }: { page: number; pages: number; count: number; label: string; onChange: (page: number) => void }) {
+  if (pages === 1) return null;
+  return <nav className="relayPickerPages" aria-label={`Страницы: ${label}`}><span aria-live="polite">{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, count)} из {count}</span><div>
+    <button type="button" aria-label={`${label}: предыдущая страница`} disabled={page === 1} onClick={() => onChange(page - 1)}>‹</button>
+    <button type="button" aria-label={`${label}: следующая страница`} disabled={page === pages} onClick={() => onChange(page + 1)}>›</button>
+  </div></nav>;
+}
+
+function ChoiceSelection({ label, hidden, onReveal }: { label: string; hidden: boolean; onReveal: () => void }) {
+  return <div className="relayPickerSelection"><span title={label}><small>Выбрано</small><strong>{label}</strong></span>{hidden && <button type="button" onClick={onReveal}>К выбранному</button>}</div>;
+}
 
 export function RelayRoutePicker({ host, selected, onChange }: { host: RelayHost; selected: string; onChange: (id: string) => void }) {
-  return <div className="relayRouteChoices" role="group" aria-label="Маршрут Relay">
-    {host.routes.map(route => {
+  const choices = useChoices(host.routes, selected, route => `${route.transport} ${route.listen_port} ${route.target_port} ${routeStates[route.state]}`);
+  return <div className="relayRoutePicker">
+    <div className="relayConsumerHeading"><h4>Маршруты Relay <span>{host.routes.length}</span></h4>{choices.query && <small aria-live="polite">Найдено: {choices.count}</small>}</div>
+    {(host.routes.length > PAGE_SIZE || choices.query) && <ChoiceSearch query={choices.query} onChange={choices.search} label="Поиск маршрута Relay" placeholder="Порт или протокол" />}
+    <div className="relayRouteChoices" role="group" aria-label="Маршрут Relay">
+    {choices.visible.map(route => {
       const current = host.state === "connected";
       const attention = current && routeNeedsAttention(route);
       const sessions = current && route.sessions !== undefined ? route.sessions.toLocaleString("ru-RU") : "—";
@@ -18,18 +55,23 @@ export function RelayRoutePicker({ host, selected, onChange }: { host: RelayHost
         <span className="relayRouteChoiceSessions"><strong>{sessions}</strong><small>Сессии</small></span>
       </button>;
     })}
+    {!choices.count && <p>Маршруты не найдены.</p>}
+    </div>
+    <ChoicePages {...choices} label="Маршруты Relay" onChange={choices.setPage} />
+    {choices.selection && !choices.selectedVisible && <ChoiceSelection label={`${choices.selection.transport.toUpperCase()} · ${choices.selection.listen_port} → VPS · ${choices.selection.target_port}`} hidden onReveal={choices.reveal} />}
   </div>;
 }
 
 export function RelayConsumerPicker({ consumers, selected, disabled, onChange }: { consumers: NonNullable<RelayStatus["consumers"]>; selected: string; disabled: boolean; onChange: (id: string) => void }) {
-  const [query, setQuery] = useState("");
-  const filtered = consumers.filter(item => item.label.toLocaleLowerCase("ru-RU").includes(query.trim().toLocaleLowerCase("ru-RU")));
+  const choices = useChoices(consumers, selected, item => `${item.label} ${item.id}`);
   return <div className="relayConsumerPicker">
-    <div className="relayConsumerHeading"><h4>Подключение для проверки <span>{consumers.length}</span></h4>{selected && <span>Выбрано: {consumers.find(item => item.id === selected)?.label}</span>}</div>
-    {consumers.length > 6 && <input type="search" aria-label="Поиск подключения для проверки" placeholder="Найти подключение" value={query} onChange={event => setQuery(event.target.value)} />}
+    <div className="relayConsumerHeading"><h4>Подключение для проверки <span>{consumers.length}</span></h4>{choices.query && <small aria-live="polite">Найдено: {choices.count}</small>}</div>
+    {(consumers.length > PAGE_SIZE || choices.query) && <ChoiceSearch query={choices.query} onChange={choices.search} label="Поиск подключения для проверки" placeholder="Найти подключение" />}
     {consumers.length ? <>
-      <div className="relayConsumerChoices" role="group" aria-label="Подключение для проверки">{filtered.map(item => <button type="button" key={item.id} aria-pressed={selected === item.id} disabled={disabled} onClick={() => onChange(item.id)}>{item.label}</button>)}</div>
-      {!filtered.length && <p>Подключения не найдены.</p>}
+      <div className="relayConsumerChoices" role="group" aria-label="Подключение для проверки">{choices.visible.map(item => <button type="button" key={item.id} title={item.label} aria-pressed={selected === item.id} disabled={disabled} onClick={() => onChange(item.id)}><span>{item.label}</span><i aria-hidden="true">{selected === item.id ? "✓" : ""}</i></button>)}</div>
+      {!choices.count && <p>Подключения не найдены.</p>}
+      <ChoicePages {...choices} label="Подключения" onChange={choices.setPage} />
+      {choices.selection && <ChoiceSelection label={choices.selection.label} hidden={!choices.selectedVisible} onReveal={choices.reveal} />}
     </> : <p>Нет доступных подключений для проверки.</p>}
   </div>;
 }

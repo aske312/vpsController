@@ -38,7 +38,28 @@ test('connection choices preserve disabled state, selected identity and large-li
   const consumers = Array.from({ length: 7 }, (_, i) => ({ id: String(i), label: `Connection ${i}` }));
   const html = renderToStaticMarkup(createElement(RelayConsumerPicker, { consumers, selected: '3', disabled: true, onChange() {} }));
   assert.match(html, /type="search"/);
-  assert.match(html, /aria-pressed="true" disabled="">Connection 3/);
-  assert.equal((html.match(/disabled=""/g) || []).length, 7);
+  assert.match(html, /aria-pressed="true" disabled=""><span>Connection 3/);
+  const options = html.split('class="relayConsumerChoices"')[1].split('</div>')[0];
+  assert.equal((options.match(/disabled=""/g) || []).length, 5);
+  assert.match(html, /1–5 из 7/);
   assert.doesNotMatch(html, /<select/);
+});
+
+test('large route lists open on the selected page and render only five rows', () => {
+  const routes = Array.from({ length: 80 }, (_, i) => ({ ...route, id: `route-${i}`, listen_port: 20000 + i }));
+  const html = renderToStaticMarkup(createElement(RelayRoutePicker, { host: { ...host, routes }, selected: 'route-79', onChange() {} }));
+  assert.equal((html.match(/class="relayRouteChoice"/g) || []).length, 5);
+  assert.match(html, /76–80 из 80/);
+  assert.match(html, /TCP · 20079/);
+  assert.doesNotMatch(html, /TCP · 20000/);
+  assert.match(html, /aria-label="Поиск маршрута Relay"/);
+});
+
+test('large connection lists retain the selected label without rendering every connection', () => {
+  const consumers = Array.from({ length: 1000 }, (_, i) => ({ id: String(i), label: `Connection ${i}` }));
+  const html = renderToStaticMarkup(createElement(RelayConsumerPicker, { consumers, selected: '999', disabled: false, onChange() {} }));
+  const options = html.split('class="relayConsumerChoices"')[1].split('</div>')[0];
+  assert.equal((options.match(/<button/g) || []).length, 5);
+  assert.match(html, /996–1000 из 1000/);
+  assert.match(html, /<strong>Connection 999<\/strong>/);
 });
