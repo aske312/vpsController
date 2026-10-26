@@ -3,6 +3,27 @@ set -Eeuo pipefail
 
 ROOT=/opt/vps-control/protocol-images/mihomo
 PYTHON=/opt/vps-control/venv/bin/python
+
+refresh_limits_service() {
+  local unit="$1" previous_pid="$2" current_pid
+  systemctl enable "$unit"
+  # Protocol units use Wants= plus a validating ExecStartPre below. Restarting
+  # accounting must load new code without restarting authenticated connections;
+  # nftables continues enforcing their policy while this process is replaced.
+  systemctl restart "$unit"
+  for _ in $(seq 1 60); do
+    current_pid="$(systemctl show "$unit" --property=MainPID --value)"
+    if [[ "$current_pid" =~ ^[1-9][0-9]*$ && "$current_pid" != "$previous_pid" ]] \
+      && systemctl is-active --quiet "$unit"; then
+      return 0
+    fi
+    sleep .25
+  done
+  echo "Subscription limits service did not load the updated runtime" >&2
+  return 1
+}
+
+previous_pid="$(systemctl show vps-control-subscription-limits.service --property=MainPID --value 2>/dev/null || true)"
 if ! command -v nft >/dev/null 2>&1; then
   apt-get -o DPkg::Lock::Timeout=300 update
   apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends nftables
@@ -32,7 +53,7 @@ for unit in vps-control-mihomo-manager vps-control-mihomo-reality vps-control-mi
   install -d -m 0755 "$directory"
   cat >"${directory}/20-subscription-limits.conf" <<EOF
 [Unit]
-Requires=vps-control-subscription-limits.service
+Wants=vps-control-subscription-limits.service
 After=vps-control-subscription-limits.service
 [Service]
 ExecStartPre=+${PYTHON} ${ROOT}/subscription_limits.py refresh
@@ -44,4 +65,4 @@ cat >>/etc/systemd/system/vps-control-mihomo-reality.service.d/20-subscription-l
 AmbientCapabilities=CAP_NET_ADMIN
 EOF
 systemctl daemon-reload
-systemctl enable --now vps-control-subscription-limits.service
+refresh_limits_service vps-control-subscription-limits.service "$previous_pid"

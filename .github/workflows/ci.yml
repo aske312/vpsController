@@ -37,6 +37,9 @@ jobs:
         run: |
           sudo apt-get install -y -qq --no-install-recommends nftables
           sudo unshare --net "$(command -v python)" tests/subscription_limits_smoke.py
+      - name: Verify disposable service recovery and runtime upgrades
+        run: |
+          sudo env PRIVACY_SYSTEMD_TESTS=1 CORE_SYSTEMD_TESTS=1 "$(command -v python)" -m unittest -v tests.api.test_application_operation_systemd tests.api.test_profile_recovery_systemd tests.api.test_subscription_limits_systemd tests.api.test_shadowsocks_systemd
       - run: npm ci --include=dev --include=optional --ignore-scripts
       - run: npm run check
 
