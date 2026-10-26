@@ -2985,7 +2985,7 @@ update_prebuilt_branch() {
       break
     fi
     if (( attempt == 1 || attempt % 6 == 0 )); then
-      info "GitHub готовит релиз ${branch} ${latest:0:7}; ожидание публикации"
+      info "Релиз ${branch} ${latest:0:7} ещё не опубликован; ожидание готового архива (статус сборки — в GitHub Actions)"
     fi
     sleep 10
   done

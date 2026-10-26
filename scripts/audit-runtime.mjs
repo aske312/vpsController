@@ -20,7 +20,12 @@ try {
         })
       : spawnSync("npm", ["audit", "--omit=dev", "--json"], { encoding: "utf8" });
     if (audit.error) throw audit.error;
+    if (audit.signal || ![0, 1].includes(audit.status)) throw new Error("npm audit did not complete");
     report = JSON.parse(audit.stdout || "{}");
+  }
+  if (!report || typeof report !== "object" || Array.isArray(report) || report.error ||
+      !report.vulnerabilities || typeof report.vulnerabilities !== "object" || Array.isArray(report.vulnerabilities)) {
+    throw new Error("Incomplete npm audit report");
   }
 } catch {
   console.error("npm audit returned an invalid or unavailable report");

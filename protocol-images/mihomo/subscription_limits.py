@@ -378,6 +378,12 @@ def merge_usage(saved, current):
 
 def update(policy, root=ROOT, *, force=False, fresh_groups=False):
     with locked(root):
+        if policy is None:
+            # Read after taking the same lock as the manager's updates. A
+            # watcher waiting for that lock must not restore an older policy.
+            if not (root / "policy.json").exists() and not (root / "applied.json").exists():
+                return
+            policy = read(root / "policy.json", {"schema": 1, "profiles": []})
         previous = read(root / "applied.json", read(root / "policy.json", {"schema": 1, "profiles": []}))
         saved = read(root / "usage.json", {})
         current, exists = kernel_state(previous)
@@ -549,9 +555,7 @@ def main():
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     while True:
-        policy = read(args.root / "policy.json", {"schema": 1, "profiles": []})
-        if policy["profiles"] or (args.root / "policy.json").exists() or (args.root / "applied.json").exists():
-            update(policy, args.root, fresh_groups=args.action == "refresh")
+        update(None, args.root, fresh_groups=args.action == "refresh")
         if args.action != "watch" or stopped:
             break
         time.sleep(1)

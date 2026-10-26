@@ -25,6 +25,30 @@ def profile(identity="first"):
 
 
 class SubscriptionLimitsTests(unittest.TestCase):
+    def test_refresh_reads_policy_after_acquiring_lock_not_before(self):
+        from contextlib import contextmanager
+        old = limits.plan([profile()])
+        new = deepcopy(old)
+        new["profiles"][0]["limits"]["speed_mbps"] = 75
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            limits.atomic(root / "policy.json", old)
+
+            @contextmanager
+            def concurrent_update(_root):
+                # The manager commits while the watcher waits for this lock.
+                limits.atomic(root / "policy.json", new)
+                yield
+
+            with patch.object(limits, "locked", concurrent_update), \
+                    patch.object(limits, "kernel_state", return_value=({}, False)), \
+                    patch.object(limits, "cgroups", return_value={}), \
+                    patch.object(limits, "command"), \
+                    patch("sys.argv", ["subscription_limits.py", "refresh", "--root", str(root)]):
+                limits.main()
+            self.assertEqual(limits.read(root / "applied.json", {}), new)
+            self.assertEqual(limits.read(root / "policy.json", {}), new)
+
     def test_systemd_escaped_cgroup_path_remains_literal_in_nft_syntax(self):
         item = profile()
         unit = limits.plan([item])["profiles"][0]["shadowsocks"][0]["unit"]
