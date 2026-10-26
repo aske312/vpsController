@@ -241,5 +241,8 @@ class ProfileTransitionTests(unittest.TestCase):
             async with manager.manager_lifespan(manager.app):
                 self.assertTrue(await asyncio.to_thread(called.wait, 2))
 
-        with patch.object(manager, "cleanup_profile_transitions", side_effect=called.set):
+        # Startup provisioning is covered separately; this lifecycle test must
+        # never install packages or operate the CI runner's systemd services.
+        with patch.object(manager, "cleanup_profile_transitions", side_effect=called.set), \
+                patch.object(manager.subscription_limits, "ensure_runtime"):
             asyncio.run(lifecycle())
