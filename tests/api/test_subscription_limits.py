@@ -25,6 +25,34 @@ def profile(identity="first"):
 
 
 class SubscriptionLimitsTests(unittest.TestCase):
+    def test_systemd_escaped_cgroup_path_remains_literal_in_nft_syntax(self):
+        item = profile()
+        unit = limits.plan([item])["profiles"][0]["shadowsocks"][0]["unit"]
+        path = r"/system.slice/system-vps\x2dcontrol.slice/instance.service"
+        rules = limits.nft_rules(limits.plan([item]), {}, {unit: {"level": 3, "path": path}})
+        self.assertIn('"' + path.lstrip('/') + '"', rules)
+        self.assertNotIn(r"\\x2d", rules)
+
+    def test_old_updater_missing_runtime_is_bootstrapped_and_verified(self):
+        with patch.object(manager.shutil, "which", side_effect=[None, "/usr/sbin/nft"]), \
+                patch.object(manager, "systemctl_active", return_value=True), \
+                patch.object(limits.subprocess, "run") as run:
+            limits.ensure_runtime(manager)
+        self.assertEqual(run.call_args.args[0], ["bash", str(manager.MODULE_ROOT / "install-subscription-limits.sh")])
+        self.assertTrue(run.call_args.kwargs["check"])
+
+    def test_ready_runtime_is_not_reinstalled_at_manager_restart(self):
+        with patch.object(manager.shutil, "which", return_value="/usr/sbin/nft"), \
+                patch.object(manager, "systemctl_active", return_value=True), \
+                patch.object(limits.subprocess, "run") as run:
+            limits.ensure_runtime(manager)
+        run.assert_not_called()
+
+    def test_runtime_install_failure_prevents_false_readiness(self):
+        with patch.object(manager.shutil, "which", return_value=None), \
+                patch.object(limits.subprocess, "run"), self.assertRaises(RuntimeError):
+            limits.ensure_runtime(manager)
+
     def test_each_limit_is_nullable_but_never_zero_negative_boolean_or_unbounded(self):
         self.assertEqual(limits.normalized(None), limits.UNLIMIT)
         for key, maximum in (("speed_mbps", 100000), ("traffic_gb", 1000000), ("days", 36500)):

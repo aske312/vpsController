@@ -281,7 +281,12 @@ def nft_rules(policy, state, groups, *, existing=False):
             group = groups.get(instance["unit"])
             if group:
                 for transport in ("tcp", "udp"):
-                    group_path = json.dumps(group["path"].lstrip("/"))
+                    # nft's string parser preserves backslashes. JSON escaping
+                    # would turn systemd's literal \x2d into a different path.
+                    path = group["path"].lstrip("/")
+                    if any(character in path for character in ('"', '\n', '\r', '\x00')):
+                        raise ValueError("Invalid subscription cgroup path")
+                    group_path = '"' + path + '"'
                     output.insert(0, f"socket cgroupv2 level {group['level']} {group_path} {transport} sport != {instance['port']} ct mark set {mark}")
         for peer in profile["peers"]:
             family = "ip6" if ":" in peer["ip"] else "ip"
@@ -422,6 +427,20 @@ def userinfo(profile, root=ROOT):
 
 def current_policy(api):
     return read(api.DATA_ROOT / "subscription-limits" / "policy.json", {"schema": 1, "profiles": []})
+
+
+def ensure_runtime(api):
+    """Older updaters keep their pre-upgrade shell functions in memory.
+
+    Bootstrap from the new manager too, before declaring its API ready.
+    """
+    if api.shutil.which("nft") and api.systemctl_active("vps-control-subscription-limits.service"):
+        return
+    installer = api.MODULE_ROOT / "install-subscription-limits.sh"
+    subprocess.run(["bash", str(installer)], check=True, timeout=600,
+                   env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"})
+    if not api.shutil.which("nft") or not api.systemctl_active("vps-control-subscription-limits.service"):
+        raise RuntimeError("Subscription limits runtime is not ready after installation")
 
 
 def resolve_profiles(api, profiles):

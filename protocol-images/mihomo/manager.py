@@ -276,6 +276,8 @@ def transition_worker(stopped: threading.Event) -> None:
 
 @asynccontextmanager
 async def manager_lifespan(_app):
+    if Path("/run/systemd/system").is_dir():
+        await asyncio.to_thread(subscription_limits.ensure_runtime, sys.modules[__name__])
     stopped = threading.Event()
     worker = threading.Thread(target=transition_worker, args=(stopped,), daemon=True)
     worker.start()
