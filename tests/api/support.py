@@ -63,13 +63,13 @@ def free_port(*, udp=False):
         return sock.getsockname()[1]
 
 
-def wait_port(port, process):
+def wait_port(port, process, host="127.0.0.1"):
     deadline = time.monotonic() + 12
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise AssertionError("Test core exited before listening")
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=.2):
+            with socket.create_connection((host, port), timeout=.2):
                 return
         except OSError:
             time.sleep(.05)

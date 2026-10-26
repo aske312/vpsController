@@ -96,6 +96,19 @@ class ShadowsocksSystemdTests(unittest.TestCase):
                 resources.callback(origin.shutdown)
 
                 def connect_proxy(item):
+                    # Type=simple reports started before guard.py has launched
+                    # ss-server. Wait for the actual listener, including after
+                    # rollback, before testing the newly established stream.
+                    server_port = json.loads((ss / f"{item}.json").read_text())["server_port"]
+                    deadline = time.monotonic() + 5
+                    while True:
+                        try:
+                            with socket.create_connection(("127.0.0.1", server_port), timeout=.25):
+                                break
+                        except OSError:
+                            if time.monotonic() > deadline:
+                                raise AssertionError("Test Shadowsocks server did not start listening")
+                            time.sleep(.05)
                     port = free_port()
                     process = subprocess.Popen([shutil.which("ss-local"), "-c", str(ss / f"{item}.json"),
                                                 "-b", "127.0.0.1", "-l", str(port)],

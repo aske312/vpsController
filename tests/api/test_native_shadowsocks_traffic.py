@@ -42,11 +42,15 @@ class NativeShadowsocksTrafficTests(unittest.TestCase):
                 'local_address': '127.0.0.1', 'local_port': local_port, 'method': method, 'password': password}))
             processes = []
             try:
-                server = subprocess.Popen(['ss-server', '-c', str(root / 'fixture.json')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                server_log = root / 'server.log'
+                with server_log.open('w') as output:
+                    server = subprocess.Popen(['ss-server', '-c', str(root / 'fixture.json')], stdout=output, stderr=subprocess.STDOUT)
                 processes.append(server)
                 wait_port(server_port, server)
-                with socket.create_connection(('::1', server_port), timeout=2):
-                    pass
+                try:
+                    wait_port(server_port, server, host='::1')
+                except AssertionError as exc:
+                    raise AssertionError(server_log.read_text()[-4000:]) from exc
                 client = subprocess.Popen(['ss-local', '-c', str(client_config)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 processes.append(client)
                 wait_port(local_port, client)

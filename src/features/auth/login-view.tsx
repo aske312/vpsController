@@ -1,12 +1,15 @@
 "use client";
 
 import type { Dispatch, FormEvent, SetStateAction } from "react";
+import { useSyncExternalStore } from "react";
 import { BrandGlyph } from "../../shared/components/brand-glyph";
 import { LegalFooter } from "../../shared/components/legal-footer";
 
 type LoginViewProps = { loginUser: string; loginPassword: string; loginPasswordVisible: boolean; busy: boolean; version: string; channel: string; commit: string; setLoginUser: Dispatch<SetStateAction<string>>; setLoginPassword: Dispatch<SetStateAction<string>>; setLoginPasswordVisible: Dispatch<SetStateAction<boolean>>; login: (event: FormEvent) => Promise<void> | void; };
 
 export function LoginView({ loginUser, loginPassword, loginPasswordVisible, busy, version, channel, commit, setLoginUser, setLoginPassword, setLoginPasswordVisible, login }: LoginViewProps) {
+  const hydrated = useSyncExternalStore(() => () => {}, () => true, () => false);
+  const disabled = !hydrated || busy;
   return (
     <main className="loginPage visualLogin loginRedesign">
       <div className="loginBackdrop" aria-hidden="true" />
@@ -22,14 +25,14 @@ export function LoginView({ loginUser, loginPassword, loginPasswordVisible, busy
         </aside>
 
         <div className="loginPanelWrap">
-          <form className="loginPanel" onSubmit={login}>
+          <form className="loginPanel" onSubmit={login} aria-busy={disabled}>
             <header className="loginPanelHeader"><span className="loginLock"><LockIcon /></span><div><p>MANAGEMENT ACCESS</p><h2>Вход в панель управления</h2></div></header>
             <p className="loginPanelCopy">Авторизуйтесь для контроля и управления приложением.</p>
             <div className="loginFields">
-              <label className="loginField"><span>Логин</span><div className="loginInputWrap"><UserIcon /><input type="text" value={loginUser} onChange={(event) => setLoginUser(event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus required placeholder="admin" /></div></label>
-              <label className="loginField"><span>Пароль</span><div className="loginInputWrap loginPasswordWrap"><KeyIcon /><input type={loginPasswordVisible ? "text" : "password"} value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} autoComplete="current-password" required placeholder="Введите пароль" /><button type="button" className="loginVisibility" onClick={() => setLoginPasswordVisible((value) => !value)} aria-label={loginPasswordVisible ? "Скрыть пароль" : "Показать пароль"} aria-pressed={loginPasswordVisible}>{loginPasswordVisible ? <EyeOffIcon /> : <EyeIcon />}</button></div></label>
+              <label className="loginField"><span>Логин</span><div className="loginInputWrap"><UserIcon /><input type="text" disabled={disabled} value={loginUser} onChange={(event) => setLoginUser(event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus required placeholder="admin" /></div></label>
+              <label className="loginField"><span>Пароль</span><div className="loginInputWrap loginPasswordWrap"><KeyIcon /><input type={loginPasswordVisible ? "text" : "password"} disabled={disabled} value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} autoComplete="current-password" required placeholder="Введите пароль" /><button type="button" className="loginVisibility" disabled={disabled} onClick={() => setLoginPasswordVisible((value) => !value)} aria-label={loginPasswordVisible ? "Скрыть пароль" : "Показать пароль"} aria-pressed={loginPasswordVisible}>{loginPasswordVisible ? <EyeOffIcon /> : <EyeIcon />}</button></div></label>
             </div>
-            <button className="loginSubmit" type="submit" disabled={busy}><span>{busy ? "Проверяем доступ…" : "Войти в панель"}</span>{busy ? <i className="loginSpinner" /> : <ArrowIcon />}</button>
+            <button className="loginSubmit" type="submit" disabled={disabled}><span>{busy ? "Проверяем доступ…" : "Войти в панель"}</span>{busy ? <i className="loginSpinner" /> : <ArrowIcon />}</button>
             <footer className="loginPanelFooter"><ShieldIcon /><span>Доступ только для администратора</span></footer>
           </form>
         </div>
