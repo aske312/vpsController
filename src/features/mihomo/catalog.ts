@@ -182,7 +182,7 @@ export const p2pClientCatalog = [
 ];
 
 export const profileDirectRules = [
-  { key: "block_ads", code: "AD", title: "Реклама", text: "Рекламные сети и трекеры. Видеореклама YouTube блокируется не полностью.", group: "Защита" },
+  { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и рекламные трекеры.", group: "Защита" },
   { key: "block_privacy", code: "PRIV", title: "Приватность", text: "Аналитика и профилирование.", group: "Защита" },
   { key: "direct_ru_sites", code: "RU", title: "Сайты РФ", text: "Домены и IP России.", group: "Напрямую" },
   { key: "direct_ru_banks", code: "BANK", title: "Банки", text: "Банки и платёжные сервисы.", group: "Напрямую" },
