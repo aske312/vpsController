@@ -5,6 +5,7 @@ import { presetConnectionOptions, presetOptionGroups, channelShort, dnsProviderM
 import { clientUuid, deviceClientShortName, clientConfigFormat, devicePlatformMeta, deviceSystemLabel, registeredProfileDevices, selectedGameIds } from "./profile-utils";
 import { Tab, HeroFact, ModuleCatalog, Empty } from "./components";
 import { clientCapabilities, compatibleClientRouting, clientConnectionSupported } from "./client-capabilities";
+import { partitionRuleGroups, toggleRuleGroup } from "./rule-groups";
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
 import { SubscriptionLimitsFields, unlimitedSubscription } from "./subscription-limits";
@@ -111,6 +112,9 @@ export function MihomoPage({
   const dnsDirtyRef = useRef(false);
   const dnsDraftRef = useRef<Record<string, string | number | boolean>>({});
   const [routingPolicy, setRoutingPolicy] = useState<PolicySettings | null>(null);
+  const ruleGroupCatalogs = useMemo(() => Object.fromEntries((routingPolicy?.rule_lists || []).map(
+    (list) => [list.id, partitionRuleGroups(list, ruleIconGroups[list.id] || [])],
+  )), [routingPolicy]);
   const [routingReadKnown, setRoutingReadKnown] = useState(false);
   const [routingDraft, setRoutingDraft] = useState<Record<string, string | number | boolean>>({});
   const [routingDirty, setRoutingDirty] = useState(false);
@@ -535,27 +539,11 @@ export function MihomoPage({
   }
 
   function ruleGroupLines(ruleList: NonNullable<PolicySettings["rule_lists"]>[number], group: RuleIconGroup) {
-    const groups = ruleIconGroups[ruleList.id] || [];
-    const lines = String(ruleList.available_rules || ruleList.default_rules).split("\n").map((line) => line.trim()).filter(Boolean);
-    const matches = (line: string, candidate: RuleIconGroup) => candidate.tokens.some((token) => line.toLowerCase().includes(token.toLowerCase()));
-    return group.tokens.length ? lines.filter((line) => matches(line, group)) : lines.filter((line) => !groups.some((candidate) => candidate.tokens.length && matches(line, candidate)));
+    return ruleGroupCatalogs[ruleList.id]?.[group.id] || [];
   }
 
   function toggleRuleIconGroup(ruleList: NonNullable<PolicySettings["rule_lists"]>[number], group: RuleIconGroup) {
-    const defaults = ruleList.default_rules.split("\n").map((line) => line.trim()).filter(Boolean);
-    const available = String(ruleList.available_rules || ruleList.default_rules).split("\n").map((line) => line.trim()).filter(Boolean);
-    const current = (String(routingDraft[ruleList.key] ?? "@default").trim() === "@default" ? defaults : String(routingDraft[ruleList.key] || "").split("\n").map((line) => line.trim()).filter(Boolean));
-    const groupLines = ruleGroupLines(ruleList, group);
-    const selected = new Set(current);
-    const enabled = groupLines.length > 0 && groupLines.every((line) => selected.has(line));
-    for (const line of groupLines) {
-      if (enabled) selected.delete(line);
-      else selected.add(line);
-    }
-    const custom = current.filter((line) => !available.includes(line) && selected.has(line));
-    const selectedAvailable = available.filter((line) => selected.has(line));
-    const isDefault = selectedAvailable.length === defaults.length && defaults.every((line) => selected.has(line)) && !custom.length;
-    updateRoutingDraft(ruleList.key, isDefault ? "@default" : [...selectedAvailable, ...custom].join("\n"));
+    updateRoutingDraft(ruleList.key, toggleRuleGroup(ruleList, ruleIconGroups[ruleList.id] || [], String(routingDraft[ruleList.key] ?? "@default"), group.id));
   }
 
   function ruleExtraLines(ruleList: NonNullable<PolicySettings["rule_lists"]>[number]) {

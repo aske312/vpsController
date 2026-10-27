@@ -40,6 +40,27 @@ class RoutingPresetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             quic_domains('\n'.join(f'domain{i}.example' for i in range(257)))
 
+    def test_russian_sites_do_not_bypass_unrelated_mail_com(self):
+        rules = manager.profile_rules({'direct_ru_sites': True})
+        self.assertNotIn('DOMAIN-SUFFIX,mail.com,DIRECT', rules)
+        self.assertIn('DOMAIN-SUFFIX,ru,DIRECT', rules)
+        translated, _ = singbox_rules(rules)
+        self.assertFalse(any('mail.com' in rule.get('domain_suffix', []) for rule in translated))
+
+    def test_singbox_aggregate_ads_excludes_named_group_resources(self):
+        rules, providers = singbox_rules(['GEOSITE,category-ads-all,REJECT',
+                                         'DOMAIN-SUFFIX,advertising.com,REJECT'])
+        base, named = rules
+        self.assertEqual(base['mode'], 'and')
+        self.assertEqual(base['rules'][0], {'rule_set': ['geosite-category-ads-all']})
+        excluded = base['rules'][1]
+        self.assertTrue(excluded['invert'])
+        for domain in ['advertising.com', 'adform.com', 'ero-advertising.com', 'eroadvertising.com']:
+            self.assertIn(domain, excluded['domain_suffix'])
+        self.assertNotIn('youtube.com', excluded['domain_suffix'])
+        self.assertEqual(named, {'domain_suffix': ['advertising.com'], 'outbound': 'block'})
+        self.assertEqual(len(providers), 1)
+
     def test_profile_inheritance_device_override_and_no_mutation(self):
         item = profile()
         item['routing'] = {'quic_compatibility': True, 'block_malware': True, 'direct_ru_services': True,

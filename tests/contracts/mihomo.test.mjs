@@ -4,7 +4,7 @@ import { read, readMihomoSources, readApiSources } from "./support.mjs";
 
 test("Mihomo transports automatically provision DNS and routing policies", async () => {
   const [manager, page, dnsManifest, routingManifest] = await Promise.all([
-    read("protocol-images/mihomo/manager.py"),
+    Promise.all([read("protocol-images/mihomo/manager.py"), read("protocol-images/mihomo/advertising_rules.py")]).then((sources) => sources.join("\n")),
     readMihomoSources(),
     read("protocol-images/mihomo/modules/dns-private/manifest.json").then(JSON.parse),
     read("protocol-images/mihomo/modules/routing-policy/manifest.json").then(JSON.parse),
@@ -23,7 +23,7 @@ test("Mihomo transports automatically provision DNS and routing policies", async
   assert.match(manager, /TUNNEL_GAME_PROCESSES/);
   assert.match(manager, /DEFAULT_TUNNEL_GAMES = tuple\(TUNNEL_GAME_PROCESSES\)/);
   assert.match(manager, /DEFAULT_DIRECT_GAMES = tuple\(game_id for game_id in DIRECT_GAME_PROCESSES if game_id not in TUNNEL_GAME_PROCESSES\)/);
-  assert.match(manager, /"block_ads": \[/);
+  assert.match(manager, /"block_ads": AD_RULES/);
   assert.match(manager, /"block_privacy": \[/);
   assert.match(manager, /DOMAIN-SUFFIX,google-analytics\.com,REJECT/);
   assert.match(manager, /DOMAIN-SUFFIX,appsflyer\.com,REJECT/);
