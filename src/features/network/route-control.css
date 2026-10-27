@@ -116,3 +116,26 @@
   [data-network-page] .routeFieldPair { grid-template-columns:minmax(0,1fr); }
   [data-network-page] .routeCurrentRole { display:none; }
 }
+[data-network-page] .relayProfilePicker { display:grid; gap:10px; min-width:0; }
+[data-network-page] .relayProfileChoices { display:grid; border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+[data-network-page] .routeRelayTests button.relayProfileChoice { display:grid; grid-template-columns:minmax(0,1fr) minmax(220px,1fr); gap:12px; align-items:center; width:100%; max-width:100%; padding:12px; border:0; border-bottom:1px solid var(--line); border-radius:0; background:var(--panel); text-align:left; color:var(--text); white-space:normal; }
+[data-network-page] .routeRelayTests button.relayProfileChoice:last-child { border-bottom:0; }
+[data-network-page] .routeRelayTests button.relayProfileChoice[aria-pressed=true] { background:color-mix(in srgb,var(--cyan) 6%,var(--panel)); box-shadow:inset 3px 0 var(--cyan); }
+[data-network-page] .relayProfileName { display:grid; gap:4px; min-width:0; overflow-wrap:anywhere; }
+[data-network-page] .relayProfileName strong { font:600 13px/1.5 var(--ui-font); }
+[data-network-page] .relayProfileName small { color:var(--muted); }
+[data-network-page] .relayProfileName small[data-state=warning] { color:var(--amber); }
+[data-network-page] .relayProfileTransports { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; min-width:0; }
+[data-network-page] .relayProfileTransports > span { display:grid; align-content:start; gap:4px; min-width:0; }
+[data-network-page] .relayProfileCount { color:var(--muted); font:12px/1.5 var(--technical-font); }
+[data-network-page] .relayProfileCount strong { color:var(--text); font-weight:600; font-variant-numeric:tabular-nums; }
+[data-network-page] .relayProfileTransports code { color:var(--muted); font:11px/1.5 var(--technical-font); overflow-wrap:anywhere; }
+[data-network-page] .relayProfileDiagnostics { min-width:0; border-top:1px solid var(--line); padding-top:12px; }
+[data-network-page] .relayProfileDiagnostics > summary { cursor:pointer; color:var(--muted); font:500 12px/1.5 var(--ui-font); overflow-wrap:anywhere; }
+[data-network-page] .relayProfileDiagnostics[open] { display:grid; gap:14px; }
+[data-network-page] .relayProfileDiagnostics[open] > summary { margin-bottom:14px; }
+[data-network-page] .routeRelayTests button.relayAllConnections { padding:0; min-height:28px; background:transparent; border:0; color:var(--muted); font-size:11px; }
+[data-network-page] .relayProfileChoice:focus-visible { outline:2px solid var(--cyan); outline-offset:-3px; }
+@media (max-width:600px) {
+  [data-network-page] .routeRelayTests button.relayProfileChoice { grid-template-columns:minmax(0,1fr); gap:8px; }
+}

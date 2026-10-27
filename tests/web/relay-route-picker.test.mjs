@@ -7,9 +7,31 @@ import reactPlugin from '@vitejs/plugin-react';
 
 const loader = await createServer({ configFile: false, cacheDir: '.runtime/vite-relay-route-picker-tests', plugins: [reactPlugin()], server: { middlewareMode: true, hmr: false }, appType: 'custom', optimizeDeps: { noDiscovery: true } });
 after(() => loader.close());
-const { RelayRoutePicker, RelayConsumerPicker } = await loader.ssrLoadModule('/src/features/network/relay-route-picker.tsx');
+const { RelayRoutePicker, RelayConsumerPicker, RelayProfilePicker, compactPorts } = await loader.ssrLoadModule('/src/features/network/relay-route-picker.tsx');
 const route = { id: 'tcp', transport: 'tcp', listen_port: 20000, target_port: 443, state: 'listening', sessions: 0 };
 const host = { state: 'connected', routes: [route, { ...route, id: 'udp', transport: 'udp', sessions: 7, state: 'failed' }] };
+
+test('port ranges preserve gaps, sort and deduplicate shared sockets', () => {
+  assert.equal(compactPorts([20005, 20001, 20000, 20003, 20002, 20001, 20009]), '20000–20003, 20005, 20009');
+  assert.equal(compactPorts([]), '—');
+});
+
+test('a profile renders once with configured channel totals and compressed ports', () => {
+  const routes = Array.from({length: 6}, (_, i) => ({ ...route, id: `r${i}`, listen_port: 20000 + i }));
+  const channels = routes.map((item, i) => ({id: `c${i}`, label: `Channel ${i}`, transport: 'tcp', host_id: i < 3 ? 'relay' : 'other', route_ids: [item.id]}));
+  const html = renderToStaticMarkup(createElement(RelayProfilePicker, {host: {id: 'relay', state: 'connected', routes}, profiles: [{id: 'profile', name: 'Phone', channels}], selected: 'profile', onChange() {}}));
+  assert.equal((html.match(/class="relayProfileChoice"/g) || []).length, 1);
+  assert.match(html, /TCP <strong>3\/6<\/strong>/);
+  assert.match(html, /20000–20002/);
+  assert.doesNotMatch(html, /20003|Channel 0/);
+});
+
+test('a disconnected profile retains configuration counts without claiming live readiness', () => {
+  const html = renderToStaticMarkup(createElement(RelayProfilePicker, {host: {id: 'relay', state: 'unknown', routes: [route]}, profiles: [{id: 'p', name: 'Phone', channels: [{id: 'c', transport: 'tcp', host_id: 'relay', route_ids: ['tcp']}]}], selected: 'p', onChange() {}}));
+  assert.match(html, /1\/1/);
+  assert.match(html, /Нет связи с Agent/);
+  assert.doesNotMatch(html, /Пересылки настроены/);
+});
 
 test('route choices distinguish shared ports by transport and keep zero sessions visible', () => {
   const html = renderToStaticMarkup(createElement(RelayRoutePicker, { host, selected: 'tcp', onChange() {} }));

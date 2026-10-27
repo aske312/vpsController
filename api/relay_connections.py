@@ -14,6 +14,39 @@ UDP_COMPONENTS = {'transport-wg', 'transport-awg', 'transport-hysteria2', 'trans
 COMPONENTS = UDP_COMPONENTS | {'transport-shadowsocks', 'transport-reality'}
 
 
+def profile_summaries(profiles, hosts, origin):
+    """Public channel references only; never return credentials or settings."""
+    result = []
+    for profile in profiles:
+        channels = []
+        for connection in profile.get('connections', []):
+            if connection.get('component') not in COMPONENTS:
+                continue
+            settings = connection.get('settings', {})
+            selected = settings.get('relay_host_id', '')
+            transports = ('tcp', 'udp') if connection['component'] == 'transport-shadowsocks' else (
+                'tcp' if connection['component'] == 'transport-reality' else 'udp',)
+            try:
+                groups = connection_groups(connection)
+                targets = {transport: {port for group in groups for kind, port in group if kind == transport}
+                           for transport in transports}
+            except (KeyError, ValueError, TypeError):
+                # Old/incomplete snapshots still count as configured channels.
+                targets = {kind: set() for kind in transports}
+            host = next((item for item in hosts if item['id'] == selected), {})
+            for transport, ports in targets.items():
+                routes = [route['id'] for route in host.get('routes', [])
+                          if route['transport'] == transport and route['target_port'] in ports
+                          and (route.get('cdn_domain') == settings.get('cdn_domain') if relay_cdn.before(settings)
+                               else not route.get('cdn_domain') and route['target_ip'] == origin)]
+                channels.append({'id': f"mihomo:{profile['id']}:{connection['id']}",
+                                 'label': str(connection.get('name') or connection['id']),
+                                 'transport': transport, 'host_id': selected, 'route_ids': routes})
+        if channels:
+            result.append({'id': str(profile['id']), 'name': str(profile.get('name') or profile['id']), 'channels': channels})
+    return result
+
+
 def host_id(settings):
     value = settings.get('relay_host_id', '')
     if not isinstance(value, str) or value and not re.fullmatch(r'[0-9a-f]{32}', value):

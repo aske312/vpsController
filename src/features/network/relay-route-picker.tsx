@@ -1,11 +1,47 @@
 "use client";
 
 import { useState } from "react";
-import type { RelayHost, RelayStatus } from "./relay-state";
+import type { RelayHost, RelayProfile, RelayStatus } from "./relay-state";
 import { routeNeedsAttention } from "./route-library-state";
 
 const routeStates = { listening: "Порт слушает", failed: "Ошибка", missing: "Пересылка отсутствует", drift: "Настройки расходятся", unknown: "Нет данных" };
 const PAGE_SIZE = 5;
+
+export function compactPorts(values: number[]) {
+  const ports = [...new Set(values)].sort((a, b) => a - b);
+  const ranges: string[] = [];
+  for (let i = 0; i < ports.length; i++) {
+    const start = ports[i];
+    while (i + 1 < ports.length && ports[i + 1] === ports[i] + 1) i++;
+    ranges.push(start === ports[i] ? String(start) : `${start}–${ports[i]}`);
+  }
+  return ranges.join(", ") || "—";
+}
+
+export function RelayProfilePicker({ host, profiles, selected, onChange }: { host: RelayHost; profiles: RelayProfile[]; selected: string; onChange: (id: string) => void }) {
+  const choices = useChoices(profiles, selected, profile => `${profile.name} ${profile.channels.flatMap(channel => channel.route_ids).map(id => host.routes.find(route => route.id === id)?.listen_port || "").join(" ")}`);
+  return <div className="relayProfilePicker">
+    <div className="relayConsumerHeading"><h3>Профили <small>{profiles.length}</small></h3><small>Каналов через этот Relay / всего</small></div>
+    <small className="relayProfilePortsLabel">Под счётчиками — входные порты Relay</small>
+    {(profiles.length > PAGE_SIZE || choices.query) && <ChoiceSearch query={choices.query} onChange={choices.search} label="Поиск профиля Relay" placeholder="Профиль или порт" />}
+    <div className="relayProfileChoices" role="group" aria-label="Профили Relay">{choices.visible.map(profile => {
+      const configured = profile.channels.filter(channel => channel.host_id === host.id);
+      const ids = new Set(configured.flatMap(channel => channel.route_ids));
+      const routes = host.routes.filter(route => ids.has(route.id));
+      const attention = routes.some(routeNeedsAttention) || configured.some(channel => !channel.route_ids.length);
+      return <button type="button" className="relayProfileChoice" key={profile.id} aria-pressed={selected === profile.id} onClick={() => onChange(profile.id)}>
+        <span className="relayProfileName"><strong>{profile.name}</strong><small data-state={host.state !== "connected" ? "unknown" : attention ? "warning" : "listening"}>{host.state !== "connected" ? "Нет связи с Agent" : attention ? "Требует внимания" : "Пересылки настроены"}</small></span>
+        <span className="relayProfileTransports">{(["tcp", "udp"] as const).map(transport => <span key={transport}>
+          <span className="relayProfileCount">{transport.toUpperCase()} <strong>{configured.filter(channel => channel.transport === transport).length}/{profile.channels.filter(channel => channel.transport === transport).length}</strong></span>
+          <code title="Входные порты Relay">{compactPorts(routes.filter(route => route.transport === transport).map(route => route.listen_port))}</code>
+        </span>)}</span>
+      </button>;
+    })}</div>
+    {!choices.count && <p>Профили не найдены.</p>}
+    <ChoicePages {...choices} label="Профили Relay" onChange={choices.setPage} />
+    {choices.selection && !choices.selectedVisible && <ChoiceSelection label={choices.selection.name} hidden onReveal={choices.reveal} />}
+  </div>;
+}
 
 function useChoices<T extends { id: string }>(items: T[], selected: string, describe: (item: T) => string) {
   const [query, setQuery] = useState("");

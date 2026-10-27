@@ -2755,13 +2755,16 @@ def get_relays(_: None = Depends(require_token), view: Literal['live', 'inventor
         candidates.extend({'id': f"direct:{item['id']}", 'label': str(item.get('name') or item['id'])} for item in read_clients() if item.get('id') and item.get('protocol') in ('tuic', 'hysteria2'))
         candidates.extend({'id': f"direct:{item['id']}", 'label': str(item.get('name') or item['id'])} for item in read_clients() if item.get('id') and item.get('protocol') in ('wg', 'awg'))
         profiles_path = DATA_DIR / 'mihomo' / 'profiles.json'
+        profiles = []
         if profiles_path.is_file():
-            for profile in json.loads(profiles_path.read_text(encoding='utf-8')):
+            profiles = json.loads(profiles_path.read_text(encoding='utf-8'))
+            for profile in profiles:
                 for item in profile.get('connections', []):
                     relay_id = item.get('settings', {}).get('relay_host_id')
                     if relay_id and item.get('id'):
                         candidates.append({'id': f"mihomo:{profile['id']}:{item['id']}", 'label': f"{profile.get('name', profile['id'])} · {item.get('name') or item['id']}", 'host_id': relay_id})
         result['consumers'] = list({item['id']: item for item in candidates}.values())
+        result['profiles'] = relay_connections.profile_summaries(profiles, result['hosts'], PUBLIC_IPV4)
         for host in result['hosts']:
             for route in host['routes']:
                 check = route.get('check')

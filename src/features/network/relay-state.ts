@@ -24,7 +24,9 @@ export type RelayHost = {
   excluded_addresses?: string[];
   addresses?: { ipv4: string[]; ipv6: string[]; domains: string[]; cdn_domains?: string[] };
 };
+export type RelayProfile = { id: string; name: string; channels: { id: string; label: string; transport: "tcp" | "udp"; host_id: string; route_ids: string[] }[] };
 export type RelayStatus = {
+  profiles?: RelayProfile[];
   revision: string; hosts: RelayHost[]; pending: boolean; origin_ip: string; origin_hosts: string[];
   targets: { transport: "tcp" | "udp"; port: number }[];
   consumers?: { id: string; label: string; host_id?: string }[];
@@ -114,6 +116,11 @@ export function relaySnapshot(value: unknown): RelayStatus {
     }
   }
   if (value.consumers !== undefined && (!Array.isArray(value.consumers) || value.consumers.some(item => !object(item) || typeof item.id !== "string" || typeof item.label !== "string"))) return invalid();
+  if (value.profiles !== undefined && (!Array.isArray(value.profiles) || value.profiles.some(profile => !object(profile)
+    || typeof profile.id !== "string" || typeof profile.name !== "string" || !Array.isArray(profile.channels)
+    || profile.channels.some(channel => !object(channel) || typeof channel.id !== "string" || typeof channel.label !== "string"
+      || !["tcp", "udp"].includes(String(channel.transport)) || typeof channel.host_id !== "string"
+      || !Array.isArray(channel.route_ids) || channel.route_ids.some(id => typeof id !== "string"))))) return invalid();
   return value as RelayStatus;
 }
 
