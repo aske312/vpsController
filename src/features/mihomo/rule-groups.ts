@@ -2,6 +2,14 @@ import type { PolicySettings, RuleIconGroup } from "./types";
 
 type RuleList = NonNullable<PolicySettings["rule_lists"]>[number];
 
+export function ruleGroupStatus(id: string, enabled: boolean, partial = false) {
+  if (partial) return "Частично";
+  if (id === "quic_compatibility") return enabled ? "Без QUIC" : "QUIC разрешён";
+  if (id.startsWith("block_")) return enabled ? "Блокируется" : "Без блокировки";
+  if (id === "udp_tunnel_exclusions") return enabled ? "Через VPN" : "Напрямую";
+  return enabled ? "Напрямую" : "Через VPN";
+}
+
 function lines(value: string) {
   return [...new Set(value.split("\n").map((line) => line.trim()).filter(Boolean))];
 }

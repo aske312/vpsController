@@ -44,6 +44,8 @@ class RoutingPresetTests(unittest.TestCase):
         rules = manager.profile_rules({'direct_ru_sites': True})
         self.assertNotIn('DOMAIN-SUFFIX,mail.com,DIRECT', rules)
         self.assertIn('DOMAIN-SUFFIX,ru,DIRECT', rules)
+        self.assertIn('DOMAIN-SUFFIX,mail.ru,DIRECT', rules)
+        self.assertIn('DOMAIN-SUFFIX,imgsmail.ru,DIRECT', rules)
         translated, _ = singbox_rules(rules)
         self.assertFalse(any('mail.com' in rule.get('domain_suffix', []) for rule in translated))
 
