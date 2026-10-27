@@ -9,8 +9,6 @@ def quic_rule(domain):
 
 # Curated service domains from v2fly/domain-list-community/data.
 # Shared CDN parents are deliberately excluded; only service-specific names match.
-# Curated service domains from v2fly/domain-list-community/data.
-# Shared CDN parents are deliberately excluded; only service-specific names match.
 QUIC_GROUPS = {
     'youtube': (
         'youtube.com', 'googlevideo.com', 'youtubei.googleapis.com',
@@ -49,30 +47,6 @@ QUIC_GROUPS = {
     'dailymotion': (
         'dailymotion.com', 'dmcdn.net',
     ),
-    'vk_video': (
-        'vkvideo.ru', 'vkvideo.com', 'vkuservideo.com',
-        'vkuservideo.net', 'vkuservideo.ru', 'vkuserlive.com',
-        'vkuserlive.net',
-    ),
-    'rutube': (
-        'rutube.ru', 'rutubelist.ru', 'rtbcdn.ru',
-        'rutube.sport',
-    ),
-    'ok_video': (
-        'ok.ru', 'okcdn.ru',
-    ),
-    'kinopoisk': (
-        'kinopoisk.ru', 'kinopoisk-ru.clstorage.net', 'kp.yandex.net',
-        'kp-config-smart-tv.akamaized.net',
-    ),
-    'okko': (
-        'okko.tv', 'okkoapi.tv', 'playfamily.ru',
-        'okko.sport',
-    ),
-    'wink': (
-        'wink.ru', 'wink.am', 'restream-media.net',
-        'restream.ru', 'more.tv',
-    ),
     'media_library': (
         'pornhub.com', 'pornhub.org', 'pornhubpremium.com',
         'phncdn.com', 'phprcdn.com', 'xvideos.com',
@@ -87,7 +61,8 @@ QUIC_GROUPS = {
         'spankbang.party', 'sb-cd.com',
     ),
 }
-QUIC_DEFAULT_RULES = [quic_rule(domain) for domain in QUIC_GROUPS['youtube']]
+QUIC_DEFAULT_GROUPS = ('youtube', 'instagram', 'media_library')
+QUIC_DEFAULT_RULES = [quic_rule(domain) for group in QUIC_DEFAULT_GROUPS for domain in QUIC_GROUPS[group]]
 QUIC_AVAILABLE_RULES = list(dict.fromkeys(quic_rule(domain) for domains in QUIC_GROUPS.values() for domain in domains))
 QUIC_RULE_PATTERN = re.compile(r'AND,\(\(NETWORK,UDP\),\(DST-PORT,443\),\(DOMAIN-SUFFIX,([a-z0-9.-]+)\)\),REJECT')
 

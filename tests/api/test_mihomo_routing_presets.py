@@ -15,7 +15,7 @@ from unittest.mock import patch
 import yaml
 from tests.api.support import manager, ROOT, free_port, wait_port, wait_http_proxy, mihomo_readiness
 from tests.api.test_mihomo_rules_runtime import profile
-from routing_presets import quic_rule, quic_domains, QUIC_GROUPS, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES
+from routing_presets import quic_rule, quic_domains, QUIC_DEFAULT_GROUPS, QUIC_GROUPS, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES
 from client_singbox import singbox_rules, UnsupportedClientConfig
 from client_capabilities import compatible_routing, device_capabilities
 
@@ -95,7 +95,11 @@ class RoutingPresetTests(unittest.TestCase):
                     self.assertEqual(rule['port'], [443])
         schema = next(row for row in manager.routing_rule_lists({}) if row['id'] == 'quic_compatibility')
         self.assertEqual(set(schema['available_rules'].splitlines()), set(QUIC_AVAILABLE_RULES))
-        self.assertEqual(schema['default_rules'].splitlines(), [quic_rule(d) for d in QUIC_GROUPS['youtube']])
+        self.assertEqual(schema['default_rules'].splitlines(), [quic_rule(d) for group in ('youtube', 'instagram', 'media_library') for d in QUIC_GROUPS[group]])
+        self.assertEqual(QUIC_DEFAULT_GROUPS, ('youtube', 'instagram', 'media_library'))
+        self.assertFalse({'vk_video', 'rutube', 'ok_video', 'kinopoisk', 'okko', 'wink'} & set(QUIC_GROUPS))
+        legacy = quic_rule('rutube.ru')
+        self.assertIn(legacy, manager.profile_rules({'quic_compatibility': True, 'quic_compatibility_rules': legacy}))
         for shared_cdn in ['cloudfront.net', 'akamaized.net', 'edgesuite.net', 'yandex.ru', 'googleapis.com']:
             self.assertNotIn(quic_rule(shared_cdn), [quic_rule(d) for key, domains in QUIC_GROUPS.items()
                                                    if key != 'google' for d in domains])
