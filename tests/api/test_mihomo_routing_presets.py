@@ -15,7 +15,7 @@ from unittest.mock import patch
 import yaml
 from tests.api.support import manager, ROOT, free_port, wait_port, wait_http_proxy, mihomo_readiness
 from tests.api.test_mihomo_rules_runtime import profile
-from routing_presets import quic_rule, quic_domains, SECURITY_PROVIDERS, SERVICE_RULES
+from routing_presets import quic_rule, quic_domains, QUIC_GROUPS, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES
 from client_singbox import singbox_rules, UnsupportedClientConfig
 from client_capabilities import compatible_routing, device_capabilities
 
@@ -75,6 +75,31 @@ class RoutingPresetTests(unittest.TestCase):
         with self.assertRaises(UnsupportedClientConfig):
             singbox_rules(['AND,((NETWORK,UDP),(DST-PORT,444)),REJECT'])
 
+    def test_video_groups_are_selectable_and_preserve_saved_selections(self):
+        catalog = (ROOT / 'src/features/mihomo/catalog.ts').read_text(encoding='utf-8')
+        catalog = catalog.split('  quic_compatibility: [', 1)[1].split('  direct_ru_services:', 1)[0]
+        for group, domains in QUIC_GROUPS.items():
+            with self.subTest(group=group):
+                row = next(line for line in catalog.splitlines() if f'id: "{group}"' in line)
+                for domain in domains:
+                    self.assertIn(f'"DOMAIN-SUFFIX,{domain})"', row)
+                selected = [quic_rule(domain) for domain in domains]
+                routing = {'quic_compatibility': True, 'quic_compatibility_rules': '\n'.join(selected)}
+                emitted = manager.profile_rules(routing)
+                self.assertEqual([rule for rule in emitted if rule.startswith('AND,')], selected)
+                translated, providers = singbox_rules(selected)
+                self.assertEqual(providers, [])
+                self.assertEqual({d for rule in translated for d in rule['domain_suffix']}, set(domains))
+                for rule in translated:
+                    self.assertEqual(rule['network'], ['udp'])
+                    self.assertEqual(rule['port'], [443])
+        schema = next(row for row in manager.routing_rule_lists({}) if row['id'] == 'quic_compatibility')
+        self.assertEqual(set(schema['available_rules'].splitlines()), set(QUIC_AVAILABLE_RULES))
+        self.assertEqual(schema['default_rules'].splitlines(), [quic_rule(d) for d in QUIC_GROUPS['youtube']])
+        for shared_cdn in ['cloudfront.net', 'akamaized.net', 'edgesuite.net', 'yandex.ru', 'googleapis.com']:
+            self.assertNotIn(quic_rule(shared_cdn), [quic_rule(d) for key, domains in QUIC_GROUPS.items()
+                                                   if key != 'google' for d in domains])
+
     def test_priorities_protect_against_general_direct_routes(self):
         personal = ['DOMAIN,allowed.evil.example,DIRECT', 'PROCESS-NAME,browser.exe,DIRECT']
         rules = manager.profile_rules({'block_malware': True, 'quic_compatibility': True, 'direct_ru_services': True,
@@ -128,7 +153,8 @@ class RoutingPresetTests(unittest.TestCase):
     @unittest.skipUnless(os.getenv('PRIVACY_MIHOMO_BIN'), 'Requires real Mihomo')
     def test_all_new_presets_pass_real_mihomo_validation(self):
         item = profile()
-        item['routing'] = {'quic_compatibility': True, 'block_malware': True, 'direct_ru_services': True}
+        item['routing'] = {'quic_compatibility': True, 'block_malware': True, 'direct_ru_services': True,
+                           'quic_compatibility_rules': '\n'.join(QUIC_AVAILABLE_RULES)}
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'config.yaml'
             path.write_text(manager.render_profile(item), encoding='utf-8')

@@ -7,12 +7,85 @@ def quic_rule(domain):
     return f"AND,((NETWORK,UDP),(DST-PORT,443),(DOMAIN-SUFFIX,{domain})),REJECT"
 
 
+# Curated service domains from v2fly/domain-list-community/data.
+# Shared CDN parents are deliberately excluded; only service-specific names match.
+# Curated service domains from v2fly/domain-list-community/data.
+# Shared CDN parents are deliberately excluded; only service-specific names match.
 QUIC_GROUPS = {
-    'youtube': ('youtube.com', 'googlevideo.com', 'youtubei.googleapis.com', 'ytimg.com'),
-    'google': ('google.com', 'googleapis.com', 'gstatic.com'),
-    'instagram': ('instagram.com', 'cdninstagram.com'),
-    'facebook': ('facebook.com', 'fbcdn.net'),
-    'tiktok': ('tiktok.com', 'tiktokcdn.com'),
+    'youtube': (
+        'youtube.com', 'googlevideo.com', 'youtubei.googleapis.com',
+        'ytimg.com', 'youtube-nocookie.com', 'youtube.googleapis.com',
+        'youtubeembeddedplayer.googleapis.com', 'youtu.be',
+    ),
+    'google': (
+        'google.com', 'googleapis.com', 'gstatic.com',
+    ),
+    'instagram': (
+        'instagram.com', 'cdninstagram.com',
+    ),
+    'facebook': (
+        'facebook.com', 'fbcdn.net',
+    ),
+    'tiktok': (
+        'tiktok.com', 'tiktokcdn.com', 'tiktokcdn-eu.com',
+        'tiktokcdn-us.com', 'tiktokeu-cdn.com', 'tiktokrow-cdn.com',
+        'tiktokv.com', 'tiktokv.eu', 'tiktokv.us',
+        'ttlivecdn.com', 'tiktokcdn.com.akamaized.net', 'tiktokcdn.com.edgesuite.net',
+        'tiktokcdn-us.com.edgesuite.net', 'tiktokv.com.edgekey.net', 'tiktokv.com.edgesuite.net',
+    ),
+    'twitch': (
+        'twitch.tv', 'ttvnw.net', 'jtvnw.net',
+        'twitchcdn.net', 'live-video.net',
+    ),
+    'netflix': (
+        'netflix.com', 'netflix.net', 'nflxvideo.net',
+        'nflxso.net', 'nflxext.com', 'nflximg.com',
+        'nflximg.net', 'netflix.com.edgesuite.net',
+    ),
+    'vimeo': (
+        'vimeo.com', 'vimeocdn.com', 'vimeoondemand.com',
+        'vhx.tv', 'livestream.com',
+    ),
+    'dailymotion': (
+        'dailymotion.com', 'dmcdn.net',
+    ),
+    'vk_video': (
+        'vkvideo.ru', 'vkvideo.com', 'vkuservideo.com',
+        'vkuservideo.net', 'vkuservideo.ru', 'vkuserlive.com',
+        'vkuserlive.net',
+    ),
+    'rutube': (
+        'rutube.ru', 'rutubelist.ru', 'rtbcdn.ru',
+        'rutube.sport',
+    ),
+    'ok_video': (
+        'ok.ru', 'okcdn.ru',
+    ),
+    'kinopoisk': (
+        'kinopoisk.ru', 'kinopoisk-ru.clstorage.net', 'kp.yandex.net',
+        'kp-config-smart-tv.akamaized.net',
+    ),
+    'okko': (
+        'okko.tv', 'okkoapi.tv', 'playfamily.ru',
+        'okko.sport',
+    ),
+    'wink': (
+        'wink.ru', 'wink.am', 'restream-media.net',
+        'restream.ru', 'more.tv',
+    ),
+    'media_library': (
+        'pornhub.com', 'pornhub.org', 'pornhubpremium.com',
+        'phncdn.com', 'phprcdn.com', 'xvideos.com',
+        'xv-ru.com', 'xvideos-cdn.com', 'xnxx.com',
+        'xnxx.net', 'xnxx.tv', 'xnxx3.com',
+        'xnxx-cdn.com', 'xhamster.com', 'xhamster.desi',
+        'xhamster.xxx', 'xhamster18.com', 'xhamster19.com',
+        'xhamster2.com', 'xhamster3.com', 'xhcdn.com',
+        'xhpingcdn.com', 'youporn.com', 'youpornru.com',
+        'youpornpremium.com', 'ypncdn.com', 'redtube.com',
+        'redtubepremium.com', 'rdtcdn.com', 'spankbang.com',
+        'spankbang.party', 'sb-cd.com',
+    ),
 }
 QUIC_DEFAULT_RULES = [quic_rule(domain) for domain in QUIC_GROUPS['youtube']]
 QUIC_AVAILABLE_RULES = list(dict.fromkeys(quic_rule(domain) for domains in QUIC_GROUPS.values() for domain in domains))
