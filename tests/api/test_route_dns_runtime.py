@@ -6,6 +6,7 @@ separately requires HTTPS for the production tunnel resolver pool.
 import contextlib
 import json
 import os
+import select
 from pathlib import Path
 import socket
 import socketserver
@@ -123,7 +124,28 @@ class SocksHandler(socketserver.BaseRequestHandler):
             self.request.sendall(b'\x05\x00')
             header = read_exact(self.request, 4)
             size = 4 if header[3] == 1 else (16 if header[3] == 4 else read_exact(self.request, 1)[0])
-            read_exact(self.request, size + 2)
+            address = read_exact(self.request, size)
+            destination_port = struct.unpack('!H', read_exact(self.request, 2))[0]
+            if header[1] == 1:
+                host = socket.inet_ntoa(address) if header[3] == 1 else address.decode('ascii')
+                self.server.tcp_requests.append((host, destination_port))
+                if host.endswith('.test'):
+                    host = '127.0.0.1'
+                if host != '127.0.0.1':
+                    raise ValueError('Public destinations are forbidden')
+                with socket.create_connection((host, destination_port), timeout=2) as upstream:
+                    self.server.tcp_destinations.append(destination_port)
+                    self.request.sendall(b'\x05\x00\x00\x01\x7f\x00\x00\x01' + b'\0\0')
+                    while True:
+                        readable, _, _ = select.select([self.request, upstream], [], [], 2)
+                        if not readable:
+                            return
+                        for source in readable:
+                            data = source.recv(65535)
+                            if not data:
+                                return
+                            (upstream if source is self.request else self.request).sendall(data)
+                return
             if header[1] != 3:
                 self.request.sendall(b'\x05\x07\x00\x01' + b'\0' * 6)
                 return
@@ -188,6 +210,8 @@ class DnsLab:
             threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .05}, daemon=True).start()
         self.proxy = TcpServer(('127.0.0.1', 0), SocksHandler)
         self.proxy.queries = []
+        self.proxy.tcp_destinations = []
+        self.proxy.tcp_requests = []
         threading.Thread(target=self.proxy.serve_forever, kwargs={'poll_interval': .05}, daemon=True).start()
         return self
 
@@ -245,6 +269,8 @@ def core(lab, engine, *, vpn_down=False):
                       {'type': 'field', 'inboundTag': ['route-dns-bootstrap', 'route-dns-direct'], 'outboundTag': 'direct'},
                       {'type': 'field', 'inboundTag': ['route-dns-vpn'], 'outboundTag': 'proxy'}]}}
     with tempfile.TemporaryDirectory(prefix='route-dns-') as folder:
+        if hasattr(lab, 'configure'):
+            lab.configure(config, engine)
         path = Path(folder) / 'config.json'
         path.write_text(json.dumps(config), encoding='utf-8')
         args = ['-d', folder, '-f', str(path)] if engine == 'mihomo' else (
@@ -258,7 +284,8 @@ def core(lab, engine, *, vpn_down=False):
                     if process.poll() is not None:
                         raise AssertionError(Path(log.name).read_text(encoding='utf-8'))
                     try:
-                        if query(dns_port, 'ready.direct.test', .3)[1] == '198.51.100.11':
+                        address = query(dns_port, 'ready.direct.test', .3)[1]
+                        if address == '198.51.100.11' or (getattr(lab, 'fake_ip', False) and address and address.startswith('198.18.')):
                             break
                     except (OSError, ValueError, IndexError):
                         time.sleep(.05)
