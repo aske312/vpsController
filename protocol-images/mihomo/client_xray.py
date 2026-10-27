@@ -3,6 +3,7 @@ from copy import deepcopy
 from client_singbox import UnsupportedClientConfig
 from client_labels import connection_label
 import xray_protocols
+from dns_routing import xray_route_dns
 
 
 def xray_rules(rules):
@@ -86,4 +87,13 @@ def build_xray_configs(connections, routing, dns, rules, endpoint, direct_settin
                         "inbounds": [{"tag": "socks", "listen": "127.0.0.1", "port": 10808, "protocol": "socks", "settings": {"auth": "noauth", "udp": True}, "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True}}],
                         "outbounds": [node, {"tag": "direct", "protocol": "freedom"}, {"tag": "block", "protocol": "blackhole"}],
                         "routing": {"domainStrategy": "AsIs", "rules": deepcopy(xray_rules(rules))}})
+        if dns.get('route_dns'):
+            config = configs[-1]
+            config['dns'] = xray_route_dns(dns, rules, node)
+            node.setdefault('streamSettings', {}).setdefault('sockopt', {})['domainStrategy'] = 'UseIP'
+            config['outbounds'][1]['settings'] = {'domainStrategy': 'UseIP'}
+            config['routing']['rules'][:0] = [
+                {'type': 'field', 'inboundTag': ['route-dns-bootstrap', 'route-dns-direct'], 'outboundTag': 'direct'},
+                {'type': 'field', 'inboundTag': ['route-dns-vpn'], 'outboundTag': 'proxy'},
+            ]
     return configs

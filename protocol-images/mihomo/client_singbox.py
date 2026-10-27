@@ -9,6 +9,7 @@ from client_labels import connection_label
 import xray_protocols
 from routing_presets import QUIC_RULE_PATTERN, SECURITY_PROVIDERS
 from advertising_rules import ad_catalog_matchers
+from dns_routing import singbox_route_dns
 
 
 class UnsupportedClientConfig(ValueError):
@@ -162,6 +163,17 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
               "route": {"auto_detect_interface": True, "default_domain_resolver": "bootstrap", "rules": [{"action": "sniff"}, {"protocol": "dns", "action": "hijack-dns"}, *route_rules], "final": proxy_tag}}
     if endpoints:
         config["endpoints"] = endpoints
+    if dns.get('route_dns'):
+        config['dns'] = singbox_route_dns(dns, rules, proxy_tag)
+        config['route']['default_domain_resolver'] = 'remote'
+        for outbound in outbounds:
+            if outbound.get('tag') == 'direct':
+                outbound['domain_resolver'] = 'direct-dns'
+            elif 'server' in outbound:
+                # A tunnel cannot resolve its own endpoint through itself.
+                outbound['domain_resolver'] = 'bootstrap'
+        for endpoint_config in endpoints:
+            endpoint_config['domain_resolver'] = 'bootstrap'
     if rule_sets:
         config["route"]["rule_set"] = rule_sets
         config.setdefault("experimental", {})["cache_file"] = {"enabled": True}

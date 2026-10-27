@@ -43,6 +43,7 @@ from client_subscription import CLIENT_HINTS, import_page, vless_subscription
 import client_compatibility
 from client_capabilities import CAPABILITIES, FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
 from advertising_rules import AD_RULES, mihomo_ad_base_rule
+from dns_routing import mihomo_route_dns, validate_route_dns
 from routing_presets import QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, quic_domains, quic_rule
 from telemetry import ConnectionTelemetry
 from xray_stats import XrayStats
@@ -1466,7 +1467,7 @@ def dns_schema() -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
         item = dict(item)
-        if item.get("key") in ("nameserver", "fallback"):
+        if item.get("key") in ("nameserver", "fallback", "direct_nameserver", "proxy_nameserver"):
             item["options"] = options
         result.append(item)
     return result
@@ -1485,6 +1486,20 @@ def dns_settings(stored: Any = None) -> dict[str, Any]:
         stored = load_json(DNS_SETTINGS_FILE, {})
     stored = {key: value for key, value in stored.items() if key != "_mutation"} if isinstance(stored, dict) else {}
     return {**dns_defaults(), **stored}
+
+
+def client_dns_settings(routing: dict[str, Any], ech_enabled: bool = False) -> dict[str, Any]:
+    dns = dict(dns_settings())
+    dns['enhanced_mode'] = 'fake-ip' if bool(routing.get('dns_fake_ip', dns.get('enhanced_mode') == 'fake-ip')) else 'redir-host'
+    dns['ipv6'] = bool(routing.get('dns_ipv6', dns.get('ipv6', False)))
+    dns['prefer_h3'] = bool(routing.get('dns_prefer_h3', dns.get('prefer_h3', False)))
+    if routing.get('dns_secure') and not dns.get('route_dns'):
+        dns.update(nameserver='https://cloudflare-dns.com/dns-query', fallback='https://dns.google/dns-query')
+    if ech_enabled:
+        for key, default in (('nameserver', 'https://cloudflare-dns.com/dns-query'), ('fallback', 'https://dns.google/dns-query')):
+            if not str(dns.get(key, '')).startswith(('https://', 'tls://', 'quic://')):
+                dns[key] = default
+    return dns
 
 
 def routing_settings(stored: Any = None) -> dict[str, Any]:
@@ -1642,6 +1657,10 @@ def validate_dns(values: dict[str, Any]) -> dict[str, Any]:
             if not value:
                 raise HTTPException(status_code=422, detail=f"{key} cannot be empty")
             result[key] = value
+    try:
+        validate_route_dns(result)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     return result
 
 
@@ -4933,17 +4952,7 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     for key in (*DIRECT_RULE_PRESETS.keys(), "direct_games_enabled", "direct_games_udp_enabled", "direct_p2p_enabled"):
         routing[key] = bool(profile_routing.get(key, False))
     mode = str(routing.get("mode", "rule"))
-    dns = dict(dns_settings())
-    dns["enhanced_mode"] = "fake-ip" if bool(profile_routing.get("dns_fake_ip", dns.get("enhanced_mode") == "fake-ip")) else "redir-host"
-    dns["ipv6"] = bool(profile_routing.get("dns_ipv6", dns.get("ipv6", False)))
-    dns["prefer_h3"] = bool(profile_routing.get("dns_prefer_h3", dns.get("prefer_h3", False)))
-    if bool(profile_routing.get("dns_secure", False)):
-        dns["nameserver"] = "https://cloudflare-dns.com/dns-query"
-        dns["fallback"] = "https://dns.google/dns-query"
-    if ech_enabled:
-        for key, default in (("nameserver", "https://cloudflare-dns.com/dns-query"), ("fallback", "https://dns.google/dns-query")):
-            if not str(dns.get(key, "")).startswith(("https://", "tls://", "quic://")):
-                dns[key] = default
+    dns = client_dns_settings(profile_routing, ech_enabled)
     lines = [
         "mixed-port: 7890",
         "allow-lan: false",
@@ -4991,7 +5000,22 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         "  fallback-filter:",
         "    geoip: false",
     ]
-    if ech_enabled:
+    if dns.get('route_dns'):
+        # Replace the legacy common resolver pool only when explicitly enabled.
+        dns_start = lines.index('  nameserver:')
+        del lines[dns_start:]
+        for key, value in mihomo_route_dns(dns, profile_rules(routing), MIHOMO_PROXY_GROUP, mode).items():
+            if isinstance(value, bool):
+                lines.append(f'  {key}: {str(value).lower()}')
+            elif isinstance(value, dict):
+                lines.append(f'  {key}:' if value else f'  {key}: {{}}')
+                for domain, resolvers in value.items():
+                    lines.append(f'    {q(domain)}:')
+                    lines.extend(f'      - {q(resolver)}' for resolver in resolvers)
+            else:
+                lines.append(f'  {key}:')
+                lines.extend(f'    - {q(resolver)}' for resolver in value)
+    elif ech_enabled:
         resolvers = ech_dns_resolvers(dns)
         # ECH needs HTTPS DNS records. Resolve the proxy hostname explicitly
         # over the user's encrypted resolvers, never via an implicit OS DNS.
@@ -5169,11 +5193,11 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
     try:
         connections = with_relay_labels(connections)
         if export_format in {"xray", "uri"}:
-            config = build_xray_configs(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings, relay_client_nodes)
+            config = build_xray_configs(connections, routing, client_dns_settings(device_values), profile_rules(routing), public_endpoint(), reality_connection_settings, relay_client_nodes)
             if export_format == "uri":
                 return vless_subscription(config), "txt"
         else:
-            config = build_singbox_config(connections, routing, dns_settings(), profile_rules(routing), public_endpoint(), reality_connection_settings, fragment, device_capabilities(export_format, client=client_name), relay_client_nodes)
+            config = build_singbox_config(connections, routing, client_dns_settings(device_values, bool(routing.get("tunnel_ech"))), profile_rules(routing), public_endpoint(), reality_connection_settings, fragment, device_capabilities(export_format, client=client_name), relay_client_nodes)
     except UnsupportedClientConfig as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return json.dumps(config, ensure_ascii=False, indent=2) + "\n", "json"

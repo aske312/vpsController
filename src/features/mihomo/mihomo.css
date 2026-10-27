@@ -1385,3 +1385,16 @@
 .mihomoRouteHop[data-hop="relay"] b { color:var(--cyan); }
 .mihomoRouteHop[data-hop="cdn"] b { color:var(--amber); }
 .mihomoRouteHop[data-hop="vps"] b { color:var(--green); }
+.mihomoDnsRouteResolvers { min-width:0; padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--panel-soft); }
+.mihomoDnsRouteResolvers > header { display:grid; gap:5px; margin-bottom:15px; }
+.mihomoDnsRouteResolvers small { display:block; color:var(--muted); font-size:11px; line-height:1.5; }
+.mihomoDnsRouteResolvers > div,.mihomoDnsRouteDetails > div { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+.mihomoDnsRouteResolvers label { display:grid; align-content:start; min-width:0; gap:8px; }
+.mihomoDnsRouteResolvers label > span { display:grid; gap:5px; }
+.mihomoDnsRouteResolvers input,.mihomoDnsRouteResolvers select { min-width:0; width:100%; }
+.mihomoDnsRouteDetails { margin-top:18px; border-top:1px solid var(--line); padding-top:14px; }
+.mihomoDnsRouteDetails summary { cursor:pointer; color:var(--muted); font-size:12px; }
+.mihomoDnsRouteDetails > div { margin-top:14px; }
+@media (max-width:1100px) {
+  .mihomoDnsRouteResolvers > div,.mihomoDnsRouteDetails > div { grid-template-columns:1fr; }
+}
