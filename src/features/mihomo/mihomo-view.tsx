@@ -6,6 +6,8 @@ import { clientUuid, deviceClientShortName, clientConfigFormat, devicePlatformMe
 import { Tab, HeroFact, ModuleCatalog, Empty } from "./components";
 import { clientCapabilities, compatibleClientRouting, clientConnectionSupported } from "./client-capabilities";
 import { partitionRuleGroups, ruleGroupStatus, toggleRuleGroup } from "./rule-groups";
+import { createRuleLeaveGuard, type SectionLeaveGuard } from "./rule-leave-guard";
+import { RuleLeaveDialog } from "./rule-leave-dialog";
 import realityTargets from "../../../protocol-images/mihomo/reality-targets.json" with { type: "json" };
 import { ProfileProtection } from "./profile-protection";
 import { SubscriptionLimitsFields, unlimitedSubscription } from "./subscription-limits";
@@ -32,7 +34,7 @@ import { profilePage, PROFILES_PER_PAGE } from "./profile-pagination";
 import { actionLabels, duration, connectionOnline, trafficBytes, aggregateTraffic } from "../../shared/lib/control-plane-ui";
 import QRCode from "qrcode";
 import Image from "next/image";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 
 function validatePolicyResult(save: PolicySave, value: unknown): unknown {
@@ -75,6 +77,7 @@ export function MihomoPage({
   profilesPage,
   setProfilesPage,
   onDirtyChange,
+  onBeforeLeaveChange,
   onSystemOperation,
   systemOperation,
 }: {
@@ -88,10 +91,11 @@ export function MihomoPage({
   onRemoveCore: () => Promise<void>;
   onLoadingChange?: (loading: boolean, run?: number) => void;
   onDirtyChange?: (dirty: boolean) => void;
+  onBeforeLeaveChange?: (guard: SectionLeaveGuard | null) => void;
   profilesPage: number;
   setProfilesPage: Dispatch<SetStateAction<number>>;
 }) {
-  const [view, setView] = useState<View>("overview");
+  const [view, setCurrentView] = useState<View>("overview");
   const [status, setStatus] = useState<Status | null>(null);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatus | null>(null);
   const [modules, setModules] = useState<Module[]>([]);
@@ -131,6 +135,16 @@ export function MihomoPage({
   const [pendingPolicySave, setPendingPolicySave] = useState<PolicySave | null>(null);
   const [pendingProfileSave, setPendingProfileSave] = useState<{ mutation: ProfileMutation; session: number; draft: string } | null>(null);
   const pendingPolicySaveRef = useRef<PolicySave | null>(null);
+  const routingLeaveActions = useRef<{ canSave: () => boolean; save: () => Promise<boolean>; discard: () => void }>({ canSave: () => false, save: async () => false, discard: () => {} });
+  const remainingDirtyRef = useRef(false);
+  const [routingLeaveGuard] = useState(() => createRuleLeaveGuard({
+    dirty: () => routingDirtyRef.current,
+    pending: () => pendingPolicySaveRef.current?.kind === "routing",
+    canSave: () => routingLeaveActions.current.canSave(),
+    save: () => routingLeaveActions.current.save(),
+    discard: () => routingLeaveActions.current.discard(),
+  }));
+  const ruleLeaveState = useSyncExternalStore(routingLeaveGuard.subscribe, routingLeaveGuard.getSnapshot, routingLeaveGuard.getSnapshot);
   const pendingPolicyApply = useRef<{ id: string; apply: (result: unknown) => void } | null>(null);
   const policyChecking = useRef(false);
   const pageActive = useRef(false);
@@ -529,6 +543,20 @@ export function MihomoPage({
 
   useEffect(() => { onDirtyChange?.(dnsDirty || routingDirty || profileDirty || settingsDirty || presetDirty || personalRuleDirty || Boolean(pendingPolicySave || pendingProfileSave)); }, [dnsDirty, routingDirty, profileDirty, settingsDirty, presetDirty, personalRuleDirty, pendingPolicySave, pendingProfileSave, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+  useEffect(() => {
+    remainingDirtyRef.current = dnsDirty || profileDirty || settingsDirty || presetDirty || personalRuleDirty
+      || Boolean(pendingProfileSave || (pendingPolicySave && pendingPolicySave.kind !== "routing"));
+  }, [dnsDirty, profileDirty, settingsDirty, presetDirty, personalRuleDirty, pendingProfileSave, pendingPolicySave]);
+  useEffect(() => {
+    onBeforeLeaveChange?.(async () => ({ allowed: await routingLeaveGuard.request(), dirty: remainingDirtyRef.current }));
+    return () => { onBeforeLeaveChange?.(null); routingLeaveGuard.dispose(); };
+  }, [onBeforeLeaveChange, routingLeaveGuard]);
+  useEffect(() => { routingLeaveGuard.reconcile(); }, [routingDirty, pendingPolicySave, ruleLeaveState.saving, routingLeaveGuard]);
+
+  function setView(next: View) {
+    if (next === view) return;
+    void routingLeaveGuard.request().then((allowed) => { if (allowed) setCurrentView(next); });
+  }
 
   function updateRoutingDraft(key: string, value: string | number | boolean) {
     const next = { ...routingDraftRef.current, [key]: value };
@@ -623,9 +651,9 @@ export function MihomoPage({
     }));
   }
 
-  async function saveRoutingWorkspace(event: FormEvent) {
-    event.preventDefault();
-    if (!routingReadKnown || busy || routingSaving.current || routingRevisionConflict) return;
+  async function saveRoutingWorkspace(event?: FormEvent): Promise<boolean> {
+    event?.preventDefault();
+    if (!routingReadKnown || readOnly || busy || routingSaving.current || routingRevisionConflict) return false;
     routingSaving.current = true;
     setBusy("settings:routing-policy");
 
@@ -639,15 +667,33 @@ export function MihomoPage({
           setRoutingDirty(false);
         }
       });
+      return !routingDirtyRef.current && !pendingPolicySaveRef.current;
     } catch {
       void refresh();
+      return false;
     } finally {
       routingSaving.current = false;
       setBusy("");
     }
   }
 
+  useEffect(() => {
+    routingLeaveActions.current = {
+      canSave: () => routingReadKnown && !readOnly && !busy && !routingRevisionConflict && !routingSaving.current,
+      save: () => saveRoutingWorkspace(),
+      discard: () => {
+        if (!routingPolicy) return;
+        routingDraftRef.current = { ...routingPolicy.values };
+        setRoutingDraft(routingDraftRef.current);
+        setRoutingDraftRevision(routingPolicy.revision);
+        routingDirtyRef.current = false;
+        setRoutingDirty(false);
+      },
+    };
+  });
+
   async function requestCoreRemoval() {
+    if (!await routingLeaveGuard.request()) return;
 
     let current: Status;
     try {
@@ -1868,6 +1914,10 @@ export function MihomoPage({
           <footer><p>{presetDraft.some((item) => !item.components.length) ? "В каждом пресете нужен хотя бы один канал" : "Изменения применятся только к новым конфигурациям"}</p><button type="button" className="ghostButton" onClick={() => { void closePresets(); }}>Отмена</button><button type="submit" className="primaryButton" disabled={!routingReadKnown || Boolean(busy) || presetRevisionConflict || presetDraft.some((item) => !item.components.length)}>Сохранить пресеты</button></footer>
         </form>
       </div>}
+      {ruleLeaveState.open && <RuleLeaveDialog state={ruleLeaveState}
+        canSave={routingReadKnown && !readOnly && !busy && !routingRevisionConflict}
+        pending={pendingPolicySave?.kind === "routing"}
+        onChoose={(choice) => { void routingLeaveGuard.choose(choice); }} />}
     </section>
   );
 }

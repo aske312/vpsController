@@ -262,6 +262,7 @@ textarea { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialias
 }
 
 .standardConfirmDialog .confirmActions button { min-height:38px; border-radius:8px; }
+.unsavedRulesDialog .confirmActions { grid-template-columns:1fr 1fr 1fr; }
 
 @media (max-width:520px) {
   .standardConfirmDialog .confirmActions { grid-template-columns:1fr; }

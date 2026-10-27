@@ -20,6 +20,7 @@ import { LegalFooter } from "../shared/components/legal-footer";
 import { basicCredentials } from "../features/auth/basic-credentials";
 import { ProtocolIcon } from "../shared/components/protocol-icon";
 import { MihomoPage } from "../features/mihomo/mihomo-view";
+import type { SectionLeaveGuard } from "../features/mihomo/rule-leave-guard";
 import { OverviewDashboard } from "../features/overview/overview-view";
 import { AppWorkspace } from "./components/app-workspace";
 import { OperationHistory } from "./components/operation-history";
@@ -154,6 +155,8 @@ type SshAccessState = { phase: "password" | "key-installed" | "awaiting-confirma
 export function ControlPanel() {
   const [tab, setTab] = useState<Tab>("overview");
   const [sectionDirty, setSectionDirty] = useState(false);
+  const mihomoLeaveGuard = useRef<SectionLeaveGuard | null>(null);
+  const registerMihomoLeaveGuard = useCallback((guard: SectionLeaveGuard | null) => { mihomoLeaveGuard.current = guard; }, []);
   const [networkListState, setNetworkListState] = useState<NetworkListState>({ query: "", expanded: [] });
   const [networkRefreshKey, setNetworkRefreshKey] = useState(0);
   const [mihomoRefreshKey, setMihomoRefreshKey] = useState(0);
@@ -368,9 +371,19 @@ export function ControlPanel() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [settingsDirty]);
 
+  async function canLeaveSection() {
+    let dirty = sectionDirty;
+    if (tab === "mihomo" && mihomoLeaveGuard.current) {
+      const result = await mihomoLeaveGuard.current();
+      if (!result.allowed) return false;
+      dirty = result.dirty;
+    }
+    if (dirty && !await askConfirmation({ title: "Уйти без сохранения?", message: "Несохранённые настройки текущего раздела будут потеряны. Серверные настройки не изменятся.", cancelLabel: "Остаться", confirmLabel: "Уйти без сохранения" })) return false;
+    return true;
+  }
+
   async function navigateTo(next: Tab) {
-    if (next === tab) return;
-    if (sectionDirty && !await askConfirmation({ title: "Уйти без сохранения?", message: "Несохранённые настройки текущего раздела будут потеряны. Серверные настройки не изменятся.", cancelLabel: "Остаться", confirmLabel: "Уйти без сохранения" })) return;
+    if (next === tab || !await canLeaveSection()) return;
     setTab(next);
   }
 
@@ -1905,7 +1918,7 @@ export function ControlPanel() {
     onToggleAutoRefresh={() => setAutoRefresh((value) => !value)}
     viewLoading={viewLoading}
     onRefresh={() => void refreshCurrent(true, true)}
-    onLogout={() => { invalidateApiSession(token, false); clearSession(); }}
+    onLogout={() => { void (async () => { if (await canLeaveSection()) { invalidateApiSession(token, false); clearSession(); } })(); }}
     operationHistory={<OperationHistory token={token} />}
   >
       {tab !== "overview" && tab !== "network" && <div className="gateSectionIntro"><div><p className="eyebrow">312.NET / {navigationLabels[tab]}</p><h1>{labels[tab]}</h1><p>{overview?.server.city || "Город не определён"}, {overview?.server.country || "Страна не определена"} · управление инфраструктурой</p></div></div>}
@@ -1940,6 +1953,7 @@ export function ControlPanel() {
           onSystemOperation={acceptSystemOperation}
           systemOperation={application?.action}
           onDirtyChange={setSectionDirty}
+          onBeforeLeaveChange={registerMihomoLeaveGuard}
           profilesPage={mihomoProfilesPage}
           setProfilesPage={setMihomoProfilesPage}
           token={token}
