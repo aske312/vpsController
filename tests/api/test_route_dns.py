@@ -84,6 +84,19 @@ class RouteDnsTests(unittest.TestCase):
         self.assertTrue(all(value.endswith('#' + manager.MIHOMO_PROXY_GROUP) for value in current['nameserver']))
         self.assertNotIn('fallback', current)
 
+    def test_disabled_route_mode_keeps_existing_non_mihomo_exports(self):
+        self.settings.update(nameserver='208.67.222.222', fallback='185.228.168.9')
+        item = profile()
+        item['routing'] = {'dns_secure': True}
+        for format in ['singbox', 'xray']:
+            with self.subTest(format=format), patch.object(manager, 'dns_settings', return_value=self.settings):
+                text, _ = manager.render_client_profile(deepcopy(item), 'common', format)
+                config = json.loads(text)
+                if format == 'singbox':
+                    self.assertEqual(config['dns']['servers'][1]['server'], self.settings['nameserver'])
+                else:
+                    self.assertEqual(config[0]['dns']['servers'], [self.settings['nameserver'], self.settings['fallback']])
+
     def test_profile_and_device_rules_generate_different_dns_policy(self):
         self.settings['route_dns'] = True
         item = profile()
