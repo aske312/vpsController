@@ -184,7 +184,7 @@ export const p2pClientCatalog = [
 export const profileDirectRules = [
   { key: "block_malware", code: "SAFE", title: "Фишинг и вредоносные сайты", text: "Опасные домены и фишинг.", group: "Защита" },
   { key: "quic_compatibility", code: "QUIC", title: "Совместимость QUIC", text: "TCP вместо QUIC для выбранных сайтов.", group: "Сеть" },
-  { key: "direct_ru_services", code: "GOS", title: "Госуслуги и операторы", text: "Государственные сервисы и операторы напрямую.", group: "Напрямую" },
+  { key: "direct_ru_services", code: "GOS", title: "Госуслуги и операторы", text: "Госуслуги и связь напрямую.", group: "Напрямую" },
   { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и рекламные трекеры.", group: "Защита" },
   { key: "block_privacy", code: "PRIV", title: "Приватность", text: "Аналитика и профилирование.", group: "Защита" },
   { key: "direct_ru_sites", code: "RU", title: "Сайты РФ", text: "Домены и IP России.", group: "Напрямую" },
