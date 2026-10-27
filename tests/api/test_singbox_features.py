@@ -56,7 +56,7 @@ class SingboxFeaturesTests(unittest.TestCase):
         rules = manager.profile_rules(routing)
         rules.append("PROCESS-NAME-WILDCARD,game*.exe,DIRECT")
         result = self.config(rules=rules)
-        self.assertEqual({item["tag"] for item in result["route"]["rule_set"]}, {"geoip-ru", "geosite-category-ads-all"})
+        self.assertEqual({item["tag"] for item in result["route"]["rule_set"]}, {"geoip-ru", "geosite-category-ads-all", "security-threats", "security-phishing"})
         self.assertTrue(any("process_name" in rule for rule in result["route"]["rules"]))
         self.assertTrue(any("process_path_regex" in rule for rule in result["route"]["rules"]))
         self.assertTrue(any(rule.get("port") == [53] for rule in result["route"]["rules"]))

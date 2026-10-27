@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 import re
 from client_labels import connection_label
 import xray_protocols
-from routing_presets import QUIC_RULE_PATTERN
+from routing_presets import QUIC_RULE_PATTERN, SECURITY_PROVIDERS
 
 
 class UnsupportedClientConfig(ValueError):
@@ -200,6 +200,12 @@ def singbox_rules(rules, proxy_tag="GATE.312"):
         elif kind == "PROCESS-NAME-WILDCARD":
             # Match the entire process name; RE2 syntax, unlike Python fnmatch's \Z.
             item["process_path_regex"] = [r"(?:^|[/\\])" + re.escape(value).replace(r"\*", ".*").replace(r"\?", ".") + "$"]
+        elif kind == 'RULE-SET' and value in SECURITY_PROVIDERS:
+            definition = SECURITY_PROVIDERS[value]
+            item['rule_set'] = [value]
+            rule_sets[value] = {'type': 'remote', 'tag': value, 'format': 'binary',
+                                'url': definition['singbox_url'], 'download_detour': proxy_tag,
+                                'update_interval': f"{definition['interval']}s"}
         elif kind in {"GEOSITE", "GEOIP"}:
             name = value.lower()
             if not re.fullmatch(r"[a-z0-9_-]+", name):

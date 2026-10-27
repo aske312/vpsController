@@ -63,7 +63,7 @@ test("routing presets match exporter capabilities on desktop and mobile", () => 
     assert.ok(clientCapabilities("xray", os).rules.includes("direct_ru_services"));
   }
   const source = { quic_compatibility: true, direct_ru_services: true, block_malware: true };
-  assert.equal(compatibleClientRouting(source, "singbox").block_malware, false);
+  assert.equal(compatibleClientRouting(source, "singbox").block_malware, true);
   assert.equal(compatibleClientRouting(source, "singbox").quic_compatibility, true);
   assert.equal(compatibleClientRouting(source, "xray").quic_compatibility, false);
   assert.equal(compatibleClientRouting(source, "xray").direct_ru_services, true);

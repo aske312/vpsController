@@ -200,8 +200,8 @@ export const profileDirectRules = [
 
 export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
   block_malware: [
-    { id: "threats", code: "TIF", name: "Вредоносные домены · HaGeZi", tokens: ["RULE-SET,security-threats,"] },
-    { id: "phishing", code: "PHISH", name: "Фишинг · Phishing Army", tokens: ["RULE-SET,security-phishing,"] },
+    { id: "threats", code: "TIF", name: "Вредоносные домены", tokens: ["RULE-SET,security-threats,"] },
+    { id: "phishing", code: "PHISH", name: "Фишинг", tokens: ["RULE-SET,security-phishing,"] },
   ],
   quic_compatibility: [
     { id: "youtube", code: "YT", name: "YouTube", tokens: ["DOMAIN-SUFFIX,youtube.com)", "DOMAIN-SUFFIX,googlevideo.com)", "DOMAIN-SUFFIX,youtubei.googleapis.com)", "DOMAIN-SUFFIX,ytimg.com)"] },

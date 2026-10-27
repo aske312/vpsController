@@ -110,10 +110,18 @@ class RoutingPresetTests(unittest.TestCase):
         self.assertNotIn('GEOIP,RU,DIRECT,no-resolve', SERVICE_RULES)
         self.assertNotIn('DOMAIN-SUFFIX,ru,DIRECT', SERVICE_RULES)
 
-    def test_export_capabilities_do_not_claim_unsupported_providers(self):
+    def test_export_capabilities_and_singbox_security_providers(self):
         self.assertIn('block_malware', device_capabilities('mihomo')['rules'])
         self.assertIn('quic_compatibility', device_capabilities('singbox')['rules'])
-        for format in ('singbox', 'xray', 'uri'):
+        item = profile()
+        item['routing'] = {'block_malware': True}
+        config = json.loads(manager.render_client_profile(item, 'common', 'singbox')[0])
+        self.assertEqual({provider['tag'] for provider in config['route']['rule_set']}, set(SECURITY_PROVIDERS))
+        for provider in config['route']['rule_set']:
+            self.assertEqual(provider['url'], SECURITY_PROVIDERS[provider['tag']]['singbox_url'])
+            self.assertEqual(provider['update_interval'], f"{SECURITY_PROVIDERS[provider['tag']]['interval']}s")
+        self.assertTrue(config['experimental']['cache_file']['enabled'])
+        for format in ('xray', 'uri'):
             self.assertNotIn('block_malware', device_capabilities(format)['rules'])
             self.assertFalse(compatible_routing({'block_malware': True}, format)['block_malware'])
 
