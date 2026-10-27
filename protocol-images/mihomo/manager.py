@@ -886,7 +886,7 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
                 raise HTTPException(status_code=422, detail="Неизвестный формат клиента")
             result[key] = raw
             continue
-        if key in {"tunnel_privacy", "tunnel_ech", "tunnel_fragment"}:
+        if key in {"tunnel_privacy", "tunnel_ech", "tunnel_fragment", "route_dns"}:
             if not isinstance(raw, bool):
                 raise HTTPException(status_code=422, detail=f"{key} must be boolean")
             result[key] = raw
@@ -931,6 +931,8 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
                     raise HTTPException(status_code=422, detail=str(exc)) from None
             else:
                 result[key] = str(raw)
+    if result.get('route_dns'):
+        client_dns_settings(result)
     return result
 
 
@@ -1490,6 +1492,8 @@ def dns_settings(stored: Any = None) -> dict[str, Any]:
 
 def client_dns_settings(routing: dict[str, Any], ech_enabled: bool = False, base: dict[str, Any] | None = None) -> dict[str, Any]:
     dns = dict(base if base is not None else dns_settings())
+    # Missing per-profile values retain the former global behavior.
+    dns['route_dns'] = bool(routing.get('route_dns', dns.get('route_dns', False)))
     dns['enhanced_mode'] = 'fake-ip' if bool(routing.get('dns_fake_ip', dns.get('enhanced_mode') == 'fake-ip')) else 'redir-host'
     dns['ipv6'] = bool(routing.get('dns_ipv6', dns.get('ipv6', False)))
     dns['prefer_h3'] = bool(routing.get('dns_prefer_h3', dns.get('prefer_h3', False)))
@@ -1499,6 +1503,10 @@ def client_dns_settings(routing: dict[str, Any], ech_enabled: bool = False, base
         for key, default in (('nameserver', 'https://cloudflare-dns.com/dns-query'), ('fallback', 'https://dns.google/dns-query')):
             if not str(dns.get(key, '')).startswith(('https://', 'tls://', 'quic://')):
                 dns[key] = default
+    try:
+        validate_route_dns(dns)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     return dns
 
 
@@ -1658,7 +1666,11 @@ def validate_dns(values: dict[str, Any]) -> dict[str, Any]:
                 raise HTTPException(status_code=422, detail=f"{key} cannot be empty")
             result[key] = value
     try:
-        validate_route_dns(result)
+        route_enabled = result.get('route_dns') or any(
+            device_routing(profile, device['id']).get('route_dns', result.get('route_dns', False))
+            for profile in profiles() for device in profile.get('devices', [])
+        )
+        validate_route_dns({**result, 'route_dns': bool(route_enabled)})
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     return result
@@ -5192,9 +5204,11 @@ def render_client_profile(item: dict[str, Any], device_id: str, requested_format
         routing[key] = bool(device_values.get(key, False))
     try:
         connections = with_relay_labels(connections)
-        export_dns = dns_settings()
-        if export_dns.get('route_dns'):
+        export_dns = dict(dns_settings())
+        if device_values.get('route_dns', export_dns.get('route_dns')):
             export_dns = client_dns_settings(device_values, bool(routing.get('tunnel_ech')), export_dns)
+        else:
+            export_dns['route_dns'] = False
         if export_format in {"xray", "uri"}:
             config = build_xray_configs(connections, routing, export_dns, profile_rules(routing), public_endpoint(), reality_connection_settings, relay_client_nodes)
             if export_format == "uri":

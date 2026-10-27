@@ -54,6 +54,61 @@ class RouteDnsTests(unittest.TestCase):
         self.assertTrue(policy['.ads.ru'][0].endswith('#VPN'))
         self.assertEqual(domain_dns_routes(['PROCESS-NAME,browser.exe,GATE.312', 'DOMAIN-SUFFIX,ru,DIRECT']), [])
 
+    def test_profile_switch_is_independent_in_all_exports(self):
+        for global_value in (False, True):
+            self.settings['route_dns'] = global_value
+            for profile_value in (False, True):
+                item = profile()
+                item['routing'] = {'route_dns': profile_value, 'direct_ru_sites': True}
+                original = deepcopy(item)
+                with patch.object(manager, 'dns_settings', return_value=self.settings):
+                    for format in ('mihomo', 'singbox', 'xray'):
+                        with self.subTest(global_value=global_value, profile_value=profile_value, format=format):
+                            text, _ = manager.render_client_profile(deepcopy(item), 'common', format)
+                            config = yaml.safe_load(text) if format == 'mihomo' else json.loads(text)
+                            if format == 'mihomo':
+                                enabled = 'direct-nameserver' in config['dns']
+                            elif format == 'singbox':
+                                enabled = any(row['tag'] == 'direct-dns' for row in config['dns']['servers'])
+                            else:
+                                enabled = bool(config[0]['dns'].get('disableFallbackIfMatch'))
+                            self.assertEqual(enabled, profile_value)
+                self.assertEqual(item, original)
+                self.assertEqual(self.settings['route_dns'], global_value)
+
+    def test_profile_switch_validation_and_legacy_inheritance(self):
+        with patch.object(manager, 'dns_settings', return_value=self.settings):
+            for value in (False, True):
+                self.assertEqual(manager.validate_routing({'route_dns': value}, current={})['route_dns'], value)
+            with self.assertRaises(manager.HTTPException):
+                manager.validate_routing({'route_dns': 'true'}, current={})
+            for value in (False, True):
+                self.settings['route_dns'] = value
+                self.assertEqual(manager.client_dns_settings({})['route_dns'], value)
+            self.settings.update(route_dns=False, nameserver='208.67.222.222')
+            with self.assertRaises(manager.HTTPException):
+                manager.validate_routing({'route_dns': True}, current={})
+
+    def test_device_can_override_and_inherit_profile_dns_mode(self):
+        item = manager.normalize_profile(profile())
+        item['routing'] = {'route_dns': True}
+        device = item['devices'][0]
+        device['routing'] = {}
+        with patch.object(manager, 'dns_settings', return_value=self.settings):
+            for override, expected in ((None, True), (False, False), (True, True)):
+                device['routing'] = {} if override is None else {'route_dns': override}
+                with self.subTest(override=override):
+                    result = yaml.safe_load(manager.render_profile(deepcopy(item), device['id']))
+                    self.assertEqual('direct-nameserver' in result['dns'], expected)
+
+    def test_dns_save_preserves_requirements_of_enabled_profiles(self):
+        item = profile()
+        item['routing'] = {'route_dns': True}
+        with patch.object(manager, 'profiles', return_value=[manager.normalize_profile(item)]), patch.object(
+                manager, 'dns_settings', return_value=self.settings):
+            with self.assertRaises(manager.HTTPException):
+                manager.validate_dns({'nameserver': '208.67.222.222'})
+
     def test_match_and_secure_profile_do_not_override_explicit_dns_choices(self):
         self.settings.update(route_dns=True, nameserver='https://dns.quad9.net/dns-query')
         rules = ['DOMAIN,exception.test,GATE.312', 'MATCH,DIRECT', 'DOMAIN,unreachable.test,DIRECT']
