@@ -42,6 +42,7 @@ from client_labels import connection_label
 from client_subscription import CLIENT_HINTS, import_page, vless_subscription
 import client_compatibility
 from client_capabilities import CAPABILITIES, FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
+from routing_presets import QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, quic_domains, quic_rule
 from telemetry import ConnectionTelemetry
 from xray_stats import XrayStats
 import ss_runtime
@@ -921,7 +922,13 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
         else:
             # Unlike module settings, routing text fields (e.g. "rules") are
             # allowed to be empty: a profile without extra rules is valid.
-            result[key] = str(raw)
+            if key == 'quic_domains':
+                try:
+                    result[key] = '\n'.join(quic_domains(raw))
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=str(exc)) from None
+            else:
+                result[key] = str(raw)
     return result
 
 
@@ -929,6 +936,9 @@ AD_RULE_PROVIDER = "ads-extended"
 AD_RULE_PROVIDER_URL = "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/reject.txt"
 
 DIRECT_RULE_PRESETS: dict[str, list[str]] = {
+    "block_malware": [f"RULE-SET,{name},REJECT" for name in SECURITY_PROVIDERS],
+    "quic_compatibility": QUIC_DEFAULT_RULES,
+    "direct_ru_services": SERVICE_RULES,
     "block_ads": [
         "GEOSITE,category-ads-all,REJECT",
         # Keep this preset limited to ad delivery. Broad tracker/analytics and
@@ -1407,6 +1417,9 @@ DIRECT_P2P_PROCESSES: dict[str, list[str]] = {
 }
 
 DIRECT_RULE_META = {
+    "block_malware": ("Фишинг и вредоносные сайты", "Опасные домены и фишинг."),
+    "quic_compatibility": ("Совместимость QUIC", "TCP вместо QUIC для выбранных сайтов."),
+    "direct_ru_services": ("Госуслуги и операторы", "Государственные сервисы и операторы напрямую."),
     "windows_geolocation": ("Геолокация Windows", "Только запросы Windows Location Services идут напрямую; остальной трафик остаётся в туннеле."),
     "block_ads": ("Блокировка рекламы", "Реклама и рекламные трекеры."),
     "block_privacy": ("Приватность", "Блокирует стороннюю аналитику, профилирование, запись сессий и мобильную атрибуцию."),
@@ -1456,7 +1469,7 @@ def routing_rule_lists(values: dict[str, Any] | None = None) -> list[dict[str, A
             "title": DIRECT_RULE_META[setting][0],
             "description": DIRECT_RULE_META[setting][1],
             "default_rules": "\n".join(DIRECT_RULE_PRESETS[setting]),
-            "available_rules": "\n".join(DIRECT_RULE_PRESETS[setting] + (PRIVACY_TELEMETRY_RULES if setting == "block_privacy" else [])),
+            "available_rules": "\n".join(QUIC_AVAILABLE_RULES if setting == "quic_compatibility" else DIRECT_RULE_PRESETS[setting] + (PRIVACY_TELEMETRY_RULES if setting == "block_privacy" else [])),
             "using_default": str(routing.get(f"{setting}_rules", "@default")).strip() == "@default",
         }
         for setting in DIRECT_RULE_PRESETS
@@ -1539,12 +1552,14 @@ def profile_rules(routing: dict[str, Any]) -> list[str]:
     # Explicit domain exceptions keep their priority. An application-wide
     # route (browser/player) must not bypass enabled ad/privacy protection.
     rules.extend(rule for rule in personal if not rule.startswith("PROCESS-"))
-    for setting in ("block_ads", "block_privacy"):
+    for setting in ("block_malware", "block_ads", "block_privacy", "quic_compatibility"):
         if routing.get(setting, False):
             rules.extend(configured_preset_rules(routing, setting))
+    if routing.get('quic_compatibility', False):
+        rules.extend(quic_rule(domain) for domain in quic_domains(routing.get('quic_domains', '')))
     rules.extend(rule for rule in personal if rule.startswith("PROCESS-"))
     for setting in DIRECT_RULE_PRESETS:
-        if setting in {"direct_local_network", "block_ads", "block_privacy"}:
+        if setting in {"direct_local_network", "block_malware", "block_ads", "block_privacy", "quic_compatibility"}:
             continue
         if routing.get(setting, False):
             rules.extend(configured_preset_rules(routing, setting))
@@ -5212,14 +5227,19 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     # Replace only the built-in advertising category at the same priority.
     # Explicit custom lists without this category must remain untouched.
     # A rule-provider refreshes independently of the client's geosite.dat.
+    providers = dict(SECURITY_PROVIDERS)
     if "GEOSITE,category-ads-all,REJECT" in rules:
-        lines += ["rule-providers:", f"  {AD_RULE_PROVIDER}:", "    type: http",
-                  "    behavior: domain", "    format: yaml",
-                  f"    url: {q(AD_RULE_PROVIDER_URL)}",
-                  f"    path: ./rule-providers/{AD_RULE_PROVIDER}.yaml",
-                  "    interval: 86400", "    size-limit: 16777216",
-                  f"    proxy: {q(MIHOMO_PROXY_GROUP)}"]
+        providers[AD_RULE_PROVIDER] = {'url': AD_RULE_PROVIDER_URL, 'format': 'yaml', 'interval': 86400}
         rules = [f"RULE-SET,{AD_RULE_PROVIDER},REJECT" if rule == "GEOSITE,category-ads-all,REJECT" else rule for rule in rules]
+    used_providers = {name: definition for name, definition in providers.items() if any(f'RULE-SET,{name},' in rule for rule in rules)}
+    if used_providers:
+        lines.append('rule-providers:')
+        for name, definition in used_providers.items():
+            lines += [f'  {name}:', '    type: http', '    behavior: domain',
+                      f"    format: {definition['format']}", f"    url: {q(definition['url'])}",
+                      f"    path: ./rule-providers/{name}.{'yaml' if definition['format'] == 'yaml' else 'txt'}",
+                      f"    interval: {definition['interval']}", '    size-limit: 16777216',
+                      f'    proxy: {q(MIHOMO_PROXY_GROUP)}']
     lines.append("rules:")
     for rule in rules:
         lines.append(f"  - {q(rule.replace(',GATE.312', ',' + MIHOMO_PROXY_GROUP))}")

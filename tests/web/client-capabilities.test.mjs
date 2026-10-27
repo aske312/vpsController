@@ -54,3 +54,18 @@ test("Launcher extensions do not alter ordinary sing-box or shared profiles", ()
   assert.equal(clientCapabilities("singbox").transports.includes("xhttp"), false);
   assert.equal(compatibleClientRouting({ tunnel_privacy: true }, "singbox", "windows", "Sing-Box Launcher").tunnel_privacy, true);
 });
+
+test("routing presets match exporter capabilities on desktop and mobile", () => {
+  for (const os of ["windows", "android", "ios"]) {
+    const mihomo = clientCapabilities("mihomo", os);
+    for (const key of ["quic_compatibility", "direct_ru_services", "block_malware"]) assert.ok(mihomo.rules.includes(key));
+    assert.ok(clientCapabilities("singbox", os).rules.includes("quic_compatibility"));
+    assert.ok(clientCapabilities("xray", os).rules.includes("direct_ru_services"));
+  }
+  const source = { quic_compatibility: true, direct_ru_services: true, block_malware: true };
+  assert.equal(compatibleClientRouting(source, "singbox").block_malware, false);
+  assert.equal(compatibleClientRouting(source, "singbox").quic_compatibility, true);
+  assert.equal(compatibleClientRouting(source, "xray").quic_compatibility, false);
+  assert.equal(compatibleClientRouting(source, "xray").direct_ru_services, true);
+  assert.equal(source.block_malware, true);
+});

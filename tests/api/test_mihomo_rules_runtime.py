@@ -240,6 +240,7 @@ class RuleExportTests(unittest.TestCase):
                 ad_rules = [rule for rule in manager.configured_preset_rules({}, 'block_ads')
                             if not rule.startswith('GEOSITE,')]
                 item["devices"][0]["routing"] = {"strategy": "select", "direct_ru_banks": True,
+                    "block_malware": True, "quic_compatibility": True, "direct_ru_services": True,
                     "block_ads": True, "block_ads_rules": '\n'.join(['GEOSITE,category-ads-all,REJECT', *ad_rules, 'DOMAIN-SUFFIX,ads.audit.test,REJECT'])}
                 with patch.object(manager, "personal_rule_lines_for_device", return_value=["DOMAIN,allowed.ads.audit.test,DIRECT"]):
                     config = yaml.safe_load(manager.render_profile(item))
@@ -247,7 +248,13 @@ class RuleExportTests(unittest.TestCase):
                 provider_file.write_text('payload:\n  - "+.fresh-provider.audit.test"\n  - "+.ads.audit.test"\n', encoding='utf-8')
                 config['rule-providers'][manager.AD_RULE_PROVIDER] = {
                     'type': 'file', 'behavior': 'domain', 'format': 'yaml', 'path': str(provider_file)}
+                for name, domain in [('security-threats', 'malware.audit.test'), ('security-phishing', 'phishing.audit.test')]:
+                    feed = root / f'{name}.txt'
+                    feed.write_text(f'# Security fixture\n{domain}\n', encoding='utf-8')
+                    config['rule-providers'][name] = {'type': 'file', 'behavior': 'domain', 'format': 'text', 'path': str(feed)}
                 cases = [('sberbank.ru', b'via-direct'), ('unmatched.audit.test', b'via-tunnel'),
+                         ('malware.audit.test', b'502'), ('phishing.audit.test', b'502'),
+                         ('gosuslugi.ru', b'via-direct'), ('t2.ru', b'via-direct'), ('rt.ru', b'via-direct'),
                          ('fresh-provider.audit.test', b'502'), ('delivery.mgid.com', b'502'),
                          ('adservice.google.ru', b'502'), ('ssp.rutube.ru', b'502'),
                          ('ads.audit.test', b'502'), ('allowed.ads.audit.test', b'via-direct'),

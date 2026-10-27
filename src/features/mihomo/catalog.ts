@@ -182,6 +182,9 @@ export const p2pClientCatalog = [
 ];
 
 export const profileDirectRules = [
+  { key: "block_malware", code: "SAFE", title: "Фишинг и вредоносные сайты", text: "Опасные домены и фишинг.", group: "Защита" },
+  { key: "quic_compatibility", code: "QUIC", title: "Совместимость QUIC", text: "TCP вместо QUIC для выбранных сайтов.", group: "Сеть" },
+  { key: "direct_ru_services", code: "GOS", title: "Госуслуги и операторы", text: "Государственные сервисы и операторы напрямую.", group: "Напрямую" },
   { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и рекламные трекеры.", group: "Защита" },
   { key: "block_privacy", code: "PRIV", title: "Приватность", text: "Аналитика и профилирование.", group: "Защита" },
   { key: "direct_ru_sites", code: "RU", title: "Сайты РФ", text: "Домены и IP России.", group: "Напрямую" },
@@ -196,6 +199,28 @@ export const profileDirectRules = [
 ];
 
 export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
+  block_malware: [
+    { id: "threats", code: "TIF", name: "Вредоносные домены · HaGeZi", tokens: ["RULE-SET,security-threats,"] },
+    { id: "phishing", code: "PHISH", name: "Фишинг · Phishing Army", tokens: ["RULE-SET,security-phishing,"] },
+  ],
+  quic_compatibility: [
+    { id: "youtube", code: "YT", name: "YouTube", tokens: ["DOMAIN-SUFFIX,youtube.com)", "DOMAIN-SUFFIX,googlevideo.com)", "DOMAIN-SUFFIX,youtubei.googleapis.com)", "DOMAIN-SUFFIX,ytimg.com)"] },
+    { id: "google", code: "GOOG", name: "Google", tokens: ["DOMAIN-SUFFIX,google.com)", "DOMAIN-SUFFIX,googleapis.com)", "DOMAIN-SUFFIX,gstatic.com)"] },
+    { id: "instagram", code: "IG", name: "Instagram", tokens: ["DOMAIN-SUFFIX,instagram.com)", "DOMAIN-SUFFIX,cdninstagram.com)"] },
+    { id: "facebook", code: "FB", name: "Facebook", tokens: ["DOMAIN-SUFFIX,facebook.com)", "DOMAIN-SUFFIX,fbcdn.net)"] },
+    { id: "tiktok", code: "TT", name: "TikTok", tokens: ["DOMAIN-SUFFIX,tiktok.com)", "DOMAIN-SUFFIX,tiktokcdn.com)"] },
+  ],
+  direct_ru_services: [
+    { id: "gosuslugi", code: "GOS", name: "Госуслуги и ЕСИА", tokens: ["gosuslugi", "gu-st.ru"] },
+    { id: "government", code: "GOV", name: "Государственные ведомства", tokens: ["gov.ru", "government.ru", "kremlin.ru", "nalog.ru"] },
+    { id: "regions", code: "REG", name: "Региональные порталы", tokens: ["mos.ru", "mosreg.ru", "gu.spb.ru", "gov.spb.ru"] },
+    { id: "mts", code: "MTS", name: "МТС и МГТС", tokens: ["mts.ru", "mgts.ru"] },
+    { id: "beeline", code: "BEE", name: "Билайн", tokens: ["beeline.ru"] },
+    { id: "megafon", code: "MF", name: "МегаФон и Yota", tokens: ["megafon.ru", "yota.ru"] },
+    { id: "t2", code: "T2", name: "T2 / Tele2", tokens: ["t2.ru", "tele2.ru"] },
+    { id: "rostelecom", code: "RT", name: "Ростелеком", tokens: ["rt.ru", "rostelecom.ru", "onlime.ru"] },
+    { id: "providers", code: "ISP", name: "Дом.ру и ТТК", tokens: ["domru.ru", "ertelecom.ru", "ttk.ru"] },
+  ],
   block_ads: [
     { id: "base", code: "AD", name: "Расширенная база · ежедневное обновление", tokens: ["category-ads-all"] },
     { id: "google", code: "G ADS", name: "Google Ads", tokens: ["doubleclick", "googlesyndication", "googleadservices", "googletagservices", "adservice.google.", "ads.youtube.com"] },

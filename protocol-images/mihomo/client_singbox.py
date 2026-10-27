@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 import re
 from client_labels import connection_label
 import xray_protocols
+from routing_presets import QUIC_RULE_PATTERN
 
 
 class UnsupportedClientConfig(ValueError):
@@ -171,6 +172,10 @@ def build_singbox_config(connections, routing, dns, rules, endpoint, direct_sett
 def singbox_rules(rules, proxy_tag="GATE.312"):
     route_rules, rule_sets = [], {}
     for rule in rules:
+        quic = QUIC_RULE_PATTERN.fullmatch(rule)
+        if quic:
+            route_rules.append({'outbound': 'block', 'domain_suffix': [quic[1]], 'network': ['udp'], 'port': [443]})
+            continue
         parts = [part.strip() for part in rule.split(",")]
         if parts and parts[-1] == "no-resolve":
             parts.pop()
