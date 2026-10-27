@@ -925,6 +925,9 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
     return result
 
 
+AD_RULE_PROVIDER = "ads-extended"
+AD_RULE_PROVIDER_URL = "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/reject.txt"
+
 DIRECT_RULE_PRESETS: dict[str, list[str]] = {
     "block_ads": [
         "GEOSITE,category-ads-all,REJECT",
@@ -1058,6 +1061,66 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN-SUFFIX,popads.net,REJECT",
         "DOMAIN-SUFFIX,popcash.net,REJECT",
         "DOMAIN-SUFFIX,propellerads.com,REJECT",
+        # Dedicated delivery hosts reviewed against AdGuard DNS Filter.
+        # Keep explicit coverage when an external list is unavailable/stale.
+        "DOMAIN-SUFFIX,googleadsserving.cn,REJECT",
+        "DOMAIN-SUFFIX,adsensecustomsearchads.com,REJECT",
+        "DOMAIN-SUFFIX,adtrafficquality.google,REJECT",
+        "DOMAIN-SUFFIX,adservice.google.ru,REJECT",
+        "DOMAIN-SUFFIX,adservice.google.co.uk,REJECT",
+        "DOMAIN-SUFFIX,adservice.google.de,REJECT",
+        "DOMAIN-SUFFIX,adservice.google.fr,REJECT",
+        "DOMAIN-SUFFIX,adservice.google.com.br,REJECT",
+        "DOMAIN-SUFFIX,adservice.google.co.jp,REJECT",
+        "DOMAIN-SUFFIX,adservice.google.ca,REJECT",
+        "DOMAIN-SUFFIX,adservice.google.com.au,REJECT",
+        "DOMAIN-SUFFIX,adform.com,REJECT",
+        "DOMAIN-SUFFIX,adtech.de,REJECT",
+        "DOMAIN-SUFFIX,adition.com,REJECT",
+        "DOMAIN-SUFFIX,adscale.de,REJECT",
+        "DOMAIN-SUFFIX,bidr.io,REJECT",
+        "DOMAIN-SUFFIX,bidswitch.net,REJECT",
+        "DOMAIN-SUFFIX,contextweb.com,REJECT",
+        "DOMAIN-SUFFIX,yieldmanager.net,REJECT",
+        "DOMAIN-SUFFIX,turn.com,REJECT",
+        "DOMAIN-SUFFIX,revcontent.com,REJECT",
+        "DOMAIN-SUFFIX,mgid.com,REJECT",
+        "DOMAIN-SUFFIX,adskeeper.co.uk,REJECT",
+        "DOMAIN-SUFFIX,adskeeper.com,REJECT",
+        "DOMAIN-SUFFIX,cpmstar.com,REJECT",
+        "DOMAIN-SUFFIX,adsterra.com,REJECT",
+        "DOMAIN-SUFFIX,adcash.com,REJECT",
+        "DOMAIN-SUFFIX,ad-maven.com,REJECT",
+        "DOMAIN-SUFFIX,clickadu.com,REJECT",
+        "DOMAIN-SUFFIX,hilltopads.net,REJECT",
+        "DOMAIN-SUFFIX,adnium.com,REJECT",
+        "DOMAIN-SUFFIX,plugrush.com,REJECT",
+        "DOMAIN-SUFFIX,clickaine.com,REJECT",
+        "DOMAIN-SUFFIX,adtng.com,REJECT",
+        "DOMAIN-SUFFIX,adxpremium.services,REJECT",
+        "DOMAIN-SUFFIX,adxxx.com,REJECT",
+        "DOMAIN-SUFFIX,sharethrough.com,REJECT",
+        "DOMAIN-SUFFIX,triplelift.com,REJECT",
+        "DOMAIN-SUFFIX,emxdgt.com,REJECT",
+        "DOMAIN-SUFFIX,seedtag.com,REJECT",
+        "DOMAIN-SUFFIX,gumgum.com,REJECT",
+        "DOMAIN-SUFFIX,mediaforge.com,REJECT",
+        "DOMAIN-SUFFIX,adblade.com,REJECT",
+        "DOMAIN-SUFFIX,ad4game.com,REJECT",
+        "DOMAIN-SUFFIX,adinplay.com,REJECT",
+        "DOMAIN-SUFFIX,admatic.com.tr,REJECT",
+        "DOMAIN-SUFFIX,advertserve.com,REJECT",
+        "DOMAIN-SUFFIX,ad.cauly.co.kr,REJECT",
+        "DOMAIN-SUFFIX,ad.daum.net,REJECT",
+        "DOMAIN-SUFFIX,adserver.yahoo.com,REJECT",
+        "DOMAIN-SUFFIX,ads.samsung.com,REJECT",
+        "DOMAIN-SUFFIX,samsungads.com,REJECT",
+        "DOMAIN-SUFFIX,ad.xiaomi.com,REJECT",
+        "DOMAIN-SUFFIX,adv.sec.intl.miui.com,REJECT",
+        "DOMAIN-SUFFIX,alt-ad.mail.ru,REJECT",
+        "DOMAIN-SUFFIX,r0.mradx.net,REJECT",
+        "DOMAIN-SUFFIX,a.rutube.ru,REJECT",
+        "DOMAIN-SUFFIX,ssp.rutube.ru,REJECT",
     ],
     "block_privacy": [
         # Analytics and profiling endpoints that are normally independent of
@@ -1345,7 +1408,7 @@ DIRECT_P2P_PROCESSES: dict[str, list[str]] = {
 
 DIRECT_RULE_META = {
     "windows_geolocation": ("Геолокация Windows", "Только запросы Windows Location Services идут напрямую; остальной трафик остаётся в туннеле."),
-    "block_ads": ("Блокировка рекламы", "Блокирует рекламные сети, видеорекламу и безопасно отделяемые рекламные трекеры внутри Mihomo."),
+    "block_ads": ("Блокировка рекламы", "Расширенная база рекламных сетей с ежедневным обновлением и резервными доменными правилами. Видеореклама YouTube в общем потоке не отделяется доменными правилами."),
     "block_privacy": ("Приватность", "Блокирует стороннюю аналитику, профилирование, запись сессий и мобильную атрибуцию."),
     "direct_ru_sites": ("Российские сайты", "Домены РФ, российские сервисы и IP-адреса."),
     "direct_ru_banks": ("Банки и платежи", "Банки РФ, СБП, НСПК и финансовые сервисы."),
@@ -5063,11 +5126,16 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         f"tcp-concurrent: {str(bool(routing.get('tcp_concurrent', True))).lower()}",
         "sniffer:",
         f"  enable: {str(bool(routing.get('sniffer', True))).lower()}",
+        "  force-dns-mapping: true",
+        "  parse-pure-ip: true",
+        "  override-destination: false",
         "  sniff:",
         "    TLS:",
         "      ports: [443, 8443]",
         "    HTTP:",
         "      ports: [80, 8080, 8880]",
+        "    QUIC:",
+        "      ports: [443, 8443]",
         "tun:",
         # A portable profile must start without a privileged TUN driver.
         # Desktop clients can enable TUN explicitly after import; mixed-port
@@ -5140,8 +5208,20 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         ]
         if group_type == "url-test":
             lines.append(f"    tolerance: {int(routing.get('tolerance', 50))}")
+    rules = profile_rules(routing)
+    # Replace only the built-in advertising category at the same priority.
+    # Explicit custom lists without this category must remain untouched.
+    # A rule-provider refreshes independently of the client's geosite.dat.
+    if "GEOSITE,category-ads-all,REJECT" in rules:
+        lines += ["rule-providers:", f"  {AD_RULE_PROVIDER}:", "    type: http",
+                  "    behavior: domain", "    format: yaml",
+                  f"    url: {q(AD_RULE_PROVIDER_URL)}",
+                  f"    path: ./rule-providers/{AD_RULE_PROVIDER}.yaml",
+                  "    interval: 86400", "    size-limit: 16777216",
+                  f"    proxy: {q(MIHOMO_PROXY_GROUP)}"]
+        rules = [f"RULE-SET,{AD_RULE_PROVIDER},REJECT" if rule == "GEOSITE,category-ads-all,REJECT" else rule for rule in rules]
     lines.append("rules:")
-    for rule in profile_rules(routing):
+    for rule in rules:
         lines.append(f"  - {q(rule.replace(',GATE.312', ',' + MIHOMO_PROXY_GROUP))}")
     lines.append(f"  - {q(f'MATCH,{MIHOMO_PROXY_GROUP}')}")
     return "\n".join(lines) + "\n"

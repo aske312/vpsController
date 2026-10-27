@@ -182,7 +182,7 @@ export const p2pClientCatalog = [
 ];
 
 export const profileDirectRules = [
-  { key: "block_ads", code: "AD", title: "Реклама", text: "Реклама и рекламные трекеры.", group: "Защита" },
+  { key: "block_ads", code: "AD", title: "Реклама", text: "Рекламные сети и трекеры. Видеореклама YouTube блокируется не полностью.", group: "Защита" },
   { key: "block_privacy", code: "PRIV", title: "Приватность", text: "Аналитика и профилирование.", group: "Защита" },
   { key: "direct_ru_sites", code: "RU", title: "Сайты РФ", text: "Домены и IP России.", group: "Напрямую" },
   { key: "direct_ru_banks", code: "BANK", title: "Банки", text: "Банки и платёжные сервисы.", group: "Напрямую" },
@@ -197,8 +197,8 @@ export const profileDirectRules = [
 
 export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
   block_ads: [
-    { id: "base", code: "AD", name: "Базовый список рекламы", tokens: ["category-ads-all"] },
-    { id: "google", code: "G ADS", name: "Google Ads", tokens: ["doubleclick", "googlesyndication", "googleadservices", "googletagservices", "adservice.google.com", "ads.youtube.com"] },
+    { id: "base", code: "AD", name: "Расширенная база · ежедневное обновление", tokens: ["category-ads-all"] },
+    { id: "google", code: "G ADS", name: "Google Ads", tokens: ["doubleclick", "googlesyndication", "googleadservices", "googletagservices", "adservice.google.", "ads.youtube.com"] },
     { id: "yandex", code: "YA AD", name: "Яндекс Реклама", tokens: ["yandexadexchange", "an.yandex.ru", "adfox"] },
     { id: "vk_ads", code: "VK AD", name: "VK / myTarget", tokens: ["mytarget"] },
     { id: "native", code: "NATIVE", name: "Taboola и Outbrain", tokens: ["taboola", "outbrain"] },
@@ -211,6 +211,7 @@ export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
     { id: "adult_video", code: "18+ AD", name: "Реклама PornHub и других видеосайтов", tokens: ["trafficjunky", "exoclick", "exosrv", "juicyads", "tsyndicate", "trafficstars", "trafficfactory", "ero-advertising", "eroadvertising", "realsrv", "adsco.re"] },
     { id: "popups", code: "POP AD", name: "Рекламные всплывающие окна", tokens: ["popads", "popcash", "propellerads"] },
     { id: "metrics", code: "TRACK", name: "Рекламные измерения", tokens: ["scorecardresearch", "moatads", "adsafeprotected"] },
+    { id: "extended", code: "AD+", name: "Дополнительные рекламные сети", tokens: ["googleadsserving", "adsensecustomsearchads", "adtrafficquality", "adform.com", "adtech.de", "adition", "adscale", "bidr.io", "bidswitch", "contextweb", "yieldmanager", "turn.com", "revcontent", "mgid", "adskeeper", "cpmstar", "adsterra", "adcash", "ad-maven", "clickadu", "hilltopads", "adnium", "plugrush", "clickaine", "adtng", "adxpremium", "adxxx", "sharethrough", "triplelift", "emxdgt", "seedtag", "gumgum", "mediaforge", "adblade", "ad4game", "adinplay", "admatic", "advertserve", "cauly", "ad.daum", "adserver.yahoo", "ads.samsung", "samsungads", "ad.xiaomi", "adv.sec.intl.miui", "alt-ad.mail", "r0.mradx", "a.rutube", "ssp.rutube"] },
   ],
   block_privacy: [
     { id: "google", code: "GA", name: "Google Analytics", tokens: ["google-analytics"] },

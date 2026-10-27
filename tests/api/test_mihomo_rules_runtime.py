@@ -111,6 +111,47 @@ class RuleExportTests(unittest.TestCase):
         item['devices'][0]['routing'] = {}
         self.assertEqual(item, source)
 
+    def test_mihomo_ad_database_updates_daily_and_respects_custom_lists(self):
+        item = profile()
+        item['routing'] = {'block_ads': True}
+        with patch.object(manager, 'personal_rule_lines_for_device', return_value=['DOMAIN,allowed.ads.audit.test,DIRECT']):
+            config = yaml.safe_load(manager.render_profile(deepcopy(item)))
+        provider = config['rule-providers'][manager.AD_RULE_PROVIDER]
+        self.assertEqual(provider['url'], manager.AD_RULE_PROVIDER_URL)
+        self.assertEqual((provider['behavior'], provider['format'], provider['interval']), ('domain', 'yaml', 86400))
+        self.assertEqual(provider['proxy'], manager.MIHOMO_PROXY_GROUP)
+        self.assertLess(config['rules'].index('DOMAIN,allowed.ads.audit.test,DIRECT'),
+                        config['rules'].index(f'RULE-SET,{manager.AD_RULE_PROVIDER},REJECT'))
+        for routing in ({'block_ads': False}, {'block_ads': True, 'block_ads_rules': 'DOMAIN,ads.audit.test,REJECT'}):
+            item['devices'][0]['routing'] = routing
+            self.assertNotIn('rule-providers', yaml.safe_load(manager.render_profile(deepcopy(item))))
+
+    def test_extended_delivery_domains_export_to_both_clients_without_shared_video_hosts(self):
+        item = profile()
+        item['routing'] = {'block_ads': True}
+        rules = yaml.safe_load(manager.render_profile(deepcopy(item)))['rules']
+        config = json.loads(manager.render_client_profile(deepcopy(item), 'common', 'singbox')[0])
+        blocked = {domain for rule in config['route']['rules'] if rule.get('outbound') == 'block'
+                   for domain in rule.get('domain_suffix', [])}
+        for domain in ['adservice.google.ru', 'googleadsserving.cn', 'mgid.com', 'triplelift.com',
+                       'bidswitch.net', 'adcash.com', 'ad.xiaomi.com', 'ssp.rutube.ru']:
+            self.assertIn(f'DOMAIN-SUFFIX,{domain},REJECT', rules)
+            self.assertIn(domain, blocked)
+        for domain in ['youtube.com', 'googlevideo.com', 'ytimg.com', 'googleapis.com', 'gvt1.com', 'rutube.ru']:
+            self.assertNotIn(f'DOMAIN-SUFFIX,{domain},REJECT', rules)
+            self.assertNotIn(domain, blocked)
+
+    def test_sniffer_covers_quic_and_ip_connections_without_overriding_destinations(self):
+        item = profile()
+        for enabled in (True, False):
+            item['devices'][0]['routing'] = {'sniffer': enabled}
+            sniffer = yaml.safe_load(manager.render_profile(deepcopy(item)))['sniffer']
+            self.assertEqual(sniffer['enable'], enabled)
+            self.assertEqual(sniffer['sniff']['QUIC']['ports'], [443, 8443])
+            self.assertTrue(sniffer['force-dns-mapping'])
+            self.assertTrue(sniffer['parse-pure-ip'])
+            self.assertFalse(sniffer['override-destination'])
+
     def test_export_uses_applied_quic_settings_without_mutating_saved_credentials(self):
         connections = [{"component": "transport-hysteria2", "credential": {"port": 1234, "password": "client", "obfs": False}}]
         with patch.object(manager, "load_json", return_value={"inbounds": [{"type": "hysteria2", "listen_port": 5678, "up_mbps": 123, "down_mbps": 456, "obfs": {"type": "salamander", "password": "applied-obfs"}}]}):
@@ -195,15 +236,20 @@ class RuleExportTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as folder, mihomo_readiness() as readiness_port:
                 root = Path(folder)
                 item = profile()
-                # Exercise the bundled domain rules offline; GEOSITE downloading
-                # is separate from explicit advertising-domain matching.
+                # Exercise the expanded provider and explicit fallbacks offline.
                 ad_rules = [rule for rule in manager.configured_preset_rules({}, 'block_ads')
                             if not rule.startswith('GEOSITE,')]
                 item["devices"][0]["routing"] = {"strategy": "select", "direct_ru_banks": True,
-                    "block_ads": True, "block_ads_rules": '\n'.join(ad_rules + ['DOMAIN-SUFFIX,ads.audit.test,REJECT'])}
+                    "block_ads": True, "block_ads_rules": '\n'.join(['GEOSITE,category-ads-all,REJECT', *ad_rules, 'DOMAIN-SUFFIX,ads.audit.test,REJECT'])}
                 with patch.object(manager, "personal_rule_lines_for_device", return_value=["DOMAIN,allowed.ads.audit.test,DIRECT"]):
                     config = yaml.safe_load(manager.render_profile(item))
+                provider_file = root / 'ads.yaml'
+                provider_file.write_text('payload:\n  - "+.fresh-provider.audit.test"\n  - "+.ads.audit.test"\n', encoding='utf-8')
+                config['rule-providers'][manager.AD_RULE_PROVIDER] = {
+                    'type': 'file', 'behavior': 'domain', 'format': 'yaml', 'path': str(provider_file)}
                 cases = [('sberbank.ru', b'via-direct'), ('unmatched.audit.test', b'via-tunnel'),
+                         ('fresh-provider.audit.test', b'502'), ('delivery.mgid.com', b'502'),
+                         ('adservice.google.ru', b'502'), ('ssp.rutube.ru', b'502'),
                          ('ads.audit.test', b'502'), ('allowed.ads.audit.test', b'via-direct'),
                          ('delivery.adsmoloco.com', b'502'), ('api.pangle.io', b'502'),
                          ('iadsdk.apple.com', b'502'), ('adservice.google.com', b'502'),
