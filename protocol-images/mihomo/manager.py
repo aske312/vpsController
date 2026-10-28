@@ -5123,10 +5123,9 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         rules = [mihomo_ad_base_rule(AD_RULE_PROVIDER) if rule == "GEOSITE,category-ads-all,REJECT" else rule for rule in rules]
     used_providers = {name: definition for name, definition in providers.items() if any(
         rule.startswith(f'RULE-SET,{name},') or f'(RULE-SET,{name})' in rule for rule in rules)}
-    selected_os = next((device.get('os') for device in normalized.get('devices', []) if str(device['id']) == selected_device), None)
     # Read-only legacy installations cannot build a cache, and IP-only panels
     # have no portable HTTPS rule URL. Preserve their existing subscriptions.
-    automatic_mrs = selected_os == 'ios' and bool(os.getenv('PUBLIC_DOMAIN', '').strip()) and component_is_managed()
+    automatic_mrs = bool(os.getenv('PUBLIC_DOMAIN', '').strip()) and component_is_managed()
     if profile_routing.get('mrs_rule_sets', automatic_mrs):
         used_providers = {name: mrs_provider(name, definition) for name, definition in used_providers.items()}
     if used_providers:
