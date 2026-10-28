@@ -71,10 +71,8 @@ jobs:
       - name: Select test package version
         shell: bash
         run: |
-          base="$(node -p 'require("./package.json").version')"
-          latest="$(git tag --list "pro-v${base%.*}.*" --sort=-v:refname | head -n 1)"
-          [[ -n "$latest" ]] || { echo "Production PRO version tag is missing" >&2; exit 1; }
-          echo "RELEASE_VERSION=${latest#pro-}" >> "$GITHUB_ENV"
+          version="$(python3 scripts/release-version.py)"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
       - name: Verify PRO packaging
         env:
           BUILD_COMMIT: ${{ github.sha }}

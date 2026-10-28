@@ -72,20 +72,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          base="$(node -p 'require("./package.json").version')"
-          major_minor="${base%.*}"
-          latest="$(git tag --list "pro-v${major_minor}.*" --sort=-v:refname | head -n 1)"
-          if [[ "$GITHUB_REF_NAME" == "test-pro" ]]; then
-            [[ -n "$latest" ]] || { echo "Production PRO version tag is missing" >&2; exit 1; }
-            version="${latest#pro-}"
-          elif [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
-            version="${latest#pro-}"
-          elif [[ -z "$latest" ]]; then
-            version="v${base}"
-          else
-            patch="${latest##*.}"
-            version="v${major_minor}.$((patch + 1))"
-          fi
+          version="$(python3 scripts/release-version.py)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Build PRO archive
         env:
@@ -124,20 +111,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          base="$(node -p 'require("./package.json").version')"
-          major_minor="${base%.*}"
-          latest="$(git tag --list "pro-v${major_minor}.*" --sort=-v:refname | head -n 1)"
-          if [[ "$GITHUB_REF_NAME" == "test-pro" ]]; then
-            [[ -n "$latest" ]] || { echo "Production PRO version tag is missing" >&2; exit 1; }
-            version="${latest#pro-}"
-          elif [[ -n "$latest" && "$(git rev-list -n 1 "$latest")" == "$GITHUB_SHA" ]]; then
-            version="${latest#pro-}"
-          elif [[ -z "$latest" ]]; then
-            version="v${base}"
-          else
-            patch="${latest##*.}"
-            version="v${major_minor}.$((patch + 1))"
-          fi
+          version="$(python3 scripts/release-version.py)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Publish PRO release
         env:
