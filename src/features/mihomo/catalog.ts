@@ -1,4 +1,5 @@
 import type { ProfilePreset, RuleIconGroup } from "./types";
+import ruServices from "../../../protocol-images/mihomo/ru-service-domains.json" with { type: "json" };
 
 export const presetConnectionOptions: ProfilePreset["components"] = [
   { id: "transport-reality", transport: "xhttp", label: "VLESS · XHTTP" },
@@ -273,7 +274,7 @@ export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
   direct_ru_sites: [
     { id: "zones", code: "RU", name: "Домены и IP России", tokens: ["DOMAIN-SUFFIX,ru,", "xn--p1ai", "DOMAIN-SUFFIX,su,", "GEOIP,RU"] },
     { id: "yandex", code: "YA", name: "Яндекс", tokens: ["yandex", "yastatic"] },
-    { id: "vk", code: "VK", name: "ВКонтакте", tokens: ["vk.ru", "vk.com", "userapi", "vkuseraudio", "vk-portal.net"] },
+    { id: "vk", code: "VK", name: "ВКонтакте", tokens: ["vk.ru", "vk.com", "userapi", "vkuseraudio"] },
     { id: "mail", code: "MAIL", name: "Mail.ru", tokens: ["DOMAIN-SUFFIX,mail.ru,", "DOMAIN-SUFFIX,imgsmail.ru,", "DOMAIN-SUFFIX,attachmail.ru,", "DOMAIN-SUFFIX,cdnmail.ru,", "DOMAIN-SUFFIX,bk.ru,", "DOMAIN-SUFFIX,inbox.ru,", "DOMAIN-SUFFIX,list.ru,"] },
     { id: "ok", code: "OK", name: "Одноклассники", tokens: ["mycdn", "ok.ru", "odnoklassniki"] },
     { id: "dzen", code: "DZEN", name: "Дзен", tokens: ["dzen.ru"] },
@@ -339,6 +340,19 @@ export const ruleIconGroups: Record<string, RuleIconGroup[]> = {
     { id: "discovery", code: "CAST", name: "Обнаружение устройств", tokens: ["224.0.0.0/4", "ff00::/8"] },
   ],
 };
+
+for (const entry of ruServices.groups) {
+  const tokens = [
+    ...entry.domains.map(domain => `DOMAIN-SUFFIX,${domain},`),
+    ...entry.hosts.map(host => `DOMAIN,${host},`),
+  ];
+  for (const preset of entry.presets) {
+    const groups = ruleIconGroups[preset];
+    const existing = groups.find(group => group.id === entry.id);
+    if (existing) existing.tokens = [...new Set([...existing.tokens, ...tokens])];
+    else groups.push({ id: entry.id, code: entry.code, name: entry.name, tokens });
+  }
+}
 
 export const profileStrategies = [
   { value: "", code: "AUTO", title: "Общие", text: "Наследовать стратегию маршрутизации." },

@@ -1,0 +1,346 @@
+{
+  "schema": 1,
+  "audited_at": "2026-10-28",
+  "sources": [
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/category-gov-ru",
+      "blob_sha": "836fe4476dd1bc862dfbc40d525c6258dc20f70c"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/vk",
+      "blob_sha": "ee758eaca49101d17650a1121d6a17e82a9dc415"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/mailru-group",
+      "blob_sha": "fb821ddc43a8e0ba9e82967c9cde74ca10b8793e"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/yandex",
+      "blob_sha": "50b5e921a4a1ed76dc5b0a55f8d63b3de01f568c"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/ok",
+      "blob_sha": "c46302464f7ed70f25b04516906389e7fdd8e316"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/kinopoisk",
+      "blob_sha": "107cb5f1aec31051465fb249733628f1725f3437"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/rutube",
+      "blob_sha": "7c7cca6fa5c95df9ab92163d58f9cada66ed3e5c"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/2gis",
+      "blob_sha": "b84b53ceddb705d816f1a0c0f34db21ea0a5ba8b"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/kaspersky",
+      "blob_sha": "7b91fbb9620fcd0cbd67716d1e19ade95157a3a0"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/mts-ru",
+      "blob_sha": "8098df29ca1c27be16cc9fbd9f7f16a4cd8847ac"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/megafon",
+      "blob_sha": "f7f4f361e19ced841fac0fe9ac9e8165b9e83aca"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/wink",
+      "blob_sha": "4003aaead73b2f9a21491b1cf07556721d5134fc"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/ozon",
+      "blob_sha": "946c1aad35137062e0fee9d35bc209ce063d09e2"
+    },
+    {
+      "url": "https://github.com/v2fly/domain-list-community/blob/master/data/wildberries",
+      "blob_sha": "f1199b704b00a5ccc3917dc1a47870249fafd335"
+    }
+  ],
+  "groups": [
+    {
+      "presets": [
+        "direct_ru_sites"
+      ],
+      "id": "vk",
+      "code": "VK",
+      "name": "ВКонтакте",
+      "domains": [
+        "vk-portal.net",
+        "cdn-vk.net",
+        "vk-cdn.me",
+        "vk-cdn.net",
+        "vkcache.com",
+        "vkuser.net",
+        "vkuseraudio.com",
+        "vkuserlive.com",
+        "vkuserlive.net",
+        "vkuservideo.com",
+        "vkuservideo.net",
+        "vk-apps.com",
+        "vkclips.app",
+        "vkgo.app",
+        "vklive.app",
+        "vk.me",
+        "vkmessenger.app",
+        "vkmessenger.com",
+        "vkontakte.com",
+        "mvk.com",
+        "vk.link",
+        "vk.cc"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_sites"
+      ],
+      "id": "yandex",
+      "code": "YA",
+      "name": "Яндекс",
+      "domains": [
+        "yadi.sk",
+        "ya.cc",
+        "naydex.net",
+        "yastat.net",
+        "yndx.net",
+        "yandex.st",
+        "yandex.cloud",
+        "yandex.kz",
+        "yandex.by",
+        "yandex.uz",
+        "yandex.com.tr",
+        "yandex.com.ge",
+        "yandex.com.am",
+        "yandexgo.com",
+        "yandex.taxi",
+        "yandex.travel",
+        "yandex.market"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_sites"
+      ],
+      "id": "mail",
+      "code": "MAIL",
+      "name": "Mail.ru",
+      "domains": [
+        "attachmy.com",
+        "bizmrg.com",
+        "datacloudmy.com",
+        "mpgw-my.com",
+        "smailru.net",
+        "staticmy.com",
+        "vmailru.net"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_sites"
+      ],
+      "id": "kinopoisk",
+      "code": "KP",
+      "name": "Кинопоиск",
+      "domains": [
+        "kinopoisk-ru.clstorage.net"
+      ],
+      "hosts": [
+        "kp-config-smart-tv.akamaized.net",
+        "kp-configs-smart-tv.s3.eu-central-1.amazonaws.com"
+      ]
+    },
+    {
+      "presets": [
+        "direct_ru_sites"
+      ],
+      "id": "ok",
+      "code": "OK",
+      "name": "Одноклассники",
+      "domains": [
+        "ok.me",
+        "okl.lt"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_sites"
+      ],
+      "id": "rutube",
+      "code": "RUTUBE",
+      "name": "Rutube",
+      "domains": [
+        "rutube.sport"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_sites"
+      ],
+      "id": "kaspersky",
+      "code": "KAV",
+      "name": "Лаборатория Касперского",
+      "domains": [
+        "kaspersky-labs.com"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_sites"
+      ],
+      "id": "twogis",
+      "code": "2GIS",
+      "name": "2ГИС",
+      "domains": [
+        "2gis.kz",
+        "2gis.by",
+        "2gis.uz",
+        "2gis.kg",
+        "2gis.am",
+        "2gis.ge",
+        "2gis.tech"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_sites"
+      ],
+      "id": "gosuslugi",
+      "code": "GOS",
+      "name": "Госуслуги",
+      "domains": [
+        "gu-st.ru"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_sites",
+        "direct_ru_services"
+      ],
+      "id": "health",
+      "code": "MED",
+      "name": "Государственная медицина",
+      "domains": [
+        "emias.info"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_sites",
+        "direct_ru_services"
+      ],
+      "id": "education",
+      "code": "EDU",
+      "name": "Государственное образование",
+      "domains": [
+        "edu22.info",
+        "netschool.website"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_sites",
+        "direct_ru_services"
+      ],
+      "id": "regions",
+      "code": "REG",
+      "name": "Региональные порталы",
+      "domains": [
+        "volganet.net"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_services"
+      ],
+      "id": "mts",
+      "code": "MTS",
+      "name": "МТС и МГТС",
+      "domains": [
+        "mts-ws.net"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_services"
+      ],
+      "id": "megafon",
+      "code": "MF",
+      "name": "МегаФон и Yota",
+      "domains": [
+        "megafon.com"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_sites"
+      ],
+      "id": "wink",
+      "code": "WNK",
+      "name": "Wink и More",
+      "domains": [
+        "restream-media.net",
+        "more.tv",
+        "wink.am"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_services"
+      ],
+      "id": "rostelecom",
+      "code": "RT",
+      "name": "Ростелеком",
+      "domains": [
+        "restream-media.net",
+        "more.tv",
+        "wink.am"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_marketplaces"
+      ],
+      "id": "ozon",
+      "code": "OZON",
+      "name": "Ozon",
+      "domains": [
+        "ozonusercontent.com"
+      ],
+      "hosts": []
+    },
+    {
+      "presets": [
+        "direct_ru_marketplaces"
+      ],
+      "id": "wildberries",
+      "code": "WB",
+      "name": "Wildberries",
+      "domains": [
+        "wbstatic.net",
+        "wbcontent.net",
+        "wbwh.tech",
+        "wbautomation.tech",
+        "rwbautomation.tech",
+        "paywb.com"
+      ],
+      "hosts": []
+    }
+  ]
+}

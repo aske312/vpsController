@@ -24,6 +24,18 @@ class RouteDnsTests(unittest.TestCase):
         for domain in ('vk-portal.net', '.vk-portal.net'):
             self.assertEqual(policy[domain], [self.settings['direct_nameserver'] + '#DIRECT'])
 
+    def test_shared_cloud_exceptions_keep_exact_dns_scope(self):
+        item = profile()
+        item['routing'] = {'route_dns': True, 'direct_ru_sites': True}
+        with patch.object(manager, 'dns_settings', return_value=self.settings):
+            policy = yaml.safe_load(manager.render_profile(item))['dns']['nameserver-policy']
+        for host in ('kp-config-smart-tv.akamaized.net', 'kp-configs-smart-tv.s3.eu-central-1.amazonaws.com'):
+            self.assertEqual(policy[host], [self.settings['direct_nameserver'] + '#DIRECT'])
+            self.assertNotIn('.' + host, policy)
+        for parent in ('akamaized.net', 'amazonaws.com', 'clstorage.net', 'ipify.org'):
+            self.assertNotIn(parent, policy)
+            self.assertNotIn('.' + parent, policy)
+
     def setUp(self):
         self.enterContext(patch.object(manager, 'SUBMODULE_ROOT', ROOT / 'protocol-images/mihomo/modules'))
         self.enterContext(patch.object(manager, 'public_endpoint', return_value='192.0.2.1'))

@@ -10,6 +10,20 @@ const adsLines = [...adsBlock.matchAll(/^\s*"((?:DOMAIN|DOMAIN-SUFFIX|GEOSITE),[
 const list = { id: "block_ads", key: "block_ads_rules", default_rules: adsLines.join("\n") };
 const groups = ruleIconGroups.block_ads;
 
+test("reviewed RU domains belong to the matching service switch", () => {
+  const catalog = JSON.parse(fs.readFileSync(new URL("../../protocol-images/mihomo/ru-service-domains.json", import.meta.url), "utf8"));
+  for (const entry of catalog.groups) {
+    const rules = [...entry.domains.map(domain => `DOMAIN-SUFFIX,${domain},DIRECT`), ...entry.hosts.map(host => `DOMAIN,${host},DIRECT`)];
+    for (const preset of entry.presets) {
+      const list = { id: preset, default_rules: rules.join("\n") };
+      const groups = ruleIconGroups[preset];
+      assert.deepEqual(partitionRuleGroups(list, groups)[entry.id], rules);
+      const disabled = toggleRuleGroup(list, groups, "@default", entry.id);
+      for (const rule of rules) assert.equal(disabled.includes(rule), false);
+    }
+  }
+});
+
 test("every built-in advertising entry belongs to exactly one group", () => {
   assert.ok(adsLines.length > 150);
   const partition = partitionRuleGroups(list, groups);

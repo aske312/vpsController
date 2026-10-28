@@ -44,7 +44,7 @@ import client_compatibility
 from client_capabilities import CAPABILITIES, FEATURES, RULES, compatible_routing, connection_supported, device_capabilities
 from advertising_rules import AD_RULES, mihomo_ad_base_rule
 from dns_routing import mihomo_route_dns, validate_route_dns
-from routing_presets import QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, quic_domains, quic_rule
+from routing_presets import QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_PROVIDERS, SERVICE_RULES, RU_DIRECT_RULES, quic_domains, quic_rule
 from telemetry import ConnectionTelemetry
 from xray_stats import XrayStats
 import ss_runtime
@@ -1021,7 +1021,7 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN,vk.ru,DIRECT", "DOMAIN-SUFFIX,vk.ru,DIRECT",
         "DOMAIN-SUFFIX,yandex.com,DIRECT", "DOMAIN-SUFFIX,yandex.net,DIRECT", "DOMAIN-SUFFIX,yastatic.net,DIRECT",
         "DOMAIN-SUFFIX,yandexcloud.net,DIRECT", "DOMAIN-SUFFIX,vk.com,DIRECT", "DOMAIN-SUFFIX,userapi.com,DIRECT",
-        "DOMAIN-SUFFIX,vkuseraudio.net,DIRECT", "DOMAIN-SUFFIX,vk-portal.net,DIRECT", "DOMAIN-SUFFIX,mycdn.me,DIRECT",
+        "DOMAIN-SUFFIX,vkuseraudio.net,DIRECT", "DOMAIN-SUFFIX,mycdn.me,DIRECT",
         "DOMAIN-SUFFIX,mail.ru,DIRECT", "DOMAIN-SUFFIX,imgsmail.ru,DIRECT",
         "DOMAIN-SUFFIX,attachmail.ru,DIRECT", "DOMAIN-SUFFIX,cdnmail.ru,DIRECT",
         "DOMAIN-SUFFIX,bk.ru,DIRECT", "DOMAIN-SUFFIX,inbox.ru,DIRECT", "DOMAIN-SUFFIX,list.ru,DIRECT",
@@ -1157,6 +1157,9 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN,nodejs.org,DIRECT",
     ],
 }
+
+for _preset, _rules in RU_DIRECT_RULES.items():
+    DIRECT_RULE_PRESETS[_preset] = list(dict.fromkeys([*DIRECT_RULE_PRESETS[_preset], *_rules]))
 
 PRIVACY_TELEMETRY_RULES = [
     "DOMAIN,settings-win.data.microsoft.com,REJECT",
