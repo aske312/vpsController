@@ -85,7 +85,7 @@ export function useNetworkRelays({ request, admit, operation, onOperation, busy,
     window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
   }, [changed]);
   useEffect(() => {
-    if (!operation?.action?.startsWith("relay-") || systemActionNeedsPolling(operation)) return;
+    if (!(operation?.action?.startsWith("relay-") || operation?.action === "mihomo-profile-relay-prepare") || systemActionNeedsPolling(operation)) return;
     if (pending && operation.id !== pending) return;
     const key = `${operation.id}:${operation.state}`;
     if (terminalRead.current === key) return;

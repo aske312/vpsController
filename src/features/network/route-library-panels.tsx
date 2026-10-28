@@ -45,6 +45,11 @@ export function RelayEntryPanel({ host, relay, close }: { host: RelayHost; relay
     <section className="routeTaskCard routeRelayTests" aria-label="Проверка маршрута Relay">
       {profiles.length > 0 && <RelayProfilePicker host={host} profiles={profiles} selected={profile?.id || ""} onChange={id => { setProfile(id); setSelected(""); setConsumer(""); }} />}
       {profiles.length > 0 && <button type="button" className="relayAllConnections" aria-pressed={selectedProfile === "__all__"} onClick={() => { setProfile("__all__"); setSelected(""); setConsumer(""); }}>Все порты и отдельные подключения</button>}
+      {profiles.filter(item => item.relay_failures?.some(error => error.host_id === host.id)).map(item => <div key={item.id} className="routeLibraryCallout" role="alert">
+        <p>{item.name}: не удалось настроить пересылку через {host.name}. Профиль сохранён.</p>
+        {item.relay_failures?.some(error => error.host_id === host.id && error.reason === "recovery_required") && <p>Сначала проверьте результат прерванной операции Relay.</p>}
+        <button type="button" disabled={locked || active} onClick={() => submit(`/mihomo/profiles/${encodeURIComponent(item.id)}/relays`)}>Повторить настройку пересылки</button>
+      </div>)}
       {profiles.length === 0 && <p>Профили через этот Relay пока не настроены.</p>}
       <details className="relayProfileDiagnostics" open={active || undefined}><summary>Диагностика{profile ? ` · ${profile.name}` : " и отдельные подключения"}</summary>
       {route ? <>
