@@ -1,4 +1,4 @@
-"""Automatic MRS refresh, last-good retention and iOS subscription delivery."""
+"""Automatic MRS refresh, last-good retention and portable subscription delivery."""
 from copy import deepcopy
 import io
 import os
@@ -97,7 +97,7 @@ class MrsCacheTests(unittest.TestCase):
 
 
 class MrsExportTests(unittest.TestCase):
-    def test_ios_uses_mrs_without_changing_routing_or_non_ios_clients(self):
+    def test_all_mihomo_platforms_and_common_profiles_use_mrs(self):
         item = profile()
         item['devices'][0]['routing'] = {'block_ads': True, 'block_malware': True}
         with patch.object(manager, 'SUBMODULE_ROOT', ROOT / 'protocol-images/mihomo/modules'), \
@@ -106,8 +106,9 @@ class MrsExportTests(unittest.TestCase):
                 patch.object(manager, 'component_is_managed', return_value=True), \
                 patch.object(manager, 'MRS_CACHE'), \
                 patch.dict(os.environ, {'PUBLIC_DOMAIN': 'panel.example'}):
+            item['devices'][0]['routing']['mrs_rule_sets'] = False
             legacy = yaml.safe_load(manager.render_profile(deepcopy(item)))
-            item['devices'][0]['os'] = 'ios'
+            item['devices'][0]['routing'].pop('mrs_rule_sets')
             compact = yaml.safe_load(manager.render_profile(deepcopy(item)))
             self.assertEqual(compact['rules'], legacy['rules'])
             self.assertEqual(compact['proxies'], legacy['proxies'])
@@ -117,6 +118,10 @@ class MrsExportTests(unittest.TestCase):
                 self.assertEqual(definition['url'], f'https://panel.example/s/rules/{name}.mrs')
                 self.assertTrue(definition['path'].endswith('.mrs'))
                 self.assertEqual(definition['interval'], legacy['rule-providers'][name]['interval'])
+            for platform in ('ios', 'android', 'windows', 'macos', 'linux', 'unknown', None):
+                with self.subTest(platform=platform):
+                    item['devices'][0]['os'] = platform
+                    self.assertEqual(yaml.safe_load(manager.render_profile(deepcopy(item))), compact)
             item['devices'][0]['routing']['mrs_rule_sets'] = False
             self.assertEqual(yaml.safe_load(manager.render_profile(deepcopy(item))), legacy)
             item['devices'][0]['routing'].pop('mrs_rule_sets')
@@ -125,6 +130,19 @@ class MrsExportTests(unittest.TestCase):
             with patch.dict(os.environ, {'PUBLIC_DOMAIN': ''}):
                 self.assertEqual(yaml.safe_load(manager.render_profile(deepcopy(item))), legacy)
         self.assertTrue(manager.validate_routing({'mrs_rule_sets': True}, current={})['mrs_rule_sets'])
+
+    def test_singbox_keeps_its_native_binary_rule_sets(self):
+        item = profile()
+        item['devices'][0]['routing'] = {'block_ads': True, 'block_malware': True}
+        with patch.object(manager, 'SUBMODULE_ROOT', ROOT / 'protocol-images/mihomo/modules'), \
+                patch.object(manager, 'public_endpoint', return_value='127.0.0.1'), \
+                patch.object(manager, 'module_is_installed', return_value=True):
+            import json
+            config = json.loads(manager.render_client_profile(item, 'common', 'singbox')[0])
+        self.assertEqual(len(config['route']['rule_set']), 3)
+        for definition in config['route']['rule_set']:
+            self.assertEqual(definition['format'], 'binary')
+            self.assertTrue(definition['url'].endswith('.srs'))
 
     def test_export_waits_for_first_successful_build(self):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'PUBLIC_DOMAIN': 'panel.example'}), \
