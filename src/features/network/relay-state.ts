@@ -16,6 +16,7 @@ export type RelayHost = {
   id: string; name: string; agent_url: string; client_address?: string; certificate_sha256: string; api_version: 1;
   token_configured: boolean; state: "connected" | "unknown"; version?: string; agent_revision?: number;
   foreign_routes: number; routes: RelayRoute[]; error?: string;
+  profile_failures?: number;
   capabilities?: string[];
   agent_release?: { state: "unknown" | "current" | "outdated" | "newer"; version?: string; digest?: string };
   agent_update?: { state: "sending" | "queued" | "running" | "updated" | "failed" | "unknown"; id?: string; version?: string; requested_at?: number; polling?: boolean };
@@ -24,7 +25,7 @@ export type RelayHost = {
   excluded_addresses?: string[];
   addresses?: { ipv4: string[]; ipv6: string[]; domains: string[]; cdn_domains?: string[] };
 };
-export type RelayProfile = { id: string; name: string; channels: { id: string; label: string; transport: "tcp" | "udp"; host_id: string; route_ids: string[] }[] };
+export type RelayProfile = { relay_failures?: { host_id: string; reason: "recovery_required" | "preparation_failed" }[]; id: string; name: string; channels: { id: string; label: string; transport: "tcp" | "udp"; host_id: string; route_ids: string[] }[] };
 export type RelayStatus = {
   profiles?: RelayProfile[];
   revision: string; hosts: RelayHost[]; pending: boolean; origin_ip: string; origin_hosts: string[];
@@ -76,6 +77,7 @@ export function relaySnapshot(value: unknown): RelayStatus {
       || host.api_version !== 1 || host.token_configured !== true || "token" in host || !["connected", "unknown"].includes(String(host.state))
       || !integer(host.foreign_routes) || !Array.isArray(host.routes) || host.error !== undefined && typeof host.error !== "string"
       || host.state === "connected" && (!integer(host.agent_revision) || typeof host.version !== "string")) return invalid();
+    if (host.profile_failures !== undefined && !integer(host.profile_failures)) return invalid();
     ids.add(host.id);
     if (host.agent_release !== undefined && (!object(host.agent_release) || !["unknown", "current", "outdated", "newer"].includes(String(host.agent_release.state)) || host.agent_release.state !== "unknown" && (typeof host.agent_release.version !== "string" || !/^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(host.agent_release.version) || typeof host.agent_release.digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(host.agent_release.digest)))) return invalid();
     if (host.agent_update !== undefined && (!object(host.agent_update) || !["sending", "queued", "running", "updated", "failed", "unknown"].includes(String(host.agent_update.state)))) return invalid();
@@ -118,6 +120,7 @@ export function relaySnapshot(value: unknown): RelayStatus {
   if (value.consumers !== undefined && (!Array.isArray(value.consumers) || value.consumers.some(item => !object(item) || typeof item.id !== "string" || typeof item.label !== "string"))) return invalid();
   if (value.profiles !== undefined && (!Array.isArray(value.profiles) || value.profiles.some(profile => !object(profile)
     || typeof profile.id !== "string" || typeof profile.name !== "string" || !Array.isArray(profile.channels)
+    || profile.relay_failures !== undefined && (!Array.isArray(profile.relay_failures) || profile.relay_failures.some(error => !object(error) || typeof error.host_id !== "string" || !["recovery_required", "preparation_failed"].includes(String(error.reason))))
     || profile.channels.some(channel => !object(channel) || typeof channel.id !== "string" || typeof channel.label !== "string"
       || !["tcp", "udp"].includes(String(channel.transport)) || typeof channel.host_id !== "string"
       || !Array.isArray(channel.route_ids) || channel.route_ids.some(id => typeof id !== "string"))))) return invalid();

@@ -55,6 +55,7 @@ import network_routes
 import server_addresses
 import network_probe
 import relay_connections
+import relay_profile_status
 import relay_cdn
 import xray_protocols
 import xray_core
@@ -1762,7 +1763,10 @@ def require_mihomo_admission(request: Request, _: None = Depends(auth_required))
         if identity and application_operation.read(DATA_ROOT.parent / "operations" / f"{application_operation.operation_id(identity)}.json"):
             return
         require_mihomo_management()
-        application_operation.require_recovery_clear(DATA_ROOT.parent)
+        action = ('mihomo-profile-create' if request.method == 'POST' and request.url.path == '/api/mihomo/profiles'
+                  else 'mihomo-profile-update' if request.method == 'PATCH' and re.fullmatch(r'/api/mihomo/profiles/[^/]+', request.url.path)
+                  else None)
+        application_operation.require_recovery_clear(DATA_ROOT.parent, action)
     except application_operation.OperationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except ValueError:
@@ -2544,7 +2548,7 @@ def start_profile_operation(action: str, payload: dict, identity: str | None):
         with application_operation.locked(root):
             if not application_operation.read(root / "operations" / f"{identity}.json"):
                 require_mihomo_management()
-                application_operation.require_recovery_clear(root)
+                application_operation.require_recovery_clear(root, f"mihomo-profile-{action}")
                 if action == "module-settings":
                     check_module_settings_revision(payload["module_id"], payload["settings"].get("expected_revision"))
                 elif action in {"create", "update"} and payload.get("settings", {}).get("connections") is not None:
@@ -2572,6 +2576,12 @@ def submit_module_settings(module_id: str, payload: ModuleSettingsPatch, operati
 @app.post("/api/mihomo/profiles", status_code=202, dependencies=[Depends(require_mihomo_admission)])
 def submit_profile_create(payload: ProfileCreate, operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
     return start_profile_operation("create", {"settings": payload.model_dump()}, operation_id)
+
+
+@app.post("/api/mihomo/profiles/{profile_id}/relays", status_code=202, dependencies=[Depends(require_mihomo_admission)])
+def submit_profile_relays(profile_id: str, relay_revision: str = Header(alias="If-Match"), operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
+    relay_connection_control().checked(relay_revision)
+    return start_profile_operation("relay-prepare", {"profile_id": profile_id, "relay_revision": relay_revision}, operation_id)
 
 
 @app.patch("/api/mihomo/profiles/{profile_id}", status_code=202, dependencies=[Depends(require_mihomo_admission)])
@@ -3201,8 +3211,9 @@ def used_vless_ports(config: dict[str, Any]) -> set[int]:
     return {int(item.get("port", 0)) for item in config.get("inbounds", []) if isinstance(item, dict) and int(item.get("port", 0) or 0) > 0}
 
 
-def next_vless_port(config: dict[str, Any], start: int, owner: str | None = None) -> int:
-    return free_module_port(start, {"tcp"}, used=used_vless_ports(config), owner=owner)
+def next_vless_port(config: dict[str, Any], start: int, owner: str | None = None, *, relay: bool = False) -> int:
+    reserved = {22, 8000, 9443} if relay else set()
+    return free_module_port(start, {"tcp"}, used=used_vless_ports(config) | reserved, owner=owner)
 
 
 def vless_stream(settings: dict[str, Any], private_key: str, short_id: str) -> dict[str, Any]:
@@ -3387,7 +3398,7 @@ def apply_tunnel_privacy(enabled: bool) -> None:
     # Validate every device, including HWID-bound and fallback connections.
     for item in items:
         for device_id in {str(connection.get("device_id", item["common_device_id"])) for connection in item.get("connections", [])}:
-            validate_rendered_profile(render_profile(item, device_id))
+            validate_rendered_profile(render_profile(item, device_id, resolve_relays=False))
     if changed:
         apply_reality_config(config_path, config)
     if items:
@@ -3405,7 +3416,7 @@ def add_reality_credential(profile_id: str, connection_id: str, connection_setti
     core = module_settings("transport-reality")
     direct_enabled = settings["route_mode"] in {"direct", "both"}
     allocation_owner = f"mihomo:vless:{profile_id}-{connection_id}"
-    direct_port = (int(settings["port"]) or next_vless_port(config, int(core["port_start"]), allocation_owner + ":direct")) if direct_enabled else 0
+    direct_port = (int(settings["port"]) or next_vless_port(config, int(core["port_start"]), allocation_owner + ":direct", **({"relay": True} if relay_connections.host_id(settings) else {}))) if direct_enabled else 0
     if direct_enabled and int(settings["port"]) and direct_port in (used_vless_ports(config) | unavailable_module_ports({"tcp"})):
         raise RuntimeError(f"VLESS port {direct_port} is already used")
     if direct_enabled and int(settings["port"]):
@@ -4038,7 +4049,7 @@ def reconcile_profile_encryption(profile: dict[str, Any]) -> None:
         changed = True
     if changed:
         for device_id in {str(entry.get("device_id", "device-1")) for entry in profile.get("connections", [])}:
-            validate_rendered_profile(render_profile(profile, device_id))
+            validate_rendered_profile(render_profile(profile, device_id, resolve_relays=False))
         if runtime_changed:
             apply_reality_config(config_path, config, restart_service=False)
             apply_batched_reality_runtime()
@@ -4088,7 +4099,7 @@ def provision_connections(profile_id: str, definitions: list[dict[str, Any]], pr
             completed.append({**definition, "credential": credential})
         if batch_reality:
             apply_batched_reality_runtime()
-        prepare_profile_relays({'connections': completed}, os.getenv('VPS_CONTROL_OPERATION_ID'))
+        prepare_profile_relays({'id': profile_id, 'connections': completed}, os.getenv('VPS_CONTROL_OPERATION_ID'), partial=True)
     except Exception:
         for connection in reversed(completed):
             try:
@@ -4770,16 +4781,10 @@ def with_relay_labels(connections):
             for item in connections]
 
 
-def prepare_profile_relays(item, identity=None, previous=()):
-    if not any(relay_connections.host_id(connection.get('settings', {})) for connection in item.get('connections', [])):
-        return
-    try:
-        relay_connections.prepare_mihomo(relay_connection_control(), effective_client_connections(item['connections']),
-                                        (identity or uuid.uuid4().hex).replace('-', ''), reality_connection_settings, previous)
-    except RelayAddressError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except (ValueError, OSError, RuntimeError) as exc:
-        raise HTTPException(status_code=409, detail='Не удалось подтвердить пересылку Relay. Проверьте узел и результат операции в ROUTES перед повтором') from exc
+def prepare_profile_relays(item, identity=None, previous=(), *, partial=False):
+    return relay_profile_status.prepare(
+        relay_connection_control(), item['id'], effective_client_connections(item.get('connections', [])),
+        (identity or uuid.uuid4().hex).replace('-', ''), reality_connection_settings, previous, partial=partial)
 
 
 def relay_client_nodes(connection, nodes, endpoints=()):
@@ -4947,7 +4952,7 @@ def render_vless_tls(credential: dict[str, Any], proxy_name: str) -> list[str]:
     return render_vless_cdn({**credential, "cdn_domain": credential.get("tls_domain", ""), "cdn_path": credential.get("tls_path", "/"), "cdn_transport": credential.get("tls_transport", "xhttp"), "cdn_xhttp_mode": credential.get("tls_xhttp_mode", "auto")}, proxy_name)
 
 
-def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
+def render_profile(item: dict[str, Any], device_id: str | None = None, *, resolve_relays: bool = True) -> str:
     default_names = {
         "transport-awg": "AWG",
         "transport-wg": "WG",
@@ -4960,7 +4965,8 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     normalized["connections"] = subscription_limits.client_connections(normalized, effective_client_connections(normalized.get("connections", [])))
     selected_device = device_id or str(normalized["common_device_id"])
     connections = [connection for connection in normalized.get("connections", []) if connection.get("component") in default_names and connection.get("device_id", "device-1") == selected_device]
-    connections = with_relay_labels(connections)
+    connections = with_relay_labels(connections) if resolve_relays else connections
+    redirect = relay_client_lines if resolve_relays else lambda connection, lines: lines
     if not connections:
         raise HTTPException(status_code=409, detail="У профиля нет подключений Mihomo")
     profile_routing = device_routing(normalized, selected_device)
@@ -5083,12 +5089,12 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
     lines.append("proxies:")
     for connection, name, cdn_name, tls_name in rendered:
         if name:
-            lines.extend(relay_client_lines(connection, render_proxy(str(connection["component"]), connection.get("credential", {}), name)))
+            lines.extend(redirect(connection, render_proxy(str(connection["component"]), connection.get("credential", {}), name)))
         if cdn_name:
             credential = connection.get("credential", {})
-            lines.extend(relay_client_lines(connection, render_vless_cdn({**credential, "cdn_ech": ech_enabled}, cdn_name)))
+            lines.extend(redirect(connection, render_vless_cdn({**credential, "cdn_ech": ech_enabled}, cdn_name)))
         if tls_name:
-            lines.extend(relay_client_lines(connection, render_vless_tls(connection.get("credential", {}), tls_name)))
+            lines.extend(redirect(connection, render_vless_tls(connection.get("credential", {}), tls_name)))
     group_type = str(routing.get("strategy", "fallback"))
     lines += [
         "proxy-groups:",
@@ -5625,8 +5631,16 @@ def execute_profile_operation(action: str, path: Path, digest: str, identity: st
     adapter = SimpleNamespace(DATA_DIR=DATA_ROOT.parent, ACTION_FILE=DATA_ROOT.parent / "application-action.json", logger=logger)
     def perform():
         require_mihomo_management()
+        application_operation.require_recovery_clear(adapter.DATA_DIR, f"mihomo-profile-{action}")
         payload = application_operation.load_payload(adapter.DATA_DIR, identity, path, digest)
-        if action == "create":
+        if action == "relay-prepare":
+            relay_connection_control().checked(payload["relay_revision"])
+            item = next((item for item in profiles() if item["id"] == payload["profile_id"]), None)
+            if item is None:
+                raise HTTPException(status_code=404, detail="Профиль не найден")
+            if prepare_profile_relays(item, identity):
+                raise HTTPException(status_code=409, detail="Не удалось настроить пересылку Relay. Подробности на странице Сеть → ROUTES")
+        elif action == "create":
             create_profile(ProfileCreate.model_validate(payload["settings"]))
         elif action == "update":
             update_profile(payload["profile_id"], ProfileUpdate.model_validate(payload["settings"]))

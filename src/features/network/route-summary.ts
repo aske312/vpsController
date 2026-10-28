@@ -49,6 +49,7 @@ export function relayRouteSummary(host: RelayHost, failed = false, pending = fal
   if (pending) return { ...base, state: "pending", label: "Проверяем", detail: "Результат изменения Relay ещё не подтверждён." };
   if (reading && host.state !== "connected") return { ...base, state: "pending", label: "Проверяем", detail: "Проверяем соединение с агентом и состояние его портов." };
   if (host.error) return { ...base, state: "error", label: "Ошибка Relay", detail: `${host.name}: ${host.error}` };
+  if (host.profile_failures) return { ...base, state: "error", label: "Ошибка пересылки", detail: `Не удалось настроить Relay для профилей: ${host.profile_failures}. Раскройте адрес, чтобы повторить настройку.` };
   if (failed || host.state !== "connected") return { ...base, state: "unknown", label: "Нет данных", detail: "Доступность агента и портов не подтверждена. Число перенаправлений — из сохранённых настроек." };
   if (host.routes.some(route => route.check?.cleanup_state === "failed" || route.device_test?.cleanup_state === "failed")) return { ...base, state: "error", label: "Ошибка очистки теста", detail: "Не удалось подтвердить удаление всех временных ресурсов. Раскройте адрес для сведений." };
   if (host.routes.some(route => ["failed", "missing", "drift"].includes(route.state) || route.check?.state === "failed")) return { ...base, state: "error", label: "Ошибка маршрута", detail: "Есть отсутствующие, изменённые или не прошедшие проверку перенаправления. Раскройте адрес для результатов и ошибок." };
