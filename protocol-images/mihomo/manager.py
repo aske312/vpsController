@@ -1021,7 +1021,7 @@ DIRECT_RULE_PRESETS: dict[str, list[str]] = {
         "DOMAIN,vk.ru,DIRECT", "DOMAIN-SUFFIX,vk.ru,DIRECT",
         "DOMAIN-SUFFIX,yandex.com,DIRECT", "DOMAIN-SUFFIX,yandex.net,DIRECT", "DOMAIN-SUFFIX,yastatic.net,DIRECT",
         "DOMAIN-SUFFIX,yandexcloud.net,DIRECT", "DOMAIN-SUFFIX,vk.com,DIRECT", "DOMAIN-SUFFIX,userapi.com,DIRECT",
-        "DOMAIN-SUFFIX,vkuseraudio.net,DIRECT", "DOMAIN-SUFFIX,mycdn.me,DIRECT",
+        "DOMAIN-SUFFIX,vkuseraudio.net,DIRECT", "DOMAIN-SUFFIX,vk-portal.net,DIRECT", "DOMAIN-SUFFIX,mycdn.me,DIRECT",
         "DOMAIN-SUFFIX,mail.ru,DIRECT", "DOMAIN-SUFFIX,imgsmail.ru,DIRECT",
         "DOMAIN-SUFFIX,attachmail.ru,DIRECT", "DOMAIN-SUFFIX,cdnmail.ru,DIRECT",
         "DOMAIN-SUFFIX,bk.ru,DIRECT", "DOMAIN-SUFFIX,inbox.ru,DIRECT", "DOMAIN-SUFFIX,list.ru,DIRECT",

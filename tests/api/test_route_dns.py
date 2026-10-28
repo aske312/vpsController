@@ -15,6 +15,15 @@ from dns_routing import domain_dns_routes, mihomo_route_dns, singbox_route_dns
 
 
 class RouteDnsTests(unittest.TestCase):
+    def test_vk_portal_uses_direct_dns_with_direct_vk_routes(self):
+        item = profile()
+        item['routing'] = {'route_dns': True, 'direct_ru_sites': True}
+        with patch.object(manager, 'dns_settings', return_value=self.settings):
+            config = yaml.safe_load(manager.render_profile(item))
+        policy = config['dns']['nameserver-policy']
+        for domain in ('vk-portal.net', '.vk-portal.net'):
+            self.assertEqual(policy[domain], [self.settings['direct_nameserver'] + '#DIRECT'])
+
     def setUp(self):
         self.enterContext(patch.object(manager, 'SUBMODULE_ROOT', ROOT / 'protocol-images/mihomo/modules'))
         self.enterContext(patch.object(manager, 'public_endpoint', return_value='192.0.2.1'))

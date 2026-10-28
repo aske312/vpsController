@@ -74,6 +74,16 @@ test("Mail.ru selection changes its own entries and preserves Russian zones", ()
   assert.equal(toggleRuleGroup(ruList, ruGroups, vpn, "mail"), "@default");
 });
 
+test("VK portal CDN routes belong to the VK switch", () => {
+  const rule = "DOMAIN-SUFFIX,vk-portal.net,DIRECT";
+  const list = { id: "direct_ru_sites", default_rules: ["DOMAIN-SUFFIX,ru,DIRECT", rule].join("\n") };
+  const groups = ruleIconGroups.direct_ru_sites;
+  assert.deepEqual(partitionRuleGroups(list, groups).vk, [rule]);
+  const disabled = toggleRuleGroup(list, groups, "@default", "vk");
+  assert.equal(disabled.includes(rule), false);
+  assert.ok(disabled.includes("DOMAIN-SUFFIX,ru,DIRECT"));
+});
+
 test("group captions describe routes, protection, QUIC and partial selections", () => {
   for (const id of ["direct_ru_sites", "direct_ru_services", "direct_ru_banks", "direct_ru_marketplaces", "direct_local_network", "direct_downloads", "windows_geolocation"]) {
     assert.equal(ruleGroupStatus(id, true), "Напрямую");

@@ -49,6 +49,23 @@ class RoutingPresetTests(unittest.TestCase):
         translated, _ = singbox_rules(rules)
         self.assertFalse(any('mail.com' in rule.get('domain_suffix', []) for rule in translated))
 
+    def test_vk_portal_follows_vk_route_in_supported_client_formats(self):
+        item = profile()
+        item['routing'] = {'direct_ru_sites': True, 'block_ads': True, 'block_malware': True}
+        rule = 'DOMAIN-SUFFIX,vk-portal.net,DIRECT'
+        rules = manager.profile_rules(item['routing'])
+        self.assertIn(rule, rules)
+        self.assertLess(rules.index('GEOSITE,category-ads-all,REJECT'), rules.index(rule))
+        self.assertLess(rules.index('RULE-SET,security-phishing,REJECT'), rules.index(rule))
+        for format in ('mihomo', 'singbox'):
+            with self.subTest(format=format):
+                rendered, _ = manager.render_client_profile(deepcopy(item), 'common', format)
+                self.assertIn('vk-portal.net', rendered)
+        item['devices'][0]['routing'] = {'direct_ru_sites': False}
+        self.assertNotIn(rule, yaml.safe_load(manager.render_profile(item))['rules'])
+        custom = {'direct_ru_sites': True, 'direct_ru_sites_rules': 'DOMAIN-SUFFIX,example.org,DIRECT'}
+        self.assertNotIn(rule, manager.profile_rules(custom))
+
     def test_singbox_aggregate_ads_excludes_named_group_resources(self):
         rules, providers = singbox_rules(['GEOSITE,category-ads-all,REJECT',
                                          'DOMAIN-SUFFIX,advertising.com,REJECT'])
