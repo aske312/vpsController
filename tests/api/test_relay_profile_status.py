@@ -96,3 +96,19 @@ class RelayProfileStatusTests(unittest.TestCase):
         with patch.object(manager, 'relay_connection_control', return_value=control):
             with self.assertRaises(ValueError):
                 manager.relay_client_lines(self.connections[0], ['    server: origin', '    port: 31000'])
+
+    def test_retry_rejects_a_stale_network_snapshot_before_admission(self):
+        self.control.checked = Mock(side_effect=application_operation.OperationConflict('changed'))
+        with (patch.object(manager, 'relay_connection_control', return_value=self.control),
+              patch.object(manager, 'start_profile_operation') as start):
+            with self.assertRaises(manager.HTTPException) as error:
+                manager.submit_profile_relays('abcdef123456', 'e' * 32, 'c' * 32)
+        self.assertEqual(error.exception.status_code, 409)
+        start.assert_not_called()
+
+    def test_retry_admits_only_profile_identity_and_network_revision(self):
+        self.control.checked = Mock()
+        with (patch.object(manager, 'relay_connection_control', return_value=self.control),
+              patch.object(manager, 'start_profile_operation') as start):
+            manager.submit_profile_relays('abcdef123456', 'e' * 32, 'c' * 32)
+        start.assert_called_once_with('relay-prepare', {'profile_id': 'abcdef123456', 'relay_revision': 'e' * 32}, 'c' * 32)

@@ -2580,7 +2580,12 @@ def submit_profile_create(payload: ProfileCreate, operation_id: str | None = Hea
 
 @app.post("/api/mihomo/profiles/{profile_id}/relays", status_code=202, dependencies=[Depends(require_mihomo_admission)])
 def submit_profile_relays(profile_id: str, relay_revision: str = Header(alias="If-Match"), operation_id: str | None = Header(default=None, alias="X-Operation-ID")):
-    relay_connection_control().checked(relay_revision)
+    try:
+        relay_connection_control().checked(relay_revision)
+    except application_operation.OperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except (ValueError, OSError):
+        raise HTTPException(status_code=503, detail="Реестр Relay недоступен") from None
     return start_profile_operation("relay-prepare", {"profile_id": profile_id, "relay_revision": relay_revision}, operation_id)
 
 
