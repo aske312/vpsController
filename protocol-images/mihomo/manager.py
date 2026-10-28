@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
@@ -48,6 +48,7 @@ from routing_presets import QUIC_DEFAULT_RULES, QUIC_AVAILABLE_RULES, SECURITY_P
 from telemetry import ConnectionTelemetry
 from xray_stats import XrayStats
 import ss_runtime
+from mrs_cache import MrsCache
 import cdn_security
 import application_operation
 import network_routes
@@ -284,11 +285,14 @@ async def manager_lifespan(_app):
     stopped = threading.Event()
     worker = threading.Thread(target=transition_worker, args=(stopped,), daemon=True)
     worker.start()
+    mrs_worker = threading.Thread(target=maintain_mrs, args=(stopped,), daemon=True)
+    mrs_worker.start()
     try:
         yield
     finally:
         stopped.set()
         await asyncio.to_thread(worker.join, 10)
+        await asyncio.to_thread(mrs_worker.join, 2)
         for collector in list(quic_telemetry.values()):
             await asyncio.to_thread(collector.close)
         quic_telemetry.clear()
@@ -886,7 +890,7 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
                 raise HTTPException(status_code=422, detail="Неизвестный формат клиента")
             result[key] = raw
             continue
-        if key in {"tunnel_privacy", "tunnel_ech", "tunnel_fragment", "route_dns"}:
+        if key in {"tunnel_privacy", "tunnel_ech", "tunnel_fragment", "route_dns", "mrs_rule_sets"}:
             if not isinstance(raw, bool):
                 raise HTTPException(status_code=422, detail=f"{key} must be boolean")
             result[key] = raw
@@ -938,6 +942,44 @@ def validate_routing(values: dict[str, Any], current: dict[str, Any] | None = No
 
 AD_RULE_PROVIDER = "ads-extended"
 AD_RULE_PROVIDER_URL = "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/reject.txt"
+
+MRS_CACHE = MrsCache(DATA_ROOT / 'rule-sets' / 'mrs', CORE_BIN, {
+    **SECURITY_PROVIDERS,
+    AD_RULE_PROVIDER: {'url': AD_RULE_PROVIDER_URL, 'format': 'yaml', 'interval': 86400},
+})
+
+
+def maintain_mrs(stopped: threading.Event) -> None:
+    while not stopped.is_set():
+        if component_is_managed() and CORE_BIN.is_file():
+            MRS_CACHE.maintain(stopped, logger)
+            return
+        stopped.wait(60)
+
+
+def mrs_provider(name: str, definition: dict[str, Any]) -> dict[str, Any]:
+    domain = os.getenv('PUBLIC_DOMAIN', '').strip()
+    if not domain:
+        raise HTTPException(status_code=503, detail='Для MRS нужен публичный домен подписки')
+    if not MRS_CACHE.path(name).is_file():
+        raise HTTPException(status_code=503, detail='Списки MRS подготавливаются; повторите обновление подписки через минуту')
+    return {**definition, 'format': 'mrs', 'url': f'https://{domain}/s/rules/{name}.mrs'}
+
+
+@app.get('/s/rules/{name}.mrs')
+def public_mrs_rules(name: str, request: Request) -> Response:
+    try:
+        data = MRS_CACHE.read(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail='Rule set not found') from None
+    except (OSError, ValueError):
+        # Do not substitute a large text feed or compile in an HTTP worker.
+        raise HTTPException(status_code=503, detail='Rule set is being prepared', headers={'Retry-After': '60'}) from None
+    etag = '"' + hashlib.sha256(data).hexdigest() + '"'
+    headers = {'ETag': etag, 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff'}
+    if request.headers.get('if-none-match') == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(data, media_type='application/octet-stream', headers=headers)
 
 DIRECT_RULE_PRESETS: dict[str, list[str]] = {
     "block_malware": [f"RULE-SET,{name},REJECT" for name in SECURITY_PROVIDERS],
@@ -5081,12 +5123,15 @@ def render_profile(item: dict[str, Any], device_id: str | None = None) -> str:
         rules = [mihomo_ad_base_rule(AD_RULE_PROVIDER) if rule == "GEOSITE,category-ads-all,REJECT" else rule for rule in rules]
     used_providers = {name: definition for name, definition in providers.items() if any(
         rule.startswith(f'RULE-SET,{name},') or f'(RULE-SET,{name})' in rule for rule in rules)}
+    selected_os = next((device.get('os') for device in normalized.get('devices', []) if str(device['id']) == selected_device), None)
+    if profile_routing.get('mrs_rule_sets', selected_os == 'ios'):
+        used_providers = {name: mrs_provider(name, definition) for name, definition in used_providers.items()}
     if used_providers:
         lines.append('rule-providers:')
         for name, definition in used_providers.items():
             lines += [f'  {name}:', '    type: http', '    behavior: domain',
                       f"    format: {definition['format']}", f"    url: {q(definition['url'])}",
-                      f"    path: ./rule-providers/{name}.{'yaml' if definition['format'] == 'yaml' else 'txt'}",
+                      f"    path: ./rule-providers/{name}.{'txt' if definition['format'] == 'text' else definition['format']}",
                       f"    interval: {definition['interval']}", '    size-limit: 16777216',
                       f'    proxy: {q(MIHOMO_PROXY_GROUP)}']
     lines.append("rules:")
