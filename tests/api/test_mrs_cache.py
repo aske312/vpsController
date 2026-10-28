@@ -103,6 +103,7 @@ class MrsExportTests(unittest.TestCase):
         with patch.object(manager, 'SUBMODULE_ROOT', ROOT / 'protocol-images/mihomo/modules'), \
                 patch.object(manager, 'public_endpoint', return_value='127.0.0.1'), \
                 patch.object(manager, 'module_is_installed', return_value=True), \
+                patch.object(manager, 'component_is_managed', return_value=True), \
                 patch.object(manager, 'MRS_CACHE'), \
                 patch.dict(os.environ, {'PUBLIC_DOMAIN': 'panel.example'}):
             legacy = yaml.safe_load(manager.render_profile(deepcopy(item)))
@@ -118,6 +119,11 @@ class MrsExportTests(unittest.TestCase):
                 self.assertEqual(definition['interval'], legacy['rule-providers'][name]['interval'])
             item['devices'][0]['routing']['mrs_rule_sets'] = False
             self.assertEqual(yaml.safe_load(manager.render_profile(deepcopy(item))), legacy)
+            item['devices'][0]['routing'].pop('mrs_rule_sets')
+            with patch.object(manager, 'component_is_managed', return_value=False):
+                self.assertEqual(yaml.safe_load(manager.render_profile(deepcopy(item))), legacy)
+            with patch.dict(os.environ, {'PUBLIC_DOMAIN': ''}):
+                self.assertEqual(yaml.safe_load(manager.render_profile(deepcopy(item))), legacy)
         self.assertTrue(manager.validate_routing({'mrs_rule_sets': True}, current={})['mrs_rule_sets'])
 
     def test_export_waits_for_first_successful_build(self):
