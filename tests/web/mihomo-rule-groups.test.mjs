@@ -101,7 +101,7 @@ test("VK portal CDN routes belong to the VK switch", () => {
 test("group captions describe routes, protection, QUIC and partial selections", () => {
   for (const id of ["direct_ru_sites", "direct_ru_services", "direct_ru_banks", "direct_ru_marketplaces", "direct_local_network", "direct_downloads", "windows_geolocation"]) {
     assert.equal(ruleGroupStatus(id, true), "Напрямую");
-    assert.equal(ruleGroupStatus(id, false), "Через VPN");
+    assert.equal(ruleGroupStatus(id, false), "По общим правилам");
   }
   assert.equal(ruleGroupStatus("udp_tunnel_exclusions", true), "Через VPN");
   assert.equal(ruleGroupStatus("udp_tunnel_exclusions", false), "Напрямую");

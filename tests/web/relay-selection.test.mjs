@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createServer } from "vite";
+import { createTestLoader } from "./vite-test-loader.mjs";
 import reactPlugin from "@vitejs/plugin-react";
 
-const loader = await createServer({ configFile: false, plugins: [reactPlugin()], server: { middlewareMode: true, hmr: false }, appType: "custom", optimizeDeps: { noDiscovery: true } });
+const loader = await createTestLoader(import.meta.url, [reactPlugin()]);
 after(() => loader.close());
 const { RelayEndpointSelect } = await loader.ssrLoadModule("/src/features/network/relay-endpoint-select.tsx");
 const { routeEntries, filterEntries } = await loader.ssrLoadModule("/src/features/network/route-library-state.ts");

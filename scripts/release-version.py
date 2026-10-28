@@ -23,7 +23,8 @@ def release_version(root: Path, revision: str = 'HEAD') -> str:
     # A protected PR may add a merge commit without changing the tested files.
     if git('rev-parse', '--verify', latest + '^{tree}') == git('rev-parse', '--verify', revision + '^{tree}'):
         return latest.removeprefix('pro-')
-    return f'v{major_minor}.{int(latest.rsplit(".", 1)[1]) + 1}'
+    patch = max(int(base.rsplit('.', 1)[1]), int(latest.rsplit('.', 1)[1]) + 1)
+    return f'v{major_minor}.{patch}'
 
 
 if __name__ == '__main__':

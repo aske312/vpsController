@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test,{after} from 'node:test';
-import {createServer} from 'vite';
+import { createTestLoader } from "./vite-test-loader.mjs";
 import react from '@vitejs/plugin-react';
 import {routeCheck} from './network-fixtures.mjs';
-const loader=await createServer({configFile:false,plugins:[react()],server:{middlewareMode:true,hmr:false},appType:'custom',optimizeDeps:{noDiscovery:true}});after(()=>loader.close());
+const loader = await createTestLoader(import.meta.url, [react()]);
+after(() => loader.close());
 const {endpointTargets}=await loader.ssrLoadModule('/src/features/network/use-endpoint-sweep.ts');
 const target={id:'direct:tuic:a',owner:'direct',component:'tuic',label:'TUIC',consumer_label:'Phone',consumer_id:'direct:a',state:'pending',message:''};
 const snapshot={kind:'udp_relay',domain:'relay.example',items:[target],observation:routeCheck};

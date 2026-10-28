@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createServer } from "vite";
+import { createTestLoader } from "./vite-test-loader.mjs";
 import react from "@vitejs/plugin-react";
 
-const loader = await createServer({ configFile: false, cacheDir: ".runtime/vite-auth-login-tests", plugins: [react()], server: { middlewareMode: true, hmr: false }, appType: "custom", optimizeDeps: { noDiscovery: true } });
+const loader = await createTestLoader(import.meta.url, [react()]);
 after(() => loader.close());
 const { LoginView } = await loader.ssrLoadModule("/src/features/auth/login-view.tsx");
 

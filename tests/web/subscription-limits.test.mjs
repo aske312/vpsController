@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { createServer } from 'vite';
+import { createTestLoader } from "./vite-test-loader.mjs";
 import react from '@vitejs/plugin-react';
 
-const loader = await createServer({ configFile: false, cacheDir: '.runtime/vite-subscription-limits-tests', plugins: [react()], server: { middlewareMode: true, hmr: false }, appType: 'custom', optimizeDeps: { noDiscovery: true } });
+const loader = await createTestLoader(import.meta.url, [react()]);
 after(() => loader.close());
 const { SubscriptionLimitsFields, unlimitedSubscription } = await loader.ssrLoadModule('/src/features/mihomo/subscription-limits.tsx');
 const { profileSnapshots } = await loader.ssrLoadModule('/src/features/mihomo/workspace-refresh.ts');

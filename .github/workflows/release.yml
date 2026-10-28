@@ -15,8 +15,12 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -26,6 +30,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Select application version
+        id: version
+        shell: bash
+        run: |
+          version="$(python3 scripts/release-version.py)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - run: pip install -r tests/requirements.txt
       - run: python -m unittest discover -s tests/api -t . -p 'test_*.py'
       - name: Verify disposable WireGuard peer in isolated network
@@ -68,19 +78,13 @@ jobs:
         with:
           go-version: '1.26.10'
           cache: false
-      - name: Select application version
-        id: version
-        shell: bash
-        run: |
-          version="$(python3 scripts/release-version.py)"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Build PRO archive
         env:
           BUILD_COMMIT: ${{ github.sha }}
           RELEASE_EDITION: pro
           RELEASE_CHANNEL: ${{ github.ref_name == 'test-pro' && 'test' || 'production' }}
           RELEASE_BRANCH: ${{ github.ref_name }}
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
         run: bash scripts/build-release.sh "outputs/vps-control-pro-linux-${{ matrix.architecture }}.tar.gz"
       - uses: actions/upload-artifact@v4
         with:
@@ -90,8 +94,8 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: package
-    if: always() && needs.package.result == 'success'
+    needs: [verify, package]
+    if: always() && needs.verify.result == 'success' && needs.package.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -107,16 +111,10 @@ jobs:
           pattern: pro-*
           path: outputs
           merge-multiple: true
-      - name: Select application version
-        id: version
-        shell: bash
-        run: |
-          version="$(python3 scripts/release-version.py)"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Publish PRO release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
           if [[ "$GITHUB_REF_NAME" == "test-pro" ]]; then
             release_tag="pro-test-latest"

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
-import { createServer } from 'vite';
-const loader = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: 'custom', optimizeDeps: { noDiscovery: true } });
+import { createTestLoader } from "./vite-test-loader.mjs";
+const loader = await createTestLoader(import.meta.url);
 after(() => loader.close());
 const { relayConnection, relaySnapshot, relayClientResult } = await loader.ssrLoadModule('/src/features/network/relay-state.ts');
 

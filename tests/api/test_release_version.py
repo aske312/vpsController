@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import yaml
 
 from tests.api.support import ROOT
 
@@ -50,3 +51,44 @@ class ReleaseVersionTests(unittest.TestCase):
         (self.root / 'fix.txt').write_text('next fix')
         self.commit('next candidate')
         self.assertEqual(module.release_version(self.root), 'v0.2.33')
+
+    def test_explicit_minor_version_starts_at_requested_release(self):
+        self.git('tag', 'pro-v0.2.31')
+        (self.root / 'package.json').write_text(json.dumps({'version': '0.3.0'}))
+        self.commit('prepare 0.3.0')
+        self.assertEqual(module.release_version(self.root), 'v0.3.0')
+        self.commit('production merge')
+        self.assertEqual(module.release_version(self.root), 'v0.3.0')
+        self.git('tag', 'pro-v0.3.0')
+        (self.root / 'fix.txt').write_text('next fix')
+        self.commit('new fix')
+        self.assertEqual(module.release_version(self.root), 'v0.3.1')
+
+    def test_explicit_patch_version_is_not_lowered_to_next_automatic_patch(self):
+        self.git('tag', 'pro-v0.2.31')
+        (self.root / 'package.json').write_text(json.dumps({'version': '0.2.40'}))
+        self.commit('explicit version')
+        self.assertEqual(module.release_version(self.root), 'v0.2.40')
+
+
+class ReleaseWorkflowVersionTests(unittest.TestCase):
+    def test_architectures_and_publication_use_the_verified_version_snapshot(self):
+        for name in ('ci.yml', 'release.yml'):
+            with self.subTest(workflow=name):
+                workflow = yaml.safe_load((ROOT / '.github/workflows' / name).read_text(encoding='utf-8'))
+                jobs = workflow['jobs']
+                verify = jobs['verify']
+                self.assertEqual(verify['outputs']['version'], '${{ steps.version.outputs.version }}')
+                selectors = [step for step in verify['steps'] if 'release-version.py' in step.get('run', '')]
+                self.assertEqual(len(selectors), 1)
+                self.assertEqual(selectors[0]['id'], 'version')
+                self.assertEqual(verify['steps'][0]['with']['fetch-depth'], 0)
+                build = next(step for step in jobs['package']['steps'] if 'RELEASE_VERSION' in step.get('env', {}))
+                self.assertEqual(build['env']['RELEASE_VERSION'], '${{ needs.verify.outputs.version }}')
+                for job_name, job in jobs.items():
+                    if job_name != 'verify':
+                        self.assertFalse(any('release-version.py' in step.get('run', '') for step in job['steps']))
+                if 'publish' in jobs:
+                    self.assertIn('verify', jobs['publish']['needs'])
+                    publish = next(step for step in jobs['publish']['steps'] if 'VERSION' in step.get('env', {}))
+                    self.assertEqual(publish['env']['VERSION'], build['env']['RELEASE_VERSION'])

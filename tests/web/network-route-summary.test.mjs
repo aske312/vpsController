@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
-import { createServer } from "vite";
+import { createTestLoader } from "./vite-test-loader.mjs";
 
-const loader = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: "custom", optimizeDeps: { noDiscovery: true } });
+const loader = await createTestLoader(import.meta.url);
 after(() => loader.close());
 const { domainRouteSummary, relayRouteSummary, serverAddressSummary } = await loader.ssrLoadModule("/src/features/network/route-summary.ts");
 
